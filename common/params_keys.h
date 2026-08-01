@@ -568,7 +568,12 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"FordPrefHevDataAvailable", {CLEAR_ON_MANAGER_START, BOOL, "0"}},
     {"FordPrefHevBattDataAvailable", {CLEAR_ON_MANAGER_START, BOOL, "0"}},
     {"mici_complication", {PERSISTENT | BACKUP, INT, "0"}},
+    // ShowBrakeStatus default is ICBM's, not this branch's: it was flipped to 1 deliberately as
+    // part of making the owner's tested tune the shipped one. Keep theirs.
     {"ShowBrakeStatus", {PERSISTENT | BACKUP, BOOL, "1"}},
+    // BluePilot: the passing-assist panel. Every gate, the dry run of the manoeuvre and the drive
+    // summary all land here -- it is the whole feature's readout. Nothing acts; this only displays.
+    {"ShowPassingAssist", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"FordPrefHybridPowerFlowAlternate", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"mici_hide_onroad_fade", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"mici_hide_onroad_border", {PERSISTENT | BACKUP, BOOL, "0"}},

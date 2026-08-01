@@ -91,6 +91,7 @@ class BluePilotLayout(Widget):
       ("BPRainbowLines", self._rainbow_lane_lines),
       ("ShowBlindspotOverlay", self._show_blindspot),
       ("ShowBrakeStatus", self._show_brake_status),
+      ("ShowPassingAssist", self._show_passing_assist),
       ("BPHideOnroadBorder", self._hide_onroad_border),
       ("BPShowConfidenceBall", self._show_confidence_ball),
       ("BPAnimateSteeringWheel", self._animate_steering_wheel),
@@ -190,6 +191,16 @@ class BluePilotLayout(Widget):
                  "for (ACCEL / COAST / BRAKE, in m/s2) plus what ICBM is doing to the set speed."),
       initial_state=self._safe_get_bool(self._params, "ShowBrakeStatus"),
       callback=lambda state: self._toggle_callback(state, "ShowBrakeStatus"),
+      icon="warning.png"
+    )
+
+    # Passing assist observer readout (debug)
+    self._show_passing_assist = toggle_item(
+      lambda: tr("Show Passing Assist (Debug)"),
+      lambda: tr("Display what the passing-assist observer would have suggested, and which check "
+                 "blocked it. Observation only — it never suggests, alerts, or steers."),
+      initial_state=self._safe_get_bool(self._params, "ShowPassingAssist"),
+      callback=lambda state: self._toggle_callback(state, "ShowPassingAssist"),
       icon="warning.png"
     )
 

@@ -202,6 +202,12 @@ class HudRendererBP(HudRendererSP):
     # BluePilot: actual mode from controllerStateBP (None = not published, e.g. non-Ford)
     self._lateral_mode = None
 
+    # BluePilot: passing-assist observer readout. Debug only -- this displays what the phase-1
+    # observer WOULD have suggested. It is not an instruction and nothing acts on it.
+    self._show_passing_assist = self._bp_params.get_bool("ShowPassingAssist")
+    self._pa_text = ""
+    self._pa_color = COLORS.WHITE
+
   def set_gradient_rect(self, rect: rl.Rectangle):
     """Set full-width rect for header gradient (when HUD renders offset for confidence ball)."""
     self._gradient_rect = rect
@@ -365,6 +371,49 @@ class HudRendererBP(HudRendererSP):
         pass
 
 
+    self._update_passing_assist()
+
+  def _update_passing_assist(self) -> None:
+    """BluePilot: build the passing-assist debug string.
+
+    Shows blockedBy rather than just the suggestion, because the blocking gate is the interesting
+    field: it says which filter is doing the work, and whether a silent system is silent for the
+    reason you expect. The stuck timer is appended while it is running so you can watch it climb
+    toward the threshold instead of guessing whether the lead was ever counted.
+    """
+    self._pa_text = ""
+    self._pa_color = COLORS.WHITE
+    if not self._show_passing_assist:
+      return
+
+    sm = ui_state.sm
+    if not sm.valid.get('longitudinalPlanSP', False):
+      return
+
+    try:
+      pa = sm['longitudinalPlanSP'].passingAssist
+    except (KeyError, AttributeError):
+      return
+
+    suggestion = str(pa.suggestion)
+    if suggestion != 'none':
+      # Green is deliberate but it is NOT a go-ahead: nothing has checked approaching traffic.
+      self._pa_text = f"PASS {suggestion.upper()}"
+      self._pa_color = rl.Color(120, 220, 140, 255)
+    else:
+      blocked = str(pa.blockedBy)
+      self._pa_text = f"PA {blocked}"
+      if blocked == 'notStuck' and pa.stuckSeconds > 0:
+        self._pa_text += f" {pa.stuckSeconds:.0f}s"
+      self._pa_color = rl.Color(160, 160, 160, 220)
+
+    # Flag the two "looks checked but was not" cases inline, so a log reviewer cannot mistake a
+    # suggestion made with no blind-spot data for one that passed a blind-spot check.
+    if not pa.blindspotAvailable:
+      self._pa_text += " ~bs"
+    if not pa.tsrAvailable:
+      self._pa_text += " ~tsr"
+
   def _render(self, rect: rl.Rectangle) -> None:
     # BluePilot: Draw header gradient at full content width (not offset by confidence ball)
     gradient_rect = self._gradient_rect if self._gradient_rect else rect
@@ -393,6 +442,7 @@ class HudRendererBP(HudRendererSP):
       button_y + UI_CONFIG.button_size / 2,
       UI_CONFIG.button_size,
     )
+    self._draw_passing_assist(rect)
 
     # SP additions (dev UI, road name, speed limit, SCC, turn signals, circular alerts, rocket fuel)
     self.developer_ui.render(rect)
@@ -636,6 +686,23 @@ class HudRendererBP(HudRendererSP):
       rl.draw_rectangle_rounded(
         rl.Rectangle(bar_x, bar_y, max(bar_height, bar_width * frac), bar_height), 1.0, 6, ACC_INK)
     return ACC_PILL_HEIGHT
+
+  def _draw_passing_assist(self, rect: rl.Rectangle) -> None:
+    """BluePilot: small debug line under the speed readout. Off by default.
+
+    Positioned below the speed unit rather than anywhere prominent: this is diagnostic output for
+    a system that is not making decisions, and it should not read as an instruction to the driver.
+    """
+    if not self._pa_text:
+      return
+
+    font_size = FONT_SIZES.max_speed
+    text_dims = measure_text_cached(self._font_bold, self._pa_text, font_size)
+    pos = rl.Vector2(
+      rect.x + rect.width / 2 - text_dims.x / 2,
+      rect.y + SPEED_UNIT_CENTER_Y + FONT_SIZES.speed_unit,
+    )
+    rl.draw_text_ex(self._font_bold, self._pa_text, pos, font_size, 0, self._pa_color)
 
   def _draw_lateral_control_overlay(self, center_x: float, center_y: float, wheel_size: int) -> None:
     """Draw the current lateral control mode over the steering wheel icon."""
