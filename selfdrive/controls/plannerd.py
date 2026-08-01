@@ -30,6 +30,10 @@ def main():
   # needs it to tell "nothing is braking for this" from "stock ACC is already on it" -- without it
   # the detector kept commanding and kept alerting while Ford was visibly slowing for the same car.
   sm = messaging.SubMaster(['carControl', 'carState', 'controlsState', 'liveParameters', 'radarState', 'modelV2', 'selfdriveState',
+                            # BluePilot: carStateBP carries the raw TSR and BLIS signals the
+                            # passing-assist observer records. Not in any all_checks() list, so a
+                            # platform that never publishes it (non-Ford, non-BluePilot) is
+                            # unaffected -- sm.valid stays False and the observer reports it.
                             'liveMapDataSP', 'carStateSP', 'carStateBP', gps_location_service],
                            poll='carState')
 

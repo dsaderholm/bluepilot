@@ -245,6 +245,14 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // finds out for itself and declines if nothing moves, but until that has happened on the road
     // once, nothing should be pressing this button unasked.
     {"IcbmGapControl", {PERSISTENT | BACKUP, BOOL, "0"}},
+    // BluePilot: passing-assist observation. Defaults ON, unlike the Icbm* actuating features --
+    // this one only publishes a message. It cannot alert, steer, or touch the set speed, and it
+    // is worthless switched off because its entire purpose is collecting drive data.
+    {"PassingAssistLogEnabled", {PERSISTENT | BACKUP, BOOL, "1"}},
+    // How far below the set speed the lead must hold us before it counts as being held back (mph).
+    {"PassingAssistMinDeficit", {PERSISTENT | BACKUP, INT, "8"}},
+    // How long that must persist before a pass would be suggested (seconds).
+    {"PassingAssistStuckTime", {PERSISTENT | BACKUP, INT, "25"}},
     {"DeviceBootMode", {PERSISTENT | BACKUP, INT, "0"}},
     {"DevUIInfo", {PERSISTENT | BACKUP, INT, "0"}},
     {"EnableCopyparty", {PERSISTENT | BACKUP, BOOL}},

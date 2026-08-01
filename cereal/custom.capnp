@@ -238,6 +238,7 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
   events @6 :List(OnroadEventSP.Event);
   e2eAlerts @7 :E2eAlerts;
   unconfirmedLead @8 :UnconfirmedLead;
+  passingAssist @9 :PassingAssist;
 
   # BluePilot: ACC follow-gap requested by a longitudinal feature (Time_Gap_1..5), 0 for none.
   #
@@ -283,6 +284,81 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       tracking @1;    # candidate seen, still accumulating persistence/range-sweep evidence
       active @2;      # triggered: requesting the MPC target down to the floor
       restoring @3;   # resolved: returning the set speed to restoreSetSpeed
+    }
+  }
+
+  # BluePilot: passing-assist observation channel. LOG ONLY -- nothing reads this to make a
+  # decision, and no alert or actuation is wired to it. It answers three questions that can only
+  # be settled from real drive data:
+  #
+  #   1. How often does the geometry test claim a lane to the left on an UNDIVIDED road, where
+  #      that lane is oncoming traffic? The model publishes geometry, not direction of travel, so
+  #      this is the failure mode that decides whether the idea is viable at all. Both the
+  #      painted-line evidence (lineProb) and the drivable-width evidence (edgeGap) are recorded
+  #      separately so they can be compared as discriminators rather than assumed equivalent.
+  #   2. Does this market's camera populate Traffic_RecognitnData's overtaking fields at all?
+  #      Ford documents TSR around Vienna Convention signage; US no-passing zones are a solid
+  #      yellow line plus a rectangular MUTCD sign. overtakeRestricted may simply never go true.
+  #   3. Is BLIS informative here? It reports blind-spot OCCUPANCY, not approach -- a car closing
+  #      from well behind does not light it until already alongside. Recorded at decision time so
+  #      its correlation with a genuinely safe gap can be measured.
+  #
+  # The suggestion field is what the system WOULD have said. blockedBy is why it stayed silent,
+  # which is the more useful field: it shows which gate is actually doing the work.
+  struct PassingAssist {
+    suggestion @0 :Side;
+    blockedBy @1 :Blocked;
+    stuckSeconds @2 :Float32;     # continuous time held below set speed by this lead
+
+    # lead evidence
+    hasLead @3 :Bool;
+    leadDRel @4 :Float32;
+    leadVLead @5 :Float32;
+    speedDeficit @6 :Float32;     # set speed - lead speed, m/s. The reason to want to pass.
+
+    # geometry evidence, per side. lineProb is the model's confidence in a painted line BEYOND
+    # ego's own lane line; edgeGap is metres of drivable width between ego's lane line and the
+    # road edge. On a divided highway in the left lane, edgeGap collapses to the shoulder. On an
+    # undivided road it does NOT -- the oncoming lane is drivable width -- which is exactly the
+    # discrimination this is here to measure.
+    leftLineProb @7 :Float32;
+    rightLineProb @8 :Float32;
+    leftEdgeGap @9 :Float32;
+    rightEdgeGap @10 :Float32;
+    leftGeometryOk @11 :Bool;
+    rightGeometryOk @12 :Bool;
+
+    # BLIS at decision time. Mirrors carState, which folds sensor-fault and blocked into "occupied".
+    leftBlindspot @13 :Bool;
+    rightBlindspot @14 :Bool;
+    blindspotAvailable @15 :Bool; # false until the BLIS messages reach the bus openpilot reads
+
+    # TSR overtaking veto. See the Traffic_RecognitnData value tables: TsrOvtkMsgTxt_D_Rq is a
+    # LATCHED zone state (Lim* in force, LimAllCancelled = zone ended), not a momentary sign
+    # event, and TsrOvtkStatMsgTxt_D_Rq is its confidence channel.
+    overtakeRestricted @16 :Bool;
+    overtakeMsg @17 :UInt8;
+    overtakeStatus @18 :UInt8;
+    tsrAvailable @19 :Bool;
+
+    enum Side {
+      none @0;
+      left @1;
+      right @2;
+    }
+
+    # Why no suggestion was made. Ordered by evaluation, first failing gate wins.
+    enum Blocked {
+      none @0;              # a suggestion was made
+      disabled @1;
+      notEngaged @2;
+      tooSlow @3;
+      driverActive @4;      # blinker, brake or steering input -- driver already acting
+      noLead @5;
+      notStuck @6;          # lead present but not holding us back, or not for long enough
+      noLaneAvailable @7;   # geometry says there is nowhere to go on either side
+      blindspotOccupied @8; # geometry was fine, BLIS was not
+      overtakeRestricted @9; # TSR reports a no-overtaking zone in force
     }
   }
 

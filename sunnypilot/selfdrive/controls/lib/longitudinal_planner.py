@@ -14,6 +14,7 @@ from openpilot.sunnypilot.selfdrive.controls.lib.e2e_alerts_helper import E2EAle
 from openpilot.sunnypilot.selfdrive.controls.lib.smart_cruise_control.smart_cruise_control import SmartCruiseControl
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.speed_limit_assist import SpeedLimitAssist
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.speed_limit_resolver import SpeedLimitResolver
+from openpilot.sunnypilot.selfdrive.controls.lib.passing_assist import PassingAssistDetector
 from openpilot.sunnypilot.selfdrive.controls.lib.unconfirmed_lead import UnconfirmedLeadDetector
 from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP
 from openpilot.sunnypilot.models.helpers import get_active_bundle
@@ -31,6 +32,7 @@ class LongitudinalPlannerSP:
     self.resolver = SpeedLimitResolver()
     self.sla = SpeedLimitAssist(CP, CP_SP)
     self.unconfirmed_lead = UnconfirmedLeadDetector()
+    self.passing_assist = PassingAssistDetector()
     self.generation = int(model_bundle.generation) if (model_bundle := get_active_bundle()) else None
     self.source = LongitudinalPlanSource.cruise
     self.e2e_alerts_helper = E2EAlertsHelper()
@@ -68,6 +70,11 @@ class LongitudinalPlannerSP:
     self.unconfirmed_lead.update(sm, self.v_desired_trajectory, v_cruise_cluster,
                                  long_enabled and not long_override, self.events_sp,
                                  self.dec.has_slow_down(), self.dec.endpoint_x())
+
+    # BluePilot: passing-assist observation. Log only -- no events_sp, no target, no return value
+    # consumed anywhere. Takes v_cruise_cluster rather than v_cruise because the question is
+    # whether the lead is holding us below the speed the DRIVER set, not below a limiter's output.
+    self.passing_assist.update(sm, v_cruise_cluster, long_enabled)
 
     # Speed Limit Assist
     has_speed_limit = self.resolver.speed_limit_valid or self.resolver.speed_limit_last_valid
@@ -185,6 +192,30 @@ class LongitudinalPlannerSP:
     unconfirmedLead.modelDesiredAccel = float(self.unconfirmed_lead.model_desired_accel)
     unconfirmedLead.hasLead = self.unconfirmed_lead.has_lead
     unconfirmedLead.trigger = self.unconfirmed_lead.trigger
+
+    # BluePilot: passing-assist observation (log only -- see the capnp comment)
+    pa = self.passing_assist
+    passingAssist = longitudinalPlanSP.passingAssist
+    passingAssist.suggestion = pa.suggestion
+    passingAssist.blockedBy = pa.blocked_by
+    passingAssist.stuckSeconds = float(pa.stuck_seconds)
+    passingAssist.hasLead = pa.has_lead
+    passingAssist.leadDRel = float(pa.lead_d_rel)
+    passingAssist.leadVLead = float(pa.lead_v_lead)
+    passingAssist.speedDeficit = float(pa.speed_deficit)
+    passingAssist.leftLineProb = float(pa.left_line_prob)
+    passingAssist.rightLineProb = float(pa.right_line_prob)
+    passingAssist.leftEdgeGap = float(pa.left_edge_gap)
+    passingAssist.rightEdgeGap = float(pa.right_edge_gap)
+    passingAssist.leftGeometryOk = pa.left_geometry_ok
+    passingAssist.rightGeometryOk = pa.right_geometry_ok
+    passingAssist.leftBlindspot = pa.left_blindspot
+    passingAssist.rightBlindspot = pa.right_blindspot
+    passingAssist.blindspotAvailable = pa.blindspot_available
+    passingAssist.overtakeRestricted = pa.overtake_restricted
+    passingAssist.overtakeMsg = pa.overtake_msg
+    passingAssist.overtakeStatus = pa.overtake_status
+    passingAssist.tsrAvailable = pa.tsr_available
 
     # E2E Alerts
     e2eAlerts = longitudinalPlanSP.e2eAlerts
