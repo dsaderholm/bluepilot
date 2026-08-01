@@ -740,6 +740,47 @@ struct CarStateBP @0xb057204d7deadf3f {
   trafficSignData @3 :TrafficSignData;
   blisLeft @4 :SideDetect;
   blisRight @5 :SideDetect;
+  blinkerTest @6 :BlinkerTest;
+
+  # BluePilot: bench test for whether openpilot can operate the turn signal on this car.
+  #
+  # Standing question, because desire_helper's whole lane-change state machine keys off
+  # carState.leftBlinker/rightBlinker, and those come from the SCCM's own Steering_Data_FD1 on
+  # bus 0. openpilot already transmits that message and passes TurnLghtSwtch_D_Stat through
+  # untouched; panda explicitly permits it (ford.h: "blinkers, wiper switches, high beam ...
+  # which we passthru in OP"). ICBM proves the car acts on openpilot's injected copy of this exact
+  # frame for cruise buttons. Whether the BCM honours it for the turn signal is untested.
+  #
+  # lampLeft/lampRight are the ANSWER, read from BodyInfo_3_FD1 (0x3B3) -- the body module's own
+  # report of what the lamps are doing, on a bus openpilot already parses. That makes this a
+  # closed-loop measurement rather than a guess, and needs no extra hardware.
+  #
+  # Note the lamps FLASH, so lampLeft/lampRight toggle at the flash rate while commanded; a
+  # consumer wants to latch over a flash period rather than read a single frame.
+  struct BlinkerTest {
+    state @0 :State;
+    commanded @1 :UInt8;      # what we put in TurnLghtSwtch_D_Stat: 0 none, 1 left, 2 right
+    secondsRemaining @2 :Float32;
+    lampLeft @3 :Bool;        # TurnLghtLeftOn_B_Stat, BodyInfo_3_FD1
+    lampRight @4 :Bool;       # TurnLghtRightOn_B_Stat
+    lampSeen @5 :Bool;        # a commanded lamp was observed lit at least once this pulse
+    blockedReason @6 :Blocked;
+
+    enum State {
+      idle @0;
+      pulsing @1;
+      done @2;
+    }
+
+    # Why a requested pulse did not run. Standstill is not negotiable: this operates a lamp other
+    # drivers read, and a stationary car signals nothing about a manoeuvre.
+    enum Blocked {
+      none @0;
+      notStationary @1;
+      cruiseEngaged @2;      # never fight a live lane-change decision
+      driverSignalling @3;   # the driver's own stalk wins, always
+    }
+  }
 
   # BluePilot: every signal in Side_Detect_L/R_Stat (0x3A6 / 0x3A7), raw.
   #

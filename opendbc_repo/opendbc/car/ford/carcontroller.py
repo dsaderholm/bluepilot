@@ -11,6 +11,7 @@ from openpilot.common.params import Params
 # BluePilot: extension imports for lateral, longitudinal, and HUD control
 from opendbc.sunnypilot.car.ford.lateral_curv_ext import LateralCurvExt, PrimaryLateralControl
 from opendbc.sunnypilot.car.ford.lateral_angle_ext import LateralAngleExt
+from opendbc.sunnypilot.car.ford.blinker_test_ext import BlinkerTestExt
 from opendbc.sunnypilot.car.ford.longitudinal_ext import LongitudinalExt
 from opendbc.sunnypilot.car.ford.hud_ext import HudExt
 from opendbc.sunnypilot.car.ford import fordcan_ext
@@ -72,7 +73,7 @@ def apply_creep_compensation(accel: float, v_ego: float) -> float:
 # and enhanced HUD messaging.
 # Init order: CarControllerBase first (sets self.CP, self.frame), then ext classes.
 class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, LongitudinalExt, HudExt,
-                    IntelligentCruiseButtonManagementInterface):
+                    BlinkerTestExt, IntelligentCruiseButtonManagementInterface):
   def __init__(self, dbc_names, CP, CP_SP):
     CarControllerBase.__init__(self, dbc_names, CP, CP_SP)
     # BluePilot: initialize extension classes
@@ -80,6 +81,7 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
     LateralAngleExt.__init__(self, CP, CP_SP)
     LongitudinalExt.__init__(self, CP, CP_SP)
     HudExt.__init__(self, CP, CP_SP)
+    BlinkerTestExt.__init__(self)
     # ICBM: base class sets state used at runtime, init for robustness
     # IntelligentCruiseButtonManagementInterface.__init__(self, CP, CP_SP)
 
@@ -125,6 +127,15 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
 
     # BluePilot: compute DM state (TJA message, warning, hands level)
     HudExt.update_dm(self, hud_control, main_on, CS.out.cruiseState.standstill, self.frame)
+
+    # BluePilot: stationary turn-signal actuation test. Returns SIGNAL_NONE on every normal frame,
+    # in which case create_button_msg keeps passing the driver's own switch position through
+    # untouched. Only an explicitly requested, standstill-gated pulse returns anything else.
+    turn_signal = BlinkerTestExt.update_blinker_test(self, CS)
+    ts = turn_signal if turn_signal else None
+    if ts is not None:
+      can_sends.append(fordcan_ext.create_button_msg(self.packer, self.CAN.main, CS.buttons_stock_values,
+                                                     turn_signal=ts))
 
     ### acc buttons ###
     if CC.cruiseControl.cancel:

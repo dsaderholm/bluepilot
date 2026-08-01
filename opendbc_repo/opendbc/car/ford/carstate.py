@@ -243,6 +243,14 @@ class CarState(CarStateBase, MadsCarState, CarStateExt):
                         cp.vl["BodyInfo_3_FD1"]["DrStatRl_B_Actl"], cp.vl["BodyInfo_3_FD1"]["DrStatRr_B_Actl"]])
     ret.seatbeltUnlatched = cp.vl["RCMStatusMessage2_FD1"]["FirstRowBuckleDriver"] == 2
 
+    # BluePilot: the body module's own report of the turn lamps. This is the ANSWER side of the
+    # blinker-actuation question -- ret.leftBlinker above is the SWITCH position from the SCCM, and
+    # openpilot cannot see its own transmitted switch value (panda returns TX at bus | 0x80, which
+    # the parser drops). The lamp state is what the car actually did. Note these flash, so a
+    # consumer must latch over a flash period rather than trust one frame.
+    self.turn_lamp_left = bool(cp.vl["BodyInfo_3_FD1"]["TurnLghtLeftOn_B_Stat"])
+    self.turn_lamp_right = bool(cp.vl["BodyInfo_3_FD1"]["TurnLghtRightOn_B_Stat"])
+
     # blindspot sensors
     if self.CP.enableBsm:
       cp_bsm = cp_cam if self.CP.flags & FordFlags.CANFD else cp

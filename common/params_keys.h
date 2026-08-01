@@ -574,6 +574,10 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // BluePilot: the passing-assist panel. Every gate, the dry run of the manoeuvre and the drive
     // summary all land here -- it is the whole feature's readout. Nothing acts; this only displays.
     {"ShowPassingAssist", {PERSISTENT | BACKUP, BOOL, "0"}},
+    // BluePilot: one-shot stationary turn-signal actuation test. 0 off, 1 left, 2 right.
+    // NOT persistent and NOT backed up: cleared on manager start and self-cleared when the pulse
+    // ends, so it cannot survive a reboot and cannot repeat without a fresh deliberate request.
+    {"FordBlinkerTest", {CLEAR_ON_MANAGER_START | CLEAR_ON_IGNITION_ON, INT, "0"}},
     {"FordPrefHybridPowerFlowAlternate", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"mici_hide_onroad_fade", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"mici_hide_onroad_border", {PERSISTENT | BACKUP, BOOL, "0"}},

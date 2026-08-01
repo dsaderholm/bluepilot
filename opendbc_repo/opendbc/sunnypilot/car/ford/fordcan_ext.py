@@ -316,7 +316,7 @@ def create_lkas_ui_msg(packer, CAN: CanBus, main_on: bool, enabled: bool, hands:
 
 
 def create_button_msg(packer, bus: int, stock_values: dict, cancel=False, resume=False,
-                      tja_toggle=False, icbm_button=None):
+                      tja_toggle=False, icbm_button=None, turn_signal=None):
   """
   Creates a CAN message for the Ford SCCM buttons/switches.
 
@@ -373,5 +373,11 @@ def create_button_msg(packer, bus: int, stock_values: dict, cancel=False, resume
   # ICBM button support — set the specified button signal to 1
   if icbm_button is not None:
     values[icbm_button] = 1
+
+  # BluePilot: turn-signal override for the stationary blinker actuation test. None means keep the
+  # driver's own switch position, which is the passthrough above and the case on every normal
+  # frame. Only BlinkerTestExt ever passes a value here.
+  if turn_signal is not None:
+    values["TurnLghtSwtch_D_Stat"] = turn_signal
 
   return packer.make_can_msg("Steering_Data_FD1", bus, values)

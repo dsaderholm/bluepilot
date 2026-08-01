@@ -371,6 +371,7 @@ class CarStateExt:
     traffic_sign_data = dat.carStateBP.trafficSignData
     blis_left = dat.carStateBP.blisLeft
     blis_right = dat.carStateBP.blisRight
+    blinker_test = dat.carStateBP.blinkerTest
 
     # Initialize with defaults
     hybrid_drive.dataAvailable = False
@@ -394,6 +395,12 @@ class CarStateExt:
     dat.carStateBP.accGap = 0
     blis_left.dataAvailable = False
     blis_right.dataAvailable = False
+
+    # BluePilot: turn-signal actuation test. lampLeft/lampRight are read every frame regardless of
+    # whether a pulse is running -- during a pulse they are the measurement, and outside one they
+    # are the baseline that proves the signal decodes at all when the DRIVER uses the stalk.
+    blinker_test.lampLeft = bool(getattr(self, 'turn_lamp_left', False))
+    blinker_test.lampRight = bool(getattr(self, 'turn_lamp_right', False))
 
     brake_light_status.dataAvailable = False
     brake_light_status.brakeLightsOn = False
