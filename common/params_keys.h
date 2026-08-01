@@ -159,9 +159,13 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // BluePilot: furthest a vision-only lead is considered for the radar-blind decel, in metres.
     // Ford ACC handles close leads itself; the case this exists for is a stopped car far ahead.
     {"IcbmLeadMaxDistance", {PERSISTENT | BACKUP, INT, "120"}},
+    // BluePilot: time-to-collision bound for the radar-blind lead trigger, in tenths of a second.
+    // This is the real earliness control -- against a stopped lead TTC = dRel / v_ego, so at
+    // 65 mph 4.0 s already caps range near 116 m and IcbmLeadMaxDistance never binds.
+    {"IcbmLeadMaxTtc", {PERSISTENT | BACKUP, INT, "40"}},
     // BluePilot: act on the driving model's own stop intent (stop signs, red lights) when no
     // lead explains it. Same floor-and-alert channel as the radar-blind lead case.
-    {"IcbmModelStopEnabled", {PERSISTENT | BACKUP, BOOL, "1"}},
+    {"IcbmModelStopEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"DeviceBootMode", {PERSISTENT | BACKUP, INT, "0"}},
     {"DevUIInfo", {PERSISTENT | BACKUP, INT, "0"}},
     {"EnableCopyparty", {PERSISTENT | BACKUP, BOOL}},

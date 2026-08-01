@@ -53,13 +53,15 @@ MIN_PERSISTENCE_S = 1.0
 # filter: bridges, gantries and guardrails tend to appear and vanish, while a real vehicle
 # survives a closing range sweep. Least-justified threshold here -- refit from logs.
 MIN_RANGE_SWEEP_M = 15.0
-MAX_TTC_S = 4.0            # only act when the closing rate actually matters
+DEFAULT_MAX_TTC_S = 4.0    # fallback; tunable via IcbmLeadMaxTtc (tenths of a second)
 MAX_V_REL_MS = -2.0        # genuinely closing, not sensor noise
 MAX_D_PATH_M = 1.2         # in-path, not an adjacent lane or roadside return
 MIN_V_EGO_MS = 25 * CV.MPH_TO_MS  # below this a floor request is meaningless
 
 # --- release gates ---
-RELEASE_TTC_S = 6.0        # hysteresis against chatter around MAX_TTC_S
+# Release margin above the trigger TTC. Relative, not absolute: the trigger is tunable, and a
+# fixed release value would erase the hysteresis entirely once the two met.
+RELEASE_TTC_MARGIN_S = 2.0
 LEAD_LOST_S = 0.5          # candidate gone this long -> released
 
 # --- model stop intent (stop signs, red lights) ---
@@ -104,11 +106,13 @@ class UnconfirmedLeadDetector:
     self.params = Params()
     self.frame = 0
     self.max_lead_distance = 120
-    self.model_stop_enabled = True
+    self.max_ttc = DEFAULT_MAX_TTC_S
+    self.model_stop_enabled = False
 
   def update_params(self) -> None:
     if self.frame % int(PARAMS_UPDATE_PERIOD / DT_MDL) == 0:
       self.max_lead_distance = self.params.get("IcbmLeadMaxDistance", return_default=True)
+      self.max_ttc = self.params.get("IcbmLeadMaxTtc", return_default=True) / 10.
       self.model_stop_enabled = self.params.get_bool("IcbmModelStopEnabled")
 
   @property
@@ -136,9 +140,9 @@ class UnconfirmedLeadDetector:
     if abs(lead.dPath) > MAX_D_PATH_M:
       return False
     # Ford ACC deals with close leads perfectly well. This exists for the distant stopped car, so
-    # the far bound is the tunable one. Note MAX_TTC_S also bounds range implicitly -- against a
-    # stopped lead, TTC = dRel / v_ego, so at 65 mph a 4 s TTC is already about 116 m. Raising this
-    # past that does nothing on its own.
+    # the far bound is a sanity limit. The real earliness control is IcbmLeadMaxTtc: against a
+    # stopped lead TTC = dRel / v_ego, so at 65 mph a 4 s TTC already caps range near 116 m and
+    # this gate never binds. Raising this alone does nothing.
     if lead.dRel > self.max_lead_distance:
       return False
     if v_ego < MIN_V_EGO_MS:
@@ -259,7 +263,7 @@ class UnconfirmedLeadDetector:
       else:
         self._lost_s = 0.0
 
-      if self.ttc > RELEASE_TTC_S:
+      if self.ttc > self.max_ttc + RELEASE_TTC_MARGIN_S:
         self._release()
         return
 
@@ -304,7 +308,7 @@ class UnconfirmedLeadDetector:
 
     swept = self._sweep_start_d_rel - lead.dRel
     if (self._persistence_s >= MIN_PERSISTENCE_S and swept >= MIN_RANGE_SWEEP_M
-        and self.ttc <= MAX_TTC_S):
+        and self.ttc <= self.max_ttc):
       self.state = State.active
       self.trigger = Trigger.visionLead
       self.restore_set_speed = v_cruise_cluster
