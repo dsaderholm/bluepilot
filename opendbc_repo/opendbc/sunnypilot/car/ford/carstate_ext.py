@@ -16,6 +16,30 @@ from opendbc.sunnypilot.car.ford.values_ext import BUTTONS
 from openpilot.common.swaglog import cloudlog
 
 
+# BluePilot: Traffic_RecognitnData (0x3CD) signal map, capnp field -> CAN signal. Logged whole so
+# the camera's actual behaviour can be read from a route. wrongWayAlert is handled separately
+# because it is the one Bool.
+_TSR_SIGNALS = (
+  ("vLimit1", "TsrVLim1MsgTxt_D_Rq"),
+  ("vLimit2", "TsrVLim2MsgTxt_D_Rq"),
+  ("vLimitUnit", "TsrVlUnitMsgTxt_D_Rq"),
+  ("vLimit1Status", "TsrVl1StatMsgTxt_D_Rq"),
+  ("vLimit2Status", "TsrVl2StatMsgTxt_D_Rq"),
+  ("vLimit1Restrict", "TsrVl1RstrcMsgTxt_D_Rq"),
+  ("vLimit2Restrict", "TsrVl2RstrcMsgTxt_D_Rq"),
+  ("vLimit1Restrict2", "TsrVl1RstrcMsgTxt2_D_Rq"),
+  ("vLimit2Restrict2", "TsrVl2RstrcMsgTxt2_D_Rq"),
+  ("vLimit1Permanent", "TsrVl1PrmntMsgTxt_D_Rq"),
+  ("vLimit2Permanent", "TsrVl2PrmntMsgTxt_D_Rq"),
+  ("overtakeMsg", "TsrOvtkMsgTxt_D_Rq"),
+  ("overtakeMsg2", "TsrOvtkMsgTxt2_D_Rq"),
+  ("overtakeStatus", "TsrOvtkStatMsgTxt_D_Rq"),
+  ("tsrMsg", "TsrMsgTxt_D_Rq"),
+  ("tsrStatus", "TsrStatMsgTxt_D_Rq"),
+  ("overSpeedWarn", "TsrOswWarnMsgTxt_D_Rq"),
+)
+
+
 # BluePilot: HEV power flow mode text lookup (moved from helpers.py)
 def get_hev_power_flow_text(mode_value):
   """Convert HEV power flow mode value to human-readable text.
@@ -318,6 +342,7 @@ class CarStateExt:
     hybrid_drive = dat.carStateBP.hybridDrive
     hybrid_battery = dat.carStateBP.hybridBattery
     brake_light_status = dat.carStateBP.brakeLightStatus
+    traffic_sign_data = dat.carStateBP.trafficSignData
 
     # Initialize with defaults
     hybrid_drive.dataAvailable = False
@@ -336,6 +361,8 @@ class CarStateExt:
     hybrid_battery.socMinPerc = 0.0
     hybrid_battery.socMaxPerc = 0.0
     hybrid_battery.socActual = 0.0
+
+    traffic_sign_data.dataAvailable = False
 
     brake_light_status.dataAvailable = False
     brake_light_status.brakeLightsOn = False
@@ -431,6 +458,20 @@ class CarStateExt:
           hybrid_battery.socActual = batt_data4["BattTracSoc2_Pc_Actl"]
     except (KeyError, AttributeError):
       pass
+
+    # BluePilot: log every Traffic_RecognitnData signal, not just the two the resolver consumes.
+    # What a given camera actually populates varies by market and build, and it is far cheaper to
+    # read it off a route than to reason about it. See the capnp comment: there is no curve or
+    # advisory field in this message at all, so nothing here can drive curve speed.
+    if self.CP.flags & FordFlags.TSR:
+      try:
+        tsr = cp_cam.vl["Traffic_RecognitnData"]
+        traffic_sign_data.dataAvailable = True
+        for field, signal in _TSR_SIGNALS:
+          setattr(traffic_sign_data, field, int(tsr[signal]))
+        traffic_sign_data.wrongWayAlert = bool(tsr["WwaWarn_B_Rq"])
+      except (KeyError, AttributeError):
+        pass
 
     return dat
 

@@ -586,6 +586,39 @@ struct CarStateBP @0xb057204d7deadf3f {
   hybridDrive @0 :HybridDrive;
   hybridBattery @1 :HybridBattery;
   brakeLightStatus @2 :BrakeLightStatus;
+  trafficSignData @3 :TrafficSignData;
+
+  # BluePilot: every signal in Traffic_RecognitnData (0x3CD), raw, for investigation.
+  # Only vLimit1 and vLimitUnit feed the speed limit resolver; the rest are logged so what the
+  # camera actually reports can be read off a route instead of guessed at.
+  #
+  # Note there is NO curve / advisory / warning-sign field anywhere in this message. The only two
+  # "warn" signals are wrongWayAlert and overSpeedWarn (you are exceeding the detected limit).
+  # Ford TSR reports speed limits and overtaking restrictions only.
+  struct TrafficSignData {
+    dataAvailable @0 :Bool;
+
+    vLimit1 @1 :UInt8;          # TsrVLim1MsgTxt_D_Rq
+    vLimit2 @2 :UInt8;          # TsrVLim2MsgTxt_D_Rq -- conditional/supplementary limit
+    vLimitUnit @3 :UInt8;       # TsrVlUnitMsgTxt_D_Rq: 1=km/h, 2=mph
+    vLimit1Status @4 :UInt8;    # TsrVl1StatMsgTxt_D_Rq
+    vLimit2Status @5 :UInt8;    # TsrVl2StatMsgTxt_D_Rq
+    vLimit1Restrict @6 :UInt8;  # TsrVl1RstrcMsgTxt_D_Rq -- e.g. wet/time/vehicle-class qualifier
+    vLimit2Restrict @7 :UInt8;  # TsrVl2RstrcMsgTxt_D_Rq
+    vLimit1Restrict2 @8 :UInt8; # TsrVl1RstrcMsgTxt2_D_Rq
+    vLimit2Restrict2 @9 :UInt8; # TsrVl2RstrcMsgTxt2_D_Rq
+    vLimit1Permanent @10 :UInt8;  # TsrVl1PrmntMsgTxt_D_Rq -- permanent vs temporary (roadworks)
+    vLimit2Permanent @11 :UInt8;  # TsrVl2PrmntMsgTxt_D_Rq
+
+    overtakeMsg @12 :UInt8;       # TsrOvtkMsgTxt_D_Rq
+    overtakeMsg2 @13 :UInt8;      # TsrOvtkMsgTxt2_D_Rq
+    overtakeStatus @14 :UInt8;    # TsrOvtkStatMsgTxt_D_Rq
+
+    tsrMsg @15 :UInt8;            # TsrMsgTxt_D_Rq
+    tsrStatus @16 :UInt8;         # TsrStatMsgTxt_D_Rq
+    overSpeedWarn @17 :UInt8;     # TsrOswWarnMsgTxt_D_Rq -- exceeding the detected limit
+    wrongWayAlert @18 :Bool;      # WwaWarn_B_Rq
+  }
 
   struct HybridDrive {
     dataAvailable @0 :Bool;
