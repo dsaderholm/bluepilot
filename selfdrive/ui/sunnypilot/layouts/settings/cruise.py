@@ -52,6 +52,26 @@ class CruiseLayout(Widget):
       description=tr("Use vision path predictions to estimate the appropriate speed to drive through turns ahead."),
       param="SmartCruiseControlVision")
 
+    # BluePilot: curve aggressiveness, split by speed regime like the angle-steering feel factors
+    self.scc_v_low_speed_factor = option_item_sp(
+      title=tr("Curve Sensitivity (Low Speed)"),
+      param="SmartCruiseControlVisionLowSpeedFactor",
+      min_value=50, max_value=150, value_change_step=5,
+      inline=True)
+
+    self.scc_v_high_speed_factor = option_item_sp(
+      title=tr("Curve Sensitivity (High Speed)"),
+      param="SmartCruiseControlVisionHighSpeedFactor",
+      min_value=50, max_value=150, value_change_step=5,
+      inline=True)
+
+    # BluePilot: cap on how far ICBM drops the set speed in one step
+    self.icbm_max_target_drop = option_item_sp(
+      title=tr("Max Set Speed Drop Per Step"),
+      param="IcbmMaxTargetDrop",
+      min_value=0, max_value=9, value_change_step=1,
+      inline=True)
+
     self.scc_m_toggle = toggle_item_sp(
       title=tr("Smart Cruise Control - Map"),
       description=tr("Use map data to estimate the appropriate speed to drive through turns ahead."),
@@ -89,8 +109,11 @@ class CruiseLayout(Widget):
 
     items = [
       self.icbm_toggle,
+      self.icbm_max_target_drop,
       self.dec_toggle,
       self.scc_v_toggle,
+      self.scc_v_low_speed_factor,
+      self.scc_v_high_speed_factor,
       self.scc_m_toggle,
       self.custom_acc_toggle,
       self.custom_acc_short_increment,
