@@ -63,11 +63,21 @@ class LongitudinalPlannerSP:
                     self.resolver.speed_limit_final_last, has_speed_limit, self.resolver.distance, self.events_sp)
 
     targets = {
-      LongitudinalPlanSource.cruise: (v_cruise, a_ego),
       LongitudinalPlanSource.sccVision: (self.scc.vision.output_v_target, self.scc.vision.output_a_target),
       LongitudinalPlanSource.sccMap: (self.scc.map.output_v_target, self.scc.map.output_a_target),
       LongitudinalPlanSource.speedLimitAssist: (self.sla.output_v_target, self.sla.output_a_target),
     }
+
+    # BluePilot: with bidirectional Speed Limit Assist, SLA becomes authoritative rather than one
+    # more limiter -- it replaces the cruise baseline instead of being min()'d against it, which is
+    # what lets it raise the set speed as well as lower it. This is a deliberate departure from
+    # upstream sunnypilot, where the min()-of-sources architecture is exactly what guarantees SLA
+    # can never auto-increase. The ceiling (SpeedLimitMaxSetSpeed) bounds what it may request, and
+    # ICBM's manual override latch lets one real button press take it back.
+    #
+    # The curve controllers stay inside the min() either way: they may only ever lower.
+    if not (self.sla.auto_follow and self.sla.is_active):
+      targets[LongitudinalPlanSource.cruise] = (v_cruise, a_ego)
 
     self.source = min(targets, key=lambda k: targets[k][0])
     self.output_v_target, self.output_a_target = targets[self.source]

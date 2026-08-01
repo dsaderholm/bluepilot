@@ -267,6 +267,11 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"SpeedLimitOffsetType", {PERSISTENT | BACKUP, INT, "0"}},
     {"SpeedLimitPolicy", {PERSISTENT | BACKUP, INT, "3"}},
     {"SpeedLimitValueOffset", {PERSISTENT | BACKUP, INT, "0"}},
+    // BluePilot: bidirectional Speed Limit Assist. When set, SLA follows the limit in both
+    // directions instead of only lowering, and never requests above SpeedLimitMaxSetSpeed.
+    {"SpeedLimitAutoFollow", {PERSISTENT | BACKUP, BOOL, "1"}},
+    // Ceiling for what SLA may request, in display units (mph/kph). Well under Ford ACC's 110 mph cap.
+    {"SpeedLimitMaxSetSpeed", {PERSISTENT | BACKUP, INT, "85"}},
 
     // Smart Cruise Control
     {"MapTargetVelocities", {CLEAR_ON_ONROAD_TRANSITION, STRING}},

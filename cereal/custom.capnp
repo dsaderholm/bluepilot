@@ -350,6 +350,8 @@ struct OnroadEventSP @0xda96579883444c35 {
     speedLimitChanged @21;
     speedLimitPending @22;
     e2eChime @23;
+    # BluePilot: SLA changed the set speed automatically (raise or lower)
+    speedLimitAutoSet @24;
   }
 }
 

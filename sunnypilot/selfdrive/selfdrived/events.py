@@ -37,6 +37,28 @@ def speed_limit_adjust_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.
     Priority.LOW, VisualAlert.none, AudibleAlert.none, 4.)
 
 
+def speed_limit_auto_set_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
+  """BluePilot: fired on every automatic set-speed change made by bidirectional Speed Limit Assist.
+
+  Deliberately announces the direction as well as the value: with auto-raise enabled, a wrong map
+  tag can push the set speed *up*, and that has to be visible immediately rather than felt. One
+  real button press latches ICBM to MANUAL and takes it back.
+  """
+  speed_conv = CV.MS_TO_KPH if metric else CV.MS_TO_MPH
+  unit = "km/h" if metric else "mph"
+
+  target = round(sm['longitudinalPlanSP'].speedLimit.assist.vTarget * speed_conv)
+  # carState.vCruiseCluster is kph (card.py sets it from v_cruise_cluster_kph), not m/s
+  set_speed = round(CS.vCruiseCluster * CV.KPH_TO_MS * speed_conv)
+  direction = "Raising" if target > set_speed else "Lowering"
+
+  return Alert(
+    f"{direction} set speed to {target} {unit} speed limit",
+    "",
+    AlertStatus.normal, AlertSize.small,
+    Priority.LOW, VisualAlert.none, AudibleAlertSP.promptSingleHigh, 4.)
+
+
 def speed_limit_pre_active_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
   speed_conv = CV.MS_TO_KPH if metric else CV.MS_TO_MPH
   v_cruise_cluster = CS.vCruiseCluster
@@ -214,6 +236,10 @@ EVENTS_SP: dict[int, dict[str, Alert | AlertCallbackType]] = {
       "",
       AlertStatus.normal, AlertSize.small,
       Priority.LOW, VisualAlert.none, AudibleAlertSP.promptSingleHigh, 5.),
+  },
+
+  EventNameSP.speedLimitAutoSet: {
+    ET.WARNING: speed_limit_auto_set_alert,
   },
 
   EventNameSP.speedLimitChanged: {

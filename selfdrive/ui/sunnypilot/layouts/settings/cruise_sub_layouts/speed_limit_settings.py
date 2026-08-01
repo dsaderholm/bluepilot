@@ -14,7 +14,7 @@ from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.common import Mode 
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.common import OffsetType as SpeedLimitOffsetType
 from openpilot.system.ui.lib.multilang import tr
 from openpilot.system.ui.sunnypilot.widgets import get_highlighted_description
-from openpilot.system.ui.sunnypilot.widgets.list_view import multiple_button_item_sp, option_item_sp, simple_button_item_sp, LineSeparatorSP
+from openpilot.system.ui.sunnypilot.widgets.list_view import multiple_button_item_sp, option_item_sp, simple_button_item_sp, toggle_item_sp, LineSeparatorSP
 from openpilot.system.ui.widgets import Widget
 from openpilot.system.ui.widgets.network import NavButton
 from openpilot.system.ui.widgets.scroller_tici import Scroller
@@ -86,10 +86,31 @@ class SpeedLimitSettingsLayout(Widget):
       label_callback=self._get_offset_label,
     )
 
+    # BluePilot: bidirectional following and its ceiling
+    self._speed_limit_auto_follow = toggle_item_sp(
+      title=tr("Automatic Speed Limit Following"),
+      description=tr("Follow detected speed limits in both directions without confirmation. "
+                     "Stock behavior only ever lowers the set speed and requires you to confirm increases. "
+                     "Every automatic change is announced on screen, and any cruise button press takes back control."),
+      param="SpeedLimitAutoFollow")
+
+    self._speed_limit_max_set_speed = option_item_sp(
+      title=tr("Maximum Set Speed"),
+      param="SpeedLimitMaxSetSpeed",
+      min_value=25,
+      max_value=100,
+      value_change_step=5,
+      description=tr("Automatic speed limit following will never request above this speed, "
+                     "regardless of the detected limit."),
+      inline=True)
+
     items = [
       self._speed_limit_mode,
       LineSeparatorSP(40),
       self._source_button,
+      LineSeparatorSP(40),
+      self._speed_limit_auto_follow,
+      self._speed_limit_max_set_speed,
       LineSeparatorSP(40),
       self._speed_limit_offset_type,
       self._speed_limit_value_offset

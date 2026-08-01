@@ -62,6 +62,10 @@ class SpeedLimitAssist:
     self.is_metric = self.params.get_bool("IsMetric")
     set_speed_limit_assist_availability(self.CP, self.CP_SP, self.params)
     self.enabled = self.params.get("SpeedLimitMode", return_default=True) == Mode.assist
+    # BluePilot: bidirectional following + ceiling. Upstream sunnypilot deliberately never raises
+    # the set speed without driver confirmation; this fork follows the limit in both directions.
+    self.auto_follow = self.params.get_bool("SpeedLimitAutoFollow")
+    self.max_set_speed = self.params.get("SpeedLimitMaxSetSpeed", return_default=True)
     self.long_enabled = False
     self.long_enabled_prev = False
     self.is_enabled = False
@@ -144,6 +148,8 @@ class SpeedLimitAssist:
       self.is_metric = self.params.get_bool("IsMetric")
       set_speed_limit_assist_availability(self.CP, self.CP_SP, self.params)
       self.enabled = self.params.get("SpeedLimitMode", return_default=True) == Mode.assist
+      self.auto_follow = self.params.get_bool("SpeedLimitAutoFollow")
+      self.max_set_speed = self.params.get("SpeedLimitMaxSetSpeed", return_default=True)
 
   def update_car_state(self, CS: car.CarState) -> None:
     now = time.monotonic()
@@ -190,7 +196,31 @@ class SpeedLimitAssist:
     self.target_set_speed_conv = pcm_long_required_max_set_speed_conv if self.pcm_op_long else self.speed_limit_final_last_conv
 
   @property
+  def max_set_speed_ms(self) -> float:
+    return self.max_set_speed * (CV.KPH_TO_MS if self.is_metric else CV.MPH_TO_MS)
+
+  @property
+  def cluster_converging(self) -> bool:
+    """BluePilot: True when the set speed moved toward the target rather than away from it.
+
+    With ICBM driving the cluster, SLA's "driver changed the set speed, stand down" check would
+    otherwise fire on ICBM's own convergence and immediately deactivate the assist it is serving.
+    Movement toward the target is ICBM working; movement away is the driver, and item 1's manual
+    override latch handles that case on the ICBM side.
+    """
+    if not self.auto_follow:
+      return False
+    before = abs(self.prev_v_cruise_cluster_conv - self.target_set_speed_conv)
+    after = abs(self.v_cruise_cluster_conv - self.target_set_speed_conv)
+    return after < before
+
+  @property
   def apply_confirm_speed_threshold(self) -> bool:
+    # BluePilot: bidirectional auto-follow never asks for confirmation, in either direction.
+    # The ceiling bounds what can be requested and the manual override latch is the safety valve.
+    if self.auto_follow:
+      return False
+
     # below CST: always require user confirmation
     if self.v_cruise_cluster_below_confirm_speed_threshold:
       return True
@@ -223,6 +253,11 @@ class SpeedLimitAssist:
 
   def _update_non_pcm_long_confirmed_state(self) -> bool:
     if self.target_set_speed_confirmed:
+      return True
+
+    # BluePilot: in auto-follow there is nothing to confirm -- ICBM drives the cluster to the
+    # target itself, so the assist activates as soon as a limit is available.
+    if self.auto_follow and self._has_speed_limit:
       return True
 
     if self.state != SpeedLimitAssistState.preActive:
@@ -326,7 +361,7 @@ class SpeedLimitAssist:
       else:
         # ACTIVE
         if self.state == SpeedLimitAssistState.active:
-          if self.v_cruise_cluster_changed:
+          if self.v_cruise_cluster_changed and not self.cluster_converging:
             self.state = SpeedLimitAssistState.inactive
 
           elif self.speed_limit_changed and self.apply_confirm_speed_threshold:
@@ -371,6 +406,11 @@ class SpeedLimitAssist:
     return enabled, active
 
   def update_events(self, events_sp: EventsSP) -> None:
+    # BluePilot: announce every automatic set-speed change, raise or lower, so a bad limit is
+    # seen rather than only felt. Fires on the target changing, which is when the assist commits.
+    if self.auto_follow and self.is_active and        self.speed_limit_final_last_conv != self.prev_speed_limit_final_last_conv:
+      events_sp.add(EventNameSP.speedLimitAutoSet)
+
     if self.state == SpeedLimitAssistState.preActive:
       events_sp.add(EventNameSP.speedLimitPreActive)
 
@@ -399,6 +439,11 @@ class SpeedLimitAssist:
     self._speed_limit = speed_limit
     self._speed_limit_final_last = speed_limit_final_last
     self._distance = distance
+
+    # BluePilot: never request above the configured ceiling, whatever the detected limit says.
+    # Clamped before update_calculations so the confirm/target logic all sees the capped value.
+    if self.auto_follow:
+      self._speed_limit_final_last = min(self._speed_limit_final_last, self.max_set_speed_ms)
 
     self.update_params()
     self.update_calculations(v_cruise_cluster)
