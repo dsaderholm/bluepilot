@@ -435,7 +435,7 @@ class CarStateExt:
     return dat
 
   def update_traffic_signals(self, cp_cam):
-    """Parse traffic sign recognition data for speed limit (CANFD only).
+    """Parse traffic sign recognition data for speed limit.
 
     Args:
       cp_cam: Camera bus CAN parser
@@ -443,7 +443,7 @@ class CarStateExt:
     Returns:
       Speed limit in m/s, or 0 if not available.
     """
-    if self.CP.flags & FordFlags.CANFD:
+    if self.CP.flags & FordFlags.TSR:
       v_limit = cp_cam.vl["Traffic_RecognitnData"]["TsrVLim1MsgTxt_D_Rq"]
       v_limit_unit = cp_cam.vl["Traffic_RecognitnData"]["TsrVlUnitMsgTxt_D_Rq"]
 

@@ -64,6 +64,13 @@ def apply_ford_ext_params(ret: structs.CarParams, CP, car_fw, fingerprint, alpha
   if 0x07A in fingerprint[CAN.main] and 0x24B in fingerprint[CAN.main] and 0x24C in fingerprint[CAN.main]:
     ret.flags |= int(FordFlags.HEV_BATTERY_DATA)
 
+  # BluePilot: camera traffic-sign recognition. Traffic_RecognitnData (0x3CD) carries the signals
+  # update_traffic_signals reads and lives in ford_lincoln_base_pt, so it is NOT limited to CAN FD
+  # platforms -- the old CANFD gate was a proxy that silently zeroed the car speed-limit source on
+  # every Q3 Ford that actually has TSR. Detected from the camera bus so it follows the hardware.
+  if 0x3CD in fingerprint.get(CAN.camera, {}):
+    ret.flags |= int(FordFlags.TSR)
+
 
 def apply_ford_ext_params_sp(ret: structs.CarParamsSP) -> None:
   """

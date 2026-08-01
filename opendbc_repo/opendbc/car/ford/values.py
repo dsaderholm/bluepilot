@@ -53,6 +53,10 @@ class FordFlags(IntFlag):
   ALT_STEER_ANGLE = 2
   HEV_CLUSTER_DATA = 4
   HEV_BATTERY_DATA = 8
+  # BluePilot: camera traffic-sign recognition present. Traffic_RecognitnData (0x3CD) is in
+  # ford_lincoln_base_pt, not just the CAN FD platforms, so this is detected from the camera-bus
+  # fingerprint rather than inferred from CANFD as it used to be.
+  TSR = 16
 
 
 class RADAR:

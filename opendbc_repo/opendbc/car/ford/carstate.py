@@ -105,7 +105,7 @@ class CarState(CarStateBase, MadsCarState, CarStateExt):
     ret.accFaulted = cp.vl["EngBrakeData"]["CcStat_D_Actl"] in (1, 2)
 
     # BluePilot: traffic sign recognition (delegated to carstate_ext)
-    if self.CP.flags & FordFlags.CANFD:
+    if self.CP.flags & FordFlags.TSR:
       ret_sp.speedLimit = CarStateExt.update_traffic_signals(self, cp_cam)
 
     if not self.CP.openpilotLongitudinalControl:
@@ -252,8 +252,14 @@ class CarState(CarStateBase, MadsCarState, CarStateExt):
 
     if CP.flags & FordFlags.CANFD:
       cam_messages += [
-        ("Traffic_RecognitnData", 1),
         ("IPMA_Data2", 1),
+      ]
+
+    # BluePilot: TSR is independent of CANFD. float('nan') marks it non-critical for CAN validity,
+    # same as the HEV overlay messages -- a car whose camera stays quiet must not fault the bus.
+    if CP.flags & FordFlags.TSR:
+      cam_messages += [
+        ("Traffic_RecognitnData", float('nan')),
       ]
 
     if CP.enableBsm and CP.flags & FordFlags.CANFD:
