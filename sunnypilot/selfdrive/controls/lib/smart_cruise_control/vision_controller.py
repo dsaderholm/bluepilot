@@ -43,6 +43,26 @@ _TURNING_ACC_BP = [1.5, 2.3, 3.]  # absolute value of current lat acc
 
 _LEAVING_ACC = 0.5  # Conformable acceleration to regain speed while leaving a turn.
 
+# BluePilot: curve aggressiveness, tuned separately for the low- and high-speed regimes and blended
+# across them by vEgo. Same shape as the angle-steering feel factors (FordAngleLow/HighSpeedFactor
+# in lateral_angle_ext), including the 0.5-1.5 clip and the 30-60 mph blend band, so the two sets of
+# knobs behave consistently and can be reasoned about together.
+#
+# A tight 25 mph off-ramp and a 60 mph highway sweeper want genuinely different aggressiveness, and
+# a single multiplier can't express that -- raising it enough to handle the off-ramp makes the
+# sweeper feel like it's braking for nothing.
+#
+# The blended factor divides the lateral-acceleration budget and every lat-acc threshold, so one
+# knob moves the whole curve response coherently:
+#   > 100 -> smaller accel budget and earlier triggers: slows sooner and further for a given curve
+#   < 100 -> larger budget and later triggers: carries more speed through
+# Applied to _A_LAT_REG_MAX (which sets the target speed) and to the state-machine thresholds, but
+# NOT to the _TURNING_ACC / _ENTERING_SMOOTH_DECEL tables -- those are comfort limits on how hard
+# the controller may act, and scaling them would change ride feel rather than curve sensitivity.
+_SENSITIVITY_MIN = 0.5
+_SENSITIVITY_MAX = 1.5
+_SENSITIVITY_V_BP = [13.5, 26.82]  # m/s, ~30-60 mph. Matches lateral_angle_ext's gain blend band.
+
 
 class SmartCruiseControlVision:
   v_target: float = 0
@@ -66,6 +86,40 @@ class SmartCruiseControlVision:
     self.current_lat_acc = 0.
     self.max_pred_lat_acc = 0.
 
+    # BluePilot: curve aggressiveness feel factors, blended by speed into self.sensitivity
+    self.low_speed_curve_factor = 1.0
+    self.high_speed_curve_factor = 1.0
+    self.sensitivity = 1.0
+
+  def _update_sensitivity(self) -> None:
+    """BluePilot: blend the two feel factors by current speed."""
+    self.sensitivity = float(np.interp(self.v_ego, _SENSITIVITY_V_BP,
+                                       [self.low_speed_curve_factor, self.high_speed_curve_factor]))
+
+  @property
+  def a_lat_reg_max(self) -> float:
+    return _A_LAT_REG_MAX / self.sensitivity
+
+  @property
+  def entering_pred_lat_acc_th(self) -> float:
+    return _ENTERING_PRED_LAT_ACC_TH / self.sensitivity
+
+  @property
+  def abort_entering_pred_lat_acc_th(self) -> float:
+    return _ABORT_ENTERING_PRED_LAT_ACC_TH / self.sensitivity
+
+  @property
+  def turning_lat_acc_th(self) -> float:
+    return _TURNING_LAT_ACC_TH / self.sensitivity
+
+  @property
+  def leaving_lat_acc_th(self) -> float:
+    return _LEAVING_LAT_ACC_TH / self.sensitivity
+
+  @property
+  def finish_lat_acc_th(self) -> float:
+    return _FINISH_LAT_ACC_TH / self.sensitivity
+
   def get_a_target_from_control(self) -> float:
     return self.a_target
 
@@ -78,6 +132,11 @@ class SmartCruiseControlVision:
   def _update_params(self) -> None:
     if self.frame % int(PARAMS_UPDATE_PERIOD / DT_MDL) == 0:
       self.enabled = self.params.get_bool("SmartCruiseControlVision")
+      # BluePilot: curve aggressiveness feel factors, stored as percentages
+      for attr, key in (("low_speed_curve_factor", "SmartCruiseControlVisionLowSpeedFactor"),
+                        ("high_speed_curve_factor", "SmartCruiseControlVisionHighSpeedFactor")):
+        factor = self.params.get(key, return_default=True) / 100.
+        setattr(self, attr, float(np.clip(factor, _SENSITIVITY_MIN, _SENSITIVITY_MAX)))
 
   def _update_calculations(self, sm: messaging.SubMaster) -> None:
     if not self.long_enabled:
@@ -97,7 +156,7 @@ class SmartCruiseControlVision:
       max_curve = self.max_pred_lat_acc / (v_ego**2)
 
       # Get the target velocity for the maximum curve
-      self.v_target = (_A_LAT_REG_MAX / max_curve) ** 0.5
+      self.v_target = (self.a_lat_reg_max / max_curve) ** 0.5
 
   def _update_state_machine(self) -> tuple[bool, bool]:
     # ENABLED, ENTERING, TURNING, LEAVING, OVERRIDING
@@ -115,7 +174,7 @@ class SmartCruiseControlVision:
           if self.v_ego <= MIN_V:
             pass
           # If significant lateral acceleration is predicted ahead, then move to Entering turn state.
-          elif self.max_pred_lat_acc >= _ENTERING_PRED_LAT_ACC_TH:
+          elif self.max_pred_lat_acc >= self.entering_pred_lat_acc_th:
             self.state = VisionState.entering
 
         # OVERRIDING
@@ -126,25 +185,25 @@ class SmartCruiseControlVision:
         # ENTERING
         elif self.state == VisionState.entering:
           # Transition to Turning if current lateral acceleration is over the threshold.
-          if self.current_lat_acc >= _TURNING_LAT_ACC_TH:
+          if self.current_lat_acc >= self.turning_lat_acc_th:
             self.state = VisionState.turning
           # Abort if the predicted lateral acceleration drops
-          elif self.max_pred_lat_acc < _ABORT_ENTERING_PRED_LAT_ACC_TH:
+          elif self.max_pred_lat_acc < self.abort_entering_pred_lat_acc_th:
             self.state = VisionState.enabled
 
         # TURNING
         elif self.state == VisionState.turning:
           # Transition to Leaving if current lateral acceleration drops below a threshold.
-          if self.current_lat_acc <= _LEAVING_LAT_ACC_TH:
+          if self.current_lat_acc <= self.leaving_lat_acc_th:
             self.state = VisionState.leaving
 
         # LEAVING
         elif self.state == VisionState.leaving:
           # Transition back to Turning if current lateral acceleration goes back over the threshold.
-          if self.current_lat_acc >= _TURNING_LAT_ACC_TH:
+          if self.current_lat_acc >= self.turning_lat_acc_th:
             self.state = VisionState.turning
           # Finish if current lateral acceleration goes below a threshold.
-          elif self.current_lat_acc < _FINISH_LAT_ACC_TH:
+          elif self.current_lat_acc < self.finish_lat_acc_th:
             self.state = VisionState.enabled
 
     # DISABLED
@@ -192,6 +251,7 @@ class SmartCruiseControlVision:
     self.v_cruise_setpoint = v_cruise_setpoint
 
     self._update_params()
+    self._update_sensitivity()  # BluePilot: blend feel factors before they are read below
     self._update_calculations(sm)
 
     self.is_enabled, self.is_active = self._update_state_machine()
