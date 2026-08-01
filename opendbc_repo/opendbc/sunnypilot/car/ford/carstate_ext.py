@@ -19,6 +19,30 @@ from openpilot.common.swaglog import cloudlog
 # BluePilot: Traffic_RecognitnData (0x3CD) signal map, capnp field -> CAN signal. Logged whole so
 # the camera's actual behavior can be read from a route. wrongWayAlert is handled separately
 # because it is the one Bool.
+# BluePilot: Side_Detect_L/R_Stat signal map, capnp field -> (left signal, right signal).
+# Ford does not name these symmetrically, hence the explicit pairing.
+_BLIS_SIGNALS = (
+  ("sodDetect", "SodDetctLeft_D_Stat", "SodDetctRight_D_Stat"),
+  ("sodStat", "SodLeft_D_Stat", "SodRight_D_Stat"),
+  ("sodAlert", "SodAlrtLeft_D_Stat", "SodAlrtRight_D_Stat"),
+  ("sodSensor", "SodSnsLeft_D_Stat", "SodSnsRight_D_Stat"),
+  ("sodWarnPeriodMs", "SodWarnLeft_Prd_Rq", "SodWarnRight_Prd_Rq"),
+  ("ctaStat", "CtaLeft_D_Stat", "CtaRight_D_Stat"),
+  ("ctaAlert", "CtaAlrtLeft_D_Stat", "CtaAlrtRight_D_Stat"),
+  ("ctaAlert2", "CtaAlrtLeft2_D_Stat", "CtaAlrtRight2_D_Stat"),
+  ("ctaSensor", "CtaSnsLeft_D_Stat", "CtaSnsRight_D_Stat"),
+  ("bttStat", "BttLeft_D_Stat", "BttRight_D_Stat"),
+  ("bttDriverReq", "BttLeft_D_RqDrv", "BttRight_D_RqDrv"),
+  ("illumPercent", "Side_Detect_L_Illum", "Side_Detect_R_Illum"),
+)
+
+_BLIS_BOOL_SIGNALS = (
+  ("ctaBrakeDecelReq", "CtaLeftBrkDecel_B_Rq", "CtaRightBrkDecel_B_Rq"),
+  ("ctaBrakeEnableReq", "CtaLeftBrkEnbl_B_Rq", "CtaRightBrkEnbl_B_Rq"),
+  ("ctaBrakeMsgReq", "CtaBrkLeftMsgTxt_B_Rq", "CtaBrkRightMsgTxt_B_Rq"),
+)
+
+
 _TSR_SIGNALS = (
   ("vLimit1", "TsrVLim1MsgTxt_D_Rq"),
   ("vLimit2", "TsrVLim2MsgTxt_D_Rq"),
@@ -345,6 +369,8 @@ class CarStateExt:
     hybrid_battery = dat.carStateBP.hybridBattery
     brake_light_status = dat.carStateBP.brakeLightStatus
     traffic_sign_data = dat.carStateBP.trafficSignData
+    blis_left = dat.carStateBP.blisLeft
+    blis_right = dat.carStateBP.blisRight
 
     # Initialize with defaults
     hybrid_drive.dataAvailable = False
@@ -366,6 +392,8 @@ class CarStateExt:
 
     traffic_sign_data.dataAvailable = False
     dat.carStateBP.accGap = 0
+    blis_left.dataAvailable = False
+    blis_right.dataAvailable = False
 
     brake_light_status.dataAvailable = False
     brake_light_status.brakeLightsOn = False
@@ -491,6 +519,23 @@ class CarStateExt:
         traffic_sign_data.wrongWayAlert = bool(tsr["WwaWarn_B_Rq"])
       except (KeyError, AttributeError):
         pass
+
+    # BluePilot: log every Side_Detect_L/R_Stat signal, not just the one bool openpilot consumes.
+    # sodStat and sodAlert have no value table in the DBC -- if Ford encodes anything like Toyota's
+    # ADJACENT vs APPROACHING split, that is where it would be, and it is the only rear-approach
+    # information this car could possibly expose.
+    if self.CP.enableBsm:
+      cp_bsm = cp_cam if self.CP.flags & FordFlags.CANFD else cp
+      for target, msg, idx in ((blis_left, "Side_Detect_L_Stat", 1), (blis_right, "Side_Detect_R_Stat", 2)):
+        try:
+          vl = cp_bsm.vl[msg]
+          target.dataAvailable = True
+          for field, *sigs in _BLIS_SIGNALS:
+            setattr(target, field, int(vl[sigs[idx - 1]]))
+          for field, *sigs in _BLIS_BOOL_SIGNALS:
+            setattr(target, field, bool(vl[sigs[idx - 1]]))
+        except (KeyError, AttributeError):
+          pass
 
     return dat
 

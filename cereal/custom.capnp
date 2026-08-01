@@ -662,6 +662,41 @@ struct CarStateBP @0xb057204d7deadf3f {
   hybridBattery @1 :HybridBattery;
   brakeLightStatus @2 :BrakeLightStatus;
   trafficSignData @3 :TrafficSignData;
+  blisLeft @4 :SideDetect;
+  blisRight @5 :SideDetect;
+
+  # BluePilot: every signal in Side_Detect_L/R_Stat (0x3A6 / 0x3A7), raw.
+  #
+  # openpilot reduces all of this to one bool per side (SodDetct != 0). Toyota and Subaru publish
+  # ADJACENT and APPROACHING as separate signals and openpilot ORs them together, so the interface
+  # has nowhere to put approach information even where the car provides it. Ford has no documented
+  # equivalent -- but sodStat (3 bits) and sodAlert (2 bits) have NO value table in the DBC, and
+  # the sensor must compute closing rate internally to decide whether to warn. Logged to find out
+  # whether anything approach-like is encoded there.
+  #
+  # Note SodDetct's own table is: 0=clear 1=Alert_On 2=Flash_On 3=Sensor_Fault 4=Sensor_Blocked,
+  # so openpilot's "!= 0" currently treats a faulted or blocked sensor as a permanent detection.
+  struct SideDetect {
+    dataAvailable @0 :Bool;
+
+    sodDetect @1 :UInt8;        # SodDetct*_D_Stat -- the one openpilot uses
+    sodStat @2 :UInt8;          # Sod*_D_Stat, 3 bits, UNDOCUMENTED
+    sodAlert @3 :UInt8;         # SodAlrt*_D_Stat, 2 bits, UNDOCUMENTED
+    sodSensor @4 :UInt8;        # SodSns*_D_Stat -- sensor health
+    sodWarnPeriodMs @5 :UInt8;  # SodWarn*_Prd_Rq -- warning flash period, ms
+
+    ctaStat @6 :UInt8;          # Cta*_D_Stat -- cross traffic, active in reverse
+    ctaAlert @7 :UInt8;         # CtaAlrt*_D_Stat
+    ctaAlert2 @8 :UInt8;        # CtaAlrt*2_D_Stat
+    ctaSensor @9 :UInt8;        # CtaSns*_D_Stat
+    ctaBrakeDecelReq @10 :Bool; # Cta*BrkDecel_B_Rq -- addressed to ABS_ESC
+    ctaBrakeEnableReq @11 :Bool;# Cta*BrkEnbl_B_Rq -- addressed to ABS_ESC
+    ctaBrakeMsgReq @12 :Bool;   # CtaBrk*MsgTxt_B_Rq
+
+    bttStat @13 :UInt8;         # Btt*_D_Stat
+    bttDriverReq @14 :UInt8;    # Btt*_D_RqDrv
+    illumPercent @15 :UInt8;    # Side_Detect_*_Illum -- mirror lamp brightness
+  }
 
   # BluePilot: the ACC follow gap the camera is reporting, AccTGap_D_Dsply from ACCDATA_3
   # (Time_Gap_1..5; 0 means the camera is not reporting a usable value).
