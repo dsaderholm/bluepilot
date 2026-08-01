@@ -22,6 +22,8 @@ UnconfirmedLeadState = custom.LongitudinalPlanSP.UnconfirmedLead.State
 
 # BluePilot: states in which the radar-blind lead detector owns the target outright
 UNCONFIRMED_LEAD_COMMANDING = (UnconfirmedLeadState.active, UnconfirmedLeadState.restoring)
+# ...but only the hazard itself outranks the driver. Restoring the set speed afterwards must not.
+UNCONFIRMED_LEAD_OVERRIDES_MANUAL = (UnconfirmedLeadState.active,)
 
 ALLOWED_SPEED_THRESHOLD = 1.8  # m/s, ~4 MPH
 HYST_GAP = 0.0  # currently disabled; TODO-SP: might need to be brand-specific
@@ -88,6 +90,7 @@ class IntelligentCruiseButtonManagement:
 
     # BluePilot: radar-blind lead detector currently owns the target
     self.unconfirmed_lead_commanding = False
+    self.unconfirmed_lead_state = UnconfirmedLeadState.inactive
 
   def update_params(self) -> None:
     if self.frame % int(PARAMS_UPDATE_PERIOD / DT_CTRL) == 0:
@@ -132,6 +135,7 @@ class IntelligentCruiseButtonManagement:
     # so it needs no rate limiting of its own. The same channel carries the restore request that
     # returns the set speed once the event resolves.
     unconfirmed_lead = LP_SP.unconfirmedLead
+    self.unconfirmed_lead_state = unconfirmed_lead.state
     self.unconfirmed_lead_commanding = unconfirmed_lead.state in UNCONFIRMED_LEAD_COMMANDING
     if self.unconfirmed_lead_commanding:
       self.v_target = round(unconfirmed_lead.vTarget * speed_conv)
@@ -291,11 +295,16 @@ class IntelligentCruiseButtonManagement:
     # BluePilot: in MANUAL, stop chasing the target entirely and let the driver's press stand.
     # is_ready_prev is still advanced so the inactive -> preActive edge fires correctly on re-arm.
     #
-    # The radar-blind lead detector is the one thing that overrides MANUAL. A driver adjusting
-    # their set speed earlier in the drive should not disable hazard response for the rest of it,
-    # and the same applies to the restore that follows. The latch is cleared rather than merely
-    # bypassed so that behaviour after the event is unambiguous.
-    if self.unconfirmed_lead_commanding:
+    # An ACTIVE radar-blind lead is the one thing that overrides MANUAL: a driver who adjusted
+    # their set speed earlier in the drive should not have disabled hazard response for the rest
+    # of it. The latch is cleared rather than merely bypassed so behaviour afterwards is
+    # unambiguous.
+    #
+    # RESTORING deliberately does NOT override it. Once the hazard has resolved there is nothing
+    # urgent left, and a driver pressing a button mid-restore is telling us what speed they want.
+    # Letting the restore win there would mean ICBM fighting a real press, which is the exact
+    # behaviour this whole state machine exists to remove.
+    if self.unconfirmed_lead_state in UNCONFIRMED_LEAD_OVERRIDES_MANUAL:
       self.override_state = OverrideState.auto
 
     if self.override_state == OverrideState.manual:
