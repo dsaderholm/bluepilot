@@ -28,6 +28,9 @@ class HudRendererBP(HudRendererSP):
     self._exp_button = ExpButtonBP(UI_CONFIG.button_size, UI_CONFIG.wheel_icon_size)
     self._bp_params = Params()
     self._brakes_on = False
+    # BluePilot: Ford ACC asking for brakes, which is not the same event as the lamps lighting.
+    # Light applications decelerate without ever reaching the stop-lamp threshold.
+    self._acc_braking = False
     self.speed_right = 0
     self._gradient_rect = None  # BluePilot: Full-width rect for header gradient
 
@@ -68,14 +71,20 @@ class HudRendererBP(HudRendererSP):
           car_state_bp = sm['carStateBP']
           brake_light_status = car_state_bp.brakeLightStatus
           self._brakes_on = brake_light_status.dataAvailable and brake_light_status.brakeLightsOn
+          self._acc_braking = (brake_light_status.accDataAvailable and
+                               (brake_light_status.accDecelRequest or brake_light_status.accPrechargeRequest))
         except (KeyError, AttributeError):
           self._brakes_on = False
+          self._acc_braking = False
       else:
         self._brakes_on = False
+        self._acc_braking = False
     else:
       self._brakes_on = False
+      self._acc_braking = False
 
     bp_ui_log.state("HudRendererBP", "brakes_on", self._brakes_on)
+    bp_ui_log.state("HudRendererBP", "acc_braking", self._acc_braking)
 
   def _render(self, rect: rl.Rectangle) -> None:
     # BluePilot: Draw header gradient at full content width (not offset by confidence ball)
@@ -144,8 +153,18 @@ class HudRendererBP(HudRendererSP):
     )
     self.speed_right = speed_pos.x + speed_text_size.x
 
-    # BluePilot: Show red when braking if brake status is enabled
-    speed_color = rl.Color(255, 60, 60, 255) if self._brakes_on else COLORS.WHITE
+    # BluePilot: colour the speed by what the brakes are doing, if brake status is enabled.
+    #   red   -> stop lamps are lit: traffic behind you is being told you are slowing
+    #   amber -> ACC is asking for brakes but the lamps have not lit, i.e. a light application
+    #            below the stop-lamp threshold. This is the "slowed without anyone noticing"
+    #            case, and the one worth tuning IcbmMaxTargetDrop against.
+    #   white -> no braking of either kind
+    if self._brakes_on:
+      speed_color = rl.Color(255, 60, 60, 255)
+    elif self._acc_braking:
+      speed_color = rl.Color(255, 180, 40, 255)
+    else:
+      speed_color = COLORS.WHITE
     rl.draw_text_ex(self._font_bold, speed_text, speed_pos, FONT_SIZES.current_speed, 0, speed_color)
 
     unit_text = "km/h" if ui_state.is_metric else "mph"

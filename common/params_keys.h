@@ -282,6 +282,9 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // higher = slows earlier and harder for a given curve, lower = carries more speed through.
     {"SmartCruiseControlVisionLowSpeedFactor", {PERSISTENT | BACKUP, INT, "100"}},
     {"SmartCruiseControlVisionHighSpeedFactor", {PERSISTENT | BACKUP, INT, "100"}},
+    // BluePilot: how early the curve cycle starts, independent of how much it slows. 100 = stock.
+    // Higher starts sooner, which spreads the same speed change over more distance.
+    {"SmartCruiseControlVisionEarliness", {PERSISTENT | BACKUP, INT, "100"}},
 
     // Torque lateral control custom params
     {"CustomTorqueParams", {PERSISTENT | BACKUP , BOOL}},

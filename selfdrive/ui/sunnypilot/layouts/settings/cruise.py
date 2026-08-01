@@ -65,6 +65,13 @@ class CruiseLayout(Widget):
       min_value=50, max_value=150, value_change_step=5,
       inline=True)
 
+    # BluePilot: how early the curve cycle starts, independent of how much it slows
+    self.scc_v_earliness = option_item_sp(
+      title=tr("Curve Detection Earliness"),
+      param="SmartCruiseControlVisionEarliness",
+      min_value=50, max_value=200, value_change_step=10,
+      inline=True)
+
     # BluePilot: cap on how far ICBM drops the set speed in one step
     self.icbm_max_target_drop = option_item_sp(
       title=tr("Max Set Speed Drop Per Step"),
@@ -114,6 +121,7 @@ class CruiseLayout(Widget):
       self.scc_v_toggle,
       self.scc_v_low_speed_factor,
       self.scc_v_high_speed_factor,
+      self.scc_v_earliness,
       self.scc_m_toggle,
       self.custom_acc_toggle,
       self.custom_acc_short_increment,

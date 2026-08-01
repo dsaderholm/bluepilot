@@ -611,6 +611,15 @@ struct CarStateBP @0xb057204d7deadf3f {
   struct BrakeLightStatus {
     dataAvailable @0 :Bool;
     brakeLightsOn @1 :Bool;
+
+    # BluePilot: what Ford's own ACC is asking the brakes to do, read from the stock ACCDATA the
+    # camera sends. Kept separate from brakeLightsOn on purpose -- the lamp is what traffic behind
+    # you sees, these are what the system is actually doing, and they are not the same event.
+    # Precharge pressurises the system without meaningful deceleration and normally lights nothing.
+    accDataAvailable @2 :Bool;
+    accDecelRequest @3 :Bool;      # AccBrkDecel_B_Rq
+    accPrechargeRequest @4 :Bool;  # AccBrkPrchg_B_Rq
+    accAccelRequest @5 :Float32;   # AccBrkTot_A_Rq, m/s^2 (negative is deceleration)
   }
 }
 

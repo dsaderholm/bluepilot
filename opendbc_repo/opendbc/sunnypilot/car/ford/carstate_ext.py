@@ -339,6 +339,10 @@ class CarStateExt:
 
     brake_light_status.dataAvailable = False
     brake_light_status.brakeLightsOn = False
+    brake_light_status.accDataAvailable = False
+    brake_light_status.accDecelRequest = False
+    brake_light_status.accPrechargeRequest = False
+    brake_light_status.accAccelRequest = 0.0
 
     # Brake light status — try BCM message first, then fallback to BrakeSysFeatures_2
     brake_lights_detected = False
@@ -370,14 +374,27 @@ class CarStateExt:
       except (KeyError, AttributeError):
         pass
 
-    # ACC brake light overlay (applies to both sources)
+    # BluePilot: expose what ACC is asking the brakes to do, separately from the lamp state.
+    #
+    # Read unconditionally, not only under openpilotLongitudinalControl. When op long is off this
+    # is the STOCK ACC's own ACCDATA as sent by the camera, which is exactly the thing worth seeing
+    # on a car running Ford ACC: it catches applications too light to trigger the stop lamps.
+    # The lamp signal above stays untouched -- it is what traffic behind actually sees, and these
+    # two are different events, not two measurements of one.
+    try:
+      acc_data = cp_cam.vl["ACCDATA"]
+      brake_light_status.accDataAvailable = True
+      brake_light_status.accDecelRequest = acc_data["AccBrkDecel_B_Rq"] == 1
+      brake_light_status.accPrechargeRequest = acc_data["AccBrkPrchg_B_Rq"] == 1
+      brake_light_status.accAccelRequest = float(acc_data["AccBrkTot_A_Rq"])
+    except (KeyError, AttributeError):
+      pass
+
+    # ACC brake light overlay: only meaningful when openpilot is the one sending ACCDATA, since
+    # then the lamp has not been commanded by anything the BCM signal above would have caught.
     if brake_lights_detected and self.CP.openpilotLongitudinalControl:
-      try:
-        acc_data = cp_cam.vl["ACCDATA"]
-        acc_brake_active = (acc_data["AccBrkPrchg_B_Rq"] == 1 or acc_data["AccBrkDecel_B_Rq"] == 1)
-        brake_light_status.brakeLightsOn = brake_light_status.brakeLightsOn or acc_brake_active
-      except (KeyError, AttributeError):
-        pass
+      acc_brake_active = brake_light_status.accPrechargeRequest or brake_light_status.accDecelRequest
+      brake_light_status.brakeLightsOn = brake_light_status.brakeLightsOn or acc_brake_active
 
     # HEV cluster data (Cluster_HEV_Data2)
     try:
