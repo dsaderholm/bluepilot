@@ -215,6 +215,16 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     dRel @3 :Float32;
     ttc @4 :Float32;
 
+    # BluePilot: the driving model's own stop intent, logged only -- nothing acts on it yet.
+    # modelV2.action.shouldStop is published every cycle whatever the longitudinal mode is;
+    # is_e2e() in the planner only decides whether the planner consumes it. So on a car running
+    # stock ACC with experimental mode unavailable, this is still the model saying "I would stop
+    # here". shouldStop with NO lead present is the candidate signature for a red light or stop
+    # sign, which is the one case the radar-blind lead trigger above can never catch.
+    modelShouldStop @5 :Bool;
+    modelDesiredAccel @6 :Float32;
+    hasLead @7 :Bool;
+
     enum State {
       inactive @0;
       tracking @1;    # candidate seen, still accumulating persistence/range-sweep evidence

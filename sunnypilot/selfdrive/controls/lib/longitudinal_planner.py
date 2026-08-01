@@ -159,6 +159,9 @@ class LongitudinalPlannerSP:
     unconfirmedLead.restoreSetSpeed = float(self.unconfirmed_lead.restore_set_speed)
     unconfirmedLead.dRel = float(self.unconfirmed_lead.d_rel)
     unconfirmedLead.ttc = float(self.unconfirmed_lead.ttc)
+    unconfirmedLead.modelShouldStop = self.unconfirmed_lead.model_should_stop
+    unconfirmedLead.modelDesiredAccel = float(self.unconfirmed_lead.model_desired_accel)
+    unconfirmedLead.hasLead = self.unconfirmed_lead.has_lead
 
     # E2E Alerts
     e2eAlerts = longitudinalPlanSP.e2eAlerts

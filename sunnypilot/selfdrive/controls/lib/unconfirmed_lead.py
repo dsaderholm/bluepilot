@@ -68,6 +68,11 @@ class UnconfirmedLeadDetector:
     self.d_rel = 0.0
     self.ttc = 0.0
 
+    # Logging only -- see the capnp comment. Nothing reads these to make a decision.
+    self.model_should_stop = False
+    self.model_desired_accel = 0.0
+    self.has_lead = False
+
     self._persistence_s = 0.0
     self._lost_s = 0.0
     self._sweep_start_d_rel = 0.0
@@ -132,6 +137,13 @@ class UnconfirmedLeadDetector:
 
     self.d_rel = lead.dRel
     self.ttc = self._ttc(lead.dRel, lead.vRel)
+
+    # Diagnostics for the stop-sign / red-light question. Logged unconditionally, including while
+    # this detector is inactive, because the interesting case is exactly when there is no lead.
+    model_action = sm['modelV2'].action
+    self.model_should_stop = bool(model_action.shouldStop)
+    self.model_desired_accel = float(model_action.desiredAcceleration)
+    self.has_lead = bool(lead.status)
 
     if not long_enabled:
       # Disengaged: drop everything, including any pending restore. Ford restores its own set
