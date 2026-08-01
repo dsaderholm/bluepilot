@@ -106,6 +106,9 @@ class IntelligentCruiseButtonManagement:
     default_factory=lambda: IntelligentCruiseButtonManagement.SendButtonState.none
   )
   vTarget: float = auto_field()
+  overrideState: 'IntelligentCruiseButtonManagement.OverrideState' = field(
+    default_factory=lambda: IntelligentCruiseButtonManagement.OverrideState.auto
+  )
 
   class IntelligentCruiseButtonManagementState(StrEnum):
     inactive = auto()
@@ -113,6 +116,12 @@ class IntelligentCruiseButtonManagement:
     increasing = auto()
     decreasing = auto()
     holding = auto()
+
+  # BluePilot: mirrors custom.capnp's OverrideState. Values are spelled out rather than auto()
+  # because a member named `auto` would rebind the enum.auto callable for the rest of the body.
+  class OverrideState(StrEnum):
+    auto = "auto"
+    manual = "manual"
 
   class SendButtonState(StrEnum):
     none = auto()
