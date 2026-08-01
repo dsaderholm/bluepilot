@@ -591,6 +591,7 @@ class SelfdriveD(CruiseHelper):
     icbm.state = self.icbm.state
     icbm.sendButton = self.icbm.cruise_button
     icbm.vTarget = self.icbm.v_target
+    icbm.overrideState = self.icbm.override_state
 
     self.pm.send('selfdriveStateSP', ss_sp_msg)
 

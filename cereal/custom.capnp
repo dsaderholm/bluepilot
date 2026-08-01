@@ -29,6 +29,7 @@ struct IntelligentCruiseButtonManagement {
   state @0 :IntelligentCruiseButtonManagementState;
   sendButton @1 :SendButtonState;
   vTarget @2 :Float32;
+  overrideState @3 :OverrideState;
 
   enum IntelligentCruiseButtonManagementState {
     inactive @0;      # No button press or default state
@@ -36,6 +37,13 @@ struct IntelligentCruiseButtonManagement {
     increasing @2;    # Increasing speed
     decreasing @3;    # Decreasing speed
     holding @4;       # Holding steady speed
+  }
+
+  # BluePilot: driver manual override latch. In manual, ICBM stops chasing its target
+  # entirely and lets the driver's set speed stand until it re-arms.
+  enum OverrideState {
+    auto @0;          # ICBM is free to drive the set speed toward its target
+    manual @1;        # Driver overrode with a real button press; target chasing suspended
   }
 
   enum SendButtonState {

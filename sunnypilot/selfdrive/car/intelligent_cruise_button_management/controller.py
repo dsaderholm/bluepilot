@@ -7,17 +7,41 @@ See the LICENSE.md file in the root directory for more details.
 from cereal import car, custom
 from opendbc.car import structs, apply_hysteresis
 from openpilot.common.constants import CV
+from openpilot.common.params import Params
 from openpilot.common.realtime import DT_CTRL
+from openpilot.sunnypilot import PARAMS_UPDATE_PERIOD
 from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management.helpers import get_minimum_set_speed
-from openpilot.sunnypilot.selfdrive.car.cruise_ext import CRUISE_BUTTON_TIMER, update_manual_button_timers
+from openpilot.sunnypilot.selfdrive.car.cruise_ext import CRUISE_BUTTON_TIMER, V_CRUISE_MAX, update_manual_button_timers
 
+ButtonType = car.CarState.ButtonEvent.Type
 LongitudinalPlanSource = custom.LongitudinalPlanSP.LongitudinalPlanSource
 State = custom.IntelligentCruiseButtonManagement.IntelligentCruiseButtonManagementState
 SendButtonState = custom.IntelligentCruiseButtonManagement.SendButtonState
+OverrideState = custom.IntelligentCruiseButtonManagement.OverrideState
 
 ALLOWED_SPEED_THRESHOLD = 1.8  # m/s, ~4 MPH
 HYST_GAP = 0.0  # currently disabled; TODO-SP: might need to be brand-specific
 INACTIVE_TIMER = 0.4
+
+# BluePilot: buttons that count as the driver taking the set speed back from ICBM.
+# gapAdjustCruise/lkas/mainCruise deliberately excluded -- they don't change the set speed.
+MANUAL_OVERRIDE_BUTTONS = (ButtonType.accelCruise, ButtonType.decelCruise, ButtonType.setCruise)
+
+# BluePilot: re-arm policy for the manual override latch. Both conditions are ORed.
+# Named rather than inlined so the behavior is greppable and tunable from one place.
+RE_ARM_ON_CRUISE_CYCLE = True  # cancel (or any disengage) followed by re-engage returns to AUTO
+RE_ARM_ON_NEW_TARGET = True    # a genuinely new target returns to AUTO mid-drive
+# How far a new target must sit from BOTH the rejected target and the driver's own set speed
+# before it counts as "newly detected" rather than an echo of either. Display units (mph/kph).
+RE_ARM_TARGET_DELTA = 2
+
+# BluePilot: target-drop rate limiting. Ford's stock ACC brakes aggressively when the set speed
+# falls by roughly 10 mph or more at once, but coasts for smaller drops. Capping each step below
+# that threshold and walking larger drops down over several steps keeps the car coasting.
+# The cap itself is tunable via the IcbmMaxTargetDrop param; this is only the fallback default.
+DEFAULT_MAX_TARGET_DROP = 8  # display units (mph/kph)
+# How close actual speed must get to the current step's floor before the next step is allowed.
+DROP_STEP_SETTLE_MARGIN = 2  # display units (mph/kph)
 
 
 SEND_BUTTONS = {
@@ -44,10 +68,23 @@ class IntelligentCruiseButtonManagement:
     self.is_metric = False
 
     self.cruise_button_timers = CRUISE_BUTTON_TIMER
-    
-    # BluePilot: Track initial cruise speed when first enabled
-    self.initial_cruise_speed_kph = 0
+
+    # BluePilot: manual override latch. AUTO = ICBM drives the set speed toward v_target;
+    # MANUAL = the driver has taken it back and ICBM stops chasing entirely.
+    self.override_state = OverrideState.auto
+    self.v_target_overridden = 0
     self.cruise_enabled_prev = False
+    self.v_target_valid = False
+
+    # BluePilot: target-drop rate limiting
+    self.params = Params()
+    self.frame = 0
+    self.max_target_drop = DEFAULT_MAX_TARGET_DROP
+    self.drop_anchor = 0
+
+  def update_params(self) -> None:
+    if self.frame % int(PARAMS_UPDATE_PERIOD / DT_CTRL) == 0:
+      self.max_target_drop = self.params.get("IcbmMaxTargetDrop", return_default=True)
 
   @property
   def v_cruise_equal(self) -> bool:
@@ -57,30 +94,64 @@ class IntelligentCruiseButtonManagement:
     speed_conv = CV.MS_TO_KPH if self.is_metric else CV.MS_TO_MPH
     ms_conv = CV.KPH_TO_MS if self.is_metric else CV.MPH_TO_MS
 
-    # BluePilot: Capture initial cruise speed when cruise is first enabled
-    # Use current speed (vEgo) as the initial setpoint if planner target is invalid/unreasonable
-    cruise_enabled = CS.cruiseState.available and CS.cruiseState.enabled
-    if cruise_enabled and not self.cruise_enabled_prev:
-      # Cruise just enabled - capture current speed as initial setpoint
-      current_speed_kph = CS.vEgo * CV.MS_TO_KPH
-      self.initial_cruise_speed_kph = round(current_speed_kph)
-    self.cruise_enabled_prev = cruise_enabled
-
     self.v_target_ms_last = apply_hysteresis(LP_SP.vTarget, self.v_target_ms_last, HYST_GAP * ms_conv)
 
     self.v_target = round(self.v_target_ms_last * speed_conv)
     self.v_cruise_min = get_minimum_set_speed(self.is_metric)
     self.v_cruise_cluster = round(CS.cruiseState.speedCluster * speed_conv)
-    
-    # BluePilot: If planner target is invalid/unreasonable and we have an initial cruise speed,
-    # use the initial speed as the target (or cluster speed if it's been set)
-    MAX_REASONABLE_TARGET = 145 if self.is_metric else 90
-    if self.v_target >= MAX_REASONABLE_TARGET or self.v_target == 0:
-      # Planner target is invalid - use initial cruise speed or cluster speed
-      if self.initial_cruise_speed_kph > 0:
-        self.v_target = self.initial_cruise_speed_kph
-      elif self.v_cruise_cluster > 0:
-        self.v_target = self.v_cruise_cluster
+
+    # BluePilot: reject planner targets that aren't real requests, rather than substituting a
+    # remembered speed for them.
+    #
+    # longitudinal_planner clamps vTarget to V_CRUISE_MAX (145 kph) whenever carState.vCruise is
+    # still V_CRUISE_UNSET, and publishes 0 before it has run at all. Neither is a speed anyone
+    # asked for, so ICBM holds the current cluster speed instead of chasing them.
+    #
+    # This replaces an earlier fallback that substituted a kph-valued engage speed (vEgo * MS_TO_KPH)
+    # into a target that is mph-valued on an imperial device -- at 65 mph that produced v_target=105,
+    # which then re-tripped the same >= 90 guard and pinned the state machine. 145 kph rounds to
+    # exactly 90 mph, which is why the guard fired on every unset frame.
+    v_target_unset = round(V_CRUISE_MAX * CV.KPH_TO_MS * speed_conv)
+    self.v_target_valid = 0 < self.v_target < v_target_unset
+    if not self.v_target_valid:
+      self.v_target = self.v_cruise_cluster
+
+    self.v_target = self.apply_target_drop_limit(round(CS.vEgo * speed_conv))
+
+  def apply_target_drop_limit(self, v_ego_conv: int) -> int:
+    """BluePilot: cap how far below the set speed ICBM may command in one step.
+
+    Ford's stock ACC treats a large single drop in set speed as a reason to brake hard; smaller
+    drops it handles by coasting. So rather than commanding a curve or speed-limit target all at
+    once, hold at (anchor - max_target_drop) and only take the next step once the car has actually
+    slowed to that floor. Net deceleration is the same, but it arrives as coasting.
+
+    Only decreases are limited -- increases are what the driver or the ceiling asked for and are
+    rate-limited naturally by ICBM emitting one button press per cycle.
+    """
+    if self.max_target_drop <= 0:  # 0 disables the limiter
+      self.drop_anchor = 0
+      return self.v_target
+
+    if self.v_target >= self.v_cruise_cluster:
+      self.drop_anchor = 0
+      return self.v_target
+
+    if self.drop_anchor == 0:
+      self.drop_anchor = self.v_cruise_cluster
+
+    floor = self.drop_anchor - self.max_target_drop
+    if self.v_target >= floor:
+      return self.v_target  # the whole requested drop fits inside one step
+
+    # Requested drop is larger than one step. Advance the anchor only once the cluster has reached
+    # the current floor AND actual speed has caught up to it, so each step is a separate, gentle
+    # request rather than a continuous slide that Ford reads as one big drop.
+    if self.v_cruise_cluster <= floor and v_ego_conv <= floor + DROP_STEP_SETTLE_MARGIN:
+      self.drop_anchor = self.v_cruise_cluster
+      floor = self.drop_anchor - self.max_target_drop
+
+    return max(self.v_target, floor)
 
   def update_state_machine(self) -> custom.IntelligentCruiseButtonManagement.SendButtonState:
     self.pre_active_timer = max(0, self.pre_active_timer - 1)
@@ -98,19 +169,11 @@ class IntelligentCruiseButtonManagement:
               self.state = State.holding
 
             elif self.v_target > self.v_cruise_cluster:
-              # BluePilot: Prevent ICBM from increasing speed when cruise is first enabled
-              # If cluster speed is 0 or very low, don't increase - wait for user to set initial speed
-              # Also cap target to reasonable maximum (145 kph / 90 mph)
-              # Don't increase if target exceeds initial cruise speed by more than 5 mph/kph
-              MAX_REASONABLE_TARGET = 145 if self.is_metric else 90
-              MAX_INITIAL_INCREASE = 5  # Allow small increases from initial speed
-              
-              if self.v_cruise_cluster == 0 or self.v_target >= MAX_REASONABLE_TARGET:
-                # Don't increase - stay in preActive or go to holding
-                self.state = State.holding
-              elif self.initial_cruise_speed_kph > 0 and self.v_target > (self.initial_cruise_speed_kph + MAX_INITIAL_INCREASE):
-                # Don't increase beyond initial cruise speed + small margin
-                # This prevents ICBM from ramping up when cruise is first enabled
+              # BluePilot: don't push a cluster the driver hasn't set yet -- wait for their first SET.
+              # The former MAX_REASONABLE_TARGET / MAX_INITIAL_INCREASE caps are gone: unreasonable
+              # targets are now rejected in update_calculations, and the upper bound on what ICBM may
+              # request belongs to the configurable speed ceiling, not to a fixed +5 from engage speed.
+              if self.v_cruise_cluster == 0:
                 self.state = State.holding
               else:
                 self.state = State.increasing
@@ -154,11 +217,45 @@ class IntelligentCruiseButtonManagement:
     if not ready:
       for k in self.cruise_button_timers:
         self.cruise_button_timers[k] = 0
-      # BluePilot: Reset initial cruise speed when cruise is disabled
-      # This ensures we capture a fresh initial speed when cruise is re-enabled
-      self.initial_cruise_speed_kph = 0
 
     self.is_ready = ready and not button_pressed
+
+  def update_manual_override(self, CS: car.CarState) -> None:
+    """BluePilot: AUTO/MANUAL latch.
+
+    Every ButtonEvent reaching here is a genuine driver press. ICBM's own virtual presses cannot
+    appear: panda returns transmitted frames with src = bus | CAN_RETURNED_BUS_OFFSET (0x80), and
+    Ford's CANParser binds Steering_Data_FD1 to bus 0, so the injected frames are dropped by the
+    parser before carstate_ext ever decodes them. No sent-command bookkeeping is needed to tell the
+    two apart -- if a set-speed button shows up in CS.buttonEvents, a human pressed it.
+    """
+    cruise_enabled = CS.cruiseState.available and CS.cruiseState.enabled
+    cruise_cycled = cruise_enabled and not self.cruise_enabled_prev
+    self.cruise_enabled_prev = cruise_enabled
+
+    # Re-arm on cruise cancel + re-engage.
+    if RE_ARM_ON_CRUISE_CYCLE and cruise_cycled:
+      self.override_state = OverrideState.auto
+      return
+
+    # A real driver press latches MANUAL and records the target they rejected.
+    if any(b.type.raw in MANUAL_OVERRIDE_BUTTONS and b.pressed for b in CS.buttonEvents):
+      if self.override_state != OverrideState.manual:
+        self.v_target_overridden = self.v_target
+      self.override_state = OverrideState.manual
+      return
+
+    if self.override_state != OverrideState.manual or not RE_ARM_ON_NEW_TARGET:
+      return
+
+    # Re-arm on a newly-detected target: one that differs from the target the driver rejected AND
+    # from the set speed they chose instead. Requiring both keeps a press from instantly re-arming
+    # itself -- the driver's own press moves carState.vCruise, and therefore v_target, within a few
+    # frames, so a bare "target changed" test would never hold MANUAL at all.
+    differs_from_rejected = abs(self.v_target - self.v_target_overridden) >= RE_ARM_TARGET_DELTA
+    differs_from_driver = abs(self.v_target - self.v_cruise_cluster) >= RE_ARM_TARGET_DELTA
+    if self.v_target_valid and differs_from_rejected and differs_from_driver:
+      self.override_state = OverrideState.auto
 
   def run(self, CS: car.CarState, CC: car.CarControl, LP_SP: custom.LongitudinalPlanSP, is_metric: bool) -> None:
     if self.CP_SP.pcmCruiseSpeed:
@@ -166,9 +263,18 @@ class IntelligentCruiseButtonManagement:
 
     self.is_metric = is_metric
 
+    self.update_params()
     self.update_calculations(CS, LP_SP)
     self.update_readiness(CS, CC)
+    self.update_manual_override(CS)
 
-    self.cruise_button = self.update_state_machine()
+    # BluePilot: in MANUAL, stop chasing the target entirely and let the driver's press stand.
+    # is_ready_prev is still advanced so the inactive -> preActive edge fires correctly on re-arm.
+    if self.override_state == OverrideState.manual:
+      self.state = State.inactive
+      self.cruise_button = SendButtonState.none
+    else:
+      self.cruise_button = self.update_state_machine()
 
     self.is_ready_prev = self.is_ready
+    self.frame += 1
