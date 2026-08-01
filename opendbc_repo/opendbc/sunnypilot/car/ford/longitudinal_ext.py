@@ -69,10 +69,52 @@ class LongitudinalExt:
     self.disable_BP_long_UI = False
     self.disable_downhill_comp_UI = True
 
+    # BluePilot: standstill resume gate
+    self.resume_gate_enabled = False
+    self.resume_min_gap_m = 6.0
+    self.resume_min_lead_speed_ms = 5 * 0.44704
+    self.resume_gate_blocking = False
+
   def update_long_params(self, params):
     """Read longitudinal-related Params from the UI. Called each frame."""
     self.disable_BP_long_UI = params.get_bool("disable_BP_long_UI")
     self.disable_downhill_comp_UI = params.get_bool("disable_downhill_comp_UI")
+    self.resume_gate_enabled = params.get_bool("IcbmResumeGateEnabled")
+    self.resume_min_gap_m = float(params.get("IcbmResumeMinGap", return_default=True))
+    self.resume_min_lead_speed_ms = float(params.get("IcbmResumeMinLeadSpeed", return_default=True)) * 0.44704
+
+  def resume_allowed(self, sm) -> bool:
+    """BluePilot: should openpilot's standstill resume request actually be sent?
+
+    controlsd sets CC.cruiseControl.resume from its own MPC plan (shouldStop), which is the right
+    judgement when openpilot is driving. On a car running stock Ford ACC it is the wrong one: the
+    MPC decides there is room to move, openpilot presses RESUME, and Ford's ACC -- which was not
+    consulted -- takes that as "go" and accelerates toward the set speed. If the lead has crept
+    forward only a foot or two, Ford's radar then finds it immediately and brakes hard. Two
+    planners, one car, neither aware of the other.
+
+    So gate on the lead itself: resume only once there is a real gap or the lead is genuinely
+    moving. With no lead at all there is nothing to wait for.
+
+    Off by default -- this changes standstill behaviour and wants A/B testing on a real drive.
+    """
+    if not self.resume_gate_enabled:
+      self.resume_gate_blocking = False
+      return True
+
+    try:
+      lead = sm['radarState'].leadOne
+    except (KeyError, AttributeError):
+      self.resume_gate_blocking = False
+      return True
+
+    if not lead.status:
+      self.resume_gate_blocking = False
+      return True
+
+    allowed = lead.dRel >= self.resume_min_gap_m or lead.vLead >= self.resume_min_lead_speed_ms
+    self.resume_gate_blocking = not allowed
+    return allowed
 
   def update(self, CC, CS, op_accel, op_gas, accel_due_to_pitch, v_ego_mph, stopping, target_speed):
     """

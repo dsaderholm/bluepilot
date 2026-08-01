@@ -79,6 +79,27 @@ class CruiseLayout(Widget):
       min_value=0, max_value=9, value_change_step=1,
       inline=True)
 
+    # BluePilot: hold openpilot's standstill resume until the lead has actually gone
+    self.icbm_resume_gate = toggle_item_sp(
+      title=tr("Gate Standstill Resume On Lead"),
+      description=tr("Wait for the vehicle ahead to actually move before resuming from a stop. "
+                     "Without this, openpilot requests resume from its own plan and stock ACC "
+                     "accelerates toward the set speed, then brakes hard when its radar finds the "
+                     "lead still close."),
+      param="IcbmResumeGateEnabled")
+
+    self.icbm_resume_min_gap = option_item_sp(
+      title=tr("Resume Minimum Gap (m)"),
+      param="IcbmResumeMinGap",
+      min_value=2, max_value=20, value_change_step=1,
+      inline=True)
+
+    self.icbm_resume_min_lead_speed = option_item_sp(
+      title=tr("Resume Minimum Lead Speed (mph)"),
+      param="IcbmResumeMinLeadSpeed",
+      min_value=1, max_value=15, value_change_step=1,
+      inline=True)
+
     self.scc_m_toggle = toggle_item_sp(
       title=tr("Smart Cruise Control - Map"),
       description=tr("Use map data to estimate the appropriate speed to drive through turns ahead."),
@@ -117,6 +138,9 @@ class CruiseLayout(Widget):
     items = [
       self.icbm_toggle,
       self.icbm_max_target_drop,
+      self.icbm_resume_gate,
+      self.icbm_resume_min_gap,
+      self.icbm_resume_min_lead_speed,
       self.dec_toggle,
       self.scc_v_toggle,
       self.scc_v_low_speed_factor,
