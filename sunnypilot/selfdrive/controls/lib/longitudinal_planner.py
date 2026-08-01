@@ -162,6 +162,7 @@ class LongitudinalPlannerSP:
     unconfirmedLead.modelShouldStop = self.unconfirmed_lead.model_should_stop
     unconfirmedLead.modelDesiredAccel = float(self.unconfirmed_lead.model_desired_accel)
     unconfirmedLead.hasLead = self.unconfirmed_lead.has_lead
+    unconfirmedLead.trigger = self.unconfirmed_lead.trigger
 
     # E2E Alerts
     e2eAlerts = longitudinalPlanSP.e2eAlerts

@@ -32,11 +32,14 @@ positives, and along with the usable detection range it should be refitted from 
 
 from cereal import custom, log
 from openpilot.common.constants import CV
+from openpilot.common.params import Params
 from openpilot.common.realtime import DT_MDL
+from openpilot.sunnypilot import PARAMS_UPDATE_PERIOD
 from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP
 
 EventNameSP = custom.OnroadEventSP.EventName
 State = custom.LongitudinalPlanSP.UnconfirmedLead.State
+Trigger = custom.LongitudinalPlanSP.UnconfirmedLead.Trigger
 
 # Ford ACC's minimum settable speed. Not a workaround -- the hardware floor.
 ACC_FLOOR_MS = 20 * CV.MPH_TO_MS
@@ -59,6 +62,24 @@ MIN_V_EGO_MS = 25 * CV.MPH_TO_MS  # below this a floor request is meaningless
 RELEASE_TTC_S = 6.0        # hysteresis against chatter around MAX_TTC_S
 LEAD_LOST_S = 0.5          # candidate gone this long -> released
 
+# --- model stop intent (stop signs, red lights) ---
+#
+# modelV2.action.shouldStop is published every cycle whatever the longitudinal mode is; is_e2e()
+# in longitudinal_planner only decides whether the planner consumes it. It is the same signal that
+# stops the car under openpilot longitudinal with experimental mode, which is reported to work well
+# on this vehicle for signs and signals -- the reason for running stock Ford ACC is the rest of
+# op long's behaviour, not this part of it.
+#
+# This is the only signal available for the case the lead trigger structurally cannot catch: a sign
+# or signal with no vehicle at it produces no lead, so there is no dRel, vRel or TTC to gate on.
+# Persistence and the speed floor are therefore the whole filter, which is why it is separately
+# switchable via IcbmModelStopEnabled.
+MODEL_STOP_PERSISTENCE_S = 1.0
+MODEL_STOP_RELEASE_S = 0.5
+# Horizon used to turn the model's desired acceleration into a set-speed target. Matches SCC-V's
+# _NO_OVERSHOOT_TIME_HORIZON so the two produce comparably paced requests.
+MODEL_STOP_HORIZON_S = 4.0
+
 
 class UnconfirmedLeadDetector:
   def __init__(self):
@@ -72,10 +93,23 @@ class UnconfirmedLeadDetector:
     self.model_should_stop = False
     self.model_desired_accel = 0.0
     self.has_lead = False
+    self.trigger = Trigger.none
 
     self._persistence_s = 0.0
     self._lost_s = 0.0
     self._sweep_start_d_rel = 0.0
+    self._model_stop_s = 0.0
+    self._model_clear_s = 0.0
+
+    self.params = Params()
+    self.frame = 0
+    self.max_lead_distance = 120
+    self.model_stop_enabled = True
+
+  def update_params(self) -> None:
+    if self.frame % int(PARAMS_UPDATE_PERIOD / DT_MDL) == 0:
+      self.max_lead_distance = self.params.get("IcbmLeadMaxDistance", return_default=True)
+      self.model_stop_enabled = self.params.get_bool("IcbmModelStopEnabled")
 
   @property
   def is_active(self) -> bool:
@@ -101,6 +135,12 @@ class UnconfirmedLeadDetector:
       return False
     if abs(lead.dPath) > MAX_D_PATH_M:
       return False
+    # Ford ACC deals with close leads perfectly well. This exists for the distant stopped car, so
+    # the far bound is the tunable one. Note MAX_TTC_S also bounds range implicitly -- against a
+    # stopped lead, TTC = dRel / v_ego, so at 65 mph a 4 s TTC is already about 116 m. Raising this
+    # past that does nothing on its own.
+    if lead.dRel > self.max_lead_distance:
+      return False
     if v_ego < MIN_V_EGO_MS:
       return False
     if brake_pressed:
@@ -108,6 +148,13 @@ class UnconfirmedLeadDetector:
     return True
 
   def _reset_evidence(self) -> None:
+    """Clear LEAD evidence only.
+
+    Deliberately does not touch the model-stop timers. The inactive branch calls this on every
+    frame without a lead candidate, which is exactly when model-stop evidence is accumulating --
+    clearing it here would reset the counter immediately after each increment and the model-stop
+    trigger could never reach its threshold.
+    """
     self._persistence_s = 0.0
     self._sweep_start_d_rel = 0.0
 
@@ -115,6 +162,9 @@ class UnconfirmedLeadDetector:
     """Leave active. Restore the set speed if we lowered it, otherwise go idle."""
     self._reset_evidence()
     self._lost_s = 0.0
+    self._model_stop_s = 0.0
+    self._model_clear_s = 0.0
+    self.trigger = Trigger.none
     if self.restore_set_speed > 0:
       self.state = State.restoring
     else:
@@ -131,6 +181,9 @@ class UnconfirmedLeadDetector:
       long_enabled: cruise engaged and under our control
       events_sp: alert sink
     """
+    self.update_params()
+    self.frame += 1
+
     CS = sm['carState']
     lead = sm['radarState'].leadOne
     v_ego = CS.vEgo
@@ -150,6 +203,7 @@ class UnconfirmedLeadDetector:
       # speed on re-engage, and ICBM re-arms to AUTO on the cruise cycle.
       self.state = State.inactive
       self.restore_set_speed = 0.0
+      self.trigger = Trigger.none
       self._reset_evidence()
       return
 
@@ -169,7 +223,26 @@ class UnconfirmedLeadDetector:
 
     candidate = self._candidate(lead, v_ego, CS.brakePressed)
 
-    # ---- ACTIVE: hold the request until something resolves it ----
+    # ---- ACTIVE (model stop): resolve on the model letting go ----
+    if self.state == State.active and self.trigger == Trigger.modelStop:
+      if self.model_should_stop:
+        self._model_clear_s = 0.0
+      else:
+        self._model_clear_s += DT_MDL
+        if self._model_clear_s >= MODEL_STOP_RELEASE_S:
+          self._release()
+          return
+
+      # Below the floor the driver has taken over with the pedal; there is nothing left to ask for.
+      if v_ego < ACC_FLOOR_MS or CS.brakePressed:
+        self._release()
+        return
+
+      self.v_target = self._model_stop_target(v_ego)
+      events_sp.add(EventNameSP.modelStopBraking)
+      return
+
+    # ---- ACTIVE (vision lead): hold the request until something resolves it ----
     if self.state == State.active:
       radar_acquired = lead.status and lead.radar
       if radar_acquired:
@@ -197,6 +270,26 @@ class UnconfirmedLeadDetector:
       events_sp.add(EventNameSP.unconfirmedLeadBraking)
       return
 
+    # ---- model stop intent: the only signal for a sign or signal with no vehicle at it ----
+    # Evaluated before the lead path so a real lead always takes precedence: if there is something
+    # to see, the lead trigger's geometry filters are strictly better evidence than shouldStop.
+    if self.model_stop_enabled and not candidate:
+      radar_has_it = lead.status and lead.radar
+      model_candidate = (self.model_should_stop and not radar_has_it and
+                         v_ego >= MIN_V_EGO_MS and not CS.brakePressed)
+      if model_candidate:
+        self._model_stop_s += DT_MDL
+        if self._model_stop_s >= MODEL_STOP_PERSISTENCE_S:
+          self.state = State.active
+          self.trigger = Trigger.modelStop
+          self.restore_set_speed = v_cruise_cluster
+          self.v_target = self._model_stop_target(v_ego)
+          self._model_clear_s = 0.0
+          events_sp.add(EventNameSP.modelStopBraking)
+          return
+      else:
+        self._model_stop_s = 0.0
+
     # ---- INACTIVE / TRACKING: accumulate evidence ----
     if not candidate:
       self.state = State.inactive
@@ -213,8 +306,23 @@ class UnconfirmedLeadDetector:
     if (self._persistence_s >= MIN_PERSISTENCE_S and swept >= MIN_RANGE_SWEEP_M
         and self.ttc <= MAX_TTC_S):
       self.state = State.active
+      self.trigger = Trigger.visionLead
       self.restore_set_speed = v_cruise_cluster
       self.v_target = max(float(v_desired_trajectory[-1]), ACC_FLOOR_MS)
       self._lost_s = 0.0
       # Alert at trigger, not at the floor: the whole deceleration is the driver's reaction time.
       events_sp.add(EventNameSP.unconfirmedLeadBraking)
+
+  def _model_stop_target(self, v_ego: float) -> float:
+    """Set-speed target from the model's own desired deceleration.
+
+    The MPC plan is no use here: with no lead, it plans normally and shows no deceleration at all,
+    because in ACC mode the planner never consumes the model's stop intent. So the target is built
+    from modelV2.action.desiredAcceleration directly -- projected over a fixed horizon, floored at
+    what Ford's ACC can hold, and never allowed to request above current speed.
+
+    This paces the request by how hard the model wants to stop: gentle for a distant sign, sharper
+    for one already close.
+    """
+    projected = v_ego + self.model_desired_accel * MODEL_STOP_HORIZON_S
+    return max(min(projected, v_ego), ACC_FLOOR_MS)

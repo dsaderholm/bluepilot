@@ -156,6 +156,12 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // BluePilot: max per-step ICBM set-speed decrement, in display units (mph/kph).
     // Kept under Ford's ~10 mph aggressive-brake threshold so stock ACC coasts instead of braking.
     {"IcbmMaxTargetDrop", {PERSISTENT | BACKUP, INT, "8"}},
+    // BluePilot: furthest a vision-only lead is considered for the radar-blind decel, in metres.
+    // Ford ACC handles close leads itself; the case this exists for is a stopped car far ahead.
+    {"IcbmLeadMaxDistance", {PERSISTENT | BACKUP, INT, "120"}},
+    // BluePilot: act on the driving model's own stop intent (stop signs, red lights) when no
+    // lead explains it. Same floor-and-alert channel as the radar-blind lead case.
+    {"IcbmModelStopEnabled", {PERSISTENT | BACKUP, BOOL, "1"}},
     {"DeviceBootMode", {PERSISTENT | BACKUP, INT, "0"}},
     {"DevUIInfo", {PERSISTENT | BACKUP, INT, "0"}},
     {"EnableCopyparty", {PERSISTENT | BACKUP, BOOL}},

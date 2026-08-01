@@ -224,6 +224,13 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     modelShouldStop @5 :Bool;
     modelDesiredAccel @6 :Float32;
     hasLead @7 :Bool;
+    trigger @8 :Trigger;
+
+    enum Trigger {
+      none @0;
+      visionLead @1;  # vision lead the radar never confirmed
+      modelStop @2;   # model wants to stop with nothing for the radar to see: sign or signal
+    }
 
     enum State {
       inactive @0;
@@ -384,6 +391,8 @@ struct OnroadEventSP @0xda96579883444c35 {
     speedLimitAutoSet @24;
     # BluePilot: vision lead with no radar confirmation -- driver must brake
     unconfirmedLeadBraking @25;
+    # BluePilot: model wants to stop (sign/signal) and Ford ACC will not
+    modelStopBraking @26;
   }
 }
 
