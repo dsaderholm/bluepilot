@@ -18,6 +18,10 @@ LongitudinalPlanSource = custom.LongitudinalPlanSP.LongitudinalPlanSource
 State = custom.IntelligentCruiseButtonManagement.IntelligentCruiseButtonManagementState
 SendButtonState = custom.IntelligentCruiseButtonManagement.SendButtonState
 OverrideState = custom.IntelligentCruiseButtonManagement.OverrideState
+UnconfirmedLeadState = custom.LongitudinalPlanSP.UnconfirmedLead.State
+
+# BluePilot: states in which the radar-blind lead detector owns the target outright
+UNCONFIRMED_LEAD_COMMANDING = (UnconfirmedLeadState.active, UnconfirmedLeadState.restoring)
 
 ALLOWED_SPEED_THRESHOLD = 1.8  # m/s, ~4 MPH
 HYST_GAP = 0.0  # currently disabled; TODO-SP: might need to be brand-specific
@@ -82,6 +86,9 @@ class IntelligentCruiseButtonManagement:
     self.max_target_drop = DEFAULT_MAX_TARGET_DROP
     self.drop_anchor = 0
 
+    # BluePilot: radar-blind lead detector currently owns the target
+    self.unconfirmed_lead_commanding = False
+
   def update_params(self) -> None:
     if self.frame % int(PARAMS_UPDATE_PERIOD / DT_CTRL) == 0:
       self.max_target_drop = self.params.get("IcbmMaxTargetDrop", return_default=True)
@@ -117,6 +124,19 @@ class IntelligentCruiseButtonManagement:
       self.v_target = self.v_cruise_cluster
 
     self.v_target = self.apply_target_drop_limit(round(CS.vEgo * speed_conv))
+
+    # BluePilot: the radar-blind lead detector supersedes everything above, including the drop
+    # limiter. That limiter exists to keep Ford's ACC coasting through routine speed-limit and
+    # curve changes; metering out a hazard decel over several settling steps is exactly wrong.
+    # Its target is already the MPC's own geometry-scaled plan, floored at Ford's 20 mph minimum,
+    # so it needs no rate limiting of its own. The same channel carries the restore request that
+    # returns the set speed once the event resolves.
+    unconfirmed_lead = LP_SP.unconfirmedLead
+    self.unconfirmed_lead_commanding = unconfirmed_lead.state in UNCONFIRMED_LEAD_COMMANDING
+    if self.unconfirmed_lead_commanding:
+      self.v_target = round(unconfirmed_lead.vTarget * speed_conv)
+      self.v_target_valid = True
+      self.drop_anchor = 0
 
   def apply_target_drop_limit(self, v_ego_conv: int) -> int:
     """BluePilot: cap how far below the set speed ICBM may command in one step.
@@ -270,6 +290,14 @@ class IntelligentCruiseButtonManagement:
 
     # BluePilot: in MANUAL, stop chasing the target entirely and let the driver's press stand.
     # is_ready_prev is still advanced so the inactive -> preActive edge fires correctly on re-arm.
+    #
+    # The radar-blind lead detector is the one thing that overrides MANUAL. A driver adjusting
+    # their set speed earlier in the drive should not disable hazard response for the rest of it,
+    # and the same applies to the restore that follows. The latch is cleared rather than merely
+    # bypassed so that behaviour after the event is unambiguous.
+    if self.unconfirmed_lead_commanding:
+      self.override_state = OverrideState.auto
+
     if self.override_state == OverrideState.manual:
       self.state = State.inactive
       self.cruise_button = SendButtonState.none

@@ -202,6 +202,26 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
   aTarget @5 :Float32;
   events @6 :List(OnroadEventSP.Event);
   e2eAlerts @7 :E2eAlerts;
+  unconfirmedLead @8 :UnconfirmedLead;
+
+  # BluePilot: vision-detected lead with no radar corroboration. Carried on its own channel rather
+  # than folded into vTarget so it bypasses ICBM's target-drop rate limiter -- that limiter exists
+  # to keep Ford's ACC coasting for routine speed-limit and curve changes, which is the opposite of
+  # what is wanted here.
+  struct UnconfirmedLead {
+    state @0 :State;
+    vTarget @1 :Float32;          # MPC-sourced target, clipped to the ACC floor
+    restoreSetSpeed @2 :Float32;  # set speed to return to once the event resolves
+    dRel @3 :Float32;
+    ttc @4 :Float32;
+
+    enum State {
+      inactive @0;
+      tracking @1;    # candidate seen, still accumulating persistence/range-sweep evidence
+      active @2;      # triggered: requesting the MPC target down to the floor
+      restoring @3;   # resolved: returning the set speed to restoreSetSpeed
+    }
+  }
 
   struct DynamicExperimentalControl {
     state @0 :DynamicExperimentalControlState;
@@ -352,6 +372,8 @@ struct OnroadEventSP @0xda96579883444c35 {
     e2eChime @23;
     # BluePilot: SLA changed the set speed automatically (raise or lower)
     speedLimitAutoSet @24;
+    # BluePilot: vision lead with no radar confirmation -- driver must brake
+    unconfirmedLeadBraking @25;
   }
 }
 

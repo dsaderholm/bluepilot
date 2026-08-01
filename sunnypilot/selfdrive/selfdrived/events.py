@@ -25,6 +25,8 @@ EVENT_NAME_SP = {v: k for k, v in EventNameSP.schema.enumerants.items()}
 
 IS_MICI = HARDWARE.get_device_type() == 'mici'
 
+_METER_TO_FOOT = 3.28084  # common.constants.CV has no length conversions
+
 
 def speed_limit_adjust_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
   speedLimit = sm['longitudinalPlanSP'].speedLimit.resolver.speedLimit
@@ -35,6 +37,24 @@ def speed_limit_adjust_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.
     "",
     AlertStatus.normal, AlertSize.small,
     Priority.LOW, VisualAlert.none, AudibleAlert.none, 4.)
+
+
+def unconfirmed_lead_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
+  """BluePilot: a vision lead the radar has not confirmed, so stock ACC will not brake for it.
+
+  Raised the moment the detector triggers rather than when the set speed reaches Ford's floor: the
+  whole deceleration is meant to be the driver's reaction time. Ford ACC holds 20 mph and will not
+  go below it, so past that point the driver is the only thing that can stop the car.
+  """
+  ul = sm['longitudinalPlanSP'].unconfirmedLead
+  dist = round(ul.dRel * (1.0 if metric else _METER_TO_FOOT))
+  unit = "m" if metric else "ft"
+
+  return Alert(
+    "Lead not confirmed by radar - BRAKE",
+    f"Vision only at {dist} {unit}. Cruise will not stop for it.",
+    AlertStatus.critical, AlertSize.mid,
+    Priority.HIGH, VisualAlert.fcw, AudibleAlertSP.warningImmediate, 2.)
 
 
 def speed_limit_auto_set_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
@@ -236,6 +256,10 @@ EVENTS_SP: dict[int, dict[str, Alert | AlertCallbackType]] = {
       "",
       AlertStatus.normal, AlertSize.small,
       Priority.LOW, VisualAlert.none, AudibleAlertSP.promptSingleHigh, 5.),
+  },
+
+  EventNameSP.unconfirmedLeadBraking: {
+    ET.WARNING: unconfirmed_lead_alert,
   },
 
   EventNameSP.speedLimitAutoSet: {

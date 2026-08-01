@@ -14,6 +14,7 @@ from openpilot.sunnypilot.selfdrive.controls.lib.e2e_alerts_helper import E2EAle
 from openpilot.sunnypilot.selfdrive.controls.lib.smart_cruise_control.smart_cruise_control import SmartCruiseControl
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.speed_limit_assist import SpeedLimitAssist
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.speed_limit_resolver import SpeedLimitResolver
+from openpilot.sunnypilot.selfdrive.controls.lib.unconfirmed_lead import UnconfirmedLeadDetector
 from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP
 from openpilot.sunnypilot.models.helpers import get_active_bundle
 
@@ -29,6 +30,7 @@ class LongitudinalPlannerSP:
     self.scc = SmartCruiseControl()
     self.resolver = SpeedLimitResolver()
     self.sla = SpeedLimitAssist(CP, CP_SP)
+    self.unconfirmed_lead = UnconfirmedLeadDetector()
     self.generation = int(model_bundle.generation) if (model_bundle := get_active_bundle()) else None
     self.source = LongitudinalPlanSource.cruise
     self.e2e_alerts_helper = E2EAlertsHelper()
@@ -56,6 +58,13 @@ class LongitudinalPlannerSP:
 
     # Speed Limit Resolver
     self.resolver.update(v_ego, sm)
+
+    # BluePilot: radar-blind lead detection. Reads the stock planner's own MPC plan, which
+    # already accounts for vision-only leads, and reports on its own channel so it bypasses ICBM's
+    # target-drop rate limiter. v_desired_trajectory is one cycle stale here (mpc.update runs after
+    # update_targets), which at 20 Hz is 50 ms and immaterial to a multi-second deceleration.
+    self.unconfirmed_lead.update(sm, self.v_desired_trajectory, v_cruise_cluster,
+                                 long_enabled and not long_override, self.events_sp)
 
     # Speed Limit Assist
     has_speed_limit = self.resolver.speed_limit_valid or self.resolver.speed_limit_last_valid
@@ -142,6 +151,14 @@ class LongitudinalPlannerSP:
     assist.active = self.sla.is_active
     assist.vTarget = float(self.sla.output_v_target)
     assist.aTarget = float(self.sla.output_a_target)
+
+    # BluePilot: radar-blind lead state
+    unconfirmedLead = longitudinalPlanSP.unconfirmedLead
+    unconfirmedLead.state = self.unconfirmed_lead.state
+    unconfirmedLead.vTarget = float(self.unconfirmed_lead.v_target)
+    unconfirmedLead.restoreSetSpeed = float(self.unconfirmed_lead.restore_set_speed)
+    unconfirmedLead.dRel = float(self.unconfirmed_lead.d_rel)
+    unconfirmedLead.ttc = float(self.unconfirmed_lead.ttc)
 
     # E2E Alerts
     e2eAlerts = longitudinalPlanSP.e2eAlerts
