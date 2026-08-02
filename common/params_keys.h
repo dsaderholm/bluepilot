@@ -160,6 +160,11 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // button rather than tapping it, and Ford reads a held button as a continuous ramp, so without
     // this the set speed slams back up after a curve or a low-limit zone. 0 disables.
     {"IcbmMaxTargetRise", {PERSISTENT | BACKUP, INT, "5"}},
+    // BluePilot: how far the posted speed limit must move before a driver set-speed press is
+    // discarded and Speed Limit Assist takes the set speed back. Display units (mph/kph).
+    // Small enough and every zone-to-zone drift throws away the driver's number; large enough
+    // and a 55-zone baseline follows them into a 35 zone.
+    {"IcbmBaselineResetDelta", {PERSISTENT | BACKUP, INT, "10"}},
     // BluePilot: furthest a vision-only lead is considered for the radar-blind decel, in metres.
     // Ford ACC handles close leads itself; the case this exists for is a stopped car far ahead.
     {"IcbmLeadMaxDistance", {PERSISTENT | BACKUP, INT, "120"}},

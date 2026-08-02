@@ -90,6 +90,18 @@ class CruiseLayout(Widget):
       min_value=0, max_value=15, value_change_step=1,
       inline=True)
 
+    # BluePilot: when a driver's set-speed press stops applying
+    self.icbm_baseline_reset = option_item_sp(
+      title=tr("Reset My Set Speed On Limit Change"),
+      description=tr("When you adjust the set speed yourself, ICBM keeps every other feature "
+                     "working but aims at your number instead of the speed limit target. This is "
+                     "how far the posted limit has to move before your number is discarded and "
+                     "Speed Limit Assist takes over again. Curves and lead vehicles never discard "
+                     "it. 0 means only cancelling cruise does."),
+      param="IcbmBaselineResetDelta",
+      min_value=0, max_value=30, value_change_step=1,
+      inline=True)
+
     # BluePilot: radar-blind lead detector reach. TTC is the control that actually binds --
     # against a stopped lead TTC = dRel / v_ego, so at 65 mph 4.0 s already caps range near 116 m
     # and the distance bound never fires. Distance stays as a sanity limit.
@@ -180,6 +192,7 @@ class CruiseLayout(Widget):
       self.icbm_toggle,
       self.icbm_max_target_drop,
       self.icbm_max_target_rise,
+      self.icbm_baseline_reset,
       self.icbm_lead_max_ttc,
       self.icbm_lead_max_distance,
       self.icbm_model_stop,
@@ -216,8 +229,27 @@ class CruiseLayout(Widget):
     if panel == PanelType.SLA:
       self._speed_limit_layout.show_event()
 
+  @property
+  def _icbm_tunables(self):
+    """BluePilot: the ICBM settings that only do anything while ICBM is actually driving the
+    set speed. Greyed out otherwise, so a dead control never looks live."""
+    return (
+      self.icbm_max_target_drop,
+      self.icbm_max_target_rise,
+      self.icbm_baseline_reset,
+      self.icbm_lead_max_ttc,
+      self.icbm_lead_max_distance,
+      self.icbm_model_stop,
+      self.icbm_resume_gate,
+      self.icbm_resume_min_gap,
+      self.icbm_resume_min_lead_speed,
+    )
+
   def _update_state(self):
     super()._update_state()
+
+    for item in self._icbm_tunables:
+      item.action_item.set_enabled(ui_state.has_icbm)
 
     if ui_state.CP is not None and ui_state.CP_SP is not None:
       has_icbm = ui_state.has_icbm

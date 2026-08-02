@@ -20,10 +20,11 @@ SendButtonState = custom.IntelligentCruiseButtonManagement.SendButtonState
 OverrideState = custom.IntelligentCruiseButtonManagement.OverrideState
 UnconfirmedLeadState = custom.LongitudinalPlanSP.UnconfirmedLead.State
 
-# BluePilot: states in which the radar-blind lead detector owns the target outright
+# BluePilot: states in which the radar-blind lead detector owns the target outright.
+# There is no longer a companion "...and this one also cancels the driver's baseline" list: a
+# baseline changes the number ICBM aims for, never whether it acts, so a hazard needs no exception
+# to get through. It simply replaces v_target like it always did.
 UNCONFIRMED_LEAD_COMMANDING = (UnconfirmedLeadState.active, UnconfirmedLeadState.restoring)
-# ...but only the hazard itself outranks the driver. Restoring the set speed afterwards must not.
-UNCONFIRMED_LEAD_OVERRIDES_MANUAL = (UnconfirmedLeadState.active,)
 
 ALLOWED_SPEED_THRESHOLD = 1.8  # m/s, ~4 MPH
 HYST_GAP = 0.0  # currently disabled; TODO-SP: might need to be brand-specific
@@ -33,13 +34,25 @@ INACTIVE_TIMER = 0.4
 # gapAdjustCruise/lkas/mainCruise deliberately excluded -- they don't change the set speed.
 MANUAL_OVERRIDE_BUTTONS = (ButtonType.accelCruise, ButtonType.decelCruise, ButtonType.setCruise)
 
-# BluePilot: re-arm policy for the manual override latch. Both conditions are ORed.
-# Named rather than inlined so the behavior is greppable and tunable from one place.
-RE_ARM_ON_CRUISE_CYCLE = True  # cancel (or any disengage) followed by re-engage returns to AUTO
-RE_ARM_ON_NEW_TARGET = True    # a genuinely new target returns to AUTO mid-drive
-# How far a new target must sit from BOTH the rejected target and the driver's own set speed
-# before it counts as "newly detected" rather than an echo of either. Display units (mph/kph).
-RE_ARM_TARGET_DELTA = 2
+# BluePilot: what a driver's set-speed press means.
+#
+# It is NOT "stop managing my cruise". It is "for this speed limit, I want a different number" --
+# faster on a freeway, slower elsewhere. So the press records a BASELINE and every ICBM feature
+# keeps running against it: curves still slow the car, the vision-lead trigger still fires, and
+# when the reason for slowing passes the set speed returns to the baseline instead of to whatever
+# Speed Limit Assist wanted.
+#
+# An earlier design made a press suspend ICBM outright. That was wrong in both directions: it lost
+# curve slowing for the rest of the drive, and it needed an ever-growing set of exceptions to let
+# hazards back through. Treating the press as an offset rather than an off switch removes the need
+# for any of them.
+RE_ARM_ON_CRUISE_CYCLE = True  # cancel (or any disengage) followed by re-engage drops the baseline
+# The baseline applies to the speed-limit/cruise component only. A curve target is a physics limit,
+# not something to add an offset to -- SCC-Vision asking for 40 means 40, whatever the baseline is.
+BASELINE_SOURCES = (LongitudinalPlanSource.cruise, LongitudinalPlanSource.speedLimitAssist)
+# How far the posted limit must move before the baseline is discarded and SLA takes over again.
+# Fallback only; the live value comes from IcbmBaselineResetDelta.
+DEFAULT_BASELINE_RESET_DELTA = 10  # display units (mph/kph)
 
 # BluePilot: target-drop rate limiting. Ford's stock ACC brakes aggressively when the set speed
 # falls by roughly 10 mph or more at once, but coasts for smaller drops. Capping each step below
@@ -87,8 +100,11 @@ class IntelligentCruiseButtonManagement:
     # BluePilot: manual override latch. AUTO = ICBM drives the set speed toward v_target;
     # MANUAL = the driver has taken it back and ICBM stops chasing entirely.
     self.override_state = OverrideState.auto
-    self.v_target_overridden = 0
-    self.override_diverged = False
+    self.v_target_overridden = 0   # the SLA target in force when the baseline was set
+    self.v_baseline = 0            # the driver's chosen speed; 0 = no baseline, follow SLA
+    self.v_target_raw = 0
+    self.plan_source = LongitudinalPlanSource.cruise
+    self.baseline_reset_delta = DEFAULT_BASELINE_RESET_DELTA
     self.cruise_enabled_prev = False
     self.v_target_valid = False
 
@@ -108,6 +124,7 @@ class IntelligentCruiseButtonManagement:
     if self.frame % int(PARAMS_UPDATE_PERIOD / DT_CTRL) == 0:
       self.max_target_drop = self.params.get("IcbmMaxTargetDrop", return_default=True)
       self.max_target_rise = self.params.get("IcbmMaxTargetRise", return_default=True)
+      self.baseline_reset_delta = self.params.get("IcbmBaselineResetDelta", return_default=True)
 
   @property
   def v_cruise_equal(self) -> bool:
@@ -138,6 +155,14 @@ class IntelligentCruiseButtonManagement:
     self.v_target_valid = 0 < self.v_target < v_target_unset
     if not self.v_target_valid:
       self.v_target = self.v_cruise_cluster
+
+    # BluePilot: keep the planner's own target before the limiters touch it. Every override
+    # decision compares against this, never against self.v_target -- the limiters clamp toward the
+    # cluster, so a limited value drifts for reasons that have nothing to do with what was planned.
+    # Comparing post-limiter values is exactly how the original re-arm bug worked.
+    self.v_target_raw = self.v_target
+    self.plan_source = LP_SP.longitudinalPlanSource
+    self.v_target = self.apply_baseline(self.v_target)
 
     v_ego_conv = round(CS.vEgo * speed_conv)
     self.v_target = self.apply_target_drop_limit(v_ego_conv)
@@ -196,6 +221,29 @@ class IntelligentCruiseButtonManagement:
       floor = self.drop_anchor - self.max_target_drop
 
     return max(self.v_target, floor)
+
+  def apply_baseline(self, v_target: int) -> int:
+    """BluePilot: substitute the driver's chosen speed for the speed-limit component.
+
+    With no baseline this is the identity. With one:
+
+      speed limit / cruise  -> the baseline outright. This is the component the driver overrode,
+                               so their number replaces it. Above or below the posted limit; the
+                               baseline wins either way and SLA does not pull them back.
+      curve / map / lead    -> min(planned, baseline). A curve target is a physics limit and is
+                               honoured as-is; the baseline only ever caps, never raises it. This
+                               is what keeps SCC slowing you down while overridden.
+
+    Because the baseline is a value rather than a mode, everything downstream -- the state machine,
+    the rate limiters, the hazard path -- keeps working unchanged.
+    """
+    if self.v_baseline <= 0:
+      return v_target
+
+    if self.plan_source in BASELINE_SOURCES:
+      return self.v_baseline
+
+    return min(v_target, self.v_baseline)
 
   def apply_target_rise_limit(self, v_ego_conv: int) -> int:
     """BluePilot: cap how far above the set speed ICBM may command in one step.
@@ -297,7 +345,7 @@ class IntelligentCruiseButtonManagement:
     self.is_ready = ready and not button_pressed
 
   def update_manual_override(self, CS: car.CarState) -> None:
-    """BluePilot: AUTO/MANUAL latch.
+    """BluePilot: capture, hold and discard the driver's baseline.
 
     Every ButtonEvent reaching here is a genuine driver press. ICBM's own virtual presses cannot
     appear: panda returns transmitted frames with src = bus | CAN_RETURNED_BUS_OFFSET (0x80), and
@@ -309,43 +357,48 @@ class IntelligentCruiseButtonManagement:
     cruise_cycled = cruise_enabled and not self.cruise_enabled_prev
     self.cruise_enabled_prev = cruise_enabled
 
-    # Re-arm on cruise cancel + re-engage.
+    # Cancel + re-engage is the driver starting over.
     if RE_ARM_ON_CRUISE_CYCLE and cruise_cycled:
-      self.override_state = OverrideState.auto
+      self.clear_baseline()
       return
 
-    # A real driver press latches MANUAL and records the target they rejected.
+    # While the driver is pressing, the baseline follows the cluster. It therefore settles wherever
+    # they stop, and holding the button through several increments records the final speed rather
+    # than the first. v_target_overridden captures the SLA target being rejected, once per override.
     if any(b.type.raw in MANUAL_OVERRIDE_BUTTONS and b.pressed for b in CS.buttonEvents):
       if self.override_state != OverrideState.manual:
-        self.v_target_overridden = self.v_target
-        self.override_diverged = False
+        self.v_target_overridden = self.v_target_raw
       self.override_state = OverrideState.manual
+      self.v_baseline = self.v_cruise_cluster
       return
 
-    if self.override_state != OverrideState.manual or not RE_ARM_ON_NEW_TARGET:
+    if self.override_state != OverrideState.manual:
+      return
+
+    # Keep tracking while the press is still in flight -- the cluster lags the button by a few
+    # frames, so freezing on the first frame after the event would record a stale speed.
+    if any(self.cruise_button_timers[k] > 0 for k in self.cruise_button_timers):
+      self.v_baseline = self.v_cruise_cluster
       return
 
     if not self.v_target_valid:
       return
 
-    # Re-arm once our target and the driver's set speed agree again. The disagreement is the whole
-    # reason they pressed, so its end -- not its mere movement -- is what should end MANUAL.
+    # Discard the baseline when the posted limit itself moves materially. A new zone is a new
+    # situation the driver has not ruled on, and carrying a 55-zone baseline into a 35 zone is
+    # exactly the failure worth avoiding.
     #
-    # The previous rule re-armed when the target moved RE_ARM_TARGET_DELTA away from the one that
-    # was rejected. Against a planner target that varies continuously (curve slowing, a speed
-    # limit change, an offset recalculation) 2 mph of movement is nothing, so an override survived
-    # only until the next wobble and ICBM walked the set speed straight back down -- reported from
-    # a drive as "it minuses my cruise back to the limit and won't let me set it faster". Its
-    # companion differs_from_driver test contributed nothing: with the driver set above the target
-    # it is true by construction.
-    #
-    # override_diverged gates the convergence test so the driver's own press cannot satisfy it.
-    # On the press frame the cluster has not moved yet, so target and set speed still agree; only
-    # once the press has actually opened a gap does converging again mean anything.
-    if abs(self.v_target - self.v_cruise_cluster) > RE_ARM_TARGET_DELTA:
-      self.override_diverged = True
-    elif self.override_diverged:
-      self.override_state = OverrideState.auto
+    # Source-gated deliberately. Magnitude alone cannot tell "entered a school zone" from
+    # "SCC-Vision is slowing for a bend", and a curve must never discard the baseline: it ends by
+    # itself in seconds, whereas a limit change persists. Only speedLimitAssist counts.
+    if (self.plan_source == LongitudinalPlanSource.speedLimitAssist and
+        abs(self.v_target_raw - self.v_target_overridden) >= self.baseline_reset_delta):
+      self.clear_baseline()
+
+  def clear_baseline(self) -> None:
+    self.override_state = OverrideState.auto
+    self.v_baseline = 0
+    self.v_target_overridden = 0
 
   def run(self, CS: car.CarState, CC: car.CarControl, LP_SP: custom.LongitudinalPlanSP, is_metric: bool) -> None:
     if self.CP_SP.pcmCruiseSpeed:
@@ -358,33 +411,14 @@ class IntelligentCruiseButtonManagement:
     self.update_readiness(CS, CC)
     self.update_manual_override(CS)
 
-    # BluePilot: in MANUAL, stop chasing the target entirely and let the driver's press stand.
-    # is_ready_prev is still advanced so the inactive -> preActive edge fires correctly on re-arm.
+    # BluePilot: the state machine runs unconditionally. A baseline changes WHAT ICBM aims for,
+    # not WHETHER it aims -- see apply_baseline. The previous design forced State.inactive here,
+    # which is why curve slowing silently stopped working for the rest of a drive after a single
+    # button press, and why hazards needed an explicit exception to get back through.
     #
-    # An ACTIVE radar-blind lead is the one thing that overrides MANUAL: a driver who adjusted
-    # their set speed earlier in the drive should not have disabled hazard response for the rest
-    # of it. The latch is cleared rather than merely bypassed so behaviour afterwards is
-    # unambiguous.
-    #
-    # RESTORING deliberately does NOT override it. Once the hazard has resolved there is nothing
-    # urgent left, and a driver pressing a button mid-restore is telling us what speed they want.
-    # Letting the restore win there would mean ICBM fighting a real press, which is the exact
-    # behaviour this whole state machine exists to remove.
-    if self.unconfirmed_lead_state in UNCONFIRMED_LEAD_OVERRIDES_MANUAL:
-      self.override_state = OverrideState.auto
-
-    if self.override_state == OverrideState.manual:
-      self.state = State.inactive
-      self.cruise_button = SendButtonState.none
-      # Hold the edge detector low rather than advancing it. update_state_machine leaves inactive
-      # only on a RISING edge of is_ready, so advancing is_ready_prev here would let that edge be
-      # consumed while MANUAL has the machine masked -- after which re-arming left ICBM stuck
-      # inactive until the driver happened to press a button again, which is both erratic and the
-      # worst possible moment for it to wake up. Held low, re-arming always produces a clean
-      # inactive -> preActive transition on the next ready frame.
-      self.is_ready_prev = False
-    else:
-      self.cruise_button = self.update_state_machine()
-      self.is_ready_prev = self.is_ready
+    # With the baseline folded into v_target there is nothing left to except: an ACTIVE radar-blind
+    # lead already owns v_target outright further up, and the driver's number cannot suppress it.
+    self.cruise_button = self.update_state_machine()
+    self.is_ready_prev = self.is_ready
 
     self.frame += 1
