@@ -38,6 +38,8 @@ DRIVER = 70   # what the driver wants instead, for this limit
 ACCEL_PRESS = NS(type=NS(raw=ButtonType.accelCruise), pressed=True)
 ACCEL_RELEASE = NS(type=NS(raw=ButtonType.accelCruise), pressed=False)
 GAP_PRESS = NS(type=NS(raw=ButtonType.gapAdjustCruise), pressed=True)
+DECEL_PRESS = NS(type=NS(raw=ButtonType.decelCruise), pressed=True)
+DECEL_RELEASE = NS(type=NS(raw=ButtonType.decelCruise), pressed=False)
 
 CC = NS(enabled=True, cruiseControl=NS(resume=False, override=False, cancel=False))
 
@@ -401,12 +403,28 @@ class TestSettingSpeedBackClearsTheHold:
   """Driver asked for this: putting the set speed back to what SLA wants should drop the HOLD."""
 
   def test_returning_to_the_sla_target_clears_the_baseline(self):
+    """The set speed must be WALKED back, not teleported.
+
+    The stand-down after a press ends only once the cluster has actually moved and then settled,
+    so a harness that jumps it 15 mph in a single frame leaves ICBM standing down for its full
+    cap. That is correct behaviour, not a bug: on the car the set speed only ever moves one
+    increment at a time.
+    """
     icbm = fresh()
     set_baseline(icbm)
     settle(icbm, LIMIT)
     assert icbm.override_state == OverrideState.manual
-    set_baseline(icbm, to=LIMIT)          # driver walks it back down to the limit
-    settle(icbm, LIMIT, cluster=LIMIT)
+
+    cluster = DRIVER
+    for _ in range(DRIVER - LIMIT):                 # driver taps - back down to the limit
+      icbm.run(make_cs(cluster, buttons=(DECEL_PRESS,)), CC, make_lp(LIMIT), False)
+      cluster -= 1
+      for f in range(12):
+        icbm.run(make_cs(cluster, buttons=(DECEL_RELEASE,) if f == 2 else ()), CC,
+                 make_lp(LIMIT), False)
+    settle(icbm, LIMIT, cluster=cluster, frames=200)
+
+    assert cluster == LIMIT
     assert icbm.override_state == OverrideState.auto, "HOLD survived the driver undoing it"
     assert icbm.v_baseline == 0
 
@@ -416,3 +434,60 @@ class TestSettingSpeedBackClearsTheHold:
     set_baseline(icbm)
     settle(icbm, DRIVER, source=PlanSource.sccVision)   # curve happens to want the driver's speed
     assert icbm.override_state == OverrideState.manual
+
+
+class TestPressSurvivesAnyClusterLag:
+  """THE ONE THAT KEPT REACHING THE ROAD.
+
+  Four fixes failed because each ended the post-press stand-down on a TIMER. On a car whose
+  cruiseState.speedCluster reports slower than that timer, the stand-down closed while the
+  baseline still equalled SLA's target -- and the convergence check then deleted the override as
+  though the driver had just undone it. Reported four times as "it won't let me increase the
+  speed, it keeps resetting it back down", and it only worked after pressing down first because
+  that moved the set speed BELOW the target, so the two were never equal.
+
+  The stand-down now ends when the set speed has actually moved and then gone quiet. These sweep
+  the lag well past any timer, which is the case every previous version passed and shipped broken.
+  """
+
+  @pytest.mark.parametrize("lag", [5, 30, 59, 61, 90, 200, 400])
+  def test_single_tap_survives(self, lag):
+    icbm = fresh(max_rise=5, max_drop=8)
+    cluster = LIMIT
+    for _ in range(200):
+      icbm.run(make_cs(cluster), CC, make_lp(LIMIT), False)
+    for f in range(1500):
+      btn = (ACCEL_PRESS,) if f == 0 else ((ACCEL_RELEASE,) if f == 3 else ())
+      if f == lag:
+        cluster += 1
+      icbm.run(make_cs(cluster, buttons=btn), CC, make_lp(LIMIT), False)
+      if f % 5 == 0:
+        if icbm.cruise_button == SendButtonState.decrease:
+          cluster -= 1
+        elif icbm.cruise_button == SendButtonState.increase:
+          cluster += 1
+    assert cluster == LIMIT + 1, f"press undone with {lag}-frame cluster lag (ended {cluster})"
+    assert icbm.v_baseline == LIMIT + 1
+    assert icbm.override_state == OverrideState.manual
+
+  @pytest.mark.parametrize("hold", [3, 60, 300, 700])
+  def test_long_hold_survives(self, hold):
+    """A hold longer than any fixed window must not freeze the baseline mid-ramp."""
+    icbm = fresh(max_rise=5, max_drop=8)
+    cluster = LIMIT
+    for _ in range(200):
+      icbm.run(make_cs(cluster), CC, make_lp(LIMIT), False)
+    for f in range(2000):
+      btn = (ACCEL_PRESS,) if f == 0 else ((ACCEL_RELEASE,) if f == hold else ())
+      # A tap yields one increment; a hold keeps ramping. Either way the set speed moves at
+      # least once, roughly 6 frames after the press, as it does on the car.
+      if f == 6 or (f < hold and f % 30 == 29 and cluster < LIMIT + 5):
+        cluster += 1
+      icbm.run(make_cs(cluster, buttons=btn), CC, make_lp(LIMIT), False)
+      if f % 5 == 0:
+        if icbm.cruise_button == SendButtonState.decrease:
+          cluster -= 1
+        elif icbm.cruise_button == SendButtonState.increase:
+          cluster += 1
+    assert icbm.v_baseline == cluster, f"baseline {icbm.v_baseline} != set speed {cluster}"
+    assert cluster > LIMIT, "the whole ramp was undone"

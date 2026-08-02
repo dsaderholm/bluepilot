@@ -66,11 +66,12 @@ DEFAULT_BASELINE_RESET_DELTA = 10  # display units (mph/kph)
 # Standing down for half a second after a press removes it. Nothing else can be moving the number
 # in that window, so whatever it settles at is the driver's, with no attribution needed. The cost
 # is half a second of ICBM inaction immediately after a press, when the driver is adjusting anyway.
-PRESS_SETTLE_FRAMES = 60  # 0.6 s at 100 Hz, comfortably past the cluster's lag behind the button
-# How close the driver's baseline has to get to what SLA wants before it stops meaning anything.
-# Exact match only: a 1 mph override is a real preference and must not be mistaken for the driver
-# withdrawing one. Anything looser reverted single taps, since a 1 mph offset reads as converged.
-BASELINE_CONVERGED_DELTA = 0  # display units (mph/kph)
+# The stand-down ends when the SET SPEED STOPS MOVING, not on a fixed timer. A fixed 0.6 s window
+# was the fourth failed attempt at this: on a car whose cluster takes longer than that to report a
+# press, the baseline was still equal to SLA's target when the window closed, and everything
+# downstream then treated the override as never having happened.
+PRESS_SETTLE_STABLE_FRAMES = 40   # cluster unchanged this long => the driver has finished
+PRESS_SETTLE_MAX_FRAMES = 600     # 6 s hard cap, so a stuck cluster cannot suspend ICBM forever
 # BluePilot: target-drop rate limiting. Ford's stock ACC brakes aggressively when the set speed
 # falls by roughly 10 mph or more at once, but coasts for smaller drops. Capping each step below
 # that threshold and walking larger drops down over several steps keeps the car coasting.
@@ -124,7 +125,10 @@ class IntelligentCruiseButtonManagement:
     self.baseline_reset_delta = DEFAULT_BASELINE_RESET_DELTA
     self.v_cruise_cluster_prev = 0
     self.icbm_idle_frames = 0
-    self.press_settle_frames = 0  # >0 while ICBM stands down after a driver press
+    self.press_settle_frames = 0     # >0 while ICBM stands down after a driver press
+    self.cluster_stable_frames = 0   # how long the set speed has been unchanged
+    self.v_cluster_at_press = 0      # set speed when the driver's press was seen
+    self.baseline_diverged = False   # has the baseline ever actually differed from SLA?
     self.cruise_enabled_prev = False
     self.v_target_valid = False
 
@@ -388,9 +392,16 @@ class IntelligentCruiseButtonManagement:
     if any(b.type.raw in MANUAL_OVERRIDE_BUTTONS and b.pressed for b in CS.buttonEvents):
       if self.override_state != OverrideState.manual:
         self.v_target_overridden = self.v_target_raw
+        self.baseline_diverged = False
       self.override_state = OverrideState.manual
       self.v_baseline = self.v_cruise_cluster
-      self.press_settle_frames = PRESS_SETTLE_FRAMES
+      # Only the FIRST press of a sequence sets the reference. Re-arming it on every press would
+      # move the goalposts to wherever the set speed had already got to, so "has it moved yet"
+      # could never become true while the driver kept pressing.
+      if self.press_settle_frames == 0:
+        self.v_cluster_at_press = self.v_cruise_cluster
+      self.press_settle_frames = PRESS_SETTLE_MAX_FRAMES
+      self.cluster_stable_frames = 0
       return
 
     if self.override_state != OverrideState.manual:
@@ -412,21 +423,38 @@ class IntelligentCruiseButtonManagement:
     # reaches its target and an unmoved cluster is never adopted.
     # Standing down after a press (see PRESS_SETTLE_FRAMES): ICBM is emitting nothing, so the set
     # speed can only be moving because the driver is still pressing. Track it until it settles.
+    # Standing down after a press: ICBM emits nothing, so the set speed can only be moving because
+    # the driver is still pressing. Track it, and keep standing down until it stops moving AND no
+    # button is still held. Ending this on a timer instead is what broke it on the road -- the
+    # baseline froze at the pre-press speed on any car whose cluster reports slower than the timer.
     if self.press_settle_frames > 0:
       self.v_baseline = self.v_cruise_cluster
+      # The set speed must have actually MOVED before "stable" means anything. Without this the
+      # counter reaches its threshold while the cluster is merely slow to report, the stand-down
+      # ends on the pre-press value, and the press is undone -- the same shape of bug as the fixed
+      # timer it replaced. A press that never moves the cluster (already at Ford's ceiling) is
+      # released by PRESS_SETTLE_MAX_FRAMES instead.
+      moved = self.v_cruise_cluster != self.v_cluster_at_press
+      held = any(self.cruise_button_timers[k] > 0 for k in self.cruise_button_timers)
+      settled = moved and not held and self.cluster_stable_frames >= PRESS_SETTLE_STABLE_FRAMES
+      if settled:
+        self.press_settle_frames = 0
       return
 
     if not self.v_target_valid:
       return
 
-    # The driver putting the set speed back where SLA wanted it is them withdrawing the override.
-    # Holding a baseline identical to the target would keep HOLD on screen and keep suppressing
-    # the limit-change reset for a preference that no longer differs from anything.
+    # The driver putting the set speed back where SLA wanted it is them withdrawing the override,
+    # so the HOLD should drop. Requested behaviour.
     #
-    # Source-gated: mid-curve the target is the curve's, and the baseline matching it is a
-    # coincidence of geometry, not the driver changing their mind.
-    if (self.plan_source in BASELINE_SOURCES
-        and abs(self.v_baseline - self.v_target_raw) <= BASELINE_CONVERGED_DELTA):
+    # Gated on the baseline having ACTUALLY DIFFERED from the target at some point first. Without
+    # that gate this was the bug that broke the plus button on the road: at the instant of a press
+    # the cluster has not moved yet, so the baseline still equals SLA's target, and any car whose
+    # set speed reports slower than the stand-down had its brand-new override deleted as though
+    # the driver had just undone it. Diverging first is what makes converging mean anything.
+    if abs(self.v_baseline - self.v_target_raw) > 0:
+      self.baseline_diverged = True
+    elif (self.baseline_diverged and self.plan_source in BASELINE_SOURCES):
       self.clear_baseline()
       return
 
@@ -445,6 +473,7 @@ class IntelligentCruiseButtonManagement:
     self.override_state = OverrideState.auto
     self.v_baseline = 0
     self.v_target_overridden = 0
+    self.baseline_diverged = False
 
   def run(self, CS: car.CarState, CC: car.CarControl, LP_SP: custom.LongitudinalPlanSP, is_metric: bool) -> None:
     if self.CP_SP.pcmCruiseSpeed:
@@ -462,6 +491,8 @@ class IntelligentCruiseButtonManagement:
     # have caused any cluster movement visible now.
     self.icbm_idle_frames = 0 if self.cruise_button != SendButtonState.none else self.icbm_idle_frames + 1
     self.press_settle_frames = max(0, self.press_settle_frames - 1)
+    self.cluster_stable_frames = (self.cluster_stable_frames + 1
+                                  if self.v_cruise_cluster == self.v_cruise_cluster_prev else 0)
 
     self.update_manual_override(CS)
 
