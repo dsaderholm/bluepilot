@@ -174,7 +174,12 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"IcbmLeadMaxTtc", {PERSISTENT | BACKUP, INT, "40"}},
     // BluePilot: act on the driving model's own stop intent (stop signs, red lights) when no
     // lead explains it. Same floor-and-alert channel as the radar-blind lead case.
-    {"IcbmModelStopEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},
+    // Defaulted ON as of 2026-08-01, reversing the original "never run on a vehicle" caution:
+    // the owner asked twice why stop-sign slowing was not happening, and it could not be reached
+    // from the UI at all until now, so leaving it off guaranteed it would never get tested.
+    // It remains the weakest-evidence path here -- no lead means no dRel, vRel or TTC, so
+    // persistence and the 20 mph ACC floor are its entire filter.
+    {"IcbmModelStopEnabled", {PERSISTENT | BACKUP, BOOL, "1"}},
     // BluePilot: hold off openpilot's standstill resume request until the lead has actually gone.
     // controlsd asserts resume from ITS OWN MPC plan, which on a stock-ACC car is not the
     // controller that then has to drive -- Ford ACC reads resume as "go", accelerates toward the
@@ -310,7 +315,10 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"SmartCruiseControlVisionHighSpeedFactor", {PERSISTENT | BACKUP, INT, "100"}},
     // BluePilot: how early the curve cycle starts, independent of how much it slows. 100 = stock.
     // Higher starts sooner, which spreads the same speed change over more distance.
-    {"SmartCruiseControlVisionEarliness", {PERSISTENT | BACKUP, INT, "100"}},
+    // Raised from 100 to 140 on 2026-08-01: reported as triggering too late on real drives,
+    // most noticeably on freeway off-ramps. 140 drops the entering threshold from 1.3 to
+    // 0.93 m/s^2, so at 70 mph it reacts to roughly a 1030 m radius instead of 740 m.
+    {"SmartCruiseControlVisionEarliness", {PERSISTENT | BACKUP, INT, "140"}},
 
     // Torque lateral control custom params
     {"CustomTorqueParams", {PERSISTENT | BACKUP , BOOL}},
