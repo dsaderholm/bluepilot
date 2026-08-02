@@ -491,3 +491,29 @@ class TestPressSurvivesAnyClusterLag:
           cluster += 1
     assert icbm.v_baseline == cluster, f"baseline {icbm.v_baseline} != set speed {cluster}"
     assert cluster > LIMIT, "the whole ramp was undone"
+
+
+class TestStandDownDoesNotBlindTheHazardPath:
+  """Suppressing every output during the post-press stand-down also suppressed the radar-blind
+  lead response for up to 6 s. Adjusting cruise must not blind a stopped car the radar cannot see."""
+
+  def test_active_hazard_commands_during_the_stand_down(self):
+    icbm = fresh()
+    icbm.run(make_cs(LIMIT, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT), False)
+    icbm.run(make_cs(LIMIT, buttons=(ACCEL_RELEASE,)), CC, make_lp(LIMIT), False)
+    assert icbm.press_settle_frames > 0, "stand-down should be armed right after a press"
+    # Long enough to clear pre_active_timer; the stand-down cap is far longer, so it is still on.
+    for _ in range(120):
+      icbm.run(make_cs(LIMIT), CC, make_lp(LIMIT, UnconfirmedLeadState.active, 20.0), False)
+    assert icbm.press_settle_frames > 0, "stand-down ended early; test no longer covers the case"
+    assert icbm.v_target == 20, "hazard target was ignored"
+    assert icbm.cruise_button == SendButtonState.decrease, "hazard decel suppressed by stand-down"
+
+  def test_stand_down_still_suppresses_normal_output(self):
+    """The bypass must be hazard-only, or the whole point of the stand-down is lost."""
+    icbm = fresh()
+    icbm.run(make_cs(LIMIT, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT), False)
+    icbm.run(make_cs(LIMIT, buttons=(ACCEL_RELEASE,)), CC, make_lp(LIMIT), False)
+    for _ in range(120):
+      icbm.run(make_cs(LIMIT), CC, make_lp(40, source=PlanSource.sccVision), False)
+    assert icbm.cruise_button == SendButtonState.none, "stand-down leaked a normal command"

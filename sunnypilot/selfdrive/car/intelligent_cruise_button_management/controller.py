@@ -507,7 +507,13 @@ class IntelligentCruiseButtonManagement:
     # with ICBM emitting nothing, any set-speed movement in this window is the driver's by
     # construction, so no attempt to attribute it after the fact is needed. is_ready_prev is held
     # low so the inactive -> preActive edge fires cleanly when ICBM picks back up.
-    if self.press_settle_frames > 0:
+    # An ACTIVE radar-blind lead is the one thing that outranks the stand-down. Suppressing every
+    # output made the baseline unambiguous, but it also meant a stopped car the radar cannot see
+    # got no response for as long as the window lasted -- normally ~0.5 s, but up to the 6 s cap
+    # when a press moves nothing at all, e.g. at Ford's set-speed ceiling. Adjusting cruise must
+    # not blind the hazard path. Attribution is unaffected: the detector owns v_target outright
+    # here, so any set-speed movement is still explained.
+    if self.press_settle_frames > 0 and self.unconfirmed_lead_state != UnconfirmedLeadState.active:
       self.state = State.inactive
       self.cruise_button = SendButtonState.none
       self.is_ready_prev = False
