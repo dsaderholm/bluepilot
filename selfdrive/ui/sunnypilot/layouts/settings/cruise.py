@@ -295,13 +295,13 @@ class CruiseLayout(Widget):
 
     # BluePilot: the mirror of the pass suggestion. Only evaluated when no pass is warranted, so
     # it can never fire mid-overtake.
-    self.passing_assist_approach_ttc = option_item_sp(
-      title=tr("Passing: Max Lead Time (0.1s)"),
-      description=tr("Sanity bound only: ignore a slower vehicle this far ahead in time, since it "
-                     "may exit or speed up before you reach it. Raise it to consider vehicles "
-                     "further out. The speed difference below is what actually triggers a pass."),
-      param="PassingAssistApproachTtc",
-      min_value=30, max_value=600, value_change_step=10,
+    self.passing_assist_max_distance = option_item_sp(
+      title=tr("Passing: Look-Ahead Distance (m)"),
+      description=tr("How far ahead to notice a slower vehicle. Higher decides earlier, which is "
+                     "what avoids ACC braking for a car you were going to pass anyway. Beyond "
+                     "about 200 m there is usually nothing tracked to decide on."),
+      param="PassingAssistMaxDistance",
+      min_value=40, max_value=250, value_change_step=10,
       inline=True)
 
     self.passing_assist_settle_time = option_item_sp(
@@ -445,7 +445,7 @@ class CruiseLayout(Widget):
       self.passing_assist_toggle,
       self.passing_assist_min_deficit,
       self.passing_assist_stuck_time,
-      self.passing_assist_approach_ttc,
+      self.passing_assist_max_distance,
       self.passing_assist_settle_time,
       self.passing_assist_suspend_minutes,
       self.passing_assist_keep_right,

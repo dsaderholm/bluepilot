@@ -79,10 +79,6 @@ MAX_ROAD_EDGE_STD = 0.5
 # --- lead gates ---
 MIN_V_EGO_MS = 40 * CV.MPH_TO_MS  # below this, passing is not the manoeuvre being considered
 MAX_LEAD_D_PATH_M = 1.5           # in our lane, not an adjacent-lane return
-# Far bound. Not "when does it hold us back" -- a slower car in our lane always will -- but "is
-# this real": a lead at 250 m may exit, speed up, or turn out not to be there. Generous, because
-# the whole point is to decide before any speed is given away.
-MAX_LEAD_D_REL_M = 220.0
 
 # The real knob, and the whole judgement: is that car slower than the speed I asked for. Two mph,
 # not eight -- a driver who sets 80 and finds someone doing 78 in front of them is being slowed
@@ -104,15 +100,18 @@ DEFAULT_PERSISTENCE_S = 2
 # whether a given suggestion actually beat ACC to it is recorded rather than assumed -- see
 # accBrakingAtDecision, which is what `trigger` now reports.
 #
-# TTC is a sanity bound, not the trigger, and now a very loose one. At a small speed difference the
-# closing rate is low, so TTC gets large fast: 80 vs 65 mph closes at 6.7 m/s, which puts a lead
-# 200 m out at 30 s. A tight bound therefore silently blocked exactly the early decision this is
-# built for. Distance (MAX_LEAD_D_REL_M) is the real limit; this only stops us reacting to
-# something we would never actually reach.
-DEFAULT_APPROACH_TTC_S = 60.0
-# Below this closing rate the TTC figure is meaningless, so it simply is not applied. A lead we are
-# already pacing has no closing rate and still counts -- that is the point.
+# There is no time-based bound. TTC was one, and it was actively backwards: at a small speed
+# difference the closing rate is low, so a fixed TTC translates into a SHORT distance. Three mph
+# under closes at 1.3 m/s, which a 60 s bound turns into about 80 m -- the gentler the difference,
+# the later it would notice, which is the opposite of deciding early.
+#
+# Distance is the honest limit, and it means what it says: how far ahead to look. Beyond the reach
+# of lead tracking there is nothing to decide on anyway.
+DEFAULT_MAX_DISTANCE_M = 220
+# Kept only for the log -- how long until we reach this lead at the current closing rate. Nothing
+# gates on it.
 MIN_APPROACH_CLOSING_MS = 1.0
+NO_TTC_S = 999.0
 
 # --- anti-weave ---
 # After a pass is suggested, hold off suggesting the return for this long. Without it, a three-lane
@@ -121,8 +120,6 @@ MIN_APPROACH_CLOSING_MS = 1.0
 # know what the adjacent lane is doing -- it just refuses to reverse a decision it only just made.
 DEFAULT_SETTLE_TIME_S = 20
 
-# Returned when not closing, so callers can compare numerically without special-casing.
-NO_TTC_S = 999.0
 
 # --- keep right ---
 # "Keep right except to pass" is the mirror of the passing question: nothing is holding us back and
@@ -196,7 +193,7 @@ class PassingAssistDetector:
     # spend its first settle period refusing to suggest a return.
     self._settle_s = 1e3
     self._right_bs_prev = False
-    self.approach_ttc_s = DEFAULT_APPROACH_TTC_S
+    self.max_distance_m = float(DEFAULT_MAX_DISTANCE_M)
 
   def update_params(self) -> None:
     if self.frame % int(PARAMS_UPDATE_PERIOD / DT_MDL) == 0:
@@ -208,7 +205,7 @@ class PassingAssistDetector:
       self.avoid_outermost = self.params.get_bool("PassingAssistAvoidOutermost")
       self.settle_time_s = float(self.params.get("PassingAssistSettleTime", return_default=True))
       self.suspend_minutes = self.params.get("PassingAssistSuspendMinutes", return_default=True)
-      self.approach_ttc_s = self.params.get("PassingAssistApproachTtc", return_default=True) / 10.
+      self.max_distance_m = float(self.params.get("PassingAssistMaxDistance", return_default=True))
 
   def _reset_outputs(self, blocked: int) -> None:
     self.suggestion = Side.none
@@ -392,19 +389,11 @@ class PassingAssistDetector:
     So: in our lane, slower than the SET speed by a margin worth the manoeuvre, near enough to be
     real. The margin is the judgement; everything else is a sanity bound.
     """
-    if abs(lead.dPath) > MAX_LEAD_D_PATH_M or lead.dRel > MAX_LEAD_D_REL_M:
+    if abs(lead.dPath) > MAX_LEAD_D_PATH_M or lead.dRel > self.max_distance_m:
       self.approach_seconds = 0.0
       return False
 
     if self.speed_deficit < self.min_deficit_ms:
-      self.approach_seconds = 0.0
-      return False
-
-    # TTC only bounds the case where we are actually catching something. A lead already being paced
-    # has no meaningful closing rate and must still qualify -- it is the case where ACC has ALREADY
-    # taken the speed, which is the outcome this exists to prevent, not a reason to stay silent.
-    closing = -lead.vRel
-    if closing >= MIN_APPROACH_CLOSING_MS and self.lead_ttc > self.approach_ttc_s:
       self.approach_seconds = 0.0
       return False
 

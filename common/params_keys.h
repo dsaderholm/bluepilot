@@ -256,10 +256,10 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // design -- waiting is the behaviour this exists to remove, and the only job of this timer is
     // to reject a single bad frame of lead tracking.
     {"PassingAssistStuckTime", {PERSISTENT | BACKUP, INT, "2"}},
-    // Time-to-contact at which the preemptive trigger fires, in tenths of a second. Generous by
-    // design: the decision is about the SPEED DIFFERENCE, not proximity, and a tight bound turns
-    // "pass before slowing" back into "pass once nearly there".
-    {"PassingAssistApproachTtc", {PERSISTENT | BACKUP, INT, "600"}},
+    // How far ahead to look for a slower vehicle, in metres. Distance, not time: a time bound
+    // shrinks as the speed difference shrinks, so it would notice a gently slower car LATER than a
+    // dramatically slower one, which is backwards.
+    {"PassingAssistMaxDistance", {PERSISTENT | BACKUP, INT, "220"}},
     // Hold-off after suggesting a pass before suggesting the return. Stops a slow left lane on a
     // three-lane road turning into a weave.
     {"PassingAssistSettleTime", {PERSISTENT | BACKUP, INT, "20"}},

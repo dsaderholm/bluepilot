@@ -293,7 +293,7 @@ class _KeepRightOnParams:
   def get(self, key, block=False, return_default=False):
     return {"PassingAssistMinDeficit": 2, "PassingAssistStuckTime": 2,
             "PassingAssistKeepRightDelay": 10, "PassingAssistSettleTime": 20,
-            "PassingAssistApproachTtc": 600, "PassingAssistSuspendMinutes": 15}[key]
+            "PassingAssistMaxDistance": 220, "PassingAssistSuspendMinutes": 15}[key]
 
   def __init__(self, avoid_outermost=True):
     self.avoid_outermost = avoid_outermost
@@ -485,11 +485,20 @@ class TestOneTrigger:
       det.update(make_sm(v_ego=CRUISE_MS, v_lead=CRUISE_MS - 0.4, d_rel=60.), CRUISE_MS, True)
     assert det.suggestion == Side.none
 
-  def test_ttc_only_bounds_the_case_where_we_are_closing(self):
-    """A lead already being paced has no closing rate and must still qualify -- that is the case
-    where ACC has ALREADY taken the speed."""
-    det = run(PassingAssistDetector(), STUCK_FRAMES, d_rel=45.)
-    assert det.suggestion == Side.left
+  def test_a_gentle_deficit_reaches_just_as_far_as_a_large_one(self):
+    """The reason TTC was removed. At 3 mph under, closing is 1.3 m/s, which a 60 s TTC bound
+    turned into about 80 m -- the gentler the difference, the LATER it noticed. Distance must not
+    depend on the speed difference at all."""
+    MPH = 0.44704
+    gentle = PassingAssistDetector()
+    steep = PassingAssistDetector()
+    for _ in range(int(3.0 / DT_MDL)):
+      gentle.update(make_sm(v_ego=80 * MPH, v_lead=77 * MPH, d_rel=180.,
+                            set_speed=80 * MPH), CRUISE_MS, True)
+      steep.update(make_sm(v_ego=80 * MPH, v_lead=50 * MPH, d_rel=180.,
+                           set_speed=80 * MPH), CRUISE_MS, True)
+    assert gentle.suggestion == Side.left, "3 mph under at 180 m must still be noticed"
+    assert steep.suggestion == Side.left
 
 
 class TestBeatingAccBraking:
@@ -548,7 +557,7 @@ class _SuspendParams:
   def get(self, key, block=False, return_default=False):
     return {"PassingAssistMinDeficit": 2, "PassingAssistStuckTime": 2,
             "PassingAssistKeepRightDelay": 10, "PassingAssistSettleTime": 20,
-            "PassingAssistApproachTtc": 600, "PassingAssistSuspendMinutes": self.minutes}[key]
+            "PassingAssistMaxDistance": 220, "PassingAssistSuspendMinutes": self.minutes}[key]
 
   def get_bool(self, key, block=False):
     return self.suspend if key == "PassingAssistSuspend" else True
@@ -698,3 +707,22 @@ class TestReferenceSpeedIsTheDriversIntent:
     det = self._drive(v_ego=80 * self.MPH, v_lead=78 * self.MPH, d_rel=60.,
                       set_speed=80 * self.MPH, icbm_hold=50 * self.MPH, icbm_manual=True)
     assert det.reference_speed >= 79 * self.MPH
+
+
+class TestLookAheadDistance:
+  MPH = 0.44704
+
+  def test_three_mph_under_is_enough_at_range(self):
+    """The question asked directly: does 3 mph under trigger a pass, and at a useful distance."""
+    det = PassingAssistDetector()
+    for _ in range(int(3.0 / DT_MDL)):
+      det.update(make_sm(v_ego=80 * self.MPH, v_lead=77 * self.MPH, d_rel=200.,
+                         set_speed=80 * self.MPH), CRUISE_MS, True)
+    assert det.suggestion == Side.left
+
+  def test_beyond_the_look_ahead_is_ignored(self):
+    det = PassingAssistDetector()
+    for _ in range(int(3.0 / DT_MDL)):
+      det.update(make_sm(v_ego=80 * self.MPH, v_lead=77 * self.MPH, d_rel=300.,
+                         set_speed=80 * self.MPH), CRUISE_MS, True)
+    assert det.suggestion == Side.none
