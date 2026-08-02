@@ -141,6 +141,23 @@ class CAR(Platforms):
     CarSpecs(mass=1933, steerRatio=15.3, wheelbase=2.824),
     flags=FordFlags.ALT_STEER_ANGLE,
   )
+  # BluePilot: retrofitted 2020 Fusion Titanium AWD. NOT a stock Fusion -- the ADAS hardware was
+  # transplanted, and a stock Fusion has none of it. Kept separate from FORD_EDGE_MK2 (which this
+  # car was selected as for months) purely for CarSpecs; TSR already works on either, since
+  # FordFlags.TSR comes from the camera fingerprint rather than the platform.
+  #
+  # steerRatio is MEASURED, not from a spec sheet: paramsd learned 17.23 (std 0.010, valid) while
+  # running Edge's wheelbase of 2.824. The vehicle model uses steerRatio * wheelbase, so 17.23 is
+  # rescaled to 17.07 here for the Fusion's 2.85 -- otherwise correcting the wheelbase would
+  # silently change the steering behaviour that value was learned to produce.
+  #
+  # mass is CURB weight; openpilot adds STD_CARGO_KG itself (Edge: 1933 here shows as 2069 in
+  # CarParams). 1731 kg = 3816 lb, 2020 Titanium AWD.
+  FORD_FUSION_MK5 = FordPlatformConfig(
+    [FordCarDocs("Ford Fusion 2020 (ADAS retrofit)")],
+    CarSpecs(mass=1731, wheelbase=2.85, steerRatio=17.07),
+    flags=FordFlags.ALT_STEER_ANGLE,
+  )
   FORD_ESCAPE_MK4 = FordPlatformConfig(
     [
       FordCarDocs("Ford Escape 2020-22", hybrid=True, plug_in_hybrid=True),

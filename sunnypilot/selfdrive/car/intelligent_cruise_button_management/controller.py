@@ -53,10 +53,24 @@ BASELINE_SOURCES = (LongitudinalPlanSource.cruise, LongitudinalPlanSource.speedL
 # How far the posted limit must move before the baseline is discarded and SLA takes over again.
 # Fallback only; the live value comes from IcbmBaselineResetDelta.
 DEFAULT_BASELINE_RESET_DELTA = 10  # display units (mph/kph)
-# How long ICBM must have sent nothing before a cluster movement is credited to the driver.
-# Guards against reading the tail of ICBM's own commanded change as a fresh press.
-BASELINE_ADOPT_IDLE_FRAMES = 10  # ~0.1 s at 100 Hz
-
+# After a driver press, ICBM stands down for this long and takes whatever the set speed settles
+# at as the baseline.
+#
+# Three attempts failed trying to work out WHO moved the set speed after the fact. Requiring ICBM
+# to be idle missed the one frame the cluster caught up on, so a press was reverted unless the
+# driver pressed down first to let ICBM settle. Crediting everything inside a window after a press
+# adopted ICBM's own curve deceleration. Comparing directions broke when ICBM reversed, because an
+# older command of the opposite sign was still in flight and landed looking like a driver press.
+#
+# The ambiguity is self-inflicted: it only exists because both parties move the set speed at once.
+# Standing down for half a second after a press removes it. Nothing else can be moving the number
+# in that window, so whatever it settles at is the driver's, with no attribution needed. The cost
+# is half a second of ICBM inaction immediately after a press, when the driver is adjusting anyway.
+PRESS_SETTLE_FRAMES = 60  # 0.6 s at 100 Hz, comfortably past the cluster's lag behind the button
+# How close the driver's baseline has to get to what SLA wants before it stops meaning anything.
+# Exact match only: a 1 mph override is a real preference and must not be mistaken for the driver
+# withdrawing one. Anything looser reverted single taps, since a 1 mph offset reads as converged.
+BASELINE_CONVERGED_DELTA = 0  # display units (mph/kph)
 # BluePilot: target-drop rate limiting. Ford's stock ACC brakes aggressively when the set speed
 # falls by roughly 10 mph or more at once, but coasts for smaller drops. Capping each step below
 # that threshold and walking larger drops down over several steps keeps the car coasting.
@@ -110,6 +124,7 @@ class IntelligentCruiseButtonManagement:
     self.baseline_reset_delta = DEFAULT_BASELINE_RESET_DELTA
     self.v_cruise_cluster_prev = 0
     self.icbm_idle_frames = 0
+    self.press_settle_frames = 0  # >0 while ICBM stands down after a driver press
     self.cruise_enabled_prev = False
     self.v_target_valid = False
 
@@ -375,6 +390,7 @@ class IntelligentCruiseButtonManagement:
         self.v_target_overridden = self.v_target_raw
       self.override_state = OverrideState.manual
       self.v_baseline = self.v_cruise_cluster
+      self.press_settle_frames = PRESS_SETTLE_FRAMES
       return
 
     if self.override_state != OverrideState.manual:
@@ -394,12 +410,24 @@ class IntelligentCruiseButtonManagement:
     # with one rule. The idle requirement keeps the tail of ICBM's own commanded change from being
     # read as a fresh press; a curve is safe regardless, since the cluster stops moving once ICBM
     # reaches its target and an unmoved cluster is never adopted.
-    if (self.v_cruise_cluster != self.v_cruise_cluster_prev
-        and self.icbm_idle_frames >= BASELINE_ADOPT_IDLE_FRAMES):
+    # Standing down after a press (see PRESS_SETTLE_FRAMES): ICBM is emitting nothing, so the set
+    # speed can only be moving because the driver is still pressing. Track it until it settles.
+    if self.press_settle_frames > 0:
       self.v_baseline = self.v_cruise_cluster
       return
 
     if not self.v_target_valid:
+      return
+
+    # The driver putting the set speed back where SLA wanted it is them withdrawing the override.
+    # Holding a baseline identical to the target would keep HOLD on screen and keep suppressing
+    # the limit-change reset for a preference that no longer differs from anything.
+    #
+    # Source-gated: mid-curve the target is the curve's, and the baseline matching it is a
+    # coincidence of geometry, not the driver changing their mind.
+    if (self.plan_source in BASELINE_SOURCES
+        and abs(self.v_baseline - self.v_target_raw) <= BASELINE_CONVERGED_DELTA):
+      self.clear_baseline()
       return
 
     # Discard the baseline when the posted limit itself moves materially. A new zone is a new
@@ -433,6 +461,7 @@ class IntelligentCruiseButtonManagement:
     # needs it. self.cruise_button is still last frame's value here, which is the one that would
     # have caused any cluster movement visible now.
     self.icbm_idle_frames = 0 if self.cruise_button != SendButtonState.none else self.icbm_idle_frames + 1
+    self.press_settle_frames = max(0, self.press_settle_frames - 1)
 
     self.update_manual_override(CS)
 
@@ -443,8 +472,17 @@ class IntelligentCruiseButtonManagement:
     #
     # With the baseline folded into v_target there is nothing left to except: an ACTIVE radar-blind
     # lead already owns v_target outright further up, and the driver's number cannot suppress it.
-    self.cruise_button = self.update_state_machine()
-    self.is_ready_prev = self.is_ready
+    # Stand down while the driver's press settles. This is what makes the baseline unambiguous:
+    # with ICBM emitting nothing, any set-speed movement in this window is the driver's by
+    # construction, so no attempt to attribute it after the fact is needed. is_ready_prev is held
+    # low so the inactive -> preActive edge fires cleanly when ICBM picks back up.
+    if self.press_settle_frames > 0:
+      self.state = State.inactive
+      self.cruise_button = SendButtonState.none
+      self.is_ready_prev = False
+    else:
+      self.cruise_button = self.update_state_machine()
+      self.is_ready_prev = self.is_ready
     self.v_cruise_cluster_prev = self.v_cruise_cluster
 
     self.frame += 1

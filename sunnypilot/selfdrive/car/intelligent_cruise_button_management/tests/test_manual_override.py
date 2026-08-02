@@ -83,7 +83,9 @@ def set_baseline(icbm, to=DRIVER):
   icbm.run(make_cs(to, buttons=(ACCEL_RELEASE,)), CC, make_lp(LIMIT), False)
 
 
-def settle(icbm, target, cluster=DRIVER, frames=50, source=PlanSource.speedLimitAssist):
+def settle(icbm, target, cluster=DRIVER, frames=150, source=PlanSource.speedLimitAssist):
+  """Default runs past PRESS_SETTLE_FRAMES: ICBM stands down for 0.6 s after a driver press, so
+  a shorter settle would assert on the stand-down rather than on steady-state behaviour."""
   for _ in range(frames):
     icbm.run(make_cs(cluster), CC, make_lp(target, source=source), False)
 
@@ -331,3 +333,86 @@ class TestBaselineSurvivesClusterLag:
         cluster -= 1
     assert cluster < DRIVER, "curve never slowed the car"
     assert icbm.v_baseline == DRIVER, "ICBM adopted its own curve decel as the driver's baseline"
+
+
+class TestPressWinsWhileIcbmIsBusy:
+  """The reported failure: "+ minuses my speed back down, unless I go down and then back up".
+
+  Baseline adoption used to require ICBM to have been idle. The cluster catches up ~6 frames after
+  a press, so if ICBM had commanded anything recently -- which it does constantly while actively
+  setting a speed -- the movement was never credited to the driver and ICBM drove the press back
+  out. Pressing down first let ICBM settle, which is why that worked.
+
+  ICBM is held deliberately busy here (SLA wants a speed it has not reached), which is the
+  condition the old logic failed under. Assertions are relative to the set speed at the moment of
+  the first press, not to LIMIT -- ICBM has legitimately been moving it before the driver touches
+  anything.
+  """
+
+  LAG = 6
+
+  def _sim(self, sla_target, presses, settle_frames=900):
+    icbm = fresh(max_rise=5, max_drop=8)
+    cluster = LIMIT
+    pending = []
+
+    def step(buttons=()):
+      nonlocal cluster
+      icbm.run(make_cs(cluster, buttons=buttons), CC, make_lp(sla_target), False)
+      s = 0
+      if icbm.cruise_button == SendButtonState.increase:
+        s = +1
+      elif icbm.cruise_button == SendButtonState.decrease:
+        s = -1
+      pending.append(s)
+      if len(pending) > self.LAG:
+        cluster += pending.pop(0)
+
+    for _ in range(120):          # ICBM actively working toward the SLA target: NOT idle
+      step()
+    assert icbm.cruise_button != SendButtonState.none or icbm.icbm_idle_frames < 20,       "harness failed to keep ICBM busy, so this would not exercise the bug"
+    before = cluster
+
+    for _ in range(presses):
+      step((ACCEL_PRESS,))
+      for k in range(24):
+        if k == self.LAG:
+          cluster += 1          # the driver's own press reaching the set speed
+        step((ACCEL_RELEASE,) if k == 3 else ())
+    for _ in range(settle_frames):
+      step()
+    return icbm, before, cluster
+
+  @pytest.mark.parametrize("presses", [1, 2, 3, 5])
+  def test_presses_are_never_undone_while_icbm_is_busy(self, presses):
+    icbm, before, after = self._sim(sla_target=50, presses=presses)
+    assert after == before + presses, f"{presses} press(es) ended at {after}, expected {before + presses}"
+    assert icbm.v_baseline == after, f"baseline {icbm.v_baseline} != set speed {after}"
+    assert icbm.override_state == OverrideState.manual
+
+  def test_up_only_matches_down_then_up(self):
+    """Up-only must land in the same place. Before the fix it did not, which is what the driver
+    noticed: the workaround was to press down first."""
+    icbm, before, after = self._sim(sla_target=50, presses=2)
+    assert after - before == 2
+
+
+class TestSettingSpeedBackClearsTheHold:
+  """Driver asked for this: putting the set speed back to what SLA wants should drop the HOLD."""
+
+  def test_returning_to_the_sla_target_clears_the_baseline(self):
+    icbm = fresh()
+    set_baseline(icbm)
+    settle(icbm, LIMIT)
+    assert icbm.override_state == OverrideState.manual
+    set_baseline(icbm, to=LIMIT)          # driver walks it back down to the limit
+    settle(icbm, LIMIT, cluster=LIMIT)
+    assert icbm.override_state == OverrideState.auto, "HOLD survived the driver undoing it"
+    assert icbm.v_baseline == 0
+
+  def test_a_curve_matching_the_baseline_does_not_clear_it(self):
+    """Geometry coincidence, not a change of mind."""
+    icbm = fresh()
+    set_baseline(icbm)
+    settle(icbm, DRIVER, source=PlanSource.sccVision)   # curve happens to want the driver's speed
+    assert icbm.override_state == OverrideState.manual

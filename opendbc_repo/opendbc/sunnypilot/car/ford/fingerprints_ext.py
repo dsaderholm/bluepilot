@@ -28,6 +28,25 @@ FW_VERSIONS_EXT = {
       b'KT4T-14F397-AF\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00',
     ],
   },
+  # BluePilot: read off the car 2026-08-02. Worth recording what these say -- every one is a
+  # CD4/Mondeo-family part, NOT an Edge part. The camera is byte-identical to the Mondeo entry
+  # below, and eps/abs carry K2GC/KG9C where Edge carries M2GC. All four differ from
+  # FORD_EDGE_MK2, so exact matching separates the two cleanly and this should fingerprint
+  # automatically rather than needing manual selection.
+  CAR.FORD_FUSION_MK5: {
+    (Ecu.eps, 0x730, None): [
+      b'K2GC-14D003-AH\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00',
+    ],
+    (Ecu.abs, 0x760, None): [
+      b'KG9C-2D053-MD\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00',
+    ],
+    (Ecu.fwdRadar, 0x764, None): [
+      b'JX7T-14D049-AC\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00',
+    ],
+    (Ecu.fwdCamera, 0x706, None): [
+      b'KT4T-14F397-AE\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00',
+    ],
+  },
   CAR.FORD_MONDEO_MK5: {
     # BluePilot: the original PR (#135) included several non-ASCII byte strings alongside each
     # legit part number below -- e.g. a bare b'U', 0xff-padded blobs -- that look like NAK/error
