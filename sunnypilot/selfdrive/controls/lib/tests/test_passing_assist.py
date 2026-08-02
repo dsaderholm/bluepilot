@@ -264,7 +264,7 @@ class _KeepRightOnParams:
   def get(self, key, block=False, return_default=False):
     return {"PassingAssistMinDeficit": 8, "PassingAssistStuckTime": 10,
             "PassingAssistKeepRightDelay": 10, "PassingAssistSettleTime": 20,
-            "PassingAssistApproachTtc": 90}[key]
+            "PassingAssistApproachTtc": 90, "PassingAssistSuspendMinutes": 15}[key]
 
   def __init__(self, avoid_outermost=True):
     self.avoid_outermost = avoid_outermost
@@ -272,7 +272,10 @@ class _KeepRightOnParams:
   def get_bool(self, key, block=False):
     if key == "PassingAssistAvoidOutermost":
       return self.avoid_outermost
-    return True
+    return key != "PassingAssistSuspend"
+
+  def put_bool(self, key, val):
+    pass
 
 
 def keep_right_det(avoid_outermost=True):
@@ -509,3 +512,75 @@ class TestAntiWeave:
     run(det, int(35.0 / DT_MDL), status=False, **IN_LEFT_LANE)
     assert det.suggestion == Side.right
     assert det.reason == Reason.keepRight
+
+
+class _SuspendParams:
+  """Params stub with a settable one-shot suspend request."""
+
+  def __init__(self, minutes=15):
+    self.suspend = False
+    self.minutes = minutes
+
+  def get(self, key, block=False, return_default=False):
+    return {"PassingAssistMinDeficit": 8, "PassingAssistStuckTime": 10,
+            "PassingAssistKeepRightDelay": 10, "PassingAssistSettleTime": 20,
+            "PassingAssistApproachTtc": 90, "PassingAssistSuspendMinutes": self.minutes}[key]
+
+  def get_bool(self, key, block=False):
+    return self.suspend if key == "PassingAssistSuspend" else True
+
+  def put_bool(self, key, val):
+    if key == "PassingAssistSuspend":
+      self.suspend = bool(val)
+
+
+class TestSuspend:
+  def _det(self, minutes=15):
+    det = PassingAssistDetector()
+    det.params = _SuspendParams(minutes)
+    return det
+
+  def test_tap_suspends_and_blocks_everything(self):
+    det = self._det()
+    run(det, STUCK_FRAMES)
+    assert det.suggestion == Side.left
+    det.params.suspend = True
+    det.update(make_sm(), CRUISE_MS, True)
+    assert det.suspended_seconds > 0
+    assert det.blocked_by == Blocked.suspended
+    assert det.suggestion == Side.none
+
+  def test_request_is_consumed_so_it_cannot_retrigger(self):
+    det = self._det()
+    det.params.suspend = True
+    det.update(make_sm(), CRUISE_MS, True)
+    assert not det.params.suspend, "one-shot request was not cleared"
+
+  def test_second_tap_resumes_immediately(self):
+    det = self._det()
+    det.params.suspend = True
+    det.update(make_sm(), CRUISE_MS, True)
+    assert det.suspended_seconds > 0
+    det.params.suspend = True
+    det.update(make_sm(), CRUISE_MS, True)
+    assert det.suspended_seconds == 0.0
+
+  def test_counts_down_and_resumes_on_its_own(self):
+    """A pause you must remember to undo is one that disables the feature for a month."""
+    det = self._det(minutes=0.02)   # ~1.2 s
+    det.params.suspend = True
+    det.update(make_sm(), CRUISE_MS, True)
+    assert det.suspended_seconds > 0
+    for _ in range(int(2.0 / DT_MDL)):
+      det.update(make_sm(), CRUISE_MS, True)
+    assert det.suspended_seconds == 0.0
+    run(det, STUCK_FRAMES)
+    assert det.suggestion == Side.left, "did not resume after the countdown"
+
+  def test_timers_do_not_accumulate_while_paused(self):
+    det = self._det()
+    det.params.suspend = True
+    det.update(make_sm(), CRUISE_MS, True)
+    run(det, STUCK_FRAMES)
+    assert det.stuck_seconds == 0.0
+    assert det.approach_seconds == 0.0

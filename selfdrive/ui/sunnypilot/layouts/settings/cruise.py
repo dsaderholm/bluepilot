@@ -320,6 +320,16 @@ class CruiseLayout(Widget):
       min_value=5, max_value=90, value_change_step=5,
       inline=True)
 
+    self.passing_assist_suspend_minutes = option_item_sp(
+      title=tr("Pause Duration (min)"),
+      description=tr("Tapping the onroad passing-assist panel pauses it for this long — for "
+                     "construction zones, weather, or anywhere the lane markings are unusual. It "
+                     "resumes on its own so it cannot be left switched off. Tap again to resume "
+                     "immediately."),
+      param="PassingAssistSuspendMinutes",
+      min_value=1, max_value=120, value_change_step=1,
+      inline=True)
+
     self.passing_assist_keep_right = toggle_item_sp(
       title=tr("Keep Right Except To Pass"),
       description=tr("Also record when you could return to a lane on your right because nothing "
@@ -446,6 +456,7 @@ class CruiseLayout(Widget):
       self.passing_assist_preemptive,
       self.passing_assist_approach_ttc,
       self.passing_assist_settle_time,
+      self.passing_assist_suspend_minutes,
       self.passing_assist_keep_right,
       self.passing_assist_keep_right_delay,
 

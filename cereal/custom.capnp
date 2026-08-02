@@ -376,6 +376,12 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     accBrakingAtDecision @30 :Bool;
     accBrakingAvailable @31 :Bool;
 
+    # BluePilot: driver-requested pause. Construction zones, weather, unfamiliar roads -- times
+    # when the geometry is unusual and no amount of gating substitutes for a driver saying "not
+    # here". Times out on its own rather than latching off: a suspend you have to remember to undo
+    # is one that silently disables the feature for the rest of the month.
+    suspendedSeconds @32 :Float32;
+
     enum Trigger {
       none @0;
       heldUp @1;      # already behind it and below the set speed -- the reactive case
@@ -446,6 +452,7 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       blindspotOccupied @8; # geometry was fine, BLIS was not
       overtakeRestricted @9; # TSR reports a no-overtaking zone in force
       rearApproaching @10;   # something is closing on that lane from behind
+      suspended @11;         # driver paused it -- construction zone, weather, unfamiliar road
     }
   }
 

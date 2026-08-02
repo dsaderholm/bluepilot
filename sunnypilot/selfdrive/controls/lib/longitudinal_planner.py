@@ -234,6 +234,7 @@ class LongitudinalPlannerSP:
     passingAssist.approachSeconds = float(pa.approach_seconds)
     passingAssist.accBrakingAtDecision = pa.acc_braking_at_decision
     passingAssist.accBrakingAvailable = pa.acc_braking_available
+    passingAssist.suspendedSeconds = float(pa.suspended_seconds)
 
     # E2E Alerts
     e2eAlerts = longitudinalPlanSP.e2eAlerts

@@ -150,6 +150,7 @@ class PassingAssistDetector:
     self.trigger = Trigger.none
     self.acc_braking_at_decision = False
     self.acc_braking_available = False
+    self.suspended_seconds = 0.0
 
     self.left_line_prob = 0.0
     self.right_line_prob = 0.0
@@ -181,6 +182,7 @@ class PassingAssistDetector:
     self.keep_right_delay_s = float(DEFAULT_KEEP_RIGHT_DELAY_S)
     self.avoid_outermost = False
     self.settle_time_s = float(DEFAULT_SETTLE_TIME_S)
+    self.suspend_minutes = 15
     # Starts settled: at boot we have not just passed anyone, and a fresh detector must not
     # spend its first settle period refusing to suggest a return.
     self._settle_s = 1e3
@@ -198,6 +200,7 @@ class PassingAssistDetector:
       self.avoid_outermost = self.params.get_bool("PassingAssistAvoidOutermost")
       self.preemptive_enabled = self.params.get_bool("PassingAssistPreemptive")
       self.settle_time_s = float(self.params.get("PassingAssistSettleTime", return_default=True))
+      self.suspend_minutes = self.params.get("PassingAssistSuspendMinutes", return_default=True)
       self.approach_ttc_s = self.params.get("PassingAssistApproachTtc", return_default=True) / 10.
 
   def _reset_outputs(self, blocked: int) -> None:
@@ -295,6 +298,27 @@ class PassingAssistDetector:
     self.right_geometry_ok = (self.right_line_prob >= MIN_ADJACENT_LINE_PROB and
                               self.right_edge_gap >= MIN_LANE_WIDTH_M and
                               right_std <= MAX_ROAD_EDGE_STD)
+
+  def _update_suspend(self) -> None:
+    """Consume a tap and run the countdown.
+
+    The request arrives as a one-shot param the UI sets and this clears, rather than a param the UI
+    holds -- so the timing lives here where DT_MDL is, and the UI cannot leave the system off by
+    crashing mid-suspend. A second tap while suspended cancels it, because the same control turning
+    a thing off and back on is the only one that can be operated without looking.
+    """
+    try:
+      requested = self.params.get_bool("PassingAssistSuspend")
+    except (AttributeError, TypeError):
+      return
+    if requested:
+      self.params.put_bool("PassingAssistSuspend", False)
+      # Toggle: tapping while suspended resumes immediately.
+      self.suspended_seconds = 0.0 if self.suspended_seconds > 0 else self.suspend_minutes * 60.0
+      return
+
+    if self.suspended_seconds > 0:
+      self.suspended_seconds = max(0.0, self.suspended_seconds - DT_MDL)
 
   def _acc_braking(self, car_state_bp) -> None:
     """Is Ford's ACC already asking for brakes?
@@ -461,6 +485,17 @@ class PassingAssistDetector:
     # Advances every cycle regardless of the gates below, so it measures real elapsed time rather
     # than time-spent-in-a-particular-branch.
     self._settle_s = min(self._settle_s + DT_MDL, 1e3)  # capped; only the threshold matters
+
+    self._update_suspend()
+    if self.suspended_seconds > 0:
+      # Suspended beats every other gate, including the ones that would report something more
+      # specific. The driver has said "not here", and a panel reporting "no lane to move into"
+      # while suspended would misrepresent why it is silent.
+      self.stuck_seconds = 0.0
+      self.approach_seconds = 0.0
+      self.keep_right_seconds = 0.0
+      self._reset_outputs(Blocked.suspended)
+      return
 
     if not self.enabled:
       self.stuck_seconds = 0.0

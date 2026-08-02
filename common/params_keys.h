@@ -262,6 +262,11 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // Hold-off after suggesting a pass before suggesting the return. Stops a slow left lane on a
     // three-lane road turning into a weave.
     {"PassingAssistSettleTime", {PERSISTENT | BACKUP, INT, "20"}},
+    // BluePilot: one-shot request to pause passing assist, set by tapping the onroad panel and
+    // cleared by the detector once consumed. NOT persistent -- a pause must never survive a boot.
+    {"PassingAssistSuspend", {CLEAR_ON_MANAGER_START | CLEAR_ON_IGNITION_ON, BOOL, "0"}},
+    // How long a tap pauses it for, in minutes. Times out on its own so it cannot be left off.
+    {"PassingAssistSuspendMinutes", {PERSISTENT | BACKUP, INT, "15"}},
     // BluePilot: "keep right except to pass". DEFAULT OFF -- modelV2 cannot tell a through lane
     // from an exit-only or merge lane, so the suggestion can mean "take the exit". Left in place
     // because the observer still records what it WOULD have said, which measures how often that
