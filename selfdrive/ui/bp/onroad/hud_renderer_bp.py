@@ -161,6 +161,7 @@ _BLOCKED_TEXT = {
   'noLaneAvailable': "No lane to move into",
   'blindspotOccupied': "Blind spot not clear",
   'overtakeRestricted': "No-passing zone",
+  'rearApproaching': "Traffic coming up behind",
 }
 
 # BluePilot: sunnypilot's "AHEAD" box hangs off the bottom of the speed-limit sign, in the same
@@ -485,6 +486,8 @@ class HudRendererBP(HudRendererSP):
       caveats.append("no blind spot data")
     if not pa.tsrAvailable:
       caveats.append("no sign data")
+    if not (pa.rearLeft.available or pa.rearRight.available):
+      caveats.append("no rear data")
     if self._pa_count:
       caveats.append(f"{self._pa_count} this drive")
     self._pa_sub = "  ·  ".join(caveats)

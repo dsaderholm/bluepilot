@@ -39,6 +39,7 @@ from openpilot.common.constants import CV
 from openpilot.common.params import Params
 from openpilot.common.realtime import DT_MDL
 from openpilot.sunnypilot import PARAMS_UPDATE_PERIOD
+from openpilot.sunnypilot.selfdrive.controls.lib.rear_approach import RearApproach
 
 Side = custom.LongitudinalPlanSP.PassingAssist.Side
 Blocked = custom.LongitudinalPlanSP.PassingAssist.Blocked
@@ -109,6 +110,7 @@ class PassingAssistDetector:
     self.right_edge_gap = 0.0
     self.left_geometry_ok = False
     self.right_geometry_ok = False
+    self.lane_beyond_right = False
 
     self.left_blindspot = False
     self.right_blindspot = False
@@ -119,6 +121,7 @@ class PassingAssistDetector:
     self.overtake_status = 0
     self.tsr_available = False
     self.road_name = ""
+    self.rear = RearApproach()
 
     self.params = Params()
     self.frame = 0
@@ -127,6 +130,7 @@ class PassingAssistDetector:
     self.stuck_time_s = float(DEFAULT_STUCK_TIME_S)
     self.keep_right_enabled = True
     self.keep_right_delay_s = float(DEFAULT_KEEP_RIGHT_DELAY_S)
+    self.avoid_outermost = True
 
   def update_params(self) -> None:
     if self.frame % int(PARAMS_UPDATE_PERIOD / DT_MDL) == 0:
@@ -135,6 +139,7 @@ class PassingAssistDetector:
       self.stuck_time_s = float(self.params.get("PassingAssistStuckTime", return_default=True))
       self.keep_right_enabled = self.params.get_bool("PassingAssistKeepRight")
       self.keep_right_delay_s = float(self.params.get("PassingAssistKeepRightDelay", return_default=True))
+      self.avoid_outermost = self.params.get_bool("PassingAssistAvoidOutermost")
 
   def _reset_outputs(self, blocked: int) -> None:
     self.suggestion = Side.none
@@ -180,6 +185,15 @@ class PassingAssistDetector:
 
     # Both channels must agree before a side is called available. Requiring agreement is the
     # conservative reading and keeps phase 2 honest if this ever stops being log-only.
+    # BluePilot: is there another lane beyond the one to our right? Exit and merge lanes are
+    # always the outermost, so a target lane with a further lane outboard of it cannot be one.
+    # Measured from the far-right lane line (laneLines[3]) out to the right road edge: on a
+    # three-lane road that gap is another lane, and on a two-lane road it collapses to the
+    # shoulder. This is what makes "move right" safe from exits without any map data.
+    beyond_gap = self._edge_gap(model, LL_FAR_RIGHT, RE_RIGHT)
+    self.lane_beyond_right = (float(probs[LL_FAR_RIGHT]) >= MIN_ADJACENT_LINE_PROB and
+                              beyond_gap >= MIN_LANE_WIDTH_M and right_std <= MAX_ROAD_EDGE_STD)
+
     self.left_geometry_ok = (self.left_line_prob >= MIN_ADJACENT_LINE_PROB and
                              self.left_edge_gap >= MIN_LANE_WIDTH_M and
                              left_std <= MAX_ROAD_EDGE_STD)
@@ -288,6 +302,7 @@ class PassingAssistDetector:
       self.road_name = ""
 
     car_state_bp = sm['carStateBP'] if 'carStateBP' in sm else None
+    self.rear.update(sm)
     self._blindspot(car_state_bp)
     self._traffic_signs(car_state_bp)
     self._geometry(sm['modelV2'])
@@ -344,19 +359,36 @@ class PassingAssistDetector:
       self._reset_outputs(Blocked.overtakeRestricted)
       return
 
+    # Rear approach. Sits here -- after geometry and the sign veto, before the side is chosen --
+    # because it is per-side: a car closing on the left must not veto a pass on the right.
+    #
+    # An UNAVAILABLE side does not block. That is the honest behaviour while no rear sensor is
+    # fitted (blocking would disable the feature outright and hide the real reason), and it is why
+    # rearAvailable is published and shown: a suggestion made with no rear sensing must be legible
+    # as such rather than pass for a checked one. When a source is fitted this becomes a real gate
+    # with no code change here.
+    left_ok = self.left_geometry_ok and not self.left_blindspot and not self.rear.left.blocks_lane_change
+    right_ok = self.right_geometry_ok and not self.right_blindspot and not self.rear.right.blocks_lane_change
+
+    if not (left_ok or right_ok):
+      # Name rear approach only when it is what actually decided it -- otherwise the blind spot or
+      # the geometry is the more useful thing to report.
+      rear_blocked = ((self.left_geometry_ok and not self.left_blindspot and self.rear.left.blocks_lane_change) or
+                      (self.right_geometry_ok and not self.right_blindspot and self.rear.right.blocks_lane_change))
+      self._reset_outputs(Blocked.rearApproaching if rear_blocked else Blocked.blindspotOccupied)
+      return
+
     # Left is preferred where both are available: passing on the right is the wrong default, and
     # on a divided highway the right side being "available" usually means a slower lane or an
     # exit-only lane rather than somewhere to pass.
-    if self.left_geometry_ok and not self.left_blindspot:
+    if left_ok:
       self.suggestion = Side.left
       self.blocked_by = Blocked.none
       self.reason = Reason.passing
-    elif self.right_geometry_ok and not self.right_blindspot:
+    else:
       self.suggestion = Side.right
       self.blocked_by = Blocked.none
       self.reason = Reason.passing
-    else:
-      self._reset_outputs(Blocked.blindspotOccupied)
 
   def _keep_right(self) -> None:
     """BluePilot: "keep right except to pass", the mirror of the passing question.
@@ -378,9 +410,21 @@ class PassingAssistDetector:
       self.keep_right_seconds = 0.0
       return
 
+    # Never suggest moving into the OUTERMOST lane. Exit-only and merge lanes are always outermost
+    # and are geometrically identical to a through lane, so requiring a further lane beyond the
+    # target removes the "move right" -> "take the exit" failure entirely.
+    #
+    # The cost is real and worth stating: on a two-lane-each-way road the right lane IS the
+    # outermost, so keep-right never fires there -- which is most of an interstate outside cities.
+    # That is the deliberate trade. A suggestion that is silent where it cannot be sure beats one
+    # that is occasionally confidently wrong about an exit.
+    if self.avoid_outermost and not self.lane_beyond_right:
+      self.keep_right_seconds = 0.0
+      return
+
     # Blind spot is a hard gate here, unlike geometry: moving into an occupied lane is the failure
     # mode, and returning right is never urgent enough to justify acting on stale evidence.
-    if self.right_blindspot:
+    if self.right_blindspot or self.rear.right.blocks_lane_change:
       self.keep_right_seconds = 0.0
       return
 

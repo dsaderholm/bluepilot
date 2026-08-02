@@ -219,6 +219,14 @@ class LongitudinalPlannerSP:
     passingAssist.reason = pa.reason
     passingAssist.keepRightSeconds = float(pa.keep_right_seconds)
     passingAssist.roadName = pa.road_name
+    for dest, side in ((passingAssist.rearLeft, pa.rear.left), (passingAssist.rearRight, pa.rear.right)):
+      dest.available = side.available
+      dest.detected = side.detected
+      dest.closing = side.closing
+      dest.dRel = float(side.d_rel)
+      dest.vRel = float(side.v_rel)
+      dest.ttc = float(side.ttc)
+      dest.source = side.source
 
     # E2E Alerts
     e2eAlerts = longitudinalPlanSP.e2eAlerts

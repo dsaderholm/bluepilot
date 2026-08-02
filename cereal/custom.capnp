@@ -346,6 +346,39 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     # lane after one. Without this the log cannot tell them apart.
     reason @20 :Reason;
     keepRightSeconds @21 :Float32;
+    rearLeft @23 :RearApproach;
+    rearRight @24 :RearApproach;
+
+    # BluePilot: traffic closing from behind in the adjacent lane. NO SOURCE EXISTS YET -- every
+    # field reports unavailable until one is fitted. It is defined now because the shape of this
+    # answer determines the shape of the gate, and retrofitting a gate into a state machine after
+    # the fact is how the ordering bugs get in.
+    #
+    # Ford BLIS cannot fill this. carState.leftBlindspot is SodDetct*_D_Stat != 0 -- blind-spot
+    # OCCUPANCY -- so a vehicle closing at 25 mph from 150 m back does not register until it is
+    # already alongside, which is far too late to plan a lane change against. Whether sodStat or
+    # sodAlert encode anything approach-like is the open question the raw BLIS logging exists to
+    # answer; if they do, a BLIS adapter fills this in categories with ttc unset.
+    #
+    # Modelled on the RADAR shape (range, closing rate, derived TTC) rather than the BLIS shape,
+    # deliberately: radar carries strictly more information, so a BLIS source can be adapted UP
+    # into these fields losing nothing, while the reverse would throw away exactly the numbers the
+    # decision needs. ESR.dbc is the reference -- range, range-rate and angle per target.
+    struct RearApproach {
+      available @0 :Bool;      # false = nothing is watching this side. NOT the same as "clear".
+      detected @1 :Bool;       # something is there at all
+      closing @2 :Bool;        # ...and gaining on us
+      dRel @3 :Float32;        # metres behind, 0 when unknown
+      vRel @4 :Float32;        # m/s, positive = closing
+      ttc @5 :Float32;         # seconds until it reaches us, large when not closing
+      source @6 :Source;
+    }
+
+    enum Source {
+      none @0;      # no rear sensing fitted
+      blis @1;      # derived from Side_Detect_L/R_Stat, categories only, ttc unset
+      radar @2;     # a rear-facing radar object list
+    }
 
     # BluePilot: LiveMapDataSP.roadName at decision time. Recorded because it is the cheapest
     # candidate for the divided-highway gate that geometry cannot provide: mapd already publishes
@@ -379,6 +412,7 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       noLaneAvailable @7;   # geometry says there is nowhere to go on either side
       blindspotOccupied @8; # geometry was fine, BLIS was not
       overtakeRestricted @9; # TSR reports a no-overtaking zone in force
+      rearApproaching @10;   # something is closing on that lane from behind
     }
   }
 

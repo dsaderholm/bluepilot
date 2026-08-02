@@ -259,6 +259,10 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // actually bites; it is not a feature to lean on until map data can distinguish the two.
     {"PassingAssistKeepRight", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"PassingAssistKeepRightDelay", {PERSISTENT | BACKUP, INT, "10"}},  // seconds
+    // BluePilot: never suggest moving into the OUTERMOST lane. Exit-only and merge lanes are always
+    // outermost and look identical to a through lane, so requiring a further lane beyond the target
+    // removes accidental "take the exit" suggestions. Costs keep-right entirely on two-lane roads.
+    {"PassingAssistAvoidOutermost", {PERSISTENT | BACKUP, BOOL, "1"}},
     {"DeviceBootMode", {PERSISTENT | BACKUP, INT, "0"}},
     {"DevUIInfo", {PERSISTENT | BACKUP, INT, "0"}},
     {"EnableCopyparty", {PERSISTENT | BACKUP, BOOL}},

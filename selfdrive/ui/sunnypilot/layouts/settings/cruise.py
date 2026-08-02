@@ -301,6 +301,14 @@ class CruiseLayout(Widget):
                      "exit-only or merge lane, which is one of the things this measures."),
       param="PassingAssistKeepRight")
 
+    self.passing_assist_avoid_outermost = toggle_item_sp(
+      title=tr("Keep Right: Never Enter Outermost Lane"),
+      description=tr("Only suggest moving right when there is still another lane beyond the one "
+                     "you would move into. Exit-only and merge lanes are always the outermost and "
+                     "look identical to a through lane, so this prevents being sent onto an exit. "
+                     "Costs the suggestion entirely on two-lane-each-way roads."),
+      param="PassingAssistAvoidOutermost")
+
     self.passing_assist_keep_right_delay = option_item_sp(
       title=tr("Keep Right: Delay (s)"),
       description=tr("How long a lane must be clear on your right before returning would be "
@@ -412,6 +420,7 @@ class CruiseLayout(Widget):
       self.passing_assist_keep_right,
       self.passing_assist_keep_right_delay,
 
+      self.passing_assist_avoid_outermost,
       SectionHeader(tr("Curves")),
       self.scc_v_toggle,
       self.scc_v_low_speed_factor,

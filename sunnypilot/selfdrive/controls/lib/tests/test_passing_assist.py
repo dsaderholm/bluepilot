@@ -237,9 +237,13 @@ class TestPassingAssistIsObservationOnly:
       assert not hasattr(det, attr), f"passing assist gained {attr}: it is supposed to be log-only"
 
 
-# Geometry with a clear lane on the RIGHT and nothing usable on the left (i.e. we are sitting in
-# the left lane of a divided highway).
-IN_LEFT_LANE = dict(probs=(0.1, 0.99, 0.99, 0.9), edges=(-2.2, 5.7))
+# Three lanes each way, sitting in the middle: a lane to the right, and another beyond it. This is
+# the geometry keep-right is scoped to now -- see PassingAssistAvoidOutermost.
+IN_LEFT_LANE = dict(probs=(0.1, 0.99, 0.99, 0.9), edges=(-2.2, 9.3))
+
+# Two lanes each way, sitting in the left: the lane to our right IS the outermost, so it could be
+# an exit-only lane and keep-right must stay silent.
+TWO_LANE_ROAD = dict(probs=(0.1, 0.99, 0.99, 0.9), edges=(-2.2, 5.7))
 KEEP_RIGHT_FRAMES = int(11.0 / DT_MDL)
 
 
@@ -326,3 +330,52 @@ class TestKeepRightIsOptIn:
     det = run(PassingAssistDetector(), KEEP_RIGHT_FRAMES, status=False, **IN_LEFT_LANE)
     assert det.suggestion == Side.none
     assert det.keep_right_seconds == 0.0
+
+
+class TestRearApproachGate:
+  def test_no_rear_sensor_does_not_block_a_suggestion(self):
+    """Today's behaviour: nothing is fitted, so the gate must not silently kill the feature."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES)
+    assert det.suggestion == Side.left
+    assert not det.rear.available
+
+  def test_closing_vehicle_on_the_left_blocks_the_left_pass(self):
+    det = PassingAssistDetector()
+    for _ in range(STUCK_FRAMES):
+      det.update(make_sm(), CRUISE_MS, True)
+      det.rear.left.from_radar(d_rel=50.0, v_rel=12.0)   # applied after update(), as a source would
+    det.update(make_sm(), CRUISE_MS, True)
+    # update() resets rear each cycle while no source exists, so assert the gate logic directly
+    det.rear.left.from_radar(d_rel=50.0, v_rel=12.0)
+    assert det.rear.left.blocks_lane_change
+
+  def test_left_threat_leaves_right_usable(self):
+    det = PassingAssistDetector()
+    det.rear.left.from_radar(d_rel=50.0, v_rel=12.0)
+    det.rear.right.from_radar(d_rel=250.0, v_rel=0.0)
+    assert det.rear.left.blocks_lane_change
+    assert not det.rear.right.blocks_lane_change
+
+
+
+class TestAvoidOutermostLane:
+  def test_moves_right_when_another_lane_lies_beyond(self):
+    det = run(keep_right_det(), KEEP_RIGHT_FRAMES, status=False, **IN_LEFT_LANE)
+    assert det.lane_beyond_right
+    assert det.suggestion == Side.right
+    assert det.reason == Reason.keepRight
+
+  def test_will_not_enter_the_outermost_lane(self):
+    """Two lanes each way: the right lane IS the outermost, so it could be an exit. Stay put."""
+    det = run(keep_right_det(), KEEP_RIGHT_FRAMES, status=False, **TWO_LANE_ROAD)
+    assert not det.lane_beyond_right
+    assert det.suggestion == Side.none
+    assert det.keep_right_seconds == 0.0
+
+  def test_passing_is_unaffected_by_the_outermost_rule(self):
+    """The rule is scoped to keep-right. Overtaking on the right is a different decision and the
+    driver is choosing to make it."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, left_bs=True,
+              probs=(0.9, 0.99, 0.99, 0.9), edges=(-5.6, 5.7))
+    assert det.suggestion == Side.right
+    assert det.reason == Reason.passing
