@@ -216,6 +216,8 @@ class LongitudinalPlannerSP:
     passingAssist.overtakeMsg = pa.overtake_msg
     passingAssist.overtakeStatus = pa.overtake_status
     passingAssist.tsrAvailable = pa.tsr_available
+    passingAssist.reason = pa.reason
+    passingAssist.keepRightSeconds = float(pa.keep_right_seconds)
 
     # E2E Alerts
     e2eAlerts = longitudinalPlanSP.e2eAlerts

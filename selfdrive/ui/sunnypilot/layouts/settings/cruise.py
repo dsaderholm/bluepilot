@@ -265,6 +265,51 @@ class CruiseLayout(Widget):
       inline=True)
 
 
+    # BluePilot: passing-assist observer. LOG ONLY -- it never suggests, alerts or steers; it
+    # records what it would have said so the idea can be judged from drive data.
+    self.passing_assist_toggle = toggle_item_sp(
+      title=tr("Passing Assist Observer (Log Only)"),
+      description=tr("Record whether a pass would have been suggested, and which check blocked "
+                     "it. Nothing acts on this: no alert, no steering, no set speed change. It "
+                     "exists to measure how often the lane geometry is fooled by an oncoming "
+                     "lane, whether the camera reports no-passing zones here, and whether blind "
+                     "spot data is any use for this."),
+      param="PassingAssistLogEnabled")
+
+    self.passing_assist_min_deficit = option_item_sp(
+      title=tr("Passing: Min Speed Deficit (mph)"),
+      description=tr("How far below your set speed the vehicle ahead must hold you before it "
+                     "counts as being held back."),
+      param="PassingAssistMinDeficit",
+      min_value=3, max_value=25, value_change_step=1,
+      inline=True)
+
+    self.passing_assist_stuck_time = option_item_sp(
+      title=tr("Passing: Time Stuck (s)"),
+      description=tr("How long you must be held below the set speed before a pass would be "
+                     "suggested."),
+      param="PassingAssistStuckTime",
+      min_value=5, max_value=90, value_change_step=5,
+      inline=True)
+
+    # BluePilot: the mirror of the pass suggestion. Only evaluated when no pass is warranted, so
+    # it can never fire mid-overtake.
+    self.passing_assist_keep_right = toggle_item_sp(
+      title=tr("Keep Right Except To Pass"),
+      description=tr("Also record when you could return to a lane on your right because nothing "
+                     "is holding you back. Note the camera cannot tell a through lane from an "
+                     "exit-only or merge lane, which is one of the things this measures."),
+      param="PassingAssistKeepRight")
+
+    self.passing_assist_keep_right_delay = option_item_sp(
+      title=tr("Keep Right: Delay (s)"),
+      description=tr("How long a lane must be clear on your right before returning would be "
+                     "suggested. Longer avoids nagging during gaps while overtaking a line of "
+                     "vehicles."),
+      param="PassingAssistKeepRightDelay",
+      min_value=3, max_value=60, value_change_step=1,
+      inline=True)
+
     self.scc_m_toggle = toggle_item_sp(
       title=tr("Smart Cruise Control - Map"),
       description=recommended(tr("Use map data to estimate the appropriate speed to drive through turns ahead. "
@@ -359,6 +404,13 @@ class CruiseLayout(Widget):
       self.icbm_resume_min_gap,
       self.icbm_resume_min_lead_speed,
       self.icbm_gap_control,
+
+      SectionHeader(tr("Passing Assist")),
+      self.passing_assist_toggle,
+      self.passing_assist_min_deficit,
+      self.passing_assist_stuck_time,
+      self.passing_assist_keep_right,
+      self.passing_assist_keep_right_delay,
 
       SectionHeader(tr("Curves")),
       self.scc_v_toggle,

@@ -253,6 +253,10 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"PassingAssistMinDeficit", {PERSISTENT | BACKUP, INT, "8"}},
     // How long that must persist before a pass would be suggested (seconds).
     {"PassingAssistStuckTime", {PERSISTENT | BACKUP, INT, "25"}},
+    // BluePilot: "keep right except to pass" -- the mirror of the passing suggestion. Fires only
+    // when no pass is warranted, so it can never nag mid-overtake.
+    {"PassingAssistKeepRight", {PERSISTENT | BACKUP, BOOL, "1"}},
+    {"PassingAssistKeepRightDelay", {PERSISTENT | BACKUP, INT, "10"}},  // seconds
     {"DeviceBootMode", {PERSISTENT | BACKUP, INT, "0"}},
     {"DevUIInfo", {PERSISTENT | BACKUP, INT, "0"}},
     {"EnableCopyparty", {PERSISTENT | BACKUP, BOOL}},

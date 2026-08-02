@@ -5,7 +5,7 @@ from openpilot.common.params_pyx import UnknownKeyName
 from openpilot.common.swaglog import cloudlog
 from openpilot.system.ui.widgets import Widget, DialogResult
 from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
-from openpilot.system.ui.widgets.list_view import toggle_item, multiple_button_item, button_item, ButtonAction, ListItem
+from openpilot.system.ui.widgets.list_view import toggle_item, multiple_button_item, button_item, dual_button_item, ButtonAction, ListItem
 from openpilot.system.ui.widgets.scroller_tici import Scroller
 from openpilot.system.ui.widgets.option_dialog import MultiOptionDialog
 from openpilot.system.ui.lib.application import gui_app
@@ -34,6 +34,14 @@ class BluePilotLayout(Widget):
   """BluePilot settings layout for TICI UI."""
 
   @staticmethod
+  def _request_blinker_test(self, side: int) -> None:
+    """Arm one turn-signal pulse. Every real gate lives in the car controller, not here -- a UI
+    that could be dismissed or crash must not be what stops a lamp."""
+    try:
+      self._params.put("FordBlinkerTest", str(int(side)))
+    except (UnknownKeyName, Exception) as e:  # noqa: BLE001
+      cloudlog.warning(f"blinker test request failed: {e}")
+
   def _safe_get_bool(params: Params, key: str, default: bool = False) -> bool:
     """Get bool param; return default if key is unknown (e.g. dev environment with reduced params)."""
     try:
@@ -92,6 +100,7 @@ class BluePilotLayout(Widget):
       ("ShowBlindspotOverlay", self._show_blindspot),
       ("ShowBrakeStatus", self._show_brake_status),
       ("ShowPassingAssist", self._show_passing_assist),
+      ("FordBlinkerTest", self._blinker_test_buttons),
       ("BPHideOnroadBorder", self._hide_onroad_border),
       ("BPShowConfidenceBall", self._show_confidence_ball),
       ("BPAnimateSteeringWheel", self._animate_steering_wheel),
@@ -202,6 +211,19 @@ class BluePilotLayout(Widget):
       initial_state=self._safe_get_bool(self._params, "ShowPassingAssist"),
       callback=lambda state: self._toggle_callback(state, "ShowPassingAssist"),
       icon="warning.png"
+    )
+
+    # BluePilot: stationary turn-signal actuation test. Requests a single 4 s pulse; the car
+    # controller refuses unless stopped, cruise off and the driver's stalk idle, and it times out
+    # and self-clears regardless. Result appears in the onroad debug readout above.
+    self._blinker_test_buttons = dual_button_item(
+      lambda: tr("Test Left Signal"),
+      lambda: tr("Test Right Signal"),
+      left_callback=lambda: self._request_blinker_test(1),
+      right_callback=lambda: self._request_blinker_test(2),
+      description=lambda: tr("Parked test: ask openpilot to operate the turn signal and report "
+                             "whether the car actually lit the lamp. Only runs while stopped with "
+                             "cruise off. Enable Show Passing Assist to see the result."),
     )
 
     # Hide onroad border toggle

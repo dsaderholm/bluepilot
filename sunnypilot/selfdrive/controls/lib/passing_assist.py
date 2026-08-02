@@ -42,6 +42,7 @@ from openpilot.sunnypilot import PARAMS_UPDATE_PERIOD
 
 Side = custom.LongitudinalPlanSP.PassingAssist.Side
 Blocked = custom.LongitudinalPlanSP.PassingAssist.Blocked
+Reason = custom.LongitudinalPlanSP.PassingAssist.Reason
 
 # --- lane line indices. modelV2 publishes exactly 4 lines and 2 road edges. ---
 # y is negative to the left and positive to the right in this frame: ldw.py tests the left line
@@ -73,6 +74,13 @@ MAX_LEAD_D_PATH_M = 1.5           # in our lane, not an adjacent-lane return
 DEFAULT_MIN_DEFICIT_MPH = 8
 DEFAULT_STUCK_TIME_S = 25
 
+# --- keep right ---
+# "Keep right except to pass" is the mirror of the passing question: nothing is holding us back and
+# a lane exists to our right, so we should not be sitting out here. Deliberately slower to fire
+# than the pass suggestion -- returning right is never urgent, and a short delay would nag on every
+# brief gap in traffic while genuinely overtaking a line of cars.
+DEFAULT_KEEP_RIGHT_DELAY_S = 10
+
 # TsrOvtkMsgTxt_D_Rq. 0 Null, 1 OvertakingAllowed, 2-7 are all "Lim*" -- a limitation in force or
 # its explicit cancellation. Only the cancel codes clear the zone; the rest mean restricted.
 TSR_OVTK_CANCELLED = (4, 7)       # LimAllCancelled, LimForTrucksCancelled
@@ -86,7 +94,9 @@ class PassingAssistDetector:
   def __init__(self):
     self.suggestion = Side.none
     self.blocked_by = Blocked.disabled
+    self.reason = Reason.none
     self.stuck_seconds = 0.0
+    self.keep_right_seconds = 0.0
 
     self.has_lead = False
     self.lead_d_rel = 0.0
@@ -114,16 +124,21 @@ class PassingAssistDetector:
     self.enabled = True
     self.min_deficit_ms = DEFAULT_MIN_DEFICIT_MPH * CV.MPH_TO_MS
     self.stuck_time_s = float(DEFAULT_STUCK_TIME_S)
+    self.keep_right_enabled = True
+    self.keep_right_delay_s = float(DEFAULT_KEEP_RIGHT_DELAY_S)
 
   def update_params(self) -> None:
     if self.frame % int(PARAMS_UPDATE_PERIOD / DT_MDL) == 0:
       self.enabled = self.params.get_bool("PassingAssistLogEnabled")
       self.min_deficit_ms = self.params.get("PassingAssistMinDeficit", return_default=True) * CV.MPH_TO_MS
       self.stuck_time_s = float(self.params.get("PassingAssistStuckTime", return_default=True))
+      self.keep_right_enabled = self.params.get_bool("PassingAssistKeepRight")
+      self.keep_right_delay_s = float(self.params.get("PassingAssistKeepRightDelay", return_default=True))
 
   def _reset_outputs(self, blocked: int) -> None:
     self.suggestion = Side.none
     self.blocked_by = blocked
+    self.reason = Reason.none
 
   @staticmethod
   def _edge_gap(model, line_idx: int, edge_idx: int) -> float:
@@ -271,16 +286,19 @@ class PassingAssistDetector:
 
     if not self.enabled:
       self.stuck_seconds = 0.0
+      self.keep_right_seconds = 0.0
       self._reset_outputs(Blocked.disabled)
       return
 
     if not long_enabled:
       self.stuck_seconds = 0.0
+      self.keep_right_seconds = 0.0
       self._reset_outputs(Blocked.notEngaged)
       return
 
     if CS.vEgo < MIN_V_EGO_MS:
       self.stuck_seconds = 0.0
+      self.keep_right_seconds = 0.0
       self._reset_outputs(Blocked.tooSlow)
       return
 
@@ -288,6 +306,7 @@ class PassingAssistDetector:
     # and it would corrupt the stuck timer for the far more interesting no-input case.
     if CS.leftBlinker or CS.rightBlinker or CS.brakePressed or CS.steeringPressed:
       self.stuck_seconds = 0.0
+      self.keep_right_seconds = 0.0
       self._reset_outputs(Blocked.driverActive)
       return
 
@@ -295,11 +314,16 @@ class PassingAssistDetector:
       self.stuck_seconds = 0.0
       self.has_lead = False
       self._reset_outputs(Blocked.noLead)
+      self._keep_right()
       return
 
     if not self._stuck(CS, lead, v_cruise):
       self._reset_outputs(Blocked.notStuck)
+      self._keep_right()
       return
+
+    # Past here a pass is warranted, so we are not sitting in a lane we should be leaving.
+    self.keep_right_seconds = 0.0
 
     if not (self.left_geometry_ok or self.right_geometry_ok):
       self._reset_outputs(Blocked.noLaneAvailable)
@@ -318,8 +342,42 @@ class PassingAssistDetector:
     if self.left_geometry_ok and not self.left_blindspot:
       self.suggestion = Side.left
       self.blocked_by = Blocked.none
+      self.reason = Reason.passing
     elif self.right_geometry_ok and not self.right_blindspot:
       self.suggestion = Side.right
       self.blocked_by = Blocked.none
+      self.reason = Reason.passing
     else:
       self._reset_outputs(Blocked.blindspotOccupied)
+
+  def _keep_right(self) -> None:
+    """BluePilot: "keep right except to pass", the mirror of the passing question.
+
+    Evaluated ONLY on the paths where no pass is warranted -- no lead, or a lead that is not
+    holding us back. That ordering is the whole design: if a pass is on, we are out here for a
+    reason and should not be told to move over mid-overtake.
+
+    A lane existing to the right is the entire positive signal, and it is a decent one: on a
+    two-lane-each-way highway, rightGeometryOk collapses to the shoulder once you ARE in the right
+    lane, so the suggestion stops on its own without needing to know which lane we occupy.
+
+    What this cannot see, and why it stays observation-only: an exit-only or merge lane is
+    geometrically identical to a through lane, so "move right" could mean "take the exit". The
+    same modelV2 limitation that cannot tell an oncoming lane from a passing lane applies here,
+    and phase 1 exists to measure how often it bites.
+    """
+    if not self.keep_right_enabled or not self.right_geometry_ok:
+      self.keep_right_seconds = 0.0
+      return
+
+    # Blind spot is a hard gate here, unlike geometry: moving into an occupied lane is the failure
+    # mode, and returning right is never urgent enough to justify acting on stale evidence.
+    if self.right_blindspot:
+      self.keep_right_seconds = 0.0
+      return
+
+    self.keep_right_seconds += DT_MDL
+    if self.keep_right_seconds >= self.keep_right_delay_s:
+      self.suggestion = Side.right
+      self.blocked_by = Blocked.none
+      self.reason = Reason.keepRight

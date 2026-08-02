@@ -29,6 +29,7 @@ from openpilot.sunnypilot.selfdrive.controls.lib.passing_assist import (
 
 Side = custom.LongitudinalPlanSP.PassingAssist.Side
 Blocked = custom.LongitudinalPlanSP.PassingAssist.Blocked
+Reason = custom.LongitudinalPlanSP.PassingAssist.Reason
 
 CRUISE_MS = 31.0            # ~70 mph set speed
 SLOW_LEAD_MS = 24.0         # ~54 mph lead -> ~7 m/s deficit, over the 8 mph default
@@ -233,3 +234,53 @@ class TestPassingAssistIsObservationOnly:
     det = PassingAssistDetector()
     for attr in ('v_target', 'a_target', 'events_sp', 'output_v_target'):
       assert not hasattr(det, attr), f"passing assist gained {attr}: it is supposed to be log-only"
+
+
+# Geometry with a clear lane on the RIGHT and nothing usable on the left (i.e. we are sitting in
+# the left lane of a divided highway).
+IN_LEFT_LANE = dict(probs=(0.1, 0.99, 0.99, 0.9), edges=(-2.2, 5.7))
+KEEP_RIGHT_FRAMES = int(11.0 / DT_MDL)
+
+
+class TestKeepRight:
+  def test_suggests_returning_right_with_no_lead(self):
+    det = run(PassingAssistDetector(), KEEP_RIGHT_FRAMES, status=False, **IN_LEFT_LANE)
+    assert det.suggestion == Side.right
+    assert det.reason == Reason.keepRight
+
+  def test_delay_must_elapse(self):
+    det = run(PassingAssistDetector(), int(4.0 / DT_MDL), status=False, **IN_LEFT_LANE)
+    assert det.suggestion == Side.none
+    assert 3.0 < det.keep_right_seconds < 5.0
+
+  def test_no_lane_to_the_right_means_no_suggestion(self):
+    # Already in the right lane: the gap to the road edge collapses to a shoulder.
+    det = run(PassingAssistDetector(), KEEP_RIGHT_FRAMES, status=False,
+              probs=(0.9, 0.99, 0.99, 0.1), edges=(-5.6, 2.3))
+    assert det.suggestion == Side.none
+    assert det.keep_right_seconds == 0.0
+
+  def test_right_blindspot_blocks_and_resets(self):
+    det = PassingAssistDetector()
+    run(det, int(8.0 / DT_MDL), status=False, **IN_LEFT_LANE)
+    assert det.keep_right_seconds > 7.0
+    run(det, 1, status=False, right_bs=True, **IN_LEFT_LANE)
+    assert det.keep_right_seconds == 0.0
+    assert det.suggestion == Side.none
+
+  def test_not_suggested_while_a_pass_is_warranted(self):
+    """The ordering that matters: never told to move over mid-overtake."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, **IN_LEFT_LANE)
+    assert det.reason == Reason.passing
+    assert det.suggestion == Side.right   # left unavailable in this geometry
+    assert det.keep_right_seconds == 0.0
+
+  def test_lead_present_but_not_holding_us_back_still_keeps_right(self):
+    # A lead pacing us at our own set speed is not a reason to sit in the left lane.
+    det = run(PassingAssistDetector(), KEEP_RIGHT_FRAMES, v_lead=CRUISE_MS, **IN_LEFT_LANE)
+    assert det.reason == Reason.keepRight
+
+  def test_passing_suggestion_reports_reason_passing(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES)
+    assert det.suggestion == Side.left
+    assert det.reason == Reason.passing

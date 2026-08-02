@@ -387,6 +387,13 @@ class HudRendererBP(HudRendererSP):
       return
 
     sm = ui_state.sm
+
+    # The stationary blinker test takes the line while it runs. The two cannot overlap -- passing
+    # assist needs 40 mph and the blinker test only runs stopped -- so sharing one line is safe
+    # and avoids adding another element to the layout.
+    if self._render_blinker_test(sm):
+      return
+
     if not sm.valid.get('longitudinalPlanSP', False):
       return
 
@@ -398,8 +405,14 @@ class HudRendererBP(HudRendererSP):
     suggestion = str(pa.suggestion)
     if suggestion != 'none':
       # Green is deliberate but it is NOT a go-ahead: nothing has checked approaching traffic.
-      self._pa_text = f"PASS {suggestion.upper()}"
-      self._pa_color = rl.Color(120, 220, 140, 255)
+      # KEEP RIGHT and PASS RIGHT are both Side.right and mean opposite things, so the reason is
+      # spelled out rather than inferred from the side.
+      if str(pa.reason) == 'keepRight':
+        self._pa_text = "KEEP RIGHT"
+        self._pa_color = rl.Color(140, 190, 230, 255)
+      else:
+        self._pa_text = f"PASS {suggestion.upper()}"
+        self._pa_color = rl.Color(120, 220, 140, 255)
     else:
       blocked = str(pa.blockedBy)
       self._pa_text = f"PA {blocked}"
@@ -686,6 +699,28 @@ class HudRendererBP(HudRendererSP):
       rl.draw_rectangle_rounded(
         rl.Rectangle(bar_x, bar_y, max(bar_height, bar_width * frac), bar_height), 1.0, 6, ACC_INK)
     return ACC_PILL_HEIGHT
+
+  def _render_blinker_test(self, sm) -> bool:
+    """Show blinker-test state while a pulse runs, or its verdict just after. Returns True if it
+    owns the line this frame."""
+    try:
+      bt = sm['carStateBP'].blinkerTest
+    except (KeyError, AttributeError):
+      return False
+
+    state = str(bt.state)
+    if state == 'pulsing':
+      side = 'L' if bt.commanded == 1 else 'R'
+      lamp = 'LAMP OK' if bt.lampSeen else 'no lamp yet'
+      self._pa_text = f"BLINK {side} {bt.secondsRemaining:.0f}s  {lamp}"
+      self._pa_color = rl.Color(255, 200, 60, 255)
+      return True
+    if state == 'done':
+      # Held after the pulse so the answer is readable without watching the whole 4 seconds.
+      self._pa_text = "BLINK: LAMP CONFIRMED" if bt.lampSeen else "BLINK: NO LAMP"
+      self._pa_color = rl.Color(120, 220, 140, 255) if bt.lampSeen else rl.Color(255, 90, 90, 255)
+      return True
+    return False
 
   def _draw_passing_assist(self, rect: rl.Rectangle) -> None:
     """BluePilot: small debug line under the speed readout. Off by default.

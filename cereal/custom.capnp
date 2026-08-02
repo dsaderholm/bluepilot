@@ -341,6 +341,18 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     overtakeStatus @18 :UInt8;
     tsrAvailable @19 :Bool;
 
+    # BluePilot: which question produced the suggestion. Both can land on Side.right and they mean
+    # opposite things -- passing on the right is an overtake, keepRight is returning to the travel
+    # lane after one. Without this the log cannot tell them apart.
+    reason @20 :Reason;
+    keepRightSeconds @21 :Float32;
+
+    enum Reason {
+      none @0;
+      passing @1;    # a slower lead is holding us below the set speed
+      keepRight @2;  # nothing is holding us back and a lane exists to the right
+    }
+
     enum Side {
       none @0;
       left @1;
