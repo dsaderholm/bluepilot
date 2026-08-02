@@ -28,11 +28,24 @@ FW_VERSIONS_EXT = {
       b'KT4T-14F397-AF\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00',
     ],
   },
-  # BluePilot: read off the car 2026-08-02. Worth recording what these say -- every one is a
-  # CD4/Mondeo-family part, NOT an Edge part. The camera is byte-identical to the Mondeo entry
-  # below, and eps/abs carry K2GC/KG9C where Edge carries M2GC. All four differ from
-  # FORD_EDGE_MK2, so exact matching separates the two cleanly and this should fingerprint
-  # automatically rather than needing manual selection.
+  # BluePilot: read off the car 2026-08-02. The ADAS hardware here was pulled from a Ford Edge.
+  #
+  # Do not read the prefixes as model codes -- the first character is a MODEL YEAR code and only
+  # characters 2-4 identify the part program. K2GC and M2GC are the same 2GC steering part, two
+  # model years apart. Comparing programs against every Ford entry in tree:
+  #
+  #   eps    14D003  program 2GC  <- shared by Edge Mk2, Fusion and Mondeo
+  #   camera 14F397  program T4T  <- shared by Edge Mk2, Fusion and Mondeo
+  #   radar  14D049  program X7T  <- shared by Edge Mk2, Fusion, Mondeo, Focus, Ranger
+  #   abs    2D053   program G9C  <- Fusion/Mondeo only; Edge Mk2 carries 2GC
+  #
+  # So three of the four are CD4 parts common to Edge and Fusion, which is consistent with
+  # Edge-sourced hardware rather than evidence against it, and the ABS -- the one component that
+  # was not transplanted -- is the only genuinely model-distinguishing entry. An earlier version
+  # of this comment claimed these were "not Edge parts", which the program codes do not support.
+  #
+  # What matters for matching is unaffected: all four strings differ from FORD_EDGE_MK2's, so
+  # exact matching separates the two and this should fingerprint without manual selection.
   CAR.FORD_FUSION_MK5: {
     (Ecu.eps, 0x730, None): [
       b'K2GC-14D003-AH\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00',
