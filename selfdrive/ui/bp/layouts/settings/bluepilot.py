@@ -33,15 +33,15 @@ from openpilot.selfdrive.ui.bp.onroad.augmented_road_view_bp import GaugeStyle
 class BluePilotLayout(Widget):
   """BluePilot settings layout for TICI UI."""
 
-  @staticmethod
   def _request_blinker_test(self, side: int) -> None:
     """Arm one turn-signal pulse. Every real gate lives in the car controller, not here -- a UI
     that could be dismissed or crash must not be what stops a lamp."""
     try:
       self._params.put("FordBlinkerTest", str(int(side)))
-    except (UnknownKeyName, Exception) as e:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001
       cloudlog.warning(f"blinker test request failed: {e}")
 
+  @staticmethod
   def _safe_get_bool(params: Params, key: str, default: bool = False) -> bool:
     """Get bool param; return default if key is unknown (e.g. dev environment with reduced params)."""
     try:
@@ -100,7 +100,6 @@ class BluePilotLayout(Widget):
       ("ShowBlindspotOverlay", self._show_blindspot),
       ("ShowBrakeStatus", self._show_brake_status),
       ("ShowPassingAssist", self._show_passing_assist),
-      ("FordBlinkerTest", self._blinker_test_buttons),
       ("BPHideOnroadBorder", self._hide_onroad_border),
       ("BPShowConfidenceBall", self._show_confidence_ball),
       ("BPAnimateSteeringWheel", self._animate_steering_wheel),
