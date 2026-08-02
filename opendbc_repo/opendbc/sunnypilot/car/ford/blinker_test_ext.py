@@ -63,9 +63,11 @@ class BlinkerTestExt:
 
   def _disarm(self) -> None:
     """Clear the request so a pulse can never repeat on its own."""
+    # int, NOT str -- see the note in bluepilot.py::_request_blinker_test. Writing "0" here raised
+    # TypeError, so DONE could never be cleared and a second pulse could never be armed.
     try:
-      self.bt_params.put("FordBlinkerTest", "0")
-    except Exception:  # noqa: BLE001 - a param write failure must not stop the timeout below
+      self.bt_params.put("FordBlinkerTest", 0)
+    except Exception:  # noqa: BLE001 - a param write failure must not stop the timeout above
       pass
 
   def update_blinker_test(self, CS) -> int:

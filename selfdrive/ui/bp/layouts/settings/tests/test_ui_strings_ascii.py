@@ -18,8 +18,16 @@ import pathlib
 
 import pytest
 
-# tests/ -> settings/ -> layouts/ -> bp/ -> ui/ -> selfdrive/ -> repo root
-ROOT = pathlib.Path(__file__).parents[6]
+def _repo_root() -> pathlib.Path:
+  """Walk up to the checkout root rather than counting parents -- the count is easy to get
+  wrong and fails as a confusing FileNotFoundError rather than as the check itself."""
+  for d in pathlib.Path(__file__).resolve().parents:
+    if (d / "common" / "params_keys.h").exists():
+      return d
+  raise RuntimeError("repo root not found")
+
+
+ROOT = _repo_root()
 
 # (path, mode) -- "tr" checks only strings inside tr(...), "all" checks every string literal
 TARGETS = [

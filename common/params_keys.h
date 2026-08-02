@@ -257,8 +257,10 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // On stock Ford ACC this is the difference between passing cleanly and letting ACC brake for a
     // lead we were always going to go around, then spending fuel recovering the speed.
     {"PassingAssistPreemptive", {PERSISTENT | BACKUP, BOOL, "1"}},
-    // Time-to-contact at which the preemptive trigger fires, in tenths of a second.
-    {"PassingAssistApproachTtc", {PERSISTENT | BACKUP, INT, "90"}},
+    // Time-to-contact at which the preemptive trigger fires, in tenths of a second. Generous by
+    // design: the decision is about the SPEED DIFFERENCE, not proximity, and a tight bound turns
+    // "pass before slowing" back into "pass once nearly there".
+    {"PassingAssistApproachTtc", {PERSISTENT | BACKUP, INT, "250"}},
     // Hold-off after suggesting a pass before suggesting the return. Stops a slow left lane on a
     // three-lane road turning into a weave.
     {"PassingAssistSettleTime", {PERSISTENT | BACKUP, INT, "20"}},

@@ -309,7 +309,7 @@ class CruiseLayout(Widget):
                      "decides earlier and is more likely to beat ACC's braking; lower waits until "
                      "you are closer."),
       param="PassingAssistApproachTtc",
-      min_value=30, max_value=200, value_change_step=5,
+      min_value=30, max_value=600, value_change_step=10,
       inline=True)
 
     self.passing_assist_settle_time = option_item_sp(

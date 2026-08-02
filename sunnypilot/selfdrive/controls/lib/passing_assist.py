@@ -86,7 +86,7 @@ MAX_LEAD_D_PATH_M = 1.5           # in our lane, not an adjacent-lane return
 DEFAULT_MIN_DEFICIT_MPH = 8
 # Ten seconds, not twenty-five. A driver decides to pass within a few seconds of settling in behind
 # something slow; twenty-five was a cautious guess and reads as an unusually patient driver.
-DEFAULT_STUCK_TIME_S = 10
+DEFAULT_STUCK_TIME_S = 10  # only reachable if preemptive is off or the lead was never approached
 
 # --- preemptive (approaching) trigger ---
 # The point of the whole feature: decide to pass BEFORE the speed is lost. On stock Ford ACC the
@@ -100,7 +100,14 @@ DEFAULT_STUCK_TIME_S = 10
 # TTC bound rather than distance: against a lead 20 mph slower, closing takes far longer from the
 # same range than against one 40 mph slower, and it is the time available to move over that decides
 # whether the manoeuvre is comfortable.
-DEFAULT_APPROACH_TTC_S = 9.0
+#
+# 25 s, not 9. Nine seconds sounds early and is not: closing on a truck 15 mph slower, it puts the
+# decision at about 170 m -- already committed, already about to be braked for. The driver this is
+# built for decides the moment he sees a slower vehicle and recognises it as slower, which is a
+# judgement about the SPEED DIFFERENCE, not about proximity. TTC is still the right bound because
+# it stops us reacting to something we will never actually reach, but it should be generous enough
+# that the deficit test is what really fires.
+DEFAULT_APPROACH_TTC_S = 25.0
 # Brief persistence only. This trigger is deliberately quick -- waiting is the behaviour it exists
 # to remove -- but a single frame of a bad range estimate should not commit us.
 APPROACH_PERSISTENCE_S = 0.6

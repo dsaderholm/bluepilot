@@ -36,10 +36,10 @@ class BluePilotLayout(Widget):
   def _request_blinker_test(self, side: int) -> None:
     """Arm one turn-signal pulse. Every real gate lives in the car controller, not here -- a UI
     that could be dismissed or crash must not be what stops a lamp."""
-    try:
-      self._params.put("FordBlinkerTest", str(int(side)))
-    except Exception as e:  # noqa: BLE001
-      cloudlog.warning(f"blinker test request failed: {e}")
+    # int, NOT str. Params enforces the registered type: PYTHON_2_CPP has (int, INT) and no
+    # (str, INT), so writing "1" to an INT key raises TypeError. This used to be caught and logged,
+    # which meant the button silently did nothing.
+    self._params.put("FordBlinkerTest", int(side))
 
   @staticmethod
   def _safe_get_bool(params: Params, key: str, default: bool = False) -> bool:
