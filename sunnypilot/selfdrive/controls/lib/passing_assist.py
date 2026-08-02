@@ -52,6 +52,16 @@ Reason = custom.LongitudinalPlanSP.PassingAssist.Reason
 LL_FAR_LEFT, LL_LEFT, LL_RIGHT, LL_FAR_RIGHT = 0, 1, 2, 3
 RE_LEFT, RE_RIGHT = 0, 1
 
+# --- road widening (exit / on-ramp detection) ---
+# modelV2 publishes 33 points along X_IDXS = 192 * (i/32)^2, so index 4 is ~3 m and index 20 is
+# ~75 m. Near is not index 0 because the very first point is noisiest; far is not the last because
+# beyond ~100 m the road edge gets unreliable and every curve starts to look like a divergence.
+WIDEN_NEAR_IDX, WIDEN_FAR_IDX = 4, 20
+# Growth in the lane-line-to-road-edge gap that reads as the road opening up rather than a shoulder
+# varying. Roughly two thirds of a lane: enough that a real off-ramp trips it well before the gore
+# point, small enough that ordinary shoulder variation does not. Starting value -- fit from logs.
+MAX_WIDENING_M = 2.5
+
 # --- geometry gates ---
 # Confidence that a painted line exists BEYOND ego's own lane line. Matches the 0.5 that ldw.py
 # uses for "lane visible"; raised slightly because acting on it is a stronger claim than warning.
@@ -111,6 +121,8 @@ class PassingAssistDetector:
     self.left_geometry_ok = False
     self.right_geometry_ok = False
     self.lane_beyond_right = False
+    self.right_widening_m = 0.0
+    self.right_widening = False
 
     self.left_blindspot = False
     self.right_blindspot = False
@@ -161,6 +173,39 @@ class PassingAssistDetector:
       return 0.0
     return abs(edge_y - line_y)
 
+  def _road_widening(self, model, right_std: float) -> None:
+    """Does the road open up to our right between here and ~75 m ahead?
+
+    This is the cue a human uses to spot an off-ramp without reading the signs: a through lane runs
+    parallel, an exit peels away. Measured as the growth in the gap between ego's right lane line
+    and the right road edge, which cancels curvature -- both bend together through a corner, so
+    only a genuine divergence shows up.
+
+    It also fires on on-ramps, rest areas and truck pullouts. That is correct rather than a false
+    positive: none of them is somewhere to move over into.
+
+    Reported even when the edge is untrusted, so a log can show whether the measurement or the
+    threshold is what needs work.
+    """
+    self.right_widening_m = 0.0
+    self.right_widening = False
+    if right_std > MAX_ROAD_EDGE_STD:
+      return
+    try:
+      line = model.laneLines[LL_RIGHT].y
+      edge = model.roadEdges[RE_RIGHT].y
+      if len(line) <= WIDEN_FAR_IDX or len(edge) <= WIDEN_FAR_IDX:
+        return
+      near = float(edge[WIDEN_NEAR_IDX]) - float(line[WIDEN_NEAR_IDX])
+      far = float(edge[WIDEN_FAR_IDX]) - float(line[WIDEN_FAR_IDX])
+    except (IndexError, AttributeError, TypeError):
+      return
+
+    # Only growth counts. The road narrowing ahead is a lane ending, which the availability test
+    # already handles, and treating it as a divergence would double-count it.
+    self.right_widening_m = max(0.0, far - near)
+    self.right_widening = self.right_widening_m > MAX_WIDENING_M
+
   def _geometry(self, model) -> None:
     """Evaluate whether a lane exists either side, recording both evidence channels separately.
 
@@ -190,6 +235,8 @@ class PassingAssistDetector:
     # Measured from the far-right lane line (laneLines[3]) out to the right road edge: on a
     # three-lane road that gap is another lane, and on a two-lane road it collapses to the
     # shoulder. This is what makes "move right" safe from exits without any map data.
+    self._road_widening(model, right_std)
+
     beyond_gap = self._edge_gap(model, LL_FAR_RIGHT, RE_RIGHT)
     self.lane_beyond_right = (float(probs[LL_FAR_RIGHT]) >= MIN_ADJACENT_LINE_PROB and
                               beyond_gap >= MIN_LANE_WIDTH_M and right_std <= MAX_ROAD_EDGE_STD)
@@ -418,6 +465,13 @@ class PassingAssistDetector:
     # outermost, so keep-right never fires there -- which is most of an interstate outside cities.
     # That is the deliberate trade. A suggestion that is silent where it cannot be sure beats one
     # that is occasionally confidently wrong about an exit.
+    # The road opening up ahead means an exit, on-ramp or pullout, and none of those is a lane to
+    # settle into. Unlike the outermost rule this works on a two-lane road, because it asks what
+    # the lane DOES rather than merely whether another lane exists beyond it.
+    if self.right_widening:
+      self.keep_right_seconds = 0.0
+      return
+
     if self.avoid_outermost and not self.lane_beyond_right:
       self.keep_right_seconds = 0.0
       return

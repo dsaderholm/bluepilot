@@ -349,6 +349,17 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     rearLeft @23 :RearApproach;
     rearRight @24 :RearApproach;
 
+    # BluePilot: how much the road opens up to the right between roughly 3 m and 75 m ahead,
+    # measured as the growth in the gap between ego's right lane line and the right road edge.
+    # A through lane holds that gap constant; an exit, on-ramp or pullout grows it. Because both
+    # the lane line and the road edge bend together through a curve, the difference between them
+    # is curvature-invariant, which a raw road-edge heading would not be.
+    #
+    # Logged whether or not it is acting, because it is unproven against real roads and the
+    # threshold wants fitting from drive data rather than from argument.
+    rightWideningM @25 :Float32;
+    rightWidening @26 :Bool;    # exceeded the threshold: treated as a possible exit or merge
+
     # BluePilot: traffic closing from behind in the adjacent lane. NO SOURCE EXISTS YET -- every
     # field reports unavailable until one is fitted. It is defined now because the shape of this
     # answer determines the shape of the gate, and retrofitting a gate into a state machine after

@@ -227,6 +227,8 @@ class LongitudinalPlannerSP:
       dest.vRel = float(side.v_rel)
       dest.ttc = float(side.ttc)
       dest.source = side.source
+    passingAssist.rightWideningM = float(pa.right_widening_m)
+    passingAssist.rightWidening = pa.right_widening
 
     # E2E Alerts
     e2eAlerts = longitudinalPlanSP.e2eAlerts

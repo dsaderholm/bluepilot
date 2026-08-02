@@ -303,10 +303,10 @@ class CruiseLayout(Widget):
 
     self.passing_assist_avoid_outermost = toggle_item_sp(
       title=tr("Keep Right: Never Enter Outermost Lane"),
-      description=tr("Only suggest moving right when there is still another lane beyond the one "
-                     "you would move into. Exit-only and merge lanes are always the outermost and "
-                     "look identical to a through lane, so this prevents being sent onto an exit. "
-                     "Costs the suggestion entirely on two-lane-each-way roads."),
+      description=tr("Extra-conservative: only suggest moving right when another lane exists "
+                     "beyond the one you would move into. Costs the suggestion entirely on "
+                     "two-lane-each-way roads. Off by default because exit detection now watches "
+                     "whether the road opens up ahead, which works on two-lane roads too."),
       param="PassingAssistAvoidOutermost")
 
     self.passing_assist_keep_right_delay = option_item_sp(

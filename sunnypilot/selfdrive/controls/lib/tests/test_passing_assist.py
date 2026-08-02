@@ -24,7 +24,7 @@ from cereal import custom
 from openpilot.common.constants import CV
 from openpilot.common.realtime import DT_MDL
 from openpilot.sunnypilot.selfdrive.controls.lib.passing_assist import (
-  PassingAssistDetector, MIN_LANE_WIDTH_M, MIN_V_EGO_MS,
+  PassingAssistDetector, MIN_LANE_WIDTH_M, MIN_V_EGO_MS, MAX_WIDENING_M,
 )
 
 Side = custom.LongitudinalPlanSP.PassingAssist.Side
@@ -35,15 +35,17 @@ CRUISE_MS = 31.0            # ~70 mph set speed
 SLOW_LEAD_MS = 24.0         # ~54 mph lead -> ~7 m/s deficit, over the 8 mph default
 
 
-def xyz(y):
-  return NS(y=[y] * 33)
+def xyz(y, widen=0.0):
+  """33 points along X_IDXS. `widen` grows the value with distance, which is what an exit or
+  on-ramp looks like on the right road edge."""
+  return NS(y=[y + widen * (i / 32.0) ** 2 * (32 / 20.0) ** 2 for i in range(33)])
 
 
 def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., d_path=0.2, status=True,
             left_bs=False, right_bs=False, blis_avail=True,
             # geometry: ego lane lines at -1.85/+1.85, road edges default to one clear lane left
             ll=(-5.5, -1.85, 1.85, 5.5), probs=(0.9, 0.99, 0.99, 0.2),
-            edges=(-5.6, 2.4), edge_stds=(0.1, 0.1),
+            edges=(-5.6, 2.4), edge_stds=(0.1, 0.1), right_edge_widen=0.0,
             tsr_avail=True, ovtk_msg=1, ovtk_status=2,
             blinker=False, brake=False, steering=False, road_name="I 15"):
   # Being stuck behind a car means matching its speed, not still closing on it: vEgo tracks vLead
@@ -58,7 +60,8 @@ def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., d_path=0.2, status=Tr
                    leftBlindspot=left_bs, rightBlindspot=right_bs),
     'radarState': NS(leadOne=NS(status=status, dRel=d_rel, vRel=v_rel, vLead=v_lead, dPath=d_path)),
     'modelV2': NS(laneLines=[xyz(v) for v in ll], laneLineProbs=list(probs),
-                  roadEdges=[xyz(v) for v in edges], roadEdgeStds=list(edge_stds)),
+                  roadEdges=[xyz(edges[0]), xyz(edges[1], widen=right_edge_widen)],
+                  roadEdgeStds=list(edge_stds)),
     'carStateBP': NS(blisLeft=NS(dataAvailable=blis_avail), blisRight=NS(dataAvailable=blis_avail),
                      trafficSignData=NS(dataAvailable=tsr_avail, overtakeMsg=ovtk_msg,
                                         overtakeStatus=ovtk_status)),
@@ -257,13 +260,18 @@ class _KeepRightOnParams:
     return {"PassingAssistMinDeficit": 8, "PassingAssistStuckTime": 25,
             "PassingAssistKeepRightDelay": 10}[key]
 
+  def __init__(self, avoid_outermost=True):
+    self.avoid_outermost = avoid_outermost
+
   def get_bool(self, key, block=False):
+    if key == "PassingAssistAvoidOutermost":
+      return self.avoid_outermost
     return True
 
 
-def keep_right_det():
+def keep_right_det(avoid_outermost=True):
   det = PassingAssistDetector()
-  det.params = _KeepRightOnParams()
+  det.params = _KeepRightOnParams(avoid_outermost)
   return det
 
 
@@ -379,3 +387,37 @@ class TestAvoidOutermostLane:
               probs=(0.9, 0.99, 0.99, 0.9), edges=(-5.6, 5.7))
     assert det.suggestion == Side.right
     assert det.reason == Reason.passing
+
+
+class TestRoadWidening:
+  def test_parallel_road_is_not_widening(self):
+    det = run(PassingAssistDetector(), 1, **IN_LEFT_LANE)
+    assert det.right_widening_m < 0.5
+    assert not det.right_widening
+
+  def test_exit_ahead_is_detected(self):
+    # Right road edge peeling away by ~4 m at the 75 m mark.
+    det = run(PassingAssistDetector(), 1, right_edge_widen=4.0, **IN_LEFT_LANE)
+    assert det.right_widening_m > MAX_WIDENING_M
+    assert det.right_widening
+
+  def test_widening_blocks_keep_right_on_a_two_lane_road(self):
+    """The case the outermost rule could only solve by giving up on two-lane roads entirely."""
+    det = keep_right_det(avoid_outermost=False)
+    run(det, KEEP_RIGHT_FRAMES, status=False, right_edge_widen=4.0, **TWO_LANE_ROAD)
+    assert det.suggestion == Side.none
+    assert det.keep_right_seconds == 0.0
+
+  def test_two_lane_road_works_when_not_widening(self):
+    """...and the point of it: with no exit ahead, a two-lane road now gets the suggestion."""
+    det = keep_right_det(avoid_outermost=False)
+    run(det, KEEP_RIGHT_FRAMES, status=False, **TWO_LANE_ROAD)
+    assert not det.right_widening
+    assert det.suggestion == Side.right
+    assert det.reason == Reason.keepRight
+
+  def test_untrusted_road_edge_reports_nothing(self):
+    det = run(PassingAssistDetector(), 1, right_edge_widen=4.0, edge_stds=(0.1, 2.0),
+              **{k: v for k, v in IN_LEFT_LANE.items() if k != 'edge_stds'})
+    assert det.right_widening_m == 0.0
+    assert not det.right_widening
