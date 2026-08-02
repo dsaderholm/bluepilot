@@ -109,6 +109,7 @@ class IntelligentCruiseButtonManagement:
   overrideState: 'IntelligentCruiseButtonManagement.OverrideState' = field(
     default_factory=lambda: IntelligentCruiseButtonManagement.OverrideState.auto
   )
+  vBaseline: float = auto_field()
 
   class IntelligentCruiseButtonManagementState(StrEnum):
     inactive = auto()

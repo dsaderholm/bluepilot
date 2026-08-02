@@ -13,6 +13,15 @@ from openpilot.selfdrive.ui.bp.lib.ui_debug_logger import bp_ui_log
 SPEED_CENTER_Y = 180
 SPEED_UNIT_CENTER_Y = 290
 
+# BluePilot: below this the propulsion request reads as coasting rather than accelerating. ACC
+# trims constantly at small values; with no deadband the readout would never sit still.
+ACC_DEADBAND = 0.15  # m/s^2
+ACC_STATUS_COLORS = {
+  "ACCEL": rl.Color(80, 200, 120, 255),
+  "COAST": rl.Color(190, 190, 190, 255),
+  "BRAKE": rl.Color(255, 180, 40, 255),
+}
+
 
 class HudRendererBP(HudRendererSP):
   """BluePilot HudRenderer with brake status display.
@@ -31,6 +40,12 @@ class HudRendererBP(HudRendererSP):
     # BluePilot: Ford ACC asking for brakes, which is not the same event as the lamps lighting.
     # Light applications decelerate without ever reaching the stop-lamp threshold.
     self._acc_braking = False
+    # BluePilot: what Ford ACC is asking for, and what ICBM is doing about it. The speed colours
+    # above say what traffic behind you sees; these say what the systems are requesting. Those are
+    # different facts, which is why this is a separate readout rather than more colours.
+    self._acc_state = ""      # "ACCEL" / "COAST" / "BRAKE", "" when unknown
+    self._acc_accel = 0.0     # m/s^2, signed
+    self._icbm_text = ""      # "" when ICBM has nothing to say
     self.speed_right = 0
     self._gradient_rect = None  # BluePilot: Full-width rect for header gradient
 
@@ -83,8 +98,53 @@ class HudRendererBP(HudRendererSP):
       self._brakes_on = False
       self._acc_braking = False
 
+    self._update_acc_status()
+
     bp_ui_log.state("HudRendererBP", "brakes_on", self._brakes_on)
     bp_ui_log.state("HudRendererBP", "acc_braking", self._acc_braking)
+    bp_ui_log.state("HudRendererBP", "acc_state", self._acc_state)
+
+  def _update_acc_status(self) -> None:
+    """BluePilot: is Ford ACC accelerating, coasting or braking, and is ICBM moving the set speed?
+
+    Read from the stock ACCDATA the camera sends, so this is Ford's own request even though
+    openpilot is not the longitudinal controller.
+    """
+    self._acc_state, self._acc_accel, self._icbm_text = "", 0.0, ""
+    if not self._show_brake_status:
+      return
+
+    sm = ui_state.sm
+    if sm.valid['carStateBP']:
+      try:
+        bls = sm['carStateBP'].brakeLightStatus
+        if bls.accDataAvailable:
+          # The friction-brake bits win outright: they mean the pads are being used, whatever the
+          # propulsion request says. Otherwise the two m/s^2 requests decide between them.
+          # accAccelRequest is AccBrkTot_A_Rq -- the BRAKE total, despite the name -- so it cannot
+          # tell accelerating from coasting on its own. That is what accPropulsionRequest is for.
+          if bls.accDecelRequest or bls.accPrechargeRequest:
+            self._acc_state, self._acc_accel = "BRAKE", bls.accAccelRequest
+          elif bls.accPropulsionRequest > ACC_DEADBAND:
+            self._acc_state, self._acc_accel = "ACCEL", bls.accPropulsionRequest
+          elif bls.accAccelRequest < -ACC_DEADBAND:
+            self._acc_state, self._acc_accel = "BRAKE", bls.accAccelRequest
+          else:
+            self._acc_state, self._acc_accel = "COAST", 0.0
+      except (KeyError, AttributeError):
+        pass
+
+    try:
+      icbm = sm['selfdriveStateSP'].intelligentCruiseButtonManagement
+      arrow = {1: "+", 2: "-"}.get(int(icbm.sendButton), "")
+      # A held baseline is exactly the state that was invisible while ICBM and the driver
+      # disagreed about the set speed, so name the number being held, not just the mode.
+      if int(icbm.overrideState) == 1 and icbm.vBaseline > 0:
+        self._icbm_text = f"{arrow} HOLD {round(icbm.vBaseline)}".strip()
+      elif arrow:
+        self._icbm_text = arrow
+    except (KeyError, AttributeError):
+      pass
 
   def _render(self, rect: rl.Rectangle) -> None:
     # BluePilot: Draw header gradient at full content width (not offset by confidence ball)
@@ -98,6 +158,7 @@ class HudRendererBP(HudRendererSP):
     # HUD elements use the (possibly offset) rect for positioning
     if self.is_cruise_available:
       self._draw_set_speed(rect)
+      self._draw_acc_status(rect)
     self._draw_current_speed(rect)
 
     button_x = rect.x + rect.width - UI_CONFIG.border_size - UI_CONFIG.button_size
@@ -117,6 +178,35 @@ class HudRendererBP(HudRendererSP):
     self.turn_signal_controller.render(rect)
     self.circular_alerts_renderer.render(rect)
     self.rocket_fuel.render(rect, ui_state.sm)
+
+  def _draw_acc_status(self, rect: rl.Rectangle) -> None:
+    """BluePilot: a compact line under the MAX box -- what ACC is asking for, what ICBM is doing.
+
+    Placed here rather than as another icon because the two renderers that already exist say WHY
+    the target moved (SmartCruiseControl shows a curve, SpeedLimit shows the sign). Neither says
+    what the car is doing about it, and nothing at all showed ICBM's state.
+    """
+    if not self._acc_state and not self._icbm_text:
+      return
+
+    set_speed_width = UI_CONFIG.set_speed_width_metric if ui_state.is_metric else UI_CONFIG.set_speed_width_imperial
+    x = rect.x + 60 + (UI_CONFIG.set_speed_width_imperial - set_speed_width) // 2
+    y = rect.y + 45 + UI_CONFIG.set_speed_height + 12
+
+    font_size = 34
+    if self._acc_state:
+      label = self._acc_state if self._acc_state == "COAST" else f"{self._acc_state} {abs(self._acc_accel):.1f}"
+      color = ACC_STATUS_COLORS.get(self._acc_state, COLORS.WHITE)
+      width = measure_text_cached(self._font_bold, label, font_size).x
+      rl.draw_text_ex(self._font_bold, label,
+                      rl.Vector2(x + (set_speed_width - width) / 2, y), font_size, 0, color)
+
+    if self._icbm_text:
+      y2 = y + (font_size + 6 if self._acc_state else 0)
+      width = measure_text_cached(self._font_semi_bold, self._icbm_text, font_size).x
+      rl.draw_text_ex(self._font_semi_bold, self._icbm_text,
+                      rl.Vector2(x + (set_speed_width - width) / 2, y2), font_size, 0,
+                      rl.Color(120, 170, 255, 255))
 
   def _draw_lateral_control_overlay(self, center_x: float, center_y: float, wheel_size: int) -> None:
     """Draw the current lateral control mode over the steering wheel icon."""

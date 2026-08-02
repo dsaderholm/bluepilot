@@ -30,6 +30,7 @@ struct IntelligentCruiseButtonManagement {
   sendButton @1 :SendButtonState;
   vTarget @2 :Float32;
   overrideState @3 :OverrideState;
+  vBaseline @4 :Float32;  # BluePilot: the driver's own set speed while overrideState is manual
 
   enum IntelligentCruiseButtonManagementState {
     inactive @0;      # No button press or default state
@@ -672,6 +673,9 @@ struct CarStateBP @0xb057204d7deadf3f {
     accDecelRequest @3 :Bool;      # AccBrkDecel_B_Rq
     accPrechargeRequest @4 :Bool;  # AccBrkPrchg_B_Rq
     accAccelRequest @5 :Float32;   # AccBrkTot_A_Rq, m/s^2 (negative is deceleration)
+    # BluePilot: the propulsion side. AccBrkTot_A_Rq above is the BRAKE total despite its
+    # capnp name, so on its own it cannot tell accelerating from coasting.
+    accPropulsionRequest @6 :Float32;  # AccPrpl_A_Rq, m/s^2
   }
 }
 

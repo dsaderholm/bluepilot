@@ -177,8 +177,10 @@ class BluePilotLayout(Widget):
 
     # Brake status toggle
     self._show_brake_status = toggle_item(
-      lambda: tr("Show Brake Status"),
-      lambda: tr("Display speed setpoint in red when vehicle is braking."),
+      lambda: tr("Show Ford ACC Status"),
+      lambda: tr("Colour the current speed red when the stop lamps are lit and amber when ACC is "
+                 "braking without lighting them, and show under the MAX box what ACC is asking "
+                 "for (ACCEL / COAST / BRAKE, in m/s2) plus what ICBM is doing to the set speed."),
       initial_state=self._safe_get_bool(self._params, "ShowBrakeStatus"),
       callback=lambda state: self._toggle_callback(state, "ShowBrakeStatus"),
       icon="warning.png"

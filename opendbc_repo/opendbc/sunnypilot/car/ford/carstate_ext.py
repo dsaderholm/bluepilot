@@ -370,6 +370,7 @@ class CarStateExt:
     brake_light_status.accDecelRequest = False
     brake_light_status.accPrechargeRequest = False
     brake_light_status.accAccelRequest = 0.0
+    brake_light_status.accPropulsionRequest = 0.0
 
     # Brake light status — try BCM message first, then fallback to BrakeSysFeatures_2
     brake_lights_detected = False
@@ -414,6 +415,7 @@ class CarStateExt:
       brake_light_status.accDecelRequest = acc_data["AccBrkDecel_B_Rq"] == 1
       brake_light_status.accPrechargeRequest = acc_data["AccBrkPrchg_B_Rq"] == 1
       brake_light_status.accAccelRequest = float(acc_data["AccBrkTot_A_Rq"])
+      brake_light_status.accPropulsionRequest = float(acc_data["AccPrpl_A_Rq"])
     except (KeyError, AttributeError):
       pass
 

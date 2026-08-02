@@ -63,12 +63,18 @@ def model_stop_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaste
   Distinct from the radar-blind lead alert because the driver's task is different: there is no
   vehicle ahead to look for, and Ford's ACC has no floor below 20 mph, so the stop itself is
   entirely the driver's. Raised at trigger and held for as long as the model keeps asking.
+
+  A PROMPT, not a warning, and deliberately not the FCW presentation. This fires at every sign and
+  signal, which in town is constantly. Sharing a visual and chime with unconfirmed_lead_alert --
+  an actual stopped car the radar cannot see -- would train the driver to tune out the one that
+  matters. The driver does still have to brake, so it stays audible and mid-sized; it just stops
+  claiming to be an emergency.
   """
   return Alert(
     "Stop ahead - cruise will not stop",
     "Model detected a stop. Brake to complete it.",
-    AlertStatus.critical, AlertSize.mid,
-    Priority.HIGH, VisualAlert.fcw, AudibleAlertSP.warningImmediate, 2.)
+    AlertStatus.userPrompt, AlertSize.mid,
+    Priority.MID, VisualAlert.none, AudibleAlertSP.promptSingleHigh, 2.)
 
 
 def speed_limit_auto_set_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
