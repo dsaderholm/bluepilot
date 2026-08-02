@@ -79,6 +79,36 @@ class CruiseLayout(Widget):
       min_value=0, max_value=9, value_change_step=1,
       inline=True)
 
+    # BluePilot: radar-blind lead detector reach. TTC is the control that actually binds --
+    # against a stopped lead TTC = dRel / v_ego, so at 65 mph 4.0 s already caps range near 116 m
+    # and the distance bound never fires. Distance stays as a sanity limit.
+    self.icbm_lead_max_ttc = option_item_sp(
+      title=tr("Vision Lead Trigger Time (0.1s)"),
+      description=tr("How early to slow for a vehicle the model sees but the radar has not "
+                     "confirmed, as time-to-collision in tenths of a second. Higher reacts "
+                     "sooner. This is the knob that changes behavior; the distance limit below "
+                     "rarely binds."),
+      param="IcbmLeadMaxTtc",
+      min_value=10, max_value=80, value_change_step=5,
+      inline=True)
+
+    self.icbm_lead_max_distance = option_item_sp(
+      title=tr("Vision Lead Max Distance (m)"),
+      param="IcbmLeadMaxDistance",
+      min_value=40, max_value=200, value_change_step=10,
+      inline=True)
+
+    # BluePilot: act on the model's own stop intent. Off by default -- with no lead there is no
+    # dRel, vRel or TTC, so persistence and the speed floor are the entire filter.
+    self.icbm_model_stop = toggle_item_sp(
+      title=tr("Slow For Stop Signs And Lights"),
+      description=tr("Use the driving model's own stop intent to bring the set speed down for "
+                     "stop signs and red lights with no vehicle at them. This is the one case "
+                     "the vision-lead trigger cannot catch, since an empty intersection produces "
+                     "no lead to measure. Weaker evidence than the lead path -- persistence and "
+                     "the speed floor are its only filters."),
+      param="IcbmModelStopEnabled")
+
     # BluePilot: hold openpilot's standstill resume until the lead has actually gone
     self.icbm_resume_gate = toggle_item_sp(
       title=tr("Gate Standstill Resume On Lead"),
@@ -138,6 +168,9 @@ class CruiseLayout(Widget):
     items = [
       self.icbm_toggle,
       self.icbm_max_target_drop,
+      self.icbm_lead_max_ttc,
+      self.icbm_lead_max_distance,
+      self.icbm_model_stop,
       self.icbm_resume_gate,
       self.icbm_resume_min_gap,
       self.icbm_resume_min_lead_speed,
