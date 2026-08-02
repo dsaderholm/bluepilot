@@ -147,6 +147,21 @@ TSR_PILL_INK = rl.Color(226, 206, 110, 255)
 # be learned; one symbol in two states reads immediately.
 PIN_DOT_RADIUS = 9
 PIN_DOT_COLOR = rl.Color(255, 214, 120, 255)
+# BluePilot: blockedBy -> what a driver should read. The enum names are for the log; putting
+# "notStuck" or "noLaneAvailable" in front of someone at 70 mph is a failure of the display, not
+# a shorthand. Anything unmapped falls through to the raw name so a new state is visible rather
+# than silently blank.
+_BLOCKED_TEXT = {
+  'disabled': "Passing assist off",
+  'notEngaged': "Cruise not engaged",
+  'tooSlow': "Below 40 mph",
+  'driverActive': "You are driving",
+  'noLead': "Road ahead clear",
+  'notStuck': "Not held up",
+  'noLaneAvailable': "No lane to move into",
+  'blindspotOccupied': "Blind spot not clear",
+  'overtakeRestricted': "No-passing zone",
+}
 
 # BluePilot: sunnypilot's "AHEAD" box hangs off the bottom of the speed-limit sign, in the same
 # rows our stack occupies. Its geometry, from SpeedLimitRenderer._draw_ahead_info: 170x160 at
@@ -205,8 +220,12 @@ class HudRendererBP(HudRendererSP):
     # BluePilot: passing-assist observer readout. Debug only -- this displays what the phase-1
     # observer WOULD have suggested. It is not an instruction and nothing acts on it.
     self._show_passing_assist = self._bp_params.get_bool("ShowPassingAssist")
-    self._pa_text = ""
+    self._pa_main = ""
+    self._pa_sub = ""
+    self._pa_progress = 0.0
+    self._pa_alert = False
     self._pa_color = COLORS.WHITE
+    self._pa_stuck_target = float(self._bp_params.get("PassingAssistStuckTime", return_default=True) or 25)
     # BluePilot: suggestions are transient -- a glance at the wrong moment misses one entirely, and
     # "I saw nothing" is indistinguishable from "it never ran". A per-drive count makes the answer
     # readable at any time without watching continuously or opening a log.
@@ -231,7 +250,13 @@ class HudRendererBP(HudRendererSP):
       self._show_brake_status = self._bp_params.get_bool("ShowBrakeStatus")
       self._hide_v_ego_ui = self._bp_params.get_bool("HideVEgoUI")
       self._show_lateral_control = self._bp_params.get_bool("BpShowLateralControl")
+      self._show_passing_assist = self._bp_params.get_bool("ShowPassingAssist")
+      if self._show_passing_assist:
+        # Needed as the progress-bar denominator, so the bar means "how close to the threshold
+        # you actually configured" rather than to a hardcoded guess.
+        self._pa_stuck_target = float(self._bp_params.get("PassingAssistStuckTime", return_default=True) or 25)
 
+    # 7.0 reads the lateral mode from controllerStateBP rather than re-deriving it from params.
     if self._show_lateral_control:
       sm = ui_state.sm
       self._lateral_mode = sm['controllerStateBP'].activeLateralMode if sm.alive['controllerStateBP'] else None
@@ -380,23 +405,28 @@ class HudRendererBP(HudRendererSP):
     self._update_passing_assist()
 
   def _update_passing_assist(self) -> None:
-    """BluePilot: build the passing-assist debug string.
+    """BluePilot: build the passing-assist panel state.
 
-    Shows blockedBy rather than just the suggestion, because the blocking gate is the interesting
-    field: it says which filter is doing the work, and whether a silent system is silent for the
-    reason you expect. The stuck timer is appended while it is running so you can watch it climb
-    toward the threshold instead of guessing whether the lead was ever counted.
+    Written to be read at a glance at speed, not decoded. Enum names like "notStuck" are what the
+    log records and are the wrong thing to put in front of a driver, so every state maps to plain
+    words; the stuck timer becomes a progress bar because a bar answers "is it nearly there" in
+    peripheral vision and a number does not.
+
+    Three things have to be legible without study: is it running, is it building toward something,
+    and did it decide -- which way.
     """
-    self._pa_text = ""
+    self._pa_main = ""
+    self._pa_sub = ""
+    self._pa_progress = 0.0
+    self._pa_alert = False
     self._pa_color = COLORS.WHITE
     if not self._show_passing_assist:
       return
 
     sm = ui_state.sm
 
-    # The stationary blinker test takes the line while it runs. The two cannot overlap -- passing
-    # assist needs 40 mph and the blinker test only runs stopped -- so sharing one line is safe
-    # and avoids adding another element to the layout.
+    # The stationary blinker test owns the panel while it runs. The two cannot overlap -- passing
+    # assist needs 40 mph and the blinker test only runs stopped.
     if self._render_blinker_test(sm):
       return
 
@@ -423,34 +453,41 @@ class HudRendererBP(HudRendererSP):
       self._pa_count += 1
     self._pa_suggesting_prev = suggesting
 
-    if suggestion != 'none':
-      # Green is deliberate but it is NOT a go-ahead: nothing has checked approaching traffic.
-      # KEEP RIGHT and PASS RIGHT are both Side.right and mean opposite things, so the reason is
-      # spelled out rather than inferred from the side.
+    if suggesting:
+      self._pa_alert = True
+      # Direction is carried by chevrons on the correct side, so the side registers before the
+      # words are read. KEEP RIGHT and PASS RIGHT are both Side.right and mean opposite things,
+      # which is why the reason is spelled out rather than inferred from the side.
       if str(pa.reason) == 'keepRight':
-        self._pa_text = "KEEP RIGHT"
+        self._pa_main = "MOVE RIGHT  >>>"
         self._pa_color = rl.Color(140, 190, 230, 255)
+      elif suggestion == 'left':
+        self._pa_main = "<<<  PASS LEFT"
+        self._pa_color = rl.Color(120, 220, 140, 255)
       else:
-        self._pa_text = f"PASS {suggestion.upper()}"
+        self._pa_main = "PASS RIGHT  >>>"
         self._pa_color = rl.Color(120, 220, 140, 255)
     else:
       blocked = str(pa.blockedBy)
-      self._pa_text = f"PA {blocked}"
+      self._pa_color = rl.Color(170, 175, 180, 255)
       if blocked == 'notStuck' and pa.stuckSeconds > 0:
-        self._pa_text += f" {pa.stuckSeconds:.0f}s"
-      self._pa_color = rl.Color(160, 160, 160, 220)
+        # The one state that is genuinely "working on it". Show the bar, not the arithmetic.
+        self._pa_main = "Held up by car ahead"
+        self._pa_progress = min(1.0, pa.stuckSeconds / max(self._pa_stuck_target, 1.0))
+      else:
+        self._pa_main = _BLOCKED_TEXT.get(blocked, blocked)
 
-    # Flag the two "looks checked but was not" cases inline, so a log reviewer cannot mistake a
-    # suggestion made with no blind-spot data for one that passed a blind-spot check.
+    # Sub-line: what was NOT checked, plus the per-drive count. Both belong here rather than in the
+    # headline -- a suggestion with no blind-spot data must never read as one that passed a check,
+    # but the caveat should not crowd out the thing being suggested.
+    caveats = []
     if not pa.blindspotAvailable:
-      self._pa_text += " ~bs"
+      caveats.append("no blind spot data")
     if not pa.tsrAvailable:
-      self._pa_text += " ~tsr"
-
-    # How many suggestions this drive. Present even while none is showing, which is the case that
-    # actually needed answering: glance down at any point and know whether it has ever fired.
+      caveats.append("no sign data")
     if self._pa_count:
-      self._pa_text += f"  x{self._pa_count}"
+      caveats.append(f"{self._pa_count} this drive")
+    self._pa_sub = "  ·  ".join(caveats)
 
   def _render(self, rect: rl.Rectangle) -> None:
     # BluePilot: Draw header gradient at full content width (not offset by confidence ball)
@@ -735,34 +772,75 @@ class HudRendererBP(HudRendererSP):
 
     state = str(bt.state)
     if state == 'pulsing':
-      side = 'L' if bt.commanded == 1 else 'R'
-      lamp = 'LAMP OK' if bt.lampSeen else 'no lamp yet'
-      self._pa_text = f"BLINK {side} {bt.secondsRemaining:.0f}s  {lamp}"
+      side = "LEFT" if bt.commanded == 1 else "RIGHT"
+      self._pa_main = f"SIGNAL {side}"
+      self._pa_sub = "lamp confirmed" if bt.lampSeen else "waiting for lamp..."
+      self._pa_progress = min(1.0, max(0.0, 1.0 - bt.secondsRemaining / 4.0))
       self._pa_color = rl.Color(255, 200, 60, 255)
+      self._pa_alert = True
       return True
     if state == 'done':
-      # Held after the pulse so the answer is readable without watching the whole 4 seconds.
-      self._pa_text = "BLINK: LAMP CONFIRMED" if bt.lampSeen else "BLINK: NO LAMP"
-      self._pa_color = rl.Color(120, 220, 140, 255) if bt.lampSeen else rl.Color(255, 90, 90, 255)
+      # Held after the pulse so the answer is readable without watching all four seconds.
+      ok = bool(bt.lampSeen)
+      self._pa_main = "SIGNAL WORKS" if ok else "SIGNAL DID NOT WORK"
+      self._pa_sub = "the car lit the lamp" if ok else "car ignored the request"
+      self._pa_color = rl.Color(120, 220, 140, 255) if ok else rl.Color(255, 90, 90, 255)
+      self._pa_alert = True
       return True
     return False
 
   def _draw_passing_assist(self, rect: rl.Rectangle) -> None:
-    """BluePilot: small debug line under the speed readout. Off by default.
+    """BluePilot: glanceable panel under the speed. Off by default.
 
-    Positioned below the speed unit rather than anywhere prominent: this is diagnostic output for
-    a system that is not making decisions, and it should not read as an instruction to the driver.
+    Sized and coloured so the three questions answer themselves in peripheral vision: a dim panel
+    means running-but-idle, a filling bar means building toward a suggestion, and a bright panel
+    with chevrons means it decided and which way. Nothing here instructs -- it reports what an
+    observer that checks no approaching traffic would have said.
     """
-    if not self._pa_text:
+    if not self._pa_main:
       return
 
-    font_size = FONT_SIZES.max_speed
-    text_dims = measure_text_cached(self._font_bold, self._pa_text, font_size)
-    pos = rl.Vector2(
-      rect.x + rect.width / 2 - text_dims.x / 2,
+    main_size = 52 if self._pa_alert else 40
+    sub_size = 30
+    main_dims = measure_text_cached(self._font_bold, self._pa_main, main_size)
+    sub_dims = measure_text_cached(self._font_bold, self._pa_sub, sub_size) if self._pa_sub else rl.Vector2(0, 0)
+
+    pad_x, pad_y = 36, 18
+    content_w = max(main_dims.x, sub_dims.x)
+    content_h = main_dims.y + (sub_dims.y + 6 if self._pa_sub else 0) + (14 if self._pa_progress > 0 else 0)
+    panel_w = min(content_w + pad_x * 2, rect.width - 40)
+    panel_h = content_h + pad_y * 2
+
+    panel = rl.Rectangle(
+      rect.x + rect.width / 2 - panel_w / 2,
       rect.y + SPEED_UNIT_CENTER_Y + FONT_SIZES.speed_unit,
+      panel_w, panel_h,
     )
-    rl.draw_text_ex(self._font_bold, self._pa_text, pos, font_size, 0, self._pa_color)
+
+    bg_alpha = 210 if self._pa_alert else 130
+    rl.draw_rectangle_rounded(panel, 0.25, 10, rl.Color(0, 0, 0, bg_alpha))
+    if self._pa_alert:
+      rl.draw_rectangle_rounded_lines_ex(panel, 0.25, 10, 3, self._pa_color)
+
+    y = panel.y + pad_y
+    rl.draw_text_ex(self._font_bold, self._pa_main,
+                    rl.Vector2(panel.x + panel.width / 2 - main_dims.x / 2, y),
+                    main_size, 0, self._pa_color)
+    y += main_dims.y + 6
+
+    if self._pa_sub:
+      rl.draw_text_ex(self._font_bold, self._pa_sub,
+                      rl.Vector2(panel.x + panel.width / 2 - sub_dims.x / 2, y),
+                      sub_size, 0, rl.Color(200, 205, 210, 200))
+      y += sub_dims.y + 6
+
+    if self._pa_progress > 0:
+      # A bar answers "nearly there?" without reading digits, which a number never does at speed.
+      bar_w = panel.width - pad_x * 2
+      track = rl.Rectangle(panel.x + pad_x, y, bar_w, 8)
+      rl.draw_rectangle_rounded(track, 1.0, 6, rl.Color(255, 255, 255, 50))
+      fill = rl.Rectangle(track.x, track.y, max(8.0, bar_w * self._pa_progress), 8)
+      rl.draw_rectangle_rounded(fill, 1.0, 6, self._pa_color)
 
   def _draw_lateral_control_overlay(self, center_x: float, center_y: float, wheel_size: int) -> None:
     """Draw the current lateral control mode over the steering wheel icon."""
