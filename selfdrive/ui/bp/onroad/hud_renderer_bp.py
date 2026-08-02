@@ -236,6 +236,7 @@ class HudRendererBP(HudRendererSP):
     self._pa_suggesting_prev = False
     self._pa_started_frame = 0
     self._pa_panel_rect = None   # last drawn rect, used as the tap target
+    self._pa_failed = False      # own latch: must not share fate with the ACC readout
 
   def set_gradient_rect(self, rect: rl.Rectangle):
     """Set full-width rect for header gradient (when HUD renders offset for confidence ball)."""
@@ -303,6 +304,18 @@ class HudRendererBP(HudRendererSP):
         self._acc_state, self._acc_accel = "", 0.0
         self._icbm_baseline, self._icbm_arrow = 0, ""
         bp_ui_log.state("HudRendererBP", "acc_status_error", repr(e))
+
+    # BluePilot: same protection, SEPARATE latch. These are unrelated readouts and must fail
+    # independently -- sharing one would mean an ACC error silently freezing the passing-assist
+    # panel on its last frame forever, and a panel error blanking the ACC line. Calling this from
+    # inside _update_acc_status, where it briefly lived after a merge, produced exactly that.
+    if not self._pa_failed:
+      try:
+        self._update_passing_assist()
+      except Exception as e:
+        self._pa_failed = True
+        self._pa_main, self._pa_sub, self._pa_progress, self._pa_alert = "", "", 0.0, False
+        bp_ui_log.state("HudRendererBP", "passing_assist_error", repr(e))
 
     bp_ui_log.state("HudRendererBP", "brakes_on", self._brakes_on)
     bp_ui_log.state("HudRendererBP", "acc_braking", self._acc_braking)
@@ -405,8 +418,6 @@ class HudRendererBP(HudRendererSP):
       except Exception:
         pass
 
-
-    self._update_passing_assist()
 
   def _update_passing_assist(self) -> None:
     """BluePilot: build the passing-assist panel state.
