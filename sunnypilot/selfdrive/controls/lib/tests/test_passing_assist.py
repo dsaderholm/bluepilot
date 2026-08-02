@@ -31,6 +31,7 @@ Side = custom.LongitudinalPlanSP.PassingAssist.Side
 Blocked = custom.LongitudinalPlanSP.PassingAssist.Blocked
 Reason = custom.LongitudinalPlanSP.PassingAssist.Reason
 Trigger = custom.LongitudinalPlanSP.PassingAssist.Trigger
+RefSource = custom.LongitudinalPlanSP.PassingAssist.ReferenceSource
 
 CRUISE_MS = 31.0            # ~70 mph set speed
 SLOW_LEAD_MS = 24.0         # ~54 mph lead -> ~7 m/s deficit, over the 8 mph default
@@ -68,7 +69,8 @@ def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., d_path=0.2, status=Tr
             edges=(-5.6, 2.4), edge_stds=(0.1, 0.1), right_edge_widen=0.0,
             tsr_avail=True, ovtk_msg=1, ovtk_status=2,
             blinker=False, brake=False, steering=False, road_name="I 15",
-            acc_braking=False, acc_avail=True, set_speed=None):
+            acc_braking=False, acc_avail=True, set_speed=None,
+            icbm_hold=0.0, icbm_manual=False):
   # Being stuck behind a car means matching its speed, not still closing on it: vEgo tracks vLead
   # and the gap to the SET speed is what makes passing worth suggesting. Tests that need a genuine
   # approach pass v_ego explicitly.
@@ -90,6 +92,8 @@ def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., d_path=0.2, status=Tr
                      trafficSignData=NS(dataAvailable=tsr_avail, overtakeMsg=ovtk_msg,
                                         overtakeStatus=ovtk_status)),
     'liveMapDataSP': NS(roadName=road_name),
+    'selfdriveStateSP': NS(intelligentCruiseButtonManagement=NS(
+        vBaseline=icbm_hold, overrideState=1 if icbm_manual else 0)),
   })
 
 
@@ -648,3 +652,49 @@ class TestSetSpeedIsTheClusterSpeed:
       det.update(make_sm(v_ego=CRUISE_MS, v_lead=CRUISE_MS - 7.0, d_rel=120., set_speed=0.0),
                  CRUISE_MS, True)
     assert det.suggestion == Side.left
+
+
+class TestReferenceSpeedIsTheDriversIntent:
+  """With ICBM running, the dash value is the CURRENT commanded set speed -- ICBM lowers it for
+  curves, speed limits and the radar-blind lead. Differencing against it means every lead stops
+  looking slow the moment anything slows the car, which is exactly when a pass is wanted.
+  """
+
+  MPH = 0.44704
+
+  def _drive(self, frames=int(3.0 / DT_MDL), sl=0.0, **kw):
+    det = PassingAssistDetector()
+    for _ in range(frames):
+      det.update(make_sm(**kw), CRUISE_MS, True, sl)
+    return det
+
+  def test_icbm_lowered_the_dash_but_the_hold_is_the_intent(self):
+    """Driver holds 80, ICBM has dropped the dash to 68 for a curve, lead is doing 65."""
+    det = self._drive(v_ego=68 * self.MPH, v_lead=65 * self.MPH, d_rel=60.,
+                      set_speed=68 * self.MPH, icbm_hold=80 * self.MPH, icbm_manual=True)
+    assert det.reference_source == RefSource.icbmHold
+    assert det.suggestion == Side.left
+
+  def test_speed_limit_plus_offset_is_the_intent_when_sla_drives(self):
+    """SLA following 75+offset, ICBM momentarily showing 66, lead doing 64."""
+    det = self._drive(sl=78 * self.MPH, v_ego=66 * self.MPH, v_lead=64 * self.MPH, d_rel=60.,
+                      set_speed=66 * self.MPH)
+    assert det.reference_source == RefSource.speedLimit
+    assert det.suggestion == Side.left
+
+  def test_dash_value_is_used_when_nothing_else_is_higher(self):
+    det = self._drive(v_ego=80 * self.MPH, v_lead=65 * self.MPH, d_rel=120.,
+                      set_speed=80 * self.MPH)
+    assert det.reference_source == RefSource.cluster
+    assert det.reference_speed > 79 * self.MPH
+
+  def test_icbm_hold_ignored_while_in_auto(self):
+    """A stale baseline must not raise the reference when ICBM is not actually holding it."""
+    det = self._drive(v_ego=70 * self.MPH, v_lead=69 * self.MPH, d_rel=60.,
+                      set_speed=70 * self.MPH, icbm_hold=95 * self.MPH, icbm_manual=False)
+    assert det.reference_source == RefSource.cluster
+
+  def test_reference_never_below_the_dash(self):
+    det = self._drive(v_ego=80 * self.MPH, v_lead=78 * self.MPH, d_rel=60.,
+                      set_speed=80 * self.MPH, icbm_hold=50 * self.MPH, icbm_manual=True)
+    assert det.reference_speed >= 79 * self.MPH

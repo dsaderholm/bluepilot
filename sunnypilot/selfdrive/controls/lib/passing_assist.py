@@ -45,6 +45,7 @@ Side = custom.LongitudinalPlanSP.PassingAssist.Side
 Blocked = custom.LongitudinalPlanSP.PassingAssist.Blocked
 Reason = custom.LongitudinalPlanSP.PassingAssist.Reason
 Trigger = custom.LongitudinalPlanSP.PassingAssist.Trigger
+RefSource = custom.LongitudinalPlanSP.PassingAssist.ReferenceSource
 
 # --- lane line indices. modelV2 publishes exactly 4 lines and 2 road edges. ---
 # y is negative to the left and positive to the right in this frame: ldw.py tests the left line
@@ -157,6 +158,8 @@ class PassingAssistDetector:
     self.acc_braking_at_decision = False
     self.acc_braking_available = False
     self.suspended_seconds = 0.0
+    self.reference_speed = 0.0
+    self.reference_source = RefSource.cluster
 
     self.left_line_prob = 0.0
     self.right_line_prob = 0.0
@@ -417,7 +420,42 @@ class PassingAssistDetector:
     closing = -float(lead.vRel)
     self.lead_ttc = (lead.dRel / closing) if closing > MIN_APPROACH_CLOSING_MS else NO_TTC_S
 
-  def update(self, sm, v_cruise: float, long_enabled: bool) -> None:
+  def _reference_speed(self, CS, sm, v_cruise: float, speed_limit_target: float) -> float:
+    """The speed the driver asked for -- the operand the deficit is measured against.
+
+    NOT the number on the dash. With ICBM running, Veh_V_DsplyCcSet is the CURRENT commanded set
+    speed, which ICBM lowers for curves, speed limits and the radar-blind lead and then restores.
+    Differencing against it means that the moment anything slows the car, every lead stops looking
+    slow -- exactly when a pass is most wanted.
+
+    The intent is the highest of the three things that can express it. Taking the max is what makes
+    that safe: ICBM only ever moves the dash value DOWN from the driver's baseline, so a maximum
+    recovers the baseline without needing to know which feature lowered it or why.
+
+    Source is recorded, because an operand that is silently wrong produces a system that looks
+    correct and never fires -- which is how this was wrong twice.
+    """
+    cluster = float(CS.cruiseState.speedCluster)
+    best, source = (cluster if cluster > 0 else v_cruise), RefSource.cluster
+
+    # SLA following the limit plus offset.
+    if speed_limit_target > best:
+      best, source = speed_limit_target, RefSource.speedLimit
+
+    # The driver took the set speed back and ICBM is holding their number.
+    try:
+      icbm = sm['selfdriveStateSP'].intelligentCruiseButtonManagement
+      baseline = float(icbm.vBaseline)
+      if int(icbm.overrideState) == 1 and baseline > best:
+        best, source = baseline, RefSource.icbmHold
+    except (KeyError, AttributeError, TypeError, ValueError):
+      pass
+
+    self.reference_speed = best
+    self.reference_source = source
+    return best
+
+  def update(self, sm, v_cruise: float, long_enabled: bool, speed_limit_target: float = 0.0) -> None:
     """
     Args:
       sm: SubMaster with carState, radarState, modelV2 and (BluePilot, Ford) carStateBP
@@ -434,16 +472,7 @@ class PassingAssistDetector:
     CS = sm['carState']
     lead = sm['radarState'].leadOne
 
-    # The set speed is the number on YOUR dash, read straight from Ford's own Veh_V_DsplyCcSet via
-    # cruiseState.speedCluster -- not carState.vCruiseCluster, which comes from VCruiseHelper and
-    # depends on pcmCruise/pcmCruiseSpeed wiring that differs once ICBM is managing the target.
-    # A lead 15 mph slower than an 80 mph set speed was reporting "nothing slower ahead" because the
-    # number being differenced was not the number the driver set. Falls back to the passed value if
-    # the cluster reports nothing.
-    set_speed = float(CS.cruiseState.speedCluster)
-    if set_speed <= 0:
-      set_speed = v_cruise
-    v_cruise = set_speed
+    v_cruise = self._reference_speed(CS, sm, v_cruise, speed_limit_target)
 
     # BLIS is read every cycle regardless of the gates below -- its behaviour approaching a pass
     # is exactly what needs measuring, including on the frames where nothing is suggested.

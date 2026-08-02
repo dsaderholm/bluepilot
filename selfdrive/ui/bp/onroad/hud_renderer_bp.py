@@ -225,6 +225,7 @@ class HudRendererBP(HudRendererSP):
     self._show_passing_assist = self._bp_params.get_bool("ShowPassingAssist")
     self._pa_main = ""
     self._pa_sub = ""
+    self._pa_sub_detail = ""
     self._pa_progress = 0.0
     self._pa_alert = False
     self._pa_color = COLORS.WHITE
@@ -432,6 +433,7 @@ class HudRendererBP(HudRendererSP):
     """
     self._pa_main = ""
     self._pa_sub = ""
+    self._pa_sub_detail = ""
     self._pa_progress = 0.0
     self._pa_alert = False
     self._pa_color = COLORS.WHITE
@@ -498,6 +500,15 @@ class HudRendererBP(HudRendererSP):
         self._pa_progress = min(1.0, pa.stuckSeconds / max(self._pa_stuck_target, 1.0))
       else:
         self._pa_main = _BLOCKED_TEXT.get(blocked, blocked)
+        # Show the two numbers actually being compared. "Nothing slower ahead" with a visibly
+        # slower car in front is the exact report that took a drive to diagnose twice; the operands
+        # make it a glance instead. Reference is the speed the driver asked for, which with ICBM
+        # running is NOT the number on the dash.
+        if blocked == 'notStuck' and pa.hasLead and pa.referenceSpeed > 0:
+          conv = 2.23694 if not ui_state.is_metric else 3.6
+          self._pa_sub_detail = (f"want {pa.referenceSpeed * conv:.0f}"
+                                 f"  lead {pa.leadVLead * conv:.0f}"
+                                 f"  [{pa.referenceSource}]")
 
     # Sub-line: what was NOT checked, plus the per-drive count. Both belong here rather than in the
     # headline -- a suggestion with no blind-spot data must never read as one that passed a check,
@@ -511,6 +522,8 @@ class HudRendererBP(HudRendererSP):
       caveats.append("no rear data")
     if self._pa_count:
       caveats.append(f"{self._pa_count} this drive")
+    if self._pa_sub_detail:
+      caveats.insert(0, self._pa_sub_detail)
     self._pa_sub = "  -  ".join(caveats)
 
   def _render(self, rect: rl.Rectangle) -> None:

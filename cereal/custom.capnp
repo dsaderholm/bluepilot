@@ -382,6 +382,23 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     # is one that silently disables the feature for the rest of the month.
     suspendedSeconds @32 :Float32;
 
+    # BluePilot: the speed the DRIVER asked for, which the deficit is measured against, and where
+    # it came from. Logged because getting this operand wrong is silent -- the subtraction looks
+    # perfectly correct and simply never fires -- and it has now been wrong twice.
+    #
+    # With ICBM running, the number on the dash is NOT the intent: ICBM actively lowers
+    # Veh_V_DsplyCcSet for curves, speed limits and the radar-blind lead, then restores it. The
+    # intent is whichever of these is highest -- the driver's held baseline, the speed limit plus
+    # offset that SLA is following, or the current dash value as a floor.
+    referenceSpeed @33 :Float32;
+    referenceSource @34 :ReferenceSource;
+
+    enum ReferenceSource {
+      cluster @0;      # the dash value; also the fallback
+      icbmHold @1;     # driver took the set speed back, ICBM is holding their number
+      speedLimit @2;   # SLA is following the limit plus offset
+    }
+
     enum Trigger {
       none @0;
       heldUp @1;      # already behind it and below the set speed -- the reactive case

@@ -74,7 +74,10 @@ class LongitudinalPlannerSP:
     # BluePilot: passing-assist observation. Log only -- no events_sp, no target, no return value
     # consumed anywhere. Takes v_cruise_cluster rather than v_cruise because the question is
     # whether the lead is holding us below the speed the DRIVER set, not below a limiter's output.
-    self.passing_assist.update(sm, v_cruise_cluster, long_enabled)
+    # speed_limit_final is the limit plus offset -- one of the three things that can express
+    # what the driver actually asked for. See PassingAssistDetector._reference_speed.
+    sl_target = self.resolver.speed_limit_final if self.resolver.speed_limit_valid else 0.0
+    self.passing_assist.update(sm, v_cruise_cluster, long_enabled, sl_target)
 
     # Speed Limit Assist
     has_speed_limit = self.resolver.speed_limit_valid or self.resolver.speed_limit_last_valid
@@ -236,6 +239,8 @@ class LongitudinalPlannerSP:
     passingAssist.accBrakingAtDecision = pa.acc_braking_at_decision
     passingAssist.accBrakingAvailable = pa.acc_braking_available
     passingAssist.suspendedSeconds = float(pa.suspended_seconds)
+    passingAssist.referenceSpeed = float(pa.reference_speed)
+    passingAssist.referenceSource = pa.reference_source
 
     # E2E Alerts
     e2eAlerts = longitudinalPlanSP.e2eAlerts

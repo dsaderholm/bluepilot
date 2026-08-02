@@ -34,7 +34,10 @@ def main():
                             # passing-assist observer records. Not in any all_checks() list, so a
                             # platform that never publishes it (non-Ford, non-BluePilot) is
                             # unaffected -- sm.valid stays False and the observer reports it.
-                            'liveMapDataSP', 'carStateSP', 'carStateBP', gps_location_service],
+                            # selfdriveStateSP carries ICBM's held baseline, which is the driver's own set speed
+                            # when they have taken it back from ICBM.
+                            'liveMapDataSP', 'carStateSP', 'carStateBP',
+                            'selfdriveStateSP', gps_location_service],
                            poll='carState')
 
   while True:
