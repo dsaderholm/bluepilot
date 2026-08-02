@@ -285,29 +285,21 @@ class CruiseLayout(Widget):
       inline=True)
 
     self.passing_assist_stuck_time = option_item_sp(
-      title=tr("Passing: Time Stuck (s)"),
-      description=tr("How long you must be held below the set speed before a pass would be "
-                     "suggested."),
+      title=tr("Passing: Confirm Time (s)"),
+      description=tr("How long a slower vehicle must be seen before a pass is suggested. Short by "
+                     "design: this only rejects a bad frame of tracking, it is not a waiting "
+                     "period."),
       param="PassingAssistStuckTime",
-      min_value=3, max_value=60, value_change_step=1,
+      min_value=1, max_value=20, value_change_step=1,
       inline=True)
 
     # BluePilot: the mirror of the pass suggestion. Only evaluated when no pass is warranted, so
     # it can never fire mid-overtake.
-    self.passing_assist_preemptive = toggle_item_sp(
-      title=tr("Pass Before Slowing Down"),
-      description=tr("Decide to pass while still catching up to a slower vehicle, before Ford ACC "
-                     "starts braking for it. The car measures the closing speed exactly rather "
-                     "than estimating it, so it can commit earlier than you would by eye. Avoids "
-                     "the brake-then-accelerate cycle that costs fuel on a pass you were always "
-                     "going to make."),
-      param="PassingAssistPreemptive")
-
     self.passing_assist_approach_ttc = option_item_sp(
-      title=tr("Pass Before Slowing: Lead Time (0.1s)"),
-      description=tr("How long before reaching the slower vehicle the pass is suggested. Higher "
-                     "decides earlier and is more likely to beat ACC's braking; lower waits until "
-                     "you are closer."),
+      title=tr("Passing: Max Lead Time (0.1s)"),
+      description=tr("Sanity bound only: ignore a slower vehicle this far ahead in time, since it "
+                     "may exit or speed up before you reach it. Raise it to consider vehicles "
+                     "further out. The speed difference below is what actually triggers a pass."),
       param="PassingAssistApproachTtc",
       min_value=30, max_value=600, value_change_step=10,
       inline=True)
@@ -453,7 +445,6 @@ class CruiseLayout(Widget):
       self.passing_assist_toggle,
       self.passing_assist_min_deficit,
       self.passing_assist_stuck_time,
-      self.passing_assist_preemptive,
       self.passing_assist_approach_ttc,
       self.passing_assist_settle_time,
       self.passing_assist_suspend_minutes,

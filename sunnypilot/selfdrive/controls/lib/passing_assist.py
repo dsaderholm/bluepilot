@@ -75,43 +75,39 @@ MIN_LANE_WIDTH_M = 3.0
 # per-edge std; above this the edge gap is not trusted and the side is reported unavailable.
 MAX_ROAD_EDGE_STD = 0.5
 
-# --- lead / stuck gates ---
+# --- lead gates ---
 MIN_V_EGO_MS = 40 * CV.MPH_TO_MS  # below this, passing is not the manoeuvre being considered
-# The lead must actually be pacing us, not merely being approached: if we are still closing, the
-# set speed is not yet being held back and the stuck timer would start far too early.
-MAX_CLOSING_SPEED_MS = 2.0
-MAX_LEAD_D_REL_M = 60.0           # beyond this it is not holding us back yet
 MAX_LEAD_D_PATH_M = 1.5           # in our lane, not an adjacent-lane return
+# Far bound. Not "when does it hold us back" -- a slower car in our lane always will -- but "is
+# this real": a lead at 250 m may exit, speed up, or turn out not to be there. Generous, because
+# the whole point is to decide before any speed is given away.
+MAX_LEAD_D_REL_M = 220.0
 
+# The real knob. Everything else is a sanity bound -- this is the judgement a driver actually
+# makes: is that car slow enough to be worth going around.
 DEFAULT_MIN_DEFICIT_MPH = 8
-# Ten seconds, not twenty-five. A driver decides to pass within a few seconds of settling in behind
-# something slow; twenty-five was a cautious guess and reads as an unusually patient driver.
-DEFAULT_STUCK_TIME_S = 10  # only reachable if preemptive is off or the lead was never approached
+# How long the slower lead must persist before suggesting. Short by design: waiting is the whole
+# behaviour this exists to remove. Long enough only to reject a single bad frame of lead tracking.
+DEFAULT_PERSISTENCE_S = 2
 
-# --- preemptive (approaching) trigger ---
-# The point of the whole feature: decide to pass BEFORE the speed is lost. On stock Ford ACC the
-# expensive sequence is brake-then-accelerate -- ACC sheds speed for a lead we were always going to
-# pass, then spends fuel winning it back in the other lane. Moving over while still at set speed
-# avoids both halves.
+# --- the one question ---
+# "Is there a vehicle in my lane slow enough to cost me speed?"
 #
-# The car has the advantage here that a driver does not: it knows the closing rate exactly instead
-# of estimating it, so it can commit earlier and with less margin than a human safely would.
+# There is no second question. Closing on a slower car and sitting behind one are the same
+# situation at two moments: either we are about to brake for it or we already have. Splitting them
+# produced a machine that waited in one branch for a condition the driver never lets happen.
 #
-# TTC bound rather than distance: against a lead 20 mph slower, closing takes far longer from the
-# same range than against one 40 mph slower, and it is the time available to move over that decides
-# whether the manoeuvre is comfortable.
+# On stock Ford ACC the cost is concrete: ACC brakes for a lead we were always going to pass, then
+# fuel is spent winning the speed back in the other lane. Deciding early avoids both halves, and
+# whether a given suggestion actually beat ACC to it is recorded rather than assumed -- see
+# accBrakingAtDecision, which is what `trigger` now reports.
 #
-# 25 s, not 9. Nine seconds sounds early and is not: closing on a truck 15 mph slower, it puts the
-# decision at about 170 m -- already committed, already about to be braked for. The driver this is
-# built for decides the moment he sees a slower vehicle and recognises it as slower, which is a
-# judgement about the SPEED DIFFERENCE, not about proximity. TTC is still the right bound because
-# it stops us reacting to something we will never actually reach, but it should be generous enough
-# that the deficit test is what really fires.
+# TTC is a sanity bound, not the trigger. From the same range a lead 20 mph slower is much further
+# away in time than one 40 mph slower, so a raw distance limit would behave differently at every
+# speed difference. It exists only to stop us reacting to something we will never reach.
 DEFAULT_APPROACH_TTC_S = 25.0
-# Brief persistence only. This trigger is deliberately quick -- waiting is the behaviour it exists
-# to remove -- but a single frame of a bad range estimate should not commit us.
-APPROACH_PERSISTENCE_S = 0.6
-# Below this closing rate we are not really catching anyone and the TTC figure gets meaningless.
+# Below this closing rate the TTC figure is meaningless, so it simply is not applied. A lead we are
+# already pacing has no closing rate and still counts -- that is the point.
 MIN_APPROACH_CLOSING_MS = 1.0
 
 # --- anti-weave ---
@@ -145,7 +141,7 @@ class PassingAssistDetector:
     self.suggestion = Side.none
     self.blocked_by = Blocked.disabled
     self.reason = Reason.none
-    self.stuck_seconds = 0.0
+    self.approach_seconds = 0.0
     self.keep_right_seconds = 0.0
 
     self.has_lead = False
@@ -184,7 +180,7 @@ class PassingAssistDetector:
     self.frame = 0
     self.enabled = True
     self.min_deficit_ms = DEFAULT_MIN_DEFICIT_MPH * CV.MPH_TO_MS
-    self.stuck_time_s = float(DEFAULT_STUCK_TIME_S)
+    self.persistence_s = float(DEFAULT_PERSISTENCE_S)
     self.keep_right_enabled = True
     self.keep_right_delay_s = float(DEFAULT_KEEP_RIGHT_DELAY_S)
     self.avoid_outermost = False
@@ -194,18 +190,16 @@ class PassingAssistDetector:
     # spend its first settle period refusing to suggest a return.
     self._settle_s = 1e3
     self._right_bs_prev = False
-    self.preemptive_enabled = True
     self.approach_ttc_s = DEFAULT_APPROACH_TTC_S
 
   def update_params(self) -> None:
     if self.frame % int(PARAMS_UPDATE_PERIOD / DT_MDL) == 0:
       self.enabled = self.params.get_bool("PassingAssistLogEnabled")
       self.min_deficit_ms = self.params.get("PassingAssistMinDeficit", return_default=True) * CV.MPH_TO_MS
-      self.stuck_time_s = float(self.params.get("PassingAssistStuckTime", return_default=True))
+      self.persistence_s = float(self.params.get("PassingAssistStuckTime", return_default=True))
       self.keep_right_enabled = self.params.get_bool("PassingAssistKeepRight")
       self.keep_right_delay_s = float(self.params.get("PassingAssistKeepRightDelay", return_default=True))
       self.avoid_outermost = self.params.get_bool("PassingAssistAvoidOutermost")
-      self.preemptive_enabled = self.params.get_bool("PassingAssistPreemptive")
       self.settle_time_s = float(self.params.get("PassingAssistSettleTime", return_default=True))
       self.suspend_minutes = self.params.get("PassingAssistSuspendMinutes", return_default=True)
       self.approach_ttc_s = self.params.get("PassingAssistApproachTtc", return_default=True) / 10.
@@ -382,63 +376,34 @@ class PassingAssistDetector:
     self.overtake_restricted = (self.overtake_msg not in TSR_OVTK_UNRESTRICTED and
                                 self.overtake_status == TSR_OVTK_STATUS_RELIABLE)
 
-  def _worth_passing(self, lead, v_cruise: float) -> bool:
-    """Is this lead slow enough, and in our lane, to be worth going around at all?
+  def _should_pass(self, lead, v_cruise: float) -> bool:
+    """The one question: is there a vehicle in our lane slow enough to cost us speed?
 
-    Shared by both triggers. Deliberately does NOT test whether we have already slowed down -- that
-    is the difference between the two cases, not part of what makes a pass worthwhile.
+    Deliberately does NOT ask whether we are closing on it or already behind it. Those are the same
+    situation at two moments -- about to brake, or already braked -- and treating them separately is
+    what made the old version wait for a state this driver never reaches.
+
+    So: in our lane, slower than the SET speed by a margin worth the manoeuvre, near enough to be
+    real. The margin is the judgement; everything else is a sanity bound.
     """
-    return (self.speed_deficit >= self.min_deficit_ms and
-            abs(lead.dPath) <= MAX_LEAD_D_PATH_M)
-
-  def _stuck(self, CS, lead, v_cruise: float) -> bool:
-    """REACTIVE: already behind it and below the set speed.
-
-    Still needed even with the preemptive path -- traffic that slows in front of you was never
-    approached, so there is no closing rate to trigger on. Requires the lead to be pacing us rather
-    than being caught, because if we are still closing the approaching trigger owns the decision
-    and this one would double-count it.
-    """
-    if not self._worth_passing(lead, v_cruise):
-      self.stuck_seconds = 0.0
-      return False
-    if lead.dRel > MAX_LEAD_D_REL_M or lead.vRel <= -MAX_CLOSING_SPEED_MS:
-      self.stuck_seconds = 0.0
-      return False
-
-    self.stuck_seconds += DT_MDL
-    return self.stuck_seconds >= self.stuck_time_s
-
-  def _approaching(self, lead, v_cruise: float) -> bool:
-    """PREEMPTIVE: closing on something slower, before any speed has been lost.
-
-    This is the case a human handles by moving over early and never braking, and the one the car
-    should handle better than a human: closing rate is measured, not estimated, so the decision can
-    be made earlier and more confidently than by eye.
-
-    It matters most on stock Ford ACC, where the alternative is ACC braking for a lead we were
-    always going to pass and then spending fuel recovering the speed in the other lane. Whether a
-    given suggestion actually beat ACC to it is recorded in accBrakingAtDecision rather than
-    assumed.
-
-    Gated on time-to-contact, not distance: from the same range, a lead 20 mph slower takes far
-    longer to reach than one 40 mph slower, and it is the time available to move over that decides
-    whether the manoeuvre is comfortable.
-    """
-    closing = -lead.vRel  # lead.vRel is negative while closing
-    if closing < MIN_APPROACH_CLOSING_MS or not self._worth_passing(lead, v_cruise):
+    if abs(lead.dPath) > MAX_LEAD_D_PATH_M or lead.dRel > MAX_LEAD_D_REL_M:
       self.approach_seconds = 0.0
       return False
 
-    self.lead_ttc = lead.dRel / max(closing, 0.1)
-    if self.lead_ttc > self.approach_ttc_s:
-      # Still too far out to act on. Not a reset of the evidence -- we are simply not there yet,
-      # and the timer below only starts once inside the window.
+    if self.speed_deficit < self.min_deficit_ms:
+      self.approach_seconds = 0.0
+      return False
+
+    # TTC only bounds the case where we are actually catching something. A lead already being paced
+    # has no meaningful closing rate and must still qualify -- it is the case where ACC has ALREADY
+    # taken the speed, which is the outcome this exists to prevent, not a reason to stay silent.
+    closing = -lead.vRel
+    if closing >= MIN_APPROACH_CLOSING_MS and self.lead_ttc > self.approach_ttc_s:
       self.approach_seconds = 0.0
       return False
 
     self.approach_seconds += DT_MDL
-    return self.approach_seconds >= APPROACH_PERSISTENCE_S
+    return self.approach_seconds >= self.persistence_s
 
   def _lead_state(self, lead, v_cruise: float) -> None:
     """Record what the lead is doing, whichever trigger ends up using it."""
@@ -505,26 +470,25 @@ class PassingAssistDetector:
       # Suspended beats every other gate, including the ones that would report something more
       # specific. The driver has said "not here", and a panel reporting "no lane to move into"
       # while suspended would misrepresent why it is silent.
-      self.stuck_seconds = 0.0
       self.approach_seconds = 0.0
       self.keep_right_seconds = 0.0
       self._reset_outputs(Blocked.suspended)
       return
 
     if not self.enabled:
-      self.stuck_seconds = 0.0
+      self.approach_seconds = 0.0
       self.keep_right_seconds = 0.0
       self._reset_outputs(Blocked.disabled)
       return
 
     if not long_enabled:
-      self.stuck_seconds = 0.0
+      self.approach_seconds = 0.0
       self.keep_right_seconds = 0.0
       self._reset_outputs(Blocked.notEngaged)
       return
 
     if CS.vEgo < MIN_V_EGO_MS:
-      self.stuck_seconds = 0.0
+      self.approach_seconds = 0.0
       self.keep_right_seconds = 0.0
       self._reset_outputs(Blocked.tooSlow)
       return
@@ -532,13 +496,12 @@ class PassingAssistDetector:
     # The driver is already doing something about it. Suggesting a pass mid-manoeuvre is noise,
     # and it would corrupt the stuck timer for the far more interesting no-input case.
     if CS.leftBlinker or CS.rightBlinker or CS.brakePressed or CS.steeringPressed:
-      self.stuck_seconds = 0.0
+      self.approach_seconds = 0.0
       self.keep_right_seconds = 0.0
       self._reset_outputs(Blocked.driverActive)
       return
 
     if not lead.status:
-      self.stuck_seconds = 0.0
       self.approach_seconds = 0.0
       self.has_lead = False
       self.lead_ttc = NO_TTC_S
@@ -548,17 +511,15 @@ class PassingAssistDetector:
 
     self._lead_state(lead, v_cruise)
 
-    # Approaching is evaluated FIRST. If both would fire, the preemptive one is the better outcome
-    # -- it is the same pass, decided before the speed was given away.
-    approaching = self.preemptive_enabled and self._approaching(lead, v_cruise)
-    held_up = self._stuck(CS, lead, v_cruise)
-
-    if not (approaching or held_up):
+    if not self._should_pass(lead, v_cruise):
       self._reset_outputs(Blocked.notStuck)
       self._keep_right()
       return
 
-    pending_trigger = Trigger.approaching if approaching else Trigger.heldUp
+    # trigger now reports the OUTCOME rather than the mechanism: did the suggestion land before
+    # Ford's ACC started braking for a lead we were always going to pass, or after. That is the
+    # only distinction worth recording, and it is measured rather than inferred.
+    pending_trigger = Trigger.heldUp if self.acc_braking_at_decision else Trigger.approaching
 
     # Past here a pass is warranted, so we are not sitting in a lane we should be leaving.
     self.keep_right_seconds = 0.0

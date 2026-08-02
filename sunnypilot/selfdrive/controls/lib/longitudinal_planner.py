@@ -198,7 +198,8 @@ class LongitudinalPlannerSP:
     passingAssist = longitudinalPlanSP.passingAssist
     passingAssist.suggestion = pa.suggestion
     passingAssist.blockedBy = pa.blocked_by
-    passingAssist.stuckSeconds = float(pa.stuck_seconds)
+    # One timer now. The field keeps its name so older logs stay comparable.
+    passingAssist.stuckSeconds = float(pa.approach_seconds)
     passingAssist.hasLead = pa.has_lead
     passingAssist.leadDRel = float(pa.lead_d_rel)
     passingAssist.leadVLead = float(pa.lead_v_lead)

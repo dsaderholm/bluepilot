@@ -98,8 +98,8 @@ def run(det, frames, **kw):
   return det
 
 
-# Enough frames to clear the default 25 s stuck timer with margin.
-STUCK_FRAMES = int(12.0 / DT_MDL)
+# Enough frames to clear the confirmation window with margin.
+STUCK_FRAMES = int(4.0 / DT_MDL)  # persistence is 2 s now
 
 
 class TestPassingAssistGeometry:
@@ -149,26 +149,29 @@ class TestPassingAssistGeometry:
 
 
 class TestPassingAssistGates:
-  def test_not_stuck_until_the_timer_elapses(self):
-    det = run(PassingAssistDetector(), int(5.0 / DT_MDL))
+  def test_brief_confirmation_before_suggesting(self):
+    """The timer is now only long enough to reject a bad frame of lead tracking -- it is NOT a
+    waiting period, which is the behaviour this whole design exists to remove."""
+    det = run(PassingAssistDetector(), int(1.0 / DT_MDL))
     assert det.suggestion == Side.none
     assert det.blocked_by == Blocked.notStuck
-    assert 4.0 < det.stuck_seconds < 6.0
+    assert 0.5 < det.approach_seconds < 1.5
 
-  def test_stuck_timer_resets_when_lead_drops(self):
+  def test_confirmation_resets_when_lead_drops(self):
     det = PassingAssistDetector()
     run(det, int(20.0 / DT_MDL))
-    assert det.stuck_seconds > 19.0
+    assert det.approach_seconds > 19.0
     run(det, 1, status=False)
-    assert det.stuck_seconds == 0.0
+    assert det.approach_seconds == 0.0
 
-  def test_still_closing_uses_the_preemptive_path_not_the_held_up_timer(self):
-    """Closing on a slower lead used to be disqualifying. It is now the PREFERRED trigger -- the
-    pass gets decided before any speed is lost -- so assert the held-up timer stayed at zero."""
-    det = run(PassingAssistDetector(), STUCK_FRAMES,
-              v_lead=CRUISE_MS - 10.0, v_ego=CRUISE_MS, d_rel=55.)
-    assert det.trigger == Trigger.approaching
-    assert det.stuck_seconds == 0.0
+  def test_closing_and_pacing_are_the_same_situation(self):
+    """There is one trigger now. Whether we are still catching the slower car or already sitting
+    behind it, the answer is the same: pass it."""
+    closing = run(PassingAssistDetector(), STUCK_FRAMES,
+                  v_lead=CRUISE_MS - 10.0, v_ego=CRUISE_MS, d_rel=55.)
+    pacing = run(PassingAssistDetector(), STUCK_FRAMES)
+    assert closing.suggestion == Side.left
+    assert pacing.suggestion == Side.left
 
   def test_small_deficit_is_not_worth_passing(self):
     det = run(PassingAssistDetector(), STUCK_FRAMES, v_lead=CRUISE_MS - 1.0)
@@ -183,7 +186,7 @@ class TestPassingAssistGates:
     run(det, int(20.0 / DT_MDL))
     run(det, 1, blinker=True)
     assert det.blocked_by == Blocked.driverActive
-    assert det.stuck_seconds == 0.0
+    assert det.approach_seconds == 0.0
 
   def test_not_engaged_blocks(self):
     det = PassingAssistDetector()
@@ -281,9 +284,9 @@ class _KeepRightOnParams:
   default cannot silently make them pass for the wrong reason."""
 
   def get(self, key, block=False, return_default=False):
-    return {"PassingAssistMinDeficit": 8, "PassingAssistStuckTime": 10,
+    return {"PassingAssistMinDeficit": 8, "PassingAssistStuckTime": 2,
             "PassingAssistKeepRightDelay": 10, "PassingAssistSettleTime": 20,
-            "PassingAssistApproachTtc": 90, "PassingAssistSuspendMinutes": 15}[key]
+            "PassingAssistApproachTtc": 250, "PassingAssistSuspendMinutes": 15}[key]
 
   def __init__(self, avoid_outermost=True):
     self.avoid_outermost = avoid_outermost
@@ -451,49 +454,41 @@ class TestRoadWidening:
     assert not det.right_widening
 
 
-class TestPreemptiveTrigger:
-  def test_passes_while_still_closing_without_slowing(self):
-    """The whole point: at set speed, catching a slower lead, decide before losing any speed."""
+class TestOneTrigger:
+  def test_suggests_while_still_closing_before_any_speed_is_lost(self):
     det = PassingAssistDetector()
-    for _ in range(int(2.0 / DT_MDL)):
-      det.update(make_sm(v_ego=CRUISE_MS, v_lead=CRUISE_MS - 9.0, d_rel=60.), CRUISE_MS, True)
-    assert det.suggestion == Side.left
-    assert det.trigger == Trigger.approaching
-    assert det.stuck_seconds == 0.0, "must not have needed the held-up timer"
+    for _ in range(int(3.0 / DT_MDL)):
+      det.update(make_sm(v_ego=CRUISE_MS, v_lead=CRUISE_MS - 9.0, d_rel=150.), CRUISE_MS, True)
+    assert det.suggestion == Side.left, "must not wait until we are close"
 
-  def test_too_far_out_does_not_trigger_yet(self):
+  def test_suggests_when_already_pacing_a_slower_car(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES)
+    assert det.suggestion == Side.left
+
+  def test_beyond_the_far_bound_is_ignored(self):
     det = PassingAssistDetector()
-    for _ in range(int(2.0 / DT_MDL)):
-      det.update(make_sm(v_ego=CRUISE_MS, v_lead=CRUISE_MS - 9.0, d_rel=250.), CRUISE_MS, True)
+    for _ in range(int(3.0 / DT_MDL)):
+      det.update(make_sm(v_ego=CRUISE_MS, v_lead=CRUISE_MS - 9.0, d_rel=400.), CRUISE_MS, True)
     assert det.suggestion == Side.none
-    assert det.lead_ttc > det.approach_ttc_s
 
-  def test_not_closing_does_not_use_the_preemptive_path(self):
-    det = run(PassingAssistDetector(), STUCK_FRAMES)   # pacing, not closing
-    assert det.suggestion == Side.left
-    assert det.trigger == Trigger.heldUp
-
-  def test_small_deficit_is_not_worth_passing_even_when_closing(self):
+  def test_small_deficit_is_not_worth_passing(self):
+    """The deficit is the judgement. Everything else is a sanity bound."""
     det = PassingAssistDetector()
-    for _ in range(int(2.0 / DT_MDL)):
+    for _ in range(int(3.0 / DT_MDL)):
       det.update(make_sm(v_ego=CRUISE_MS, v_lead=CRUISE_MS - 1.0, d_rel=60.), CRUISE_MS, True)
     assert det.suggestion == Side.none
 
-  def test_disabled_falls_back_to_held_up_only(self):
-    det = PassingAssistDetector()
-    det.preemptive_enabled = False
-    det.params = None  # freeze params so update_params cannot re-enable it
-    try:
-      for _ in range(int(2.0 / DT_MDL)):
-        det.update(make_sm(v_ego=CRUISE_MS, v_lead=CRUISE_MS - 9.0, d_rel=60.), CRUISE_MS, True)
-    except AttributeError:
-      pass  # update_params touches params; the assertion below is what matters
-    assert det.trigger != Trigger.approaching
+  def test_ttc_only_bounds_the_case_where_we_are_closing(self):
+    """A lead already being paced has no closing rate and must still qualify -- that is the case
+    where ACC has ALREADY taken the speed."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, d_rel=45.)
+    assert det.suggestion == Side.left
 
 
 class TestBeatingAccBraking:
   def test_records_that_acc_was_not_yet_braking(self):
-    """The quality metric: a suggestion made before ACC brakes could have avoided it entirely."""
+    """The quality metric, and what `trigger` now means: a suggestion made before ACC brakes could
+    have avoided the deceleration entirely."""
     det = PassingAssistDetector()
     for _ in range(int(2.0 / DT_MDL)):
       det.update(make_sm(v_ego=CRUISE_MS, v_lead=CRUISE_MS - 9.0, d_rel=60., acc_braking=False),
@@ -501,6 +496,7 @@ class TestBeatingAccBraking:
     assert det.suggestion == Side.left
     assert det.acc_braking_available
     assert not det.acc_braking_at_decision
+    assert det.trigger == Trigger.approaching, "beat ACC to it"
 
   def test_records_that_acc_had_already_started(self):
     det = PassingAssistDetector()
@@ -508,11 +504,13 @@ class TestBeatingAccBraking:
       det.update(make_sm(v_ego=CRUISE_MS, v_lead=CRUISE_MS - 9.0, d_rel=60., acc_braking=True),
                  CRUISE_MS, True)
     assert det.acc_braking_at_decision
+    assert det.trigger == Trigger.heldUp, "after ACC started braking, we did not beat it"
 
   def test_unavailable_is_not_reported_as_not_braking(self):
     det = run(PassingAssistDetector(), STUCK_FRAMES, acc_avail=False)
     assert not det.acc_braking_available
     assert not det.acc_braking_at_decision
+    assert det.trigger == Trigger.approaching, "beat ACC to it"
 
 
 class TestAntiWeave:
@@ -541,9 +539,9 @@ class _SuspendParams:
     self.minutes = minutes
 
   def get(self, key, block=False, return_default=False):
-    return {"PassingAssistMinDeficit": 8, "PassingAssistStuckTime": 10,
+    return {"PassingAssistMinDeficit": 8, "PassingAssistStuckTime": 2,
             "PassingAssistKeepRightDelay": 10, "PassingAssistSettleTime": 20,
-            "PassingAssistApproachTtc": 90, "PassingAssistSuspendMinutes": self.minutes}[key]
+            "PassingAssistApproachTtc": 250, "PassingAssistSuspendMinutes": self.minutes}[key]
 
   def get_bool(self, key, block=False):
     return self.suspend if key == "PassingAssistSuspend" else True
@@ -601,5 +599,5 @@ class TestSuspend:
     det.params.suspend = True
     det.update(make_sm(), CRUISE_MS, True)
     run(det, STUCK_FRAMES)
-    assert det.stuck_seconds == 0.0
+    assert det.approach_seconds == 0.0
     assert det.approach_seconds == 0.0

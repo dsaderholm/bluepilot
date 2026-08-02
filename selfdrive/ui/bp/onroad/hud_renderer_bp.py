@@ -158,7 +158,7 @@ _BLOCKED_TEXT = {
   'tooSlow': "Below 40 mph",
   'driverActive': "You are driving",
   'noLead': "Road ahead clear",
-  'notStuck': "Not held up",
+  'notStuck': "Nothing slower ahead",
   'noLaneAvailable': "No lane to move into",
   'blindspotOccupied': "Blind spot not clear",
   'overtakeRestricted': "No-passing zone",
@@ -494,7 +494,7 @@ class HudRendererBP(HudRendererSP):
       self._pa_color = rl.Color(170, 175, 180, 255)
       if blocked == 'notStuck' and pa.stuckSeconds > 0:
         # The one state that is genuinely "working on it". Show the bar, not the arithmetic.
-        self._pa_main = "Held up by car ahead"
+        self._pa_main = "Slower car ahead"
         self._pa_progress = min(1.0, pa.stuckSeconds / max(self._pa_stuck_target, 1.0))
       else:
         self._pa_main = _BLOCKED_TEXT.get(blocked, blocked)
