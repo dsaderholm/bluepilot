@@ -399,40 +399,48 @@ class TestPressWinsWhileIcbmIsBusy:
     assert after - before == 2
 
 
-class TestSettingSpeedBackClearsTheHold:
-  """Driver asked for this: putting the set speed back to what SLA wants should drop the HOLD."""
+class TestMinusAlwaysAdjustsNeverCancels:
+  """Returning the set speed to exactly SLA's number used to delete the HOLD.
 
-  def test_returning_to_the_sla_target_clears_the_baseline(self):
-    """The set speed must be WALKED back, not teleported.
+  Removed. It made the minus button unpredictable -- whether a press adjusted the hold or deleted
+  it depended on a number the driver cannot see -- and it is why "press down then up" looked like
+  a workaround: down was not fixing anything, it was deleting the override so the next press built
+  a fresh one. On this car SET/RESUME shares a CAN signal with cancel, so there is no separate
+  resume to press while engaged; cancel + re-engage is the explicit "hand it back to the speed
+  limit" control, and that still clears it.
+  """
 
-    The stand-down after a press ends only once the cluster has actually moved and then settled,
-    so a harness that jumps it 15 mph in a single frame leaves ICBM standing down for its full
-    cap. That is correct behaviour, not a bug: on the car the set speed only ever moves one
-    increment at a time.
-    """
+  def test_minus_down_to_the_sla_target_keeps_the_hold(self):
     icbm = fresh()
     set_baseline(icbm)
     settle(icbm, LIMIT)
-    assert icbm.override_state == OverrideState.manual
-
     cluster = DRIVER
-    for _ in range(DRIVER - LIMIT):                 # driver taps - back down to the limit
+    for _ in range(DRIVER - LIMIT):                 # walk it back down to the limit
       icbm.run(make_cs(cluster, buttons=(DECEL_PRESS,)), CC, make_lp(LIMIT), False)
       cluster -= 1
       for f in range(12):
         icbm.run(make_cs(cluster, buttons=(DECEL_RELEASE,) if f == 2 else ()), CC,
                  make_lp(LIMIT), False)
     settle(icbm, LIMIT, cluster=cluster, frames=200)
-
     assert cluster == LIMIT
-    assert icbm.override_state == OverrideState.auto, "HOLD survived the driver undoing it"
+    assert icbm.override_state == OverrideState.manual, "minus deleted the hold instead of adjusting it"
+    assert icbm.v_baseline == LIMIT
+
+  def test_cancel_and_reengage_clears_the_hold(self):
+    """The explicit control, and the one the driver actually uses."""
+    icbm = fresh()
+    set_baseline(icbm)
+    settle(icbm, LIMIT)
+    assert icbm.override_state == OverrideState.manual
+    icbm.run(make_cs(DRIVER, enabled=False), CC, make_lp(LIMIT), False)
+    icbm.run(make_cs(DRIVER, enabled=True), CC, make_lp(LIMIT), False)
+    assert icbm.override_state == OverrideState.auto
     assert icbm.v_baseline == 0
 
   def test_a_curve_matching_the_baseline_does_not_clear_it(self):
-    """Geometry coincidence, not a change of mind."""
     icbm = fresh()
     set_baseline(icbm)
-    settle(icbm, DRIVER, source=PlanSource.sccVision)   # curve happens to want the driver's speed
+    settle(icbm, DRIVER, source=PlanSource.sccVision)
     assert icbm.override_state == OverrideState.manual
 
 
@@ -517,3 +525,90 @@ class TestStandDownDoesNotBlindTheHazardPath:
     for _ in range(120):
       icbm.run(make_cs(LIMIT), CC, make_lp(40, source=PlanSource.sccVision), False)
     assert icbm.cruise_button == SendButtonState.none, "stand-down leaked a normal command"
+
+
+class TestPressAndHold:
+  """The driver's actual habit: press and HOLD to change speed, rather than tapping.
+
+  openpilot emits button events on EDGES only, so a hold produces one press event, then nothing
+  for seconds, then one release. The stand-down cap counted down through all of that, expired
+  mid-hold, froze the baseline at that instant, and ICBM then walked the set speed back down one
+  increment at a time while the button was still held. Reported as "the number goes up on the dash
+  but instantly gets lowered one by one back to where it just was".
+  """
+
+  RAMP_EVERY = 30   # Ford steps the set speed roughly every 0.3 s while held
+
+  def _hold(self, seconds, prior_hold=False):
+    icbm = fresh(max_rise=5, max_drop=8)
+    cluster = LIMIT
+    f = 0
+
+    def step(buttons=()):
+      nonlocal cluster, f
+      icbm.run(make_cs(cluster, buttons=buttons), CC, make_lp(LIMIT), False)
+      if f % 5 == 0:
+        if icbm.cruise_button == SendButtonState.decrease:
+          cluster -= 1
+        elif icbm.cruise_button == SendButtonState.increase:
+          cluster += 1
+      f += 1
+
+    for _ in range(100):
+      step()
+    if prior_hold:                                  # establish a HOLD first
+      step((ACCEL_PRESS,))
+      for k in range(200):
+        if k == 20:
+          cluster += 1
+        step((ACCEL_RELEASE,) if k == 3 else ())
+
+    start = cluster
+    step((ACCEL_PRESS,))
+    for k in range(int(seconds * 100)):             # held: no events, set speed ramps
+      if k % self.RAMP_EVERY == self.RAMP_EVERY - 1:
+        cluster += 1
+      step()
+    step((ACCEL_RELEASE,))
+    for _ in range(600):
+      step()
+    return icbm, cluster, start
+
+  @pytest.mark.parametrize("seconds", [1, 3, 6, 9, 15])
+  def test_hold_is_never_walked_back(self, seconds):
+    icbm, cluster, start = self._hold(seconds)
+    expected = start + int(seconds * 100 / self.RAMP_EVERY)
+    assert cluster == expected, f"{seconds}s hold walked back to {cluster}, wanted {expected}"
+    assert icbm.v_baseline == cluster
+
+  @pytest.mark.parametrize("seconds", [1, 6, 15])
+  def test_hold_raises_an_existing_hold(self, seconds):
+    """Raising a HOLD that is already set -- the case reported as impossible."""
+    icbm, cluster, start = self._hold(seconds, prior_hold=True)
+    assert cluster > start, f"existing HOLD was not raised (stuck at {cluster})"
+    assert icbm.v_baseline == cluster
+    assert icbm.override_state == OverrideState.manual
+
+
+class TestResumeDoesNotCreateAHold:
+  """This wheel has combined RES+ / SET- buttons and a separate CNCL. The driver's only route back
+  to Speed Limit Assist is CNCL then RES+, so resuming must not immediately create a new HOLD."""
+
+  SET_CRUISE = NS(type=NS(raw=ButtonType.setCruise), pressed=True)
+
+  def test_press_while_disengaged_creates_no_hold(self):
+    icbm = fresh()
+    icbm.run(make_cs(LIMIT, buttons=(self.SET_CRUISE,), enabled=False), CC, make_lp(LIMIT), False)
+    assert icbm.override_state == OverrideState.auto, "a press while disengaged created a HOLD"
+    assert icbm.v_baseline == 0
+
+  def test_cancel_then_resume_leaves_sla_in_charge(self):
+    icbm = fresh()
+    set_baseline(icbm)
+    settle(icbm, LIMIT)
+    assert icbm.override_state == OverrideState.manual
+    icbm.run(make_cs(DRIVER, buttons=(self.SET_CRUISE,), enabled=False), CC, make_lp(LIMIT), False)
+    for _ in range(20):
+      icbm.run(make_cs(LIMIT, enabled=True), CC, make_lp(LIMIT), False)
+    assert icbm.override_state == OverrideState.auto, "resume rebuilt the HOLD it just cleared"
+    assert icbm.v_baseline == 0

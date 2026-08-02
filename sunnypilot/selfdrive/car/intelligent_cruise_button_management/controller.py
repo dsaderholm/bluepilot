@@ -389,7 +389,13 @@ class IntelligentCruiseButtonManagement:
     # While the driver is pressing, the baseline follows the cluster. It therefore settles wherever
     # they stop, and holding the button through several increments records the final speed rather
     # than the first. v_target_overridden captures the SLA target being rejected, once per override.
-    if any(b.type.raw in MANUAL_OVERRIDE_BUTTONS and b.pressed for b in CS.buttonEvents):
+    # Only while cruise is actually engaged. On this wheel RES+ and SET- are combined buttons, so
+    # the same signals that adjust the speed are also how cruise is resumed and set -- and a press
+    # made while disengaged reports as setCruise, which would otherwise create a HOLD at whatever
+    # speed the car resumed to. That would break the only way the driver has to hand the speed back
+    # to Speed Limit Assist: CNCL, then RES+. You cannot hold a speed that cruise is not driving.
+    if cruise_enabled and any(b.type.raw in MANUAL_OVERRIDE_BUTTONS and b.pressed
+                              for b in CS.buttonEvents):
       if self.override_state != OverrideState.manual:
         self.v_target_overridden = self.v_target_raw
         self.baseline_diverged = False
@@ -444,19 +450,11 @@ class IntelligentCruiseButtonManagement:
     if not self.v_target_valid:
       return
 
-    # The driver putting the set speed back where SLA wanted it is them withdrawing the override,
-    # so the HOLD should drop. Requested behaviour.
-    #
-    # Gated on the baseline having ACTUALLY DIFFERED from the target at some point first. Without
-    # that gate this was the bug that broke the plus button on the road: at the instant of a press
-    # the cluster has not moved yet, so the baseline still equals SLA's target, and any car whose
-    # set speed reports slower than the stand-down had its brand-new override deleted as though
-    # the driver had just undone it. Diverging first is what makes converging mean anything.
-    if abs(self.v_baseline - self.v_target_raw) > 0:
-      self.baseline_diverged = True
-    elif (self.baseline_diverged and self.plan_source in BASELINE_SOURCES):
-      self.clear_baseline()
-      return
+    # NOTE: returning the set speed to exactly SLA's number used to clear the baseline. Removed --
+    # it made the minus button unpredictable, since whether a press adjusted the hold or deleted it
+    # depended on a number the driver cannot see, and it is what made "press down then up" look
+    # like a workaround. On this car SET/RESUME shares a signal with cancel, so cancel + re-engage
+    # is already the explicit "give it back to the speed limit" control, and that still clears it.
 
     # Discard the baseline when the posted limit itself moves materially. A new zone is a new
     # situation the driver has not ruled on, and carrying a 55-zone baseline into a 35 zone is
@@ -490,7 +488,16 @@ class IntelligentCruiseButtonManagement:
     # needs it. self.cruise_button is still last frame's value here, which is the one that would
     # have caused any cluster movement visible now.
     self.icbm_idle_frames = 0 if self.cruise_button != SendButtonState.none else self.icbm_idle_frames + 1
-    self.press_settle_frames = max(0, self.press_settle_frames - 1)
+    # The stand-down cap exists for a press that never moves the set speed. It must NOT run while
+    # the driver is still holding the button: on a press-and-hold long enough to reach it, the cap
+    # expired mid-hold, the baseline froze at that instant, and ICBM woke up and walked the set
+    # speed back down one increment at a time while the button was still pressed. Reported exactly
+    # that way. While held, the window is re-armed every frame instead.
+    if any(self.cruise_button_timers[k] > 0 for k in MANUAL_OVERRIDE_BUTTONS):
+      if self.press_settle_frames > 0:
+        self.press_settle_frames = PRESS_SETTLE_MAX_FRAMES
+    else:
+      self.press_settle_frames = max(0, self.press_settle_frames - 1)
     self.cluster_stable_frames = (self.cluster_stable_frames + 1
                                   if self.v_cruise_cluster == self.v_cruise_cluster_prev else 0)
 
