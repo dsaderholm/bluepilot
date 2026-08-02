@@ -46,6 +46,7 @@ class HudRendererBP(HudRendererSP):
     self._acc_state = ""      # "ACCEL" / "COAST" / "BRAKE", "" when unknown
     self._acc_accel = 0.0     # m/s^2, signed
     self._icbm_text = ""      # "" when ICBM has nothing to say
+    self._acc_status_failed = False   # latched on any error; keeps a display bug off the screen
     self.speed_right = 0
     self._gradient_rect = None  # BluePilot: Full-width rect for header gradient
 
@@ -98,7 +99,17 @@ class HudRendererBP(HudRendererSP):
       self._brakes_on = False
       self._acc_braking = False
 
-    self._update_acc_status()
+    # BluePilot: a cosmetic readout must never be able to take the screen down. This one did --
+    # int() on a capnp _DynamicEnum raised TypeError inside _update_state, which crash-looped the
+    # UI, and because it only runs when cruise is available it only happened with the car on.
+    # Anything unexpected here now disables the readout for the session instead of the display.
+    if not self._acc_status_failed:
+      try:
+        self._update_acc_status()
+      except Exception as e:
+        self._acc_status_failed = True
+        self._acc_state, self._acc_accel, self._icbm_text = "", 0.0, ""
+        bp_ui_log.state("HudRendererBP", "acc_status_error", repr(e))
 
     bp_ui_log.state("HudRendererBP", "brakes_on", self._brakes_on)
     bp_ui_log.state("HudRendererBP", "acc_braking", self._acc_braking)
@@ -131,19 +142,22 @@ class HudRendererBP(HudRendererSP):
             self._acc_state, self._acc_accel = "BRAKE", bls.accAccelRequest
           else:
             self._acc_state, self._acc_accel = "COAST", 0.0
-      except (KeyError, AttributeError):
+      except Exception:
         pass
 
     try:
       icbm = sm['selfdriveStateSP'].intelligentCruiseButtonManagement
-      arrow = {1: "+", 2: "-"}.get(int(icbm.sendButton), "")
+      # .raw, not int(). A field read off a live capnp message is a _DynamicEnum, which int()
+      # rejects -- and the enum constants used in tests ARE ints, so this only fails on the car.
+      # .raw is the idiom the rest of the codebase uses for exactly this (see b.type.raw).
+      arrow = {1: "+", 2: "-"}.get(icbm.sendButton.raw, "")
       # A held baseline is exactly the state that was invisible while ICBM and the driver
       # disagreed about the set speed, so name the number being held, not just the mode.
-      if int(icbm.overrideState) == 1 and icbm.vBaseline > 0:
+      if icbm.overrideState.raw == 1 and icbm.vBaseline > 0:
         self._icbm_text = f"{arrow} HOLD {round(icbm.vBaseline)}".strip()
       elif arrow:
         self._icbm_text = arrow
-    except (KeyError, AttributeError):
+    except Exception:
       pass
 
   def _render(self, rect: rl.Rectangle) -> None:
@@ -186,7 +200,7 @@ class HudRendererBP(HudRendererSP):
     the target moved (SmartCruiseControl shows a curve, SpeedLimit shows the sign). Neither says
     what the car is doing about it, and nothing at all showed ICBM's state.
     """
-    if not self._acc_state and not self._icbm_text:
+    if self._acc_status_failed or (not self._acc_state and not self._icbm_text):
       return
 
     set_speed_width = UI_CONFIG.set_speed_width_metric if ui_state.is_metric else UI_CONFIG.set_speed_width_imperial
