@@ -201,6 +201,7 @@ class PassingAssistDetector:
     # Starts settled: at boot we have not just passed anyone, and a fresh detector must not
     # spend its first settle period refusing to suggest a return.
     self._settle_s = 1e3
+    self._lka_prev = False
     self._right_bs_prev = False
     self.max_distance_m = float(DEFAULT_MAX_DISTANCE_M)
 
@@ -312,7 +313,21 @@ class PassingAssistDetector:
                               self.right_edge_gap >= MIN_LANE_WIDTH_M and
                               right_std <= MAX_ROAD_EDGE_STD)
 
-  def _update_suspend(self) -> None:
+  def _lka_toggle(self, car_state_bp) -> bool:
+    """Rising edge of the stalk-end LKA button.
+
+    A physical control for the thing most often wanted while driving. Edge-triggered, not level:
+    the signal reads Pressed for as long as it is held, and a held button must be one request.
+    """
+    try:
+      pressed = bool(car_state_bp.lkaButtonPressed) if car_state_bp is not None else False
+    except AttributeError:
+      pressed = False
+    edge = pressed and not self._lka_prev
+    self._lka_prev = pressed
+    return edge
+
+  def _update_suspend(self, lka_edge: bool = False) -> None:
     """Consume a tap and run the countdown.
 
     The request arrives as a one-shot param the UI sets and this clears, rather than a param the UI
@@ -323,9 +338,14 @@ class PassingAssistDetector:
     try:
       requested = self.params.get_bool("PassingAssistSuspend")
     except (AttributeError, TypeError):
-      return
+      requested = False
+    # The stalk button and the panel tap are the same request by different routes.
+    requested = requested or lka_edge
     if requested:
-      self.params.put_bool("PassingAssistSuspend", False)
+      try:
+        self.params.put_bool("PassingAssistSuspend", False)
+      except (AttributeError, TypeError):
+        pass
       # Toggle: tapping while suspended resumes immediately.
       self.suspended_seconds = 0.0 if self.suspended_seconds > 0 else self.suspend_minutes * 60.0
       return
@@ -506,7 +526,7 @@ class PassingAssistDetector:
     # than time-spent-in-a-particular-branch.
     self._settle_s = min(self._settle_s + DT_MDL, 1e3)  # capped; only the threshold matters
 
-    self._update_suspend()
+    self._update_suspend(self._lka_toggle(car_state_bp))
     if self.suspended_seconds > 0:
       # Suspended beats every other gate, including the ones that would report something more
       # specific. The driver has said "not here", and a panel reporting "no lane to move into"

@@ -399,6 +399,8 @@ class CarStateExt:
     # BluePilot: turn-signal actuation test. lampLeft/lampRight are read every frame regardless of
     # whether a pulse is running -- during a pulse they are the measurement, and outside one they
     # are the baseline that proves the signal decodes at all when the DRIVER uses the stalk.
+    dat.carStateBP.lkaButtonPressed = bool(getattr(self, 'lka_button_pressed', False))
+
     blinker_test.lampLeft = bool(getattr(self, 'turn_lamp_left', False))
     blinker_test.lampRight = bool(getattr(self, 'turn_lamp_right', False))
 

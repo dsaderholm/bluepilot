@@ -70,7 +70,7 @@ def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., d_path=0.2, status=Tr
             tsr_avail=True, ovtk_msg=1, ovtk_status=2,
             blinker=False, brake=False, steering=False, road_name="I 15",
             acc_braking=False, acc_avail=True, set_speed=None,
-            icbm_hold=0.0, icbm_manual=False):
+            icbm_hold=0.0, icbm_manual=False, lka=False):
   # Being stuck behind a car means matching its speed, not still closing on it: vEgo tracks vLead
   # and the gap to the SET speed is what makes passing worth suggesting. Tests that need a genuine
   # approach pass v_ego explicitly.
@@ -86,7 +86,8 @@ def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., d_path=0.2, status=Tr
     'modelV2': NS(laneLines=[xyz(v) for v in ll], laneLineProbs=list(probs),
                   roadEdges=[xyz(edges[0]), xyz(edges[1], widen=right_edge_widen)],
                   roadEdgeStds=list(edge_stds)),
-    'carStateBP': NS(brakeLightStatus=NS(accDataAvailable=acc_avail, accDecelRequest=acc_braking,
+    'carStateBP': NS(lkaButtonPressed=lka,
+                     brakeLightStatus=NS(accDataAvailable=acc_avail, accDecelRequest=acc_braking,
                                          accPrechargeRequest=False),
                      blisLeft=NS(dataAvailable=blis_avail), blisRight=NS(dataAvailable=blis_avail),
                      trafficSignData=NS(dataAvailable=tsr_avail, overtakeMsg=ovtk_msg,
@@ -732,3 +733,50 @@ class TestLookAheadDistance:
       det.update(make_sm(v_ego=80 * self.MPH, v_lead=75 * self.MPH, d_rel=300.,
                          set_speed=80 * self.MPH), CRUISE_MS, True)
     assert det.suggestion == Side.none
+
+
+class TestLkaButtonPause:
+  """The stalk-end LKA button, bound to the same pause as the panel tap.
+
+  Free input: it does nothing on this car and openpilot already passes the signal through, so
+  reading it costs no new message, parser entry or DBC work.
+  """
+
+  def _det(self):
+    det = PassingAssistDetector()
+    det.params = _SuspendParams()
+    return det
+
+  def test_press_pauses(self):
+    det = self._det()
+    run(det, STUCK_FRAMES)
+    assert det.suggestion == Side.left
+    det.update(make_sm(lka=True), CRUISE_MS, True)
+    assert det.suspended_seconds > 0
+    assert det.blocked_by == Blocked.suspended
+
+  def test_second_press_resumes(self):
+    det = self._det()
+    det.update(make_sm(lka=True), CRUISE_MS, True)
+    assert det.suspended_seconds > 0
+    det.update(make_sm(lka=False), CRUISE_MS, True)   # release
+    det.update(make_sm(lka=True), CRUISE_MS, True)    # press again
+    assert det.suspended_seconds == 0.0
+
+  def test_holding_the_button_is_one_request_not_many(self):
+    """Level, not edge, would toggle every cycle for as long as it is held -- roughly 20 times a
+    second, leaving the final state a coin flip."""
+    det = self._det()
+    det.update(make_sm(lka=True), CRUISE_MS, True)
+    first = det.suspended_seconds
+    assert first > 0
+    for _ in range(40):
+      det.update(make_sm(lka=True), CRUISE_MS, True)
+    assert det.suspended_seconds > 0, "held button toggled the pause back off"
+    assert det.suspended_seconds < first, "countdown should still be running"
+
+  def test_not_pressed_changes_nothing(self):
+    det = self._det()
+    run(det, STUCK_FRAMES, lka=False)
+    assert det.suspended_seconds == 0.0
+    assert det.suggestion == Side.left

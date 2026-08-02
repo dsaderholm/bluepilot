@@ -248,6 +248,10 @@ class CarState(CarStateBase, MadsCarState, CarStateExt):
     # openpilot cannot see its own transmitted switch value (panda returns TX at bus | 0x80, which
     # the parser drops). The lamp state is what the car actually did. Note these flash, so a
     # consumer must latch over a flash period rather than trust one frame.
+    # BluePilot: the stalk-end LKA button. Unused by this car and by openpilot, so it is free for
+    # the fork to bind. 1 = Pressed; 2 and 3 are Unused and Fault, not presses.
+    self.lka_button_pressed = cp.vl["Steering_Data_FD1"]["LaSwtchPos_D_Stat"] == 1
+
     self.turn_lamp_left = bool(cp.vl["BodyInfo_3_FD1"]["TurnLghtLeftOn_B_Stat"])
     self.turn_lamp_right = bool(cp.vl["BodyInfo_3_FD1"]["TurnLghtRightOn_B_Stat"])
 

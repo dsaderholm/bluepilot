@@ -853,6 +853,15 @@ struct CarStateBP @0xb057204d7deadf3f {
   blisRight @5 :SideDetect;
   blinkerTest @6 :BlinkerTest;
 
+  # BluePilot: the LKA button on the end of the turn-signal stalk. It does nothing on this car --
+  # the wheel's LCA button is what toggles lateral -- so it is a free physical input, and a stalk
+  # press beats reaching for the screen for anything wanted while driving.
+  #
+  # LaSwtchPos_D_Stat in Steering_Data_FD1 (0x083, bus 0): 0 Open / 1 Pressed / 2 Unused / 3 Fault.
+  # openpilot already parses that message and passes the signal through untouched in
+  # create_button_msg, so reading it costs nothing -- no new message, parser entry or DBC work.
+  lkaButtonPressed @7 :Bool;
+
   # BluePilot: bench test for whether openpilot can operate the turn signal on this car.
   #
   # Standing question, because desire_helper's whole lane-change state machine keys off
