@@ -79,6 +79,7 @@ class IntelligentCruiseButtonManagement:
     # MANUAL = the driver has taken it back and ICBM stops chasing entirely.
     self.override_state = OverrideState.auto
     self.v_target_overridden = 0
+    self.override_diverged = False
     self.cruise_enabled_prev = False
     self.v_target_valid = False
 
@@ -266,19 +267,33 @@ class IntelligentCruiseButtonManagement:
     if any(b.type.raw in MANUAL_OVERRIDE_BUTTONS and b.pressed for b in CS.buttonEvents):
       if self.override_state != OverrideState.manual:
         self.v_target_overridden = self.v_target
+        self.override_diverged = False
       self.override_state = OverrideState.manual
       return
 
     if self.override_state != OverrideState.manual or not RE_ARM_ON_NEW_TARGET:
       return
 
-    # Re-arm on a newly-detected target: one that differs from the target the driver rejected AND
-    # from the set speed they chose instead. Requiring both keeps a press from instantly re-arming
-    # itself -- the driver's own press moves carState.vCruise, and therefore v_target, within a few
-    # frames, so a bare "target changed" test would never hold MANUAL at all.
-    differs_from_rejected = abs(self.v_target - self.v_target_overridden) >= RE_ARM_TARGET_DELTA
-    differs_from_driver = abs(self.v_target - self.v_cruise_cluster) >= RE_ARM_TARGET_DELTA
-    if self.v_target_valid and differs_from_rejected and differs_from_driver:
+    if not self.v_target_valid:
+      return
+
+    # Re-arm once our target and the driver's set speed agree again. The disagreement is the whole
+    # reason they pressed, so its end -- not its mere movement -- is what should end MANUAL.
+    #
+    # The previous rule re-armed when the target moved RE_ARM_TARGET_DELTA away from the one that
+    # was rejected. Against a planner target that varies continuously (curve slowing, a speed
+    # limit change, an offset recalculation) 2 mph of movement is nothing, so an override survived
+    # only until the next wobble and ICBM walked the set speed straight back down -- reported from
+    # a drive as "it minuses my cruise back to the limit and won't let me set it faster". Its
+    # companion differs_from_driver test contributed nothing: with the driver set above the target
+    # it is true by construction.
+    #
+    # override_diverged gates the convergence test so the driver's own press cannot satisfy it.
+    # On the press frame the cluster has not moved yet, so target and set speed still agree; only
+    # once the press has actually opened a gap does converging again mean anything.
+    if abs(self.v_target - self.v_cruise_cluster) > RE_ARM_TARGET_DELTA:
+      self.override_diverged = True
+    elif self.override_diverged:
       self.override_state = OverrideState.auto
 
   def run(self, CS: car.CarState, CC: car.CarControl, LP_SP: custom.LongitudinalPlanSP, is_metric: bool) -> None:
@@ -310,8 +325,15 @@ class IntelligentCruiseButtonManagement:
     if self.override_state == OverrideState.manual:
       self.state = State.inactive
       self.cruise_button = SendButtonState.none
+      # Hold the edge detector low rather than advancing it. update_state_machine leaves inactive
+      # only on a RISING edge of is_ready, so advancing is_ready_prev here would let that edge be
+      # consumed while MANUAL has the machine masked -- after which re-arming left ICBM stuck
+      # inactive until the driver happened to press a button again, which is both erratic and the
+      # worst possible moment for it to wake up. Held low, re-arming always produces a clean
+      # inactive -> preActive transition on the next ready frame.
+      self.is_ready_prev = False
     else:
       self.cruise_button = self.update_state_machine()
+      self.is_ready_prev = self.is_ready
 
-    self.is_ready_prev = self.is_ready
     self.frame += 1
