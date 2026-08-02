@@ -42,6 +42,25 @@ def xyz(y, widen=0.0):
   return NS(y=[y + widen * (i / 32.0) ** 2 * (32 / 20.0) ** 2 for i in range(33)])
 
 
+class FakeSubMaster:
+  """Mimics cereal SubMaster, deliberately NOT a dict.
+
+  SubMaster exposes __getitem__ and no __contains__, so `'x' in sm` falls back to sequence
+  iteration and calls sm[0] -- KeyError: 0. A dict fixture makes that work perfectly in tests and
+  crash-loop plannerd on the car, which is what happened. Anything sm-shaped here must reproduce
+  SubMaster's actual protocol, not a convenient superset.
+  """
+
+  def __init__(self, data: dict):
+    self.data = data
+
+  def __getitem__(self, s):
+    return self.data[s]
+
+  def __delitem__(self, s):
+    del self.data[s]
+
+
 def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., d_path=0.2, status=True,
             left_bs=False, right_bs=False, blis_avail=True,
             # geometry: ego lane lines at -1.85/+1.85, road edges default to one clear lane left
@@ -56,7 +75,7 @@ def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., d_path=0.2, status=Tr
   if v_ego is None:
     v_ego = v_lead
   v_rel = v_lead - v_ego
-  return {
+  return FakeSubMaster({
     'carState': NS(vEgo=v_ego, brakePressed=brake, steeringPressed=steering,
                    leftBlinker=blinker, rightBlinker=False,
                    leftBlindspot=left_bs, rightBlindspot=right_bs),
@@ -70,7 +89,7 @@ def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., d_path=0.2, status=Tr
                      trafficSignData=NS(dataAvailable=tsr_avail, overtakeMsg=ovtk_msg,
                                         overtakeStatus=ovtk_status)),
     'liveMapDataSP': NS(roadName=road_name),
-  }
+  })
 
 
 def run(det, frames, **kw):

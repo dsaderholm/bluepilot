@@ -475,7 +475,14 @@ class PassingAssistDetector:
     except (KeyError, AttributeError):
       self.road_name = ""
 
-    car_state_bp = sm['carStateBP'] if 'carStateBP' in sm else None
+    # NOT `if 'carStateBP' in sm`. SubMaster defines __getitem__ and no __contains__, so `in`
+    # falls back to the old sequence-iteration protocol and calls sm[0] -- which raises
+    # KeyError: 0 out of its internal dict. Catching the lookup is the only correct membership
+    # test here, and it is what a plain dict in a test fixture will never tell you.
+    try:
+      car_state_bp = sm['carStateBP']
+    except KeyError:
+      car_state_bp = None
     self.rear.update(sm)
     self._blindspot(car_state_bp)
     self._acc_braking(car_state_bp)
