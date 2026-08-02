@@ -728,6 +728,7 @@ class BluePilotLayout(Widget):
         self._show_hands_free_ui,
         self._steer_angle_curvature,
         self._vbatt_pause_charging,
+        self._blinker_test_buttons,
       ]) +
       _section(tr("Audio"), [
         self._use_custom_sounds,
@@ -741,6 +742,7 @@ class BluePilotLayout(Widget):
         self._rainbow_lane_lines,
         self._show_blindspot,
         self._show_brake_status,
+        self._show_passing_assist,
         self._show_confidence_ball,
         self._animate_steering_wheel,
         self._wheel_icon_style_btn,

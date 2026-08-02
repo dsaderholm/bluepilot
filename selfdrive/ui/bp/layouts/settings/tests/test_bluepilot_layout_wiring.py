@@ -12,6 +12,10 @@ checking it at all. Parsing the source needs none of that and runs anywhere.
   2. A dual_button_item was registered in _refresh_toggles, which calls
      item.action_item.set_state() on everything in that list. Only toggles have set_state.
 
+  3. Two items were built in _initialize_items and never added to any _section(), so they existed,
+     refreshed correctly, and were invisible on the device. Nothing errors -- the settings page
+     just silently lacks the control, which reads as "the feature did not ship".
+
 Both are the same shape: a change that is locally reasonable and breaks something several lines
 away. That is what a structural test is for.
 """
@@ -101,3 +105,46 @@ class TestRefreshTogglesOnlyContainsToggles:
     bad = {n: b for n, b in builders.items() if "toggle" not in b}
     assert not bad, f"non-toggle items registered in _refresh_toggles: {bad}"
     assert init is None or True
+
+
+ITEM_BUILDERS = {"toggle_item", "button_item", "dual_button_item", "multiple_button_item",
+                 "text_item", "option_item", "simple_button_item"}
+
+
+class TestEveryBuiltItemIsRendered:
+  """An item built and never placed in a section is invisible with no error anywhere.
+
+  This is the quietest failure mode in the file: the param exists, the toggle refreshes, the code
+  is correct, and the control simply is not on screen. Only a wiring check finds it.
+  """
+
+  def test_no_orphaned_items(self, cls):
+    src = LAYOUT_SRC.read_text(encoding="utf-8")
+    tree = ast.parse(src)
+
+    built = {}
+    for node in ast.walk(tree):
+      if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+        fn = node.value.func
+        name = fn.id if isinstance(fn, ast.Name) else getattr(fn, "attr", None)
+        if name in ITEM_BUILDERS:
+          for t in node.targets:
+            if getattr(t, "attr", None):
+              built[t.attr] = name
+
+    # An item reaches the screen by being put in a list -- directly in a _section(...) call, or in
+    # an intermediate list that is later spliced (the lateral section does this). Membership of ANY
+    # list literal is therefore the test; it is loose enough to avoid false positives on assembly
+    # style, and still catches the real failure, which is an item that is never placed anywhere.
+    rendered = set()
+    for node in ast.walk(tree):
+      if isinstance(node, ast.List):
+        rendered |= {n.attr for n in ast.walk(node) if isinstance(n, ast.Attribute)}
+
+    # _refresh_toggles is a registry, not a rendering path -- but it is a tuple literal, so it
+    # never contributes to `rendered` in the first place and needs no special handling.
+
+    orphans = {n: b for n, b in built.items() if n not in rendered}
+    assert not orphans, (
+      f"built but never rendered in any section: {orphans}. The control exists, refreshes, and "
+      f"is invisible on the device.")
