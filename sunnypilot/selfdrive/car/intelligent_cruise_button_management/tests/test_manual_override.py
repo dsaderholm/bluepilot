@@ -162,3 +162,69 @@ class TestManualOverrideLatch:
     assert icbm.override_state == OverrideState.auto
     settle(icbm, LIMIT, frames=100)                # target drops again; ICBM should act
     assert icbm.state != State.inactive, "state machine never left inactive after re-arm"
+
+
+class TestTargetRiseLimit:
+  """BluePilot: the set speed must come back up in steps, not one continuous pull.
+
+  ICBM holds CcAslButtnSetIncPress high for as long as the state machine sits in `increasing`,
+  and Ford reads a held button as a continuous ramp. Reported from a drive as speeding back up
+  way too fast after curves and speed-limit zones.
+  """
+
+  CURVE = 40   # what SCC-Vision wants through the bend
+  CRUISE = 70  # what to return to afterwards
+
+  def _icbm(self, max_rise):
+    icbm = IntelligentCruiseButtonManagement(NS(), NS(pcmCruiseSpeed=False))
+    for k in icbm.cruise_button_timers:
+      icbm.cruise_button_timers[k] = 0
+    icbm.max_target_rise = max_rise
+    icbm.update_params = lambda: None  # pin it; params would overwrite from defaults
+    return icbm
+
+  def test_rise_is_capped_to_one_step(self):
+    icbm = self._icbm(5)
+    icbm.run(make_cs(self.CURVE), CC, make_lp(self.CURVE), False)
+    icbm.run(make_cs(self.CURVE), CC, make_lp(self.CRUISE), False)  # curve ends, target jumps
+    assert icbm.v_target == self.CURVE + 5, "asked for the whole 30 mph rise at once"
+
+  def test_step_advances_only_once_speed_catches_up(self):
+    icbm = self._icbm(5)
+    icbm.run(make_cs(self.CURVE), CC, make_lp(self.CURVE), False)
+
+    # curve ends: the rise starts here, so the anchor is captured at the current set speed
+    icbm.run(make_cs(self.CURVE, v_ego=self.CURVE), CC, make_lp(self.CRUISE), False)
+    assert icbm.v_target == self.CURVE + 5
+
+    # set speed has reached the ceiling but the car has not accelerated to it yet -- hold
+    icbm.run(make_cs(self.CURVE + 5, v_ego=self.CURVE), CC, make_lp(self.CRUISE), False)
+    assert icbm.v_target == self.CURVE + 5, "advanced before the car caught up"
+
+    # now the car is actually there -- next step is allowed
+    icbm.run(make_cs(self.CURVE + 5, v_ego=self.CURVE + 5), CC, make_lp(self.CRUISE), False)
+    assert icbm.v_target == self.CURVE + 10, "did not advance once speed caught up"
+
+  def test_reaches_cruise_speed_eventually(self):
+    icbm = self._icbm(5)
+    cluster = self.CURVE
+    for _ in range(400):
+      icbm.run(make_cs(cluster, v_ego=cluster), CC, make_lp(self.CRUISE), False)
+      if icbm.v_target > cluster:
+        cluster += 1
+    assert cluster == self.CRUISE, f"stalled at {cluster}, never reached {self.CRUISE}"
+
+  def test_zero_disables_the_cap(self):
+    icbm = self._icbm(0)
+    icbm.run(make_cs(self.CURVE), CC, make_lp(self.CURVE), False)
+    icbm.run(make_cs(self.CURVE), CC, make_lp(self.CRUISE), False)
+    assert icbm.v_target == self.CRUISE
+
+  def test_drops_are_untouched_by_the_rise_limiter(self):
+    """The hazard path must not be metered. An ACTIVE lead only ever lowers the target."""
+    icbm = self._icbm(5)
+    icbm.max_target_drop = 0  # isolate: drop limiter off
+    icbm.run(make_cs(self.CRUISE), CC, make_lp(self.CRUISE), False)
+    icbm.run(make_cs(self.CRUISE), CC,
+             make_lp(self.CRUISE, UnconfirmedLeadState.active, 20.0), False)
+    assert icbm.v_target == 20, "rise limiter interfered with a hazard decel"

@@ -79,6 +79,17 @@ class CruiseLayout(Widget):
       min_value=0, max_value=9, value_change_step=1,
       inline=True)
 
+    # BluePilot: same cap in the other direction -- how fast the set speed comes back up
+    self.icbm_max_target_rise = option_item_sp(
+      title=tr("Max Set Speed Rise Per Step"),
+      description=tr("How much the set speed may climb in one step when returning to cruise "
+                     "speed after a curve or a low speed limit. ICBM holds the button rather "
+                     "than tapping it, so without a cap the car accelerates back up as hard as "
+                     "it can. Lower is gentler. 0 disables the cap."),
+      param="IcbmMaxTargetRise",
+      min_value=0, max_value=15, value_change_step=1,
+      inline=True)
+
     # BluePilot: radar-blind lead detector reach. TTC is the control that actually binds --
     # against a stopped lead TTC = dRel / v_ego, so at 65 mph 4.0 s already caps range near 116 m
     # and the distance bound never fires. Distance stays as a sanity limit.
@@ -168,6 +179,7 @@ class CruiseLayout(Widget):
     items = [
       self.icbm_toggle,
       self.icbm_max_target_drop,
+      self.icbm_max_target_rise,
       self.icbm_lead_max_ttc,
       self.icbm_lead_max_distance,
       self.icbm_model_stop,

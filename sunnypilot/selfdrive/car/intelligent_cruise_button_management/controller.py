@@ -49,6 +49,15 @@ DEFAULT_MAX_TARGET_DROP = 8  # display units (mph/kph)
 # How close actual speed must get to the current step's floor before the next step is allowed.
 DROP_STEP_SETTLE_MARGIN = 2  # display units (mph/kph)
 
+# BluePilot: the same treatment in the other direction. An earlier comment claimed increases were
+# "rate-limited naturally by ICBM emitting one button press per cycle" -- that is not true on Ford.
+# icbm.py holds CcAslButtnSetIncPress high for as long as the state machine sits in `increasing`,
+# and Ford reads a held button as a continuous ramp, so recovering from a curve or a speed-limit
+# drop slammed the set speed back up as fast as the car could take it. Capping each step and
+# waiting for actual speed to catch up turns that back into a series of short presses.
+DEFAULT_MAX_TARGET_RISE = 5  # display units (mph/kph)
+RISE_STEP_SETTLE_MARGIN = 2  # display units (mph/kph)
+
 
 SEND_BUTTONS = {
   State.increasing: SendButtonState.increase,
@@ -88,6 +97,8 @@ class IntelligentCruiseButtonManagement:
     self.frame = 0
     self.max_target_drop = DEFAULT_MAX_TARGET_DROP
     self.drop_anchor = 0
+    self.max_target_rise = DEFAULT_MAX_TARGET_RISE
+    self.rise_anchor = 0
 
     # BluePilot: radar-blind lead detector currently owns the target
     self.unconfirmed_lead_commanding = False
@@ -96,6 +107,7 @@ class IntelligentCruiseButtonManagement:
   def update_params(self) -> None:
     if self.frame % int(PARAMS_UPDATE_PERIOD / DT_CTRL) == 0:
       self.max_target_drop = self.params.get("IcbmMaxTargetDrop", return_default=True)
+      self.max_target_rise = self.params.get("IcbmMaxTargetRise", return_default=True)
 
   @property
   def v_cruise_equal(self) -> bool:
@@ -127,7 +139,8 @@ class IntelligentCruiseButtonManagement:
     if not self.v_target_valid:
       self.v_target = self.v_cruise_cluster
 
-    self.v_target = self.apply_target_drop_limit(round(CS.vEgo * speed_conv))
+    v_ego_conv = round(CS.vEgo * speed_conv)
+    self.v_target = self.apply_target_drop_limit(v_ego_conv)
 
     # BluePilot: the radar-blind lead detector supersedes everything above, including the drop
     # limiter. That limiter exists to keep Ford's ACC coasting through routine speed-limit and
@@ -142,6 +155,12 @@ class IntelligentCruiseButtonManagement:
       self.v_target = round(unconfirmed_lead.vTarget * speed_conv)
       self.v_target_valid = True
       self.drop_anchor = 0
+
+    # BluePilot: the rise limiter runs last, and unlike the drop limiter it is NOT bypassed for
+    # the radar-blind lead. Rising is never the urgent direction -- an ACTIVE hazard only ever
+    # lowers the target -- so the only thing this can meter is the RESTORING half, which returns
+    # the set speed after the hazard has cleared and has no reason to be abrupt.
+    self.v_target = self.apply_target_rise_limit(v_ego_conv)
 
   def apply_target_drop_limit(self, v_ego_conv: int) -> int:
     """BluePilot: cap how far below the set speed ICBM may command in one step.
@@ -177,6 +196,38 @@ class IntelligentCruiseButtonManagement:
       floor = self.drop_anchor - self.max_target_drop
 
     return max(self.v_target, floor)
+
+  def apply_target_rise_limit(self, v_ego_conv: int) -> int:
+    """BluePilot: cap how far above the set speed ICBM may command in one step.
+
+    The mirror of apply_target_drop_limit, and needed for the same reason the drop version is:
+    ICBM does not tap the button, it holds it. Coming out of a curve or leaving a low-limit zone,
+    the target jumps back to cruise speed all at once and Ford ramps continuously until it gets
+    there, which is a much harder acceleration than a driver would ask for.
+
+    Hold at (anchor + max_target_rise) and only take the next step once actual speed has caught
+    up. Net acceleration ends up the same, but it arrives in stages instead of one pull.
+    """
+    if self.max_target_rise <= 0:  # 0 disables the limiter
+      self.rise_anchor = 0
+      return self.v_target
+
+    if self.v_target <= self.v_cruise_cluster:
+      self.rise_anchor = 0
+      return self.v_target
+
+    if self.rise_anchor == 0:
+      self.rise_anchor = self.v_cruise_cluster
+
+    ceiling = self.rise_anchor + self.max_target_rise
+    if self.v_target <= ceiling:
+      return self.v_target  # the whole requested rise fits inside one step
+
+    if self.v_cruise_cluster >= ceiling and v_ego_conv >= ceiling - RISE_STEP_SETTLE_MARGIN:
+      self.rise_anchor = self.v_cruise_cluster
+      ceiling = self.rise_anchor + self.max_target_rise
+
+    return min(self.v_target, ceiling)
 
   def update_state_machine(self) -> custom.IntelligentCruiseButtonManagement.SendButtonState:
     self.pre_active_timer = max(0, self.pre_active_timer - 1)
