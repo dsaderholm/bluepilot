@@ -184,7 +184,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // controlsd asserts resume from ITS OWN MPC plan, which on a stock-ACC car is not the
     // controller that then has to drive -- Ford ACC reads resume as "go", accelerates toward the
     // set speed, and brakes hard when its radar finds the lead still a few feet away.
-    {"IcbmResumeGateEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},
+    {"IcbmResumeGateEnabled", {PERSISTENT | BACKUP, BOOL, "1"}},
     {"IcbmResumeMinGap", {PERSISTENT | BACKUP, INT, "6"}},        // metres of lead gap
     {"IcbmResumeMinLeadSpeed", {PERSISTENT | BACKUP, INT, "5"}},  // mph the lead must be doing
     {"DeviceBootMode", {PERSISTENT | BACKUP, INT, "0"}},
