@@ -207,6 +207,12 @@ class HudRendererBP(HudRendererSP):
     self._show_passing_assist = self._bp_params.get_bool("ShowPassingAssist")
     self._pa_text = ""
     self._pa_color = COLORS.WHITE
+    # BluePilot: suggestions are transient -- a glance at the wrong moment misses one entirely, and
+    # "I saw nothing" is indistinguishable from "it never ran". A per-drive count makes the answer
+    # readable at any time without watching continuously or opening a log.
+    self._pa_count = 0
+    self._pa_suggesting_prev = False
+    self._pa_started_frame = 0
 
   def set_gradient_rect(self, rect: rl.Rectangle):
     """Set full-width rect for header gradient (when HUD renders offset for confidence ball)."""
@@ -402,7 +408,21 @@ class HudRendererBP(HudRendererSP):
     except (KeyError, AttributeError):
       return
 
+    # Reset the count on each new drive rather than each UI start, so it always means
+    # "this trip" no matter when the display was switched on.
+    if ui_state.started_frame != self._pa_started_frame:
+      self._pa_started_frame = ui_state.started_frame
+      self._pa_count = 0
+      self._pa_suggesting_prev = False
+
     suggestion = str(pa.suggestion)
+
+    # Rising edge only: a suggestion that holds for 30 s is one event, not 600.
+    suggesting = suggestion != 'none'
+    if suggesting and not self._pa_suggesting_prev:
+      self._pa_count += 1
+    self._pa_suggesting_prev = suggesting
+
     if suggestion != 'none':
       # Green is deliberate but it is NOT a go-ahead: nothing has checked approaching traffic.
       # KEEP RIGHT and PASS RIGHT are both Side.right and mean opposite things, so the reason is
@@ -426,6 +446,11 @@ class HudRendererBP(HudRendererSP):
       self._pa_text += " ~bs"
     if not pa.tsrAvailable:
       self._pa_text += " ~tsr"
+
+    # How many suggestions this drive. Present even while none is showing, which is the case that
+    # actually needed answering: glance down at any point and know whether it has ever fired.
+    if self._pa_count:
+      self._pa_text += f"  x{self._pa_count}"
 
   def _render(self, rect: rl.Rectangle) -> None:
     # BluePilot: Draw header gradient at full content width (not offset by confidence ball)
