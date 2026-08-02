@@ -11,6 +11,7 @@ from openpilot.system.ui.widgets.option_dialog import MultiOptionDialog
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.lib.multilang import tr
 from openpilot.system.ui.lib.wifi_manager import WifiManager, Network
+from opendbc.car.ford.values import FordFlags
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.selfdrive.ui.bp.widgets.float_control_item import float_control_item, int_control_item
 from openpilot.selfdrive.ui.bp.widgets.section_header import CollapsibleSectionHeader
@@ -51,11 +52,17 @@ class BluePilotLayout(Widget):
 
   @staticmethod
   def _pinion_yaw_sensor_supported() -> bool:
-    """FORD_EDGE_MK2's pinion sensor only reports a relative angle (see
+    """ALT_STEER_ANGLE platforms report only a RELATIVE pinion angle (see
     FORD_PINION_GEOMETRY_INDEX in opendbc/sunnypilot/car/ford/values_ext.py) -- the
     safety/control layers already no-op the toggle there, so grey it out here too rather
-    than leaving a live-looking control that silently does nothing."""
-    return ui_state.CP is None or ui_state.CP.carFingerprint != "FORD_EDGE_MK2"
+    than leaving a live-looking control that silently does nothing.
+
+    Keyed on the FLAG, not the platform name. This used to test carFingerprint against
+    FORD_EDGE_MK2 alone, which silently stopped covering the case the moment a second
+    ALT_STEER_ANGLE platform existed -- FORD_FUSION_MK5 has the same Edge PSCM and would
+    have shown a live control that does nothing.
+    """
+    return ui_state.CP is None or not (ui_state.CP.flags & FordFlags.ALT_STEER_ANGLE)
 
   def __init__(self):
     super().__init__()
@@ -123,7 +130,7 @@ class BluePilotLayout(Widget):
     # flip only takes effect after the next restart (safe to toggle any time).
     self._steer_angle_curvature = toggle_item(
       lambda: tr("Use Pinion Yaw Sensor"),
-      lambda: tr('Measures how the car is turning from the steering pinion angle sensor instead of a faulty RCM yaw sensor (symptoms: "Turn Exceeds Steering Limit" warnings, weak curve tracking, "Service AdvanceTrac"). Check with tools/ford_yaw_health_check.py. Applies the next time the car starts. Not available on the Edge.'),
+      lambda: tr('Measures how the car is turning from the steering pinion angle sensor instead of a faulty RCM yaw sensor (symptoms: "Turn Exceeds Steering Limit" warnings, weak curve tracking, "Service AdvanceTrac"). Check with tools/ford_yaw_health_check.py. Applies the next time the car starts. Not available on this car.'),
       initial_state=self._safe_get_bool(self._params, "FordPrefSteerAngleCurvature"),
       callback=lambda state: self._toggle_callback(state, "FordPrefSteerAngleCurvature"),
       icon="monitoring.png",
