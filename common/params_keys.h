@@ -250,7 +250,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // is worthless switched off because its entire purpose is collecting drive data.
     {"PassingAssistLogEnabled", {PERSISTENT | BACKUP, BOOL, "1"}},
     // How far below the set speed the lead must hold us before it counts as being held back (mph).
-    {"PassingAssistMinDeficit", {PERSISTENT | BACKUP, INT, "8"}},
+    {"PassingAssistMinDeficit", {PERSISTENT | BACKUP, INT, "2"}},
     // How long that must persist before a pass would be suggested (seconds).
     // BluePilot: how long a slower lead must persist before suggesting, in seconds. Short by
     // design -- waiting is the behaviour this exists to remove, and the only job of this timer is
@@ -259,7 +259,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // Time-to-contact at which the preemptive trigger fires, in tenths of a second. Generous by
     // design: the decision is about the SPEED DIFFERENCE, not proximity, and a tight bound turns
     // "pass before slowing" back into "pass once nearly there".
-    {"PassingAssistApproachTtc", {PERSISTENT | BACKUP, INT, "250"}},
+    {"PassingAssistApproachTtc", {PERSISTENT | BACKUP, INT, "600"}},
     // Hold-off after suggesting a pass before suggesting the return. Stops a slow left lane on a
     // three-lane road turning into a weave.
     {"PassingAssistSettleTime", {PERSISTENT | BACKUP, INT, "20"}},

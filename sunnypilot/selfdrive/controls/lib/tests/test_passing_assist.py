@@ -68,7 +68,7 @@ def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., d_path=0.2, status=Tr
             edges=(-5.6, 2.4), edge_stds=(0.1, 0.1), right_edge_widen=0.0,
             tsr_avail=True, ovtk_msg=1, ovtk_status=2,
             blinker=False, brake=False, steering=False, road_name="I 15",
-            acc_braking=False, acc_avail=True):
+            acc_braking=False, acc_avail=True, set_speed=None):
   # Being stuck behind a car means matching its speed, not still closing on it: vEgo tracks vLead
   # and the gap to the SET speed is what makes passing worth suggesting. Tests that need a genuine
   # approach pass v_ego explicitly.
@@ -78,7 +78,8 @@ def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., d_path=0.2, status=Tr
   return FakeSubMaster({
     'carState': NS(vEgo=v_ego, brakePressed=brake, steeringPressed=steering,
                    leftBlinker=blinker, rightBlinker=False,
-                   leftBlindspot=left_bs, rightBlindspot=right_bs),
+                   leftBlindspot=left_bs, rightBlindspot=right_bs,
+                   cruiseState=NS(speedCluster=set_speed if set_speed is not None else CRUISE_MS)),
     'radarState': NS(leadOne=NS(status=status, dRel=d_rel, vRel=v_rel, vLead=v_lead, dPath=d_path)),
     'modelV2': NS(laneLines=[xyz(v) for v in ll], laneLineProbs=list(probs),
                   roadEdges=[xyz(edges[0]), xyz(edges[1], widen=right_edge_widen)],
@@ -173,8 +174,10 @@ class TestPassingAssistGates:
     assert closing.suggestion == Side.left
     assert pacing.suggestion == Side.left
 
-  def test_small_deficit_is_not_worth_passing(self):
-    det = run(PassingAssistDetector(), STUCK_FRAMES, v_lead=CRUISE_MS - 1.0)
+  def test_deficit_below_the_threshold_is_not_worth_passing(self):
+    # 0.4 m/s is under 1 mph. The threshold is 2 mph now, so this has to be smaller than the
+    # 1.0 m/s this test used when the threshold was 8.
+    det = run(PassingAssistDetector(), STUCK_FRAMES, v_lead=CRUISE_MS - 0.4)
     assert det.blocked_by == Blocked.notStuck
 
   def test_below_min_speed_blocks(self):
@@ -284,9 +287,9 @@ class _KeepRightOnParams:
   default cannot silently make them pass for the wrong reason."""
 
   def get(self, key, block=False, return_default=False):
-    return {"PassingAssistMinDeficit": 8, "PassingAssistStuckTime": 2,
+    return {"PassingAssistMinDeficit": 2, "PassingAssistStuckTime": 2,
             "PassingAssistKeepRightDelay": 10, "PassingAssistSettleTime": 20,
-            "PassingAssistApproachTtc": 250, "PassingAssistSuspendMinutes": 15}[key]
+            "PassingAssistApproachTtc": 600, "PassingAssistSuspendMinutes": 15}[key]
 
   def __init__(self, avoid_outermost=True):
     self.avoid_outermost = avoid_outermost
@@ -471,11 +474,11 @@ class TestOneTrigger:
       det.update(make_sm(v_ego=CRUISE_MS, v_lead=CRUISE_MS - 9.0, d_rel=400.), CRUISE_MS, True)
     assert det.suggestion == Side.none
 
-  def test_small_deficit_is_not_worth_passing(self):
+  def test_below_the_deficit_is_not_worth_passing(self):
     """The deficit is the judgement. Everything else is a sanity bound."""
     det = PassingAssistDetector()
     for _ in range(int(3.0 / DT_MDL)):
-      det.update(make_sm(v_ego=CRUISE_MS, v_lead=CRUISE_MS - 1.0, d_rel=60.), CRUISE_MS, True)
+      det.update(make_sm(v_ego=CRUISE_MS, v_lead=CRUISE_MS - 0.4, d_rel=60.), CRUISE_MS, True)
     assert det.suggestion == Side.none
 
   def test_ttc_only_bounds_the_case_where_we_are_closing(self):
@@ -539,9 +542,9 @@ class _SuspendParams:
     self.minutes = minutes
 
   def get(self, key, block=False, return_default=False):
-    return {"PassingAssistMinDeficit": 8, "PassingAssistStuckTime": 2,
+    return {"PassingAssistMinDeficit": 2, "PassingAssistStuckTime": 2,
             "PassingAssistKeepRightDelay": 10, "PassingAssistSettleTime": 20,
-            "PassingAssistApproachTtc": 250, "PassingAssistSuspendMinutes": self.minutes}[key]
+            "PassingAssistApproachTtc": 600, "PassingAssistSuspendMinutes": self.minutes}[key]
 
   def get_bool(self, key, block=False):
     return self.suspend if key == "PassingAssistSuspend" else True
@@ -601,3 +604,47 @@ class TestSuspend:
     run(det, STUCK_FRAMES)
     assert det.approach_seconds == 0.0
     assert det.approach_seconds == 0.0
+
+
+class TestSetSpeedIsTheClusterSpeed:
+  """The reported failure, pinned exactly.
+
+  Set 80, lead doing 65, and it reported "nothing slower ahead". The deficit was being measured
+  against carState.vCruiseCluster -- VCruiseHelper's number, which depends on pcmCruise wiring that
+  changes once ICBM manages the target -- instead of against the set speed on the dash.
+  """
+
+  MPH = 0.44704
+
+  def _drive(self, set_mph, lead_mph, ego_mph=None, d_rel=120.):
+    det = PassingAssistDetector()
+    ego = (ego_mph if ego_mph is not None else set_mph) * self.MPH
+    for _ in range(int(3.0 / DT_MDL)):
+      det.update(make_sm(v_ego=ego, v_lead=lead_mph * self.MPH, d_rel=d_rel,
+                         set_speed=set_mph * self.MPH), set_mph * self.MPH, True)
+    return det
+
+  def test_set_80_lead_65_suggests_a_pass(self):
+    det = self._drive(80, 65, ego_mph=80, d_rel=150.)
+    assert det.suggestion == Side.left, "the exact case that reported nothing slower ahead"
+
+  def test_two_mph_slower_is_enough(self):
+    """"I want to pass a car that is two miles per hour slower than how fast I want to go." """
+    det = self._drive(80, 77.5, ego_mph=78)
+    assert det.suggestion == Side.left
+
+  def test_measured_against_the_set_speed_not_our_current_speed(self):
+    """Already slowed to the lead's speed: current speed says no deficit, set speed says 15 mph."""
+    det = self._drive(80, 65, ego_mph=65, d_rel=40.)
+    assert det.suggestion == Side.left
+
+  def test_a_lead_at_the_set_speed_is_not_passed(self):
+    det = self._drive(80, 80, ego_mph=80)
+    assert det.suggestion == Side.none
+
+  def test_falls_back_when_the_cluster_reports_nothing(self):
+    det = PassingAssistDetector()
+    for _ in range(int(3.0 / DT_MDL)):
+      det.update(make_sm(v_ego=CRUISE_MS, v_lead=CRUISE_MS - 7.0, d_rel=120., set_speed=0.0),
+                 CRUISE_MS, True)
+    assert det.suggestion == Side.left

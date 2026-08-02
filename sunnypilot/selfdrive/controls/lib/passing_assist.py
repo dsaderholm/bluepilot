@@ -83,9 +83,10 @@ MAX_LEAD_D_PATH_M = 1.5           # in our lane, not an adjacent-lane return
 # the whole point is to decide before any speed is given away.
 MAX_LEAD_D_REL_M = 220.0
 
-# The real knob. Everything else is a sanity bound -- this is the judgement a driver actually
-# makes: is that car slow enough to be worth going around.
-DEFAULT_MIN_DEFICIT_MPH = 8
+# The real knob, and the whole judgement: is that car slower than the speed I asked for. Two mph,
+# not eight -- a driver who sets 80 and finds someone doing 78 in front of them is being slowed
+# down, and "how far below my set speed" is the question, not "is it dramatically slower".
+DEFAULT_MIN_DEFICIT_MPH = 2
 # How long the slower lead must persist before suggesting. Short by design: waiting is the whole
 # behaviour this exists to remove. Long enough only to reject a single bad frame of lead tracking.
 DEFAULT_PERSISTENCE_S = 2
@@ -102,10 +103,12 @@ DEFAULT_PERSISTENCE_S = 2
 # whether a given suggestion actually beat ACC to it is recorded rather than assumed -- see
 # accBrakingAtDecision, which is what `trigger` now reports.
 #
-# TTC is a sanity bound, not the trigger. From the same range a lead 20 mph slower is much further
-# away in time than one 40 mph slower, so a raw distance limit would behave differently at every
-# speed difference. It exists only to stop us reacting to something we will never reach.
-DEFAULT_APPROACH_TTC_S = 25.0
+# TTC is a sanity bound, not the trigger, and now a very loose one. At a small speed difference the
+# closing rate is low, so TTC gets large fast: 80 vs 65 mph closes at 6.7 m/s, which puts a lead
+# 200 m out at 30 s. A tight bound therefore silently blocked exactly the early decision this is
+# built for. Distance (MAX_LEAD_D_REL_M) is the real limit; this only stops us reacting to
+# something we would never actually reach.
+DEFAULT_APPROACH_TTC_S = 60.0
 # Below this closing rate the TTC figure is meaningless, so it simply is not applied. A lead we are
 # already pacing has no closing rate and still counts -- that is the point.
 MIN_APPROACH_CLOSING_MS = 1.0
@@ -430,6 +433,17 @@ class PassingAssistDetector:
 
     CS = sm['carState']
     lead = sm['radarState'].leadOne
+
+    # The set speed is the number on YOUR dash, read straight from Ford's own Veh_V_DsplyCcSet via
+    # cruiseState.speedCluster -- not carState.vCruiseCluster, which comes from VCruiseHelper and
+    # depends on pcmCruise/pcmCruiseSpeed wiring that differs once ICBM is managing the target.
+    # A lead 15 mph slower than an 80 mph set speed was reporting "nothing slower ahead" because the
+    # number being differenced was not the number the driver set. Falls back to the passed value if
+    # the cluster reports nothing.
+    set_speed = float(CS.cruiseState.speedCluster)
+    if set_speed <= 0:
+      set_speed = v_cruise
+    v_cruise = set_speed
 
     # BLIS is read every cycle regardless of the gates below -- its behaviour approaching a pass
     # is exactly what needs measuring, including on the frames where nothing is suggested.
