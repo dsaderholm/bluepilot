@@ -22,14 +22,19 @@ Two sources are plausible and they carry different amounts of information:
 
   radar  per-object range, range-rate, angle. ESR.dbc is the reference: CAN_TX_TRACK_RANGE,
          CAN_TX_TRACK_RANGE_RATE, CAN_TX_TRACK_ANGLE, 64 targets.
-  BLIS   Side_Detect_L/R_Stat categories. sodStat (3 bits) and sodAlert (2 bits) have no value
-         table in the DBC; whether either encodes approach at all is unknown, and openpilot's
-         existing use reduces the whole message to one bool.
+  BLIS   Side_Detect_L/R_Stat categories. Presence only -- researched 2026-08-02 and settled:
+         Sod*_D_Stat is the system's enable state, SodAlrt*_D_Stat is the mirror lamp whose Flash
+         state follows the DRIVER's turn signal, and SodSns*_D_Stat is sensor health. Ford BLIS
+         answers "is that side occupied" and cannot answer "is something closing on it".
 
 Modelled on radar because a BLIS source adapts UP into these fields losing nothing (categories set
 detected/closing, ttc stays unset), while a BLIS-shaped interface would throw away the range and
 rate a radar provides -- which are precisely the numbers a lane-change decision needs. Designing
 for the weaker source would have to be undone the moment the stronger one is fitted.
+
+Given what BLIS turned out to be, the radar is not a fallback for it -- it is the only source that
+can fill these fields properly. BLIS remains worth wiring as a veto: a lane known to be occupied
+right now is still a lane not to move into.
 """
 
 from cereal import custom

@@ -528,9 +528,13 @@ class CarStateExt:
         pass
 
     # BluePilot: log every Side_Detect_L/R_Stat signal, not just the one bool openpilot consumes.
-    # sodStat and sodAlert have no value table in the DBC -- if Ford encodes anything like Toyota's
-    # ADJACENT vs APPROACHING split, that is where it would be, and it is the only rear-approach
-    # information this car could possibly expose.
+    # Sensor health in particular is discarded by that bool: SodDetct 3/4 are Sensor_Fault and
+    # Sensor_Blocked, which "!= 0" turns into a permanent blind-spot detection.
+    #
+    # These do NOT carry approach information -- see the CarStateBP.SideDetect comment in
+    # custom.capnp. Sod*_D_Stat is the system enable state and SodAlrt*_D_Stat is the mirror lamp,
+    # whose Flash state follows the driver's own turn signal rather than the other vehicle. Logged
+    # to confirm that on this car, not in hope of finding closing rate in them.
     if self.CP.enableBsm:
       cp_bsm = cp_cam if self.CP.flags & FordFlags.CANFD else cp
       for target, msg, idx in ((blis_left, "Side_Detect_L_Stat", 1), (blis_right, "Side_Detect_R_Stat", 2)):

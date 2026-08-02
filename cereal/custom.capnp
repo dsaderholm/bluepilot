@@ -878,12 +878,30 @@ struct CarStateBP @0xb057204d7deadf3f {
 
   # BluePilot: every signal in Side_Detect_L/R_Stat (0x3A6 / 0x3A7), raw.
   #
-  # openpilot reduces all of this to one bool per side (SodDetct != 0). Toyota and Subaru publish
-  # ADJACENT and APPROACHING as separate signals and openpilot ORs them together, so the interface
-  # has nowhere to put approach information even where the car provides it. Ford has no documented
-  # equivalent -- but sodStat (3 bits) and sodAlert (2 bits) have NO value table in the DBC, and
-  # the sensor must compute closing rate internally to decide whether to warn. Logged to find out
-  # whether anything approach-like is encoded there.
+  # openpilot reduces all of this to one bool per side (SodDetct != 0). These are logged in full
+  # because that bool discards sensor health, and because the raw values are the only way to check
+  # what this particular car does rather than what the DBC claims.
+  #
+  # CORRECTION (researched 2026-08-02): an earlier version of this comment said sodStat and
+  # sodAlert were undocumented and might encode approach. Both are documented, and neither does:
+  #
+  #   Sod*_D_Stat      Off / Trailer_Tow_Off / On / Disabled / Invalid -- the SYSTEM's enable
+  #                    state, not a detection at all
+  #   SodAlrt*_D_Stat  Off / On / Flash / Bulb_Proveout -- the mirror LAMP's state. Per Ford's own
+  #                    documentation the flash is triggered by the DRIVER's turn signal toward an
+  #                    occupied side, so it is a function of our own stalk, not of the other
+  #                    vehicle's closing rate
+  #   SodSns*_D_Stat   Clear / Blocked / System_Failure / Second_Warning_Audio -- sensor health
+  #   SodDetct*_D_Stat AlertOff / Alert_On / Flash_On / Sensor_Fault / Sensor_Blocked
+  #
+  # So Ford BLIS answers "is that side occupied" and nothing more. It cannot support a lane-change
+  # decision that needs to know about traffic still approaching from behind; only a rear-facing
+  # radar can. See RearApproach, whose blis source is presence-only by design.
+  #
+  # The two signals that genuinely have no value table are sodWarnPeriodMs (lamp flash period) and
+  # illumPercent (lamp brightness). Both cosmetic. ctaAlert2 does carry AlertZone1-4, which is real
+  # zone information, but Cross Traffic Alert runs in reverse at parking speeds -- logged in case
+  # a build reuses it, not expected to help.
   #
   # Note SodDetct's own table is: 0=clear 1=Alert_On 2=Flash_On 3=Sensor_Fault 4=Sensor_Blocked,
   # so openpilot's "!= 0" currently treats a faulted or blocked sensor as a permanent detection.
@@ -891,8 +909,8 @@ struct CarStateBP @0xb057204d7deadf3f {
     dataAvailable @0 :Bool;
 
     sodDetect @1 :UInt8;        # SodDetct*_D_Stat -- the one openpilot uses
-    sodStat @2 :UInt8;          # Sod*_D_Stat, 3 bits, UNDOCUMENTED
-    sodAlert @3 :UInt8;         # SodAlrt*_D_Stat, 2 bits, UNDOCUMENTED
+    sodStat @2 :UInt8;          # Sod*_D_Stat -- system enable state, not a detection
+    sodAlert @3 :UInt8;         # SodAlrt*_D_Stat -- lamp state; Flash follows OUR turn signal
     sodSensor @4 :UInt8;        # SodSns*_D_Stat -- sensor health
     sodWarnPeriodMs @5 :UInt8;  # SodWarn*_Prd_Rq -- warning flash period, ms
 
