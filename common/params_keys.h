@@ -253,9 +253,11 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"PassingAssistMinDeficit", {PERSISTENT | BACKUP, INT, "8"}},
     // How long that must persist before a pass would be suggested (seconds).
     {"PassingAssistStuckTime", {PERSISTENT | BACKUP, INT, "25"}},
-    // BluePilot: "keep right except to pass" -- the mirror of the passing suggestion. Fires only
-    // when no pass is warranted, so it can never nag mid-overtake.
-    {"PassingAssistKeepRight", {PERSISTENT | BACKUP, BOOL, "1"}},
+    // BluePilot: "keep right except to pass". DEFAULT OFF -- modelV2 cannot tell a through lane
+    // from an exit-only or merge lane, so the suggestion can mean "take the exit". Left in place
+    // because the observer still records what it WOULD have said, which measures how often that
+    // actually bites; it is not a feature to lean on until map data can distinguish the two.
+    {"PassingAssistKeepRight", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"PassingAssistKeepRightDelay", {PERSISTENT | BACKUP, INT, "10"}},  // seconds
     {"DeviceBootMode", {PERSISTENT | BACKUP, INT, "0"}},
     {"DevUIInfo", {PERSISTENT | BACKUP, INT, "0"}},

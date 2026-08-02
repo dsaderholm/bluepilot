@@ -118,6 +118,7 @@ class PassingAssistDetector:
     self.overtake_msg = 0
     self.overtake_status = 0
     self.tsr_available = False
+    self.road_name = ""
 
     self.params = Params()
     self.frame = 0
@@ -279,6 +280,13 @@ class PassingAssistDetector:
     # dataAvailable flags rather than SubMaster liveness, because that is the flag that actually
     # answers the question: on this car BLIS stays unavailable until the canbox routes
     # Side_Detect_L/R_Stat from MS-CAN onto the bus openpilot reads.
+    # Where we are, recorded with every decision. See the capnp comment: this is the candidate
+    # divided-highway gate, logged before it is trusted.
+    try:
+      self.road_name = str(sm['liveMapDataSP'].roadName or "")
+    except (KeyError, AttributeError):
+      self.road_name = ""
+
     car_state_bp = sm['carStateBP'] if 'carStateBP' in sm else None
     self._blindspot(car_state_bp)
     self._traffic_signs(car_state_bp)

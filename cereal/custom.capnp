@@ -347,6 +347,14 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     reason @20 :Reason;
     keepRightSeconds @21 :Float32;
 
+    # BluePilot: LiveMapDataSP.roadName at decision time. Recorded because it is the cheapest
+    # candidate for the divided-highway gate that geometry cannot provide: mapd already publishes
+    # it and the UI already renders it, so if it carries a usable interstate identifier the
+    # oncoming-lane problem is solvable today without forking mapd or waiting for navigation.
+    # Logged before being trusted -- what pfeiferj's mapd puts here for a US interstate is
+    # unverified, and a filter written against a guessed format would silently never match.
+    roadName @22 :Text;
+
     enum Reason {
       none @0;
       passing @1;    # a slower lead is holding us below the set speed

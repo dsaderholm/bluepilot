@@ -218,6 +218,7 @@ class LongitudinalPlannerSP:
     passingAssist.tsrAvailable = pa.tsr_available
     passingAssist.reason = pa.reason
     passingAssist.keepRightSeconds = float(pa.keep_right_seconds)
+    passingAssist.roadName = pa.road_name
 
     # E2E Alerts
     e2eAlerts = longitudinalPlanSP.e2eAlerts
