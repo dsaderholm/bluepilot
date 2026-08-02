@@ -463,7 +463,7 @@ class HudRendererBP(HudRendererSP):
     if pa.suspendedSeconds > 0:
       mins = int(pa.suspendedSeconds // 60) + 1
       self._pa_main = "PASSING PAUSED"
-      self._pa_sub = f"resumes in {mins} min  ·  tap to resume now"
+      self._pa_sub = f"resumes in {mins} min  -  tap to resume now"
       self._pa_color = rl.Color(255, 180, 60, 255)
       return
 
@@ -511,7 +511,7 @@ class HudRendererBP(HudRendererSP):
       caveats.append("no rear data")
     if self._pa_count:
       caveats.append(f"{self._pa_count} this drive")
-    self._pa_sub = "  ·  ".join(caveats)
+    self._pa_sub = "  -  ".join(caveats)
 
   def _render(self, rect: rl.Rectangle) -> None:
     # BluePilot: Draw header gradient at full content width (not offset by confidence ball)

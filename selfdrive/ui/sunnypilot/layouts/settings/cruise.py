@@ -322,7 +322,7 @@ class CruiseLayout(Widget):
 
     self.passing_assist_suspend_minutes = option_item_sp(
       title=tr("Pause Duration (min)"),
-      description=tr("Tapping the onroad passing-assist panel pauses it for this long — for "
+      description=tr("Tapping the onroad passing-assist panel pauses it for this long, for "
                      "construction zones, weather, or anywhere the lane markings are unusual. It "
                      "resumes on its own so it cannot be left switched off. Tap again to resume "
                      "immediately."),
