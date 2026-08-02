@@ -278,10 +278,11 @@ class CruiseLayout(Widget):
 
     self.passing_assist_min_deficit = option_item_sp(
       title=tr("Passing: Min Speed Deficit (mph)"),
-      description=tr("How far below your set speed the vehicle ahead must hold you before it "
-                     "counts as being held back."),
+      description=tr("How far below your set speed a vehicle must be to be worth passing. Below "
+                     "about 3 mph you are inside normal traffic variation, so it will fire on "
+                     "cars that are not really slower."),
       param="PassingAssistMinDeficit",
-      min_value=3, max_value=25, value_change_step=1,
+      min_value=1, max_value=25, value_change_step=1,
       inline=True)
 
     self.passing_assist_stuck_time = option_item_sp(

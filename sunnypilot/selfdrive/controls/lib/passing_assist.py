@@ -80,10 +80,19 @@ MAX_ROAD_EDGE_STD = 0.5
 MIN_V_EGO_MS = 40 * CV.MPH_TO_MS  # below this, passing is not the manoeuvre being considered
 MAX_LEAD_D_PATH_M = 1.5           # in our lane, not an adjacent-lane return
 
-# The real knob, and the whole judgement: is that car slower than the speed I asked for. Two mph,
-# not eight -- a driver who sets 80 and finds someone doing 78 in front of them is being slowed
-# down, and "how far below my set speed" is the question, not "is it dramatically slower".
-DEFAULT_MIN_DEFICIT_MPH = 2
+# The real knob, and the whole judgement: is that car slower than the speed I asked for. The
+# question is "how far below my set speed", not "is it dramatically slower" -- which is why this is
+# 4 and not the 8 it started at.
+#
+# Not 2, though, and the reason is measurement rather than taste: ordinary traffic varies by a mph
+# or two. A driver holding 65 oscillates, another car's cruise hunts on grades, and vLead is a
+# filtered estimate. At 2 mph the threshold sits inside that band, so it fires on cars that are not
+# actually slower -- just momentarily varying. Four clears the noise and still catches the case
+# this exists for.
+#
+# speedDeficit is logged on every decision, so this can be refitted from a drive instead of argued
+# about.
+DEFAULT_MIN_DEFICIT_MPH = 4
 # How long the slower lead must persist before suggesting. Short by design: waiting is the whole
 # behaviour this exists to remove. Long enough only to reject a single bad frame of lead tracking.
 DEFAULT_PERSISTENCE_S = 2

@@ -250,7 +250,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // is worthless switched off because its entire purpose is collecting drive data.
     {"PassingAssistLogEnabled", {PERSISTENT | BACKUP, BOOL, "1"}},
     // How far below the set speed the lead must hold us before it counts as being held back (mph).
-    {"PassingAssistMinDeficit", {PERSISTENT | BACKUP, INT, "2"}},
+    {"PassingAssistMinDeficit", {PERSISTENT | BACKUP, INT, "4"}},
     // How long that must persist before a pass would be suggested (seconds).
     // BluePilot: how long a slower lead must persist before suggesting, in seconds. Short by
     // design -- waiting is the behaviour this exists to remove, and the only job of this timer is

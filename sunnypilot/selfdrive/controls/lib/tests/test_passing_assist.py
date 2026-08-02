@@ -291,7 +291,7 @@ class _KeepRightOnParams:
   default cannot silently make them pass for the wrong reason."""
 
   def get(self, key, block=False, return_default=False):
-    return {"PassingAssistMinDeficit": 2, "PassingAssistStuckTime": 2,
+    return {"PassingAssistMinDeficit": 4, "PassingAssistStuckTime": 2,
             "PassingAssistKeepRightDelay": 10, "PassingAssistSettleTime": 20,
             "PassingAssistMaxDistance": 220, "PassingAssistSuspendMinutes": 15}[key]
 
@@ -486,18 +486,18 @@ class TestOneTrigger:
     assert det.suggestion == Side.none
 
   def test_a_gentle_deficit_reaches_just_as_far_as_a_large_one(self):
-    """The reason TTC was removed. At 3 mph under, closing is 1.3 m/s, which a 60 s TTC bound
-    turned into about 80 m -- the gentler the difference, the LATER it noticed. Distance must not
+    """The reason TTC was removed. At 5 mph under, closing is 2.2 m/s, which a 60 s TTC bound
+    turned into about 130 m -- the gentler the difference, the LATER it noticed. Distance must not
     depend on the speed difference at all."""
     MPH = 0.44704
     gentle = PassingAssistDetector()
     steep = PassingAssistDetector()
     for _ in range(int(3.0 / DT_MDL)):
-      gentle.update(make_sm(v_ego=80 * MPH, v_lead=77 * MPH, d_rel=180.,
+      gentle.update(make_sm(v_ego=80 * MPH, v_lead=75 * MPH, d_rel=180.,
                             set_speed=80 * MPH), CRUISE_MS, True)
       steep.update(make_sm(v_ego=80 * MPH, v_lead=50 * MPH, d_rel=180.,
                            set_speed=80 * MPH), CRUISE_MS, True)
-    assert gentle.suggestion == Side.left, "3 mph under at 180 m must still be noticed"
+    assert gentle.suggestion == Side.left, "5 mph under at 180 m must still be noticed"
     assert steep.suggestion == Side.left
 
 
@@ -555,7 +555,7 @@ class _SuspendParams:
     self.minutes = minutes
 
   def get(self, key, block=False, return_default=False):
-    return {"PassingAssistMinDeficit": 2, "PassingAssistStuckTime": 2,
+    return {"PassingAssistMinDeficit": 4, "PassingAssistStuckTime": 2,
             "PassingAssistKeepRightDelay": 10, "PassingAssistSettleTime": 20,
             "PassingAssistMaxDistance": 220, "PassingAssistSuspendMinutes": self.minutes}[key]
 
@@ -641,10 +641,16 @@ class TestSetSpeedIsTheClusterSpeed:
     det = self._drive(80, 65, ego_mph=80, d_rel=150.)
     assert det.suggestion == Side.left, "the exact case that reported nothing slower ahead"
 
-  def test_two_mph_slower_is_enough(self):
-    """"I want to pass a car that is two miles per hour slower than how fast I want to go." """
-    det = self._drive(80, 77.5, ego_mph=78)
+  def test_a_modest_deficit_is_enough(self):
+    """Five mph under, which is the everyday case -- not a dramatically slower vehicle."""
+    det = self._drive(80, 75, ego_mph=76)
     assert det.suggestion == Side.left
+
+  def test_inside_traffic_variation_is_ignored(self):
+    """Two mph is where another car's cruise hunting lives. Above the threshold by default so it
+    does not fire on a car that is not really slower."""
+    det = self._drive(80, 78, ego_mph=79)
+    assert det.suggestion == Side.none
 
   def test_measured_against_the_set_speed_not_our_current_speed(self):
     """Already slowed to the lead's speed: current speed says no deficit, set speed says 15 mph."""
@@ -712,17 +718,17 @@ class TestReferenceSpeedIsTheDriversIntent:
 class TestLookAheadDistance:
   MPH = 0.44704
 
-  def test_three_mph_under_is_enough_at_range(self):
-    """The question asked directly: does 3 mph under trigger a pass, and at a useful distance."""
+  def test_a_deficit_above_the_threshold_reaches_full_distance(self):
+    """The point of dropping TTC: reach must not shrink as the speed difference shrinks."""
     det = PassingAssistDetector()
     for _ in range(int(3.0 / DT_MDL)):
-      det.update(make_sm(v_ego=80 * self.MPH, v_lead=77 * self.MPH, d_rel=200.,
+      det.update(make_sm(v_ego=80 * self.MPH, v_lead=75 * self.MPH, d_rel=200.,
                          set_speed=80 * self.MPH), CRUISE_MS, True)
     assert det.suggestion == Side.left
 
   def test_beyond_the_look_ahead_is_ignored(self):
     det = PassingAssistDetector()
     for _ in range(int(3.0 / DT_MDL)):
-      det.update(make_sm(v_ego=80 * self.MPH, v_lead=77 * self.MPH, d_rel=300.,
+      det.update(make_sm(v_ego=80 * self.MPH, v_lead=75 * self.MPH, d_rel=300.,
                          set_speed=80 * self.MPH), CRUISE_MS, True)
     assert det.suggestion == Side.none
