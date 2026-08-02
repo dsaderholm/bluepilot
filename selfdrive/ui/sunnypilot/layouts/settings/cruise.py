@@ -289,11 +289,37 @@ class CruiseLayout(Widget):
       description=tr("How long you must be held below the set speed before a pass would be "
                      "suggested."),
       param="PassingAssistStuckTime",
-      min_value=5, max_value=90, value_change_step=5,
+      min_value=3, max_value=60, value_change_step=1,
       inline=True)
 
     # BluePilot: the mirror of the pass suggestion. Only evaluated when no pass is warranted, so
     # it can never fire mid-overtake.
+    self.passing_assist_preemptive = toggle_item_sp(
+      title=tr("Pass Before Slowing Down"),
+      description=tr("Decide to pass while still catching up to a slower vehicle, before Ford ACC "
+                     "starts braking for it. The car measures the closing speed exactly rather "
+                     "than estimating it, so it can commit earlier than you would by eye. Avoids "
+                     "the brake-then-accelerate cycle that costs fuel on a pass you were always "
+                     "going to make."),
+      param="PassingAssistPreemptive")
+
+    self.passing_assist_approach_ttc = option_item_sp(
+      title=tr("Pass Before Slowing: Lead Time (0.1s)"),
+      description=tr("How long before reaching the slower vehicle the pass is suggested. Higher "
+                     "decides earlier and is more likely to beat ACC's braking; lower waits until "
+                     "you are closer."),
+      param="PassingAssistApproachTtc",
+      min_value=30, max_value=200, value_change_step=5,
+      inline=True)
+
+    self.passing_assist_settle_time = option_item_sp(
+      title=tr("Settle Time After Passing (s)"),
+      description=tr("How long after suggesting a pass before suggesting a return. Stops a slow "
+                     "left lane on a three-lane road turning into a weave."),
+      param="PassingAssistSettleTime",
+      min_value=5, max_value=90, value_change_step=5,
+      inline=True)
+
     self.passing_assist_keep_right = toggle_item_sp(
       title=tr("Keep Right Except To Pass"),
       description=tr("Also record when you could return to a lane on your right because nothing "
@@ -417,6 +443,9 @@ class CruiseLayout(Widget):
       self.passing_assist_toggle,
       self.passing_assist_min_deficit,
       self.passing_assist_stuck_time,
+      self.passing_assist_preemptive,
+      self.passing_assist_approach_ttc,
+      self.passing_assist_settle_time,
       self.passing_assist_keep_right,
       self.passing_assist_keep_right_delay,
 

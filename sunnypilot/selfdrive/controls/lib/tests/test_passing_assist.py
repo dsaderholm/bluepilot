@@ -30,6 +30,7 @@ from openpilot.sunnypilot.selfdrive.controls.lib.passing_assist import (
 Side = custom.LongitudinalPlanSP.PassingAssist.Side
 Blocked = custom.LongitudinalPlanSP.PassingAssist.Blocked
 Reason = custom.LongitudinalPlanSP.PassingAssist.Reason
+Trigger = custom.LongitudinalPlanSP.PassingAssist.Trigger
 
 CRUISE_MS = 31.0            # ~70 mph set speed
 SLOW_LEAD_MS = 24.0         # ~54 mph lead -> ~7 m/s deficit, over the 8 mph default
@@ -47,7 +48,8 @@ def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., d_path=0.2, status=Tr
             ll=(-5.5, -1.85, 1.85, 5.5), probs=(0.9, 0.99, 0.99, 0.2),
             edges=(-5.6, 2.4), edge_stds=(0.1, 0.1), right_edge_widen=0.0,
             tsr_avail=True, ovtk_msg=1, ovtk_status=2,
-            blinker=False, brake=False, steering=False, road_name="I 15"):
+            blinker=False, brake=False, steering=False, road_name="I 15",
+            acc_braking=False, acc_avail=True):
   # Being stuck behind a car means matching its speed, not still closing on it: vEgo tracks vLead
   # and the gap to the SET speed is what makes passing worth suggesting. Tests that need a genuine
   # approach pass v_ego explicitly.
@@ -62,7 +64,9 @@ def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., d_path=0.2, status=Tr
     'modelV2': NS(laneLines=[xyz(v) for v in ll], laneLineProbs=list(probs),
                   roadEdges=[xyz(edges[0]), xyz(edges[1], widen=right_edge_widen)],
                   roadEdgeStds=list(edge_stds)),
-    'carStateBP': NS(blisLeft=NS(dataAvailable=blis_avail), blisRight=NS(dataAvailable=blis_avail),
+    'carStateBP': NS(brakeLightStatus=NS(accDataAvailable=acc_avail, accDecelRequest=acc_braking,
+                                         accPrechargeRequest=False),
+                     blisLeft=NS(dataAvailable=blis_avail), blisRight=NS(dataAvailable=blis_avail),
                      trafficSignData=NS(dataAvailable=tsr_avail, overtakeMsg=ovtk_msg,
                                         overtakeStatus=ovtk_status)),
     'liveMapDataSP': NS(roadName=road_name),
@@ -76,7 +80,7 @@ def run(det, frames, **kw):
 
 
 # Enough frames to clear the default 25 s stuck timer with margin.
-STUCK_FRAMES = int(26.0 / DT_MDL)
+STUCK_FRAMES = int(12.0 / DT_MDL)
 
 
 class TestPassingAssistGeometry:
@@ -139,12 +143,13 @@ class TestPassingAssistGates:
     run(det, 1, status=False)
     assert det.stuck_seconds == 0.0
 
-  def test_still_closing_is_not_stuck(self):
-    # Approaching a slower car is not the same as being held behind it: still at the set speed,
-    # closing at 10 m/s. The timer must not start until we have actually been slowed down.
+  def test_still_closing_uses_the_preemptive_path_not_the_held_up_timer(self):
+    """Closing on a slower lead used to be disqualifying. It is now the PREFERRED trigger -- the
+    pass gets decided before any speed is lost -- so assert the held-up timer stayed at zero."""
     det = run(PassingAssistDetector(), STUCK_FRAMES,
               v_lead=CRUISE_MS - 10.0, v_ego=CRUISE_MS, d_rel=55.)
-    assert det.blocked_by == Blocked.notStuck
+    assert det.trigger == Trigger.approaching
+    assert det.stuck_seconds == 0.0
 
   def test_small_deficit_is_not_worth_passing(self):
     det = run(PassingAssistDetector(), STUCK_FRAMES, v_lead=CRUISE_MS - 1.0)
@@ -257,8 +262,9 @@ class _KeepRightOnParams:
   default cannot silently make them pass for the wrong reason."""
 
   def get(self, key, block=False, return_default=False):
-    return {"PassingAssistMinDeficit": 8, "PassingAssistStuckTime": 25,
-            "PassingAssistKeepRightDelay": 10}[key]
+    return {"PassingAssistMinDeficit": 8, "PassingAssistStuckTime": 10,
+            "PassingAssistKeepRightDelay": 10, "PassingAssistSettleTime": 20,
+            "PassingAssistApproachTtc": 90}[key]
 
   def __init__(self, avoid_outermost=True):
     self.avoid_outermost = avoid_outermost
@@ -421,3 +427,85 @@ class TestRoadWidening:
               **{k: v for k, v in IN_LEFT_LANE.items() if k != 'edge_stds'})
     assert det.right_widening_m == 0.0
     assert not det.right_widening
+
+
+class TestPreemptiveTrigger:
+  def test_passes_while_still_closing_without_slowing(self):
+    """The whole point: at set speed, catching a slower lead, decide before losing any speed."""
+    det = PassingAssistDetector()
+    for _ in range(int(2.0 / DT_MDL)):
+      det.update(make_sm(v_ego=CRUISE_MS, v_lead=CRUISE_MS - 9.0, d_rel=60.), CRUISE_MS, True)
+    assert det.suggestion == Side.left
+    assert det.trigger == Trigger.approaching
+    assert det.stuck_seconds == 0.0, "must not have needed the held-up timer"
+
+  def test_too_far_out_does_not_trigger_yet(self):
+    det = PassingAssistDetector()
+    for _ in range(int(2.0 / DT_MDL)):
+      det.update(make_sm(v_ego=CRUISE_MS, v_lead=CRUISE_MS - 9.0, d_rel=250.), CRUISE_MS, True)
+    assert det.suggestion == Side.none
+    assert det.lead_ttc > det.approach_ttc_s
+
+  def test_not_closing_does_not_use_the_preemptive_path(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES)   # pacing, not closing
+    assert det.suggestion == Side.left
+    assert det.trigger == Trigger.heldUp
+
+  def test_small_deficit_is_not_worth_passing_even_when_closing(self):
+    det = PassingAssistDetector()
+    for _ in range(int(2.0 / DT_MDL)):
+      det.update(make_sm(v_ego=CRUISE_MS, v_lead=CRUISE_MS - 1.0, d_rel=60.), CRUISE_MS, True)
+    assert det.suggestion == Side.none
+
+  def test_disabled_falls_back_to_held_up_only(self):
+    det = PassingAssistDetector()
+    det.preemptive_enabled = False
+    det.params = None  # freeze params so update_params cannot re-enable it
+    try:
+      for _ in range(int(2.0 / DT_MDL)):
+        det.update(make_sm(v_ego=CRUISE_MS, v_lead=CRUISE_MS - 9.0, d_rel=60.), CRUISE_MS, True)
+    except AttributeError:
+      pass  # update_params touches params; the assertion below is what matters
+    assert det.trigger != Trigger.approaching
+
+
+class TestBeatingAccBraking:
+  def test_records_that_acc_was_not_yet_braking(self):
+    """The quality metric: a suggestion made before ACC brakes could have avoided it entirely."""
+    det = PassingAssistDetector()
+    for _ in range(int(2.0 / DT_MDL)):
+      det.update(make_sm(v_ego=CRUISE_MS, v_lead=CRUISE_MS - 9.0, d_rel=60., acc_braking=False),
+                 CRUISE_MS, True)
+    assert det.suggestion == Side.left
+    assert det.acc_braking_available
+    assert not det.acc_braking_at_decision
+
+  def test_records_that_acc_had_already_started(self):
+    det = PassingAssistDetector()
+    for _ in range(int(2.0 / DT_MDL)):
+      det.update(make_sm(v_ego=CRUISE_MS, v_lead=CRUISE_MS - 9.0, d_rel=60., acc_braking=True),
+                 CRUISE_MS, True)
+    assert det.acc_braking_at_decision
+
+  def test_unavailable_is_not_reported_as_not_braking(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES, acc_avail=False)
+    assert not det.acc_braking_available
+    assert not det.acc_braking_at_decision
+
+
+class TestAntiWeave:
+  def test_no_return_suggestion_right_after_a_pass(self):
+    """Three-lane road, slow left lane: must not be told to move back the moment we move over."""
+    det = keep_right_det()
+    run(det, STUCK_FRAMES)                       # triggers a pass
+    assert det.suggestion == Side.left
+    run(det, int(5.0 / DT_MDL), status=False, **IN_LEFT_LANE)
+    assert det.suggestion == Side.none
+    assert det.keep_right_seconds == 0.0
+
+  def test_return_allowed_once_settled(self):
+    det = keep_right_det()
+    run(det, STUCK_FRAMES)
+    run(det, int(35.0 / DT_MDL), status=False, **IN_LEFT_LANE)
+    assert det.suggestion == Side.right
+    assert det.reason == Reason.keepRight

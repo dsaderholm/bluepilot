@@ -229,6 +229,11 @@ class LongitudinalPlannerSP:
       dest.source = side.source
     passingAssist.rightWideningM = float(pa.right_widening_m)
     passingAssist.rightWidening = pa.right_widening
+    passingAssist.trigger = pa.trigger
+    passingAssist.leadTtc = float(pa.lead_ttc)
+    passingAssist.approachSeconds = float(pa.approach_seconds)
+    passingAssist.accBrakingAtDecision = pa.acc_braking_at_decision
+    passingAssist.accBrakingAvailable = pa.acc_braking_available
 
     # E2E Alerts
     e2eAlerts = longitudinalPlanSP.e2eAlerts

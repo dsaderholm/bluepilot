@@ -252,7 +252,16 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // How far below the set speed the lead must hold us before it counts as being held back (mph).
     {"PassingAssistMinDeficit", {PERSISTENT | BACKUP, INT, "8"}},
     // How long that must persist before a pass would be suggested (seconds).
-    {"PassingAssistStuckTime", {PERSISTENT | BACKUP, INT, "25"}},
+    {"PassingAssistStuckTime", {PERSISTENT | BACKUP, INT, "10"}},
+    // BluePilot: decide to pass while still CLOSING on a slower lead, before any speed is lost.
+    // On stock Ford ACC this is the difference between passing cleanly and letting ACC brake for a
+    // lead we were always going to go around, then spending fuel recovering the speed.
+    {"PassingAssistPreemptive", {PERSISTENT | BACKUP, BOOL, "1"}},
+    // Time-to-contact at which the preemptive trigger fires, in tenths of a second.
+    {"PassingAssistApproachTtc", {PERSISTENT | BACKUP, INT, "90"}},
+    // Hold-off after suggesting a pass before suggesting the return. Stops a slow left lane on a
+    // three-lane road turning into a weave.
+    {"PassingAssistSettleTime", {PERSISTENT | BACKUP, INT, "20"}},
     // BluePilot: "keep right except to pass". DEFAULT OFF -- modelV2 cannot tell a through lane
     // from an exit-only or merge lane, so the suggestion can mean "take the exit". Left in place
     // because the observer still records what it WOULD have said, which measures how often that

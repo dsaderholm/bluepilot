@@ -360,6 +360,28 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     rightWideningM @25 :Float32;
     rightWidening @26 :Bool;    # exceeded the threshold: treated as a possible exit or merge
 
+    # BluePilot: which situation produced the suggestion.
+    trigger @27 :Trigger;
+    leadTtc @28 :Float32;       # seconds to reach the lead at the current closing rate
+    approachSeconds @29 :Float32;
+
+    # BluePilot: was Ford's ACC already asking for brakes when we decided?
+    #
+    # This is the quality metric for the whole preemptive path, not diagnostics. On stock ACC the
+    # costly sequence is brake-then-accelerate: ACC sheds speed for a lead we were always going to
+    # pass, then has to win it back in the other lane. A suggestion that lands BEFORE
+    # accDecelRequest goes true is one that could have avoided the deceleration entirely; one that
+    # lands after is merely tidying up. Logged so "did we beat ACC" is answerable from a drive
+    # rather than assumed.
+    accBrakingAtDecision @30 :Bool;
+    accBrakingAvailable @31 :Bool;
+
+    enum Trigger {
+      none @0;
+      heldUp @1;      # already behind it and below the set speed -- the reactive case
+      approaching @2; # closing on something slower, not yet slowed -- pass without losing speed
+    }
+
     # BluePilot: traffic closing from behind in the adjacent lane. NO SOURCE EXISTS YET -- every
     # field reports unavailable until one is fitted. It is defined now because the shape of this
     # answer determines the shape of the gate, and retrofitting a gate into a state machine after
