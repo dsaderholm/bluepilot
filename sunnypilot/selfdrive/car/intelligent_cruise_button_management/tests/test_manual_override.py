@@ -16,6 +16,7 @@ The tests that matter are the ones with something MOVING: a static target passes
 version of this logic, which is why both defects shipped.
 """
 
+import pytest
 from types import SimpleNamespace as NS
 
 from cereal import car, custom
@@ -138,11 +139,28 @@ class TestFeaturesKeepWorkingUnderBaseline:
     assert icbm.v_target == 40
 
   def test_returns_to_the_baseline_after_the_curve(self):
+    """The cluster must be driven BY ICBM here, not teleported.
+
+    Baseline adoption credits any cluster movement ICBM did not command to the driver, which is
+    correct on a real car -- the set speed only moves because a human pressed or ICBM asked. A
+    harness that jumps the cluster 30 mph in one frame is indistinguishable from a press, and
+    would have the curve silently become the new baseline.
+    """
     icbm = fresh()
     set_baseline(icbm)
-    settle(icbm, 40, cluster=40, source=PlanSource.sccVision)
-    settle(icbm, LIMIT, cluster=40)  # curve ends, SLA back in charge
-    assert icbm.v_target == DRIVER, "returned to the SLA target instead of the driver's speed"
+    cluster = DRIVER
+    for _ in range(400):                       # into the curve, ICBM drives the set speed down
+      icbm.run(make_cs(cluster), CC, make_lp(40, source=PlanSource.sccVision), False)
+      if icbm.cruise_button == SendButtonState.decrease:
+        cluster -= 1
+    assert cluster == 40, f"curve slowing stalled at {cluster}"
+    assert icbm.v_baseline == DRIVER, "curve decel was mistaken for a driver press"
+
+    for _ in range(600):                       # curve ends, SLA back in charge at 55
+      icbm.run(make_cs(cluster), CC, make_lp(LIMIT), False)
+      if icbm.cruise_button == SendButtonState.increase:
+        cluster += 1
+    assert cluster == DRIVER, f"returned to {cluster}, not the driver's {DRIVER}"
 
   def test_hazard_still_commands_under_a_baseline(self):
     icbm = fresh()
@@ -262,3 +280,54 @@ class TestTargetRiseLimit:
     icbm.run(make_cs(self.CRUISE), CC,
              make_lp(self.CRUISE, UnconfirmedLeadState.active, 20.0), False)
     assert icbm.v_target == 20, "rise limiter interfered with a hazard decel"
+
+
+class TestBaselineSurvivesClusterLag:
+  """cruiseState.speedCluster lags the button, and that lag broke the first two fixes.
+
+  On a real car the release ButtonEvent arrives BEFORE the cluster reports the new set speed.
+  Freezing the baseline when the button timer clears therefore captured the speed the driver was
+  leaving, and ICBM drove straight back to it -- reported from a drive as "it still minuses my
+  speed down when I try to increase it with the plus".
+
+  Every case here is a single tap. The parameter is how many frames after the press the cluster
+  catches up; the release lands at frame 3, so anything >= 3 is the broken window.
+  """
+
+  LIMIT = 55
+
+  def _tap(self, cluster_lag, press_len=3, frames=300):
+    icbm = fresh(max_rise=5, max_drop=8)
+    for _ in range(120):                       # cruising a while first, as on a real drive
+      icbm.run(make_cs(self.LIMIT), CC, make_lp(self.LIMIT), False)
+    cluster = self.LIMIT
+    for f in range(frames):
+      btn = (ACCEL_PRESS,) if f == 0 else ((ACCEL_RELEASE,) if f == press_len else ())
+      if f == cluster_lag:
+        cluster += 1                           # the car finally reports the new set speed
+      icbm.run(make_cs(cluster, buttons=btn), CC, make_lp(self.LIMIT), False)
+      if icbm.cruise_button == SendButtonState.decrease:
+        cluster -= 1
+      elif icbm.cruise_button == SendButtonState.increase:
+        cluster += 1
+    return icbm, cluster
+
+  @pytest.mark.parametrize("lag", [1, 2, 3, 4, 6, 10, 20])
+  def test_single_tap_is_not_dragged_back(self, lag):
+    icbm, cluster = self._tap(lag)
+    assert cluster == self.LIMIT + 1, f"tap undone (cluster lag {lag} frames)"
+    assert icbm.v_baseline == self.LIMIT + 1
+
+  def test_icbm_does_not_adopt_its_own_commanded_change(self):
+    """The mirror risk: if ICBM credited its own decel to the driver, a curve would silently
+    become the new baseline and the set speed would never come back."""
+    icbm = fresh(max_rise=0, max_drop=0)
+    set_baseline(icbm)
+    assert icbm.v_baseline == DRIVER
+    cluster = DRIVER
+    for _ in range(300):                       # a curve ICBM slows for, no driver input at all
+      icbm.run(make_cs(cluster), CC, make_lp(40, source=PlanSource.sccVision), False)
+      if icbm.cruise_button == SendButtonState.decrease:
+        cluster -= 1
+    assert cluster < DRIVER, "curve never slowed the car"
+    assert icbm.v_baseline == DRIVER, "ICBM adopted its own curve decel as the driver's baseline"

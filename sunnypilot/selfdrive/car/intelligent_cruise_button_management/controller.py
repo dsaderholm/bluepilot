@@ -53,6 +53,9 @@ BASELINE_SOURCES = (LongitudinalPlanSource.cruise, LongitudinalPlanSource.speedL
 # How far the posted limit must move before the baseline is discarded and SLA takes over again.
 # Fallback only; the live value comes from IcbmBaselineResetDelta.
 DEFAULT_BASELINE_RESET_DELTA = 10  # display units (mph/kph)
+# How long ICBM must have sent nothing before a cluster movement is credited to the driver.
+# Guards against reading the tail of ICBM's own commanded change as a fresh press.
+BASELINE_ADOPT_IDLE_FRAMES = 10  # ~0.1 s at 100 Hz
 
 # BluePilot: target-drop rate limiting. Ford's stock ACC brakes aggressively when the set speed
 # falls by roughly 10 mph or more at once, but coasts for smaller drops. Capping each step below
@@ -105,6 +108,8 @@ class IntelligentCruiseButtonManagement:
     self.v_target_raw = 0
     self.plan_source = LongitudinalPlanSource.cruise
     self.baseline_reset_delta = DEFAULT_BASELINE_RESET_DELTA
+    self.v_cruise_cluster_prev = 0
+    self.icbm_idle_frames = 0
     self.cruise_enabled_prev = False
     self.v_target_valid = False
 
@@ -375,9 +380,22 @@ class IntelligentCruiseButtonManagement:
     if self.override_state != OverrideState.manual:
       return
 
-    # Keep tracking while the press is still in flight -- the cluster lags the button by a few
-    # frames, so freezing on the first frame after the event would record a stale speed.
-    if any(self.cruise_button_timers[k] > 0 for k in self.cruise_button_timers):
+    # Adopt any cluster movement ICBM did not command.
+    #
+    # This is the whole ballgame, and getting it wrong is what made the first two attempts fail on
+    # the road. cruiseState.speedCluster LAGS the button: the release event arrives before the
+    # cluster reflects the new set speed. Freezing the baseline when the button timer clears
+    # therefore records the speed the driver was leaving, not the one they chose -- and ICBM then
+    # drives straight back to it. Reproduced: with the cluster updating 3+ frames after release, a
+    # single tap from 55 to 56 was pulled back to 55 every time.
+    #
+    # So do not key off the button at all. If the set speed moved and ICBM was not the one moving
+    # it, a human was, whatever the timers say. That covers taps, holds, lag and repeat presses
+    # with one rule. The idle requirement keeps the tail of ICBM's own commanded change from being
+    # read as a fresh press; a curve is safe regardless, since the cluster stops moving once ICBM
+    # reaches its target and an unmoved cluster is never adopted.
+    if (self.v_cruise_cluster != self.v_cruise_cluster_prev
+        and self.icbm_idle_frames >= BASELINE_ADOPT_IDLE_FRAMES):
       self.v_baseline = self.v_cruise_cluster
       return
 
@@ -409,6 +427,13 @@ class IntelligentCruiseButtonManagement:
     self.update_params()
     self.update_calculations(CS, LP_SP)
     self.update_readiness(CS, CC)
+
+    # BluePilot: how long ICBM has gone without commanding anything, counted unconditionally --
+    # not only while a baseline is held, or it would read 0 at the exact moment a fresh press
+    # needs it. self.cruise_button is still last frame's value here, which is the one that would
+    # have caused any cluster movement visible now.
+    self.icbm_idle_frames = 0 if self.cruise_button != SendButtonState.none else self.icbm_idle_frames + 1
+
     self.update_manual_override(CS)
 
     # BluePilot: the state machine runs unconditionally. A baseline changes WHAT ICBM aims for,
@@ -420,5 +445,6 @@ class IntelligentCruiseButtonManagement:
     # lead already owns v_target outright further up, and the driver's number cannot suppress it.
     self.cruise_button = self.update_state_machine()
     self.is_ready_prev = self.is_ready
+    self.v_cruise_cluster_prev = self.v_cruise_cluster
 
     self.frame += 1
