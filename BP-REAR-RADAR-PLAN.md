@@ -1440,3 +1440,81 @@ The practical consequence is the design rule this project has followed throughou
 remains responsible, so the system must never present a guess as a check. That is why an
 unavailable sensor reports *unavailable* rather than *clear*, and why the onroad panel names which
 gate stopped a suggestion.
+
+---
+
+## 11. Hands-off lane changes: the level, and what actually stands in the way
+
+Added 2026-08-03. The goal stated: the car does the whole manoeuvre, driver watches but does not
+touch anything.
+
+### It is still Level 2, and there is a production car doing exactly this
+
+**GM Super Cruise performs automatic lane changes with no driver input at all, and is SAE Level 2.**
+That is the direct precedent — not an analogy.
+
+Level 2 does not require the driver to *initiate* anything. It requires the driver to *supervise*
+and to remain the fallback for object-and-event detection. A system that decides and executes a
+lane change while the driver watches is squarely Level 2. Tesla's Autopilot with confirmation
+disabled is the same.
+
+What would make it Level 3 is the system taking over the *watching* — the driver no longer being
+the backup. Nothing here does that, openpilot enforces the opposite through driver monitoring, and
+the stated intention is to keep paying attention and checking mirrors. So: Level 2, with or without
+the rear radar, with or without hands-off lane changes.
+
+### The blinker test proved more than it was designed to
+
+`blinker_test_ext.py` asked one question: does writing `TurnLghtSwtch_D_Stat` into the
+`Steering_Data_FD1` frame openpilot already transmits actually light the lamp? **Confirmed working
+on this car by the owner.** So openpilot *can* signal — no canbox, no extra hardware, no MS-CAN.
+
+That is a bigger result than a bench test. It means the turn signal can be both the outward
+indication to other drivers *and* the trigger for the existing lane-change machinery.
+
+### The one thing genuinely in the way, and it is not the SAE level
+
+From the module's own docstring:
+
+> openpilot cannot self-receive its own transmissions -- panda returns them at bus | 0x80 and the
+> parser drops them -- so commanding the signal would NOT feed back through carState.
+
+`desire_helper` keys the entire lane-change state machine off `carState.leftBlinker/rightBlinker`,
+which is decoded from **the SCCM's** copy of that frame. Command the signal and the lamp lights,
+but `carState.leftBlinker` still reports the driver's stalk, which is off. The state machine never
+starts.
+
+So the missing piece is not hardware and not permission. It is that `desire_helper` must accept a
+lane-change request from somewhere other than the driver's stalk. That is a fork change to code
+already owned, and it needs **no panda change** — `Steering_Data_FD1` is already in
+`FORD_COMMON_TX_MSGS`, and the steering commands a lane change uses are the ones openpilot already
+sends.
+
+### The shape of the full implementation
+
+1. Passing assist decides a side is clear — with the rear radar now answering "is something
+   closing", which is the gate that does not exist today.
+2. Command the turn signal via `Steering_Data_FD1`. Proven.
+3. Feed `desire_helper` the request directly, rather than waiting for a stalk that will never move.
+4. `AutoLaneChangeController` runs the manoeuvre on its existing nudgeless timer.
+5. Cancel the signal when the state machine completes.
+
+Every piece except step 3 already exists and is tested.
+
+### What changes about the design once it actuates
+
+This is the escalation the whole project has been building toward, and it inverts one assumption
+that has held throughout: **an advisory system that is wrong costs a glance; an actuating system
+that is wrong moves the car.**
+
+Consequences already anticipated in the code, which is why they were built early:
+
+- `RearApproach` reporting `available=False` rather than "clear" stops being a logging nicety and
+  becomes the thing that prevents a lane change into a car it cannot see.
+- The per-side oncoming veto stops being an annoyance-reducer and becomes a safety gate.
+- `blockedBy` naming the binding gate stops being a debugging aid and becomes the driver's only
+  window into why the car did or did not act.
+
+None of that needs redesigning. It was built this way on purpose. But phase 2 should not begin
+before the rear sensor is fitted and its logs have been reviewed against real drives — the ordering
+in §0 stands.
