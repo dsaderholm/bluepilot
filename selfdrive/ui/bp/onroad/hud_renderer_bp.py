@@ -125,10 +125,26 @@ class HudRendererBP(HudRendererSP):
     openpilot is not the longitudinal controller.
     """
     self._acc_state, self._acc_accel, self._icbm_text = "", 0.0, ""
+    sm = ui_state.sm
+
+    # BluePilot: the ICBM line is NOT gated on the brake-status toggle. Whether ICBM is holding
+    # the driver's own set speed or chasing Speed Limit Assist is basic state, not a debug
+    # readout -- and hiding it behind an unrelated toggle meant the driver spent days unable to
+    # see whether an override had taken at all. The ACC accel/coast/brake line below stays behind
+    # the toggle; that one really is diagnostic.
+    try:
+      icbm = sm['selfdriveStateSP'].intelligentCruiseButtonManagement
+      arrow = {1: "+", 2: "-"}.get(icbm.sendButton.raw, "")
+      if icbm.overrideState.raw == 1 and icbm.vBaseline > 0:
+        self._icbm_text = f"{arrow} HOLD {round(icbm.vBaseline)}".strip()
+      elif arrow:
+        self._icbm_text = arrow
+    except Exception:
+      pass
+
     if not self._show_brake_status:
       return
 
-    sm = ui_state.sm
     if sm.valid['carStateBP']:
       try:
         bls = sm['carStateBP'].brakeLightStatus
@@ -148,20 +164,6 @@ class HudRendererBP(HudRendererSP):
       except Exception:
         pass
 
-    try:
-      icbm = sm['selfdriveStateSP'].intelligentCruiseButtonManagement
-      # .raw, not int(). A field read off a live capnp message is a _DynamicEnum, which int()
-      # rejects -- and the enum constants used in tests ARE ints, so this only fails on the car.
-      # .raw is the idiom the rest of the codebase uses for exactly this (see b.type.raw).
-      arrow = {1: "+", 2: "-"}.get(icbm.sendButton.raw, "")
-      # A held baseline is exactly the state that was invisible while ICBM and the driver
-      # disagreed about the set speed, so name the number being held, not just the mode.
-      if icbm.overrideState.raw == 1 and icbm.vBaseline > 0:
-        self._icbm_text = f"{arrow} HOLD {round(icbm.vBaseline)}".strip()
-      elif arrow:
-        self._icbm_text = arrow
-    except Exception:
-      pass
 
   def _render(self, rect: rl.Rectangle) -> None:
     # BluePilot: Draw header gradient at full content width (not offset by confidence ball)
