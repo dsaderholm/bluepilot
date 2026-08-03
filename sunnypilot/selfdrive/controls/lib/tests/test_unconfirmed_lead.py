@@ -66,9 +66,12 @@ class TestUnconfirmedLead:
     assert det.restore_set_speed == CRUISE_MS
 
   def test_radar_acquisition_releases_into_restore(self):
+    # The acquired lead must be MOVING. Ford only follows what it tracks, and its manual puts that
+    # bound at 6 mph -- releasing on a stationary radar return hands the car back to a system that
+    # filters stationary returns out, and ACC then accelerates toward it.
     det, ev = UnconfirmedLeadDetector(), FakeEvents()
     run(det, ev, 60, d_rel=lambda i: 100. - i * 0.5)
-    det.update(make_sm(d_rel=70., radar=True), TRAJ, CRUISE_MS, True, ev)
+    det.update(make_sm(d_rel=70., radar=True, v_rel=-5.), TRAJ, CRUISE_MS, True, ev)
     assert det.state == State.restoring, "radar taking over is the expected good outcome"
     det.update(make_sm(), TRAJ, CRUISE_MS, True, ev)
     assert det.state == State.inactive
@@ -97,10 +100,37 @@ class TestUnconfirmedLead:
     run(det, ev, 15, status=False, should_stop=False)
     assert det.state in (State.restoring, State.inactive)
 
-  def test_radar_confirmed_lead_suppresses_model_stop(self):
-    # Ford ACC already handles anything the radar can see; nothing to add.
+  def test_radar_confirmed_moving_lead_suppresses_model_stop(self):
+    # Ford ACC handles what it actually tracks, so there is nothing to add -- but only while the
+    # lead is moving fast enough for Ford to track it.
     det, ev = UnconfirmedLeadDetector(), FakeEvents()
-    run(det, ev, 60, status=True, radar=True, should_stop=True, accel=-2.)
+    run(det, ev, 60, status=True, radar=True, v_rel=-5., should_stop=True, accel=-2.)
+    assert det.state == State.inactive
+
+
+class TestFordDoesNotTrackStationaryReturns:
+  """openpilot reads the Delphi MRR's raw detections with no stationary rejection, so a stopped
+  car arrives here as a radar-confirmed lead. Ford's ACC consumes the same sensor but filters
+  zero-Doppler returns -- its manual says ACC "may not detect stationary or slow moving vehicles
+  below 6 mph (10 km/h)". Treating radar confirmation as "Ford has it" disabled this feature in
+  exactly the case it exists for: the stopped car it will otherwise drive into."""
+
+  def test_stopped_radar_confirmed_lead_still_triggers(self):
+    det, ev = UnconfirmedLeadDetector(), FakeEvents()
+    run(det, ev, 60, radar=True, d_rel=lambda i: 100. - i * 0.5)
+    assert det.state == State.active, "a stopped lead was ignored because radar could see it"
+    assert det.trigger == Trigger.visionLead
+
+  def test_stopped_radar_return_does_not_release_an_active_trigger(self):
+    det, ev = UnconfirmedLeadDetector(), FakeEvents()
+    run(det, ev, 60, d_rel=lambda i: 100. - i * 0.5)
+    assert det.state == State.active
+    det.update(make_sm(d_rel=70., radar=True), TRAJ, CRUISE_MS, True, ev)
+    assert det.state == State.active, "released to Ford for a lead Ford is not tracking"
+
+  def test_a_moving_radar_lead_is_still_left_to_ford(self):
+    det, ev = UnconfirmedLeadDetector(), FakeEvents()
+    run(det, ev, 60, radar=True, v_rel=-5., d_rel=lambda i: 100. - i * 0.5)
     assert det.state == State.inactive
 
   def test_speed_gate_blocks_low_speed_trigger(self):

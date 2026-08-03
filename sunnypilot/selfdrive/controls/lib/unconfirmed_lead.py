@@ -69,6 +69,10 @@ MIN_RANGE_SWEEP_M = 15.0
 # nothing can trigger beyond ~116 m no matter how obvious the target is.
 STOPPED_LEAD_SPEED_MS = 1.5        # |v_ego + vRel| below this is stopped, not slow
 STOPPED_LEAD_PERSISTENCE_S = 0.3   # enough to reject a single bad model frame, not much more
+# Ford's own stated limit: ACC "may not detect stationary or slow moving vehicles below 6 mph
+# (10 km/h)". Above this, Ford is tracking the lead and this detector must stay out of the way;
+# below it, radar confirmation from openpilot's side means nothing because Ford is not acting on it.
+FORD_ACC_MIN_TRACKED_SPEED_MS = 6 * CV.MPH_TO_MS
 DEFAULT_MAX_TTC_S = 4.0    # fallback; tunable via IcbmLeadMaxTtc (tenths of a second)
 MAX_V_REL_MS = -2.0        # genuinely closing, not sensor noise
 MAX_D_PATH_M = 1.2         # in-path, not an adjacent lane or roadside return
@@ -145,10 +149,31 @@ class UnconfirmedLeadDetector:
     closing = max(-v_rel, 0.1)
     return d_rel / closing
 
+  @staticmethod
+  def _ford_tracks(lead: log.RadarState.LeadData, v_ego: float) -> bool:
+    """Will Ford's ACC actually follow this lead? Not the same question as "does radar see it".
+
+    Conflating the two disabled this feature in precisely the case it exists for. openpilot reads
+    the Delphi MRR's RAW detections (MRR_Detection_001..064), filtered only on validity and
+    minimum range -- there is no stationary rejection anywhere in that path, so a stopped car does
+    produce points, does cluster, and does arrive as a radar-confirmed lead. Ford's ACC module
+    consumes the same sensor but applies its own Doppler filtering, and its manual states plainly
+    that ACC "may not detect stationary or slow moving vehicles below 6 mph (10 km/h)".
+    Suppressing zero-Doppler returns is standard practice: otherwise signs, guardrails and
+    overhead structures trigger phantom braking.
+
+    So radar confirmation only means "hands off" while the lead is moving fast enough for Ford to
+    track it. Below that, Ford is going to drive into it.
+    """
+    return bool(lead.status and lead.radar and
+                abs(v_ego + lead.vRel) > FORD_ACC_MIN_TRACKED_SPEED_MS)
+
   def _candidate(self, lead: log.RadarState.LeadData, v_ego: float, brake_pressed: bool) -> bool:
     """Frame-level gates. Persistence and range sweep are accumulated by the caller."""
-    if not lead.status or lead.radar:
-      return False  # no lead, or radar already confirms it -- Ford ACC handles that case itself
+    if not lead.status:
+      return False
+    if self._ford_tracks(lead, v_ego):
+      return False  # Ford ACC is following this one itself; leave it alone
     if lead.modelProb < MIN_MODEL_PROB:
       return False
     if lead.vRel > MAX_V_REL_MS:
@@ -264,10 +289,12 @@ class UnconfirmedLeadDetector:
 
     # ---- ACTIVE (vision lead): hold the request until something resolves it ----
     if self.state == State.active:
-      radar_acquired = lead.status and lead.radar
-      if radar_acquired:
-        # The good outcome: the deceleration bought a radar detection. Ford ACC owns it now and
-        # can follow to a full stop, which this never could.
+      # The good outcome: the deceleration bought a radar detection Ford will actually follow.
+      # Gated on _ford_tracks, not on lead.radar: releasing because "radar sees it" would hand a
+      # STOPPED object straight back to a system that filters stationary returns out, and ACC
+      # would then accelerate toward it.
+      if self._ford_tracks(lead, v_ego):
+        # Ford ACC owns it now and can follow to a full stop, which this never could.
         self._release()
         return
 
@@ -294,7 +321,8 @@ class UnconfirmedLeadDetector:
     # Evaluated before the lead path so a real lead always takes precedence: if there is something
     # to see, the lead trigger's geometry filters are strictly better evidence than shouldStop.
     if self.model_stop_enabled and not candidate:
-      radar_has_it = lead.status and lead.radar
+      # Same distinction as the lead path: a stationary radar return does not mean Ford is on it.
+      radar_has_it = self._ford_tracks(lead, v_ego)
       model_candidate = (self.model_should_stop and not radar_has_it and
                          v_ego >= MIN_V_EGO_MS and not CS.brakePressed)
       if model_candidate:
