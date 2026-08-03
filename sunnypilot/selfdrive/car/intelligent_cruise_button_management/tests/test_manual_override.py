@@ -612,3 +612,70 @@ class TestResumeDoesNotCreateAHold:
       icbm.run(make_cs(LIMIT, enabled=True), CC, make_lp(LIMIT), False)
     assert icbm.override_state == OverrideState.auto, "resume rebuilt the HOLD it just cleared"
     assert icbm.v_baseline == 0
+
+
+class TestMappingAgnosticFallback:
+  """The press path assumes the driver's button arrives as one of MANUAL_OVERRIDE_BUTTONS. On a car
+  with flashed SCCM firmware that is an assumption. If the set speed moves and ICBM has been silent
+  far longer than any command of its own could take to land, a human moved it -- adopt it."""
+
+  def _drive(self, moves, source=PlanSource.speedLimitAssist, target=LIMIT, frames=900):
+    """moves: {frame: delta} applied to the set speed with NO button event at all."""
+    icbm = fresh(max_rise=5, max_drop=8)
+    cluster = LIMIT
+    for f in range(frames):
+      cluster += moves.get(f, 0)
+      icbm.run(make_cs(cluster), CC, make_lp(target, source=source), False)
+      if f % 5 == 0:
+        if icbm.cruise_button == SendButtonState.decrease:
+          cluster -= 1
+        elif icbm.cruise_button == SendButtonState.increase:
+          cluster += 1
+    return icbm, cluster
+
+  def test_unrecognised_button_still_creates_a_hold(self):
+    """THE POINT. No ButtonEvent ICBM knows about -- only the set speed moving."""
+    icbm, cluster = self._drive({200: +1})
+    assert icbm.override_state == OverrideState.manual, "no hold created without a known button"
+    assert icbm.v_baseline == LIMIT + 1
+    assert cluster == LIMIT + 1, f"set speed was walked back to {cluster}"
+
+  def test_repeated_unrecognised_presses_accumulate(self):
+    icbm, cluster = self._drive({200: +1, 400: +1, 600: +1})
+    assert cluster == LIMIT + 3, f"ended at {cluster}, wanted {LIMIT + 3}"
+    assert icbm.v_baseline == LIMIT + 3
+
+  def test_downward_too(self):
+    icbm, cluster = self._drive({200: -1})
+    assert cluster == LIMIT - 1
+    assert icbm.v_baseline == LIMIT - 1
+
+  def test_a_curve_is_never_adopted(self):
+    """The failure this fallback could reintroduce: ICBM slows for a curve, goes idle at the curve
+    target, and the lowered set speed gets mistaken for the driver. Keyed on MOVEMENT, so once
+    ICBM arrives the set speed stops moving and there is nothing to adopt."""
+    icbm = fresh(max_rise=5, max_drop=8)
+    set_baseline(icbm)
+    cluster = DRIVER
+    for _ in range(1500):                     # ICBM drives the set speed down for a curve
+      icbm.run(make_cs(cluster), CC, make_lp(40, source=PlanSource.sccVision), False)
+      if icbm.cruise_button == SendButtonState.decrease:
+        cluster -= 1
+    assert cluster <= 41, f"curve slowing stalled at {cluster}"
+    assert icbm.v_baseline == DRIVER, f"curve was adopted as the baseline ({icbm.v_baseline})"
+
+  def test_icbm_own_recovery_is_never_adopted(self):
+    """Same risk on the way back up."""
+    icbm = fresh(max_rise=5, max_drop=8)
+    set_baseline(icbm)
+    cluster = DRIVER
+    for _ in range(1500):
+      icbm.run(make_cs(cluster), CC, make_lp(40, source=PlanSource.sccVision), False)
+      if icbm.cruise_button == SendButtonState.decrease:
+        cluster -= 1
+    for _ in range(2500):                     # curve ends, ICBM climbs back to the driver's number
+      icbm.run(make_cs(cluster), CC, make_lp(LIMIT), False)
+      if icbm.cruise_button == SendButtonState.increase:
+        cluster += 1
+    assert icbm.v_baseline == DRIVER, f"recovery was adopted ({icbm.v_baseline})"
+    assert cluster == DRIVER, f"did not return to the driver's number ({cluster})"

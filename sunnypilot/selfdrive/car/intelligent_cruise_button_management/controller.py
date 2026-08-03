@@ -72,6 +72,23 @@ DEFAULT_BASELINE_RESET_DELTA = 10  # display units (mph/kph)
 # downstream then treated the override as never having happened.
 PRESS_SETTLE_STABLE_FRAMES = 40   # cluster unchanged this long => the driver has finished
 PRESS_SETTLE_MAX_FRAMES = 600     # 6 s hard cap, so a stuck cluster cannot suspend ICBM forever
+# BluePilot: last-resort fallback -- adopt set-speed movement ICBM did not command, whatever button
+# produced it. The press path above is primary; this exists because it depends on the driver's
+# button arriving as one of MANUAL_OVERRIDE_BUTTONS, and on a car with flashed SCCM firmware that
+# is an assumption, not a fact. If the set speed moved and ICBM has been silent for well longer
+# than any command of its own could take to land, a human moved it.
+#
+# Keyed on MOVEMENT, never on difference: after ICBM reaches a curve target the set speed differs
+# from the baseline but has stopped moving, so the curve is never adopted. And never on direction,
+# which broke when ICBM reversed with an older opposite command still in flight. ICBM emits at
+# 20 Hz while acting, so an idle run this long cannot overlap its own activity.
+#
+# 90 frames, not 30. This car's set speed was measured lagging a button press by well over 60
+# frames, and ICBM's own commands land on the same slow path -- a 30-frame threshold would let a
+# late-arriving command of its own be credited to the driver, recreating the curve-adoption bug
+# this rule is written to avoid. The cost of being generous is only that the fallback fires a
+# little later; the cost of being tight is a wrong baseline.
+ADOPT_IDLE_FRAMES = 90  # 0.9 s at 100 Hz, comfortably past this car's observed set-speed lag
 # BluePilot: target-drop rate limiting. Ford's stock ACC brakes aggressively when the set speed
 # falls by roughly 10 mph or more at once, but coasts for smaller drops. Capping each step below
 # that threshold and walking larger drops down over several steps keeps the car coasting.
@@ -406,6 +423,20 @@ class IntelligentCruiseButtonManagement:
       # could never become true while the driver kept pressing.
       if self.press_settle_frames == 0:
         self.v_cluster_at_press = self.v_cruise_cluster
+      self.press_settle_frames = PRESS_SETTLE_MAX_FRAMES
+      self.cluster_stable_frames = 0
+      return
+
+    # Fallback: set speed moved, ICBM has been silent long enough that it cannot be responsible.
+    # Runs before the manual-only guard below so it can CREATE a baseline, not just update one.
+    if (self.v_cruise_cluster != self.v_cruise_cluster_prev
+        and self.icbm_idle_frames >= ADOPT_IDLE_FRAMES):
+      if self.override_state != OverrideState.manual:
+        self.v_target_overridden = self.v_target_raw
+        self.baseline_diverged = False
+        self.v_cluster_at_press = self.v_cruise_cluster_prev
+      self.override_state = OverrideState.manual
+      self.v_baseline = self.v_cruise_cluster
       self.press_settle_frames = PRESS_SETTLE_MAX_FRAMES
       self.cluster_stable_frames = 0
       return
