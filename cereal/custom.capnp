@@ -293,9 +293,12 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
   #
   #   1. How often does the geometry test claim a lane to the left on an UNDIVIDED road, where
   #      that lane is oncoming traffic? The model publishes geometry, not direction of travel, so
-  #      this is the failure mode that decides whether the idea is viable at all. Both the
+  #      this was the failure mode that decided whether the idea was viable at all. Both the
   #      painted-line evidence (lineProb) and the drivable-width evidence (edgeGap) are recorded
   #      separately so they can be compared as discriminators rather than assumed equivalent.
+  #      ANSWERED by the radar rather than by either of them -- see undividedRoad below. These two
+  #      are still logged because the question of which geometry channel discriminates better is
+  #      independently useful, and because the radar veto needs something to be audited against.
   #   2. Does this market's camera populate Traffic_RecognitnData's overtaking fields at all?
   #      Ford documents TSR around Vienna Convention signage; US no-passing zones are a solid
   #      yellow line plus a rectangular MUTCD sign. overtakeRestricted may simply never go true.

@@ -14,12 +14,22 @@ clear, they flick the blinker, and the existing AutoLaneChangeController takes i
 
 The three unknowns
 ------------------
-1. ONCOMING TRAFFIC. This is the one that decides whether the idea survives. modelV2 publishes lane
-   geometry, not direction of travel. On a two-lane undivided road, the lane to the left is
-   oncoming traffic, and it looks exactly like a passing lane to every test below. Map data cannot
-   currently help: LiveMapDataSP carries speed limit fields and roadName, with no `oneway` or
-   `lanes` tag plumbed through mapd. So this phase measures how often the geometry test fires
-   where it must not, and whether either evidence channel discriminates.
+1. ONCOMING TRAFFIC -- ANSWERED, see adjacent_lane.py. This was the one that decided whether the
+   idea survived. modelV2 publishes lane geometry, not direction of travel, so on a two-lane
+   undivided road the lane to the left is oncoming traffic and looks exactly like a passing lane to
+   every geometry test below. Map data could not help and still cannot on this build: mapd v1.12.0
+   ships here and writes no oneway tag and no lane count. (mapd v2 publishes oneWay, lanes and
+   highwayClass on a MapdOut message, which would make this a cross-check rather than the only
+   source, whenever sunnypilot moves to it.)
+
+   The front radar settles it directly. An oncoming vehicle's absolute ground speed is roughly
+   minus its own, which nothing travelling our way and no roadside object can produce, and the
+   lateral band excludes an opposing carriageway across a median for free. The veto is per side and
+   held for a while after the last sighting; the reasoning is all in adjacent_lane.py.
+
+   What is still worth measuring from a drive: how often it fires on a divided road it should not
+   (undividedRoad and oncomingSeen are logged with every decision), and whether 90 s of memory is
+   the right number for the roads actually driven.
 
 2. TSR OVERTAKING. Traffic_RecognitnData carries a latched no-overtaking zone state with its own
    confidence channel. If this market's camera populates it, it is a sound VETO. It is not a
