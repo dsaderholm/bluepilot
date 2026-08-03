@@ -221,6 +221,7 @@ class PassingAssistDetector:
     self.avoid_outermost = False
     self.adjacent_enabled = True
     self.oncoming_veto = True
+    self.strict_two_way = True
     self.oncoming_memory_s = float(DEFAULT_ONCOMING_MEMORY_S)
     self.settle_time_s = float(DEFAULT_SETTLE_TIME_S)
     self.suspend_minutes = 15
@@ -241,6 +242,7 @@ class PassingAssistDetector:
       self.avoid_outermost = self.params.get_bool("PassingAssistAvoidOutermost")
       self.adjacent_enabled = self.params.get_bool("PassingAssistAdjacentLane")
       self.oncoming_veto = self.params.get_bool("PassingAssistOncomingVeto")
+      self.strict_two_way = self.params.get_bool("PassingAssistStrictTwoWay")
       self.oncoming_memory_s = float(self.params.get("PassingAssistOncomingMemory", return_default=True))
       self.settle_time_s = float(self.params.get("PassingAssistSettleTime", return_default=True))
       self.suspend_minutes = self.params.get("PassingAssistSuspendMinutes", return_default=True)
@@ -553,7 +555,8 @@ class PassingAssistDetector:
     # frames where nothing is suggested too -- that is how the band and the debounce get fitted.
     if self.adjacent_enabled:
       self.adjacent.update(sm, float(CS.vEgo), self.max_distance_m,
-                           dt=DT_MDL, memory_s=self.oncoming_memory_s)
+                           dt=DT_MDL, memory_s=self.oncoming_memory_s,
+                           strict=self.strict_two_way)
     else:
       self.adjacent.reset()
     self._blindspot(car_state_bp)

@@ -445,6 +445,17 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       oncoming @6 :Bool;
       oncomingDRel @7 :Float32;
       oncomingVAbs @8 :Float32;   # negative: its ground speed is towards us
+      # The two facts that decide whether this side is refused, logged because they are what a
+      # disputed decision comes down to and neither is visible from the road.
+      #
+      # oncomingAdjacent means opposing traffic was seen in the lane RIGHT NEXT to us -- that lane
+      # is theirs and no setting overrides it. Without it, an oncoming sighting further out only
+      # says the ROAD is two-way; whether the next lane over is a turn lane or a travel lane is
+      # then decided by sameDirectionRecent, because a centre turn lane and an ordinary passing
+      # lane are geometrically identical (a lane at 3.7 m, opposing traffic at 7.9 m, our own road
+      # edge beyond both) and nothing in the sensors separates them.
+      oncomingAdjacent @9 :Bool;
+      sameDirectionRecent @10 :Bool;
     }
 
     enum ReferenceSource {

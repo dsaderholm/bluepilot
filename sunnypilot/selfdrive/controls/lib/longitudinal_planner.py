@@ -252,6 +252,8 @@ class LongitudinalPlannerSP:
       dest.oncoming = side.oncoming
       dest.oncomingDRel = float(side.oncoming_d_rel)
       dest.oncomingVAbs = float(side.oncoming_v_abs)
+      dest.oncomingAdjacent = side.oncoming_adjacent_seconds > 0.0
+      dest.sameDirectionRecent = side.same_direction_recent
     passingAssist.undividedRoad = pa.adjacent.undivided
     passingAssist.undividedSeconds = float(pa.adjacent.undivided_seconds)
     passingAssist.oncomingSeen = pa.adjacent.oncoming_seen

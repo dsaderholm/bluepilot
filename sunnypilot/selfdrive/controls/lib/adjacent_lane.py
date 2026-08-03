@@ -117,6 +117,21 @@ MIN_MOVING_MS = 5.0
 # it is already fitted.
 MIN_ONCOMING_MS = 5.0
 
+# How far out to LOOK for oncoming traffic. Deliberately much wider than the adjacent-lane band,
+# and the reason is the centre turn lane.
+#
+# Bounding oncoming detection to the adjacent band assumed the opposing lane is the one next to us.
+# It is on a two-lane road. It is not on any road with a two-way left-turn lane down the middle,
+# which is most American arterials: from the single through lane of a 1 + TWLTL + 1 road the turn
+# lane sits at 3.7 m and opposing traffic at 7.4 m -- outside a 5.5 m band, so no oncoming was ever
+# detected, no veto ever fired, and the geometry test happily offered a pass INTO THE TURN LANE.
+# Add a lane each way and it is 11 m. The band was measuring the wrong thing entirely.
+#
+# The road edge is what bounds this properly (see _on_our_carriageway); this is only a sanity limit
+# for radar lateral error at range. 15 m reaches across four lanes, which covers any undivided road
+# worth passing on.
+ONCOMING_MAX_M = 15.0
+
 # How long a single sighting keeps the road classified as undivided.
 #
 # Long, and deliberately so. Meeting a car is EVIDENCE about the road, not an event to react to:
@@ -233,12 +248,31 @@ class AdjacentLaneSide:
     self.oncoming = False        # something on this side is travelling the other way, right now
     self.oncoming_d_rel = 0.0
     self.oncoming_v_abs = NO_SPEED
-    # Seconds of "this SIDE carries opposing traffic" left on the clock. Per side, not per road,
-    # and that is what lets the feature keep working on a four-lane undivided arterial: sitting in
-    # the left lane there, the oncoming lane is one over on the LEFT and the through lane is one
-    # over on the RIGHT. A whole-road veto would give up on both; this gives up only on the side
-    # the traffic is actually on.
+    # Three latches, because three different facts decide whether this side is usable and they
+    # expire independently.
+    #
+    #   oncoming_seconds           opposing traffic somewhere on our road, this side. Says the road
+    #                              is two-way. Does NOT by itself say the next lane is theirs.
+    #   oncoming_adjacent_seconds  opposing traffic in the lane RIGHT NEXT to us. That lane is
+    #                              theirs, full stop -- the two-lane-road case.
+    #   same_direction_seconds     a vehicle in the next lane over travelling OUR way. Positive
+    #                              proof that lane is a travel lane and not a turn lane.
+    #
+    # The third exists because two very common roads are geometrically identical and mean opposite
+    # things. From the right lane of a four-lane undivided road, and from the left lane of a
+    # 2 + TWLTL + 2 arterial, the picture is the same: a lane at 3.7 m and opposing traffic at
+    # 7.4 m. In the first the next lane is an ordinary passing lane. In the second it is a two-way
+    # left-turn lane and moving into it is neither legal nor survivable as a passing manoeuvre.
+    # Nothing in the geometry separates them. What separates them is whether anyone has ever driven
+    # down that lane in our direction.
     self.oncoming_seconds = 0.0
+    self.oncoming_adjacent_seconds = 0.0
+    self.same_direction_seconds = 0.0
+    # Set from the param each cycle by AdjacentLane.update. Held as state rather than passed to
+    # blocks_oncoming, so that stays a PROPERTY like RearApproachSide.blocks_lane_change next to it.
+    # As a method it silently passed every `assert not side.blocks_oncoming` in the suite -- a bound
+    # method is truthy, so the negation is always False and the assertion never fired.
+    self.strict = True
     self._raw_occupied = False
     self._streak = 0
 
@@ -250,9 +284,11 @@ class AdjacentLaneSide:
     observation that created it, and it would do so silently, at exactly the moment the display is
     already reporting no data.
     """
-    held_s, held_seen = self.oncoming_seconds, self.oncoming
+    held = (self.oncoming_seconds, self.oncoming_adjacent_seconds, self.same_direction_seconds,
+            self.oncoming, self.strict)
     self.__init__()
-    self.oncoming_seconds, self.oncoming = held_s, held_seen
+    (self.oncoming_seconds, self.oncoming_adjacent_seconds, self.same_direction_seconds,
+     self.oncoming, self.strict) = held
 
   def observe(self, occupied: bool, d_rel: float, y_rel: float, v_rel: float, v_ego: float) -> None:
     """Feed one radar message's raw finding through the debounce."""
@@ -273,29 +309,71 @@ class AdjacentLaneSide:
     elif not self.occupied:
       self.d_rel, self.y_rel, self.v_rel, self.v_abs = 0.0, 0.0, 0.0, NO_SPEED
 
-  def observe_oncoming(self, d_rel: float, v_abs: float, memory_s: float) -> None:
+  def observe_oncoming(self, d_rel: float, v_abs: float, memory_s: float, adjacent: bool) -> None:
     """Record a vehicle travelling the other way on this side. See ONCOMING_FRAMES: no debounce."""
     self.available = True
     self.oncoming = True
     self.oncoming_d_rel = float(d_rel)
     self.oncoming_v_abs = float(v_abs)
     self.oncoming_seconds = float(memory_s)
+    if adjacent:
+      self.oncoming_adjacent_seconds = float(memory_s)
+
+  def observe_same_direction(self, memory_s: float) -> None:
+    """A vehicle in the next lane going our way. The only positive evidence that lane is drivable."""
+    self.same_direction_seconds = float(memory_s)
 
   def clear_oncoming(self) -> None:
     self.oncoming = False
 
   def decay_oncoming(self, dt: float) -> None:
     self.oncoming_seconds = max(0.0, self.oncoming_seconds - dt)
+    self.oncoming_adjacent_seconds = max(0.0, self.oncoming_adjacent_seconds - dt)
+    self.same_direction_seconds = max(0.0, self.same_direction_seconds - dt)
+
+  @property
+  def same_direction_recent(self) -> bool:
+    return self.same_direction_seconds > 0.0
 
   @property
   def blocks_oncoming(self) -> bool:
-    """Is this side the one they are driving on?
+    """Is the lane next to us one we must not move into?
 
-    Held rather than instantaneous: meeting a car is evidence about the road, not an event. The
-    seconds after it has gone by are exactly when the lane looks most invitingly empty and is most
-    certainly still theirs.
+    Two ways to be true, and they are not the same claim:
+
+    1. Opposing traffic has been seen IN that lane. It is theirs. Nothing overrides this -- not even
+       having also seen a car going our way there, which on a two-lane road just means somebody was
+       overtaking us.
+
+    2. The road is two-way, and we have no evidence the next lane is a travel lane. This is the
+       centre-turn-lane case. From the left lane of a 2 + TWLTL + 2 arterial the turn lane is at
+       3.7 m and opposing traffic at 7.4 m; from the right lane of a plain four-lane undivided road
+       an ordinary passing lane is at 3.7 m and opposing traffic at 7.4 m. Identical geometry,
+       opposite meanings. The only thing that tells them apart is whether anyone has driven down
+       that lane in our direction, so absence of that evidence is treated as "assume turn lane".
+
+    Held rather than instantaneous throughout: meeting a car is evidence about the road, not an
+    event. The seconds after it has gone by are exactly when the lane looks most invitingly empty
+    and is most certainly still not ours.
+
+    `self.strict` decides case 2 only, and it is a genuine trade rather than a safety dial, which
+    is why it is the driver's to make:
+
+      strict   Utah's 2+1 highways lose their passing lanes until someone drives down one. US-6 and
+               US-89 have long alternating passing-lane sections and they are often empty, which is
+               exactly when a pass is wanted.
+      lenient  a 1 + TWLTL + 1 arterial can offer a pass into the turn lane, until an oncoming car
+               happens to use that lane to turn -- which does eventually happen, and then case 1
+               latches and it stops.
+
+    Case 1 is unaffected by the flag. Opposing traffic seen IN the next lane is not a judgement
+    call.
     """
-    return self.oncoming_seconds > 0.0
+    if self.oncoming_adjacent_seconds > 0.0:
+      return True
+    if not self.strict:
+      return False
+    return self.oncoming_seconds > 0.0 and not self.same_direction_recent
 
   def blocks_move(self, beat_speed: float, margin: float) -> bool:
     """Would moving into this lane actually gain anything?
@@ -333,9 +411,10 @@ class AdjacentLane:
 
   @property
   def undivided(self) -> bool:
-    """Either side is carrying opposing traffic. For the log and the display; the GATE is per
-    side, because a road being two-way does not make both sides of it unusable."""
-    return self.left.blocks_oncoming or self.right.blocks_oncoming
+    """The road has opposing traffic on it. For the log and the display; the GATE is per side and
+    goes through blocks_oncoming(), because a road being two-way does not make both sides of it
+    unusable and the middle-lane case is a judgement call the driver owns."""
+    return self.left.oncoming_seconds > 0.0 or self.right.oncoming_seconds > 0.0
 
   @property
   def undivided_seconds(self) -> float:
@@ -369,7 +448,7 @@ class AdjacentLane:
     return lat > edge_lat if side == 'left' else lat < edge_lat
 
   def update(self, sm, v_ego: float, max_distance_m: float, dt: float = 0.05,
-             memory_s: float = DEFAULT_ONCOMING_MEMORY_S) -> None:
+             memory_s: float = DEFAULT_ONCOMING_MEMORY_S, strict: bool = True) -> None:
     """Scan liveTracks for the nearest vehicle in each adjacent lane.
 
     Nearest by dRel, because that is the one we would meet first. Anything beyond the passing
@@ -383,6 +462,7 @@ class AdjacentLane:
     # Runs before every early return below. A dead radar does not make a two-way road one-way, and
     # a cycle with no new message is not evidence of anything -- so the clock is wall time, not
     # radar time, and nothing except its own expiry clears it.
+    self.left.strict = self.right.strict = strict
     self.left.decay_oncoming(dt)
     self.right.decay_oncoming(dt)
 
@@ -410,27 +490,43 @@ class AdjacentLane:
       # offset-from-the-lane rather than offset-from-straight-ahead. See path_offset: skipping
       # this puts our own lead in the next lane on every curve.
       lat = -p.yRel - path_offset(model, p.dRel)
-      if not (ADJACENT_MIN_M <= abs(lat) <= ADJACENT_MAX_M):
+      abs_lat = abs(lat)
+      # Our own lane. Nothing here is about a lane change.
+      if abs_lat < ADJACENT_MIN_M:
+        continue
+      # Beyond any road we would consider passing on, and beyond what the radar's lateral estimate
+      # is worth at range.
+      if abs_lat > ONCOMING_MAX_M:
         continue
       # Camera frame now: negative is left.
       side = 'left' if lat < 0 else 'right'
+      obj = self.left if side == 'left' else self.right
+      adjacent = abs_lat <= ADJACENT_MAX_M
 
-      # Three kinds of thing live in that band, and the sign of the absolute ground speed is what
-      # separates them. Order matters: oncoming is checked FIRST, because it is the only one of the
-      # three that is a safety fact rather than a convenience one.
+      # The sign of absolute ground speed sorts everything out here. Oncoming is checked FIRST,
+      # because it is the only one of the three that is a safety fact rather than a convenience one.
       v_abs = v_ego + p.vRel
-      if v_abs < -MIN_ONCOMING_MS and self._on_our_carriageway(model, side, lat, p.dRel):
-        # Travelling the other way. The lane to our left is not a passing lane -- it is the one
-        # they are using. Note the band does the discriminating for free on a divided road: an
-        # opposing carriageway sits 10 m or more away, well outside it, so a highway with a real
-        # median never trips this while a two-lane road trips it on the first car we meet.
-        (self.left if side == 'left' else self.right).observe_oncoming(p.dRel, v_abs, memory_s)
-        self.oncoming_seen = True
+
+      if v_abs < -MIN_ONCOMING_MS:
+        # Travelling the other way. Looked for across the FULL width of our road, not just the next
+        # lane -- on anything with a centre turn lane the opposing traffic is two lanes out, and
+        # bounding this to the adjacent band meant those roads produced no veto at all.
+        if self._on_our_carriageway(model, side, lat, p.dRel):
+          obj.observe_oncoming(p.dRel, v_abs, memory_s, adjacent)
+          self.oncoming_seen = True
         continue
+
       # Roadside furniture, not traffic. See MIN_MOVING_MS -- this radar publishes barriers and
       # sign gantries as ordinary tracks and nothing upstream tells them apart from cars.
       if v_abs < MIN_MOVING_MS:
         continue
+
+      # Same-direction traffic. Beyond the adjacent lane it tells us nothing we act on, but WITHIN
+      # it, it is the only positive evidence that the next lane is a travel lane rather than a
+      # two-way turn lane. See blocks_oncoming: those two are otherwise indistinguishable.
+      if not adjacent:
+        continue
+      obj.observe_same_direction(memory_s)
 
       if best[side] is None or p.dRel < best[side].dRel:
         best[side] = p

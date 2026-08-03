@@ -348,6 +348,16 @@ class CruiseLayout(Widget):
       min_value=15, max_value=600, value_change_step=15,
       inline=True)
 
+    self.passing_assist_strict_two_way = toggle_item_sp(
+      title=tr("Two-Way Roads: Treat Unknown Middle Lanes As Turn Lanes"),
+      description=tr("On a road with oncoming traffic, a centre turn lane and an ordinary passing "
+                     "lane look identical to the sensors. On, the next lane over is assumed to be "
+                     "a turn lane until a vehicle is seen driving down it in your direction, which "
+                     "is safer but quiets passing on two-lane highways with alternating passing "
+                     "lanes such as US-6 and US-89. Off trades that back. Oncoming traffic seen in "
+                     "the next lane blocks a pass either way."),
+      param="PassingAssistStrictTwoWay")
+
     self.passing_assist_keep_right = toggle_item_sp(
       title=tr("Keep Right Except To Pass"),
       description=tr("Also record when you could return to a lane on your right because nothing "
@@ -477,6 +487,7 @@ class CruiseLayout(Widget):
       self.passing_assist_adjacent_lane,
       self.passing_assist_oncoming_veto,
       self.passing_assist_oncoming_memory,
+      self.passing_assist_strict_two_way,
       self.passing_assist_keep_right,
       self.passing_assist_keep_right_delay,
 

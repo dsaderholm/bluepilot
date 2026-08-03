@@ -299,6 +299,16 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // meeting a car is evidence about the ROAD, not an event, and on a quiet two-lane road the
     // gaps between meetings are exactly when a wrong suggestion would look most plausible.
     {"PassingAssistOncomingMemory", {PERSISTENT | BACKUP, INT, "90"}},
+    // BluePilot: on a two-way road, is a middle lane we have no evidence about a turn lane or a
+    // travel lane? They are geometrically identical -- from the left lane of a 2+TWLTL+2 arterial
+    // and from the right lane of a plain four-lane undivided road, the picture is the same: a lane
+    // at 3.7 m and opposing traffic at 7.9 m. Nothing in the sensors separates them.
+    //
+    // DEFAULT ON (assume turn lane). The cost is real and local: Utah's 2+1 highways, US-6 and
+    // US-89 especially, lose their passing lanes until a car drives down one. Off trades that back
+    // for the chance of suggesting a pass into a centre turn lane. Opposing traffic seen IN the
+    // next lane blocks it either way -- that part is not a judgement call.
+    {"PassingAssistStrictTwoWay", {PERSISTENT | BACKUP, BOOL, "1"}},
     {"DeviceBootMode", {PERSISTENT | BACKUP, INT, "0"}},
     {"DevUIInfo", {PERSISTENT | BACKUP, INT, "0"}},
     {"EnableCopyparty", {PERSISTENT | BACKUP, BOOL}},

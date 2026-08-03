@@ -24,7 +24,7 @@ from types import SimpleNamespace as NS
 
 from openpilot.sunnypilot.selfdrive.controls.lib.adjacent_lane import (
   AdjacentLane, AdjacentLaneSide, ADJACENT_MIN_M, ADJACENT_MAX_M, DEBOUNCE_FRAMES, MIN_MOVING_MS,
-  path_offset,
+  ONCOMING_MAX_M, path_offset,
 )
 
 X_IDXS = [192.0 * (i / 32.0) ** 2 for i in range(33)]
@@ -320,6 +320,172 @@ class TestMedians:
     adj = AdjacentLane()
     adj.update(FakeSM([self.oncoming_at(-3.7)], right_edge=7.0), V_EGO, MAX_D)
     assert adj.right.oncoming
+
+
+TWLTL_W = 4.27    # 14 ft, the AASHTO preferred width. Minimum 12, maximum 16.
+LANE_W = 3.66     # 12 ft, the standard travel lane
+SHOULDER = 1.5
+
+
+def road(*, ego_offset_from_left=0.0, lanes_our_way=1, twltl=False, oncoming_lanes=1,
+         divided_median=None):
+  """Build one US road configuration, measured out from ego's lane centre.
+
+  Returns (left_edge, oncoming_lane_offsets, same_direction_lane_offsets), all camera-frame
+  (negative = left), relative to ego.
+
+  `divided_median` in metres puts a median between our carriageway and theirs; None means undivided
+  and the opposing lanes sit inside our own road edge, which is the whole distinction.
+  """
+  # Lanes to our left on our own side.
+  same_dir = [-(i + 1) * LANE_W for i in range(int(ego_offset_from_left))]
+  edge_of_ours = -(ego_offset_from_left * LANE_W + LANE_W / 2)
+
+  x = edge_of_ours
+  if twltl:
+    x -= TWLTL_W
+  onc = []
+  for i in range(oncoming_lanes):
+    onc.append(x - LANE_W / 2 - i * LANE_W)
+
+  if divided_median is not None:
+    # Their carriageway is past a median: our road edge closes before it.
+    left_edge = edge_of_ours - SHOULDER
+    onc = [o - divided_median for o in onc]
+  else:
+    left_edge = x - oncoming_lanes * LANE_W - SHOULDER
+  return left_edge, onc, same_dir
+
+
+# Every configuration worth naming, traced end to end. `expect_block` is whether the LEFT side
+# should be refused when the only traffic seen is the oncoming vehicle nearest us.
+ROAD_CASES = [
+  # name, road kwargs, strict, expect_block_left
+  ("two-lane undivided (US-89 typical)",
+   dict(ego_offset_from_left=0, oncoming_lanes=1), True, True),
+  ("two-lane undivided, lenient mode still blocks",
+   dict(ego_offset_from_left=0, oncoming_lanes=1), False, True),
+  ("1 + TWLTL + 1 arterial",
+   dict(ego_offset_from_left=0, twltl=True, oncoming_lanes=1), True, True),
+  ("2 + TWLTL + 2 arterial, ego in the LEFT lane",
+   dict(ego_offset_from_left=1, twltl=True, oncoming_lanes=2), True, True),
+  ("2 + TWLTL + 2 arterial, ego in the RIGHT lane",
+   dict(ego_offset_from_left=0, twltl=True, oncoming_lanes=2), True, True),
+  ("four-lane undivided, ego in the RIGHT lane",
+   dict(ego_offset_from_left=0, oncoming_lanes=2), True, True),
+  ("divided interstate, wide median",
+   dict(ego_offset_from_left=1, oncoming_lanes=2, divided_median=20.0), True, False),
+  ("divided interstate, jersey barrier",
+   dict(ego_offset_from_left=1, oncoming_lanes=2, divided_median=2.0), True, False),
+]
+
+
+class TestUSRoadConfigurations:
+  """Every US road layout worth naming, traced from real lane widths.
+
+  The two that broke the first design are the TWLTL cases. Bounding oncoming detection to the
+  adjacent band assumed opposing traffic is in the next lane, which is true only on a two-lane
+  road: put a 14 ft turn lane down the middle and opposing traffic moves to 7.9 m, outside a 5.5 m
+  band, so no veto fired at all and the geometry test offered a pass into the turn lane.
+  """
+
+  @staticmethod
+  def _run(cfg, strict):
+    left_edge, onc, _same = road(**cfg)
+    # The nearest oncoming vehicle, at 100 m, converted back to the radar's left-positive frame.
+    tracks = [track(100, -onc[0], v_rel=-27.0 - V_EGO)]
+    adj = AdjacentLane()
+    adj.update(FakeSM(tracks, left_edge=left_edge), V_EGO, MAX_D, strict=strict)
+    return adj.left.blocks_oncoming
+
+  def test_every_road_configuration(self):
+    failures = []
+    for name, cfg, strict, expect in ROAD_CASES:
+      got = self._run(cfg, strict)
+      if got != expect:
+        failures.append(f"{name}: expected block={expect}, got {got}")
+    assert not failures, "\n".join(failures)
+
+  def test_twltl_oncoming_is_out_of_the_adjacent_band(self):
+    """The measurement behind the bug, asserted directly so the reasoning cannot rot.
+
+    If someone later narrows ONCOMING_MAX_M back to the adjacent band, this is the number that
+    explains why every arterial went quiet.
+    """
+    _edge, onc, _same = road(ego_offset_from_left=0, twltl=True, oncoming_lanes=1)
+    assert abs(onc[0]) > ADJACENT_MAX_M      # the whole point: outside the next-lane band
+    assert abs(onc[0]) < ONCOMING_MAX_M      # but well inside what we now look at
+
+
+class TestMiddleLaneAmbiguity:
+  """Two roads the sensors cannot tell apart, and the setting that decides which way to be wrong.
+
+  From the right lane of a 2+1 passing-lane section (US-6, US-89) and from the left lane of a
+  2+TWLTL+2 arterial, the picture is identical: a lane at ~3.7 m, opposing traffic at ~7.9 m, our
+  road edge beyond both. One is a passing lane, the other is a turn lane.
+  """
+
+  @staticmethod
+  def _side(strict, same_direction_seen):
+    left_edge, onc, _ = road(ego_offset_from_left=0, twltl=True, oncoming_lanes=1)
+    tracks = [track(100, -onc[0], v_rel=-27.0 - V_EGO)]
+    if same_direction_seen:
+      # A car using the middle lane in OUR direction: the only positive evidence it is a travel lane
+      tracks.append(track(60, LANE_W, v_rel=2.0))
+    adj = AdjacentLane()
+    for _ in range(DEBOUNCE_FRAMES):
+      adj.update(FakeSM(tracks, left_edge=left_edge), V_EGO, MAX_D, strict=strict)
+    return adj.left
+
+  def test_strict_assumes_turn_lane(self):
+    assert self._side(strict=True, same_direction_seen=False).blocks_oncoming
+
+  def test_lenient_assumes_travel_lane(self):
+    assert not self._side(strict=False, same_direction_seen=False).blocks_oncoming
+
+  def test_evidence_of_a_travel_lane_unblocks_it_even_when_strict(self):
+    # One car down the passing lane in our direction is all it takes. This is what gives US-6 and
+    # US-89 their passing lanes back without loosening the setting.
+    assert not self._side(strict=True, same_direction_seen=True).blocks_oncoming
+
+  def test_oncoming_in_the_next_lane_blocks_regardless_of_the_setting(self):
+    # Not a judgement call, so the flag must not reach it. Two-lane road: opposing traffic IS the
+    # next lane over.
+    left_edge, onc, _ = road(ego_offset_from_left=0, oncoming_lanes=1)
+    for strict in (True, False):
+      adj = AdjacentLane()
+      adj.update(FakeSM([track(100, -onc[0], v_rel=-27.0 - V_EGO)], left_edge=left_edge),
+                 V_EGO, MAX_D, strict=strict)
+      assert adj.left.blocks_oncoming, f"strict={strict}"
+    
+
+
+class TestGateShapes:
+  """Every gate must evaluate to a bool on attribute access, not return a callable.
+
+  `blocks_oncoming` was briefly a method taking the strict flag. A bound method is truthy, so every
+  `assert not side.blocks_oncoming` in this file passed unconditionally and `assert
+  side.blocks_oncoming` passed without measuring anything -- the suite went green while the gate was
+  untested. The call site in passing_assist.py had the same problem in the other direction: a side
+  that should not have blocked would have blocked always.
+
+  The neighbouring RearApproachSide.blocks_lane_change is a property, so this also keeps the two
+  gates the decision chain reads side by side from having different shapes.
+  """
+
+  GATES = ('blocks_oncoming', 'same_direction_recent', 'available', 'occupied', 'oncoming')
+
+  def test_gates_are_properties_not_methods(self):
+    side = AdjacentLaneSide()
+    for name in self.GATES:
+      value = getattr(side, name)
+      assert isinstance(value, bool), f"{name} is {type(value).__name__}, expected bool"
+
+  def test_the_aggregate_gates_are_properties_too(self):
+    adj = AdjacentLane()
+    for name in ('available', 'undivided'):
+      assert isinstance(getattr(adj, name), bool), name
+    assert isinstance(adj.undivided_seconds, float)
 
 
 class TestPathOffset:
