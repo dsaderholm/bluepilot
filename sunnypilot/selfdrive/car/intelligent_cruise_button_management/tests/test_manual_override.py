@@ -619,8 +619,13 @@ class TestMappingAgnosticFallback:
   with flashed SCCM firmware that is an assumption. If the set speed moves and ICBM has been silent
   far longer than any command of its own could take to land, a human moved it -- adopt it."""
 
-  def _drive(self, moves, source=PlanSource.speedLimitAssist, target=LIMIT, frames=900):
-    """moves: {frame: delta} applied to the set speed with NO button event at all."""
+  def _drive(self, moves, source=PlanSource.speedLimitAssist, target=LIMIT, frames=1400):
+    """moves: {frame: delta} applied to the set speed with NO button event at all.
+
+    Moves start well past frame 250: engaging cruise opens a settle window during which
+    uncommanded movement is the resume jump, not the driver. Nobody presses + within 2.5 s of
+    engaging, so the delay is realistic rather than a workaround.
+    """
     icbm = fresh(max_rise=5, max_drop=8)
     cluster = LIMIT
     for f in range(frames):
@@ -635,18 +640,18 @@ class TestMappingAgnosticFallback:
 
   def test_unrecognised_button_still_creates_a_hold(self):
     """THE POINT. No ButtonEvent ICBM knows about -- only the set speed moving."""
-    icbm, cluster = self._drive({200: +1})
+    icbm, cluster = self._drive({400: +1})
     assert icbm.override_state == OverrideState.manual, "no hold created without a known button"
     assert icbm.v_baseline == LIMIT + 1
     assert cluster == LIMIT + 1, f"set speed was walked back to {cluster}"
 
   def test_repeated_unrecognised_presses_accumulate(self):
-    icbm, cluster = self._drive({200: +1, 400: +1, 600: +1})
+    icbm, cluster = self._drive({400: +1, 700: +1, 1000: +1})
     assert cluster == LIMIT + 3, f"ended at {cluster}, wanted {LIMIT + 3}"
     assert icbm.v_baseline == LIMIT + 3
 
   def test_downward_too(self):
-    icbm, cluster = self._drive({200: -1})
+    icbm, cluster = self._drive({400: -1})
     assert cluster == LIMIT - 1
     assert icbm.v_baseline == LIMIT - 1
 
@@ -679,3 +684,54 @@ class TestMappingAgnosticFallback:
         cluster += 1
     assert icbm.v_baseline == DRIVER, f"recovery was adopted ({icbm.v_baseline})"
     assert cluster == DRIVER, f"did not return to the driver's number ({cluster})"
+
+
+class TestResumeJumpIsNotADriverChange:
+  """Re-engaging cruise makes the set speed jump to whatever it resumes at. The mapping-agnostic
+  fallback sees uncommanded movement and cannot tell that apart from a press -- so without a
+  settle window after a cruise cycle it built a HOLD at the resumed speed, destroying the only
+  route this car has back to Speed Limit Assist (CNCL then RES+, since RES+ is a combined button).
+  """
+
+  def _cycle(self, resume_to, frames_off=200):
+    icbm = fresh(max_rise=5, max_drop=8)
+    for _ in range(300):
+      icbm.run(make_cs(LIMIT), CC, make_lp(LIMIT), False)
+    assert icbm.override_state == OverrideState.auto
+    for _ in range(frames_off):                       # CNCL
+      icbm.run(make_cs(LIMIT, enabled=False), CC, make_lp(LIMIT), False)
+    for _ in range(3):                                # RES+
+      icbm.run(make_cs(LIMIT, enabled=True), CC, make_lp(LIMIT), False)
+    for _ in range(20):                               # set speed jumps to the resumed value
+      icbm.run(make_cs(resume_to, enabled=True), CC, make_lp(LIMIT), False)
+    for _ in range(600):
+      icbm.run(make_cs(resume_to, enabled=True), CC, make_lp(LIMIT), False)
+    return icbm
+
+  @pytest.mark.parametrize("resume_to", [DRIVER, LIMIT + 5, LIMIT - 5])
+  def test_resume_leaves_sla_in_charge(self, resume_to):
+    icbm = self._cycle(resume_to)
+    assert icbm.override_state == OverrideState.auto, \
+      f"resuming to {resume_to} created a HOLD; CNCL+RES+ no longer hands the speed back"
+    assert icbm.v_baseline == 0
+
+  def test_a_press_after_the_resume_still_works(self):
+    """The window must expire, not disable the fallback permanently.
+
+    Resuming to LIMIT so ICBM has nothing to correct -- resuming to a speed SLA disagrees with
+    leaves it actively driving the set speed, and movement while it is working is correctly NOT
+    credited to the driver.
+    """
+    icbm = self._cycle(LIMIT)
+    cluster = LIMIT
+    for f in range(1200):
+      if f == 500:
+        cluster += 1                                  # driver nudges it, no known button event
+      icbm.run(make_cs(cluster), CC, make_lp(LIMIT), False)
+      if f % 5 == 0:
+        if icbm.cruise_button == SendButtonState.decrease:
+          cluster -= 1
+        elif icbm.cruise_button == SendButtonState.increase:
+          cluster += 1
+    assert icbm.override_state == OverrideState.manual, "fallback stayed disabled after the resume"
+    assert cluster == LIMIT + 1

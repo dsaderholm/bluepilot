@@ -89,6 +89,11 @@ PRESS_SETTLE_MAX_FRAMES = 600     # 6 s hard cap, so a stuck cluster cannot susp
 # this rule is written to avoid. The cost of being generous is only that the fallback fires a
 # little later; the cost of being tight is a wrong baseline.
 ADOPT_IDLE_FRAMES = 90  # 0.9 s at 100 Hz, comfortably past this car's observed set-speed lag
+# After cruise is re-engaged the set speed jumps to whatever it resumes at. That is not the driver
+# choosing a speed, and the fallback above cannot tell the difference -- it sees uncommanded
+# movement. Without this window, CNCL + RES+ built a HOLD at the resumed speed and destroyed the
+# only route this car has back to Speed Limit Assist.
+CRUISE_CYCLE_SETTLE_FRAMES = 250  # 2.5 s at 100 Hz, past the resume jump on this car
 # BluePilot: target-drop rate limiting. Ford's stock ACC brakes aggressively when the set speed
 # falls by roughly 10 mph or more at once, but coasts for smaller drops. Capping each step below
 # that threshold and walking larger drops down over several steps keeps the car coasting.
@@ -144,6 +149,7 @@ class IntelligentCruiseButtonManagement:
     self.icbm_idle_frames = 0
     self.press_settle_frames = 0     # >0 while ICBM stands down after a driver press
     self.cluster_stable_frames = 0   # how long the set speed has been unchanged
+    self.cruise_cycle_frames = 0     # >0 while a resume's set-speed jump is still settling
     self.v_cluster_at_press = 0      # set speed when the driver's press was seen
     self.baseline_diverged = False   # has the baseline ever actually differed from SLA?
     self.cruise_enabled_prev = False
@@ -401,6 +407,7 @@ class IntelligentCruiseButtonManagement:
     # Cancel + re-engage is the driver starting over.
     if RE_ARM_ON_CRUISE_CYCLE and cruise_cycled:
       self.clear_baseline()
+      self.cruise_cycle_frames = CRUISE_CYCLE_SETTLE_FRAMES
       return
 
     # While the driver is pressing, the baseline follows the cluster. It therefore settles wherever
@@ -429,7 +436,8 @@ class IntelligentCruiseButtonManagement:
 
     # Fallback: set speed moved, ICBM has been silent long enough that it cannot be responsible.
     # Runs before the manual-only guard below so it can CREATE a baseline, not just update one.
-    if (self.v_cruise_cluster != self.v_cruise_cluster_prev
+    if (cruise_enabled and self.cruise_cycle_frames == 0
+        and self.v_cruise_cluster != self.v_cruise_cluster_prev
         and self.icbm_idle_frames >= ADOPT_IDLE_FRAMES):
       if self.override_state != OverrideState.manual:
         self.v_target_overridden = self.v_target_raw
@@ -529,6 +537,8 @@ class IntelligentCruiseButtonManagement:
         self.press_settle_frames = PRESS_SETTLE_MAX_FRAMES
     else:
       self.press_settle_frames = max(0, self.press_settle_frames - 1)
+    # unconditional: the resume jump settles on its own clock, held button or not
+    self.cruise_cycle_frames = max(0, self.cruise_cycle_frames - 1)
     self.cluster_stable_frames = (self.cluster_stable_frames + 1
                                   if self.v_cruise_cluster == self.v_cruise_cluster_prev else 0)
 
