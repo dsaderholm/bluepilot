@@ -1146,3 +1146,45 @@ sender.
 That is separate from, and worse than, the load problem in §3. Even if bus 1 had unlimited
 headroom, two identical modules on one bus could not work. The private pair is what makes a second
 radar possible at all, not merely comfortable.
+
+### What you physically install — it is one loom, not two
+
+Added 2026-08-03 after the topology sections above made the job sound bigger than it is. Reading
+back, the phrase "run a second pair of wires" was badly chosen: **that second pair IS the rear-to-
+front run you were already planning.** Nothing was added to the job by naming it a bus.
+
+**Nothing connects to the comma. At all.** The comma is already on bus 1 through the existing
+harness. This project never touches it, never adds a wire to it, and never modifies it.
+
+The complete physical install:
+
+| # | What | Where | Length |
+|---|---|---|---|
+| 1 | Rear radar on its bracket | rear bumper | — |
+| 2 | **One 4-conductor loom: 12 V, ground, CANH, CANL** | rear bumper to front | **the only long run** |
+| 3 | Teensy in a small enclosure | front, near the existing radar | — |
+| 4 | Jumper, Teensy to the front radar's CAN pins | at the crimp already made | **a few inches** |
+| 5 | Fused 12 V and ground for the Teensy | front | short |
+
+Line 2 is exactly the run already planned. Line 4 is the part called "the bus 1 tap" throughout
+this document, and it is a few inches of wire at a connector already worked on once.
+
+**Why the count does not change if the Teensy goes at the rear instead.** Radar-to-Teensy becomes
+inches, but the digest still has to reach the front: CANH, CANL, plus 12 V and ground for both
+devices. Four conductors either way. So the choice is made on power, shelter and reflashing access
+— all of which favour the front — not on wiring effort.
+
+The one variant that *does* save wires: if a switched, ignition-controlled 12 V feed can be found
+in the trunk area, a rear-mounted Teensy needs only CANH and CANL run forward. Two conductors
+instead of four. Tail and reverse lights are not ignition-switched so they do not qualify;
+whether the Fusion has a suitable trunk accessory feed is **unverified**. Weigh it against
+reflashing a microcontroller in a wet bumper.
+
+**Routing.** Follow the existing body harness rather than inventing a path — the factory loom
+already runs front to rear along the sill under the trim, with grommets at every panel crossing.
+This is the same class of job as adding a trailer-lighting harness or a rear dashcam feed, both
+of which are routinely done in a driveway.
+
+For scale: this car has already had its ADAS hardware transplanted, its steering rack changed, a
+radar bracket cut at a metal shop, and a radar wired in that works. A four-conductor loom along
+an existing harness path is the easiest wiring task in that list.
