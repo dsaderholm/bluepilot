@@ -36,7 +36,12 @@ def main():
                             # unaffected -- sm.valid stays False and the observer reports it.
                             # selfdriveStateSP carries ICBM's held baseline, which is the driver's own set speed
                             # when they have taken it back from ICBM.
-                            'liveMapDataSP', 'carStateSP', 'carStateBP',
+                            # liveTracks is the FULL front-radar object list, including the off-path
+                            # tracks radard discards after picking its two in-path leads. It is how
+                            # the observer sees the lane it would move into. Note the rate: card
+                            # emits it at ~8.3 Hz on a Delphi MRR, not the 20 Hz declared in
+                            # services.py, so anything counting frames must gate on sm.updated.
+                            'liveMapDataSP', 'carStateSP', 'carStateBP', 'liveTracks',
                             'selfdriveStateSP', gps_location_service],
                            poll='carState')
 

@@ -39,6 +39,7 @@ from openpilot.common.constants import CV
 from openpilot.common.params import Params
 from openpilot.common.realtime import DT_MDL
 from openpilot.sunnypilot import PARAMS_UPDATE_PERIOD
+from openpilot.sunnypilot.selfdrive.controls.lib.adjacent_lane import AdjacentLane
 from openpilot.sunnypilot.selfdrive.controls.lib.rear_approach import RearApproach
 
 Side = custom.LongitudinalPlanSP.PassingAssist.Side
@@ -187,6 +188,7 @@ class PassingAssistDetector:
     self.tsr_available = False
     self.road_name = ""
     self.rear = RearApproach()
+    self.adjacent = AdjacentLane()
 
     self.params = Params()
     self.frame = 0
@@ -196,6 +198,7 @@ class PassingAssistDetector:
     self.keep_right_enabled = True
     self.keep_right_delay_s = float(DEFAULT_KEEP_RIGHT_DELAY_S)
     self.avoid_outermost = False
+    self.adjacent_enabled = True
     self.settle_time_s = float(DEFAULT_SETTLE_TIME_S)
     self.suspend_minutes = 15
     # Starts settled: at boot we have not just passed anyone, and a fresh detector must not
@@ -213,6 +216,7 @@ class PassingAssistDetector:
       self.keep_right_enabled = self.params.get_bool("PassingAssistKeepRight")
       self.keep_right_delay_s = float(self.params.get("PassingAssistKeepRightDelay", return_default=True))
       self.avoid_outermost = self.params.get_bool("PassingAssistAvoidOutermost")
+      self.adjacent_enabled = self.params.get_bool("PassingAssistAdjacentLane")
       self.settle_time_s = float(self.params.get("PassingAssistSettleTime", return_default=True))
       self.suspend_minutes = self.params.get("PassingAssistSuspendMinutes", return_default=True)
       self.max_distance_m = float(self.params.get("PassingAssistMaxDistance", return_default=True))
@@ -517,6 +521,12 @@ class PassingAssistDetector:
     except KeyError:
       car_state_bp = None
     self.rear.update(sm)
+    # Runs every cycle, before any gate. What the next lane over is doing is worth logging on the
+    # frames where nothing is suggested too -- that is how the band and the debounce get fitted.
+    if self.adjacent_enabled:
+      self.adjacent.update(sm, float(CS.vEgo), self.max_distance_m)
+    else:
+      self.adjacent.reset()
     self._blindspot(car_state_bp)
     self._acc_braking(car_state_bp)
     self._traffic_signs(car_state_bp)
@@ -604,15 +614,37 @@ class PassingAssistDetector:
     # rearAvailable is published and shown: a suggestion made with no rear sensing must be legible
     # as such rather than pass for a checked one. When a source is fitted this becomes a real gate
     # with no code change here.
-    left_ok = self.left_geometry_ok and not self.left_blindspot and not self.rear.left.blocks_lane_change
-    right_ok = self.right_geometry_ok and not self.right_blindspot and not self.rear.right.blocks_lane_change
+    # Adjacent lane occupancy, from the front radar's off-path tracks. Last of the per-side gates
+    # and deliberately so: it is the only one that can be wrong in a merely wasteful direction. The
+    # blind spot and rear approach answer "is this move unsafe"; this answers "is it worth making",
+    # so it must not be able to mask either of them in blockedBy.
+    #
+    # Beat the LEAD, not our own set speed. We are not asking whether the other lane is fast, we are
+    # asking whether it is faster than what we are stuck behind -- a queue crawling at 45 is still
+    # worth moving into if the lead is doing 40 and we want 70. The margin is the same deficit that
+    # decided the pass was worth wanting, so one knob governs both halves of the judgement.
+    adj_left = self.adjacent.left.blocks_move(self.lead_v_lead, self.min_deficit_ms)
+    adj_right = self.adjacent.right.blocks_move(self.lead_v_lead, self.min_deficit_ms)
+
+    left_ok = (self.left_geometry_ok and not self.left_blindspot and
+               not self.rear.left.blocks_lane_change and not adj_left)
+    right_ok = (self.right_geometry_ok and not self.right_blindspot and
+                not self.rear.right.blocks_lane_change and not adj_right)
 
     if not (left_ok or right_ok):
-      # Name rear approach only when it is what actually decided it -- otherwise the blind spot or
-      # the geometry is the more useful thing to report.
+      # Name the gate that actually decided it. Checked in reverse severity order so the most
+      # specific safety reason wins over the merely-pointless one: a side stopped by both a closing
+      # car and slow traffic reports the closing car.
       rear_blocked = ((self.left_geometry_ok and not self.left_blindspot and self.rear.left.blocks_lane_change) or
                       (self.right_geometry_ok and not self.right_blindspot and self.rear.right.blocks_lane_change))
-      self._reset_outputs(Blocked.rearApproaching if rear_blocked else Blocked.blindspotOccupied)
+      if rear_blocked:
+        blocked = Blocked.rearApproaching
+      elif ((self.left_geometry_ok and not self.left_blindspot and adj_left) or
+            (self.right_geometry_ok and not self.right_blindspot and adj_right)):
+        blocked = Blocked.adjacentSlow
+      else:
+        blocked = Blocked.blindspotOccupied
+      self._reset_outputs(blocked)
       return
 
     # Left is preferred where both are available: passing on the right is the wrong default, and
@@ -684,6 +716,17 @@ class PassingAssistDetector:
     # mirror", which is a little later. One timer, not two: an extra margin stage before this one
     # would double-count the same wait.
     if self.right_blindspot or self.rear.right.blocks_lane_change:
+      self.keep_right_seconds = 0.0
+      return
+
+    # Do not move over behind a car we would immediately want to pass. "Keep right except to pass"
+    # assumes the right lane is moving; dropping in behind traffic slow enough to trip the passing
+    # threshold buys a pair of lane changes and no progress, and does it at exactly the moment the
+    # settle timer is expired and least able to stop the second one.
+    #
+    # Expressed as the passing threshold read backwards -- slower than the set speed by the deficit
+    # margin -- so the two behaviours cannot disagree about what "slow" means.
+    if self.adjacent.right.blocks_move(self.reference_speed - self.min_deficit_ms, 0.0):
       self.keep_right_seconds = 0.0
       return
 

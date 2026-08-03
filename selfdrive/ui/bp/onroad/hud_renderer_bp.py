@@ -164,6 +164,7 @@ _BLOCKED_TEXT = {
   'overtakeRestricted': "No-passing zone",
   'rearApproaching': "Traffic coming up behind",
   'suspended': "Paused",
+  'adjacentSlow': "Next lane is no faster",
 }
 
 # BluePilot: sunnypilot's "AHEAD" box hangs off the bottom of the speed-limit sign, in the same
@@ -504,11 +505,20 @@ class HudRendererBP(HudRendererSP):
         # slower car in front is the exact report that took a drive to diagnose twice; the operands
         # make it a glance instead. Reference is the speed the driver asked for, which with ICBM
         # running is NOT the number on the dash.
+        conv = 2.23694 if not ui_state.is_metric else 3.6
         if blocked == 'notStuck' and pa.hasLead and pa.referenceSpeed > 0:
-          conv = 2.23694 if not ui_state.is_metric else 3.6
           self._pa_sub_detail = (f"want {pa.referenceSpeed * conv:.0f}"
                                  f"  lead {pa.leadVLead * conv:.0f}"
                                  f"  [{pa.referenceSource}]")
+        elif blocked == 'adjacentSlow':
+          # Same reasoning as above: show the comparison, not just its verdict. Which side is
+          # reported matters, because "the next lane is no faster" is a claim about a specific
+          # lane and the driver can look at it.
+          parts = [f"lead {pa.leadVLead * conv:.0f}"]
+          for name, adj in (("L", pa.adjacentLeft), ("R", pa.adjacentRight)):
+            if adj.available and adj.occupied:
+              parts.append(f"{name} {adj.vAbs * conv:.0f} at {adj.dRel:.0f}m")
+          self._pa_sub_detail = "  ".join(parts)
 
     # Sub-line: what was NOT checked, plus the per-drive count. Both belong here rather than in the
     # headline -- a suggestion with no blind-spot data must never read as one that passed a check,
@@ -520,6 +530,8 @@ class HudRendererBP(HudRendererSP):
       caveats.append("no sign data")
     if not (pa.rearLeft.available or pa.rearRight.available):
       caveats.append("no rear data")
+    if not (pa.adjacentLeft.available or pa.adjacentRight.available):
+      caveats.append("no next-lane data")
     if self._pa_count:
       caveats.append(f"{self._pa_count} this drive")
     if self._pa_sub_detail:

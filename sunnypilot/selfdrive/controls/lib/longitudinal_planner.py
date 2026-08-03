@@ -241,6 +241,13 @@ class LongitudinalPlannerSP:
     passingAssist.suspendedSeconds = float(pa.suspended_seconds)
     passingAssist.referenceSpeed = float(pa.reference_speed)
     passingAssist.referenceSource = pa.reference_source
+    for dest, side in ((passingAssist.adjacentLeft, pa.adjacent.left),
+                       (passingAssist.adjacentRight, pa.adjacent.right)):
+      dest.available = side.available
+      dest.occupied = side.occupied
+      dest.dRel = float(side.d_rel)
+      dest.vRel = float(side.v_rel)
+      dest.vAbs = float(side.v_abs)
 
     # E2E Alerts
     e2eAlerts = longitudinalPlanSP.e2eAlerts

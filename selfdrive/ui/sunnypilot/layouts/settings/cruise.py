@@ -323,6 +323,14 @@ class CruiseLayout(Widget):
       min_value=1, max_value=120, value_change_step=1,
       inline=True)
 
+    self.passing_assist_adjacent_lane = toggle_item_sp(
+      title=tr("Check The Lane Before Suggesting It"),
+      description=tr("Use the front radar to see traffic in the next lane over, and skip a "
+                     "suggestion when that lane is already full of vehicles no faster than the car "
+                     "ahead of you. Uses the radar already fitted to the car. If the radar is not "
+                     "reporting, the panel says so rather than assuming the lane is clear."),
+      param="PassingAssistAdjacentLane")
+
     self.passing_assist_keep_right = toggle_item_sp(
       title=tr("Keep Right Except To Pass"),
       description=tr("Also record when you could return to a lane on your right because nothing "
@@ -449,6 +457,7 @@ class CruiseLayout(Widget):
       self.passing_assist_max_distance,
       self.passing_assist_settle_time,
       self.passing_assist_suspend_minutes,
+      self.passing_assist_adjacent_lane,
       self.passing_assist_keep_right,
       self.passing_assist_keep_right_delay,
 

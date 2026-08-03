@@ -393,6 +393,31 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     referenceSpeed @33 :Float32;
     referenceSource @34 :ReferenceSource;
 
+    # BluePilot: what is already sitting in the lane we would move into, from the FRONT radar's
+    # off-path tracks. Unlike rearApproach this needs no new hardware: the Delphi MRR derives a
+    # lateral position for every detection and card publishes all of them on liveTracks, where
+    # radard discards everything that is not an in-path lead. So the measurement exists today and
+    # is simply thrown away.
+    #
+    # This is the missing half of the passing decision. Geometry answers "is there a lane", and a
+    # lane can be there and full. Without this the system suggests a pass into traffic no faster
+    # than the car being passed, then wants to undo it -- which is what the settle timer papers
+    # over rather than fixes.
+    #
+    # Note the two different frames in play: radar yRel is LEFT-POSITIVE while modelV2 lane
+    # geometry is left-negative. The conversion happens in adjacent_lane.py; these fields are
+    # already resolved to a named side.
+    adjacentLeft @35 :AdjacentLane;
+    adjacentRight @36 :AdjacentLane;
+
+    struct AdjacentLane {
+      available @0 :Bool;   # false = liveTracks is not reporting. NOT the same as "clear".
+      occupied @1 :Bool;    # debounced: 3 consecutive radar messages, not one frame
+      dRel @2 :Float32;     # metres ahead of the nearest vehicle in that lane, 0 when clear
+      vRel @3 :Float32;     # m/s relative to ego, negative = slower than us
+      vAbs @4 :Float32;     # its absolute speed -- the number the pass decision compares
+    }
+
     enum ReferenceSource {
       cluster @0;      # the dash value; also the fallback
       icbmHold @1;     # driver took the set speed back, ICBM is holding their number
@@ -470,6 +495,7 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       overtakeRestricted @9; # TSR reports a no-overtaking zone in force
       rearApproaching @10;   # something is closing on that lane from behind
       suspended @11;         # driver paused it -- construction zone, weather, unfamiliar road
+      adjacentSlow @12;      # the lane is there and clear behind, but full of traffic no faster
     }
   }
 

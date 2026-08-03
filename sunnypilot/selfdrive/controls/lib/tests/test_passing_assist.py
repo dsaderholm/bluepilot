@@ -50,16 +50,26 @@ class FakeSubMaster:
   iteration and calls sm[0] -- KeyError: 0. A dict fixture makes that work perfectly in tests and
   crash-loop plannerd on the car, which is what happened. Anything sm-shaped here must reproduce
   SubMaster's actual protocol, not a convenient superset.
+
+  alive/valid/updated are plain dicts keyed by service, as in the real thing, and a missing service
+  raises KeyError rather than defaulting -- the same reason. Code that reads them must handle the
+  absent case explicitly instead of inheriting a convenient True.
   """
 
-  def __init__(self, data: dict):
+  def __init__(self, data: dict, updated: dict | None = None):
     self.data = data
+    self.alive = dict.fromkeys(data, True)
+    self.valid = dict.fromkeys(data, True)
+    self.updated = dict.fromkeys(data, True) if updated is None else updated
 
   def __getitem__(self, s):
     return self.data[s]
 
   def __delitem__(self, s):
     del self.data[s]
+    self.alive.pop(s, None)
+    self.valid.pop(s, None)
+    self.updated.pop(s, None)
 
 
 def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., d_path=0.2, status=True,
@@ -70,7 +80,7 @@ def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., d_path=0.2, status=Tr
             tsr_avail=True, ovtk_msg=1, ovtk_status=2,
             blinker=False, brake=False, steering=False, road_name="I 15",
             acc_braking=False, acc_avail=True, set_speed=None,
-            icbm_hold=0.0, icbm_manual=False, lka=False):
+            icbm_hold=0.0, icbm_manual=False, lka=False, tracks=()):
   # Being stuck behind a car means matching its speed, not still closing on it: vEgo tracks vLead
   # and the gap to the SET speed is what makes passing worth suggesting. Tests that need a genuine
   # approach pass v_ego explicitly.
@@ -95,7 +105,17 @@ def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., d_path=0.2, status=Tr
     'liveMapDataSP': NS(roadName=road_name),
     'selfdriveStateSP': NS(intelligentCruiseButtonManagement=NS(
         vBaseline=icbm_hold, overrideState=1 if icbm_manual else 0)),
+    # Front-radar object list. Empty by default: alive and reporting nothing beside us, which is
+    # "the next lane is clear" -- NOT the same as the unavailable case, which tests remove the
+    # service entirely to produce.
+    'liveTracks': NS(points=list(tracks)),
   })
+
+
+def track(d_rel, y_rel, v_rel):
+  """One liveTracks point. yRel is LEFT-POSITIVE here, matching the radar and NOT the lane
+  geometry above -- the two frames are opposite and that is the point of stating it twice."""
+  return NS(dRel=d_rel, yRel=y_rel, vRel=v_rel)
 
 
 def run(det, frames, **kw):
@@ -403,6 +423,95 @@ class TestRearApproachGate:
     assert det.rear.left.blocks_lane_change
     assert not det.rear.right.blocks_lane_change
 
+
+
+class TestAdjacentLaneGate:
+  """The front radar's off-path tracks, wired into the decision.
+
+  Distinct from every other gate here in what it is protecting against: not safety, but a
+  suggestion that would be immediately regretted. So it must be the LAST thing consulted and must
+  never take the blame in blockedBy from a gate that is about safety.
+  """
+
+  def test_clear_next_lane_still_suggests(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES)
+    assert det.suggestion == Side.left
+    assert det.adjacent.available
+    assert not det.adjacent.left.occupied
+
+  def test_left_lane_full_of_traffic_no_faster_blocks_the_pass(self):
+    # The manoeuvre this exists to prevent: pull out to pass a car doing 24 m/s and land behind
+    # one doing the same. yRel is LEFT-POSITIVE.
+    det = run(PassingAssistDetector(), STUCK_FRAMES, tracks=[track(70, 3.7, 0.0)])
+    assert det.adjacent.left.occupied
+    assert det.suggestion == Side.none
+    assert det.blocked_by == Blocked.adjacentSlow
+
+  def test_faster_traffic_in_the_left_lane_does_not_block(self):
+    # Occupied is not the test. A lane moving 5 m/s faster than the car we are stuck behind is
+    # exactly the lane we want.
+    det = run(PassingAssistDetector(), STUCK_FRAMES, tracks=[track(70, 3.7, 5.0)])
+    assert det.adjacent.left.occupied
+    assert det.suggestion == Side.left
+
+  def test_comparison_is_against_the_lead_not_the_set_speed(self):
+    # Crawling traffic: everything is well under the 31 m/s set speed, but the left lane is still
+    # 4 m/s better than what we are behind. Measuring against the set speed here would refuse
+    # every pass in exactly the conditions where passing matters most.
+    det = run(PassingAssistDetector(), STUCK_FRAMES, v_lead=20.0, tracks=[track(70, 3.7, 4.0)])
+    assert det.suggestion == Side.left
+
+  def test_right_lane_traffic_does_not_block_a_left_pass(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES, tracks=[track(60, -3.7, 0.0)])
+    assert det.adjacent.right.occupied
+    assert det.suggestion == Side.left
+
+  def test_no_radar_data_does_not_block(self):
+    det = PassingAssistDetector()
+    for _ in range(STUCK_FRAMES):
+      sm = make_sm()
+      del sm['liveTracks']
+      det.update(sm, CRUISE_MS, True)
+    assert not det.adjacent.available
+    assert det.suggestion == Side.left
+
+  def test_blind_spot_is_reported_over_slow_traffic(self):
+    # Ordering: a side stopped by both must report the safety reason, not the pointless one.
+    det = run(PassingAssistDetector(), STUCK_FRAMES, left_bs=True, tracks=[track(70, 3.7, 0.0)])
+    assert det.blocked_by == Blocked.blindspotOccupied
+
+  def test_disabling_the_gate_leaves_it_unavailable(self):
+    class _Off(_KeepRightOnParams):
+      def get_bool(self, key, block=False):
+        if key == "PassingAssistAdjacentLane":
+          return False
+        return super().get_bool(key, block)
+
+    det = PassingAssistDetector()
+    det.params = _Off()
+    for _ in range(STUCK_FRAMES):
+      det.update(make_sm(tracks=[track(70, 3.7, 0.0)]), CRUISE_MS, True)
+    assert not det.adjacent.available
+    assert det.suggestion == Side.left
+
+
+class TestKeepRightAdjacentLane:
+  def test_will_not_move_over_behind_slow_traffic(self):
+    # "Keep right except to pass" assumes the right lane is moving. Dropping in behind a car slow
+    # enough to trip the passing threshold buys two lane changes and no progress.
+    # Cruising at the set speed with nothing ahead, which is the situation keep-right applies to.
+    det = run(keep_right_det(), KEEP_RIGHT_FRAMES, status=False, v_ego=CRUISE_MS,
+              tracks=[track(80, -3.7, -5.0)], **IN_LEFT_LANE)
+    assert det.adjacent.right.occupied
+    assert det.suggestion == Side.none
+    assert det.keep_right_seconds == 0.0
+
+  def test_moves_over_behind_traffic_at_our_own_speed(self):
+    det = run(keep_right_det(), KEEP_RIGHT_FRAMES, status=False, v_ego=CRUISE_MS,
+              tracks=[track(80, -3.7, 0.0)], **IN_LEFT_LANE)
+    assert det.adjacent.right.occupied
+    assert det.suggestion == Side.right
+    assert det.reason == Reason.keepRight
 
 
 class TestAvoidOutermostLane:

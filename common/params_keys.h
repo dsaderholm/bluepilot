@@ -279,6 +279,12 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // from the road opening up ahead and works on two-lane roads. Default off: this one costs
     // keep-right entirely on two-lane-each-way roads, which is most of an interstate.
     {"PassingAssistAvoidOutermost", {PERSISTENT | BACKUP, BOOL, "0"}},
+    // BluePilot: use the front radar's off-path tracks to check the target lane is not already
+    // full of traffic no faster than the car being passed. DEFAULT ON -- unlike the two gates
+    // above it can only ever suppress a suggestion that was going to be wasted, it needs no
+    // hardware that is not already fitted, and an unavailable radar reports unavailable rather
+    // than clear. Off is for isolating it when the band or the debounce is being fitted from logs.
+    {"PassingAssistAdjacentLane", {PERSISTENT | BACKUP, BOOL, "1"}},
     {"DeviceBootMode", {PERSISTENT | BACKUP, INT, "0"}},
     {"DevUIInfo", {PERSISTENT | BACKUP, INT, "0"}},
     {"EnableCopyparty", {PERSISTENT | BACKUP, BOOL}},
