@@ -1311,3 +1311,48 @@ wires pass from the bumper into the body — a small weatherproof inline connect
 Its only job is that the rear bumper can be removed later without cutting wires. With the Teensy in
 the trunk it becomes even more natural: the bumper-to-trunk section is a short pigtail with a plug
 on the end, and everything else stays in the car.
+
+### Getting wires in and out of the trunk
+
+Added 2026-08-03. Owner confirmed the car has the **Sony premium system**, which settles the power
+question and makes the trunk the natural home for everything except the radar itself.
+
+**The amp is behind the passenger-side trunk trim panel** on a 2013–2020 Fusion, and is reported
+as easy to access. That single panel then hides the whole electronics package: relay, fuse, Teensy.
+
+**Power, without running anything forward:**
+
+- **Trigger:** the amp's remote turn-on lead. It goes live with the ignition, which is exactly the
+  behaviour wanted. It is a signal, not a supply, so it drives a **relay coil** — never the radar
+  directly.
+- **Supply:** the amp's constant 12 V, taken through **its own inline fuse** (3–5 A) so the new
+  branch is protected independently and a fault cannot take the audio down with it.
+- **Ground:** a body bolt in the trunk.
+- **Fallback if the amp tap is unappealing:** BCM fuse panel position 23 with a 10 A ATR micro2
+  add-a-circuit is reported as a working switched source. That panel is in the cabin, not the
+  trunk, so it costs a short run — still far less than reaching the front.
+
+With power sourced in the trunk, **the only thing that leaves the trunk toward the front is the CAN
+pair. Two wires.**
+
+**Route A — bumper to trunk. Use the hole that already exists.** The photo confirms this car has
+rear parking sensors, so a harness already passes from inside the bumper, through a grommet in the
+rear body panel, into the trunk area. Follow it. Pull the bumper cover, find where the sensor loom
+crosses, and take the same path. **No drilling.** This is a short run and it is where the inline
+connector goes, so the bumper can come off later without cutting.
+
+**Route B — trunk to the front. Along the sill, under trim that unclips.** On a sedan the body
+harness runs from the trunk, through the quarter panel, along the rocker beneath the door sill
+trim plates, into the front footwell. The sill plates are usually clip-in and come up by hand. Lift
+the carpet edge, lay the pair alongside the factory loom, put the trim back. Behind the rear seat
+back is an alternative entry into the cabin if the quarter-panel route is awkward.
+
+**Where to land it at the front.** The front radar's own connector, because that is the one place
+bus 1 is *guaranteed* to be present — and there is already a crimp there from the retrofit. The
+comma end is physically closer to the cabin, but whether the Q3 harness breaks bus 1 out at the
+camera connector is **unverified**, so it is not the place to plan around.
+
+**What this adds up to:** a plug behind the bumper, a short pigtail into the trunk, everything
+electronic behind one trim panel with the amp, and a two-wire pair down the sill to a connector
+already worked on once. No drilling, no new holes, and nothing that cannot be undone by pulling
+one plug.
