@@ -452,6 +452,54 @@ class TestRearApproachGate:
 
 
 
+class TestDrivingBelowTheLimit:
+  """Setting a speed below the posted limit is a choice, not a condition to be talked out of.
+
+  The reference speed used to be max(dash, limit + offset, ICBM baseline). On its own that is
+  sound -- ICBM only ever moves the dash DOWN, so a maximum recovers the driver's baseline. It
+  breaks the moment the limit is ABOVE anything the driver asked for, which is an ordinary Tuesday:
+  set 60 where the limit plus offset is 70, and a car ahead doing 62 -- genuinely faster than you
+  chose to travel -- measured as 8 under and produced a suggestion to pass it.
+  """
+
+  MPH = CV.MPH_TO_MS
+
+  def _drive(self, **kw):
+    det = PassingAssistDetector()
+    for _ in range(STUCK_FRAMES):
+      det.update(make_sm(**kw), CRUISE_MS, True, 70 * self.MPH)   # limit + offset = 70
+    return det
+
+  def test_a_manual_hold_below_the_limit_is_respected(self):
+    det = self._drive(v_ego=60 * self.MPH, v_lead=62 * self.MPH, d_rel=60.,
+                      set_speed=60 * self.MPH, icbm_hold=60 * self.MPH, icbm_manual=True)
+    assert abs(det.reference_speed - 60 * self.MPH) < 0.1
+    assert det.reference_source == RefSource.icbmHold
+    # 62 is faster than we asked to go, so there is nothing to pass.
+    assert det.suggestion == Side.none
+
+  def test_the_limit_still_applies_without_an_override(self):
+    # No override: the dash may have been lowered by ICBM for a curve or a limit, so the higher of
+    # the two really is the driver's baseline.
+    det = self._drive(v_ego=60 * self.MPH, v_lead=60 * self.MPH, d_rel=60.,
+                      set_speed=60 * self.MPH, icbm_manual=False)
+    assert abs(det.reference_speed - 70 * self.MPH) < 0.1
+    assert det.reference_source == RefSource.speedLimit
+
+  def test_a_manual_hold_above_the_limit_is_also_respected(self):
+    det = self._drive(v_ego=80 * self.MPH, v_lead=70 * self.MPH, d_rel=60.,
+                      set_speed=80 * self.MPH, icbm_hold=80 * self.MPH, icbm_manual=True)
+    assert abs(det.reference_speed - 80 * self.MPH) < 0.1
+    assert det.suggestion == Side.left
+
+  def test_the_dash_still_floors_it_under_an_override(self):
+    # ICBM sets its baseline from the cluster when the override latches, so the two agree in
+    # normal operation. If they ever drift, the dash is the number the car is actually driving to.
+    det = self._drive(v_ego=80 * self.MPH, v_lead=78 * self.MPH, d_rel=60.,
+                      set_speed=80 * self.MPH, icbm_hold=50 * self.MPH, icbm_manual=True)
+    assert det.reference_speed >= 79 * self.MPH
+
+
 class TestLeadInLaneGate:
   """The lead must be in OUR lane, measured against the model path.
 

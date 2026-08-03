@@ -480,28 +480,46 @@ class PassingAssistDetector:
     Differencing against it means that the moment anything slows the car, every lead stops looking
     slow -- exactly when a pass is most wanted.
 
-    The intent is the highest of the three things that can express it. Taking the max is what makes
-    that safe: ICBM only ever moves the dash value DOWN from the driver's baseline, so a maximum
+    A MANUAL OVERRIDE TAKES THE SPEED LIMIT OUT OF IT. If ICBM reports the driver took the set
+    speed back, the limit stops being evidence of anything: they have said what they want. That is
+    the fix for a real and ordinary case -- set 60 where the limit plus offset is 70, and the old
+    max() measured against 70, so a car ahead doing 62 (FASTER than the driver asked to go) read as
+    8 under and produced a pass suggestion. Deliberately driving below the limit is not a condition
+    to be talked out of.
+
+    The dash still floors it, even under an override. ICBM sets v_baseline from the cluster when the
+    override latches, so the two agree in normal operation; if they ever drift apart the dash is the
+    more trustworthy of the two, because that is the number the car is physically driving toward. A
+    lead below it really is holding us back whatever ICBM's record says.
+
+    Otherwise the intent is the highest of what is left, and the max is what makes that safe: with
+    no override, ICBM only ever moves the dash value DOWN from the driver's baseline, so a maximum
     recovers the baseline without needing to know which feature lowered it or why.
 
     Source is recorded, because an operand that is silently wrong produces a system that looks
     correct and never fires -- which is how this was wrong twice.
     """
     cluster = float(CS.cruiseState.speedCluster)
-    best, source = (cluster if cluster > 0 else v_cruise), RefSource.cluster
 
-    # SLA following the limit plus offset.
-    if speed_limit_target > best:
-      best, source = speed_limit_target, RefSource.speedLimit
-
-    # The driver took the set speed back and ICBM is holding their number.
+    # The driver took the set speed back and ICBM is holding their number. Checked FIRST and
+    # returned immediately: an explicit choice is not one of several candidates.
     try:
       icbm = sm['selfdriveStateSP'].intelligentCruiseButtonManagement
       baseline = float(icbm.vBaseline)
-      if int(icbm.overrideState) == 1 and baseline > best:
-        best, source = baseline, RefSource.icbmHold
+      if int(icbm.overrideState) == 1 and baseline > 0:
+        held = max(baseline, cluster)
+        self.reference_speed = held
+        self.reference_source = RefSource.icbmHold if baseline >= cluster else RefSource.cluster
+        return held
     except (KeyError, AttributeError, TypeError, ValueError):
       pass
+
+    best, source = (cluster if cluster > 0 else v_cruise), RefSource.cluster
+
+    # SLA following the limit plus offset. Only reaches here when the driver has not overridden,
+    # and the planner only supplies it when Speed Limit Assist is actually switched on.
+    if speed_limit_target > best:
+      best, source = speed_limit_target, RefSource.speedLimit
 
     self.reference_speed = best
     self.reference_source = source

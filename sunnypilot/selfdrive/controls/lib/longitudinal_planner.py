@@ -74,9 +74,13 @@ class LongitudinalPlannerSP:
     # BluePilot: passing-assist observation. Log only -- no events_sp, no target, no return value
     # consumed anywhere. Takes v_cruise_cluster rather than v_cruise because the question is
     # whether the lead is holding us below the speed the DRIVER set, not below a limiter's output.
-    # speed_limit_final is the limit plus offset -- one of the three things that can express
-    # what the driver actually asked for. See PassingAssistDetector._reference_speed.
-    sl_target = self.resolver.speed_limit_final if self.resolver.speed_limit_valid else 0.0
+    # speed_limit_final is the limit plus offset -- one of the things that can express what the
+    # driver actually asked for, but ONLY when Speed Limit Assist is switched on. A valid limit is
+    # not consent to drive it: with SLA off the driver's set speed is the whole intent, and feeding
+    # the limit in anyway made passing assist suggest passes to reach a speed they had not asked
+    # for. See PassingAssistDetector._reference_speed.
+    sl_target = (self.resolver.speed_limit_final
+                 if self.sla.enabled and self.resolver.speed_limit_valid else 0.0)
     self.passing_assist.update(sm, v_cruise_cluster, long_enabled, sl_target)
 
     # Speed Limit Assist
