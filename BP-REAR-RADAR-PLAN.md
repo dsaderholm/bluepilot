@@ -816,3 +816,70 @@ radar is idle apart from passing assist. It is not. `radarState` feeds:
 So the accurate statement is narrower: the front radar is not driving openpilot's *own* brake and
 throttle, because those are Ford's. It is very much driving what ICBM does to the set speed, and
 that does move the car.
+
+### §2 revisited for the MRR — what changes, and what gets easier
+
+§2 above was written for the ESR. Most of it still applies; three things change, and one of them
+is a genuine upgrade.
+
+**Alignment is no longer settable over CAN — and that is fine, because we can do it in software.**
+Every alignment signal in §2 (`ANGLE_MOUNTING_OFFSET`, `AUTO_ALIGN_DISABLE`, the ±8° range) is an
+`ESR.dbc` message *sent to* the radar. The MRR receives nothing, so none of it exists. There is no
+stored offset, no auto-alignment routine, no ±8° limit.
+
+That sounds like a loss and is not, because **we decode the azimuth ourselves**. `_update_delphi_mrr`
+reads `CAN_DET_AZIMUTH` per detection and turns it into a lateral position. A rear unit's decoder
+can subtract a constant. So:
+
+- The ESR's mechanical tolerance was ±8°, hard-limited by the CAN signal range.
+- The MRR's is **whatever we choose**, corrected by one constant in our own code, calibrated by
+  parking behind a known target and reading back the measured azimuth.
+
+Elevation still has to be mechanically right, exactly as before — nothing in the data path can fix
+a sensor pointed at the tarmac.
+
+**Aim matters more than the loose tolerance suggests.** Lane assignment comes from azimuth, and at
+range a small angle is a big offset: **3° of yaw error is 2.6 m at 50 m** — more than half a lane.
+So "roughly straight back" is not enough; get it close mechanically, then measure the residual and
+put it in the code. The calibration is a parked car and a target at a known offset, not a drive.
+
+**The depth problem — the one §2 calls "the tightest fit in the whole project and it is
+unverified" — is now measurable today.** That paragraph assumed a 49.2 mm ESR brick and unknown
+Fusion rear clearance. But the JX7T is in the car right now with a custom mount already fabricated
+for it, so:
+
+1. Its real dimensions can be measured rather than looked up.
+2. The bracket geometry that works is already designed and proven, and a second identical part
+   uses it unchanged.
+3. Rear cover-to-beam clearance can be measured with a tape before anything is bought.
+
+Buying the identical part turns the riskiest mechanical unknown into a repeat of work already done.
+
+### Where to put it on the back of a Fusion
+
+Ranked by whether it works, then by effort. Everything here needs measuring on the actual car —
+these are the constraints to measure *against*, not answers.
+
+| Location | RF path | Effort | Verdict |
+|---|---|---|---|
+| Behind the rear bumper cover, centred | plastic, good | pull the cover | **first choice** — mirror of the front install |
+| On a bracket below the bumper, off the beam or tow points | free air, best | no disassembly | fallback — exposed to spray and stone chips |
+| Behind the licence plate | **blocked** | — | no: the plate and frame are metal |
+| Inside the rear glass | **blocked** | — | no: defroster grid, tint, raked angle, cabin multipath |
+
+Constraints for whichever is chosen:
+
+- **Height 30–86 cm** to the sensor face (Delphi manual figure, quoted for the ESR — treat as
+  indicative for the MRR and sanity-check against where Ford mounts the front one). A Fusion's
+  rear bumper centre sits comfortably inside that.
+- **Centred laterally**, or the lane maths inherits an offset. Off-centre is correctable in code
+  like azimuth, but it is one more constant to calibrate — prefer centred.
+- **Level, pointing straight back.** See the 3°-is-half-a-lane note above.
+- **Nothing metal in front of the antenna face.** A metal bracket *behind* it is fine.
+- **Away from the tailpipe.** Heat and vibration, and exhaust plume is not something to ask a
+  radar to see through.
+- **Connector facing down or sealed.** The module is rated for bumper life; the bracket and the
+  connector are what fail.
+- **Paint still matters.** Metallic and pearl paints contain aluminium flake and attenuate 76 GHz.
+  If mounting behind the cover, test with a cut-off piece of the actual cover between radar and
+  target during the bench test — that is nearly free to add and settles it before anything is cut.
