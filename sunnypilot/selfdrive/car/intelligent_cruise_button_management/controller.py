@@ -125,10 +125,19 @@ CRUISE_CYCLE_SETTLE_FRAMES = 250  # 2.5 s at 100 Hz, past the resume jump on thi
 # -- the driver's habit is RESUME then immediately press-and-hold, and the fixed window swallowed
 # the press. Same shape as PRESS_SETTLE_STABLE_FRAMES: stop guessing a duration, watch the number.
 CRUISE_CYCLE_STABLE_FRAMES = 40  # 0.4 s unchanged => the resume jump has landed
-# BluePilot: target-drop rate limiting. Ford's stock ACC brakes aggressively when the set speed
-# falls by roughly 10 mph or more at once, but coasts for smaller drops. Capping each step below
-# that threshold and walking larger drops down over several steps keeps the car coasting.
-# The cap itself is tunable via the IcbmMaxTargetDrop param; this is only the fallback default.
+# BluePilot: target-drop rate limiting. Stock ACC coasts for small set-speed drops and brakes for
+# large ones; capping each step and walking larger drops down over several steps keeps it coasting.
+#
+# The 8 is a GUESS, and specifically a guess at where Ford switches from one to the other -- the
+# "roughly 10 mph" figure it sits under was never measured. It is now measurable: UN R13-H lights
+# the stop lamps above 1.3 m/s^2 of automatically commanded braking, the BCM reports lamp state on
+# the bus, and the onroad BRAKE LAMPS readout shows it. Raise IcbmMaxTargetDrop until the lamps
+# start lighting during routine slowing and back off one, and this becomes a measured value.
+#
+# Worth doing rather than leaving alone: too low a cap meters curve slowing out over several steps
+# and arrives late for a tight bend, and if the real threshold is above 8 that caution buys nothing.
+# The tunable range was capped at 9 to match the unverified theory, which made the theory
+# untestable; it now runs to 15.
 DEFAULT_MAX_TARGET_DROP = 8  # display units (mph/kph)
 # How close actual speed must get to the current step's floor before the next step is allowed.
 DROP_STEP_SETTLE_MARGIN = 2  # display units (mph/kph)

@@ -89,11 +89,13 @@ class CruiseLayout(Widget):
     # BluePilot: cap on how far ICBM drops the set speed in one step
     self.icbm_max_target_drop = option_item_sp(
       title=tr("Max Set Speed Drop Per Step"),
-      description=tr("How far the set speed may fall in one step. Stock ACC brakes hard when the "
-                     "set speed drops about 10 at once but coasts for smaller drops, so staying "
-                     "under that turns one hard brake into a few gentle steps. 0 disables the cap."),
+      description=tr("How far the set speed may fall in one step. Bigger steps slow the car sooner "
+                     "for curves and speed limits, but past a point stock ACC stops coasting and "
+                     "brakes. Watch the BRAKE LAMPS readout: regulations light the stop lamps "
+                     "above 1.3 m/s2 of automatic braking, so raise this until the lamps start "
+                     "coming on during routine slowing, then go back one. 0 disables the cap."),
       param="IcbmMaxTargetDrop",
-      min_value=0, max_value=9, value_change_step=1,
+      min_value=0, max_value=15, value_change_step=1,
       label_callback=self._speed_step_label,
       inline=True)
 
