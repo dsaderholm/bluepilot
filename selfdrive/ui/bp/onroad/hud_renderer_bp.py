@@ -18,6 +18,12 @@ SPEED_UNIT_CENTER_Y = 290
 # BluePilot: below this the propulsion request reads as coasting rather than accelerating. ACC
 # trims constantly at small values; with no deadband the readout would never sit still.
 ACC_DEADBAND = 0.15  # m/s^2
+# BluePilot: AccPrpl_A_Rq's floor is the "no propulsion request" sentinel, not a -5 m/s^2 request.
+# opendbc sends INACTIVE_GAS = -5.0 whenever longitudinal is off or the request falls below
+# MIN_GAS = -0.5, and fordcan pins AccPrpl_A_Pred at -5.0 outright. Anything at or near the floor
+# means "nothing asked for" and must not read as engine braking -- without this the pill would sit
+# on ENG BRAKE permanently, which is worse than the COAST it replaced.
+ACC_PROPULSION_INACTIVE = -4.5  # m/s^2; at or below this the signal carries no request
 # BluePilot: one green-to-red scale, read as "how much is the car slowing". Position on the scale
 # is the information, so the four states are ordered rather than merely distinct:
 #
@@ -245,7 +251,7 @@ class HudRendererBP(HudRendererSP):
           # how that gets settled: if ENG BRAKE never appears on a descent or a curve, it does not
           # use this channel. Checked after accDecelRequest, so anything touching the pads is
           # BRAKE regardless.
-          elif bls.accPropulsionRequest < -ACC_DEADBAND:
+          elif ACC_PROPULSION_INACTIVE < bls.accPropulsionRequest < -ACC_DEADBAND:
             self._acc_state, self._acc_accel = "ENG BRAKE", bls.accPropulsionRequest
           elif bls.accAccelRequest < -ACC_DEADBAND:
             self._acc_state, self._acc_accel = "BRAKE", bls.accAccelRequest
