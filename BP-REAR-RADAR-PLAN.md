@@ -1518,3 +1518,63 @@ Consequences already anticipated in the code, which is why they were built early
 None of that needs redesigning. It was built this way on purpose. But phase 2 should not begin
 before the rear sensor is fitted and its logs have been reviewed against real drives — the ordering
 in §0 stands.
+
+---
+
+## 12. BLIS via the canbox — the cheapest piece of the 360, and it needs no code
+
+Added 2026-08-03. Owner wants factory BLIS looped in for full coverage. Checked what that costs:
+**nothing in software.** It is a canbox configuration job and the entire chain downstream already
+exists and is tested.
+
+### It is already wired, end to end
+
+| Layer | State |
+|---|---|
+| `ford_lincoln_base_pt.dbc` | `Side_Detect_L_Stat` / `Side_Detect_R_Stat` both present |
+| `interface.py:96` | `ret.enableBsm = 0x3A6 in fingerprint[CAN.main] and 0x3A7 in fingerprint[CAN.main]` |
+| `carstate.py:252` | registers both messages at 5 Hz when `enableBsm` and not CANFD |
+| `carstate.py:163` | non-CANFD reads them from **`cp`, which is bus 0** |
+| `carstate.py:164` | decodes into `ret.leftBlindspot` / `ret.rightBlindspot` |
+| `carstate_ext.py:528` | BluePilot logs *every* BLIS signal into `blisLeft` / `blisRight` |
+| `passing_assist.py::_blindspot` | sets `blindspot_available` from those `dataAvailable` flags |
+
+**The only missing link is the two messages appearing on bus 0.** Route `0x3A6` and `0x3A7` from
+MS-CAN onto the bus openpilot reads and every row above starts working with no change to any file.
+
+### What switches on by itself
+
+- **`enableBsm` flips true automatically.** It is derived from the *fingerprint*, not from a
+  parameter — so nothing has to be configured or selected. The car simply comes up with BLIS.
+- `carState.leftBlindspot` / `rightBlindspot` populate, which is what the passing-assist blind-spot
+  gate has been reading all along while always seeing False.
+- `blindspotAvailable` goes true, so the onroad panel stops printing "no blind spot data" and
+  suggestions become genuinely blind-spot-checked rather than merely appearing to be.
+- **sunnypilot's own `AutoLaneChangeBsmDelay` becomes available.** `lane_change_settings.py:78`
+  greys that control out on `ui_state.CP.enableBsm`. Routing BLIS unlocks an existing upstream
+  feature that has been unreachable on this car.
+
+### Two things to get right
+
+1. **Fingerprint timing.** `enableBsm` is decided at car init from what is seen on the bus. The
+   canbox must therefore be routing *before* openpilot fingerprints — expect to restart after
+   enabling it, and do not conclude it failed from the first boot.
+2. **Verify no ID collision on bus 0.** `0x3A6`/`0x3A7` are legitimate bus-0 IDs on the Fords where
+   upstream expects them, so the risk is low — but this car's bus 0 is the powertrain bus and it is
+   worth a log rather than an assumption.
+
+### How the three sensors compose
+
+| Zone | Sensor | Coverage | State |
+|---|---|---|---|
+| Ahead, own lane and adjacent | front MRR | to ~130 m measured, 174 m spec | **working today** |
+| Alongside, the mirror zone | BLIS | ~0 to 7 m | **canbox config, no code** |
+| Behind | rear MRR | ~4 m to 174 m | needs hardware |
+
+They overlap rather than abut, which is the useful arrangement: BLIS runs out around where the
+rear radar becomes reliable, and the front radar's off-path tracks already cover the lane ahead.
+
+**Do BLIS first.** It is free, it needs no parts, it makes the existing passing-assist gate real
+instead of decorative, and it unlocks a sunnypilot feature that is already written. It also means
+that if the rear radar bench test disappoints, the car still gained genuine blind-spot awareness
+for the cost of a configuration change.
