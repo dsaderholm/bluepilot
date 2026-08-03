@@ -188,14 +188,29 @@ class AdjacentLaneSide:
     self.y_rel = 0.0             # radar frame, left-positive
     self.v_rel = 0.0
     self.v_abs = NO_SPEED        # absolute speed of the nearest vehicle in that lane
-    self.oncoming = False        # something on this side is travelling the other way
+    self.oncoming = False        # something on this side is travelling the other way, right now
     self.oncoming_d_rel = 0.0
     self.oncoming_v_abs = NO_SPEED
+    # Seconds of "this SIDE carries opposing traffic" left on the clock. Per side, not per road,
+    # and that is what lets the feature keep working on a four-lane undivided arterial: sitting in
+    # the left lane there, the oncoming lane is one over on the LEFT and the through lane is one
+    # over on the RIGHT. A whole-road veto would give up on both; this gives up only on the side
+    # the traffic is actually on.
+    self.oncoming_seconds = 0.0
     self._raw_occupied = False
     self._streak = 0
 
   def reset(self) -> None:
+    """Radar gone. Everything measured goes with it -- EXCEPT the oncoming memory.
+
+    A sensor dropping out is not evidence that a two-way road became one-way. Rebuilding the whole
+    object here would clear the one piece of state whose entire purpose is to outlive the
+    observation that created it, and it would do so silently, at exactly the moment the display is
+    already reporting no data.
+    """
+    held_s, held_seen = self.oncoming_seconds, self.oncoming
     self.__init__()
+    self.oncoming_seconds, self.oncoming = held_s, held_seen
 
   def observe(self, occupied: bool, d_rel: float, y_rel: float, v_rel: float, v_ego: float) -> None:
     """Feed one radar message's raw finding through the debounce."""
@@ -216,15 +231,29 @@ class AdjacentLaneSide:
     elif not self.occupied:
       self.d_rel, self.y_rel, self.v_rel, self.v_abs = 0.0, 0.0, 0.0, NO_SPEED
 
-  def observe_oncoming(self, d_rel: float, v_abs: float) -> None:
+  def observe_oncoming(self, d_rel: float, v_abs: float, memory_s: float) -> None:
     """Record a vehicle travelling the other way on this side. See ONCOMING_FRAMES: no debounce."""
     self.available = True
     self.oncoming = True
     self.oncoming_d_rel = float(d_rel)
     self.oncoming_v_abs = float(v_abs)
+    self.oncoming_seconds = float(memory_s)
 
   def clear_oncoming(self) -> None:
     self.oncoming = False
+
+  def decay_oncoming(self, dt: float) -> None:
+    self.oncoming_seconds = max(0.0, self.oncoming_seconds - dt)
+
+  @property
+  def blocks_oncoming(self) -> bool:
+    """Is this side the one they are driving on?
+
+    Held rather than instantaneous: meeting a car is evidence about the road, not an event. The
+    seconds after it has gone by are exactly when the lane looks most invitingly empty and is most
+    certainly still theirs.
+    """
+    return self.oncoming_seconds > 0.0
 
   def blocks_move(self, beat_speed: float, margin: float) -> bool:
     """Would moving into this lane actually gain anything?
@@ -254,10 +283,6 @@ class AdjacentLane:
   def __init__(self):
     self.left = AdjacentLaneSide()
     self.right = AdjacentLaneSide()
-    # Seconds of "this road carries opposing traffic" left on the clock. Not a per-frame reading:
-    # see DEFAULT_ONCOMING_MEMORY_S -- meeting a car is evidence about the ROAD, and the road does
-    # not become one-way again the moment that car has gone by.
-    self.undivided_seconds = 0.0
     self.oncoming_seen = False   # ever, this drive -- logged so the veto can be audited
 
   @property
@@ -266,7 +291,13 @@ class AdjacentLane:
 
   @property
   def undivided(self) -> bool:
-    return self.undivided_seconds > 0.0
+    """Either side is carrying opposing traffic. For the log and the display; the GATE is per
+    side, because a road being two-way does not make both sides of it unusable."""
+    return self.left.blocks_oncoming or self.right.blocks_oncoming
+
+  @property
+  def undivided_seconds(self) -> float:
+    return max(self.left.oncoming_seconds, self.right.oncoming_seconds)
 
   def reset(self) -> None:
     self.left.reset()
@@ -287,7 +318,8 @@ class AdjacentLane:
     # Runs before every early return below. A dead radar does not make a two-way road one-way, and
     # a cycle with no new message is not evidence of anything -- so the clock is wall time, not
     # radar time, and nothing except its own expiry clears it.
-    self.undivided_seconds = max(0.0, self.undivided_seconds - dt)
+    self.left.decay_oncoming(dt)
+    self.right.decay_oncoming(dt)
 
     try:
       if not (sm.alive['liveTracks'] and sm.valid['liveTracks']):
@@ -327,8 +359,7 @@ class AdjacentLane:
         # they are using. Note the band does the discriminating for free on a divided road: an
         # opposing carriageway sits 10 m or more away, well outside it, so a highway with a real
         # median never trips this while a two-lane road trips it on the first car we meet.
-        (self.left if side == 'left' else self.right).observe_oncoming(p.dRel, v_abs)
-        self.undivided_seconds = memory_s
+        (self.left if side == 'left' else self.right).observe_oncoming(p.dRel, v_abs, memory_s)
         self.oncoming_seen = True
         continue
       # Roadside furniture, not traffic. See MIN_MOVING_MS -- this radar publishes barriers and

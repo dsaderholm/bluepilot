@@ -618,18 +618,26 @@ class PassingAssistDetector:
       self._reset_outputs(Blocked.noLaneAvailable)
       return
 
-    # Two-way road. FIRST of the vetoes, ahead of the sign, and it is the one this whole design was
-    # waiting on: geometry cannot tell an oncoming lane from a passing lane, so until now every gate
-    # below would happily clear a pass into head-on traffic on any two-lane road.
+    # Two-way road. Evaluated before the sign veto, and it is the one this whole design was waiting
+    # on: geometry cannot tell an oncoming lane from a passing lane, so until now every gate below
+    # would happily clear a pass into head-on traffic on any two-lane road.
     #
-    # Ahead of TSR on two counts. It is measured rather than inferred from a sign channel that may
-    # never populate in this market, and it explains a SUSTAINED silence where a no-passing zone
-    # explains a passing one -- a driver reading "two-way road" understands the feature is off for
-    # this whole road, which is the more useful thing to be told.
+    # PER SIDE, not per road, and that is what keeps this from costing more than it should. On a
+    # four-lane undivided arterial sitting in the left lane, the oncoming lane is one over to the
+    # LEFT and a perfectly ordinary through lane is one over to the RIGHT. A whole-road veto gives
+    # up on both; this gives up only on the side the opposing traffic is actually on.
     #
-    # Vetoes BOTH sides, not just the left. Passing on the right of a two-lane road means using the
-    # shoulder, which is not a manoeuvre to suggest either.
-    if self.oncoming_veto and self.adjacent.undivided:
+    # On a true two-lane road it costs nothing extra: there is no lane to the right, so
+    # right_geometry_ok collapses to the shoulder and nothing is suggested there anyway.
+    onc_left = self.oncoming_veto and self.adjacent.left.blocks_oncoming
+    onc_right = self.oncoming_veto and self.adjacent.right.blocks_oncoming
+
+    # If oncoming rules out every side geometry offered, report it NOW, ahead of the sign veto.
+    # That is the two-lane case, where the two are true together constantly and the road fact is
+    # the more useful of the two: a no-passing zone explains a passing silence, a two-way road
+    # explains the whole road. Reaching this line means geometry offered something, so oncoming is
+    # necessarily what took it away.
+    if not ((self.left_geometry_ok and not onc_left) or (self.right_geometry_ok and not onc_right)):
       self._reset_outputs(Blocked.oncomingLane)
       return
 
@@ -660,18 +668,20 @@ class PassingAssistDetector:
     adj_left = self.adjacent.left.blocks_move(self.lead_v_lead, self.min_deficit_ms)
     adj_right = self.adjacent.right.blocks_move(self.lead_v_lead, self.min_deficit_ms)
 
-    left_ok = (self.left_geometry_ok and not self.left_blindspot and
+    left_ok = (self.left_geometry_ok and not onc_left and not self.left_blindspot and
                not self.rear.left.blocks_lane_change and not adj_left)
-    right_ok = (self.right_geometry_ok and not self.right_blindspot and
+    right_ok = (self.right_geometry_ok and not onc_right and not self.right_blindspot and
                 not self.rear.right.blocks_lane_change and not adj_right)
 
     if not (left_ok or right_ok):
-      # Name the gate that actually decided it. Checked in reverse severity order so the most
-      # specific safety reason wins over the merely-pointless one: a side stopped by both a closing
-      # car and slow traffic reports the closing car.
-      rear_blocked = ((self.left_geometry_ok and not self.left_blindspot and self.rear.left.blocks_lane_change) or
-                      (self.right_geometry_ok and not self.right_blindspot and self.rear.right.blocks_lane_change))
-      if rear_blocked:
+      # Name the gate that actually decided it, most severe first. Oncoming outranks everything:
+      # it is the only one here about a dangerous manoeuvre rather than a wasted one, and it
+      # explains a SUSTAINED silence where the others explain a passing one -- a driver reading
+      # "two-way road" understands the feature is off for this whole road.
+      if (self.left_geometry_ok and onc_left) or (self.right_geometry_ok and onc_right):
+        blocked = Blocked.oncomingLane
+      elif ((self.left_geometry_ok and not self.left_blindspot and self.rear.left.blocks_lane_change) or
+            (self.right_geometry_ok and not self.right_blindspot and self.rear.right.blocks_lane_change)):
         blocked = Blocked.rearApproaching
       elif ((self.left_geometry_ok and not self.left_blindspot and adj_left) or
             (self.right_geometry_ok and not self.right_blindspot and adj_right)):

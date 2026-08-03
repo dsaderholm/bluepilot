@@ -578,6 +578,27 @@ class TestOncomingVeto:
     det = run(PassingAssistDetector(), STUCK_FRAMES, tracks=self.ONCOMING, ovtk_msg=2, ovtk_status=2)
     assert det.blocked_by == Blocked.oncomingLane
 
+  def test_a_four_lane_undivided_road_keeps_the_other_side(self):
+    """The case the per-side veto exists for, and the reason it is not a whole-road one.
+
+    Left lane of a four-lane undivided arterial: the oncoming lane is one over to the LEFT, and an
+    ordinary through lane is one over to the RIGHT. Giving up on both would throw away every
+    arterial in the state to protect against a lane that is only on one side.
+    """
+    det = run(PassingAssistDetector(), STUCK_FRAMES, tracks=self.ONCOMING,
+              probs=(0.9, 0.99, 0.99, 0.9), edges=(-5.6, 5.7))
+    assert det.adjacent.left.blocks_oncoming
+    assert not det.adjacent.right.blocks_oncoming
+    assert det.suggestion == Side.right
+    assert det.reason == Reason.passing
+
+  def test_a_two_lane_road_has_no_other_side_to_keep(self):
+    # Same veto, default geometry: the shoulder is not a lane, so nothing is suggested and the
+    # reason names the road rather than the missing lane.
+    det = run(PassingAssistDetector(), STUCK_FRAMES, tracks=self.ONCOMING)
+    assert det.suggestion == Side.none
+    assert det.blocked_by == Blocked.oncomingLane
+
   def test_a_divided_highway_is_unaffected(self):
     det = run(PassingAssistDetector(), STUCK_FRAMES)
     assert not det.adjacent.undivided
