@@ -1,5 +1,41 @@
 # BluePilot fork — working notes
 
+## START HERE if the owner asks to update
+
+They will open a fresh session and say something like *"update BluePilot"*, *"get the latest
+version"*, or *"there's a new BluePilot"*. That is the whole request. Handle it end to end:
+
+```bash
+python tools/bp_merge_upstream.py
+```
+
+Then:
+
+1. **No conflicts, tests green** → show them the summary, commit, push, and give them the
+   copy-pasteable device command below. Done.
+2. **Conflicts** → resolve them yourself. The script prints what *ours* is in each file. Keep our
+   change, re-apply theirs around it, `git add`, re-run the script. Then as above.
+3. **Tests fail** → say so plainly and do not tell them it is safe to flash. Diagnose it.
+
+Then give them exactly this, and nothing more complicated:
+
+```bash
+cd /data/openpilot && git pull && sudo reboot
+```
+
+**Rules for this task, learned the hard way:**
+
+- **Never ask them a git question.** Not merge vs rebase, not how to resolve a conflict, not which
+  branch. They have said plainly they do not want git terminology. Decide and proceed.
+- **Never report it as safe to flash with a failing test.** A dismissed test is how a duplicate CAN
+  registration reached the car and stranded it on "waiting to start".
+- After resolving anything in `controller.py`, re-read **The ICBM button contract** further down and
+  check the resolution against it. Tests cannot catch a merge that quietly changes what a cruise
+  button means.
+- If something goes badly wrong, the script printed a rollback tag: `git reset --hard <tag>`.
+
+Everything below is background for when that is not enough.
+
 ## Run tests with `tools/bp_offline_test.py`, never bare `pytest`
 
 ```bash
