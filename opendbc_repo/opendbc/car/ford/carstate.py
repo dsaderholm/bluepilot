@@ -201,6 +201,7 @@ class CarState(CarStateBase, MadsCarState, CarStateExt):
       pt_messages.append(("Battery_Traction_1_FD1", float('nan')))
       pt_messages.append(("Battery_Traction_3_FD1", float('nan')))
       pt_messages.append(("Battery_Traction_4_FD1", float('nan')))
+      pt_messages.append(("MtrTracData_1_FD1", float('nan')))
 
     if CP.flags & FordFlags.ALT_STEER_ANGLE:
       pt_messages += [
@@ -253,6 +254,14 @@ class CarState(CarStateBase, MadsCarState, CarStateExt):
     if CP.flags & FordFlags.CANFD:
       cam_messages += [
         ("IPMA_Data2", 1),
+      ]
+    else:
+      # BluePilot: Q3 Ford IPMA also broadcasts TSR speed limit on the camera bus.
+      # Marked non-critical (nan) because traffic sign recognition is an optional
+      # Co-Pilot360 camera feature — trims without it simply never send this message,
+      # and it must not invalidate the rest of carState when absent.
+      cam_messages += [
+        ("Traffic_RecognitnData", float('nan')),
       ]
 
     # BluePilot: TSR is independent of CANFD. float('nan') marks it non-critical for CAN validity,
