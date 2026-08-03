@@ -69,6 +69,22 @@ MIN_RANGE_SWEEP_M = 15.0
 # nothing can trigger beyond ~116 m no matter how obvious the target is.
 STOPPED_LEAD_SPEED_MS = 1.5        # |v_ego + vRel| below this is stopped, not slow
 STOPPED_LEAD_PERSISTENCE_S = 0.3   # enough to reject a single bad model frame, not much more
+# Camera confirmation stands in for most of the range sweep.
+#
+# The sweep was written as if a radar return alone could reach here, but it cannot: radard's
+# get_lead publishes nothing unless the DRIVING MODEL's lead probability clears 0.5, for both the
+# radar-matched and vision-only paths. So every candidate has already been classified as a vehicle
+# by the camera, and modelProb says how sure it is. A guardrail or gantry is not a high-confidence
+# model lead -- that is the classifier's job, and it is better at it than a kinematic proxy.
+# (The one path that skips the model, potential_low_speed_lead, needs v_ego near zero and
+# dRel < 25 m and reports modelProb 0; MIN_V_EGO_MS and MIN_MODEL_PROB both exclude it.)
+#
+# So above CONFIDENT_MODEL_PROB on a stopped target, trade kinematic evidence for classifier
+# evidence and require only enough sweep to show the range is closing at all. Not zero: a few
+# metres costs ~0.14 s at 65 mph and is the only guard left against a model that latches onto a
+# static structure and holds it -- the signature test_persistence_alone_does_not_trigger covers.
+CONFIDENT_MODEL_PROB = 0.85
+CONFIDENT_RANGE_SWEEP_M = 4.0
 # Ford's own stated limit: ACC "may not detect stationary or slow moving vehicles below 6 mph
 # (10 km/h)". Above this, Ford is tracking the lead and this detector must stay out of the way;
 # below it, radar confirmation from openpilot's side means nothing because Ford is not acting on it.
@@ -350,11 +366,14 @@ class UnconfirmedLeadDetector:
 
     self._persistence_s += DT_MDL
 
-    # A stopped lead needs less persistence, but still has to prove the range is closing.
+    # A stopped lead needs less persistence, and a stopped lead the camera is confident about
+    # needs far less sweep -- but every lead still has to prove the range is closing.
     stopped = abs(v_ego + lead.vRel) <= STOPPED_LEAD_SPEED_MS
-    needed = STOPPED_LEAD_PERSISTENCE_S if stopped else MIN_PERSISTENCE_S
+    confident = stopped and lead.modelProb >= CONFIDENT_MODEL_PROB
+    needed_persistence = STOPPED_LEAD_PERSISTENCE_S if stopped else MIN_PERSISTENCE_S
+    needed_sweep = CONFIDENT_RANGE_SWEEP_M if confident else MIN_RANGE_SWEEP_M
     swept = self._sweep_start_d_rel - lead.dRel
-    if (self._persistence_s >= needed and swept >= MIN_RANGE_SWEEP_M
+    if (self._persistence_s >= needed_persistence and swept >= needed_sweep
         and self.ttc <= self.max_ttc):
       self.state = State.active
       self.trigger = Trigger.visionLead

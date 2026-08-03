@@ -128,6 +128,27 @@ class TestFordDoesNotTrackStationaryReturns:
     det.update(make_sm(d_rel=70., radar=True), TRAJ, CRUISE_MS, True, ev)
     assert det.state == State.active, "released to Ford for a lead Ford is not tracking"
 
+  def test_confident_stopped_lead_triggers_on_a_short_sweep(self):
+    """Camera confirmation replaces most of the kinematic evidence. radard will not publish a lead
+    at all unless the model's lead probability clears 0.5, so a high-confidence lead is the camera
+    saying "vehicle", not "bridge"."""
+    det, ev = UnconfirmedLeadDetector(), FakeEvents()
+    # ~5 m of closing in total -- nowhere near the 15 m a low-confidence lead must show.
+    run(det, ev, 30, prob=0.95, d_rel=lambda i: 100. - i * 0.18)
+    assert det.state == State.active
+    assert det.trigger == Trigger.visionLead
+
+  def test_a_low_confidence_stopped_lead_still_needs_the_full_sweep(self):
+    det, ev = UnconfirmedLeadDetector(), FakeEvents()
+    run(det, ev, 30, prob=0.7, d_rel=lambda i: 100. - i * 0.18)
+    assert det.state != State.active, "low model confidence skipped the range sweep"
+
+  def test_confidence_does_not_excuse_a_target_that_never_closes(self):
+    """The bridge signature: the model is sure, but the range does not shrink."""
+    det, ev = UnconfirmedLeadDetector(), FakeEvents()
+    run(det, ev, 60, prob=0.99, d_rel=100.)
+    assert det.state != State.active
+
   def test_a_moving_radar_lead_is_still_left_to_ford(self):
     det, ev = UnconfirmedLeadDetector(), FakeEvents()
     run(det, ev, 60, radar=True, v_rel=-5., d_rel=lambda i: 100. - i * 0.5)
