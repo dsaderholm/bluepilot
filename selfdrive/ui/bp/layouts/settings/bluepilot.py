@@ -100,6 +100,7 @@ class BluePilotLayout(Widget):
       ("ShowBlindspotOverlay", self._show_blindspot),
       ("ShowBrakeStatus", self._show_brake_status),
       ("ShowPassingAssist", self._show_passing_assist),
+      ("ShowAdjacentLanes", self._show_adjacent_lanes),
       ("BPHideOnroadBorder", self._hide_onroad_border),
       ("BPShowConfidenceBall", self._show_confidence_ball),
       ("BPAnimateSteeringWheel", self._animate_steering_wheel),
@@ -209,6 +210,18 @@ class BluePilotLayout(Widget):
                  "blocked it. Observation only: it never suggests, alerts, or steers."),
       initial_state=self._safe_get_bool(self._params, "ShowPassingAssist"),
       callback=lambda state: self._toggle_callback(state, "ShowPassingAssist"),
+      icon="warning.png"
+    )
+
+    # Next-lane vehicle readout on the road view
+    self._show_adjacent_lanes = toggle_item(
+      lambda: tr("Show Next Lane Speeds"),
+      lambda: tr("Draw the speed and distance of the nearest vehicle in each lane beside you, "
+                 "over the car itself, using the front radar. Turns amber when that lane is the "
+                 "reason no pass is being suggested. Does not affect the passing logic, which "
+                 "runs whether this is on or off."),
+      initial_state=self._safe_get_bool(self._params, "ShowAdjacentLanes"),
+      callback=lambda state: self._toggle_callback(state, "ShowAdjacentLanes"),
       icon="warning.png"
     )
 
@@ -743,6 +756,7 @@ class BluePilotLayout(Widget):
         self._show_blindspot,
         self._show_brake_status,
         self._show_passing_assist,
+        self._show_adjacent_lanes,
         self._show_confidence_ball,
         self._animate_steering_wheel,
         self._wheel_icon_style_btn,

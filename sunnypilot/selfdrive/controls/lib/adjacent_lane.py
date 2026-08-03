@@ -91,6 +91,7 @@ class AdjacentLaneSide:
     self.available = False
     self.occupied = False
     self.d_rel = 0.0
+    self.y_rel = 0.0             # radar frame, left-positive
     self.v_rel = 0.0
     self.v_abs = NO_SPEED        # absolute speed of the nearest vehicle in that lane
     self._raw_occupied = False
@@ -99,7 +100,7 @@ class AdjacentLaneSide:
   def reset(self) -> None:
     self.__init__()
 
-  def observe(self, occupied: bool, d_rel: float, v_rel: float, v_ego: float) -> None:
+  def observe(self, occupied: bool, d_rel: float, y_rel: float, v_rel: float, v_ego: float) -> None:
     """Feed one radar message's raw finding through the debounce."""
     self.available = True
 
@@ -113,9 +114,10 @@ class AdjacentLaneSide:
       self.occupied = occupied
 
     if self.occupied and occupied:
-      self.d_rel, self.v_rel, self.v_abs = float(d_rel), float(v_rel), float(v_ego + v_rel)
+      self.d_rel, self.y_rel = float(d_rel), float(y_rel)
+      self.v_rel, self.v_abs = float(v_rel), float(v_ego + v_rel)
     elif not self.occupied:
-      self.d_rel, self.v_rel, self.v_abs = 0.0, 0.0, NO_SPEED
+      self.d_rel, self.y_rel, self.v_rel, self.v_abs = 0.0, 0.0, 0.0, NO_SPEED
 
   def blocks_move(self, beat_speed: float, margin: float) -> bool:
     """Would moving into this lane actually gain anything?
@@ -194,5 +196,7 @@ class AdjacentLane:
 
     for name, obj in (('left', self.left), ('right', self.right)):
       p = best[name]
-      obj.observe(p is not None, p.dRel if p is not None else 0.0,
+      obj.observe(p is not None,
+                  p.dRel if p is not None else 0.0,
+                  p.yRel if p is not None else 0.0,
                   p.vRel if p is not None else 0.0, v_ego)

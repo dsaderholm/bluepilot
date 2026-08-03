@@ -91,6 +91,22 @@ class TestSideAssignment:
     adj = feed(AdjacentLane(), [track(MAX_D + 10, 3.7)])
     assert not adj.left.occupied
 
+  def test_lateral_position_is_carried_through_unflipped(self):
+    """The UI places its readout from this value and flips the sign itself at the draw site.
+
+    Normalising to the camera frame here instead would be the subtle version of the same trap:
+    the number in the log and the number on screen would silently mean different things, and only
+    one of them would match the radar it came from.
+    """
+    adj = feed(AdjacentLane(), [track(50, 3.4), track(60, -3.9)])
+    assert adj.left.y_rel == 3.4
+    assert adj.right.y_rel == -3.9
+
+  def test_lateral_position_clears_with_the_lane(self):
+    adj = feed(AdjacentLane(), [track(50, 3.4)])
+    feed(adj, [])
+    assert adj.left.y_rel == 0.0
+
 
 class TestStationaryRejection:
   """This radar publishes barriers and sign gantries as ordinary tracks -- no classification of any
@@ -185,7 +201,7 @@ class TestBlocksMove:
   def occupied_at(v_abs):
     side = AdjacentLaneSide()
     for _ in range(DEBOUNCE_FRAMES):
-      side.observe(True, 50.0, v_abs - V_EGO, V_EGO)
+      side.observe(True, 50.0, 3.7, v_abs - V_EGO, V_EGO)
     return side
 
   def test_slower_than_the_lead_blocks(self):
@@ -203,12 +219,12 @@ class TestBlocksMove:
   def test_clear_lane_never_blocks(self):
     side = AdjacentLaneSide()
     for _ in range(DEBOUNCE_FRAMES):
-      side.observe(False, 0.0, 0.0, V_EGO)
+      side.observe(False, 0.0, 0.0, 0.0, V_EGO)
     assert side.available
     assert not side.blocks_move(beat_speed=1e3, margin=0.0)
 
   def test_absolute_speed_is_derived_from_ego(self):
     side = AdjacentLaneSide()
     for _ in range(DEBOUNCE_FRAMES):
-      side.observe(True, 50.0, -4.0, V_EGO)
+      side.observe(True, 50.0, 3.7, -4.0, V_EGO)
     assert side.v_abs == V_EGO - 4.0

@@ -416,6 +416,10 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       dRel @2 :Float32;     # metres ahead of the nearest vehicle in that lane, 0 when clear
       vRel @3 :Float32;     # m/s relative to ego, negative = slower than us
       vAbs @4 :Float32;     # its absolute speed -- the number the pass decision compares
+      # Lateral offset in the RADAR's frame, LEFT-POSITIVE, carried so the UI can place the readout
+      # over the actual vehicle instead of guessing a lane centre. Note the flip at the draw site:
+      # _map_to_screen takes the camera frame, where the sign is the other way round.
+      yRel @5 :Float32;
     }
 
     enum ReferenceSource {

@@ -246,6 +246,7 @@ class LongitudinalPlannerSP:
       dest.available = side.available
       dest.occupied = side.occupied
       dest.dRel = float(side.d_rel)
+      dest.yRel = float(side.y_rel)
       dest.vRel = float(side.v_rel)
       dest.vAbs = float(side.v_abs)
 

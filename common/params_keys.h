@@ -285,6 +285,11 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // hardware that is not already fitted, and an unavailable radar reports unavailable rather
     // than clear. Off is for isolating it when the band or the debounce is being fitted from logs.
     {"PassingAssistAdjacentLane", {PERSISTENT | BACKUP, BOOL, "1"}},
+    // BluePilot: draw the speed and distance of the next-lane vehicle over it on the road view.
+    // Separate from PassingAssistAdjacentLane above, which is the detection itself: turning the
+    // display off must not stop the gate working, and turning the gate off must not leave a
+    // display showing stale numbers.
+    {"ShowAdjacentLanes", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"DeviceBootMode", {PERSISTENT | BACKUP, INT, "0"}},
     {"DevUIInfo", {PERSISTENT | BACKUP, INT, "0"}},
     {"EnableCopyparty", {PERSISTENT | BACKUP, BOOL}},

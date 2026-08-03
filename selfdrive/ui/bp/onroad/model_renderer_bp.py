@@ -4,6 +4,7 @@ from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.params import Params
 from openpilot.selfdrive.ui.onroad.model_renderer import ModelRenderer, LeadVehicle, CLIP_MARGIN, MIN_DRAW_DISTANCE, MAX_DRAW_DISTANCE
 from openpilot.selfdrive.ui.bp.onroad.chevron_metrics_bp import ChevronMetricsBP
+from openpilot.selfdrive.ui.bp.onroad.adjacent_lane_renderer import AdjacentLaneRenderer
 from openpilot.selfdrive.ui.ui_state import ui_state, UIStatus
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.lib.shader_polygon import draw_polygon
@@ -51,6 +52,9 @@ class ModelRendererBP(RadRacerRoadMixin, ModelRenderer):
 
     # BluePilot: Replace SP chevron metrics with BP version (horizontal boxed layout)
     self.chevron_metrics = ChevronMetricsBP()
+    # BluePilot: speed readout over the vehicle in each adjacent lane
+    self.adjacent_lanes = AdjacentLaneRenderer()
+    self._show_adjacent_lanes = self._bp_params.get_bool("ShowAdjacentLanes")
 
     # Path smoothing: store previous smoothed path for temporal damping
     self._previous_path_projected_points = np.empty((0, 2), dtype=np.float32)
@@ -107,6 +111,7 @@ class ModelRendererBP(RadRacerRoadMixin, ModelRenderer):
     self.ford_overlay_enabled = self._bp_params.get_bool("FordPrefShowRadarLeadOverlay")
     self._disable_lane_line_status_color = self._bp_params.get_bool("BPDisableLaneLineStatusColor")
     self._rainbow_lane_lines = self._bp_params.get_bool("BPRainbowLines")
+    self._show_adjacent_lanes = self._bp_params.get_bool("ShowAdjacentLanes")
 
   def _render(self, rect: rl.Rectangle):
     sm = ui_state.sm
@@ -187,6 +192,36 @@ class ModelRendererBP(RadRacerRoadMixin, ModelRenderer):
       self.chevron_metrics.lead_is_radar = self._lead_is_radar
       self.chevron_metrics.overlay_scale = self._overlay_scale
       self.chevron_metrics.draw_lead_status(sm, radar_state, self._rect, self._lead_vehicles)
+
+    # BluePilot: adjacent-lane readout. Outside the lead block on purpose -- it does not depend on
+    # a lead existing, and the lane beside you is worth seeing on an empty road too. Skipped under
+    # Rad Racer, where the road is a game board and a radar overlay would not belong.
+    if self._show_adjacent_lanes and not self._rad_racer:
+      try:
+        self.adjacent_lanes.draw(sm, self, self._rect)
+      except Exception as e:
+        bp_ui_log.state("ModelRenderer", "adjacent_lane_error", repr(e))
+
+  def project_ground_point(self, d_rel: float, y_rel: float):
+    """Project a radar-frame point onto the screen at road height. None when off screen.
+
+    Extracted from the lead path so anything wanting to put a marker on a radar target uses the
+    same two corrections rather than rediscovering them:
+
+      - the SIGN. Radar y is left-POSITIVE, the camera frame is left-NEGATIVE. Getting this wrong
+        draws every marker in the mirrored lane, which looks like a calibration problem.
+      - HEIGHT. A point at road level is not at the camera's height. The lead code samples z from
+        the model's own path at that distance, so the marker rides the road over a crest or through
+        a dip instead of floating; _path_offset_z is the calibrated camera height on top.
+    """
+    if self._path.raw_points.size == 0:
+      return None
+    path_x_array = self._path.raw_points[:, 0]
+    if path_x_array.size == 0:
+      return None
+    idx = self._get_path_length_idx(path_x_array, d_rel)
+    z = self._path.raw_points[idx, 2] if idx < len(self._path.raw_points) else 0.0
+    return self._map_to_screen(d_rel, -y_rel + self._camera_offset, z + self._path_offset_z)
 
   def _update_lead_radar_status(self, radar_state):
     """Track whether each lead is radar-sourced for coloring."""
