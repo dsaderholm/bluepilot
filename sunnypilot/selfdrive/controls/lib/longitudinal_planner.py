@@ -249,6 +249,12 @@ class LongitudinalPlannerSP:
       dest.yRel = float(side.y_rel)
       dest.vRel = float(side.v_rel)
       dest.vAbs = float(side.v_abs)
+      dest.oncoming = side.oncoming
+      dest.oncomingDRel = float(side.oncoming_d_rel)
+      dest.oncomingVAbs = float(side.oncoming_v_abs)
+    passingAssist.undividedRoad = pa.adjacent.undivided
+    passingAssist.undividedSeconds = float(pa.adjacent.undivided_seconds)
+    passingAssist.oncomingSeen = pa.adjacent.oncoming_seen
 
     # E2E Alerts
     e2eAlerts = longitudinalPlanSP.e2eAlerts

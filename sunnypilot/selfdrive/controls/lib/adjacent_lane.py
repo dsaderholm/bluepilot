@@ -1,5 +1,30 @@
 """
-BluePilot: is the lane I would move into already occupied by something slow?
+BluePilot: what is in the lane I would move into -- and is it even going my way?
+
+Two questions off one sensor. Whether the next lane is worth moving into, and whether it is a lane
+at all or the other half of a two-way road.
+
+THE SECOND ONE IS WHY THIS MATTERS
+modelV2 publishes lane geometry, not direction of travel. On a two-lane undivided road the oncoming
+lane has the same paint, the same drivable width and the same road edge as a passing lane, so every
+geometry test in passing_assist.py says "lane available" and means "head-on traffic". That was the
+open question the whole design was built around and could not answer.
+
+Map data cannot settle it on this build. mapd v1.12.0 is what ships here, and its documented
+outputs are RoadName, MapSpeedLimit, NextMapSpeedLimit, advisory speeds, hazards and curvatures --
+no oneway, no lane count. (mapd v2 publishes oneWay, lanes and highwayClass on a cereal MapdOut
+message, so this becomes free the day sunnypilot moves to it. It is not this day.)
+
+The radar can just watch. An oncoming vehicle's absolute ground speed is roughly minus its own --
+about -27 m/s for someone doing 60 -- and nothing travelling our way, and no barrier or gantry, can
+produce that number. One sighting classifies the road, and the classification is held (see
+DEFAULT_ONCOMING_MEMORY_S) because the road does not change back when that car has gone by.
+
+The lateral band does the rest for free: an opposing carriageway on a divided highway sits 10 m or
+more away, outside the band entirely, so an interstate never trips this while a two-lane road trips
+it on the first car met.
+
+THE FIRST ONE
 
 Answers the question the settle timer only papers over. Moving out to pass and finding the other
 lane no faster is the manoeuvre that makes a system feel unfinished, and unlike the rear gap this
@@ -76,10 +101,42 @@ ADJACENT_MAX_M = 5.5
 # return lands within a m/s or two of zero.
 MIN_MOVING_MS = 5.0
 
+# Absolute ground speed below which a track is coming TOWARDS us. Same magnitude as MIN_MOVING_MS
+# and the same reasoning: this is a noise floor around zero, and anything outside it in the negative
+# direction is moving the other way down the road.
+#
+# This is the answer to the question the whole design has been unable to settle. modelV2 publishes
+# lane geometry, not direction of travel, so on a two-lane undivided road the oncoming lane looks
+# exactly like a passing lane -- same paint, same drivable width, same everything. Map data cannot
+# help on this build: mapd v1.12.0 is what ships here and it writes only RoadName, MapSpeedLimit
+# and friends to /dev/shm/params. No oneway, no lane count.
+#
+# The radar can just watch. An oncoming car's absolute ground speed is roughly minus its own speed
+# -- around -27 m/s for someone doing 60 -- which is not a value any same-direction vehicle,
+# barrier or sign can produce. It is the one unambiguous measurement available, and the sensor for
+# it is already fitted.
+MIN_ONCOMING_MS = 5.0
+
+# How long a single sighting keeps the road classified as undivided.
+#
+# Long, and deliberately so. Meeting a car is EVIDENCE about the road, not an event to react to:
+# one oncoming vehicle proves the lane to the left carries opposing traffic, and that stays true
+# for the rest of the road whether or not anyone else comes along. On a quiet two-lane road you can
+# drive a minute between meetings, and a short memory would spend those gaps offering to pass into
+# the oncoming lane -- which is the exact failure this exists to prevent, arriving in the exact
+# gaps where it is most plausible.
+DEFAULT_ONCOMING_MEMORY_S = 90
+
 # Consecutive liveTracks messages a side must agree on before the reading is believed. Symmetric on
 # purpose: the flicker drops tracks as often as it invents them, so debouncing only the appearing
 # edge would still produce a jittery clear.
 DEBOUNCE_FRAMES = 3
+
+# Oncoming needs no such patience, and giving it any would be backwards. Occupancy debounces
+# because a flickering track produces a flickering suggestion; a single oncoming return is already
+# proof of a two-way road, and the cost of believing a false one is a few quiet minutes while the
+# cost of waiting for a second is a suggestion to pass into a head-on lane. One is enough.
+ONCOMING_FRAMES = 1
 
 NO_SPEED = 0.0
 
@@ -131,6 +188,9 @@ class AdjacentLaneSide:
     self.y_rel = 0.0             # radar frame, left-positive
     self.v_rel = 0.0
     self.v_abs = NO_SPEED        # absolute speed of the nearest vehicle in that lane
+    self.oncoming = False        # something on this side is travelling the other way
+    self.oncoming_d_rel = 0.0
+    self.oncoming_v_abs = NO_SPEED
     self._raw_occupied = False
     self._streak = 0
 
@@ -155,6 +215,16 @@ class AdjacentLaneSide:
       self.v_rel, self.v_abs = float(v_rel), float(v_ego + v_rel)
     elif not self.occupied:
       self.d_rel, self.y_rel, self.v_rel, self.v_abs = 0.0, 0.0, 0.0, NO_SPEED
+
+  def observe_oncoming(self, d_rel: float, v_abs: float) -> None:
+    """Record a vehicle travelling the other way on this side. See ONCOMING_FRAMES: no debounce."""
+    self.available = True
+    self.oncoming = True
+    self.oncoming_d_rel = float(d_rel)
+    self.oncoming_v_abs = float(v_abs)
+
+  def clear_oncoming(self) -> None:
+    self.oncoming = False
 
   def blocks_move(self, beat_speed: float, margin: float) -> bool:
     """Would moving into this lane actually gain anything?
@@ -184,16 +254,26 @@ class AdjacentLane:
   def __init__(self):
     self.left = AdjacentLaneSide()
     self.right = AdjacentLaneSide()
+    # Seconds of "this road carries opposing traffic" left on the clock. Not a per-frame reading:
+    # see DEFAULT_ONCOMING_MEMORY_S -- meeting a car is evidence about the ROAD, and the road does
+    # not become one-way again the moment that car has gone by.
+    self.undivided_seconds = 0.0
+    self.oncoming_seen = False   # ever, this drive -- logged so the veto can be audited
 
   @property
   def available(self) -> bool:
     return self.left.available or self.right.available
 
+  @property
+  def undivided(self) -> bool:
+    return self.undivided_seconds > 0.0
+
   def reset(self) -> None:
     self.left.reset()
     self.right.reset()
 
-  def update(self, sm, v_ego: float, max_distance_m: float) -> None:
+  def update(self, sm, v_ego: float, max_distance_m: float, dt: float = 0.05,
+             memory_s: float = DEFAULT_ONCOMING_MEMORY_S) -> None:
     """Scan liveTracks for the nearest vehicle in each adjacent lane.
 
     Nearest by dRel, because that is the one we would meet first. Anything beyond the passing
@@ -204,6 +284,11 @@ class AdjacentLane:
     dead or invalid. Between those two cases lies the whole distinction this module maintains --
     stale-but-real data is not the same as no sensor.
     """
+    # Runs before every early return below. A dead radar does not make a two-way road one-way, and
+    # a cycle with no new message is not evidence of anything -- so the clock is wall time, not
+    # radar time, and nothing except its own expiry clears it.
+    self.undivided_seconds = max(0.0, self.undivided_seconds - dt)
+
     try:
       if not (sm.alive['liveTracks'] and sm.valid['liveTracks']):
         self.reset()
@@ -216,13 +301,12 @@ class AdjacentLane:
       self.reset()
       return
 
+    self.left.clear_oncoming()
+    self.right.clear_oncoming()
+
     best: dict[str, object] = {'left': None, 'right': None}
     for p in tracks:
       if p.dRel <= 0 or p.dRel > max_distance_m:
-        continue
-      # Roadside furniture, not traffic. See MIN_MOVING_MS -- this radar publishes barriers and
-      # sign gantries as ordinary tracks and nothing upstream tells them apart from cars.
-      if v_ego + p.vRel < MIN_MOVING_MS:
         continue
       # Radar yRel is LEFT-POSITIVE -- the opposite of the camera frame the model works in. Flip
       # first, THEN subtract where the road actually goes at that distance, so the result is
@@ -233,6 +317,25 @@ class AdjacentLane:
         continue
       # Camera frame now: negative is left.
       side = 'left' if lat < 0 else 'right'
+
+      # Three kinds of thing live in that band, and the sign of the absolute ground speed is what
+      # separates them. Order matters: oncoming is checked FIRST, because it is the only one of the
+      # three that is a safety fact rather than a convenience one.
+      v_abs = v_ego + p.vRel
+      if v_abs < -MIN_ONCOMING_MS:
+        # Travelling the other way. The lane to our left is not a passing lane -- it is the one
+        # they are using. Note the band does the discriminating for free on a divided road: an
+        # opposing carriageway sits 10 m or more away, well outside it, so a highway with a real
+        # median never trips this while a two-lane road trips it on the first car we meet.
+        (self.left if side == 'left' else self.right).observe_oncoming(p.dRel, v_abs)
+        self.undivided_seconds = memory_s
+        self.oncoming_seen = True
+        continue
+      # Roadside furniture, not traffic. See MIN_MOVING_MS -- this radar publishes barriers and
+      # sign gantries as ordinary tracks and nothing upstream tells them apart from cars.
+      if v_abs < MIN_MOVING_MS:
+        continue
+
       if best[side] is None or p.dRel < best[side].dRel:
         best[side] = p
 

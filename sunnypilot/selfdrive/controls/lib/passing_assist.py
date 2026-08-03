@@ -39,7 +39,9 @@ from openpilot.common.constants import CV
 from openpilot.common.params import Params
 from openpilot.common.realtime import DT_MDL
 from openpilot.sunnypilot import PARAMS_UPDATE_PERIOD
-from openpilot.sunnypilot.selfdrive.controls.lib.adjacent_lane import AdjacentLane, path_offset
+from openpilot.sunnypilot.selfdrive.controls.lib.adjacent_lane import (
+  AdjacentLane, path_offset, DEFAULT_ONCOMING_MEMORY_S,
+)
 from openpilot.sunnypilot.selfdrive.controls.lib.rear_approach import RearApproach
 
 Side = custom.LongitudinalPlanSP.PassingAssist.Side
@@ -208,6 +210,8 @@ class PassingAssistDetector:
     self.keep_right_delay_s = float(DEFAULT_KEEP_RIGHT_DELAY_S)
     self.avoid_outermost = False
     self.adjacent_enabled = True
+    self.oncoming_veto = True
+    self.oncoming_memory_s = float(DEFAULT_ONCOMING_MEMORY_S)
     self.settle_time_s = float(DEFAULT_SETTLE_TIME_S)
     self.suspend_minutes = 15
     # Starts settled: at boot we have not just passed anyone, and a fresh detector must not
@@ -226,6 +230,8 @@ class PassingAssistDetector:
       self.keep_right_delay_s = float(self.params.get("PassingAssistKeepRightDelay", return_default=True))
       self.avoid_outermost = self.params.get_bool("PassingAssistAvoidOutermost")
       self.adjacent_enabled = self.params.get_bool("PassingAssistAdjacentLane")
+      self.oncoming_veto = self.params.get_bool("PassingAssistOncomingVeto")
+      self.oncoming_memory_s = float(self.params.get("PassingAssistOncomingMemory", return_default=True))
       self.settle_time_s = float(self.params.get("PassingAssistSettleTime", return_default=True))
       self.suspend_minutes = self.params.get("PassingAssistSuspendMinutes", return_default=True)
       self.max_distance_m = float(self.params.get("PassingAssistMaxDistance", return_default=True))
@@ -536,7 +542,8 @@ class PassingAssistDetector:
     # Runs every cycle, before any gate. What the next lane over is doing is worth logging on the
     # frames where nothing is suggested too -- that is how the band and the debounce get fitted.
     if self.adjacent_enabled:
-      self.adjacent.update(sm, float(CS.vEgo), self.max_distance_m)
+      self.adjacent.update(sm, float(CS.vEgo), self.max_distance_m,
+                           dt=DT_MDL, memory_s=self.oncoming_memory_s)
     else:
       self.adjacent.reset()
     self._blindspot(car_state_bp)
@@ -609,6 +616,21 @@ class PassingAssistDetector:
 
     if not (self.left_geometry_ok or self.right_geometry_ok):
       self._reset_outputs(Blocked.noLaneAvailable)
+      return
+
+    # Two-way road. FIRST of the vetoes, ahead of the sign, and it is the one this whole design was
+    # waiting on: geometry cannot tell an oncoming lane from a passing lane, so until now every gate
+    # below would happily clear a pass into head-on traffic on any two-lane road.
+    #
+    # Ahead of TSR on two counts. It is measured rather than inferred from a sign channel that may
+    # never populate in this market, and it explains a SUSTAINED silence where a no-passing zone
+    # explains a passing one -- a driver reading "two-way road" understands the feature is off for
+    # this whole road, which is the more useful thing to be told.
+    #
+    # Vetoes BOTH sides, not just the left. Passing on the right of a two-lane road means using the
+    # shoulder, which is not a manoeuvre to suggest either.
+    if self.oncoming_veto and self.adjacent.undivided:
+      self._reset_outputs(Blocked.oncomingLane)
       return
 
     # TSR veto before the blind-spot check: a no-overtaking zone makes the blind spot irrelevant,

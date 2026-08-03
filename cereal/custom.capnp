@@ -410,6 +410,22 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     adjacentLeft @35 :AdjacentLane;
     adjacentRight @36 :AdjacentLane;
 
+    # BluePilot: does this road carry traffic the other way?
+    #
+    # The question the whole design was built around and could not answer. modelV2 publishes lane
+    # geometry, not direction of travel, so on a two-lane undivided road the oncoming lane passes
+    # every geometry test as a passing lane. Map data cannot settle it either: mapd v1.12.0 ships
+    # here and writes no oneway tag and no lane count.
+    #
+    # The radar answers it directly. An oncoming vehicle's absolute ground speed is roughly minus
+    # its own -- about -27 m/s at 60 mph -- which nothing travelling our way and no roadside object
+    # can produce. Held for a while after the last sighting rather than read per frame, because one
+    # oncoming car is evidence about the ROAD, and the road does not become one-way again once it
+    # has passed.
+    undividedRoad @37 :Bool;        # a sighting is still in memory: treat the left lane as theirs
+    undividedSeconds @38 :Float32;  # how much of that memory is left
+    oncomingSeen @39 :Bool;         # ever this drive, whether or not the memory has expired
+
     struct AdjacentLane {
       available @0 :Bool;   # false = liveTracks is not reporting. NOT the same as "clear".
       occupied @1 :Bool;    # debounced: 3 consecutive radar messages, not one frame
@@ -420,6 +436,12 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       # over the actual vehicle instead of guessing a lane centre. Note the flip at the draw site:
       # _map_to_screen takes the camera frame, where the sign is the other way round.
       yRel @5 :Float32;
+      # Travelling the OTHER WAY on this side. Not debounced, unlike occupied: one sighting is
+      # already proof of a two-way road, and waiting for a second costs a suggestion to pass into
+      # a head-on lane.
+      oncoming @6 :Bool;
+      oncomingDRel @7 :Float32;
+      oncomingVAbs @8 :Float32;   # negative: its ground speed is towards us
     }
 
     enum ReferenceSource {
@@ -500,6 +522,7 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       rearApproaching @10;   # something is closing on that lane from behind
       suspended @11;         # driver paused it -- construction zone, weather, unfamiliar road
       adjacentSlow @12;      # the lane is there and clear behind, but full of traffic no faster
+      oncomingLane @13;      # two-way road: the lane to the left is theirs, not a passing lane
     }
   }
 

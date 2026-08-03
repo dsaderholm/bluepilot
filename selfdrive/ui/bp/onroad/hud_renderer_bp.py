@@ -165,6 +165,7 @@ _BLOCKED_TEXT = {
   'rearApproaching': "Traffic coming up behind",
   'suspended': "Paused",
   'adjacentSlow': "Next lane is no faster",
+  'oncomingLane': "Two-way road - no passing",
 }
 
 # BluePilot: sunnypilot's "AHEAD" box hangs off the bottom of the speed-limit sign, in the same
@@ -510,6 +511,10 @@ class HudRendererBP(HudRendererSP):
           self._pa_sub_detail = (f"want {pa.referenceSpeed * conv:.0f}"
                                  f"  lead {pa.leadVLead * conv:.0f}"
                                  f"  [{pa.referenceSource}]")
+        elif blocked == 'oncomingLane':
+          # Say how long the veto has left, so a driver who has just turned off a two-lane road
+          # onto a divided one can see it counting down rather than wonder if it is stuck.
+          self._pa_sub_detail = f"seen {pa.undividedSeconds:.0f}s of memory left"
         elif blocked == 'adjacentSlow':
           # Same reasoning as above: show the comparison, not just its verdict. Which side is
           # reported matters, because "the next lane is no faster" is a claim about a specific

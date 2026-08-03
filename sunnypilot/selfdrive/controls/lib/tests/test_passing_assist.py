@@ -324,15 +324,24 @@ KEEP_RIGHT_FRAMES = int(11.0 / DT_MDL)
 
 
 
+# Every params stub reads from this one dict. They used to each carry their own literal, so adding
+# a single new param raised KeyError in nine unrelated tests at once, none of which were about the
+# new param. Defaults live in params_keys.h; these mirror them.
+_STUB_PARAM_DEFAULTS = {
+  "PassingAssistMinDeficit": 4, "PassingAssistStuckTime": 2,
+  "PassingAssistKeepRightDelay": 10, "PassingAssistSettleTime": 20,
+  "PassingAssistMaxDistance": 220, "PassingAssistSuspendMinutes": 15,
+  "PassingAssistOncomingMemory": 90,
+}
+
+
 class _KeepRightOnParams:
   """Keep right is DEFAULT OFF in params_keys.h -- the exit-lane ambiguity makes it unsafe to
   lean on. These tests opt in explicitly so the default stays honest and a future flip of that
   default cannot silently make them pass for the wrong reason."""
 
   def get(self, key, block=False, return_default=False):
-    return {"PassingAssistMinDeficit": 4, "PassingAssistStuckTime": 2,
-            "PassingAssistKeepRightDelay": 10, "PassingAssistSettleTime": 20,
-            "PassingAssistMaxDistance": 220, "PassingAssistSuspendMinutes": 15}[key]
+    return _STUB_PARAM_DEFAULTS[key]
 
   def __init__(self, avoid_outermost=True):
     self.avoid_outermost = avoid_outermost
@@ -540,6 +549,55 @@ class TestAdjacentLaneGate:
     assert det.suggestion == Side.left
 
 
+class TestOncomingVeto:
+  """A two-lane undivided road passes every geometry test as though the oncoming lane were a
+  passing lane. This is the gate that stops it, and it is the only one here guarding against a
+  dangerous suggestion rather than a merely wasted one."""
+
+  # 27 m/s the other way, one lane left. Default geometry already reports a clear lane there.
+  ONCOMING = [track(90, 3.7, -27.0 - SLOW_LEAD_MS)]
+
+  def test_oncoming_traffic_stops_the_pass(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES, tracks=self.ONCOMING)
+    assert det.adjacent.undivided
+    assert det.suggestion == Side.none
+    assert det.blocked_by == Blocked.oncomingLane
+
+  def test_it_outlasts_the_car(self):
+    # The dangerous window: the oncoming car has gone by, the left lane looks clear and inviting,
+    # and it is still the lane they are using.
+    det = PassingAssistDetector()
+    det.update(make_sm(tracks=self.ONCOMING), CRUISE_MS, True)
+    run(det, STUCK_FRAMES)
+    assert det.suggestion == Side.none
+    assert det.blocked_by == Blocked.oncomingLane
+
+  def test_it_outranks_the_sign_veto(self):
+    # Both apply constantly on a two-lane road. The road fact is reported, because it explains a
+    # sustained silence where a no-passing zone explains a passing one.
+    det = run(PassingAssistDetector(), STUCK_FRAMES, tracks=self.ONCOMING, ovtk_msg=2, ovtk_status=2)
+    assert det.blocked_by == Blocked.oncomingLane
+
+  def test_a_divided_highway_is_unaffected(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES)
+    assert not det.adjacent.undivided
+    assert det.suggestion == Side.left
+
+  def test_the_veto_can_be_turned_off(self):
+    class _Off(_KeepRightOnParams):
+      def get_bool(self, key, block=False):
+        if key == "PassingAssistOncomingVeto":
+          return False
+        return super().get_bool(key, block)
+
+    det = PassingAssistDetector()
+    det.params = _Off()
+    for _ in range(STUCK_FRAMES):
+      det.update(make_sm(tracks=self.ONCOMING), CRUISE_MS, True)
+    assert det.adjacent.undivided     # still measured and logged
+    assert det.suggestion == Side.left  # but not acted on
+
+
 class TestKeepRightAdjacentLane:
   def test_will_not_move_over_behind_slow_traffic(self):
     # "Keep right except to pass" assumes the right lane is moving. Dropping in behind a car slow
@@ -710,9 +768,9 @@ class _SuspendParams:
     self.minutes = minutes
 
   def get(self, key, block=False, return_default=False):
-    return {"PassingAssistMinDeficit": 4, "PassingAssistStuckTime": 2,
-            "PassingAssistKeepRightDelay": 10, "PassingAssistSettleTime": 20,
-            "PassingAssistMaxDistance": 220, "PassingAssistSuspendMinutes": self.minutes}[key]
+    if key == "PassingAssistSuspendMinutes":
+      return self.minutes
+    return _STUB_PARAM_DEFAULTS[key]
 
   def get_bool(self, key, block=False):
     return self.suspend if key == "PassingAssistSuspend" else True

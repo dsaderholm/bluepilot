@@ -290,6 +290,15 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // display off must not stop the gate working, and turning the gate off must not leave a
     // display showing stale numbers.
     {"ShowAdjacentLanes", {PERSISTENT | BACKUP, BOOL, "0"}},
+    // BluePilot: never suggest a pass on a road the radar has seen oncoming traffic on. DEFAULT
+    // ON, and it is the only gate here that guards against a genuinely dangerous suggestion rather
+    // than a merely wasted one -- the camera cannot tell an oncoming lane from a passing lane, so
+    // without this every two-lane road clears a pass into head-on traffic.
+    {"PassingAssistOncomingVeto", {PERSISTENT | BACKUP, BOOL, "1"}},
+    // How long one sighting keeps the road classified as two-way, in seconds. Long on purpose:
+    // meeting a car is evidence about the ROAD, not an event, and on a quiet two-lane road the
+    // gaps between meetings are exactly when a wrong suggestion would look most plausible.
+    {"PassingAssistOncomingMemory", {PERSISTENT | BACKUP, INT, "90"}},
     {"DeviceBootMode", {PERSISTENT | BACKUP, INT, "0"}},
     {"DevUIInfo", {PERSISTENT | BACKUP, INT, "0"}},
     {"EnableCopyparty", {PERSISTENT | BACKUP, BOOL}},

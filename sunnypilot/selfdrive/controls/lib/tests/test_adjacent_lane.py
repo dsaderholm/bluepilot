@@ -155,6 +155,101 @@ class TestCurves:
     assert adj.left.occupied
 
 
+class TestOncoming:
+  """The one question the geometry could never answer.
+
+  An oncoming lane and a passing lane are identical to the camera: same paint, same drivable width,
+  same road edge. The radar separates them outright, because an oncoming vehicle's absolute ground
+  speed is roughly minus its own and nothing else on the road can produce that number.
+  """
+
+  # Someone doing 27 m/s the other way, one lane to the left. v_rel = -(their speed + ours).
+  ONCOMING = staticmethod(lambda d=90: track(d, 3.7, v_rel=-27.0 - V_EGO))
+
+  def test_a_single_oncoming_car_classifies_the_road(self):
+    adj = AdjacentLane()
+    adj.update(FakeSM([self.ONCOMING()]), V_EGO, MAX_D)
+    assert adj.undivided
+    assert adj.left.oncoming
+    assert adj.oncoming_seen
+
+  def test_no_debounce_on_oncoming(self):
+    # Occupancy waits three messages; this must not. Waiting for a second sighting costs a
+    # suggestion to pass into a head-on lane, and one sighting is already proof.
+    adj = AdjacentLane()
+    adj.update(FakeSM([self.ONCOMING()]), V_EGO, MAX_D)
+    assert adj.undivided
+
+  def test_oncoming_is_not_counted_as_lane_occupancy(self):
+    # It must not fall through into the "is that lane faster" comparison, where a large negative
+    # speed would read as very slow traffic and produce the wrong blocked reason.
+    adj = feed(AdjacentLane(), [self.ONCOMING()])
+    assert not adj.left.occupied
+
+  def test_same_direction_traffic_never_classifies_the_road(self):
+    adj = feed(AdjacentLane(), [track(90, 3.7, v_rel=4.0)])
+    assert not adj.undivided
+    assert not adj.left.oncoming
+
+  def test_a_barrier_is_not_oncoming(self):
+    # Stationary is v_abs ~ 0, which is inside neither threshold. A guardrail must not classify
+    # every divided highway as two-way.
+    adj = feed(AdjacentLane(), [track(60, 3.5, v_rel=-V_EGO)])
+    assert not adj.undivided
+
+  def test_divided_highway_opposing_carriageway_is_out_of_band(self):
+    # The band does this discrimination for free: an opposing carriageway across a median sits well
+    # beyond ADJACENT_MAX_M, so an interstate never trips the veto.
+    adj = AdjacentLane()
+    adj.update(FakeSM([track(120, 14.0, v_rel=-27.0 - V_EGO)]), V_EGO, MAX_D)
+    assert not adj.undivided
+
+  def test_classification_outlives_the_car_that_caused_it(self):
+    # The whole point of the memory. On a quiet two-lane road the gaps between meeting cars are
+    # exactly when a wrong suggestion would look most convincing.
+    adj = AdjacentLane()
+    adj.update(FakeSM([self.ONCOMING()]), V_EGO, MAX_D, dt=0.05, memory_s=90)
+    for _ in range(200):     # 10 s of empty road
+      adj.update(FakeSM([]), V_EGO, MAX_D, dt=0.05, memory_s=90)
+    assert adj.undivided
+    assert not adj.left.oncoming    # the car is gone...
+    assert adj.undivided_seconds > 70   # ...the road is not
+
+  def test_the_memory_does_expire(self):
+    adj = AdjacentLane()
+    adj.update(FakeSM([self.ONCOMING()]), V_EGO, MAX_D, dt=0.05, memory_s=5)
+    for _ in range(120):     # 6 s
+      adj.update(FakeSM([]), V_EGO, MAX_D, dt=0.05, memory_s=5)
+    assert not adj.undivided
+    assert adj.oncoming_seen        # but the drive still records that it happened
+
+  def test_a_dead_radar_does_not_clear_the_classification(self):
+    # A sensor dropping out is not evidence the road became one-way.
+    adj = AdjacentLane()
+    adj.update(FakeSM([self.ONCOMING()]), V_EGO, MAX_D)
+    adj.update(FakeSM([], alive=False), V_EGO, MAX_D)
+    assert adj.undivided
+
+  def test_memory_decays_on_cycles_with_no_new_radar_message(self):
+    # The clock is wall time, not radar time. Decaying only on radar frames would stretch the
+    # memory by whatever the message rate happened to be.
+    adj = AdjacentLane()
+    adj.update(FakeSM([self.ONCOMING()]), V_EGO, MAX_D, dt=0.05, memory_s=10)
+    before = adj.undivided_seconds
+    for _ in range(20):
+      adj.update(FakeSM([], updated=False), V_EGO, MAX_D, dt=0.05, memory_s=10)
+    assert adj.undivided_seconds < before - 0.9
+
+  def test_oncoming_on_a_curve_is_still_found(self):
+    # Same path-relative geometry as everything else here: a fixed band from the car's axis would
+    # lose the oncoming lane on exactly the bends where meeting someone matters most.
+    car = track(70, 4.9 + 3.7, v_rel=-27.0 - V_EGO)
+    adj = AdjacentLane()
+    adj.update(FakeSM([car], curve=-500.0), V_EGO, MAX_D)
+    assert adj.undivided
+    assert adj.left.oncoming
+
+
 class TestPathOffset:
   def test_straight_path_is_zero_everywhere(self):
     assert path_offset(NS(position=path()), 80.0) == 0.0

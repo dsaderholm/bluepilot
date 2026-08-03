@@ -331,6 +331,23 @@ class CruiseLayout(Widget):
                      "reporting, the panel says so rather than assuming the lane is clear."),
       param="PassingAssistAdjacentLane")
 
+    self.passing_assist_oncoming_veto = toggle_item_sp(
+      title=tr("Never Pass Into Oncoming Traffic"),
+      description=tr("Watch the front radar for vehicles coming the other way. If any are seen, "
+                     "treat the road as two-way and stop suggesting passes on it. The camera "
+                     "cannot tell an oncoming lane from a passing lane by itself, so leave this "
+                     "on unless you only ever drive divided highways."),
+      param="PassingAssistOncomingVeto")
+
+    self.passing_assist_oncoming_memory = option_item_sp(
+      title=tr("Two-Way Road Memory (s)"),
+      description=tr("How long after seeing an oncoming vehicle the road stays classified as "
+                     "two-way. Long is safer: on a quiet road the gaps between meeting cars are "
+                     "exactly when a wrong suggestion would look most convincing."),
+      param="PassingAssistOncomingMemory",
+      min_value=15, max_value=600, value_change_step=15,
+      inline=True)
+
     self.passing_assist_keep_right = toggle_item_sp(
       title=tr("Keep Right Except To Pass"),
       description=tr("Also record when you could return to a lane on your right because nothing "
@@ -458,6 +475,8 @@ class CruiseLayout(Widget):
       self.passing_assist_settle_time,
       self.passing_assist_suspend_minutes,
       self.passing_assist_adjacent_lane,
+      self.passing_assist_oncoming_veto,
+      self.passing_assist_oncoming_memory,
       self.passing_assist_keep_right,
       self.passing_assist_keep_right_delay,
 
