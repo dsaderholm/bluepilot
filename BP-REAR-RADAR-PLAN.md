@@ -48,7 +48,24 @@ of sixty-four, and §5 collapses to almost nothing.
 That one test answers the #1 risk for the price of the part you would have had to buy regardless.
 If it fails, you have spent $150 and a Saturday instead of a month.
 
-**Order of work:** §6 → bench-test the radar → decide → hardware.
+**Order of work, updated 2026-08-03.** Two stages cost nothing and come first. Nothing is urgent
+and each stage stands on its own if the next never happens.
+
+| Stage | Cost | What | Gate to the next |
+|---|---|---|---|
+| **1. Drive what exists** | $0 | Flash the branch. Turn on the two On Screen toggles under Steering → Customize Passing Assist. Drive normally and read the panel. | Does the observer say sensible things on your roads? |
+| **2. BLIS via canbox** | $0 | Route `0x3A6`/`0x3A7` onto bus 0 (§12). Restart so the fingerprint takes. | Does `blindspotAvailable` go true and the "no blind spot data" caveat disappear? |
+| **3. Buy and bench the radar** | $110–255 | `JX7T-9G768-AC` + pigtail + CANable 2.0 + 12 V supply. Power it on a bench, log what it emits (§8, §9). | **Does it emit detections with nothing sent to it?** |
+| **4. Fit it** | $70–110 | Teensy 4.0, dual-CAN board, loom, bracket. Bench → listen-only → transmit (§9). | — |
+
+Stage 3 is the first money and the only real gamble, and PR #351 has largely already
+de-risked it — someone tested this exact part number standalone. Stage 4 only starts if stage 3
+produces target data.
+
+Stages 1 and 2 are worth doing regardless: stage 1 is the only way to find out whether the phase-1
+observer's thresholds suit these roads, and stage 2 makes the blind-spot gate real, unlocks
+`AutoLaneChangeBsmDelay`, and stands alone as a genuine safety gain even if the radar never
+happens.
 
 ---
 
