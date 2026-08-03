@@ -309,6 +309,12 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // for the chance of suggesting a pass into a centre turn lane. Opposing traffic seen IN the
     // next lane blocks it either way -- that part is not a judgement call.
     {"PassingAssistStrictTwoWay", {PERSISTENT | BACKUP, BOOL, "1"}},
+    // BluePilot: seconds to wait AFTER the blind spot clears before an auto lane change starts.
+    // sunnypilot's arithmetic gave exactly one second regardless of the configured delay, which
+    // put the car alongside a vehicle that had only just stopped being beside it. BLIS cannot say
+    // whether that vehicle is now ahead or behind, so a longer hold stands in for the measurement
+    // until a rear sensor exists. Default 3.
+    {"AutoLaneChangeBsmHoldTime", {PERSISTENT | BACKUP, INT, "3"}},
     {"DeviceBootMode", {PERSISTENT | BACKUP, INT, "0"}},
     {"DevUIInfo", {PERSISTENT | BACKUP, INT, "0"}},
     {"EnableCopyparty", {PERSISTENT | BACKUP, BOOL}},

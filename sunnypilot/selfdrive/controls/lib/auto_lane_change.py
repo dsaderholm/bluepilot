@@ -32,6 +32,24 @@ AUTO_LANE_CHANGE_TIMER = {
 
 ONE_SECOND_DELAY = -1
 
+# BluePilot: how long AFTER the blind spot goes clear before the lane change may start.
+#
+# Diagnosed from the owner's own report: sunnypilot's BSM delay moved over too close to a car it
+# had just waited for. It is not a tuning fault, it is arithmetic. While the blind spot is
+# occupied the wait timer is pinned exactly ONE_SECOND_DELAY below the threshold, so the instant
+# BSM clears it needs precisely one second to cross it -- whatever delay the driver configured.
+#
+# One second after a car leaves your blind spot it is a metre or two off your rear quarter, and if
+# it was overtaking you it is still closing. That is the manoeuvre reported.
+#
+# No timer value fixes this properly, because BLIS answers the wrong question: it goes clear when
+# the car is no longer BESIDE you and says nothing about whether it is now ahead or behind, or how
+# fast. A rear-facing sensor is the real answer (see BP-REAR-RADAR-PLAN.md). Until one is fitted,
+# a longer hold is the honest stand-in -- it buys distance on the assumption we cannot measure it.
+#
+# Default 3 s rather than 1. At a 10 mph overtaking difference that is ~13 m of extra separation.
+DEFAULT_BSM_HOLD_S = 3
+
 
 class AutoLaneChangeController:
   def __init__(self, desire_helper):
@@ -44,6 +62,7 @@ class AutoLaneChangeController:
 
     self.lane_change_set_timer = self.params.get("AutoLaneChangeTimer", return_default=True)
     self.lane_change_bsm_delay = False
+    self.lane_change_bsm_hold = float(DEFAULT_BSM_HOLD_S)
 
     self.prev_brake_pressed = False
     self.auto_lane_change_allowed = False
@@ -62,6 +81,8 @@ class AutoLaneChangeController:
   def read_params(self) -> None:
     self.lane_change_bsm_delay = self.params.get_bool("AutoLaneChangeBsmDelay")
     self.lane_change_set_timer = self.params.get("AutoLaneChangeTimer", return_default=True)
+    # BluePilot: see DEFAULT_BSM_HOLD_S.
+    self.lane_change_bsm_hold = float(self.params.get("AutoLaneChangeBsmHoldTime", return_default=True))
 
   def update_params(self) -> None:
     if self.param_read_counter % 50 == 0:
@@ -75,10 +96,11 @@ class AutoLaneChangeController:
     self.lane_change_wait_timer += DT_MDL
 
     if self.lane_change_bsm_delay and blindspot_detected and self.lane_change_delay > 0:
-      if self.lane_change_delay == AUTO_LANE_CHANGE_TIMER[AutoLaneChangeMode.NUDGELESS]:
-        self.lane_change_wait_timer = ONE_SECOND_DELAY
-      else:
-        self.lane_change_wait_timer = self.lane_change_delay + ONE_SECOND_DELAY
+      # BluePilot: pin the timer a full hold below the threshold, so clearing the blind spot buys
+      # `lane_change_bsm_hold` seconds rather than the one second the original arithmetic gave.
+      # The nudgeless special case folds in: its threshold is 0.05, so this lands at 0.05 - hold
+      # and still yields `hold` seconds of wait. See DEFAULT_BSM_HOLD_S.
+      self.lane_change_wait_timer = self.lane_change_delay - self.lane_change_bsm_hold
 
   def update_allowed(self) -> bool:
     # Auto lane change allowed if:
