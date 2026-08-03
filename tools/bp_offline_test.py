@@ -56,7 +56,9 @@ DEFAULT_TARGETS = [
   "sunnypilot/selfdrive/car/intelligent_cruise_button_management/tests/",
   "opendbc_repo/opendbc/sunnypilot/car/ford/tests/",
   # (that directory glob already covers test_button_mapping.py)
-  "sunnypilot/selfdrive/controls/lib/tests/test_unconfirmed_lead.py",
+  # The whole folder: unconfirmed lead, passing assist, the adjacent-lane radar work and the
+  # maneuver dry run all live here and all collect offline.
+  "sunnypilot/selfdrive/controls/lib/tests/",
   "sunnypilot/selfdrive/controls/lib/smart_cruise_control/tests/test_map_model_veto.py",
   "sunnypilot/selfdrive/controls/lib/smart_cruise_control/tests/test_map_factor_split.py",
   "sunnypilot/selfdrive/controls/lib/smart_cruise_control/tests/test_scc_leaves_disabled.py",
@@ -77,6 +79,11 @@ DEFAULT_TARGETS = [
   "sunnypilot/selfdrive/controls/lib/speed_limit/tests/test_speed_limit_resolver.py",
   "selfdrive/car/tests/test_structs_capnp_parity.py",
   "selfdrive/car/tests/test_pre_enable_standstill.py",
+  # BluePilot: passing assist -- the observer, the radar's adjacent-lane and oncoming detection,
+  # and the static guards over the settings layouts (param types, orphaned and dangling items).
+  "selfdrive/car/tests/test_param_write_types.py",
+  "selfdrive/car/tests/test_settings_widget_params.py",
+  "selfdrive/ui/bp/layouts/settings/tests/",
   "selfdrive/ui/bp/onroad/tests/",
   "system/tests/test_sentry_disabled_by_default.py",
   # Guards the policy stated in CLAUDE.md's "Params, defaults, and his settings": nothing may write
@@ -155,13 +162,25 @@ def install_stubs() -> None:
 
   class Params:
     """Reads defaults straight out of params_keys.h, so a test that references an undeclared
-    key fails here the same way it would on the device."""
+    key fails here the same way it would on the device.
+
+    Writes are kept, and shared across instances the way the real key-value store is. They used to
+    be no-ops, which quietly broke any test whose fixture sets a param and whose subject reads it
+    back through its own Params() -- the write vanished and the subject saw the default. That is
+    what kept test_lane_turn_desire out of the target list below: two of its cases looked like
+    genuine failures and were an artifact of this stub.
+    """
+    _store: dict = {}
+
     def __init__(self, *a, **k):
       pass
 
     def get(self, key, *a, **k):
       if key not in known:
         raise KeyError(f"UnknownKeyName: {key}")
+      # A write wins over the default, then the default is parsed the way the device parses it.
+      if key in self._store:
+        return self._store[key]
       if key in text_keys:
         return defaults.get(key)          # None when unset, exactly like the device
       raw = defaults.get(key, "0")
@@ -170,13 +189,18 @@ def install_stubs() -> None:
     def get_bool(self, key, *a, **k):
       if key not in known:
         raise KeyError(f"UnknownKeyName: {key}")
+      if key in self._store:
+        return bool(self._store[key])
       return defaults.get(key, "0") == "1"
 
-    def put(self, *a, **k):
-      pass
+    def put(self, key, value, *a, **k):
+      self._store[key] = value
 
-    def put_bool(self, *a, **k):
-      pass
+    def put_bool(self, key, value, *a, **k):
+      self._store[key] = bool(value)
+
+    def remove(self, key, *a, **k):
+      self._store.pop(key, None)
 
   pp = types.ModuleType("openpilot.common.params")
   pp.Params = Params
