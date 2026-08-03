@@ -1356,3 +1356,87 @@ camera connector is **unverified**, so it is not the place to plan around.
 electronic behind one trim panel with the amp, and a two-wire pair down the sill to a connector
 already worked on once. No drilling, no new holes, and nothing that cannot be undone by pulling
 one plug.
+
+---
+
+## 10. Final check: is any of this avoidable, and two questions
+
+Added 2026-08-03. The brief was "make sure we aren't doing work we don't have to, or that could be
+found somewhere else."
+
+### Three ways out, checked and priced
+
+**1. An aftermarket blind-spot radar kit.** Brandmotion RDBS-1600 and similar, ~$200–500. These
+are real radar, and better than assumed: the RDBS-1600 is documented as alerting to vehicles
+approaching from behind at "27 feet at low speeds and up to 290 feet at higher speeds" — 88 m,
+which is genuine approach detection, not mere occupancy. They take vehicle speed **in** over CAN.
+
+Why it is not the answer, but is a legitimate fallback: **they output an LED and a buzzer, not
+data.** No range, no closing rate, nothing to log, nothing to tune. You would be tapping an
+indicator wire to recover one bit per side — which `RearApproachSide.from_blis(detected, closing)`
+already accepts, so it would drop in. It also duplicates hardware this car already has: the factory
+BLIS modules exist and are stranded behind MS-CAN routing, not absent.
+
+Verdict: worth remembering if the MRR path stalls. Not worth choosing first, because a binary
+answer cannot be refitted from logs and this whole project is built on refitting from logs.
+
+**2. Wait for the comma four.** $999, or $699 on trade-in, ordering now. It advertises a "triple
+camera 360° vision system".
+
+Read that claim carefully before treating it as a rear sensor. The device is windshield-mounted and
+one-fifth the size of a 3X. Three cameras in a windshield unit is road, wide-road and driver — the
+3X layout. **A device on the windshield cannot see traffic behind the car**; the car is in the way.
+"360°" describes the unit's own coverage, not the vehicle's surroundings. Even if the third camera
+looks rearward through the cabin, that is through the rear glass, past headrests and a defroster
+grid, at night and in rain — the very path §2 already rules out for radar.
+
+Verdict: watch it, do not wait for it. **UNVERIFIED** whether any rear-facing detection reaches
+openpilot's messages; if it ever does, this project's consumer interface (`RearApproach`, with its
+`Source` enum) accepts it without redesign.
+
+**3. Find someone who has already done it.** Searched repeatedly across forks, forums and issue
+trackers. The closest is eFiniLan's external radar addon, which is **front**-facing and for
+longitudinal control. No rear-radar integration exists in any openpilot fork.
+
+### Why has nobody done this before?
+
+Not because it is unusually hard. Because the payoff is unusually small *for everyone else*:
+
+1. **Most supported cars already have working factory BSM**, readable on a bus openpilot sees. The
+   need only appears on a car where the blind-spot hardware exists but is stranded — which is this
+   car's specific situation, not a general one.
+2. **openpilot has no rear anything.** `radard` selects forward *leads*; the model outputs a
+   forward path; every message is forward-facing. There is no rear-sensor abstraction to plug into
+   because nothing has ever needed one. `RearApproach` in this fork is the first.
+3. **A rear sensor unlocks no new feature.** Lane changes are driver-initiated by blinker, so
+   better rear data improves a *warning*, not a capability. High effort, modest reward.
+4. **comma's direction is vision**, and their new hardware adds cameras rather than sensors. Fork
+   authors follow the platform.
+5. **It is a hardware and firmware project** in a community whose centre of gravity is software.
+   Brackets, looms and microcontrollers are a different hobby from Python.
+
+None of those is a reason it will not work. They are reasons nobody was motivated.
+
+### Will this still be Level 2?
+
+**Yes, and nothing in this project can change that.**
+
+SAE J3016 sets the level by **who performs which task**, not by what sensors are fitted. Level 2 is
+sustained lateral *and* longitudinal control by the system, with the human supervising continuously
+and performing object-and-event detection as backup. Adding a radar does not move the boundary,
+because the boundary is about responsibility.
+
+Where the pieces sit:
+
+- **Passing assist as built is below Level 2 on its own** — it is an information display. It never
+  steers, never brakes, never touches the set speed. The car's Level 2 comes from lane centering
+  plus Ford ACC, and that is unchanged.
+- **Even fully automated lane changes stay Level 2**, provided the driver must supervise. Ford
+  BlueCruise is hands-free and Level 2; Tesla Autopilot with automatic lane change is Level 2.
+- **Level 3 would require the system to take over environmental monitoring** so the driver need not
+  watch. Nothing here does that, and openpilot enforces the opposite through driver monitoring.
+
+The practical consequence is the design rule this project has followed throughout: the driver
+remains responsible, so the system must never present a guess as a check. That is why an
+unavailable sensor reports *unavailable* rather than *clear*, and why the onroad panel names which
+gate stopped a suggestion.
