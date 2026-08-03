@@ -44,6 +44,15 @@ version"*, or *"there's a new BluePilot"*. That is the whole request. Handle it 
 python tools/bp_merge_upstream.py
 ```
 
+**This fork has several worktrees, one per line of work, and a fresh session lands in whichever
+one it lands in.** Upstream is merged into `icbm-manual-override-and-tuning` only; the others pick
+the update up by being rebased onto it afterwards. The script checks this and, if it is in the
+wrong place, prints the `cd` to run instead -- so just follow what it says rather than reasoning
+about branches.
+
+After the merge lands, rebase the other worktrees onto it and run their tests too. `git worktree
+list` shows them.
+
 Then:
 
 1. **No conflicts, tests green** → show them the summary, commit, push, and give them the
