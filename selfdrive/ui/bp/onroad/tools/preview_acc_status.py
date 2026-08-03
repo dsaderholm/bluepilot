@@ -32,6 +32,7 @@ SCENES = [
   ("settled, holding 70 in a 55 -- lamps dark", 70, 55, 70, "", "COAST", 0.0, False),
   ("curve: ACC braking hard enough to light the lamps", 44, 55, 70, "-", "BRAKE", 1.4, True),
   ("ACC braking too lightly to light them", 50, 55, 70, "-", "BRAKE", 0.4, False),
+  ("precharging: no decel, no lamps, no pads", 58, 55, 70, "", "PRE-BRAKE", 0.0, False),
   ("no hold, ACC accelerating", 55, 55, 0, "", "ACCEL", 0.6, False),
 ]
 

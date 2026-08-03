@@ -34,6 +34,9 @@ HOLD_LABEL_SIZE = 32
 HOLD_VALUE_SIZE = 66
 # Dark ink on the filled ACCEL/BRAKE pills; they are bright enough that white text greys out.
 ACC_INK = rl.Color(10, 14, 20, 255)
+# States drawn outlined rather than filled: neither is commanding deceleration, and both are on
+# screen most of the time. Only a real propulsion or brake request lights up.
+QUIET_ACC_STATES = ("COAST", "PRE-BRAKE")
 ACC_COAST_FILL = rl.Color(0, 0, 0, 150)
 ACC_COAST_EDGE = rl.Color(150, 156, 162, 200)
 ACC_COAST_INK = rl.Color(190, 196, 202, 255)
@@ -131,8 +134,10 @@ class HudRendererBP(HudRendererSP):
           brake_light_status = car_state_bp.brakeLightStatus
           self._lamp_data_available = brake_light_status.dataAvailable
           self._brakes_on = brake_light_status.dataAvailable and brake_light_status.brakeLightsOn
+          # Decel request only -- precharge produces no deceleration, so colouring the speed for
+          # it would claim the car was slowing when it was not.
           self._acc_braking = (brake_light_status.accDataAvailable and
-                               (brake_light_status.accDecelRequest or brake_light_status.accPrechargeRequest))
+                               brake_light_status.accDecelRequest)
         except (KeyError, AttributeError):
           self._lamp_data_available = False
           self._brakes_on = False
@@ -197,12 +202,22 @@ class HudRendererBP(HudRendererSP):
           # propulsion request says. Otherwise the two m/s^2 requests decide between them.
           # accAccelRequest is AccBrkTot_A_Rq -- the BRAKE total, despite the name -- so it cannot
           # tell accelerating from coasting on its own. That is what accPropulsionRequest is for.
-          if bls.accDecelRequest or bls.accPrechargeRequest:
+          # BluePilot: precharge is NOT braking and must not read as it. It pressurises the
+          # system so a later application arrives without slack -- no meaningful deceleration,
+          # no stop lamps, and no pad wear worth the name. Counting it as BRAKE made the readout
+          # overstate how often the friction brakes were doing anything, which is the one number
+          # worth trusting when the goal is to use the pads as little as possible.
+          #
+          # It still gets its own state rather than folding into COAST: ACC precharging means it
+          # is expecting to brake shortly, which is worth seeing coming.
+          if bls.accDecelRequest:
             self._acc_state, self._acc_accel = "BRAKE", bls.accAccelRequest
           elif bls.accPropulsionRequest > ACC_DEADBAND:
             self._acc_state, self._acc_accel = "ACCEL", bls.accPropulsionRequest
           elif bls.accAccelRequest < -ACC_DEADBAND:
             self._acc_state, self._acc_accel = "BRAKE", bls.accAccelRequest
+          elif bls.accPrechargeRequest:
+            self._acc_state, self._acc_accel = "PRE-BRAKE", 0.0
           else:
             self._acc_state, self._acc_accel = "COAST", 0.0
       except Exception:
@@ -346,7 +361,7 @@ class HudRendererBP(HudRendererSP):
 
     # Coasting is the resting state and is on screen most of the time, so it is drawn quiet --
     # outlined rather than filled. Only an actual propulsion or brake request lights up.
-    if self._acc_state == "COAST":
+    if self._acc_state in QUIET_ACC_STATES:
       rl.draw_rectangle_rounded(rect, 0.42, 10, ACC_COAST_FILL)
       rl.draw_rectangle_rounded_lines_ex(rect, 0.42, 10, 5, ACC_COAST_EDGE)
       ink = ACC_COAST_INK
@@ -357,7 +372,7 @@ class HudRendererBP(HudRendererSP):
     rl.draw_text_ex(self._font_bold, self._acc_state, rl.Vector2(x + 22, y + 16),
                     ACC_LABEL_SIZE, 0, ink)
 
-    if self._acc_state != "COAST":
+    if self._acc_state not in QUIET_ACC_STATES:
       value = f"{abs(self._acc_accel):.1f}"
       value_width = measure_text_cached(self._font_semi_bold, value, ACC_VALUE_SIZE).x
       rl.draw_text_ex(self._font_semi_bold, value,
