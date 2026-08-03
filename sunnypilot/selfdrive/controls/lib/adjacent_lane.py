@@ -178,6 +178,48 @@ def path_offset(model, d_rel: float) -> float:
   return float(ys[n - 1])
 
 
+# Matches passing_assist's threshold of the same name. Duplicated rather than imported because
+# importing it the other way round would be circular, and a road-edge reading this module cannot
+# trust is a different decision from one that module cannot trust.
+MAX_ROAD_EDGE_STD = 0.5
+RE_LEFT, RE_RIGHT = 0, 1
+
+
+def road_edge_offset(model, side: str, d_rel: float):
+  """Where the drivable surface ends on that side at d_rel, relative to the path. None if untrusted.
+
+  This is the honest answer to "is that oncoming car on MY road or across a median", and it beats
+  the lateral band at it. The band asks how far away something is; a barrier-only divided highway
+  puts the opposing lane centre around 7 m off, which clears ADJACENT_MAX_M by less than a lane
+  width and depends on shoulder widths nobody measured. The road edge asks the question directly:
+  the median edge IS where our carriageway stops, so anything beyond it is not on our road.
+
+  It also inverts correctly on the case that matters. On a two-lane undivided road the left road
+  edge sits BEYOND the oncoming lane, so an oncoming car is inside it and counts. On a divided road
+  the median edge sits between us and them, so it does not. No width assumptions either way.
+
+  Returns None when the model's own std says the edge is not worth trusting -- the caller then
+  falls back to the band alone, which is the conservative direction: it can only over-detect
+  oncoming traffic, and over-detecting costs a quiet stretch of road rather than a bad suggestion.
+  """
+  idx = RE_LEFT if side == 'left' else RE_RIGHT
+  try:
+    if float(model.roadEdgeStds[idx]) > MAX_ROAD_EDGE_STD:
+      return None
+    edge = model.roadEdges[idx]
+  except (IndexError, AttributeError, TypeError):
+    return None
+  # Same frame and same path-relative convention as the tracks it will be compared against.
+  return path_offset(NS_EDGE(edge), d_rel) - path_offset(model, d_rel)
+
+
+class NS_EDGE:
+  """Adapts a roadEdge (which has .x/.y directly) to the .position shape path_offset expects."""
+
+  def __init__(self, edge):
+    self.position = edge
+
+
 class AdjacentLaneSide:
   """One side. Defaults to unavailable, which is not the same as clear."""
 
@@ -303,6 +345,29 @@ class AdjacentLane:
     self.left.reset()
     self.right.reset()
 
+  @staticmethod
+  def _on_our_carriageway(model, side: str, lat: float, d_rel: float) -> bool:
+    """Is that oncoming vehicle on our road, or across a median on the other carriageway?
+
+    The one case the lateral band cannot settle on its own. A divided highway with a jersey barrier
+    and no grass puts the opposing lane centre around 7 m away -- outside ADJACENT_MAX_M, but by
+    less than a lane width, and the margin rests on shoulder widths that vary by road. Radar
+    lateral error grows with range, so at 120 m that margin is not something to bet a veto on.
+
+    The road edge answers it without any width assumptions at all. Beyond the edge of our own
+    drivable surface is, by definition, not our road.
+
+    Unknown counts as ON our road: an untrusted or missing edge falls back to the band alone, which
+    can only over-detect oncoming traffic. Over-detecting costs a quiet stretch of road. The other
+    error costs a suggestion to pass into a head-on lane, and those are not the same size.
+    """
+    edge_lat = road_edge_offset(model, side, d_rel)
+    if edge_lat is None:
+      return True
+    # Camera frame: left is negative. "Inside the edge" is therefore a different comparison per
+    # side, which is exactly the sort of thing that reads fine and is backwards.
+    return lat > edge_lat if side == 'left' else lat < edge_lat
+
   def update(self, sm, v_ego: float, max_distance_m: float, dt: float = 0.05,
              memory_s: float = DEFAULT_ONCOMING_MEMORY_S) -> None:
     """Scan liveTracks for the nearest vehicle in each adjacent lane.
@@ -354,7 +419,7 @@ class AdjacentLane:
       # separates them. Order matters: oncoming is checked FIRST, because it is the only one of the
       # three that is a safety fact rather than a convenience one.
       v_abs = v_ego + p.vRel
-      if v_abs < -MIN_ONCOMING_MS:
+      if v_abs < -MIN_ONCOMING_MS and self._on_our_carriageway(model, side, lat, p.dRel):
         # Travelling the other way. The lane to our left is not a passing lane -- it is the one
         # they are using. Note the band does the discriminating for free on a divided road: an
         # opposing carriageway sits 10 m or more away, well outside it, so a highway with a real

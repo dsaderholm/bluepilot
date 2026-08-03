@@ -30,6 +30,12 @@ from openpilot.sunnypilot.selfdrive.controls.lib.adjacent_lane import (
 X_IDXS = [192.0 * (i / 32.0) ** 2 for i in range(33)]
 
 
+def edge_at(y, curve_radius_m=0.0):
+  """A road edge offset y metres from the path, bending with it."""
+  base = path(curve_radius_m).y
+  return NS(x=list(X_IDXS), y=[b + y for b in base])
+
+
 def path(curve_radius_m=0.0):
   """Model predicted path, straight by default. Positive radius bends RIGHT (camera frame y is
   left-negative), by the small-angle displacement d^2 / 2R."""
@@ -48,8 +54,13 @@ def track(d_rel, y_rel, v_rel=0.0):
 class FakeSM:
   """SubMaster-shaped: __getitem__ plus alive/valid/updated dicts, and no __contains__."""
 
-  def __init__(self, tracks=(), *, alive=True, valid=True, updated=True, present=True, curve=0.0):
-    self.data = {'modelV2': NS(position=path(curve))}
+  def __init__(self, tracks=(), *, alive=True, valid=True, updated=True, present=True, curve=0.0,
+               left_edge=-7.0, right_edge=7.0, edge_stds=(0.1, 0.1)):
+    # Road edges relative to the path, in the camera frame: negative left. Default is a wide
+    # two-lane road -- the oncoming lane is INSIDE the left edge, which is the undivided case.
+    self.data = {'modelV2': NS(position=path(curve),
+                               roadEdges=[edge_at(left_edge, curve), edge_at(right_edge, curve)],
+                               roadEdgeStds=list(edge_stds))}
     if present:
       self.data['liveTracks'] = NS(points=list(tracks))
     self.alive = {'liveTracks': alive} if present else {}
@@ -248,6 +259,67 @@ class TestOncoming:
     adj.update(FakeSM([car], curve=-500.0), V_EGO, MAX_D)
     assert adj.undivided
     assert adj.left.oncoming
+
+
+class TestMedians:
+  """The case the lateral band cannot settle by itself.
+
+  A divided highway with a jersey barrier and no grass puts the opposing lane centre around 7 m
+  away. That clears ADJACENT_MAX_M, but by less than a lane width, and the margin rests on shoulder
+  widths that vary road to road -- while radar lateral error grows with range. The road edge asks
+  the question directly instead: beyond the edge of our own drivable surface is not our road.
+  """
+
+  @staticmethod
+  def oncoming_at(y_rel, d=100):
+    return track(d, y_rel, v_rel=-27.0 - V_EGO)
+
+  def test_barrier_divided_highway_does_not_trip_the_veto(self):
+    # Narrow median: our carriageway ends 5.5 m out, the opposing lane sits at 5.0 m -- INSIDE the
+    # band, so the band alone would have called this a two-way road and killed passing on I-15.
+    adj = AdjacentLane()
+    adj.update(FakeSM([self.oncoming_at(5.0)], left_edge=-4.0), V_EGO, MAX_D)
+    assert not adj.undivided
+
+  def test_two_lane_road_still_trips_it(self):
+    # Same lateral distance, but here the road edge is beyond the oncoming lane, because that lane
+    # is part of our road. This is the inversion the band cannot see and the edge gets right.
+    adj = AdjacentLane()
+    adj.update(FakeSM([self.oncoming_at(3.7)], left_edge=-7.0), V_EGO, MAX_D)
+    assert adj.undivided
+
+  def test_an_untrusted_road_edge_falls_back_to_the_band(self):
+    # Unknown counts as ON our road. Over-detecting costs a quiet stretch; under-detecting costs a
+    # suggestion to pass into a head-on lane, and those are not the same size.
+    adj = AdjacentLane()
+    adj.update(FakeSM([self.oncoming_at(5.0)], left_edge=-4.0, edge_stds=(9.9, 9.9)),
+               V_EGO, MAX_D)
+    assert adj.undivided
+
+  def test_a_missing_road_edge_falls_back_to_the_band(self):
+    adj = AdjacentLane()
+    sm = FakeSM([self.oncoming_at(3.7)])
+    del sm.data['modelV2'].roadEdges
+    adj.update(sm, V_EGO, MAX_D)
+    assert adj.undivided
+
+  def test_the_edge_test_follows_a_curve(self):
+    # Both the track and the edge are taken path-relative, so a bend must not push a same-road
+    # oncoming car outside its own road edge.
+    adj = AdjacentLane()
+    adj.update(FakeSM([track(70, 4.9 + 3.7, v_rel=-27.0 - V_EGO)], curve=-500.0, left_edge=-7.0),
+               V_EGO, MAX_D)
+    assert adj.undivided
+
+  def test_the_right_side_edge_comparison_is_not_mirrored(self):
+    # Camera frame: left negative, right positive, so "inside the edge" is a different comparison
+    # per side. Easy to write once and have backwards on one of them.
+    adj = AdjacentLane()
+    adj.update(FakeSM([self.oncoming_at(-5.0)], right_edge=4.0), V_EGO, MAX_D)
+    assert not adj.undivided
+    adj = AdjacentLane()
+    adj.update(FakeSM([self.oncoming_at(-3.7)], right_edge=7.0), V_EGO, MAX_D)
+    assert adj.right.oncoming
 
 
 class TestPathOffset:
