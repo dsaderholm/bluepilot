@@ -1188,3 +1188,76 @@ of which are routinely done in a driveway.
 For scale: this car has already had its ADAS hardware transplanted, its steering rack changed, a
 radar bracket cut at a metal shop, and a radar wired in that works. A four-conductor loom along
 an existing harness path is the easiest wiring task in that list.
+
+### The loom, the power budget, and why a microcontroller rather than a Pi
+
+Added 2026-08-03.
+
+**Only ONE radar is being powered, not two.** The front radar keeps its factory feed and is not
+touched. The new circuit carries the rear radar plus the Teensy:
+
+| Load | Draw | Note |
+|---|---|---|
+| Rear radar | ~0.5 A | comparable retrofits report >0.2 A; assume 0.5 and verify on the bench |
+| Teensy 4.0 + dual CAN board | ~0.15 A | ~70 mA of that is the transceivers |
+| **Total** | **under 1 A** | a 3 A or 5 A fuse, sized for the wire not the load |
+
+Do **not** splice into the front radar's circuit. It is fused for one radar, and a fault in the new
+branch would take out a working ADAS sensor. Take a separate switched, fused feed.
+
+**Cable.** Two requirements, one of which is easy to get wrong:
+
+- **The CAN pair must be twisted.** That is not a nicety — twisting is the entire reason CAN
+  survives in a car. The two wires pick up interference equally and the receiver reads only the
+  difference between them. Untwisted, they pick up different amounts and the difference becomes
+  noise. Buy twisted pair, or twist it yourself: a drill on one end of two conductors, roughly one
+  twist per inch, is fine at 500 kbit/s.
+- **Power and CAN can share one jacket** — a 4-core cable with the CAN pair twisted inside is
+  ideal. What to avoid is running the CAN pair alongside genuinely noisy high-current wiring
+  (ignition, fuel pump) for a long parallel distance.
+
+18 AWG is generous for under 1 A over the length of a car; 20 AWG is adequate. Size for mechanical
+robustness rather than current.
+
+**Practical points that matter more than the electrical spec:**
+
+- **Put a connector at the rear**, inside the trunk before the bumper. The bumper then comes off
+  for service without cutting anything.
+- **Follow the factory harness.** It already runs front to rear with grommets at every panel
+  crossing. Do not drill a new hole through a bulkhead.
+- **Crimp and heat-shrink**, not twist-and-tape. Secure every 12–18 inches so nothing chafes.
+- **Leave a service loop** at both ends.
+
+### Flashing the Teensy
+
+The firmware is mine to write. The owner's side of it is:
+
+1. Install the Arduino IDE and the Teensyduino add-on. Both free, both installers.
+2. Plug in a USB cable, open the sketch, press the button on the Teensy, click Upload.
+
+That is the whole procedure, and it is the same every time it needs changing. There is no
+bootloader to configure, no programmer to buy, no soldering. The Teensy appears as a USB device
+and its own loader takes care of the rest.
+
+The firmware itself is small: read the radar's frames on one CAN channel, pick the nearest few
+targets, write two summary frames on the other. A few hundred lines with `FlexCAN_T4` doing the
+CAN work. It is the smaller half of the software in this project; the openpilot side is larger.
+
+**What cannot be shortcut:** it cannot be tested from here. Bench output has to be read back with
+the CANable and reported. That is the same loop as everything else on this car.
+
+### No Raspberry Pi
+
+Asked 2026-08-03. A Pi is the wrong tool here, on four counts:
+
+1. **No CAN hardware.** The Teensy has three CAN controllers built into the chip. A Pi has none —
+   it needs a HAT per bus, which costs more than the whole Teensy solution and adds SPI latency.
+2. **No real-time guarantee.** A Pi runs Linux, which schedules when it feels like it. A 20 Hz
+   digest wants deterministic timing; a microcontroller gives it for free.
+3. **Boot time and power loss.** The Teensy is running milliseconds after ignition. A Pi takes
+   half a minute, and yanking power from a running Linux system corrupts SD cards. In a car, power
+   gets yanked constantly.
+4. **Nothing to maintain.** No OS, no updates, no filesystem, no cooling.
+
+A Pi is the right answer when you need Linux — networking, a filesystem, heavy computation. This
+job is "read frames, do arithmetic, write frames", which is exactly what a microcontroller is for.
