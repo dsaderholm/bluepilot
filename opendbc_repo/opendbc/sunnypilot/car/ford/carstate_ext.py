@@ -502,14 +502,13 @@ class CarStateExt:
     Returns:
       Speed limit in m/s, or 0 if not available.
     """
-    if self.CP.flags & FordFlags.TSR:
-      v_limit = cp_cam.vl["Traffic_RecognitnData"]["TsrVLim1MsgTxt_D_Rq"]
-      v_limit_unit = cp_cam.vl["Traffic_RecognitnData"]["TsrVlUnitMsgTxt_D_Rq"]
+    # The flag gate matters for more than skipping work: without TSR on a CAN FD car the message
+    # is never registered with the parser, so reading it would raise rather than return a default.
+    if not self.CP.flags & FordFlags.TSR:
+      return 0
 
-      speed_factor = CV.MPH_TO_MS if v_limit_unit == 2 else CV.KPH_TO_MS if v_limit_unit == 1 else 0
-      return v_limit * speed_factor if v_limit not in (0, 255) else 0
-
-    return 0
+    v_limit = cp_cam.vl["Traffic_RecognitnData"]["TsrVLim1MsgTxt_D_Rq"]
+    v_limit_unit = cp_cam.vl["Traffic_RecognitnData"]["TsrVlUnitMsgTxt_D_Rq"]
 
     speed_factor = CV.MPH_TO_MS if v_limit_unit == 2 else CV.KPH_TO_MS if v_limit_unit == 1 else 0
     return v_limit * speed_factor if v_limit not in (0, 255) else 0
