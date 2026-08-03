@@ -47,6 +47,18 @@ MANUAL_OVERRIDE_BUTTONS = (ButtonType.accelCruise, ButtonType.decelCruise, Butto
 # hazards back through. Treating the press as an offset rather than an off switch removes the need
 # for any of them.
 RE_ARM_ON_CRUISE_CYCLE = True  # cancel (or any disengage) followed by re-engage drops the baseline
+# BluePilot: which button re-engaged decides whether the hold survives, so that RESUME and SET stop
+# being the same control. Every disengage/engage cycle used to drop the baseline regardless, which
+# left the driver no way to get a hold back except rebuilding it by hand.
+#
+#   RESUME -> keep the hold. That is what the word means: go back to what I had.
+#   SET    -> drop it, and Speed Limit Assist takes the set speed. The way to hand it back.
+#
+# The press arrives while cruise is still DISENGAGED -- carstate_ext maps CcAslButtnCnclResPress to
+# resumeCruise in that state -- and cruise_enabled only flips a few frames later, so the press has
+# to be remembered across the transition rather than read on the cycle frame.
+RESUME_BUTTONS = (ButtonType.resumeCruise,)
+RESUME_PRESS_MEMORY_FRAMES = 150  # 1.5 s at 100 Hz, generous next to the engage delay
 # The baseline applies to the speed-limit/cruise component only. A curve target is a physics limit,
 # not something to add an offset to -- SCC-Vision asking for 40 means 40, whatever the baseline is.
 BASELINE_SOURCES = (LongitudinalPlanSource.cruise, LongitudinalPlanSource.speedLimitAssist)
@@ -107,6 +119,12 @@ COUNTER_MOVE_UNITS = 2  # display units (mph/kph) moved against ICBM's own comma
 # movement. Without this window, CNCL + RES+ built a HOLD at the resumed speed and destroyed the
 # only route this car has back to Speed Limit Assist.
 CRUISE_CYCLE_SETTLE_FRAMES = 250  # 2.5 s at 100 Hz, past the resume jump on this car
+# ...but end it as soon as the set speed has actually settled, rather than always serving the full
+# 2.5 s. The window exists to let the resume jump land, and that is over the moment the number
+# stops moving. Reported on the road as having to wait after RESUME before pressing up would take
+# -- the driver's habit is RESUME then immediately press-and-hold, and the fixed window swallowed
+# the press. Same shape as PRESS_SETTLE_STABLE_FRAMES: stop guessing a duration, watch the number.
+CRUISE_CYCLE_STABLE_FRAMES = 40  # 0.4 s unchanged => the resume jump has landed
 # BluePilot: target-drop rate limiting. Ford's stock ACC brakes aggressively when the set speed
 # falls by roughly 10 mph or more at once, but coasts for smaller drops. Capping each step below
 # that threshold and walking larger drops down over several steps keeps the car coasting.
@@ -169,6 +187,8 @@ class IntelligentCruiseButtonManagement:
     self.icbm_idle_frames = 0
     self.counter_move_accum = 0      # set-speed movement against ICBM's own command, display units
     self.cruise_button_prev = SendButtonState.none
+    self.resume_press_frames = 0     # >0 while a RESUME press is recent enough to have re-engaged
+    self.v_cluster_at_cycle = 0      # set speed when cruise was re-engaged; the resume jump moves it
     self.press_settle_frames = 0     # >0 while ICBM stands down after a driver press
     self.cluster_stable_frames = 0   # how long the set speed has been unchanged
     self.cruise_cycle_frames = 0     # >0 while a resume's set-speed jump is still settling
@@ -426,10 +446,17 @@ class IntelligentCruiseButtonManagement:
     cruise_cycled = cruise_enabled and not self.cruise_enabled_prev
     self.cruise_enabled_prev = cruise_enabled
 
-    # Cancel + re-engage is the driver starting over.
+    # Remember a RESUME press across the engage transition -- see RESUME_BUTTONS.
+    if any(b.type.raw in RESUME_BUTTONS and b.pressed for b in CS.buttonEvents):
+      self.resume_press_frames = RESUME_PRESS_MEMORY_FRAMES
+
+    # Re-engaging. RESUME keeps the hold, anything else (SET) hands the set speed back to SLA.
     if RE_ARM_ON_CRUISE_CYCLE and cruise_cycled:
-      self.clear_baseline()
+      if self.resume_press_frames == 0:
+        self.clear_baseline()
       self.cruise_cycle_frames = CRUISE_CYCLE_SETTLE_FRAMES
+      self.v_cluster_at_cycle = self.v_cruise_cluster
+      self.resume_press_frames = 0
       return
 
     # While the driver is pressing, the baseline follows the cluster. It therefore settles wherever
@@ -589,8 +616,20 @@ class IntelligentCruiseButtonManagement:
       self.press_settle_frames = max(0, self.press_settle_frames - 1)
     # unconditional: the resume jump settles on its own clock, held button or not
     self.cruise_cycle_frames = max(0, self.cruise_cycle_frames - 1)
+    self.resume_press_frames = max(0, self.resume_press_frames - 1)
     self.cluster_stable_frames = (self.cluster_stable_frames + 1
                                   if self.v_cruise_cluster == self.v_cruise_cluster_prev else 0)
+    # End the resume window early once the resume jump has landed AND settled, so the driver's
+    # habitual RESUME-then-immediately-press-and-hold is not swallowed by a fixed 2.5 s.
+    #
+    # "Moved, then stable" -- not "stable" alone. The set speed is typically already stable for the
+    # whole time cruise was off, so a bare stability test closes the window before the jump even
+    # arrives, and the jump is then adopted as a driver press. That is the exact bug this window
+    # exists to prevent, and it is what the resume tests caught.
+    if (self.cruise_cycle_frames > 0
+        and self.v_cruise_cluster != self.v_cluster_at_cycle
+        and self.cluster_stable_frames >= CRUISE_CYCLE_STABLE_FRAMES):
+      self.cruise_cycle_frames = 0
 
     self.update_manual_override(CS)
 

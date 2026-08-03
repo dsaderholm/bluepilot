@@ -53,6 +53,22 @@ MIN_PERSISTENCE_S = 1.0
 # filter: bridges, gantries and guardrails tend to appear and vanish, while a real vehicle
 # survives a closing range sweep. Least-justified threshold here -- refit from logs.
 MIN_RANGE_SWEEP_M = 15.0
+# BluePilot: a lead that is genuinely STOPPED is stronger evidence than one merely closing, and it
+# is the entire reason this feature exists -- radar ACC ignores stationary returns, so a stopped car
+# at the end of a queue is the one thing Ford will drive into. It gets a shorter persistence.
+#
+# It does NOT get to skip the range sweep, which was the first attempt here. The sweep is a physics
+# check, not a delay: it confirms the range is actually shrinking. A target reporting "stopped"
+# whose range never closes is the bridge/overpass signature -- the model calls an overhead
+# structure a stopped vehicle, and dropping the sweep makes that fire a 20 mph request on an open
+# motorway. test_persistence_alone_does_not_trigger exists for exactly that and caught it.
+#
+# The sweep is also not the bottleneck it looked like. Against a stopped lead at 65 mph the range
+# closes at ~29 m/s, so 15 m costs ~0.5 s and runs concurrently with persistence. What actually
+# bounds how early this fires is TTC (IcbmLeadMaxTtc) and the distance cap -- at 4 s and 65 mph
+# nothing can trigger beyond ~116 m no matter how obvious the target is.
+STOPPED_LEAD_SPEED_MS = 1.5        # |v_ego + vRel| below this is stopped, not slow
+STOPPED_LEAD_PERSISTENCE_S = 0.3   # enough to reject a single bad model frame, not much more
 DEFAULT_MAX_TTC_S = 4.0    # fallback; tunable via IcbmLeadMaxTtc (tenths of a second)
 MAX_V_REL_MS = -2.0        # genuinely closing, not sensor noise
 MAX_D_PATH_M = 1.2         # in-path, not an adjacent lane or roadside return
@@ -306,8 +322,11 @@ class UnconfirmedLeadDetector:
 
     self._persistence_s += DT_MDL
 
+    # A stopped lead needs less persistence, but still has to prove the range is closing.
+    stopped = abs(v_ego + lead.vRel) <= STOPPED_LEAD_SPEED_MS
+    needed = STOPPED_LEAD_PERSISTENCE_S if stopped else MIN_PERSISTENCE_S
     swept = self._sweep_start_d_rel - lead.dRel
-    if (self._persistence_s >= MIN_PERSISTENCE_S and swept >= MIN_RANGE_SWEEP_M
+    if (self._persistence_s >= needed and swept >= MIN_RANGE_SWEEP_M
         and self.ttc <= self.max_ttc):
       self.state = State.active
       self.trigger = Trigger.visionLead

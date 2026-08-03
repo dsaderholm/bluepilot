@@ -839,3 +839,87 @@ class TestButtonTimersAreNotShared:
     assert a.cruise_button_timers is not b.cruise_button_timers
     a.cruise_button_timers[ButtonType.accelCruise] = 99
     assert b.cruise_button_timers[ButtonType.accelCruise] == 0
+
+
+RESUME_PRESS = NS(type=NS(raw=ButtonType.resumeCruise), pressed=True)
+SET_PRESS = NS(type=NS(raw=ButtonType.setCruise), pressed=True)
+
+
+class TestResumeKeepsTheHoldAndSetGivesItBack:
+  """RESUME and SET stopped being the same control.
+
+  Every disengage/engage cycle used to drop the baseline whatever button caused it, so the two
+  buttons were functionally identical and there was no way to get a hold back except rebuilding
+  it by hand. The words on the buttons decide it: RESUME means go back to what I had, SET means
+  start from here and let Speed Limit Assist have the number.
+  """
+
+  @staticmethod
+  def _cycle_back_on(icbm, button, off_frames=200):
+    for _ in range(off_frames):
+      icbm.run(make_cs(DRIVER, enabled=False), CC, make_lp(LIMIT), False)
+    # The press lands while cruise is still disengaged; engagement follows a few frames later.
+    icbm.run(make_cs(DRIVER, enabled=False, buttons=(button,)), CC, make_lp(LIMIT), False)
+    for _ in range(5):
+      icbm.run(make_cs(DRIVER, enabled=False), CC, make_lp(LIMIT), False)
+    for _ in range(30):
+      icbm.run(make_cs(DRIVER, enabled=True), CC, make_lp(LIMIT), False)
+
+  def test_resume_keeps_the_hold(self):
+    icbm = fresh()
+    set_baseline(icbm)
+    settle(icbm, LIMIT)
+    assert icbm.v_baseline == DRIVER
+    self._cycle_back_on(icbm, RESUME_PRESS)
+    assert icbm.override_state == OverrideState.manual, "RESUME threw the hold away"
+    assert icbm.v_baseline == DRIVER
+
+  def test_set_hands_it_back_to_sla(self):
+    icbm = fresh()
+    set_baseline(icbm)
+    settle(icbm, LIMIT)
+    self._cycle_back_on(icbm, SET_PRESS)
+    assert icbm.override_state == OverrideState.auto, "SET kept the hold"
+    assert icbm.v_baseline == 0
+
+  def test_a_stale_resume_press_does_not_keep_it(self):
+    """The memory window has to expire, or a RESUME from minutes ago revives a dead hold."""
+    icbm = fresh()
+    set_baseline(icbm)
+    settle(icbm, LIMIT)
+    icbm.run(make_cs(DRIVER, enabled=False, buttons=(RESUME_PRESS,)), CC, make_lp(LIMIT), False)
+    for _ in range(400):                       # far longer than RESUME_PRESS_MEMORY_FRAMES
+      icbm.run(make_cs(DRIVER, enabled=False), CC, make_lp(LIMIT), False)
+    for _ in range(30):
+      icbm.run(make_cs(DRIVER, enabled=True), CC, make_lp(LIMIT), False)
+    assert icbm.override_state == OverrideState.auto
+
+
+class TestResumeWindowEndsWhenTheJumpLands:
+  """The driver's habit is RESUME then immediately press-and-hold. A fixed 2.5 s window swallowed
+  that press. Ending it on the jump settling gives the window back without giving up the guard."""
+
+  def test_window_closes_once_the_set_speed_has_moved_and_settled(self):
+    icbm = fresh()
+    for _ in range(300):
+      icbm.run(make_cs(LIMIT), CC, make_lp(LIMIT), False)
+    for _ in range(200):
+      icbm.run(make_cs(LIMIT, enabled=False), CC, make_lp(LIMIT), False)
+    icbm.run(make_cs(LIMIT, enabled=True), CC, make_lp(LIMIT), False)
+    assert icbm.cruise_cycle_frames > 0
+    for _ in range(60):                        # the resume jump lands, then holds still
+      icbm.run(make_cs(LIMIT + 5, enabled=True), CC, make_lp(LIMIT), False)
+    assert icbm.cruise_cycle_frames == 0, "window outlived the jump it exists to cover"
+
+  def test_window_does_not_close_before_the_jump_arrives(self):
+    """The set speed is already stable for the whole time cruise is off, so a bare stability test
+    closes the window early and the jump is then adopted as a driver press."""
+    icbm = fresh()
+    for _ in range(300):
+      icbm.run(make_cs(LIMIT), CC, make_lp(LIMIT), False)
+    for _ in range(200):
+      icbm.run(make_cs(LIMIT, enabled=False), CC, make_lp(LIMIT), False)
+    icbm.run(make_cs(LIMIT, enabled=True), CC, make_lp(LIMIT), False)
+    for _ in range(60):                        # stable, but the jump has not happened yet
+      icbm.run(make_cs(LIMIT, enabled=True), CC, make_lp(LIMIT), False)
+    assert icbm.cruise_cycle_frames > 0, "window closed before the resume jump could land"
