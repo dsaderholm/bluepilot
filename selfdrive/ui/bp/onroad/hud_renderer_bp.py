@@ -19,10 +19,30 @@ SPEED_UNIT_CENTER_Y = 290
 # trims constantly at small values; with no deadband the readout would never sit still.
 ACC_DEADBAND = 0.15  # m/s^2
 ACC_STATUS_COLORS = {
-  "ACCEL": rl.Color(80, 200, 120, 255),
-  "COAST": rl.Color(190, 190, 190, 255),
-  "BRAKE": rl.Color(255, 180, 40, 255),
+  "ACCEL": rl.Color(70, 200, 115, 235),
+  "BRAKE": rl.Color(255, 168, 30, 235),
 }
+# BluePilot: both readouts used to be 34 px unbacked text under the MAX box, which the owner could
+# not pick out at a glance while driving. They are now drawn as filled shapes sized against the
+# MAX box next to them -- see scratchpad/hud_preview.py, which renders this corner offline at
+# device scale so placement can be judged without a drive.
+HOLD_FILL = rl.Color(30, 78, 176, 235)
+HOLD_EDGE = rl.Color(130, 185, 255, 255)
+HOLD_LABEL_COLOR = rl.Color(175, 210, 255, 255)
+HOLD_HEIGHT = 124
+HOLD_LABEL_SIZE = 32
+HOLD_VALUE_SIZE = 66
+# Dark ink on the filled ACCEL/BRAKE pills; they are bright enough that white text greys out.
+ACC_INK = rl.Color(10, 14, 20, 255)
+ACC_COAST_FILL = rl.Color(0, 0, 0, 150)
+ACC_COAST_EDGE = rl.Color(150, 156, 162, 200)
+ACC_COAST_INK = rl.Color(190, 196, 202, 255)
+ACC_PILL_WIDTH = 268   # wider than the MAX column: "BRAKE 1.4" does not fit 172 px legibly
+ACC_PILL_HEIGHT = 78
+ACC_LABEL_SIZE = 38
+ACC_VALUE_SIZE = 34
+ACC_MAX_MAG = 2.5      # m/s^2 that fills the intensity bar
+STACK_GAP = 12
 
 
 class HudRendererBP(HudRendererSP):
@@ -47,7 +67,8 @@ class HudRendererBP(HudRendererSP):
     # different facts, which is why this is a separate readout rather than more colours.
     self._acc_state = ""      # "ACCEL" / "COAST" / "BRAKE", "" when unknown
     self._acc_accel = 0.0     # m/s^2, signed
-    self._icbm_text = ""      # "" when ICBM has nothing to say
+    self._icbm_baseline = 0   # the driver's held set speed; 0 = no hold
+    self._icbm_arrow = ""     # "+" / "-" while ICBM is actively moving the set speed, else ""
     self._acc_status_failed = False   # latched on any error; keeps a display bug off the screen
     self.speed_right = 0
     self._gradient_rect = None  # BluePilot: Full-width rect for header gradient
@@ -111,7 +132,8 @@ class HudRendererBP(HudRendererSP):
         self._update_acc_status()
       except Exception as e:
         self._acc_status_failed = True
-        self._acc_state, self._acc_accel, self._icbm_text = "", 0.0, ""
+        self._acc_state, self._acc_accel = "", 0.0
+        self._icbm_baseline, self._icbm_arrow = 0, ""
         bp_ui_log.state("HudRendererBP", "acc_status_error", repr(e))
 
     bp_ui_log.state("HudRendererBP", "brakes_on", self._brakes_on)
@@ -124,7 +146,8 @@ class HudRendererBP(HudRendererSP):
     Read from the stock ACCDATA the camera sends, so this is Ford's own request even though
     openpilot is not the longitudinal controller.
     """
-    self._acc_state, self._acc_accel, self._icbm_text = "", 0.0, ""
+    self._acc_state, self._acc_accel = "", 0.0
+    self._icbm_baseline, self._icbm_arrow = 0, ""
     sm = ui_state.sm
 
     # BluePilot: the ICBM line is NOT gated on the brake-status toggle. Whether ICBM is holding
@@ -134,11 +157,9 @@ class HudRendererBP(HudRendererSP):
     # the toggle; that one really is diagnostic.
     try:
       icbm = sm['selfdriveStateSP'].intelligentCruiseButtonManagement
-      arrow = {1: "+", 2: "-"}.get(icbm.sendButton.raw, "")
+      self._icbm_arrow = {1: "+", 2: "-"}.get(icbm.sendButton.raw, "")
       if icbm.overrideState.raw == 1 and icbm.vBaseline > 0:
-        self._icbm_text = f"{arrow} HOLD {round(icbm.vBaseline)}".strip()
-      elif arrow:
-        self._icbm_text = arrow
+        self._icbm_baseline = round(icbm.vBaseline)
     except Exception:
       pass
 
@@ -205,27 +226,94 @@ class HudRendererBP(HudRendererSP):
     the target moved (SmartCruiseControl shows a curve, SpeedLimit shows the sign). Neither says
     what the car is doing about it, and nothing at all showed ICBM's state.
     """
-    if self._acc_status_failed or (not self._acc_state and not self._icbm_text):
+    if self._acc_status_failed or (not self._acc_state and not self._icbm_baseline):
       return
 
     set_speed_width = UI_CONFIG.set_speed_width_metric if ui_state.is_metric else UI_CONFIG.set_speed_width_imperial
     x = rect.x + 60 + (UI_CONFIG.set_speed_width_imperial - set_speed_width) // 2
-    y = rect.y + 45 + UI_CONFIG.set_speed_height + 12
+    y = rect.y + 45 + UI_CONFIG.set_speed_height + 16
 
-    font_size = 34
+    if self._icbm_baseline:
+      y += self._draw_hold_badge(x, y, set_speed_width) + STACK_GAP
     if self._acc_state:
-      label = self._acc_state if self._acc_state == "COAST" else f"{self._acc_state} {abs(self._acc_accel):.1f}"
-      color = ACC_STATUS_COLORS.get(self._acc_state, COLORS.WHITE)
-      width = measure_text_cached(self._font_bold, label, font_size).x
-      rl.draw_text_ex(self._font_bold, label,
-                      rl.Vector2(x + (set_speed_width - width) / 2, y), font_size, 0, color)
+      self._draw_acc_pill(x, y)
 
-    if self._icbm_text:
-      y2 = y + (font_size + 6 if self._acc_state else 0)
-      width = measure_text_cached(self._font_semi_bold, self._icbm_text, font_size).x
-      rl.draw_text_ex(self._font_semi_bold, self._icbm_text,
-                      rl.Vector2(x + (set_speed_width - width) / 2, y2), font_size, 0,
-                      rl.Color(120, 170, 255, 255))
+  def _draw_hold_badge(self, x: float, y: float, width: float) -> int:
+    """BluePilot: the driver's own number, drawn as a sibling of the MAX box.
+
+    Same width, same label-over-number structure, so it reads as "the other set speed" rather than
+    as a caption. During a curve or a hazard the MAX box shows what ICBM is commanding right now
+    and this shows what it will return to; when nothing is acting the two agree.
+    """
+    rect = rl.Rectangle(x, y, width, HOLD_HEIGHT)
+    rl.draw_rectangle_rounded(rect, 0.32, 10, HOLD_FILL)
+    rl.draw_rectangle_rounded_lines_ex(rect, 0.32, 10, 6, HOLD_EDGE)
+
+    center_x = x + width / 2
+    label_width = measure_text_cached(self._font_semi_bold, "HOLD", HOLD_LABEL_SIZE).x
+    # The label stays centred on its own and the arrow hangs off its right, so the word does not
+    # shift position every time ICBM starts or stops adjusting.
+    rl.draw_text_ex(self._font_semi_bold, "HOLD",
+                    rl.Vector2(center_x - label_width / 2, y + 12), HOLD_LABEL_SIZE, 0,
+                    HOLD_LABEL_COLOR)
+    if self._icbm_arrow:
+      self._draw_arrow(center_x + label_width / 2 + 20, y + 29, 24, self._icbm_arrow == "+")
+
+    value = str(self._icbm_baseline)
+    value_width = measure_text_cached(self._font_bold, value, HOLD_VALUE_SIZE).x
+    rl.draw_text_ex(self._font_bold, value, rl.Vector2(center_x - value_width / 2, y + 46),
+                    HOLD_VALUE_SIZE, 0, COLORS.WHITE)
+    return HOLD_HEIGHT
+
+  @staticmethod
+  def _draw_arrow(center_x: float, center_y: float, size: float, up: bool) -> None:
+    """Drawn rather than typed: the device loads bitmap .fnt fonts and an arrow glyph is not
+    guaranteed to be baked into them, whereas a triangle always renders."""
+    half = size / 2
+    if up:
+      a = rl.Vector2(center_x, center_y - half)
+      b = rl.Vector2(center_x - half, center_y + half)
+      c = rl.Vector2(center_x + half, center_y + half)
+    else:
+      a = rl.Vector2(center_x, center_y + half)
+      b = rl.Vector2(center_x + half, center_y - half)
+      c = rl.Vector2(center_x - half, center_y - half)
+    rl.draw_triangle(a, b, c, COLORS.WHITE)
+
+  def _draw_acc_pill(self, x: float, y: float) -> int:
+    """BluePilot: what Ford ACC is asking for, and how hard."""
+    rect = rl.Rectangle(x, y, ACC_PILL_WIDTH, ACC_PILL_HEIGHT)
+
+    # Coasting is the resting state and is on screen most of the time, so it is drawn quiet --
+    # outlined rather than filled. Only an actual propulsion or brake request lights up.
+    if self._acc_state == "COAST":
+      rl.draw_rectangle_rounded(rect, 0.42, 10, ACC_COAST_FILL)
+      rl.draw_rectangle_rounded_lines_ex(rect, 0.42, 10, 5, ACC_COAST_EDGE)
+      ink = ACC_COAST_INK
+    else:
+      rl.draw_rectangle_rounded(rect, 0.42, 10, ACC_STATUS_COLORS.get(self._acc_state, COLORS.WHITE))
+      ink = ACC_INK
+
+    rl.draw_text_ex(self._font_bold, self._acc_state, rl.Vector2(x + 22, y + 16),
+                    ACC_LABEL_SIZE, 0, ink)
+
+    if self._acc_state != "COAST":
+      value = f"{abs(self._acc_accel):.1f}"
+      value_width = measure_text_cached(self._font_semi_bold, value, ACC_VALUE_SIZE).x
+      rl.draw_text_ex(self._font_semi_bold, value,
+                      rl.Vector2(x + ACC_PILL_WIDTH - 22 - value_width, y + 20),
+                      ACC_VALUE_SIZE, 0, ink)
+      # Intensity as its own bar rather than as a fill behind the text: clipping a rounded rect
+      # leaves a hard vertical seam that reads as a rendering fault, and it forced the ink colour
+      # to change halfway across the pill.
+      bar_width, bar_height = ACC_PILL_WIDTH - 44, 7
+      bar_x, bar_y = x + 22, y + ACC_PILL_HEIGHT - 16
+      rl.draw_rectangle_rounded(rl.Rectangle(bar_x, bar_y, bar_width, bar_height), 1.0, 6,
+                                rl.Color(0, 0, 0, 70))
+      frac = min(1.0, abs(self._acc_accel) / ACC_MAX_MAG)
+      rl.draw_rectangle_rounded(
+        rl.Rectangle(bar_x, bar_y, max(bar_height, bar_width * frac), bar_height), 1.0, 6, ACC_INK)
+    return ACC_PILL_HEIGHT
 
   def _draw_lateral_control_overlay(self, center_x: float, center_y: float, wheel_size: int) -> None:
     """Draw the current lateral control mode over the steering wheel icon."""

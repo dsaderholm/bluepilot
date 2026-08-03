@@ -10,6 +10,10 @@ from openpilot.selfdrive.ui.sunnypilot.layouts.settings.cruise_sub_layouts.speed
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.multilang import tr, tr_noop
 from openpilot.system.ui.sunnypilot.widgets.list_view import toggle_item_sp, option_item_sp, simple_button_item_sp
+# BluePilot: SectionHeader lives under the bp layer only because that is where it was first
+# needed. It is a plain Widget over system.ui with no BluePilot-specific dependencies, and both
+# panels drive the same scroller_tici.Scroller, so reusing it here is safe.
+from openpilot.selfdrive.ui.bp.widgets.section_header import SectionHeader
 from openpilot.system.ui.widgets import Widget
 from openpilot.system.ui.widgets.scroller_tici import Scroller
 
@@ -52,31 +56,45 @@ class CruiseLayout(Widget):
       description=tr("Use vision path predictions to estimate the appropriate speed to drive through turns ahead."),
       param="SmartCruiseControlVision")
 
-    # BluePilot: curve aggressiveness, split by speed regime like the angle-steering feel factors
+    # BluePilot: curve aggressiveness, split by speed regime like the angle-steering feel factors.
+    # Shown as a percentage because that is what the value is -- a scale on the computed target.
     self.scc_v_low_speed_factor = option_item_sp(
       title=tr("Curve Sensitivity (Low Speed)"),
+      description=tr("How much to slow for turns taken at low speed. Above 100% slows more than "
+                     "the model asks for, below 100% slows less."),
       param="SmartCruiseControlVisionLowSpeedFactor",
       min_value=50, max_value=150, value_change_step=5,
+      label_callback=lambda v: f"{v}%",
       inline=True)
 
     self.scc_v_high_speed_factor = option_item_sp(
       title=tr("Curve Sensitivity (High Speed)"),
+      description=tr("The same scale for turns taken at highway speed, where the same corner "
+                     "needs a very different amount of slowing."),
       param="SmartCruiseControlVisionHighSpeedFactor",
       min_value=50, max_value=150, value_change_step=5,
+      label_callback=lambda v: f"{v}%",
       inline=True)
 
     # BluePilot: how early the curve cycle starts, independent of how much it slows
     self.scc_v_earliness = option_item_sp(
       title=tr("Curve Detection Earliness"),
+      description=tr("How far ahead of a turn to begin slowing. This changes the timing only; "
+                     "how much speed comes off is set by the two sensitivity controls above."),
       param="SmartCruiseControlVisionEarliness",
       min_value=50, max_value=200, value_change_step=10,
+      label_callback=lambda v: f"{v}%",
       inline=True)
 
     # BluePilot: cap on how far ICBM drops the set speed in one step
     self.icbm_max_target_drop = option_item_sp(
       title=tr("Max Set Speed Drop Per Step"),
+      description=tr("How far the set speed may fall in one step. Stock ACC brakes hard when the "
+                     "set speed drops about 10 at once but coasts for smaller drops, so staying "
+                     "under that turns one hard brake into a few gentle steps. 0 disables the cap."),
       param="IcbmMaxTargetDrop",
       min_value=0, max_value=9, value_change_step=1,
+      label_callback=self._speed_step_label,
       inline=True)
 
     # BluePilot: same cap in the other direction -- how fast the set speed comes back up
@@ -88,37 +106,45 @@ class CruiseLayout(Widget):
                      "it can. Lower is gentler. 0 disables the cap."),
       param="IcbmMaxTargetRise",
       min_value=0, max_value=15, value_change_step=1,
+      label_callback=self._speed_step_label,
       inline=True)
 
     # BluePilot: when a driver's set-speed press stops applying
     self.icbm_baseline_reset = option_item_sp(
-      title=tr("Reset My Set Speed On Limit Change"),
+      title=tr("Forget My Set Speed On Limit Change"),
       description=tr("When you adjust the set speed yourself, ICBM keeps every other feature "
                      "working but aims at your number instead of the speed limit target. This is "
                      "how far the posted limit has to move before your number is discarded and "
                      "Speed Limit Assist takes over again. Curves and lead vehicles never discard "
-                     "it. 0 means only cancelling cruise does."),
+                     "it. You can also hand it back at any time by setting the speed to exactly "
+                     "the limit, or by cancelling and re-engaging."),
       param="IcbmBaselineResetDelta",
       min_value=0, max_value=30, value_change_step=1,
+      label_callback=lambda v: tr("Never") if v == 0 else self._speed_step_label(v),
       inline=True)
 
     # BluePilot: radar-blind lead detector reach. TTC is the control that actually binds --
     # against a stopped lead TTC = dRel / v_ego, so at 65 mph 4.0 s already caps range near 116 m
     # and the distance bound never fires. Distance stays as a sanity limit.
     self.icbm_lead_max_ttc = option_item_sp(
-      title=tr("Vision Lead Trigger Time (0.1s)"),
-      description=tr("How early to slow for a vehicle the model sees but the radar has not "
-                     "confirmed, as time-to-collision in tenths of a second. Higher reacts "
-                     "sooner. This is the knob that changes behavior; the distance limit below "
-                     "rarely binds."),
+      title=tr("Slow For Unconfirmed Vehicles"),
+      description=tr("How early to slow for a vehicle the camera sees but the radar has not "
+                     "confirmed -- most importantly a stopped car ahead. Measured as how many "
+                     "seconds away it is. Higher reacts sooner. This is the control that changes "
+                     "behaviour; the distance limit below rarely comes into play."),
       param="IcbmLeadMaxTtc",
       min_value=10, max_value=80, value_change_step=5,
+      # Stored in tenths of a second, so the raw number is 10x what the driver should read.
+      label_callback=lambda v: f"{v / 10:.1f} s",
       inline=True)
 
     self.icbm_lead_max_distance = option_item_sp(
-      title=tr("Vision Lead Max Distance (m)"),
+      title=tr("Unconfirmed Vehicle Max Distance"),
+      description=tr("A sanity limit on the setting above: never react to an unconfirmed vehicle "
+                     "further away than this, however early the timing says."),
       param="IcbmLeadMaxDistance",
       min_value=40, max_value=200, value_change_step=10,
+      label_callback=lambda v: f"{v} m",
       inline=True)
 
     # BluePilot: act on the model's own stop intent. Off by default -- with no lead there is no
@@ -127,14 +153,14 @@ class CruiseLayout(Widget):
       title=tr("Slow For Stop Signs And Lights"),
       description=tr("Use the driving model's own stop intent to bring the set speed down for "
                      "stop signs and red lights with no vehicle at them. This is the one case "
-                     "the vision-lead trigger cannot catch, since an empty intersection produces "
-                     "no lead to measure. Weaker evidence than the lead path -- persistence and "
-                     "the speed floor are its only filters."),
+                     "the setting above cannot catch, since an empty intersection produces "
+                     "no vehicle to measure. Weaker evidence than the vehicle case -- how long "
+                     "the model insists, and a speed floor, are its only filters."),
       param="IcbmModelStopEnabled")
 
     # BluePilot: hold openpilot's standstill resume until the lead has actually gone
     self.icbm_resume_gate = toggle_item_sp(
-      title=tr("Gate Standstill Resume On Lead"),
+      title=tr("Wait For The Car Ahead Before Resuming"),
       description=tr("Wait for the vehicle ahead to actually move before resuming from a stop. "
                      "Without this, openpilot requests resume from its own plan and stock ACC "
                      "accelerates toward the set speed, then brakes hard when its radar finds the "
@@ -142,15 +168,20 @@ class CruiseLayout(Widget):
       param="IcbmResumeGateEnabled")
 
     self.icbm_resume_min_gap = option_item_sp(
-      title=tr("Resume Minimum Gap (m)"),
+      title=tr("Resume Minimum Gap"),
+      description=tr("How far the car ahead must have pulled away before resuming counts as safe."),
       param="IcbmResumeMinGap",
       min_value=2, max_value=20, value_change_step=1,
+      label_callback=lambda v: f"{v} m",
       inline=True)
 
     self.icbm_resume_min_lead_speed = option_item_sp(
-      title=tr("Resume Minimum Lead Speed (mph)"),
+      title=tr("Resume Minimum Lead Speed"),
+      description=tr("How fast the car ahead must be moving before resuming. Together with the "
+                     "gap above, this is what separates it rolling away from it merely creeping."),
       param="IcbmResumeMinLeadSpeed",
       min_value=1, max_value=15, value_change_step=1,
+      label_callback=self._speed_step_label,
       inline=True)
 
     self.scc_m_toggle = toggle_item_sp(
@@ -188,23 +219,41 @@ class CruiseLayout(Widget):
       description=tr("Enable toggle to allow the model to determine when to use sunnypilot ACC or sunnypilot End to End Longitudinal."),
       param="DynamicExperimentalControl")
 
+    # BluePilot: grouped under headings rather than run together as one list. ICBM alone now owns
+    # ten controls, and flat they read as a wall of unrelated numbers -- there was no way to tell
+    # which ones affect the set speed, which affect hazards, and which only matter at a stop.
+    #
+    # Behaviour settings live here, next to the feature that owns them; the display side of the
+    # same work (Show Ford ACC Status) stays in the BluePilot panel with the other display
+    # toggles. That split is deliberate: this panel changes what the car does, that one changes
+    # what you are shown.
     items = [
       self.icbm_toggle,
+
+      SectionHeader(tr("Set Speed Management")),
       self.icbm_max_target_drop,
       self.icbm_max_target_rise,
       self.icbm_baseline_reset,
+
+      SectionHeader(tr("Slowing For Hazards")),
       self.icbm_lead_max_ttc,
       self.icbm_lead_max_distance,
       self.icbm_model_stop,
+
+      SectionHeader(tr("Resuming From A Stop")),
       self.icbm_resume_gate,
       self.icbm_resume_min_gap,
       self.icbm_resume_min_lead_speed,
-      self.dec_toggle,
+
+      SectionHeader(tr("Curves")),
       self.scc_v_toggle,
       self.scc_v_low_speed_factor,
       self.scc_v_high_speed_factor,
       self.scc_v_earliness,
       self.scc_m_toggle,
+
+      SectionHeader(tr("Other")),
+      self.dec_toggle,
       self.custom_acc_toggle,
       self.custom_acc_short_increment,
       self.custom_acc_long_increment,
@@ -228,6 +277,12 @@ class CruiseLayout(Widget):
     self._current_panel = panel
     if panel == PanelType.SLA:
       self._speed_limit_layout.show_event()
+
+  @staticmethod
+  def _speed_step_label(value: int) -> str:
+    """BluePilot: these params are stored in display units -- the same units the set speed is shown
+    in -- so the label has to follow the driver's mph/km-h choice rather than assume one."""
+    return f'{value} {"km/h" if ui_state.is_metric else "mph"}'
 
   @property
   def _icbm_tunables(self):
