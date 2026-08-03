@@ -128,16 +128,24 @@ CRUISE_CYCLE_STABLE_FRAMES = 40  # 0.4 s unchanged => the resume jump has landed
 # BluePilot: target-drop rate limiting. Stock ACC coasts for small set-speed drops and brakes for
 # large ones; capping each step and walking larger drops down over several steps keeps it coasting.
 #
-# The 8 is a GUESS, and specifically a guess at where Ford switches from one to the other -- the
-# "roughly 10 mph" figure it sits under was never measured. It is now measurable: UN R13-H lights
-# the stop lamps above 1.3 m/s^2 of automatically commanded braking, the BCM reports lamp state on
-# the bus, and the onroad BRAKE LAMPS readout shows it. Raise IcbmMaxTargetDrop until the lamps
-# start lighting during routine slowing and back off one, and this becomes a measured value.
+# The ~10 mph coast/brake boundary this sits under is documented Ford behaviour, not a guess. What
+# WAS assumed is the goal: 8 was chosen to stay in the coasting regime because coasting was taken
+# to be the only way to avoid lighting the stop lamps and telling the car behind there is a hazard
+# on an ordinary curve.
 #
-# Worth doing rather than leaving alone: too low a cap meters curve slowing out over several steps
-# and arrives late for a tight bend, and if the real threshold is above 8 that caution buys nothing.
-# The tunable range was capped at 9 to match the unverified theory, which made the theory
-# untestable; it now runs to 15.
+# That assumption is wrong, and it matters. UN R13-H lights the lamps above 1.3 m/s^2 of
+# automatically commanded braking -- so there is a band where ACC uses the friction brakes without
+# signalling anything. Coasting is not the only quiet option.
+#
+# Which splits one constraint into two, and they want different things:
+#   signalling  -> the lamps. Governed by 1.3 m/s^2, shown by the BRAKE LAMPS readout.
+#   pad wear    -> whether the friction brakes are used at all. That is AccBrkDecel_B_Rq, which is
+#                  what puts the ACC pill into BRAKE.
+#
+# So the honest framing for tuning this is not "keep it coasting" but "is this curve worth the
+# pads". Coast when there is time; a quiet brake application is acceptable when there is not, and
+# is strictly better than arriving at the bend too fast. The range runs to 15 so that trade can
+# actually be explored -- it was capped at 9, which allowed only one side of it.
 DEFAULT_MAX_TARGET_DROP = 8  # display units (mph/kph)
 # How close actual speed must get to the current step's floor before the next step is allowed.
 DROP_STEP_SETTLE_MARGIN = 2  # display units (mph/kph)
