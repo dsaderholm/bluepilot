@@ -51,6 +51,21 @@ so the raw occupancy signal flickers. Three consecutive messages is roughly 0.36
 which is enough to drop the flicker without being slow enough to miss a car we are about to pull
 in front of.
 
+THE RADAR IS NOT ON THE CENTRELINE, AND NOTHING CORRECTS FOR IT
+Confirmed 2026-08-03: the front radar on this car is mounted off-centre, as it is on most cars.
+`_update_delphi_mrr` derives lateral position from azimuth and range alone -- there is no lateral
+mounting offset anywhere in the path -- so every track carries a constant sideways bias equal to
+however far the sensor sits from the centreline.
+
+Left alone deliberately, for now. A typical offset is 0.2-0.4 m against a 3.5 m wide band, so it
+shifts both edges by about a tenth of a lane; the debounce, the road-edge test and the
+path-relative measurement all matter more. But it is a real bias and it is silent, so: if the
+adjacent-lane band ever looks skewed to one side in the logs, this is the first thing to suspect.
+
+Measuring it is a tape measure from the car's centreline to the sensor face, and applying it is one
+constant subtracted from `lat` below. Not added speculatively -- the number has to be measured
+first, and a wrong constant is worse than none.
+
 SIGN CONVENTION -- THE TRAP
 Radar `yRel` is LEFT-POSITIVE on this car. Model lane geometry is LEFT-NEGATIVE: `ldw.py` tests the
 left lane line against `-(1.08 + CAMERA_OFFSET)`, and `passing_assist.py` follows that. The two
