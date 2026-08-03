@@ -242,8 +242,23 @@ class HudRendererBP(HudRendererSP):
     """BluePilot: the driver's own number, drawn as a sibling of the MAX box.
 
     Same width, same label-over-number structure, so it reads as "the other set speed" rather than
-    as a caption. During a curve or a hazard the MAX box shows what ICBM is commanding right now
-    and this shows what it will return to; when nothing is acting the two agree.
+    as a caption.
+
+    Distinct from BOTH numbers the MAX box can show, which is worth being precise about because
+    all three are speeds and two of them often agree:
+
+      big number      carState.vCruiseCluster -- openpilot's OWN v_cruise. With ICBM
+                      (pcmCruiseSpeed False) VCruiseHelper maintains this from button presses
+                      using openpilot's increments, NOT the car's.
+      small number    carState.cruiseState.speedCluster -- the car's real dash set speed, shown
+                      in place of the word MAX by HudRendererSP._get_icbm_status whenever the two
+                      disagree, latched ~3 s.
+      this badge      the ICBM baseline -- the number ICBM returns the set speed to once a curve
+                      or hazard has passed. Persistent for as long as the override is held, where
+                      the small number is transient.
+
+    Geometry is safe against the small number: that one is drawn inside the box (y + 15) and this
+    starts below it (y + set_speed_height + 16).
     """
     rect = rl.Rectangle(x, y, width, HOLD_HEIGHT)
     rl.draw_rectangle_rounded(rect, 0.32, 10, HOLD_FILL)
