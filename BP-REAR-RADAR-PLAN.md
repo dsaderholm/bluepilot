@@ -1578,3 +1578,88 @@ rear radar becomes reliable, and the front radar's off-path tracks already cover
 instead of decorative, and it unlocks a sunnypilot feature that is already written. It also means
 that if the rear radar bench test disappoints, the car still gained genuine blind-spot awareness
 for the cost of a configuration change.
+
+---
+
+## 13. Why the sunnypilot BSM delay moved over too close — it is one second, exactly
+
+Added 2026-08-03. The owner reported that sunnypilot's BSM-aware auto lane change, tested
+previously with a working gateway, would move over **too close** to a car after waiting for it to
+leave the blind spot. That is not a vague impression. It is calculable from
+`auto_lane_change.py`.
+
+```python
+if self.lane_change_bsm_delay and blindspot_detected and self.lane_change_delay > 0:
+    if self.lane_change_delay == AUTO_LANE_CHANGE_TIMER[NUDGELESS]:
+        self.lane_change_wait_timer = ONE_SECOND_DELAY          # ONE_SECOND_DELAY = -1
+    else:
+        self.lane_change_wait_timer = self.lane_change_delay + ONE_SECOND_DELAY
+```
+
+While the blind spot is occupied the wait timer is *pinned* one second below the threshold. The
+instant BSM clears it resumes counting, and `update_allowed` passes when
+`wait_timer > lane_change_delay`. So the manoeuvre begins **one second after the blind spot goes
+clear**, whatever the configured delay was.
+
+One second after a car leaves your blind spot it is a metre or two off your rear quarter. If it was
+overtaking you it is still closing. Moving over then is precisely the behaviour reported.
+
+**This is the whole argument for the rear radar, arrived at from the driver's seat rather than from
+a datasheet.** BLIS going clear means the car is no longer *beside* you. It does not say whether it
+is now ahead or behind, and it certainly does not say how fast. One second of blind faith is not a
+gap — and no tuning of that timer can fix it, because the sensor stops reporting at exactly the
+moment the information becomes necessary.
+
+**BluePilot's own keep-right already avoids this**, and by accident of reasoning rather than luck:
+`_keep_right` resets its timer when the blind spot is occupied so the delay means "time since the
+blind spot went clear", and the default is **10 s, not 1**. The docstring argues for landing nearer
+the textbook "both headlights in the mirror". The owner's report is independent confirmation that
+one second is far too eager.
+
+**Practical consequence once BLIS is routed:** `AutoLaneChangeBsmDelay` will become available and
+will reproduce this exact behaviour. Do not enable it on the strength of BLIS alone. Either leave
+it off, or change the constant in this fork — it is a one-line default with a real argument behind
+it.
+
+---
+
+## 14. What else the three sensors would make possible
+
+Asked 2026-08-03. Ordered by value, with the honest verdict on each. Nothing here is built; this is
+the shortlist for after the sensor exists.
+
+**1. Lane-change abort — the highest-value item, and only possible with rear closing rate.**
+Today, once `desire_helper` commits to a lane change, it commits. There is no sensor that could
+justify bailing out mid-manoeuvre, so there is no bail-out. With a rear radar there is: a car
+appearing at closing speed while the car is half-way across is exactly the case that hurts, and
+aborting back into the original lane is a genuinely safer response than completing. This is the
+one item that reduces risk rather than adding convenience.
+
+**2. Overtake completion, replacing the settle timer.** `PassingAssistSettleTime` is 20 s of
+guesswork standing in for "have I actually cleared the car I passed". The front radar cannot see it
+once it is behind. A rear radar measures the gap directly, so "move back right when the car you
+passed is N metres behind and opening" replaces a timer with a measurement. It also fixes the same
+class of error as §13, from the other direction.
+
+**3. Merge assist for on-ramps.** Joining a highway means judging traffic in a lane you are about
+to enter, approaching from behind, often faster than you. That is the rear radar's exact geometry
+and it is nearly impossible without one. Genuinely new capability rather than a refinement — and
+the honest caveat is that it wants the merge lane identified, which is the same lane-topology
+problem §6 already struggles with.
+
+**4. Tailgater-aware following.** If something is close behind and not slowing, opening the gap
+ahead gives everyone more room. Modest value, and it is longitudinal — on this car that means ICBM
+moving the set speed, which is a blunt instrument for it. Low priority.
+
+**5. Rear-approach warning.** Something closing fast that shows no sign of stopping. The car cannot
+flash its own brake lights (no body actuation — MS-CAN), so this can only warn the driver, who can
+usually already see it in the mirror. Marginal.
+
+**Explicitly out of scope, by standing instruction:** anything touching AEB, openpilot longitudinal
+control, driver monitoring, or panda safety. A rear radar invites all four; none of them is being
+built here.
+
+**The ordering that follows from all of this:** BLIS via canbox (§12, free) → rear radar bench test
+(§8) → lane-change abort and overtake completion, because those two are what the sensor is actually
+for. Automatic lane changes (§11) sit after them, not before — the abort path should exist before
+the car starts initiating manoeuvres on its own.
