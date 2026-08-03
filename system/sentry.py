@@ -264,6 +264,19 @@ def _sentry_sdk_supports_enable_logs() -> bool:
 
 
 def init(project: SentryProject) -> bool:
+  # BluePilot fork: crash/log reporting is OPT-IN and defaults off. The owner self-hosts their own
+  # comma-server stack and does not want device telemetry -- dongle id, logs, fingerprints --
+  # leaving the car.
+  #
+  # Deliberately a single early return rather than deleting sentry.py or unpicking the ~20
+  # capture_exception() call sites scattered across the tree. sentry_sdk calls are no-ops when the
+  # client was never initialised, so this one branch disables all of them, and it is the smallest
+  # possible thing to re-resolve when upstream edits this file (which they do often).
+  #
+  # test_sentry_disabled_by_default.py fails loudly if a future merge drops this.
+  if not Params().get_bool("BPSentryEnabled"):
+    return False
+
   build_metadata = get_build_metadata()
 
   env = build_metadata.channel_type

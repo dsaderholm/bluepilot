@@ -395,6 +395,9 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"BPCustSoundsSelection", {PERSISTENT | BACKUP, INT, "0"}},  // 0=Comma 4, 1=Comma 3x, 2=Tesla
     {"BpShowLateralControl", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"BPDisableLaneLineStatusColor", {PERSISTENT | BACKUP, BOOL, "0"}},
+    // BluePilot: opt-in crash/log reporting to BluePilot's GlitchTip. Default OFF on this
+    // fork -- the owner self-hosts and does not want device telemetry leaving the car.
+    {"BPSentryEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"BPUIDebugLog", {PERSISTENT, BOOL, "0"}},
     {"Blindspot", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"BlinkerPauseLaneChange", {PERSISTENT | BACKUP, BOOL, "0"}},

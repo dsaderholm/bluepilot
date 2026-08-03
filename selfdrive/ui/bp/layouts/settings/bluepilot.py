@@ -91,6 +91,7 @@ class BluePilotLayout(Widget):
       ("BPRainbowLines", self._rainbow_lane_lines),
       ("ShowBlindspotOverlay", self._show_blindspot),
       ("ShowBrakeStatus", self._show_brake_status),
+      ("BPSentryEnabled", self._sentry_enabled),
       ("BPHideOnroadBorder", self._hide_onroad_border),
       ("BPShowConfidenceBall", self._show_confidence_ball),
       ("BPAnimateSteeringWheel", self._animate_steering_wheel),
@@ -179,6 +180,16 @@ class BluePilotLayout(Widget):
       lambda: tr("Display red overlay when vehicle is detected in blindspot."),
       initial_state=self._safe_get_bool(self._params, "ShowBlindspotOverlay"),
       callback=lambda state: self._toggle_callback(state, "ShowBlindspotOverlay"),
+      icon="warning.png"
+    )
+
+    # BluePilot fork: crash/log reporting, opt-in and off by default
+    self._sentry_enabled = toggle_item(
+      lambda: tr("Send Crash Reports"),
+      lambda: tr("Send crashes and error logs to BluePilot's server, tagged with your device ID. "
+                 "Off by default on this fork. Nothing leaves the car while this is off."),
+      initial_state=self._safe_get_bool(self._params, "BPSentryEnabled"),
+      callback=lambda state: self._toggle_callback(state, "BPSentryEnabled"),
       icon="warning.png"
     )
 
@@ -697,6 +708,7 @@ class BluePilotLayout(Widget):
         self._rainbow_lane_lines,
         self._show_blindspot,
         self._show_brake_status,
+        self._sentry_enabled,
         self._show_confidence_ball,
         self._animate_steering_wheel,
         self._wheel_icon_style_btn,
