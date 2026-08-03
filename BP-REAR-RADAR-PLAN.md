@@ -642,3 +642,111 @@ Things the brief asserted that turned out to be wrong or incomplete. All verifie
    before adding anything, and the ESR would lose arbitration to the MRR by ID priority.
 7. **`liveTracks` publishes at 8.3 Hz on a Delphi MRR**, not the 20 Hz declared in
    `services.py` — `_update_delphi_mrr` emits once per four scan modes.
+
+---
+
+## 8. Hardware and cost — revised: buy a second MRR, not an ESR
+
+Added 2026-08-03. Confidence: **high** on the DBC evidence (checked in-tree), **medium** on
+prices (observed listings, not quotes).
+
+### The finding that changes the part choice
+
+§1 says buy a Delphi ESR, and §0 names the reason it might never work: a Ford-programmed ESR may
+refuse to leave its no-radiate state without gateway frames that are documented nowhere.
+
+Compare the two DBCs in this repo:
+
+```
+ESR.dbc         BU_: Gateway ESR      <- two nodes. Something has to FEED it.
+FORD_CADS.dbc   BU_: MRR              <- one node. Every message is FROM the radar.
+```
+
+Every `BO_` in `FORD_CADS.dbc` is sent by `MRR`: the 64 detection messages, four headers, the
+status and fault frames, the XCP and diagnostic responses. **Nothing is addressed to it.** And
+openpilot transmits nothing to any radar — `FORD_COMMON_TX_MSGS` is `Steering_Data_FD1`,
+`ACCDATA_3`, `Lane_Assist_Data1`, `IPMA_Data`, all on bus 0 and 2.
+
+Which means the MRR **cannot know the vehicle speed**, because nothing tells it. So it cannot be
+running the speed-dependent stationary/oncoming classification or the auto-alignment convergence
+that §2's "feed it `SPEED_DIRECTION = Reverse`" trick exists to work around. There is no internal
+model to confuse by pointing it backwards. It reports range, azimuth and range-rate, and
+`_update_delphi_mrr` clusters them in openpilot.
+
+That removes the project's #1 risk rather than mitigating it — and note the trick is *impossible*
+with an MRR anyway, since there is no channel to send it anything on. The two facts cancel.
+
+Caveat, stated plainly: a single-node DBC is openpilot's view, not a bus capture. Ford could send
+the MRR something in a message openpilot never decodes. The bench test settles it in ten minutes
+— power the radar alone on a bench and see whether detections appear.
+
+### Three further advantages
+
+1. **The decoder already exists and is exercised.** `_update_delphi_mrr` runs on this car every
+   drive. An ESR would need a new `radar_interface` path written against an undocumented protocol.
+2. **A known-good reference.** The car already contains a working one. Bench output can be
+   compared against the front radar's live output frame for frame — a debugging position nobody
+   doing this with an ESR has.
+3. **The feeder MCU loses a channel.** §3 specified three: private ESR bus, bus 0 listen-only for
+   vehicle speed, bus 1 digest out. With an MRR there are no gateway frames to send and no vehicle
+   data to relay, so channel B disappears. **Two channels, and a $15 dual-transceiver board covers
+   it.**
+
+Bus 1 still has no headroom (§3), so the digest architecture stands unchanged.
+
+### Which part, exactly
+
+**Read the part number off the radar already in the car and buy the same one.** That guarantees
+`FORD_CADS`, classic 500 kbit/s CAN, and a decoder known to work — no cross-referencing required.
+
+If sourcing blind, these are `RADAR.DELPHI_MRR` platforms (non-CANFD Fords):
+
+| Vehicle | Part number | Notes |
+|---|---|---|
+| Fusion 2017–2020 | `HG9T-9G768-AG` / `-BG` | also fits Edge, MKZ 2017–2019 |
+| Edge 2019–2024 | (match the car's own) | what this car runs |
+| Explorer 2016–2019 | `GB5T-9G768-AE` | |
+
+⚠️ **Avoid CANFD platforms** — Explorer 2020+ (`LB5T-9G768-AB`), F-150 2021+. Those take
+`RADAR.STEER_ASSIST_DATA`, a different bus and a different decode path.
+
+⚠️ **Still avoid `-14D453` and `-14C689`** — those are the blind-spot (SODL/SODR) modules, the
+sensors the BLIS work already established cannot answer "is something closing".
+
+### Bill of materials
+
+**Phase 1 — bench test only.** Answers the one question that decides the project.
+
+| Item | Price | Note |
+|---|---|---|
+| Delphi MRR, salvage | $50–150 | listings seen $33–469; used mostly $50–150 |
+| Connector pigtail | $0–30 | buy the harness stub with it; cutting one off a donor is far easier than sourcing the mate |
+| CANable 2.0 USB-CAN | ~$36 | 500 kbit/s classic CAN is all that is needed |
+| 12 V bench supply, 3 A | $25–40 | a spare battery and a fuse also works |
+| **Phase 1 total** | **$110–255** | money spent regardless of which way the answer goes |
+
+**Phase 2 — only if phase 1 shows detections.**
+
+| Item | Price | Note |
+|---|---|---|
+| Teensy 4.0 | $24 | 4.1 is $30 and unnecessary; three CAN controllers either way, two used |
+| Dual CAN-Bus adapter for Teensy | $15 | transceivers *and* termination on board |
+| Wiring, fuse, inline connectors, DC-DC | ~$30 | |
+| Bracket / radome | $0–40 | 3D print, or fabricate from the donor's own bracket |
+| **Phase 2 total** | **$70–110** | |
+
+**All-in: roughly $180–365**, with the go/no-go decision reached after the first $110–255.
+
+### The alternative, and why it is second
+
+eFiniLan's `openpilot-ext-radar-addon` — the sunnypilot author's own external-radar project — is
+a ~$236 AliExpress module with its own DBC, `radar_interface.py` and a `card.diff`. It is the only
+prior art for adding a radar openpilot never expected, and its architecture is the template.
+
+It is second here for three reasons: it is front-facing and unproven rearward, its protocol is not
+one this fork already decodes, and it costs more than a salvage MRR. Its real value to this project
+is the patch shape, which applies whichever sensor is fitted. Worth reading before writing §5.
+
+Its warning is also worth repeating, because it independently confirms §3: *"CAN Message Conflict:
+This proof of concept may trigger errors due to conflicts. A CAN filter or gateway can resolve
+them."* He put his on CAN1 and hit exactly the contention this plan routes around.
