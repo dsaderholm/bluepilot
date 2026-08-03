@@ -146,7 +146,7 @@ CRUISE_CYCLE_STABLE_FRAMES = 40  # 0.4 s unchanged => the resume jump has landed
 # pads". Coast when there is time; a quiet brake application is acceptable when there is not, and
 # is strictly better than arriving at the bend too fast. The range runs to 15 so that trade can
 # actually be explored -- it was capped at 9, which allowed only one side of it.
-DEFAULT_MAX_TARGET_DROP = 8  # display units (mph/kph)
+DEFAULT_MAX_TARGET_DROP = 12  # display units (mph/kph)
 # How close actual speed must get to the current step's floor before the next step is allowed.
 DROP_STEP_SETTLE_MARGIN = 2  # display units (mph/kph)
 

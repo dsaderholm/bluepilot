@@ -155,7 +155,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"CustomAccShortPressIncrement", {PERSISTENT | BACKUP, INT, "1"}},
     // BluePilot: max per-step ICBM set-speed decrement, in display units (mph/kph).
     // Kept under Ford's ~10 mph aggressive-brake threshold so stock ACC coasts instead of braking.
-    {"IcbmMaxTargetDrop", {PERSISTENT | BACKUP, INT, "8"}},
+    {"IcbmMaxTargetDrop", {PERSISTENT | BACKUP, INT, "12"}},
     // BluePilot: max per-step ICBM set-speed increment, in display units (mph/kph). ICBM holds the
     // button rather than tapping it, and Ford reads a held button as a continuous ramp, so without
     // this the set speed slams back up after a curve or a low-limit zone. 0 disables.
@@ -318,7 +318,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // Raised from 100 to 140 on 2026-08-01: reported as triggering too late on real drives,
     // most noticeably on freeway off-ramps. 140 drops the entering threshold from 1.3 to
     // 0.93 m/s^2, so at 70 mph it reacts to roughly a 1030 m radius instead of 740 m.
-    {"SmartCruiseControlVisionEarliness", {PERSISTENT | BACKUP, INT, "140"}},
+    {"SmartCruiseControlVisionEarliness", {PERSISTENT | BACKUP, INT, "170"}},
 
     // Torque lateral control custom params
     {"CustomTorqueParams", {PERSISTENT | BACKUP , BOOL}},
