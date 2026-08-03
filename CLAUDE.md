@@ -1,0 +1,93 @@
+# BluePilot fork — working notes
+
+## Run tests with `tools/bp_offline_test.py`, never bare `pytest`
+
+```bash
+python tools/bp_offline_test.py                      # the offline-testable suite
+python tools/bp_offline_test.py path/to/test_x.py    # anything pytest accepts
+```
+
+Bare `pytest` does not work here and, worse, **fails in ways that look like environment noise**:
+
+- **Wrong interpreter.** `pyproject.toml` pins `>= 3.12.3, < 3.13`. On Python 3.14, PEP 649 makes
+  class annotations lazy, so opendbc's `auto_dataclass` — which reads
+  `cls.__dict__['__annotations__']` — sees nothing and converts no fields. Every `auto_field()`
+  default stays a raw sentinel `object` instead of becoming an `int`/`bool`/`str`. Tests then fail
+  with things like `unsupported operand type(s) for |=: 'object' and 'int'` that cannot happen on
+  the device. The runner re-execs itself under 3.12, so it works whatever Python you invoke it with.
+- **Missing compiled extensions.** `common/params_pyx` is a Cython module built by scons, and the
+  repo `conftest.py` imports `Params` at collection time, so nothing collects without it. The
+  runner stubs `Params` and the other device-only leaves and passes `--noconftest`.
+
+The suite is **299 passing, 0 failing**. Keep it that way. Do not learn to ignore a failure — three
+of them were dismissed as "pre-existing stub artifacts" across two sessions, and that habit is
+what let a startup crash reach the car.
+
+Environment (already set up): `../.venv-bp312`, a 3.12.13 venv. Recreate with:
+
+```bash
+uv python install 3.12
+uv venv --python 3.12 ../.venv-bp312
+uv pip install --python ../.venv-bp312/Scripts/python.exe pytest pycapnp numpy zstandard requests tqdm crcmod-plus sympy pyserial raylib ruff
+```
+
+## What offline tests do NOT cover
+
+Anything needing compiled extensions, a real CAN bus, or a display. Two specific gaps have bitten:
+
+- **`get_can_parsers`.** `CANParser` rejects a duplicate message address with
+  `RuntimeError("Duplicate Message Check: N")` at car init, which kills `card` and leaves the
+  device on "waiting to start". This happened for real when an upstream merge added a second
+  `Traffic_RecognitnData` registration. `test_can_parser_messages.py` now stubs `CANParser`/`DBC`
+  and asserts on the argument lists across all flag combinations. **Anything that builds a parser
+  or runs at car init needs a test of this shape** — the behavioural suite never reaches it.
+- **Settings screens rendering.** Structure and names can be checked statically (see below), but
+  nothing renders them offline.
+
+Onroad HUD drawing *is* checkable: `selfdrive/ui/bp/onroad/tools/preview_acc_status.py` renders the
+shipped drawing methods to PNG at device scale. Use it rather than guessing at sizes.
+
+## Before saying a branch is safe to flash
+
+1. `python tools/bp_offline_test.py` — expect 299 passed, 0 failed.
+2. `ruff check --isolated --select F821,F811,F401,F841 <changed .py files>` — F821 (undefined name)
+   is the one that matters; it catches what import tests cannot reach. Compare any finding against
+   the merge base before treating it as yours.
+3. For changes under `opendbc/car/` or anything in `card`: confirm nothing new is constructed at
+   car init without a test, and that every CAN signal read exists in the DBC.
+4. For new `Params` keys: confirm each is declared in `common/params_keys.h`. The stubbed `Params`
+   raises on unknown keys the way the device does.
+
+## The ICBM button contract
+
+Settled on the road, 2026-08-03. Do not change these meanings without asking — they are muscle
+memory now, and the owner has already relearned them once.
+
+A HOLD is the driver's own set speed. While one is held every other ICBM feature keeps working
+against it: curves still slow the car, the hazard path still fires, and the speed returns to the
+driver's number afterwards rather than to the speed limit.
+
+| Button | Cruise engaged | Cruise off |
+|---|---|---|
+| `+` (`CcAslButtnSetIncPress`) | `accelCruise` — creates or raises a HOLD | `setCruise` — engages, **clears** the hold, SLA takes the speed |
+| `−` (`CcAslButtnSetDecPress`) | `decelCruise` — creates or lowers a HOLD | `setCruise` — engages, **clears** the hold |
+| CNCL/RES (`CcAslButtnCnclResPress`) | `cancel` | `resumeCruise` — engages and **keeps** the previous hold |
+
+A hold is also cleared by returning the set speed to exactly SLA's target, or by the posted limit
+moving more than `IcbmBaselineResetDelta`. It is NOT cleared by curves or lead vehicles.
+
+Two things that decided the design:
+
+- **SET does not hold the current vehicle speed**, even though Ford's PCM briefly sets it there.
+  If it did, every engagement would create a hold and SLA would never manage a limit unless the
+  driver explicitly handed it back each drive. `+` is already the deliberate "I want a different
+  number" gesture, so SET is left meaning "engage and manage it".
+- **Tap moves the set speed 1 mph, press-and-hold moves it 5 mph** — the car's behaviour, not
+  openpilot's. Model set-speed movement as 5 mph jumps with stationary gaps, never a 1 mph ramp.
+
+## Car
+
+2020 Ford Fusion Titanium AWD with retrofitted Edge ADAS parts (Edge PSCM, rack, IPMA camera, CCM
+radar; Fusion ABS, IPC, steering column). Platform `FORD_FUSION_MK5`, `flags 18` =
+`ALT_STEER_ANGLE | TSR`, **not** CAN FD — that combination is what exposed the duplicate-message
+bug, so keep it in mind when reasoning about flag-gated branches.
