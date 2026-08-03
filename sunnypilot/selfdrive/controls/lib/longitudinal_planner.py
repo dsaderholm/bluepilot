@@ -200,68 +200,9 @@ class LongitudinalPlannerSP:
     unconfirmedLead.hasLead = self.unconfirmed_lead.has_lead
     unconfirmedLead.trigger = self.unconfirmed_lead.trigger
 
-    # BluePilot: passing-assist observation (log only -- see the capnp comment)
-    pa = self.passing_assist
-    passingAssist = longitudinalPlanSP.passingAssist
-    passingAssist.suggestion = pa.suggestion
-    passingAssist.blockedBy = pa.blocked_by
-    # One timer now. The field keeps its name so older logs stay comparable.
-    passingAssist.stuckSeconds = float(pa.approach_seconds)
-    passingAssist.hasLead = pa.has_lead
-    passingAssist.leadDRel = float(pa.lead_d_rel)
-    passingAssist.leadVLead = float(pa.lead_v_lead)
-    passingAssist.speedDeficit = float(pa.speed_deficit)
-    passingAssist.leftLineProb = float(pa.left_line_prob)
-    passingAssist.rightLineProb = float(pa.right_line_prob)
-    passingAssist.leftEdgeGap = float(pa.left_edge_gap)
-    passingAssist.rightEdgeGap = float(pa.right_edge_gap)
-    passingAssist.leftGeometryOk = pa.left_geometry_ok
-    passingAssist.rightGeometryOk = pa.right_geometry_ok
-    passingAssist.leftBlindspot = pa.left_blindspot
-    passingAssist.rightBlindspot = pa.right_blindspot
-    passingAssist.blindspotAvailable = pa.blindspot_available
-    passingAssist.overtakeRestricted = pa.overtake_restricted
-    passingAssist.overtakeMsg = pa.overtake_msg
-    passingAssist.overtakeStatus = pa.overtake_status
-    passingAssist.tsrAvailable = pa.tsr_available
-    passingAssist.reason = pa.reason
-    passingAssist.keepRightSeconds = float(pa.keep_right_seconds)
-    passingAssist.roadName = pa.road_name
-    for dest, side in ((passingAssist.rearLeft, pa.rear.left), (passingAssist.rearRight, pa.rear.right)):
-      dest.available = side.available
-      dest.detected = side.detected
-      dest.closing = side.closing
-      dest.dRel = float(side.d_rel)
-      dest.vRel = float(side.v_rel)
-      dest.ttc = float(side.ttc)
-      dest.source = side.source
-    passingAssist.rightWideningM = float(pa.right_widening_m)
-    passingAssist.rightWidening = pa.right_widening
-    passingAssist.trigger = pa.trigger
-    passingAssist.leadTtc = float(pa.lead_ttc)
-    passingAssist.approachSeconds = float(pa.approach_seconds)
-    passingAssist.accBrakingAtDecision = pa.acc_braking_at_decision
-    passingAssist.accBrakingAvailable = pa.acc_braking_available
-    passingAssist.accPrechargeAtDecision = pa.acc_precharge_at_decision
-    passingAssist.suspendedSeconds = float(pa.suspended_seconds)
-    passingAssist.referenceSpeed = float(pa.reference_speed)
-    passingAssist.referenceSource = pa.reference_source
-    for dest, side in ((passingAssist.adjacentLeft, pa.adjacent.left),
-                       (passingAssist.adjacentRight, pa.adjacent.right)):
-      dest.available = side.available
-      dest.occupied = side.occupied
-      dest.dRel = float(side.d_rel)
-      dest.yRel = float(side.y_rel)
-      dest.vRel = float(side.v_rel)
-      dest.vAbs = float(side.v_abs)
-      dest.oncoming = side.oncoming
-      dest.oncomingDRel = float(side.oncoming_d_rel)
-      dest.oncomingVAbs = float(side.oncoming_v_abs)
-      dest.oncomingAdjacent = side.oncoming_adjacent_seconds > 0.0
-      dest.sameDirectionRecent = side.same_direction_recent
-    passingAssist.undividedRoad = pa.adjacent.undivided
-    passingAssist.undividedSeconds = float(pa.adjacent.undivided_seconds)
-    passingAssist.oncomingSeen = pa.adjacent.oncoming_seen
+    # BluePilot: passing-assist observation (log only -- see the capnp comment).
+    # The field copying lives in the detector so it is not upstream rebase surface.
+    self.passing_assist.publish(longitudinalPlanSP.passingAssist)
 
     # E2E Alerts
     e2eAlerts = longitudinalPlanSP.e2eAlerts
