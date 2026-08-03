@@ -1663,3 +1663,107 @@ built here.
 (§8) → lane-change abort and overtake completion, because those two are what the sensor is actually
 for. Automatic lane changes (§11) sit after them, not before — the abort path should exist before
 the car starts initiating manoeuvres on its own.
+
+---
+
+## 15. Design decisions on the five, from the owner's responses
+
+Added 2026-08-03.
+
+### 1. Abort: only for hazards, never for geometry
+
+The owner's distinction is the right one and it becomes a rule: **abort on a moving hazard, never
+on the system reconsidering the road's shape.**
+
+The example given is exactly the failure to avoid — signalling right to take an exit, while the
+road-widening check decides "that is an exit lane, do not go there". The driver knows where they
+are going and the system does not. Stated generally:
+
+> **Geometry gates suppress SUGGESTIONS. They must never veto the DRIVER.**
+> `right_widening`, `lane_beyond_right`, `MIN_LANE_WIDTH_M`, `MIN_ADJACENT_LINE_PROB` — every one
+> of these exists to stop the system *offering* something. None may cancel a manoeuvre a human
+> asked for.
+
+This holds today only because passing assist is log-only. The moment §11 wires actuation it has to
+be enforced deliberately, so: the abort criteria narrow as driver intent strengthens.
+
+| Who started it | Abort for |
+|---|---|
+| Driver flicked the blinker | a closing vehicle that would cause a collision. **Nothing else.** |
+| System initiated it | that, plus the reason for the manoeuvre evaporating |
+
+Exits stay a manual, driver-initiated lane change until navigation exists. Nothing in this project
+should make that harder.
+
+### 2. Multiple slow cars — already handled, and the real gap is elsewhere
+
+Asked: after passing one car, what if another slow one is ahead?
+
+**The existing gate ordering covers it.** `_keep_right()` is only reached on the `noLead` branch or
+when `_should_pass()` returns False. If the next car is the new lead and is slow enough, the pass
+path fires instead and `keep_right_seconds` resets. The system does not suggest returning right
+while a pass is still warranted — that ordering was built for the mid-overtake case and happens to
+solve this one too.
+
+The genuine gap is different, and the rear radar does not help with it: a slow car **beyond**
+`PassingAssistMaxDistance` (220 m default) is not yet the lead, so keep-right can fire, and then
+the car comes into range and a pass is wanted again. That is a *forward* look-ahead problem. The
+fix is look-ahead distance, not a rear sensor.
+
+### 3. Merge assist — agreed, parked
+
+Hard for the reason given, and for one more: it needs the merge lane identified, which is the same
+lane-topology problem §6 has not solved. Revisit after navigation.
+
+### 4. Speed boost to complete a pass — worth building, with hard limits
+
+The owner's framing is right on every point, including the two that matter most: revert to the
+correct baseline (hold, or SLA + offset), and **never speed up for a car behind**.
+
+The mechanism already exists. `Steering_Data_FD1` — the one frame openpilot transmits — carries the
+full set of cruise buttons (`CcAslButtnSetIncPress`, `CcAslButtnResIncPress` and the rest), which
+is exactly how ICBM raises the set speed today. And coasting back down is already solved:
+`IcbmMaxTargetDrop` exists because Ford ACC brakes hard for a ~10 mph drop but *coasts* for smaller
+ones, so returning in small steps coasts by construction.
+
+Constraints for whoever builds it:
+
+- **Bounded.** A few mph over, not "whatever completes the pass".
+- **Time-limited.** If the pass has not completed within a timeout, revert regardless. A stuck
+  boost is a car quietly travelling faster than its driver asked for.
+- **Reverts to the reference speed**, which `_reference_speed()` already computes — the hold, the
+  limit plus offset, or the dash, whichever expresses the driver's intent.
+- **Never triggered by anything behind.** A car behind should make the system *more eager to move
+  right*, which `_keep_right` already does. It must never make the car go faster.
+
+This is ICBM's actuator, so it lands on the ICBM branch rather than here. Flagged as the
+coordination point between the two.
+
+### 5. Signalling a tailgater — the idea is good, the car cannot do it
+
+Checked directly rather than reasoned about. Every signal in `Steering_Data_FD1`:
+
+```
+HeadLghtHiFlash_D_Stat  TurnLghtSwtch_D_Stat  WiprFront_D_Stat  LghtAmb_D_Sns
+LaSwtchPos_D_Stat  TjaButtnOnOffPress  ... and the cruise button set
+```
+
+**No brake lamp. No hazards.** And that frame is the *only* thing openpilot transmits carrying body
+switches, which gives the general rule:
+
+> **openpilot can only command what happens to live in a frame it already transmits.**
+> `Steering_Data_FD1` is the steering column's stalk-switch report, so openpilot can impersonate
+> the stalk — turn signals, wipers, headlight flash, cruise buttons. It cannot impersonate the
+> brake pedal or the hazard switch, because those are not in this frame and there is no other frame
+> to put them in.
+
+That is also why the blinker actuation worked and is not a counter-example to "no body actuation":
+the turn signal is not general body control, it is one signal that happens to sit in the one frame
+openpilot sends.
+
+The only rear-facing lamps reachable at all are the turn signals, and alternating them is not a
+hazard flash — it is a confusing and probably illegal imitation of one. **Not recommended, and not
+buildable properly.**
+
+What remains possible: the rear radar can still *tell the driver* something is closing. Worth
+having, and it downgrades §14 item 5 from "flash the lights" to "say so on screen".
