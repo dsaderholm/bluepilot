@@ -52,7 +52,10 @@ class VCruiseHelperSP:
     self.short_increment = self.params.get("CustomAccShortPressIncrement", return_default=True)
     self.long_increment = self.params.get("CustomAccLongPressIncrement", return_default=True)
 
-    self.enable_button_timers = CRUISE_BUTTON_TIMER
+    # BluePilot: a COPY. Binding the module-level dict directly shares these timers with every
+    # other holder of CRUISE_BUTTON_TIMER -- ICBM's controller binds it too and runs its own
+    # update_manual_button_timers over the same object.
+    self.enable_button_timers = dict(CRUISE_BUTTON_TIMER)
 
     # Speed Limit Assist
     self.sla_state = SpeedLimitAssistState.disabled
