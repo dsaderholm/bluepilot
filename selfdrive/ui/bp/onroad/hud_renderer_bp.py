@@ -43,6 +43,24 @@ ACC_LABEL_SIZE = 38
 ACC_VALUE_SIZE = 34
 ACC_MAX_MAG = 2.5      # m/s^2 that fills the intensity bar
 STACK_GAP = 12
+# BluePilot: the stop lamps themselves, as their own readout rather than only as a speed colour.
+#
+# This is a REAL signal, not an inference: BCM_Lamp_Stat_FD1's StopLghtOn_B_Stat is the body
+# control module reporting actual lamp state, with BrakeSysFeatures_2's BrkLamp_B_Rq as fallback.
+# Whatever lit them -- the driver's foot, stock ACC, anything -- shows here. The one place that
+# reading gets an ACC-derived overlay mixed in is gated on openpilotLongitudinalControl, which is
+# false on a car running stock Ford ACC, so on this vehicle it is a pure mirror.
+#
+# Deliberately distinct from the ACC pill above it. That one says what the system is ASKING for;
+# this says what traffic behind you is actually being shown, and light applications below the
+# lamp threshold are exactly the case where the two disagree.
+LAMP_PILL_WIDTH = 268
+LAMP_PILL_HEIGHT = 56
+LAMP_LABEL_SIZE = 32
+LAMP_ON_FILL = rl.Color(228, 40, 40, 240)
+LAMP_OFF_FILL = rl.Color(0, 0, 0, 150)
+LAMP_OFF_EDGE = rl.Color(120, 126, 132, 190)
+LAMP_OFF_INK = rl.Color(150, 156, 162, 255)
 
 
 class HudRendererBP(HudRendererSP):
@@ -69,6 +87,7 @@ class HudRendererBP(HudRendererSP):
     self._acc_accel = 0.0     # m/s^2, signed
     self._icbm_baseline = 0   # the driver's held set speed; 0 = no hold
     self._icbm_arrow = ""     # "+" / "-" while ICBM is actively moving the set speed, else ""
+    self._lamp_data_available = False  # the BCM/brake-system lamp signal is actually being decoded
     self._acc_status_failed = False   # latched on any error; keeps a display bug off the screen
     self.speed_right = 0
     self._gradient_rect = None  # BluePilot: Full-width rect for header gradient
@@ -110,16 +129,20 @@ class HudRendererBP(HudRendererSP):
         try:
           car_state_bp = sm['carStateBP']
           brake_light_status = car_state_bp.brakeLightStatus
+          self._lamp_data_available = brake_light_status.dataAvailable
           self._brakes_on = brake_light_status.dataAvailable and brake_light_status.brakeLightsOn
           self._acc_braking = (brake_light_status.accDataAvailable and
                                (brake_light_status.accDecelRequest or brake_light_status.accPrechargeRequest))
         except (KeyError, AttributeError):
+          self._lamp_data_available = False
           self._brakes_on = False
           self._acc_braking = False
       else:
+        self._lamp_data_available = False
         self._brakes_on = False
         self._acc_braking = False
     else:
+      self._lamp_data_available = False
       self._brakes_on = False
       self._acc_braking = False
 
@@ -236,7 +259,12 @@ class HudRendererBP(HudRendererSP):
     if self._icbm_baseline:
       y += self._draw_hold_badge(x, y, set_speed_width) + STACK_GAP
     if self._acc_state:
-      self._draw_acc_pill(x, y)
+      y += self._draw_acc_pill(x, y) + STACK_GAP
+    # Shown whenever brake status is on, in both states -- an indicator that only appears when lit
+    # cannot be told apart from one that is broken, and "are my lamps on right now" is a question
+    # about both answers.
+    if self._show_brake_status and self._lamp_data_available:
+      self._draw_brake_lamp_pill(x, y)
 
   def _draw_hold_badge(self, x: float, y: float, width: float) -> int:
     """BluePilot: the driver's own number, drawn as a sibling of the MAX box.
@@ -294,6 +322,23 @@ class HudRendererBP(HudRendererSP):
       b = rl.Vector2(center_x + half, center_y - half)
       c = rl.Vector2(center_x - half, center_y - half)
     rl.draw_triangle(a, b, c, COLORS.WHITE)
+
+  def _draw_brake_lamp_pill(self, x: float, y: float) -> int:
+    """BluePilot: are the stop lamps lit, right now. See LAMP_* for why this is its own readout."""
+    rect = rl.Rectangle(x, y, LAMP_PILL_WIDTH, LAMP_PILL_HEIGHT)
+    if self._brakes_on:
+      rl.draw_rectangle_rounded(rect, 0.5, 10, LAMP_ON_FILL)
+      ink = COLORS.WHITE
+    else:
+      rl.draw_rectangle_rounded(rect, 0.5, 10, LAMP_OFF_FILL)
+      rl.draw_rectangle_rounded_lines_ex(rect, 0.5, 10, 4, LAMP_OFF_EDGE)
+      ink = LAMP_OFF_INK
+
+    label = "BRAKE LAMPS"
+    width = measure_text_cached(self._font_bold, label, LAMP_LABEL_SIZE).x
+    rl.draw_text_ex(self._font_bold, label,
+                    rl.Vector2(x + (LAMP_PILL_WIDTH - width) / 2, y + 12), LAMP_LABEL_SIZE, 0, ink)
+    return LAMP_PILL_HEIGHT
 
   def _draw_acc_pill(self, x: float, y: float) -> int:
     """BluePilot: what Ford ACC is asking for, and how hard."""

@@ -27,12 +27,12 @@ W, H = 1120, 1080          # the left portion of the 2160x1080 display; all of t
 HEADER_H = 300
 SET_W, SET_H = 172, 204    # UI_CONFIG.set_speed_width_imperial / set_speed_height
 
-# (caption, set speed, posted limit, hold baseline, icbm arrow, acc state, acc m/s^2)
+# (caption, set speed, posted limit, hold baseline, icbm arrow, acc state, acc m/s^2, lamps lit)
 SCENES = [
-  ("settled, holding 70 in a 55", 70, 55, 70, "", "COAST", 0.0),
-  ("curve: ACC braking, hold remembered", 44, 55, 70, "-", "BRAKE", 1.4),
-  ("recovering after the curve", 61, 55, 70, "+", "ACCEL", 1.1),
-  ("no hold, ACC accelerating", 55, 55, 0, "", "ACCEL", 0.6),
+  ("settled, holding 70 in a 55 -- lamps dark", 70, 55, 70, "", "COAST", 0.0, False),
+  ("curve: ACC braking hard enough to light the lamps", 44, 55, 70, "-", "BRAKE", 1.4, True),
+  ("ACC braking too lightly to light them", 50, 55, 70, "-", "BRAKE", 0.4, False),
+  ("no hold, ACC accelerating", 55, 55, 0, "", "ACCEL", 0.6, False),
 ]
 
 
@@ -45,7 +45,7 @@ def load_shipped_drawing_code():
   """
   tree = ast.parse(open(HUD, encoding="utf-8").read())
   cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "HudRendererBP")
-  wanted = ("_draw_hold_badge", "_draw_acc_pill", "_draw_arrow")
+  wanted = ("_draw_hold_badge", "_draw_acc_pill", "_draw_arrow", "_draw_brake_lamp_pill")
   methods = [n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name in wanted]
   assert len(methods) == len(wanted), f"expected {wanted}, found {[m.name for m in methods]}"
 
@@ -63,7 +63,8 @@ def load_shipped_drawing_code():
       pass
   exec(compile(ast.Module(body=methods, type_ignores=[]), "<methods>", "exec"), ns)
 
-  for required in ("HOLD_HEIGHT", "HOLD_FILL", "ACC_PILL_WIDTH", "ACC_STATUS_COLORS", "STACK_GAP"):
+  for required in ("HOLD_HEIGHT", "HOLD_FILL", "ACC_PILL_WIDTH", "ACC_STATUS_COLORS", "STACK_GAP",
+                   "LAMP_PILL_WIDTH", "LAMP_ON_FILL"):
     assert required in ns, f"{required} did not survive extraction -- the preview would be a lie"
   return ns
 
@@ -107,10 +108,11 @@ def main(outdir):
     rl.set_texture_filter(fonts[key].texture, rl.TextureFilter.TEXTURE_FILTER_BILINEAR)
 
   tex = rl.load_render_texture(W, H)
-  for i, (cap, set_speed, limit, hold, arrow, acc, mag) in enumerate(SCENES):
+  for i, (cap, set_speed, limit, hold, arrow, acc, mag, lamps) in enumerate(SCENES):
     stub = types.SimpleNamespace(
       _font_bold=fonts["bold"], _font_semi_bold=fonts["semi"],
       _icbm_baseline=hold, _icbm_arrow=arrow, _acc_state=acc, _acc_accel=mag,
+      _brakes_on=lamps, _show_brake_status=True, _lamp_data_available=True,
       _draw_arrow=ns["_draw_arrow"],
     )
     rl.begin_texture_mode(tex)
@@ -126,7 +128,8 @@ def main(outdir):
     if hold:
       cy += ns["_draw_hold_badge"](stub, x, cy, SET_W) + ns["STACK_GAP"]
     if acc:
-      ns["_draw_acc_pill"](stub, x, cy)
+      cy += ns["_draw_acc_pill"](stub, x, cy) + ns["STACK_GAP"]
+    ns["_draw_brake_lamp_pill"](stub, x, cy)
 
     rl.draw_text_ex(fonts["med"], cap, rl.Vector2(60, H - 70), 34, 0, rl.Color(255, 255, 255, 210))
     rl.end_texture_mode()
