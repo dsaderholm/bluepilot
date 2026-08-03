@@ -18,9 +18,21 @@ SPEED_UNIT_CENTER_Y = 290
 # BluePilot: below this the propulsion request reads as coasting rather than accelerating. ACC
 # trims constantly at small values; with no deadband the readout would never sit still.
 ACC_DEADBAND = 0.15  # m/s^2
+# BluePilot: one green-to-red scale, read as "how much is the car slowing". Position on the scale
+# is the information, so the four states are ordered rather than merely distinct:
+#
+#   ACCEL     green   -- adding speed
+#   COAST     yellow  -- neither; the resting state, so deliberately the dimmest of the four
+#   PRE-BRAKE orange  -- brakes pressurised, still not slowing you
+#   BRAKE     red     -- friction brakes in use
+#
+# COAST is muted rather than a full yellow because it is on screen most of the time and a bright
+# resting state trains you to stop looking. The others are vivid: they are the exceptions.
 ACC_STATUS_COLORS = {
   "ACCEL": rl.Color(70, 200, 115, 235),
-  "BRAKE": rl.Color(255, 168, 30, 235),
+  "COAST": rl.Color(196, 176, 70, 205),
+  "PRE-BRAKE": rl.Color(245, 145, 35, 235),
+  "BRAKE": rl.Color(232, 58, 48, 240),
 }
 # BluePilot: both readouts used to be 34 px unbacked text under the MAX box, which the owner could
 # not pick out at a glance while driving. They are now drawn as filled shapes sized against the
@@ -34,12 +46,9 @@ HOLD_LABEL_SIZE = 32
 HOLD_VALUE_SIZE = 66
 # Dark ink on the filled ACCEL/BRAKE pills; they are bright enough that white text greys out.
 ACC_INK = rl.Color(10, 14, 20, 255)
-# States drawn outlined rather than filled: neither is commanding deceleration, and both are on
-# screen most of the time. Only a real propulsion or brake request lights up.
+# States with no magnitude to report: no number, no intensity bar. They are still filled -- the
+# colour IS the reading for these two.
 QUIET_ACC_STATES = ("COAST", "PRE-BRAKE")
-ACC_COAST_FILL = rl.Color(0, 0, 0, 150)
-ACC_COAST_EDGE = rl.Color(150, 156, 162, 200)
-ACC_COAST_INK = rl.Color(190, 196, 202, 255)
 ACC_PILL_WIDTH = 268   # wider than the MAX column: "BRAKE 1.4" does not fit 172 px legibly
 ACC_PILL_HEIGHT = 78
 ACC_LABEL_SIZE = 38
@@ -359,15 +368,11 @@ class HudRendererBP(HudRendererSP):
     """BluePilot: what Ford ACC is asking for, and how hard."""
     rect = rl.Rectangle(x, y, ACC_PILL_WIDTH, ACC_PILL_HEIGHT)
 
-    # Coasting is the resting state and is on screen most of the time, so it is drawn quiet --
-    # outlined rather than filled. Only an actual propulsion or brake request lights up.
-    if self._acc_state in QUIET_ACC_STATES:
-      rl.draw_rectangle_rounded(rect, 0.42, 10, ACC_COAST_FILL)
-      rl.draw_rectangle_rounded_lines_ex(rect, 0.42, 10, 5, ACC_COAST_EDGE)
-      ink = ACC_COAST_INK
-    else:
-      rl.draw_rectangle_rounded(rect, 0.42, 10, ACC_STATUS_COLORS.get(self._acc_state, COLORS.WHITE))
-      ink = ACC_INK
+    # All four states are filled: the colour is the reading, and its position on the green-to-red
+    # scale is what makes the pill glanceable. COAST is muted in ACC_STATUS_COLORS rather than
+    # given a different treatment here, so the scale stays continuous.
+    rl.draw_rectangle_rounded(rect, 0.42, 10, ACC_STATUS_COLORS.get(self._acc_state, COLORS.WHITE))
+    ink = ACC_INK
 
     rl.draw_text_ex(self._font_bold, self._acc_state, rl.Vector2(x + 22, y + 16),
                     ACC_LABEL_SIZE, 0, ink)
