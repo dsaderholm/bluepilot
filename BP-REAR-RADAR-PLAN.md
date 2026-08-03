@@ -1103,3 +1103,46 @@ cheapest experiment in the whole project.
 So centring the rear one is a preference, not a requirement — an offset is one measured constant
 (see the note in `adjacent_lane.py`). Centre it if the packaging allows, because it is one less
 number to calibrate, but do not distort the bracket to achieve it.
+
+### "Aren't both radars still on bus 1?" No. What a bus physically is
+
+Asked 2026-08-03, and it is the right question to be confused by, because "bus 1" sounds like a
+channel or a setting. It is neither.
+
+**A CAN bus is a pair of wires.** Two conductors, CANH and CANL, with a resistor at each end.
+Devices connect to those two wires and hear each other. That is the whole thing.
+
+"Bus 1" is not a place in the car. It is openpilot's *name for which panda port* a particular pair
+of wires happens to be plugged into — see `fordcan.py`, where `main` is 0, `radar` is 1 and
+`camera` is 2. Ford does not call it that. It is a pair of wires that happens to land on port 1.
+
+So:
+
+- **Bus 1** is the pair of wires already in the car joining the front radar, the camera side and
+  the comma.
+- **The private bus** is a *second, brand new pair of wires* you run yourself, joining the rear
+  radar to the Teensy. Nothing else in the car is attached to those two conductors.
+
+They are as separate as two garden hoses. No electrical path connects them. The rear radar is not
+on bus 1 in any sense — it cannot be heard from bus 1 any more than a device on your neighbour's
+network can be heard on yours.
+
+**The Teensy is the only thing on both, and that is not a contradiction.** The dual-CAN board
+carries *two independent transceiver circuits*, each with its own CANH/CANL terminals. They are not
+joined inside the chip or on the board. The Teensy listens on one pair and transmits on the other,
+and messages only cross because the firmware reads from one and writes to the other — and it
+chooses to write two small summary messages, never the raw traffic.
+
+### The reason this is not optional
+
+**Both radars are the same part number, so they broadcast the same message IDs.**
+
+A JX7T sends `MRR_Detection_001` through `_064`, plus its headers, at fixed IDs. A second JX7T
+sends *the same IDs*. Put both on one pair of wires and every frame collides with its twin —
+`radard` would be parsing two radars' detections interleaved as though they were one sensor, and
+the DBC has no way to tell them apart because there is nothing in the frame that identifies the
+sender.
+
+That is separate from, and worse than, the load problem in §3. Even if bus 1 had unlimited
+headroom, two identical modules on one bus could not work. The private pair is what makes a second
+radar possible at all, not merely comfortable.
