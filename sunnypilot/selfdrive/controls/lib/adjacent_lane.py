@@ -53,6 +53,29 @@ which is exactly why the discrepancy has survived.
 ADJACENT_MIN_M = 2.0
 ADJACENT_MAX_M = 5.5
 
+# Absolute ground speed below which a track is roadside furniture, not traffic.
+#
+# NOT optional, and the reason is the whole character of this radar: liveTracks carries every
+# clustered return with no classification of any kind. do_clustering() groups on geometry and
+# velocity alone -- there is no object type, no moving/stationary flag, and nothing rejects ground
+# objects except a minimum-range guard. Guardrails, jersey barriers, sign gantries and parked cars
+# all arrive as ordinary tracks.
+#
+# A concrete barrier sits 3-5 m off the lane centre, which is the middle of the band above. Without
+# this test it reads as an adjacent vehicle doing 0 mph -- slower than any lead -- and blocks every
+# pass on that side for the length of the barrier. That is the failure mode, and it would look
+# exactly like the feature being too conservative rather than like a bug.
+#
+# The cost is stated plainly: genuinely stopped traffic in the next lane is indistinguishable from
+# a barrier to this sensor, so it is not counted either. That is the right way to be wrong here --
+# this gate only ever SUPPRESSES a suggestion, so failing to suppress leaves the driver exactly
+# where they were, with the blind spot, the mirrors and their own eyes still in the loop. Blocking
+# every pass along a barrier would instead make the whole feature look broken.
+#
+# 5 m/s (11 mph) clears the noise floor: v_abs is v_ego plus a filtered range rate, so a stationary
+# return lands within a m/s or two of zero.
+MIN_MOVING_MS = 5.0
+
 # Consecutive liveTracks messages a side must agree on before the reading is believed. Symmetric on
 # purpose: the flicker drops tracks as often as it invents them, so debouncing only the appearing
 # edge would still produce a jittery clear.
@@ -158,6 +181,10 @@ class AdjacentLane:
       if p.dRel <= 0 or p.dRel > max_distance_m:
         continue
       if not (ADJACENT_MIN_M <= abs(p.yRel) <= ADJACENT_MAX_M):
+        continue
+      # Roadside furniture, not traffic. See MIN_MOVING_MS -- this radar publishes barriers and
+      # sign gantries as ordinary tracks and nothing upstream tells them apart from cars.
+      if v_ego + p.vRel < MIN_MOVING_MS:
         continue
       # Radar yRel is LEFT-POSITIVE -- the opposite of the model's lane geometry. See the module
       # docstring; this one line is the easiest thing here to get backwards.

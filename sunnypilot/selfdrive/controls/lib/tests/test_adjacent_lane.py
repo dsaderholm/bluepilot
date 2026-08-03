@@ -23,7 +23,7 @@ Four things here can be wrong in ways a drive would not reveal:
 from types import SimpleNamespace as NS
 
 from openpilot.sunnypilot.selfdrive.controls.lib.adjacent_lane import (
-  AdjacentLane, AdjacentLaneSide, ADJACENT_MIN_M, ADJACENT_MAX_M, DEBOUNCE_FRAMES,
+  AdjacentLane, AdjacentLaneSide, ADJACENT_MIN_M, ADJACENT_MAX_M, DEBOUNCE_FRAMES, MIN_MOVING_MS,
 )
 
 V_EGO = 30.0
@@ -90,6 +90,28 @@ class TestSideAssignment:
   def test_beyond_look_ahead_is_ignored(self):
     adj = feed(AdjacentLane(), [track(MAX_D + 10, 3.7)])
     assert not adj.left.occupied
+
+
+class TestStationaryRejection:
+  """This radar publishes barriers and sign gantries as ordinary tracks -- no classification of any
+  kind exists upstream. A guardrail sits squarely inside the adjacent-lane band, and without this
+  filter it reads as a car doing 0 mph and blocks every pass for the length of the barrier."""
+
+  def test_guardrail_is_not_a_vehicle(self):
+    # 3.5 m to the left, closing at exactly ego speed: a stationary object.
+    adj = feed(AdjacentLane(), [track(60, 3.5, v_rel=-V_EGO)])
+    assert not adj.left.occupied
+
+  def test_barrier_does_not_hide_a_real_vehicle_behind_it(self):
+    # The barrier is nearer, so a "nearest wins" rule that ran before this filter would pick the
+    # barrier and report the lane stopped. The car must still be found.
+    adj = feed(AdjacentLane(), [track(30, 3.4, v_rel=-V_EGO), track(70, 3.7, v_rel=-2.0)])
+    assert adj.left.occupied
+    assert adj.left.d_rel == 70
+
+  def test_traffic_moving_slowly_but_really_moving_still_counts(self):
+    adj = feed(AdjacentLane(), [track(60, 3.5, v_rel=MIN_MOVING_MS + 1.0 - V_EGO)])
+    assert adj.left.occupied
 
 
 class TestAvailability:
