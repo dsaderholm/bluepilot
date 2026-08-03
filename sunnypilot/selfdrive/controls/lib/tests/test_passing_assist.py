@@ -619,6 +619,31 @@ class TestOncomingVeto:
     assert det.suggestion == Side.left  # but not acted on
 
 
+class TestKeepRightOncoming:
+  """Keep-right must respect the oncoming gate too. It did not, and the pass path did -- exactly
+  the ordering bug the rear-approach interface was built early to avoid."""
+
+  # Opposing traffic in the lane to our RIGHT. Rare, and Utah has the road: 5400 South runs three
+  # reversible flex lanes, so which side is theirs changes by time of day.
+  ONCOMING_RIGHT = [track(90, -3.7, -27.0 - CRUISE_MS)]
+
+  def test_never_keep_right_into_opposing_traffic(self):
+    det = run(keep_right_det(), KEEP_RIGHT_FRAMES, status=False, v_ego=CRUISE_MS,
+              tracks=self.ONCOMING_RIGHT, **IN_LEFT_LANE)
+    assert det.adjacent.right.blocks_oncoming
+    assert det.suggestion == Side.none
+    assert det.keep_right_seconds == 0.0
+
+  def test_opposing_traffic_on_the_LEFT_does_not_stop_keep_right(self):
+    # An ordinary undivided road: they are on the left, the lane to our right is ours, and moving
+    # over is exactly the right thing to do.
+    det = run(keep_right_det(), KEEP_RIGHT_FRAMES, status=False, v_ego=CRUISE_MS,
+              tracks=[track(90, 3.7, -27.0 - CRUISE_MS)], **IN_LEFT_LANE)
+    assert not det.adjacent.right.blocks_oncoming
+    assert det.suggestion == Side.right
+    assert det.reason == Reason.keepRight
+
+
 class TestKeepRightAdjacentLane:
   def test_will_not_move_over_behind_slow_traffic(self):
     # "Keep right except to pass" assumes the right lane is moving. Dropping in behind a car slow

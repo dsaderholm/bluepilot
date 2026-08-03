@@ -776,6 +776,21 @@ class PassingAssistDetector:
       self.keep_right_seconds = 0.0
       return
 
+    # The oncoming gate applies here too, and it was missed the first time round -- the pass path
+    # got it and this one did not, which is precisely the ordering bug the rear-approach interface
+    # was designed early to avoid.
+    #
+    # Rare but real, and Utah has the road: a reversible flex lane can put opposing traffic in the
+    # lane to our RIGHT, and 5400 South runs three of them. Keeping right into that would be the
+    # worst suggestion this system could make, and nothing else in this function would have stopped
+    # it -- the blind spot only lights once they are already alongside.
+    #
+    # Costs nothing on an ordinary undivided road: opposing traffic there is on the left, so
+    # right.blocks_oncoming stays false and keep-right works normally.
+    if self.oncoming_veto and self.adjacent.right.blocks_oncoming:
+      self.keep_right_seconds = 0.0
+      return
+
     # Do not move over behind a car we would immediately want to pass. "Keep right except to pass"
     # assumes the right lane is moving; dropping in behind traffic slow enough to trip the passing
     # threshold buys a pair of lane changes and no progress, and does it at exactly the moment the

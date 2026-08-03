@@ -537,6 +537,11 @@ class HudRendererBP(HudRendererSP):
       caveats.append("no rear data")
     if not (pa.adjacentLeft.available or pa.adjacentRight.available):
       caveats.append("no next-lane data")
+    # Say so even when it is not what is blocking. On a four-lane undivided road a pass can still be
+    # suggested to the right while the left is refused, and the driver should be able to see WHY
+    # only one side is ever offered rather than infer it.
+    if pa.undividedRoad:
+      caveats.append("two-way road")
     if self._pa_count:
       caveats.append(f"{self._pa_count} this drive")
     if self._pa_sub_detail:

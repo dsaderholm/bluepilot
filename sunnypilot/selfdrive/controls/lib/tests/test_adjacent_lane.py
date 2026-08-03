@@ -24,7 +24,7 @@ from types import SimpleNamespace as NS
 
 from openpilot.sunnypilot.selfdrive.controls.lib.adjacent_lane import (
   AdjacentLane, AdjacentLaneSide, ADJACENT_MIN_M, ADJACENT_MAX_M, DEBOUNCE_FRAMES, MIN_MOVING_MS,
-  ONCOMING_MAX_M, path_offset,
+  ONCOMING_MAX_M, SAME_DIRECTION_MIN_FRACTION, path_offset,
 )
 
 X_IDXS = [192.0 * (i / 32.0) ** 2 for i in range(33)]
@@ -458,6 +458,40 @@ class TestMiddleLaneAmbiguity:
                  V_EGO, MAX_D, strict=strict)
       assert adj.left.blocks_oncoming, f"strict={strict}"
     
+
+
+class TestTurnLaneEvidenceQuality:
+  """The discriminator leaks if any moving vehicle counts as proof of a travel lane.
+
+  A car slowing into a centre turn lane is still moving -- 6 or 7 m/s while it decelerates, well
+  over MIN_MOVING_MS -- so without a speed floor it would vouch for the lane it is about to stop
+  in, and unblock a pass into that exact lane.
+  """
+
+  @staticmethod
+  def _left_after(middle_lane_v_abs):
+    left_edge, onc, _ = road(ego_offset_from_left=0, twltl=True, oncoming_lanes=1)
+    tracks = [track(100, -onc[0], v_rel=-27.0 - V_EGO),
+              track(60, LANE_W, v_rel=middle_lane_v_abs - V_EGO)]
+    adj = AdjacentLane()
+    for _ in range(DEBOUNCE_FRAMES):
+      adj.update(FakeSM(tracks, left_edge=left_edge), V_EGO, MAX_D, strict=True)
+    return adj.left
+
+  def test_a_car_entering_a_turn_lane_does_not_vouch_for_it(self):
+    # 7 m/s while we do 30: moving, but nothing like travelling.
+    assert not self._left_after(7.0).same_direction_recent
+    assert self._left_after(7.0).blocks_oncoming
+
+  def test_a_car_actually_using_the_lane_does_vouch_for_it(self):
+    assert self._left_after(V_EGO).same_direction_recent
+    assert not self._left_after(V_EGO).blocks_oncoming
+
+  def test_the_floor_scales_with_our_own_speed(self):
+    # The same absolute speed means different things at different road speeds, so the threshold is
+    # a fraction rather than a number.
+    assert self._left_after(SAME_DIRECTION_MIN_FRACTION * V_EGO + 1.0).same_direction_recent
+    assert not self._left_after(SAME_DIRECTION_MIN_FRACTION * V_EGO - 1.0).same_direction_recent
 
 
 class TestGateShapes:

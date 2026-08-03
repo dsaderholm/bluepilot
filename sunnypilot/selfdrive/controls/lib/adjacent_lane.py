@@ -132,6 +132,19 @@ MIN_ONCOMING_MS = 5.0
 # worth passing on.
 ONCOMING_MAX_M = 15.0
 
+# Fraction of our own speed a vehicle in the next lane must be doing before it counts as proof that
+# lane is a TRAVEL lane rather than a turn lane.
+#
+# Without this the discriminator leaks in the one direction that matters. A car slowing into a
+# centre turn lane to wait for a gap is still moving -- 6 or 7 m/s as it decelerates, comfortably
+# over MIN_MOVING_MS -- so it would register as "somebody drove down that lane in our direction"
+# and unblock a pass into the very turn lane it was entering.
+#
+# Traffic actually using a travel lane is doing roughly what we are doing. Traffic entering a turn
+# lane is shedding speed hard. 0.6 sits between them and scales with the road instead of assuming
+# one: at 45 mph it asks for 27 mph, which a through lane clears easily and a turning car does not.
+SAME_DIRECTION_MIN_FRACTION = 0.6
+
 # How long a single sighting keeps the road classified as undivided.
 #
 # Long, and deliberately so. Meeting a car is EVIDENCE about the road, not an event to react to:
@@ -526,7 +539,11 @@ class AdjacentLane:
       # two-way turn lane. See blocks_oncoming: those two are otherwise indistinguishable.
       if not adjacent:
         continue
-      obj.observe_same_direction(memory_s)
+      # ...but only at a speed that means "travelling", not "turning". See
+      # SAME_DIRECTION_MIN_FRACTION: a car decelerating into a turn lane would otherwise vouch for
+      # the lane it is about to stop in.
+      if v_abs >= SAME_DIRECTION_MIN_FRACTION * v_ego:
+        obj.observe_same_direction(memory_s)
 
       if best[side] is None or p.dRel < best[side].dRel:
         best[side] = p
