@@ -89,7 +89,7 @@ CONFIDENT_RANGE_SWEEP_M = 4.0
 # (10 km/h)". Above this, Ford is tracking the lead and this detector must stay out of the way;
 # below it, radar confirmation from openpilot's side means nothing because Ford is not acting on it.
 FORD_ACC_MIN_TRACKED_SPEED_MS = 6 * CV.MPH_TO_MS
-DEFAULT_MAX_TTC_S = 4.0    # fallback; tunable via IcbmLeadMaxTtc (tenths of a second)
+DEFAULT_MAX_TTC_S = 7.0    # fallback; tunable via IcbmLeadMaxTtc (tenths of a second)
 MAX_V_REL_MS = -2.0        # genuinely closing, not sensor noise
 MAX_D_PATH_M = 1.2         # in-path, not an adjacent lane or roadside return
 MIN_V_EGO_MS = 25 * CV.MPH_TO_MS  # below this a floor request is meaningless
@@ -141,7 +141,7 @@ class UnconfirmedLeadDetector:
 
     self.params = Params()
     self.frame = 0
-    self.max_lead_distance = 120
+    self.max_lead_distance = 180
     self.max_ttc = DEFAULT_MAX_TTC_S
     self.model_stop_enabled = False
 

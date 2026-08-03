@@ -167,11 +167,13 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"IcbmBaselineResetDelta", {PERSISTENT | BACKUP, INT, "10"}},
     // BluePilot: furthest a vision-only lead is considered for the radar-blind decel, in metres.
     // Ford ACC handles close leads itself; the case this exists for is a stopped car far ahead.
-    {"IcbmLeadMaxDistance", {PERSISTENT | BACKUP, INT, "120"}},
+    {"IcbmLeadMaxDistance", {PERSISTENT | BACKUP, INT, "180"}},
     // BluePilot: time-to-collision bound for the radar-blind lead trigger, in tenths of a second.
     // This is the real earliness control -- against a stopped lead TTC = dRel / v_ego, so at
-    // 65 mph 4.0 s already caps range near 116 m and IcbmLeadMaxDistance never binds.
-    {"IcbmLeadMaxTtc", {PERSISTENT | BACKUP, INT, "40"}},
+    // 65 mph 7.0 s reaches ~203 m, so IcbmLeadMaxDistance (180 m) is what binds at highway speed
+    // and TTC binds below it. Raised from 4.0 s / 120 m: at those values nothing could trigger
+    // beyond ~116 m however obvious the stopped car was, which is far too late to be useful.
+    {"IcbmLeadMaxTtc", {PERSISTENT | BACKUP, INT, "70"}},
     // BluePilot: act on the driving model's own stop intent (stop signs, red lights) when no
     // lead explains it. Same floor-and-alert channel as the radar-blind lead case.
     // Defaulted ON as of 2026-08-01, reversing the original "never run on a vehicle" caution:

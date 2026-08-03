@@ -77,9 +77,19 @@ class TestUnconfirmedLead:
     assert det.state == State.inactive
 
   def test_lead_beyond_max_distance_rejected(self):
+    # Sweeps 220 -> 190 m, entirely beyond the 180 m cap. TTC drops under the 7 s trigger partway
+    # through, so this now tests the distance gate specifically rather than being rejected by TTC.
     det, ev = UnconfirmedLeadDetector(), FakeEvents()
-    run(det, ev, 60, d_rel=lambda i: 150. - i * 0.5)
+    run(det, ev, 60, d_rel=lambda i: 220. - i * 0.5)
     assert det.state != State.active
+
+  def test_lead_inside_the_raised_range_triggers(self):
+    """The counterpart: 160 m used to be beyond reach at the old 120 m / 4 s defaults, and is the
+    whole point of raising them -- a stopped car wants seeing well before 116 m at 65 mph."""
+    det, ev = UnconfirmedLeadDetector(), FakeEvents()
+    run(det, ev, 60, d_rel=lambda i: 175. - i * 0.5)
+    assert det.state == State.active
+    assert det.trigger == Trigger.visionLead
 
   def test_model_stop_without_lead_triggers(self):
     det, ev = UnconfirmedLeadDetector(), FakeEvents()
