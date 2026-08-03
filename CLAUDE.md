@@ -108,6 +108,11 @@ looks harmless.
 
 ## Merging a newer BluePilot
 
+**Do not ask the owner to choose between merge and rebase, or any other git decision.** They have
+said plainly they do not want to deal with git terminology -- they ask for "the latest BluePilot"
+and expect it handled. Default to merge, which is the easier path for a fork carrying this many
+commits, and only use `--rebase` if they specifically ask for it by name.
+
 Staying current matters more than any individual change here — an update that looks like a chore is
 an update that gets deferred. So it is one command:
 
