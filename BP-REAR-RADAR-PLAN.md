@@ -1261,3 +1261,53 @@ Asked 2026-08-03. A Pi is the wrong tool here, on four counts:
 
 A Pi is the right answer when you need Linux — networking, a filesystem, heavy computation. This
 job is "read frames, do arithmetic, write frames", which is exactly what a microcontroller is for.
+
+### Correcting the wire count: two or three, not four — and put the Teensy in the trunk
+
+Added 2026-08-03. The "4-conductor loom" above over-specifies the job, and the earlier reasoning
+for putting the Teensy at the front missed an option.
+
+**Ground does not need to be run.** Every module in the car grounds locally to the body, and
+factory CAN buses are **two wires, not four** — the transceivers sit inside a common-mode range
+that chassis ground provides everywhere. A ring terminal on a clean body bolt at each end is
+correct automotive practice, not a shortcut. That removes one conductor from the run immediately.
+
+**The trunk is as dry and reachable as the front.** The earlier argument for a front-mounted
+Teensy was power, shelter and reflashing access. A trunk mount has all three: it is inside the
+body, opens with a button, and is a metre from the rear bumper. Only the *bumper* is a bad place
+for electronics — the trunk is not the bumper.
+
+That gives a better layout:
+
+| | Teensy at the front | **Teensy in the trunk** |
+|---|---|---|
+| Private radar bus | full length of the car | **under a metre** |
+| Run to the front | none | the CAN pair |
+| Power | easy, front feed | needs a rear source — see below |
+| Reflashing | reach behind the front bumper | **open the trunk** |
+| Wires in the long run | 12 V + CAN pair (3) | **CAN pair (2)** |
+
+**So the run is two wires if a switched feed exists at the rear, three if not.**
+
+**Finding switched power at the rear.** What does not work: tail lights and licence plate lights
+(on with headlights, not ignition), reverse lights (only in reverse), trunk lamp (only when open).
+
+What is worth checking, in order:
+
+1. **A trunk-mounted amplifier.** A Titanium with the premium Sony system typically has an amp in
+   the trunk, and an amp has exactly what is wanted: constant 12 V, a good local ground, and a
+   **remote turn-on lead** that goes live with the ignition. That remote lead cannot supply the
+   radar directly — it is a signal, not a supply — but it is a perfect trigger for a small relay
+   fed from the amp's constant 12 V. **UNVERIFIED that this car has the amp; check the trunk.**
+2. **Any BCM-fed accessory circuit** back there.
+3. **If nothing switched exists:** run one 12 V conductor from a front fused feed and ground
+   locally. Three wires total, still not four.
+
+Do not use a permanently-live feed without switching it. Two radars' worth of standby draw will
+flatten the battery over a weekend.
+
+**On the connector in the trunk.** This is just a plug in the middle of the run, sitting where the
+wires pass from the bumper into the body — a small weatherproof inline connector, a few dollars.
+Its only job is that the rear bumper can be removed later without cutting wires. With the Teensy in
+the trunk it becomes even more natural: the bumper-to-trunk section is a short pigtail with a plug
+on the end, and everything else stays in the car.
