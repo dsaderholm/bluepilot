@@ -33,6 +33,7 @@ SCENES = [
   ("curve: ACC braking hard enough to light the lamps", 44, 55, 70, "-", "BRAKE", 1.4, True),
   ("ACC braking too lightly to light them", 50, 55, 70, "-", "BRAKE", 0.4, False),
   ("precharging: no decel, no lamps, no pads", 58, 55, 70, "", "PRE-BRAKE", 0.0, False),
+  ("engine braking: slowing, no pads, no lamps", 52, 55, 70, "-", "ENG BRAKE", 0.9, False),
   ("no hold, ACC accelerating", 55, 55, 0, "", "ACCEL", 0.6, False),
 ]
 

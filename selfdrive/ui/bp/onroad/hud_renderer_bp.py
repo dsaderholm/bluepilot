@@ -22,15 +22,22 @@ ACC_DEADBAND = 0.15  # m/s^2
 # is the information, so the four states are ordered rather than merely distinct:
 #
 #   ACCEL     green   -- adding speed
-#   COAST     yellow  -- neither; the resting state, so deliberately the dimmest of the four
+#   COAST     yellow  -- neither; the resting state, so deliberately the dimmest
 #   PRE-BRAKE orange  -- brakes pressurised, still not slowing you
 #   BRAKE     red     -- friction brakes in use
 #
 # COAST is muted rather than a full yellow because it is on screen most of the time and a bright
 # resting state trains you to stop looking. The others are vivid: they are the exceptions.
+#
+# ENG BRAKE sits deliberately OFF that scale, in teal. It is the one state that is both slowing the
+# car and costing nothing -- no pads, and below 1.3 m/s^2 no stop lamps either -- which does not
+# fit on a single "how hard is it slowing" axis. Ford documents ACC as using transmission downshift
+# to slow "without wearing out the brakes", so this is the good outcome and should not be coloured
+# like an escalation toward red.
 ACC_STATUS_COLORS = {
   "ACCEL": rl.Color(70, 200, 115, 235),
   "COAST": rl.Color(196, 176, 70, 205),
+  "ENG BRAKE": rl.Color(55, 185, 195, 235),
   "PRE-BRAKE": rl.Color(245, 145, 35, 235),
   "BRAKE": rl.Color(232, 58, 48, 240),
 }
@@ -52,6 +59,7 @@ QUIET_ACC_STATES = ("COAST", "PRE-BRAKE")
 ACC_PILL_WIDTH = 268   # wider than the MAX column: "BRAKE 1.4" does not fit 172 px legibly
 ACC_PILL_HEIGHT = 78
 ACC_LABEL_SIZE = 38
+ACC_LABEL_MIN_SIZE = 26  # floor for the shrink-to-fit above; below this it stops being legible
 ACC_VALUE_SIZE = 34
 ACC_MAX_MAG = 2.5      # m/s^2 that fills the intensity bar
 STACK_GAP = 12
@@ -223,6 +231,22 @@ class HudRendererBP(HudRendererSP):
             self._acc_state, self._acc_accel = "BRAKE", bls.accAccelRequest
           elif bls.accPropulsionRequest > ACC_DEADBAND:
             self._acc_state, self._acc_accel = "ACCEL", bls.accPropulsionRequest
+          # BluePilot: NEGATIVE propulsion is the powertrain being asked to slow the car -- closed
+          # throttle and a downshift, no friction brakes. AccPrpl_A_Rq runs [-5 | 5.23] m/s^2 and
+          # goes to the PCM, while AccBrkTot_A_Rq goes to ABS_ESC; two channels, two modules.
+          #
+          # This case previously fell through to COAST, so engine braking -- the one way the car
+          # slows at zero cost in pads or stop lamps -- was invisible.
+          #
+          # Whether stock ACC actually uses this channel is UNVERIFIED. Ford documents ACC as
+          # downshifting to slow "without wearing out the brakes", but fordcan.py notes the stock
+          # system appears to put positives here and negatives in AccBrkTot, which would mean the
+          # PCM decides to downshift on its own and this signal never goes negative. Reading it is
+          # how that gets settled: if ENG BRAKE never appears on a descent or a curve, it does not
+          # use this channel. Checked after accDecelRequest, so anything touching the pads is
+          # BRAKE regardless.
+          elif bls.accPropulsionRequest < -ACC_DEADBAND:
+            self._acc_state, self._acc_accel = "ENG BRAKE", bls.accPropulsionRequest
           elif bls.accAccelRequest < -ACC_DEADBAND:
             self._acc_state, self._acc_accel = "BRAKE", bls.accAccelRequest
           elif bls.accPrechargeRequest:
@@ -374,12 +398,23 @@ class HudRendererBP(HudRendererSP):
     rl.draw_rectangle_rounded(rect, 0.42, 10, ACC_STATUS_COLORS.get(self._acc_state, COLORS.WHITE))
     ink = ACC_INK
 
-    rl.draw_text_ex(self._font_bold, self._acc_state, rl.Vector2(x + 22, y + 16),
-                    ACC_LABEL_SIZE, 0, ink)
+    show_value = self._acc_state not in QUIET_ACC_STATES
+    value = f"{abs(self._acc_accel):.1f}" if show_value else ""
+    value_width = measure_text_cached(self._font_semi_bold, value, ACC_VALUE_SIZE).x if value else 0.0
 
-    if self._acc_state not in QUIET_ACC_STATES:
-      value = f"{abs(self._acc_accel):.1f}"
-      value_width = measure_text_cached(self._font_semi_bold, value, ACC_VALUE_SIZE).x
+    # Shrink the label to whatever room the value leaves, rather than trusting every state name to
+    # fit at one size. "ENG BRAKE 0.9" does not, and hard-coding a shorter word for that one state
+    # just moves the problem to the next state added.
+    available = ACC_PILL_WIDTH - 44 - (value_width + 14 if value else 0)
+    label_size = ACC_LABEL_SIZE
+    while label_size > ACC_LABEL_MIN_SIZE and         measure_text_cached(self._font_bold, self._acc_state, label_size).x > available:
+      label_size -= 2
+    # Keep the baseline steady as the size changes, so the row does not jump between states.
+    label_y = y + 16 + (ACC_LABEL_SIZE - label_size) * 0.5
+    rl.draw_text_ex(self._font_bold, self._acc_state, rl.Vector2(x + 22, label_y),
+                    label_size, 0, ink)
+
+    if show_value:
       rl.draw_text_ex(self._font_semi_bold, value,
                       rl.Vector2(x + ACC_PILL_WIDTH - 22 - value_width, y + 20),
                       ACC_VALUE_SIZE, 0, ink)
