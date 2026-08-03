@@ -904,3 +904,106 @@ Constraints for whichever is chosen:
 - **Paint still matters.** Metallic and pearl paints contain aluminium flake and attenuate 76 GHz.
   If mounting behind the cover, test with a cut-off piece of the actual cover between radar and
   target during the bench test — that is nearly free to add and settles it before anything is cut.
+
+---
+
+## 9. Wiring
+
+Added 2026-08-03. Confidence: **high** on topology and bus numbering (verified in-tree),
+**medium** on the connector, which is not publicly documented.
+
+### The standalone question is largely answered already
+
+opendbc PR #351, which added `FORD_CADS` in the first place, says:
+
+> "I have tested this DBC extensively with a ford radar part number H1BT-9G768-AG off a fiesta as
+> well as someone else testing it with a focus radar (**JX7T-9G768-AC**)"
+>
+> "this radar also presents a very affordable alternative to the tesla or Toyota radars for **OP
+> long in custom setups** as you can buy it for only $100"
+
+Two things fall out. The DBC was validated against **this exact part number**, not merely the
+family. And the radar is *already used as a bolt-on in custom builds* — which is a third party
+independently confirming what §8 inferred from the single-node DBC: power it and it talks, with no
+gateway frames and no host vehicle. The bench test drops from "does this project work at all" to a
+confirmation step.
+
+### Topology — controller at the front, which is the right instinct
+
+```
+   REAR                                                    FRONT
+   ┌──────────────┐                                        ┌──────────────┐
+   │ rear JX7T    │  12 V  ─────────── fused feed ───────► │ front JX7T   │
+   │              │  GND   ─────────── chassis             │ (untouched)  │
+   │              │  CANH  ──┐                             └──────┬───────┘
+   │              │  CANL  ──┤ twisted pair, full length          │ bus 1
+   └──────────────┘          │ of the car                         │
+                             ▼                                    │
+                    ┌────────────────────┐                        │
+                    │ Teensy 4.0         │                        │
+                    │  CAN1  private ────┘   TERMINATE            │
+                    │  CAN2  digest ──────────────────────────────┘  DO NOT TERMINATE
+                    └────────────────────┘
+```
+
+Putting the controller at the front is correct, for reasons beyond convenience:
+
+- **Power is there.** The front radar already has a switched, fused feed to borrow a reference
+  from (take a separate fused feed rather than sharing its circuit — see below).
+- **It is dry and reachable.** Reflashing a microcontroller buried in a wet rear bumper is a bad
+  afternoon.
+- **Bus 1 is physically there.** `fordcan.py` fixes the numbering — `main` = 0, `radar` = **1**,
+  `camera` = 2 — so the front radar's own CAN pins *are* bus 1. No hunting.
+
+Wire count is the same either way: four conductors run the length of the car regardless of which
+end the controller sits at. So take the end with power, shelter and access.
+
+**The controller must never bridge raw rear-radar frames onto bus 1.** It emits only the digest.
+That is the entire reason it exists — §3 measured bus 1 at 60–73 % and a second MRR would add
+37–45 %.
+
+### The gotcha most likely to break the working front radar
+
+**The $15 Tindie dual-CAN board has termination resistors on both channels.** That is right for
+one channel and wrong for the other:
+
+- **CAN1, private rear-radar bus:** wants termination. Measure the radar's own CANH–CANL first —
+  Delphi modules often carry an internal 120 Ω. If it does, the board's resistor is the second and
+  the bus is correct at ~60 Ω. If it does not, you need one more at the far end.
+- **CAN2, the bus 1 tap:** must **not** be terminated. Bus 1 already has its two terminators. A
+  third takes it to ~40 Ω, which can stop the bus working — and that bus is the one your *working*
+  front radar and ACC depend on. Remove or disable that resistor before connecting anything.
+
+Verify before and after: **~60 Ω across CANH–CANL on a healthy terminated bus, key off.** If it
+reads ~40 Ω after the tap, the resistor is still in.
+
+Keep the bus 1 stub short. 500 kbit/s is forgiving but a metre of unterminated spur is not free.
+
+### The connector
+
+Not published anywhere I could find — Ford service documentation only. But it does not need to be,
+because **there is a wired, working example of it in the car**: replicate the front install's
+assignment onto the new connector.
+
+For an independently bought pigtail, verify rather than assume:
+
+1. **Radar unplugged and unpowered**, measure resistance between each pin pair. A pair reading
+   ~120 Ω is CANH/CANL — the module's internal termination identifies them for you.
+2. The remaining two are supply and ground. **Identify ground by continuity to the module case or
+   to chassis on the vehicle side.** Do not infer polarity from wire colour.
+3. Fuse the rear radar's feed **separately** rather than splicing into the front radar's circuit.
+   Comparable retrofits draw well over 0.2 A; assume ~0.5 A and size for two radars only if you
+   deliberately choose to share, which there is no reason to do.
+4. Reverse polarity kills these modules. Meter it twice.
+
+### Rear recovery point — it exists, but check where it is
+
+The 2020 Fusion **does** have a rear towing eye: a threaded socket behind a pop-out panel in the
+bumper cover, with a screw-in eye stored with the spare. So §8's second mounting candidate is real
+on this car.
+
+Two caveats before designing around it. It is usually **off-centre**, and a centred sensor is worth
+more than a convenient one — an offset is correctable in code but is one more constant to
+calibrate. And using it as a mount means either giving up the recovery function or designing a
+bracket that passes it through. Measure where it actually sits before choosing it over the bumper
+reinforcement beam.
