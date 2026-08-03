@@ -106,6 +106,62 @@ connection to this car. Reverted. If something like that is worth fixing, send i
 When in doubt, ask rather than fix. Reordering upstream's own UI items counts too, even though it
 looks harmless.
 
+## Merging a newer BluePilot
+
+Staying current matters more than any individual change here — an update that looks like a chore is
+an update that gets deferred. So it is one command:
+
+```bash
+python tools/bp_merge_upstream.py               # merge upstream/bp-7.0
+python tools/bp_merge_upstream.py --dry-run     # what would come in, changes nothing
+```
+
+It tags a rollback point first, refuses to start on a dirty tree, regenerates `car_list.json`
+instead of merging it, prints what *ours* is in each remaining conflict, runs the test suite, and
+stops without committing or pushing. Resolve conflicts, `git add`, re-run it to finish the checks.
+
+**`car_list.json` is generated — never hand-merge it**, which is why the script handles it. It is
+the largest conflict surface in the fork by an order of magnitude (~420 lines rewritten, because
+adding one platform re-sorts the whole file). By hand, if ever needed:
+
+```bash
+git checkout --theirs opendbc_repo/opendbc/sunnypilot/car/car_list.json
+python opendbc_repo/opendbc/sunnypilot/car/platform_list.py
+```
+
+Everything else, ranked by how often upstream touches it — the top of this list is where conflicts
+will actually land, and what our change is in each so it can be preserved rather than rediscovered:
+
+| File | Upstream commits/yr | What is ours |
+|---|---|---|
+| `selfdrive/ui/bp/layouts/settings/bluepilot.py` | ~47 | pinion-yaw toggle gated on the `ALT_STEER_ANGLE` flag, not a platform name; ACC status toggle wording |
+| `opendbc/car/ford/carcontroller.py` | ~34 | 3 lines: the standstill resume gate |
+| `sunnypilot/.../intelligent_cruise_button_management/controller.py` | ~16 | all of it — this is the fork's core work |
+| `sunnypilot/sunnylink/settings_ui.json` | ~18 | our settings entries |
+| `sunnypilot/.../speed_limit/speed_limit_assist.py` | ~12 | SLA hooks |
+| `sunnypilot/.../longitudinal_planner.py` | ~13 | unconfirmed-lead plumbing |
+| `opendbc/car/ford/carstate.py` | ~10 | TSR flag gating + `Traffic_RecognitnData` registration |
+| `opendbc/sunnypilot/car/ford/carstate_ext.py` | ~8 | TSR parsing, brake-light status |
+| `selfdrive/ui/bp/onroad/hud_renderer_bp.py` | ~10 | HOLD / ACC / lamp readouts — almost purely additive |
+
+Everything not listed is either a new file (never conflicts) or a pure addition.
+
+**After any merge, before flashing**, in this order — the first two exist specifically because an
+upstream merge broke them before:
+
+1. `python tools/bp_offline_test.py` — 0 failures.
+   - `test_structs_capnp_parity` catches a capnp field added without its dataclass mirror, which
+     crashed `card` at startup once.
+   - `test_can_parser_messages` catches a duplicate CAN registration, which stranded the car on
+     "waiting to start" after upstream added a second `Traffic_RecognitnData`.
+2. `ruff check --isolated --select F821,F811,F401,F841 <changed .py>` — compare findings against the
+   merge base before assuming they are yours.
+3. Re-read any conflict resolution in `controller.py` against **The ICBM button contract** below.
+   A merge that silently changes what a button means is the worst outcome here, and the tests will
+   not catch it if the resolution is internally consistent.
+
+If it goes wrong: `git reset --hard pre-upstream-<sha>`.
+
 ## The ICBM button contract
 
 Settled on the road, 2026-08-03. Do not change these meanings without asking — they are muscle
