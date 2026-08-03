@@ -19,9 +19,12 @@ Bare `pytest` does not work here and, worse, **fails in ways that look like envi
   repo `conftest.py` imports `Params` at collection time, so nothing collects without it. The
   runner stubs `Params` and the other device-only leaves and passes `--noconftest`.
 
-The suite is **299 passing, 0 failing**. Keep it that way. Do not learn to ignore a failure — three
-of them were dismissed as "pre-existing stub artifacts" across two sessions, and that habit is
-what let a startup crash reach the car.
+The bar is **0 failures**, not a particular total — the count moves with the branch and with what
+is in `DEFAULT_TARGETS`, so a hardcoded number here just goes stale and stops being checked.
+
+Do not learn to ignore a failure. Three were dismissed as "pre-existing stub artifacts" across two
+sessions, and that habit is what let a startup crash reach the car. Diagnose it, or say plainly
+that it is unexplained — never report a branch as safe to flash with a red test in it.
 
 Environment (already set up): `../.venv-bp312`, a 3.12.13 venv. Recreate with:
 
@@ -49,7 +52,7 @@ shipped drawing methods to PNG at device scale. Use it rather than guessing at s
 
 ## Before saying a branch is safe to flash
 
-1. `python tools/bp_offline_test.py` — expect 299 passed, 0 failed.
+1. `python tools/bp_offline_test.py` — expect 0 failed.
 2. `ruff check --isolated --select F821,F811,F401,F841 <changed .py files>` — F821 (undefined name)
    is the one that matters; it catches what import tests cannot reach. Compare any finding against
    the merge base before treating it as yours.
