@@ -58,6 +58,42 @@ shipped drawing methods to PNG at device scale. Use it rather than guessing at s
 4. For new `Params` keys: confirm each is declared in `common/params_keys.h`. The stubbed `Params`
    raises on unknown keys the way the device does.
 
+## Do not fix upstream bugs in this fork
+
+This is a personal fork of BluePilot, which forks sunnypilot, which forks openpilot. A bug that
+belongs to one of those layers should be **reported there, not patched here**.
+
+Every upstream line this fork modifies is a merge conflict paid for on every future rebase, forever.
+That is worth it for something this car needs and free-riding on someone else's maintenance for
+anything else.
+
+Layers, outermost first — check which one a file belongs to before editing it:
+
+| Path | Owner |
+|---|---|
+| `selfdrive/ui/bp/`, `bluepilot/`, `launch_chffrplus.sh`, `scripts/boot_logo.sh` | BluePilot |
+| `sunnypilot/`, `opendbc/sunnypilot/`, `selfdrive/ui/sunnypilot/` | sunnypilot |
+| everything else | openpilot / opendbc |
+
+**Legitimate reasons to touch an upstream file:**
+
+- a new `Params` key (`common/params_keys.h`), capnp field (`cereal/custom.capnp`) or its dataclass
+  mirror (`opendbc/car/structs.py`) that this fork's features need
+- this car's platform: `opendbc/car/ford/values.py`, `torque_data/override.toml`, fingerprints
+- a bug that is genuinely load-bearing for our code. `sunnypilot/selfdrive/car/cruise_ext.py`'s
+  shared button-timer dict qualifies: it is upstream's bug, but ICBM's press stand-down reads those
+  timers and a shared dict corrupts them
+- something the owner explicitly asked for, e.g. the Sentry opt-in guard in `system/sentry.py`
+- new test files, which are additive and never conflict
+
+**Not legitimate**, and the case that prompted this rule: on 2026-08-03 a PWD/`$(pwd)` inconsistency
+in `launch_chffrplus.sh` was fixed here because it printed a warning on the boot splash. Correct
+fix, wrong repo — a cosmetic message, in a boot-critical file that cannot be tested offline, with no
+connection to this car. Reverted. If something like that is worth fixing, send it upstream.
+
+When in doubt, ask rather than fix. Reordering upstream's own UI items counts too, even though it
+looks harmless.
+
 ## The ICBM button contract
 
 Settled on the road, 2026-08-03. Do not change these meanings without asking — they are muscle
