@@ -37,10 +37,26 @@ CRUISE_MS = 31.0            # ~70 mph set speed
 SLOW_LEAD_MS = 24.0         # ~54 mph lead -> ~7 m/s deficit, over the 8 mph default
 
 
+X_IDXS = [192.0 * (i / 32.0) ** 2 for i in range(33)]
+
+
 def xyz(y, widen=0.0):
   """33 points along X_IDXS. `widen` grows the value with distance, which is what an exit or
   on-ramp looks like on the right road edge."""
-  return NS(y=[y + widen * (i / 32.0) ** 2 * (32 / 20.0) ** 2 for i in range(33)])
+  return NS(x=list(X_IDXS), y=[y + widen * (i / 32.0) ** 2 * (32 / 20.0) ** 2 for i in range(33)])
+
+
+def path(curve_radius_m=0.0):
+  """The model's predicted path. Straight by default.
+
+  `curve_radius_m` bends it right by the usual small-angle displacement d^2 / 2R (negative radius
+  bends left). This is the geometry that put our own lead in the next lane: at 70 m on a 500 m
+  bend the path is 4.9 m off the car's straight-ahead axis, which is the middle of the
+  adjacent-lane band.
+  """
+  if not curve_radius_m:
+    return NS(x=list(X_IDXS), y=[0.0] * 33)
+  return NS(x=list(X_IDXS), y=[(x * x) / (2.0 * curve_radius_m) for x in X_IDXS])
 
 
 class FakeSubMaster:
@@ -72,13 +88,13 @@ class FakeSubMaster:
     self.updated.pop(s, None)
 
 
-def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., d_path=0.2, status=True,
+def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., lead_y=0.0, status=True,
             left_bs=False, right_bs=False, blis_avail=True,
             # geometry: ego lane lines at -1.85/+1.85, road edges default to one clear lane left
             ll=(-5.5, -1.85, 1.85, 5.5), probs=(0.9, 0.99, 0.99, 0.2),
             edges=(-5.6, 2.4), edge_stds=(0.1, 0.1), right_edge_widen=0.0,
             tsr_avail=True, ovtk_msg=1, ovtk_status=2,
-            blinker=False, brake=False, steering=False, road_name="I 15",
+            blinker=False, brake=False, steering=False, road_name="I 15", curve=0.0,
             acc_braking=False, acc_avail=True, set_speed=None,
             icbm_hold=0.0, icbm_manual=False, lka=False, tracks=()):
   # Being stuck behind a car means matching its speed, not still closing on it: vEgo tracks vLead
@@ -92,10 +108,12 @@ def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., d_path=0.2, status=Tr
                    leftBlinker=blinker, rightBlinker=False,
                    leftBlindspot=left_bs, rightBlindspot=right_bs,
                    cruiseState=NS(speedCluster=set_speed if set_speed is not None else CRUISE_MS)),
-    'radarState': NS(leadOne=NS(status=status, dRel=d_rel, vRel=v_rel, vLead=v_lead, dPath=d_path)),
+    # leadOne yRel is LEFT-POSITIVE, like the radar's. dPath is deliberately absent: nothing
+    # in openpilot populates it, and a fixture that supplied it let a dead gate look alive.
+    'radarState': NS(leadOne=NS(status=status, dRel=d_rel, yRel=lead_y, vRel=v_rel, vLead=v_lead)),
     'modelV2': NS(laneLines=[xyz(v) for v in ll], laneLineProbs=list(probs),
                   roadEdges=[xyz(edges[0]), xyz(edges[1], widen=right_edge_widen)],
-                  roadEdgeStds=list(edge_stds)),
+                  roadEdgeStds=list(edge_stds), position=path(curve)),
     'carStateBP': NS(lkaButtonPressed=lka,
                      brakeLightStatus=NS(accDataAvailable=acc_avail, accDecelRequest=acc_braking,
                                          accPrechargeRequest=False),
@@ -423,6 +441,33 @@ class TestRearApproachGate:
     assert det.rear.left.blocks_lane_change
     assert not det.rear.right.blocks_lane_change
 
+
+
+class TestLeadInLaneGate:
+  """The lead must be in OUR lane, measured against the model path.
+
+  This gate used to read lead.dPath, which nothing in openpilot populates -- it arrived as 0.0, so
+  `abs(0.0) > 1.5` rejected nothing and the gate only looked like a filter. The fixture supplied a
+  dPath, which is exactly how a dead gate passes for a live one.
+  """
+
+  def test_a_lead_in_our_lane_still_passes_the_gate(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES, lead_y=0.3)
+    assert det.suggestion == Side.left
+    assert det.lead_d_path < 1.0
+
+  def test_an_off_path_return_is_rejected(self):
+    # A radar return a lane over is not a reason to pass. Before the fix this suggested anyway.
+    det = run(PassingAssistDetector(), STUCK_FRAMES, lead_y=3.7)
+    assert det.blocked_by == Blocked.notStuck
+    assert det.suggestion == Side.none
+
+  def test_a_lead_on_a_curve_is_still_in_our_lane(self):
+    # Measured from the car's axis, a lead at 70 m on a 500 m bend is 4.9 m off and would look
+    # like it was two lanes over. Measured from the path, it is where it actually is: in front.
+    det = run(PassingAssistDetector(), STUCK_FRAMES, d_rel=70., lead_y=-4.9, curve=500.0)
+    assert det.lead_d_path < 1.0
+    assert det.reason == Reason.passing
 
 
 class TestAdjacentLaneGate:

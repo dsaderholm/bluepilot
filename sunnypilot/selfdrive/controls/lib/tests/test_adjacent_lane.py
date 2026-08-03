@@ -24,7 +24,17 @@ from types import SimpleNamespace as NS
 
 from openpilot.sunnypilot.selfdrive.controls.lib.adjacent_lane import (
   AdjacentLane, AdjacentLaneSide, ADJACENT_MIN_M, ADJACENT_MAX_M, DEBOUNCE_FRAMES, MIN_MOVING_MS,
+  path_offset,
 )
+
+X_IDXS = [192.0 * (i / 32.0) ** 2 for i in range(33)]
+
+
+def path(curve_radius_m=0.0):
+  """Model predicted path, straight by default. Positive radius bends RIGHT (camera frame y is
+  left-negative), by the small-angle displacement d^2 / 2R."""
+  ys = [0.0] * 33 if not curve_radius_m else [(x * x) / (2.0 * curve_radius_m) for x in X_IDXS]
+  return NS(x=list(X_IDXS), y=ys)
 
 V_EGO = 30.0
 MAX_D = 220.0
@@ -38,8 +48,10 @@ def track(d_rel, y_rel, v_rel=0.0):
 class FakeSM:
   """SubMaster-shaped: __getitem__ plus alive/valid/updated dicts, and no __contains__."""
 
-  def __init__(self, tracks=(), *, alive=True, valid=True, updated=True, present=True):
-    self.data = {'liveTracks': NS(points=list(tracks))} if present else {}
+  def __init__(self, tracks=(), *, alive=True, valid=True, updated=True, present=True, curve=0.0):
+    self.data = {'modelV2': NS(position=path(curve))}
+    if present:
+      self.data['liveTracks'] = NS(points=list(tracks))
     self.alive = {'liveTracks': alive} if present else {}
     self.valid = {'liveTracks': valid} if present else {}
     self.updated = {'liveTracks': updated} if present else {}
@@ -106,6 +118,54 @@ class TestSideAssignment:
     adj = feed(AdjacentLane(), [track(50, 3.4)])
     feed(adj, [])
     assert adj.left.y_rel == 0.0
+
+
+class TestCurves:
+  """A fixed lateral band measured from the car's straight-ahead axis is only the lane on a
+  straight road. These are the cases that band gets wrong, and they are not rare -- a 500 to 1000 m
+  radius is an ordinary interstate bend."""
+
+  # Right-hand bend. At 70 m the path is 70^2 / (2 * 500) = 4.9 m off axis, mid-band.
+  BEND_R = 500.0
+
+  def test_our_own_lead_on_a_curve_is_not_in_the_next_lane(self):
+    # The false positive that matters most: our own lead is slower than us by definition, so
+    # counting it as adjacent traffic would block the very pass it caused, on every curve.
+    lead = track(70, -4.9, v_rel=-2.0)   # radar left-positive, so a right-bend lead reads negative
+    adj = feed(AdjacentLane(), [lead], curve=self.BEND_R)
+    assert not adj.right.occupied
+    assert not adj.left.occupied
+
+  def test_a_real_adjacent_car_on_a_curve_is_still_found(self):
+    # Same bend, but this one is a lane over: path offset plus a lane width.
+    car = track(70, -(4.9 + 3.7), v_rel=-2.0)
+    adj = feed(AdjacentLane(), [car], curve=self.BEND_R)
+    assert adj.right.occupied
+
+  def test_left_bend_puts_the_adjacent_car_on_the_correct_side(self):
+    # Sign check through the whole chain. On a LEFT bend the path swings left, so a car one lane
+    # to the LEFT of the path sits further left still.
+    car = track(70, 4.9 + 3.7, v_rel=-2.0)
+    adj = feed(AdjacentLane(), [car], curve=-self.BEND_R)
+    assert adj.left.occupied
+    assert not adj.right.occupied
+
+  def test_straight_road_is_unchanged(self):
+    adj = feed(AdjacentLane(), [track(70, 3.7)], curve=0.0)
+    assert adj.left.occupied
+
+
+class TestPathOffset:
+  def test_straight_path_is_zero_everywhere(self):
+    assert path_offset(NS(position=path()), 80.0) == 0.0
+
+  def test_interpolates_between_model_points(self):
+    # 70 m is between X_IDXS points, so this exercises the interpolation rather than a lucky hit.
+    assert abs(path_offset(NS(position=path(500.0)), 70.0) - (70.0 ** 2) / 1000.0) < 0.15
+
+  def test_missing_path_degrades_to_straight_ahead(self):
+    # No position field at all: the old behaviour, not a crash and not an arbitrary number.
+    assert path_offset(NS(), 80.0) == 0.0
 
 
 class TestStationaryRejection:

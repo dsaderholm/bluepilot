@@ -84,6 +84,43 @@ DEBOUNCE_FRAMES = 3
 NO_SPEED = 0.0
 
 
+def path_offset(model, d_rel: float) -> float:
+  """Where the road goes at d_rel: the model path's lateral position there, camera frame.
+
+  Without this the lane band is measured from the car's straight-ahead axis, which is only the
+  lane centre on a straight road. A curve of radius R displaces the path by roughly d^2 / 2R, so
+  on an ordinary interstate bend -- 500 to 1000 m radius -- our OWN lead at 60 to 100 m sits 2 to
+  5 m off axis and lands squarely inside the adjacent-lane band. It is slower than us by
+  definition, since that is why a pass is wanted, so it would block the very pass it caused and
+  report the next lane as no faster while pointing at the car directly ahead.
+
+  Measuring against the path cancels that: both the lead and the adjacent car swing with the road,
+  and only their separation from it survives.
+
+  Returns 0.0 when the model has no usable path, which degrades exactly to the old straight-ahead
+  assumption rather than to something arbitrary.
+  """
+  try:
+    xs, ys = model.position.x, model.position.y
+  except AttributeError:
+    return 0.0
+  n = min(len(xs), len(ys))
+  if n == 0:
+    return 0.0
+  if d_rel <= xs[0]:
+    return float(ys[0])
+  for i in range(1, n):
+    if xs[i] >= d_rel:
+      x0, x1 = float(xs[i - 1]), float(xs[i])
+      if x1 <= x0:
+        return float(ys[i])
+      f = (d_rel - x0) / (x1 - x0)
+      return float(ys[i - 1]) + f * (float(ys[i]) - float(ys[i - 1]))
+  # Past the end of the path. The last point is the best estimate available; the distance bound in
+  # update() keeps this from being reached with anything the decision depends on.
+  return float(ys[n - 1])
+
+
 class AdjacentLaneSide:
   """One side. Defaults to unavailable, which is not the same as clear."""
 
@@ -174,6 +211,7 @@ class AdjacentLane:
       if not sm.updated['liveTracks']:
         return
       tracks = sm['liveTracks'].points
+      model = sm['modelV2']
     except (KeyError, AttributeError):
       self.reset()
       return
@@ -182,15 +220,19 @@ class AdjacentLane:
     for p in tracks:
       if p.dRel <= 0 or p.dRel > max_distance_m:
         continue
-      if not (ADJACENT_MIN_M <= abs(p.yRel) <= ADJACENT_MAX_M):
-        continue
       # Roadside furniture, not traffic. See MIN_MOVING_MS -- this radar publishes barriers and
       # sign gantries as ordinary tracks and nothing upstream tells them apart from cars.
       if v_ego + p.vRel < MIN_MOVING_MS:
         continue
-      # Radar yRel is LEFT-POSITIVE -- the opposite of the model's lane geometry. See the module
-      # docstring; this one line is the easiest thing here to get backwards.
-      side = 'left' if p.yRel > 0 else 'right'
+      # Radar yRel is LEFT-POSITIVE -- the opposite of the camera frame the model works in. Flip
+      # first, THEN subtract where the road actually goes at that distance, so the result is
+      # offset-from-the-lane rather than offset-from-straight-ahead. See path_offset: skipping
+      # this puts our own lead in the next lane on every curve.
+      lat = -p.yRel - path_offset(model, p.dRel)
+      if not (ADJACENT_MIN_M <= abs(lat) <= ADJACENT_MAX_M):
+        continue
+      # Camera frame now: negative is left.
+      side = 'left' if lat < 0 else 'right'
       if best[side] is None or p.dRel < best[side].dRel:
         best[side] = p
 

@@ -39,7 +39,7 @@ from openpilot.common.constants import CV
 from openpilot.common.params import Params
 from openpilot.common.realtime import DT_MDL
 from openpilot.sunnypilot import PARAMS_UPDATE_PERIOD
-from openpilot.sunnypilot.selfdrive.controls.lib.adjacent_lane import AdjacentLane
+from openpilot.sunnypilot.selfdrive.controls.lib.adjacent_lane import AdjacentLane, path_offset
 from openpilot.sunnypilot.selfdrive.controls.lib.rear_approach import RearApproach
 
 Side = custom.LongitudinalPlanSP.PassingAssist.Side
@@ -79,7 +79,15 @@ MAX_ROAD_EDGE_STD = 0.5
 
 # --- lead gates ---
 MIN_V_EGO_MS = 40 * CV.MPH_TO_MS  # below this, passing is not the manoeuvre being considered
-MAX_LEAD_D_PATH_M = 1.5           # in our lane, not an adjacent-lane return
+# In our lane, not an adjacent-lane return. Measured from the MODEL PATH, not from the car's
+# straight-ahead axis, and computed here rather than read off radarState.
+#
+# This used to test lead.dPath, which is a dead field: nothing in openpilot has populated it since
+# the LeadData struct was written, so it arrives as 0.0 and `abs(0.0) > 1.5` never rejected
+# anything. The gate read as a filter and was not one. Found while checking how twilsonco's fork
+# groups radar points into lanes -- its get_path_adjacent_leads uses dPath the same way, on an
+# older openpilot where it was still real.
+MAX_LEAD_D_PATH_M = 1.5
 
 # The real knob, and the whole judgement: is that car slower than the speed I asked for. The
 # question is "how far below my set speed", not "is it dramatically slower" -- which is why this is
@@ -160,6 +168,7 @@ class PassingAssistDetector:
     self.lead_v_lead = 0.0
     self.speed_deficit = 0.0
     self.lead_ttc = 0.0
+    self.lead_d_path = 0.0
     self.approach_seconds = 0.0
     self.trigger = Trigger.none
     self.acc_braking_at_decision = False
@@ -412,7 +421,7 @@ class PassingAssistDetector:
     self.overtake_restricted = (self.overtake_msg not in TSR_OVTK_UNRESTRICTED and
                                 self.overtake_status == TSR_OVTK_STATUS_RELIABLE)
 
-  def _should_pass(self, lead, v_cruise: float) -> bool:
+  def _should_pass(self, lead, v_cruise: float, model=None) -> bool:
     """The one question: is there a vehicle in our lane slow enough to cost us speed?
 
     Deliberately does NOT ask whether we are closing on it or already behind it. Those are the same
@@ -422,7 +431,10 @@ class PassingAssistDetector:
     So: in our lane, slower than the SET speed by a margin worth the manoeuvre, near enough to be
     real. The margin is the judgement; everything else is a sanity bound.
     """
-    if abs(lead.dPath) > MAX_LEAD_D_PATH_M or lead.dRel > self.max_distance_m:
+    # radarState yRel is left-POSITIVE like the radar's; flip to the camera frame before comparing
+    # against the path. See MAX_LEAD_D_PATH_M for why this is no longer lead.dPath.
+    self.lead_d_path = abs(-float(lead.yRel) - path_offset(model, float(lead.dRel))) if model is not None else 0.0
+    if self.lead_d_path > MAX_LEAD_D_PATH_M or lead.dRel > self.max_distance_m:
       self.approach_seconds = 0.0
       return False
 
@@ -582,7 +594,7 @@ class PassingAssistDetector:
 
     self._lead_state(lead, v_cruise)
 
-    if not self._should_pass(lead, v_cruise):
+    if not self._should_pass(lead, v_cruise, sm['modelV2']):
       self._reset_outputs(Blocked.notStuck)
       self._keep_right()
       return
