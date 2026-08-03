@@ -696,19 +696,24 @@ Bus 1 still has no headroom (§3), so the digest architecture stands unchanged.
 
 ### Which part, exactly
 
-**Read the part number off the radar already in the car and buy the same one.** That guarantees
-`FORD_CADS`, classic 500 kbit/s CAN, and a decoder known to work — no cross-referencing required.
+### `JX7T-9G768-AC` — buy a second one of exactly what is already fitted
 
-If sourcing blind, these are `RADAR.DELPHI_MRR` platforms (non-CANFD Fords):
+Corrected 2026-08-03 with the owner's own part numbers, which beat any cross-reference table:
 
-| Vehicle | Part number | Notes |
-|---|---|---|
-| Fusion 2017–2020 | `HG9T-9G768-AG` / `-BG` | also fits Edge, MKZ 2017–2019 |
-| Edge 2019–2024 | (match the car's own) | what this car runs |
-| Explorer 2016–2019 | `GB5T-9G768-AE` | |
+- `HG9T-9G768-AG` — the **stock Fusion** radar, **removed from this car and sold**. Not the part.
+- `JX7T-9G768-AC` — the **F-150 unit currently fitted and working**, feeding `FORD_CADS` over
+  classic 500 kbit/s CAN on bus 1, decoded every drive by `_update_delphi_mrr`.
 
-⚠️ **Avoid CANFD platforms** — Explorer 2020+ (`LB5T-9G768-AB`), F-150 2021+. Those take
-`RADAR.STEER_ASSIST_DATA`, a different bus and a different decode path.
+**Buy another `JX7T-9G768-AC` (or `-AD`).** This is a stronger recommendation than "an MRR":
+identical hardware, identical protocol, identical decode path, and a live reference in the same
+vehicle to compare bench output against. Nothing needs cross-referencing or verifying by
+photograph.
+
+It also corrects an over-broad warning in an earlier draft of this section. `JX7T-9G768` is
+catalogued as an F-150 2019–2023 part, and that draft said to avoid F-150 units as CAN FD. Wrong
+on this part: CAN FD is a property of the *car's buses and openpilot's decode path*
+(`RADAR.STEER_ASSIST_DATA`, `FORD_CADS_64`), not of this radar, which demonstrably speaks classic
+`FORD_CADS` on this car. Buying the same number as the working one sidesteps the whole question.
 
 ⚠️ **Still avoid `-14D453` and `-14C689`** — those are the blind-spot (SODL/SODR) modules, the
 sensors the BLIS work already established cannot answer "is something closing".
@@ -750,3 +755,64 @@ is the patch shape, which applies whichever sensor is fitted. Worth reading befo
 Its warning is also worth repeating, because it independently confirms §3: *"CAN Message Conflict:
 This proof of concept may trigger errors due to conflicts. A CAN filter or gateway can resolve
 them."* He put his on CAN1 and hit exactly the contention this plan routes around.
+
+### Build the MCU as a sensor hub, not a radar adapter
+
+Asked 2026-08-03: what if more sensors get added later? Worth answering now, because two
+decisions made at build time cost nothing today and are expensive to retrofit.
+
+**The Teensy already has three CAN controllers and this uses two.** One private sensor bus, one
+digest out to bus 1. The third is free. A second radar — rear corners for true blind spot, say —
+either joins the private bus (two MRRs at ~1400 frames/s each is ~80 % of a 500 kbit/s bus: tight
+but survivable, and they can be given different scan phasing) or takes the spare controller
+outright. **No hardware change, no second MCU.** Buy the Teensy 4.0 with this in mind rather than
+something with one controller.
+
+**Put a sensor ID in the digest from day one.** The digest is a message this project defines from
+nothing, so it costs a nibble now and a redesign later. Something like:
+
+```
+byte 0   bits 0-3  sensor id   (0 = rear centre, 1 = rear left, 2 = rear right, ...)
+         bits 4-7  object index within that sensor
+byte 1-7 range, range-rate, azimuth, validity
+```
+
+Without it, a second sensor means either a second message ID hard-coded per sensor, or a
+protocol change that touches the MCU, the DBC and the openpilot decoder together.
+
+**The cereal side is already shaped for this.** `PassingAssist.RearApproach` carries a `Source`
+enum (`none` / `blis` / `radar`) precisely so a fitted sensor is distinguishable from an absent
+one, and `available` is per side. Adding sensors fills those in; it does not change the decision
+chain, which was the point of building the consumer before the producer.
+
+**Bus 1 has room for the digests even though it has none for raw radar.** The measured 60–73 %
+is raw MRR traffic. Two 20 Hz digest messages are under 1 %; ten of them are under 5 %. The
+digest architecture is what makes expansion cheap — the constraint is the private sensor bus,
+not bus 1.
+
+**What is worth adding later, roughly in order of value:**
+
+1. **Rear centre radar** — this project. Answers "is something closing" for lane changes.
+2. **BLIS via the canbox** — no new sensor, just routing `Side_Detect_L/R_Stat` onto a bus
+   openpilot reads. Complements rather than duplicates: BLIS covers the mirror to ~7 m, the radar
+   starts at ~3.7 m, and they overlap.
+3. **Rear corner radars** — only if the centre unit's ±45° mid-range beam proves insufficient
+   close in. Measure before buying.
+
+### What the front radar is actually doing on this car
+
+Also asked 2026-08-03, and the answer is more than it looks. openpilot does not do longitudinal
+control here — stock Ford ACC brakes and accelerates — so it is tempting to conclude the front
+radar is idle apart from passing assist. It is not. `radarState` feeds:
+
+- `unconfirmed_lead.py`, whose output **ICBM acts on** by commanding the set speed down. The
+  radar is the *negative* signal there: the trigger is a vehicle the camera sees and the radar has
+  **not** confirmed.
+- `controlsd_ext.py`, which copies `leadOne`/`leadTwo` into `carControlSP`.
+- the onroad lead chevrons and the distance/speed/time readout.
+- `dec.py` (dynamic experimental control) and `e2e_alerts_helper.py`.
+- `passing_assist.py` and `adjacent_lane.py` — this project.
+
+So the accurate statement is narrower: the front radar is not driving openpilot's *own* brake and
+throttle, because those are Ford's. It is very much driving what ICBM does to the set speed, and
+that does move the car.
