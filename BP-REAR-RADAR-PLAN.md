@@ -843,17 +843,38 @@ range a small angle is a big offset: **3° of yaw error is 2.6 m at 50 m** — m
 So "roughly straight back" is not enough; get it close mechanically, then measure the residual and
 put it in the code. The calibration is a parked car and a target at a known offset, not a drive.
 
-**The depth problem — the one §2 calls "the tightest fit in the whole project and it is
-unverified" — is now measurable today.** That paragraph assumed a 49.2 mm ESR brick and unknown
-Fusion rear clearance. But the JX7T is in the car right now with a custom mount already fabricated
-for it, so:
+**Half of the depth problem goes away; the other half does not.** §2 calls this "the tightest fit
+in the whole project and it is unverified", assuming a 49.2 mm ESR brick and unknown Fusion rear
+clearance. The JX7T is in the car now, on a custom adapter bracket cut at a metal shop to carry a
+JX7T on the *Fusion's stock HG9T front mounting points*. Be precise about what that buys.
 
-1. Its real dimensions can be measured rather than looked up.
-2. The bracket geometry that works is already designed and proven, and a second identical part
-   uses it unchanged.
-3. Rear cover-to-beam clearance can be measured with a tape before anything is bought.
+**Transfers to a rear build:**
 
-Buying the identical part turns the riskiest mechanical unknown into a repeat of work already done.
+1. The radar-side geometry — bolt pattern, cradle, standoffs, the face plane. That is the
+   dimension-critical half, and it exists as a proven drawing.
+2. Its real measured dimensions, rather than a datasheet lookup for a part family.
+3. The shop, the material and thickness, and the knowledge that the design survives a bumper's
+   vibration and weather.
+
+**Does not transfer:**
+
+1. The car-side geometry. That bracket bolts to the Fusion's *front* radar bosses. The rear of the
+   car has no equivalent — there are no factory radar mounting points back there at all.
+2. Rear cavity clearance. Front bumper cavities on an ADAS car are packaged around a radar; rear
+   ones are not. Depth behind the rear cover is still unmeasured and still the tightest unknown.
+
+So the second bracket is the proven radar-side half joined to a new car-side half — a redraw, not a
+reinvention, and the dimensions that were hard are the ones already solved.
+
+**Candidate rear attachment points**, in order of how much they resemble the front install:
+
+1. **The rear bumper beam / reinforcement bar.** Steel, bolted to the frame rails through the crash
+   cans, structural, and at roughly the right height. The closest analogue to what the front
+   bracket does, and the first thing to measure.
+2. **The threaded tow eye** behind its cover in the rear fascia. Strong and already threaded, but a
+   single point — it needs a second locating feature or the sensor can rotate, and rotation is
+   exactly the error that costs half a lane at 50 m.
+3. **Bumper cover tabs.** Plastic. Not for a sensor whose aim has to hold.
 
 ### Where to put it on the back of a Fusion
 
