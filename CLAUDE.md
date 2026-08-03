@@ -58,14 +58,24 @@ shipped drawing methods to PNG at device scale. Use it rather than guessing at s
 4. For new `Params` keys: confirm each is declared in `common/params_keys.h`. The stubbed `Params`
    raises on unknown keys the way the device does.
 
-## Do not fix upstream bugs in this fork
+## Do not fix UNRELATED upstream bugs in this fork
 
 This is a personal fork of BluePilot, which forks sunnypilot, which forks openpilot. A bug that
-belongs to one of those layers should be **reported there, not patched here**.
+belongs to one of those layers, and has nothing to do with the work here, should be **reported
+there, not patched here**.
 
 Every upstream line this fork modifies is a merge conflict paid for on every future rebase, forever.
 That is worth it for something this car needs and free-riding on someone else's maintenance for
 anything else.
+
+**ICBM is the exception, and it is a broad one.** Anything touching Intelligent Cruise Button
+Management is in scope whatever layer owns the file, bug or feature, without asking. ICBM itself
+lives under `sunnypilot/`, most of what it reads is sunnypilot's, and the whole point of this fork
+is making it work properly on this car -- so "that is upstream's file" is not a reason to leave ICBM
+behaviour broken. The same goes for anything ICBM depends on: `cruise_ext.py`'s button timers feed
+the press stand-down, so they are ICBM's business too.
+
+The rule is about bugs that are *not ours*. A boot-splash warning is not ours. ICBM always is.
 
 Layers, outermost first — check which one a file belongs to before editing it:
 
@@ -80,9 +90,8 @@ Layers, outermost first — check which one a file belongs to before editing it:
 - a new `Params` key (`common/params_keys.h`), capnp field (`cereal/custom.capnp`) or its dataclass
   mirror (`opendbc/car/structs.py`) that this fork's features need
 - this car's platform: `opendbc/car/ford/values.py`, `torque_data/override.toml`, fingerprints
-- a bug that is genuinely load-bearing for our code. `sunnypilot/selfdrive/car/cruise_ext.py`'s
-  shared button-timer dict qualifies: it is upstream's bug, but ICBM's press stand-down reads those
-  timers and a shared dict corrupts them
+- anything ICBM-related at all -- see above, no justification needed
+- a bug that is genuinely load-bearing for other work here
 - something the owner explicitly asked for, e.g. the Sentry opt-in guard in `system/sentry.py`
 - new test files, which are additive and never conflict
 
