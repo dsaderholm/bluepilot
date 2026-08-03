@@ -1057,3 +1057,49 @@ worst one available in this project.
 
 Add a physical disconnect and its own fuse while building, so step 3 is reversible in ten seconds
 at the roadside.
+
+### What the actual rear bumper looks like
+
+Photograph supplied 2026-08-03. Read from a photo, so everything here is a thing to **measure**,
+not a conclusion.
+
+**The single most useful feature: the lower valance is unpainted textured black plastic.** The
+bumper is two zones — body-colour metallic paint from the plate down to a moulding line, then a
+separate dark grey textured lower section carrying the exhaust outlets. §2 warns that metallic and
+pearl paint contains aluminium flake and attenuates 76 GHz badly. **That warning does not apply to
+the lower section at all.** It is exactly the kind of bare plastic an OEM radome is made from.
+
+That inverts the ranking in §8. Behind the *unpainted* lower valance is now the first place to
+measure, ahead of the painted upper bumper.
+
+| | Painted upper bumper | Unpainted lower valance |
+|---|---|---|
+| Paint attenuation | metallic flake, real risk, needs testing | **none** |
+| Height above ground | ~55–70 cm, middle of the 30–86 cm window | ~35–45 cm, low end but in spec |
+| Ground clutter | less | more — the radar sees more road |
+| Exhaust | clear | outlets are at both **outer corners**; centre is clear |
+| Obstructions | parking sensors are in this zone | clear in the centre |
+
+Neither is obviously better. The paint problem is the one that cannot be fixed without cutting;
+the height difference can be evaluated on the bench by pointing the radar at a road from each
+height and looking at the clutter. **Test the paint before assuming the upper zone works** — hold a
+cut-off scrap of the actual painted cover in front of the radar during the bench test. That is the
+cheapest experiment in the whole project.
+
+**Other things the photo settles:**
+
+- **Both exhaust outlets are at the outer corners of the lower valance.** A centred mount is clear
+  of both, which removes the heat concern that would otherwise rule the lower zone out.
+- **The car has rear parking sensors** in the painted zone. Two consequences: do not place the
+  radar where it shadows one, and note the bumper already has precision apertures cut in it from
+  the factory, so cutting one more is not unprecedented on this panel.
+- **The reversing camera sits above the plate** in the trunk trim, not in the bumper. Not in the
+  way.
+- **No towing-eye access panel is visible** in this view. §9 found that the model has one; it may
+  be lower, on the underside, or not resolvable at this angle. **Verify by hand before designing
+  around it** — and the bumper reinforcement beam remains the better attachment anyway.
+
+**On centring:** the front radar on this car is off-centre toward the driver's side and works fine.
+So centring the rear one is a preference, not a requirement — an offset is one measured constant
+(see the note in `adjacent_lane.py`). Centre it if the packaging allows, because it is one less
+number to calibrate, but do not distort the bracket to achieve it.
