@@ -128,10 +128,21 @@ CRUISE_CYCLE_STABLE_FRAMES = 40  # 0.4 s unchanged => the resume jump has landed
 # BluePilot: target-drop rate limiting. Stock ACC coasts for small set-speed drops and brakes for
 # large ones; capping each step and walking larger drops down over several steps keeps it coasting.
 #
-# The ~10 mph coast/brake boundary this sits under is documented Ford behaviour, not a guess. What
-# WAS assumed is the goal: 8 was chosen to stay in the coasting regime because coasting was taken
-# to be the only way to avoid lighting the stop lamps and telling the car behind there is a hazard
-# on an ordinary curve.
+# The "~10 mph of set-speed drop is where stock ACC starts braking" figure this was built around
+# is UNVERIFIED. Searching found the general mechanism -- ACC patents describe a coasting
+# deceleration rate distinct from, and smaller than, a braking one -- but nothing Ford-specific and
+# no threshold. An earlier version of this comment called it documented; it is not.
+#
+# It is also unlikely to be a fixed number. A controller almost certainly computes the deceleration
+# it needs and coasts when closing the throttle delivers it, brakes when it does not, which makes
+# the apparent boundary move with speed, grade and load. Steeper downhill, coasting sheds less, so
+# the brakes come in after a smaller drop. There is therefore no single correct value here, which
+# is why the onroad readout matters more than the constant: ACC pill for whether the pads are in
+# use, BRAKE LAMPS for whether anyone behind was told.
+#
+# What WAS assumed is the goal: 8 was chosen to stay in the coasting regime because coasting was
+# taken to be the only way to avoid lighting the stop lamps and telling the car behind there is a
+# hazard on an ordinary curve.
 #
 # That assumption is wrong, and it matters. UN R13-H lights the lamps above 1.3 m/s^2 of
 # automatically commanded braking -- so there is a band where ACC uses the friction brakes without
