@@ -62,8 +62,8 @@ def fresh(max_rise=0, max_drop=0):
   """ICBM settled with no baseline, agreeing with the driver at the limit.
 
   Rate limiters default off here so target assertions read the baseline logic directly; they get
-  their own class below. cruise_button_timers is bound to the module-level CRUISE_BUTTON_TIMER
-  dict by reference rather than copied, so instances share it -- clear it or state leaks.
+  their own class below. The timer clear below is now belt-and-braces -- cruise_button_timers is a
+  per-instance copy since the aliasing fix -- and is kept as a regression tripwire.
   """
   icbm = IntelligentCruiseButtonManagement(NS(), NS(pcmCruiseSpeed=False))
   for k in icbm.cruise_button_timers:
@@ -399,18 +399,20 @@ class TestPressWinsWhileIcbmIsBusy:
     assert after - before == 2
 
 
-class TestMinusAlwaysAdjustsNeverCancels:
-  """Returning the set speed to exactly SLA's number used to delete the HOLD.
+class TestReturningToTheLimitHandsItBack:
+  """Walking the set speed back to exactly SLA's number clears the HOLD.
 
-  Removed. It made the minus button unpredictable -- whether a press adjusted the hold or deleted
-  it depended on a number the driver cannot see -- and it is why "press down then up" looked like
-  a workaround: down was not fixing anything, it was deleting the override so the next press built
-  a fresh one. On this car SET/RESUME shares a CAN signal with cancel, so there is no separate
-  resume to press while engaged; cancel + re-engage is the explicit "hand it back to the speed
-  limit" control, and that still clears it.
+  This rule was built, then withdrawn on the reasoning that it made minus unpredictable -- whether
+  a press adjusted the hold or deleted it depended on a number the driver cannot see. That reading
+  was wrong about what the driver can see: the posted limit is on screen, and going back to it is a
+  deliberate gesture, not an accident. It is also the only way out of a hold that does not require
+  disengaging cruise, which matters on this car because SET/RESUME shares a CAN signal with cancel.
+
+  The unpredictability it was withdrawn for is handled by baseline_diverged instead: the baseline
+  has to have actually been somewhere else before coming back counts. See the instant-delete test.
   """
 
-  def test_minus_down_to_the_sla_target_keeps_the_hold(self):
+  def test_minus_down_to_the_sla_target_clears_the_hold(self):
     icbm = fresh()
     set_baseline(icbm)
     settle(icbm, LIMIT)
@@ -423,8 +425,24 @@ class TestMinusAlwaysAdjustsNeverCancels:
                  make_lp(LIMIT), False)
     settle(icbm, LIMIT, cluster=cluster, frames=200)
     assert cluster == LIMIT
+    assert icbm.override_state == OverrideState.auto, "hold survived a return to SLA's number"
+    assert icbm.v_baseline == 0
+
+  def test_minus_that_stops_short_of_the_limit_still_adjusts(self):
+    """Only landing exactly on SLA's number hands it back. Anything else is a new hold."""
+    icbm = fresh()
+    set_baseline(icbm)
+    settle(icbm, LIMIT)
+    cluster = DRIVER
+    for _ in range(DRIVER - LIMIT - 3):             # stop 3 short
+      icbm.run(make_cs(cluster, buttons=(DECEL_PRESS,)), CC, make_lp(LIMIT), False)
+      cluster -= 1
+      for f in range(12):
+        icbm.run(make_cs(cluster, buttons=(DECEL_RELEASE,) if f == 2 else ()), CC,
+                 make_lp(LIMIT), False)
+    settle(icbm, LIMIT, cluster=cluster, frames=200)
     assert icbm.override_state == OverrideState.manual, "minus deleted the hold instead of adjusting it"
-    assert icbm.v_baseline == LIMIT
+    assert icbm.v_baseline == LIMIT + 3
 
   def test_cancel_and_reengage_clears_the_hold(self):
     """The explicit control, and the one the driver actually uses."""
@@ -735,3 +753,89 @@ class TestResumeJumpIsNotADriverChange:
           cluster += 1
     assert icbm.override_state == OverrideState.manual, "fallback stayed disabled after the resume"
     assert cluster == LIMIT + 1
+
+
+class TestReturningToTheLimitClearsTheHold:
+  """Walking the set speed back to exactly what SLA wants hands control back.
+
+  The second way out of a hold, and the only one that does not require disengaging cruise. It was
+  built, removed while fixing something else, and then not restored across the next rewrite --
+  baseline_diverged was left behind as dead state, which is how the omission was found.
+  """
+
+  def test_a_press_that_lands_on_the_sla_number_is_not_instantly_deleted(self):
+    """The failure the rule was withdrawn for the first time round.
+
+    A hold is created at the set speed the driver pressed FROM, which on the first frame still
+    equals SLA's target. Clearing on bare equality would delete it before the press had moved
+    anything, making the minus button behave differently depending on an invisible number.
+    """
+    icbm = fresh()
+    icbm.run(make_cs(LIMIT, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT), False)
+    icbm.run(make_cs(LIMIT), CC, make_lp(LIMIT), False)
+    assert icbm.override_state == OverrideState.manual, "hold deleted on the frame it was created"
+
+  def test_clearing_is_source_gated(self):
+    """Under `cruise` there is no posted limit, so equality is coincidence rather than intent."""
+    icbm = fresh()
+    set_baseline(icbm, DRIVER)
+    settle(icbm, DRIVER, cluster=DRIVER, source=PlanSource.cruise)
+    assert icbm.override_state == OverrideState.manual
+
+
+class TestCounterMovementBreaksTheDeadlock:
+  """ICBM must be able to notice the driver disagreeing WHILE it is commanding.
+
+  icbm_idle_frames resets to 0 on every frame ICBM sends a button, so the idle fallback can only
+  fire when ICBM is quiet -- and ICBM walking the set speed back down is exactly when it is not.
+  That is the reported symptom: the number goes up on the dash and gets taken back down one
+  increment at a time, with the fallback structurally unable to intervene.
+  """
+
+  @staticmethod
+  def _icbm_actively_decreasing():
+    """SLA wants LIMIT, the set speed is well above it, so ICBM is commanding decrease."""
+    icbm = fresh()
+    for _ in range(300):  # past CRUISE_CYCLE_SETTLE_FRAMES
+      icbm.run(make_cs(DRIVER), CC, make_lp(LIMIT), False)
+    assert icbm.cruise_button == SendButtonState.decrease, "precondition: ICBM should be commanding"
+    assert icbm.icbm_idle_frames == 0, "precondition: idle counter pinned while commanding"
+    return icbm
+
+  def test_set_speed_rising_against_a_decrease_command_is_adopted(self):
+    icbm = self._icbm_actively_decreasing()
+    # Driver presses and holds +. The press does not arrive as a button event -- the case the
+    # fallback exists for -- and the car ramps the set speed up in one 5 mph step.
+    icbm.run(make_cs(DRIVER + 5), CC, make_lp(LIMIT), False)
+    assert icbm.override_state == OverrideState.manual, "ICBM never noticed the driver"
+    assert icbm.v_baseline == DRIVER + 5
+
+  def test_one_unit_of_counter_movement_is_not_enough(self):
+    """A stale command of the opposite sign still in flight is worth at most one step."""
+    icbm = self._icbm_actively_decreasing()
+    icbm.run(make_cs(DRIVER + 1), CC, make_lp(LIMIT), False)
+    assert icbm.override_state == OverrideState.auto
+
+  def test_movement_agreeing_with_the_command_is_not_adopted(self):
+    """ICBM's own commanded decrease must never look like a driver press."""
+    icbm = self._icbm_actively_decreasing()
+    for step in range(1, 6):
+      icbm.run(make_cs(DRIVER - step), CC, make_lp(LIMIT), False)
+    assert icbm.override_state == OverrideState.auto, "ICBM adopted its own commanded movement"
+
+  def test_adopting_stands_icbm_down_so_it_stops_fighting(self):
+    icbm = self._icbm_actively_decreasing()
+    icbm.run(make_cs(DRIVER + 5), CC, make_lp(LIMIT), False)
+    assert icbm.press_settle_frames > 0
+    assert icbm.cruise_button == SendButtonState.none, "ICBM kept commanding after adopting"
+
+
+class TestButtonTimersAreNotShared:
+  def test_two_instances_do_not_share_timers(self):
+    """Upstream binds the module-level CRUISE_BUTTON_TIMER dict by reference. Shared mutable state
+    between ICBM and VCruiseHelperSP, and between every test case in this file."""
+    a = IntelligentCruiseButtonManagement(NS(), NS(pcmCruiseSpeed=False))
+    b = IntelligentCruiseButtonManagement(NS(), NS(pcmCruiseSpeed=False))
+    assert a.cruise_button_timers is not b.cruise_button_timers
+    a.cruise_button_timers[ButtonType.accelCruise] = 99
+    assert b.cruise_button_timers[ButtonType.accelCruise] == 0

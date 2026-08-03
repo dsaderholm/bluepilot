@@ -89,6 +89,19 @@ PRESS_SETTLE_MAX_FRAMES = 600     # 6 s hard cap, so a stuck cluster cannot susp
 # this rule is written to avoid. The cost of being generous is only that the fallback fires a
 # little later; the cost of being tight is a wrong baseline.
 ADOPT_IDLE_FRAMES = 90  # 0.9 s at 100 Hz, comfortably past this car's observed set-speed lag
+# The idle rule above has a hole, and it is a deadlock rather than a missed case: icbm_idle_frames
+# resets to 0 on every frame ICBM commands a button, so it can only reach ADOPT_IDLE_FRAMES while
+# ICBM is doing nothing. ICBM walking the set speed back down is therefore the exact state in which
+# the fallback can never fire -- the one state where the driver most needs it to. Reported as the
+# set speed going up on the dash and being taken back down one increment at a time.
+#
+# Movement AGAINST the button ICBM is holding closes it. ICBM cannot raise the set speed while
+# holding decrease, so that is a human, and it needs no idle period to establish. Accumulated in
+# display units rather than counted in frames, because the set speed moves in discrete steps with
+# stationary gaps between them -- and reset whenever the commanded direction changes, so a stale
+# command of the opposite sign still in flight cannot reach the threshold by itself. Two units:
+# one step of counter-movement can be in-flight residue, a second one cannot.
+COUNTER_MOVE_UNITS = 2  # display units (mph/kph) moved against ICBM's own command => a human
 # After cruise is re-engaged the set speed jumps to whatever it resumes at. That is not the driver
 # choosing a speed, and the fallback above cannot tell the difference -- it sees uncommanded
 # movement. Without this window, CNCL + RES+ built a HOLD at the resumed speed and destroyed the
@@ -135,7 +148,14 @@ class IntelligentCruiseButtonManagement:
     self.v_target_ms_last = 0.0
     self.is_metric = False
 
-    self.cruise_button_timers = CRUISE_BUTTON_TIMER
+    # BluePilot: a COPY. Upstream binds the module-level dict directly, which makes these timers
+    # shared mutable state between every ICBM instance and VCruiseHelperSP, which binds the same
+    # object at cruise_ext.py:55 and calls update_manual_button_timers on it too. Two owners
+    # double-increment it, and either one zeroing it on !ready wipes the other's view of a held
+    # button -- the exact signal the press stand-down depends on. In tests it also leaks button
+    # state from one case into the next, which is a good way to have a green suite and a car that
+    # misbehaves.
+    self.cruise_button_timers = dict(CRUISE_BUTTON_TIMER)
 
     # BluePilot: manual override latch. AUTO = ICBM drives the set speed toward v_target;
     # MANUAL = the driver has taken it back and ICBM stops chasing entirely.
@@ -147,6 +167,8 @@ class IntelligentCruiseButtonManagement:
     self.baseline_reset_delta = DEFAULT_BASELINE_RESET_DELTA
     self.v_cruise_cluster_prev = 0
     self.icbm_idle_frames = 0
+    self.counter_move_accum = 0      # set-speed movement against ICBM's own command, display units
+    self.cruise_button_prev = SendButtonState.none
     self.press_settle_frames = 0     # >0 while ICBM stands down after a driver press
     self.cluster_stable_frames = 0   # how long the set speed has been unchanged
     self.cruise_cycle_frames = 0     # >0 while a resume's set-speed jump is still settling
@@ -438,7 +460,8 @@ class IntelligentCruiseButtonManagement:
     # Runs before the manual-only guard below so it can CREATE a baseline, not just update one.
     if (cruise_enabled and self.cruise_cycle_frames == 0
         and self.v_cruise_cluster != self.v_cruise_cluster_prev
-        and self.icbm_idle_frames >= ADOPT_IDLE_FRAMES):
+        and (self.icbm_idle_frames >= ADOPT_IDLE_FRAMES
+             or self.counter_move_accum >= COUNTER_MOVE_UNITS)):
       if self.override_state != OverrideState.manual:
         self.v_target_overridden = self.v_target_raw
         self.baseline_diverged = False
@@ -447,6 +470,8 @@ class IntelligentCruiseButtonManagement:
       self.v_baseline = self.v_cruise_cluster
       self.press_settle_frames = PRESS_SETTLE_MAX_FRAMES
       self.cluster_stable_frames = 0
+      # Spent. The stand-down now suppresses ICBM's output, so nothing is left to move against.
+      self.counter_move_accum = 0
       return
 
     if self.override_state != OverrideState.manual:
@@ -489,11 +514,25 @@ class IntelligentCruiseButtonManagement:
     if not self.v_target_valid:
       return
 
-    # NOTE: returning the set speed to exactly SLA's number used to clear the baseline. Removed --
-    # it made the minus button unpredictable, since whether a press adjusted the hold or deleted it
-    # depended on a number the driver cannot see, and it is what made "press down then up" look
-    # like a workaround. On this car SET/RESUME shares a signal with cancel, so cancel + re-engage
-    # is already the explicit "give it back to the speed limit" control, and that still clears it.
+    # Returning the set speed to exactly what Speed Limit Assist wants hands control back. This is
+    # the second way out of a hold, alongside cancel + re-engage, and the only one that does not
+    # require disengaging cruise.
+    #
+    # Gated on baseline_diverged, which is the whole reason that flag exists. A hold is created at
+    # the set speed the driver pressed from, and on the very first frame that speed can still equal
+    # SLA's target -- clearing on bare equality would delete the hold before the driver's press had
+    # moved anything, which is the "minus is unpredictable" failure this rule was withdrawn for the
+    # first time around. Requiring the baseline to have actually been somewhere else first makes
+    # the gesture unambiguous: you have to leave SLA's number and come back to it.
+    #
+    # Source-gated like the reset-delta rule below. Under `cruise` there is no posted limit for
+    # v_target_raw to represent, and equality there is coincidence rather than intent.
+    if self.plan_source == LongitudinalPlanSource.speedLimitAssist:
+      if self.v_baseline != self.v_target_raw:
+        self.baseline_diverged = True
+      elif self.baseline_diverged:
+        self.clear_baseline()
+        return
 
     # Discard the baseline when the posted limit itself moves materially. A new zone is a new
     # situation the driver has not ruled on, and carrying a 55-zone baseline into a 35 zone is
@@ -511,6 +550,7 @@ class IntelligentCruiseButtonManagement:
     self.v_baseline = 0
     self.v_target_overridden = 0
     self.baseline_diverged = False
+    self.counter_move_accum = 0
 
   def run(self, CS: car.CarState, CC: car.CarControl, LP_SP: custom.LongitudinalPlanSP, is_metric: bool) -> None:
     if self.CP_SP.pcmCruiseSpeed:
@@ -527,6 +567,16 @@ class IntelligentCruiseButtonManagement:
     # needs it. self.cruise_button is still last frame's value here, which is the one that would
     # have caused any cluster movement visible now.
     self.icbm_idle_frames = 0 if self.cruise_button != SendButtonState.none else self.icbm_idle_frames + 1
+    # Counter-movement, the other half of the fallback (see COUNTER_MOVE_UNITS). self.cruise_button
+    # is still last frame's command here, which is the one that could have moved the set speed now.
+    if self.cruise_button != self.cruise_button_prev:
+      self.counter_move_accum = 0
+    cluster_delta = self.v_cruise_cluster - self.v_cruise_cluster_prev
+    if self.cruise_button == SendButtonState.decrease and cluster_delta > 0:
+      self.counter_move_accum += cluster_delta
+    elif self.cruise_button == SendButtonState.increase and cluster_delta < 0:
+      self.counter_move_accum -= cluster_delta
+    self.cruise_button_prev = self.cruise_button
     # The stand-down cap exists for a press that never moves the set speed. It must NOT run while
     # the driver is still holding the button: on a press-and-hold long enough to reach it, the cap
     # expired mid-hold, the baseline froze at that instant, and ICBM woke up and walked the set
