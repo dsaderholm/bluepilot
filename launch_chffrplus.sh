@@ -86,15 +86,7 @@ function launch {
   fi
 
   # handle pythonpath
-  # BluePilot: resync PWD with the real working directory before exporting anything derived from
-  # it. The two lines below disagreed: the symlink asked the kernel via $(pwd) while PYTHONPATH
-  # read the $PWD environment variable, which is only as correct as whatever spawned this script
-  # left it. When they diverge, every child inherits the stale value -- including capnp, whose KJ
-  # layer prints "kj/filesystem-disk-unix.c++: warning: PWD environment variable doesn't match
-  # current directory" onto the boot screen. Harmless in itself, since KJ falls back to getcwd(),
-  # but it also meant PYTHONPATH and /data/pythonpath could point at different places.
-  export PWD="$(pwd)"
-  ln -sfn "$PWD" /data/pythonpath
+  ln -sfn $(pwd) /data/pythonpath
   export PYTHONPATH="$PWD"
 
   # hardware specific init
