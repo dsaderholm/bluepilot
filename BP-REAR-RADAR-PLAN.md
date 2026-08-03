@@ -1007,3 +1007,53 @@ more than a convenient one — an offset is correctable in code but is one more 
 calibrate. And using it as a mount means either giving up the recovery function or designing a
 bracket that passes it through. Measure where it actually sits before choosing it over the bumper
 reinforcement beam.
+
+### Will the car mind the new messages? The messages are not the risk
+
+Asked 2026-08-03. The honest answer reframes the worry rather than soothing it.
+
+**The message content is close to harmless, provided the ID is genuinely unused.** CAN receivers
+filter by ID, usually in hardware. A frame with an ID a module was never told about is dropped
+before any software sees it. That is not a Ford quirk, it is how the bus is designed to work, and
+it is why an aftermarket node can sit on a vehicle bus at all.
+
+Three conditions make that true, and each is checkable rather than hopeful:
+
+1. **The ID must actually be unused on THIS car's bus 1.** Verify against the owner's own log, not
+   a generic Ford DBC. If the ID collides, we are no longer sending something ignorable -- we are
+   impersonating a module that something does listen to.
+2. **Pick a HIGH id number.** On CAN the ID is also the priority: lower wins arbitration. A
+   low-numbered digest would win against the radar's own frames and delay them. High-numbered
+   traffic yields instead.
+3. **Bus load stays trivial.** Two frames at 20 Hz is ~40 frames/s against a bus already carrying
+   thousands. Under 1 %.
+
+**The wiring is the part that can actually hurt.** A node that is electrically wrong -- the wrong
+bit rate, a third terminator, a swapped or shorted pair -- does not send ignorable frames. It sends
+**error frames**, and enough of those drive the bus into error-passive or bus-off. That can set
+DTCs, and on a bad day it takes down the bus that the *working* front radar and stock ACC depend
+on. Nothing about the message payload matters at that point.
+
+So the risk is not "will Ford's modules be confused by a message they do not know". It is "is the
+new node electrically correct". Which is good news, because that is testable.
+
+### Stage it: listen-only on bus 1 before transmitting anything
+
+The strictly safer order, and it costs one firmware flag:
+
+1. **Bench.** Teensy plus rear radar on the private bus, nothing connected to the car. Confirm the
+   radar talks and the digest is built correctly. No vehicle involvement at all.
+2. **Listen-only on bus 1.** Connect the bus 1 channel with the CAN controller in listen-only mode.
+   It is then *electrically incapable* of transmitting -- it cannot send a frame, and it cannot
+   even send the error flags that a mis-set bit rate would otherwise produce. Drive it. This proves
+   the tap, the bit rate and the termination while the node is physically unable to disturb
+   anything.
+3. **Enable transmit.** Only after step 2 is clean for a drive. Flip the flag, log bus 1, and
+   confirm the digest appears and nothing else changed.
+
+Step 2 is the one worth insisting on. It converts "I hope the wiring is right" into a measurement,
+and the failure mode it protects against -- taking out bus 1 while the car is moving -- is the
+worst one available in this project.
+
+Add a physical disconnect and its own fuse while building, so step 3 is reversible in ten seconds
+at the roadside.
