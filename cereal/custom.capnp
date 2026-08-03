@@ -429,6 +429,12 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     undividedSeconds @38 :Float32;  # how much of that memory is left
     oncomingSeen @39 :Bool;         # ever this drive, whether or not the memory has expired
 
+    # BluePilot: ACC had pressurised the brakes but was not yet slowing the car. A weaker claim
+    # than accBrakingAtDecision and an EARLIER one -- beating the precharge means the suggestion
+    # landed before Ford had even decided it would need to brake. Split out because counting it as
+    # braking labelled preemptive suggestions as reactive, which inverted the metric.
+    accPrechargeAtDecision @40 :Bool;
+
     struct AdjacentLane {
       available @0 :Bool;   # false = liveTracks is not reporting. NOT the same as "clear".
       occupied @1 :Bool;    # debounced: 3 consecutive radar messages, not one frame

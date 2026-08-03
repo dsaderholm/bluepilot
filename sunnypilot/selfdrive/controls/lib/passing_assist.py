@@ -143,6 +143,17 @@ DEFAULT_MAX_DISTANCE_M = 220
 MIN_APPROACH_CLOSING_MS = 1.0
 NO_TTC_S = 999.0
 
+# --- what counts as "Ford ACC is already paying for this lead" ---
+# Kept in sync with hud_renderer_bp.py, which derived these while building the ACC pill. Duplicated
+# rather than imported because that is UI and this is controls; if one changes, change both.
+#
+# AccPrpl_A_Rq's floor is a "no request" sentinel, not a -5 m/s^2 demand -- opendbc sends
+# INACTIVE_GAS = -5.0 whenever longitudinal is off or the request falls below MIN_GAS. Anything at
+# or below this carries no information.
+ACC_PROPULSION_INACTIVE = -4.5   # m/s^2
+# Below this the propulsion request is real engine braking rather than trim around zero.
+ACC_ENGINE_BRAKE_MS2 = -0.15
+
 # --- anti-weave ---
 # After a pass is suggested, hold off suggesting the return for this long. Without it, a three-lane
 # road with a slow left lane produces exactly the ping-ponging that makes a system feel unfinished:
@@ -184,6 +195,7 @@ class PassingAssistDetector:
     self.approach_seconds = 0.0
     self.trigger = Trigger.none
     self.acc_braking_at_decision = False
+    self.acc_precharge_at_decision = False
     self.acc_braking_available = False
     self.suspended_seconds = 0.0
     self.reference_speed = 0.0
@@ -385,22 +397,42 @@ class PassingAssistDetector:
       self.suspended_seconds = max(0.0, self.suspended_seconds - DT_MDL)
 
   def _acc_braking(self, car_state_bp) -> None:
-    """Is Ford's ACC already asking for brakes?
+    """Is Ford's ACC already SLOWING THE CAR for this lead?
 
-    The quality metric for the preemptive path. A suggestion made while this is False is one that
-    could have avoided the deceleration entirely; made while True, ACC has already started paying
-    for the lead and the pass is only recovering. Recorded rather than acted on -- the threshold
-    that would beat ACC consistently has to be fitted from drives, not guessed.
+    The quality metric for the preemptive path. A suggestion made while this is False could have
+    avoided the deceleration entirely; made while True, ACC has already started paying for the lead
+    and the pass is only recovering.
+
+    Two corrections, both from what the ICBM work established while building the ACC pill:
+
+    PRECHARGE IS NOT BRAKING. It pressurises the system so a later application arrives without
+    slack -- no meaningful deceleration, no stop lamps, no pad wear. Counting it here labelled a
+    genuinely preemptive suggestion as reactive, which is backwards for a metric whose entire job
+    is to measure how often we beat ACC to the decision. It gets its own field instead, because
+    "we beat even the precharge" is a stronger claim worth being able to make separately.
+
+    ENGINE BRAKING IS BRAKING, for this purpose. Ford documents ACC slowing by transmission
+    downshift to avoid wearing the pads. No stop lamps and no pad wear, but the car IS losing speed
+    for the lead, which is exactly what this measures. Missing it under-reported the reactive case.
+
+    The two errors pushed in opposite directions, so neither cancelled the other -- they just made
+    the number mean nothing in particular.
     """
     self.acc_braking_at_decision = False
+    self.acc_precharge_at_decision = False
     self.acc_braking_available = False
     if car_state_bp is None:
       return
     bls = getattr(car_state_bp, 'brakeLightStatus', None)
     if bls is None or not bls.accDataAvailable:
       return
+
     self.acc_braking_available = True
-    self.acc_braking_at_decision = bool(bls.accDecelRequest or bls.accPrechargeRequest)
+    self.acc_precharge_at_decision = bool(bls.accPrechargeRequest)
+
+    propulsion = float(getattr(bls, 'accPropulsionRequest', 0.0) or 0.0)
+    engine_braking = ACC_PROPULSION_INACTIVE < propulsion < ACC_ENGINE_BRAKE_MS2
+    self.acc_braking_at_decision = bool(bls.accDecelRequest) or engine_braking
 
   def _blindspot(self, car_state_bp) -> None:
     """Is BLIS actually reporting, as opposed to silently reading 'clear' because it is absent?

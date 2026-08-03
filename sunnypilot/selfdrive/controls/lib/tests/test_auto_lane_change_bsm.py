@@ -17,8 +17,6 @@ invisible in the source, where `= self.lane_change_delay + ONE_SECOND_DELAY` rea
 being applied rather than one being cancelled.
 """
 
-from types import SimpleNamespace as NS
-
 from cereal import log
 from openpilot.common.realtime import DT_MDL
 from openpilot.sunnypilot.selfdrive.controls.lib.auto_lane_change import (

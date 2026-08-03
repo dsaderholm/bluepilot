@@ -95,7 +95,8 @@ def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., lead_y=0.0, status=Tr
             edges=(-5.6, 2.4), edge_stds=(0.1, 0.1), right_edge_widen=0.0,
             tsr_avail=True, ovtk_msg=1, ovtk_status=2,
             blinker=False, brake=False, steering=False, road_name="I 15", curve=0.0,
-            acc_braking=False, acc_avail=True, set_speed=None,
+            acc_braking=False, acc_precharge=False, acc_propulsion=0.0,
+            acc_avail=True, set_speed=None,
             icbm_hold=0.0, icbm_manual=False, lka=False, tracks=()):
   # Being stuck behind a car means matching its speed, not still closing on it: vEgo tracks vLead
   # and the gap to the SET speed is what makes passing worth suggesting. Tests that need a genuine
@@ -116,7 +117,8 @@ def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., lead_y=0.0, status=Tr
                   roadEdgeStds=list(edge_stds), position=path(curve)),
     'carStateBP': NS(lkaButtonPressed=lka,
                      brakeLightStatus=NS(accDataAvailable=acc_avail, accDecelRequest=acc_braking,
-                                         accPrechargeRequest=False),
+                                         accPrechargeRequest=acc_precharge,
+                                         accPropulsionRequest=acc_propulsion),
                      blisLeft=NS(dataAvailable=blis_avail), blisRight=NS(dataAvailable=blis_avail),
                      trafficSignData=NS(dataAvailable=tsr_avail, overtakeMsg=ovtk_msg,
                                         overtakeStatus=ovtk_status)),
@@ -450,6 +452,51 @@ class TestRearApproachGate:
     assert det.rear.left.blocks_lane_change
     assert not det.rear.right.blocks_lane_change
 
+
+
+class TestAccBrakingMetric:
+  """accBrakingAtDecision answers one question: had Ford's ACC already started slowing the car
+  when we decided? It is the measure of whether passing assist beats ACC to a lead, so getting it
+  wrong does not break a feature -- it silently makes the drive data say nothing.
+
+  Two errors were fixed here at once, in opposite directions, which is why neither showed up as an
+  obviously wrong number."""
+
+  def test_precharge_is_not_braking(self):
+    # Pressurising the brakes produces no deceleration, no stop lamps and no pad wear. A suggestion
+    # made here beat ACC to the decision and must be recorded as preemptive.
+    det = run(PassingAssistDetector(), STUCK_FRAMES, acc_precharge=True)
+    assert not det.acc_braking_at_decision
+    assert det.acc_precharge_at_decision
+    assert det.trigger == Trigger.approaching
+
+  def test_a_decel_request_is_braking(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES, acc_braking=True)
+    assert det.acc_braking_at_decision
+    assert det.trigger == Trigger.heldUp
+
+  def test_engine_braking_counts_as_braking(self):
+    # Ford slows by downshifting to spare the pads. No lamps, no wear -- but the car is losing
+    # speed for this lead, which is exactly what the metric asks about.
+    det = run(PassingAssistDetector(), STUCK_FRAMES, acc_propulsion=-1.2)
+    assert det.acc_braking_at_decision
+    assert det.trigger == Trigger.heldUp
+
+  def test_the_inactive_sentinel_is_not_engine_braking(self):
+    # AccPrpl_A_Rq's floor means "nothing requested", not a -5 m/s2 demand. Reading it as engine
+    # braking would mark every decision reactive.
+    det = run(PassingAssistDetector(), STUCK_FRAMES, acc_propulsion=-5.0)
+    assert not det.acc_braking_at_decision
+    assert det.trigger == Trigger.approaching
+
+  def test_trim_around_zero_is_not_engine_braking(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES, acc_propulsion=-0.05)
+    assert not det.acc_braking_at_decision
+
+  def test_unavailable_acc_data_reports_neither(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES, acc_avail=False, acc_braking=True)
+    assert not det.acc_braking_available
+    assert not det.acc_braking_at_decision
 
 
 class TestDrivingBelowTheLimit:

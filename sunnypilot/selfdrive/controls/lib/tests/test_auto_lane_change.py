@@ -8,7 +8,7 @@ from openpilot.common.parameterized import parameterized
 from openpilot.common.realtime import DT_MDL
 from openpilot.selfdrive.controls.lib.desire_helper import DesireHelper, LaneChangeState, LaneChangeDirection
 from openpilot.sunnypilot.selfdrive.controls.lib.auto_lane_change import AutoLaneChangeController, AutoLaneChangeMode, \
-  AUTO_LANE_CHANGE_TIMER, ONE_SECOND_DELAY
+  AUTO_LANE_CHANGE_TIMER
 
 AUTO_LANE_CHANGE_TIMER_COMBOS = [
   (AutoLaneChangeMode.NUDGELESS, AUTO_LANE_CHANGE_TIMER[AutoLaneChangeMode.NUDGELESS]),
@@ -159,8 +159,11 @@ class TestAutoLaneChangeController:
     self.alc.update_lane_change(blindspot_detected=True, brake_pressed=False)
     assert not self.alc.auto_lane_change_allowed
 
-    # Now update with blindspot cleared - should start incrementing timer from negative value
-    num_updates = int((timer_delay + abs(ONE_SECOND_DELAY)) / DT_MDL) + 1
+    # Now update with blindspot cleared - should start incrementing timer from negative value.
+    # BluePilot: the wait after the blind spot clears is lane_change_bsm_hold, not one second --
+    # see DEFAULT_BSM_HOLD_S in auto_lane_change.py. Read it off the controller rather than
+    # hard-coding, so this follows the configured hold instead of re-encoding a constant.
+    num_updates = int((timer_delay + self.alc.lane_change_bsm_hold) / DT_MDL) + 1
     for _ in range(num_updates):
       self.alc.update_lane_change(blindspot_detected=False, brake_pressed=False)
 
