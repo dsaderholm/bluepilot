@@ -255,18 +255,20 @@ class CarState(CarStateBase, MadsCarState, CarStateExt):
       cam_messages += [
         ("IPMA_Data2", 1),
       ]
-    else:
-      # BluePilot: Q3 Ford IPMA also broadcasts TSR speed limit on the camera bus.
-      # Marked non-critical (nan) because traffic sign recognition is an optional
-      # Co-Pilot360 camera feature — trims without it simply never send this message,
-      # and it must not invalidate the rest of carState when absent.
-      cam_messages += [
-        ("Traffic_RecognitnData", float('nan')),
-      ]
 
-    # BluePilot: TSR is independent of CANFD. float('nan') marks it non-critical for CAN validity,
-    # same as the HEV overlay messages -- a car whose camera stays quiet must not fault the bus.
-    if CP.flags & FordFlags.TSR:
+    # BluePilot: Q3 Ford IPMA also broadcasts the TSR speed limit on the camera bus. Marked
+    # non-critical (nan) because traffic sign recognition is an optional Co-Pilot360 camera
+    # feature -- trims without it simply never send this message, and it must not invalidate the
+    # rest of carState when absent.
+    #
+    # ONE registration, covering both conditions. This existed twice: upstream bp-7.0 added a copy
+    # inside the non-CANFD branch above, and this fork already had a TSR-flag-gated copy below it.
+    # Both fired on a non-CANFD car carrying the TSR flag -- flags 18 on the retrofit Fusion --
+    # and CANParser raised "Duplicate Message Check: 973" while building the camera parser, so
+    # card died at startup and the device never got past "waiting to start". Neither branch is
+    # redundant on its own: TSR comes from the camera fingerprint rather than the platform, so a
+    # CANFD car can carry it, and non-CANFD cars get it regardless of the flag.
+    if (CP.flags & FordFlags.TSR) or not (CP.flags & FordFlags.CANFD):
       cam_messages += [
         ("Traffic_RecognitnData", float('nan')),
       ]
