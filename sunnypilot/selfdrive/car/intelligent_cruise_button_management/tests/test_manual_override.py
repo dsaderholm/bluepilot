@@ -1134,3 +1134,34 @@ class TestIcbmStaysOutOfItUnderMadsOnly:
       icbm.run(make_cs(LIMIT, enabled=False), self._mads_only(), make_lp(DRIVER), False)
       assert icbm.cruise_button == SendButtonState.none, \
         "ICBM sent a set-speed button with cruise off; that press would engage ACC"
+
+
+class TestTheBadgeGreysWhenCruiseIsOff:
+  """Matters because of MADS: the owner drives with lateral engaged essentially always, so
+  "openpilot steering with ACC off" is a normal cruising state, not a moment in passing.
+
+  The hold survives that disengagement by design and stays on screen -- but +/- there map to
+  setCruise, which engages cruise and DISCARDS the hold rather than adjusting it. Showing the badge
+  as live would be a lie for as long as that lasts, which on this car is a lot of the time.
+  """
+
+  def test_suppressed_while_cruise_is_off(self):
+    icbm = fresh()
+    set_baseline(icbm)
+    settle(icbm, LIMIT)
+    assert not icbm.hold_suppressed
+    for _ in range(50):
+      icbm.run(make_cs(DRIVER, enabled=False), CC, make_lp(LIMIT), False)
+    assert icbm.v_baseline == DRIVER, "the hold should still be remembered"
+    assert icbm.hold_suppressed, "badge would show as live while +/- cannot adjust it"
+
+  def test_live_again_once_cruise_returns(self):
+    icbm = fresh()
+    set_baseline(icbm)
+    settle(icbm, LIMIT)
+    for _ in range(50):
+      icbm.run(make_cs(DRIVER, enabled=False), CC, make_lp(LIMIT), False)
+    icbm.run(make_cs(DRIVER, enabled=False, buttons=(RESUME_PRESS,)), CC, make_lp(LIMIT), False)
+    for _ in range(60):
+      icbm.run(make_cs(DRIVER, enabled=True), CC, make_lp(LIMIT), False)
+    assert not icbm.hold_suppressed

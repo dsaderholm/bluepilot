@@ -262,6 +262,7 @@ class IntelligentCruiseButtonManagement:
     self.press_suppressed = False    # the press happened while a curve/lead owned the target
     self.baseline_diverged = False   # has the baseline ever actually differed from SLA?
     self.cruise_enabled_prev = False
+    self.cruise_enabled = False      # current engagement; hold_suppressed reads it
     self.v_target_valid = False
 
     # BluePilot: target-drop rate limiting
@@ -384,6 +385,12 @@ class IntelligentCruiseButtonManagement:
   def hold_suppressed(self) -> bool:
     """Is something other than the driver's number currently owning the target?
 
+    Cruise being OFF counts, and matters more on this car than it looks: the owner drives with
+    MADS engaged essentially always, so "openpilot steering with ACC off" is a normal cruising
+    state rather than a moment in passing. The hold survives that disengagement by design and the
+    badge stays on screen -- but +/- there map to setCruise, which engages cruise and DISCARDS the
+    hold rather than adjusting it. Blue would be a lie for as long as that lasts.
+
     While this is true a set-speed press cannot change the hold -- it gives a momentary bump that
     the curve or hazard then reclaims. That is deliberate (a curve is a physics limit the baseline
     only caps), but it means the press does not do what a press normally does, so the UI greys the
@@ -395,7 +402,9 @@ class IntelligentCruiseButtonManagement:
     the same defect as the curve case, reached a different way.
     """
     return bool(self.v_baseline > 0 and
-                (self.plan_source not in BASELINE_SOURCES or self.unconfirmed_lead_commanding))
+                (not self.cruise_enabled
+                 or self.plan_source not in BASELINE_SOURCES
+                 or self.unconfirmed_lead_commanding))
 
   def apply_baseline(self, v_target: int) -> int:
     """BluePilot: substitute the driver's chosen speed for the speed-limit component.
@@ -550,6 +559,7 @@ class IntelligentCruiseButtonManagement:
     two apart -- if a set-speed button shows up in CS.buttonEvents, a human pressed it.
     """
     cruise_enabled = CS.cruiseState.available and CS.cruiseState.enabled
+    self.cruise_enabled = cruise_enabled
     cruise_cycled = cruise_enabled and not self.cruise_enabled_prev
     self.cruise_enabled_prev = cruise_enabled
 
