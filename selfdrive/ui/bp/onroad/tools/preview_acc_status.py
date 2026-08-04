@@ -40,6 +40,8 @@ SCENES = [
    "TSR REGION N/A"),
   ("hold pinned to this place -- tap the badge to unpin", 45, 55, 45, "", "COAST", 0.0, False,
    False, "", True),
+  ("worst case today: every readout at once, TSR still down", 70, 55, 70, "-", "BRAKE", 1.4, True,
+   True, "TSR NO NAV DATA", True),
 ]
 
 

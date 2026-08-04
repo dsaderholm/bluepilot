@@ -131,8 +131,9 @@ TSR_PILL_EDGE = rl.Color(196, 176, 70, 205)
 TSR_PILL_INK = rl.Color(226, 206, 110, 255)
 
 # BluePilot: a hold pinned to this place re-applies itself on every drive. Marked with a dot in the
-# badge corner rather than a word: the badge is 172 px wide and already carries a label and a
-# two-digit number, and "PIN" competing with "HOLD" reads as two labels for one thing.
+# badge's LEFT corner rather than a word: the badge is 172 px wide and already carries a label and a
+# two-digit number, and "PIN" competing with "HOLD" reads as two labels for one thing. Left because
+# the right corner belongs to the +/- arrow.
 PIN_DOT_RADIUS = 9
 PIN_DOT_COLOR = rl.Color(255, 214, 120, 255)
 
@@ -507,8 +508,13 @@ class HudRendererBP(HudRendererSP):
     # Remember where the badge landed: this is the tap target for pinning, and the geometry above
     # is the only place that knows it.
     self._hold_rect = rl.Rectangle(x, y, width, HOLD_HEIGHT)
+    # LEFT of the label, not right. The right corner is where the +/- arrow hangs off the label,
+    # and the two landed within a pixel of each other -- arrow centre x+151, dot centre x+152 --
+    # so a hold that was both pinned and being adjusted drew them on top of one another. Found by
+    # rendering every readout at once rather than one state at a time; the individual scenes each
+    # looked fine.
     if self._icbm_pinned:
-      rl.draw_circle(int(x + width - 20), int(y + 20), PIN_DOT_RADIUS, PIN_DOT_COLOR)
+      rl.draw_circle(int(x + 20), int(y + 20), PIN_DOT_RADIUS, PIN_DOT_COLOR)
     return HOLD_HEIGHT
 
   def _draw_tsr_pill(self, x: float, y: float) -> int:
