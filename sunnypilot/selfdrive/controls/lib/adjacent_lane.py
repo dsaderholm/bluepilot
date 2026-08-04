@@ -527,13 +527,24 @@ class AdjacentLane:
     The road edge answers it without any width assumptions at all. Beyond the edge of our own
     drivable surface is, by definition, not our road.
 
-    Unknown counts as ON our road: an untrusted or missing edge falls back to the band alone, which
-    can only over-detect oncoming traffic. Over-detecting costs a quiet stretch of road. The other
-    error costs a suggestion to pass into a head-on lane, and those are not the same size.
+    UNKNOWN NARROWS THE BAND RATHER THAN OPENING IT. An untrusted or missing edge used to fall
+    back to the full band, on the reasoning that over-detecting only costs a quiet stretch of road.
+    The road disagreed: "I was on I-15 for a while, and kept saying two-way road." Each firing is a
+    ninety second silence, so on a divided highway a leaky fallback is not a quiet stretch, it is
+    the feature switched off for the drive.
+
+    So with no usable edge, only the ADJACENT lane counts. That is where opposing traffic sits on
+    the road this veto exists for -- an ordinary two-lane highway -- and it is the one claim that
+    can be made without knowing where our carriageway ends. Something ten metres out with no edge
+    to place it against is more likely across a median than in the next lane.
+
+    The cost is real and worth naming: on an undivided road with a centre turn lane the opposing
+    traffic is two lanes out, and that case now needs a trusted road edge to be seen at all. With
+    one, the full band still applies.
     """
     edge_lat = road_edge_offset(model, side, d_rel)
     if edge_lat is None:
-      return True
+      return abs(lat) <= ADJACENT_MAX_M
     # Camera frame: left is negative. "Inside the edge" is therefore a different comparison per
     # side, which is exactly the sort of thing that reads fine and is backwards.
     return lat > edge_lat if side == 'left' else lat < edge_lat

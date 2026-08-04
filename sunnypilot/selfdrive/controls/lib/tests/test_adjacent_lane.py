@@ -306,7 +306,7 @@ class TestMedians:
     upd(adj, FakeSM([self.oncoming_at(3.7)], left_edge=-7.0), V_EGO, MAX_D)
     assert adj.undivided
 
-  def test_an_untrusted_road_edge_falls_back_to_the_band(self):
+  def test_an_untrusted_road_edge_still_sees_the_next_lane(self):
     # Unknown counts as ON our road. Over-detecting costs a quiet stretch; under-detecting costs a
     # suggestion to pass into a head-on lane, and those are not the same size.
     adj = AdjacentLane()
@@ -314,7 +314,7 @@ class TestMedians:
                V_EGO, MAX_D)
     assert adj.undivided
 
-  def test_a_missing_road_edge_falls_back_to_the_band(self):
+  def test_a_missing_road_edge_still_sees_the_next_lane(self):
     adj = AdjacentLane()
     sm = FakeSM([self.oncoming_at(3.7)])
     del sm.data['modelV2'].roadEdges
@@ -770,3 +770,41 @@ class TestOncomingNeedsCorroboration:
     adj = upd(AdjacentLane(), FakeSM([self.ONCOMING()]), V_EGO, MAX_D)
     assert adj.left.oncoming_d_rel == 90
     assert adj.left.oncoming_v_abs < -MIN_ONCOMING_MS
+
+
+class TestUnusableRoadEdge:
+  """What happens when the model cannot say where our carriageway ends.
+
+  It used to fall back to the full 15 m band, on the reasoning that over-detecting oncoming traffic
+  only costs a quiet stretch of road. The road disagreed -- "I was on I-15 for a while, and kept
+  saying two-way road" -- because each firing is a ninety second silence, so on a divided highway a
+  leaky fallback is the feature switched off for the drive.
+  """
+
+  FAR = 11.0     # beyond the next lane, inside the old band: across a median, most likely
+  NEXT = 3.7     # the next lane along: opposing traffic on an ordinary two-lane road
+
+  @staticmethod
+  def _onc(lat):
+    return track(90, lat, v_rel=-27.0 - V_EGO)
+
+  def test_something_far_out_with_no_edge_is_not_believed(self):
+    adj = upd(AdjacentLane(), FakeSM([self._onc(self.FAR)], edge_stds=(9.9, 9.9)), V_EGO, MAX_D)
+    assert not adj.undivided
+
+  def test_but_the_next_lane_still_is(self):
+    """The road this veto exists for. Opposing traffic on a two-lane highway is in the next lane,
+    and that claim needs no knowledge of where the carriageway ends."""
+    adj = upd(AdjacentLane(), FakeSM([self._onc(self.NEXT)], edge_stds=(9.9, 9.9)), V_EGO, MAX_D)
+    assert adj.undivided
+    assert adj.left.oncoming
+
+  def test_a_trusted_edge_restores_the_full_band(self):
+    """The cost is scoped, not paid everywhere: with a usable edge, traffic two lanes out on an
+    undivided road -- a centre turn lane -- is still seen."""
+    adj = upd(AdjacentLane(), FakeSM([self._onc(self.FAR)], left_edge=-14.0), V_EGO, MAX_D)
+    assert adj.undivided
+
+  def test_and_a_trusted_edge_still_excludes_the_far_carriageway(self):
+    adj = upd(AdjacentLane(), FakeSM([self._onc(self.FAR)], left_edge=-6.0), V_EGO, MAX_D)
+    assert not adj.undivided
