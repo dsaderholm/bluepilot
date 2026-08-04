@@ -319,24 +319,23 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // 30-60 mph, mirroring FordAngleLow/HighSpeedFactor. 100 = stock behavior for that regime,
     // higher = slows earlier and harder for a given curve, lower = carries more speed through.
     //
-    // The owner runs FordLowSpeedFactor_ang = 0.92 and FordHighSpeedFactor_ang = 0.87, set
-    // deliberately while tuning. An earlier version of this comment derived these two values from
-    // those as 1/f, on the reasoning that scaled-down steering means the car under-turns and needs
-    // to arrive slower. That derivation is NOT sound, and the reason is worth keeping:
+    // NOT derived from this car's angle gains, and that is settled rather than assumed. Two
+    // earlier attempts got it wrong in opposite directions, so the reasoning is recorded here.
     //
-    // A gain below 1.0 can mean two opposite things. Either the rack cannot deliver what the model
-    // asks (a deficit, which slowing compensates for), or the model asks for too much and the
-    // scale corrects it (no deficit, and slowing compensates for nothing). BluePilot's own
-    // documentation says the model's desired steering angle is too aggressive in curves and that
-    // in-curve reduction exists for exactly that -- which favours the second reading. Under it,
-    // 0.87 is a car that tracks correctly, not a weak one, and 1/f would slow for a phantom.
+    // The owner runs FordLowSpeedFactor_ang = 0.92 / FordHighSpeedFactor_ang = 0.87. Per
+    // BluePilot's own writeup of angle control, that gain is a CALIBRATION: path_angle is derived
+    // as curvature * v_ego * gain, which is pure geometry, and the gain exists only because the
+    // PSCM continuously compensates for yaw, sway and roll against a factory model of the vehicle
+    // it believes it is installed in. A correctly dialled gain means the car tracks the path it
+    // was asked to -- there is no steering deficit for a lower corner speed to make up.
     //
-    // So these are set from the OBJECTIVE instead: minimise takeovers, slower is explicitly
-    // acceptable. A uniform modest bump is defensible under either reading. It is not derived and
-    // should not be presented as though it were.
+    // (The over-aggressive-model problem is real but belongs to CURVATURE mode: desired curvature
+    // swinging about predicted on straights, which is what the blend ratio addresses. Angle mode
+    // zeroes c2/c3 and does not have it.)
     //
-    // The question that would settle it: at 1.0, did the car weave and overshoot (correction), or
-    // run wide in curves (deficit)? Only the second justifies scaling these with the angle gains.
+    // So these are set from the objective alone -- minimise takeovers, slower is explicitly
+    // acceptable -- and a flat modest bump is the honest expression of that. If the angle gains
+    // move after the alignment, these do NOT need to move with them.
     {"SmartCruiseControlVisionLowSpeedFactor", {PERSISTENT | BACKUP, INT, "110"}},
     {"SmartCruiseControlVisionHighSpeedFactor", {PERSISTENT | BACKUP, INT, "110"}},
     // BluePilot: how early the curve cycle starts, independent of how much it slows. 100 = stock.
@@ -376,7 +375,10 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"enable_lane_full_mode", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"custom_profile", {PERSISTENT | BACKUP, INT, "0"}},
     {"LC_PID_gain_UI", {PERSISTENT | BACKUP, FLOAT, "3.0"}},
-    {"FordPrefLateralControl", {PERSISTENT | BACKUP, INT, "0"}},
+        // BluePilot upstream defaults this to Curvature (0) "until you're ready to switch". This car
+    // switched and is not going back -- angle mode zeroes c2/c3 and drives path_angle directly,
+    // sidestepping the PSCM's sticky curvature filter entirely.
+    {"FordPrefLateralControl", {PERSISTENT | BACKUP, INT, "1"}},
     {"FordAngleLowSpeedFactor", {PERSISTENT | BACKUP, FLOAT, "1.0"}},
     {"FordAngleHighSpeedFactor", {PERSISTENT | BACKUP, FLOAT, "1.0"}},
 
@@ -392,8 +394,19 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"enable_lane_full_mode_curv", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"custom_profile_curv", {PERSISTENT | BACKUP, INT, "0"}},
     {"LC_PID_gain_UI_curv", {PERSISTENT | BACKUP, FLOAT, "3.0"}},
-    {"FordLowSpeedFactor_ang", {PERSISTENT | BACKUP, FLOAT, "1.0"}},
-    {"FordHighSpeedFactor_ang", {PERSISTENT | BACKUP, FLOAT, "1.0"}},
+        // BluePilot: the owner's dialled-in values, not the upstream 1.0. These are a CALIBRATION,
+    // not a detune. path_angle = curvature * v_ego * gain, which is pure geometry; the gain exists
+    // because the PSCM continuously compensates for yaw/sway/roll against a factory model of the
+    // vehicle it thinks it is in. This car is a Fusion carrying an Edge PSCM and Edge rack on
+    // Fusion suspension, so that model is wrong by construction -- exactly the case BluePilot says
+    // needs dialling in. Its PSCM firmware was also never in the reverse-engineered set, which was
+    // CAN FD only (F-150, Lightning, Mach-E, Expedition, Ranger, Escape).
+    //
+    // Below 1.0 means the wheel turns LESS for the same commanded geometry. At a correctly
+    // calibrated gain the car tracks the path it was asked to. It does NOT mean the car
+    // under-turns and needs to arrive slower -- see the SCC sensitivity comment above.
+    {"FordLowSpeedFactor_ang", {PERSISTENT | BACKUP, FLOAT, "0.92"}},
+    {"FordHighSpeedFactor_ang", {PERSISTENT | BACKUP, FLOAT, "0.87"}},
     {"FordHighSpeedDampening_ang", {PERSISTENT | BACKUP, FLOAT, "1.0"}},
     {"BPLateralSchemeParamsMigratedV1", {PERSISTENT | BACKUP, STRING, "0"}},
 
@@ -413,7 +426,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"FordPrefHevDataAvailable", {CLEAR_ON_MANAGER_START, BOOL, "0"}},
     {"FordPrefHevBattDataAvailable", {CLEAR_ON_MANAGER_START, BOOL, "0"}},
     {"mici_complication", {PERSISTENT | BACKUP, INT, "0"}},
-    {"ShowBrakeStatus", {PERSISTENT | BACKUP, BOOL, "0"}},
+    {"ShowBrakeStatus", {PERSISTENT | BACKUP, BOOL, "1"}},
     {"FordPrefHybridPowerFlowAlternate", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"mici_hide_onroad_fade", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"mici_hide_onroad_border", {PERSISTENT | BACKUP, BOOL, "0"}},
