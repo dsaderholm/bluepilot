@@ -764,6 +764,37 @@ class TestOncomingNeedsCorroboration:
         adj.update(FakeSM([]), V_EGO, MAX_D)
     assert not adj.oncoming_any_side
 
+  def test_three_returns_in_ONE_message_are_not_three_corroborations(self):
+    """The hole the corroboration rule had, and it is the shape of the reported fault.
+
+    Every other test here feeds one track per message, so "three returns" and "three messages" were
+    the same thing and nothing distinguished them. They are not the same thing: the count lived on
+    the per-track path, so a single radar message carrying three tracks satisfied it outright and
+    latched the ninety second veto in one frame -- no time passing, nothing corroborated.
+
+    That is not a hypothetical arrangement of traffic. It is what roadside furniture looks like to
+    this radar: a guardrail, a sign gantry or a barrier run publishes several returns at once, at
+    slightly different ranges, and nothing upstream separates them from vehicles. Which makes it a
+    live candidate for "I was on I-15 for a while, and kept saying two-way road" -- and the
+    mitigation written for that report did not cover it.
+
+    Real opposing traffic is unaffected: it is tracked for seconds across dozens of messages.
+    """
+    adj = AdjacentLane()
+    # One message, three tracks -- a barrier run at slightly different ranges.
+    adj.update(FakeSM([track(88, 3.7, v_rel=-27.0 - V_EGO),
+                       track(90, 3.8, v_rel=-27.0 - V_EGO),
+                       track(92, 3.9, v_rel=-27.0 - V_EGO)]), V_EGO, MAX_D)
+    assert not adj.oncoming_any_side, "one message latched the veto on its own"
+    assert not adj.left.blocks_oncoming
+
+  def test_and_three_separate_messages_still_do(self):
+    """The other half: fixing the above must not stop real corroboration working."""
+    adj = AdjacentLane()
+    for _ in range(ONCOMING_FRAMES):
+      adj.update(FakeSM([self.ONCOMING()]), V_EGO, MAX_D)
+    assert adj.oncoming_any_side
+
   def test_the_evidence_is_kept_from_the_first_sighting(self):
     """So a veto that DOES fire can say what fired it -- the only way to tell a real opposing
     carriageway from a bad return without reading a log."""

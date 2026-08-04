@@ -325,6 +325,8 @@ class AdjacentLaneSide:
     # Corroboration for the veto. See ONCOMING_FRAMES.
     self._oncoming_hits = 0
     self._oncoming_gap_s = 0.0
+    # ONE COUNT PER MESSAGE, however many tracks that message carries. See observe_oncoming.
+    self._counted_this_message = False
     # Three latches, because three different facts decide whether this side is usable and they
     # expire independently.
     #
@@ -390,10 +392,22 @@ class AdjacentLaneSide:
                        adjacent: bool) -> None:
     """Record a vehicle travelling the other way on this side.
 
-    Latches the memory only once ONCOMING_FRAMES returns have corroborated each other. The
+    Latches the memory only once ONCOMING_FRAMES MESSAGES have corroborated each other. The
     evidence is kept from the first sighting either way, so a veto that does fire can say what
     fired it -- which is the only way to tell a real opposing carriageway from a bad return
     without reading a log.
+
+    MESSAGES, NOT TRACKS, and the distinction is the whole point of the rule. The count used to
+    increment per track, so one radar message carrying three returns satisfied three-way
+    corroboration in a single frame -- no time passed and nothing was corroborated by anything.
+    That is not an odd arrangement of traffic; it is what roadside furniture looks like to this
+    radar, which publishes a guardrail or a sign gantry as several tracks at once at slightly
+    different ranges, with nothing upstream to separate them from vehicles. So the mitigation
+    written for "I was on I-15 for a while, and kept saying two-way road" did not cover the most
+    likely way that report happens.
+
+    Costs a genuine sighting nothing: opposing traffic closes at 120+ mph and is tracked across
+    dozens of messages, so it still corroborates in well under half a second.
     """
     self.available = True
     self.oncoming = True
@@ -401,7 +415,9 @@ class AdjacentLaneSide:
     self.oncoming_y_rel = float(y_rel)
     self.oncoming_v_abs = float(v_abs)
     self._oncoming_gap_s = 0.0
-    self._oncoming_hits += 1
+    if not self._counted_this_message:
+      self._counted_this_message = True
+      self._oncoming_hits += 1
     if self._oncoming_hits < ONCOMING_FRAMES:
       return
     self.oncoming_seconds = float(memory_s)
@@ -413,7 +429,10 @@ class AdjacentLaneSide:
     self.same_direction_seconds = float(memory_s)
 
   def clear_oncoming(self) -> None:
+    """Start of a new liveTracks message. Called once per message, which is what makes it the right
+    place to re-arm the per-message corroboration gate -- see observe_oncoming."""
     self.oncoming = False
+    self._counted_this_message = False
 
   def decay_oncoming(self, dt: float) -> None:
     # A partial count that stops being corroborated is discarded rather than carried forward, or
