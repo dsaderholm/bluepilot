@@ -2215,3 +2215,69 @@ class TestWhichHalfOfTheOncomingVetoWorks:
     assert det.blocked_by == Blocked.noLaneAvailable
     assert det.oncoming_seen_seconds == 0.0
     assert det.oncoming_remembered_seconds == 0.0
+
+
+class TestItDoesNotAbortItsOwnPass:
+  """The bug this system would have inflicted on itself the day it started actuating.
+
+  The driver-override test was `leftBlinker or rightBlinker or brakePressed or steeringPressed`,
+  which is exactly right while nothing here commands anything -- every blinker on the car is the
+  driver's. The moment passing assist lights its OWN blinker, that test sees it, calls it driver
+  input, and aborts the pass it just started. Every time.
+
+  Found by researching how BlueCruise handles the same problem, not by any test: nothing could
+  fail, because nothing actuates yet.
+  """
+
+  @staticmethod
+  def _acting(side=Side.left):
+    """A detector mid-maneuver with the blinker lit for `side`, as phase 2 will have it."""
+    det = PassingAssistDetector()
+    det.params = _KeepRightOnParams()
+    det.actuating = True
+    det.maneuver.side = side
+    det.maneuver.phase = Phase.signaling
+    return det
+
+  def test_our_own_blinker_is_not_a_driver_override(self):
+    det = self._acting(Side.left)
+    assert det.maneuver.blinker_on                       # the dry run really is signaling
+    assert not det._driver_override(NS(leftBlinker=True, rightBlinker=False,
+                                       brakePressed=False, steeringPressed=False))
+
+  def test_signaling_the_OTHER_way_calls_it_off(self):
+    """The cancel gesture, and Ford uses the same one on BlueCruise. It falls out of subtracting our
+    own signal rather than being bolted on: the other side is by definition not our side."""
+    det = self._acting(Side.left)
+    assert det._driver_override(NS(leftBlinker=False, rightBlinker=True,
+                                   brakePressed=False, steeringPressed=False))
+
+  def test_the_driver_agreeing_does_not_cancel(self):
+    """Reaching for the stalk the way the car is already going is agreement, not a takeover.
+    Treating it as one is how a system teaches you not to touch it."""
+    det = self._acting(Side.right)
+    assert not det._driver_override(NS(leftBlinker=False, rightBlinker=True,
+                                       brakePressed=False, steeringPressed=False))
+
+  def test_brake_and_steering_still_always_win(self):
+    det = self._acting(Side.left)
+    for kw in ({"brakePressed": True}, {"steeringPressed": True}):
+      cs = dict(leftBlinker=True, rightBlinker=False, brakePressed=False, steeringPressed=False)
+      cs.update(kw)
+      assert det._driver_override(NS(**cs)), f"{kw} did not override"
+
+  def test_with_the_blinker_out_our_side_stops_being_ours(self):
+    """Only while we are actually signaling. Once the maneuver drops the signal, a blinker on that
+    side is the driver's again -- otherwise one pass would deafen us to that stalk for the drive."""
+    det = self._acting(Side.left)
+    det.maneuver.phase = Phase.idle
+    assert not det.maneuver.blinker_on
+    assert det._driver_override(NS(leftBlinker=True, rightBlinker=False,
+                                   brakePressed=False, steeringPressed=False))
+
+  def test_and_none_of_this_applies_until_it_actuates(self):
+    """Phase 1: every blinker on the car is the driver's, and the old behavior must be exact."""
+    det = self._acting(Side.left)
+    det.actuating = False
+    assert det._driver_override(NS(leftBlinker=True, rightBlinker=False,
+                                   brakePressed=False, steeringPressed=False))

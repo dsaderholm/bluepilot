@@ -406,6 +406,11 @@ class PassingAssistDetector:
     # the tail of its memory.
     self.oncoming_seen_seconds = 0.0
     self.oncoming_remembered_seconds = 0.0
+    # Does anything here command the blinker yet? No -- and until it does, _driver_override must
+    # behave exactly as the plain test it replaced, because in phase 1 every blinker on the car
+    # IS the driver's. One flag, flipped when the lamp is actually wired, and the fix is already
+    # in place and tested rather than remembered.
+    self.actuating = False
     # See overtakenSeconds in custom.capnp -- the longest either lane has gone without anyone
     # passing us. Tracked at drive level because the per-side clock resets on every overtake, so the
     # live value can never say how quiet the road got.
@@ -1168,7 +1173,7 @@ class PassingAssistDetector:
     if self.wanted_seconds > 0.0:
       self._save_drive_summary()
 
-    override = bool(CS.leftBlinker or CS.rightBlinker or CS.brakePressed or CS.steeringPressed)
+    override = self._driver_override(CS)
 
     # Keep-right signals when it has DECIDED, not when it first sees somewhere to go -- unlike
     # passing, where the whole point of signaling early is beating Ford's ACC to the brakes.
@@ -1212,6 +1217,38 @@ class PassingAssistDetector:
       self.oncoming_seen_seconds += DT_MDL
     else:
       self.oncoming_remembered_seconds += DT_MDL
+
+  def _own_blinker(self) -> int:
+    """The side WE are lighting the blinker for, or none.
+
+    Answers none until this actuates, so nothing below changes today -- see `self.actuating`.
+    """
+    if not self.actuating:
+      return Side.none
+    return self.maneuver.side if self.maneuver.blinker_on else Side.none
+
+  def _driver_override(self, CS) -> bool:
+    """Is the DRIVER taking over -- as opposed to us watching our own blinker?
+
+    THE BUG THIS EXISTS TO PREVENT is one the system would have inflicted on itself. The test used
+    to be `leftBlinker or rightBlinker or brakePressed or steeringPressed`, which is exactly right
+    while nothing here commands anything. The moment this lights its own blinker, that same test
+    sees the signal, calls it driver input, and aborts the pass it just started -- every time,
+    forever. ICBM already solved this for cruise buttons: what we commanded and what the driver did
+    are trivially separable as long as you bother to subtract your own.
+
+    Subtracting it also hands us the cancel gesture for free, and it is the one Ford uses on
+    BlueCruise: signaling the OTHER way calls the maneuver off. That falls out rather than being
+    added, because the other side is by definition not the side we are signaling.
+
+    And signaling the SAME way no longer aborts, which is the half worth stating. Reaching for the
+    stalk in the direction the car is already going is agreement -- the driver saying "yes, that
+    one" -- and treating agreement as a takeover is how a system teaches you not to touch it.
+    """
+    ours = self._own_blinker()
+    driver_left = bool(CS.leftBlinker) and ours != Side.left
+    driver_right = bool(CS.rightBlinker) and ours != Side.right
+    return bool(driver_left or driver_right or CS.brakePressed or CS.steeringPressed)
 
   def _must_abort(self, side: int) -> bool:
     """Is there something in that lane worth REVERSING a crossing for?
@@ -1362,7 +1399,7 @@ class PassingAssistDetector:
       self._reset_outputs(Blocked.driverChangedLanes)
       return
 
-    if CS.leftBlinker or CS.rightBlinker or CS.brakePressed or CS.steeringPressed:
+    if self._driver_override(CS):
       self._clear_confirmation()
       self.keep_right_seconds = 0.0
       self._reset_outputs(Blocked.driverActive)
