@@ -529,14 +529,15 @@ class SelfdriveD(CruiseHelper):
       # Learn from holds the DRIVER creates. Not ones a pin created -- counting those would make a
       # suggestion evidence for itself and it would re-suggest forever.
       baseline = int(self.icbm.v_baseline)
-      if baseline > 0 and baseline != self._last_observed_hold          and self.icbm.baseline_source != BaselineSource.pinned:
+      if (baseline > 0 and baseline != self._last_observed_hold
+          and self.icbm.baseline_source != BaselineSource.pinned):
         self._last_observed_hold = baseline
         self.pinned_holds.observe_hold(lat, lon, baseline)
       elif baseline == 0:
         self._last_observed_hold = 0
 
-      self.icbm_pin_suggestion = self.pinned_holds.suggestion(lat, lon)
-      return self.pinned_holds.match(lat, lon)
+      matched, self.icbm_pin_suggestion = self.pinned_holds.evaluate(lat, lon)
+      return matched
     except Exception:
       return 0
 

@@ -94,6 +94,13 @@ _SETTINGS_PERIOD_FRAMES = max(int(PARAMS_UPDATE_PERIOD / DT_CTRL), 1)
 # The pin request is a button press and cannot wait three seconds, but it does not need 100 Hz
 # either. 10 Hz is below the threshold where a tap feels delayed and is a tenth of the cost.
 _REQUEST_PERIOD_FRAMES = max(int(0.1 / DT_CTRL), 1)
+# Matching is CHEAP per entry and expensive in aggregate: a haversine against every pin and every
+# observation, at 100 Hz, is tens of thousands of trig calls a second for an answer that cannot
+# change meaningfully between frames. At 80 mph the car moves 0.36 m per frame and the radius is
+# tens of metres, so re-testing at 10 Hz is 3.6 m of travel -- far inside any radius that makes
+# sense. This is the same mistake as the param reads above, in compute rather than I/O, and it was
+# introduced by the fix for that one.
+_MATCH_PERIOD_FRAMES = max(int(0.1 / DT_CTRL), 1)
 
 
 def distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -120,6 +127,7 @@ class PinnedHolds:
     self._obs_raw = None
     self.observations: list[dict] = []
     self.frame = -1
+    self._match_cache = (0, 0)   # (matched speed, suggested speed) from the last evaluation
 
   def update_params(self) -> None:
     """Re-read on the standard settings cadence, then only re-parse if the JSON actually changed.
@@ -181,6 +189,16 @@ class PinnedHolds:
       if d < best_d:
         best, best_d = p, d
     return best, best_d
+
+  def evaluate(self, lat: float, lon: float) -> tuple[int, int]:
+    """(pinned speed here, speed worth suggesting here). Re-tested at 10 Hz, cached between.
+
+    One entry point for both because they walk the same lists and are wanted on the same frame;
+    computing them separately doubled the work for no extra information.
+    """
+    if self.frame % _MATCH_PERIOD_FRAMES == 0:
+      self._match_cache = (self.match(lat, lon), self.suggestion(lat, lon))
+    return self._match_cache
 
   def match(self, lat: float, lon: float) -> int:
     """Pinned speed for this position in display units, or 0 for none.
