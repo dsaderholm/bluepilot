@@ -1836,6 +1836,20 @@ class TestNoRearSensingAtAll:
     assert det.suggestion == Side.none
     assert det.blocked_by == Blocked.blindspotOccupied
 
+  def test_drifting_over_first_and_signalling_after_is_one_manoeuvre(self):
+    """Found by reading rather than by a failure. The blinker's rising edge cleared the widening
+    evidence, so a driver who drifts toward an exit and signals afterwards -- by which time the
+    ramp's own road edge has replaced the widening -- got the four second pause instead of the
+    full one. That is precisely the case the long stand-down exists for."""
+    det = keep_right_det()
+    run(det, int(1.5 / DT_MDL), steering=True, **TestDriverOwnLaneChange.EXIT)
+    run(det, int(1.0 / DT_MDL), steering=True, blinker_right=True, **IN_LEFT_LANE)
+    run(det, 2, **IN_LEFT_LANE)
+    assert det.driver_change_was_exit
+    assert det.driver_change_standdown > 30.0
+
+
+
 
 class TestAgreementWithTheDriver:
   """The closest thing to a readiness score this phase can produce, and the most useful thing

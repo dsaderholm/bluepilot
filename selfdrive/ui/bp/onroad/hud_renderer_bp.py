@@ -519,6 +519,12 @@ class HudRendererBP(HudRendererSP):
         lines.append(line)
       if pa.emergencyAborts:
         lines.append(f"{pa.emergencyAborts} reversed mid-change")
+      # Split by manoeuvre only when they disagree. The counters were kept separate so an unstable
+      # gate could be attributed to one or the other -- and then never shown, which made the whole
+      # justification for splitting them worthless. One number when they agree, two when they
+      # differ, because the difference IS the finding.
+      if pa.keepRightAborts:
+        lines.append(f"{pa.keepRightAborts} backed out moving right")
       # The most useful line here, so it goes first: what actually stopped the passes.
       # A minute of evidence, not five seconds. A percentage over six seconds of data is noise
       # dressed as a finding, and this line is meant to decide what gets worked on next.
@@ -787,6 +793,13 @@ class HudRendererBP(HudRendererSP):
           self._pa_sub_detail = (f"want {pa.referenceSpeed * conv:.0f}"
                                  f"  lead {pa.leadVLead * conv:.0f}"
                                  f"  [{pa.referenceSource}]")
+        elif blocked == 'closingIn' and pa.minApproachActive > 0:
+          # Auto derives this from what the car's own ACC has been measured doing, so the number is
+          # different per car and changes as it learns. Without showing it, "Waiting to get closer"
+          # is a state with no observable meaning -- closer than WHAT.
+          d = pa.minApproachActive if ui_state.is_metric else pa.minApproachActive * 3.28084
+          self._pa_sub_detail = (f"until {d:.0f}{'m' if ui_state.is_metric else 'ft'}"
+                                 f"  -  now {pa.leadDRel * (1 if ui_state.is_metric else 3.28084):.0f}")
         elif blocked == 'oncomingLane':
           # Say how long the veto has left, so a driver who has just turned off a two-lane road
           # onto a divided one can see it counting down rather than wonder if it has hung.

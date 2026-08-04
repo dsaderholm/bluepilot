@@ -909,7 +909,12 @@ class PassingAssistDetector:
         if side == 'left' and self.has_lead:
           self._record_driver_pass()
         self._driver_blinker = side
-        self._signalled_over_widening = False
+        # NOT cleared if the wheel is already being held. Drifting over and signalling afterwards
+        # is one manoeuvre, and clearing here threw away the widening the steering had already
+        # seen -- so an exit taken in that order got the four second pause instead of the full
+        # one, which is the case the stand-down exists for.
+        if self._steer_held_s == 0.0:
+          self._signalled_over_widening = False
       # Right-hand only: the road opening up on the left is not an exit, it is a lane being added.
       if side == 'right' and self.right_widening:
         self._signalled_over_widening = True
@@ -1153,6 +1158,11 @@ class PassingAssistDetector:
       rear, adjacent = self.rear.right, self.adjacent.right
     else:
       return False
+    # The oncoming half is gated on the SETTING, and that deserves stating because it means a
+    # convenience switch can disable a safety behaviour. It is the right way round anyway: the one
+    # reason to turn the oncoming veto off is that it false-fires -- which is exactly what was
+    # reported on I-15 -- and an abort driven by phantom sightings would reverse real lane changes
+    # mid-manoeuvre. Off must mean off, not off-except-when-it-matters-most.
     return rear.demands_abort or (self.oncoming_veto and adjacent.blocks_oncoming)
 
   @property
