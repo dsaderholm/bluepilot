@@ -150,19 +150,21 @@ class CarStateExt:
       # Track which signals we've already processed to avoid duplicate events
       processed_signals = set()
 
-      # CcAslButtnSetIncPress: setCruise (9) when disabled, accelCruise (3) when enabled
+      # CcAslButtnSetIncPress is the "RES +" button: resumeCruise (10) when cruise is disabled,
+      # accelCruise (3) when enabled. It emitted setCruise (9) when disabled, which reported every
+      # resume as a set and discarded the driver's hold -- see the BUTTONS comment in values_ext.
       if button.can_msg == "CcAslButtnSetIncPress" and button.can_msg not in processed_signals:
         processed_signals.add(button.can_msg)
         signal_state = state
         prev_accel_state = self.button_states.get(3, False)  # accelCruise
-        prev_set_state = self.button_states.get(9, False)  # setCruise
+        prev_set_state = self.button_states.get(10, False)  # resumeCruise
 
         if signal_state and (prev_accel_state != signal_state or prev_set_state != signal_state):
           # Choose event type based on cruise state
           if cruise_enabled:
             event_type = 3  # accelCruise
           else:
-            event_type = 9  # setCruise
+            event_type = 10  # resumeCruise
 
           # Emit the appropriate event
           if self.button_states.get(event_type, False) != signal_state:
@@ -175,7 +177,7 @@ class CarStateExt:
 
           # Update state for both event types
           self.button_states[3] = signal_state  # accelCruise
-          self.button_states[9] = signal_state  # setCruise
+          self.button_states[10] = signal_state  # resumeCruise
         elif not signal_state and (prev_accel_state != signal_state or prev_set_state != signal_state):
           # Button released - emit release ONLY for the event type that was actually emitted on press
           last_emitted = self.last_emitted_event.get(button.can_msg)

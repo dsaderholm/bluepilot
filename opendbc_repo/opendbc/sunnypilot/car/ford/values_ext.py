@@ -18,22 +18,36 @@ Button = namedtuple('Button', ['event_type', 'can_addr', 'can_msg', 'values'])
 # Ford cruise control buttons are in the Steering_Data_FD1 message (CAN ID 131)
 # These signals are 1-bit flags: 1 = pressed, 0 = not pressed
 #
-# Note: Some buttons are combo buttons that emit multiple ButtonEvent types:
-# - CcAslButtnSetIncPress emits both accelCruise (type 3) and setCruise (type 9)
-# - CcAslButtnCnclResPress emits both cancel (type 5) and resumeCruise (type 10)
+# Note: Some buttons are combo buttons that emit multiple ButtonEvent types, chosen by cruise state.
 #
-# There is also a separate CcAslButtnSetPress signal for the standalone "Set" button,
-# but based on user mapping, setCruise is mapped to the combo button instead.
+# BluePilot: CcAslButtnSetIncPress emitted setCruise when cruise was off. On this wheel that signal
+# comes from the button labelled "RES +" -- confirmed, because it is the signal the ICBM press path
+# captures when the owner builds a hold with the + side. Pressing RES to resume was therefore
+# reported to openpilot as SET, which is the one event that DISCARDS the driver's hold.
+#
+# That is the original "holds are not remembered on resume" report. The behavioural detector added
+# later works around it by comparing the landed set speed against the pre-cancel value, and that is
+# why holds survive today -- the label was still wrong underneath.
+#
+# The wheel is CNCL / RES+ / SET- with a separate dedicated CNCL, so the correct reading is:
+#   RES +   -> resume when off, increase when engaged
+#   SET -   -> set when off, decrease when engaged
+#   CNCL    -> cancel
+# which is what the mapping below now says.
+#
+# There is also a separate CcAslButtnSetPress signal for a standalone "Set" button, unused here --
+# this wheel has no such button.
 BUTTONS = [
-  # Combo button: Set + Increase (emits accelCruise when enabled, setCruise when disabled)
+  # RES + : resume when cruise is off, increase the set speed when engaged.
   Button(ButtonType.accelCruise, "Steering_Data_FD1", "CcAslButtnSetIncPress", [1]),
-  Button(ButtonType.setCruise, "Steering_Data_FD1", "CcAslButtnSetIncPress", [1]),
+  Button(ButtonType.resumeCruise, "Steering_Data_FD1", "CcAslButtnSetIncPress", [1]),
 
-  # Combo button: Set + Decrease (emits decelCruise when enabled, setCruise when disabled)
+  # SET - : set when cruise is off, decrease the set speed when engaged.
   Button(ButtonType.decelCruise, "Steering_Data_FD1", "CcAslButtnSetDecPress", [1]),
   Button(ButtonType.setCruise, "Steering_Data_FD1", "CcAslButtnSetDecPress", [1]),
 
-  # Combo button: Cancel/Resume (emits cancel when enabled, resumeCruise when disabled)
+  # CNCL : a dedicated button on this wheel. Ford still names the signal Cncl/Res and reports a
+  # resume from it when cruise is off, which is harmless -- resume is now reachable from either.
   Button(ButtonType.cancel, "Steering_Data_FD1", "CcAslButtnCnclResPress", [1]),
   Button(ButtonType.resumeCruise, "Steering_Data_FD1", "CcAslButtnCnclResPress", [1]),
 
