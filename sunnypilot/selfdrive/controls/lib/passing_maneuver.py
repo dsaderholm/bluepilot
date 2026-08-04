@@ -77,6 +77,17 @@ ABORT_DURATION_S = 2.5
 #
 # Long enough for the situation that caused it to actually resolve. A vehicle that arrived fast
 # enough to force an abort is past and gone well inside this.
+#
+# APPLIES TO COLLISION ABORTS ONLY, and that is deliberate for phase 1 but must NOT stay that way
+# once this actuates. A gate going red during `signaling` backs out and is free to re-signal on the
+# very next frame, so a flickering gate -- BLIS is the raw carState bool, with no debounce of its
+# own -- strobes the turn signal. Right now that is the measurement working correctly: `aborts` is
+# the whole output of this module, and standing down after a gate abort would suppress exactly the
+# instability it exists to count, under-reporting a flickering gate as one event per ten seconds.
+#
+# When a control is wired up, the count has served its purpose and the strobe becomes the only thing
+# that matters. Extend this to gate aborts then, and debounce whichever gate the drive data shows is
+# doing it.
 ABORT_STANDDOWN_S = 10.0
 
 

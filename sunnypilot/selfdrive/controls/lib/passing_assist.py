@@ -55,9 +55,9 @@ from openpilot.sunnypilot.selfdrive.controls.lib.adjacent_lane import (
 from openpilot.sunnypilot.selfdrive.controls.lib.overtake_progress import OvertakeProgress
 from openpilot.sunnypilot.selfdrive.controls.lib.passing_maneuver import PassingManeuver
 
-Phase = custom.LongitudinalPlanSP.PassingAssist.Maneuver
 from openpilot.sunnypilot.selfdrive.controls.lib.rear_approach import RearApproach
 
+Phase = custom.LongitudinalPlanSP.PassingAssist.Maneuver
 Side = custom.LongitudinalPlanSP.PassingAssist.Side
 Blocked = custom.LongitudinalPlanSP.PassingAssist.Blocked
 Reason = custom.LongitudinalPlanSP.PassingAssist.Reason
@@ -622,15 +622,10 @@ class PassingAssistDetector:
     left_std = float(stds[RE_LEFT]) if len(stds) > RE_LEFT else 1e3
     right_std = float(stds[RE_RIGHT]) if len(stds) > RE_RIGHT else 1e3
 
-    # Both channels must agree before a side is called available. Requiring agreement is the
-    # conservative reading and keeps phase 2 honest if this ever stops being log-only.
-    # BluePilot: is there another lane beyond the one to our right? Exit and merge lanes are
-    # always the outermost, so a target lane with a further lane outboard of it cannot be one.
-    # Measured from the far-right lane line (laneLines[3]) out to the right road edge: on a
-    # three-lane road that gap is another lane, and on a two-lane road it collapses to the
-    # shoulder. This is what makes "move right" safe from exits without any map data.
     self._road_widening(model, right_std)
 
+    # Both channels must agree before a side is called available. Requiring agreement is the
+    # conservative reading and keeps phase 2 honest if this ever stops being log-only.
     self.left_geometry_ok = (self.left_line_prob >= MIN_ADJACENT_LINE_PROB and
                              self.left_edge_gap >= MIN_LANE_WIDTH_M and
                              left_std <= MAX_ROAD_EDGE_STD)
@@ -838,9 +833,6 @@ class PassingAssistDetector:
         "crawlLongest": round(self.overtake.crawl_longest, 1),
         "aborts": int(self.maneuver.aborts),
         "accOnsetMax": round(self.acc_onset_max, 1),
-        # The evidence behind the LAST oncoming veto of the drive. Kept because the live panel
-        # only shows it while the veto is up, and catching that means glancing at the screen at
-        # the right moment on a road where it may only fire once.
         "driverPasses": int(self.driver_passes),
         "driverPassesAgreed": int(self.driver_passes_agreed),
         "driverPassLead": round(self.driver_pass_lead_s, 1),
@@ -854,6 +846,9 @@ class PassingAssistDetector:
         "longestIgnored": round(self.longest_ignored, 1),
         "oncomingSeen": round(self.oncoming_seen_seconds, 1),
         "oncomingRemembered": round(self.oncoming_remembered_seconds, 1),
+        # The evidence behind the LAST oncoming veto of the drive. Kept because the live panel only
+        # shows it while the veto is up, and catching that means glancing at the screen at the right
+        # moment on a road where it may only fire once.
         "oncomingDRel": round(self._last_oncoming[0], 1),
         "oncomingVAbs": round(self._last_oncoming[1], 1),
       })
