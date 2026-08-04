@@ -192,6 +192,13 @@ Onroad HUD drawing *is* checkable, and the check is **trustworthy**:
 device scale. The owner confirmed on 2026-08-03, after driving it, that the car looks *exactly*
 like the preview renders -- colors, sizes, spacing, all of it.
 
+`selfdrive/ui/bp/onroad/tools/preview_passing_panel.py` does the same for the passing-assist
+panel, which is now that whole feature's readout -- every gate, the dry run of the manoeuvre, the
+slow-pass warning and the drive summary all land in the same three lines. It prints each panel's
+pixel size and asserts none exceeds the screen. **Add a scene to its SCENES whenever a new panel
+state is introduced**; the first render found three readouts that were being assembled and then
+silently dropped, which the full suite had passed over.
+
 So treat a preview render as the answer, not an approximation. Iterate on it until it looks right
 and ship that; do not caveat UI work with "we won't know until you drive it", and do not ask the
 owner to judge a layout you have not rendered. It calls the real drawing methods out of
