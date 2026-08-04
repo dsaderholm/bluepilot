@@ -67,6 +67,26 @@ class DesireHelper:
     self.alc.update_params()
     self.lane_turn_controller.update_params()
     v_ego = carstate.vEgo
+    # BluePilot: `one_blinker` means A BLINKER IS ON. It does NOT mean the driver asked for
+    # anything, and the day openpilot commands the signal that difference becomes a hazard rather
+    # than a nicety. READ THIS BEFORE WIRING THE BLINKER UP.
+    #
+    # The plan is that a cancelled lane change signals the way it is going back -- which is correct
+    # driving and what was asked for. Trace it through this state machine as it stands:
+    #
+    #   revert starts, we light the opposite signal; on this car a tap runs eight flashes, ~5.5 s
+    #   the reverse crossing takes ~2-4 s, then laneChangeFinishing fades the lane lines back in
+    #   at the end of that, OUR signal is still flashing -- and the line below reads `one_blinker`
+    #   and arms preLaneChange, whereupon the nudgeless timer starts ANOTHER lane change, the same
+    #   way we just went
+    #
+    # A revert that launches a second lane change is worse than no revert. The same trap exists at
+    # `off -> preLaneChange` above, on the rising edge.
+    #
+    # The fix is not a special case in any one branch: it is that `one_blinker` must mean the
+    # DRIVER's blinker everywhere in this function, with our own commanded signal subtracted --
+    # exactly what PassingAssistDetector._driver_override already does for its own gates, and for
+    # exactly the same reason. Do that once, here, rather than patching the branches that bite.
     one_blinker = carstate.leftBlinker != carstate.rightBlinker
     # BluePilot: see AutoLaneChangeController.should_cancel -- the blinker on this car turns itself
     # off after its one-touch flashes, and how long it was on is what separates that from a cancel.
