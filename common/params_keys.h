@@ -257,7 +257,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // to reject a single bad frame of lead tracking.
     {"PassingAssistBlinkerLead", {PERSISTENT | BACKUP, INT, "1"}},
     // -1 = Auto (from the measured ACC braking onset), 0 = off, otherwise metres.
-    {"PassingAssistMinApproach", {PERSISTENT | BACKUP, INT, "-1"}},
+    {"PassingAssistMinApproach", {PERSISTENT | BACKUP, INT, "0"}},
     // The previous drive's measurements, so parking does not throw them away. Written
     // periodically by the detector, read by the panel when the current drive has nothing yet.
     {"PassingAssistLastDrive", {PERSISTENT | BACKUP, JSON}},
@@ -285,7 +285,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // from an exit-only or merge lane, so the suggestion can mean "take the exit". Left in place
     // because the observer still records what it WOULD have said, which measures how often that
     // actually bites; it is not a feature to lean on until map data can distinguish the two.
-    {"PassingAssistKeepRight", {PERSISTENT | BACKUP, BOOL, "0"}},
+    {"PassingAssistKeepRight", {PERSISTENT | BACKUP, BOOL, "1"}},
     {"PassingAssistKeepRightDelay", {PERSISTENT | BACKUP, INT, "10"}},  // seconds
     // BluePilot: seconds the lane to the right must have existed CONTINUOUSLY before moving into
     // it is suggested. An exit lane did not exist a moment ago and now does; a through lane has
@@ -309,8 +309,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // BluePilot: draw oncoming vehicles too, in their own colour. Separate from the
     // same-direction markers because the roads differ: this only ever appears where the
     // opposing carriageway is within radar reach, which on a divided highway it is not.
-    {"ShowOncomingSpeeds", {PERSISTENT | BACKUP, BOOL, "0"}},
-    {"ShowAdjacentLanes", {PERSISTENT | BACKUP, BOOL, "0"}},
+    {"ShowOncomingSpeeds", {PERSISTENT | BACKUP, BOOL, "1"}},
+    {"ShowAdjacentLanes", {PERSISTENT | BACKUP, BOOL, "1"}},
     // BluePilot: never suggest a pass on a road the radar has seen oncoming traffic on. DEFAULT
     // ON, and it is the only gate here that guards against a genuinely dangerous suggestion rather
     // than a merely wasted one -- the camera cannot tell an oncoming lane from a passing lane, so
@@ -637,6 +637,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // STRING, not BOOL -- see the note in params_migration: a BOOL marker made put("1") raise, so
     // the marker never stuck and the migration re-ran (and re-clobbered) on every boot.
     {"BPPassingAssistRenameMigrated", {PERSISTENT | BACKUP, STRING, "0"}},
+    {"BPPassingAssistTestingMigrated", {PERSISTENT | BACKUP, STRING, "0"}},
 
     {"disable_BP_lat_UI", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"disable_BP_long_UI", {PERSISTENT | BACKUP, BOOL, "0"}},
@@ -659,7 +660,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"ShowBrakeStatus", {PERSISTENT | BACKUP, BOOL, "1"}},
     // BluePilot: the passing-assist panel. Every gate, the dry run of the manoeuvre and the drive
     // summary all land here -- it is the whole feature's readout. Nothing acts; this only displays.
-    {"ShowPassingAssist", {PERSISTENT | BACKUP, BOOL, "0"}},
+    {"ShowPassingAssist", {PERSISTENT | BACKUP, BOOL, "1"}},
     // BluePilot: one-shot stationary turn-signal actuation test. 0 off, 1 left, 2 right.
     // NOT persistent and NOT backed up: cleared on manager start and self-cleared when the pulse
     // ends, so it cannot survive a reboot and cannot repeat without a fresh deliberate request.

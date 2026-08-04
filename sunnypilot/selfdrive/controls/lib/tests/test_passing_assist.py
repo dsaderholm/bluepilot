@@ -506,12 +506,26 @@ class TestRoadNameLogging:
     assert det.road_name == ""
 
 
-class TestKeepRightIsOptIn:
-  def test_disabled_by_default(self):
-    """The default must stay off: an exit-only lane is geometrically a through lane."""
+class TestKeepRightIsOnForMeasurement:
+  """It shipped OFF, because an exit-only lane is geometrically a through lane and a suggestion
+  there can mean take the exit. Two things guard that now -- the road opening up ahead, and the
+  lane having been continuously present -- and both are unproven on real roads.
+
+  On, deliberately, for exactly that reason. Nothing actuates, so a wrong suggestion costs a wrong
+  line on a screen and buys the measurement that would settle it. Off, it is the one built feature
+  that can never produce any data at all.
+  """
+
+  def test_it_is_on_by_default_now(self):
     det = run(PassingAssistDetector(), KEEP_RIGHT_FRAMES, status=False, **IN_LEFT_LANE)
+    assert det.suggestion == Side.right
+    assert det.reason == Reason.keepRight
+
+  def test_and_the_gates_still_hold(self):
+    """On is not the same as unguarded. A lane that just appeared is still refused."""
+    det = run(PassingAssistDetector(), KEEP_RIGHT_FRAMES, status=False, **NO_RIGHT_LANE)
+    run(det, int(11.0 / DT_MDL), status=False, **IN_LEFT_LANE)
     assert det.suggestion == Side.none
-    assert det.keep_right_seconds == 0.0
 
 
 class TestRearApproachGate:

@@ -210,10 +210,12 @@ class PassingAssistSettingsLayout(Widget):
     self._keep_right = toggle_item_sp(
       title=tr("Keep Right Except To Pass"),
       description=tr("Also work out when you could return to a lane on your right because nothing "
-                     "is holding you back. Off by default: the camera cannot tell a through lane "
-                     "from an exit-only or merge lane, so a suggestion here can mean take the "
-                     "exit. Exit detection watches whether the road opens up ahead, which helps "
-                     "but is unproven."),
+                     "is holding you back. The hard part is that a camera cannot tell a through "
+                     "lane from an exit-only one, so a suggestion here can mean take the exit. Two "
+                     "things guard it: the road opening up ahead, and the lane having been "
+                     "continuously there for a while. Both are unproven on real roads, which is "
+                     "why this is on -- nothing acts on it, so a wrong suggestion costs a wrong "
+                     "line on screen and buys a measurement."),
       param="PassingAssistKeepRight")
 
     self._keep_right_delay = option_item_sp(

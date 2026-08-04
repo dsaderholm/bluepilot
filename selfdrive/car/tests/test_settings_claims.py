@@ -72,3 +72,23 @@ def test_every_described_param_exists(path):
   defaults = _defaults()
   missing = [p for p, _ in _items(path) if p not in defaults]
   assert not missing, f"described but not declared: {missing}"
+
+
+def test_the_measurement_readouts_ship_on():
+  """This phase's only output is the panel. A device that measures a whole drive and shows nobody
+  is the one configuration that wastes the drive, so these three cannot quietly go back to off --
+  which is what a merge taking upstream's side of a default would do.
+
+  The migration in params_migration.py covers a device that has already written them; this covers a
+  fresh one, and the two must not disagree.
+  """
+  d = _defaults()
+  for key in ("ShowPassingAssist", "ShowAdjacentLanes", "ShowOncomingSpeeds"):
+    assert d.get(key) == "1", f"{key} ships off; the drive would be measured and never shown"
+
+
+def test_close_in_is_off_while_measuring():
+  """Auto holds the suggestion until roughly where ACC starts braking, which directly shortens the
+  lead time -- the number that measures the entire claimed benefit. Right for the finished system,
+  wrong for measuring it."""
+  assert _defaults().get("PassingAssistMinApproach") == "0"
