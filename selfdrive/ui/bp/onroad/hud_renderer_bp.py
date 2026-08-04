@@ -232,6 +232,7 @@ class HudRendererBP(HudRendererSP):
     self._pa_alert = False
     self._pa_color = COLORS.WHITE
     self._pa_confirm_target = float(self._bp_params.get("PassingAssistConfirmTime", return_default=True) or 2)
+    self._pa_blinker_lead = float(self._bp_params.get("PassingAssistBlinkerLead", return_default=True) or 1)
     # BluePilot: suggestions are transient -- a glance at the wrong moment misses one entirely, and
     # "I saw nothing" is indistinguishable from "it never ran". A per-drive count makes the answer
     # readable at any time without watching continuously or opening a log.
@@ -263,6 +264,9 @@ class HudRendererBP(HudRendererSP):
         # Needed as the progress-bar denominator, so the bar means "how close to the threshold
         # you actually configured" rather than to a hardcoded guess.
         self._pa_confirm_target = float(self._bp_params.get("PassingAssistConfirmTime", return_default=True) or 2)
+        # Refreshed here as well as in __init__, or the setting would only take effect on a reboot
+        # -- which reads as the control doing nothing.
+        self._pa_blinker_lead = float(self._bp_params.get("PassingAssistBlinkerLead", return_default=True) or 1)
 
     # 7.0 reads the lateral mode from controllerStateBP rather than re-deriving it from params.
     if self._show_lateral_control:
@@ -422,6 +426,44 @@ class HudRendererBP(HudRendererSP):
         pass
 
 
+  def _draw_manoeuvre(self, pa) -> bool:
+    """The dry run: what a fully automatic pass WOULD be doing right now. Returns True if it owns
+    the line this frame.
+
+    Nothing here is actuating anything and the wording has to keep saying so, every phase, or a
+    driver glancing at "SIGNALLING LEFT" will reasonably conclude the car did it. Hence the
+    "would" line under every phase, and no chevrons -- those mean "act on this" everywhere else on
+    this screen.
+    """
+    try:
+      phase = str(pa.manoeuvre)
+    except (AttributeError, KeyError):
+      return False
+    if phase in ('idle', 'confirming', 'waiting'):
+      return False   # nothing committed yet; the verdict display below is the better readout
+
+    side = str(pa.manoeuvreSide).upper()
+    self._pa_alert = True
+    self._pa_color = rl.Color(190, 150, 235, 255)   # not the green of a real suggestion
+
+    if phase == 'signalling':
+      self._pa_main = f"WOULD SIGNAL {side}"
+      self._pa_sub = "waiting before moving"
+      self._pa_progress = min(1.0, pa.manoeuvreSeconds / max(self._pa_blinker_lead, 0.1))
+    elif phase == 'changing':
+      self._pa_main = f"WOULD BE CHANGING {side}"
+      self._pa_sub = "blinker on, steering across"
+      self._pa_progress = min(1.0, pa.manoeuvreSeconds / 4.0)
+    else:
+      self._pa_main = "WOULD BE DONE"
+      self._pa_sub = "blinker off"
+
+    # Aborts are the number this whole dry run exists to produce, so they are on screen rather
+    # than only in the log -- a drive where this climbs is a drive that answered the question.
+    if pa.manoeuvreAborts:
+      self._pa_sub_detail = f"{pa.manoeuvreAborts} backed out this drive"
+    return True
+
   def _update_passing_assist(self) -> None:
     """BluePilot: build the passing-assist panel state.
 
@@ -472,6 +514,12 @@ class HudRendererBP(HudRendererSP):
       return
 
     suggestion = str(pa.suggestion)
+
+    # The dry run takes the line whenever a sequence is actually running. It is strictly more
+    # informative than the single-frame verdict below -- it says the same thing plus where in the
+    # manoeuvre it is -- and it is the readout the whole phase-2 question turns on.
+    if self._draw_manoeuvre(pa):
+      return
 
     # Rising edge only: a suggestion that holds for 30 s is one event, not 600.
     suggesting = suggestion != 'none'

@@ -558,6 +558,32 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       adjacentSlow @12;      # the lane is there and clear behind, but full of traffic no faster
       oncomingLane @13;      # two-way road: the lane to the left is theirs, not a passing lane
     }
+
+    # BluePilot: the manoeuvre this WOULD perform, run as a dry run. Nothing actuates; see
+    # passing_manoeuvre.py. The detector above answers "would I suggest a pass this frame", which
+    # is a single frame's verdict and NOT what decides whether an automatic system works -- that
+    # depends on whether the verdict holds still long enough to act on. These fields make the
+    # sequence visible over time, and `manoeuvreAborts` is the number the whole thing is for.
+    manoeuvre @41 :Manoeuvre;
+    manoeuvreSeconds @42 :Float32;   # time in the current phase
+    manoeuvreSide @43 :Side;         # the side the sequence committed to
+    blinkerWouldBeOn @44 :Bool;      # on through the crossing, out when it completes
+    steeringWouldBeActive @45 :Bool;
+
+    # Sequences that reached `signalling` and then backed out -- a blinker shown to traffic behind
+    # for a manoeuvre that did not happen. Near zero on a drive means the gates are stable enough
+    # to act on. Anything else names an unstable gate that no amount of reading the code would
+    # have found.
+    manoeuvreAborts @46 :UInt16;
+
+    enum Manoeuvre {
+      idle @0;         # nothing warranted
+      confirming @1;   # a slower vehicle is being confirmed, timer running
+      waiting @2;      # confirmed, and a gate is what is stopping us -- see blockedBy
+      signalling @3;   # blinker would be on, holding before any movement
+      changing @4;     # crossing. COMMITTED: gates can no longer call it off, only the driver can
+      finishing @5;    # across, blinker out
+    }
   }
 
   struct DynamicExperimentalControl {

@@ -80,6 +80,17 @@ class PassingAssistSettingsLayout(Widget):
       label_callback=lambda v: f"{v} s",
       inline=True)
 
+    self._blinker_lead = option_item_sp(
+      title=tr("Signal Before Moving"),
+      description=tr("How long the turn signal would be on before the lane change starts. Nothing "
+                     "is actuated yet -- this drives the dry run on screen, which shows the whole "
+                     "sequence a fully automatic pass would go through so it can be judged from a "
+                     "real drive before anything is wired to a control."),
+      param="PassingAssistBlinkerLead",
+      min_value=0, max_value=5, value_change_step=1,
+      label_callback=lambda v: f"{v} s",
+      inline=True)
+
     self._max_distance = option_item_sp(
       title=tr("Look Ahead"),
       description=tr("How far ahead to notice a slower vehicle. Higher decides earlier, which is "
@@ -209,6 +220,7 @@ class PassingAssistSettingsLayout(Widget):
       SectionHeader(tr("When To Suggest A Pass")),
       self._min_deficit,
       self._confirm_time,
+      self._blinker_lead,
       self._max_distance,
 
       SectionHeader(tr("The Lane You Would Move Into")),

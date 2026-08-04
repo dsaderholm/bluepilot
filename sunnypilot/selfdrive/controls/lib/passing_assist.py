@@ -52,6 +52,7 @@ from openpilot.sunnypilot import PARAMS_UPDATE_PERIOD
 from openpilot.sunnypilot.selfdrive.controls.lib.adjacent_lane import (
   AdjacentLane, path_offset, DEFAULT_ONCOMING_MEMORY_S,
 )
+from openpilot.sunnypilot.selfdrive.controls.lib.passing_manoeuvre import PassingManoeuvre
 from openpilot.sunnypilot.selfdrive.controls.lib.rear_approach import RearApproach
 
 Side = custom.LongitudinalPlanSP.PassingAssist.Side
@@ -292,6 +293,8 @@ class PassingAssistDetector:
     self._settle_s = 1e3
     self._lka_prev = False
     self.max_distance_m = float(DEFAULT_MAX_DISTANCE_M)
+    # The dry run: what a fully-automatic pass would be doing right now. Actuates nothing.
+    self.manoeuvre = PassingManoeuvre()
 
   def update_params(self) -> None:
     if self.frame % int(PARAMS_UPDATE_PERIOD / DT_MDL) == 0:
@@ -305,6 +308,7 @@ class PassingAssistDetector:
       self.oncoming_veto = self.params.get_bool("PassingAssistOncomingVeto")
       self.strict_two_way = self.params.get_bool("PassingAssistStrictTwoWay")
       self.oncoming_memory_s = float(self.params.get("PassingAssistOncomingMemory", return_default=True))
+      self.manoeuvre.blinker_lead_s = float(self.params.get("PassingAssistBlinkerLead", return_default=True))
       self.settle_time_s = float(self.params.get("PassingAssistSettleTime", return_default=True))
       self.suspend_minutes = self.params.get("PassingAssistSuspendMinutes", return_default=True)
       self.max_distance_m = float(self.params.get("PassingAssistMaxDistance", return_default=True))
@@ -639,6 +643,28 @@ class PassingAssistDetector:
     return best
 
   def update(self, sm, v_cruise: float, long_enabled: bool, speed_limit_target: float = 0.0) -> None:
+    """Decide, then advance the dry run of the manoeuvre that decision would produce."""
+    self._decide(sm, v_cruise, long_enabled, speed_limit_target)
+    self._run_manoeuvre(sm['carState'])
+
+  def _run_manoeuvre(self, CS) -> None:
+    """Feed the dry run. See passing_manoeuvre.py -- this actuates nothing.
+
+    Scoped to PASSING only. Keep-right is a different manoeuvre with different gates and a
+    different urgency, and folding it in here would make the abort count -- the one number this
+    produces -- mean two things at once.
+    """
+    confirmed = self.approach_seconds >= self.persistence_s
+    self.manoeuvre.update(
+      suggested=self.suggestion if self.reason == Reason.passing else Side.none,
+      confirming=self.approach_seconds > 0.0 and not confirmed,
+      confirmed=confirmed,
+      # Exactly the inputs the detector already treats as the driver taking over. Reusing the same
+      # test rather than restating it means the dry run cannot disagree with the gate above it.
+      driver_override=bool(CS.leftBlinker or CS.rightBlinker or CS.brakePressed or CS.steeringPressed),
+    )
+
+  def _decide(self, sm, v_cruise: float, long_enabled: bool, speed_limit_target: float = 0.0) -> None:
     """
     Args:
       sm: SubMaster with carState, radarState, modelV2 and (BluePilot, Ford) carStateBP
@@ -999,6 +1025,16 @@ class PassingAssistDetector:
     passingAssist.suspendedSeconds = float(pa.suspended_seconds)
     passingAssist.referenceSpeed = float(pa.reference_speed)
     passingAssist.referenceSource = pa.reference_source
+
+    # The dry run. See passing_manoeuvre.py.
+    passingAssist.manoeuvre = pa.manoeuvre.phase
+    passingAssist.manoeuvreSeconds = float(pa.manoeuvre.phase_seconds)
+    passingAssist.manoeuvreSide = pa.manoeuvre.side
+    passingAssist.blinkerWouldBeOn = pa.manoeuvre.blinker_on
+    passingAssist.steeringWouldBeActive = pa.manoeuvre.steering_active
+    # Saturates rather than wraps: a UInt16 rolling over to 0 would read as a clean drive, which is
+    # the exact opposite of what a huge abort count means.
+    passingAssist.manoeuvreAborts = min(pa.manoeuvre.aborts, 65535)
     for dest, side in ((passingAssist.adjacentLeft, pa.adjacent.left),
                        (passingAssist.adjacentRight, pa.adjacent.right)):
       dest.available = side.available
