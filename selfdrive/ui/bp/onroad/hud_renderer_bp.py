@@ -234,6 +234,7 @@ class HudRendererBP(HudRendererSP):
     self._pa_color = COLORS.WHITE
     self._pa_confirm_target = float(self._bp_params.get("PassingAssistConfirmTime", return_default=True) or 2)
     self._pa_blinker_lead = float(self._bp_params.get("PassingAssistBlinkerLead", return_default=True) or 1)
+    self._pa_crawl_target = float(self._bp_params.get("PassingAssistCrawlTime", return_default=True) or 8)
     # BluePilot: suggestions are transient -- a glance at the wrong moment misses one entirely, and
     # "I saw nothing" is indistinguishable from "it never ran". A per-drive count makes the answer
     # readable at any time without watching continuously or opening a log.
@@ -268,6 +269,7 @@ class HudRendererBP(HudRendererSP):
         # Refreshed here as well as in __init__, or the setting would only take effect on a reboot
         # -- which reads as the control doing nothing.
         self._pa_blinker_lead = float(self._bp_params.get("PassingAssistBlinkerLead", return_default=True) or 1)
+        self._pa_crawl_target = float(self._bp_params.get("PassingAssistCrawlTime", return_default=True) or 8)
 
     # 7.0 reads the lateral mode from controllerStateBP rather than re-deriving it from params.
     if self._show_lateral_control:
@@ -427,6 +429,21 @@ class HudRendererBP(HudRendererSP):
         pass
 
 
+  def _draw_crawl(self, pa) -> bool:
+    """A pass that is taking too long. Returns True if it owns the line this frame."""
+    try:
+      if pa.crawlSeconds < self._pa_crawl_target:
+        return False
+    except (AttributeError, KeyError):
+      return False
+
+    side = "LEFT" if str(pa.crawlSide) == 'left' else "RIGHT"
+    self._pa_main = f"SLOW PASS  {pa.crawlSeconds:.0f}s"
+    self._pa_sub = f"barely gaining on the car {side.lower()}"
+    self._pa_color = rl.Color(240, 175, 60, 255)
+    self._pa_alert = True
+    return True
+
   def _draw_manoeuvre(self, pa) -> bool:
     """The dry run: what a fully automatic pass WOULD be doing right now. Returns True if it owns
     the line this frame.
@@ -521,6 +538,11 @@ class HudRendererBP(HudRendererSP):
       return
 
     suggestion = str(pa.suggestion)
+
+    # A grinding pass outranks the dry run: it is happening NOW, in the other lane, and it is the
+    # one state the driver might actually want to do something about.
+    if self._draw_crawl(pa):
+      return
 
     # The dry run takes the line whenever a sequence is actually running. It is strictly more
     # informative than the single-frame verdict below -- it says the same thing plus where in the

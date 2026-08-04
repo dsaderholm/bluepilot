@@ -605,6 +605,23 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     # is the good case and the one to hope for.
     accBrakingOnsetDRel @49 :Float32;
 
+    # BluePilot: is this pass GRINDING? See overtake_progress.py.
+    #
+    # The one circumstance in which passing assist may ever touch the set speed -- crawling
+    # alongside a car you are barely faster than. Measured before it is acted on, because how often
+    # it happens and how long it lasts are what should set the trigger and the size of the nudge,
+    # and neither is guessable.
+    #
+    # crawlAfterSuggestion labels provenance rather than gating anything: a forward radar cannot
+    # honestly tell whether we MEANT to overtake, so the condition is measured and the association
+    # recorded separately. Crawls clustering after suggestions would be a finding; crawls that do
+    # not would be a more interesting one.
+    crawlSeconds @50 :Float32;
+    crawlLongestSeconds @51 :Float32;   # worst this drive
+    crawlEvents @52 :UInt16;            # crawls that passed the threshold
+    crawlSide @53 :Side;
+    crawlAfterSuggestion @54 :Bool;
+
     enum Manoeuvre {
       idle @0;         # nothing warranted
       confirming @1;   # a slower vehicle is being confirmed, timer running

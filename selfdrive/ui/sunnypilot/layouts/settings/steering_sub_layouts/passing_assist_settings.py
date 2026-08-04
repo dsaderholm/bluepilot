@@ -80,6 +80,18 @@ class PassingAssistSettingsLayout(Widget):
       label_callback=lambda v: f"{v} s",
       inline=True)
 
+    self._crawl_time = option_item_sp(
+      title=tr("Call It A Slow Pass After"),
+      description=tr("How long grinding past a car you are barely faster than counts as a pass "
+                     "that is taking too long. Measured only for now -- this is the one situation "
+                     "where passing assist would ever be allowed to nudge your set speed, and the "
+                     "size of that nudge should come from what your own drives show rather than "
+                     "from a guess."),
+      param="PassingAssistCrawlTime",
+      min_value=3, max_value=30, value_change_step=1,
+      label_callback=lambda v: f"{v} s",
+      inline=True)
+
     self._blinker_lead = option_item_sp(
       title=tr("Signal Before Moving"),
       description=tr("How long the turn signal would be on before the lane change starts. Nothing "
@@ -235,6 +247,7 @@ class PassingAssistSettingsLayout(Widget):
       self._min_deficit,
       self._confirm_time,
       self._blinker_lead,
+      self._crawl_time,
       self._max_distance,
       self._min_approach,
 

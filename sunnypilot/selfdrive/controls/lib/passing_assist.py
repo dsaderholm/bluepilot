@@ -52,6 +52,7 @@ from openpilot.sunnypilot import PARAMS_UPDATE_PERIOD
 from openpilot.sunnypilot.selfdrive.controls.lib.adjacent_lane import (
   AdjacentLane, path_offset, DEFAULT_ONCOMING_MEMORY_S,
 )
+from openpilot.sunnypilot.selfdrive.controls.lib.overtake_progress import OvertakeProgress
 from openpilot.sunnypilot.selfdrive.controls.lib.passing_manoeuvre import PassingManoeuvre
 from openpilot.sunnypilot.selfdrive.controls.lib.rear_approach import RearApproach
 
@@ -342,6 +343,8 @@ class PassingAssistDetector:
     self.closing_in = False
     # The dry run: what a fully-automatic pass would be doing right now. Actuates nothing.
     self.manoeuvre = PassingManoeuvre()
+    # Is a pass grinding? The one case that may ever earn the set-speed actuator. Measures only.
+    self.overtake = OvertakeProgress()
 
   def update_params(self) -> None:
     if self.frame % int(PARAMS_UPDATE_PERIOD / DT_MDL) == 0:
@@ -357,6 +360,7 @@ class PassingAssistDetector:
       self.oncoming_memory_s = float(self.params.get("PassingAssistOncomingMemory", return_default=True))
       self.manoeuvre.blinker_lead_s = float(self.params.get("PassingAssistBlinkerLead", return_default=True))
       self.min_approach_m = float(self.params.get("PassingAssistMinApproach", return_default=True))
+      self.overtake.crawl_time_s = float(self.params.get("PassingAssistCrawlTime", return_default=True))
       self.settle_time_s = float(self.params.get("PassingAssistSettleTime", return_default=True))
       self.suspend_minutes = self.params.get("PassingAssistSuspendMinutes", return_default=True)
       self.max_distance_m = float(self.params.get("PassingAssistMaxDistance", return_default=True))
@@ -730,6 +734,12 @@ class PassingAssistDetector:
     different urgency, and folding it in here would make the abort count -- the one number this
     produces -- mean two things at once.
     """
+    # Runs on EVERY frame, including the ones where the gates above returned early. A pass that is
+    # grinding is happening in the other lane, where the lead-based gates have nothing to say -- so
+    # hanging this off the decision path would have measured only the crawls that began while a
+    # fresh suggestion was still live, which is the subset least in need of measuring.
+    self.overtake.update(CS.vEgo, self.adjacent.left, self.adjacent.right, self._settle_s)
+
     confirmed = self.approach_seconds >= self.persistence_s
     self.manoeuvre.update(
       clear=self.clear_side,
@@ -1134,6 +1144,12 @@ class PassingAssistDetector:
     passingAssist.accBrakingAvailable = pa.acc_braking_available
     passingAssist.accPrechargeAtDecision = pa.acc_precharge_at_decision
     passingAssist.accBrakingOnsetDRel = float(pa.acc_onset_d_rel)
+
+    passingAssist.crawlSeconds = float(pa.overtake.crawl_seconds)
+    passingAssist.crawlLongestSeconds = float(pa.overtake.crawl_longest)
+    passingAssist.crawlEvents = min(pa.overtake.crawl_events, 65535)
+    passingAssist.crawlSide = pa.overtake.crawl_side
+    passingAssist.crawlAfterSuggestion = pa.overtake.crawl_after_suggestion
     passingAssist.suspendedSeconds = float(pa.suspended_seconds)
     passingAssist.referenceSpeed = float(pa.reference_speed)
     passingAssist.referenceSource = pa.reference_source

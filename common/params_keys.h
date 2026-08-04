@@ -258,6 +258,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"PassingAssistBlinkerLead", {PERSISTENT | BACKUP, INT, "1"}},
     {"PassingAssistMinApproach", {PERSISTENT | BACKUP, INT, "0"}},
     {"PassingAssistConfirmTime", {PERSISTENT | BACKUP, INT, "2"}},
+    {"PassingAssistCrawlTime", {PERSISTENT | BACKUP, INT, "8"}},
     // Renamed to PassingAssistConfirmTime. Declared only so params_migration can read a value
     // stored before the rename; nothing in the UI or controls references it.
     {"PassingAssistStuckTime", {PERSISTENT | BACKUP, INT, "2"}},
