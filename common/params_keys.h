@@ -194,6 +194,9 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // camera reliably misreads, a limit nobody drives, a school zone out of hours. Not for ramps;
     // those are curve geometry and belong to SCC-Map.
     {"IcbmPinnedHolds", {PERSISTENT | BACKUP, JSON}},
+    // BluePilot: places the driver has set the same hold more than once. Feeds the suggestion to
+    // pin it -- see SUGGEST_AFTER in pinned_holds.py. Suggestions never act on their own.
+    {"IcbmHoldObservations", {PERSISTENT | BACKUP, JSON}},
     {"IcbmPinnedHoldsEnabled", {PERSISTENT | BACKUP, BOOL, "1"}},
     // Metres. Big enough that GPS scatter cannot step over it, small enough that a surface-street
     // pin does not fire on the freeway above it. A pin only has to hit ONCE -- it sets a normal

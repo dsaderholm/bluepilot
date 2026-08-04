@@ -114,6 +114,7 @@ class IntelligentCruiseButtonManagement:
   baselineSource: 'IntelligentCruiseButtonManagement.BaselineSource' = field(
     default_factory=lambda: IntelligentCruiseButtonManagement.BaselineSource.none
   )
+  pinSuggestion: float = auto_field()
 
   class IntelligentCruiseButtonManagementState(StrEnum):
     inactive = auto()

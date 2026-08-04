@@ -134,6 +134,9 @@ TSR_PILL_INK = rl.Color(226, 206, 110, 255)
 # badge's LEFT corner rather than a word: the badge is 172 px wide and already carries a label and a
 # two-digit number, and "PIN" competing with "HOLD" reads as two labels for one thing. Left because
 # the right corner belongs to the +/- arrow.
+# A HOLLOW dot is a suggestion, a filled one is a pin. Same mark, same corner, same tap -- the
+# difference is whether the car is already doing it or only offering to. Two symbols would have to
+# be learned; one symbol in two states reads immediately.
 PIN_DOT_RADIUS = 9
 PIN_DOT_COLOR = rl.Color(255, 214, 120, 255)
 
@@ -177,6 +180,7 @@ class HudRendererBP(HudRendererSP):
     self._lamp_data_available = False  # the BCM/brake-system lamp signal is actually being decoded
     self._tsr_fault = ""      # why TSR is not producing a limit; "" when it is working or silent
     self._icbm_pinned = False   # this hold came from a pin, so tapping the badge removes it
+    self._icbm_pin_suggested = False  # set the same hold here before; tapping accepts
     self._hold_rect = None      # last drawn badge rect; the tap target for pinning
     self._acc_status_failed = False   # latched on any error; keeps a display bug off the screen
     self.speed_right = 0
@@ -281,6 +285,7 @@ class HudRendererBP(HudRendererSP):
         self._icbm_baseline = round(icbm.vBaseline)
         self._icbm_hold_locked = bool(icbm.holdSuppressed)
         self._icbm_pinned = icbm.baselineSource.raw == 4  # BaselineSource.pinned
+        self._icbm_pin_suggested = icbm.pinSuggestion > 0
     except Exception:
       pass
 
@@ -515,6 +520,11 @@ class HudRendererBP(HudRendererSP):
     # looked fine.
     if self._icbm_pinned:
       rl.draw_circle(int(x + 20), int(y + 20), PIN_DOT_RADIUS, PIN_DOT_COLOR)
+    elif self._icbm_pin_suggested:
+      # A ring, not draw_circle_lines -- that is a single hairline and it disappeared against the
+      # badge fill at a glance, which for a mark whose whole job is to be noticed is no mark at all.
+      rl.draw_ring(rl.Vector2(x + 20, y + 20), PIN_DOT_RADIUS - 3, PIN_DOT_RADIUS, 0, 360, 24,
+                   PIN_DOT_COLOR)
     return HOLD_HEIGHT
 
   def _draw_tsr_pill(self, x: float, y: float) -> int:

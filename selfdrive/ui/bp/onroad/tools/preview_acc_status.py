@@ -42,6 +42,8 @@ SCENES = [
    False, "", True),
   ("worst case today: every readout at once, TSR still down", 70, 55, 70, "-", "BRAKE", 1.4, True,
    True, "TSR NO NAV DATA", True),
+  ("you have set this hold here before -- tap to remember it", 45, 55, 45, "", "COAST", 0.0, False,
+   False, "", False, True),
 ]
 
 
@@ -123,11 +125,12 @@ def main(outdir):
     cap, set_speed, limit, hold, arrow, acc, mag, lamps, locked = scene[:9]
     tsr = scene[9] if len(scene) > 9 else ""
     pinned = scene[10] if len(scene) > 10 else False
+    suggested = scene[11] if len(scene) > 11 else False
     stub = types.SimpleNamespace(
       _font_bold=fonts["bold"], _font_semi_bold=fonts["semi"],
       _icbm_baseline=hold, _icbm_arrow=arrow, _acc_state=acc, _acc_accel=mag,
       _brakes_on=lamps, _show_brake_status=True, _lamp_data_available=True,
-      _icbm_hold_locked=locked, _tsr_fault=tsr, _icbm_pinned=pinned, _hold_rect=None,
+      _icbm_hold_locked=locked, _tsr_fault=tsr, _icbm_pinned=pinned, _icbm_pin_suggested=suggested, _hold_rect=None,
       _draw_arrow=ns["_draw_arrow"],
     )
     rl.begin_texture_mode(tex)

@@ -46,6 +46,9 @@ struct IntelligentCruiseButtonManagement {
   # it is the only way to tell the two capture paths apart in a route, and a capnp field number
   # cannot be reused once retired anyway.
   baselineSource @6 :BaselineSource;
+  # BluePilot: a speed worth offering to pin at this place, because the driver has set the same
+  # hold here before. 0 = nothing to offer. Only ever a suggestion; a tap on the badge accepts it.
+  pinSuggestion @7 :Float32;
 
   enum IntelligentCruiseButtonManagementState {
     inactive @0;      # No button press or default state

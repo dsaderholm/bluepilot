@@ -30,6 +30,7 @@ from openpilot.sunnypilot.selfdrive.car.car_specific import CarSpecificEventsSP
 from openpilot.sunnypilot.selfdrive.car.cruise_helpers import CruiseHelper
 from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management.controller import IntelligentCruiseButtonManagement
 from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management.pinned_holds import PinnedHolds
+BaselineSource = custom.IntelligentCruiseButtonManagement.BaselineSource
 from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP
 
 REPLAY = "REPLAY" in os.environ
@@ -177,6 +178,8 @@ class SelfdriveD(CruiseHelper):
     # is where both halves live -- the GPS fix and the live baseline -- and the UI that creates a
     # pin needs neither.
     self.pinned_holds = PinnedHolds(self.params)
+    self._last_observed_hold = 0   # so one hold is counted once, not once per frame
+    self.icbm_pin_suggestion = 0   # a speed worth offering to pin here, published for the badge
 
     self.car_events_sp = CarSpecificEventsSP(self.CP, self.CP_SP)
 
@@ -518,10 +521,21 @@ class SelfdriveD(CruiseHelper):
       lat, lon = float(gps.latitude), float(gps.longitude)
 
       if self.pinned_holds.request_pending():
-        # v_baseline is display units already, and 0 when no hold is held -- toggle() reads that as
-        # "nothing to pin" and says so rather than pinning a zero.
-        self.pinned_holds.toggle(lat, lon, int(self.icbm.v_baseline))
+        # A tap accepts a standing suggestion if there is one, otherwise pins whatever is held.
+        # Same gesture either way -- the badge shows which state you are in.
+        suggested = self.pinned_holds.suggestion(lat, lon)
+        self.pinned_holds.toggle(lat, lon, suggested or int(self.icbm.v_baseline))
 
+      # Learn from holds the DRIVER creates. Not ones a pin created -- counting those would make a
+      # suggestion evidence for itself and it would re-suggest forever.
+      baseline = int(self.icbm.v_baseline)
+      if baseline > 0 and baseline != self._last_observed_hold          and self.icbm.baseline_source != BaselineSource.pinned:
+        self._last_observed_hold = baseline
+        self.pinned_holds.observe_hold(lat, lon, baseline)
+      elif baseline == 0:
+        self._last_observed_hold = 0
+
+      self.icbm_pin_suggestion = self.pinned_holds.suggestion(lat, lon)
       return self.pinned_holds.match(lat, lon)
     except Exception:
       return 0
@@ -638,6 +652,7 @@ class SelfdriveD(CruiseHelper):
     icbm.vBaseline = float(self.icbm.v_baseline)
     icbm.holdSuppressed = self.icbm.hold_suppressed
     icbm.baselineSource = self.icbm.baseline_source
+    icbm.pinSuggestion = float(self.icbm_pin_suggestion)
 
     self.pm.send('selfdriveStateSP', ss_sp_msg)
 

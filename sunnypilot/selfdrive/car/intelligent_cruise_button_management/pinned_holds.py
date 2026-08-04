@@ -69,6 +69,22 @@ MAX_RADIUS_M = 250
 
 MAX_PINS = 200  # sanity bound on a JSON param, not an expected count
 
+# BluePilot: noticing that you keep correcting the same place, and offering to remember it.
+#
+# Every hold you set by hand is a small statement that something here is wrong -- a limit nobody
+# drives, a sign the camera misreads, a stretch you take differently. Set the same hold in the same
+# place enough times and that stops being a one-off. No shipping system does this: an OEM cannot,
+# because it has no way to store a correction that applies to one driver on one road.
+#
+# It only ever SUGGESTS. Crossing the threshold draws a hollow dot on the badge; tapping accepts it
+# and turns it into an ordinary pin. Nothing changes how the car drives until you agree, which is
+# what makes it safe to be wrong -- the worst case is a dot you ignore.
+SUGGEST_AFTER = 3
+# The speeds have to agree too, or "I adjusted the speed near here" collapses three different
+# intentions into one meaningless average.
+SUGGEST_SPEED_TOLERANCE = 3   # display units
+MAX_OBSERVATIONS = 400        # twice MAX_PINS; observations churn faster than pins
+
 # BluePilot: this is read from selfdrived, whose step() runs at 100 Hz. Reading three params --
 # one of them a JSON blob that grows with the pin count -- on every one of those is 300 reads a
 # second for settings that change when someone opens a menu. Every other param reader in this
@@ -101,6 +117,8 @@ class PinnedHolds:
     self.enabled = False
     self.radius = DEFAULT_RADIUS_M
     self._raw = None
+    self._obs_raw = None
+    self.observations: list[dict] = []
     self.frame = -1
 
   def update_params(self) -> None:
@@ -120,9 +138,13 @@ class PinnedHolds:
       return
     self._raw = raw
     self.pins = self._parse(raw)
+    obs_raw = self.params.get("IcbmHoldObservations")
+    if obs_raw != self._obs_raw:
+      self._obs_raw = obs_raw
+      self.observations = self._parse(obs_raw, limit=MAX_OBSERVATIONS, keep_count=True)
 
   @staticmethod
-  def _parse(raw) -> list[dict]:
+  def _parse(raw, limit: int = MAX_PINS, keep_count: bool = False) -> list[dict]:
     """Tolerate anything. A corrupt param must mean "no pins", never a crash in the control loop."""
     if not raw:
       return []
@@ -133,14 +155,20 @@ class PinnedHolds:
       if not isinstance(data, list):
         return []
       out = []
-      for p in data[:MAX_PINS]:
+      for p in data[:limit]:
         try:
           lat, lon, speed = float(p["lat"]), float(p["lon"]), int(p["speed"])
         except (TypeError, KeyError, ValueError):
           continue
         # A pin at 0,0 is the signature of a fix that never came, not a place in the Gulf of Guinea.
         if speed > 0 and (abs(lat) > 1e-6 or abs(lon) > 1e-6):
-          out.append({"lat": lat, "lon": lon, "speed": speed})
+          entry = {"lat": lat, "lon": lon, "speed": speed}
+          if keep_count:
+            try:
+              entry["count"] = max(1, int(p.get("count", 1)))
+            except (TypeError, ValueError):
+              entry["count"] = 1
+          out.append(entry)
       return out
     except (ValueError, TypeError):
       return []
@@ -179,6 +207,7 @@ class PinnedHolds:
     if pin is not None and d <= self.radius:
       self.pins = [p for p in self.pins if p is not pin]
       self._save()
+      self.forget(lat, lon)   # removing a pin here also drops the evidence that suggested it
       return "removed"
 
     if speed <= 0:
@@ -188,6 +217,7 @@ class PinnedHolds:
 
     self.pins.append({"lat": round(lat, 6), "lon": round(lon, 6), "speed": int(speed)})
     self._save()
+    self.forget(lat, lon)   # the suggestion has been answered; stop counting
     return "added"
 
   def request_pending(self) -> bool:
@@ -199,9 +229,57 @@ class PinnedHolds:
     self.params.put_bool("IcbmPinHoldRequest", False)
     return True
 
+  def observe_hold(self, lat: float, lon: float, speed: int) -> int:
+    """Record that the driver set this hold here. Returns how many times that has now happened.
+
+    Called once per hold, on creation -- not per frame, and never for a hold a pin created, which
+    would count the suggestion as evidence for itself.
+    """
+    if speed <= 0 or (abs(lat) < 1e-6 and abs(lon) < 1e-6):
+      return 0
+    if self.match(lat, lon):
+      return 0   # already pinned here; nothing left to learn
+
+    for o in self.observations:
+      if (distance_m(lat, lon, o["lat"], o["lon"]) <= self.radius
+          and abs(o["speed"] - speed) <= SUGGEST_SPEED_TOLERANCE):
+        o["count"] += 1
+        o["speed"] = speed          # the latest intent wins; it is the one they just expressed
+        self._save_observations()
+        return o["count"]
+
+    if len(self.observations) < MAX_OBSERVATIONS:
+      self.observations.append({"lat": round(lat, 6), "lon": round(lon, 6),
+                                "speed": int(speed), "count": 1})
+      self._save_observations()
+    return 1
+
+  def suggestion(self, lat: float, lon: float) -> int:
+    """Speed worth offering to pin here, or 0. Never acts on its own -- see SUGGEST_AFTER."""
+    if not self.enabled or self.match(lat, lon):
+      return 0
+    if abs(lat) < 1e-6 and abs(lon) < 1e-6:
+      return 0
+    for o in self.observations:
+      if o["count"] >= SUGGEST_AFTER and distance_m(lat, lon, o["lat"], o["lon"]) <= self.radius:
+        return int(o["speed"])
+    return 0
+
+  def forget(self, lat: float, lon: float) -> None:
+    """Drop observations here, so accepting or declining a suggestion stops it re-offering."""
+    self.observations = [o for o in self.observations
+                         if distance_m(lat, lon, o["lat"], o["lon"]) > self.radius]
+    self._save_observations()
+
+  def _save_observations(self) -> None:
+    self._obs_raw = json.dumps(self.observations)
+    self.params.put("IcbmHoldObservations", self._obs_raw)
+
   def clear(self) -> None:
     self.pins = []
+    self.observations = []
     self._save()
+    self._save_observations()
 
   def _save(self) -> None:
     self._raw = json.dumps(self.pins)

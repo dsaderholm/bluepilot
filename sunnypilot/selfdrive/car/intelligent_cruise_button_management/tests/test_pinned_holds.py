@@ -8,6 +8,7 @@ import json
 
 from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management.pinned_holds import (
   PinnedHolds, distance_m, DEFAULT_RADIUS_M, MIN_RADIUS_M, MAX_RADIUS_M, MAX_PINS,
+  SUGGEST_AFTER,
 )
 
 # Two points on I-15 through Salt Lake, ~1 km apart.
@@ -153,3 +154,79 @@ class TestToggle:
     ph.toggle(FAR_LAT, FAR_LON, 30)
     ph.clear()
     assert ph.pins == [] and ph.match(LAT, LON) == 0
+
+
+class TestSuggestions:
+  """BluePilot: noticing you keep correcting the same place.
+
+  The safety property is that it only ever SUGGESTS -- nothing changes how the car drives until the
+  driver taps. So the tests that matter most are the ones proving it does NOT suggest: too few
+  observations, a different speed, or somewhere already pinned."""
+
+  def test_suggests_only_after_enough_repeats(self):
+    ph = fresh()
+    for i in range(1, SUGGEST_AFTER):
+      assert ph.observe_hold(LAT, LON, 45) == i
+      assert ph.suggestion(LAT, LON) == 0, f"suggested after only {i} observations"
+    assert ph.observe_hold(LAT, LON, 45) == SUGGEST_AFTER
+    assert ph.suggestion(LAT, LON) == 45
+
+  def test_different_speeds_do_not_accumulate(self):
+    """Three different intentions near one place are not one intention."""
+    ph = fresh()
+    for speed in (30, 45, 70):
+      ph.observe_hold(LAT, LON, speed)
+    assert ph.suggestion(LAT, LON) == 0
+
+  def test_close_speeds_do_accumulate(self):
+    """Within tolerance is the same intention -- a driver does not hit the same number every time."""
+    ph = fresh()
+    for speed in (45, 46, 44):
+      ph.observe_hold(LAT, LON, speed)
+    assert ph.suggestion(LAT, LON) == 44, "the most recent intent should win"
+
+  def test_observations_elsewhere_do_not_suggest_here(self):
+    ph = fresh()
+    for _ in range(SUGGEST_AFTER + 2):
+      ph.observe_hold(FAR_LAT, FAR_LON, 45)
+    assert ph.suggestion(LAT, LON) == 0
+
+  def test_an_existing_pin_is_not_re_suggested(self):
+    ph = fresh()
+    ph.toggle(LAT, LON, 45)
+    for _ in range(SUGGEST_AFTER + 2):
+      assert ph.observe_hold(LAT, LON, 45) == 0, "a pinned place has nothing left to learn"
+    assert ph.suggestion(LAT, LON) == 0
+
+  def test_accepting_stops_it_asking_again(self):
+    ph = fresh()
+    for _ in range(SUGGEST_AFTER):
+      ph.observe_hold(LAT, LON, 45)
+    assert ph.suggestion(LAT, LON) == 45
+    ph.toggle(LAT, LON, 45)                      # the tap
+    assert ph.match(LAT, LON) == 45              # now a real pin
+    assert ph.suggestion(LAT, LON) == 0          # and no longer offered
+
+  def test_unpinning_also_forgets(self):
+    """Otherwise removing a pin would immediately re-suggest the thing just rejected."""
+    ph = fresh()
+    for _ in range(SUGGEST_AFTER):
+      ph.observe_hold(LAT, LON, 45)
+    ph.toggle(LAT, LON, 45)
+    ph.toggle(LAT, LON, 45)                      # tap again to remove
+    assert ph.match(LAT, LON) == 0
+    assert ph.suggestion(LAT, LON) == 0
+
+  def test_no_fix_records_nothing(self):
+    assert fresh().observe_hold(0.0, 0.0, 45) == 0
+
+  def test_disabled_suggests_nothing(self):
+    ph = fresh(IcbmPinnedHoldsEnabled=False)
+    for _ in range(SUGGEST_AFTER + 2):
+      ph.observe_hold(LAT, LON, 45)
+    assert ph.suggestion(LAT, LON) == 0
+
+  def test_corrupt_observations_mean_no_suggestions(self):
+    ph = fresh(IcbmHoldObservations="not json at all")
+    assert ph.observations == []
+    assert ph.suggestion(LAT, LON) == 0
