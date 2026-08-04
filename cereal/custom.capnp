@@ -627,6 +627,14 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     leadAccel @55 :Float32;
     leadBrakingHold @56 :Bool;
 
+    # The FURTHEST BACK Ford's ACC has started braking this drive -- the earliest it ever lost
+    # patience. accBrakingOnsetDRel above is per-approach and resets; this is the drive's answer.
+    #
+    # The max rather than the average on purpose. It is the number the close-in hold has to stay
+    # clear of, and a hold set to the average would sail past ACC on every worse-than-average
+    # approach. Sizing a safety margin off a typical case is how it stops being a margin.
+    accBrakingOnsetMax @57 :Float32;
+
     enum Manoeuvre {
       idle @0;         # nothing warranted
       confirming @1;   # a slower vehicle is being confirmed, timer running

@@ -1364,26 +1364,29 @@ class TestLeadBraking:
   """
 
   def test_a_hard_braking_lead_holds_the_pass(self):
-    det = run(PassingAssistDetector(), STUCK_FRAMES, lead_accel=-2.5)
+    det = run(PassingAssistDetector(), STUCK_FRAMES, lead_accel=-4.0)
     assert det.lead_braking_hold
     assert det.suggestion == Side.none
     assert det.blocked_by == Blocked.leadBraking
 
-  def test_gentle_slowing_is_not_braking(self):
-    """The line that makes this useful rather than crippling. A car easing off its cruise reads
-    around -0.3, and that is precisely the car worth passing -- hold off for it and the feature
-    stops working on exactly the traffic it exists for."""
-    det = run(PassingAssistDetector(), STUCK_FRAMES, lead_accel=-0.3)
-    assert not det.lead_braking_hold
-    assert det.suggestion == Side.left
+  def test_ordinary_slowing_is_not_slamming_on(self):
+    """The line that makes this useful rather than crippling, and the owner moved it: "we can pass
+    a car that is slowing down a little, just not if they are slamming on their brakes."
+
+    -2.0 is ordinary traffic braking. A car shedding speed is the single best reason to go round
+    it -- it is about to cost you more, not less -- so this must NOT hold."""
+    for accel in (-0.3, -1.0, -2.0):
+      det = run(PassingAssistDetector(), STUCK_FRAMES, lead_accel=accel)
+      assert not det.lead_braking_hold, f"held for {accel} m/s^2, which is not slamming on"
+      assert det.suggestion == Side.left
 
   def test_the_hold_outlives_the_braking(self):
     """A driver braking for a turn lifts off, coasts, brakes again. The pause is not an
     invitation, and it also absorbs one noisy acceleration estimate."""
-    det = run(PassingAssistDetector(), STUCK_FRAMES, lead_accel=-2.5)
+    det = run(PassingAssistDetector(), STUCK_FRAMES, lead_accel=-4.0)
     run(det, int(1.0 / DT_MDL), lead_accel=0.0)
     assert det.lead_braking_hold, "released the instant the number crossed back"
-    run(det, int(1.5 / DT_MDL), lead_accel=0.0)
+    run(det, int(1.0 / DT_MDL), lead_accel=0.0)
     assert not det.lead_braking_hold
     assert det.suggestion == Side.left
 
@@ -1393,7 +1396,7 @@ class TestLeadBraking:
         return False if key == "PassingAssistLeadBrakingHold" else super().get_bool(key)
     det = PassingAssistDetector()
     det.params = _Off()
-    run(det, STUCK_FRAMES, lead_accel=-2.5)
+    run(det, STUCK_FRAMES, lead_accel=-4.0)
     assert not det.lead_braking_hold
     assert det.suggestion == Side.left
 

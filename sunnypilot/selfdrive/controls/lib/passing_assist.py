@@ -211,14 +211,21 @@ DEFAULT_MIN_APPROACH_M = 0
 # something ahead that we cannot see yet, in which case going round them is the last thing to do.
 # Neither is visible to any sensor on this car. The braking itself is, and it stands in for both.
 #
-# -1.5 m/s^2 is deliberately well past lift-off. Coasting is around -0.3 and a car simply easing
-# its cruise reads similar; that is exactly the car we most want to pass, and holding off for it
-# would defeat the feature. This wants real brake pedal.
-LEAD_BRAKING_MS2 = -1.5
-# Held briefly after they stop braking rather than released the instant the number crosses back.
-# A driver braking for a turn lifts off, coasts, brakes again -- and the pause between those is not
-# an invitation. Also absorbs a single noisy accel estimate.
-LEAD_BRAKING_HOLD_S = 2.0
+# SLAMMING ON, not merely slowing. Retuned on the owner's correction: "we can pass a car that is
+# slowing down a little, just not if they are slamming on their brakes."
+#
+# He is right, and the first number was timid. A car shedding speed gently is the single best
+# reason to go round it -- it is about to cost you more, not less. Holding off there would have the
+# system back out of exactly the passes it exists to make.
+#
+# For scale: coasting is about -0.3, lifting off for a bend -0.5 to -1, ordinary traffic braking
+# around -2. -3.0 is a deliberate stop -- the driver has decided something, and whatever it is we
+# cannot see it. THAT is worth waiting two seconds for; nothing softer is.
+LEAD_BRAKING_MS2 = -3.0
+# Held briefly after they stop rather than released the instant the number crosses back: someone
+# stopping hard modulates the pedal, and the gap between two stabs is not an invitation. Short,
+# because at this threshold the event is rare and being timid about it costs real passes.
+LEAD_BRAKING_HOLD_S = 1.5
 # Kept only for the log -- how long until we reach this lead at the current closing rate. Nothing
 # gates on it.
 MIN_APPROACH_CLOSING_MS = 1.0
@@ -310,6 +317,8 @@ class PassingAssistDetector:
     # See accBrakingOnsetDRel in custom.capnp -- the margin this whole design assumes, measured
     # rather than estimated. 0 means ACC never asked for deceleration during this approach.
     self.acc_onset_d_rel = 0.0
+    # Drive-level: the earliest ACC has ever started. See accBrakingOnsetMax.
+    self.acc_onset_max = 0.0
     self.suspended_seconds = 0.0
     self.reference_speed = 0.0
     self.reference_source = RefSource.cluster
@@ -899,6 +908,7 @@ class PassingAssistDetector:
     # Latched: what matters is where it started, not that it is still going.
     if spotted and self.acc_braking_at_decision and self.acc_onset_d_rel == 0.0:
       self.acc_onset_d_rel = float(self.lead_d_rel)
+      self.acc_onset_max = max(self.acc_onset_max, self.acc_onset_d_rel)
 
     # They are braking hard. Wait and see -- see LEAD_BRAKING_MS2. Checked before the close-in
     # hold because it is the more specific reason and the one a driver would recognise: "that car
@@ -1179,6 +1189,7 @@ class PassingAssistDetector:
     passingAssist.accBrakingAvailable = pa.acc_braking_available
     passingAssist.accPrechargeAtDecision = pa.acc_precharge_at_decision
     passingAssist.accBrakingOnsetDRel = float(pa.acc_onset_d_rel)
+    passingAssist.accBrakingOnsetMax = float(pa.acc_onset_max)
 
     passingAssist.crawlSeconds = float(pa.overtake.crawl_seconds)
     passingAssist.crawlLongestSeconds = float(pa.overtake.crawl_longest)

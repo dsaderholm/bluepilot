@@ -430,6 +430,43 @@ class HudRendererBP(HudRendererSP):
         pass
 
 
+  def _draw_drive_summary(self, pa, sm) -> bool:
+    """What this drive actually measured, shown while stopped. Returns True if it owns the line.
+
+    Every number here exists to settle a question that cannot be settled by argument:
+
+      slow passes   -> how often a pass grinds, and for how long. Sets the speed-nudge trigger.
+      backed out    -> how often a sequence signalled and had to abandon it. Near zero means the
+                       gates are steady enough to act on; climbing names an unstable one.
+      ACC braked by -> the furthest back Ford's ACC ever lost patience. The close-in hold has to
+                       stay clear of this, and until it is measured that hold has no safe value.
+    """
+    try:
+      if sm['carState'].vEgo > 0.3:
+        return False
+      lines = []
+      if pa.crawlEvents:
+        lines.append(f"{pa.crawlEvents} slow "
+                     f"{'pass' if pa.crawlEvents == 1 else 'passes'}, worst {pa.crawlLongestSeconds:.0f}s")
+      if pa.manoeuvreAborts:
+        lines.append(f"{pa.manoeuvreAborts} backed out")
+      if pa.accBrakingOnsetMax > 0:
+        d = pa.accBrakingOnsetMax if ui_state.is_metric else pa.accBrakingOnsetMax * 3.28084
+        lines.append(f"ACC braked by {d:.0f}{'m' if ui_state.is_metric else 'ft'}")
+    except (AttributeError, KeyError):
+      return False
+
+    if not lines:
+      return False
+
+    self._pa_main = "THIS DRIVE"
+    # Assembled here, NOT via _pa_sub_detail. That field is folded into _pa_sub at the end of
+    # _update_passing_assist, and every method here returns before reaching it -- so anything left
+    # in it is silently dropped. Cost me three readouts before a preview render showed it.
+    self._pa_sub = "  -  ".join(lines)
+    self._pa_color = rl.Color(150, 205, 235, 255)
+    return True
+
   def _draw_crawl(self, pa) -> bool:
     """A pass that is taking too long. Returns True if it owns the line this frame."""
     try:
@@ -481,12 +518,13 @@ class HudRendererBP(HudRendererSP):
     # that lead's speed is the model's guess rather than the radar's measurement, and "4 mph
     # slower" is the entire judgement. Takes priority over the abort count -- it says something
     # about THIS manoeuvre, where the count is about the drive.
+    # Appended to _pa_sub directly -- see the note in _draw_drive_summary about _pa_sub_detail.
     if not pa.leadRadarConfirmed:
-      self._pa_sub_detail = "camera only -- speed not radar-measured"
+      self._pa_sub += "  -  camera only, speed not radar-measured"
     elif pa.manoeuvreAborts:
       # The number this whole dry run exists to produce, on screen rather than only in the log --
       # a drive where this climbs is a drive that answered the question.
-      self._pa_sub_detail = f"{pa.manoeuvreAborts} backed out this drive"
+      self._pa_sub += f"  -  {pa.manoeuvreAborts} backed out this drive"
     return True
 
   def _update_passing_assist(self) -> None:
@@ -539,6 +577,12 @@ class HudRendererBP(HudRendererSP):
       return
 
     suggestion = str(pa.suggestion)
+
+    # Stopped, so nothing is happening and the panel is free. This is the only place the drive's
+    # own numbers can be read: the owner does not SSH into the car and does not read logs, so a
+    # measurement with nowhere to appear is a measurement that was never taken.
+    if self._draw_drive_summary(pa, sm):
+      return
 
     # A grinding pass outranks the dry run: it is happening NOW, in the other lane, and it is the
     # one state the driver might actually want to do something about.

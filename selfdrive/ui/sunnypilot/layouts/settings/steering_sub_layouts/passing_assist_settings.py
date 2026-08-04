@@ -81,11 +81,11 @@ class PassingAssistSettingsLayout(Widget):
       inline=True)
 
     self._lead_braking = toggle_item_sp(
-      title=tr("Wait If The Car Ahead Is Braking"),
-      description=tr("Do not start a pass while the vehicle in front is braking hard. People do "
-                     "not, and the instinct is a good one: they are usually turning off -- so the "
-                     "pass was never needed -- or braking for something ahead you cannot see yet. "
-                     "Gentle slowing does not count; that is the car you most want to pass."),
+      title=tr("Wait If The Car Ahead Slams On"),
+      description=tr("Do not start a pass while the vehicle in front is braking hard -- they are "
+                     "usually turning off, or braking for something ahead you cannot see yet. "
+                     "Only a deliberate stop counts. A car merely slowing is the best reason "
+                     "there is to go round it, and this stays out of the way for that."),
       param="PassingAssistLeadBrakingHold")
 
     self._crawl_time = option_item_sp(
