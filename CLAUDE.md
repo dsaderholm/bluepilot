@@ -220,11 +220,21 @@ A HOLD is the driver's own set speed. While one is held every other ICBM feature
 against it: curves still slow the car, the hazard path still fires, and the speed returns to the
 driver's number afterwards rather than to the speed limit.
 
-| Button | Cruise engaged | Cruise off |
+| Key on the wheel | Cruise engaged | Cruise off |
 |---|---|---|
-| `+` (`CcAslButtnSetIncPress`) | `accelCruise` — creates or raises a HOLD | `setCruise` — engages, **clears** the hold, SLA takes the speed |
-| `−` (`CcAslButtnSetDecPress`) | `decelCruise` — creates or lowers a HOLD | `setCruise` — engages, **clears** the hold |
-| CNCL/RES (`CcAslButtnCnclResPress`) | `cancel` | `resumeCruise` — engages and **keeps** the previous hold |
+| `RES +` (`CcAslButtnSetIncPress`) | `accelCruise` — creates or raises a HOLD | `resumeCruise` — engages and **keeps** the hold |
+| `SET −` (`CcAslButtnSetDecPress`) | `decelCruise` — creates or lowers a HOLD | `setCruise` — engages, **clears** the hold, SLA takes the speed |
+| `CNCL` (`CcAslButtnCnclResPress`) | `cancel` | also reports `resumeCruise`; harmless, resume is reachable from either |
+
+The wheel is **CNCL / RES+ / SET−**, with CNCL as its own dedicated button — confirmed from a photo
+on 2026-08-04. RES+ and SET− are single keys that change meaning with cruise state.
+
+**Corrected 2026-08-04:** `CcAslButtnSetIncPress` previously emitted `setCruise` when cruise was
+off, so every press of RES to resume reached openpilot as a SET — the one event that discards the
+driver's hold. That is the original "holds are not remembered on resume" report, and the behavioural
+detector (comparing the landed set speed against the pre-cancel value) had been compensating for a
+mislabelled event rather than a missing one. The detector stays as belt-and-braces.
+`test_button_mapping.py` guards the table.
 
 A hold is also cleared by returning the set speed to exactly SLA's target, or by the posted limit
 moving more than `IcbmBaselineResetDelta`. It is NOT cleared by curves or lead vehicles.
