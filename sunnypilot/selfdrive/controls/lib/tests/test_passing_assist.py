@@ -906,6 +906,44 @@ class TestLaneAge:
     run(det, DELAY_FRAMES, status=False, **IN_LEFT_LANE)
     assert det.suggestion == Side.none
 
+  def test_our_own_lane_change_restarts_the_clock(self):
+    """The hole the age gate had: it aged the SIDE, not the LANE.
+
+    Three lanes, sitting in the middle. Lane three has been beside us for a minute, so its age is
+    well past the gate. The driver moves right into it -- and now the lane on our right is a
+    different piece of road, which we have never looked at, and which on a highway is very often an
+    exit-only lane. Nothing zeroed the counter, so that brand-new lane inherited the previous one's
+    sixty seconds and sailed through the one test built to catch exactly it.
+
+    The four second post-change settle does not cover this: it is shorter than the ten second
+    clear-lane delay, so it expires with the stale age still standing.
+
+    Resetting on a LEFT change too is deliberate. The lane to our right afterwards is the one we
+    just left, so its age is genuinely known -- but re-proving it costs nothing (the 20 s anti-weave
+    settle is longer than the 15 s age anyway) and a gate that has to reason about which direction
+    we went is a gate with a second way to be wrong.
+
+    A 30 s age rather than the default 15 so the timing is not a coincidence. The post-change
+    stand-down holds the clear-lane clock at zero for its first four seconds, so at the default the
+    delay is satisfied at 14 s and age at 15 -- a one second window in which age is provably the
+    thing deciding. That is too narrow to tell a real gate from an arithmetic accident.
+    """
+    det = run(keep_right_det(PassingAssistMinLaneAge=30), int(35.0 / DT_MDL),
+              status=False, **IN_LEFT_LANE)
+    assert det.suggestion == Side.right                      # aged in, as before
+
+    run(det, int(2.0 / DT_MDL), status=False, blinker_right=True, **IN_LEFT_LANE)
+    run(det, 1, status=False, **IN_LEFT_LANE)                # stalk off: the change is done
+    assert det.right_lane_age_s == 0.0, "a new lane inherited the old lane's age"
+
+    # Both clocks run again from zero and CONCURRENTLY -- the wait is the 30 s age, not 30 + 10.
+    run(det, int(20.0 / DT_MDL), status=False, **IN_LEFT_LANE)
+    assert det.keep_right_seconds >= det.keep_right_delay_s   # the other clock is satisfied
+    assert det.right_lane_age_s < det.min_lane_age_s          # this one is not
+    assert det.suggestion == Side.none, "suggested moving into an unproven lane"
+    run(det, int(12.0 / DT_MDL), status=False, **IN_LEFT_LANE)
+    assert det.suggestion == Side.right                       # and it comes back once proven
+
   def test_zero_disables_the_gate(self):
     """The control goes down to 0 s, and there the widening test is on its own."""
     det = keep_right_det(PassingAssistMinLaneAge=0)

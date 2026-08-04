@@ -919,10 +919,7 @@ class PassingAssistDetector:
       if held >= MIN_STEER_TAKEOVER_S and self._driver_blinker is None:
         # No stalk, so no direction -- the widening seen during the takeover is the only evidence
         # about where they went, and it is right-hand by construction.
-        self.driver_change_was_exit = self._signalled_over_widening
-        self.driver_change_standdown = (self.exit_standdown_s if self._signalled_over_widening
-                                        else float(SETTLE_AFTER_CHANGE_S))
-        self._signalled_over_widening = False
+        self._stand_down(self._signalled_over_widening)
         return
 
     side = 'left' if CS.leftBlinker else 'right' if CS.rightBlinker else None
@@ -946,11 +943,32 @@ class PassingAssistDetector:
       return
 
     # Stalk just went off: the change is done, or they thought better of it. Either way, pause.
-    was_exit = self._driver_blinker == 'right' and self._signalled_over_widening
+    self._stand_down(self._driver_blinker == 'right' and self._signalled_over_widening)
+    self._driver_blinker = None
+
+  def _stand_down(self, was_exit: bool) -> None:
+    """The driver just finished a maneuver of their own. Pause, and forget what was beside us.
+
+    Called from both routes into a stand-down -- the stalk and a silent steering takeover -- for the
+    same reason `_record_oncoming_refusal` is shared: two sites doing this by hand is two sites that
+    can drift, and one of them already had.
+
+    THE LANE AGE HAS TO RESTART HERE, and missing it left the exit gate with a hole the size of the
+    thing it was built for. That counter ages the SIDE, not the lane: it only ever zeroed when the
+    model stopped seeing a lane to our right. Change lanes and the lane on our right is a different
+    piece of road -- on a highway, very often an exit-only lane -- but the counter carried on from
+    the through lane that used to be there. A brand-new lane arrived pre-aged and walked through the
+    one test that exists to catch it.
+
+    Restarted for a LEFT change as well, where the lane to our right afterwards is the one we just
+    left and its age really is known. Re-proving it costs nothing -- the anti-weave settle is longer
+    than the age gate, so the wait does not change -- and a gate that reasons about which way we
+    went is a gate with a second way to be wrong.
+    """
     self.driver_change_was_exit = was_exit
     self.driver_change_standdown = self.exit_standdown_s if was_exit else float(SETTLE_AFTER_CHANGE_S)
-    self._driver_blinker = None
     self._signalled_over_widening = False
+    self.right_lane_age_s = 0.0
 
   def _record_driver_pass(self) -> None:
     """The driver just started a pass. Did we agree, and how long had we been saying so?
