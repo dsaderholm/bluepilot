@@ -86,6 +86,8 @@ y=0, so mirroring y barely moves an in-path lead. Off-path work is the first thi
 which is exactly why the discrepancy has survived.
 """
 
+import math
+
 # Lateral band counted as "the next lane over". A US lane is 3.7 m, so the neighbouring lane centre
 # sits near 3.7 m; the band is wider than that because the radar's lateral estimate degrades with
 # range and no one drives on the lane centre. The lower bound is above our own lane's half-width so
@@ -181,7 +183,38 @@ DEBOUNCE_FRAMES = 3
 # cost of waiting for a second is a suggestion to pass into a head-on lane. One is enough.
 ONCOMING_FRAMES = 1
 
+# Below this the line-of-sight geometry stops being trustworthy and the correction below would
+# amplify range-rate noise rather than remove a bias. cos 72 degrees; nothing in the adjacent-lane
+# band reaches it except very close alongside, where the radar is least reliable anyway.
+MIN_COS_THETA = 0.3
+
 NO_SPEED = 0.0
+
+
+def ground_speed(v_ego: float, d_rel: float, y_rel: float, v_rel: float) -> float:
+  """The object's own speed over the ground, corrected for where it sits in the beam.
+
+  Radar range-rate is the RADIAL component -- the part along the line of sight -- not the full
+  relative speed. A stationary object therefore reports `-v_ego * cos(theta)`, not `-v_ego`, and
+  `v_ego + v_rel` leaves a residue of `v_ego * (1 - cos(theta))` that grows as the object moves off
+  boresight.
+
+  Reported from a drive: a barrier occasionally read as an adjacent vehicle, rarely. The geometry
+  says exactly how rarely. At 67 mph a barrier 4 m to the side reads as 0.15 m/s at 40 m, 1.0 at
+  15 m, 3.2 at 8 m -- all comfortably below MIN_MOVING_MS -- and then **6.6 m/s at 5 m**, which
+  clears the threshold and becomes a car. At 45 mph the same barrier at 5 m reads 4.4 and stays
+  furniture. Close range plus high speed only, which is why it was occasional rather than constant.
+
+  Correcting it is exact rather than a fudge:
+
+      stationary        v_rel = -v_ego * cos(t)   ->  0
+      same direction    v_rel = (u - v_ego) cos(t) -> u
+      oncoming at w     v_rel = (-w - v_ego) cos(t) -> -w
+
+  so all three classifications get the right answer at any angle, not just near boresight.
+  """
+  cos_theta = max(d_rel / math.hypot(d_rel, y_rel), MIN_COS_THETA) if d_rel > 0 else 1.0
+  return v_ego + v_rel / cos_theta
 
 
 def path_offset(model, d_rel: float) -> float:
@@ -318,7 +351,7 @@ class AdjacentLaneSide:
     (self.oncoming_seconds, self.oncoming_adjacent_seconds, self.same_direction_seconds,
      self.oncoming, self.strict) = held
 
-  def observe(self, occupied: bool, d_rel: float, y_rel: float, v_rel: float, v_ego: float) -> None:
+  def observe(self, occupied: bool, d_rel: float, y_rel: float, v_rel: float, v_abs: float) -> None:
     """Feed one radar message's raw finding through the debounce."""
     self.available = True
 
@@ -333,7 +366,7 @@ class AdjacentLaneSide:
 
     if self.occupied and occupied:
       self.d_rel, self.y_rel = float(d_rel), float(y_rel)
-      self.v_rel, self.v_abs = float(v_rel), float(v_ego + v_rel)
+      self.v_rel, self.v_abs = float(v_rel), float(v_abs)
     elif not self.occupied:
       self.d_rel, self.y_rel, self.v_rel, self.v_abs = 0.0, 0.0, 0.0, NO_SPEED
 
@@ -533,7 +566,8 @@ class AdjacentLane:
 
       # The sign of absolute ground speed sorts everything out here. Oncoming is checked FIRST,
       # because it is the only one of the three that is a safety fact rather than a convenience one.
-      v_abs = v_ego + p.vRel
+      # NOT v_ego + p.vRel -- see ground_speed(). That form reads a close barrier as a moving car.
+      v_abs = ground_speed(v_ego, p.dRel, p.yRel, p.vRel)
 
       if v_abs < -MIN_ONCOMING_MS:
         # Travelling the other way. Looked for across the FULL width of our road, not just the next
@@ -568,4 +602,5 @@ class AdjacentLane:
       obj.observe(p is not None,
                   p.dRel if p is not None else 0.0,
                   p.yRel if p is not None else 0.0,
-                  p.vRel if p is not None else 0.0, v_ego)
+                  p.vRel if p is not None else 0.0,
+                  ground_speed(v_ego, p.dRel, p.yRel, p.vRel) if p is not None else NO_SPEED)

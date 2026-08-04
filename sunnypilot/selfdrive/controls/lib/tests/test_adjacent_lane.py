@@ -24,7 +24,7 @@ from types import SimpleNamespace as NS
 
 from openpilot.sunnypilot.selfdrive.controls.lib.adjacent_lane import (
   AdjacentLane, AdjacentLaneSide, ADJACENT_MIN_M, ADJACENT_MAX_M, DEBOUNCE_FRAMES, MIN_MOVING_MS,
-  ONCOMING_MAX_M, SAME_DIRECTION_MIN_FRACTION, path_offset,
+  ONCOMING_MAX_M, SAME_DIRECTION_MIN_FRACTION, path_offset, ground_speed,
 )
 
 X_IDXS = [192.0 * (i / 32.0) ** 2 for i in range(33)]
@@ -44,6 +44,7 @@ def path(curve_radius_m=0.0):
 
 V_EGO = 30.0
 MAX_D = 220.0
+NO_SPEED_SENTINEL = 0.0
 
 
 def track(d_rel, y_rel, v_rel=0.0):
@@ -535,6 +536,53 @@ class TestPathOffset:
     assert path_offset(NS(), 80.0) == 0.0
 
 
+class TestBarrierGeometry:
+  """Reported from a drive: a barrier occasionally read as an adjacent car, rarely.
+
+  Radar range-rate is the RADIAL component, so a stationary object reports -v_ego*cos(theta), not
+  -v_ego. The old `v_ego + v_rel` left a residue of v_ego*(1 - cos(theta)) that grows as the object
+  moves off boresight -- invisible at range, and enough to clear MIN_MOVING_MS close alongside at
+  speed. That is exactly the "rare" in the report.
+  """
+
+  @staticmethod
+  def barrier(d_rel, lat=4.0, v_ego=V_EGO):
+    """What the radar actually reports for a stationary object at that position."""
+    import math
+    cos_t = d_rel / math.hypot(d_rel, lat)
+    return track(d_rel, lat, v_rel=-v_ego * cos_t)
+
+  def test_a_close_barrier_at_speed_is_still_furniture(self):
+    # The failing case: 67 mph, barrier 5 m ahead and 4 m over. Read naively it is 6.6 m/s.
+    adj = feed(AdjacentLane(), [self.barrier(5.0)])
+    assert not adj.left.occupied
+
+  def test_a_barrier_is_furniture_at_every_range(self):
+    for d in (5.0, 8.0, 15.0, 40.0, 100.0):
+      adj = feed(AdjacentLane(), [self.barrier(d)])
+      assert not adj.left.occupied, f"barrier at {d} m read as a vehicle"
+
+  def test_the_correction_is_exact_for_a_stationary_object(self):
+    for d in (4.0, 10.0, 60.0):
+      import math
+      cos_t = d / math.hypot(d, 4.0)
+      assert abs(ground_speed(V_EGO, d, 4.0, -V_EGO * cos_t)) < 0.01
+
+  def test_a_real_car_still_reads_its_own_speed(self):
+    # Same-direction traffic at 25 m/s, close alongside where the correction is largest.
+    v_car = 25.0
+    import math
+    cos_t = 6.0 / math.hypot(6.0, 4.0)
+    v_rel = (v_car - V_EGO) * cos_t
+    assert abs(ground_speed(V_EGO, 6.0, 4.0, v_rel) - v_car) < 0.01
+
+  def test_oncoming_still_reads_negative(self):
+    import math
+    cos_t = 60.0 / math.hypot(60.0, 3.7)
+    v_rel = (-27.0 - V_EGO) * cos_t
+    assert abs(ground_speed(V_EGO, 60.0, 3.7, v_rel) - (-27.0)) < 0.01
+
+
 class TestStationaryRejection:
   """This radar publishes barriers and sign gantries as ordinary tracks -- no classification of any
   kind exists upstream. A guardrail sits squarely inside the adjacent-lane band, and without this
@@ -628,7 +676,7 @@ class TestBlocksMove:
   def occupied_at(v_abs):
     side = AdjacentLaneSide()
     for _ in range(DEBOUNCE_FRAMES):
-      side.observe(True, 50.0, 3.7, v_abs - V_EGO, V_EGO)
+      side.observe(True, 50.0, 3.7, v_abs - V_EGO, v_abs)
     return side
 
   def test_slower_than_the_lead_blocks(self):
@@ -646,12 +694,15 @@ class TestBlocksMove:
   def test_clear_lane_never_blocks(self):
     side = AdjacentLaneSide()
     for _ in range(DEBOUNCE_FRAMES):
-      side.observe(False, 0.0, 0.0, 0.0, V_EGO)
+      side.observe(False, 0.0, 0.0, 0.0, NO_SPEED_SENTINEL)
     assert side.available
     assert not side.blocks_move(beat_speed=1e3, margin=0.0)
 
-  def test_absolute_speed_is_derived_from_ego(self):
+  def test_absolute_speed_comes_from_the_geometry_corrected_value(self):
+    # At 50 m the correction is negligible, so this still lands on v_ego + v_rel -- but it goes
+    # through ground_speed() rather than assuming boresight. See TestBarrierGeometry.
+    v_abs = ground_speed(V_EGO, 50.0, 3.7, -4.0)
     side = AdjacentLaneSide()
     for _ in range(DEBOUNCE_FRAMES):
-      side.observe(True, 50.0, 3.7, -4.0, V_EGO)
-    assert side.v_abs == V_EGO - 4.0
+      side.observe(True, 50.0, 3.7, -4.0, v_abs)
+    assert abs(side.v_abs - (V_EGO - 4.0)) < 0.05
