@@ -123,7 +123,12 @@ class SpeedLimitResolver:
     gps_data = sm[self._gps_location_service]
     map_data = sm['liveMapDataSP']
 
-    gps_fix_age = time.monotonic() - gps_data.unixTimestampMillis * 1e-3
+    # BluePilot: the SAME epoch mix-up fixed in _calculate_map_data_limits below, and it was still
+    # here. time.monotonic() counts from boot (~1e4); unixTimestampMillis * 1e-3 counts from 1970
+    # (~1.8e9), so this evaluated to about -1.8 billion and the guard could never be true. Map data
+    # was therefore accepted at any age, including a fix minutes old with no satellites -- which is
+    # exactly the state you are in under an overpass or in an interchange.
+    gps_fix_age = time.time() - gps_data.unixTimestampMillis * 1e-3
     if gps_fix_age > LIMIT_MAX_MAP_DATA_AGE:
       return
 
