@@ -13,6 +13,10 @@ than reimplementing it, so what it renders is what the car draws. Add a scene wh
 state is introduced.
 
 Usage:  python selfdrive/ui/bp/onroad/tools/preview_passing_panel.py [outdir]
+
+Also writes `all_states.png`, every panel on one sheet with its caption. Eighteen separate files
+are hard to hold in your head; one sheet is how you notice that two states look alike, or that a
+colour means different things in different places.
 """
 import ast
 import os
@@ -59,7 +63,7 @@ SCENES = [
   ("held: the car ahead slammed on",
    "Car ahead is braking", "no rear data  -  1 this drive", 0.0, False, GREY),
   ("held: closing in, showing the distance Auto worked out",
-   "Waiting to get closer", "until 512ft  -  now 640", 0.0, False, GREY),
+   "Waiting to get closer", "until 512ft  -  now 640ft", 0.0, False, GREY),
   ("blocked: oncoming traffic on the left",
    "ONCOMING LEFT", "saw 62 at 410ft  -  74s left", 0.0, False, GREY),
   ("keep right",
@@ -67,10 +71,10 @@ SCENES = [
   ("held: you just took an exit yourself",
    "You just changed lanes", "no rear data", 0.0, False, GREY),
   ("stopped: what this drive measured",
-   "THIS DRIVE", "you passed 7, agreed 6 (11s early), missed on oncoming traffic that side",
+   "THIS DRIVE", "7 passes, 6 agreed (11s early)  -  missed on oncoming traffic that side",
    0.0, False, INFO),
   ("stopped: the previous drive, kept across parking",
-   "LAST DRIVE", "all 14 drives: 96 passed, 89 agreed  -  oncoming: 62 at 410ft",
+   "LAST DRIVE", "14 drives: 96 passed, 89 agreed  -  oncoming: 62 at 410ft",
    0.0, False, INFO),
   ("worst case for width: everything at once",
    "WOULD BE CHANGING RIGHT",
@@ -112,6 +116,42 @@ def load_shipped_drawing_code():
   return ns
 
 
+# One row per state. Tall enough for the panel plus its caption underneath.
+ROW_H = 168
+SHEET_W = 1120
+
+
+def _contact_sheet(ns, font, outdir):
+  """Every state on one image, in the order the panel would choose between them."""
+  h = ROW_H * len(SCENES) + 40
+  tex = rl.load_render_texture(SHEET_W, h)
+  rl.begin_texture_mode(tex)
+  rl.draw_rectangle_gradient_v(0, 0, SHEET_W, h, rl.Color(88, 92, 98, 255), rl.Color(46, 49, 54, 255))
+
+  for i, (cap, main_text, sub, progress, alert, colour) in enumerate(SCENES):
+    top = 20 + i * ROW_H
+    stub = types.SimpleNamespace(
+      _font_bold=font, _pa_main=main_text, _pa_sub=sub, _pa_progress=progress,
+      _pa_alert=alert, _pa_color=rl.Color(*colour, 255), _pa_panel_rect=None,
+      _handle_panel_tap=lambda panel: None,
+    )
+    # The panel places itself relative to the rect it is given, so the rect is offset to put it
+    # where this row wants it rather than moving the drawing code.
+    off = ns["SPEED_UNIT_CENTER_Y"] + 60
+    ns["_draw_passing_assist"](stub, rl.Rectangle(0, top - off + 34, SHEET_W, h))
+    rl.draw_text_ex(font, cap, rl.Vector2(28, top + 4), 22, 0, rl.Color(190, 196, 204, 255))
+    rl.draw_line(20, top - 8, SHEET_W - 20, top - 8, rl.Color(255, 255, 255, 26))
+
+  rl.end_texture_mode()
+  img = rl.load_image_from_texture(tex.texture)
+  rl.image_flip_vertical(img)
+  path = os.path.join(outdir, "all_states.png")
+  rl.export_image(img, path.encode())
+  rl.unload_image(img)
+  print()
+  print("contact sheet:", path)
+
+
 def main(outdir):
   ns = load_shipped_drawing_code()
 
@@ -128,10 +168,11 @@ def main(outdir):
   SCENES.append((
     "worst case: a drive summary with every line it can produce", "THIS DRIVE",
     ns["_fit_sub"](fitter, [
-      "you passed 7, agreed 6 (11s early), missed on oncoming traffic that side",
-      "all 14 drives: 96 passed, 89 agreed",
-      "suggested 12, taken 6, longest ignored 34s",
       "2 reversed mid-change",
+      "7 passes, 6 agreed (11s early)",
+      "missed on oncoming traffic that side",
+      "14 drives: 96 passed, 89 agreed",
+      "suggested 12, taken 6, longest ignored 34s",
       "mostly: oncoming traffic that side 62%",
       "oncoming: 62 at 410ft",
       "ACC braked by 449ft",
@@ -167,6 +208,8 @@ def main(outdir):
     # Printed rather than only rendered: the numbers are what catch a panel about to run off the
     # edge, which is hard to spot by eye until it does.
     print(f"{i:2d}  {p.width:6.0f} x {p.height:5.0f}   {cap}")
+
+  _contact_sheet(ns, font, outdir)
 
   print(f"\nwidest panel {widest:.0f} of {W - 40} available")
   # The panel clamps its own box to the screen, so a too-long line does not widen it -- the TEXT

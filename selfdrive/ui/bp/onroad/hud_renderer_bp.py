@@ -487,38 +487,47 @@ class HudRendererBP(HudRendererSP):
         return self._draw_last_drive()
 
       # Priority order, most useful first -- see _fit_sub, which drops from the end.
+      # PRIORITY ORDER, and it matters far more than it looks. _fit_sub stops adding once the line
+      # would overflow, and rendering the whole panel on one sheet showed the truth: the agreement
+      # line alone very nearly fills the width, so in practice only two items ever appear. Anything
+      # below second is decoration.
+      #
+      # Which made a comment further down flatly false -- it claimed reversed-mid-change "must
+      # never be dropped for space" while sitting fourth, where it was always dropped. It goes
+      # first now. It is short and it is usually zero, so it costs nothing when there is nothing
+      # to say, and it is the only safety figure here.
       lines = []
-      # First, because it is the only line that answers "is this ready" rather than describing a
-      # symptom. Everything else here is evidence for why that answer is what it is.
+      if pa.emergencyAborts:
+        lines.append(f"{pa.emergencyAborts} reversed mid-change")
+
+      # Then the one line that answers "is this ready" rather than describing a symptom. Shortened
+      # from "you passed 7, agreed 6 (11s early), missed on ..." because that single sentence ate
+      # the entire budget and left no room for the evidence behind it. The miss reason is its own
+      # item now, so it competes on merit instead of riding along.
       if pa.driverPasses:
         agreed = pa.driverPassesAgreed
-        line = f"you passed {pa.driverPasses}, agreed {agreed}"
+        line = f"{pa.driverPasses} passes, {agreed} agreed"
         if agreed:
           line += f" ({pa.driverPassLeadSeconds:.0f}s early)"
+        lines.append(line)
         if agreed < pa.driverPasses:
           miss = int(pa.driverPassMissReason)
           name = _BLOCKED_ORDER[miss] if miss < len(_BLOCKED_ORDER) else ""
           if name:
-            line += f", missed on {_BLOCKED_TEXT.get(name, name).lower()}"
-        lines.append(line)
-      # Kept separate from the ordinary backouts below, and named differently, because they are
-      # not the same event: one is the system changing its mind before moving, the other is a
-      # crossing reversed because something was arriving. A single figure would hide the second
-      # inside the first, and the second is the one that must never be dropped for space.
-      # The total is what actually decides anything -- one drive's seven passes swing by a third
-      # on a single odd stretch of road. Shown only once there is more of it than the drive in
-      # front of it, or it is just the same number twice.
+            lines.append(f"missed on {_BLOCKED_TEXT.get(name, name).lower()}")
+
+      # The total is what actually decides anything -- one drive's seven passes swing by a third on
+      # a single odd stretch of road. Shown only once there is more of it than the drive in front
+      # of it, or it is the same number printed twice.
       if pa.lifetimeDrives > 1 and pa.lifetimePasses > pa.driverPasses:
-        lines.append(f"all {pa.lifetimeDrives} drives: {pa.lifetimePasses} passed, "
+        lines.append(f"{pa.lifetimeDrives} drives: {pa.lifetimePasses} passed, "
                      f"{pa.lifetimeAgreed} agreed")
-      # The other error direction, second only to agreement: suggestions nobody acted on.
+      # The other error direction: suggestions nobody acted on.
       if pa.suggestionsMade:
         line = f"suggested {pa.suggestionsMade}, taken {pa.suggestionsTaken}"
         if pa.longestIgnoredSeconds > 5.0:
           line += f", longest ignored {pa.longestIgnoredSeconds:.0f}s"
         lines.append(line)
-      if pa.emergencyAborts:
-        lines.append(f"{pa.emergencyAborts} reversed mid-change")
       # Split by manoeuvre only when they disagree. The counters were kept separate so an unstable
       # gate could be attributed to one or the other -- and then never shown, which made the whole
       # justification for splitting them worthless. One number when they agree, two when they
@@ -798,8 +807,9 @@ class HudRendererBP(HudRendererSP):
           # different per car and changes as it learns. Without showing it, "Waiting to get closer"
           # is a state with no observable meaning -- closer than WHAT.
           d = pa.minApproachActive if ui_state.is_metric else pa.minApproachActive * 3.28084
-          self._pa_sub_detail = (f"until {d:.0f}{'m' if ui_state.is_metric else 'ft'}"
-                                 f"  -  now {pa.leadDRel * (1 if ui_state.is_metric else 3.28084):.0f}")
+          unit = 'm' if ui_state.is_metric else 'ft'
+          now = pa.leadDRel * (1 if ui_state.is_metric else 3.28084)
+          self._pa_sub_detail = f"until {d:.0f}{unit}  -  now {now:.0f}{unit}"
         elif blocked == 'oncomingLane':
           # Say how long the veto has left, so a driver who has just turned off a two-lane road
           # onto a divided one can see it counting down rather than wonder if it has hung.
