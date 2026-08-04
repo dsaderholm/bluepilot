@@ -536,7 +536,11 @@ class PassingAssistDetector:
     situation at two moments -- about to brake, or already braked -- and treating them separately is
     what made the old version wait for a state this driver never reaches.
 
-    THE GOAL IS TO NEVER BE STUCK, and the measure of that is how little Ford's ACC has to brake.
+    THE GOAL IS TO NEVER BE STUCK WAITING FOR THIS, and the measure of it is how little Ford's ACC
+    has to brake. Getting stuck behind a car is not always avoidable and this does not pretend
+    otherwise -- with no lane open there is nowhere to go, and sitting there is the correct
+    outcome, reported as noLaneAvailable. What is avoidable is being stuck because the system was
+    still making up its mind.
     So the only timer left in this path is a CONFIRMATION timer -- long enough that radar noise
     cannot trigger a manoeuvre, and no longer -- rather than a "have we suffered enough yet" timer.
     Every frame it costs is a frame nearer ACC deciding to shed speed for a car we were always
