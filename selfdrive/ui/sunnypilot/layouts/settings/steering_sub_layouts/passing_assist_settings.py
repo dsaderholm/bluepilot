@@ -85,12 +85,7 @@ class PassingAssistSettingsLayout(Widget):
       description=tr("How long the turn signal would be on before the lane change starts. Nothing "
                      "is actuated yet -- this drives the dry run on screen, which shows the whole "
                      "sequence a fully automatic pass would go through so it can be judged from a "
-                     "real drive before anything is wired to a control.
-
-"
-                     "Utah Code 41-6a-804 requires a signal given continuously for at least the "
-                     "last two seconds before a lane change. Set below 2 s deliberately, not by "
-                     "accident."),
+                     "real drive before anything is wired to a control."),
       param="PassingAssistBlinkerLead",
       min_value=0, max_value=5, value_change_step=1,
       label_callback=lambda v: f"{v} s",
