@@ -13,6 +13,7 @@ from types import SimpleNamespace as NS
 from opendbc.car import DT_CTRL
 from opendbc.sunnypilot.car.ford.blinker_test_ext import (
   BlinkerTestExt, SIGNAL_NONE, SIGNAL_LEFT, SIGNAL_RIGHT, PULSE_DURATION_S, STANDSTILL_V_EGO,
+  BUTTONS_STEP,
 )
 
 
@@ -50,6 +51,47 @@ def run(ext, frames, **kw):
 
 
 POLL_FRAMES = int(0.5 / DT_CTRL) + 1
+
+
+class TestSendRate:
+  """Found on the car: the lamp flashed fast and erratically during a test pulse.
+
+  Not the tapping. The frame went out every 10 ms, roughly 100 Hz, against the SCCM's own 10 Hz
+  copy of the same message on the same bus -- so the BCM saw the switch alternating between the
+  commanded side and the driver's actual OFF about ten times per genuine frame.
+
+  These pin the rate at the module boundary, because carcontroller.py cannot be tested offline and
+  that is exactly why the bug got as far as a drive.
+  """
+
+  def test_the_signal_is_not_returned_every_frame(self):
+    ext = make_ext(SIGNAL_RIGHT)
+    out = run(ext, POLL_FRAMES + int(1.0 / DT_CTRL))
+    signalled = [v for v in out if v == SIGNAL_RIGHT]
+    assert signalled, "never signalled at all"
+    assert len(signalled) < len(out) / 2, "signal returned on most frames -- rate limit is not applied"
+
+  def test_the_gap_between_sends_is_buttons_step(self):
+    ext = make_ext(SIGNAL_RIGHT)
+    out = run(ext, POLL_FRAMES + int(2.0 / DT_CTRL))
+    idx = [i for i, v in enumerate(out) if v == SIGNAL_RIGHT]
+    gaps = {b - a for a, b in zip(idx, idx[1:])}
+    assert gaps == {BUTTONS_STEP}, f"send gaps {sorted(gaps)}, expected {BUTTONS_STEP}"
+
+  def test_the_pulse_still_ends_on_time_despite_the_rate_limit(self):
+    # The state machine must advance every frame even though it only speaks every fifth. If the
+    # timeout were rate-limited too the pulse would run five times too long.
+    ext = make_ext(SIGNAL_RIGHT)
+    out = run(ext, POLL_FRAMES + int((PULSE_DURATION_S + 1.0) / DT_CTRL))
+    last = max(i for i, v in enumerate(out) if v == SIGNAL_RIGHT)
+    elapsed = (last - out.index(SIGNAL_RIGHT)) * DT_CTRL
+    assert elapsed <= PULSE_DURATION_S + 0.1, f"pulse ran {elapsed:.2f}s"
+
+  def test_motion_still_stops_it_within_one_frame(self):
+    # Rate-limiting the send must not rate-limit the standstill re-check.
+    ext = make_ext(SIGNAL_RIGHT)
+    run(ext, POLL_FRAMES + BUTTONS_STEP)
+    assert set(run(ext, 50, v_ego=STANDSTILL_V_EGO + 1.0)) == {SIGNAL_NONE}
 
 
 class TestBlinkerTestGates:

@@ -35,6 +35,15 @@ from openpilot.common.params import Params
 SIGNAL_NONE, SIGNAL_LEFT, SIGNAL_RIGHT = 0, 1, 2
 
 PULSE_DURATION_S = 4.0        # long enough for several flash cycles at ~1.5 Hz
+# Send Steering_Data_FD1 no faster than every other sender of it does. Measured on the car: sending
+# it every 10 ms frame put ~100 Hz of this message on bus 0 against the SCCM's own 10 Hz copy, so
+# the BCM saw the turn-signal switch alternating between the commanded side and the driver's actual
+# OFF roughly ten times for every genuine frame. The lamp flashed fast and erratically.
+#
+# The rate lives in this module rather than in carcontroller.py deliberately: that file cannot be
+# tested offline, and this is the exact class of mistake that reaches the car unnoticed. Here it is
+# covered by a test.
+BUTTONS_STEP = 5              # 100 Hz / 5 = 20 Hz, matching CarControllerParams.BUTTONS_STEP
 STANDSTILL_V_EGO = 0.3        # m/s
 PARAMS_POLL_S = 0.5
 
@@ -71,12 +80,19 @@ class BlinkerTestExt:
       pass
 
   def update_blinker_test(self, CS) -> int:
-    """Advance the state machine. Returns the TurnLghtSwtch_D_Stat value to transmit.
+    """Advance the state machine. Returns the TurnLghtSwtch_D_Stat value to transmit, or
+    SIGNAL_NONE on frames where nothing should be sent.
 
     Returns SIGNAL_NONE in every case except an active, gated pulse -- and the caller passes that
     through to create_button_msg, which otherwise copies the driver's own switch position.
+
+    **The state machine advances every frame; only the RETURN is rate-limited** to BUTTONS_STEP.
+    That keeps the timeout, the standstill re-check and the lamp observation running at full rate
+    while the message goes out at the rate the bus expects. See BUTTONS_STEP for what happened when
+    it did not.
     """
     self._bt_frame += 1
+    send_frame = (self._bt_frame % BUTTONS_STEP) == 0
 
     # ---- active pulse: timeout is checked FIRST, before anything that could throw or block ----
     if self.bt_state == 1:
@@ -97,7 +113,7 @@ class BlinkerTestExt:
         self._disarm()
         return SIGNAL_NONE
 
-      return self.bt_commanded
+      return self.bt_commanded if send_frame else SIGNAL_NONE
 
     # ---- idle: look for a request, at a low rate ----
     if self._bt_frame % int(PARAMS_POLL_S / DT_CTRL) != 0:

@@ -132,10 +132,12 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
     # in which case create_button_msg keeps passing the driver's own switch position through
     # untouched. Only an explicitly requested, standstill-gated pulse returns anything else.
     turn_signal = BlinkerTestExt.update_blinker_test(self, CS)
-    ts = turn_signal if turn_signal else None
-    if ts is not None:
+    # update_blinker_test rate-limits itself to BUTTONS_STEP -- see its docstring. The rate lives
+    # there rather than here because this file cannot be tested offline, and sending this frame too
+    # fast is precisely the bug that reached the car.
+    if turn_signal:
       can_sends.append(fordcan_ext.create_button_msg(self.packer, self.CAN.main, CS.buttons_stock_values,
-                                                     turn_signal=ts))
+                                                     turn_signal=turn_signal))
 
     ### acc buttons ###
     if CC.cruiseControl.cancel:
