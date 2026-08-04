@@ -20,6 +20,7 @@ from cereal import log
 from openpilot.common.realtime import DT_MDL
 from openpilot.sunnypilot.selfdrive.controls.lib.auto_lane_change import (
   AutoLaneChangeController, AutoLaneChangeMode, DEFAULT_CANCEL_WINDOW_S,
+  LANE_CHANGE_STATS_WRITE_S,
 )
 
 LaneChangeState = log.LaneChangeState
@@ -206,3 +207,54 @@ class TestMeasuringRealLaneChanges:
       b.update(cs, True, 0.5)
     assert a.lane_change_state == b.lane_change_state
     assert a.desire == b.desire
+
+
+class TestStatsSurviveABadParam:
+  """Found by reading. The seeded flag was set BEFORE the reads that could throw, so one bad param
+  read left the flag true and the base values missing -- every later save then raised, was
+  swallowed by the same except, and the drive silently recorded nothing at all.
+
+  Silent and permanent is the worst shape a failure can take here: nothing looks wrong, the drive
+  just produces no numbers.
+  """
+
+  def _alc(self, get):
+    alc = AutoLaneChangeController(_DH())
+    alc.params.get = get
+    alc.written = []
+    alc.params.put = lambda k, v: alc.written.append(v)
+    alc.changes_completed = 1
+    alc.change_seconds = 4.0
+    return alc
+
+  def test_a_throwing_read_does_not_disable_saving_forever(self):
+    calls = {"n": 0}
+
+    def flaky(key, *a, **k):
+      calls["n"] += 1
+      if calls["n"] == 1:
+        raise ValueError("corrupt")
+      return {"changes": 5, "abandoned": 1, "cancelled": 0, "seconds": 3.0}
+
+    alc = self._alc(flaky)
+    alc._stats_write_s = LANE_CHANGE_STATS_WRITE_S
+    alc._save_stats()                       # first attempt throws
+    assert not alc.written
+    alc._stats_write_s = LANE_CHANGE_STATS_WRITE_S
+    alc._save_stats()                       # must recover, not stay broken
+    assert alc.written, "one bad read silenced the whole drive"
+    assert alc.written[-1]["changes"] == 6
+
+  def test_a_fresh_device_starts_from_zero(self):
+    alc = self._alc(lambda *a, **k: None)
+    alc._stats_write_s = LANE_CHANGE_STATS_WRITE_S
+    alc._save_stats()
+    assert alc.written[-1] == {"changes": 1, "abandoned": 0, "cancelled": 0, "seconds": 4.0}
+
+  def test_the_lifetime_mean_weights_by_how_many_changes(self):
+    """Not a mean of means: 5 changes at 3.0 s and 1 at 9.0 s is 4.0 s, not 6.0."""
+    alc = self._alc(lambda *a, **k: {"changes": 5, "abandoned": 0, "cancelled": 0, "seconds": 3.0})
+    alc.change_seconds = 9.0
+    alc._stats_write_s = LANE_CHANGE_STATS_WRITE_S
+    alc._save_stats()
+    assert alc.written[-1]["seconds"] == 4.0

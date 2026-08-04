@@ -125,6 +125,13 @@ class AutoLaneChangeController:
     self._change_started_s = 0.0
     self._stats_write_s = 0.0
     self._stats_seeded = False
+    # Assigned here rather than only on first save. They used to be created inside the try block
+    # AFTER the seeded flag was set, so a param read that threw once left the flag true and the
+    # values missing -- every later save then raised, was swallowed by the same except, and the
+    # drive silently recorded nothing. Existing by default makes that unreachable.
+    self._base = {"changes": 0, "abandoned": 0, "cancelled": 0}
+    self._base_secs = 0.0
+    self._base_n = 0
 
     self.read_params()
 
@@ -185,11 +192,11 @@ class AutoLaneChangeController:
       return
     try:
       if not self._stats_seeded:
-        self._stats_seeded = True
         old = self.params.get("LaneChangeStats") or {}
-        self._base = {k: old.get(k, 0) for k in ("changes", "abandoned", "cancelled")}
+        self._base = {k: int(old.get(k, 0)) for k in ("changes", "abandoned", "cancelled")}
         self._base_secs = float(old.get("seconds", 0.0))
         self._base_n = int(old.get("changes", 0))
+        self._stats_seeded = True   # only once the read actually succeeded
       total = self._base["changes"] + self.changes_completed
       # Weighted so the lifetime mean is over every change ever made, not a mean of means.
       secs = ((self._base_secs * self._base_n + self.change_seconds * self.changes_completed) / total
