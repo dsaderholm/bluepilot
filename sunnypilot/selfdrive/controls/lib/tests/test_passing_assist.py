@@ -748,7 +748,9 @@ class TestOncomingVeto:
     # The dangerous window: the oncoming car has gone by, the left lane looks clear and inviting,
     # and it is still the lane they are using.
     det = PassingAssistDetector()
-    det.update(make_sm(tracks=self.ONCOMING), CRUISE_MS, True)
+    # Three sightings, not one: the veto now needs corroboration. See ONCOMING_FRAMES -- it latched
+    # on a single return until a drive on I-15 showed what that costs on a divided road.
+    run(det, 3, tracks=self.ONCOMING)
     run(det, STUCK_FRAMES)
     assert det.suggestion == Side.none
     assert det.blocked_by == Blocked.oncomingLane

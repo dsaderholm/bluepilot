@@ -177,11 +177,23 @@ DEFAULT_ONCOMING_MEMORY_S = 90
 # edge would still produce a jittery clear.
 DEBOUNCE_FRAMES = 3
 
-# Oncoming needs no such patience, and giving it any would be backwards. Occupancy debounces
-# because a flickering track produces a flickering suggestion; a single oncoming return is already
-# proof of a two-way road, and the cost of believing a false one is a few quiet minutes while the
-# cost of waiting for a second is a suggestion to pass into a head-on lane. One is enough.
-ONCOMING_FRAMES = 1
+# Oncoming used to need no patience at all: one return latched the full memory. The argument was
+# that believing a false one costs "a few quiet minutes" and waiting for a second could cost a
+# suggestion to pass into a head-on lane.
+#
+# THAT COST WAS WRONG, and the road said so. Reported after a drive: "I was on I-15 for a while,
+# and kept saying two-way road." I-15 is divided. One spurious return silences the feature for the
+# full memory, and on a long interstate run a handful of them silence it for the whole drive --
+# which is not a few quiet minutes, it is the feature not existing on the road it is most used on.
+#
+# So: corroboration, and it is nearly free. Genuine opposing traffic closes at 120+ mph and is
+# still tracked for seconds -- upwards of a dozen returns at 8.3 Hz -- so three is invisible for a
+# real one and fatal to a lone bad return. NOT required to be consecutive, because radar tracks
+# flicker; they must fall within ONCOMING_WINDOW_S of each other.
+ONCOMING_FRAMES = 3
+# How long a partial count survives without corroboration. Longer than one dropped message, far
+# shorter than an oncoming vehicle's time in view.
+ONCOMING_WINDOW_S = 1.5
 
 # Below this the line-of-sight geometry stops being trustworthy and the correction below would
 # amplify range-rate noise rather than remove a bias. cos 72 degrees; nothing in the adjacent-lane
@@ -309,6 +321,9 @@ class AdjacentLaneSide:
     self.oncoming = False        # something on this side is travelling the other way, right now
     self.oncoming_d_rel = 0.0
     self.oncoming_v_abs = NO_SPEED
+    # Corroboration for the veto. See ONCOMING_FRAMES.
+    self._oncoming_hits = 0
+    self._oncoming_gap_s = 0.0
     # Three latches, because three different facts decide whether this side is usable and they
     # expire independently.
     #
@@ -371,11 +386,21 @@ class AdjacentLaneSide:
       self.d_rel, self.y_rel, self.v_rel, self.v_abs = 0.0, 0.0, 0.0, NO_SPEED
 
   def observe_oncoming(self, d_rel: float, v_abs: float, memory_s: float, adjacent: bool) -> None:
-    """Record a vehicle travelling the other way on this side. See ONCOMING_FRAMES: no debounce."""
+    """Record a vehicle travelling the other way on this side.
+
+    Latches the memory only once ONCOMING_FRAMES returns have corroborated each other. The
+    evidence is kept from the first sighting either way, so a veto that does fire can say what
+    fired it -- which is the only way to tell a real opposing carriageway from a bad return
+    without reading a log.
+    """
     self.available = True
     self.oncoming = True
     self.oncoming_d_rel = float(d_rel)
     self.oncoming_v_abs = float(v_abs)
+    self._oncoming_gap_s = 0.0
+    self._oncoming_hits += 1
+    if self._oncoming_hits < ONCOMING_FRAMES:
+      return
     self.oncoming_seconds = float(memory_s)
     if adjacent:
       self.oncoming_adjacent_seconds = float(memory_s)
@@ -388,6 +413,11 @@ class AdjacentLaneSide:
     self.oncoming = False
 
   def decay_oncoming(self, dt: float) -> None:
+    # A partial count that stops being corroborated is discarded rather than carried forward, or
+    # single bad returns minutes apart would eventually add up to a veto.
+    self._oncoming_gap_s += dt
+    if self._oncoming_gap_s > ONCOMING_WINDOW_S:
+      self._oncoming_hits = 0
     self.oncoming_seconds = max(0.0, self.oncoming_seconds - dt)
     self.oncoming_adjacent_seconds = max(0.0, self.oncoming_adjacent_seconds - dt)
     self.same_direction_seconds = max(0.0, self.same_direction_seconds - dt)

@@ -23,6 +23,7 @@ Four things here can be wrong in ways a drive would not reveal:
 from types import SimpleNamespace as NS
 
 from openpilot.sunnypilot.selfdrive.controls.lib.adjacent_lane import (
+  ONCOMING_FRAMES, MIN_ONCOMING_MS,
   AdjacentLane, AdjacentLaneSide, ADJACENT_MIN_M, ADJACENT_MAX_M, DEBOUNCE_FRAMES, MIN_MOVING_MS,
   ONCOMING_MAX_M, SAME_DIRECTION_MIN_FRACTION, path_offset, ground_speed,
 )
@@ -70,6 +71,22 @@ class FakeSM:
 
   def __getitem__(self, s):
     return self.data[s]
+
+
+def upd(adj, sm, v_ego=V_EGO, max_d=MAX_D, **kw):
+  """Apply one scene ONCOMING_FRAMES times.
+
+  Oncoming used to latch the veto on a SINGLE radar return. It does not any more -- see
+  ONCOMING_FRAMES and the I-15 report behind it -- so every case here that means "there really is
+  opposing traffic" has to show it more than once. That is what a real radar does anyway: a vehicle
+  in view produces a return every 120 ms, not one and then silence.
+
+  Used only where a scene ESTABLISHES oncoming. The decay and dropout cases still step one frame at
+  a time, because repeating those would run their clocks three times too fast.
+  """
+  for _ in range(ONCOMING_FRAMES):
+    adj.update(sm, v_ego, max_d, **kw)
+  return adj
 
 
 def feed(adj, tracks, frames=DEBOUNCE_FRAMES, **kw):
@@ -180,7 +197,7 @@ class TestOncoming:
 
   def test_a_single_oncoming_car_classifies_the_road(self):
     adj = AdjacentLane()
-    adj.update(FakeSM([self.ONCOMING()]), V_EGO, MAX_D)
+    upd(adj, FakeSM([self.ONCOMING()]), V_EGO, MAX_D)
     assert adj.undivided
     assert adj.left.oncoming
     assert adj.oncoming_seen
@@ -189,7 +206,7 @@ class TestOncoming:
     # Occupancy waits three messages; this must not. Waiting for a second sighting costs a
     # suggestion to pass into a head-on lane, and one sighting is already proof.
     adj = AdjacentLane()
-    adj.update(FakeSM([self.ONCOMING()]), V_EGO, MAX_D)
+    upd(adj, FakeSM([self.ONCOMING()]), V_EGO, MAX_D)
     assert adj.undivided
 
   def test_oncoming_is_not_counted_as_lane_occupancy(self):
@@ -213,14 +230,14 @@ class TestOncoming:
     # The band does this discrimination for free: an opposing carriageway across a median sits well
     # beyond ADJACENT_MAX_M, so an interstate never trips the veto.
     adj = AdjacentLane()
-    adj.update(FakeSM([track(120, 14.0, v_rel=-27.0 - V_EGO)]), V_EGO, MAX_D)
+    upd(adj, FakeSM([track(120, 14.0, v_rel=-27.0 - V_EGO)]), V_EGO, MAX_D)
     assert not adj.undivided
 
   def test_classification_outlives_the_car_that_caused_it(self):
     # The whole point of the memory. On a quiet two-lane road the gaps between meeting cars are
     # exactly when a wrong suggestion would look most convincing.
     adj = AdjacentLane()
-    adj.update(FakeSM([self.ONCOMING()]), V_EGO, MAX_D, dt=0.05, memory_s=90)
+    upd(adj, FakeSM([self.ONCOMING()]), V_EGO, MAX_D, dt=0.05, memory_s=90)
     for _ in range(200):     # 10 s of empty road
       adj.update(FakeSM([]), V_EGO, MAX_D, dt=0.05, memory_s=90)
     assert adj.undivided
@@ -229,7 +246,7 @@ class TestOncoming:
 
   def test_the_memory_does_expire(self):
     adj = AdjacentLane()
-    adj.update(FakeSM([self.ONCOMING()]), V_EGO, MAX_D, dt=0.05, memory_s=5)
+    upd(adj, FakeSM([self.ONCOMING()]), V_EGO, MAX_D, dt=0.05, memory_s=5)
     for _ in range(120):     # 6 s
       adj.update(FakeSM([]), V_EGO, MAX_D, dt=0.05, memory_s=5)
     assert not adj.undivided
@@ -238,7 +255,7 @@ class TestOncoming:
   def test_a_dead_radar_does_not_clear_the_classification(self):
     # A sensor dropping out is not evidence the road became one-way.
     adj = AdjacentLane()
-    adj.update(FakeSM([self.ONCOMING()]), V_EGO, MAX_D)
+    upd(adj, FakeSM([self.ONCOMING()]), V_EGO, MAX_D)
     adj.update(FakeSM([], alive=False), V_EGO, MAX_D)
     assert adj.undivided
 
@@ -246,7 +263,7 @@ class TestOncoming:
     # The clock is wall time, not radar time. Decaying only on radar frames would stretch the
     # memory by whatever the message rate happened to be.
     adj = AdjacentLane()
-    adj.update(FakeSM([self.ONCOMING()]), V_EGO, MAX_D, dt=0.05, memory_s=10)
+    upd(adj, FakeSM([self.ONCOMING()]), V_EGO, MAX_D, dt=0.05, memory_s=10)
     before = adj.undivided_seconds
     for _ in range(20):
       adj.update(FakeSM([], updated=False), V_EGO, MAX_D, dt=0.05, memory_s=10)
@@ -257,7 +274,7 @@ class TestOncoming:
     # lose the oncoming lane on exactly the bends where meeting someone matters most.
     car = track(70, 4.9 + 3.7, v_rel=-27.0 - V_EGO)
     adj = AdjacentLane()
-    adj.update(FakeSM([car], curve=-500.0), V_EGO, MAX_D)
+    upd(adj, FakeSM([car], curve=-500.0), V_EGO, MAX_D)
     assert adj.undivided
     assert adj.left.oncoming
 
@@ -279,21 +296,21 @@ class TestMedians:
     # Narrow median: our carriageway ends 5.5 m out, the opposing lane sits at 5.0 m -- INSIDE the
     # band, so the band alone would have called this a two-way road and killed passing on I-15.
     adj = AdjacentLane()
-    adj.update(FakeSM([self.oncoming_at(5.0)], left_edge=-4.0), V_EGO, MAX_D)
+    upd(adj, FakeSM([self.oncoming_at(5.0)], left_edge=-4.0), V_EGO, MAX_D)
     assert not adj.undivided
 
   def test_two_lane_road_still_trips_it(self):
     # Same lateral distance, but here the road edge is beyond the oncoming lane, because that lane
     # is part of our road. This is the inversion the band cannot see and the edge gets right.
     adj = AdjacentLane()
-    adj.update(FakeSM([self.oncoming_at(3.7)], left_edge=-7.0), V_EGO, MAX_D)
+    upd(adj, FakeSM([self.oncoming_at(3.7)], left_edge=-7.0), V_EGO, MAX_D)
     assert adj.undivided
 
   def test_an_untrusted_road_edge_falls_back_to_the_band(self):
     # Unknown counts as ON our road. Over-detecting costs a quiet stretch; under-detecting costs a
     # suggestion to pass into a head-on lane, and those are not the same size.
     adj = AdjacentLane()
-    adj.update(FakeSM([self.oncoming_at(5.0)], left_edge=-4.0, edge_stds=(9.9, 9.9)),
+    upd(adj, FakeSM([self.oncoming_at(5.0)], left_edge=-4.0, edge_stds=(9.9, 9.9)),
                V_EGO, MAX_D)
     assert adj.undivided
 
@@ -301,14 +318,14 @@ class TestMedians:
     adj = AdjacentLane()
     sm = FakeSM([self.oncoming_at(3.7)])
     del sm.data['modelV2'].roadEdges
-    adj.update(sm, V_EGO, MAX_D)
+    upd(adj, sm, V_EGO, MAX_D)
     assert adj.undivided
 
   def test_the_edge_test_follows_a_curve(self):
     # Both the track and the edge are taken path-relative, so a bend must not push a same-road
     # oncoming car outside its own road edge.
     adj = AdjacentLane()
-    adj.update(FakeSM([track(70, 4.9 + 3.7, v_rel=-27.0 - V_EGO)], curve=-500.0, left_edge=-7.0),
+    upd(adj, FakeSM([track(70, 4.9 + 3.7, v_rel=-27.0 - V_EGO)], curve=-500.0, left_edge=-7.0),
                V_EGO, MAX_D)
     assert adj.undivided
 
@@ -316,10 +333,10 @@ class TestMedians:
     # Camera frame: left negative, right positive, so "inside the edge" is a different comparison
     # per side. Easy to write once and have backwards on one of them.
     adj = AdjacentLane()
-    adj.update(FakeSM([self.oncoming_at(-5.0)], right_edge=4.0), V_EGO, MAX_D)
+    upd(adj, FakeSM([self.oncoming_at(-5.0)], right_edge=4.0), V_EGO, MAX_D)
     assert not adj.undivided
     adj = AdjacentLane()
-    adj.update(FakeSM([self.oncoming_at(-3.7)], right_edge=7.0), V_EGO, MAX_D)
+    upd(adj, FakeSM([self.oncoming_at(-3.7)], right_edge=7.0), V_EGO, MAX_D)
     assert adj.right.oncoming
 
 
@@ -396,7 +413,7 @@ class TestUSRoadConfigurations:
     # The nearest oncoming vehicle, at 100 m, converted back to the radar's left-positive frame.
     tracks = [track(100, -onc[0], v_rel=-27.0 - V_EGO)]
     adj = AdjacentLane()
-    adj.update(FakeSM(tracks, left_edge=left_edge), V_EGO, MAX_D, strict=strict)
+    upd(adj, FakeSM(tracks, left_edge=left_edge), V_EGO, MAX_D, strict=strict)
     return adj.left.blocks_oncoming
 
   def test_every_road_configuration(self):
@@ -435,7 +452,7 @@ class TestMiddleLaneAmbiguity:
       tracks.append(track(60, LANE_W, v_rel=2.0))
     adj = AdjacentLane()
     for _ in range(DEBOUNCE_FRAMES):
-      adj.update(FakeSM(tracks, left_edge=left_edge), V_EGO, MAX_D, strict=strict)
+      upd(adj, FakeSM(tracks, left_edge=left_edge), V_EGO, MAX_D, strict=strict)
     return adj.left
 
   def test_strict_assumes_turn_lane(self):
@@ -455,7 +472,7 @@ class TestMiddleLaneAmbiguity:
     left_edge, onc, _ = road(ego_offset_from_left=0, oncoming_lanes=1)
     for strict in (True, False):
       adj = AdjacentLane()
-      adj.update(FakeSM([track(100, -onc[0], v_rel=-27.0 - V_EGO)], left_edge=left_edge),
+      upd(adj, FakeSM([track(100, -onc[0], v_rel=-27.0 - V_EGO)], left_edge=left_edge),
                  V_EGO, MAX_D, strict=strict)
       assert adj.left.blocks_oncoming, f"strict={strict}"
     
@@ -476,7 +493,7 @@ class TestTurnLaneEvidenceQuality:
               track(60, LANE_W, v_rel=middle_lane_v_abs - V_EGO)]
     adj = AdjacentLane()
     for _ in range(DEBOUNCE_FRAMES):
-      adj.update(FakeSM(tracks, left_edge=left_edge), V_EGO, MAX_D, strict=True)
+      upd(adj, FakeSM(tracks, left_edge=left_edge), V_EGO, MAX_D, strict=True)
     return adj.left
 
   def test_a_car_entering_a_turn_lane_does_not_vouch_for_it(self):
@@ -706,3 +723,50 @@ class TestBlocksMove:
     for _ in range(DEBOUNCE_FRAMES):
       side.observe(True, 50.0, 3.7, -4.0, v_abs)
     assert abs(side.v_abs - (V_EGO - 4.0)) < 0.05
+
+
+class TestOncomingNeedsCorroboration:
+  """From a drive: "I was on I-15 for a while, and kept saying two-way road."
+
+  I-15 is divided. One spurious return used to latch the full memory, so on a long interstate run a
+  handful of them silenced the feature for the whole drive -- not "a few quiet minutes", which is
+  what the single-frame rule was justified on, but the feature not existing on the road it is most
+  used on.
+  """
+
+  ONCOMING = staticmethod(lambda: track(90, 3.7, v_rel=-27.0 - V_EGO))
+
+  def test_one_bad_return_no_longer_silences_the_road(self):
+    adj = AdjacentLane()
+    adj.update(FakeSM([self.ONCOMING()]), V_EGO, MAX_D)
+    assert not adj.undivided, "a single return must not latch a 90 second veto"
+
+  def test_two_are_still_not_enough(self):
+    adj = AdjacentLane()
+    for _ in range(ONCOMING_FRAMES - 1):
+      adj.update(FakeSM([self.ONCOMING()]), V_EGO, MAX_D)
+    assert not adj.undivided
+
+  def test_real_opposing_traffic_still_trips_it(self):
+    """The cost has to be near zero for a genuine one. Opposing traffic closes at 120+ mph and is
+    tracked for seconds -- dozens of returns -- so three is invisible."""
+    adj = upd(AdjacentLane(), FakeSM([self.ONCOMING()]), V_EGO, MAX_D)
+    assert adj.undivided
+    assert adj.left.oncoming
+
+  def test_returns_scattered_over_minutes_never_add_up(self):
+    """The failure mode a plain counter would have: three bad returns far apart eventually
+    latching the veto anyway, just more slowly."""
+    adj = AdjacentLane()
+    for _ in range(ONCOMING_FRAMES + 2):
+      adj.update(FakeSM([self.ONCOMING()]), V_EGO, MAX_D)
+      for _ in range(int(3.0 / 0.05)):
+        adj.update(FakeSM([]), V_EGO, MAX_D)
+    assert not adj.undivided
+
+  def test_the_evidence_is_kept_from_the_first_sighting(self):
+    """So a veto that DOES fire can say what fired it -- the only way to tell a real opposing
+    carriageway from a bad return without reading a log."""
+    adj = upd(AdjacentLane(), FakeSM([self.ONCOMING()]), V_EGO, MAX_D)
+    assert adj.left.oncoming_d_rel == 90
+    assert adj.left.oncoming_v_abs < -MIN_ONCOMING_MS

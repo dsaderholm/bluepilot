@@ -697,7 +697,19 @@ class HudRendererBP(HudRendererSP):
         elif blocked == 'oncomingLane':
           # Say how long the veto has left, so a driver who has just turned off a two-lane road
           # onto a divided one can see it counting down rather than wonder if it has hung.
-          self._pa_sub_detail = f"seen {pa.undividedSeconds:.0f}s of memory left"
+          # WHAT fired it, not just that it did. Reported on I-15, which is divided, so this
+          # veto is either seeing the opposite carriageway or inventing traffic -- and the two
+          # need completely different fixes. The numbers tell them apart at a glance, which is the
+          # only way to tell without reading a log.
+          onc = pa.adjacentLeft if pa.adjacentLeft.oncoming else pa.adjacentRight
+          conv = 2.23694 if not ui_state.is_metric else 3.6
+          if onc.oncomingDRel > 0:
+            d = onc.oncomingDRel if ui_state.is_metric else onc.oncomingDRel * 3.28084
+            self._pa_sub_detail = (f"saw {abs(onc.oncomingVAbs) * conv:.0f} at "
+                                   f"{d:.0f}{'m' if ui_state.is_metric else 'ft'}  -  "
+                                   f"{pa.undividedSeconds:.0f}s left")
+          else:
+            self._pa_sub_detail = f"seen {pa.undividedSeconds:.0f}s of memory left"
         elif blocked == 'adjacentSlow':
           # Same reasoning as above: show the comparison, not just its verdict. Which side is
           # reported matters, because "the next lane is no faster" is a claim about a specific
