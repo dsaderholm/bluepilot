@@ -501,6 +501,12 @@ class HudRendererBP(HudRendererSP):
       # not the same event: one is the system changing its mind before moving, the other is a
       # crossing reversed because something was arriving. A single figure would hide the second
       # inside the first, and the second is the one that must never be dropped for space.
+      # The other error direction, second only to agreement: suggestions nobody acted on.
+      if pa.suggestionsMade:
+        line = f"suggested {pa.suggestionsMade}, taken {pa.suggestionsTaken}"
+        if pa.longestIgnoredSeconds > 5.0:
+          line += f", longest ignored {pa.longestIgnoredSeconds:.0f}s"
+        lines.append(line)
       if pa.emergencyAborts:
         lines.append(f"{pa.emergencyAborts} reversed mid-change")
       # The most useful line here, so it goes first: what actually stopped the passes.
@@ -541,6 +547,8 @@ class HudRendererBP(HudRendererSP):
         if int(d.get("driverPassesAgreed", 0)):
           line += f" ({float(d['driverPassLead']):.0f}s early)"
         lines.append(line)
+      if int(d.get("suggestionsMade", 0)):
+        lines.append(f"suggested {int(d['suggestionsMade'])}, taken {int(d['suggestionsTaken'])}")
       share = float(d.get("topBlockedShare", 0))
       if share > 0.05:
         # The int is the Blocked ordinal. Mapped through the same table the live panel uses, so

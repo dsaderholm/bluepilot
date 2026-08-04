@@ -129,6 +129,7 @@ def main(outdir):
     "worst case: a drive summary with every line it can produce", "THIS DRIVE",
     ns["_fit_sub"](fitter, [
       "you passed 7, agreed 6 (11s early), missed on oncoming traffic that side",
+      "suggested 12, taken 6, longest ignored 34s",
       "2 reversed mid-change",
       "mostly: oncoming traffic that side 62%",
       "oncoming: 62 at 410ft",

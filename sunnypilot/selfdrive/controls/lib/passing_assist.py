@@ -463,6 +463,12 @@ class PassingAssistDetector:
     self.driver_pass_lead_s = 0.0
     self._suggest_held_s = 0.0
     self._miss_reasons: dict[int, int] = {}
+    # See suggestionsMade in custom.capnp -- the other error direction.
+    self.suggestions_made = 0
+    self.suggestions_taken = 0
+    self.longest_ignored_s = 0.0
+    self._episode_taken = False
+    self._prev_suggesting = False
     self.closing_in = False
     self.lead_accel = 0.0
     self.lead_braking_enabled = True
@@ -812,6 +818,9 @@ class PassingAssistDetector:
         "driverPassesAgreed": int(self.driver_passes_agreed),
         "driverPassLead": round(self.driver_pass_lead_s, 1),
         "driverPassMiss": int(self.driver_pass_miss_reason),
+        "suggestionsMade": int(self.suggestions_made),
+        "suggestionsTaken": int(self.suggestions_taken),
+        "longestIgnored": round(self.longest_ignored_s, 1),
         "oncomingDRel": round(self._last_oncoming[0], 1),
         "oncomingVAbs": round(self._last_oncoming[1], 1),
       })
@@ -849,10 +858,21 @@ class PassingAssistDetector:
     # How long the current suggestion has been up. Reset on any change, so at the moment the driver
     # acts this is the warning it actually gave -- which is the whole benefit being claimed: enough
     # lead time to be out of the lane before Ford's ACC starts braking.
-    if self.suggestion != Side.none and self.reason == Reason.passing:
+    suggesting = self.suggestion != Side.none and self.reason == Reason.passing
+    if suggesting:
       self._suggest_held_s += DT_MDL
-    else:
+    if suggesting and not self._prev_suggesting:
+      self.suggestions_made += 1
+      self._episode_taken = False
+    elif self._prev_suggesting and not suggesting:
+      # The episode ended. If the driver never acted on it, how long it stood is the interesting
+      # part -- one that lapsed after three seconds is ordinary traffic changing its mind, one held
+      # for half a minute while the driver sat there is the system wanting something they did not.
+      if not self._episode_taken:
+        self.longest_ignored_s = max(self.longest_ignored_s, self._suggest_held_s)
+    if not suggesting:
       self._suggest_held_s = 0.0
+    self._prev_suggesting = suggesting
 
     # A takeover with no stalk. Tracked alongside the blinker rather than instead of it: doing
     # both at once is normal, and whichever ends last is what the stand-down should follow.
@@ -903,6 +923,10 @@ class PassingAssistDetector:
     self.driver_passes += 1
     if self.suggestion == Side.left and self.reason == Reason.passing:
       self.driver_passes_agreed += 1
+      # Closes the open episode so it is not also counted as ignored -- the driver-active gate
+      # blanks the suggestion on the next frame, which otherwise looks exactly like it lapsing.
+      self.suggestions_taken += 1
+      self._episode_taken = True
       # Running mean rather than the latest, so one unusually long or short warning cannot stand
       # in for the drive.
       n = self.driver_passes_agreed
@@ -1548,6 +1572,9 @@ class PassingAssistDetector:
     passingAssist.driverPassesAgreed = min(pa.driver_passes_agreed, 65535)
     passingAssist.driverPassLeadSeconds = float(pa.driver_pass_lead_s)
     passingAssist.driverPassMissReason = pa.driver_pass_miss_reason
+    passingAssist.suggestionsMade = min(pa.suggestions_made, 65535)
+    passingAssist.suggestionsTaken = min(pa.suggestions_taken, 65535)
+    passingAssist.longestIgnoredSeconds = float(pa.longest_ignored_s)
     passingAssist.manoeuvreStandDown = float(max(pa.manoeuvre.standdown_remaining,
                                                  pa.keep_right_manoeuvre.standdown_remaining))
     passingAssist.driverChangeStandDown = float(pa.driver_change_standdown)

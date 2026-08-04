@@ -698,6 +698,19 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     driverPassLeadSeconds @71 :Float32;  # how long it had been suggesting before the driver acted
     driverPassMissReason @72 :Blocked;   # the gate that most often stopped it when it disagreed
 
+    # ...and the SAME QUESTION FROM THE OTHER SIDE. driverPasses counts the passes the driver made
+    # and asks whether this system found them -- recall. It says nothing about passes this system
+    # offered that no sane driver would take, which is the error that matters once it is allowed
+    # to act on its own, and which is invisible in the numbers above.
+    #
+    # An unacted suggestion is not automatically wrong: the lead speeds up, a lane closes, the
+    # driver simply is not in a hurry. So what is recorded is how LONG one stood unacted, because
+    # a suggestion held for half a minute while the driver sits there is a different claim from one
+    # that lapsed after three seconds.
+    suggestionsMade @73 :UInt16;
+    suggestionsTaken @74 :UInt16;
+    longestIgnoredSeconds @75 :Float32;
+
     enum Manoeuvre {
       idle @0;         # nothing warranted
       confirming @1;   # a slower vehicle is being confirmed, timer running

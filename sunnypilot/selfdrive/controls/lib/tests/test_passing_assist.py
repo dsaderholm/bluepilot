@@ -1896,3 +1896,49 @@ class TestAgreementWithTheDriver:
     det = run(PassingAssistDetector(), STUCK_FRAMES)
     run(det, int(4.0 / DT_MDL), blinker=True)
     assert det.driver_passes == 1
+
+
+class TestSuggestionsNobodyTook:
+  """The other error direction. TestAgreementWithTheDriver asks whether this system found the
+  passes the driver made -- recall. It says nothing about passes this system offered that no sane
+  driver would take, which is the error that matters once it is allowed to act on its own and is
+  completely invisible in those numbers.
+  """
+
+  def test_a_suggestion_the_driver_acts_on_is_taken(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES)
+    run(det, 2, blinker=True)
+    assert det.suggestions_made == 1
+    assert det.suggestions_taken == 1
+    assert det.longest_ignored_s == 0.0
+
+  def test_one_that_lapses_untaken_is_recorded_by_how_long_it_stood(self):
+    """Not counted as WRONG -- an unacted suggestion is often just traffic changing its mind. What
+    is recorded is duration, because three seconds and thirty seconds are different claims."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES + int(8.0 / DT_MDL))
+    run(det, int(2.0 / DT_MDL), v_lead=CRUISE_MS)     # lead speeds up; nothing to pass
+    assert det.suggestions_made == 1
+    assert det.suggestions_taken == 0
+    assert det.longest_ignored_s > 8.0
+
+  def test_the_driver_acting_does_not_also_count_as_ignored(self):
+    """The driver-active gate blanks the suggestion on the very next frame, which looks exactly
+    like it lapsing -- so without closing the episode a taken pass would be counted both ways."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES + int(6.0 / DT_MDL))
+    run(det, int(3.0 / DT_MDL), blinker=True)
+    assert det.suggestions_taken == 1
+    assert det.longest_ignored_s == 0.0
+
+  def test_a_held_suggestion_is_one_episode(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES + int(20.0 / DT_MDL))
+    assert det.suggestions_made == 1
+
+  def test_the_longest_survives_a_later_shorter_one(self):
+    """It is the worst case that says something, and a mean would bury it."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES + int(10.0 / DT_MDL))
+    run(det, int(2.0 / DT_MDL), v_lead=CRUISE_MS)
+    long_one = det.longest_ignored_s
+    run(det, STUCK_FRAMES)
+    run(det, int(2.0 / DT_MDL), v_lead=CRUISE_MS)
+    assert det.suggestions_made == 2
+    assert det.longest_ignored_s == long_one
