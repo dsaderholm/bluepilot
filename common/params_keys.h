@@ -351,7 +351,12 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"SpeedLimitLookaheadHigher", {PERSISTENT | BACKUP, INT, "4"}},
     {"SpeedLimitAutoFollow", {PERSISTENT | BACKUP, BOOL, "1"}},
     // Ceiling for what SLA may request, in display units (mph/kph). Well under Ford ACC's 110 mph cap.
-    {"SpeedLimitMaxSetSpeed", {PERSISTENT | BACKUP, INT, "85"}},
+    // BluePilot: 100, not 85. Utah runs 80 mph on rural I-15, and the banded offset asks for +10 at
+    // 65 and up -- so an 80 zone wants 90 and an 85 ceiling would silently clip it on a road the
+    // owner drives regularly. A ceiling that binds during normal driving is not a safety bound, it
+    // is a bug that looks like one. Set high on purpose; the owner intends to lower it once the
+    // banded offsets have been driven.
+    {"SpeedLimitMaxSetSpeed", {PERSISTENT | BACKUP, INT, "100"}},
 
     // Smart Cruise Control
     // BluePilot: both curve controllers default ON, and the vision tuning leans toward slowing
