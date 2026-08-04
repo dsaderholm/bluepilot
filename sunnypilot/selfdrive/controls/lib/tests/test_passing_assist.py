@@ -26,7 +26,7 @@ from openpilot.common.realtime import DT_MDL
 from openpilot.sunnypilot.selfdrive.controls.lib.passing_maneuver import CHANGE_DURATION_S
 from openpilot.sunnypilot.selfdrive.controls.lib.passing_assist import (
   PassingAssistDetector, MIN_LANE_WIDTH_M, DEFAULT_MIN_SPEED_MPH, MAX_WIDENING_M,
-  DEFAULT_PERSISTENCE_S,
+  DEFAULT_PERSISTENCE_S, DRIVE_HISTORY_MAX,
 )
 
 Side = custom.LongitudinalPlanSP.PassingAssist.Side
@@ -2370,3 +2370,92 @@ class TestTheChime:
     # ...and the other side is still the driver.
     assert det._driver_override(NS(leftBlinker=True, rightBlinker=False,
                                    brakePressed=False, steeringPressed=False))
+
+
+class TestTheDriveHistory:
+  """"I'm not going to look at that after each drive. That is cool for me to see, but I didn't want
+  it to be what I have to tell you."
+
+  PassingAssistLastDrive is overwritten every ignition cycle, so a week of driving left one drive's
+  numbers and the only way to keep the rest was for the driver to read a panel and retype it. The
+  car keeps its own history now. See DRIVE_HISTORY_MAX.
+  """
+
+  class _P(_KeepRightOnParams):
+    """Params that actually store, so archiving across simulated ignition cycles is testable."""
+
+    def __init__(self, **kw):
+      super().__init__(**kw)
+      self.store: dict = {}
+
+    def get(self, key, block=False, return_default=False):
+      if key in self.store:
+        return self.store[key]
+      return self.values[key] if key in self.values else None
+
+    def put(self, key, value, block=False):
+      self.store[key] = value
+
+  @staticmethod
+  def _drive(params, **summary):
+    """One ignition cycle: a fresh detector reads params once, then parks with a summary."""
+    det = PassingAssistDetector()
+    det.params = params
+    det.update_params()
+    params.store["PassingAssistLastDrive"] = dict(summary)
+    return det
+
+  def test_each_drive_is_kept_not_overwritten(self):
+    p = self._P()
+    for n in range(4):
+      self._drive(p, wantedSeconds=n * 10.0)
+    # The fourth boot archives drives 1-3; the fourth is still "last" until the next start.
+    hist = p.store["PassingAssistHistory"]
+    assert len(hist) == 3, f"kept {len(hist)} of 3 finished drives"
+    assert [h["wantedSeconds"] for h in hist] == [0.0, 10.0, 20.0]
+
+  def test_starting_the_car_without_driving_does_not_duplicate(self):
+    """The failure this would have had in the driveway: LastDrive is untouched by a boot with no
+    driving, so without a guard the same drive is archived on every start."""
+    p = self._P()
+    self._drive(p, wantedSeconds=42.0)
+    for _ in range(5):
+      det = PassingAssistDetector()
+      det.params = p
+      det.update_params()          # boot, no driving, no new summary
+    hist = p.store.get("PassingAssistHistory", [])
+    assert len(hist) == 1, f"one drive archived {len(hist)} times"
+
+  def test_it_stops_growing(self):
+    p = self._P()
+    for n in range(DRIVE_HISTORY_MAX + 12):
+      self._drive(p, wantedSeconds=float(n))
+    hist = p.store["PassingAssistHistory"]
+    assert len(hist) == DRIVE_HISTORY_MAX
+    # ...and it is the RECENT ones that survive. Keeping the oldest would be worse than useless: a
+    # history frozen at the first twenty drives never shows anything the system learned since.
+    #
+    # Asserting hist[-1] > hist[0] does NOT pin this -- it holds for either end of the list, which a
+    # mutation proved by passing. The first drive being GONE is the claim.
+    assert hist[0]["wantedSeconds"] > 0.0, "kept the oldest drives instead of the newest"
+    assert hist[-1]["wantedSeconds"] == float(DRIVE_HISTORY_MAX + 10), "newest drive missing"
+
+  def test_a_throwing_param_store_does_not_reach_the_planner(self):
+    class Broken(self._P):
+      def put(self, key, value, block=False):
+        if key == "PassingAssistHistory":
+          raise RuntimeError("param store is unhappy")
+        super().put(key, value, block)
+    p = Broken()
+    self._drive(p, wantedSeconds=1.0)
+    det = PassingAssistDetector()
+    det.params = p
+    det.update_params()            # must not raise
+    run(det, 4)
+
+  def test_a_fresh_device_archives_nothing(self):
+    p = self._P()
+    det = PassingAssistDetector()
+    det.params = p
+    det.update_params()
+    assert "PassingAssistHistory" not in p.store, "wrote an empty drive on a car that never drove"

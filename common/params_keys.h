@@ -270,6 +270,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // The previous drive's measurements, so parking does not throw them away. Written
     // periodically by the detector, read by the panel when the current drive has nothing yet.
     {"PassingAssistLastDrive", {PERSISTENT | BACKUP, JSON}},
+    {"PassingAssistHistory", {PERSISTENT | BACKUP, JSON}},
     {"PassingAssistExitStandDown", {PERSISTENT | BACKUP, INT, "45"}},
     {"PassingAssistMinSpeed", {PERSISTENT | BACKUP, INT, "30"}},
     {"PassingAssistConfirmTime", {PERSISTENT | BACKUP, INT, "1"}},

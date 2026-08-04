@@ -157,6 +157,22 @@ MIN_STEER_TAKEOVER_S = 0.7
 # 30 s rather than on shutdown because there is no reliable shutdown hook here, and a drive that
 # ends with a yanked ignition is exactly the drive worth keeping.
 LAST_DRIVE_WRITE_S = 30
+
+# How many drives of summaries to keep. See _archive_drive.
+#
+# "I'm not going to look at that after each drive. That is cool for me to see, but I didn't want it
+# to be what I have to tell you."
+#
+# Fair, and it was the wrong workflow to have built toward. PassingAssistLastDrive is OVERWRITTEN
+# every ignition cycle, so a week of driving left exactly one drive's numbers and the only way to
+# keep the rest was for him to read a panel and retype it. That makes the driver the data pipeline
+# for a system whose whole point is that it measures things by itself.
+#
+# So the car keeps its own history and he hands it over once, whenever. Twenty drives is a couple
+# of weeks of ordinary use, small enough to paste in one go, and enough for the questions that need
+# several drives to answer -- whether the agreement ratio is settling, whether the oncoming veto is
+# rare or constant, what a genuinely quiet lane looks like.
+DRIVE_HISTORY_MAX = 20
 # In our lane, not an adjacent-lane return. Measured from the MODEL PATH, not from the car's
 # straight-ahead axis, and computed here rather than read off radarState.
 #
@@ -557,6 +573,10 @@ class PassingAssistDetector:
         self._seeded_onset = True
         try:
           last = self.params.get("PassingAssistLastDrive")
+          # Exactly once per ignition cycle, and `last` is by definition the PREVIOUS drive --
+          # this one has written nothing yet. That makes this the natural place to archive it, and
+          # it needs no shutdown hook, which is the thing this codebase does not have.
+          self._archive_drive(last)
           if last:
             self.acc_onset_max = max(self.acc_onset_max, float(last.get("accOnsetMax", 0.0)))
             self._life_drives = int(last.get("lifetimeDrives", 0))
@@ -838,6 +858,26 @@ class PassingAssistDetector:
     # found -- and a blinker lit -- while the confirmation is still running underneath. See
     # `confirmed` there for what actually commits the car to moving.
     return True
+
+  def _archive_drive(self, last) -> None:
+    """Push the previous drive's summary onto a rolling history. See DRIVE_HISTORY_MAX.
+
+    Nothing depends on this succeeding. It is a convenience for reading a fortnight of drives in one
+    paste instead of one drive at a time, and a param write must never be able to take the planner
+    down -- same terms as the summary write itself.
+    """
+    if not last:
+      return
+    try:
+      hist = self.params.get("PassingAssistHistory") or []
+      # A boot with no driving leaves LastDrive untouched, so without this the same drive is
+      # archived again every time the car is started and the history fills with one drive.
+      if hist and hist[-1] == last:
+        return
+      hist.append(last)
+      self.params.put("PassingAssistHistory", hist[-DRIVE_HISTORY_MAX:])
+    except Exception:  # noqa: BLE001 - a param failure must never reach the planner
+      pass
 
   def _save_drive_summary(self) -> None:
     """Persist what this drive measured. See LAST_DRIVE_WRITE_S.
