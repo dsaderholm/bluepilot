@@ -206,7 +206,11 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"DevUIInfo", {PERSISTENT | BACKUP, INT, "0"}},
     {"EnableCopyparty", {PERSISTENT | BACKUP, BOOL}},
     {"EnableGithubRunner", {PERSISTENT | BACKUP, BOOL}},
-    {"GreenLightAlert", {PERSISTENT | BACKUP, BOOL, "0"}},
+    // BluePilot: both default ON. They arm only while openpilot is not engaged -- e2e_alerts_helper
+    // gates on `not CC.enabled` -- which on this car is the normal state at a stop, because braking
+    // cancels Ford's ACC and the owner drives with MADS handling lateral regardless. So the case
+    // these were written for is exactly the case this car is in at every light.
+    {"GreenLightAlert", {PERSISTENT | BACKUP, BOOL, "1"}},
     {"GithubRunnerSufficientVoltage", {CLEAR_ON_MANAGER_START , BOOL}},
     {"HasAcceptedTermsSP", {PERSISTENT, STRING, "0"}},
     {"HideVEgoUI", {PERSISTENT | BACKUP, BOOL, "0"}},
@@ -215,7 +219,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"IsDevelopmentBranch", {CLEAR_ON_MANAGER_START, BOOL}},
     {"IsReleaseSpBranch", {CLEAR_ON_MANAGER_START, BOOL}},
     {"LastGPSPositionLLK", {PERSISTENT, STRING}},
-    {"LeadDepartAlert", {PERSISTENT | BACKUP, BOOL, "0"}},
+    {"LeadDepartAlert", {PERSISTENT | BACKUP, BOOL, "1"}},
     {"MaxTimeOffroad", {PERSISTENT | BACKUP, INT, "1800"}},
     {"ModelRunnerTypeCache", {CLEAR_ON_ONROAD_TRANSITION, INT}},
     {"OffroadMode", {CLEAR_ON_MANAGER_START, BOOL}},
