@@ -1835,3 +1835,64 @@ class TestNoRearSensingAtAll:
     det = run(PassingAssistDetector(), STUCK_FRAMES, left_bs=True, right_bs=True)
     assert det.suggestion == Side.none
     assert det.blocked_by == Blocked.blindspotOccupied
+
+
+class TestAgreementWithTheDriver:
+  """The closest thing to a readiness score this phase can produce, and the most useful thing
+  measurable before any sensor is fitted.
+
+  Every gate here is checkable in isolation and none of that answers the only question that
+  matters: when a real driver decided to pass a real car on a real road, had this system decided
+  the same, and how long before? Agreeing on nine passes in ten and naming a gate for the tenth is
+  ready to be trusted with a blinker; agreeing on half is not, whatever the unit tests say.
+  """
+
+  def test_a_pass_it_had_already_suggested_counts_as_agreement(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES)
+    assert det.suggestion == Side.left
+    run(det, 2, blinker=True)
+    assert det.driver_passes == 1
+    assert det.driver_passes_agreed == 1
+
+  def test_the_lead_time_is_how_long_it_had_been_saying_so(self):
+    """The whole benefit being claimed. If it only agrees at the moment the driver acts, it has
+    added nothing over the driver's own eyes."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES + int(6.0 / DT_MDL))
+    run(det, 2, blinker=True)
+    assert det.driver_pass_lead_s > 5.0
+
+  def test_a_pass_it_refused_is_counted_with_the_gate_that_refused_it(self):
+    """The interesting half. "Missed two, both on oncoming" is a specific piece of work; "missed
+    two" is not."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, edges=(-2.3, 2.4))
+    assert det.blocked_by == Blocked.noLaneAvailable
+    run(det, 2, blinker=True, edges=(-2.3, 2.4))
+    assert det.driver_passes == 1
+    assert det.driver_passes_agreed == 0
+    assert det.driver_pass_miss_reason == int(Blocked.noLaneAvailable)
+
+  def test_it_is_sampled_on_the_rising_edge(self):
+    """The driver-active gate blanks the suggestion on the very next frame, so sampled a moment
+    later there would be nothing left to compare against and everything would read as a miss."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES)
+    run(det, int(2.0 / DT_MDL), blinker=True)
+    assert det.blocked_by == Blocked.driverActive
+    assert det.driver_passes_agreed == 1, "sampled after the gate had already blanked it"
+
+  def test_signalling_with_nothing_slow_ahead_is_not_a_pass(self):
+    """Changing lanes for an exit, a junction or the sake of it must not count against agreement."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, v_lead=CRUISE_MS)
+    run(det, 2, blinker=True, v_lead=CRUISE_MS)
+    assert det.driver_passes == 0
+
+  def test_a_right_hand_signal_is_not_counted(self):
+    """Ambiguous by nature -- an exit, a keep-right or a pass on the right all look identical, and
+    a readiness score built on a guess is worse than a smaller honest one."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES)
+    run(det, 2, blinker_right=True)
+    assert det.driver_passes == 0
+
+  def test_holding_the_stalk_is_one_pass(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES)
+    run(det, int(4.0 / DT_MDL), blinker=True)
+    assert det.driver_passes == 1

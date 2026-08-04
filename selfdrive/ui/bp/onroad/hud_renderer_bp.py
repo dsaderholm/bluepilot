@@ -484,6 +484,19 @@ class HudRendererBP(HudRendererSP):
 
       # Priority order, most useful first -- see _fit_sub, which drops from the end.
       lines = []
+      # First, because it is the only line that answers "is this ready" rather than describing a
+      # symptom. Everything else here is evidence for why that answer is what it is.
+      if pa.driverPasses:
+        agreed = pa.driverPassesAgreed
+        line = f"you passed {pa.driverPasses}, agreed {agreed}"
+        if agreed:
+          line += f" ({pa.driverPassLeadSeconds:.0f}s early)"
+        if agreed < pa.driverPasses:
+          miss = int(pa.driverPassMissReason)
+          name = _BLOCKED_ORDER[miss] if miss < len(_BLOCKED_ORDER) else ""
+          if name:
+            line += f", missed on {_BLOCKED_TEXT.get(name, name).lower()}"
+        lines.append(line)
       # Kept separate from the ordinary backouts below, and named differently, because they are
       # not the same event: one is the system changing its mind before moving, the other is a
       # crossing reversed because something was arriving. A single figure would hide the second
@@ -523,6 +536,11 @@ class HudRendererBP(HudRendererSP):
       if not d or float(d.get("wantedSeconds", 0)) <= 5.0:
         return False
       lines = []
+      if int(d.get("driverPasses", 0)):
+        line = f"you passed {int(d['driverPasses'])}, agreed {int(d['driverPassesAgreed'])}"
+        if int(d.get("driverPassesAgreed", 0)):
+          line += f" ({float(d['driverPassLead']):.0f}s early)"
+        lines.append(line)
       share = float(d.get("topBlockedShare", 0))
       if share > 0.05:
         # The int is the Blocked ordinal. Mapped through the same table the live panel uses, so

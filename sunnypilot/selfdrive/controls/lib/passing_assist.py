@@ -457,6 +457,12 @@ class PassingAssistDetector:
     self._driver_blinker = None       # side currently being signalled, or None
     self._signalled_over_widening = False
     self._steer_held_s = 0.0
+    # See driverPasses in custom.capnp -- agreement with the driver, the readiness measure.
+    self.driver_passes = 0
+    self.driver_passes_agreed = 0
+    self.driver_pass_lead_s = 0.0
+    self._suggest_held_s = 0.0
+    self._miss_reasons: dict[int, int] = {}
     self.closing_in = False
     self.lead_accel = 0.0
     self.lead_braking_enabled = True
@@ -802,6 +808,10 @@ class PassingAssistDetector:
         # The evidence behind the LAST oncoming veto of the drive. Kept because the live panel
         # only shows it while the veto is up, and catching that means glancing at the screen at
         # the right moment on a road where it may only fire once.
+        "driverPasses": int(self.driver_passes),
+        "driverPassesAgreed": int(self.driver_passes_agreed),
+        "driverPassLead": round(self.driver_pass_lead_s, 1),
+        "driverPassMiss": int(self.driver_pass_miss_reason),
         "oncomingDRel": round(self._last_oncoming[0], 1),
         "oncomingVAbs": round(self._last_oncoming[1], 1),
       })
@@ -836,6 +846,14 @@ class PassingAssistDetector:
     """
     self.driver_change_standdown = max(0.0, self.driver_change_standdown - DT_MDL)
 
+    # How long the current suggestion has been up. Reset on any change, so at the moment the driver
+    # acts this is the warning it actually gave -- which is the whole benefit being claimed: enough
+    # lead time to be out of the lane before Ford's ACC starts braking.
+    if self.suggestion != Side.none and self.reason == Reason.passing:
+      self._suggest_held_s += DT_MDL
+    else:
+      self._suggest_held_s = 0.0
+
     # A takeover with no stalk. Tracked alongside the blinker rather than instead of it: doing
     # both at once is normal, and whichever ends last is what the stand-down should follow.
     if CS.steeringPressed:
@@ -857,6 +875,8 @@ class PassingAssistDetector:
     side = 'left' if CS.leftBlinker else 'right' if CS.rightBlinker else None
     if side is not None:
       if self._driver_blinker != side:
+        if side == 'left' and self.lead_is_slow:
+          self._record_driver_pass()
         self._driver_blinker = side
         self._signalled_over_widening = False
       # Right-hand only: the road opening up on the left is not an exit, it is a lane being added.
@@ -873,6 +893,30 @@ class PassingAssistDetector:
     self.driver_change_standdown = self.exit_standdown_s if was_exit else float(SETTLE_AFTER_CHANGE_S)
     self._driver_blinker = None
     self._signalled_over_widening = False
+
+  def _record_driver_pass(self) -> None:
+    """The driver just started a pass. Did we agree, and how long had we been saying so?
+
+    Sampled on the RISING EDGE of the stalk, not afterwards: the driver-active gate blanks the
+    suggestion on the very next frame, so a moment later there is nothing left to compare against.
+    """
+    self.driver_passes += 1
+    if self.suggestion == Side.left and self.reason == Reason.passing:
+      self.driver_passes_agreed += 1
+      # Running mean rather than the latest, so one unusually long or short warning cannot stand
+      # in for the drive.
+      n = self.driver_passes_agreed
+      self.driver_pass_lead_s += (self._suggest_held_s - self.driver_pass_lead_s) / n
+    else:
+      key = int(self.blocked_by)
+      self._miss_reasons[key] = self._miss_reasons.get(key, 0) + 1
+
+  @property
+  def driver_pass_miss_reason(self) -> int:
+    """Which gate most often stopped it when the driver passed anyway."""
+    if not self._miss_reasons:
+      return int(Blocked.none)
+    return max(self._miss_reasons, key=lambda k: self._miss_reasons[k])
 
   def _lead_gap(self) -> None:
     """One frame where the lead failed a bound or was not there at all.
@@ -1500,6 +1544,10 @@ class PassingAssistDetector:
     passingAssist.steeringWouldBeActive = live.steering_active
     passingAssist.keepRightAborts = min(pa.keep_right_manoeuvre.aborts, 65535)
     passingAssist.minApproachActive = float(pa.min_approach_m)
+    passingAssist.driverPasses = min(pa.driver_passes, 65535)
+    passingAssist.driverPassesAgreed = min(pa.driver_passes_agreed, 65535)
+    passingAssist.driverPassLeadSeconds = float(pa.driver_pass_lead_s)
+    passingAssist.driverPassMissReason = pa.driver_pass_miss_reason
     passingAssist.manoeuvreStandDown = float(max(pa.manoeuvre.standdown_remaining,
                                                  pa.keep_right_manoeuvre.standdown_remaining))
     passingAssist.driverChangeStandDown = float(pa.driver_change_standdown)

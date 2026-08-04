@@ -682,6 +682,22 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     # PASS LEFT seconds after the car backed out of exactly that.
     manoeuvreStandDown @68 :Float32;
 
+    # BluePilot: DID IT AGREE WITH THE DRIVER? The most useful thing measurable before any sensor
+    # is fitted, and the closest thing to a readiness score this phase can produce.
+    #
+    # Every gate here is checkable in isolation and none of that answers the only question that
+    # matters: when a real driver decided to pass a real car on a real road, had this system
+    # decided the same thing, and how long before? A system that agrees on nine passes out of ten
+    # and names a specific gate for the tenth is ready to be trusted with a blinker. One that
+    # agrees on half is not, whatever its unit tests say.
+    #
+    # Counted on the driver signalling LEFT with a confirmed slow lead ahead -- unambiguous, unlike
+    # a right-hand signal which could be an exit, a keep-right or a pass.
+    driverPasses @69 :UInt16;
+    driverPassesAgreed @70 :UInt16;      # ...where it had already suggested that same side
+    driverPassLeadSeconds @71 :Float32;  # how long it had been suggesting before the driver acted
+    driverPassMissReason @72 :Blocked;   # the gate that most often stopped it when it disagreed
+
     enum Manoeuvre {
       idle @0;         # nothing warranted
       confirming @1;   # a slower vehicle is being confirmed, timer running

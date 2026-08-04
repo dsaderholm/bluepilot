@@ -67,7 +67,7 @@ SCENES = [
   ("held: you just took an exit yourself",
    "You just changed lanes", "no rear data", 0.0, False, GREY),
   ("stopped: what this drive measured",
-   "THIS DRIVE", "mostly: oncoming traffic that side 41%  -  2 slow passes, worst 14s",
+   "THIS DRIVE", "you passed 7, agreed 6 (11s early), missed on oncoming traffic that side",
    0.0, False, INFO),
   ("stopped: the previous drive, kept across parking",
    "LAST DRIVE", "oncoming: 62 at 410ft  -  ACC braked by 449ft  -  3 backed out",
@@ -128,6 +128,7 @@ def main(outdir):
   SCENES.append((
     "worst case: a drive summary with every line it can produce", "THIS DRIVE",
     ns["_fit_sub"](fitter, [
+      "you passed 7, agreed 6 (11s early), missed on oncoming traffic that side",
       "2 reversed mid-change",
       "mostly: oncoming traffic that side 62%",
       "oncoming: 62 at 410ft",
