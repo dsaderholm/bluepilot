@@ -70,6 +70,18 @@ class PassingAssistSettingsLayout(Widget):
       label_callback=self._speed_label,
       inline=True)
 
+    self._exit_standdown = option_item_sp(
+      title=tr("Stay Quiet After You Take An Exit"),
+      description=tr("If you change lanes yourself into a lane that was opening up like an exit, "
+                     "stay out of the way for this long. Being told to move out of your own exit "
+                     "lane at the gore point is worse than useless. Any other lane change you "
+                     "make only gets a few seconds, so pulling out to pass something manually "
+                     "hands control straight back."),
+      param="PassingAssistExitStandDown",
+      min_value=0, max_value=120, value_change_step=15,
+      label_callback=lambda v: tr("Off") if v == 0 else f"{v} s",
+      inline=True)
+
     self._min_speed = option_item_sp(
       title=tr("Only Above"),
       description=tr("Below this speed a pass is not the manoeuvre being considered. Kept low on "
@@ -268,6 +280,7 @@ class PassingAssistSettingsLayout(Widget):
       SectionHeader(tr("When To Suggest A Pass")),
       self._min_deficit,
       self._min_speed,
+      self._exit_standdown,
       self._confirm_time,
       self._blinker_lead,
       self._lead_braking,

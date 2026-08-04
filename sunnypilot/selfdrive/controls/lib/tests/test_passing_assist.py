@@ -95,7 +95,7 @@ def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., lead_y=0.0, status=Tr
             ll=(-5.5, -1.85, 1.85, 5.5), probs=(0.9, 0.99, 0.99, 0.2),
             edges=(-5.6, 2.4), edge_stds=(0.1, 0.1), right_edge_widen=0.0,
             tsr_avail=True, ovtk_msg=1, ovtk_status=2,
-            blinker=False, brake=False, steering=False, road_name="I 15", curve=0.0,
+            blinker=False, blinker_right=False, brake=False, steering=False, road_name="I 15", curve=0.0,
             acc_braking=False, acc_precharge=False, acc_propulsion=0.0,
             acc_avail=True, set_speed=None,
             icbm_hold=0.0, icbm_manual=False, lka=False, tracks=(),
@@ -108,7 +108,7 @@ def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., lead_y=0.0, status=Tr
   v_rel = v_lead - v_ego
   return FakeSubMaster({
     'carState': NS(vEgo=v_ego, brakePressed=brake, steeringPressed=steering,
-                   leftBlinker=blinker, rightBlinker=False,
+                   leftBlinker=blinker, rightBlinker=blinker_right,
                    leftBlindspot=left_bs, rightBlindspot=right_bs,
                    cruiseState=NS(speedCluster=set_speed if set_speed is not None else CRUISE_MS)),
     # leadOne yRel is LEFT-POSITIVE, like the radar's. dPath is deliberately absent: nothing
@@ -421,7 +421,7 @@ _STUB_PARAM_DEFAULTS = {
   "PassingAssistMinDeficit": 4, "PassingAssistConfirmTime": 2,
   "PassingAssistKeepRightDelay": 10, "PassingAssistSettleTime": 20,
   "PassingAssistMaxDistance": 220, "PassingAssistSuspendMinutes": 15,
-  "PassingAssistOncomingMemory": 90, "PassingAssistBlinkerLead": 1, "PassingAssistMinApproach": 0, "PassingAssistMinSpeed": 30, "PassingAssistCrawlTime": 8, "PassingAssistMinLaneAge": 15,
+  "PassingAssistOncomingMemory": 90, "PassingAssistBlinkerLead": 1, "PassingAssistMinApproach": 0, "PassingAssistMinSpeed": 30, "PassingAssistExitStandDown": 45, "PassingAssistCrawlTime": 8, "PassingAssistMinLaneAge": 15,
 }
 
 
@@ -1572,3 +1572,112 @@ class TestKeepRightManoeuvre:
     run(det, 2, status=False, blinker=True, **IN_LEFT_LANE)
     assert det.keep_right_manoeuvre.phase == Phase.idle
     assert det.keep_right_manoeuvre.aborts == 0, "a takeover is the right outcome, not an abort"
+
+
+class TestDriverOwnLaneChange:
+  """Asked directly: "what if I do a sunnypilot, nudgeless lane change into an exit lane? Will it
+  try to pull me out of that?"
+
+  It would have. The driver-active gate silences this only WHILE the blinker is on; the moment it
+  goes out the system re-evaluates from scratch, and an exit lane is geometrically a slow lane with
+  somewhere to go.
+  """
+
+  EXIT = dict(right_edge_widen=4.0, **IN_LEFT_LANE)
+
+  def test_taking_an_exit_buys_a_long_silence(self):
+    det = keep_right_det()
+    run(det, int(2.0 / DT_MDL), blinker_right=True, **self.EXIT)
+    run(det, 2, **self.EXIT)                              # stalk off: the change is done
+    assert det.driver_change_was_exit
+    assert det.driver_change_standdown > 30.0
+    assert det.blocked_by == Blocked.driverChangedLanes
+
+  def test_an_ordinary_lane_change_hands_control_straight_back(self):
+    """"Sometimes I'll do a nudgeless lane change if passing assist doesn't pass, but I still want
+    it to take over." So a manual pass costs seconds, not the better part of a minute."""
+    det = keep_right_det()
+    run(det, int(2.0 / DT_MDL), blinker=True, **IN_LEFT_LANE)
+    run(det, 2, **IN_LEFT_LANE)
+    assert not det.driver_change_was_exit
+    assert 0.0 < det.driver_change_standdown <= 4.0
+
+  def test_and_it_does_come_back(self):
+    det = keep_right_det()
+    run(det, int(2.0 / DT_MDL), blinker=True, **IN_LEFT_LANE)
+    run(det, int(5.0 / DT_MDL), status=False, **IN_LEFT_LANE)
+    assert det.driver_change_standdown == 0.0
+    assert det.blocked_by != Blocked.driverChangedLanes
+
+  def test_signalling_left_over_a_widening_road_is_not_an_exit(self):
+    """The road opening up on the LEFT is a lane being added, not an exit being taken."""
+    det = keep_right_det()
+    run(det, int(2.0 / DT_MDL), blinker=True, **self.EXIT)
+    run(det, 2, **self.EXIT)
+    assert not det.driver_change_was_exit
+    assert det.driver_change_standdown <= 4.0
+
+  def test_the_exit_evidence_is_latched_while_signalling(self):
+    """Once the car is in the ramp lane the road edge belongs to the ramp and the widening that
+    identified it has gone -- so the only moment the evidence exists is during the manoeuvre."""
+    det = keep_right_det()
+    run(det, int(2.0 / DT_MDL), blinker_right=True, **self.EXIT)
+    run(det, 2, **IN_LEFT_LANE)     # no widening visible any more
+    assert det.driver_change_was_exit
+
+  def test_it_never_fires_without_the_driver_touching_the_stalk(self):
+    det = run(keep_right_det(), STUCK_FRAMES, **IN_LEFT_LANE)
+    assert det.driver_change_standdown == 0.0
+    assert det.blocked_by != Blocked.driverChangedLanes
+
+  def test_the_stand_down_expires_while_slowing_for_the_ramp(self):
+    """It used to be tracked after the speed gate, so dropping below the minimum froze it -- and
+    slowing down is exactly what taking an exit involves. The pause would have been waiting on the
+    driveway instead of expiring on the ramp."""
+    det = keep_right_det()
+    run(det, int(2.0 / DT_MDL), blinker_right=True, **TestDriverOwnLaneChange.EXIT)
+    run(det, 2, **TestDriverOwnLaneChange.EXIT)
+    started = det.driver_change_standdown
+    run(det, int(10.0 / DT_MDL), v_lead=8.0, v_ego=9.0, **TestDriverOwnLaneChange.EXIT)
+    assert det.driver_change_standdown < started - 9.0, "frozen while below the minimum speed"
+
+
+class TestDriverSteeringTakeover:
+  """"I usually use sunnypilot nudgeless changes, but I also will just fully takeover and do my own
+  steering." Watching only the stalk would have missed that entirely, and steering onto an off-ramp
+  without signalling is about as common as driving gets."""
+
+  def test_a_sustained_takeover_stands_the_system_down(self):
+    det = keep_right_det()
+    run(det, int(1.5 / DT_MDL), steering=True, **IN_LEFT_LANE)
+    run(det, 2, **IN_LEFT_LANE)
+    assert det.driver_change_standdown > 0.0
+    assert det.blocked_by == Blocked.driverChangedLanes
+
+  def test_a_takeover_over_a_widening_road_reads_as_an_exit(self):
+    det = keep_right_det()
+    run(det, int(1.5 / DT_MDL), steering=True, **TestDriverOwnLaneChange.EXIT)
+    run(det, 2, **IN_LEFT_LANE)
+    assert det.driver_change_was_exit
+    assert det.driver_change_standdown > 30.0
+
+  def test_ordinary_corrections_are_not_takeovers(self):
+    """The whole difficulty. steeringPressed fires constantly on the small corrections of normal
+    driving, and a stand-down every time a hand tightens on the wheel would be worse than not
+    having this at all."""
+    det = keep_right_det()
+    for _ in range(6):
+      run(det, int(0.3 / DT_MDL), steering=True, **IN_LEFT_LANE)
+      run(det, int(0.5 / DT_MDL), **IN_LEFT_LANE)
+    assert det.driver_change_standdown == 0.0
+    assert det.blocked_by != Blocked.driverChangedLanes
+
+  def test_stalk_and_wheel_together_is_one_manoeuvre(self):
+    """Doing both at once is normal. It must not double-count into two stand-downs, and the exit
+    reading has to survive the wheel being released before the stalk."""
+    det = keep_right_det()
+    run(det, int(1.5 / DT_MDL), steering=True, blinker_right=True, **TestDriverOwnLaneChange.EXIT)
+    run(det, int(0.5 / DT_MDL), blinker_right=True, **TestDriverOwnLaneChange.EXIT)
+    run(det, 2, **IN_LEFT_LANE)
+    assert det.driver_change_was_exit
+    assert det.driver_change_standdown > 30.0

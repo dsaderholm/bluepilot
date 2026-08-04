@@ -559,6 +559,7 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       oncomingLane @13;      # two-way road: the lane to the left is theirs, not a passing lane
       closingIn @14;         # deliberately holding off: still closing, ACC has not had to brake
       leadBraking @15;       # they are braking hard: wait and see before committing to go round
+      driverChangedLanes @16; # standing down after the driver's own lane change -- see below
     }
 
     # BluePilot: the manoeuvre this WOULD perform, run as a dry run. Nothing actuates; see
@@ -663,6 +664,10 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     # the same event at all: one is the system changing its mind, the other is the system avoiding
     # a collision. Averaging them would hide the second inside the first.
     emergencyAborts @64 :UInt16;
+
+    # BluePilot: seconds left of the stand-down after the driver changed lanes themselves.
+    driverChangeStandDown @65 :Float32;
+    driverChangeWasExit @66 :Bool;   # ...and whether the lane they moved into looked like an exit
 
     enum Manoeuvre {
       idle @0;         # nothing warranted

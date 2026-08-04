@@ -176,6 +176,7 @@ _BLOCKED_TEXT = {
   'oncomingLane': "Oncoming traffic that side",
   'closingIn': "Closing in",
   'leadBraking': "Car ahead is braking",
+  'driverChangedLanes': "You just changed lanes",
 }
 
 # BluePilot: sunnypilot's "AHEAD" box hangs off the bottom of the speed-limit sign, in the same

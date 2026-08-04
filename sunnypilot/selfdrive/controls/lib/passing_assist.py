@@ -109,6 +109,45 @@ MAX_ROAD_EDGE_STD = 0.5
 # 30 as at 70.
 DEFAULT_MIN_SPEED_MPH = 30
 
+# --- after the driver changes lanes themselves ---
+#
+# Asked directly: "what if I do a sunnypilot, nudgeless lane change into an exit lane? Will it try
+# to pull me out of that?" It would have. The driver-active gate silences this only WHILE the
+# blinker is on; the moment it goes out the system re-evaluates from scratch, and an exit lane is
+# geometrically a slow lane with somewhere to go -- so it would happily start working on getting
+# out of the one you deliberately just entered.
+#
+# The rule that resolves it is already in the design notes: geometry gates suppress SUGGESTIONS,
+# they never veto the DRIVER. So this does not fight the manoeuvre; it stands down afterwards.
+#
+# TWO DURATIONS, because the two cases are not alike:
+#
+#   Any lane change at all gets a short pause, just long enough for the model's lane lines and the
+#   radar's tracks to re-settle around the new lane. Acting on the first frame after a lane change
+#   means acting on geometry that is still mid-transition.
+#
+#   A change into what looked like an EXIT gets much longer -- long enough to actually reach the
+#   ramp. This is the case the owner named, and getting it wrong is not a cosmetic error: being
+#   told to move out of your exit lane at the gore point is worse than useless.
+#
+# Both are only ever a STAND-DOWN. He also said: "sometimes I'll do a nudgeless lane change if
+# passing assist doesn't pass, but I still want it to take over." So a left-hand change to pass
+# something is back to normal within seconds.
+SETTLE_AFTER_CHANGE_S = 4
+DEFAULT_EXIT_STANDDOWN_S = 45
+
+# ...and the same again for a manoeuvre made with NO BLINKER AT ALL. "I usually use sunnypilot
+# nudgeless changes, but I also will just fully takeover and do my own steering."
+#
+# Watching only the stalk would have missed that entirely, and steering into an off-ramp without
+# signalling is about as common as driving gets. So sustained steering counts as a manoeuvre too.
+#
+# SUSTAINED is the whole difficulty: steeringPressed also fires on the constant small corrections
+# of ordinary driving, and a 45 second stand-down every time a hand tightens on the wheel would be
+# worse than not having this. Held for most of a second is a deliberate input; anything shorter is
+# a correction.
+MIN_STEER_TAKEOVER_S = 0.7
+
 # How often the drive's measurements are written to a param so they survive being parked.
 #
 # They are the whole output of phase 1 and they used to live only in RAM: park, screen off, gone.
@@ -396,6 +435,12 @@ class PassingAssistDetector:
     self.max_distance_m = float(DEFAULT_MAX_DISTANCE_M)
     self.min_approach_m = float(DEFAULT_MIN_APPROACH_M)
     self.min_speed_ms = DEFAULT_MIN_SPEED_MPH * CV.MPH_TO_MS
+    self.exit_standdown_s = float(DEFAULT_EXIT_STANDDOWN_S)
+    self.driver_change_standdown = 0.0
+    self.driver_change_was_exit = False
+    self._driver_blinker = None       # side currently being signalled, or None
+    self._signalled_over_widening = False
+    self._steer_held_s = 0.0
     self.closing_in = False
     self.lead_accel = 0.0
     self.lead_braking_enabled = True
@@ -426,6 +471,7 @@ class PassingAssistDetector:
       self.keep_right_manoeuvre.blinker_lead_s = self.manoeuvre.blinker_lead_s
       self.min_approach_m = float(self.params.get("PassingAssistMinApproach", return_default=True))
       self.min_speed_ms = self.params.get("PassingAssistMinSpeed", return_default=True) * CV.MPH_TO_MS
+      self.exit_standdown_s = float(self.params.get("PassingAssistExitStandDown", return_default=True))
       self.overtake.crawl_time_s = float(self.params.get("PassingAssistCrawlTime", return_default=True))
       self.lead_braking_enabled = self.params.get_bool("PassingAssistLeadBrakingHold")
       self.settle_time_s = float(self.params.get("PassingAssistSettleTime", return_default=True))
@@ -753,6 +799,53 @@ class PassingAssistDetector:
       return 0.0
     return self._block_seconds.get(int(Blocked.none), 0.0) / self.wanted_seconds
 
+  def _track_driver_change(self, CS) -> None:
+    """Watch the driver's own stalk and stand down after they use it. See SETTLE_AFTER_CHANGE_S.
+
+    The exit test is latched WHILE they signal, not sampled after. Once the car has moved into the
+    ramp lane the road edge belongs to the ramp and the widening that identified it is gone -- so
+    the only moment the evidence exists is while the manoeuvre is still happening.
+    """
+    self.driver_change_standdown = max(0.0, self.driver_change_standdown - DT_MDL)
+
+    # A takeover with no stalk. Tracked alongside the blinker rather than instead of it: doing
+    # both at once is normal, and whichever ends last is what the stand-down should follow.
+    if CS.steeringPressed:
+      self._steer_held_s += DT_MDL
+      if self._steer_held_s >= MIN_STEER_TAKEOVER_S and self.right_widening:
+        self._signalled_over_widening = True
+    elif self._steer_held_s > 0.0:
+      held = self._steer_held_s
+      self._steer_held_s = 0.0
+      if held >= MIN_STEER_TAKEOVER_S and self._driver_blinker is None:
+        # No stalk, so no direction -- the widening seen during the takeover is the only evidence
+        # about where they went, and it is right-hand by construction.
+        self.driver_change_was_exit = self._signalled_over_widening
+        self.driver_change_standdown = (self.exit_standdown_s if self._signalled_over_widening
+                                        else float(SETTLE_AFTER_CHANGE_S))
+        self._signalled_over_widening = False
+        return
+
+    side = 'left' if CS.leftBlinker else 'right' if CS.rightBlinker else None
+    if side is not None:
+      if self._driver_blinker != side:
+        self._driver_blinker = side
+        self._signalled_over_widening = False
+      # Right-hand only: the road opening up on the left is not an exit, it is a lane being added.
+      if side == 'right' and self.right_widening:
+        self._signalled_over_widening = True
+      return
+
+    if self._driver_blinker is None:
+      return
+
+    # Stalk just went off: the change is done, or they thought better of it. Either way, pause.
+    was_exit = self._driver_blinker == 'right' and self._signalled_over_widening
+    self.driver_change_was_exit = was_exit
+    self.driver_change_standdown = self.exit_standdown_s if was_exit else float(SETTLE_AFTER_CHANGE_S)
+    self._driver_blinker = None
+    self._signalled_over_widening = False
+
   def _lead_gap(self) -> None:
     """One frame where the lead failed a bound or was not there at all.
 
@@ -983,6 +1076,12 @@ class PassingAssistDetector:
     # than time-spent-in-a-particular-branch.
     self._settle_s = min(self._settle_s + DT_MDL, 1e3)  # capped; only the threshold matters
 
+    # Before every gate below, so the stand-down keeps counting down on the frames they return
+    # early on. It used to sit after the speed gate, which meant slowing below the minimum froze
+    # it -- and slowing down is exactly what taking an exit involves, so the pause would have been
+    # waiting on the driveway instead of expiring on the ramp.
+    self._track_driver_change(CS)
+
     self._update_suspend(self._lka_toggle(car_state_bp))
     if self.suspended_seconds > 0:
       # Suspended beats every other gate, including the ones that would report something more
@@ -1013,6 +1112,15 @@ class PassingAssistDetector:
 
     # The driver is already doing something about it. Suggesting a pass mid-manoeuvre is noise,
     # and it would corrupt the confirmation timer for the far more interesting no-input case.
+    # Standing down after the driver's own lane change. Checked before driverActive so the reason
+    # on screen is the useful one -- "just changed lanes" explains a silence that outlasts the
+    # blinker, where "you are driving" would look like it had simply not noticed the stalk go off.
+    if self.driver_change_standdown > 0.0:
+      self._clear_confirmation()
+      self.keep_right_seconds = 0.0
+      self._reset_outputs(Blocked.driverChangedLanes)
+      return
+
     if CS.leftBlinker or CS.rightBlinker or CS.brakePressed or CS.steeringPressed:
       self._clear_confirmation()
       self.keep_right_seconds = 0.0
@@ -1356,6 +1464,8 @@ class PassingAssistDetector:
     passingAssist.blinkerWouldBeOn = live.blinker_on
     passingAssist.steeringWouldBeActive = live.steering_active
     passingAssist.keepRightAborts = min(pa.keep_right_manoeuvre.aborts, 65535)
+    passingAssist.driverChangeStandDown = float(pa.driver_change_standdown)
+    passingAssist.driverChangeWasExit = pa.driver_change_was_exit
     passingAssist.emergencyAborts = min(
       pa.manoeuvre.emergency_aborts + pa.keep_right_manoeuvre.emergency_aborts, 65535)
     # Saturates rather than wraps: a UInt16 rolling over to 0 would read as a clean drive, which is
