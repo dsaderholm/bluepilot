@@ -141,12 +141,12 @@ class PassingAssistSettingsLayout(Widget):
       description=tr("Hold off until the car ahead is this close, instead of pulling out as soon "
                      "as it is spotted -- which is how people actually drive. Abandoned instantly "
                      "if Ford's cruise starts slowing for that car, at any distance, so setting "
-                     "it too aggressive costs a late pass rather than braking. Off by default: "
-                     "the right value sits just beyond where your cruise starts braking, and that "
-                     "distance is being measured on your drives before it gets a default."),
+                     "it too aggressive costs a late pass rather than braking.\n"
+                     "Auto uses the distance your own cruise has actually been measured starting "
+                     "to brake at, plus a margin, and re-learns it every drive."),
       param="PassingAssistMinApproach",
-      min_value=0, max_value=200, value_change_step=10,
-      label_callback=lambda v: tr("Off") if v == 0 else f"{v} m",
+      min_value=-1, max_value=200, value_change_step=10,
+      label_callback=lambda v: tr("Auto") if v < 0 else tr("Off") if v == 0 else f"{v} m",
       inline=True)
 
     self._max_distance = option_item_sp(

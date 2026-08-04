@@ -266,7 +266,21 @@ DEFAULT_MAX_DISTANCE_M = 220
 # starts braking, and nobody knows that number yet. accBrakingOnsetDRel is being logged to measure
 # it. Guessing a default here would be picking the one number this feature is most sensitive to,
 # blind, when a drive can just tell us.
-DEFAULT_MIN_APPROACH_M = 0
+DEFAULT_MIN_APPROACH_M = -1     # Auto
+
+# AUTO: hold off until the lead is this far past where Ford's ACC has actually been measured to
+# start braking. The setting had no safe default before because that distance was unknown and
+# guessing it wrong means braking, which is the one thing this is all for. It is not unknown any
+# more -- accBrakingOnsetMax measures it every drive -- so the number can come from the car.
+#
+# The first real reading was 449 ft, about 137 m, which is a good deal earlier than assumed. That
+# is worth stating plainly: it means there is far less room to close in than hoped, and Auto will
+# hold at roughly 155 m rather than the 60 or 70 m that "as close as I can" evokes. Better to be
+# told that by the car than to pick a tighter number and pay for it in braking.
+#
+# Self-correcting in the safe direction. If ACC ever loses patience earlier than it has before,
+# the measured max grows and the hold relaxes to match, so the error can only shrink.
+AUTO_APPROACH_MARGIN_M = 20.0
 
 # --- do not go round a car that is braking hard ---
 #
@@ -433,7 +447,9 @@ class PassingAssistDetector:
     self._settle_s = 1e3
     self._lka_prev = False
     self.max_distance_m = float(DEFAULT_MAX_DISTANCE_M)
-    self.min_approach_m = float(DEFAULT_MIN_APPROACH_M)
+    self.min_approach_setting = float(DEFAULT_MIN_APPROACH_M)
+    self.min_approach_m = 0.0
+    self._seeded_onset = False
     self.min_speed_ms = DEFAULT_MIN_SPEED_MPH * CV.MPH_TO_MS
     self.exit_standdown_s = float(DEFAULT_EXIT_STANDDOWN_S)
     self.driver_change_standdown = 0.0
@@ -469,7 +485,19 @@ class PassingAssistDetector:
       self.oncoming_memory_s = float(self.params.get("PassingAssistOncomingMemory", return_default=True))
       self.manoeuvre.blinker_lead_s = float(self.params.get("PassingAssistBlinkerLead", return_default=True))
       self.keep_right_manoeuvre.blinker_lead_s = self.manoeuvre.blinker_lead_s
-      self.min_approach_m = float(self.params.get("PassingAssistMinApproach", return_default=True))
+      self.min_approach_setting = float(self.params.get("PassingAssistMinApproach", return_default=True))
+
+      # Carry the last drive's measurement across the ignition cycle. Without this, Auto is off for
+      # the first part of every drive -- until ACC happens to brake once -- which is exactly the
+      # part of a drive where it would have done the most good.
+      if not self._seeded_onset:
+        self._seeded_onset = True
+        try:
+          last = self.params.get("PassingAssistLastDrive")
+          if last:
+            self.acc_onset_max = max(self.acc_onset_max, float(last.get("accOnsetMax", 0.0)))
+        except Exception:  # noqa: BLE001 - a missing or malformed param must not reach the planner
+          pass
       self.min_speed_ms = self.params.get("PassingAssistMinSpeed", return_default=True) * CV.MPH_TO_MS
       self.exit_standdown_s = float(self.params.get("PassingAssistExitStandDown", return_default=True))
       self.overtake.crawl_time_s = float(self.params.get("PassingAssistCrawlTime", return_default=True))
@@ -1165,6 +1193,13 @@ class PassingAssistDetector:
       self._reset_outputs(Blocked.leadBraking)
       return
 
+    # Resolve Auto against what this car's ACC has actually been measured to do. Falls back to no
+    # hold when nothing has been measured yet, which is the honest answer rather than a guess.
+    if self.min_approach_setting < 0:
+      self.min_approach_m = (self.acc_onset_max + AUTO_APPROACH_MARGIN_M) if self.acc_onset_max > 0 else 0.0
+    else:
+      self.min_approach_m = self.min_approach_setting
+
     # Hold off while we are still a long way back -- see DEFAULT_MIN_APPROACH_M. The confirmation
     # timer keeps running underneath, so when the distance is reached the manoeuvre starts at once
     # rather than beginning a fresh two-second wait.
@@ -1464,6 +1499,7 @@ class PassingAssistDetector:
     passingAssist.blinkerWouldBeOn = live.blinker_on
     passingAssist.steeringWouldBeActive = live.steering_active
     passingAssist.keepRightAborts = min(pa.keep_right_manoeuvre.aborts, 65535)
+    passingAssist.minApproachActive = float(pa.min_approach_m)
     passingAssist.driverChangeStandDown = float(pa.driver_change_standdown)
     passingAssist.driverChangeWasExit = pa.driver_change_was_exit
     passingAssist.emergencyAborts = min(

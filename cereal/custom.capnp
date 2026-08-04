@@ -669,6 +669,9 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     driverChangeStandDown @65 :Float32;
     driverChangeWasExit @66 :Bool;   # ...and whether the lane they moved into looked like an exit
 
+    # BluePilot: the close-in distance actually in force, after Auto has resolved. 0 = no hold.
+    minApproachActive @67 :Float32;
+
     enum Manoeuvre {
       idle @0;         # nothing warranted
       confirming @1;   # a slower vehicle is being confirmed, timer running

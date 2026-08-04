@@ -256,7 +256,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // design -- waiting is the behaviour this exists to remove, and the only job of this timer is
     // to reject a single bad frame of lead tracking.
     {"PassingAssistBlinkerLead", {PERSISTENT | BACKUP, INT, "1"}},
-    {"PassingAssistMinApproach", {PERSISTENT | BACKUP, INT, "0"}},
+    // -1 = Auto (from the measured ACC braking onset), 0 = off, otherwise metres.
+    {"PassingAssistMinApproach", {PERSISTENT | BACKUP, INT, "-1"}},
     // The previous drive's measurements, so parking does not throw them away. Written
     // periodically by the detector, read by the panel when the current drive has nothing yet.
     {"PassingAssistLastDrive", {PERSISTENT | BACKUP, JSON}},

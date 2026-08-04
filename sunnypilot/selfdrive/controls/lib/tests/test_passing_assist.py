@@ -1681,3 +1681,61 @@ class TestDriverSteeringTakeover:
     run(det, 2, **IN_LEFT_LANE)
     assert det.driver_change_was_exit
     assert det.driver_change_standdown > 30.0
+
+
+class TestAutoCloseIn:
+  """The close-in hold had no safe default because the distance Ford's ACC starts braking at was
+  unknown, and guessing it wrong means braking -- the one thing this all exists to avoid. It is
+  measured now, so Auto takes the number from the car."""
+
+  @staticmethod
+  def _det(setting=-1, onset=0.0, last=None):
+    class _P(_KeepRightOnParams):
+      def __init__(self):
+        super().__init__(PassingAssistMinApproach=setting)
+        self.last = last
+
+      def get(self, key, block=False, return_default=False):
+        if key == "PassingAssistLastDrive":
+          return self.last
+        return super().get(key)
+
+      def put(self, key, val):
+        pass
+    det = PassingAssistDetector()
+    det.params = _P()
+    det.acc_onset_max = onset
+    return det
+
+  def test_auto_holds_just_beyond_where_acc_gives_up(self):
+    det = self._det(onset=137.0)
+    run(det, STUCK_FRAMES, d_rel=200.0)
+    assert 150.0 < det.min_approach_m < 165.0
+    assert det.closing_in, "200 m is further out than the measured onset plus margin"
+
+  def test_auto_does_nothing_until_something_has_been_measured(self):
+    """No measurement is not a licence to guess. With nothing recorded there is no hold at all."""
+    det = self._det(onset=0.0)
+    run(det, STUCK_FRAMES, d_rel=200.0)
+    assert det.min_approach_m == 0.0
+    assert not det.closing_in
+    assert det.suggestion == Side.left
+
+  def test_a_manual_number_still_wins(self):
+    det = self._det(setting=80, onset=137.0)
+    run(det, STUCK_FRAMES, d_rel=200.0)
+    assert det.min_approach_m == 80.0
+
+  def test_off_means_off(self):
+    det = self._det(setting=0, onset=137.0)
+    run(det, STUCK_FRAMES, d_rel=200.0)
+    assert det.min_approach_m == 0.0
+    assert not det.closing_in
+
+  def test_the_measurement_survives_the_ignition_cycle(self):
+    """Otherwise Auto is inert for the first part of every drive -- until ACC happens to brake
+    once -- which is exactly the part of a drive where it would do the most good."""
+    det = self._det(onset=0.0, last={"accOnsetMax": 140.0})
+    run(det, STUCK_FRAMES, d_rel=200.0)
+    assert det.acc_onset_max == 140.0
+    assert det.min_approach_m > 150.0
