@@ -203,6 +203,22 @@ DEFAULT_MAX_DISTANCE_M = 220
 # it. Guessing a default here would be picking the one number this feature is most sensitive to,
 # blind, when a drive can just tell us.
 DEFAULT_MIN_APPROACH_M = 0
+
+# --- do not go round a car that is braking hard ---
+#
+# People do not pass a braking car, and the instinct is a good one: hard deceleration usually means
+# they are turning off -- in which case the pass was never needed -- or they are braking for
+# something ahead that we cannot see yet, in which case going round them is the last thing to do.
+# Neither is visible to any sensor on this car. The braking itself is, and it stands in for both.
+#
+# -1.5 m/s^2 is deliberately well past lift-off. Coasting is around -0.3 and a car simply easing
+# its cruise reads similar; that is exactly the car we most want to pass, and holding off for it
+# would defeat the feature. This wants real brake pedal.
+LEAD_BRAKING_MS2 = -1.5
+# Held briefly after they stop braking rather than released the instant the number crosses back.
+# A driver braking for a turn lifts off, coasts, brakes again -- and the pause between those is not
+# an invitation. Also absorbs a single noisy accel estimate.
+LEAD_BRAKING_HOLD_S = 2.0
 # Kept only for the log -- how long until we reach this lead at the current closing rate. Nothing
 # gates on it.
 MIN_APPROACH_CLOSING_MS = 1.0
@@ -341,6 +357,10 @@ class PassingAssistDetector:
     self.max_distance_m = float(DEFAULT_MAX_DISTANCE_M)
     self.min_approach_m = float(DEFAULT_MIN_APPROACH_M)
     self.closing_in = False
+    self.lead_accel = 0.0
+    self.lead_braking_enabled = True
+    self.lead_braking_hold = False
+    self._lead_braking_s = 1e3
     # The dry run: what a fully-automatic pass would be doing right now. Actuates nothing.
     self.manoeuvre = PassingManoeuvre()
     # Is a pass grinding? The one case that may ever earn the set-speed actuator. Measures only.
@@ -361,6 +381,7 @@ class PassingAssistDetector:
       self.manoeuvre.blinker_lead_s = float(self.params.get("PassingAssistBlinkerLead", return_default=True))
       self.min_approach_m = float(self.params.get("PassingAssistMinApproach", return_default=True))
       self.overtake.crawl_time_s = float(self.params.get("PassingAssistCrawlTime", return_default=True))
+      self.lead_braking_enabled = self.params.get_bool("PassingAssistLeadBrakingHold")
       self.settle_time_s = float(self.params.get("PassingAssistSettleTime", return_default=True))
       self.suspend_minutes = self.params.get("PassingAssistSuspendMinutes", return_default=True)
       self.max_distance_m = float(self.params.get("PassingAssistMaxDistance", return_default=True))
@@ -661,6 +682,10 @@ class PassingAssistDetector:
   def _lead_state(self, lead, v_cruise: float) -> None:
     """Record what the lead is doing, whichever trigger ends up using it."""
     self.has_lead = bool(lead.status)
+    # aLeadK is the lead's own acceleration, Kalman-filtered -- not aRel, which folds in whatever
+    # we are doing ourselves and would read as braking every time WE accelerate.
+    self.lead_accel = float(getattr(lead, 'aLeadK', 0.0))
+    self._lead_braking_s = 0.0 if self.lead_accel <= LEAD_BRAKING_MS2 else self._lead_braking_s + DT_MDL
     self.lead_radar_confirmed = bool(getattr(lead, 'radar', False))
     self.lead_model_prob = float(getattr(lead, 'modelProb', 0.0))
     self.lead_d_rel = float(lead.dRel)
@@ -874,6 +899,16 @@ class PassingAssistDetector:
     # Latched: what matters is where it started, not that it is still going.
     if spotted and self.acc_braking_at_decision and self.acc_onset_d_rel == 0.0:
       self.acc_onset_d_rel = float(self.lead_d_rel)
+
+    # They are braking hard. Wait and see -- see LEAD_BRAKING_MS2. Checked before the close-in
+    # hold because it is the more specific reason and the one a driver would recognise: "that car
+    # is stopping" beats "still closing" when both are true.
+    self.lead_braking_hold = bool(spotted and self.lead_braking_enabled and
+                                  self._lead_braking_s < LEAD_BRAKING_HOLD_S)
+    if self.lead_braking_hold:
+      self.keep_right_seconds = 0.0
+      self._reset_outputs(Blocked.leadBraking)
+      return
 
     # Hold off while we are still a long way back -- see DEFAULT_MIN_APPROACH_M. The confirmation
     # timer keeps running underneath, so when the distance is reached the manoeuvre starts at once
@@ -1150,6 +1185,8 @@ class PassingAssistDetector:
     passingAssist.crawlEvents = min(pa.overtake.crawl_events, 65535)
     passingAssist.crawlSide = pa.overtake.crawl_side
     passingAssist.crawlAfterSuggestion = pa.overtake.crawl_after_suggestion
+    passingAssist.leadAccel = float(pa.lead_accel)
+    passingAssist.leadBrakingHold = pa.lead_braking_hold
     passingAssist.suspendedSeconds = float(pa.suspended_seconds)
     passingAssist.referenceSpeed = float(pa.reference_speed)
     passingAssist.referenceSource = pa.reference_source

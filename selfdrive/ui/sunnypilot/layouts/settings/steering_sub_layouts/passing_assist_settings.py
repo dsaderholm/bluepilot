@@ -80,6 +80,14 @@ class PassingAssistSettingsLayout(Widget):
       label_callback=lambda v: f"{v} s",
       inline=True)
 
+    self._lead_braking = toggle_item_sp(
+      title=tr("Wait If The Car Ahead Is Braking"),
+      description=tr("Do not start a pass while the vehicle in front is braking hard. People do "
+                     "not, and the instinct is a good one: they are usually turning off -- so the "
+                     "pass was never needed -- or braking for something ahead you cannot see yet. "
+                     "Gentle slowing does not count; that is the car you most want to pass."),
+      param="PassingAssistLeadBrakingHold")
+
     self._crawl_time = option_item_sp(
       title=tr("Call It A Slow Pass After"),
       description=tr("How long grinding past a car you are barely faster than counts as a pass "
@@ -247,6 +255,7 @@ class PassingAssistSettingsLayout(Widget):
       self._min_deficit,
       self._confirm_time,
       self._blinker_lead,
+      self._lead_braking,
       self._crawl_time,
       self._max_distance,
       self._min_approach,

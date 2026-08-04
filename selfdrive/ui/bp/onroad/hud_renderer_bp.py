@@ -167,6 +167,7 @@ _BLOCKED_TEXT = {
   'adjacentSlow': "Next lane is no faster",
   'oncomingLane': "Two-way road - no passing",
   'closingIn': "Closing in",
+  'leadBraking': "Car ahead is braking",
 }
 
 # BluePilot: sunnypilot's "AHEAD" box hangs off the bottom of the speed-limit sign, in the same

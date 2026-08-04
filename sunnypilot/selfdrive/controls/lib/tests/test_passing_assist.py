@@ -97,7 +97,8 @@ def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., lead_y=0.0, status=Tr
             blinker=False, brake=False, steering=False, road_name="I 15", curve=0.0,
             acc_braking=False, acc_precharge=False, acc_propulsion=0.0,
             acc_avail=True, set_speed=None,
-            icbm_hold=0.0, icbm_manual=False, lka=False, tracks=()):
+            icbm_hold=0.0, icbm_manual=False, lka=False, tracks=(),
+            lead_accel=0.0, lead_radar=True):
   # Being stuck behind a car means matching its speed, not still closing on it: vEgo tracks vLead
   # and the gap to the SET speed is what makes passing worth suggesting. Tests that need a genuine
   # approach pass v_ego explicitly.
@@ -111,7 +112,8 @@ def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., lead_y=0.0, status=Tr
                    cruiseState=NS(speedCluster=set_speed if set_speed is not None else CRUISE_MS)),
     # leadOne yRel is LEFT-POSITIVE, like the radar's. dPath is deliberately absent: nothing
     # in openpilot populates it, and a fixture that supplied it let a dead gate look alive.
-    'radarState': NS(leadOne=NS(status=status, dRel=d_rel, yRel=lead_y, vRel=v_rel, vLead=v_lead)),
+    'radarState': NS(leadOne=NS(status=status, dRel=d_rel, yRel=lead_y, vRel=v_rel, vLead=v_lead,
+                              aLeadK=lead_accel, radar=lead_radar, modelProb=0.9)),
     'modelV2': NS(laneLines=[xyz(v) for v in ll], laneLineProbs=list(probs),
                   roadEdges=[xyz(edges[0]), xyz(edges[1], widen=right_edge_widen)],
                   roadEdgeStds=list(edge_stds), position=path(curve)),
@@ -1353,3 +1355,50 @@ class TestClosingIn:
     det = run(self._det(150), STUCK_FRAMES, v_lead=CRUISE_MS, d_rel=200.0)
     assert not det.closing_in
     assert det.blocked_by != Blocked.closingIn
+
+
+class TestLeadBraking:
+  """People do not pass a braking car. They are usually turning off -- so the pass was never
+  needed -- or braking for something ahead you cannot see yet, which is the worst moment to pull
+  out. Neither cause is visible to any sensor here; the braking stands in for both.
+  """
+
+  def test_a_hard_braking_lead_holds_the_pass(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES, lead_accel=-2.5)
+    assert det.lead_braking_hold
+    assert det.suggestion == Side.none
+    assert det.blocked_by == Blocked.leadBraking
+
+  def test_gentle_slowing_is_not_braking(self):
+    """The line that makes this useful rather than crippling. A car easing off its cruise reads
+    around -0.3, and that is precisely the car worth passing -- hold off for it and the feature
+    stops working on exactly the traffic it exists for."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, lead_accel=-0.3)
+    assert not det.lead_braking_hold
+    assert det.suggestion == Side.left
+
+  def test_the_hold_outlives_the_braking(self):
+    """A driver braking for a turn lifts off, coasts, brakes again. The pause is not an
+    invitation, and it also absorbs one noisy acceleration estimate."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, lead_accel=-2.5)
+    run(det, int(1.0 / DT_MDL), lead_accel=0.0)
+    assert det.lead_braking_hold, "released the instant the number crossed back"
+    run(det, int(1.5 / DT_MDL), lead_accel=0.0)
+    assert not det.lead_braking_hold
+    assert det.suggestion == Side.left
+
+  def test_it_can_be_turned_off(self):
+    class _Off(_KeepRightOnParams):
+      def get_bool(self, key, block=False):
+        return False if key == "PassingAssistLeadBrakingHold" else super().get_bool(key)
+    det = PassingAssistDetector()
+    det.params = _Off()
+    run(det, STUCK_FRAMES, lead_accel=-2.5)
+    assert not det.lead_braking_hold
+    assert det.suggestion == Side.left
+
+  def test_no_lead_never_reports_a_braking_hold(self):
+    """leadBraking must mean "that car is stopping", never leak onto an empty road."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, status=False)
+    assert not det.lead_braking_hold
+    assert det.blocked_by != Blocked.leadBraking

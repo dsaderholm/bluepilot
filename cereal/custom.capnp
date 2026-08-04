@@ -558,6 +558,7 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       adjacentSlow @12;      # the lane is there and clear behind, but full of traffic no faster
       oncomingLane @13;      # two-way road: the lane to the left is theirs, not a passing lane
       closingIn @14;         # deliberately holding off: still closing, ACC has not had to brake
+      leadBraking @15;       # they are braking hard: wait and see before committing to go round
     }
 
     # BluePilot: the manoeuvre this WOULD perform, run as a dry run. Nothing actuates; see
@@ -621,6 +622,10 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     crawlEvents @52 :UInt16;            # crawls that passed the threshold
     crawlSide @53 :Side;
     crawlAfterSuggestion @54 :Bool;
+
+    # BluePilot: the lead's own deceleration, and whether it is enough to hold a pass off.
+    leadAccel @55 :Float32;
+    leadBrakingHold @56 :Bool;
 
     enum Manoeuvre {
       idle @0;         # nothing warranted
