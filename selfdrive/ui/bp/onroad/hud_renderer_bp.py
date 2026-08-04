@@ -163,7 +163,9 @@ _BLOCKED_ORDER = tuple(
 _BLOCKED_TEXT = {
   'disabled': "Passing assist off",
   'notEngaged': "Cruise not engaged",
-  'tooSlow': "Below 40 mph",
+  # Not a number: the floor is a setting and moved from 40 to 30 without this following it, which
+  # is exactly how a label starts lying. The panel cannot know the driver's value here.
+  'tooSlow': "Too slow to pass",
   'driverActive': "You are driving",
   'noLead': "Road ahead clear",
   'nothingSlower': "Nothing slower ahead",
@@ -174,7 +176,9 @@ _BLOCKED_TEXT = {
   'suspended': "Paused",
   'adjacentSlow': "Next lane is no faster",
   'oncomingLane': "Oncoming traffic that side",
-  'closingIn': "Closing in",
+  # "Closing in" reads as something closing in on YOU, which is the opposite of what it means --
+  # this is the system deliberately hanging back until the gap is smaller.
+  'closingIn': "Waiting to get closer",
   'leadBraking': "Car ahead is braking",
   'driverChangedLanes': "You just changed lanes",
 }
