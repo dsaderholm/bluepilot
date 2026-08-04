@@ -26,8 +26,11 @@ def main():
   ldw = LaneDepartureWarning()
   longitudinal_planner = LongitudinalPlanner(CP, CP_SP)
   pm = messaging.PubMaster(['longitudinalPlan', 'driverAssistance', 'longitudinalPlanSP'])
+  # BluePilot: carStateBP carries Ford's own ACCDATA brake request. The radar-blind lead detector
+  # needs it to tell "nothing is braking for this" from "stock ACC is already on it" -- without it
+  # the detector kept commanding and kept alerting while Ford was visibly slowing for the same car.
   sm = messaging.SubMaster(['carControl', 'carState', 'controlsState', 'liveParameters', 'radarState', 'modelV2', 'selfdriveState',
-                            'liveMapDataSP', 'carStateSP', gps_location_service],
+                            'liveMapDataSP', 'carStateSP', 'carStateBP', gps_location_service],
                            poll='carState')
 
   while True:

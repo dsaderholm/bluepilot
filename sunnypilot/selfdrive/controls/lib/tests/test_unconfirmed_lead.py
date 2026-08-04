@@ -35,13 +35,26 @@ class FakeEvents:
 
 
 def make_sm(d_rel=100., v_rel=-29., prob=0.9, status=True, radar=False,
-            should_stop=False, accel=0., v_ego=CRUISE_MS, brake=False, d_path=0.2):
-  return {
+            should_stop=False, accel=0., v_ego=CRUISE_MS, brake=False, d_path=0.2,
+            ford_braking=False):
+  sm = {
     'carState': NS(vEgo=v_ego, brakePressed=brake),
     'radarState': NS(leadOne=NS(dRel=d_rel, vRel=v_rel, modelProb=prob, status=status,
                                 radar=radar, dPath=d_path)),
     'modelV2': NS(action=NS(shouldStop=should_stop, desiredAcceleration=accel)),
+    'carStateBP': NS(brakeLightStatus=NS(accDataAvailable=True, accDecelRequest=ford_braking)),
   }
+  # SubMaster exposes .valid; the detector must tolerate carStateBP being absent on other platforms
+  sm_obj = dict(sm)
+  sm_obj['__valid__'] = {'carStateBP': True}
+  return _SM(sm)
+
+
+class _SM(dict):
+  """Minimal stand-in for SubMaster: subscript plus .valid."""
+  @property
+  def valid(self):
+    return {k: True for k in self}
 
 
 def run(det, ev, frames, **kw):
@@ -210,4 +223,32 @@ class TestReleaseIsReachableForAStoppedLead:
     det, ev = UnconfirmedLeadDetector(), FakeEvents()
     run(det, ev, 60, d_rel=lambda i: 100. - i * 0.5)
     det.update(make_sm(d_rel=70., radar=True), TRAJ, CRUISE_MS, True, ev)
+    assert det.state == State.active
+
+
+class TestReleaseWhenFordStartsBraking:
+  """Reported precisely: when Ford caught the lead at the same time we never warned -- correct,
+  the trigger gate rejected it. When Ford caught it LATER we warned first, which is the whole
+  point, and then never stopped.
+
+  lead.radar cannot resolve this. It means openpilot's radar sees the object, which was likely
+  true the entire time -- Ford's ACC deciding to act on it is a separate judgement inside its own
+  ECU, and its brake request is the only signal for that.
+  """
+
+  def test_active_trigger_releases_once_ford_asks_for_brakes(self):
+    det, ev = UnconfirmedLeadDetector(), FakeEvents()
+    run(det, ev, 60, d_rel=lambda i: 100. - i * 0.5)
+    assert det.state == State.active
+    before = len(ev.fired)
+    det.update(make_sm(d_rel=70., radar=True, ford_braking=True), TRAJ, CRUISE_MS, True, ev)
+    assert det.state != State.active, "kept commanding while stock ACC was already braking"
+    det.update(make_sm(d_rel=68., radar=True, ford_braking=True), TRAJ, CRUISE_MS, True, ev)
+    assert len(ev.fired) == before, "kept alerting after handing off to Ford"
+
+  def test_it_stays_active_while_ford_is_doing_nothing(self):
+    """The whole value of the feature is the window where Ford has not reacted yet."""
+    det, ev = UnconfirmedLeadDetector(), FakeEvents()
+    run(det, ev, 60, d_rel=lambda i: 100. - i * 0.5)
+    det.update(make_sm(d_rel=70., radar=True, ford_braking=False), TRAJ, CRUISE_MS, True, ev)
     assert det.state == State.active

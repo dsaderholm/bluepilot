@@ -166,6 +166,26 @@ class UnconfirmedLeadDetector:
     return d_rel / closing
 
   @staticmethod
+  def _ford_is_braking(sm) -> bool:
+    """Is stock ACC actively asking for brakes right now?
+
+    The one unambiguous "Ford has this" signal. AccBrkDecel_B_Rq comes from the ACCDATA the camera
+    sends, so it is stock ACC's own request even though openpilot is not the longitudinal
+    controller. If it is set, something with more authority than a set-speed nudge is already
+    slowing the car and there is nothing for this detector to add.
+
+    Defensive: carStateBP is BluePilot-conditional and absent on other platforms. Missing data
+    means "cannot tell", which must read as not-braking so the detector keeps working.
+    """
+    try:
+      if not sm.valid['carStateBP']:
+        return False
+      return bool(sm['carStateBP'].brakeLightStatus.accDataAvailable and
+                  sm['carStateBP'].brakeLightStatus.accDecelRequest)
+    except (KeyError, AttributeError):
+      return False
+
+  @staticmethod
   def _ford_tracks(lead: log.RadarState.LeadData, v_ego: float) -> bool:
     """Will Ford's ACC actually follow this lead? Not the same question as "does radar see it".
 
@@ -317,8 +337,14 @@ class UnconfirmedLeadDetector:
       # Ford is in its stop-and-go regime and does follow stationary vehicles -- which the owner
       # observed directly, ACC stopping for the car. At that point this detector has done
       # everything it can do anyway; its whole output is a set-speed floor it has now reached.
+      # Third and most direct: stock ACC is asking for brakes. Reported from the road -- the alert
+      # kept firing while Ford was plainly slowing for the same car, still well above the floor, so
+      # neither of the conditions below had fired yet. If Ford is braking, this detector has
+      # nothing left to contribute and should get out of the way.
       radar_has_it = bool(lead.status and lead.radar)
-      ford_took_over = self._ford_tracks(lead, v_ego) or (radar_has_it and v_ego <= ACC_FLOOR_MS)
+      ford_took_over = (self._ford_is_braking(sm)
+                        or self._ford_tracks(lead, v_ego)
+                        or (radar_has_it and v_ego <= ACC_FLOOR_MS))
       if ford_took_over:
         # Ford ACC owns it now and can follow to a full stop, which this never could.
         self._release()
