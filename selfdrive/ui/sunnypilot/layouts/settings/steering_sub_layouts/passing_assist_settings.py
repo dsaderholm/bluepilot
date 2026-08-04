@@ -155,12 +155,16 @@ class PassingAssistSettingsLayout(Widget):
       label_callback=lambda v: f"{v} s",
       inline=True)
 
-    self._avoid_outermost = toggle_item_sp(
-      title=tr("Never Move Into The Outermost Lane"),
-      description=tr("Extra-conservative exit avoidance: only suggest moving right when another "
-                     "lane exists beyond the one you would move into. Costs the suggestion "
-                     "entirely on two-lane-each-way roads, which is most of an interstate."),
-      param="PassingAssistAvoidOutermost")
+    self._min_lane_age = option_item_sp(
+      title=tr("Lane Must Have Been There"),
+      description=tr("How long the lane on your right must have been continuously present before "
+                     "returning would be suggested. An exit lane appears out of nowhere; a "
+                     "through lane has been beside you for miles. If the camera loses the lane "
+                     "briefly the clock restarts, which just costs a few quiet seconds."),
+      param="PassingAssistMinLaneAge",
+      min_value=0, max_value=60, value_change_step=5,
+      label_callback=lambda v: f"{v} s",
+      inline=True)
 
     self._settle_time = option_item_sp(
       title=tr("Settle After A Pass"),
@@ -218,7 +222,7 @@ class PassingAssistSettingsLayout(Widget):
       SectionHeader(tr("Returning Right")),
       self._keep_right,
       self._keep_right_delay,
-      self._avoid_outermost,
+      self._min_lane_age,
       self._settle_time,
 
       SectionHeader(tr("Pausing")),

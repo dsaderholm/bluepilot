@@ -169,6 +169,26 @@ DEFAULT_SETTLE_TIME_S = 20
 # brief gap in traffic while genuinely overtaking a line of cars.
 DEFAULT_KEEP_RIGHT_DELAY_S = 10
 
+# How long the lane to our right must have existed CONTINUOUSLY before moving into it is suggested.
+#
+# The owner's idea, and it is a better exit test than the two already here: an exit lane did not
+# exist a moment ago and now does. A through lane has been beside us the whole time. So instead of
+# asking what the lane looks like -- which is what MIN_LANE_WIDTH_M and the road-widening check do,
+# and why they cannot tell an exit from a through lane -- ask how long it has been there.
+#
+# Complementary rather than a replacement. Road widening spots an exit OPENING UP AHEAD; this spots
+# one that has JUST APPEARED beside us. They catch the same thing at different moments and both
+# fail safe.
+#
+# Every way this is wrong is the harmless way. A lane the model briefly loses -- occluded by a
+# lorry, faded paint, a shadow -- comes back looking new, and the cost is a quiet keep-right for a
+# few seconds. Merging onto a highway also starts the clock late, which is correct: the lane really
+# is new to us there.
+#
+# 15 s at 70 mph is about 470 m of continuous presence. An exit lane is rarely that long before the
+# gore; a through lane has usually been there for minutes.
+DEFAULT_MIN_LANE_AGE_S = 15
+
 # TsrOvtkMsgTxt_D_Rq. 0 Null, 1 OvertakingAllowed, 2-7 are all "Lim*" -- a limitation in force or
 # its explicit cancellation. Only the cancel codes clear the zone; the rest mean restricted.
 TSR_OVTK_CANCELLED = (4, 7)       # LimAllCancelled, LimForTrucksCancelled
@@ -192,7 +212,6 @@ class PassingAssistDetector:
     self.speed_deficit = 0.0
     self.lead_ttc = 0.0
     self.lead_d_path = 0.0
-    self.approach_seconds = 0.0
     self.trigger = Trigger.none
     self.acc_braking_at_decision = False
     self.acc_precharge_at_decision = False
@@ -207,9 +226,9 @@ class PassingAssistDetector:
     self.right_edge_gap = 0.0
     self.left_geometry_ok = False
     self.right_geometry_ok = False
-    self.lane_beyond_right = False
     self.right_widening_m = 0.0
     self.right_widening = False
+    self.right_lane_age_s = 0.0
 
     self.left_blindspot = False
     self.right_blindspot = False
@@ -230,7 +249,7 @@ class PassingAssistDetector:
     self.persistence_s = float(DEFAULT_PERSISTENCE_S)
     self.keep_right_enabled = True
     self.keep_right_delay_s = float(DEFAULT_KEEP_RIGHT_DELAY_S)
-    self.avoid_outermost = False
+    self.min_lane_age_s = float(DEFAULT_MIN_LANE_AGE_S)
     self.adjacent_enabled = True
     self.oncoming_veto = True
     self.strict_two_way = True
@@ -251,7 +270,7 @@ class PassingAssistDetector:
       self.persistence_s = float(self.params.get("PassingAssistStuckTime", return_default=True))
       self.keep_right_enabled = self.params.get_bool("PassingAssistKeepRight")
       self.keep_right_delay_s = float(self.params.get("PassingAssistKeepRightDelay", return_default=True))
-      self.avoid_outermost = self.params.get_bool("PassingAssistAvoidOutermost")
+      self.min_lane_age_s = float(self.params.get("PassingAssistMinLaneAge", return_default=True))
       self.adjacent_enabled = self.params.get_bool("PassingAssistAdjacentLane")
       self.oncoming_veto = self.params.get_bool("PassingAssistOncomingVeto")
       self.strict_two_way = self.params.get_bool("PassingAssistStrictTwoWay")
@@ -345,16 +364,21 @@ class PassingAssistDetector:
     # shoulder. This is what makes "move right" safe from exits without any map data.
     self._road_widening(model, right_std)
 
-    beyond_gap = self._edge_gap(model, LL_FAR_RIGHT, RE_RIGHT)
-    self.lane_beyond_right = (float(probs[LL_FAR_RIGHT]) >= MIN_ADJACENT_LINE_PROB and
-                              beyond_gap >= MIN_LANE_WIDTH_M and right_std <= MAX_ROAD_EDGE_STD)
-
     self.left_geometry_ok = (self.left_line_prob >= MIN_ADJACENT_LINE_PROB and
                              self.left_edge_gap >= MIN_LANE_WIDTH_M and
                              left_std <= MAX_ROAD_EDGE_STD)
     self.right_geometry_ok = (self.right_line_prob >= MIN_ADJACENT_LINE_PROB and
                               self.right_edge_gap >= MIN_LANE_WIDTH_M and
                               right_std <= MAX_ROAD_EDGE_STD)
+
+    # How long that lane has been there WITHOUT INTERRUPTION. See DEFAULT_MIN_LANE_AGE_S: a lane
+    # that did not exist a moment ago and now does is an exit or an on-ramp, and this is the only
+    # test here that can tell that apart from a through lane -- every other one asks what the lane
+    # looks like, and they look identical.
+    if self.right_geometry_ok:
+      self.right_lane_age_s = min(self.right_lane_age_s + DT_MDL, 1e3)
+    else:
+      self.right_lane_age_s = 0.0
 
   def _lka_toggle(self, car_state_bp) -> bool:
     """Rising edge of the stalk-end LKA button.
@@ -796,22 +820,10 @@ class PassingAssistDetector:
       self.keep_right_seconds = 0.0
       return
 
-    # Never suggest moving into the OUTERMOST lane. Exit-only and merge lanes are always outermost
-    # and are geometrically identical to a through lane, so requiring a further lane beyond the
-    # target removes the "move right" -> "take the exit" failure entirely.
-    #
-    # The cost is real and worth stating: on a two-lane-each-way road the right lane IS the
-    # outermost, so keep-right never fires there -- which is most of an interstate outside cities.
-    # That is the deliberate trade. A suggestion that is silent where it cannot be sure beats one
-    # that is occasionally confidently wrong about an exit.
     # The road opening up ahead means an exit, on-ramp or pullout, and none of those is a lane to
     # settle into. Unlike the outermost rule this works on a two-lane road, because it asks what
     # the lane DOES rather than merely whether another lane exists beyond it.
     if self.right_widening:
-      self.keep_right_seconds = 0.0
-      return
-
-    if self.avoid_outermost and not self.lane_beyond_right:
       self.keep_right_seconds = 0.0
       return
 
@@ -853,6 +865,23 @@ class PassingAssistDetector:
       return
 
     self.keep_right_seconds += DT_MDL
+
+    # The lane also has to have BEEN there a while -- the owner's own exit test, and a better one
+    # than road widening because it needs no guess about what the edge is doing ahead. An exit lane
+    # appears; a through lane has been beside us for miles.
+    #
+    # This is deliberately NOT one of the resets above. Every gate up there is "the situation is
+    # unsafe right now", so restarting the clear-lane clock is the whole point of them. A young
+    # lane is not unsafe, it is merely unproven, and zeroing the clock here would chain the two
+    # waits end to end: 15 s of age and THEN 10 s of clear, 25 s in total, by which time the
+    # suggestion is stale. Run concurrently, both clocks start when the lane appears and the wait
+    # is max(15, 10) = 15 s, which is what the two numbers on the settings screen say.
+    #
+    # Failing safe in every direction: a lane the model briefly loses comes back looking new and
+    # costs a few quiet seconds, nothing more.
+    if self.right_lane_age_s < self.min_lane_age_s:
+      return
+
     if self.keep_right_seconds >= self.keep_right_delay_s:
       self.suggestion = Side.right
       self.blocked_by = Blocked.none

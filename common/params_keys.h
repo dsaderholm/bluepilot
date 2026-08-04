@@ -274,11 +274,15 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // actually bites; it is not a feature to lean on until map data can distinguish the two.
     {"PassingAssistKeepRight", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"PassingAssistKeepRightDelay", {PERSISTENT | BACKUP, INT, "10"}},  // seconds
+    // BluePilot: seconds the lane to the right must have existed CONTINUOUSLY before moving into
+    // it is suggested. An exit lane did not exist a moment ago and now does; a through lane has
+    // been beside us the whole time. Every other exit test asks what the lane looks like, and an
+    // exit looks exactly like a through lane. This asks how long it has been there.
+    {"PassingAssistMinLaneAge", {PERSISTENT | BACKUP, INT, "15"}},
     // BluePilot: extra-conservative exit avoidance -- require a further lane BEYOND the one being
     // moved into. Superseded as the primary defence by the road-widening check, which spots an exit
     // from the road opening up ahead and works on two-lane roads. Default off: this one costs
     // keep-right entirely on two-lane-each-way roads, which is most of an interstate.
-    {"PassingAssistAvoidOutermost", {PERSISTENT | BACKUP, BOOL, "0"}},
     // BluePilot: use the front radar's off-path tracks to check the target lane is not already
     // full of traffic no faster than the car being passed. DEFAULT ON -- unlike the two gates
     // above it can only ever suppress a suggestion that was going to be wasted, it needs no

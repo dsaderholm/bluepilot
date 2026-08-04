@@ -319,10 +319,18 @@ class TestPassingAssistIsObservationOnly:
 # the geometry keep-right is scoped to now -- see PassingAssistAvoidOutermost.
 IN_LEFT_LANE = dict(probs=(0.1, 0.99, 0.99, 0.9), edges=(-2.2, 9.3))
 
-# Two lanes each way, sitting in the left: the lane to our right IS the outermost, so it could be
-# an exit-only lane and keep-right must stay silent.
+# Two lanes each way, sitting in the left. Keep-right works here now: nothing about the geometry
+# says exit, so the widening and lane-age gates carry it instead of a blanket refusal.
 TWO_LANE_ROAD = dict(probs=(0.1, 0.99, 0.99, 0.9), edges=(-2.2, 5.7))
-KEEP_RIGHT_FRAMES = int(11.0 / DT_MDL)
+
+# No lane to our right at all: painted line gone and no drivable width to the edge. Used to age a
+# lane up from zero.
+NO_RIGHT_LANE = dict(probs=(0.1, 0.99, 0.99, 0.1), edges=(-2.2, 2.4))
+
+# Long enough to clear BOTH keep-right clocks: the 10 s clear-lane delay and the 15 s lane age.
+# They are separate, and a fixture that only cleared one would make the other untestable.
+KEEP_RIGHT_FRAMES = int(16.0 / DT_MDL)
+DELAY_FRAMES = int(11.0 / DT_MDL)   # clears the delay alone, NOT the age
 
 
 
@@ -333,7 +341,7 @@ _STUB_PARAM_DEFAULTS = {
   "PassingAssistMinDeficit": 4, "PassingAssistStuckTime": 2,
   "PassingAssistKeepRightDelay": 10, "PassingAssistSettleTime": 20,
   "PassingAssistMaxDistance": 220, "PassingAssistSuspendMinutes": 15,
-  "PassingAssistOncomingMemory": 90,
+  "PassingAssistOncomingMemory": 90, "PassingAssistMinLaneAge": 15,
 }
 
 
@@ -342,24 +350,22 @@ class _KeepRightOnParams:
   lean on. These tests opt in explicitly so the default stays honest and a future flip of that
   default cannot silently make them pass for the wrong reason."""
 
-  def get(self, key, block=False, return_default=False):
-    return _STUB_PARAM_DEFAULTS[key]
+  def __init__(self, **overrides):
+    self.values = dict(_STUB_PARAM_DEFAULTS, **overrides)
 
-  def __init__(self, avoid_outermost=True):
-    self.avoid_outermost = avoid_outermost
+  def get(self, key, block=False, return_default=False):
+    return self.values[key]
 
   def get_bool(self, key, block=False):
-    if key == "PassingAssistAvoidOutermost":
-      return self.avoid_outermost
     return key != "PassingAssistSuspend"
 
   def put_bool(self, key, val):
     pass
 
 
-def keep_right_det(avoid_outermost=True):
+def keep_right_det(**overrides):
   det = PassingAssistDetector()
-  det.params = _KeepRightOnParams(avoid_outermost)
+  det.params = _KeepRightOnParams(**overrides)
   return det
 
 
@@ -758,22 +764,61 @@ class TestKeepRightAdjacentLane:
     assert det.reason == Reason.keepRight
 
 
-class TestAvoidOutermostLane:
-  def test_moves_right_when_another_lane_lies_beyond(self):
+class TestLaneAge:
+  """The owner's own exit test: an exit lane did not exist a moment ago and now does, whereas a
+  through lane has been beside us for miles. This replaced a blanket refusal to enter the outermost
+  lane, which bought the same safety by giving up keep-right on every two-lane road.
+
+  Every case here runs at least KEEP_RIGHT_FRAMES, so the 10 s clear-lane delay is always satisfied
+  and age is the only thing that can be deciding.
+  """
+
+  def test_a_lane_that_has_always_been_there_is_suggested(self):
     det = run(keep_right_det(), KEEP_RIGHT_FRAMES, status=False, **IN_LEFT_LANE)
-    assert det.lane_beyond_right
+    assert det.right_lane_age_s >= det.min_lane_age_s
     assert det.suggestion == Side.right
     assert det.reason == Reason.keepRight
 
-  def test_will_not_enter_the_outermost_lane(self):
-    """Two lanes each way: the right lane IS the outermost, so it could be an exit. Stay put."""
-    det = run(keep_right_det(), KEEP_RIGHT_FRAMES, status=False, **TWO_LANE_ROAD)
-    assert not det.lane_beyond_right
+  def test_a_lane_that_just_appeared_is_refused(self):
+    """The exit case. Nothing to our right, then a lane opens up -- that is a gore, not a lane to
+    settle into. The clear-lane delay elapses inside this window and must not be enough alone."""
+    det = run(keep_right_det(), KEEP_RIGHT_FRAMES, status=False, **NO_RIGHT_LANE)
+    assert det.right_lane_age_s == 0.0
+    run(det, DELAY_FRAMES, status=False, **IN_LEFT_LANE)
+    assert det.keep_right_seconds >= det.keep_right_delay_s    # the OTHER clock is satisfied
+    assert det.right_lane_age_s < det.min_lane_age_s
     assert det.suggestion == Side.none
-    assert det.keep_right_seconds == 0.0
 
-  def test_passing_is_unaffected_by_the_outermost_rule(self):
-    """The rule is scoped to keep-right. Overtaking on the right is a different decision and the
+  def test_and_is_accepted_once_it_has_lasted(self):
+    """Same detector, same lane, five more seconds. If this did not flip, the case above would be
+    passing on something other than age."""
+    det = run(keep_right_det(), KEEP_RIGHT_FRAMES, status=False, **NO_RIGHT_LANE)
+    run(det, DELAY_FRAMES, status=False, **IN_LEFT_LANE)
+    assert det.suggestion == Side.none
+    run(det, int(5.0 / DT_MDL), status=False, **IN_LEFT_LANE)
+    assert det.suggestion == Side.right
+    assert det.reason == Reason.keepRight
+
+  def test_losing_the_lane_restarts_the_clock(self):
+    """Fails safe: an occlusion or faded paint costs a few quiet seconds rather than risking a
+    fresh lane being read as an old one."""
+    det = run(keep_right_det(), KEEP_RIGHT_FRAMES, status=False, **IN_LEFT_LANE)
+    assert det.suggestion == Side.right
+    run(det, 1, status=False, **NO_RIGHT_LANE)
+    assert det.right_lane_age_s == 0.0
+    run(det, DELAY_FRAMES, status=False, **IN_LEFT_LANE)
+    assert det.suggestion == Side.none
+
+  def test_zero_disables_the_gate(self):
+    """The control goes down to 0 s, and there the widening test is on its own."""
+    det = keep_right_det(PassingAssistMinLaneAge=0)
+    run(det, KEEP_RIGHT_FRAMES, status=False, **NO_RIGHT_LANE)
+    run(det, DELAY_FRAMES, status=False, **IN_LEFT_LANE)
+    assert det.min_lane_age_s == 0.0
+    assert det.suggestion == Side.right
+
+  def test_passing_is_unaffected_by_the_keep_right_gates(self):
+    """They are scoped to keep-right. Overtaking on the right is a different decision and the
     driver is choosing to make it."""
     det = run(PassingAssistDetector(), STUCK_FRAMES, left_bs=True,
               probs=(0.9, 0.99, 0.99, 0.9), edges=(-5.6, 5.7))
@@ -795,14 +840,14 @@ class TestRoadWidening:
 
   def test_widening_blocks_keep_right_on_a_two_lane_road(self):
     """The case the outermost rule could only solve by giving up on two-lane roads entirely."""
-    det = keep_right_det(avoid_outermost=False)
+    det = keep_right_det()
     run(det, KEEP_RIGHT_FRAMES, status=False, right_edge_widen=4.0, **TWO_LANE_ROAD)
     assert det.suggestion == Side.none
     assert det.keep_right_seconds == 0.0
 
   def test_two_lane_road_works_when_not_widening(self):
     """...and the point of it: with no exit ahead, a two-lane road now gets the suggestion."""
-    det = keep_right_det(avoid_outermost=False)
+    det = keep_right_det()
     run(det, KEEP_RIGHT_FRAMES, status=False, **TWO_LANE_ROAD)
     assert not det.right_widening
     assert det.suggestion == Side.right
