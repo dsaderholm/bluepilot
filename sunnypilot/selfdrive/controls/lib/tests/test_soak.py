@@ -138,3 +138,43 @@ def test_the_same_seed_gives_the_same_answer():
     return (det.suggestion, det.blocked_by, round(det.approach_seconds, 6),
             det.driver_passes, round(det.missed_deficit_mph, 6), det.suggestions_made)
   assert once() == once()
+
+
+def _containers(obj, depth=0):
+  """Every list/dict/set reachable from the detector, with its length."""
+  out = {}
+  for name, v in vars(obj).items():
+    if isinstance(v, (list, dict, set)):
+      out[name] = len(v)
+    elif hasattr(v, "__dict__") and depth < 2:
+      for inner, n in _containers(v, depth + 1).items():
+        out[f"{name}.{inner}"] = n
+  return out
+
+
+def test_nothing_grows_without_bound_over_a_long_drive():
+  """The one failure class an hour of driving would not show as a crash.
+
+  A list appended once per frame is 72,000 entries an hour. It would not raise, would not fail any
+  assertion, and would quietly consume the device's memory on a long drive -- which is exactly the
+  drive this feature is for. Nothing offline catches that except looking.
+
+  Everything here is keyed by the Blocked enum, so it converges rather than grows. The bound is
+  generous on purpose: the point is to catch per-frame accumulation, not to pin an exact size.
+  """
+  rng = random.Random(1)
+  det = keep_right_det()
+  road = Road(rng)
+  for _ in range(int(120 / DT_MDL)):
+    det.update(make_sm(**road.step()), CRUISE_MS, True)
+  early = _containers(det)
+  for _ in range(int(1800 / DT_MDL)):        # thirty more minutes
+    det.update(make_sm(**road.step()), CRUISE_MS, True)
+  late = _containers(det)
+
+  assert late, "found no containers at all -- this test would pass on anything"
+  for name, n in late.items():
+    assert n <= 64, f"{name} reached {n} entries; something accumulates per frame"
+  # Fifteen times the frames must not mean fifteen times the size.
+  for name, n in late.items():
+    assert n <= max(early.get(name, 0), 1) * 8, f"{name} grew {early.get(name, 0)} -> {n}"
