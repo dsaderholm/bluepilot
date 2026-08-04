@@ -36,15 +36,24 @@ SOURCES = [
   "opendbc_repo/opendbc/sunnypilot/car/ford/blinker_test_ext.py",
   "sunnypilot/selfdrive/controls/lib/passing_assist.py",
   "selfdrive/ui/bp/onroad/hud_renderer_bp.py",
+  # Writes LaneChangeStats from inside modeld, where a TypeError would be swallowed by the guard
+  # that keeps param faults out of the model process -- so a mismatch here is silent by design and
+  # this list is the only thing that would catch it.
+  "sunnypilot/selfdrive/controls/lib/auto_lane_change.py",
+  "sunnypilot/system/params_migration.py",
 ]
 
 # python type -> the key types Params will accept it for
+# Mirrors PYTHON_2_CPP in common/params_pyx.pyx: the pairs Params can actually cast. Anything not
+# listed there raises TypeError at the write.
 ALLOWED = {
   str: {"STRING"},
   bool: {"BOOL"},
   int: {"INT"},
   float: {"FLOAT"},
   bytes: {"BYTES"},
+  dict: {"JSON"},
+  list: {"JSON"},
 }
 
 
@@ -87,6 +96,14 @@ def test_literal_put_types_match_registration(path, key_types):
       py = type(val.value)
     elif isinstance(val, ast.Call) and getattr(val.func, "id", None) in ("str", "int", "float", "bool"):
       py = {"str": str, "int": int, "float": float, "bool": bool}[val.func.id]
+    # A dict or list LITERAL was invisible here -- neither is an ast.Constant, so both fell through
+    # to "cannot decide statically" and were skipped. The two drive summaries are exactly that
+    # shape, and their writes sit inside a catch, so a mismatch would not raise anywhere: the
+    # summary would simply never be written and the drive would end with nothing recorded.
+    elif isinstance(val, ast.Dict):
+      py = dict
+    elif isinstance(val, (ast.List, ast.ListComp)):
+      py = list
     if py is None:
       continue
 
