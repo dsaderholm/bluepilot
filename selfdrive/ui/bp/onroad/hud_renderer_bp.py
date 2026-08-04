@@ -596,6 +596,15 @@ class HudRendererBP(HudRendererSP):
         ov = abs(float(d["oncomingVAbs"])) * (3.6 if ui_state.is_metric else 2.23694)
         du = od if ui_state.is_metric else od * 3.28084
         lines.append(f"oncoming: {ov:.0f} at {du:.0f}{'m' if ui_state.is_metric else 'ft'}")
+      # The driver's own lane changes, from a separate param. Two of passing assist's constants
+      # are guesses this measures away: how long a crossing takes, and what a HUMAN abandon rate
+      # looks like -- without which its own backed-out count has no scale.
+      lc = self._bp_params.get("LaneChangeStats") or {}
+      if int(lc.get("changes", 0)):
+        line = f"your changes: {int(lc['changes'])}, {float(lc.get('seconds', 0)):.1f}s each"
+        if int(lc.get("abandoned", 0)):
+          line += f", {int(lc['abandoned'])} abandoned"
+        lines.append(line)
       if float(d.get("accOnsetMax", 0)) > 0:
         m = float(d["accOnsetMax"])
         v = m if ui_state.is_metric else m * 3.28084

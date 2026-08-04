@@ -152,3 +152,57 @@ class TestItIsActuallyWiredIn:
     self._start(dh)
     dh.update(self._cs(), True, 0.5)
     assert dh.lane_change_state == LaneChangeState.laneChangeStarting
+
+
+class TestMeasuringRealLaneChanges:
+  """Passing assist cannot steer, so every constant it holds about what a lane change IS came from
+  reasoning rather than observation. CHANGE_DURATION_S = 4.0 was invented outright, and its
+  backed-out count has no human baseline to be judged against.
+
+  The driver's own changes are the only real ones this car performs, so they are the measurement.
+  """
+
+  def _dh(self):
+    dh = TestItIsActuallyWiredIn._dh()
+    dh.alc.params.put = lambda *a, **k: None      # never touch the real param store in a test
+    return dh
+
+  def test_a_completed_change_is_timed(self):
+    dh = self._dh()
+    TestItIsActuallyWiredIn()._start(dh)
+    for _ in range(int(8.0 / DT_MDL)):
+      dh.update(TestItIsActuallyWiredIn._cs(left=True), True, 0.0)   # prob 0 -> it completes
+    assert dh.alc.changes_completed == 1
+    assert 0.5 < dh.alc.change_seconds < 8.0, "a real duration, not zero and not the whole run"
+
+  def test_signalling_and_thinking_better_of_it_is_counted_apart(self):
+    """His own change-of-mind rate. If he abandons one signal in ten, then passing assist backing
+    out one in ten is normal -- and without this that number has no scale at all."""
+    dh = self._dh()
+    for _ in range(int(0.5 / DT_MDL)):
+      dh.update(TestItIsActuallyWiredIn._cs(left=True), True, 0.5)
+    assert dh.lane_change_state == LaneChangeState.preLaneChange
+    dh.update(TestItIsActuallyWiredIn._cs(), True, 0.5)
+    assert dh.alc.changes_abandoned == 1
+    assert dh.alc.changes_completed == 0
+
+  def test_a_cancelled_change_is_neither_completed_nor_abandoned(self):
+    """Three different events. Lumping any two would hide the one that says something."""
+    dh = self._dh()
+    TestItIsActuallyWiredIn()._start(dh)
+    dh.update(TestItIsActuallyWiredIn._cs(), True, 0.5)
+    assert dh.alc.changes_cancelled == 1
+    assert dh.alc.changes_completed == 0
+    assert dh.alc.changes_abandoned == 0
+
+  def test_measuring_never_touches_the_maneuver(self):
+    """It reads the parent's state and writes none of it. If this is ever the reason a lane change
+    behaves differently, something is very wrong."""
+    a, b = self._dh(), self._dh()
+    b.alc.update_stats = lambda: None
+    for _ in range(int(6.0 / DT_MDL)):
+      cs = TestItIsActuallyWiredIn._cs(left=True)
+      a.update(cs, True, 0.5)
+      b.update(cs, True, 0.5)
+    assert a.lane_change_state == b.lane_change_state
+    assert a.desire == b.desire

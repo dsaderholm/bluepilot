@@ -143,6 +143,10 @@ class DesireHelper:
 
     self.prev_one_blinker = one_blinker
 
+    # BluePilot: measure what a real lane change did -- the only real ones this car performs. See
+    # AutoLaneChangeController.update_stats; it reads state and never writes it.
+    self.alc.update_stats()
+
     if self.lane_turn_direction != TurnDirection.none:
       self.desire = TURN_DESIRES[self.lane_turn_direction]
     else:

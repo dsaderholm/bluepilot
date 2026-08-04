@@ -72,6 +72,22 @@ DEFAULT_BSM_HOLD_S = 3
 # started in, which is the part a driver could plausibly change their mind during.
 DEFAULT_CANCEL_WINDOW_S = 2
 
+# BluePilot: MEASURE THE DRIVER'S OWN LANE CHANGES, because they are the only real ones.
+#
+# Passing assist cannot steer, so every constant it holds about what a lane change IS came from
+# reasoning rather than observation. Two of them are guesses that this can replace outright:
+#
+#   CHANGE_DURATION_S = 4.0 in passing_maneuver.py -- how long the crossing takes. Invented. Every
+#   change the driver makes measures the real thing, on this car, at his speeds.
+#
+#   The abort count has no human baseline. If he abandons one signal in ten himself, then passing
+#   assist backing out one in ten is NORMAL and the number means nothing until compared. Without a
+#   baseline it is a figure with no scale.
+#
+# Written to a param on the same terms as the drive summary: periodically, never blocking, and it
+# survives being parked because a number nobody can read is a number nobody took.
+LANE_CHANGE_STATS_WRITE_S = 30
+
 
 class AutoLaneChangeController:
   def __init__(self, desire_helper):
@@ -91,6 +107,16 @@ class AutoLaneChangeController:
     self.prev_lane_change = False
     self.lane_change_cancel_window = float(DEFAULT_CANCEL_WINDOW_S)
     self.cancelled = False
+
+    # See LANE_CHANGE_STATS_WRITE_S. Counts this drive; totals carried in from previous ones.
+    self.changes_completed = 0
+    self.changes_abandoned = 0      # signalled, then thought better of it before moving
+    self.changes_cancelled = 0      # called off mid-change
+    self.change_seconds = 0.0       # running mean of how long a completed one took
+    self._prev_state = log.LaneChangeState.off
+    self._change_started_s = 0.0
+    self._stats_write_s = 0.0
+    self._stats_seeded = False
 
     self.read_params()
 
@@ -114,6 +140,60 @@ class AutoLaneChangeController:
     if self.param_read_counter % 50 == 0:
       self.read_params()
     self.param_read_counter += 1
+
+  def update_stats(self) -> None:
+    """Watch the state machine and record what a real lane change did. See LANE_CHANGE_STATS_*.
+
+    Reads only the parent's state, so it cannot influence the maneuver -- if this is ever the
+    reason a lane change behaves differently, something is very wrong.
+    """
+    state = self.DH.lane_change_state
+    prev, self._prev_state = self._prev_state, state
+
+    if state in (log.LaneChangeState.laneChangeStarting, log.LaneChangeState.laneChangeFinishing):
+      self._change_started_s += DT_MDL
+    elif prev == log.LaneChangeState.preLaneChange and state == log.LaneChangeState.off:
+      # Signalled and then did not go. His own change-of-mind rate, which is the baseline the
+      # system's abort count has to be judged against.
+      self.changes_abandoned += 1
+    elif prev == log.LaneChangeState.laneChangeStarting and state == log.LaneChangeState.off:
+      self.changes_cancelled += 1
+      self._change_started_s = 0.0
+    elif prev == log.LaneChangeState.laneChangeFinishing and state != log.LaneChangeState.laneChangeFinishing:
+      if self._change_started_s > 0.0:
+        self.changes_completed += 1
+        # Running mean, so one unusually slow change cannot stand in for the drive.
+        self.change_seconds += (self._change_started_s - self.change_seconds) / self.changes_completed
+      self._change_started_s = 0.0
+
+    self._save_stats()
+
+  def _save_stats(self) -> None:
+    self._stats_write_s += DT_MDL
+    if self._stats_write_s < LANE_CHANGE_STATS_WRITE_S:
+      return
+    self._stats_write_s = 0.0
+    if not (self.changes_completed or self.changes_abandoned or self.changes_cancelled):
+      return
+    try:
+      if not self._stats_seeded:
+        self._stats_seeded = True
+        old = self.params.get("LaneChangeStats") or {}
+        self._base = {k: old.get(k, 0) for k in ("changes", "abandoned", "cancelled")}
+        self._base_secs = float(old.get("seconds", 0.0))
+        self._base_n = int(old.get("changes", 0))
+      total = self._base["changes"] + self.changes_completed
+      # Weighted so the lifetime mean is over every change ever made, not a mean of means.
+      secs = ((self._base_secs * self._base_n + self.change_seconds * self.changes_completed) / total
+              if total else 0.0)
+      self.params.put("LaneChangeStats", {
+        "changes": total,
+        "abandoned": self._base["abandoned"] + self.changes_abandoned,
+        "cancelled": self._base["cancelled"] + self.changes_cancelled,
+        "seconds": round(secs, 2),
+      })
+    except Exception:  # noqa: BLE001 - a param write must never reach the model process
+      pass
 
   def update_lane_change_timers(self, blindspot_detected: bool) -> None:
     self.lane_change_delay = AUTO_LANE_CHANGE_TIMER.get(self.lane_change_set_timer,
