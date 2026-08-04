@@ -13,7 +13,7 @@ about what the feature is. To a driver it does one thing: tell you which LANE to
 lane-change feature, so it belongs next to Customize Lane Change, and it now sits beside it.
 
 WHY THE DISPLAY TOGGLES ARE HERE TOO
-The ICBM panel deliberately splits these: behaviour under Cruise, display under BluePilot, on the
+The ICBM panel deliberately splits these: behavior under Cruise, display under BluePilot, on the
 grounds that one changes what the car does and the other changes what you are shown. That split is
 right for ICBM and wrong here, because this is a phase-1 OBSERVER. It never suggests, alerts or
 steers; the readout is not a view of the feature, it is the entire output. Separating them would
@@ -84,7 +84,7 @@ class PassingAssistSettingsLayout(Widget):
 
     self._min_speed = option_item_sp(
       title=tr("Only Above"),
-      description=tr("Below this speed a pass is not the manoeuvre being considered. Kept low on "
+      description=tr("Below this speed a pass is not the maneuver being considered. Kept low on "
                      "purpose: stuck behind a tractor on a 55 road your cruise drags you down to "
                      "30, and that is exactly when a pass is most obviously wanted. Town driving "
                      "is already excluded by needing cruise engaged. Much below 30 the lane "
@@ -98,7 +98,7 @@ class PassingAssistSettingsLayout(Widget):
       title=tr("Confirm For"),
       description=tr("How long that vehicle must be seen before a pass is suggested. Short by "
                      "design -- this rejects a bad frame of radar tracking, it is not a waiting "
-                     "period. Waiting is the behaviour this feature exists to remove."),
+                     "period. Waiting is the behavior this feature exists to remove."),
       param="PassingAssistConfirmTime",
       min_value=1, max_value=20, value_change_step=1,
       label_callback=lambda v: f"{v} s",
@@ -198,9 +198,9 @@ class PassingAssistSettingsLayout(Widget):
     # raise on first use. The title carries the meaning instead.
     self._strict_two_way = toggle_item_sp(
       title=tr("Assume An Unknown Middle Lane Is A Turn Lane"),
-      description=tr("On a road with oncoming traffic, a centre turn lane and an ordinary passing "
+      description=tr("On a road with oncoming traffic, a center turn lane and an ordinary passing "
                      "lane look identical to the sensors -- same width, same position, and the "
-                     "paint differs only by colour, which the camera does not report. On, it "
+                     "paint differs only by color, which the camera does not report. On, it "
                      "assumes the worst until a vehicle is seen driving down that lane in your "
                      "direction, which is safer but quiets passing on two-lane highways with "
                      "alternating passing lanes such as US-6 and US-89. Off trades that "
@@ -289,12 +289,12 @@ class PassingAssistSettingsLayout(Widget):
     # ORDERED THE WAY A DRIVER ARRIVES AT A QUESTION, not the order these were built in. They were
     # added one at a time over a long session and the first section had drifted to nine controls,
     # three of which were not about when to suggest a pass at all -- the exit stand-down is about
-    # the driver's own lane change, the signal lead is about the manoeuvre, and the slow-pass timer
+    # the driver's own lane change, the signal lead is about the maneuver, and the slow-pass timer
     # is about a pass already underway. Each read sensibly on its own and the screen as a whole did
     # not, which is a thing only reading it end to end can catch.
     #
     # The order follows the sequence itself: decide, move, check the lane, check for oncoming,
-    # come back right. Then the things that are about the DRIVER rather than the manoeuvre, then
+    # come back right. Then the things that are about the DRIVER rather than the maneuver, then
     # what appears on screen.
     return [
       self._enabled,

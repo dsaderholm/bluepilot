@@ -27,7 +27,7 @@ it on the first car met.
 THE FIRST ONE
 
 Answers the question the settle timer only papers over. Moving out to pass and finding the other
-lane no faster is the manoeuvre that makes a system feel unfinished, and unlike the rear gap this
+lane no faster is the maneuver that makes a system feel unfinished, and unlike the rear gap this
 one needs no new hardware. The front radar already measures it.
 
 WHY THIS IS FREE
@@ -52,17 +52,17 @@ which is enough to drop the flicker without being slow enough to miss a car we a
 in front of.
 
 THE RADAR IS NOT ON THE CENTRELINE, AND NOTHING CORRECTS FOR IT
-Confirmed 2026-08-03: the front radar on this car is mounted off-centre, as it is on most cars.
+Confirmed 2026-08-03: the front radar on this car is mounted off-center, as it is on most cars.
 `_update_delphi_mrr` derives lateral position from azimuth and range alone -- there is no lateral
 mounting offset anywhere in the path -- so every track carries a constant sideways bias equal to
-however far the sensor sits from the centreline.
+however far the sensor sits from the centerline.
 
 Left alone deliberately, for now. A typical offset is 0.2-0.4 m against a 3.5 m wide band, so it
 shifts both edges by about a tenth of a lane; the debounce, the road-edge test and the
 path-relative measurement all matter more. But it is a real bias and it is silent, so: if the
 adjacent-lane band ever looks skewed to one side in the logs, this is the first thing to suspect.
 
-Measuring it is a tape measure from the car's centreline to the sensor face, and applying it is one
+Measuring it is a tape measure from the car's centerline to the sensor face, and applying it is one
 constant subtracted from `lat` below. Not added speculatively -- the number has to be measured
 first, and a wrong constant is worse than none.
 
@@ -88,9 +88,9 @@ which is exactly why the discrepancy has survived.
 
 import math
 
-# Lateral band counted as "the next lane over". A US lane is 3.7 m, so the neighbouring lane centre
+# Lateral band counted as "the next lane over". A US lane is 3.7 m, so the neighbouring lane center
 # sits near 3.7 m; the band is wider than that because the radar's lateral estimate degrades with
-# range and no one drives on the lane centre. The lower bound is above our own lane's half-width so
+# range and no one drives on the lane center. The lower bound is above our own lane's half-width so
 # our own lead never reads as adjacent, and the upper bound stops two-lanes-over traffic counting.
 ADJACENT_MIN_M = 2.0
 ADJACENT_MAX_M = 5.5
@@ -103,7 +103,7 @@ ADJACENT_MAX_M = 5.5
 # objects except a minimum-range guard. Guardrails, jersey barriers, sign gantries and parked cars
 # all arrive as ordinary tracks.
 #
-# A concrete barrier sits 3-5 m off the lane centre, which is the middle of the band above. Without
+# A concrete barrier sits 3-5 m off the lane center, which is the middle of the band above. Without
 # this test it reads as an adjacent vehicle doing 0 mph -- slower than any lead -- and blocks every
 # pass on that side for the length of the barrier. That is the failure mode, and it would look
 # exactly like the feature being too conservative rather than like a bug.
@@ -135,7 +135,7 @@ MIN_MOVING_MS = 5.0
 MIN_ONCOMING_MS = 5.0
 
 # How far out to LOOK for oncoming traffic. Deliberately much wider than the adjacent-lane band,
-# and the reason is the centre turn lane.
+# and the reason is the center turn lane.
 #
 # Bounding oncoming detection to the adjacent band assumed the opposing lane is the one next to us.
 # It is on a two-lane road. It is not on any road with a two-way left-turn lane down the middle,
@@ -153,7 +153,7 @@ ONCOMING_MAX_M = 15.0
 # lane is a TRAVEL lane rather than a turn lane.
 #
 # Without this the discriminator leaks in the one direction that matters. A car slowing into a
-# centre turn lane to wait for a gap is still moving -- 6 or 7 m/s as it decelerates, comfortably
+# center turn lane to wait for a gap is still moving -- 6 or 7 m/s as it decelerates, comfortably
 # over MIN_MOVING_MS -- so it would register as "somebody drove down that lane in our direction"
 # and unblock a pass into the very turn lane it was entering.
 #
@@ -233,7 +233,7 @@ def path_offset(model, d_rel: float) -> float:
   """Where the road goes at d_rel: the model path's lateral position there, camera frame.
 
   Without this the lane band is measured from the car's straight-ahead axis, which is only the
-  lane centre on a straight road. A curve of radius R displaces the path by roughly d^2 / 2R, so
+  lane center on a straight road. A curve of radius R displaces the path by roughly d^2 / 2R, so
   on an ordinary interstate bend -- 500 to 1000 m radius -- our OWN lead at 60 to 100 m sits 2 to
   5 m off axis and lands squarely inside the adjacent-lane band. It is slower than us by
   definition, since that is why a pass is wanted, so it would block the very pass it caused and
@@ -278,7 +278,7 @@ def road_edge_offset(model, side: str, d_rel: float):
 
   This is the honest answer to "is that oncoming car on MY road or across a median", and it beats
   the lateral band at it. The band asks how far away something is; a barrier-only divided highway
-  puts the opposing lane centre around 7 m off, which clears ADJACENT_MAX_M by less than a lane
+  puts the opposing lane center around 7 m off, which clears ADJACENT_MAX_M by less than a lane
   width and depends on shoulder widths nobody measured. The road edge asks the question directly:
   the median edge IS where our carriageway stops, so anything beyond it is not on our road.
 
@@ -339,7 +339,7 @@ class AdjacentLaneSide:
     # things. From the right lane of a four-lane oncoming_any_side road, and from the left lane of a
     # 2 + TWLTL + 2 arterial, the picture is the same: a lane at 3.7 m and opposing traffic at
     # 7.4 m. In the first the next lane is an ordinary passing lane. In the second it is a two-way
-    # left-turn lane and moving into it is neither legal nor survivable as a passing manoeuvre.
+    # left-turn lane and moving into it is neither legal nor survivable as a passing maneuver.
     # Nothing in the geometry separates them. What separates them is whether anyone has ever driven
     # down that lane in our direction.
     self.oncoming_seconds = 0.0
@@ -440,7 +440,7 @@ class AdjacentLaneSide:
        overtaking us.
 
     2. The road is two-way, and we have no evidence the next lane is a travel lane. This is the
-       centre-turn-lane case. From the left lane of a 2 + TWLTL + 2 arterial the turn lane is at
+       center-turn-lane case. From the left lane of a 2 + TWLTL + 2 arterial the turn lane is at
        3.7 m and opposing traffic at 7.4 m; from the right lane of a plain four-lane oncoming_any_side road
        an ordinary passing lane is at 3.7 m and opposing traffic at 7.4 m. Identical geometry,
        opposite meanings. The only thing that tells them apart is whether anyone has driven down
@@ -460,7 +460,7 @@ class AdjacentLaneSide:
                happens to use that lane to turn -- which does eventually happen, and then case 1
                latches and it stops.
 
-    Case 1 is unaffected by the flag. Opposing traffic seen IN the next lane is not a judgement
+    Case 1 is unaffected by the flag. Opposing traffic seen IN the next lane is not a judgment
     call.
     """
     if self.oncoming_adjacent_seconds > 0.0:
@@ -507,7 +507,7 @@ class AdjacentLane:
   def oncoming_any_side(self) -> bool:
     """The road has opposing traffic on it. For the log and the display; the GATE is per side and
     goes through blocks_oncoming(), because a road being two-way does not make both sides of it
-    unusable and the middle-lane case is a judgement call the driver owns."""
+    unusable and the middle-lane case is a judgment call the driver owns."""
     return self.left.oncoming_seconds > 0.0 or self.right.oncoming_seconds > 0.0
 
   @property
@@ -523,7 +523,7 @@ class AdjacentLane:
     """Is that oncoming vehicle on our road, or across a median on the other carriageway?
 
     The one case the lateral band cannot settle on its own. A divided highway with a jersey barrier
-    and no grass puts the opposing lane centre around 7 m away -- outside ADJACENT_MAX_M, but by
+    and no grass puts the opposing lane center around 7 m away -- outside ADJACENT_MAX_M, but by
     less than a lane width, and the margin rests on shoulder widths that vary by road. Radar
     lateral error grows with range, so at 120 m that margin is not something to bet a veto on.
 
@@ -538,10 +538,10 @@ class AdjacentLane:
 
     So with no usable edge, only the ADJACENT lane counts. That is where opposing traffic sits on
     the road this veto exists for -- an ordinary two-lane highway -- and it is the one claim that
-    can be made without knowing where our carriageway ends. Something ten metres out with no edge
+    can be made without knowing where our carriageway ends. Something ten meters out with no edge
     to place it against is more likely across a median than in the next lane.
 
-    The cost is real and worth naming: on an oncoming_any_side road with a centre turn lane the opposing
+    The cost is real and worth naming: on an oncoming_any_side road with a center turn lane the opposing
     traffic is two lanes out, and that case now needs a trusted road edge to be seen at all. With
     one, the full band still applies.
     """
@@ -615,7 +615,7 @@ class AdjacentLane:
 
       if v_abs < -MIN_ONCOMING_MS:
         # Travelling the other way. Looked for across the FULL width of our road, not just the next
-        # lane -- on anything with a centre turn lane the opposing traffic is two lanes out, and
+        # lane -- on anything with a center turn lane the opposing traffic is two lanes out, and
         # bounding this to the adjacent band meant those roads produced no veto at all.
         if self._on_our_carriageway(model, side, lat, p.dRel):
           obj.observe_oncoming(p.dRel, p.yRel, v_abs, memory_s, adjacent)

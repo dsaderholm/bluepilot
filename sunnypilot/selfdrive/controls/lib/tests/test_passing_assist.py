@@ -4,7 +4,7 @@ Copyright (c) 2021-, Haibin Wen, sunnypilot, and a number of other contributors.
 This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 
-BluePilot: behavioural tests for the phase-1 passing-assist observer.
+BluePilot: behavioral tests for the phase-1 passing-assist observer.
 
 The detector cannot actuate anything, so these are not safety tests. They cover the two ways a
 log-only observer can still waste a drive's worth of data:
@@ -32,7 +32,7 @@ Blocked = custom.LongitudinalPlanSP.PassingAssist.Blocked
 Reason = custom.LongitudinalPlanSP.PassingAssist.Reason
 Trigger = custom.LongitudinalPlanSP.PassingAssist.Trigger
 RefSource = custom.LongitudinalPlanSP.PassingAssist.ReferenceSource
-Phase = custom.LongitudinalPlanSP.PassingAssist.Manoeuvre
+Phase = custom.LongitudinalPlanSP.PassingAssist.Maneuver
 
 CRUISE_MS = 31.0            # ~70 mph set speed
 SLOW_LEAD_MS = 24.0         # ~54 mph lead -> ~7 m/s deficit, over the 8 mph default
@@ -200,7 +200,7 @@ class TestPassingAssistGeometry:
 class TestPassingAssistGates:
   def test_brief_confirmation_before_suggesting(self):
     """The timer is now only long enough to reject a bad frame of lead tracking -- it is NOT a
-    waiting period, which is the behaviour this whole design exists to remove."""
+    waiting period, which is the behavior this whole design exists to remove."""
     det = run(PassingAssistDetector(), int(1.0 / DT_MDL))
     assert det.suggestion == Side.none
     assert det.blocked_by == Blocked.nothingSlower
@@ -530,7 +530,7 @@ class TestKeepRightIsOnForMeasurement:
 
 class TestRearApproachGate:
   def test_no_rear_sensor_does_not_block_a_suggestion(self):
-    """Today's behaviour: nothing is fitted, so the gate must not silently kill the feature."""
+    """Today's behavior: nothing is fitted, so the gate must not silently kill the feature."""
     det = run(PassingAssistDetector(), STUCK_FRAMES)
     assert det.suggestion == Side.left
     assert not det.rear.available
@@ -689,7 +689,7 @@ class TestAdjacentLaneGate:
     assert not det.adjacent.left.occupied
 
   def test_left_lane_full_of_traffic_no_faster_blocks_the_pass(self):
-    # The manoeuvre this exists to prevent: pull out to pass a car doing 24 m/s and land behind
+    # The maneuver this exists to prevent: pull out to pass a car doing 24 m/s and land behind
     # one doing the same. yRel is LEFT-POSITIVE.
     det = run(PassingAssistDetector(), STUCK_FRAMES, tracks=[track(70, 3.7, 0.0)])
     assert det.adjacent.left.occupied
@@ -974,7 +974,7 @@ class TestOneTrigger:
     assert det.suggestion == Side.none
 
   def test_below_the_deficit_is_not_worth_passing(self):
-    """The deficit is the judgement. Everything else is a sanity bound."""
+    """The deficit is the judgment. Everything else is a sanity bound."""
     det = PassingAssistDetector()
     for _ in range(int(3.0 / DT_MDL)):
       det.update(make_sm(v_ego=CRUISE_MS, v_lead=CRUISE_MS - 0.4, d_rel=60.), CRUISE_MS, True)
@@ -1345,7 +1345,7 @@ class TestClosingIn:
     assert det.blocked_by == Blocked.closingIn
 
   def test_and_goes_the_moment_it_is_close_enough(self):
-    """The confirmation ran underneath the hold, so reaching the distance starts the manoeuvre at
+    """The confirmation ran underneath the hold, so reaching the distance starts the maneuver at
     once rather than beginning a fresh two-second wait -- which would hand the time straight back."""
     det = self._det(150)
     run(det, STUCK_FRAMES, d_rel=200.0)
@@ -1498,7 +1498,7 @@ class TestPublishTheNewFields:
 
   A capnp assignment that the schema rejects raises inside plannerd, and plannerd dying is a device
   stuck on "waiting to start" -- the exact failure a duplicate CAN registration caused once
-  already. The behavioural suite never reaches these lines, because every one of them is a plain
+  already. The behavioral suite never reaches these lines, because every one of them is a plain
   assignment that only fails against the real schema.
 
   The enum fields are the sharp edge: they are assigned from ints here, and whether capnp accepts
@@ -1516,8 +1516,8 @@ class TestPublishTheNewFields:
     run(det, int(4.0 / DT_MDL), left_bs=True, edges=(-2.3, 2.4))
     pa = self._published(det)
     assert str(pa.topBlockedBy) == 'noLaneAvailable'
-    assert str(pa.manoeuvre) in ('idle', 'confirming', 'waiting', 'signalling', 'changing', 'finishing')
-    assert str(pa.manoeuvreSide) in ('none', 'left', 'right')
+    assert str(pa.maneuver) in ('idle', 'confirming', 'waiting', 'signaling', 'changing', 'finishing')
+    assert str(pa.maneuverSide) in ('none', 'left', 'right')
     assert str(pa.crawlSide) in ('none', 'left', 'right')
 
   def test_every_new_field_round_trips(self):
@@ -1528,64 +1528,64 @@ class TestPublishTheNewFields:
     for name in ("wantedSeconds", "topBlockedShare", "clearShare", "crawlSeconds",
                  "crawlLongestSeconds", "crawlEvents", "crawlAfterSuggestion",
                  "leadAccel", "leadBrakingHold", "leadRadarConfirmed", "leadModelProb",
-                 "accBrakingOnsetDRel", "accBrakingOnsetMax", "manoeuvreSeconds",
-                 "manoeuvreAborts", "blinkerWouldBeOn", "steeringWouldBeActive"):
+                 "accBrakingOnsetDRel", "accBrakingOnsetMax", "maneuverSeconds",
+                 "maneuverAborts", "blinkerWouldBeOn", "steeringWouldBeActive"):
       getattr(pa, name)
 
   def test_counters_saturate_rather_than_wrap(self):
     """UInt16 rolling over to 0 would read as a clean drive, which is the opposite of what a huge
     count means."""
     det = PassingAssistDetector()
-    det.manoeuvre.aborts = 99999
+    det.maneuver.aborts = 99999
     det.overtake.crawl_events = 99999
     pa = self._published(det)
-    assert pa.manoeuvreAborts == 65535
+    assert pa.maneuverAborts == 65535
     assert pa.crawlEvents == 65535
 
 
-class TestKeepRightManoeuvre:
+class TestKeepRightManeuver:
   """Moving back over is half of what the finished system does and had no dry run at all -- the
   readout went straight from "MOVE RIGHT" to nothing."""
 
   def test_deciding_to_move_right_starts_its_own_sequence(self):
     det = run(keep_right_det(), KEEP_RIGHT_FRAMES, status=False, **IN_LEFT_LANE)
     assert det.suggestion == Side.right
-    live, reason = det.live_manoeuvre
+    live, reason = det.live_maneuver
     assert reason == Reason.keepRight
-    assert live is det.keep_right_manoeuvre
+    assert live is det.keep_right_maneuver
     assert live.blinker_on
 
   def test_the_passing_machine_stays_out_of_it(self):
     """Separate machines so the abort counts stay separate -- that number is the readiness metric
-    for each manoeuvre, and one combined figure would not say which was unstable."""
+    for each maneuver, and one combined figure would not say which was unstable."""
     det = run(keep_right_det(), KEEP_RIGHT_FRAMES, status=False, **IN_LEFT_LANE)
-    assert det.manoeuvre.phase == Phase.idle
-    assert det.manoeuvre.aborts == 0
+    assert det.maneuver.phase == Phase.idle
+    assert det.maneuver.aborts == 0
 
   def test_it_signals_when_decided_rather_than_early(self):
-    """Unlike passing, where signalling early beats ACC to the brakes. Nothing is being raced when
+    """Unlike passing, where signaling early beats ACC to the brakes. Nothing is being raced when
     moving back over, and a blinker lit through the whole keep-right delay would be several seconds
-    of announcing a manoeuvre that may not happen."""
+    of announcing a maneuver that may not happen."""
     det = keep_right_det()
     run(det, int(4.0 / DT_MDL), status=False, **IN_LEFT_LANE)
     assert det.suggestion == Side.none, "delay has not elapsed"
-    assert not det.keep_right_manoeuvre.blinker_on
-    assert det.keep_right_manoeuvre.phase == Phase.idle
+    assert not det.keep_right_maneuver.blinker_on
+    assert det.keep_right_maneuver.phase == Phase.idle
 
   def test_a_pass_takes_the_screen_back(self):
     """Only one can run: keep-right is evaluated solely on frames where no pass is warranted."""
     det = run(keep_right_det(), KEEP_RIGHT_FRAMES, status=False, **IN_LEFT_LANE)
-    assert det.live_manoeuvre[1] == Reason.keepRight
+    assert det.live_maneuver[1] == Reason.keepRight
     run(det, STUCK_FRAMES, **IN_LEFT_LANE)     # a slow lead appears
     assert det.reason == Reason.passing
-    assert det.live_manoeuvre[1] == Reason.passing
+    assert det.live_maneuver[1] == Reason.passing
 
   def test_the_driver_taking_over_ends_it(self):
     det = run(keep_right_det(), KEEP_RIGHT_FRAMES, status=False, **IN_LEFT_LANE)
-    assert det.keep_right_manoeuvre.blinker_on
+    assert det.keep_right_maneuver.blinker_on
     run(det, 2, status=False, blinker=True, **IN_LEFT_LANE)
-    assert det.keep_right_manoeuvre.phase == Phase.idle
-    assert det.keep_right_manoeuvre.aborts == 0, "a takeover is the right outcome, not an abort"
+    assert det.keep_right_maneuver.phase == Phase.idle
+    assert det.keep_right_maneuver.aborts == 0, "a takeover is the right outcome, not an abort"
 
 
 class TestDriverOwnLaneChange:
@@ -1623,7 +1623,7 @@ class TestDriverOwnLaneChange:
     assert det.driver_change_standdown == 0.0
     assert det.blocked_by != Blocked.driverChangedLanes
 
-  def test_signalling_left_over_a_widening_road_is_not_an_exit(self):
+  def test_signaling_left_over_a_widening_road_is_not_an_exit(self):
     """The road opening up on the LEFT is a lane being added, not an exit being taken."""
     det = keep_right_det()
     run(det, int(2.0 / DT_MDL), blinker=True, **self.EXIT)
@@ -1631,9 +1631,9 @@ class TestDriverOwnLaneChange:
     assert not det.driver_change_was_exit
     assert det.driver_change_standdown <= 4.0
 
-  def test_the_exit_evidence_is_latched_while_signalling(self):
+  def test_the_exit_evidence_is_latched_while_signaling(self):
     """Once the car is in the ramp lane the road edge belongs to the ramp and the widening that
-    identified it has gone -- so the only moment the evidence exists is during the manoeuvre."""
+    identified it has gone -- so the only moment the evidence exists is during the maneuver."""
     det = keep_right_det()
     run(det, int(2.0 / DT_MDL), blinker_right=True, **self.EXIT)
     run(det, 2, **IN_LEFT_LANE)     # no widening visible any more
@@ -1659,7 +1659,7 @@ class TestDriverOwnLaneChange:
 class TestDriverSteeringTakeover:
   """"I usually use sunnypilot nudgeless changes, but I also will just fully takeover and do my own
   steering." Watching only the stalk would have missed that entirely, and steering onto an off-ramp
-  without signalling is about as common as driving gets."""
+  without signaling is about as common as driving gets."""
 
   def test_a_sustained_takeover_stands_the_system_down(self):
     det = keep_right_det()
@@ -1686,7 +1686,7 @@ class TestDriverSteeringTakeover:
     assert det.driver_change_standdown == 0.0
     assert det.blocked_by != Blocked.driverChangedLanes
 
-  def test_stalk_and_wheel_together_is_one_manoeuvre(self):
+  def test_stalk_and_wheel_together_is_one_maneuver(self):
     """Doing both at once is normal. It must not double-count into two stand-downs, and the exit
     reading has to survive the wheel being released before the stalk."""
     det = keep_right_det()
@@ -1785,7 +1785,7 @@ class TestGateOrder:
 
   def test_a_braking_lead_outranks_closing_in(self):
     """"That car is stopping" beats "still closing" when both are true -- it is the more specific
-    reason and the one a driver would recognise out of the windscreen."""
+    reason and the one a driver would recognize out of the windscreen."""
     det = PassingAssistDetector()
     det.params = _KeepRightOnParams(PassingAssistMinApproach=50)
     run(det, STUCK_FRAMES, d_rel=200.0, lead_accel=-4.0)
@@ -1796,7 +1796,7 @@ class TestGateOrder:
     assert det.blocked_by == Blocked.noLaneAvailable
 
   def test_oncoming_outranks_the_blind_spot(self):
-    """Oncoming is the only gate here about a DANGEROUS manoeuvre rather than a wasted one, and it
+    """Oncoming is the only gate here about a DANGEROUS maneuver rather than a wasted one, and it
     explains a sustained silence where the blind spot explains a passing one.
 
     Note for anyone changing this: oncoming is vetoed in TWO places -- an early return before the
@@ -1809,7 +1809,7 @@ class TestGateOrder:
 
   def test_the_blind_spot_outranks_a_slow_next_lane(self):
     """Reversed, a flickering blind spot would hide behind "the next lane is no faster", and the
-    two mean opposite things about whether the manoeuvre was unsafe or merely pointless."""
+    two mean opposite things about whether the maneuver was unsafe or merely pointless."""
     det = run(PassingAssistDetector(), STUCK_FRAMES, left_bs=True, right_bs=True,
               tracks=[track(80, 3.7, 0.0)])
     assert det.blocked_by == Blocked.blindspotOccupied
@@ -1850,7 +1850,7 @@ class TestNoRearSensingAtAll:
     assert det.suggestion == Side.none
     assert det.blocked_by == Blocked.blindspotOccupied
 
-  def test_drifting_over_first_and_signalling_after_is_one_manoeuvre(self):
+  def test_drifting_over_first_and_signaling_after_is_one_maneuver(self):
     """Found by reading rather than by a failure. The blinker's rising edge cleared the widening
     evidence, so a driver who drifts toward an exit and signals afterwards -- by which time the
     ramp's own road edge has replaced the widening -- got the four second pause instead of the
@@ -1985,7 +1985,7 @@ class TestSuggestionsNobodyTook:
     assert det.driver_passes_agreed == 0
     assert det.driver_pass_miss_reason == int(Blocked.nothingSlower)
 
-  def test_signalling_with_an_empty_road_is_still_not_a_pass(self):
+  def test_signaling_with_an_empty_road_is_still_not_a_pass(self):
     """The line has to be somewhere. No lead at all means no car was passed, whatever the stalk
     was for -- an exit, a junction, moving over for someone merging."""
     det = run(PassingAssistDetector(), STUCK_FRAMES, status=False)
@@ -1995,7 +1995,7 @@ class TestSuggestionsNobodyTook:
   def test_a_suggestion_still_standing_is_already_visible(self):
     """It used to be recorded only when the suggestion ENDED, so one still up when the drive ended
     was never counted. A system offering a single enormous unacted pass per drive would have
-    reported a spotless record -- the exact opposite of what that behaviour means."""
+    reported a spotless record -- the exact opposite of what that behavior means."""
     det = run(PassingAssistDetector(), STUCK_FRAMES + int(25.0 / DT_MDL))
     assert det.suggestions_made == 1
     assert det.suggestions_taken == 0

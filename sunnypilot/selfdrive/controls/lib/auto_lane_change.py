@@ -39,8 +39,8 @@ ONE_SECOND_DELAY = -1
 # occupied the wait timer is pinned exactly ONE_SECOND_DELAY below the threshold, so the instant
 # BSM clears it needs precisely one second to cross it -- whatever delay the driver configured.
 #
-# One second after a car leaves your blind spot it is a metre or two off your rear quarter, and if
-# it was overtaking you it is still closing. That is the manoeuvre reported.
+# One second after a car leaves your blind spot it is a meter or two off your rear quarter, and if
+# it was overtaking you it is still closing. That is the maneuver reported.
 #
 # No timer value fixes this properly, because BLIS answers the wrong question: it goes clear when
 # the car is no longer BESIDE you and says nothing about whether it is now ahead or behind, or how

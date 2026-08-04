@@ -8,7 +8,7 @@ behaves differently enough to crash-loop the UI -- int() on one raises TypeError
 what took the display down in the ACC readout.
 
 These build actual messages so that class of bug cannot hide. The str()-returns-the-bare-name
-behaviour the panel depends on is pinned explicitly rather than assumed.
+behavior the panel depends on is pinned explicitly rather than assumed.
 """
 
 import ast

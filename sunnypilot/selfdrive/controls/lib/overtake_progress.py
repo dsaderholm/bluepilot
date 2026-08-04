@@ -46,7 +46,7 @@ MIN_D_REL_M = 3.0
 # or losing ground, while sitting in the passing lane.
 SLOW_GAIN_MPH = 5
 
-# Below this a "pass" is not the manoeuvre in question. Same floor the detector uses.
+# Below this a "pass" is not the maneuver in question. Same floor the detector uses.
 MIN_V_EGO_MS = 40 * CV.MPH_TO_MS
 
 # A crawl starting within this long of our own suggestion is recorded as following from it. Loose

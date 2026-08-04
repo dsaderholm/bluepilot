@@ -193,7 +193,7 @@ device scale. The owner confirmed on 2026-08-03, after driving it, that the car 
 like the preview renders -- colors, sizes, spacing, all of it.
 
 `selfdrive/ui/bp/onroad/tools/preview_passing_panel.py` does the same for the passing-assist
-panel, which is now that whole feature's readout -- every gate, the dry run of the manoeuvre, the
+panel, which is now that whole feature's readout -- every gate, the dry run of the maneuver, the
 slow-pass warning and the drive summary all land in the same three lines. It prints each panel's
 pixel size and asserts none exceeds the screen. **Add a scene to its SCENES whenever a new panel
 state is introduced**; the first render found three readouts that were being assembled and then

@@ -22,7 +22,7 @@ stale. As of 2026-08-03:
 | Rear approach: shape unknown | Interface built, `RearApproachSide.demands_abort` at TTC < 3 s vs 8 s to refuse a start. Entirely inert with no sensor, pinned by test. |
 | Turn signal actuation: untried | Tried once. Lamp flashed fast and erratically. **Root cause still unknown** — the send-rate change was a guess and probably the wrong direction. See `ford-blinker-command-unproven`. |
 
-**Built since, and not described below:** the manoeuvre dry run (signal → wait → cross → finish,
+**Built since, and not described below:** the maneuver dry run (signal → wait → cross → finish,
 plus a reversal state) for passing *and* keep-right; the collision abort with a 10 s stand-down;
 lane-age exit detection, which replaced the outermost-lane rule §14 assumes is live; a
 driver-lane-change stand-down; and the whole measurement layer — agreement with the driver,
@@ -108,7 +108,7 @@ the ACC option** — mounted behind the lower grille, not in the bumper corners.
 ⚠️ **Do not buy a `-14D453` part.** That part number family is the *blind-spot* (SODL/SODR)
 radar. Searching for "Ford Fusion radar sensor" returns those first and they are the wrong
 sensor entirely — they are the modules the BLIS investigation already established cannot answer
-"is something closing". The ACC radar is a separate, larger, centre-mounted unit.
+"is something closing". The ACC radar is a separate, larger, center-mounted unit.
 
 - Physical: **173.7 × 90.2 × 49.2 mm** including mounting features (Delphi datasheet). This is a
   brick, not a puck. Bumper-cavity depth is the binding constraint — see §2.
@@ -139,7 +139,7 @@ The brief used **±51.1°** from `CAN_TX_TRACK_ANGLE`'s range. That is the *sign
 range*, not the antenna's field of view. The real FOV is two modes, and using them changes the
 answer — for the better:
 
-Rear-centre mount, adjacent lane centre at 3.7 m lateral, angle off boresight = `atan(3.7/d)`:
+Rear-center mount, adjacent lane center at 3.7 m lateral, angle off boresight = `atan(3.7/d)`:
 
 | distance behind | angle | in mid-range beam (±45°, ≤60 m) | in long-range beam (±10°, ≤174 m) |
 |---|---|---|---|
@@ -176,7 +176,7 @@ whether rear-facing alignment converges at all.
 - **Seeing through the cover**: front radar apertures on ADAS cars are specified for it —
   restricted paint systems, controlled thickness, sometimes a separate radome. **A rear bumper
   cover has none of that.** Metallic and pearl paints contain aluminium flake and attenuate
-  76 GHz badly. If the car is a metallic colour, assume this is a real problem until measured.
+  76 GHz badly. If the car is a metallic color, assume this is a real problem until measured.
   Mitigation: cut an aperture and fit a plain-plastic radome, or bench-test the attenuation with
   a cut-off piece of the actual cover between radar and target.
 - **Pitch/elevation**: `ESR.dbc` has **no elevation offset signal** — `ANGLE_MOUNTING_OFFSET`
@@ -342,7 +342,7 @@ This is the control frame and it contains the handshake.
 | `CAN_RX_MAXIMUM_TRACKS` | `64` |
 | `CAN_RX_GROUPING_MODE` | try `3` (group moving + stationary) |
 | `CAN_RX_ANGLE_MISALIGNMENT` / `_USE_` | alignment offset, 0.0625° |
-| `CAN_RX_LATERAL_MOUNTING_OFFSET` | lateral offset from vehicle centreline |
+| `CAN_RX_LATERAL_MOUNTING_OFFSET` | lateral offset from vehicle centerline |
 | `CAN_RX_BLOCKAGE_DISABLE` | `1` initially — a bumper cover may read as blockage |
 | `CAN_RX_CLEAR_FAULTS` | one-shot on startup |
 | `CAN_RX_MMR_UPSIDE_DOWN` | only if the bracket inverts the unit |
@@ -818,7 +818,7 @@ something with one controller.
 nothing, so it costs a nibble now and a redesign later. Something like:
 
 ```
-byte 0   bits 0-3  sensor id   (0 = rear centre, 1 = rear left, 2 = rear right, ...)
+byte 0   bits 0-3  sensor id   (0 = rear center, 1 = rear left, 2 = rear right, ...)
          bits 4-7  object index within that sensor
 byte 1-7 range, range-rate, azimuth, validity
 ```
@@ -838,11 +838,11 @@ not bus 1.
 
 **What is worth adding later, roughly in order of value:**
 
-1. **Rear centre radar** — this project. Answers "is something closing" for lane changes.
+1. **Rear center radar** — this project. Answers "is something closing" for lane changes.
 2. **BLIS via the canbox** — no new sensor, just routing `Side_Detect_L/R_Stat` onto a bus
    openpilot reads. Complements rather than duplicates: BLIS covers the mirror to ~7 m, the radar
    starts at ~3.7 m, and they overlap.
-3. **Rear corner radars** — only if the centre unit's ±45° mid-range beam proves insufficient
+3. **Rear corner radars** — only if the center unit's ±45° mid-range beam proves insufficient
    close in. Measure before buying.
 
 ### What the front radar is actually doing on this car
@@ -929,7 +929,7 @@ these are the constraints to measure *against*, not answers.
 
 | Location | RF path | Effort | Verdict |
 |---|---|---|---|
-| Behind the rear bumper cover, centred | plastic, good | pull the cover | **first choice** — mirror of the front install |
+| Behind the rear bumper cover, centerd | plastic, good | pull the cover | **first choice** — mirror of the front install |
 | On a bracket below the bumper, off the beam or tow points | free air, best | no disassembly | fallback — exposed to spray and stone chips |
 | Behind the licence plate | **blocked** | — | no: the plate and frame are metal |
 | Inside the rear glass | **blocked** | — | no: defroster grid, tint, raked angle, cabin multipath |
@@ -938,9 +938,9 @@ Constraints for whichever is chosen:
 
 - **Height 30–86 cm** to the sensor face (Delphi manual figure, quoted for the ESR — treat as
   indicative for the MRR and sanity-check against where Ford mounts the front one). A Fusion's
-  rear bumper centre sits comfortably inside that.
-- **Centred laterally**, or the lane maths inherits an offset. Off-centre is correctable in code
-  like azimuth, but it is one more constant to calibrate — prefer centred.
+  rear bumper center sits comfortably inside that.
+- **Centerd laterally**, or the lane maths inherits an offset. Off-center is correctable in code
+  like azimuth, but it is one more constant to calibrate — prefer centerd.
 - **Level, pointing straight back.** See the 3°-is-half-a-lane note above.
 - **Nothing metal in front of the antenna face.** A metal bracket *behind* it is fine.
 - **Away from the tailpipe.** Heat and vibration, and exhaust plume is not something to ask a
@@ -1023,7 +1023,7 @@ one channel and wrong for the other:
 Verify before and after: **~60 Ω across CANH–CANL on a healthy terminated bus, key off.** If it
 reads ~40 Ω after the tap, the resistor is still in.
 
-Keep the bus 1 stub short. 500 kbit/s is forgiving but a metre of unterminated spur is not free.
+Keep the bus 1 stub short. 500 kbit/s is forgiving but a meter of unterminated spur is not free.
 
 ### The connector
 
@@ -1036,7 +1036,7 @@ For an independently bought pigtail, verify rather than assume:
 1. **Radar unplugged and unpowered**, measure resistance between each pin pair. A pair reading
    ~120 Ω is CANH/CANL — the module's internal termination identifies them for you.
 2. The remaining two are supply and ground. **Identify ground by continuity to the module case or
-   to chassis on the vehicle side.** Do not infer polarity from wire colour.
+   to chassis on the vehicle side.** Do not infer polarity from wire color.
 3. Fuse the rear radar's feed **separately** rather than splicing into the front radar's circuit.
    Comparable retrofits draw well over 0.2 A; assume ~0.5 A and size for two radars only if you
    deliberately choose to share, which there is no reason to do.
@@ -1048,7 +1048,7 @@ The 2020 Fusion **does** have a rear towing eye: a threaded socket behind a pop-
 bumper cover, with a screw-in eye stored with the spare. So §8's second mounting candidate is real
 on this car.
 
-Two caveats before designing around it. It is usually **off-centre**, and a centred sensor is worth
+Two caveats before designing around it. It is usually **off-center**, and a centerd sensor is worth
 more than a convenient one — an offset is correctable in code but is one more constant to
 calibrate. And using it as a mount means either giving up the recovery function or designing a
 bracket that passes it through. Measure where it actually sits before choosing it over the bumper
@@ -1110,7 +1110,7 @@ Photograph supplied 2026-08-03. Read from a photo, so everything here is a thing
 not a conclusion.
 
 **The single most useful feature: the lower valance is unpainted textured black plastic.** The
-bumper is two zones — body-colour metallic paint from the plate down to a moulding line, then a
+bumper is two zones — body-color metallic paint from the plate down to a moulding line, then a
 separate dark grey textured lower section carrying the exhaust outlets. §2 warns that metallic and
 pearl paint contains aluminium flake and attenuates 76 GHz badly. **That warning does not apply to
 the lower section at all.** It is exactly the kind of bare plastic an OEM radome is made from.
@@ -1123,8 +1123,8 @@ measure, ahead of the painted upper bumper.
 | Paint attenuation | metallic flake, real risk, needs testing | **none** |
 | Height above ground | ~55–70 cm, middle of the 30–86 cm window | ~35–45 cm, low end but in spec |
 | Ground clutter | less | more — the radar sees more road |
-| Exhaust | clear | outlets are at both **outer corners**; centre is clear |
-| Obstructions | parking sensors are in this zone | clear in the centre |
+| Exhaust | clear | outlets are at both **outer corners**; center is clear |
+| Obstructions | parking sensors are in this zone | clear in the center |
 
 Neither is obviously better. The paint problem is the one that cannot be fixed without cutting;
 the height difference can be evaluated on the bench by pointing the radar at a road from each
@@ -1134,7 +1134,7 @@ cheapest experiment in the whole project.
 
 **Other things the photo settles:**
 
-- **Both exhaust outlets are at the outer corners of the lower valance.** A centred mount is clear
+- **Both exhaust outlets are at the outer corners of the lower valance.** A centerd mount is clear
   of both, which removes the heat concern that would otherwise rule the lower zone out.
 - **The car has rear parking sensors** in the painted zone. Two consequences: do not place the
   radar where it shadows one, and note the bumper already has precision apertures cut in it from
@@ -1145,9 +1145,9 @@ cheapest experiment in the whole project.
   be lower, on the underside, or not resolvable at this angle. **Verify by hand before designing
   around it** — and the bumper reinforcement beam remains the better attachment anyway.
 
-**On centring:** the front radar on this car is off-centre toward the driver's side and works fine.
+**On centring:** the front radar on this car is off-center toward the driver's side and works fine.
 So centring the rear one is a preference, not a requirement — an offset is one measured constant
-(see the note in `adjacent_lane.py`). Centre it if the packaging allows, because it is one less
+(see the note in `adjacent_lane.py`). Center it if the packaging allows, because it is one less
 number to calibrate, but do not distort the bracket to achieve it.
 
 ### "Aren't both radars still on bus 1?" No. What a bus physically is
@@ -1218,7 +1218,7 @@ this document, and it is a few inches of wire at a connector already worked on o
 **Why the count does not change if the Teensy goes at the rear instead.** Radar-to-Teensy becomes
 inches, but the digest still has to reach the front: CANH, CANL, plus 12 V and ground for both
 devices. Four conductors either way. So the choice is made on power, shelter and reflashing access
-— all of which favour the front — not on wiring effort.
+— all of which favor the front — not on wiring effort.
 
 The one variant that *does* save wires: if a switched, ignition-controlled 12 V feed can be found
 in the trunk area, a rear-mounted Teensy needs only CANH and CANL run forward. Two conductors
@@ -1320,14 +1320,14 @@ correct automotive practice, not a shortcut. That removes one conductor from the
 
 **The trunk is as dry and reachable as the front.** The earlier argument for a front-mounted
 Teensy was power, shelter and reflashing access. A trunk mount has all three: it is inside the
-body, opens with a button, and is a metre from the rear bumper. Only the *bumper* is a bad place
+body, opens with a button, and is a meter from the rear bumper. Only the *bumper* is a bad place
 for electronics — the trunk is not the bumper.
 
 That gives a better layout:
 
 | | Teensy at the front | **Teensy in the trunk** |
 |---|---|---|
-| Private radar bus | full length of the car | **under a metre** |
+| Private radar bus | full length of the car | **under a meter** |
 | Run to the front | none | the CAN pair |
 | Power | easy, front feed | needs a rear source — see below |
 | Reflashing | reach behind the front bumper | **open the trunk** |
@@ -1369,7 +1369,7 @@ as easy to access. That single panel then hides the whole electronics package: r
 **Power, without running anything forward:**
 
 - **Trigger:** the amp's remote turn-on lead. It goes live with the ignition, which is exactly the
-  behaviour wanted. It is a signal, not a supply, so it drives a **relay coil** — never the radar
+  behavior wanted. It is a signal, not a supply, so it drives a **relay coil** — never the radar
   directly.
 - **Supply:** the amp's constant 12 V, taken through **its own inline fuse** (3–5 A) so the new
   branch is protected independently and a fault cannot take the audio down with it.
@@ -1458,7 +1458,7 @@ Not because it is unusually hard. Because the payoff is unusually small *for eve
    better rear data improves a *warning*, not a capability. High effort, modest reward.
 4. **comma's direction is vision**, and their new hardware adds cameras rather than sensors. Fork
    authors follow the platform.
-5. **It is a hardware and firmware project** in a community whose centre of gravity is software.
+5. **It is a hardware and firmware project** in a community whose center of gravity is software.
    Brackets, looms and microcontrollers are a different hobby from Python.
 
 None of those is a reason it will not work. They are reasons nobody was motivated.
@@ -1491,7 +1491,7 @@ gate stopped a suggestion.
 
 ## 11. Hands-off lane changes: the level, and what actually stands in the way
 
-Added 2026-08-03. The goal stated: the car does the whole manoeuvre, driver watches but does not
+Added 2026-08-03. The goal stated: the car does the whole maneuver, driver watches but does not
 touch anything.
 
 ### It is still Level 2, and there is a production car doing exactly this
@@ -1542,7 +1542,7 @@ sends.
    closing", which is the gate that does not exist today.
 2. Command the turn signal via `Steering_Data_FD1`. Proven.
 3. Feed `desire_helper` the request directly, rather than waiting for a stalk that will never move.
-4. `AutoLaneChangeController` runs the manoeuvre on its existing nudgeless timer.
+4. `AutoLaneChangeController` runs the maneuver on its existing nudgeless timer.
 5. Cancel the signal when the state machine completes.
 
 Every piece except step 3 already exists and is tested.
@@ -1644,11 +1644,11 @@ if self.lane_change_bsm_delay and blindspot_detected and self.lane_change_delay 
 
 While the blind spot is occupied the wait timer is *pinned* one second below the threshold. The
 instant BSM clears it resumes counting, and `update_allowed` passes when
-`wait_timer > lane_change_delay`. So the manoeuvre begins **one second after the blind spot goes
+`wait_timer > lane_change_delay`. So the maneuver begins **one second after the blind spot goes
 clear**, whatever the configured delay was.
 
-One second after a car leaves your blind spot it is a metre or two off your rear quarter. If it was
-overtaking you it is still closing. Moving over then is precisely the behaviour reported.
+One second after a car leaves your blind spot it is a meter or two off your rear quarter. If it was
+overtaking you it is still closing. Moving over then is precisely the behavior reported.
 
 **This is the whole argument for the rear radar, arrived at from the driver's seat rather than from
 a datasheet.** BLIS going clear means the car is no longer *beside* you. It does not say whether it
@@ -1663,7 +1663,7 @@ the textbook "both headlights in the mirror". The owner's report is independent 
 one second is far too eager.
 
 **Practical consequence once BLIS is routed:** `AutoLaneChangeBsmDelay` will become available and
-will reproduce this exact behaviour. Do not enable it on the strength of BLIS alone. Either leave
+will reproduce this exact behavior. Do not enable it on the strength of BLIS alone. Either leave
 it off, or change the constant in this fork — it is a one-line default with a real argument behind
 it.
 
@@ -1681,7 +1681,7 @@ the shortlist for after the sensor exists.
 
 **1. Lane-change abort — the highest-value item, and only possible with rear closing rate.**
 Today, once `desire_helper` commits to a lane change, it commits. There is no sensor that could
-justify bailing out mid-manoeuvre, so there is no bail-out. With a rear radar there is: a car
+justify bailing out mid-maneuver, so there is no bail-out. With a rear radar there is: a car
 appearing at closing speed while the car is half-way across is exactly the case that hurts, and
 aborting back into the original lane is a genuinely safer response than completing. This is the
 one item that reduces risk rather than adding convenience.
@@ -1689,7 +1689,7 @@ one item that reduces risk rather than adding convenience.
 **2. Overtake completion, replacing the settle timer.** `PassingAssistSettleTime` is 20 s of
 guesswork standing in for "have I actually cleared the car I passed". The front radar cannot see it
 once it is behind. A rear radar measures the gap directly, so "move back right when the car you
-passed is N metres behind and opening" replaces a timer with a measurement. It also fixes the same
+passed is N meters behind and opening" replaces a timer with a measurement. It also fixes the same
 class of error as §13, from the other direction.
 
 **3. Merge assist for on-ramps.** Joining a highway means judging traffic in a lane you are about
@@ -1713,7 +1713,7 @@ built here.
 **The ordering that follows from all of this:** BLIS via canbox (§12, free) → rear radar bench test
 (§8) → lane-change abort and overtake completion, because those two are what the sensor is actually
 for. Automatic lane changes (§11) sit after them, not before — the abort path should exist before
-the car starts initiating manoeuvres on its own.
+the car starts initiating maneuvers on its own.
 
 ---
 
@@ -1726,13 +1726,13 @@ Added 2026-08-03.
 The owner's distinction is the right one and it becomes a rule: **abort on a moving hazard, never
 on the system reconsidering the road's shape.**
 
-The example given is exactly the failure to avoid — signalling right to take an exit, while the
+The example given is exactly the failure to avoid — signaling right to take an exit, while the
 road-widening check decides "that is an exit lane, do not go there". The driver knows where they
 are going and the system does not. Stated generally:
 
 > **Geometry gates suppress SUGGESTIONS. They must never veto the DRIVER.**
 > `right_widening`, `lane_beyond_right`, `MIN_LANE_WIDTH_M`, `MIN_ADJACENT_LINE_PROB` — every one
-> of these exists to stop the system *offering* something. None may cancel a manoeuvre a human
+> of these exists to stop the system *offering* something. None may cancel a maneuver a human
 > asked for.
 
 This holds today only because passing assist is log-only. The moment §11 wires actuation it has to
@@ -1741,7 +1741,7 @@ be enforced deliberately, so: the abort criteria narrow as driver intent strengt
 | Who started it | Abort for |
 |---|---|
 | Driver flicked the blinker | a closing vehicle that would cause a collision. **Nothing else.** |
-| System initiated it | that, plus the reason for the manoeuvre evaporating |
+| System initiated it | that, plus the reason for the maneuver evaporating |
 
 Exits stay a manual, driver-initiated lane change until navigation exists. Nothing in this project
 should make that harder.
@@ -1790,7 +1790,7 @@ Constraints for whoever builds it:
 This is ICBM's actuator, so it lands on the ICBM branch rather than here. Flagged as the
 coordination point between the two.
 
-### 5. Signalling a tailgater — the idea is good, the car cannot do it
+### 5. Signaling a tailgater — the idea is good, the car cannot do it
 
 Checked directly rather than reasoned about. Every signal in `Steering_Data_FD1`:
 

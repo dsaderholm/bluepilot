@@ -323,7 +323,7 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     speedDeficit @6 :Float32;     # set speed - lead speed, m/s. The reason to want to pass.
 
     # geometry evidence, per side. lineProb is the model's confidence in a painted line BEYOND
-    # ego's own lane line; edgeGap is metres of drivable width between ego's lane line and the
+    # ego's own lane line; edgeGap is meters of drivable width between ego's lane line and the
     # road edge. On a divided highway in the left lane, edgeGap collapses to the shoulder. On an
     # oncoming_any_side road it does NOT -- the oncoming lane is drivable width -- which is exactly the
     # discrimination this is here to measure.
@@ -446,17 +446,17 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     # BluePilot: ACC had pressurised the brakes but was not yet slowing the car. A weaker claim
     # than accBrakingAtDecision and an EARLIER one -- beating the precharge means the suggestion
     # landed before Ford had even decided it would need to brake. Split out because counting it as
-    # braking labelled preemptive suggestions as reactive, which inverted the metric.
+    # braking labeled preemptive suggestions as reactive, which inverted the metric.
     accPrechargeAtDecision @40 :Bool;
 
     struct AdjacentLane {
       available @0 :Bool;   # false = liveTracks is not reporting. NOT the same as "clear".
       occupied @1 :Bool;    # debounced: 3 consecutive radar messages, not one frame
-      dRel @2 :Float32;     # metres ahead of the nearest vehicle in that lane, 0 when clear
+      dRel @2 :Float32;     # meters ahead of the nearest vehicle in that lane, 0 when clear
       vRel @3 :Float32;     # m/s relative to ego, negative = slower than us
       vAbs @4 :Float32;     # its absolute speed -- the number the pass decision compares
       # Lateral offset in the RADAR's frame, LEFT-POSITIVE, carried so the UI can place the readout
-      # over the actual vehicle instead of guessing a lane centre. Note the flip at the draw site:
+      # over the actual vehicle instead of guessing a lane center. Note the flip at the draw site:
       # _map_to_screen takes the camera frame, where the sign is the other way round.
       yRel @5 :Float32;
       # Travelling the OTHER WAY on this side. Not debounced, unlike occupied: one sighting is
@@ -476,7 +476,7 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       # oncomingAdjacent means opposing traffic was seen in the lane RIGHT NEXT to us -- that lane
       # is theirs and no setting overrides it. Without it, an oncoming sighting further out only
       # says the ROAD is two-way; whether the next lane over is a turn lane or a travel lane is
-      # then decided by sameDirectionRecent, because a centre turn lane and an ordinary passing
+      # then decided by sameDirectionRecent, because a center turn lane and an ordinary passing
       # lane are geometrically identical (a lane at 3.7 m, opposing traffic at 7.9 m, our own road
       # edge beyond both) and nothing in the sensors separates them.
       oncomingAdjacent @9 :Bool;
@@ -514,7 +514,7 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       available @0 :Bool;      # false = nothing is watching this side. NOT the same as "clear".
       detected @1 :Bool;       # something is there at all
       closing @2 :Bool;        # ...and gaining on us
-      dRel @3 :Float32;        # metres behind, 0 when unknown
+      dRel @3 :Float32;        # meters behind, 0 when unknown
       vRel @4 :Float32;        # m/s, positive = closing
       ttc @5 :Float32;         # seconds until it reaches us, large when not closing
       source @6 :Source;
@@ -571,29 +571,29 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       driverChangedLanes @16; # standing down after the driver's own lane change -- see below
     }
 
-    # BluePilot: the manoeuvre this WOULD perform, run as a dry run. Nothing actuates; see
-    # passing_manoeuvre.py. The detector above answers "would I suggest a pass this frame", which
+    # BluePilot: the maneuver this WOULD perform, run as a dry run. Nothing actuates; see
+    # passing_maneuver.py. The detector above answers "would I suggest a pass this frame", which
     # is a single frame's verdict and NOT what decides whether an automatic system works -- that
     # depends on whether the verdict holds still long enough to act on. These fields make the
-    # sequence visible over time, and `manoeuvreAborts` is the number the whole thing is for.
-    manoeuvre @41 :Manoeuvre;
-    manoeuvreSeconds @42 :Float32;   # time in the current phase
-    manoeuvreSide @43 :Side;         # the side the sequence committed to
+    # sequence visible over time, and `maneuverAborts` is the number the whole thing is for.
+    maneuver @41 :Maneuver;
+    maneuverSeconds @42 :Float32;   # time in the current phase
+    maneuverSide @43 :Side;         # the side the sequence committed to
     blinkerWouldBeOn @44 :Bool;      # on through the crossing, out when it completes
     steeringWouldBeActive @45 :Bool;
 
-    # Sequences that reached `signalling` and then backed out -- a blinker shown to traffic behind
-    # for a manoeuvre that did not happen. Near zero on a drive means the gates are stable enough
+    # Sequences that reached `signaling` and then backed out -- a blinker shown to traffic behind
+    # for a maneuver that did not happen. Near zero on a drive means the gates are stable enough
     # to act on. Anything else names an unstable gate that no amount of reading the code would
     # have found.
-    manoeuvreAborts @46 :UInt16;
+    maneuverAborts @46 :UInt16;
 
     # BluePilot: was the lead this decision rests on RADAR-confirmed, or the camera model alone?
     #
     # radard picks leads camera-first: modelV2 proposes, and a matching radar track refines it. With
     # no matching track and a confident model, get_RadarState_from_vision returns a lead with
     # radar=False whose vLead is the MODEL's velocity estimate rather than Doppler. That is a much
-    # weaker basis for "this car is 4 mph slower than I asked for", which is the entire judgement
+    # weaker basis for "this car is 4 mph slower than I asked for", which is the entire judgment
     # here.
     #
     # NOT gated on -- deliberately. Requiring radar would throw away the earlier detection that is
@@ -658,18 +658,18 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     topBlockedShare @60 :Float32;    # its share, 0..1
     clearShare @61 :Float32;         # share where nothing was stopping it at all
 
-    # BluePilot: WHICH manoeuvre the fields above describe. Passing and keep-right are mutually
+    # BluePilot: WHICH maneuver the fields above describe. Passing and keep-right are mutually
     # exclusive by construction -- keep-right is only ever evaluated on the frames where no pass is
     # warranted -- so they share one set of state fields and are told apart by this.
     #
     # Their ABORT COUNTS stay separate, though, because that number is the readiness metric for
     # each. Lumping them together would say a gate somewhere is unstable without saying which
-    # manoeuvre it belongs to, which is most of the value.
-    manoeuvreReason @62 :Reason;
+    # maneuver it belongs to, which is most of the value.
+    maneuverReason @62 :Reason;
     keepRightAborts @63 :UInt16;
 
     # BluePilot: crossings REVERSED because something was arriving behind, as opposed to sequences
-    # that merely backed out before moving. Counted apart from manoeuvreAborts because they are not
+    # that merely backed out before moving. Counted apart from maneuverAborts because they are not
     # the same event at all: one is the system changing its mind, the other is the system avoiding
     # a collision. Averaging them would hide the second inside the first.
     emergencyAborts @64 :UInt16;
@@ -685,7 +685,7 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     # the panel contradicts itself: the detector still says a pass is warranted and clear, the dry
     # run is refusing to start one, and with nothing to say otherwise the screen shows a green
     # PASS LEFT seconds after the car backed out of exactly that.
-    manoeuvreStandDown @68 :Float32;
+    maneuverStandDown @68 :Float32;
 
     # BluePilot: DID IT AGREE WITH THE DRIVER? The most useful thing measurable before any sensor
     # is fitted, and the closest thing to a readiness score this phase can produce.
@@ -696,7 +696,7 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     # and names a specific gate for the tenth is ready to be trusted with a blinker. One that
     # agrees on half is not, whatever its unit tests say.
     #
-    # Counted on the driver signalling LEFT with a confirmed slow lead ahead -- unambiguous, unlike
+    # Counted on the driver signaling LEFT with a confirmed slow lead ahead -- unambiguous, unlike
     # a right-hand signal which could be an exit, a keep-right or a pass.
     driverPasses @69 :UInt16;
     driverPassesAgreed @70 :UInt16;      # ...where it had already suggested that same side
@@ -724,11 +724,11 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     lifetimePasses @77 :UInt16;
     lifetimeAgreed @78 :UInt16;
 
-    enum Manoeuvre {
+    enum Maneuver {
       idle @0;         # nothing warranted
       confirming @1;   # a slower vehicle is being confirmed, timer running
       waiting @2;      # confirmed, and a gate is what is stopping us -- see blockedBy
-      signalling @3;   # blinker would be on, holding before any movement
+      signaling @3;   # blinker would be on, holding before any movement
       changing @4;     # crossing. COMMITTED: gates can no longer call it off, only the driver can
       finishing @5;    # across, blinker out
       aborting @6;     # backing out of a crossing already begun -- something arrived behind us
@@ -1131,7 +1131,7 @@ struct CarStateBP @0xb057204d7deadf3f {
   # bus 0. openpilot already transmits that message and passes TurnLghtSwtch_D_Stat through
   # untouched; panda explicitly permits it (ford.h: "blinkers, wiper switches, high beam ...
   # which we passthru in OP"). ICBM proves the car acts on openpilot's injected copy of this exact
-  # frame for cruise buttons. Whether the BCM honours it for the turn signal is untested.
+  # frame for cruise buttons. Whether the BCM honors it for the turn signal is untested.
   #
   # lampLeft/lampRight are the ANSWER, read from BodyInfo_3_FD1 (0x3B3) -- the body module's own
   # report of what the lamps are doing, on a bus openpilot already parses. That makes this a
@@ -1155,7 +1155,7 @@ struct CarStateBP @0xb057204d7deadf3f {
     }
 
     # Why a requested pulse did not run. Standstill is not negotiable: this operates a lamp other
-    # drivers read, and a stationary car signals nothing about a manoeuvre.
+    # drivers read, and a stationary car signals nothing about a maneuver.
     enum Blocked {
       none @0;
       notStationary @1;

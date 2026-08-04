@@ -50,7 +50,7 @@ MIN_CLOSING_MS = 1.5
 UNSAFE_TTC_S = 8.0
 # BluePilot: the threshold that may stop a lane change ALREADY UNDERWAY, as opposed to refusing to
 # start one. Deliberately far tighter than UNSAFE_TTC_S: backing out of a crossing is itself a
-# manoeuvre, done half-way between two lanes, and it is only the right answer when continuing is
+# maneuver, done half-way between two lanes, and it is only the right answer when continuing is
 # genuinely worse. At 8 s the correct response is to keep going and let them settle behind; at 3 s
 # they are arriving whatever anyone does.
 COLLISION_TTC_S = 3.0

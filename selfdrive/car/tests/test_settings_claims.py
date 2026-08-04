@@ -3,8 +3,8 @@ BluePilot: settings descriptions that state a fact about the code.
 
 A description saying "off by default" or "defaults to 1 s" is an assertion, and nothing keeps it
 true. The panel already shipped a label reading "Below 40 mph" months after that floor moved to 30
-and became adjustable -- confidently false, invisible to every behavioural test, because it was
-never behaviour.
+and became adjustable -- confidently false, invisible to every behavioral test, because it was
+never behavior.
 
 Descriptions rot the same way and are read at exactly the moment a driver is deciding whether to
 trust the feature. So any claim about a default is checked against params_keys.h.
@@ -96,10 +96,10 @@ def test_close_in_is_off_while_measuring():
 
 @pytest.mark.parametrize("path", LAYOUTS, ids=lambda p: p.name)
 def test_no_label_hardcodes_a_unit(path):
-  """A setting shown in metres while the panel reads it back in feet is worse than either alone --
+  """A setting shown in meters while the panel reads it back in feet is worse than either alone --
   you set 150 and the car says 492, and nothing on screen connects the two.
 
-  Two controls did exactly that: the close-in distance printed metres beside a panel printing feet,
+  Two controls did exactly that: the close-in distance printed meters beside a panel printing feet,
   and the minimum speed printed mph regardless of the driver's choice. Both had a unit-aware helper
   sitting a few lines above them.
 

@@ -14,7 +14,7 @@ the picture and NOT the decision:
     recorded is still the raw per-frame truth, because the whole point of phase 1 is measuring how
     often these boundaries are hit.
   - Both effects are bounded and stated below, so a driver reading the marker knows the worst case:
-    the colour can be up to `blocking_debounce_s` stale, and a marker can persist up to
+    the color can be up to `blocking_debounce_s` stale, and a marker can persist up to
     `dropout_hold_s` after its radar track went away.
 
 WHY A SEPARATE MODULE
@@ -31,7 +31,7 @@ driving the car, which is how the 100 Hz turn-signal frame reached the road.
 # still flicker; much longer and a car that genuinely left would linger.
 DROPOUT_HOLD_S = 0.8
 
-# How long a changed blocking state must persist before the colour follows it.
+# How long a changed blocking state must persist before the color follows it.
 #
 # This is a debounce, not a minimum dwell: the new value has to HOLD for this long, so a vehicle
 # sitting exactly on the pass threshold never chatters at all rather than chattering once a second.
@@ -47,7 +47,7 @@ class MarkerHold:
     self.blocking_debounce_s = blocking_debounce_s
     self.drawing = False        # was a marker on screen last frame, held or live
     self.gap_s = 0.0            # time since the track was last seen
-    self.blocking = False       # the debounced colour state
+    self.blocking = False       # the debounced color state
     self._pending_s = 0.0
 
   def reset(self) -> None:
@@ -70,8 +70,8 @@ class MarkerHold:
       self.reset()
       return False, 0.0, was
 
-    # Colour debounce. Runs whether or not a marker is drawn, so a car that drops out and returns
-    # does not also restart its colour timer.
+    # Color debounce. Runs whether or not a marker is drawn, so a car that drops out and returns
+    # does not also restart its color timer.
     if blocking != self.blocking:
       self._pending_s += dt
       if self._pending_s >= self.blocking_debounce_s:

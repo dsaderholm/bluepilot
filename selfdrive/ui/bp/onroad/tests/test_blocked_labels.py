@@ -49,7 +49,7 @@ def test_every_reason_has_words():
   assert not missing, f"reasons with no wording: {missing}"
 
 
-def test_nothing_is_labelled_that_is_not_a_reason():
+def test_nothing_is_labeled_that_is_not_a_reason():
   extra = set(_labels()) - set(_enum_names())
   assert not extra, f"labels for reasons that no longer exist: {sorted(extra)}"
 

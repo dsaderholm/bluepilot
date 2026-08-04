@@ -36,7 +36,7 @@ def _returned_items() -> list[str]:
       # and every heading collapses to one key -- which silently made the section-size check
       # meaningless. Accept either.
       m = re.search(r"""tr\(['"](.+?)['"]\)""", ast.unparse(el))
-      assert m, f"unrecognised non-control entry: {ast.unparse(el)[:60]}"
+      assert m, f"unrecognized non-control entry: {ast.unparse(el)[:60]}"
       out.append("#" + m.group(1))
   return out
 

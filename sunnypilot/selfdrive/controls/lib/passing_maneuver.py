@@ -1,5 +1,5 @@
 """
-BluePilot: the manoeuvre passing assist WOULD perform, run as a dry run.
+BluePilot: the maneuver passing assist WOULD perform, run as a dry run.
 
 Nothing here actuates. It consumes the detector's per-frame verdict and models the full sequence a
 fully-automatic pass would go through -- spot the slow car, confirm it, signal, wait, cross, drop
@@ -10,11 +10,11 @@ WHY THIS IS THE THING WORTH BUILDING NEXT
 The detector already answers "would I suggest a pass right now". That is a single frame's verdict,
 and it is NOT the question that decides whether an automatic system works. The question is whether
 the verdict HOLDS STILL long enough to act on. A gate that flickers is invisible in a
-frame-by-frame display and fatal to a manoeuvre: the blinker goes on, a gate blinks red, the
+frame-by-frame display and fatal to a maneuver: the blinker goes on, a gate blinks red, the
 blinker goes off, and the car has lied to the traffic behind it.
 
 So the number this exists to produce is `aborts` -- how many times a sequence got as far as
-signalling and then had to back out. On a drive where that is zero or near it, the sequence is
+signaling and then had to back out. On a drive where that is zero or near it, the sequence is
 sound. Where it is not, it names exactly which gate is unstable, and no amount of reasoning about
 the code would have found it.
 
@@ -34,7 +34,7 @@ from cereal import custom
 from openpilot.common.realtime import DT_MDL
 
 Side = custom.LongitudinalPlanSP.PassingAssist.Side
-Phase = custom.LongitudinalPlanSP.PassingAssist.Manoeuvre
+Phase = custom.LongitudinalPlanSP.PassingAssist.Maneuver
 
 # How long the blinker is held before lateral motion begins. The owner's own habit: "I put the
 # blinker on, wait a second, and then change lanes."
@@ -47,7 +47,7 @@ Phase = custom.LongitudinalPlanSP.PassingAssist.Manoeuvre
 # So the two clocks OVERLAP. The blinker is lit while the confirmation is still running underneath
 # it, and the crossing begins when both are satisfied -- max(confirm, lead), not confirm + lead. If
 # the confirmation fails or a gate closes before then, the signal goes out and it is counted as an
-# abort, which is the honest cost of signalling early and exactly what the count is for.
+# abort, which is the honest cost of signaling early and exactly what the count is for.
 DEFAULT_BLINKER_LEAD_S = 1
 
 # A nominal lane change, used only to give the dry run a plausible duration for the phase nothing
@@ -60,12 +60,12 @@ CHANGE_DURATION_S = 4.0
 FINISH_HOLD_S = 1.5
 
 # How long backing out of a crossing takes. Roughly the same as the crossing itself -- it is the
-# same manoeuvre in reverse, from wherever we had got to.
+# same maneuver in reverse, from wherever we had got to.
 ABORT_DURATION_S = 2.5
 
 # ...and then STAND DOWN. Without this the machine returns to idle with every input unchanged --
 # slow car still there, lane still clear once the vehicle behind has gone past -- and immediately
-# signals again. Backing out of a crossing and re-signalling three seconds later is worse than
+# signals again. Backing out of a crossing and re-signaling three seconds later is worse than
 # either doing it or not: whoever just went past has no idea what this car is doing.
 #
 # Long enough for the situation that caused it to actually resolve. A vehicle that arrived fast
@@ -73,7 +73,7 @@ ABORT_DURATION_S = 2.5
 ABORT_STANDDOWN_S = 10.0
 
 
-class PassingManoeuvre:
+class PassingManeuver:
   """The dry run. One instance, fed once per frame from the detector."""
 
   def __init__(self):
@@ -81,8 +81,8 @@ class PassingManoeuvre:
     self.phase_seconds = 0.0
     self.side = Side.none
     self.blinker_lead_s = float(DEFAULT_BLINKER_LEAD_S)
-    # The number this module exists to produce. Counts sequences that reached `signalling` and then
-    # backed out -- a blinker shown to traffic behind for a manoeuvre that did not happen.
+    # The number this module exists to produce. Counts sequences that reached `signaling` and then
+    # backed out -- a blinker shown to traffic behind for a maneuver that did not happen.
     self.aborts = 0
     # Crossings REVERSED because something arrived behind, counted apart from the above: one is
     # changing our mind, the other is avoiding a collision, and averaging them hides the second.
@@ -93,7 +93,7 @@ class PassingManoeuvre:
   def blinker_on(self) -> bool:
     """The blinker stays on THROUGH the crossing and goes out when it completes, which is how a
     person signals. Dropping it at the start of the movement would be the common mistake."""
-    return self.phase in (Phase.signalling, Phase.changing)
+    return self.phase in (Phase.signaling, Phase.changing)
 
   @property
   def steering_active(self) -> bool:
@@ -126,7 +126,7 @@ class PassingManoeuvre:
     `suggested`  -- the same, AND the confirmation has completed. Commits to moving.
     `confirming` -- a slower vehicle is being confirmed, timer still running.
     `confirmed`  -- that timer has completed, so anything still stopping us is a gate.
-    `driver_override` -- the driver is signalling, braking or steering. Always wins.
+    `driver_override` -- the driver is signaling, braking or steering. Always wins.
     `collision_abort` -- something is ARRIVING behind. The only input that can reverse a crossing.
     """
     self.phase_seconds += DT_MDL
@@ -138,7 +138,7 @@ class PassingManoeuvre:
       self.side = Side.none
       return
 
-    # ABORT CRITERIA NARROW AS THE MANOEUVRE PROGRESSES, which is the whole shape of this.
+    # ABORT CRITERIA NARROW AS THE MANEUVER PROGRESSES, which is the whole shape of this.
     #
     # A gate going red stops a sequence that has not moved yet and is powerless once the crossing
     # begins, because a car cannot un-change lanes on a change of mind. A vehicle ARRIVING behind
@@ -147,7 +147,7 @@ class PassingManoeuvre:
     #
     # Never fires with no rear sensor -- see RearApproachSide.demands_abort, which answers False
     # when unavailable rather than guessing in either direction.
-    if collision_abort and self.phase in (Phase.signalling, Phase.changing):
+    if collision_abort and self.phase in (Phase.signaling, Phase.changing):
       self.emergency_aborts += 1
       self._standdown_s = 0.0
       self._to(Phase.aborting)
@@ -173,7 +173,7 @@ class PassingManoeuvre:
         self._to(Phase.idle)
       return
 
-    if self.phase == Phase.signalling:
+    if self.phase == Phase.signaling:
       # A gate going red here is exactly the failure this module exists to count: the signal was
       # already shown to traffic behind before the sequence backed out.
       if clear == Side.none or clear != self.side:
@@ -192,7 +192,7 @@ class PassingManoeuvre:
     # unless we have just been forced out of one, see ABORT_STANDDOWN_S.
     if clear != Side.none and self._standdown_s >= ABORT_STANDDOWN_S:
       self.side = clear
-      self._to(Phase.signalling)
+      self._to(Phase.signaling)
       return
 
     self.side = Side.none

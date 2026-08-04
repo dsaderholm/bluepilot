@@ -9,9 +9,9 @@ BluePilot: how long an auto lane change waits after the blind spot goes clear.
 Reported from a real drive: the BSM-aware auto lane change moved over too close to a car it had
 just waited for. That is arithmetic, not tuning. While the blind spot is occupied the wait timer
 was pinned exactly `ONE_SECOND_DELAY` below its threshold, so clearing the indicator bought
-precisely one second before the manoeuvre began -- no matter what delay the driver had configured.
+precisely one second before the maneuver began -- no matter what delay the driver had configured.
 
-The tests below pin the behaviour that replaced it, and one of them asserts the old bug is gone by
+The tests below pin the behavior that replaced it, and one of them asserts the old bug is gone by
 measuring the wait rather than by inspecting a constant. Measuring is the point: the failure was
 invisible in the source, where `= self.lane_change_delay + ONE_SECOND_DELAY` reads like a delay
 being applied rather than one being cancelled.
@@ -61,7 +61,7 @@ class TestBsmHold:
       assert waited is not None, f"never allowed at hold={hold}"
       assert abs(waited - hold) < 0.15, f"hold={hold} waited {waited:.2f}"
 
-  def test_the_old_one_second_behaviour_is_gone(self):
+  def test_the_old_one_second_behavior_is_gone(self):
     """The reported bug, measured rather than read.
 
     With the default hold the wait must be meaningfully longer than the one second the previous

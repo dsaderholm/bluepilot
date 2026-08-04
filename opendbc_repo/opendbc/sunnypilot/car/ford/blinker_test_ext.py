@@ -18,10 +18,10 @@ controller. It runs a single timed pulse when explicitly requested and then disa
 WHY THE GATES ARE WHAT THEY ARE
 A turn signal is not an internal state -- it is a message to other drivers about what this car is
 about to do. So:
-  - Standstill only. A stationary car signals nothing about a manoeuvre, which makes an erroneous
+  - Standstill only. A stationary car signals nothing about a maneuver, which makes an erroneous
     pulse meaningless to bystanders rather than misleading.
   - Never while cruise is engaged, so this can never overlap a real lane-change decision.
-  - The driver's stalk always wins. If they are signalling, we do not touch it.
+  - The driver's stalk always wins. If they are signaling, we do not touch it.
   - Hard timeout, enforced by frame count rather than by anything the requester controls, so a
     stuck param or a crashed UI cannot leave a lamp latched on.
   - The request param is CLEAR_ON_MANAGER_START and self-cleared on completion, so it cannot

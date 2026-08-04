@@ -67,9 +67,9 @@ class TestSendRate:
   def test_the_signal_is_not_returned_every_frame(self):
     ext = make_ext(SIGNAL_RIGHT)
     out = run(ext, POLL_FRAMES + int(1.0 / DT_CTRL))
-    signalled = [v for v in out if v == SIGNAL_RIGHT]
-    assert signalled, "never signalled at all"
-    assert len(signalled) < len(out) / 2, "signal returned on most frames -- rate limit is not applied"
+    signaled = [v for v in out if v == SIGNAL_RIGHT]
+    assert signaled, "never signaled at all"
+    assert len(signaled) < len(out) / 2, "signal returned on most frames -- rate limit is not applied"
 
   def test_the_gap_between_sends_is_buttons_step(self):
     ext = make_ext(SIGNAL_RIGHT)

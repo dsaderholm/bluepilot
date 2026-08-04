@@ -104,7 +104,7 @@ class TestProvenance:
     assert op.crawling, "a gate here would have discarded the most interesting crawls"
     assert not op.crawl_after_suggestion
 
-  def test_a_crawl_soon_after_a_suggestion_is_labelled(self):
+  def test_a_crawl_soon_after_a_suggestion_is_labeled(self):
     op = run(OvertakeProgress(), 10.0, left=lane(), settle_s=1.0)
     assert op.crawl_after_suggestion
 

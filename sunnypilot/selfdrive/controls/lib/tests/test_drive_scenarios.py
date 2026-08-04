@@ -20,7 +20,7 @@ from openpilot.sunnypilot.selfdrive.controls.lib.tests.test_passing_assist impor
 Side = custom.LongitudinalPlanSP.PassingAssist.Side
 Blocked = custom.LongitudinalPlanSP.PassingAssist.Blocked
 Reason = custom.LongitudinalPlanSP.PassingAssist.Reason
-Phase = custom.LongitudinalPlanSP.PassingAssist.Manoeuvre
+Phase = custom.LongitudinalPlanSP.PassingAssist.Maneuver
 
 
 def drive(det, seconds, **kw):
@@ -47,17 +47,17 @@ class TestAnOrdinaryInterstatePass:
 
     # 3. The blinker goes on the moment it spots the car, BEFORE the confirmation finishes -- the
     #    two clocks overlap, which is the whole reason it can beat ACC to the brakes.
-    assert det.manoeuvre.phase == Phase.signalling
-    assert det.manoeuvre.blinker_on
-    assert det.suggestion == Side.none, "signalling, not yet committed"
+    assert det.maneuver.phase == Phase.signaling
+    assert det.maneuver.blinker_on
+    assert det.suggestion == Side.none, "signaling, not yet committed"
 
     # 4. Confirmation lands and the signal lead has elapsed, so it would begin crossing.
     drive(det, 2.0, v_lead=SLOW_LEAD_MS, d_rel=150.0)
     assert det.suggestion == Side.left
     assert det.reason == Reason.passing
     drive(det, 1.5, v_lead=SLOW_LEAD_MS, d_rel=120.0)
-    assert det.manoeuvre.phase == Phase.changing
-    assert det.manoeuvre.blinker_on and det.manoeuvre.steering_active
+    assert det.maneuver.phase == Phase.changing
+    assert det.maneuver.blinker_on and det.maneuver.steering_active
 
     # 5. The driver does it for real. Counted as an agreement, and the lead time is the warning.
     drive(det, 0.5, v_lead=SLOW_LEAD_MS, d_rel=100.0, blinker=True)
@@ -81,8 +81,8 @@ class TestAnOrdinaryInterstatePass:
     drive(det, 12.0, status=False, **IN_LEFT_LANE)
     assert det.suggestion == Side.right
     assert det.reason == Reason.keepRight
-    assert det.keep_right_manoeuvre.phase == Phase.signalling
-    assert det.manoeuvre.phase == Phase.idle, "the passing machine must stay out of a keep-right"
+    assert det.keep_right_maneuver.phase == Phase.signaling
+    assert det.maneuver.phase == Phase.idle, "the passing machine must stay out of a keep-right"
 
   def test_the_drive_leaves_a_usable_record(self):
     det = keep_right_det()
@@ -109,7 +109,7 @@ class TestATwoLaneHighwayWithOncomingTraffic:
     drive(det, 0.5, v_lead=SLOW_LEAD_MS, tracks=self.ONCOMING)
     assert det.blocked_by == Blocked.oncomingLane
     assert det.suggestion == Side.none
-    assert det.manoeuvre.phase in (Phase.aborting, Phase.waiting, Phase.idle),       "must not still be crossing into a head-on lane"
+    assert det.maneuver.phase in (Phase.aborting, Phase.waiting, Phase.idle),       "must not still be crossing into a head-on lane"
 
     # And it stays refused after they have gone by, which is the whole point of the memory.
     drive(det, 20.0, v_lead=SLOW_LEAD_MS)

@@ -253,10 +253,10 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"PassingAssistMinDeficit", {PERSISTENT | BACKUP, INT, "4"}},
     // How long that must persist before a pass would be suggested (seconds).
     // BluePilot: how long a slower lead must persist before suggesting, in seconds. Short by
-    // design -- waiting is the behaviour this exists to remove, and the only job of this timer is
+    // design -- waiting is the behavior this exists to remove, and the only job of this timer is
     // to reject a single bad frame of lead tracking.
     {"PassingAssistBlinkerLead", {PERSISTENT | BACKUP, INT, "1"}},
-    // -1 = Auto (from the measured ACC braking onset), 0 = off, otherwise metres.
+    // -1 = Auto (from the measured ACC braking onset), 0 = off, otherwise meters.
     {"PassingAssistMinApproach", {PERSISTENT | BACKUP, INT, "0"}},
     // The previous drive's measurements, so parking does not throw them away. Written
     // periodically by the detector, read by the panel when the current drive has nothing yet.
@@ -269,7 +269,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // Renamed to PassingAssistConfirmTime. Declared only so params_migration can read a value
     // stored before the rename; nothing in the UI or controls references it.
     {"PassingAssistStuckTime", {PERSISTENT | BACKUP, INT, "2"}},
-    // How far ahead to look for a slower vehicle, in metres. Distance, not time: a time bound
+    // How far ahead to look for a slower vehicle, in meters. Distance, not time: a time bound
     // shrinks as the speed difference shrinks, so it would notice a gently slower car LATER than a
     // dramatically slower one, which is backwards.
     {"PassingAssistMaxDistance", {PERSISTENT | BACKUP, INT, "220"}},
@@ -306,7 +306,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // Separate from PassingAssistAdjacentLane above, which is the detection itself: turning the
     // display off must not stop the gate working, and turning the gate off must not leave a
     // display showing stale numbers.
-    // BluePilot: draw oncoming vehicles too, in their own colour. Separate from the
+    // BluePilot: draw oncoming vehicles too, in their own color. Separate from the
     // same-direction markers because the roads differ: this only ever appears where the
     // opposing carriageway is within radar reach, which on a divided highway it is not.
     {"ShowOncomingSpeeds", {PERSISTENT | BACKUP, BOOL, "1"}},
@@ -327,8 +327,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     //
     // DEFAULT ON (assume turn lane). The cost is real and local: Utah's 2+1 highways, US-6 and
     // US-89 especially, lose their passing lanes until a car drives down one. Off trades that back
-    // for the chance of suggesting a pass into a centre turn lane. Opposing traffic seen IN the
-    // next lane blocks it either way -- that part is not a judgement call.
+    // for the chance of suggesting a pass into a center turn lane. Opposing traffic seen IN the
+    // next lane blocks it either way -- that part is not a judgment call.
     {"PassingAssistStrictTwoWay", {PERSISTENT | BACKUP, BOOL, "1"}},
     // BluePilot: seconds to wait AFTER the blind spot clears before an auto lane change starts.
     // sunnypilot's arithmetic gave exactly one second regardless of the configured delay, which
@@ -658,7 +658,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // ShowBrakeStatus default is ICBM's, not this branch's: it was flipped to 1 deliberately as
     // part of making the owner's tested tune the shipped one. Keep theirs.
     {"ShowBrakeStatus", {PERSISTENT | BACKUP, BOOL, "1"}},
-    // BluePilot: the passing-assist panel. Every gate, the dry run of the manoeuvre and the drive
+    // BluePilot: the passing-assist panel. Every gate, the dry run of the maneuver and the drive
     // summary all land here -- it is the whole feature's readout. Nothing acts; this only displays.
     {"ShowPassingAssist", {PERSISTENT | BACKUP, BOOL, "1"}},
     // BluePilot: one-shot stationary turn-signal actuation test. 0 off, 1 left, 2 right.

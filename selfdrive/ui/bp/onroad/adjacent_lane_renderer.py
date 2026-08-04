@@ -20,7 +20,7 @@ rather than by re-testing the speed against the deficit margin. Same reason: one
 place. A display that applies its own version of the rule will eventually contradict the decision.
 
 TWO THINGS ABOUT DRAWING IT
-Position comes from the radar's own lateral estimate rather than an assumed lane centre, so the
+Position comes from the radar's own lateral estimate rather than an assumed lane center, so the
 marker sits on the car. `_map_to_screen` wants the CAMERA frame, where y is left-NEGATIVE, and the
 radar reports left-POSITIVE -- hence the flip, which is the same one `_update_leads` performs.
 
@@ -44,11 +44,11 @@ from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 
-# Deliberately not the lead's colours. A marker that looked like a lead would read as "openpilot is
+# Deliberately not the lead's colors. A marker that looked like a lead would read as "openpilot is
 # following that car", which is the opposite of what it means.
 NEUTRAL = rl.Color(150, 205, 235, 255)     # a car is there, and it is not what is blocking a pass
 BLOCKING = rl.Color(240, 175, 60, 255)     # this lane is why no pass is being suggested
-# Oncoming gets its own colour and is never confusable with the two above. It is not a lane you
+# Oncoming gets its own color and is never confusable with the two above. It is not a lane you
 # might move into, it is a lane that is theirs -- a different KIND of fact, not a worse version of
 # the same one.
 ONCOMING = rl.Color(235, 90, 80, 255)
@@ -72,7 +72,7 @@ class AdjacentLaneRenderer:
     # jitter, and a marker that settled at a different rate would look like a different sensor.
     self._d_filters = [FirstOrderFilter(0, 0.4, dt, initialized=False) for _ in range(2)]
     self._y_filters = [FirstOrderFilter(0, 0.5, dt, initialized=False) for _ in range(2)]
-    # Dropout hold and colour debounce, one per side. See marker_hold.py.
+    # Dropout hold and color debounce, one per side. See marker_hold.py.
     self._holds = [MarkerHold(), MarkerHold()]
     # Last drawn values, so a held marker keeps showing the vehicle it belonged to rather than
     # freezing on whatever the filters happened to contain.
@@ -155,10 +155,10 @@ class AdjacentLaneRenderer:
       # whole range in a couple of seconds, so a smoothing filter tuned for a car being overtaken
       # would lag it badly enough to draw it somewhere it is not.
       self._draw_marker(point, abs(side.oncomingVAbs), side.oncomingDRel, False, 1.0, rect,
-                        colour=ONCOMING, prefix="<< ")
+                        color=ONCOMING, prefix="<< ")
 
   def _draw_marker(self, point, v_abs: float, d_rel: float, blocking: bool, alpha: float,
-                   rect: rl.Rectangle, colour=None, prefix: str = "") -> None:
+                   rect: rl.Rectangle, color=None, prefix: str = "") -> None:
     """One line: the vehicle's speed, then its distance. Speed first because it is the decision.
 
     Absolute speed, not closing rate. "62" is a number the driver can compare against their own
@@ -181,7 +181,7 @@ class AdjacentLaneRenderer:
     def fade(c: rl.Color) -> rl.Color:
       return rl.Color(c.r, c.g, c.b, int(c.a * alpha))
 
-    color = colour if colour is not None else (BLOCKING if blocking else NEUTRAL)
+    color = color if color is not None else (BLOCKING if blocking else NEUTRAL)
     box = rl.Rectangle(int(x), int(y), w, h)
     rl.draw_rectangle_rounded(box, 0.3, 10, fade(BOX_FILL))
     rl.draw_rectangle_rounded_lines_ex(box, 0.3, 10, BORDER, fade(color))

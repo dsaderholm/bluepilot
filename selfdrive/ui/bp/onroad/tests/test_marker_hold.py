@@ -1,5 +1,5 @@
 """
-BluePilot: the adjacent-lane marker's dropout hold and colour debounce.
+BluePilot: the adjacent-lane marker's dropout hold and color debounce.
 
 These are display timings, so the thing worth guarding is not that they smooth -- it is the two
 places smoothing would be a lie: a marker outliving an unavailable radar, and a hold that never
@@ -80,7 +80,7 @@ class TestUnavailableIsNeverHeld:
 class TestBlockingDebounce:
   def test_a_vehicle_on_the_threshold_does_not_chatter(self):
     """The other half of the report: a car going 'in between the speed I want to pass at and the
-    speed I don't'. Alternating every frame must move the colour zero times, not ten a second."""
+    speed I don't'. Alternating every frame must move the color zero times, not ten a second."""
     h = MarkerHold()
     for i in range(200):
       h.update(DT, True, True, i % 2 == 0)
@@ -92,15 +92,15 @@ class TestBlockingDebounce:
     assert h.blocking is True
 
   def test_it_is_not_followed_early(self):
-    """Bounds the staleness: the colour is never more than the debounce behind the truth, and never
+    """Bounds the staleness: the color is never more than the debounce behind the truth, and never
     less than it either, which is what makes the guarantee statable."""
     h = MarkerHold()
     run(h, BLOCKING_DEBOUNCE_S - 2 * DT, blocking=True)
     assert h.blocking is False
 
-  def test_a_dropout_does_not_restart_the_colour_timer(self):
-    """The two timings are independent. A track blinking out mid-change must not reset the colour
-    debounce, or a car at the range edge could never change colour at all."""
+  def test_a_dropout_does_not_restart_the_color_timer(self):
+    """The two timings are independent. A track blinking out mid-change must not reset the color
+    debounce, or a car at the range edge could never change color at all."""
     h = MarkerHold()
     run(h, BLOCKING_DEBOUNCE_S / 2, blocking=True)
     run(h, DROPOUT_HOLD_S / 2, occupied=False, blocking=True)

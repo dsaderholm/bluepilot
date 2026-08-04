@@ -38,7 +38,7 @@ The three unknowns
 
 3. BLIS. carState.leftBlindspot is SodDetct*_D_Stat != 0 -- blind-spot OCCUPANCY. A vehicle closing
    from 150 m back does not light it until already alongside, which is far too late to base a
-   passing suggestion on. Recorded here so its behaviour at decision time can be compared against
+   passing suggestion on. Recorded here so its behavior at decision time can be compared against
    what a safe gap actually looked like.
 
 Thresholds are starting values, not derived constants. Refit them from logs; that is the point.
@@ -53,9 +53,9 @@ from openpilot.sunnypilot.selfdrive.controls.lib.adjacent_lane import (
   AdjacentLane, path_offset, DEFAULT_ONCOMING_MEMORY_S,
 )
 from openpilot.sunnypilot.selfdrive.controls.lib.overtake_progress import OvertakeProgress
-from openpilot.sunnypilot.selfdrive.controls.lib.passing_manoeuvre import PassingManoeuvre
+from openpilot.sunnypilot.selfdrive.controls.lib.passing_maneuver import PassingManeuver
 
-Phase = custom.LongitudinalPlanSP.PassingAssist.Manoeuvre
+Phase = custom.LongitudinalPlanSP.PassingAssist.Maneuver
 from openpilot.sunnypilot.selfdrive.controls.lib.rear_approach import RearApproach
 
 Side = custom.LongitudinalPlanSP.PassingAssist.Side
@@ -94,7 +94,7 @@ MIN_LANE_WIDTH_M = 3.0
 MAX_ROAD_EDGE_STD = 0.5
 
 # --- lead gates ---
-# Below this, passing is not the manoeuvre being considered.
+# Below this, passing is not the maneuver being considered.
 #
 # WAS 40 AND THAT WAS TOO HIGH, which the owner spotted: "do we really need the 40 mph rule anymore
 # with everything else we've implemented?" It fails in exactly the case it most matters. Stuck
@@ -118,7 +118,7 @@ DEFAULT_MIN_SPEED_MPH = 30
 # out of the one you deliberately just entered.
 #
 # The rule that resolves it is already in the design notes: geometry gates suppress SUGGESTIONS,
-# they never veto the DRIVER. So this does not fight the manoeuvre; it stands down afterwards.
+# they never veto the DRIVER. So this does not fight the maneuver; it stands down afterwards.
 #
 # TWO DURATIONS, because the two cases are not alike:
 #
@@ -136,11 +136,11 @@ DEFAULT_MIN_SPEED_MPH = 30
 SETTLE_AFTER_CHANGE_S = 4
 DEFAULT_EXIT_STANDDOWN_S = 45
 
-# ...and the same again for a manoeuvre made with NO BLINKER AT ALL. "I usually use sunnypilot
+# ...and the same again for a maneuver made with NO BLINKER AT ALL. "I usually use sunnypilot
 # nudgeless changes, but I also will just fully takeover and do my own steering."
 #
 # Watching only the stalk would have missed that entirely, and steering into an off-ramp without
-# signalling is about as common as driving gets. So sustained steering counts as a manoeuvre too.
+# signaling is about as common as driving gets. So sustained steering counts as a maneuver too.
 #
 # SUSTAINED is the whole difficulty: steeringPressed also fires on the constant small corrections
 # of ordinary driving, and a 45 second stand-down every time a hand tightens on the wheel would be
@@ -167,7 +167,7 @@ LAST_DRIVE_WRITE_S = 30
 # older openpilot where it was still real.
 MAX_LEAD_D_PATH_M = 1.5
 
-# The real knob, and the whole judgement: is that car slower than the speed I asked for. The
+# The real knob, and the whole judgment: is that car slower than the speed I asked for. The
 # question is "how far below my set speed", not "is it dramatically slower" -- which is why this is
 # 4 and not the 8 it started at.
 #
@@ -181,7 +181,7 @@ MAX_LEAD_D_PATH_M = 1.5
 # about.
 DEFAULT_MIN_DEFICIT_MPH = 4
 # How long the slower lead must persist before suggesting. Short by design: waiting is the whole
-# behaviour this exists to remove. Long enough only to reject a single bad frame of lead tracking.
+# behavior this exists to remove. Long enough only to reject a single bad frame of lead tracking.
 DEFAULT_PERSISTENCE_S = 2
 
 # --- and why that timer is no longer destroyed by one bad frame ---
@@ -199,7 +199,7 @@ DEFAULT_PERSISTENCE_S = 2
 # passing it stays judged slow until it is a clear margin FASTER than the threshold, so a car
 # hovering on the line is decided once instead of re-decided every frame. 1 mph is chosen against
 # the same measurement noise that set the 4 mph threshold: ordinary traffic varies by about that
-# much, so this is the width of the noise, not a second judgement.
+# much, so this is the width of the noise, not a second judgment.
 DEFICIT_HYSTERESIS_MPH = 1
 
 # A GRACE WINDOW then decay fixes the dropout, and the grace window is the part that matters.
@@ -254,7 +254,7 @@ DEFAULT_MAX_DISTANCE_M = 220
 # Those two pull opposite ways and the resolution is the escape valve below, not the number. Left
 # alone, this system notices a slower car at the look-ahead distance and moves over immediately,
 # which is not how anyone drives -- a person closes on the car and THEN pulls out. So this holds
-# the manoeuvre until the lead is within this distance.
+# the maneuver until the lead is within this distance.
 #
 # WITH ONE OVERRIDE THAT MATTERS MORE THAN THE NUMBER: the hold is abandoned the instant Ford's ACC
 # asks for any deceleration, at any distance. That is what makes "as close as possible" safe to
@@ -454,7 +454,7 @@ class PassingAssistDetector:
     self.exit_standdown_s = float(DEFAULT_EXIT_STANDDOWN_S)
     self.driver_change_standdown = 0.0
     self.driver_change_was_exit = False
-    self._driver_blinker = None       # side currently being signalled, or None
+    self._driver_blinker = None       # side currently being signaled, or None
     self._signalled_over_widening = False
     self._steer_held_s = 0.0
     # See driverPasses in custom.capnp -- agreement with the driver, the readiness measure.
@@ -480,11 +480,11 @@ class PassingAssistDetector:
     self.lead_braking_hold = False
     self._lead_braking_s = 1e3
     # The dry run: what a fully-automatic pass would be doing right now. Actuates nothing.
-    self.manoeuvre = PassingManoeuvre()
+    self.maneuver = PassingManeuver()
     # Keep-right's own dry run. A separate machine rather than a mode on the one above, so its
-    # abort count stays its own -- that number is the readiness metric for each manoeuvre, and one
+    # abort count stays its own -- that number is the readiness metric for each maneuver, and one
     # combined figure would say something is unstable without saying which.
-    self.keep_right_manoeuvre = PassingManoeuvre()
+    self.keep_right_maneuver = PassingManeuver()
     # Is a pass grinding? The one case that may ever earn the set-speed actuator. Measures only.
     self.overtake = OvertakeProgress()
 
@@ -500,8 +500,8 @@ class PassingAssistDetector:
       self.oncoming_veto = self.params.get_bool("PassingAssistOncomingVeto")
       self.strict_two_way = self.params.get_bool("PassingAssistStrictTwoWay")
       self.oncoming_memory_s = float(self.params.get("PassingAssistOncomingMemory", return_default=True))
-      self.manoeuvre.blinker_lead_s = float(self.params.get("PassingAssistBlinkerLead", return_default=True))
-      self.keep_right_manoeuvre.blinker_lead_s = self.manoeuvre.blinker_lead_s
+      self.maneuver.blinker_lead_s = float(self.params.get("PassingAssistBlinkerLead", return_default=True))
+      self.keep_right_maneuver.blinker_lead_s = self.maneuver.blinker_lead_s
       self.min_approach_setting = float(self.params.get("PassingAssistMinApproach", return_default=True))
 
       # Carry the last drive's measurement across the ignition cycle. Without this, Auto is off for
@@ -535,7 +535,7 @@ class PassingAssistDetector:
 
   @staticmethod
   def _edge_gap(model, line_idx: int, edge_idx: int) -> float:
-    """Drivable width between ego's lane line and the road edge on that side, in metres.
+    """Drivable width between ego's lane line and the road edge on that side, in meters.
 
     Returned as a positive magnitude on both sides so the two are directly comparable. Uses y[0],
     the nearest point, because that is where the measurement is most reliable and because a lane
@@ -678,7 +678,7 @@ class PassingAssistDetector:
     Two corrections, both from what the ICBM work established while building the ACC pill:
 
     PRECHARGE IS NOT BRAKING. It pressurises the system so a later application arrives without
-    slack -- no meaningful deceleration, no stop lamps, no pad wear. Counting it here labelled a
+    slack -- no meaningful deceleration, no stop lamps, no pad wear. Counting it here labeled a
     genuinely preemptive suggestion as reactive, which is backwards for a metric whose entire job
     is to measure how often we beat ACC to the decision. It gets its own field instead, because
     "we beat even the precharge" is a stronger claim worth being able to make separately.
@@ -756,13 +756,13 @@ class PassingAssistDetector:
     outcome, reported as noLaneAvailable. What is avoidable is being stuck because the system was
     still making up its mind.
     So the only timer left in this path is a CONFIRMATION timer -- long enough that radar noise
-    cannot trigger a manoeuvre, and no longer -- rather than a "have we suffered enough yet" timer.
+    cannot trigger a maneuver, and no longer -- rather than a "have we suffered enough yet" timer.
     Every frame it costs is a frame nearer ACC deciding to shed speed for a car we were always
     going to pass, which is the expensive sequence: brake, then win the speed back in the next
     lane. trigger/accBrakingAtDecision is what measures whether we beat it.
 
-    So: in our lane, slower than the SET speed by a margin worth the manoeuvre, near enough to be
-    real. The margin is the judgement; everything else is a sanity bound.
+    So: in our lane, slower than the SET speed by a margin worth the maneuver, near enough to be
+    real. The margin is the judgment; everything else is a sanity bound.
     """
     # radarState yRel is left-POSITIVE like the radar's; flip to the camera frame before comparing
     # against the path. See MAX_LEAD_D_PATH_M for why this is no longer lead.dPath.
@@ -817,7 +817,7 @@ class PassingAssistDetector:
         "clearShare": round(self.clear_share, 3),
         "crawlEvents": int(self.overtake.crawl_events),
         "crawlLongest": round(self.overtake.crawl_longest, 1),
-        "aborts": int(self.manoeuvre.aborts),
+        "aborts": int(self.maneuver.aborts),
         "accOnsetMax": round(self.acc_onset_max, 1),
         # The evidence behind the LAST oncoming veto of the drive. Kept because the live panel
         # only shows it while the veto is up, and catching that means glancing at the screen at
@@ -862,7 +862,7 @@ class PassingAssistDetector:
 
     The exit test is latched WHILE they signal, not sampled after. Once the car has moved into the
     ramp lane the road edge belongs to the ramp and the widening that identified it is gone -- so
-    the only moment the evidence exists is while the manoeuvre is still happening.
+    the only moment the evidence exists is while the maneuver is still happening.
     """
     self.driver_change_standdown = max(0.0, self.driver_change_standdown - DT_MDL)
 
@@ -909,8 +909,8 @@ class PassingAssistDetector:
         if side == 'left' and self.has_lead:
           self._record_driver_pass()
         self._driver_blinker = side
-        # NOT cleared if the wheel is already being held. Drifting over and signalling afterwards
-        # is one manoeuvre, and clearing here threw away the widening the steering had already
+        # NOT cleared if the wheel is already being held. Drifting over and signaling afterwards
+        # is one maneuver, and clearing here threw away the widening the steering had already
         # seen -- so an exit taken in that order got the four second pause instead of the full
         # one, which is the case the stand-down exists for.
         if self._steer_held_s == 0.0:
@@ -980,7 +980,7 @@ class PassingAssistDetector:
     Recorded only on the falling edge before, which meant a suggestion that was still up when the
     drive ended was never counted at all. A system that offered one enormous unacted pass per drive
     and nothing else would have reported a spotless record, which is the exact opposite of what
-    that behaviour means.
+    that behavior means.
     """
     live = self._suggest_held_s if (self._prev_suggesting and not self._episode_taken) else 0.0
     return max(self.longest_ignored_s, live)
@@ -1083,14 +1083,14 @@ class PassingAssistDetector:
     return best
 
   def update(self, sm, v_cruise: float, long_enabled: bool, speed_limit_target: float = 0.0) -> None:
-    """Decide, then advance the dry run of the manoeuvre that decision would produce."""
+    """Decide, then advance the dry run of the maneuver that decision would produce."""
     self._decide(sm, v_cruise, long_enabled, speed_limit_target)
-    self._run_manoeuvre(sm['carState'])
+    self._run_maneuver(sm['carState'])
 
-  def _run_manoeuvre(self, CS) -> None:
-    """Feed the dry run. See passing_manoeuvre.py -- this actuates nothing.
+  def _run_maneuver(self, CS) -> None:
+    """Feed the dry run. See passing_maneuver.py -- this actuates nothing.
 
-    Scoped to PASSING only. Keep-right is a different manoeuvre with different gates and a
+    Scoped to PASSING only. Keep-right is a different maneuver with different gates and a
     different urgency, and folding it in here would make the abort count -- the one number this
     produces -- mean two things at once.
     """
@@ -1119,18 +1119,18 @@ class PassingAssistDetector:
     override = bool(CS.leftBlinker or CS.rightBlinker or CS.brakePressed or CS.steeringPressed)
 
     # Keep-right signals when it has DECIDED, not when it first sees somewhere to go -- unlike
-    # passing, where the whole point of signalling early is beating Ford's ACC to the brakes.
+    # passing, where the whole point of signaling early is beating Ford's ACC to the brakes.
     # Nothing is being raced here: moving back over is never urgent, and a blinker lit through the
-    # keep-right delay would be several seconds of telling traffic behind about a manoeuvre that
+    # keep-right delay would be several seconds of telling traffic behind about a maneuver that
     # may not happen.
     kr_side = self.suggestion if self.reason == Reason.keepRight else Side.none
-    kr_rear = self._must_abort(self.keep_right_manoeuvre.side)
-    self.keep_right_manoeuvre.update(clear=kr_side, suggested=kr_side, confirming=False,
+    kr_rear = self._must_abort(self.keep_right_maneuver.side)
+    self.keep_right_maneuver.update(clear=kr_side, suggested=kr_side, confirming=False,
                                      confirmed=kr_side != Side.none, driver_override=override,
                                      collision_abort=kr_rear)
 
     confirmed = self.approach_seconds >= self.persistence_s
-    self.manoeuvre.update(
+    self.maneuver.update(
       clear=self.clear_side,
       suggested=self.suggestion if self.reason == Reason.passing else Side.none,
       confirming=self.approach_seconds > 0.0 and not confirmed,
@@ -1140,7 +1140,7 @@ class PassingAssistDetector:
       driver_override=override,
       # The narrow tier: what may reverse a crossing already begun, as opposed to merely refusing
       # to start one.
-      collision_abort=self._must_abort(self.manoeuvre.side),
+      collision_abort=self._must_abort(self.maneuver.side),
     )
 
   def _must_abort(self, side: int) -> bool:
@@ -1159,25 +1159,25 @@ class PassingAssistDetector:
     else:
       return False
     # The oncoming half is gated on the SETTING, and that deserves stating because it means a
-    # convenience switch can disable a safety behaviour. It is the right way round anyway: the one
+    # convenience switch can disable a safety behavior. It is the right way round anyway: the one
     # reason to turn the oncoming veto off is that it false-fires -- which is exactly what was
     # reported on I-15 -- and an abort driven by phantom sightings would reverse real lane changes
-    # mid-manoeuvre. Off must mean off, not off-except-when-it-matters-most.
+    # mid-maneuver. Off must mean off, not off-except-when-it-matters-most.
     return rear.demands_abort or (self.oncoming_veto and adjacent.blocks_oncoming)
 
   @property
-  def live_manoeuvre(self):
+  def live_maneuver(self):
     """Whichever dry run is actually running, and what it is for.
 
     Only one can ever be: keep-right is evaluated solely on the frames where no pass is warranted.
     Passing wins a tie on principle rather than necessity -- if that assumption ever breaks, the
-    more urgent manoeuvre should be the one on screen.
+    more urgent maneuver should be the one on screen.
     """
-    if self.manoeuvre.phase != Phase.idle:
-      return self.manoeuvre, Reason.passing
-    if self.keep_right_manoeuvre.phase != Phase.idle:
-      return self.keep_right_manoeuvre, Reason.keepRight
-    return self.manoeuvre, Reason.none
+    if self.maneuver.phase != Phase.idle:
+      return self.maneuver, Reason.passing
+    if self.keep_right_maneuver.phase != Phase.idle:
+      return self.keep_right_maneuver, Reason.keepRight
+    return self.maneuver, Reason.none
 
   def _decide(self, sm, v_cruise: float, long_enabled: bool, speed_limit_target: float = 0.0) -> None:
     """
@@ -1198,7 +1198,7 @@ class PassingAssistDetector:
 
     v_cruise = self._reference_speed(CS, sm, v_cruise, speed_limit_target)
 
-    # BLIS is read every cycle regardless of the gates below -- its behaviour approaching a pass
+    # BLIS is read every cycle regardless of the gates below -- its behavior approaching a pass
     # is exactly what needs measuring, including on the frames where nothing is suggested.
     self.left_blindspot = bool(CS.leftBlindspot)
     self.right_blindspot = bool(CS.rightBlindspot)
@@ -1274,7 +1274,7 @@ class PassingAssistDetector:
       self._reset_outputs(Blocked.tooSlow)
       return
 
-    # The driver is already doing something about it. Suggesting a pass mid-manoeuvre is noise,
+    # The driver is already doing something about it. Suggesting a pass mid-maneuver is noise,
     # and it would corrupt the confirmation timer for the far more interesting no-input case.
     # Standing down after the driver's own lane change. Checked before driverActive so the reason
     # on screen is the useful one -- "just changed lanes" explains a silence that outlasts the
@@ -1304,7 +1304,7 @@ class PassingAssistDetector:
         return
       # Inside the window with a live confirmation: carry on. Absorbing a dropped return in the
       # timer but NOT in the verdict would be the worst of both -- the confirmation survives while
-      # the suggestion blinks off for a frame, which is exactly what aborts a signalling sequence.
+      # the suggestion blinks off for a frame, which is exactly what aborts a signaling sequence.
       # Only the lead's own numbers are stale here, by at most LEAD_GAP_GRACE_S; every gate below
       # is re-evaluated live.
       in_grace = True
@@ -1320,7 +1320,7 @@ class PassingAssistDetector:
       self.acc_onset_max = max(self.acc_onset_max, self.acc_onset_d_rel)
 
     # They are braking hard. Wait and see -- see LEAD_BRAKING_MS2. Checked before the close-in
-    # hold because it is the more specific reason and the one a driver would recognise: "that car
+    # hold because it is the more specific reason and the one a driver would recognize: "that car
     # is stopping" beats "still closing" when both are true.
     self.lead_braking_hold = bool(spotted and self.lead_braking_enabled and
                                   self._lead_braking_s < LEAD_BRAKING_HOLD_S)
@@ -1337,7 +1337,7 @@ class PassingAssistDetector:
       self.min_approach_m = self.min_approach_setting
 
     # Hold off while we are still a long way back -- see DEFAULT_MIN_APPROACH_M. The confirmation
-    # timer keeps running underneath, so when the distance is reached the manoeuvre starts at once
+    # timer keeps running underneath, so when the distance is reached the maneuver starts at once
     # rather than beginning a fresh two-second wait.
     #
     # The ACC override is the whole point: any deceleration request, at any distance, abandons the
@@ -1400,7 +1400,7 @@ class PassingAssistDetector:
     # Rear approach. Sits here -- after geometry and the sign veto, before the side is chosen --
     # because it is per-side: a car closing on the left must not veto a pass on the right.
     #
-    # An UNAVAILABLE side does not block. That is the honest behaviour while no rear sensor is
+    # An UNAVAILABLE side does not block. That is the honest behavior while no rear sensor is
     # fitted (blocking would disable the feature outright and hide the real reason), and it is why
     # rearAvailable is published and shown: a suggestion made with no rear sensing must be legible
     # as such rather than pass for a checked one. When a source is fitted this becomes a real gate
@@ -1413,7 +1413,7 @@ class PassingAssistDetector:
     # Beat the LEAD, not our own set speed. We are not asking whether the other lane is fast, we are
     # asking whether it is faster than what we are stuck behind -- a queue crawling at 45 is still
     # worth moving into if the lead is doing 40 and we want 70. The margin is the same deficit that
-    # decided the pass was worth wanting, so one knob governs both halves of the judgement.
+    # decided the pass was worth wanting, so one knob governs both halves of the judgment.
     adj_left = self.adjacent.left.blocks_move(self.lead_v_lead, self.min_deficit_ms)
     adj_right = self.adjacent.right.blocks_move(self.lead_v_lead, self.min_deficit_ms)
 
@@ -1424,7 +1424,7 @@ class PassingAssistDetector:
 
     if not (left_ok or right_ok):
       # Name the gate that actually decided it, most severe first. Oncoming outranks everything:
-      # it is the only one here about a dangerous manoeuvre rather than a wasted one, and it
+      # it is the only one here about a dangerous maneuver rather than a wasted one, and it
       # explains a SUSTAINED silence where the others explain a passing one -- a driver reading
       # "two-way road" understands the feature is off for this whole road.
       if (self.left_geometry_ok and onc_left) or (self.right_geometry_ok and onc_right):
@@ -1450,7 +1450,7 @@ class PassingAssistDetector:
 
     # The confirmation gates COMMITTING, not spotting. Everything above has already run, so the
     # lane is known clear and the blinker is already on -- the two clocks overlap rather than
-    # stacking into a four second wait for a manoeuvre wanted immediately.
+    # stacking into a four second wait for a maneuver wanted immediately.
     if self.approach_seconds < self.persistence_s:
       self.blocked_by = Blocked.nothingSlower
       self.suggestion = Side.none
@@ -1529,7 +1529,7 @@ class PassingAssistDetector:
     # settle timer is expired and least able to stop the second one.
     #
     # Expressed as the passing threshold read backwards -- slower than the set speed by the deficit
-    # margin -- so the two behaviours cannot disagree about what "slow" means.
+    # margin -- so the two behaviors cannot disagree about what "slow" means.
     if self.adjacent.right.blocks_move(self.reference_speed - self.min_deficit_ms, 0.0):
       self.keep_right_seconds = 0.0
       return
@@ -1626,15 +1626,15 @@ class PassingAssistDetector:
     passingAssist.referenceSpeed = float(pa.reference_speed)
     passingAssist.referenceSource = pa.reference_source
 
-    # The dry run. See passing_manoeuvre.py.
-    live, live_reason = pa.live_manoeuvre
-    passingAssist.manoeuvre = live.phase
-    passingAssist.manoeuvreSeconds = float(live.phase_seconds)
-    passingAssist.manoeuvreSide = live.side
-    passingAssist.manoeuvreReason = live_reason
+    # The dry run. See passing_maneuver.py.
+    live, live_reason = pa.live_maneuver
+    passingAssist.maneuver = live.phase
+    passingAssist.maneuverSeconds = float(live.phase_seconds)
+    passingAssist.maneuverSide = live.side
+    passingAssist.maneuverReason = live_reason
     passingAssist.blinkerWouldBeOn = live.blinker_on
     passingAssist.steeringWouldBeActive = live.steering_active
-    passingAssist.keepRightAborts = min(pa.keep_right_manoeuvre.aborts, 65535)
+    passingAssist.keepRightAborts = min(pa.keep_right_maneuver.aborts, 65535)
     passingAssist.minApproachActive = float(pa.min_approach_m)
     passingAssist.driverPasses = min(pa.driver_passes, 65535)
     passingAssist.driverPassesAgreed = min(pa.driver_passes_agreed, 65535)
@@ -1647,15 +1647,15 @@ class PassingAssistDetector:
     passingAssist.lifetimeDrives = min(life_drives, 65535)
     passingAssist.lifetimePasses = min(life_passes, 65535)
     passingAssist.lifetimeAgreed = min(life_agreed, 65535)
-    passingAssist.manoeuvreStandDown = float(max(pa.manoeuvre.standdown_remaining,
-                                                 pa.keep_right_manoeuvre.standdown_remaining))
+    passingAssist.maneuverStandDown = float(max(pa.maneuver.standdown_remaining,
+                                                 pa.keep_right_maneuver.standdown_remaining))
     passingAssist.driverChangeStandDown = float(pa.driver_change_standdown)
     passingAssist.driverChangeWasExit = pa.driver_change_was_exit
     passingAssist.emergencyAborts = min(
-      pa.manoeuvre.emergency_aborts + pa.keep_right_manoeuvre.emergency_aborts, 65535)
+      pa.maneuver.emergency_aborts + pa.keep_right_maneuver.emergency_aborts, 65535)
     # Saturates rather than wraps: a UInt16 rolling over to 0 would read as a clean drive, which is
     # the exact opposite of what a huge abort count means.
-    passingAssist.manoeuvreAborts = min(pa.manoeuvre.aborts, 65535)
+    passingAssist.maneuverAborts = min(pa.maneuver.aborts, 65535)
     passingAssist.leadRadarConfirmed = pa.lead_radar_confirmed
     passingAssist.leadModelProb = float(pa.lead_model_prob)
     for dest, side in ((passingAssist.adjacentLeft, pa.adjacent.left),

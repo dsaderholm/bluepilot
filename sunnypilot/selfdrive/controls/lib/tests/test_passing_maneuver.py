@@ -4,7 +4,7 @@ BluePilot: the dry run of a fully-automatic pass.
 The question this file exists to answer is the owner's: "would it theoretically function
 correctly?" Not "does each gate work" -- that is tested next door -- but does the SEQUENCE hold
 together: does it commit when it should, back out when it should, back out cleanly, and never leave
-a blinker on for a manoeuvre that is not happening.
+a blinker on for a maneuver that is not happening.
 
 So the cases here are transitions and aborts, not states. A state machine that reaches every state
 and mishandles every edge between them would pass a state-coverage suite and strand a car
@@ -13,12 +13,12 @@ mid-signal on the road.
 
 from cereal import custom
 from openpilot.common.realtime import DT_MDL
-from openpilot.sunnypilot.selfdrive.controls.lib.passing_manoeuvre import (
-  PassingManoeuvre, CHANGE_DURATION_S, FINISH_HOLD_S, ABORT_DURATION_S, ABORT_STANDDOWN_S,
+from openpilot.sunnypilot.selfdrive.controls.lib.passing_maneuver import (
+  PassingManeuver, CHANGE_DURATION_S, FINISH_HOLD_S, ABORT_DURATION_S, ABORT_STANDDOWN_S,
 )
 
 Side = custom.LongitudinalPlanSP.PassingAssist.Side
-Phase = custom.LongitudinalPlanSP.PassingAssist.Manoeuvre
+Phase = custom.LongitudinalPlanSP.PassingAssist.Maneuver
 
 
 def run(m, seconds, *, clear=Side.none, suggested=Side.none, confirming=False, confirmed=False,
@@ -30,22 +30,22 @@ def run(m, seconds, *, clear=Side.none, suggested=Side.none, confirming=False, c
 
 
 def armed(lead_s=1.0, confirmed=True):
-  """A machine that has just entered `signalling`, which is where everything interesting happens.
+  """A machine that has just entered `signaling`, which is where everything interesting happens.
 
   `confirmed=True` by default so most cases exercise the gates rather than the confirmation clock;
   the overlap itself is tested explicitly in TestTheClocksOverlap.
   """
-  m = PassingManoeuvre()
+  m = PassingManeuver()
   m.blinker_lead_s = lead_s
   m.update(clear=Side.left, suggested=Side.left if confirmed else Side.none,
            confirming=not confirmed, confirmed=confirmed, driver_override=False)
-  assert m.phase == Phase.signalling
+  assert m.phase == Phase.signaling
   return m
 
 
 class TestTheHappyPath:
   def test_the_whole_sequence_in_order(self):
-    m = PassingManoeuvre()
+    m = PassingManeuver()
     run(m, 0.5, confirming=True)
     assert m.phase == Phase.confirming
 
@@ -53,7 +53,7 @@ class TestTheHappyPath:
     assert m.phase == Phase.waiting, "confirmed but gated is its own state, not 'still deciding'"
 
     run(m, 0.5, clear=Side.left, suggested=Side.left, confirmed=True)
-    assert m.phase == Phase.signalling
+    assert m.phase == Phase.signaling
     assert m.side == Side.left
     assert m.blinker_on and not m.steering_active
 
@@ -74,13 +74,13 @@ class TestTheHappyPath:
   def test_the_signal_hold_is_the_configured_one(self):
     m = armed(lead_s=2.0)
     run(m, 1.5, clear=Side.left, suggested=Side.left, confirmed=True)
-    assert m.phase == Phase.signalling
+    assert m.phase == Phase.signaling
     run(m, 0.6, clear=Side.left, suggested=Side.left, confirmed=True)
     assert m.phase == Phase.changing
 
 
 class TestBackingOut:
-  """The whole point. A gate that flickers is invisible frame by frame and fatal to a manoeuvre."""
+  """The whole point. A gate that flickers is invisible frame by frame and fatal to a maneuver."""
 
   def test_a_gate_going_red_during_the_signal_aborts_and_is_counted(self):
     m = armed()
@@ -92,7 +92,7 @@ class TestBackingOut:
     assert m.aborts == 1, "this is the number the whole module exists to produce"
 
   def test_the_side_changing_mid_signal_also_aborts(self):
-    """Signalling left and then quietly starting to go right would be the worst outcome available:
+    """Signaling left and then quietly starting to go right would be the worst outcome available:
     the traffic behind was told one thing and the car did another."""
     m = armed()
     run(m, 0.3, clear=Side.left, suggested=Side.left, confirmed=True)
@@ -106,7 +106,7 @@ class TestBackingOut:
     run(m, DT_MDL, suggested=Side.none, confirmed=True)
     assert m.aborts == 1
     run(m, DT_MDL, clear=Side.left, suggested=Side.left, confirmed=True)
-    assert m.phase == Phase.signalling
+    assert m.phase == Phase.signaling
     run(m, 1.1, clear=Side.left, suggested=Side.left, confirmed=True)
     assert m.phase == Phase.changing
     assert m.aborts == 1, "recovering is not a second abort"
@@ -128,40 +128,40 @@ class TestTheClocksOverlap:
   """
 
   def test_the_blinker_comes_on_before_the_confirmation_finishes(self):
-    m = PassingManoeuvre()
+    m = PassingManeuver()
     m.update(clear=Side.left, suggested=Side.none, confirming=True, confirmed=False,
              driver_override=False)
-    assert m.phase == Phase.signalling
+    assert m.phase == Phase.signaling
     assert m.blinker_on
-    assert not m.steering_active, "signalling, not moving"
+    assert not m.steering_active, "signaling, not moving"
 
   def test_it_does_not_move_until_confirmed(self):
     """Signal early, commit late. A 1 s signal lead must not let an unconfirmed car be passed."""
     m = armed(lead_s=1.0, confirmed=False)
     run(m, 3.0, clear=Side.left, suggested=Side.none, confirming=True)
-    assert m.phase == Phase.signalling, "the signal lead alone must not start a crossing"
+    assert m.phase == Phase.signaling, "the signal lead alone must not start a crossing"
     assert m.aborts == 0
 
   def test_and_moves_as_soon_as_both_are_satisfied(self):
     m = armed(lead_s=1.0, confirmed=False)
     run(m, 1.5, clear=Side.left, suggested=Side.none, confirming=True)
-    assert m.phase == Phase.signalling
+    assert m.phase == Phase.signaling
     run(m, DT_MDL, clear=Side.left, suggested=Side.left, confirmed=True)
     assert m.phase == Phase.changing
 
   def test_the_wait_is_the_longer_clock_not_their_sum(self):
-    """2 s of confirming and 1 s of signalling is 2 s in total, not 3. That second is the whole
+    """2 s of confirming and 1 s of signaling is 2 s in total, not 3. That second is the whole
     point -- it is a second of Ford ACC not braking for a car we had already decided to pass."""
-    m = PassingManoeuvre()
+    m = PassingManeuver()
     m.blinker_lead_s = 1.0
     run(m, 1.9, clear=Side.left, suggested=Side.none, confirming=True)
-    assert m.phase == Phase.signalling
+    assert m.phase == Phase.signaling
     assert m.phase_seconds >= 1.0, "blinker has already been up for its full lead"
     run(m, DT_MDL, clear=Side.left, suggested=Side.left, confirmed=True)
     assert m.phase == Phase.changing, "should move the instant confirmation lands, not a second after"
 
   def test_a_car_that_turns_out_not_to_be_slow_drops_the_signal(self):
-    """The honest cost of signalling early, and exactly what the abort count is for."""
+    """The honest cost of signaling early, and exactly what the abort count is for."""
     m = armed(lead_s=1.0, confirmed=False)
     run(m, 0.5, clear=Side.left, suggested=Side.none, confirming=True)
     run(m, DT_MDL, clear=Side.none, suggested=Side.none)
@@ -201,7 +201,7 @@ class TestThePointOfNoReturn:
 
 class TestNothingHappensWhenNothingShould:
   def test_idle_stays_idle(self):
-    m = run(PassingManoeuvre(), 5.0)
+    m = run(PassingManeuver(), 5.0)
     assert m.phase == Phase.idle
     assert not m.blinker_on and not m.steering_active
     assert m.aborts == 0
@@ -209,12 +209,12 @@ class TestNothingHappensWhenNothingShould:
   def test_a_driver_signalling_never_starts_a_sequence(self):
     """They are already doing it themselves -- with sunnypilot's own lane change, which stays the
     driver's tool. The dry run must not shadow it."""
-    m = run(PassingManoeuvre(), 3.0, clear=Side.left, suggested=Side.left, confirmed=True, override=True)
+    m = run(PassingManeuver(), 3.0, clear=Side.left, suggested=Side.left, confirmed=True, override=True)
     assert m.phase == Phase.idle
     assert m.aborts == 0
 
   def test_confirming_alone_never_lights_a_blinker(self):
-    m = run(PassingManoeuvre(), 5.0, confirming=True)
+    m = run(PassingManeuver(), 5.0, confirming=True)
     assert m.phase == Phase.confirming
     assert not m.blinker_on
 
@@ -224,7 +224,7 @@ class TestCollisionAbort:
   convenience. It has to exist before automatic lane changes do: a car that cannot back out should
   not be initiating.
 
-  The shape is that abort criteria narrow as the manoeuvre progresses. A gate going red stops a
+  The shape is that abort criteria narrow as the maneuver progresses. A gate going red stops a
   sequence that has not moved and is powerless once the crossing begins -- a car cannot un-change
   lanes on a change of mind. A vehicle ARRIVING behind is a different question, and reversing is
   worth doing from anywhere.
@@ -267,23 +267,23 @@ class TestCollisionAbort:
   def test_it_does_not_immediately_try_again(self):
     """Every input is unchanged after an abort -- slow car still there, lane clear again once the
     vehicle behind has gone past -- so without a stand-down it re-signals within seconds. Backing
-    out and then signalling again is worse than either doing it or not: whoever just went past has
+    out and then signaling again is worse than either doing it or not: whoever just went past has
     no idea what this car is doing."""
     m = armed()
     run(m, DT_MDL, clear=Side.left, suggested=Side.left, confirmed=True, collision=True)
     run(m, ABORT_DURATION_S + 3.0, clear=Side.left, suggested=Side.left, confirmed=True)
-    assert m.phase not in (Phase.signalling, Phase.changing), "re-signalled during the stand-down"
+    assert m.phase not in (Phase.signaling, Phase.changing), "re-signaled during the stand-down"
     assert not m.blinker_on
 
   def test_and_works_again_once_the_stand_down_expires(self):
     m = armed()
     run(m, DT_MDL, clear=Side.left, suggested=Side.left, confirmed=True, collision=True)
     run(m, ABORT_STANDDOWN_S + 1.0, clear=Side.left, suggested=Side.left, confirmed=True)
-    assert m.phase in (Phase.signalling, Phase.changing)
+    assert m.phase in (Phase.signaling, Phase.changing)
 
   def test_a_gate_still_cannot_reverse_a_crossing(self):
     """The narrow tier must stay narrow. If an ordinary gate could do this, every flickering
-    blind-spot reading would throw the car back mid-manoeuvre."""
+    blind-spot reading would throw the car back mid-maneuver."""
     m = armed()
     run(m, 1.1, clear=Side.left, suggested=Side.left, confirmed=True)
     run(m, 0.5, clear=Side.none, suggested=Side.none)
@@ -309,5 +309,5 @@ class TestCollisionAbort:
     assert m.standdown_remaining > 0.0, "nothing on the wire to say why it is refusing"
 
   def test_and_is_zero_when_nothing_has_been_reversed(self):
-    m = run(PassingManoeuvre(), 5.0, clear=Side.left, suggested=Side.left, confirmed=True)
+    m = run(PassingManeuver(), 5.0, clear=Side.left, suggested=Side.left, confirmed=True)
     assert m.standdown_remaining == 0.0

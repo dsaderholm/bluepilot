@@ -32,7 +32,7 @@ X_IDXS = [192.0 * (i / 32.0) ** 2 for i in range(33)]
 
 
 def edge_at(y, curve_radius_m=0.0):
-  """A road edge offset y metres from the path, bending with it."""
+  """A road edge offset y meters from the path, bending with it."""
   base = path(curve_radius_m).y
   return NS(x=list(X_IDXS), y=[b + y for b in base])
 
@@ -282,7 +282,7 @@ class TestOncoming:
 class TestMedians:
   """The case the lateral band cannot settle by itself.
 
-  A divided highway with a jersey barrier and no grass puts the opposing lane centre around 7 m
+  A divided highway with a jersey barrier and no grass puts the opposing lane center around 7 m
   away. That clears ADJACENT_MAX_M, but by less than a lane width, and the margin rests on shoulder
   widths that vary road to road -- while radar lateral error grows with range. The road edge asks
   the question directly instead: beyond the edge of our own drivable surface is not our road.
@@ -347,12 +347,12 @@ SHOULDER = 1.5
 
 def road(*, ego_offset_from_left=0.0, lanes_our_way=1, twltl=False, oncoming_lanes=1,
          divided_median=None):
-  """Build one US road configuration, measured out from ego's lane centre.
+  """Build one US road configuration, measured out from ego's lane center.
 
   Returns (left_edge, oncoming_lane_offsets, same_direction_lane_offsets), all camera-frame
   (negative = left), relative to ego.
 
-  `divided_median` in metres puts a median between our carriageway and theirs; None means oncoming_any_side
+  `divided_median` in meters puts a median between our carriageway and theirs; None means oncoming_any_side
   and the opposing lanes sit inside our own road edge, which is the whole distinction.
   """
   # Lanes to our left on our own side.
@@ -467,7 +467,7 @@ class TestMiddleLaneAmbiguity:
     assert not self._side(strict=True, same_direction_seen=True).blocks_oncoming
 
   def test_oncoming_in_the_next_lane_blocks_regardless_of_the_setting(self):
-    # Not a judgement call, so the flag must not reach it. Two-lane road: opposing traffic IS the
+    # Not a judgment call, so the flag must not reach it. Two-lane road: opposing traffic IS the
     # next lane over.
     left_edge, onc, _ = road(ego_offset_from_left=0, oncoming_lanes=1)
     for strict in (True, False):
@@ -481,7 +481,7 @@ class TestMiddleLaneAmbiguity:
 class TestTurnLaneEvidenceQuality:
   """The discriminator leaks if any moving vehicle counts as proof of a travel lane.
 
-  A car slowing into a centre turn lane is still moving -- 6 or 7 m/s while it decelerates, well
+  A car slowing into a center turn lane is still moving -- 6 or 7 m/s while it decelerates, well
   over MIN_MOVING_MS -- so without a speed floor it would vouch for the lane it is about to stop
   in, and unblock a pass into that exact lane.
   """
@@ -549,7 +549,7 @@ class TestPathOffset:
     assert abs(path_offset(NS(position=path(500.0)), 70.0) - (70.0 ** 2) / 1000.0) < 0.15
 
   def test_missing_path_degrades_to_straight_ahead(self):
-    # No position field at all: the old behaviour, not a crash and not an arbitrary number.
+    # No position field at all: the old behavior, not a crash and not an arbitrary number.
     assert path_offset(NS(), 80.0) == 0.0
 
 
@@ -801,7 +801,7 @@ class TestUnusableRoadEdge:
 
   def test_a_trusted_edge_restores_the_full_band(self):
     """The cost is scoped, not paid everywhere: with a usable edge, traffic two lanes out on an
-    oncoming_any_side road -- a centre turn lane -- is still seen."""
+    oncoming_any_side road -- a center turn lane -- is still seen."""
     adj = upd(AdjacentLane(), FakeSM([self._onc(self.FAR)], left_edge=-14.0), V_EGO, MAX_D)
     assert adj.oncoming_any_side
 

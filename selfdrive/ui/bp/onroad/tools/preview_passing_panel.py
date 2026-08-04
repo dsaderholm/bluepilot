@@ -2,7 +2,7 @@
 """Render the passing-assist panel to PNG, offline, at device scale.
 
 BluePilot: this panel is now the entire readout for passing assist -- every gate, the dry run of
-the manoeuvre, the slow-pass warning and the drive summary all land in the same three lines. It had
+the maneuver, the slow-pass warning and the drive summary all land in the same three lines. It had
 no preview, and the first thing rendering it found was three readouts that were being assembled and
 then silently dropped, because the methods that set `_pa_sub_detail` return before the code that
 folds it into `_pa_sub`. That bug survived a full test suite and would have survived a drive too --
@@ -16,7 +16,7 @@ Usage:  python selfdrive/ui/bp/onroad/tools/preview_passing_panel.py [outdir]
 
 Also writes `all_states.png`, every panel on one sheet with its caption. Eighteen separate files
 are hard to hold in your head; one sheet is how you notice that two states look alike, or that a
-colour means different things in different places.
+color means different things in different places.
 """
 import ast
 import os
@@ -31,7 +31,7 @@ FONTS = os.path.join(ROOT, "selfdrive", "assets", "fonts")
 
 W, H = 1120, 1080
 
-# (caption, main, sub, progress, alert, colour)
+# (caption, main, sub, progress, alert, color)
 AMBER = (240, 175, 60)
 GREEN = (120, 220, 140)
 BLUE = (140, 190, 230)
@@ -45,9 +45,9 @@ SCENES = [
    "Slower car ahead", "no rear data  -  2 this drive", 0.65, False, GREY),
   ("decided",
    "<<<  PASS LEFT", "no rear data  -  3 this drive", 0.0, True, GREEN),
-  ("dry run: signalling",
+  ("dry run: signaling",
    "WOULD SIGNAL LEFT", "waiting before moving  -  3 backed out this drive", 0.7, True, PURPLE),
-  ("dry run: signalling on a camera-only lead",
+  ("dry run: signaling on a camera-only lead",
    "WOULD SIGNAL LEFT", "waiting before moving  -  camera only, speed not radar-measured",
    0.4, True, PURPLE),
   ("dry run: crossing",
@@ -56,7 +56,7 @@ SCENES = [
    "WOULD BACK OUT", "something arriving behind", 0.0, True, RED),
   ("just reversed a crossing, standing down",
    "BACKED OUT", "waiting 8s before trying again", 0.0, True, RED),
-  ("keep right: signalling",
+  ("keep right: signaling",
    "WOULD SIGNAL RIGHT", "moving back over", 0.6, True, PURPLE),
   ("a pass that is grinding",
    "SLOW PASS  14s", "barely gaining on the car left", 0.0, True, AMBER),
@@ -128,11 +128,11 @@ def _contact_sheet(ns, font, outdir):
   rl.begin_texture_mode(tex)
   rl.draw_rectangle_gradient_v(0, 0, SHEET_W, h, rl.Color(88, 92, 98, 255), rl.Color(46, 49, 54, 255))
 
-  for i, (cap, main_text, sub, progress, alert, colour) in enumerate(SCENES):
+  for i, (cap, main_text, sub, progress, alert, color) in enumerate(SCENES):
     top = 20 + i * ROW_H
     stub = types.SimpleNamespace(
       _font_bold=font, _pa_main=main_text, _pa_sub=sub, _pa_progress=progress,
-      _pa_alert=alert, _pa_color=rl.Color(*colour, 255), _pa_panel_rect=None,
+      _pa_alert=alert, _pa_color=rl.Color(*color, 255), _pa_panel_rect=None,
       _handle_panel_tap=lambda panel: None,
     )
     # The panel places itself relative to the rect it is given, so the rect is offset to put it
@@ -184,10 +184,10 @@ def main(outdir):
   rect = rl.Rectangle(0, 0, W, H)
   widest = 0.0
 
-  for i, (cap, main_text, sub, progress, alert, colour) in enumerate(SCENES):
+  for i, (cap, main_text, sub, progress, alert, color) in enumerate(SCENES):
     stub = types.SimpleNamespace(
       _font_bold=font, _pa_main=main_text, _pa_sub=sub, _pa_progress=progress,
-      _pa_alert=alert, _pa_color=rl.Color(*colour, 255),
+      _pa_alert=alert, _pa_color=rl.Color(*color, 255),
       _pa_panel_rect=None,
       # Tap handling needs gui_app; it is input, not drawing, so it is stubbed out entirely.
       _handle_panel_tap=lambda panel: None,

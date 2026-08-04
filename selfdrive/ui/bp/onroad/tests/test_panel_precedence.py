@@ -44,7 +44,7 @@ def test_the_drive_summary_comes_before_anything_moving():
 
 def test_a_slow_pass_outranks_an_uncommitted_dry_run():
   """It is happening now and is the one state a driver might act on."""
-  a, b = _order("_draw_crawl", "_draw_manoeuvre")
+  a, b = _order("_draw_crawl", "_draw_maneuver")
   assert a < b
 
 
@@ -57,9 +57,9 @@ def test_but_not_while_the_car_is_committed():
   assert m, "the committed guard is gone; the crawl can now hide an abort"
   guard = m.group(1)
   assert "changing" in guard and "aborting" in guard
-  assert "manoeuvreStandDown" in guard
+  assert "maneuverStandDown" in guard
   assert re.search(r"if not committed and self\._draw_crawl", body), \
-    "the crawl is no longer gated on the manoeuvre being uncommitted"
+    "the crawl is no longer gated on the maneuver being uncommitted"
 
 
 def test_the_blinker_test_owns_the_panel_outright():

@@ -43,7 +43,7 @@ ACC_PROPULSION_INACTIVE = -4.5  # m/s^2; at or below this the signal carries no 
 # ENG BRAKE sits deliberately OFF that scale, in teal. It is the one state that is both slowing the
 # car and costing nothing -- no pads, and below 1.3 m/s^2 no stop lamps either -- which does not
 # fit on a single "how hard is it slowing" axis. Ford documents ACC as using transmission downshift
-# to slow "without wearing out the brakes", so this is the good outcome and should not be coloured
+# to slow "without wearing out the brakes", so this is the good outcome and should not be colored
 # like an escalation toward red.
 ACC_STATUS_COLORS = {
   "ACCEL": rl.Color(70, 200, 115, 235),
@@ -299,7 +299,7 @@ class HudRendererBP(HudRendererSP):
           brake_light_status = car_state_bp.brakeLightStatus
           self._lamp_data_available = brake_light_status.dataAvailable
           self._brakes_on = brake_light_status.dataAvailable and brake_light_status.brakeLightsOn
-          # Decel request only -- precharge produces no deceleration, so colouring the speed for
+          # Decel request only -- precharge produces no deceleration, so coloring the speed for
           # it would claim the car was slowing when it was not.
           self._acc_braking = (brake_light_status.accDataAvailable and
                                brake_light_status.accDecelRequest)
@@ -471,7 +471,7 @@ class HudRendererBP(HudRendererSP):
     Every number here exists to settle a question that cannot be settled by argument:
 
       slow passes   -> how often a pass grinds, and for how long. Sets the speed-nudge trigger.
-      backed out    -> how often a sequence signalled and had to abandon it. Near zero means the
+      backed out    -> how often a sequence signaled and had to abandon it. Near zero means the
                        gates are steady enough to act on; climbing names an unstable one.
       ACC braked by -> the furthest back Ford's ACC ever lost patience. The close-in hold has to
                        stay clear of this, and until it is measured that hold has no safe value.
@@ -483,7 +483,7 @@ class HudRendererBP(HudRendererSP):
       # Nothing measured yet this drive: show the last one instead. Parking used to throw these
       # away entirely, and they are the whole output of this phase -- read off this panel at a
       # traffic light or not at all.
-      if pa.wantedSeconds <= 0.0 and not pa.crawlEvents and not pa.manoeuvreAborts:
+      if pa.wantedSeconds <= 0.0 and not pa.crawlEvents and not pa.maneuverAborts:
         return self._draw_last_drive()
 
       # Priority order, most useful first -- see _fit_sub, which drops from the end.
@@ -528,7 +528,7 @@ class HudRendererBP(HudRendererSP):
         if pa.longestIgnoredSeconds > 5.0:
           line += f", longest ignored {pa.longestIgnoredSeconds:.0f}s"
         lines.append(line)
-      # Split by manoeuvre only when they disagree. The counters were kept separate so an unstable
+      # Split by maneuver only when they disagree. The counters were kept separate so an unstable
       # gate could be attributed to one or the other -- and then never shown, which made the whole
       # justification for splitting them worthless. One number when they agree, two when they
       # differ, because the difference IS the finding.
@@ -543,8 +543,8 @@ class HudRendererBP(HudRendererSP):
       if pa.accBrakingOnsetMax > 0:
         d = pa.accBrakingOnsetMax if ui_state.is_metric else pa.accBrakingOnsetMax * 3.28084
         lines.append(f"ACC braked by {d:.0f}{'m' if ui_state.is_metric else 'ft'}")
-      if pa.manoeuvreAborts:
-        lines.append(f"{pa.manoeuvreAborts} backed out")
+      if pa.maneuverAborts:
+        lines.append(f"{pa.maneuverAborts} backed out")
       if pa.crawlEvents:
         lines.append(f"{pa.crawlEvents} slow "
                      f"{'pass' if pa.crawlEvents == 1 else 'passes'}, worst {pa.crawlLongestSeconds:.0f}s")
@@ -625,17 +625,17 @@ class HudRendererBP(HudRendererSP):
     self._pa_alert = True
     return True
 
-  def _draw_manoeuvre(self, pa) -> bool:
+  def _draw_maneuver(self, pa) -> bool:
     """The dry run: what a fully automatic pass WOULD be doing right now. Returns True if it owns
     the line this frame.
 
     Nothing here is actuating anything and the wording has to keep saying so, every phase, or a
-    driver glancing at "SIGNALLING LEFT" will reasonably conclude the car did it. Hence the
+    driver glancing at "SIGNALING LEFT" will reasonably conclude the car did it. Hence the
     "would" line under every phase, and no chevrons -- those mean "act on this" everywhere else on
     this screen.
     """
     try:
-      phase = str(pa.manoeuvre)
+      phase = str(pa.maneuver)
     except (AttributeError, KeyError):
       return False
     if phase in ('idle', 'confirming', 'waiting'):
@@ -643,29 +643,29 @@ class HudRendererBP(HudRendererSP):
       # the lane is clear -- both true -- so with nothing said here the screen falls through to a
       # green PASS LEFT seconds after the car backed out of exactly that pass. Contradicting
       # yourself on the one readout a driver is meant to trust is worse than saying nothing.
-      if pa.manoeuvreStandDown > 0.0:
+      if pa.maneuverStandDown > 0.0:
         self._pa_main = "BACKED OUT"
-        self._pa_sub = f"waiting {pa.manoeuvreStandDown:.0f}s before trying again"
+        self._pa_sub = f"waiting {pa.maneuverStandDown:.0f}s before trying again"
         self._pa_color = rl.Color(235, 90, 80, 255)
         self._pa_alert = True
         return True
       return False   # nothing committed yet; the verdict display below is the better readout
 
-    side = str(pa.manoeuvreSide).upper()
-    keep_right = str(pa.manoeuvreReason) == 'keepRight'
+    side = str(pa.maneuverSide).upper()
+    keep_right = str(pa.maneuverReason) == 'keepRight'
     self._pa_alert = True
     self._pa_color = rl.Color(190, 150, 235, 255)   # not the green of a real suggestion
 
-    if phase == 'signalling':
+    if phase == 'signaling':
       self._pa_main = f"WOULD SIGNAL {side}"
       # Keep-right and passing look identical on this line otherwise, and they mean opposite
       # things: one is going round something, the other is getting out of the way.
       self._pa_sub = "moving back over" if keep_right else "waiting before moving"
-      self._pa_progress = min(1.0, pa.manoeuvreSeconds / max(self._pa_blinker_lead, 0.1))
+      self._pa_progress = min(1.0, pa.maneuverSeconds / max(self._pa_blinker_lead, 0.1))
     elif phase == 'changing':
       self._pa_main = f"WOULD BE CHANGING {side}"
       self._pa_sub = "blinker on, steering across"
-      self._pa_progress = min(1.0, pa.manoeuvreSeconds / 4.0)
+      self._pa_progress = min(1.0, pa.maneuverSeconds / 4.0)
     elif phase == 'aborting':
       # Red, alone among these. Every other phase is the system going about its business; this one
       # is it getting out of the way of something, and it should not look like the others.
@@ -678,15 +678,15 @@ class HudRendererBP(HudRendererSP):
 
     # A sequence resting on a camera-only lead is worth seeing AS IT HAPPENS, not just in a log:
     # that lead's speed is the model's guess rather than the radar's measurement, and "4 mph
-    # slower" is the entire judgement. Takes priority over the abort count -- it says something
-    # about THIS manoeuvre, where the count is about the drive.
+    # slower" is the entire judgment. Takes priority over the abort count -- it says something
+    # about THIS maneuver, where the count is about the drive.
     # Appended to _pa_sub directly -- see the note in _draw_drive_summary about _pa_sub_detail.
     if not pa.leadRadarConfirmed:
       self._pa_sub += "  -  camera only, speed not radar-measured"
-    elif pa.manoeuvreAborts:
+    elif pa.maneuverAborts:
       # The number this whole dry run exists to produce, on screen rather than only in the log --
       # a drive where this climbs is a drive that answered the question.
-      self._pa_sub += f"  -  {pa.manoeuvreAborts} backed out this drive"
+      self._pa_sub += f"  -  {pa.maneuverAborts} backed out this drive"
     return True
 
   def _update_passing_assist(self) -> None:
@@ -750,18 +750,18 @@ class HudRendererBP(HudRendererSP):
 
     # ORDER MATTERS, and the obvious order is wrong. A grinding pass is happening now and is the
     # one state a driver might act on, so it outranks the dry run -- but NOT while the car is
-    # committed. Once the manoeuvre is crossing, backing out, or standing down after a reversal, a
+    # committed. Once the maneuver is crossing, backing out, or standing down after a reversal, a
     # slow-pass warning would suppress the only red state this panel has, which is the one that
     # says something arrived behind us. Crawling and crossing can both be true at once: a slow pass
     # IS a car close alongside being barely gained on.
-    committed = str(pa.manoeuvre) in ('changing', 'aborting') or pa.manoeuvreStandDown > 0.0
+    committed = str(pa.maneuver) in ('changing', 'aborting') or pa.maneuverStandDown > 0.0
     if not committed and self._draw_crawl(pa):
       return
 
     # The dry run takes the line whenever a sequence is actually running. It is strictly more
     # informative than the single-frame verdict below -- it says the same thing plus where in the
-    # manoeuvre it is -- and it is the readout the whole phase-2 question turns on.
-    if self._draw_manoeuvre(pa):
+    # maneuver it is -- and it is the readout the whole phase-2 question turns on.
+    if self._draw_maneuver(pa):
       return
 
     # Rising edge only: a suggestion that holds for 30 s is one event, not 600.
@@ -1019,7 +1019,7 @@ class HudRendererBP(HudRendererSP):
 
     center_x = x + width / 2
     label_width = measure_text_cached(self._font_semi_bold, "HOLD", HOLD_LABEL_SIZE).x
-    # The label stays centred on its own and the arrow hangs off its right, so the word does not
+    # The label stays centerd on its own and the arrow hangs off its right, so the word does not
     # shift position every time ICBM starts or stops adjusting.
     rl.draw_text_ex(self._font_semi_bold, "HOLD",
                     rl.Vector2(center_x - label_width / 2, y + 12), HOLD_LABEL_SIZE, 0,
@@ -1170,7 +1170,7 @@ class HudRendererBP(HudRendererSP):
   def _draw_passing_assist(self, rect: rl.Rectangle) -> None:
     """BluePilot: glanceable panel under the speed. Off by default.
 
-    Sized and coloured so the three questions answer themselves in peripheral vision: a dim panel
+    Sized and colored so the three questions answer themselves in peripheral vision: a dim panel
     means running-but-idle, a filling bar means building toward a suggestion, and a bright panel
     with chevrons means it decided and which way. Nothing here instructs -- it reports what an
     observer that checks no approaching traffic would have said.

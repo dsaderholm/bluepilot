@@ -6,7 +6,7 @@ See the LICENSE.md file in the root directory for more details.
 
 BluePilot: tests for the rear-approach interface.
 
-No source is fitted, so these are interface tests, not behaviour tests. They pin the two decisions
+No source is fitted, so these are interface tests, not behavior tests. They pin the two decisions
 that would be expensive to get wrong once a sensor arrives:
 
   - unavailable must never read as clear, at any layer
