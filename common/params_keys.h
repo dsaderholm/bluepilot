@@ -319,23 +319,26 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // 30-60 mph, mirroring FordAngleLow/HighSpeedFactor. 100 = stock behavior for that regime,
     // higher = slows earlier and harder for a given curve, lower = carries more speed through.
     //
-    // These are DERIVED FROM THIS CAR'S ANGLE DETUNE, not picked for feel. The owner runs
-    // FordLowSpeedFactor_ang = 0.92 and FordHighSpeedFactor_ang = 0.87, i.e. commanded steering
-    // is scaled DOWN, and further down at speed. Less response means the car under-turns relative
-    // to what the model asked for, runs wide, and the driver takes over -- the exact outcome these
-    // are meant to prevent. Arriving slower is the direct compensation, because lateral demand
-    // goes as v^2: offsetting a factor f needs v scaled by sqrt(f), so the SCC factor is 1/f.
-    //   0.92 low  -> 1/0.92 = 1.09 -> 110
-    //   0.87 high -> 1/0.87 = 1.15 -> 115
-    // Note the high-speed one is the LARGER correction, which is the opposite of the obvious
-    // guess. High speed is where this car is detuned most, so it is the weaker regime, not the
-    // stronger one.
+    // The owner runs FordLowSpeedFactor_ang = 0.92 and FordHighSpeedFactor_ang = 0.87, set
+    // deliberately while tuning. An earlier version of this comment derived these two values from
+    // those as 1/f, on the reasoning that scaled-down steering means the car under-turns and needs
+    // to arrive slower. That derivation is NOT sound, and the reason is worth keeping:
     //
-    // COUPLED: if the angle factors move back toward 1.0 -- new tires and an alignment are
-    // expected to change the steering behaviour -- bring these down to match, or the car will
-    // slow for curves it no longer needs to slow for.
+    // A gain below 1.0 can mean two opposite things. Either the rack cannot deliver what the model
+    // asks (a deficit, which slowing compensates for), or the model asks for too much and the
+    // scale corrects it (no deficit, and slowing compensates for nothing). BluePilot's own
+    // documentation says the model's desired steering angle is too aggressive in curves and that
+    // in-curve reduction exists for exactly that -- which favours the second reading. Under it,
+    // 0.87 is a car that tracks correctly, not a weak one, and 1/f would slow for a phantom.
+    //
+    // So these are set from the OBJECTIVE instead: minimise takeovers, slower is explicitly
+    // acceptable. A uniform modest bump is defensible under either reading. It is not derived and
+    // should not be presented as though it were.
+    //
+    // The question that would settle it: at 1.0, did the car weave and overshoot (correction), or
+    // run wide in curves (deficit)? Only the second justifies scaling these with the angle gains.
     {"SmartCruiseControlVisionLowSpeedFactor", {PERSISTENT | BACKUP, INT, "110"}},
-    {"SmartCruiseControlVisionHighSpeedFactor", {PERSISTENT | BACKUP, INT, "115"}},
+    {"SmartCruiseControlVisionHighSpeedFactor", {PERSISTENT | BACKUP, INT, "110"}},
     // BluePilot: how early the curve cycle starts, independent of how much it slows. 100 = stock.
     // Higher starts sooner, which spreads the same speed change over more distance.
     // Raised from 100 on 2026-08-01: reported as triggering too late on real drives, most
