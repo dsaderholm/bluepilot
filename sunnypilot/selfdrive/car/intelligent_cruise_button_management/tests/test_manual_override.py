@@ -392,7 +392,8 @@ class TestPressWinsWhileIcbmIsBusy:
 
     for _ in range(120):          # ICBM actively working toward the SLA target: NOT idle
       step()
-    assert icbm.cruise_button != SendButtonState.none or icbm.icbm_idle_frames < 20,       "harness failed to keep ICBM busy, so this would not exercise the bug"
+    assert icbm.cruise_button != SendButtonState.none or icbm.icbm_idle_frames < 20, \
+      "harness failed to keep ICBM busy, so this would not exercise the bug"
     before = cluster
 
     for _ in range(presses):

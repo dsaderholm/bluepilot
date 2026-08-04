@@ -65,8 +65,10 @@ MIN_RANGE_SWEEP_M = 15.0
 #
 # The sweep is also not the bottleneck it looked like. Against a stopped lead at 65 mph the range
 # closes at ~29 m/s, so 15 m costs ~0.5 s and runs concurrently with persistence. What actually
-# bounds how early this fires is TTC (IcbmLeadMaxTtc) and the distance cap -- at 4 s and 65 mph
-# nothing can trigger beyond ~116 m no matter how obvious the target is.
+# bounds how early this fires is whichever of TTC (IcbmLeadMaxTtc) and the distance cap
+# (IcbmLeadMaxDistance) is tighter at the current speed. At the shipped defaults -- 7.0 s and
+# 180 m -- they cross at about 57 mph: below that TTC binds, above it the distance cap does. So at
+# 65 mph the limit is 180 m, not the 203 m the TTC alone would allow.
 STOPPED_LEAD_SPEED_MS = 1.5        # |v_ego + vRel| below this is stopped, not slow
 STOPPED_LEAD_PERSISTENCE_S = 0.3   # enough to reject a single bad model frame, not much more
 # Camera confirmation stands in for most of the range sweep.
@@ -217,9 +219,12 @@ class UnconfirmedLeadDetector:
     if abs(lead.dPath) > MAX_D_PATH_M:
       return False
     # Ford ACC deals with close leads perfectly well. This exists for the distant stopped car, so
-    # the far bound is a sanity limit. The real earliness control is IcbmLeadMaxTtc: against a
-    # stopped lead TTC = dRel / v_ego, so at 65 mph a 4 s TTC already caps range near 116 m and
-    # this gate never binds. Raising this alone does nothing.
+    # the far bound is a sanity limit -- but at the shipped defaults it is NOT a dormant one.
+    #
+    # Against a stopped lead TTC = dRel / v_ego, so IcbmLeadMaxTtc (7.0 s) allows 203 m at 65 mph
+    # while this cap allows 180 m: above roughly 57 mph THIS is the gate that binds, and raising
+    # the TTC alone changes nothing at highway speed. Below 57 mph the TTC binds instead. An
+    # earlier version of this comment assumed a 4 s TTC and concluded the opposite.
     if lead.dRel > self.max_lead_distance:
       return False
     if v_ego < MIN_V_EGO_MS:

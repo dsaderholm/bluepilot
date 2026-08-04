@@ -207,6 +207,10 @@ class HudRendererBP(HudRendererSP):
     """
     self._acc_state, self._acc_accel = "", 0.0
     self._icbm_baseline, self._icbm_arrow = 0, ""
+    # Reset with the rest. Today it cannot be read stale -- the badge only draws when
+    # _icbm_baseline is non-zero, and both are written together below -- but leaving one field of
+    # the group holding last frame's value is a trap for whoever next draws the lock state.
+    self._icbm_hold_locked = False
     sm = ui_state.sm
 
     # BluePilot: the ICBM line is NOT gated on the brake-status toggle. Whether ICBM is holding
@@ -327,7 +331,8 @@ class HudRendererBP(HudRendererSP):
       return
     if lamps_only and not (self._show_brake_status and self._lamp_data_available):
       return
-    if not lamps_only and not self._acc_state and not self._icbm_baseline        and not (self._show_brake_status and self._lamp_data_available):
+    if (not lamps_only and not self._acc_state and not self._icbm_baseline
+        and not (self._show_brake_status and self._lamp_data_available)):
       return
 
     set_speed_width = UI_CONFIG.set_speed_width_metric if ui_state.is_metric else UI_CONFIG.set_speed_width_imperial
@@ -439,7 +444,8 @@ class HudRendererBP(HudRendererSP):
     # just moves the problem to the next state added.
     available = ACC_PILL_WIDTH - 44 - (value_width + 14 if value else 0)
     label_size = ACC_LABEL_SIZE
-    while label_size > ACC_LABEL_MIN_SIZE and         measure_text_cached(self._font_bold, self._acc_state, label_size).x > available:
+    while (label_size > ACC_LABEL_MIN_SIZE
+           and measure_text_cached(self._font_bold, self._acc_state, label_size).x > available):
       label_size -= 2
     # Keep the baseline steady as the size changes, so the row does not jump between states.
     label_y = y + 16 + (ACC_LABEL_SIZE - label_size) * 0.5

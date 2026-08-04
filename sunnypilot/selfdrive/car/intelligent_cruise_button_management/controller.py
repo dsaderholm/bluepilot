@@ -60,12 +60,23 @@ RE_ARM_ON_CRUISE_CYCLE = True  # cancel (or any disengage) followed by re-engage
 # to be remembered across the transition rather than read on the cycle frame.
 RESUME_BUTTONS = (ButtonType.resumeCruise,)
 RESUME_PRESS_MEMORY_FRAMES = 150  # 1.5 s at 100 Hz, generous next to the engage delay
-# ...but the button event cannot be relied on, so RESUME is also recognised from BEHAVIOUR.
+# ...but the button event must not be DEPENDED on, so RESUME is also recognised from BEHAVIOUR.
 #
-# The baselineSource diagnostic came back "I" every single time on this car: the press path never
-# fires, so CS.buttonEvents is not delivering set-speed buttons at all -- flashed SCCM firmware,
-# most likely. resumeCruise arrives by the same route, which is why holds kept vanishing on RESUME
-# no matter how the timing was adjusted. It was never a timing problem.
+# Read the reasoning below carefully, because an earlier version of this comment got it backwards
+# and the wrong version is more persuasive than the right one. It claimed baselineSource read "I"
+# every time, therefore CS.buttonEvents delivers no set-speed buttons at all, therefore the press
+# path is dead code. That conclusion was false and nearly deleted a working path.
+#
+# What actually happens: the press path fires FIRST and the idle fallback relabels it moments
+# later, because a press arms the stand-down, ICBM goes idle by definition, and the driver's held
+# button keeps stepping the set speed for seconds afterwards. Instrumented on a real 5 mph hold --
+# press at the button event, still press at idle 67, overwritten to fallback at idle 128. The
+# BaselineSource.press guard at the fallback site (see "NEVER downgrade a press") is what stops
+# the relabelling now.
+#
+# So the behavioural path below is belt-and-braces, not a replacement. It matters because RESUME
+# has to survive even a frame where the event is missed or arrives outside the memory window --
+# not because the events never come.
 #
 # Ford distinguishes the two itself, in the set speed: RESUME restores the PREVIOUS set speed, SET
 # jumps to the CURRENT VEHICLE SPEED. So once the number settles after re-engaging, whichever it
@@ -275,9 +286,11 @@ class IntelligentCruiseButtonManagement:
     self.v_cluster_at_press = 0      # set speed when the driver's press was seen
     self.press_suppressed = False    # the press happened while a curve/lead owned the target
     self.baseline_diverged = False   # has the baseline ever actually differed from SLA?
-    # BluePilot: which mechanism last captured the hold. Diagnostic and deliberately temporary --
-    # see the capnp comment. Not cleared by clear_baseline: the question is "did the press path
-    # EVER fire this drive", so it has to survive the hold it describes.
+    # BluePilot: which mechanism last captured the hold. Logged, no longer shown on screen -- the
+    # badge tag that used to display it existed to settle whether the press path was dead, and it
+    # is not (see RESUME_BUTTONS above). Kept because it is the only way to tell the two capture
+    # paths apart in a route. Not cleared by clear_baseline: the question it answers is "did the
+    # press path EVER fire this drive", so it has to survive the hold it describes.
     self.baseline_source = BaselineSource.none
     self.cruise_enabled_prev = False
     self.cruise_enabled = False      # current engagement; hold_suppressed reads it
@@ -704,7 +717,8 @@ class IntelligentCruiseButtonManagement:
         #
         # I nearly deleted a working code path on that reading.
         if self.baseline_source != BaselineSource.press:
-          self.baseline_source = BaselineSource.fallbackIdle if fallback_idle else                                  BaselineSource.fallbackCounter
+          self.baseline_source = (BaselineSource.fallbackIdle if fallback_idle
+                                  else BaselineSource.fallbackCounter)
       self.press_settle_frames = PRESS_SETTLE_MAX_FRAMES
       self.cluster_stable_frames = 0
       # Spent. The stand-down now suppresses ICBM's output, so nothing is left to move against.
@@ -728,12 +742,11 @@ class IntelligentCruiseButtonManagement:
     # with one rule. The idle requirement keeps the tail of ICBM's own commanded change from being
     # read as a fresh press; a curve is safe regardless, since the cluster stops moving once ICBM
     # reaches its target and an unmoved cluster is never adopted.
-    # Standing down after a press (see PRESS_SETTLE_FRAMES): ICBM is emitting nothing, so the set
-    # speed can only be moving because the driver is still pressing. Track it until it settles.
-    # Standing down after a press: ICBM emits nothing, so the set speed can only be moving because
-    # the driver is still pressing. Track it, and keep standing down until it stops moving AND no
-    # button is still held. Ending this on a timer instead is what broke it on the road -- the
-    # baseline froze at the pre-press speed on any car whose cluster reports slower than the timer.
+    # Standing down after a press (see PRESS_SETTLE_STABLE_FRAMES / PRESS_SETTLE_MAX_FRAMES): ICBM
+    # emits nothing, so the set speed can only be moving because the driver is still pressing.
+    # Track it, and keep standing down until it stops moving AND no button is still held. Ending
+    # this on a timer instead is what broke it on the road -- the baseline froze at the pre-press
+    # speed on any car whose cluster reports slower than the timer.
     if self.press_settle_frames > 0:
       # Honour what was true when the press happened, not what is true now -- see press_suppressed.
       if not self.press_suppressed:
