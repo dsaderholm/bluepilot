@@ -36,6 +36,8 @@ SCENES = [
   ("precharging: no decel, no lamps, no pads", 58, 55, 70, "", "PRE-BRAKE", 0.0, False, False),
   ("engine braking: slowing, no pads, no lamps", 52, 55, 70, "-", "ENG BRAKE", 0.9, False, False),
   ("no hold, ACC accelerating", 55, 55, 0, "", "ACCEL", 0.6, False, False),
+  ("TSR not working -- the camera's own reason", 70, 55, 70, "", "COAST", 0.0, False, False,
+   "TSR REGION N/A"),
 ]
 
 
@@ -48,7 +50,8 @@ def load_shipped_drawing_code():
   """
   tree = ast.parse(open(HUD, encoding="utf-8").read())
   cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "HudRendererBP")
-  wanted = ("_draw_hold_badge", "_draw_acc_pill", "_draw_arrow", "_draw_brake_lamp_pill")
+  wanted = ("_draw_hold_badge", "_draw_acc_pill", "_draw_arrow", "_draw_brake_lamp_pill",
+            "_draw_tsr_pill")
   methods = [n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name in wanted]
   assert len(methods) == len(wanted), f"expected {wanted}, found {[m.name for m in methods]}"
 
@@ -112,12 +115,14 @@ def main(outdir):
     rl.set_texture_filter(fonts[key].texture, rl.TextureFilter.TEXTURE_FILTER_BILINEAR)
 
   tex = rl.load_render_texture(W, H)
-  for i, (cap, set_speed, limit, hold, arrow, acc, mag, lamps, locked) in enumerate(SCENES):
+  for i, scene in enumerate(SCENES):
+    cap, set_speed, limit, hold, arrow, acc, mag, lamps, locked = scene[:9]
+    tsr = scene[9] if len(scene) > 9 else ""
     stub = types.SimpleNamespace(
       _font_bold=fonts["bold"], _font_semi_bold=fonts["semi"],
       _icbm_baseline=hold, _icbm_arrow=arrow, _acc_state=acc, _acc_accel=mag,
       _brakes_on=lamps, _show_brake_status=True, _lamp_data_available=True,
-      _icbm_hold_locked=locked,
+      _icbm_hold_locked=locked, _tsr_fault=tsr,
       _draw_arrow=ns["_draw_arrow"],
     )
     rl.begin_texture_mode(tex)
@@ -134,7 +139,8 @@ def main(outdir):
       cy += ns["_draw_hold_badge"](stub, x, cy, SET_W) + ns["STACK_GAP"]
     if acc:
       cy += ns["_draw_acc_pill"](stub, x, cy) + ns["STACK_GAP"]
-    ns["_draw_brake_lamp_pill"](stub, x, cy)
+    cy += ns["_draw_brake_lamp_pill"](stub, x, cy) + ns["STACK_GAP"]
+    ns["_draw_tsr_pill"](stub, x, cy)
 
     rl.draw_text_ex(fonts["med"], cap, rl.Vector2(60, H - 70), 34, 0, rl.Color(255, 255, 255, 210))
     rl.end_texture_mode()
