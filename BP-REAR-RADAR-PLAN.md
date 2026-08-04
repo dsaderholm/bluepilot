@@ -1,10 +1,39 @@
 # Rear-facing radar for passing assist — research and integration plan
 
-Research only. Nothing here has been implemented. Branch `passing-assist-phase1`, 2026-08-02.
+Branch `passing-assist-phase1`. Written 2026-08-02 as research; **substantially overtaken by
+2026-08-03**, when much of it was built and some of its assumptions were measured and found wrong.
 
 Confidence is stated per section. Everything marked **UNVERIFIED** is a guess that has not been
 checked against real frames or a primary source, and should be treated the way the BLIS
 approach-detection hypothesis deserved to be treated.
+
+---
+
+## What has changed since this was written — read this before anything below
+
+The sections below still describe hardware honestly; treat their claims about **what is built** as
+stale. As of 2026-08-03:
+
+**Numbers that were unknown and are now measured, on the car:**
+
+| Was | Is |
+|---|---|
+| "Ford ACC probably starts braking around 60–70 m" | **~137 m (449 ft)**, measured. Far earlier. The close-in hold is sized from it automatically and re-learns every drive. |
+| Rear approach: shape unknown | Interface built, `RearApproachSide.demands_abort` at TTC < 3 s vs 8 s to refuse a start. Entirely inert with no sensor, pinned by test. |
+| Turn signal actuation: untried | Tried once. Lamp flashed fast and erratically. **Root cause still unknown** — the send-rate change was a guess and probably the wrong direction. See `ford-blinker-command-unproven`. |
+
+**Built since, and not described below:** the manoeuvre dry run (signal → wait → cross → finish,
+plus a reversal state) for passing *and* keep-right; the collision abort with a 10 s stand-down;
+lane-age exit detection, which replaced the outermost-lane rule §14 assumes is live; a
+driver-lane-change stand-down; and the whole measurement layer — agreement with the driver,
+suggestions nobody took, where the drive's time went, accumulated across drives.
+
+**The one confirmed on-road bug: the oncoming veto firing on I-15**, a divided highway. Three
+mitigations shipped, root cause unknown, and the panel now prints the speed and distance that fired
+it so the next occurrence diagnoses itself.
+
+**Current state, always: `passing-assist-state` in memory.** This document is the hardware plan and
+the reasoning behind it; that memory is what is true today.
 
 ---
 
@@ -1641,6 +1670,11 @@ it.
 ---
 
 ## 14. What else the three sensors would make possible
+
+> **Status note, 2026-08-03.** Item 1 (lane-change abort) is now BUILT and inert, waiting only for
+> a sensor — see `passing-assist-roadmap`. Item 5 is downgraded to an on-screen warning for the
+> reason given at the end of this document. The rest stand as written.
+
 
 Asked 2026-08-03. Ordered by value, with the honest verdict on each. Nothing here is built; this is
 the shortlist for after the sensor exists.
