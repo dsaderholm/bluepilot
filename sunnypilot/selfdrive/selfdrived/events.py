@@ -350,6 +350,18 @@ EVENTS_SP: dict[int, dict[str, Alert | AlertCallbackType]] = {
       Priority.LOW, VisualAlert.none, AudibleAlertSP.promptSingleHigh, 5.),
   },
 
+  # BluePilot: a bare chime when passing assist decides. No text and AlertSize.none, so it takes
+  # nothing over -- the panel is already saying which side and why, and an alert box on top of it
+  # would cover the readout at the one moment it is worth reading. Short: this is a notification
+  # that a decision happened, not a warning to act on.
+  EventNameSP.passingAssistSuggested: {
+    ET.PERMANENT: Alert(
+      "",
+      "",
+      AlertStatus.normal, AlertSize.none,
+      Priority.LOW, VisualAlert.none, AudibleAlert.prompt, 1.),
+  },
+
   EventNameSP.e2eChime: {
     ET.PERMANENT: Alert(
       "",

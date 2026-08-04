@@ -438,6 +438,11 @@ class _KeepRightOnParams:
     return self.values[key]
 
   def get_bool(self, key, block=False):
+    # Overrides first, so a BOOL param can actually be switched off in a test. It could not before:
+    # this answered True for everything except the suspend one-shot, whatever was passed in, so any
+    # test of a toggle's OFF state quietly asserted nothing.
+    if key in self.values:
+      return bool(self.values[key])
     return key != "PassingAssistSuspend"
 
   def put_bool(self, key, val):
@@ -2281,3 +2286,57 @@ class TestItDoesNotAbortItsOwnPass:
     det.actuating = False
     assert det._driver_override(NS(leftBlinker=True, rightBlinker=False,
                                    brakePressed=False, steeringPressed=False))
+
+
+class TestTheChime:
+  """A sound when it decides. See passingAssistSuggested in custom.capnp.
+
+  The panel is this feature's whole readout, and it is the wrong medium for the one moment that
+  matters -- nobody is reading a screen when a car moves. Ford sounds one before a BlueCruise lane
+  change for the same reason.
+
+  What these fix is that it fires ONCE PER DECISION. A suggestion stands for many seconds; a chime
+  on every frame of it would be twenty tones a second and the feature would be switched off inside
+  a mile.
+  """
+
+  def test_it_fires_on_the_frame_the_suggestion_appears(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES)
+    assert det.suggestion == Side.left
+    fired = sum(1 for _ in [1] if det.suggestion_started)
+    # Step one more frame with the same scene: the suggestion still stands, the edge does not.
+    run(det, 1)
+    assert det.suggestion == Side.left, "scene changed; this is no longer testing the edge"
+    assert not det.suggestion_started, "chimed again while the same suggestion still stood"
+    assert fired <= 1
+
+  def test_exactly_one_edge_across_a_whole_suggestion(self):
+    det = PassingAssistDetector()
+    edges = 0
+    for _ in range(STUCK_FRAMES * 2):
+      det.update(make_sm(), CRUISE_MS, True)
+      edges += bool(det.suggestion_started)
+    assert det.suggestion == Side.left
+    assert edges == 1, f"chimed {edges} times for one pass"
+
+  def test_a_second_pass_chimes_again(self):
+    """It has to re-arm, or only the first pass of a drive is ever announced."""
+    det = PassingAssistDetector()
+    edges = 0
+    for _ in range(STUCK_FRAMES * 2):
+      det.update(make_sm(), CRUISE_MS, True)
+      edges += bool(det.suggestion_started)
+    for _ in range(int(3.0 / DT_MDL)):        # lead gone: the suggestion drops
+      det.update(make_sm(status=False), CRUISE_MS, True)
+      edges += bool(det.suggestion_started)
+    assert det.suggestion != Side.left
+    for _ in range(STUCK_FRAMES * 2):
+      det.update(make_sm(), CRUISE_MS, True)
+      edges += bool(det.suggestion_started)
+    assert edges == 2, f"expected one chime per pass, got {edges}"
+
+  def test_the_toggle_is_read(self):
+    det = PassingAssistDetector()
+    det.params = _KeepRightOnParams(PassingAssistChime=False)
+    run(det, 4)
+    assert det.chime_enabled is False

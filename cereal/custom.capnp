@@ -946,6 +946,17 @@ struct OnroadEventSP @0xda96579883444c35 {
     unconfirmedLeadBraking @25;
     # BluePilot: model wants to stop (sign/signal) and Ford ACC will not
     modelStopBraking @26;
+    # BluePilot: passing assist has decided a pass is on. A SOUND, not a message.
+    #
+    # The whole readout for this feature is three lines of text on the panel, which is fine for
+    # reading numbers at a light and useless for the moment that actually matters -- the system
+    # deciding to go. Ford gives a visual AND audible prompt before a BlueCruise lane change for
+    # the same reason: nobody is watching the screen at the moment a car moves.
+    #
+    # Earns its place in phase 1 too, before anything actuates. It turns every suggestion into
+    # something noticed at the time rather than a counter read afterwards, which is exactly what
+    # the agreement measurement needs -- a chime, then whether you would have gone anyway.
+    passingAssistSuggested @27;
   }
 }
 

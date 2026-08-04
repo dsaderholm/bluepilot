@@ -59,6 +59,15 @@ class PassingAssistSettingsLayout(Widget):
                      "idea can be judged from real drives before anything is wired to it."),
       param="PassingAssistLogEnabled")
 
+    self._chime = toggle_item_sp(
+      title=tr("Chime When It Decides"),
+      description=tr("A short tone the moment a pass is worked out, so you hear it instead of "
+                     "having to be looking at the screen. Nothing else changes -- the panel still "
+                     "shows which side and why. Ford sounds one before a BlueCruise lane change "
+                     "for the same reason: at the moment a car moves, nobody is reading a "
+                     "display."),
+      param="PassingAssistChime")
+
     # --- deciding a pass is wanted ---
     self._min_deficit = option_item_sp(
       title=tr("Slower By At Least"),
@@ -298,6 +307,7 @@ class PassingAssistSettingsLayout(Widget):
     # what appears on screen.
     return [
       self._enabled,
+      self._chime,
 
       SectionHeader(tr("Deciding To Pass")),
       self._min_deficit,

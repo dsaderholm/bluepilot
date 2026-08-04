@@ -16,7 +16,7 @@ from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.speed_limit_assist 
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.speed_limit_resolver import SpeedLimitResolver
 from openpilot.sunnypilot.selfdrive.controls.lib.passing_assist import PassingAssistDetector
 from openpilot.sunnypilot.selfdrive.controls.lib.unconfirmed_lead import UnconfirmedLeadDetector
-from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP
+from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP, EventNameSP
 from openpilot.sunnypilot.models.helpers import get_active_bundle
 
 DecState = custom.LongitudinalPlanSP.DynamicExperimentalControl.DynamicExperimentalControlState
@@ -82,6 +82,11 @@ class LongitudinalPlannerSP:
     sl_target = (self.resolver.speed_limit_final
                  if self.sla.enabled and self.resolver.speed_limit_valid else 0.0)
     self.passing_assist.update(sm, v_cruise_cluster, long_enabled, sl_target)
+    # ...with one exception to "log only": a chime when it decides. See passingAssistSuggested --
+    # the panel is the whole readout for this feature and nobody is reading it at the moment that
+    # matters. Still no target and no return value; the only thing that leaves here is a sound.
+    if self.passing_assist.suggestion_started and self.passing_assist.chime_enabled:
+      self.events_sp.add(EventNameSP.passingAssistSuggested)
 
     # Speed Limit Assist
     has_speed_limit = self.resolver.speed_limit_valid or self.resolver.speed_limit_last_valid

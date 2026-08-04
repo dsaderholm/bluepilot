@@ -482,6 +482,9 @@ class PassingAssistDetector:
     # See suggestionsMade in custom.capnp -- the other error direction.
     self.suggestions_made = 0
     self.suggestions_taken = 0
+    # True for the single frame a suggestion appears. See passingAssistSuggested.
+    self.suggestion_started = False
+    self.chime_enabled = True
     self.longest_ignored_s = 0.0
     self._episode_taken = False
     self._prev_suggesting = False
@@ -553,6 +556,7 @@ class PassingAssistDetector:
       self.settle_time_s = float(self.params.get("PassingAssistSettleTime", return_default=True))
       self.suspend_minutes = self.params.get("PassingAssistSuspendMinutes", return_default=True)
       self.max_distance_m = float(self.params.get("PassingAssistMaxDistance", return_default=True))
+      self.chime_enabled = self.params.get_bool("PassingAssistChime")
 
   def _reset_outputs(self, blocked: int) -> None:
     self.clear_side = Side.none
@@ -905,6 +909,9 @@ class PassingAssistDetector:
     suggesting = self.suggestion != Side.none and self.reason == Reason.passing
     if suggesting:
       self._suggest_held_s += DT_MDL
+    # See passingAssistSuggested -- one frame, on the rising edge, so the chime fires once per
+    # decision rather than for every frame the suggestion stands.
+    self.suggestion_started = suggesting and not self._prev_suggesting
     if suggesting and not self._prev_suggesting:
       self.suggestions_made += 1
       self._episode_taken = False
