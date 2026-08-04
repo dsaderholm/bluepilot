@@ -318,8 +318,24 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // BluePilot: SCC-Vision curve aggressiveness, split by speed regime and blended across
     // 30-60 mph, mirroring FordAngleLow/HighSpeedFactor. 100 = stock behavior for that regime,
     // higher = slows earlier and harder for a given curve, lower = carries more speed through.
-    {"SmartCruiseControlVisionLowSpeedFactor", {PERSISTENT | BACKUP, INT, "115"}},
-    {"SmartCruiseControlVisionHighSpeedFactor", {PERSISTENT | BACKUP, INT, "105"}},
+    //
+    // These are DERIVED FROM THIS CAR'S ANGLE DETUNE, not picked for feel. The owner runs
+    // FordLowSpeedFactor_ang = 0.92 and FordHighSpeedFactor_ang = 0.87, i.e. commanded steering
+    // is scaled DOWN, and further down at speed. Less response means the car under-turns relative
+    // to what the model asked for, runs wide, and the driver takes over -- the exact outcome these
+    // are meant to prevent. Arriving slower is the direct compensation, because lateral demand
+    // goes as v^2: offsetting a factor f needs v scaled by sqrt(f), so the SCC factor is 1/f.
+    //   0.92 low  -> 1/0.92 = 1.09 -> 110
+    //   0.87 high -> 1/0.87 = 1.15 -> 115
+    // Note the high-speed one is the LARGER correction, which is the opposite of the obvious
+    // guess. High speed is where this car is detuned most, so it is the weaker regime, not the
+    // stronger one.
+    //
+    // COUPLED: if the angle factors move back toward 1.0 -- new tires and an alignment are
+    // expected to change the steering behaviour -- bring these down to match, or the car will
+    // slow for curves it no longer needs to slow for.
+    {"SmartCruiseControlVisionLowSpeedFactor", {PERSISTENT | BACKUP, INT, "110"}},
+    {"SmartCruiseControlVisionHighSpeedFactor", {PERSISTENT | BACKUP, INT, "115"}},
     // BluePilot: how early the curve cycle starts, independent of how much it slows. 100 = stock.
     // Higher starts sooner, which spreads the same speed change over more distance.
     // Raised from 100 on 2026-08-01: reported as triggering too late on real drives, most
