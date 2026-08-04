@@ -33,6 +33,27 @@ TARGET_ACCEL = -1.2  # m/s^2 should match up with the long planner limit
 # The value that matters for the stop lamps is 1.3 m/s^2 (UN R13-H). The stock -1.2 sits just under
 # it deliberately. Going past 1.3 here is asking for the brake lights, which is sometimes the right
 # trade on a tight ramp and should be a decision rather than an accident.
+
+# BluePilot: cross-check the map's curve against what the camera actually sees.
+#
+# SCC-Map slows from OSM way geometry. When that geometry is wrong -- a road since straightened, a
+# badly drawn bend, or GPS placing the car on the frontage road instead of the freeway -- it slows
+# for a curve that is not there, and nothing can stop it: both controllers feed a min() in the
+# planner, so either may LOWER the target and neither can veto the other. SCC-Vision detecting no
+# curve is not a "no", it is silence, and min() ignores silence.
+#
+# So the veto has to live here. It only applies once the curve is close enough for the camera to
+# have a real opinion -- beyond that, "the model sees nothing" means "not yet", not "nothing is
+# there", and vetoing on it would disable the one thing SCC-Map is for: seeing around a bend the
+# camera cannot.
+#
+# The model plans roughly 10 s ahead, so its useful horizon in metres scales with speed.
+MODEL_HORIZON_S = 10.0
+# Predicted lateral acceleration below this means the camera is looking at a straight road. Well
+# under _ENTERING_PRED_LAT_ACC_TH (1.3) in vision_controller: this is not "is there a curve worth
+# slowing for", it is "is there a curve at all".
+MODEL_DISAGREE_LAT_ACC = 0.4
+
 SCC_MAP_DECEL_MIN = 0.4   # m/s^2, magnitude. Gentler than this and the trigger distance is absurd.
 SCC_MAP_DECEL_MAX = 2.5
 TARGET_OFFSET = 1.0  # seconds - This controls how soon before the curve you reach the target velocity. It also helps
@@ -90,6 +111,9 @@ class SmartCruiseControlMap:
     self.mem_params = Params("/dev/shm/params") if platform.system() != "Darwin" else self.params
     self.enabled = self.params.get_bool("SmartCruiseControlMap")
     self.target_accel = TARGET_ACCEL
+    self.model_lat_acc = 0.0
+    self.model_vetoed = False   # logged so a missing slowdown can be explained rather than guessed
+    self.target_distance = float('inf')
     self.long_enabled = False
     self.long_override = False
     self.is_enabled = False
@@ -191,17 +215,21 @@ class SmartCruiseControlMap:
         max_d += calculate_distance(t, 0, self.target_accel, min_accel_v)
 
       if d < max_d + tv * TARGET_OFFSET:
-        valid_velocities.append((float(tv), tlat, tlon))
+        valid_velocities.append((float(tv), tlat, tlon, d))
 
     # Find the smallest velocity we need to adjust for
     min_v = 100.0
     target_lat = 0.0
     target_lon = 0.0
-    for tv, lat, lon in valid_velocities:
+    # BluePilot: how far away the chosen curve is, kept so the model cross-check knows whether the
+    # camera could even see it yet.
+    self.target_distance = float('inf')
+    for tv, lat, lon, d in valid_velocities:
       if tv < min_v:
         min_v = tv
         target_lat = lat
         target_lon = lon
+        self.target_distance = d
 
     if self.v_target < min_v and not (self.target_lat == 0 and self.target_lon == 0):
       for i in range(len(forward_points)):
@@ -264,7 +292,19 @@ class SmartCruiseControlMap:
 
     return enabled, active
 
-  def update(self, long_enabled: bool, long_override: bool, v_ego, a_ego, v_cruise) -> None:
+  def _model_disagrees(self, target_distance_m: float) -> bool:
+    """Does the camera see a straight road where the map claims a curve?
+
+    Only meaningful inside the model's own horizon. Outside it the model has nothing to say and
+    silence must not be read as disagreement.
+    """
+    horizon = self.v_ego * MODEL_HORIZON_S
+    if target_distance_m > horizon or horizon <= 0:
+      return False
+    return self.model_lat_acc < MODEL_DISAGREE_LAT_ACC
+
+  def update(self, long_enabled: bool, long_override: bool, v_ego, a_ego, v_cruise,
+             model_lat_acc: float = 0.0) -> None:
     self.long_enabled = long_enabled
     self.long_override = long_override
     self.v_ego = v_ego
@@ -275,6 +315,15 @@ class SmartCruiseControlMap:
     self.update_calculations()
 
     self.is_enabled, self.is_active = self._update_state_machine()
+
+    # BluePilot: the camera's veto, applied at the single output point rather than inside the state
+    # machine -- the machine's own bookkeeping stays untouched, so a veto that lifts resumes cleanly
+    # instead of having to re-enter from disabled. is_active is cleared too, so the SCC-M badge does
+    # not claim to be acting while it is being overruled.
+    self.model_lat_acc = model_lat_acc
+    self.model_vetoed = bool(self.is_active and self._model_disagrees(self.target_distance))
+    if self.model_vetoed:
+      self.is_active = False
 
     self.output_v_target = self.get_v_target_from_control()
     self.output_a_target = self.get_a_target_from_control()

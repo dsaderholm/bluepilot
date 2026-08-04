@@ -73,6 +73,7 @@ class SpeedLimitResolver:
     self.offset_mid_threshold = self.params.get("SpeedLimitOffsetMidThreshold", return_default=True)
     self.offset_high_threshold = self.params.get("SpeedLimitOffsetHighThreshold", return_default=True)
     self.fallback = self.params.get("SpeedLimitFallback", return_default=True)
+    self.lookahead_higher = self.params.get("SpeedLimitLookaheadHigher", return_default=True)
 
     self.speed_limit = 0.
     self.speed_limit_last = 0.
@@ -116,6 +117,7 @@ class SpeedLimitResolver:
       self.offset_mid_threshold = self.params.get("SpeedLimitOffsetMidThreshold", return_default=True)
       self.offset_high_threshold = self.params.get("SpeedLimitOffsetHighThreshold", return_default=True)
       self.fallback = self.params.get("SpeedLimitFallback", return_default=True)
+      self.lookahead_higher = self.params.get("SpeedLimitLookaheadHigher", return_default=True)
 
   def _get_speed_limit_offset(self) -> float:
     if self.offset_type == OffsetType.off:
@@ -199,6 +201,24 @@ class SpeedLimitResolver:
       adapt_distance = self.v_ego * adapt_time + 0.5 * LIMIT_ADAPT_ACC * adapt_time ** 2
 
       if distance_to_speed_limit_ahead <= adapt_distance:
+        self.limit_solutions[SpeedLimitSource.map] = next_speed_limit
+        self.distance_solutions[SpeedLimitSource.map] = distance_to_speed_limit_ahead
+
+    # BluePilot: the mirror case, which upstream does not have -- an upcoming limit that is HIGHER.
+    #
+    # Leaving a slow zone, the set speed only starts climbing once the car is past the sign, and
+    # ICBM's rise limiter then walks it up in steps. The result is a long crawl out of a 35 zone
+    # onto a 65 road. Adopting the higher limit a little early means the car is already at speed
+    # where the faster road begins, which is where it needs to be.
+    #
+    # Time-based rather than the deceleration geometry used above, and deliberately so: slowing has
+    # a correct answer set by physics -- meet the new limit at the sign -- while speeding up has no
+    # such constraint. It is purely a question of how soon you want it, so it is a plain lead time.
+    #
+    # Bounded by the sign, never past it: adopting a 65 while still in the 35 is a ticket. The lead
+    # time buys ICBM room to walk the set speed up, not permission to arrive early.
+    elif next_speed_limit > speed_limit > 0. and self.lookahead_higher > 0:
+      if distance_to_speed_limit_ahead <= self.v_ego * self.lookahead_higher:
         self.limit_solutions[SpeedLimitSource.map] = next_speed_limit
         self.distance_solutions[SpeedLimitSource.map] = distance_to_speed_limit_ahead
 

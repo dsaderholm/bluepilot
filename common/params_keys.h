@@ -331,6 +331,12 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // Defaults to standing down: reported from the road that leaving I-215 carried the freeway's
     // 70 down the ramp and along a residential street until OSM had data again.
     {"SpeedLimitFallback", {PERSISTENT | BACKUP, INT, "0"}},
+    // BluePilot: seconds of lead time before an upcoming HIGHER limit is adopted. Slowing for a
+    // lower limit is geometry -- meet the new number at the sign -- but speeding up has no such
+    // constraint, so this is a plain lead time rather than a deceleration curve. Exists because
+    // leaving a slow zone otherwise means waiting until past the sign and then watching ICBM walk
+    // the set speed up in steps. 0 disables it. Never adopts past the sign, only before it.
+    {"SpeedLimitLookaheadHigher", {PERSISTENT | BACKUP, INT, "4"}},
     {"SpeedLimitAutoFollow", {PERSISTENT | BACKUP, BOOL, "1"}},
     // Ceiling for what SLA may request, in display units (mph/kph). Well under Ford ACC's 110 mph cap.
     {"SpeedLimitMaxSetSpeed", {PERSISTENT | BACKUP, INT, "85"}},

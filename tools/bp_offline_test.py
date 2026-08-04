@@ -56,6 +56,8 @@ DEFAULT_TARGETS = [
   "sunnypilot/selfdrive/car/intelligent_cruise_button_management/tests/",
   "opendbc_repo/opendbc/sunnypilot/car/ford/tests/",
   "sunnypilot/selfdrive/controls/lib/tests/test_unconfirmed_lead.py",
+  "sunnypilot/selfdrive/controls/lib/smart_cruise_control/tests/test_map_model_veto.py",
+  "selfdrive/ui/tests/test_settings_fit.py",
   # Named files, not the directory: test_speed_limit_assist.py in the same folder imports the
   # sunnylink/API stack (jwt and friends) and cannot collect without the device environment.
   # Listing the folder pulled it in and broke collection for everything.
@@ -92,8 +94,13 @@ def find_interpreter() -> str | None:
 def install_stubs() -> None:
   """Stand in for the device-only modules the suite imports at collection time."""
   keys_src = (REPO / "common" / "params_keys.h").read_text()
-  defaults = dict(re.findall(r'\{"(\w+)", \{[^,]+, (?:INT|BOOL), "(\d+)"\}', keys_src))
+  defaults = dict(re.findall(r'\{"(\w+)", \{[^,]+, (?:INT|BOOL|FLOAT), "([^"]+)"\}', keys_src))
   known = set(re.findall(r'\{"(\w+)",', keys_src))
+  # Which keys hold text rather than a number. The device returns None or a string for these, and
+  # returning 0 instead is not a harmless stub difference: json.loads(0) raises TypeError, which is
+  # how SmartCruiseControlMap could not be constructed in a test at all. A stub that answers with
+  # the wrong TYPE fails in ways the device never would, which is the one thing it must not do.
+  text_keys = set(re.findall(r'\{"(\w+)", \{[^,]+, (?:STRING|JSON|BYTES|TIME)[,}]', keys_src))
 
   rt = types.ModuleType("openpilot.common.realtime")
   rt.DT_CTRL, rt.DT_MDL, rt.DT_HW = 0.01, 0.05, 0.5
@@ -128,7 +135,10 @@ def install_stubs() -> None:
     def get(self, key, *a, **k):
       if key not in known:
         raise KeyError(f"UnknownKeyName: {key}")
-      return int(defaults.get(key, 0))
+      if key in text_keys:
+        return defaults.get(key)          # None when unset, exactly like the device
+      raw = defaults.get(key, "0")
+      return float(raw) if "." in raw else int(raw)
 
     def get_bool(self, key, *a, **k):
       if key not in known:
