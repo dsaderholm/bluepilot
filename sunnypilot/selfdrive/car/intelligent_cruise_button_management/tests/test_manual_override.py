@@ -1077,6 +1077,25 @@ class TestPressingDuringACurveDoesNotRedefineTheHold:
         cluster += 1
     assert cluster == DRIVER, f"returned to {cluster}, not the driver's {DRIVER}"
 
+  def test_scc_reclaims_the_set_speed_after_the_press(self):
+    """The owner's stated expectation: on a curve they would use the pedals, and if they did press
+    +/- they would want it to go back to what SCC wants. Leaving the hold alone is only half of
+    that -- the curve target has to reassert itself too, and promptly."""
+    icbm = fresh()
+    set_baseline(icbm)
+    cluster = self._into_a_curve(icbm)
+    icbm.run(make_cs(cluster, buttons=(ACCEL_PRESS,)), CC,
+             make_lp(45, source=PlanSource.sccVision), False)
+    cluster += 5
+    icbm.run(make_cs(cluster, buttons=(ACCEL_RELEASE,)), CC,
+             make_lp(45, source=PlanSource.sccVision), False)
+    for _ in range(300):                       # measured at ~0.8 s; 3 s is ample headroom
+      icbm.run(make_cs(cluster), CC, make_lp(45, source=PlanSource.sccVision), False)
+      if icbm.cruise_button == SendButtonState.decrease:
+        cluster -= 1
+    assert cluster == 45, f"SCC never reclaimed the set speed; stuck at {cluster}"
+    assert icbm.v_baseline == DRIVER
+
   def test_a_press_with_no_curve_still_sets_the_hold(self):
     """The guard must be narrow -- under cruise/SLA the driver IS choosing the number."""
     icbm = fresh()
