@@ -173,7 +173,7 @@ _BLOCKED_TEXT = {
   'rearApproaching': "Traffic coming up behind",
   'suspended': "Paused",
   'adjacentSlow': "Next lane is no faster",
-  'oncomingLane': "Two-way road - no passing",
+  'oncomingLane': "Oncoming traffic that side",
   'closingIn': "Closing in",
   'leadBraking': "Car ahead is braking",
 }
@@ -505,6 +505,11 @@ class HudRendererBP(HudRendererSP):
         lines.append(f"{n} slow {'pass' if n == 1 else 'passes'}, worst {float(d['crawlLongest']):.0f}s")
       if d.get("aborts"):
         lines.append(f"{int(d['aborts'])} backed out")
+      if float(d.get("oncomingDRel", 0)) > 0:
+        od = float(d["oncomingDRel"])
+        ov = abs(float(d["oncomingVAbs"])) * (3.6 if ui_state.is_metric else 2.23694)
+        du = od if ui_state.is_metric else od * 3.28084
+        lines.append(f"oncoming: {ov:.0f} at {du:.0f}{'m' if ui_state.is_metric else 'ft'}")
       if float(d.get("accOnsetMax", 0)) > 0:
         m = float(d["accOnsetMax"])
         v = m if ui_state.is_metric else m * 3.28084
@@ -701,7 +706,15 @@ class HudRendererBP(HudRendererSP):
           # veto is either seeing the opposite carriageway or inventing traffic -- and the two
           # need completely different fixes. The numbers tell them apart at a glance, which is the
           # only way to tell without reading a log.
-          onc = pa.adjacentLeft if pa.adjacentLeft.oncoming else pa.adjacentRight
+          # Named per SIDE, because that is all this ever knew. The veto has always been
+          # per-side -- on a four-lane undivided road in the left lane, the oncoming lane is one
+          # to the left and an ordinary through lane is one to the right, and the right is still
+          # offered. Calling the state "two-way road" claimed something about the whole road that
+          # was never measured, and on I-15 it read as a flat error rather than as "something came
+          # at me on this side", which is the honest and much narrower claim.
+          left = pa.adjacentLeft.oncoming or pa.adjacentLeft.oncomingSeconds > 0
+          onc = pa.adjacentLeft if left else pa.adjacentRight
+          self._pa_main = f"ONCOMING {'LEFT' if left else 'RIGHT'}"
           conv = 2.23694 if not ui_state.is_metric else 3.6
           if onc.oncomingDRel > 0:
             d = onc.oncomingDRel if ui_state.is_metric else onc.oncomingDRel * 3.28084
@@ -736,7 +749,7 @@ class HudRendererBP(HudRendererSP):
     # suggested to the right while the left is refused, and the driver should be able to see WHY
     # only one side is ever offered rather than infer it.
     if pa.undividedRoad:
-      caveats.append("two-way road")
+      caveats.append("oncoming seen")
     if self._pa_count:
       caveats.append(f"{self._pa_count} this drive")
     if self._pa_sub_detail:

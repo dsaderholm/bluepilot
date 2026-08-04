@@ -157,7 +157,7 @@ class PassingAssistSettingsLayout(Widget):
                      "reporting, the onroad panel says so rather than assuming the lane is clear."),
       param="PassingAssistAdjacentLane")
 
-    # --- two-way roads ---
+    # --- oncoming traffic ---
     self._oncoming_veto = toggle_item_sp(
       title=tr("Never Pass Into Oncoming Traffic"),
       description=tr("Watch the front radar for vehicles coming the other way. If any are seen, "
@@ -167,11 +167,13 @@ class PassingAssistSettingsLayout(Widget):
       param="PassingAssistOncomingVeto")
 
     self._oncoming_memory = option_item_sp(
-      title=tr("Remember A Two-Way Road For"),
-      description=tr("How long after seeing an oncoming vehicle the road stays classified as "
-                     "two-way. Long is safer: meeting a car tells you about the road, not just "
-                     "that moment, and on a quiet road the gaps between meeting cars are exactly "
-                     "when a wrong suggestion would look most convincing."),
+      title=tr("Remember Oncoming Traffic For"),
+      description=tr("How long after meeting a vehicle that side of the road stays treated as "
+                     "theirs. Per side, not per road: meeting someone on your left says nothing "
+                     "about the lane on your right, and that one stays available. Long is safer "
+                     "-- meeting a car tells you about the road, not just that moment, and on a "
+                     "quiet road the gaps between meeting cars are exactly when a wrong "
+                     "suggestion would look most convincing."),
       param="PassingAssistOncomingMemory",
       min_value=15, max_value=600, value_change_step=15,
       label_callback=lambda v: f"{v} s" if v < 60 else f"{v // 60} min" + (f" {v % 60} s" if v % 60 else ""),
@@ -276,7 +278,7 @@ class PassingAssistSettingsLayout(Widget):
       SectionHeader(tr("The Lane You Would Move Into")),
       self._adjacent_lane,
 
-      SectionHeader(tr("Two-Way Roads")),
+      SectionHeader(tr("Oncoming Traffic")),
       self._oncoming_veto,
       self._oncoming_memory,
       self._strict_two_way,

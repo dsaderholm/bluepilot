@@ -348,6 +348,7 @@ class PassingAssistDetector:
     self._block_seconds: dict[int, float] = {}
     self.wanted_seconds = 0.0
     self._last_drive_write_s = 0.0
+    self._last_oncoming = (0.0, 0.0)
     self.suspended_seconds = 0.0
     self.reference_speed = 0.0
     self.reference_source = RefSource.cluster
@@ -724,6 +725,11 @@ class PassingAssistDetector:
         "crawlLongest": round(self.overtake.crawl_longest, 1),
         "aborts": int(self.manoeuvre.aborts),
         "accOnsetMax": round(self.acc_onset_max, 1),
+        # The evidence behind the LAST oncoming veto of the drive. Kept because the live panel
+        # only shows it while the veto is up, and catching that means glancing at the screen at
+        # the right moment on a road where it may only fire once.
+        "oncomingDRel": round(self._last_oncoming[0], 1),
+        "oncomingVAbs": round(self._last_oncoming[1], 1),
       })
     except Exception:  # noqa: BLE001 - a param write failure must never reach the planner
       pass
@@ -1144,6 +1150,9 @@ class PassingAssistDetector:
       # "two-way road" understands the feature is off for this whole road.
       if (self.left_geometry_ok and onc_left) or (self.right_geometry_ok and onc_right):
         blocked = Blocked.oncomingLane
+        side = self.adjacent.left if onc_left else self.adjacent.right
+        if side.oncoming_d_rel > 0:
+          self._last_oncoming = (float(side.oncoming_d_rel), float(side.oncoming_v_abs))
       elif ((self.left_geometry_ok and not self.left_blindspot and self.rear.left.blocks_lane_change) or
             (self.right_geometry_ok and not self.right_blindspot and self.rear.right.blocks_lane_change)):
         blocked = Blocked.rearApproaching
