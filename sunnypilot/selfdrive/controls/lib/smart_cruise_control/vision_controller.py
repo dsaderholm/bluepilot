@@ -74,7 +74,11 @@ _SENSITIVITY_V_BP = [13.5, 26.82]  # m/s, ~30-60 mph. Matches lateral_angle_ext'
 # Higher earliness -> lower lat-acc thresholds -> the entering phase starts further from the curve.
 # It is not free: every threshold that triggers sooner also triggers on curves that later abort
 # (see _ABORT_ENTERING_PRED_LAT_ACC_TH), so pushing this too far buys spurious slowdowns for
-# corners that would have been fine. Default is 100 (stock) until there is drive data.
+# corners that would have been fine.
+#
+# The shipped default is 170, NOT 100 -- see params_keys.h. It was raised on drive reports of the
+# cycle starting too late, most visibly on freeway off-ramps. _EARLINESS_MAX below is the hard clip,
+# so 170 leaves only a little headroom.
 _EARLINESS_MIN = 0.5
 _EARLINESS_MAX = 2.0
 

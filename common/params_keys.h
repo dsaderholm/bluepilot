@@ -317,9 +317,12 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"SmartCruiseControlVisionHighSpeedFactor", {PERSISTENT | BACKUP, INT, "100"}},
     // BluePilot: how early the curve cycle starts, independent of how much it slows. 100 = stock.
     // Higher starts sooner, which spreads the same speed change over more distance.
-    // Raised from 100 to 140 on 2026-08-01: reported as triggering too late on real drives,
-    // most noticeably on freeway off-ramps. 140 drops the entering threshold from 1.3 to
-    // 0.93 m/s^2, so at 70 mph it reacts to roughly a 1030 m radius instead of 740 m.
+    // Raised from 100 on 2026-08-01: reported as triggering too late on real drives, most
+    // noticeably on freeway off-ramps. Went to 140 first, then to the current 170. At 170 the
+    // entering threshold drops from 1.3 to 0.76 m/s^2, so at 70 mph it reacts to roughly a
+    // 1280 m radius instead of 740 m. (An earlier version of this comment still described the
+    // 140 step -- 0.93 m/s^2 and 1030 m -- after the value had already moved to 170.)
+    // 200 is the clip ceiling in vision_controller._EARLINESS_MAX; there is no headroom above it.
     {"SmartCruiseControlVisionEarliness", {PERSISTENT | BACKUP, INT, "170"}},
 
     // Torque lateral control custom params

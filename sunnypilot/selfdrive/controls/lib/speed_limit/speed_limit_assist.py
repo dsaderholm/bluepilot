@@ -408,7 +408,8 @@ class SpeedLimitAssist:
   def update_events(self, events_sp: EventsSP) -> None:
     # BluePilot: announce every automatic set-speed change, raise or lower, so a bad limit is
     # seen rather than only felt. Fires on the target changing, which is when the assist commits.
-    if self.auto_follow and self.is_active and        self.speed_limit_final_last_conv != self.prev_speed_limit_final_last_conv:
+    if (self.auto_follow and self.is_active and
+        self.speed_limit_final_last_conv != self.prev_speed_limit_final_last_conv):
       events_sp.add(EventNameSP.speedLimitAutoSet)
 
     if self.state == SpeedLimitAssistState.preActive:

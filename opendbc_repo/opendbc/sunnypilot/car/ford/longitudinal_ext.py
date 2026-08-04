@@ -96,7 +96,10 @@ class LongitudinalExt:
     So gate on the lead itself: resume only once there is a real gap or the lead is genuinely
     moving. With no lead at all there is nothing to wait for.
 
-    Off by default -- this changes standstill behaviour and wants A/B testing on a real drive.
+    ON by default (IcbmResumeGateEnabled = 1). An earlier version of this docstring said "off by
+    default", which never matched the declared default -- do not trust that reading. Withholding
+    the resume button is the conservative direction anyway: the car waits where stock Ford ACC
+    would also have waited, and the driver's own resume press still goes through untouched.
     """
     if not self.resume_gate_enabled:
       self.resume_gate_blocking = False
