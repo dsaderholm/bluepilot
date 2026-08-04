@@ -1739,3 +1739,69 @@ class TestAutoCloseIn:
     run(det, STUCK_FRAMES, d_rel=200.0)
     assert det.acc_onset_max == 140.0
     assert det.min_approach_m > 150.0
+
+
+class TestGateOrder:
+  """Which gate gets NAMED when several are true at once.
+
+  Load-bearing twice over: it is what the driver reads on the panel, and it is what the drive
+  summary's "mostly:" line counts. A gate inserted at the wrong point changes both silently -- the
+  system still refuses correctly, it just blames the wrong thing, and every conclusion drawn from a
+  drive afterwards is about the wrong gate.
+
+  Sixteen reasons now, added over a dozen commits. Each pair below is a deliberate ordering, not an
+  accident of where the code happened to grow.
+  """
+
+  def test_paused_outranks_everything(self):
+    """The driver said "not here". A panel reporting some geometric reason while suspended would
+    misrepresent why it is silent."""
+    det = keep_right_det()
+    run(det, 2, lka=True)
+    run(det, STUCK_FRAMES, left_bs=True, right_bs=True, edges=(-2.3, 2.4), lead_accel=-4.0)
+    assert det.blocked_by == Blocked.suspended
+
+  def test_your_own_lane_change_outranks_you_are_driving(self):
+    """The stand-down outlasts the stalk, so "you are driving" would read as not having noticed
+    the stalk go off."""
+    det = keep_right_det()
+    run(det, int(2.0 / DT_MDL), blinker=True)
+    run(det, 2)
+    assert det.blocked_by == Blocked.driverChangedLanes
+
+  def test_a_braking_lead_outranks_closing_in(self):
+    """"That car is stopping" beats "still closing" when both are true -- it is the more specific
+    reason and the one a driver would recognise out of the windscreen."""
+    det = PassingAssistDetector()
+    det.params = _KeepRightOnParams(PassingAssistMinApproach=50)
+    run(det, STUCK_FRAMES, d_rel=200.0, lead_accel=-4.0)
+    assert det.blocked_by == Blocked.leadBraking
+
+  def test_no_lane_at_all_outranks_a_sign(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES, edges=(-2.3, 2.4), ovtk_msg=2)
+    assert det.blocked_by == Blocked.noLaneAvailable
+
+  def test_oncoming_outranks_the_blind_spot(self):
+    """Oncoming is the only gate here about a DANGEROUS manoeuvre rather than a wasted one, and it
+    explains a sustained silence where the blind spot explains a passing one.
+
+    Note for anyone changing this: oncoming is vetoed in TWO places -- an early return before the
+    sign veto, and again in the per-side priority chain below it. The early one is what fires, so
+    editing only the chain will not change this and will not show up here either.
+    """
+    det = run(PassingAssistDetector(), 3, tracks=[track(90, 3.7, -27.0 - CRUISE_MS)], left_bs=True)
+    run(det, STUCK_FRAMES, tracks=[track(90, 3.7, -27.0 - CRUISE_MS)], left_bs=True, right_bs=True)
+    assert det.blocked_by == Blocked.oncomingLane
+
+  def test_the_blind_spot_outranks_a_slow_next_lane(self):
+    """Reversed, a flickering blind spot would hide behind "the next lane is no faster", and the
+    two mean opposite things about whether the manoeuvre was unsafe or merely pointless."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, left_bs=True, right_bs=True,
+              tracks=[track(80, 3.7, 0.0)])
+    assert det.blocked_by == Blocked.blindspotOccupied
+
+  def test_nothing_slower_never_masks_a_real_gate(self):
+    """The confirmation timer reports nothingSlower while it runs. If that outranked the gates, a
+    drive would look like it was mostly waiting to be sure when it was mostly being refused."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, edges=(-2.3, 2.4))
+    assert det.blocked_by == Blocked.noLaneAvailable
