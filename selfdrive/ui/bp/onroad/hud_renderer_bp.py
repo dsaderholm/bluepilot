@@ -836,7 +836,7 @@ class HudRendererBP(HudRendererSP):
           # need completely different fixes. The numbers tell them apart at a glance, which is the
           # only way to tell without reading a log.
           # Named per SIDE, because that is all this ever knew. The veto has always been
-          # per-side -- on a four-lane oncoming_any_side road in the left lane, the oncoming lane is one
+          # per-side -- on a four-lane two-way road in the left lane, the oncoming lane is one
           # to the left and an ordinary through lane is one to the right, and the right is still
           # offered. Calling the state "two-way road" claimed something about the whole road that
           # was never measured, and on I-15 it read as a flat error rather than as "something came
@@ -874,7 +874,7 @@ class HudRendererBP(HudRendererSP):
       caveats.append("no rear data")
     if not (pa.adjacentLeft.available or pa.adjacentRight.available):
       caveats.append("no next-lane data")
-    # Say so even when it is not what is blocking. On a four-lane oncoming_any_side road a pass can still be
+    # Say so even when it is not what is blocking. On a four-lane two-way road a pass can still be
     # suggested to the right while the left is refused, and the driver should be able to see WHY
     # only one side is ever offered rather than infer it.
     if pa.oncomingAnySide:

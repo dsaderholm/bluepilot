@@ -59,7 +59,7 @@ class FakeSM:
   def __init__(self, tracks=(), *, alive=True, valid=True, updated=True, present=True, curve=0.0,
                left_edge=-7.0, right_edge=7.0, edge_stds=(0.1, 0.1)):
     # Road edges relative to the path, in the camera frame: negative left. Default is a wide
-    # two-lane road -- the oncoming lane is INSIDE the left edge, which is the oncoming_any_side case.
+    # two-lane road -- the oncoming lane is INSIDE the left edge, which is the two-way case.
     self.data = {'modelV2': NS(position=path(curve),
                                roadEdges=[edge_at(left_edge, curve), edge_at(right_edge, curve)],
                                roadEdgeStds=list(edge_stds))}
@@ -352,7 +352,7 @@ def road(*, ego_offset_from_left=0.0, lanes_our_way=1, twltl=False, oncoming_lan
   Returns (left_edge, oncoming_lane_offsets, same_direction_lane_offsets), all camera-frame
   (negative = left), relative to ego.
 
-  `divided_median` in meters puts a median between our carriageway and theirs; None means oncoming_any_side
+  `divided_median` in meters puts a median between our carriageway and theirs; None means two-way
   and the opposing lanes sit inside our own road edge, which is the whole distinction.
   """
   # Lanes to our left on our own side.
@@ -379,9 +379,9 @@ def road(*, ego_offset_from_left=0.0, lanes_our_way=1, twltl=False, oncoming_lan
 # should be refused when the only traffic seen is the oncoming vehicle nearest us.
 ROAD_CASES = [
   # name, road kwargs, strict, expect_block_left
-  ("two-lane oncoming_any_side (US-89 typical)",
+  ("two-lane two-way (US-89 typical)",
    dict(ego_offset_from_left=0, oncoming_lanes=1), True, True),
-  ("two-lane oncoming_any_side, lenient mode still blocks",
+  ("two-lane two-way, lenient mode still blocks",
    dict(ego_offset_from_left=0, oncoming_lanes=1), False, True),
   ("1 + TWLTL + 1 arterial",
    dict(ego_offset_from_left=0, twltl=True, oncoming_lanes=1), True, True),
@@ -389,7 +389,7 @@ ROAD_CASES = [
    dict(ego_offset_from_left=1, twltl=True, oncoming_lanes=2), True, True),
   ("2 + TWLTL + 2 arterial, ego in the RIGHT lane",
    dict(ego_offset_from_left=0, twltl=True, oncoming_lanes=2), True, True),
-  ("four-lane oncoming_any_side, ego in the RIGHT lane",
+  ("four-lane two-way, ego in the RIGHT lane",
    dict(ego_offset_from_left=0, oncoming_lanes=2), True, True),
   ("divided interstate, wide median",
    dict(ego_offset_from_left=1, oncoming_lanes=2, divided_median=20.0), True, False),
@@ -801,7 +801,7 @@ class TestUnusableRoadEdge:
 
   def test_a_trusted_edge_restores_the_full_band(self):
     """The cost is scoped, not paid everywhere: with a usable edge, traffic two lanes out on an
-    oncoming_any_side road -- a center turn lane -- is still seen."""
+    two-way road -- a center turn lane -- is still seen."""
     adj = upd(AdjacentLane(), FakeSM([self._onc(self.FAR)], left_edge=-14.0), V_EGO, MAX_D)
     assert adj.oncoming_any_side
 

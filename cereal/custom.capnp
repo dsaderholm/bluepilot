@@ -325,7 +325,7 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     # geometry evidence, per side. lineProb is the model's confidence in a painted line BEYOND
     # ego's own lane line; edgeGap is meters of drivable width between ego's lane line and the
     # road edge. On a divided highway in the left lane, edgeGap collapses to the shoulder. On an
-    # oncoming_any_side road it does NOT -- the oncoming lane is drivable width -- which is exactly the
+    # two-way road it does NOT -- the oncoming lane is drivable width -- which is exactly the
     # discrimination this is here to measure.
     leftLineProb @7 :Float32;
     rightLineProb @8 :Float32;
@@ -426,7 +426,7 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     # BluePilot: does this road carry traffic the other way?
     #
     # The question the whole design was built around and could not answer. modelV2 publishes lane
-    # geometry, not direction of travel, so on a two-lane oncoming_any_side road the oncoming lane passes
+    # geometry, not direction of travel, so on a two-lane two-way road the oncoming lane passes
     # every geometry test as a passing lane. Map data cannot settle it either: mapd v1.12.0 ships
     # here and writes no oneway tag and no lane count.
     #

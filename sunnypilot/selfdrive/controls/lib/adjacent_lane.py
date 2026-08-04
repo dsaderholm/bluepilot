@@ -5,7 +5,7 @@ Two questions off one sensor. Whether the next lane is worth moving into, and wh
 at all or the other half of a two-way road.
 
 THE SECOND ONE IS WHY THIS MATTERS
-modelV2 publishes lane geometry, not direction of travel. On a two-lane oncoming_any_side road the oncoming
+modelV2 publishes lane geometry, not direction of travel. On a two-lane two-way road the oncoming
 lane has the same paint, the same drivable width and the same road edge as a passing lane, so every
 geometry test in passing_assist.py says "lane available" and means "head-on traffic". That was the
 open question the whole design was built around and could not answer.
@@ -123,7 +123,7 @@ MIN_MOVING_MS = 5.0
 # direction is moving the other way down the road.
 #
 # This is the answer to the question the whole design has been unable to settle. modelV2 publishes
-# lane geometry, not direction of travel, so on a two-lane oncoming_any_side road the oncoming lane looks
+# lane geometry, not direction of travel, so on a two-lane two-way road the oncoming lane looks
 # exactly like a passing lane -- same paint, same drivable width, same everything. Map data cannot
 # help on this build: mapd v1.12.0 is what ships here and it writes only RoadName, MapSpeedLimit
 # and friends to /dev/shm/params. No oneway, no lane count.
@@ -145,7 +145,7 @@ MIN_ONCOMING_MS = 5.0
 # Add a lane each way and it is 11 m. The band was measuring the wrong thing entirely.
 #
 # The road edge is what bounds this properly (see _on_our_carriageway); this is only a sanity limit
-# for radar lateral error at range. 15 m reaches across four lanes, which covers any oncoming_any_side road
+# for radar lateral error at range. 15 m reaches across four lanes, which covers any two-way road
 # worth passing on.
 ONCOMING_MAX_M = 15.0
 
@@ -162,7 +162,7 @@ ONCOMING_MAX_M = 15.0
 # one: at 45 mph it asks for 27 mph, which a through lane clears easily and a turning car does not.
 SAME_DIRECTION_MIN_FRACTION = 0.6
 
-# How long a single sighting keeps the road classified as oncoming_any_side.
+# How long a single sighting keeps the road classified as two-way.
 #
 # Long, and deliberately so. Meeting a car is EVIDENCE about the road, not an event to react to:
 # one oncoming vehicle proves the lane to the left carries opposing traffic, and that stays true
@@ -282,7 +282,7 @@ def road_edge_offset(model, side: str, d_rel: float):
   width and depends on shoulder widths nobody measured. The road edge asks the question directly:
   the median edge IS where our carriageway stops, so anything beyond it is not on our road.
 
-  It also inverts correctly on the case that matters. On a two-lane oncoming_any_side road the left road
+  It also inverts correctly on the case that matters. On a two-lane two-way road the left road
   edge sits BEYOND the oncoming lane, so an oncoming car is inside it and counts. On a divided road
   the median edge sits between us and them, so it does not. No width assumptions either way.
 
@@ -336,7 +336,7 @@ class AdjacentLaneSide:
     #                              proof that lane is a travel lane and not a turn lane.
     #
     # The third exists because two very common roads are geometrically identical and mean opposite
-    # things. From the right lane of a four-lane oncoming_any_side road, and from the left lane of a
+    # things. From the right lane of a four-lane two-way road, and from the left lane of a
     # 2 + TWLTL + 2 arterial, the picture is the same: a lane at 3.7 m and opposing traffic at
     # 7.4 m. In the first the next lane is an ordinary passing lane. In the second it is a two-way
     # left-turn lane and moving into it is neither legal nor survivable as a passing maneuver.
@@ -441,7 +441,7 @@ class AdjacentLaneSide:
 
     2. The road is two-way, and we have no evidence the next lane is a travel lane. This is the
        center-turn-lane case. From the left lane of a 2 + TWLTL + 2 arterial the turn lane is at
-       3.7 m and opposing traffic at 7.4 m; from the right lane of a plain four-lane oncoming_any_side road
+       3.7 m and opposing traffic at 7.4 m; from the right lane of a plain four-lane two-way road
        an ordinary passing lane is at 3.7 m and opposing traffic at 7.4 m. Identical geometry,
        opposite meanings. The only thing that tells them apart is whether anyone has driven down
        that lane in our direction, so absence of that evidence is treated as "assume turn lane".
@@ -541,7 +541,7 @@ class AdjacentLane:
     can be made without knowing where our carriageway ends. Something ten meters out with no edge
     to place it against is more likely across a median than in the next lane.
 
-    The cost is real and worth naming: on an oncoming_any_side road with a center turn lane the opposing
+    The cost is real and worth naming: on a two-way road with a center turn lane the opposing
     traffic is two lanes out, and that case now needs a trusted road edge to be seen at all. With
     one, the full band still applies.
     """

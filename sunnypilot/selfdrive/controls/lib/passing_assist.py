@@ -16,7 +16,7 @@ The three unknowns
 ------------------
 1. ONCOMING TRAFFIC -- ANSWERED, see adjacent_lane.py. This was the one that decided whether the
    idea survived. modelV2 publishes lane geometry, not direction of travel, so on a two-lane
-   oncoming_any_side road the lane to the left is oncoming traffic and looks exactly like a passing lane to
+   two-way road the lane to the left is oncoming traffic and looks exactly like a passing lane to
    every geometry test below. Map data could not help and still cannot on this build: mapd v1.12.0
    ships here and writes no oneway tag and no lane count. (mapd v2 publishes oneWay, lanes and
    highwayClass on a MapdOut message, which would make this a cross-check rather than the only
@@ -34,7 +34,7 @@ The three unknowns
 2. TSR OVERTAKING. Traffic_RecognitnData carries a latched no-overtaking zone state with its own
    confidence channel. If this market's camera populates it, it is a sound VETO. It is not a
    permit: absence of a no-passing sign says nothing about whether the left lane is same-direction,
-   since those zones are only ever marked on oncoming_any_side roads in the first place.
+   since those zones are only ever marked on two-way roads in the first place.
 
 3. BLIS. carState.leftBlindspot is SodDetct*_D_Stat != 0 -- blind-spot OCCUPANCY. A vehicle closing
    from 150 m back does not light it until already alongside, which is far too late to base a
@@ -605,10 +605,10 @@ class PassingAssistDetector:
 
     They are NOT redundant and are deliberately not combined into one score:
       - lineProb asks "is there paint beyond my lane line" -- present on a multi-lane road, but
-        equally present for the oncoming lane of an oncoming_any_side road.
+        equally present for the oncoming lane of a two-way road.
       - edgeGap asks "is there drivable width out to the road edge" -- collapses to a shoulder when
         we are already in the outermost lane, which is the case lineProb handles badly.
-    Which one discriminates better, and whether either separates divided from oncoming_any_side, is the
+    Which one discriminates better, and whether either separates divided from two-way, is the
     open question this phase exists to answer.
     """
     probs = model.laneLineProbs
@@ -1436,7 +1436,7 @@ class PassingAssistDetector:
     # would happily clear a pass into head-on traffic on any two-lane road.
     #
     # PER SIDE, not per road, and that is what keeps this from costing more than it should. On a
-    # four-lane oncoming_any_side arterial sitting in the left lane, the oncoming lane is one over to the
+    # four-lane two-way arterial sitting in the left lane, the oncoming lane is one over to the
     # LEFT and a perfectly ordinary through lane is one over to the RIGHT. A whole-road veto gives
     # up on both; this gives up only on the side the opposing traffic is actually on.
     #
@@ -1580,7 +1580,7 @@ class PassingAssistDetector:
     # worst suggestion this system could make, and nothing else in this function would have stopped
     # it -- the blind spot only lights once they are already alongside.
     #
-    # Costs nothing on an ordinary oncoming_any_side road: opposing traffic there is on the left, so
+    # Costs nothing on an ordinary two-way road: opposing traffic there is on the left, so
     # right.blocks_oncoming stays false and keep-right works normally.
     if self.oncoming_veto and self.adjacent.right.blocks_oncoming:
       self.keep_right_seconds = 0.0
