@@ -481,6 +481,39 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       # edge beyond both) and nothing in the sensors separates them.
       oncomingAdjacent @9 :Bool;
       sameDirectionRecent @10 :Bool;
+
+      # BluePilot: WHO HAS OVERTAKEN US IN THIS LANE, AND HOW LONG AGO.
+      #
+      # This is a forward-looking radar answering a question about what is BEHIND the car, and it
+      # works because of the one thing an overtake does: a vehicle that passes us was behind us a
+      # moment ago and is in front of us now. It enters our sensor's view at short range in the
+      # adjacent lane, pulling away. That transition is visible, and it is the only evidence about
+      # rear traffic this car can produce without a rear sensor.
+      #
+      # It exists because the obvious rule is backwards for how this car is meant to drive. Ford's
+      # own BlueCruise "avoids merging with traffic moving much faster than your vehicle", which is
+      # sound for a system aiming at a smooth average drive and useless for the case a passing aid
+      # is FOR: stuck behind a truck at 45 in a 70, the left lane running 25 mph faster is exactly
+      # the lane you want and exactly the one that rule refuses.
+      #
+      # The speed of that lane was never the question. The question is whether something is closing
+      # on us in it, and a rate answers that where a speed cannot:
+      #
+      #   overtakes coming thick and fast   the lane is busy behind us; assume the next one is
+      #                                     already there, because it usually is
+      #   nothing for a long time           the lane is genuinely empty behind, and this is the
+      #                                     evidence for GOING rather than a reason to hold off
+      #
+      # That second line is the point. Every gate in this file can only ever say no; this is the
+      # first thing here that can say yes on its own evidence, which is what "more aggressive, using
+      # the sensors" has to mean if it is to mean anything safe.
+      #
+      # PHASE 1: MEASURED AND PUBLISHED, GATING NOTHING. Whether the detection is any good, and what
+      # a quiet lane actually looks like in seconds, are road questions. Wiring a gate to a number
+      # nobody has seen is how the invented constants got here in the first place.
+      overtakenSeconds @12 :Float32;   # since a vehicle last passed us in this lane; 0 = never seen
+      overtakenCount @13 :UInt16;      # this drive, this side
+      overtakenVAbs @14 :Float32;      # ground speed of the last one, for judging the threshold
     }
 
     enum ReferenceSource {

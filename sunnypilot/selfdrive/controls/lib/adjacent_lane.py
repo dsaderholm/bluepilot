@@ -177,6 +177,22 @@ DEFAULT_ONCOMING_MEMORY_S = 90
 # edge would still produce a jittery clear.
 DEBOUNCE_FRAMES = 3
 
+# --- being overtaken, seen by a forward-looking radar. See overtakenSeconds in custom.capnp. ---
+#
+# A vehicle that passes us was behind us a moment ago. It appears CLOSE and travelling AWAY, and no
+# other event in the adjacent lane looks like that -- a car we are gaining on appears far off and
+# closes; a car we are passing falls back rather than pulls ahead.
+#
+# Close, because the further out it appears the more likely it was simply revealed by traffic moving
+# rather than by passing us. One and a half car lengths either side of alongside.
+OVERTAKE_MAX_D_REL_M = 25.0
+# ...and genuinely pulling away, not merely drifting. 2 m/s (4.5 mph) is faster than lane-keeping
+# noise and slower than any real overtake, which is the whole gap this has to sit in.
+OVERTAKE_MIN_V_REL_MS = 2.0
+# One vehicle is one overtake. A track that flickers must not count twice, and radar tracks flicker
+# constantly -- so a side that has just counted one holds off until the lane is quiet again.
+OVERTAKE_REARM_S = 2.0
+
 # Oncoming used to need no patience at all: one return latched the full memory. The argument was
 # that believing a false one costs "a few quiet minutes" and waiting for a second could cost a
 # suggestion to pass into a head-on lane.
@@ -354,6 +370,12 @@ class AdjacentLaneSide:
     self.strict = True
     self._raw_occupied = False
     self._streak = 0
+    # See overtakenSeconds in custom.capnp -- the only evidence about rear traffic a forward-looking
+    # radar can produce. Measured, gating nothing yet.
+    self.overtaken_seconds = 0.0     # since the last one; 0 until there has been one
+    self.overtaken_count = 0
+    self.overtaken_v_abs = 0.0
+    self._overtake_rearm_s = 1e3
 
   def reset(self) -> None:
     """Radar gone. Everything measured goes with it -- EXCEPT the oncoming memory.
@@ -364,10 +386,16 @@ class AdjacentLaneSide:
     already reporting no data.
     """
     held = (self.oncoming_seconds, self.oncoming_adjacent_seconds, self.same_direction_seconds,
-            self.oncoming, self.strict)
+            self.oncoming, self.strict,
+            # Same reasoning: how long since somebody last passed us is a fact about the road, and
+            # a sensor dropout is not evidence that it changed. Losing it would silently reset the
+            # clock to "nobody has ever overtaken", which reads as a quiet lane -- the one direction
+            # this measurement must never fail in.
+            self.overtaken_seconds, self.overtaken_count, self.overtaken_v_abs)
     self.__init__()
     (self.oncoming_seconds, self.oncoming_adjacent_seconds, self.same_direction_seconds,
-     self.oncoming, self.strict) = held
+     self.oncoming, self.strict,
+     self.overtaken_seconds, self.overtaken_count, self.overtaken_v_abs) = held
 
   def observe(self, occupied: bool, d_rel: float, y_rel: float, v_rel: float, v_abs: float) -> None:
     """Feed one radar message's raw finding through the debounce."""
@@ -423,6 +451,29 @@ class AdjacentLaneSide:
     self.oncoming_seconds = float(memory_s)
     if adjacent:
       self.oncoming_adjacent_seconds = float(memory_s)
+
+  def tick_overtaken(self, dt: float) -> None:
+    """Wall time, advanced every cycle whatever the radar is doing.
+
+    Only counts up once there has been one: zero means "nobody has passed us in this lane", which is
+    not the same claim as "nobody has passed us for zero seconds" and must not read as a busy lane.
+    """
+    if self.overtaken_count:
+      self.overtaken_seconds = min(self.overtaken_seconds + dt, 1e4)
+    self._overtake_rearm_s = min(self._overtake_rearm_s + dt, 1e4)
+
+  def observe_overtaken(self, v_abs: float) -> None:
+    """Somebody just went past us in this lane. See OVERTAKE_MAX_D_REL_M.
+
+    Re-armed rather than counted per frame -- one vehicle is one overtake, and a track that flickers
+    at the threshold would otherwise report a convoy.
+    """
+    if self._overtake_rearm_s < OVERTAKE_REARM_S:
+      return
+    self._overtake_rearm_s = 0.0
+    self.overtaken_count += 1
+    self.overtaken_seconds = 0.0
+    self.overtaken_v_abs = float(v_abs)
 
   def observe_same_direction(self, memory_s: float) -> None:
     """A vehicle in the next lane going our way. The only positive evidence that lane is drivable."""
@@ -589,6 +640,8 @@ class AdjacentLane:
     self.left.strict = self.right.strict = strict
     self.left.decay_oncoming(dt)
     self.right.decay_oncoming(dt)
+    self.left.tick_overtaken(dt)
+    self.right.tick_overtaken(dt)
 
     try:
       if not (sm.alive['liveTracks'] and sm.valid['liveTracks']):
@@ -651,6 +704,13 @@ class AdjacentLane:
       # two-way turn lane. See blocks_oncoming: those two are otherwise indistinguishable.
       if not adjacent:
         continue
+
+      # SOMEBODY JUST WENT PAST US. Close, and pulling away -- which is what an overtake looks like
+      # from in front, and nothing else in this lane does. A car we are gaining on appears far off
+      # and closes; a car we are passing falls back. See overtakenSeconds in custom.capnp: this is
+      # the only thing a forward-looking radar can say about the traffic behind us.
+      if p.dRel <= OVERTAKE_MAX_D_REL_M and p.vRel >= OVERTAKE_MIN_V_REL_MS:
+        obj.observe_overtaken(v_abs)
       # ...but only at a speed that means "travelling", not "turning". See
       # SAME_DIRECTION_MIN_FRACTION: a car decelerating into a turn lane would otherwise vouch for
       # the lane it is about to stop in.

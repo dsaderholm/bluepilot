@@ -870,3 +870,100 @@ class TestOncomingPosition:
     adj.update(FakeSM([track(120, 3.7, v_rel=-27.0 - V_EGO)]), V_EGO, MAX_D)
     assert not adj.oncoming_any_side, "not corroborated yet"
     assert adj.left.oncoming_d_rel == 120
+
+
+class TestBeingOvertaken:
+  """A forward-looking radar answering a question about what is behind the car.
+
+  The trick is that an overtake is the one event that reveals rear traffic to a front sensor: the
+  vehicle was behind us a moment ago and is in front of us now, so it appears CLOSE and PULLING
+  AWAY. See overtakenSeconds in custom.capnp for why a rate beats a speed here -- Ford's own
+  BlueCruise refuses to merge with traffic much faster than the car, which rules out exactly the
+  pass this feature exists to make.
+
+  Measured only. Nothing gates on it yet, and these tests fix the DETECTION so the road data means
+  something when it arrives.
+  """
+
+  def test_a_car_going_past_us_is_counted(self):
+    adj = AdjacentLane()
+    adj.update(FakeSM([track(18, 3.7, v_rel=8.0)]), V_EGO, MAX_D)
+    assert adj.left.overtaken_count == 1
+    assert adj.left.overtaken_seconds == 0.0
+    assert adj.left.overtaken_v_abs > V_EGO
+
+  def test_a_car_we_are_PASSING_is_not(self):
+    """The mirror image, and the one that would quietly ruin the measurement. We overtake far more
+    cars than overtake us, so counting these would report a permanently busy lane and the number
+    would never once say the lane was clear."""
+    adj = AdjacentLane()
+    adj.update(FakeSM([track(18, 3.7, v_rel=-8.0)]), V_EGO, MAX_D)
+    assert adj.left.overtaken_count == 0
+
+  def test_a_car_far_ahead_pulling_away_is_not(self):
+    """Distance is what separates an overtake from ordinary traffic. Something 120 m ahead moving
+    faster never passed us -- it was always in front."""
+    adj = AdjacentLane()
+    adj.update(FakeSM([track(120, 3.7, v_rel=8.0)]), V_EGO, MAX_D)
+    assert adj.left.overtaken_count == 0
+
+  def test_one_vehicle_is_one_overtake(self):
+    """Radar tracks flicker. Counting per frame would turn a single car into a convoy and make a
+    quiet lane unreachable."""
+    adj = AdjacentLane()
+    for _ in range(int(1.5 / 0.05)):
+      adj.update(FakeSM([track(18, 3.7, v_rel=8.0)]), V_EGO, MAX_D)
+    assert adj.left.overtaken_count == 1
+
+  def test_and_a_second_car_later_is_a_second_overtake(self):
+    adj = AdjacentLane()
+    adj.update(FakeSM([track(18, 3.7, v_rel=8.0)]), V_EGO, MAX_D)
+    for _ in range(int(4.0 / 0.05)):
+      adj.update(FakeSM([]), V_EGO, MAX_D)
+    adj.update(FakeSM([track(18, 3.7, v_rel=8.0)]), V_EGO, MAX_D)
+    assert adj.left.overtaken_count == 2
+
+  def test_the_clock_runs_on_wall_time(self):
+    """It has to count up with an EMPTY lane -- that is the whole measurement. A clock that only
+    advanced while something was in view could never report a quiet lane."""
+    adj = AdjacentLane()
+    adj.update(FakeSM([track(18, 3.7, v_rel=8.0)]), V_EGO, MAX_D)
+    for _ in range(int(10.0 / 0.05)):
+      adj.update(FakeSM([]), V_EGO, MAX_D)
+    assert 9.0 < adj.left.overtaken_seconds < 11.0
+
+  def test_never_overtaken_is_not_reported_as_just_overtaken(self):
+    """Zero means "nobody has ever passed us here", and the clock must not start until one has --
+    otherwise a fresh drive reads as the busiest possible lane, which is the one direction this
+    measurement must never fail in."""
+    adj = AdjacentLane()
+    for _ in range(int(30.0 / 0.05)):
+      adj.update(FakeSM([]), V_EGO, MAX_D)
+    assert adj.left.overtaken_count == 0
+    assert adj.left.overtaken_seconds == 0.0
+
+  def test_a_radar_dropout_does_not_reset_the_clock(self):
+    """Same rule as the oncoming memory: how long since somebody passed us is a fact about the
+    road, and losing the sensor is not evidence it changed."""
+    adj = AdjacentLane()
+    adj.update(FakeSM([track(18, 3.7, v_rel=8.0)]), V_EGO, MAX_D)
+    for _ in range(int(5.0 / 0.05)):
+      adj.update(FakeSM([]), V_EGO, MAX_D)
+    seen = adj.left.overtaken_seconds
+    adj.update(FakeSM([], alive=False), V_EGO, MAX_D)
+    assert adj.left.overtaken_count == 1, "a dropout erased the count"
+    assert adj.left.overtaken_seconds >= seen, "a dropout restarted the clock"
+
+  def test_each_side_counts_its_own(self):
+    adj = AdjacentLane()
+    adj.update(FakeSM([track(18, -3.7, v_rel=8.0)]), V_EGO, MAX_D)
+    assert adj.right.overtaken_count == 1
+    assert adj.left.overtaken_count == 0
+
+  def test_oncoming_traffic_is_never_an_overtake(self):
+    """It is close and its RELATIVE speed is enormous, so a rule written only on vRel would count
+    every car on a two-lane road as having just passed us."""
+    adj = AdjacentLane()
+    for _ in range(ONCOMING_FRAMES + 2):
+      adj.update(FakeSM([track(20, 3.7, v_rel=-27.0 - V_EGO)]), V_EGO, MAX_D)
+    assert adj.left.overtaken_count == 0

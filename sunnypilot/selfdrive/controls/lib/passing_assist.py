@@ -406,6 +406,10 @@ class PassingAssistDetector:
     # the tail of its memory.
     self.oncoming_seen_seconds = 0.0
     self.oncoming_remembered_seconds = 0.0
+    # See overtakenSeconds in custom.capnp -- the longest either lane has gone without anyone
+    # passing us. Tracked at drive level because the per-side clock resets on every overtake, so the
+    # live value can never say how quiet the road got.
+    self.overtaken_quietest_s = 0.0
     self.suspended_seconds = 0.0
     self.reference_speed = 0.0
     self.reference_source = RefSource.cluster
@@ -844,6 +848,13 @@ class PassingAssistDetector:
         "suggestionsMade": int(self.suggestions_made),
         "suggestionsTaken": int(self.suggestions_taken),
         "longestIgnored": round(self.longest_ignored, 1),
+        # See overtakenSeconds. The LONGEST quiet stretch, because the question this measurement
+        # exists to answer is whether a genuinely empty lane ever happens -- a mean would bury it
+        # under the busy stretches, which is the wrong way round for something meant to license
+        # going rather than to refuse.
+        "overtakenLeft": int(self.adjacent.left.overtaken_count),
+        "overtakenRight": int(self.adjacent.right.overtaken_count),
+        "overtakenQuietest": round(self.overtaken_quietest_s, 1),
         "oncomingSeen": round(self.oncoming_seen_seconds, 1),
         "oncomingRemembered": round(self.oncoming_remembered_seconds, 1),
         # The evidence behind the LAST oncoming veto of the drive. Kept because the live panel only
@@ -1299,6 +1310,13 @@ class PassingAssistDetector:
     # than time-spent-in-a-particular-branch.
     self._settle_s = min(self._settle_s + DT_MDL, 1e3)  # capped; only the threshold matters
 
+    # The longest either lane has gone unpassed. Only counts once a side has actually been passed
+    # at least once -- see tick_overtaken: an unvisited lane reads 0, which is "never", not "quiet
+    # for zero seconds", and taking a max over it would report every empty road as busy.
+    for _side in (self.adjacent.left, self.adjacent.right):
+      if _side.overtaken_count:
+        self.overtaken_quietest_s = max(self.overtaken_quietest_s, _side.overtaken_seconds)
+
     # Before every gate below, so the stand-down keeps counting down on the frames they return
     # early on. It used to sit after the speed gate, which meant slowing below the minimum froze
     # it -- and slowing down is exactly what taking an exit involves, so the pause would have been
@@ -1733,6 +1751,9 @@ class PassingAssistDetector:
       dest.oncomingYRel = float(side.oncoming_y_rel)
       dest.oncomingAdjacent = side.oncoming_adjacent_seconds > 0.0
       dest.sameDirectionRecent = side.same_direction_recent
+      dest.overtakenSeconds = float(side.overtaken_seconds)
+      dest.overtakenCount = min(side.overtaken_count, 65535)
+      dest.overtakenVAbs = float(side.overtaken_v_abs)
     passingAssist.oncomingAnySide = pa.adjacent.oncoming_any_side
     passingAssist.oncomingSecondsLeft = float(pa.adjacent.oncoming_seconds_left)
     passingAssist.oncomingSeen = pa.adjacent.oncoming_seen

@@ -599,6 +599,13 @@ class HudRendererBP(HudRendererSP):
       seen, remembered = float(d.get("oncomingSeen", 0)), float(d.get("oncomingRemembered", 0))
       if seen + remembered > 5.0:
         lines.append(f"oncoming: {seen:.0f}s seen, {remembered:.0f}s remembered")
+      # How many cars went past us, and how long the lane has been quiet since. The whole question
+      # this is meant to answer is whether a long quiet stretch is real, so the gap is the number
+      # that matters -- not the count.
+      passed_by = int(d.get("overtakenLeft", 0)) + int(d.get("overtakenRight", 0))
+      if passed_by:
+        quiet = float(d.get("overtakenQuietest", 0))
+        lines.append(f"passed by {passed_by}, quiet {quiet:.0f}s")
       if float(d.get("oncomingDRel", 0)) > 0:
         od = float(d["oncomingDRel"])
         ov = abs(float(d["oncomingVAbs"])) * (3.6 if ui_state.is_metric else 2.23694)
