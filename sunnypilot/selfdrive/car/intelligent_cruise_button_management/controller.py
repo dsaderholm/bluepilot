@@ -161,12 +161,27 @@ DEFAULT_MAX_TARGET_DROP = 12  # display units (mph/kph)
 # How close actual speed must get to the current step's floor before the next step is allowed.
 DROP_STEP_SETTLE_MARGIN = 2  # display units (mph/kph)
 
-# BluePilot: the same treatment in the other direction. An earlier comment claimed increases were
-# "rate-limited naturally by ICBM emitting one button press per cycle" -- that is not true on Ford.
-# icbm.py holds CcAslButtnSetIncPress high for as long as the state machine sits in `increasing`,
-# and Ford reads a held button as a continuous ramp, so recovering from a curve or a speed-limit
-# drop slammed the set speed back up as fast as the car could take it. Capping each step and
-# waiting for actual speed to catch up turns that back into a series of short presses.
+# BluePilot: the same treatment in the other direction, and DO NOT delete it on the grounds that
+# its original justification was wrong. It was, but the instinct was right for a different reason.
+#
+# The old comment claimed Ford reads a held button as a continuous ramp. It does not -- a held
+# button moves the set speed in 5 mph steps. The real mechanism is subtler and was found from the
+# road, not from the code:
+#
+#   ICBM can only raise the set speed by injecting button presses, and to Ford those are
+#   indistinguishable from the driver pressing +. A set-speed CHANGE is a driver request, and ACC
+#   answers a driver request more assertively than it answers merely returning to a speed it was
+#   already holding.
+#
+# So the two cases feel completely different from the seat, exactly as reported: when ACC slowed
+# itself for a lead or a curve the set speed never moved, and recovery is ordinary speed
+# maintenance -- gentle. When ICBM lowered the set speed and then raised it, every step reads as
+# "the driver wants more speed now" and the car accelerates hard.
+#
+# That is the cost of ICBM's whole method, and this limiter is the only lever on it: fewer and
+# smaller steps mean smaller surges. Lowering IcbmMaxTargetRise softens the acceleration; raising
+# it recovers the number faster. They trade against each other and the right answer is the owner's
+# preference, not a constant derived here.
 DEFAULT_MAX_TARGET_RISE = 5  # display units (mph/kph)
 # How close actual speed must get to the current ceiling before the next +5 is allowed. This is
 # the DELAY BETWEEN STEPS, and it is the knob for "the increments are right but it is too slow".
