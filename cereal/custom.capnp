@@ -972,6 +972,7 @@ struct CarStateBP @0xb057204d7deadf3f {
       notStationary @1;
       cruiseEngaged @2;      # never fight a live lane-change decision
       driverSignalling @3;   # the driver's own stalk wins, always
+      resultStillShowing @4; # pressed again while the last verdict was still up; press once more
     }
   }
 

@@ -162,6 +162,37 @@ class TestBlinkerTestTermination:
     assert ext.bt_params.value == 0, "request param was not self-cleared"
     assert set(run(ext, 400)) == {SIGNAL_NONE}
 
+  def test_pressing_again_during_the_verdict_does_not_deadlock(self):
+    """Found on the car: "I was pressing that button pretty soon after each other."
+
+    DONE is terminal until the request reads 0, and the ONLY thing that ever writes 0 is this
+    module disarming itself. A press that landed inside the verdict window therefore left a live
+    request that nothing would ever clear -- state stuck at DONE, every later press ignored, no way
+    back short of a reboot. The press is dropped now, but the machine has to come home.
+    """
+    ext = make_ext(SIGNAL_LEFT)
+    run(ext, POLL_FRAMES + int(PULSE_DURATION_S / DT_CTRL) + 10)
+    assert ext.bt_state == 2
+
+    ext.bt_params.value = SIGNAL_RIGHT          # the second press
+    run(ext, POLL_FRAMES + 2)
+    assert ext.bt_blocked == 4, "the dropped press should say why"
+    assert ext.bt_params.value == 0, "a press during DONE must be cleared, not left live"
+
+    run(ext, POLL_FRAMES + 2)
+    assert ext.bt_state == 0, "never returned to idle -- the test is dead until reboot"
+
+  def test_and_a_press_after_that_still_works(self):
+    """The point of the above: the feature survives being pressed twice."""
+    ext = make_ext(SIGNAL_LEFT)
+    run(ext, POLL_FRAMES + int(PULSE_DURATION_S / DT_CTRL) + 10)
+    ext.bt_params.value = SIGNAL_RIGHT
+    run(ext, 2 * POLL_FRAMES + 4)               # dropped, then back to idle
+
+    ext.bt_params.value = SIGNAL_RIGHT          # a fresh, deliberate press
+    assert SIGNAL_RIGHT in run(ext, POLL_FRAMES + 20)
+    assert ext.bt_state == 1
+
 
 class TestBlinkerTestMeasurement:
   def test_lamp_seen_records_a_confirmed_actuation(self):

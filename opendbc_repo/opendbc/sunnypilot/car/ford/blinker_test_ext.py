@@ -35,14 +35,30 @@ from openpilot.common.params import Params
 SIGNAL_NONE, SIGNAL_LEFT, SIGNAL_RIGHT = 0, 1, 2
 
 PULSE_DURATION_S = 4.0        # long enough for several flash cycles at ~1.5 Hz
-# Send Steering_Data_FD1 no faster than every other sender of it does. Measured on the car: sending
-# it every 10 ms frame put ~100 Hz of this message on bus 0 against the SCCM's own 10 Hz copy, so
-# the BCM saw the turn-signal switch alternating between the commanded side and the driver's actual
-# OFF roughly ten times for every genuine frame. The lamp flashed fast and erratically.
+# Match every other sender of Steering_Data_FD1: CarControllerParams.BUTTONS_STEP, 20 Hz against the
+# SCCM's own 10 Hz copy of the same frame.
+#
+# READ THIS BEFORE TRUSTING THE RATE TO FIX ANYTHING. Observed on the car, one pulse: the lamp
+# flashed fast and erratically. The rate was 100 Hz at the time and lowering it is a guess, not a
+# diagnosis, and quite possibly the wrong direction --
+#
+#   Our frames and the SCCM's interleave at EVERY rate; we cannot stop the SCCM transmitting. What
+#   the rate changes is only the duty cycle the BCM sees. At 100 Hz it saw the switch commanded
+#   ~91% of the time, at 20 Hz ~67%. If the flashing came from the OFF frames getting through, the
+#   slower rate makes it worse, not better.
+#
+#   The likelier mechanism is the signal's TYPE. TurnLghtSwtch_D_Stat is a LEVEL -- where the stalk
+#   is right now -- not an edge like the cruise buttons this same frame carries. openpilot's cancel
+#   and resume work fine amid contradicting SCCM frames precisely because one frame saying "pressed"
+#   is a complete event. A level alternating with OFF ten times a second is a stalk being flicked,
+#   and no send rate makes that go away.
+#
+# Which is what this whole module exists to find out. It is a bench test, not a feature: run it,
+# watch the lamp, and let the answer decide whether commanding the signal is possible on this car
+# at all. Do not write a fix into this comment before the lamp has been watched again.
 #
 # The rate lives in this module rather than in carcontroller.py deliberately: that file cannot be
-# tested offline, and this is the exact class of mistake that reaches the car unnoticed. Here it is
-# covered by a test.
+# tested offline, and a send rate is the exact class of mistake that reaches the car unnoticed.
 BUTTONS_STEP = 5              # 100 Hz / 5 = 20 Hz, matching CarControllerParams.BUTTONS_STEP
 STANDSTILL_V_EGO = 0.3        # m/s
 PARAMS_POLL_S = 0.5
@@ -129,6 +145,18 @@ class BlinkerTestExt:
     if self.bt_state == 2:
       if request == SIGNAL_NONE:
         self.bt_state = 0
+        self.bt_blocked = 0
+      else:
+        # A press that landed inside the verdict window. It must be CLEARED, not merely ignored:
+        # the only thing that ever moves this machine out of DONE is the request reading 0, and
+        # nothing else in the system writes 0 -- so leaving a live request here deadlocked the
+        # test permanently, and the only way out was a reboot. Pressing twice quickly is exactly
+        # what a driver does when the first press looks like it did nothing.
+        #
+        # Dropped rather than queued, deliberately. Queueing would mean a lamp lighting some
+        # seconds after the button, with nothing on screen connecting the two.
+        self.bt_blocked = 4
+        self._disarm()
       return SIGNAL_NONE
     if request not in (SIGNAL_LEFT, SIGNAL_RIGHT):
       self.bt_blocked = 0
