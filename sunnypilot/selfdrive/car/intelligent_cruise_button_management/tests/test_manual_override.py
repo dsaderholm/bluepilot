@@ -951,3 +951,52 @@ class TestRiseLimiterCannotStallForever:
     icbm = fresh(max_rise=5)
     icbm.run(make_cs(50, v_ego=50), CC, make_lp(DRIVER), False)
     assert icbm.v_target <= 55, "limiter let the whole rise through in one step"
+
+
+class TestTheHoldSurvivesADisengagement:
+  """Reported: hold set, cruise cancelled to make a turn, RESUME pressed, hold gone.
+
+  Neither clearing rule was gated on cruise being engaged. Turning off a road changes the posted
+  limit, which fired the 10 mph limit-change rule -- so the hold was destroyed silently, mid-turn,
+  before RESUME was ever pressed. The driver disengages to turn precisely BECAUSE the road is about
+  to change, so the rule was firing on the one manoeuvre where it should not.
+  """
+
+  @staticmethod
+  def _turn_onto_a_slower_road(icbm, frames=300):
+    """Cruise off, and SLA's target follows the new road down from 55 to 25."""
+    for _ in range(frames):
+      icbm.run(make_cs(DRIVER, enabled=False), CC, make_lp(25), False)
+
+  def test_a_limit_change_while_disengaged_does_not_discard_the_hold(self):
+    icbm = fresh()
+    set_baseline(icbm)
+    settle(icbm, LIMIT)
+    assert icbm.v_baseline == DRIVER
+    self._turn_onto_a_slower_road(icbm)
+    assert icbm.override_state == OverrideState.manual, "the turn destroyed the hold"
+    assert icbm.v_baseline == DRIVER
+
+  def test_resume_after_the_turn_restores_it(self):
+    icbm = fresh()
+    set_baseline(icbm)
+    settle(icbm, LIMIT)
+    self._turn_onto_a_slower_road(icbm)
+    icbm.run(make_cs(DRIVER, enabled=False, buttons=(RESUME_PRESS,)), CC, make_lp(25), False)
+    for _ in range(60):
+      icbm.run(make_cs(DRIVER, enabled=True), CC, make_lp(25), False)
+    assert icbm.override_state == OverrideState.manual, "RESUME did not restore the hold"
+    assert icbm.v_baseline == DRIVER
+
+  def test_a_limit_change_after_resuming_still_discards_it(self):
+    """Freezing defers the judgement, it does not skip it. Once driving again, a NEW zone change
+    measured from the road actually being driven must still hand the speed back to SLA."""
+    icbm = fresh()
+    set_baseline(icbm)
+    settle(icbm, LIMIT)
+    self._turn_onto_a_slower_road(icbm)
+    icbm.run(make_cs(DRIVER, enabled=False, buttons=(RESUME_PRESS,)), CC, make_lp(25), False)
+    settle(icbm, 25, cluster=DRIVER, frames=100)
+    assert icbm.override_state == OverrideState.manual, "re-anchor did not take"
+    settle(icbm, 60, cluster=DRIVER, frames=200)   # now a real 35 mph jump from the re-anchor
+    assert icbm.override_state == OverrideState.auto, "limit rule never fired after resuming"

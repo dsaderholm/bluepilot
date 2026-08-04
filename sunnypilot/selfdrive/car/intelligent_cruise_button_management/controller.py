@@ -238,6 +238,7 @@ class IntelligentCruiseButtonManagement:
     self.counter_move_accum = 0      # set-speed movement against ICBM's own command, display units
     self.cruise_button_prev = SendButtonState.none
     self.resume_press_frames = 0     # >0 while a RESUME press is recent enough to have re-engaged
+    self.reanchor_overridden = False  # a resume kept the hold; re-measure the limit rule from here
     self.v_cluster_at_cycle = 0      # set speed when cruise was re-engaged; the resume jump moves it
     self.press_settle_frames = 0     # >0 while ICBM stands down after a driver press
     self.cluster_stable_frames = 0   # how long the set speed has been unchanged
@@ -510,6 +511,9 @@ class IntelligentCruiseButtonManagement:
     if RE_ARM_ON_CRUISE_CYCLE and cruise_cycled:
       if self.resume_press_frames == 0:
         self.clear_baseline()
+      else:
+        # Hold survived a RESUME. Re-anchor the limit-change reference to wherever we are now.
+        self.reanchor_overridden = True
       self.cruise_cycle_frames = CRUISE_CYCLE_SETTLE_FRAMES
       self.v_cluster_at_cycle = self.v_cruise_cluster
       self.resume_press_frames = 0
@@ -597,6 +601,26 @@ class IntelligentCruiseButtonManagement:
     if not self.v_target_valid:
       return
 
+    # Nothing below this discards the hold while cruise is DISENGAGED.
+    #
+    # Both rules decide whether the driver's number still applies to the driving ICBM is doing.
+    # While disengaged ICBM is doing nothing, and the driver is usually disengaged precisely
+    # because they are turning off the road -- which changes the posted limit, which fired the
+    # 10 mph rule below and destroyed the hold silently, mid-turn, before RESUME was ever pressed.
+    # Reported exactly that way: hold, cancel for a turn, resume, hold gone.
+    #
+    # Freezing here does not skip the judgement, it defers it: v_target_overridden is re-anchored
+    # on resume (see the cycle branch), so the rule then measures from the road actually being
+    # driven rather than from one left behind several minutes ago.
+    if not cruise_enabled:
+      return
+
+    # A resume re-asserts the driver's number for wherever they now are, so the limit-change rule
+    # below has to measure from here rather than from the zone the hold was created in.
+    if self.reanchor_overridden and self.plan_source == LongitudinalPlanSource.speedLimitAssist:
+      self.v_target_overridden = self.v_target_raw
+      self.reanchor_overridden = False
+
     # Returning the set speed to exactly what Speed Limit Assist wants hands control back. This is
     # the second way out of a hold, alongside cancel + re-engage, and the only one that does not
     # require disengaging cruise.
@@ -633,6 +657,7 @@ class IntelligentCruiseButtonManagement:
     self.v_baseline = 0
     self.v_target_overridden = 0
     self.baseline_diverged = False
+    self.reanchor_overridden = False
     self.counter_move_accum = 0
 
   def run(self, CS: car.CarState, CC: car.CarControl, LP_SP: custom.LongitudinalPlanSP, is_metric: bool) -> None:
