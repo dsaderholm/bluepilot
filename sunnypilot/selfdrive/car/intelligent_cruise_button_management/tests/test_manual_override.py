@@ -1102,3 +1102,35 @@ class TestPressingDuringACurveDoesNotRedefineTheHold:
     set_baseline(icbm, to=65)
     settle(icbm, LIMIT, cluster=65)
     assert icbm.v_baseline == 65
+
+
+class TestIcbmStaysOutOfItUnderMadsOnly:
+  """The owner drives with MADS engaged essentially all the time, so openpilot is steering whenever
+  the car is moving -- including with ACC switched off.
+
+  That matters more than it looks. ICBM's only actuator is injected set-speed button presses, and
+  while cruise is DISENGAGED those map to setCruise, which ENGAGES cruise. If ICBM ever commanded
+  under MADS-only it would turn stock ACC on by itself.
+
+  It cannot, and the guard is indirect enough to be worth pinning: controlsd sets
+  cruiseControl.override = CC.enabled and not CC.longActive on this platform (pcmCruiseSpeed is
+  False), which is exactly the MADS-only condition, and update_readiness requires not override.
+  """
+
+  @staticmethod
+  def _mads_only():
+    """openpilot engaged for lateral, longitudinal not active -- so controlsd raises override."""
+    return NS(enabled=True, cruiseControl=NS(resume=False, override=True, cancel=False))
+
+  def test_icbm_is_not_ready_under_mads_only(self):
+    icbm = fresh()
+    icbm.run(make_cs(LIMIT, enabled=False), self._mads_only(), make_lp(DRIVER), False)
+    assert not icbm.is_ready, "ICBM considered itself ready with only lateral engaged"
+
+  def test_icbm_commands_no_buttons_under_mads_only(self):
+    """The consequence that actually matters: a press here would engage ACC unbidden."""
+    icbm = fresh()
+    for _ in range(300):
+      icbm.run(make_cs(LIMIT, enabled=False), self._mads_only(), make_lp(DRIVER), False)
+      assert icbm.cruise_button == SendButtonState.none, \
+        "ICBM sent a set-speed button with cruise off; that press would engage ACC"
