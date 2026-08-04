@@ -73,6 +73,7 @@ struct IntelligentCruiseButtonManagement {
     press @1;           # a real ButtonEvent reached MANUAL_OVERRIDE_BUTTONS -- the primary path
     fallbackIdle @2;    # set speed moved while ICBM had been silent long enough to rule itself out
     fallbackCounter @3; # set speed moved AGAINST the button ICBM was holding
+    pinned @4;          # a hold pinned to this place on an earlier drive re-applied itself
   }
 }
 

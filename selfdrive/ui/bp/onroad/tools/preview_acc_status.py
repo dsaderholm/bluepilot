@@ -38,6 +38,8 @@ SCENES = [
   ("no hold, ACC accelerating", 55, 55, 0, "", "ACCEL", 0.6, False, False),
   ("TSR not working -- the camera's own reason", 70, 55, 70, "", "COAST", 0.0, False, False,
    "TSR REGION N/A"),
+  ("hold pinned to this place -- tap the badge to unpin", 45, 55, 45, "", "COAST", 0.0, False,
+   False, "", True),
 ]
 
 
@@ -118,11 +120,12 @@ def main(outdir):
   for i, scene in enumerate(SCENES):
     cap, set_speed, limit, hold, arrow, acc, mag, lamps, locked = scene[:9]
     tsr = scene[9] if len(scene) > 9 else ""
+    pinned = scene[10] if len(scene) > 10 else False
     stub = types.SimpleNamespace(
       _font_bold=fonts["bold"], _font_semi_bold=fonts["semi"],
       _icbm_baseline=hold, _icbm_arrow=arrow, _acc_state=acc, _acc_accel=mag,
       _brakes_on=lamps, _show_brake_status=True, _lamp_data_available=True,
-      _icbm_hold_locked=locked, _tsr_fault=tsr,
+      _icbm_hold_locked=locked, _tsr_fault=tsr, _icbm_pinned=pinned, _hold_rect=None,
       _draw_arrow=ns["_draw_arrow"],
     )
     rl.begin_texture_mode(tex)

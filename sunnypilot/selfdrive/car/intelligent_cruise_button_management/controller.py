@@ -306,6 +306,11 @@ class IntelligentCruiseButtonManagement:
     self.rise_stall_frames = 0   # cluster sitting at the ceiling with actual speed not catching up
     self.lead_present = False    # a vehicle ahead; the set speed is then a ceiling, not a demand
 
+    # BluePilot: a hold pinned to this place, in display units; 0 = none here. Edge-triggered --
+    # see apply_pinned_hold.
+    self.pinned_hold = 0
+    self.pinned_hold_prev = 0
+
     # BluePilot: radar-blind lead detector currently owns the target
     self.unconfirmed_lead_commanding = False
     self.unconfirmed_lead_state = UnconfirmedLeadState.inactive
@@ -641,6 +646,10 @@ class IntelligentCruiseButtonManagement:
           self.clear_baseline()
         self.cycle_decision_pending = False
 
+    # A pin re-applies here: after the cycle bookkeeping above, so a resume's set-speed jump is not
+    # mistaken for it, and before the press path below, so a real press in the same frame wins.
+    self.apply_pinned_hold(cruise_enabled)
+
     # While the driver is pressing, the baseline follows the cluster. It therefore settles wherever
     # they stop, and holding the button through several increments records the final speed rather
     # than the first. v_target_overridden captures the SLA target being rejected, once per override.
@@ -817,6 +826,36 @@ class IntelligentCruiseButtonManagement:
         abs(self.v_target_raw - self.v_target_overridden) >= self.baseline_reset_delta):
       self.clear_baseline()
 
+  def apply_pinned_hold(self, cruise_enabled: bool) -> bool:
+    """BluePilot: re-apply a hold that was pinned to this place on an earlier drive.
+
+    EDGE-triggered, not level-triggered, and that is the whole design. It fires once on entering the
+    radius and then gets out of the way, so the pin decides the NUMBER and WHERE and nothing else.
+    Everything after is an ordinary hold: the driver can adjust it and their adjustment stands,
+    curves still slow the car, hazards still override, and the usual clearing rules apply.
+
+    Level-triggering would have meant re-asserting the pinned number every frame inside the zone,
+    which takes the set speed away from the driver for as long as they are in it -- the same
+    "fighting the driver" failure the manual override latch exists to prevent.
+
+    Leaving and re-entering re-arms it, which is what makes a pin useful on a road driven daily.
+    """
+    fired = self.pinned_hold > 0 and self.pinned_hold != self.pinned_hold_prev
+    self.pinned_hold_prev = self.pinned_hold
+    # A hold is a number for cruise to drive to. With cruise off there is nothing to hold, and
+    # arming one here would have it discovered later at a speed nobody chose.
+    if not fired or not cruise_enabled:
+      return False
+
+    if self.override_state != OverrideState.manual:
+      self.v_target_overridden = self.v_target_raw
+      self.baseline_diverged = False
+    self.override_state = OverrideState.manual
+    self.v_baseline = self.pinned_hold
+    self.baseline_source = BaselineSource.pinned
+    self.v_cluster_at_press = self.v_cruise_cluster
+    return True
+
   def clear_baseline(self) -> None:
     self.override_state = OverrideState.auto
     self.v_baseline = 0
@@ -826,12 +865,13 @@ class IntelligentCruiseButtonManagement:
     self.counter_move_accum = 0
 
   def run(self, CS: car.CarState, CC: car.CarControl, LP_SP: custom.LongitudinalPlanSP, is_metric: bool,
-          lead_present: bool = False) -> None:
+          lead_present: bool = False, pinned_hold: int = 0) -> None:
     if self.CP_SP.pcmCruiseSpeed:
       return
 
     self.is_metric = is_metric
     self.lead_present = lead_present
+    self.pinned_hold = int(pinned_hold)
 
     self.update_params()
     self.update_calculations(CS, LP_SP)

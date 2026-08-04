@@ -29,6 +29,7 @@ from openpilot.sunnypilot import get_sanitize_int_param
 from openpilot.sunnypilot.selfdrive.car.car_specific import CarSpecificEventsSP
 from openpilot.sunnypilot.selfdrive.car.cruise_helpers import CruiseHelper
 from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management.controller import IntelligentCruiseButtonManagement
+from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management.pinned_holds import PinnedHolds
 from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP
 
 REPLAY = "REPLAY" in os.environ
@@ -172,6 +173,10 @@ class SelfdriveD(CruiseHelper):
 
     self.mads = ModularAssistiveDrivingSystem(self)
     self.icbm = IntelligentCruiseButtonManagement(self.CP, self.CP_SP)
+    # BluePilot: holds pinned to a place. Evaluated here rather than in the controller because this
+    # is where both halves live -- the GPS fix and the live baseline -- and the UI that creates a
+    # pin needs neither.
+    self.pinned_holds = PinnedHolds(self.params)
 
     self.car_events_sp = CarSpecificEventsSP(self.CP, self.CP_SP)
 
@@ -492,7 +497,35 @@ class SelfdriveD(CruiseHelper):
     # ceiling that never binds, so ICBM's rise limiter has nothing to meter -- see
     # apply_target_rise_limit. radarState is already subscribed above.
     lead_present = bool(self.sm['radarState'].leadOne.status) if self.sm.valid['radarState'] else False
-    self.icbm.run(CS, self.sm['carControl'], self.sm['longitudinalPlanSP'], self.is_metric, lead_present)
+    self.icbm.run(CS, self.sm['carControl'], self.sm['longitudinalPlanSP'], self.is_metric, lead_present,
+                  self.update_pinned_holds())
+
+  def update_pinned_holds(self) -> int:
+    """BluePilot: pinned speed for where the car is now, in display units, or 0.
+
+    Also services the pin/unpin request the HOLD badge raises. Doing both here keeps every use of
+    the GPS fix in one place; the alternative was giving the UI a position and the controller a
+    second one, and having them disagree.
+
+    Every failure mode returns 0, which reads as "no pin" and leaves ICBM exactly as it was. A
+    feature that edits the set speed from a stored file must degrade to doing nothing.
+    """
+    try:
+      self.pinned_holds.update_params()
+      gps = self.sm[self.gps_location_service]
+      if not self.sm.valid[self.gps_location_service] or not gps.hasFix:
+        return 0
+      lat, lon = float(gps.latitude), float(gps.longitude)
+
+      if self.params.get_bool("IcbmPinHoldRequest"):
+        self.params.put_bool("IcbmPinHoldRequest", False)
+        # v_baseline is display units already, and 0 when no hold is held -- toggle() reads that as
+        # "nothing to pin" and says so rather than pinning a zero.
+        self.pinned_holds.toggle(lat, lon, int(self.icbm.v_baseline))
+
+      return self.pinned_holds.match(lat, lon)
+    except Exception:
+      return 0
 
   def data_sample(self):
     _car_state = messaging.recv_one(self.car_state_sock)

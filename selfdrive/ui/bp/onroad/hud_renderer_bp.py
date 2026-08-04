@@ -128,6 +128,12 @@ TSR_PILL_FILL = rl.Color(0, 0, 0, 150)
 TSR_PILL_EDGE = rl.Color(196, 176, 70, 205)
 TSR_PILL_INK = rl.Color(226, 206, 110, 255)
 
+# BluePilot: a hold pinned to this place re-applies itself on every drive. Marked with a dot in the
+# badge corner rather than a word: the badge is 172 px wide and already carries a label and a
+# two-digit number, and "PIN" competing with "HOLD" reads as two labels for one thing.
+PIN_DOT_RADIUS = 9
+PIN_DOT_COLOR = rl.Color(255, 214, 120, 255)
+
 
 class HudRendererBP(HudRendererSP):
   """BluePilot HudRenderer with brake status display.
@@ -156,6 +162,8 @@ class HudRendererBP(HudRendererSP):
     self._icbm_hold_locked = False  # something else owns the target; a press cannot change the hold
     self._lamp_data_available = False  # the BCM/brake-system lamp signal is actually being decoded
     self._tsr_fault = ""      # why TSR is not producing a limit; "" when it is working or silent
+    self._icbm_pinned = False   # this hold came from a pin, so tapping the badge removes it
+    self._hold_rect = None      # last drawn badge rect; the tap target for pinning
     self._acc_status_failed = False   # latched on any error; keeps a display bug off the screen
     self.speed_right = 0
     self._gradient_rect = None  # BluePilot: Full-width rect for header gradient
@@ -258,6 +266,7 @@ class HudRendererBP(HudRendererSP):
       if icbm.overrideState.raw == 1 and icbm.vBaseline > 0:
         self._icbm_baseline = round(icbm.vBaseline)
         self._icbm_hold_locked = bool(icbm.holdSuppressed)
+        self._icbm_pinned = icbm.baselineSource.raw == 4  # BaselineSource.pinned
     except Exception:
       pass
 
@@ -366,6 +375,25 @@ class HudRendererBP(HudRendererSP):
     self.circular_alerts_renderer.render(rect)
     self.rocket_fuel.render(rect, ui_state.sm)
 
+  def _handle_mouse_release(self, mouse_pos) -> None:
+    """BluePilot: tapping the HOLD badge pins this hold to this place, or unpins it.
+
+    The badge is the tap target because it is already the thing on screen that means "hold", and
+    because the cruise buttons are full -- every one of them carries a settled meaning the owner
+    learned once, and adding a gesture would mean relearning one to gain a rare action.
+
+    Only a request is raised here. selfdrived does the work, because that is where the GPS fix and
+    the live baseline both are; the UI has neither and should not grow a second copy of either.
+    """
+    super()._handle_mouse_release(mouse_pos)
+    if self._hold_rect is None or not self._icbm_baseline:
+      return
+    if rl.check_collision_point_rec(mouse_pos, self._hold_rect):
+      try:
+        self._bp_params.put_bool("IcbmPinHoldRequest", True)
+      except Exception:
+        pass
+
   def _draw_acc_status(self, rect: rl.Rectangle) -> None:
     """BluePilot: a compact line under the MAX box -- what ACC is asking for, what ICBM is doing.
 
@@ -390,6 +418,8 @@ class HudRendererBP(HudRendererSP):
 
     if self._icbm_baseline and not lamps_only:
       y += self._draw_hold_badge(x, y, set_speed_width) + STACK_GAP
+    else:
+      self._hold_rect = None   # no badge on screen, no tap target
     if self._acc_state and not lamps_only:
       y += self._draw_acc_pill(x, y) + STACK_GAP
     # Shown whenever brake status is on, in both states -- an indicator that only appears when lit
@@ -441,6 +471,11 @@ class HudRendererBP(HudRendererSP):
     value_width = measure_text_cached(self._font_bold, value, HOLD_VALUE_SIZE).x
     rl.draw_text_ex(self._font_bold, value, rl.Vector2(center_x - value_width / 2, y + 46),
                     HOLD_VALUE_SIZE, 0, COLORS.WHITE)
+    # Remember where the badge landed: this is the tap target for pinning, and the geometry above
+    # is the only place that knows it.
+    self._hold_rect = rl.Rectangle(x, y, width, HOLD_HEIGHT)
+    if self._icbm_pinned:
+      rl.draw_circle(int(x + width - 20), int(y + 20), PIN_DOT_RADIUS, PIN_DOT_COLOR)
     return HOLD_HEIGHT
 
   def _draw_tsr_pill(self, x: float, y: float) -> int:

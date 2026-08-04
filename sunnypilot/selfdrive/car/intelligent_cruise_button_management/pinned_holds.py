@@ -1,0 +1,179 @@
+"""
+BluePilot: holds that stay pinned to a place.
+
+A normal ICBM hold is temporary by design -- it survives curves and leads, but a big enough change
+in the posted limit discards it, and so does handing the speed back to Speed Limit Assist. That is
+right for "I want 72 on this freeway" and wrong for the handful of places where the same correction
+is needed on every single drive.
+
+The analogy the owner reached for is exactly right: a radar detector's mute memory. Mute memory is
+not for a broken detector. It is for a working one that is reliably wrong in one specific spot --
+the supermarket's automatic door, every time, forever. This is that, for speed.
+
+WHAT THIS IS FOR, INCLUDING AFTER TSR WORKS
+-------------------------------------------
+The obvious use is patching bad OSM data, and that one really does evaporate once the camera reads
+signs. These do not:
+
+  - TSR's own repeatable misreads. It will pick up the frontage road's sign, or read an exit ramp's
+    yellow advisory as regulatory, at the same place every time. A correct reading of the wrong sign
+    is still the wrong number.
+  - Signs you disagree with. A correctly-read 25 on an empty stretch is still a 25 nobody drives.
+  - Signs that are right at 8am and wrong at 22:00 -- an empty construction zone, a school zone out
+    of hours.
+
+So this is deliberately NOT a workaround for a missing sensor. It encodes local knowledge, which is
+the one input no sensor and no map database has.
+
+NOT FOR RAMPS. Freeway ramps are curve geometry and belong to SCC-Map, which already knows the
+curve is coming from OSM way shape and needs no speed limit to do it. Pinning ramps by hand would
+be re-solving a solved problem one interchange at a time.
+
+HOW A PIN IS MADE
+-----------------
+Tapping the on-screen HOLD badge while a hold is active pins it at the current position; tapping a
+pinned hold removes the pin. There is no new button gesture, because the cruise buttons already
+carry settled meanings the owner has learned once and should not have to relearn -- see the ICBM
+button contract in CLAUDE.md.
+
+WHAT A PIN DOES
+---------------
+Entering the radius sets the hold to the pinned speed, exactly as though the driver had pressed for
+it. It is a normal hold from that moment: curves still slow the car, hazards still override, and the
+usual clearing rules apply. That is the whole point of reusing the baseline rather than inventing a
+second kind of hold -- the pin decides the NUMBER and WHERE, never the behaviour.
+"""
+import json
+import math
+
+from openpilot.common.params import Params
+
+# Earth radius, matching smart_cruise_control/map_controller.py so the two agree on what a metre is.
+R_EARTH = 6373000.0
+TO_RADIANS = math.pi / 180
+
+DEFAULT_RADIUS_M = 60
+# A pin is a point, but the thing it corrects is usually a stretch of road. That is fine and is why
+# the pin only has to fire ONCE: it sets a normal hold, which then persists on its own until
+# something legitimately clears it. So the radius wants to be big enough that GPS scatter cannot
+# miss it at speed, not big enough to cover the zone.
+#
+# At 80 mph a 20 Hz position update moves ~1.8 m, so even a tight radius cannot be stepped over.
+# The real lower bound is fix accuracy, which is a few metres on a good day and worse in a canyon.
+MIN_RADIUS_M = 15
+# The upper bound is what stops a pin on a surface street from firing on the freeway above it, or
+# on the opposite carriageway. Beyond a couple of hundred metres a point stops meaning a place.
+MAX_RADIUS_M = 250
+
+MAX_PINS = 200  # a JSON param read at 20 Hz; this is a sanity bound, not an expected count
+
+
+def distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+  """Haversine great-circle distance in metres."""
+  a1, o1, a2, o2 = lat1 * TO_RADIANS, lon1 * TO_RADIANS, lat2 * TO_RADIANS, lon2 * TO_RADIANS
+  a = math.sin((a2 - a1) / 2) ** 2 + math.cos(a1) * math.cos(a2) * math.sin((o2 - o1) / 2) ** 2
+  return R_EARTH * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+class PinnedHolds:
+  """Load, match and edit the pinned-hold list.
+
+  Speeds are stored in DISPLAY units (mph or km/h), because that is what a hold is -- the number on
+  the cluster. Storing metres per second here would mean a pin made in mph reading back slightly
+  different after a units change, for no benefit: nothing downstream wants SI.
+  """
+
+  def __init__(self, params: Params | None = None):
+    self.params = params or Params()
+    self.pins: list[dict] = []
+    self.enabled = False
+    self.radius = DEFAULT_RADIUS_M
+    self._raw = None
+
+  def update_params(self) -> None:
+    """Re-read on change only. The param is JSON and this is called at control rate."""
+    self.enabled = self.params.get_bool("IcbmPinnedHoldsEnabled")
+    self.radius = min(max(int(self.params.get("IcbmPinnedHoldRadius", return_default=True)),
+                          MIN_RADIUS_M), MAX_RADIUS_M)
+    raw = self.params.get("IcbmPinnedHolds")
+    if raw == self._raw:
+      return
+    self._raw = raw
+    self.pins = self._parse(raw)
+
+  @staticmethod
+  def _parse(raw) -> list[dict]:
+    """Tolerate anything. A corrupt param must mean "no pins", never a crash in the control loop."""
+    if not raw:
+      return []
+    try:
+      if isinstance(raw, bytes):
+        raw = raw.decode("utf-8", errors="replace")
+      data = json.loads(raw)
+      if not isinstance(data, list):
+        return []
+      out = []
+      for p in data[:MAX_PINS]:
+        try:
+          lat, lon, speed = float(p["lat"]), float(p["lon"]), int(p["speed"])
+        except (TypeError, KeyError, ValueError):
+          continue
+        # A pin at 0,0 is the signature of a fix that never came, not a place in the Gulf of Guinea.
+        if speed > 0 and (abs(lat) > 1e-6 or abs(lon) > 1e-6):
+          out.append({"lat": lat, "lon": lon, "speed": speed})
+      return out
+    except (ValueError, TypeError):
+      return []
+
+  def nearest(self, lat: float, lon: float) -> tuple[dict | None, float]:
+    """Closest pin and its distance, whatever the radius. Used by both matching and un-pinning."""
+    best, best_d = None, float("inf")
+    for p in self.pins:
+      d = distance_m(lat, lon, p["lat"], p["lon"])
+      if d < best_d:
+        best, best_d = p, d
+    return best, best_d
+
+  def match(self, lat: float, lon: float) -> int:
+    """Pinned speed for this position in display units, or 0 for none.
+
+    Returns 0 when disabled or without a fix, so the caller needs no separate availability test.
+    """
+    if not self.enabled or not self.pins:
+      return 0
+    if abs(lat) < 1e-6 and abs(lon) < 1e-6:
+      return 0
+    pin, d = self.nearest(lat, lon)
+    return int(pin["speed"]) if pin is not None and d <= self.radius else 0
+
+  def toggle(self, lat: float, lon: float, speed: int) -> str:
+    """Pin the current hold here, or remove the pin already here. Returns what it did.
+
+    One control for both directions, because the badge that triggers it shows which state you are
+    in -- there is nothing to disambiguate and a second control would be a second thing to learn.
+    """
+    if abs(lat) < 1e-6 and abs(lon) < 1e-6:
+      return "no_fix"
+
+    pin, d = self.nearest(lat, lon)
+    if pin is not None and d <= self.radius:
+      self.pins = [p for p in self.pins if p is not pin]
+      self._save()
+      return "removed"
+
+    if speed <= 0:
+      return "no_hold"
+    if len(self.pins) >= MAX_PINS:
+      return "full"
+
+    self.pins.append({"lat": round(lat, 6), "lon": round(lon, 6), "speed": int(speed)})
+    self._save()
+    return "added"
+
+  def clear(self) -> None:
+    self.pins = []
+    self._save()
+
+  def _save(self) -> None:
+    self._raw = json.dumps(self.pins)
+    self.params.put("IcbmPinnedHolds", self._raw)

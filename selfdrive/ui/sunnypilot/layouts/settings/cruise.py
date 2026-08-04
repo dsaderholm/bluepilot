@@ -161,6 +161,27 @@ class CruiseLayout(Widget):
       param="IcbmModelStopEnabled")
 
     # BluePilot: hold openpilot's standstill resume until the lead has actually gone
+    # BluePilot: holds pinned to a place -- see pinned_holds.py for why this survives TSR working.
+    self.icbm_pinned_holds = toggle_item_sp(
+      title=tr("Remember Holds By Location"),
+      description=tr("Tap the HOLD badge while driving to pin that hold to the spot you are in. "
+                     "It comes back on its own every time you drive through there. For the few "
+                     "places that need the same correction every trip: a sign the camera reads "
+                     "wrong, a limit nobody drives, a school zone outside school hours. Tap a "
+                     "pinned hold again to remove it."),
+      param="IcbmPinnedHoldsEnabled")
+
+    self.icbm_pinned_hold_radius = option_item_sp(
+      title=tr("Pinned Hold Range"),
+      description=tr("How close you have to get before a pinned hold takes effect. A pin only has "
+                     "to catch once, then it behaves like any other hold, so this covers GPS "
+                     "wander rather than the length of the road. Raise it if a pin gets missed; "
+                     "lower it if one fires on a road running alongside."),
+      param="IcbmPinnedHoldRadius",
+      min_value=15, max_value=250, value_change_step=5,
+      label_callback=self._distance_label,
+      inline=True)
+
     self.icbm_resume_gate = toggle_item_sp(
       title=tr("Wait For The Car Ahead Before Resuming"),
       description=tr("Wait for the vehicle ahead to actually move before resuming from a stop. "
@@ -259,6 +280,8 @@ class CruiseLayout(Widget):
       self.icbm_model_stop,
 
       SectionHeader(tr("Resuming From A Stop")),
+      self.icbm_pinned_holds,
+      self.icbm_pinned_hold_radius,
       self.icbm_resume_gate,
       self.icbm_resume_min_gap,
       self.icbm_resume_min_lead_speed,
@@ -296,6 +319,13 @@ class CruiseLayout(Widget):
     self._current_panel = panel
     if panel == PanelType.SLA:
       self._speed_limit_layout.show_event()
+
+  @staticmethod
+  def _distance_label(value: int) -> str:
+    """BluePilot: stored in metres because that is what the geometry works in, shown in feet to a
+    driver who measures in miles. Same rule as _speed_step_label below -- the unit follows the
+    driver, and a settings label must never state one without asking which they use."""
+    return f"{value} m" if ui_state.is_metric else f"{round(value * 3.28084 / 5) * 5} ft"
 
   @staticmethod
   def _speed_step_label(value: int) -> str:

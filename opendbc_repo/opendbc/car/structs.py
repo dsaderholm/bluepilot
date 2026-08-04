@@ -129,6 +129,7 @@ class IntelligentCruiseButtonManagement:
     press = "press"
     fallbackIdle = "fallbackIdle"
     fallbackCounter = "fallbackCounter"
+    pinned = "pinned"
 
   class OverrideState(StrEnum):
     auto = "auto"

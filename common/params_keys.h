@@ -189,6 +189,19 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"IcbmResumeGateEnabled", {PERSISTENT | BACKUP, BOOL, "1"}},
     {"IcbmResumeMinGap", {PERSISTENT | BACKUP, INT, "6"}},        // meters of lead gap
     {"IcbmResumeMinLeadSpeed", {PERSISTENT | BACKUP, INT, "5"}},  // mph the lead must be doing
+    // BluePilot: holds pinned to a place -- JSON [{"lat":,"lon":,"speed":}], speed in display
+    // units. For the handful of spots that need the same correction on every drive: a sign the
+    // camera reliably misreads, a limit nobody drives, a school zone out of hours. Not for ramps;
+    // those are curve geometry and belong to SCC-Map.
+    {"IcbmPinnedHolds", {PERSISTENT | BACKUP, JSON}},
+    {"IcbmPinnedHoldsEnabled", {PERSISTENT | BACKUP, BOOL, "1"}},
+    // Metres. Big enough that GPS scatter cannot step over it, small enough that a surface-street
+    // pin does not fire on the freeway above it. A pin only has to hit ONCE -- it sets a normal
+    // hold, which then persists on its own -- so this covers fix error, not the length of the zone.
+    {"IcbmPinnedHoldRadius", {PERSISTENT | BACKUP, INT, "60"}},
+    // Set by tapping the on-screen HOLD badge; consumed by selfdrived, which is where the GPS fix
+    // and the live baseline both are. Keeps the UI from needing either.
+    {"IcbmPinHoldRequest", {CLEAR_ON_MANAGER_START, BOOL}},
     {"DeviceBootMode", {PERSISTENT | BACKUP, INT, "0"}},
     {"DevUIInfo", {PERSISTENT | BACKUP, INT, "0"}},
     {"EnableCopyparty", {PERSISTENT | BACKUP, BOOL}},
