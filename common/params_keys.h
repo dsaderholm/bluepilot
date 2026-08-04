@@ -271,7 +271,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"PassingAssistLastDrive", {PERSISTENT | BACKUP, JSON}},
     {"PassingAssistExitStandDown", {PERSISTENT | BACKUP, INT, "45"}},
     {"PassingAssistMinSpeed", {PERSISTENT | BACKUP, INT, "30"}},
-    {"PassingAssistConfirmTime", {PERSISTENT | BACKUP, INT, "2"}},
+    {"PassingAssistConfirmTime", {PERSISTENT | BACKUP, INT, "1"}},
     {"PassingAssistCrawlTime", {PERSISTENT | BACKUP, INT, "8"}},
     {"PassingAssistChime", {PERSISTENT | BACKUP, BOOL, "1"}},
     {"PassingAssistLeadBrakingHold", {PERSISTENT | BACKUP, BOOL, "1"}},

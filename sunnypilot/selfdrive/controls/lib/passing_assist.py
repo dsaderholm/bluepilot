@@ -180,9 +180,24 @@ MAX_LEAD_D_PATH_M = 1.5
 # speedDeficit is logged on every decision, so this can be refitted from a drive instead of argued
 # about.
 DEFAULT_MIN_DEFICIT_MPH = 4
-# How long the slower lead must persist before suggesting. Short by design: waiting is the whole
+# How long the slower lead must persist before committing. Short by design: waiting is the whole
 # behavior this exists to remove. Long enough only to reject a single bad frame of lead tracking.
-DEFAULT_PERSISTENCE_S = 2
+#
+# ONE SECOND, DOWN FROM TWO, and the reason is that this constant was carrying work it no longer
+# does. When it was set, it was the ONLY defense against a flickering lead -- so it had to be long
+# enough to outlast the flicker. It is not any more: the deficit hysteresis, the range hysteresis,
+# the grace window and the decay rate below all exist now, and each rejects the exact noise this
+# was padded against. Two seconds was insurance being paid twice.
+#
+# What it costs is the thing the whole feature is about. The owner: "Can we not confirm a slower
+# car in 1 second while the blinker is on and then make a lane change?" Yes -- because the
+# confirmation and the blinker lead run CONCURRENTLY, not one after the other, so at 1 s each the
+# total wait is one second rather than two. The blinker goes on the moment a slow car is spotted
+# with a clear lane, and the crossing begins when both clocks are satisfied.
+#
+# Twenty frames of consistent evidence at 20 Hz. A single bad frame is 0.05 s, so this is still
+# forty times the thing it was written to reject.
+DEFAULT_PERSISTENCE_S = 1
 
 # --- and why that timer is no longer destroyed by one bad frame ---
 #

@@ -83,6 +83,9 @@ DEFAULT_TARGETS = [
   # and the static guards over the settings layouts (param types, orphaned and dangling items).
   "selfdrive/car/tests/test_param_write_types.py",
   "selfdrive/car/tests/test_settings_widget_params.py",
+  # Guards the stub the whole passing-assist suite runs against. Named, like its neighbours --
+  # the folder holds device-only tests that cannot collect here.
+  "selfdrive/car/tests/test_stub_param_defaults.py",
   "selfdrive/ui/bp/layouts/settings/tests/",
   "selfdrive/ui/bp/onroad/tests/",
   "system/tests/test_sentry_disabled_by_default.py",

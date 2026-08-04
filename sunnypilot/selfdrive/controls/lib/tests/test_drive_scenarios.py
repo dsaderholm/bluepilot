@@ -40,7 +40,9 @@ class TestAnOrdinaryInterstatePass:
     assert det.blocked_by == Blocked.noLead
 
     # 2. A lorry, and it is slower. Building toward a suggestion, not yet suggesting.
-    drive(det, 1.0, v_lead=SLOW_LEAD_MS, d_rel=180.0)
+    # HALF the confirmation, not a hardcoded second -- this step is "part way through", and writing
+    # that as an absolute time silently became "all the way through" when the default dropped.
+    drive(det, det.persistence_s / 2, v_lead=SLOW_LEAD_MS, d_rel=180.0)
     assert det.blocked_by == Blocked.nothingSlower
     assert 0.0 < det.approach_seconds < det.persistence_s
     assert det.suggestion == Side.none

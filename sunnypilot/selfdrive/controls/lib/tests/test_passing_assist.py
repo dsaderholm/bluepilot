@@ -26,6 +26,7 @@ from openpilot.common.realtime import DT_MDL
 from openpilot.sunnypilot.selfdrive.controls.lib.passing_maneuver import CHANGE_DURATION_S
 from openpilot.sunnypilot.selfdrive.controls.lib.passing_assist import (
   PassingAssistDetector, MIN_LANE_WIDTH_M, DEFAULT_MIN_SPEED_MPH, MAX_WIDENING_M,
+  DEFAULT_PERSISTENCE_S,
 )
 
 Side = custom.LongitudinalPlanSP.PassingAssist.Side
@@ -201,11 +202,21 @@ class TestPassingAssistGeometry:
 class TestPassingAssistGates:
   def test_brief_confirmation_before_suggesting(self):
     """The timer is now only long enough to reject a bad frame of lead tracking -- it is NOT a
-    waiting period, which is the behavior this whole design exists to remove."""
-    det = run(PassingAssistDetector(), int(1.0 / DT_MDL))
+    waiting period, which is the behavior this whole design exists to remove.
+
+    Measured as a FRACTION of the configured time rather than a hardcoded second. This test used to
+    run for exactly 1.0 s against a 2 s default, so it broke the moment the default became 1 -- it
+    was asserting the old number, not the behavior.
+    """
+    det = PassingAssistDetector()
+    half = int((DEFAULT_PERSISTENCE_S / 2) / DT_MDL)
+    run(det, half)
     assert det.suggestion == Side.none
     assert det.blocked_by == Blocked.nothingSlower
-    assert 0.5 < det.approach_seconds < 1.5
+    assert 0.0 < det.approach_seconds < DEFAULT_PERSISTENCE_S
+    # ...and it does complete, so the case above is "not yet" rather than "never".
+    run(det, half + 4)
+    assert det.suggestion == Side.left
 
   def test_an_intermittent_radar_track_still_confirms(self):
     """The reported failure, and the one a decay rate alone did NOT fix: "it would go in and out of
@@ -419,7 +430,7 @@ DELAY_FRAMES = int(11.0 / DT_MDL)   # clears the delay alone, NOT the age
 # a single new param raised KeyError in nine unrelated tests at once, none of which were about the
 # new param. Defaults live in params_keys.h; these mirror them.
 _STUB_PARAM_DEFAULTS = {
-  "PassingAssistMinDeficit": 4, "PassingAssistConfirmTime": 2,
+  "PassingAssistMinDeficit": 4, "PassingAssistConfirmTime": 1,
   "PassingAssistKeepRightDelay": 10, "PassingAssistSettleTime": 20,
   "PassingAssistMaxDistance": 220, "PassingAssistSuspendMinutes": 15,
   "PassingAssistOncomingMemory": 90, "PassingAssistBlinkerLead": 1, "PassingAssistMinApproach": 0, "PassingAssistMinSpeed": 30, "PassingAssistExitStandDown": 45, "PassingAssistCrawlTime": 8, "PassingAssistMinLaneAge": 15,
@@ -1500,13 +1511,16 @@ class TestWhereTheTimeWent:
 
   def test_the_dominant_gate_wins_over_a_brief_one(self):
     det = PassingAssistDetector()
-    # 4 s: the first 2 are the confirmation and are not attributed to any gate, so 2 s of blind
-    # spot land in the histogram.
-    run(det, int(4.0 / DT_MDL), left_bs=True, right_bs=True)
-    run(det, int(6.0 / DT_MDL), left_bs=True, edges=(-2.3, 2.4))  # no lane, for much longer
+    # The confirmation is not attributed to any gate, so only the time AFTER it lands in the
+    # histogram. Written relative to the setting: with it hardcoded, changing the confirmation
+    # silently changed the ratio this asserts and the test failed for a reason it was not about.
+    brief = int((DEFAULT_PERSISTENCE_S + 2.0) / DT_MDL)      # 2 s of blind spot
+    dominant = int(6.0 / DT_MDL)                             # 6 s of no lane
+    run(det, brief, left_bs=True, right_bs=True)
+    run(det, dominant, left_bs=True, edges=(-2.3, 2.4))
     key, share = det.top_blocked
     assert key == int(Blocked.noLaneAvailable)
-    assert 0.7 < share < 1.0
+    assert 0.6 < share < 1.0
 
 
 class TestMinimumSpeed:
