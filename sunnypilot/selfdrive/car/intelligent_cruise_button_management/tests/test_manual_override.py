@@ -1027,3 +1027,59 @@ class TestRiseLimiterOnlyMattersWithNoLead:
     assert icbm.v_target <= 55
     icbm.run(make_cs(50, v_ego=45), CC, make_lp(DRIVER), False, True)
     assert icbm.v_target == DRIVER
+
+
+class TestPressingDuringACurveDoesNotRedefineTheHold:
+  """Measured: hold at 70, SCC drags the set speed to 45 for a curve, one + press, hold becomes 50.
+  The driver's number was gone for the rest of the drive from a single button press.
+
+  The baseline is normally "wherever the press settles", which is right when the driver is choosing
+  a cruising speed and wrong when something else is holding the speed down. A curve is a physics
+  limit the baseline only caps, never raises -- so a press during one cannot mean "my cruising
+  number is now 50". It means "ease off here", which Ford applies to the set speed directly.
+  """
+
+  @staticmethod
+  def _into_a_curve(icbm, target=45):
+    cluster = DRIVER
+    for _ in range(400):
+      icbm.run(make_cs(cluster), CC, make_lp(target, source=PlanSource.sccVision), False)
+      if icbm.cruise_button == SendButtonState.decrease:
+        cluster -= 1
+    return cluster
+
+  def test_a_press_mid_curve_leaves_the_hold_alone(self):
+    icbm = fresh()
+    set_baseline(icbm)
+    cluster = self._into_a_curve(icbm)
+    assert cluster == 45 and icbm.v_baseline == DRIVER
+    icbm.run(make_cs(cluster, buttons=(ACCEL_PRESS,)), CC,
+             make_lp(45, source=PlanSource.sccVision), False)
+    cluster += 5
+    icbm.run(make_cs(cluster, buttons=(ACCEL_RELEASE,)), CC,
+             make_lp(45, source=PlanSource.sccVision), False)
+    settle(icbm, 45, cluster=cluster, frames=200, source=PlanSource.sccVision)
+    assert icbm.v_baseline == DRIVER, "a mid-curve press redefined the driver's cruising speed"
+
+  def test_the_hold_is_still_there_when_the_curve_ends(self):
+    """The point of leaving it alone: the number has to survive to be returned to."""
+    icbm = fresh()
+    set_baseline(icbm)
+    cluster = self._into_a_curve(icbm)
+    icbm.run(make_cs(cluster, buttons=(ACCEL_PRESS,)), CC,
+             make_lp(45, source=PlanSource.sccVision), False)
+    cluster += 5
+    icbm.run(make_cs(cluster, buttons=(ACCEL_RELEASE,)), CC,
+             make_lp(45, source=PlanSource.sccVision), False)
+    for _ in range(800):                       # curve ends, SLA back in charge
+      icbm.run(make_cs(cluster), CC, make_lp(LIMIT), False)
+      if icbm.cruise_button == SendButtonState.increase:
+        cluster += 1
+    assert cluster == DRIVER, f"returned to {cluster}, not the driver's {DRIVER}"
+
+  def test_a_press_with_no_curve_still_sets_the_hold(self):
+    """The guard must be narrow -- under cruise/SLA the driver IS choosing the number."""
+    icbm = fresh()
+    set_baseline(icbm, to=65)
+    settle(icbm, LIMIT, cluster=65)
+    assert icbm.v_baseline == 65

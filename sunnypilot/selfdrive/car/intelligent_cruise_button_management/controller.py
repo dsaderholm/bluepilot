@@ -259,6 +259,7 @@ class IntelligentCruiseButtonManagement:
     self.cluster_stable_frames = 0   # how long the set speed has been unchanged
     self.cruise_cycle_frames = 0     # >0 while a resume's set-speed jump is still settling
     self.v_cluster_at_press = 0      # set speed when the driver's press was seen
+    self.press_suppressed = False    # the press happened while a curve/lead owned the target
     self.baseline_diverged = False   # has the baseline ever actually differed from SLA?
     self.cruise_enabled_prev = False
     self.v_target_valid = False
@@ -565,7 +566,29 @@ class IntelligentCruiseButtonManagement:
         self.v_target_overridden = self.v_target_raw
         self.baseline_diverged = False
       self.override_state = OverrideState.manual
-      self.v_baseline = self.v_cruise_cluster
+      # A press while something ELSE is holding the set speed down must not redefine the hold.
+      #
+      # The baseline is normally "wherever the driver's press settles", which is right when the
+      # driver is choosing a cruising speed. It is badly wrong mid-curve: SCC has already dragged
+      # the set speed from 70 to 45, so one + press re-baselined the hold to 50 and the 70 was
+      # gone for the rest of the drive. Measured exactly that, 70 -> 50 from a single press.
+      #
+      # A curve or a lead is a physics limit that the baseline only ever caps, never raises -- so
+      # a press during one cannot mean "my cruising number is now 50". It means "ease off a bit
+      # here", which Ford honours directly on the set speed anyway. The hold is left alone, the
+      # curve target reasserts itself when the stand-down ends, and the original number is still
+      # there when the curve is over.
+      #
+      # BASELINE_SOURCES is the test: under cruise/speedLimitAssist the driver IS choosing the
+      # number, so capture it. Under sccVision/sccMap/a lead, something else owns the target.
+      # Latched at the moment of the press, not re-evaluated per frame. The stand-down outlives
+      # the curve that started it -- once the source flips back to speedLimitAssist a per-frame
+      # test stops guarding and the stand-down captures the suppressed speed anyway, which is
+      # exactly how the first attempt at this still ended up with 70 -> 50.
+      if self.press_settle_frames == 0:
+        self.press_suppressed = self.v_baseline > 0 and self.plan_source not in BASELINE_SOURCES
+      if not self.press_suppressed:
+        self.v_baseline = self.v_cruise_cluster
       # Only the FIRST press of a sequence sets the reference. Re-arming it on every press would
       # move the goalposts to wherever the set speed had already got to, so "has it moved yet"
       # could never become true while the driver kept pressing.
@@ -586,7 +609,12 @@ class IntelligentCruiseButtonManagement:
         self.baseline_diverged = False
         self.v_cluster_at_press = self.v_cruise_cluster_prev
       self.override_state = OverrideState.manual
-      self.v_baseline = self.v_cruise_cluster
+      # Same rule as the press path: under a curve or a lead, something other than the driver owns
+      # the target, so movement there must not redefine the hold. Without this the press path's
+      # protection is worthless -- the fallback re-baselines a frame later, which is what a probe
+      # caught: the hold still fell 70 -> 50 with the press path already fixed.
+      if not (self.v_baseline > 0 and self.plan_source not in BASELINE_SOURCES):
+        self.v_baseline = self.v_cruise_cluster
       self.press_settle_frames = PRESS_SETTLE_MAX_FRAMES
       self.cluster_stable_frames = 0
       # Spent. The stand-down now suppresses ICBM's output, so nothing is left to move against.
@@ -617,7 +645,9 @@ class IntelligentCruiseButtonManagement:
     # button is still held. Ending this on a timer instead is what broke it on the road -- the
     # baseline froze at the pre-press speed on any car whose cluster reports slower than the timer.
     if self.press_settle_frames > 0:
-      self.v_baseline = self.v_cruise_cluster
+      # Honour what was true when the press happened, not what is true now -- see press_suppressed.
+      if not self.press_suppressed:
+        self.v_baseline = self.v_cruise_cluster
       # The set speed must have actually MOVED before "stable" means anything. Without this the
       # counter reaches its threshold while the cluster is merely slow to report, the stand-down
       # ends on the pre-press value, and the press is undone -- the same shape of bug as the fixed
