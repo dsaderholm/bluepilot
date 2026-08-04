@@ -161,7 +161,23 @@ class AutoLaneChangeController:
 
     Reads only the parent's state, so it cannot influence the maneuver -- if this is ever the
     reason a lane change behaves differently, something is very wrong.
+
+    WHOLLY GUARDED, and that is not defensive habit. DesireHelper runs inside modeld, so anything
+    that raises here kills the model process -- and with no model there is no steering at all.
+    This is measurement: its entire purpose is optional, and no optional thing may be able to stop
+    the car driving. The param write was already protected; the accounting around it was not.
+
+    Deliberately NOT extended to should_cancel, which sits in the same process. That one decides
+    whether a lane change stops, and swallowing a fault there would mean silently failing to
+    cancel -- worse than a loud failure, for three lines of comparison that cannot realistically
+    raise. Guard what is optional; leave what is load-bearing to fail loudly.
     """
+    try:
+      self._update_stats()
+    except Exception:  # noqa: BLE001 - measurement must never take modeld down
+      pass
+
+  def _update_stats(self) -> None:
     state = self.DH.lane_change_state
     prev, self._prev_state = self._prev_state, state
 

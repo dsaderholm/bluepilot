@@ -258,3 +258,25 @@ class TestStatsSurviveABadParam:
     alc._stats_write_s = LANE_CHANGE_STATS_WRITE_S
     alc._save_stats()
     assert alc.written[-1]["seconds"] == 4.0
+
+
+class TestMeasurementCannotStopTheCar:
+  """DesireHelper runs inside modeld. Anything that raises there kills the model process, and with
+  no model there is no steering at all.
+
+  The stats are measurement -- entirely optional -- so the rule is that no optional thing may be
+  able to stop the car driving. The param write was guarded from the start; the accounting around
+  it was not, which is a twenty-line state machine one bad assumption away from the same outcome.
+  """
+
+  def test_a_fault_inside_the_accounting_does_not_escape(self):
+    alc = AutoLaneChangeController(_DH())
+    alc._update_stats = lambda: (_ for _ in ()).throw(RuntimeError("anything at all"))
+    alc.update_stats()      # must not raise
+
+  def test_and_the_lane_change_carries_on_regardless(self):
+    dh = TestItIsActuallyWiredIn._dh()
+    dh.alc._update_stats = lambda: (_ for _ in ()).throw(RuntimeError("boom"))
+    TestItIsActuallyWiredIn()._start(dh)
+    assert dh.lane_change_state == LaneChangeState.laneChangeStarting
+    assert dh.desire == log.Desire.laneChangeLeft
