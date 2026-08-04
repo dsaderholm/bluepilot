@@ -175,6 +175,25 @@ class TestBandedOffset:
     r = self._resolver(speed_limit=limit_mph * CV.MPH_TO_MS)
     assert round(r._get_speed_limit_offset() * CV.MS_TO_MPH) == expected_mph
 
+  @pytest.mark.parametrize("limit_ms,expected_mph,what", [
+    (48 * CV.KPH_TO_MS, 5, "30 mph arriving as 48 km/h -> 29.8257 mph"),
+    (13.4112, 5, "30 mph in exact m/s"),
+    (13.41, 5, "30 mph, truncated m/s"),
+    (29.0576, 10, "65 mph in exact m/s"),
+    (105 * CV.KPH_TO_MS, 10, "65 mph arriving as 105 km/h -> 65.2440 mph"),
+    (12.9642, 2, "29 mph -- must stay in the slow band"),
+    (28.6106, 5, "64 mph -- must stay in the middle band"),
+  ])
+  def test_map_derived_values_land_in_the_right_band(self, limit_ms, expected_mph, what):
+    """The reported bug: a 30 zone giving +2.
+
+    These are values as they actually ARRIVE -- a float in m/s, from a source that may have been
+    km/h. The parametrisation above builds its input as mph * MPH_TO_MS, which is the same
+    conversion the code undoes, so it could only ever show the round trip was self-consistent.
+    """
+    r = self._resolver(speed_limit=limit_ms)
+    assert round(r._get_speed_limit_offset() * CV.MS_TO_MPH) == expected_mph, what
+
   def test_offset_keys_off_the_posted_limit_not_the_car(self):
     """Keying on v_ego would make the offset drift as the car slowed for traffic."""
     fast = self._resolver(speed_limit=70 * CV.MPH_TO_MS, v_ego=5.0)

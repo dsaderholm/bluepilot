@@ -129,8 +129,20 @@ class SpeedLimitResolver:
     elif self.offset_type == OffsetType.bySpeed:
       # Banded by the POSTED limit, not by current speed: the offset is a statement about the road,
       # and keying it on v_ego would make it drift as the car slowed for traffic.
+      # ROUNDED, and this is the whole bug that shipped: reported from a drive that a 30 mph zone
+      # was getting the under-30 offset. The limit reaches here as a float in m/s and does not land
+      # on a whole display unit -- 48 km/h converts to 29.825817 mph, which is < 30 and drops into
+      # the slow band. Even a clean mph source only round-trips to 30.000000000000004, so the
+      # comparison was riding on floating-point noise in whichever direction it happened to fall.
+      #
+      # Posted limits are whole numbers. Round to one before deciding which band it is in, and the
+      # question stops being about representation at all.
+      #
+      # The test that should have caught it built its input as mph * MPH_TO_MS -- the same
+      # conversion the code undoes -- so it could only ever prove the round trip was self-consistent.
+      # Realistic map-derived values are now in the parametrisation.
       to_display = CV.MS_TO_KPH if self.is_metric else CV.MS_TO_MPH
-      limit = self.speed_limit * to_display
+      limit = round(self.speed_limit * to_display)
       if limit < self.offset_mid_threshold:
         offset = self.offset_low
       elif limit < self.offset_high_threshold:
