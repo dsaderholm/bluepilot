@@ -52,6 +52,13 @@ ACC_STATUS_COLORS = {
 # MAX box next to them -- see scratchpad/hud_preview.py, which renders this corner offline at
 # device scale so placement can be judged without a drive.
 HOLD_FILL = rl.Color(30, 78, 176, 235)
+# BluePilot: while a curve, map point or hazard owns the target, a set-speed press cannot change
+# the hold -- it gives a momentary bump the suppressor reclaims within about a second. That is
+# deliberate, but it means the press does not do what a press normally does, so the badge goes
+# grey to say so. Without it the button silently has no lasting effect and looks broken.
+HOLD_LOCKED_FILL = rl.Color(84, 90, 98, 225)
+HOLD_LOCKED_EDGE = rl.Color(140, 148, 156, 235)
+HOLD_LOCKED_LABEL = rl.Color(178, 186, 194, 255)
 HOLD_EDGE = rl.Color(130, 185, 255, 255)
 HOLD_LABEL_COLOR = rl.Color(175, 210, 255, 255)
 HOLD_HEIGHT = 124
@@ -113,6 +120,7 @@ class HudRendererBP(HudRendererSP):
     self._acc_accel = 0.0     # m/s^2, signed
     self._icbm_baseline = 0   # the driver's held set speed; 0 = no hold
     self._icbm_arrow = ""     # "+" / "-" while ICBM is actively moving the set speed, else ""
+    self._icbm_hold_locked = False  # something else owns the target; a press cannot change the hold
     self._lamp_data_available = False  # the BCM/brake-system lamp signal is actually being decoded
     self._acc_status_failed = False   # latched on any error; keeps a display bug off the screen
     self.speed_right = 0
@@ -211,6 +219,7 @@ class HudRendererBP(HudRendererSP):
       self._icbm_arrow = {1: "+", 2: "-"}.get(icbm.sendButton.raw, "")
       if icbm.overrideState.raw == 1 and icbm.vBaseline > 0:
         self._icbm_baseline = round(icbm.vBaseline)
+        self._icbm_hold_locked = bool(icbm.holdSuppressed)
     except Exception:
       pass
 
@@ -347,9 +356,11 @@ class HudRendererBP(HudRendererSP):
     Geometry is safe against the small number: that one is drawn inside the box (y + 15) and this
     starts below it (y + set_speed_height + 16).
     """
+    locked = self._icbm_hold_locked
     rect = rl.Rectangle(x, y, width, HOLD_HEIGHT)
-    rl.draw_rectangle_rounded(rect, 0.32, 10, HOLD_FILL)
-    rl.draw_rectangle_rounded_lines_ex(rect, 0.32, 10, 6, HOLD_EDGE)
+    rl.draw_rectangle_rounded(rect, 0.32, 10, HOLD_LOCKED_FILL if locked else HOLD_FILL)
+    rl.draw_rectangle_rounded_lines_ex(rect, 0.32, 10, 6,
+                                       HOLD_LOCKED_EDGE if locked else HOLD_EDGE)
 
     center_x = x + width / 2
     label_width = measure_text_cached(self._font_semi_bold, "HOLD", HOLD_LABEL_SIZE).x
@@ -357,7 +368,7 @@ class HudRendererBP(HudRendererSP):
     # shift position every time ICBM starts or stops adjusting.
     rl.draw_text_ex(self._font_semi_bold, "HOLD",
                     rl.Vector2(center_x - label_width / 2, y + 12), HOLD_LABEL_SIZE, 0,
-                    HOLD_LABEL_COLOR)
+                    HOLD_LOCKED_LABEL if locked else HOLD_LABEL_COLOR)
     if self._icbm_arrow:
       self._draw_arrow(center_x + label_width / 2 + 20, y + 29, 24, self._icbm_arrow == "+")
 

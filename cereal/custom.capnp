@@ -31,6 +31,11 @@ struct IntelligentCruiseButtonManagement {
   vTarget @2 :Float32;
   overrideState @3 :OverrideState;
   vBaseline @4 :Float32;  # BluePilot: the driver's own set speed while overrideState is manual
+  # BluePilot: a curve, map point or radar-blind hazard currently owns the target, so a set-speed
+  # press cannot change the hold -- it gives a momentary bump the suppressor then reclaims. The
+  # HOLD badge greys out while this is set, because otherwise the press silently does nothing
+  # lasting and the driver has no way to tell why.
+  holdSuppressed @5 :Bool;
 
   enum IntelligentCruiseButtonManagementState {
     inactive @0;      # No button press or default state

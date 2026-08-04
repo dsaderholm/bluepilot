@@ -27,14 +27,15 @@ W, H = 1120, 1080          # the left portion of the 2160x1080 display; all of t
 HEADER_H = 300
 SET_W, SET_H = 172, 204    # UI_CONFIG.set_speed_width_imperial / set_speed_height
 
-# (caption, set speed, posted limit, hold baseline, icbm arrow, acc state, acc m/s^2, lamps lit)
+# (caption, set speed, posted limit, hold baseline, icbm arrow, acc state, acc m/s^2, lamps lit,
+#  hold locked)
 SCENES = [
-  ("settled, holding 70 in a 55 -- lamps dark", 70, 55, 70, "", "COAST", 0.0, False),
-  ("curve: ACC braking hard enough to light the lamps", 44, 55, 70, "-", "BRAKE", 1.4, True),
-  ("ACC braking too lightly to light them", 50, 55, 70, "-", "BRAKE", 0.4, False),
-  ("precharging: no decel, no lamps, no pads", 58, 55, 70, "", "PRE-BRAKE", 0.0, False),
-  ("engine braking: slowing, no pads, no lamps", 52, 55, 70, "-", "ENG BRAKE", 0.9, False),
-  ("no hold, ACC accelerating", 55, 55, 0, "", "ACCEL", 0.6, False),
+  ("settled, holding 70 in a 55 -- lamps dark", 70, 55, 70, "", "COAST", 0.0, False, False),
+  ("curve: ACC braking hard enough to light the lamps", 44, 55, 70, "-", "BRAKE", 1.4, True, True),
+  ("ACC braking too lightly to light them", 50, 55, 70, "-", "BRAKE", 0.4, False, False),
+  ("precharging: no decel, no lamps, no pads", 58, 55, 70, "", "PRE-BRAKE", 0.0, False, False),
+  ("engine braking: slowing, no pads, no lamps", 52, 55, 70, "-", "ENG BRAKE", 0.9, False, False),
+  ("no hold, ACC accelerating", 55, 55, 0, "", "ACCEL", 0.6, False, False),
 ]
 
 
@@ -66,7 +67,7 @@ def load_shipped_drawing_code():
   exec(compile(ast.Module(body=methods, type_ignores=[]), "<methods>", "exec"), ns)
 
   for required in ("HOLD_HEIGHT", "HOLD_FILL", "ACC_PILL_WIDTH", "ACC_STATUS_COLORS", "STACK_GAP",
-                   "LAMP_PILL_WIDTH", "LAMP_ON_FILL"):
+                   "LAMP_PILL_WIDTH", "LAMP_ON_FILL", "HOLD_LOCKED_FILL"):
     assert required in ns, f"{required} did not survive extraction -- the preview would be a lie"
   return ns
 
@@ -110,11 +111,12 @@ def main(outdir):
     rl.set_texture_filter(fonts[key].texture, rl.TextureFilter.TEXTURE_FILTER_BILINEAR)
 
   tex = rl.load_render_texture(W, H)
-  for i, (cap, set_speed, limit, hold, arrow, acc, mag, lamps) in enumerate(SCENES):
+  for i, (cap, set_speed, limit, hold, arrow, acc, mag, lamps, locked) in enumerate(SCENES):
     stub = types.SimpleNamespace(
       _font_bold=fonts["bold"], _font_semi_bold=fonts["semi"],
       _icbm_baseline=hold, _icbm_arrow=arrow, _acc_state=acc, _acc_accel=mag,
       _brakes_on=lamps, _show_brake_status=True, _lamp_data_available=True,
+      _icbm_hold_locked=locked,
       _draw_arrow=ns["_draw_arrow"],
     )
     rl.begin_texture_mode(tex)

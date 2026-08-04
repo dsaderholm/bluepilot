@@ -380,6 +380,23 @@ class IntelligentCruiseButtonManagement:
 
     return max(self.v_target, floor)
 
+  @property
+  def hold_suppressed(self) -> bool:
+    """Is something other than the driver's number currently owning the target?
+
+    While this is true a set-speed press cannot change the hold -- it gives a momentary bump that
+    the curve or hazard then reclaims. That is deliberate (a curve is a physics limit the baseline
+    only caps), but it means the press does not do what a press normally does, so the UI greys the
+    HOLD badge while it holds.
+
+    The unconfirmed-lead term is not redundant with the plan-source test: the hazard path replaces
+    v_target directly and leaves longitudinalPlanSource alone, so a plan-source test by itself
+    misses it and a press during a radar-blind slowdown would re-baseline at the lowered speed --
+    the same defect as the curve case, reached a different way.
+    """
+    return bool(self.v_baseline > 0 and
+                (self.plan_source not in BASELINE_SOURCES or self.unconfirmed_lead_commanding))
+
   def apply_baseline(self, v_target: int) -> int:
     """BluePilot: substitute the driver's chosen speed for the speed-limit component.
 
@@ -586,7 +603,7 @@ class IntelligentCruiseButtonManagement:
       # test stops guarding and the stand-down captures the suppressed speed anyway, which is
       # exactly how the first attempt at this still ended up with 70 -> 50.
       if self.press_settle_frames == 0:
-        self.press_suppressed = self.v_baseline > 0 and self.plan_source not in BASELINE_SOURCES
+        self.press_suppressed = self.hold_suppressed
       if not self.press_suppressed:
         self.v_baseline = self.v_cruise_cluster
       # Only the FIRST press of a sequence sets the reference. Re-arming it on every press would
@@ -613,7 +630,7 @@ class IntelligentCruiseButtonManagement:
       # the target, so movement there must not redefine the hold. Without this the press path's
       # protection is worthless -- the fallback re-baselines a frame later, which is what a probe
       # caught: the hold still fell 70 -> 50 with the press path already fixed.
-      if not (self.v_baseline > 0 and self.plan_source not in BASELINE_SOURCES):
+      if not self.hold_suppressed:
         self.v_baseline = self.v_cruise_cluster
       self.press_settle_frames = PRESS_SETTLE_MAX_FRAMES
       self.cluster_stable_frames = 0
