@@ -1474,3 +1474,53 @@ class TestMinimumSpeed:
     det.params = _Slow()
     run(det, STUCK_FRAMES, v_lead=5.0, v_ego=10.0, set_speed=24.6)
     assert det.blocked_by != Blocked.tooSlow
+
+
+class TestPublishTheNewFields:
+  """publish() is the one place in this feature that can take the car down.
+
+  A capnp assignment that the schema rejects raises inside plannerd, and plannerd dying is a device
+  stuck on "waiting to start" -- the exact failure a duplicate CAN registration caused once
+  already. The behavioural suite never reaches these lines, because every one of them is a plain
+  assignment that only fails against the real schema.
+
+  The enum fields are the sharp edge: they are assigned from ints here, and whether capnp accepts
+  an int for an enum field is not something the Python side reveals until it runs.
+  """
+
+  @staticmethod
+  def _published(det):
+    msg = custom.LongitudinalPlanSP.new_message()
+    det.publish(msg.passingAssist)
+    return msg.passingAssist
+
+  def test_enum_fields_assigned_from_ints_survive_the_schema(self):
+    det = PassingAssistDetector()
+    run(det, int(4.0 / DT_MDL), left_bs=True, edges=(-2.3, 2.4))
+    pa = self._published(det)
+    assert str(pa.topBlockedBy) == 'noLaneAvailable'
+    assert str(pa.manoeuvre) in ('idle', 'confirming', 'waiting', 'signalling', 'changing', 'finishing')
+    assert str(pa.manoeuvreSide) in ('none', 'left', 'right')
+    assert str(pa.crawlSide) in ('none', 'left', 'right')
+
+  def test_every_new_field_round_trips(self):
+    """Names as well as types: a field renamed in the schema without its publish() line is an
+    AttributeError on the car and nothing at all offline."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES)
+    pa = self._published(det)
+    for name in ("wantedSeconds", "topBlockedShare", "clearShare", "crawlSeconds",
+                 "crawlLongestSeconds", "crawlEvents", "crawlAfterSuggestion",
+                 "leadAccel", "leadBrakingHold", "leadRadarConfirmed", "leadModelProb",
+                 "accBrakingOnsetDRel", "accBrakingOnsetMax", "manoeuvreSeconds",
+                 "manoeuvreAborts", "blinkerWouldBeOn", "steeringWouldBeActive"):
+      getattr(pa, name)
+
+  def test_counters_saturate_rather_than_wrap(self):
+    """UInt16 rolling over to 0 would read as a clean drive, which is the opposite of what a huge
+    count means."""
+    det = PassingAssistDetector()
+    det.manoeuvre.aborts = 99999
+    det.overtake.crawl_events = 99999
+    pa = self._published(det)
+    assert pa.manoeuvreAborts == 65535
+    assert pa.crawlEvents == 65535
