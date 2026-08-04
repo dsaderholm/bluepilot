@@ -13,7 +13,7 @@ from types import SimpleNamespace as NS
 from opendbc.car import DT_CTRL
 from opendbc.sunnypilot.car.ford.blinker_test_ext import (
   BlinkerTestExt, SIGNAL_NONE, SIGNAL_LEFT, SIGNAL_RIGHT, PULSE_DURATION_S, STANDSTILL_V_EGO,
-  BUTTONS_STEP,
+  BUTTONS_STEP, SIGNAL_TAP_LEFT, TAP_COMMAND_S,
 )
 
 
@@ -213,3 +213,106 @@ class TestBlinkerTestMeasurement:
     ext = make_ext(SIGNAL_LEFT)
     run(ext, POLL_FRAMES + 20)
     assert not ext.bt_lamp_seen
+
+
+def flash(ext, cycles, side='left', period_s=0.66, frames=None):
+  """Drive the machine while the lamp blinks at a realistic rate, and return the states seen."""
+  half = int((period_s / 2) / DT_CTRL)
+  out = []
+  total = frames if frames is not None else cycles * half * 2
+  for i in range(total):
+    on = (i // half) % 2 == 0
+    kw = {f"lamp_{side}": on}
+    out.append(ext.update_blinker_test(make_cs(**kw)))
+  return out
+
+
+class TestFlashCounting:
+  """"Really fast" is not a measurement, and two runs of this test settled nothing because of it.
+
+  A clean 1.5 Hz signal over a four second hold is about six flashes; the erratic case is many
+  times that. The count is what turns this question from an argument into a result -- and it is
+  also what would have told the difference between "it worked" and "I spammed the button" without
+  anyone having to remember which they did.
+  """
+
+  def test_a_steady_lamp_counts_its_flashes(self):
+    ext = make_ext(SIGNAL_LEFT)
+    run(ext, POLL_FRAMES)                       # arm it
+    flash(ext, cycles=6, side='left')
+    assert ext.bt_lamp_seen
+    assert 4 <= ext.bt_flashes <= 8, f"counted {ext.bt_flashes} for six flashes"
+
+  def test_a_lamp_stuck_on_is_one_flash_not_thousands(self):
+    """Rising edges only. Counting the level would count frames and every run would read 400."""
+    ext = make_ext(SIGNAL_LEFT)
+    run(ext, POLL_FRAMES)
+    run(ext, int(2.0 / DT_CTRL), lamp_left=True)
+    assert ext.bt_flashes == 1
+
+  def test_an_erratic_lamp_counts_far_higher(self):
+    """The case that was reported. It has to be numerically distinguishable from a clean signal,
+    which is the entire point -- otherwise the panel just says "it lit" for both."""
+    ext = make_ext(SIGNAL_LEFT)
+    run(ext, POLL_FRAMES)
+    flash(ext, cycles=0, side='left', period_s=0.08, frames=int(3.0 / DT_CTRL))
+    assert ext.bt_flashes > 12, f"an erratic signal counted only {ext.bt_flashes}"
+
+  def test_the_wrong_side_is_not_counted(self):
+    ext = make_ext(SIGNAL_LEFT)
+    run(ext, POLL_FRAMES)
+    flash(ext, cycles=6, side='right')
+    assert ext.bt_flashes == 0
+    assert not ext.bt_lamp_seen
+
+  def test_a_fresh_run_starts_from_zero(self):
+    ext = make_ext(SIGNAL_LEFT)
+    run(ext, POLL_FRAMES)
+    flash(ext, cycles=4, side='left')
+    first = ext.bt_flashes
+    assert first > 0
+    run(ext, int(PULSE_DURATION_S / DT_CTRL) + 10)   # let it finish
+    ext.bt_params.value = SIGNAL_LEFT                # ask again
+    run(ext, POLL_FRAMES * 3)
+    assert ext.bt_flashes < first or ext.bt_flashes == 0, "the second run inherited the first"
+
+
+class TestTheTap:
+  """Asking the way the stalk does: a brief command, then silence.
+
+  His BCM is set through FORScan to flash eight times from a momentary deflection, and that is how
+  he triggers every nudgeless lane change he makes. If openpilot can trigger the same thing, the
+  rate and the count belong to the car and nothing contends with the steering column module.
+  """
+
+  def test_it_stops_commanding_almost_immediately(self):
+    ext = make_ext(SIGNAL_TAP_LEFT)
+    out = run(ext, POLL_FRAMES + int(2.0 / DT_CTRL))
+    commanded = [i for i, v in enumerate(out) if v == SIGNAL_LEFT]
+    assert commanded, "never commanded at all"
+    span = (commanded[-1] - commanded[0]) * DT_CTRL
+    assert span < 0.5, f"held the signal for {span:.2f}s -- that is a hold, not a tap"
+
+  def test_but_it_keeps_watching_long_after(self):
+    """The whole measurement: flashes AFTER we go quiet are the car's own pattern."""
+    ext = make_ext(SIGNAL_TAP_LEFT)
+    run(ext, POLL_FRAMES + int(TAP_COMMAND_S / DT_CTRL) + 2)
+    assert ext.bt_state == 1, "stopped watching when it stopped commanding"
+    flash(ext, cycles=4, side='left')
+    assert ext.bt_flashes_after > 0, "flashes after the command were not attributed"
+    assert ext.bt_flashes_after == ext.bt_flashes, "counted command-phase flashes as self-generated"
+
+  def test_a_hold_attributes_nothing_to_the_car(self):
+    """The control. A held pulse commands throughout, so nothing should land in flashesAfter --
+    if it does, the two modes are not actually being told apart."""
+    ext = make_ext(SIGNAL_LEFT)
+    run(ext, POLL_FRAMES)
+    flash(ext, cycles=4, side='left')
+    assert ext.bt_flashes > 0
+    assert ext.bt_flashes_after == 0
+
+  def test_a_tap_still_obeys_every_gate(self):
+    for kw in ({"v_ego": 5.0}, {"engaged": True}, {"left_blinker": True}):
+      ext = make_ext(SIGNAL_TAP_LEFT)
+      out = run(ext, POLL_FRAMES + 20, **kw)
+      assert all(v == SIGNAL_NONE for v in out), f"a tap ignored {kw}"

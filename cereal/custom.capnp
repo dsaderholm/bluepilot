@@ -1216,6 +1216,17 @@ struct CarStateBP @0xb057204d7deadf3f {
     lampRight @4 :Bool;       # TurnLghtRightOn_B_Stat
     lampSeen @5 :Bool;        # a commanded lamp was observed lit at least once this pulse
     blockedReason @6 :Blocked;
+    # BluePilot: HOW MANY TIMES the lamp lit, not merely whether it did.
+    #
+    # Two runs of this test produced two recollections -- "it worked" and "it flashes really fast"
+    # -- and settled nothing, because "really fast" is not a measurement. A clean 1.5 Hz signal over
+    # a four second hold is about six; the erratic case is many times that. One number, comparable
+    # between runs, is what turns this from an argument into a result.
+    flashes @7 :UInt8;
+    # ...of which, after we STOPPED commanding. This is the tap measurement: flashes that happen
+    # once we have gone quiet are the body module running its own one-touch pattern, which is the
+    # thing worth knowing -- it means the car owns the rate and the count, not us.
+    flashesAfter @8 :UInt8;
 
     enum State {
       idle @0;

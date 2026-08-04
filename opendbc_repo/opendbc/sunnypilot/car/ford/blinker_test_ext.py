@@ -34,7 +34,39 @@ from openpilot.common.params import Params
 # Values of TurnLghtSwtch_D_Stat, per the DBC and carstate.py's decode (== 1 left, == 2 right).
 SIGNAL_NONE, SIGNAL_LEFT, SIGNAL_RIGHT = 0, 1, 2
 
+SIGNAL_TAP_LEFT, SIGNAL_TAP_RIGHT = 3, 4   # request values only; the COMMAND is still 1/2
+
 PULSE_DURATION_S = 4.0        # long enough for several flash cycles at ~1.5 Hz
+
+# --- WHAT THE CAR ACTUALLY SAID, 2026-08-04 ---
+#
+# "Before, it worked, but if I spammed the button I did it fast."
+#
+# A single clean press lights the lamp and flashes it normally. The erratic flashing that has
+# haunted this module for two sessions is an artifact of REPEATED REQUESTS, not of the signal
+# mechanism. Holding the level works.
+#
+# Worth recording how nearly that went the other way. The reasoning above -- level versus edge, our
+# frames interleaving with the SCCM's, no send rate can fix it -- is sound, fits the symptom, and
+# was one message away from being written down as settled fact on the strength of "it flashes
+# really fast". It was the wrong conclusion drawn from a real observation, and the only thing that
+# separated them was the owner distinguishing "I pressed it" from "I spammed it".
+#
+# WHICH IS WHY THE FLASH COUNT EXISTS NOW. Two runs of this test produced two recollections and
+# settled nothing, because "really fast" is not a measurement. A clean 1.5 Hz signal over a four
+# second hold is about six flashes; the erratic case is many times that. One number, compared
+# between runs, ends the argument -- and it should have been here from the first version.
+#
+# THE TAP IS KEPT ANYWAY, as an option rather than a rescue. His BCM is set through FORScan to
+# flash eight times from a momentary stalk deflection, and that is how he triggers every nudgeless
+# lane change he makes -- so the pattern is the body module's to generate. Handing it one clean edge
+# and going silent means the rate, the count and the cancel behavior are all the car's own,
+# identical to a stalk tap, with nothing contending with the SCCM at all. If both work, that is the
+# better one, and it is also the only one that can produce a signal longer than our own timeout.
+TAP_COMMAND_S = 0.25          # about the length of a real stalk tap
+# ...then STOP COMMANDING AND KEEP WATCHING. Flashes after we have gone quiet are the BCM running
+# its own pattern, which is the entire measurement.
+OBSERVE_AFTER_S = 6.0
 # Match every other sender of Steering_Data_FD1: CarControllerParams.BUTTONS_STEP, 20 Hz against the
 # SCCM's own 10 Hz copy of the same frame.
 #
@@ -74,6 +106,13 @@ class BlinkerTestExt:
     self.bt_frames_left = 0
     self.bt_blocked = 0        # mirrors capnp Blocked
     self.bt_lamp_seen = False
+    # HOW MANY TIMES the lamp lit, not merely whether it did. See the note above TAP_COMMAND_S:
+    # "really fast" is not a measurement, and two runs of this test settled nothing because of it.
+    self.bt_flashes = 0
+    self.bt_flashes_after = 0
+    self.bt_watching = SIGNAL_NONE
+    self._bt_lamp_prev = False
+    self._bt_command_frames_left = 0
     self._bt_frame = 0
 
   @property
@@ -109,15 +148,34 @@ class BlinkerTestExt:
     """
     self._bt_frame += 1
     send_frame = (self._bt_frame % BUTTONS_STEP) == 0
+    # THE VERDICT HAS TO GET OUT OF THIS OBJECT. This machine lives in the CarController; the
+    # carStateBP message is built in CarState. Nothing bridged them, so `state`, `lampSeen`,
+    # `secondsRemaining` and `blockedReason` were read by the panel and written by nobody -- the
+    # whole test reported its answer to an empty room, and the only way to read it was to watch a
+    # mirror. Stashed onto the CarState the controller is already handed, which carstate_ext then
+    # publishes. One cycle stale by construction, which at 100 Hz is 10 ms.
+    self._publish_to(CS)
 
     # ---- active pulse: timeout is checked FIRST, before anything that could throw or block ----
     if self.bt_state == 1:
       self.bt_frames_left -= 1
 
+      self._bt_command_frames_left = max(0, self._bt_command_frames_left - 1)
+      commanding = self._bt_command_frames_left > 0
+
       lamp_left, lamp_right = self._lamp_state(CS)
-      if (self.bt_commanded == SIGNAL_LEFT and lamp_left) or \
-         (self.bt_commanded == SIGNAL_RIGHT and lamp_right):
+      # Watch the side we ASKED for. bt_commanded is cleared for transmission during a tap's
+      # observe phase, so it is the wrong thing to watch once we go quiet -- which is exactly when
+      # the interesting flashes happen.
+      lamp = lamp_left if self.bt_watching == SIGNAL_LEFT else lamp_right
+      if lamp:
         self.bt_lamp_seen = True
+      # Rising edges only. The lamp is a square wave; counting the level would count frames.
+      if lamp and not self._bt_lamp_prev:
+        self.bt_flashes += 1
+        if not commanding:
+          self.bt_flashes_after += 1
+      self._bt_lamp_prev = lamp
 
       # Any of these ends the pulse immediately. Standstill is re-checked every frame, not just at
       # the start: if the car begins rolling mid-pulse the signal drops at once.
@@ -129,6 +187,10 @@ class BlinkerTestExt:
         self._disarm()
         return SIGNAL_NONE
 
+      # Silent once the command window closes: the point of a tap's observe phase is to find out
+      # what the car does WITHOUT us.
+      if not commanding:
+        return SIGNAL_NONE
       return self.bt_commanded if send_frame else SIGNAL_NONE
 
     # ---- idle: look for a request, at a low rate ----
@@ -158,7 +220,7 @@ class BlinkerTestExt:
         self.bt_blocked = 4
         self._disarm()
       return SIGNAL_NONE
-    if request not in (SIGNAL_LEFT, SIGNAL_RIGHT):
+    if request not in (SIGNAL_LEFT, SIGNAL_RIGHT, SIGNAL_TAP_LEFT, SIGNAL_TAP_RIGHT):
       self.bt_blocked = 0
       return SIGNAL_NONE
 
@@ -175,10 +237,29 @@ class BlinkerTestExt:
 
     self.bt_blocked = 0
     self.bt_state = 1
-    self.bt_commanded = request
-    self.bt_frames_left = int(PULSE_DURATION_S / DT_CTRL)
+    tap = request in (SIGNAL_TAP_LEFT, SIGNAL_TAP_RIGHT)
+    self.bt_commanded = SIGNAL_LEFT if request in (SIGNAL_LEFT, SIGNAL_TAP_LEFT) else SIGNAL_RIGHT
+    self.bt_watching = self.bt_commanded
+    # A tap commands briefly then watches in silence; a hold commands throughout. Same counter for
+    # both, so the two runs are directly comparable with one variable changed.
+    self._bt_command_frames_left = int((TAP_COMMAND_S if tap else PULSE_DURATION_S) / DT_CTRL)
+    self.bt_frames_left = int(((TAP_COMMAND_S + OBSERVE_AFTER_S) if tap
+                               else PULSE_DURATION_S) / DT_CTRL)
     self.bt_lamp_seen = False
+    self.bt_flashes = 0
+    self.bt_flashes_after = 0
+    self._bt_lamp_prev = False
     return self.bt_commanded
+
+  def _publish_to(self, CS) -> None:
+    """Hand this cycle's state to CarState, which owns the message. See update_blinker_test."""
+    CS.bt_state = self.bt_state
+    CS.bt_commanded = self.bt_commanded
+    CS.bt_seconds_remaining = self.bt_seconds_remaining
+    CS.bt_lamp_seen = self.bt_lamp_seen
+    CS.bt_blocked = self.bt_blocked
+    CS.bt_flashes = self.bt_flashes
+    CS.bt_flashes_after = self.bt_flashes_after
 
   @staticmethod
   def _lamp_state(CS) -> tuple[bool, bool]:

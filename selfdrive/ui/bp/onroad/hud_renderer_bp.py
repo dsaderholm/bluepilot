@@ -1198,7 +1198,16 @@ class HudRendererBP(HudRendererSP):
       # Held after the pulse so the answer is readable without watching all four seconds.
       ok = bool(bt.lampSeen)
       self._pa_main = "SIGNAL WORKS" if ok else "SIGNAL DID NOT WORK"
-      self._pa_sub = "the car lit the lamp" if ok else "car ignored the request"
+      # THE COUNT, not just "it lit". A clean signal is about six flashes in four seconds; the
+      # erratic case is many times that, and telling them apart by eye is what left this question
+      # open across two drives. `after` is the tap measurement: flashes once we stopped commanding
+      # are the car running its own one-touch pattern.
+      if ok:
+        self._pa_sub = f"{bt.flashes} flashes"
+        if bt.flashesAfter:
+          self._pa_sub += f", {bt.flashesAfter} on its own"
+      else:
+        self._pa_sub = "car ignored the request"
       self._pa_color = rl.Color(120, 220, 140, 255) if ok else rl.Color(255, 90, 90, 255)
       self._pa_alert = True
       return True

@@ -380,6 +380,16 @@ class CarStateExt:
 
     blinker_test.lampLeft = bool(getattr(self, 'turn_lamp_left', False))
     blinker_test.lampRight = bool(getattr(self, 'turn_lamp_right', False))
+    # The rest of the verdict, stashed here by BlinkerTestExt -- see its _publish_to. Defaulted so
+    # a car that never runs the test, or a cycle before the controller has run once, publishes a
+    # clean idle rather than raising.
+    blinker_test.state = int(getattr(self, 'bt_state', 0))
+    blinker_test.commanded = int(getattr(self, 'bt_commanded', 0))
+    blinker_test.secondsRemaining = float(getattr(self, 'bt_seconds_remaining', 0.0))
+    blinker_test.lampSeen = bool(getattr(self, 'bt_lamp_seen', False))
+    blinker_test.blockedReason = int(getattr(self, 'bt_blocked', 0))
+    blinker_test.flashes = min(int(getattr(self, 'bt_flashes', 0)), 255)
+    blinker_test.flashesAfter = min(int(getattr(self, 'bt_flashes_after', 0)), 255)
 
     brake_light_status.dataAvailable = False
     brake_light_status.brakeLightsOn = False

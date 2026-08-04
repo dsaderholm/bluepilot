@@ -210,8 +210,26 @@ class BluePilotLayout(Widget):
       left_callback=lambda: self._request_blinker_test(1),
       right_callback=lambda: self._request_blinker_test(2),
       description=lambda: tr("Parked test: ask openpilot to operate the turn signal and report "
-                             "whether the car actually lit the lamp. Only runs while stopped with "
-                             "cruise off. Enable Show Passing Assist to see the result."),
+                             "whether the car actually lit the lamp, and HOW MANY TIMES it "
+                             "flashed. Press once and let it finish -- pressing repeatedly is "
+                             "what makes it flash fast. Only runs while stopped with cruise off. "
+                             "Enable Show Passing Assist to see the result."),
+    )
+
+    # The other way of asking, and the one the car may prefer. See TAP_COMMAND_S in
+    # blinker_test_ext: a quarter second of command, then silence. If the body module runs its own
+    # one-touch flash from that, the rate and the count are the car's own and nothing has to
+    # contend with the steering column module for control of a held signal.
+    self._blinker_tap_buttons = dual_button_item(
+      lambda: tr("Tap Left Signal"),
+      lambda: tr("Tap Right Signal"),
+      left_callback=lambda: self._request_blinker_test(3),
+      right_callback=lambda: self._request_blinker_test(4),
+      description=lambda: tr("The same test, but asking the way the stalk does: a brief nudge, "
+                             "then nothing. If your car flashes on by itself afterwards, that is "
+                             "the body module running the one-touch pattern you set in FORScan -- "
+                             "and it is the better way to signal, because the car owns the rate "
+                             "and the count instead of openpilot holding the switch."),
     )
 
     # Hide onroad border toggle
@@ -718,6 +736,7 @@ class BluePilotLayout(Widget):
         self._steer_angle_curvature,
         self._vbatt_pause_charging,
         self._blinker_test_buttons,
+        self._blinker_tap_buttons,
       ]) +
       _section(tr("Audio"), [
         self._use_custom_sounds,
