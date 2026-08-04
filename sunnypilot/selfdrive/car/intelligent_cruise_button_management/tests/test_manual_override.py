@@ -43,10 +43,18 @@ DECEL_PRESS = NS(type=NS(raw=ButtonType.decelCruise), pressed=True)
 DECEL_RELEASE = NS(type=NS(raw=ButtonType.decelCruise), pressed=False)
 
 CC = NS(enabled=True, cruiseControl=NS(resume=False, override=False, cancel=False))
+# BluePilot: controlsd sets cruiseControl.override whenever longitudinal is being overridden, and
+# gasPressedOverride is the only event that does so -- see apply_gas_handoff.
+CC_override = NS(enabled=True, cruiseControl=NS(resume=False, override=True, cancel=False))
 
 
-def make_cs(cluster, v_ego=None, buttons=(), enabled=True):
+def make_cs(cluster, v_ego=None, buttons=(), enabled=True, gas_pressed=False, brake_pressed=False):
+  """BluePilot: gasPressed and brakePressed are on every real CarState. They were missing here, so
+  the day the controller started reading one, 111 tests failed at once on an AttributeError that
+  cannot happen on the device. A fixture thinner than the real message hides nothing useful."""
   return NS(vEgo=(cluster if v_ego is None else v_ego) * MPH,
+            gasPressed=gas_pressed,
+            brakePressed=brake_pressed,
             cruiseState=NS(available=True, enabled=enabled, speedCluster=cluster * MPH,
                            standstill=False, speed=cluster * MPH),
             buttonEvents=buttons)
@@ -1299,3 +1307,54 @@ class TestPressIsNotRelabelledByTheFallback:
       icbm.run(make_cs(DRIVER), CC, make_lp(LIMIT), False)
     icbm.run(make_cs(DRIVER + 5), CC, make_lp(LIMIT), False)
     assert icbm.baseline_source == BaselineSource.fallbackCounter
+
+
+class TestGasPedalHandoff:
+  """BluePilot: the set speed follows the car while the driver is on the throttle.
+
+  Without it, gasPressedOverride stands ICBM down for as long as the pedal is held, the set speed is
+  left behind, and lifting off hands a much lower number back to Ford's ACC, which then brakes."""
+
+  @staticmethod
+  def _icbm(gas: bool, cluster: int, road: int, limit: int = LIMIT):
+    icbm = fresh()
+    cc = CC_override if gas else CC
+    for _ in range(20):
+      icbm.run(make_cs(cluster, v_ego=road, gas_pressed=gas), cc, make_lp(limit), False)
+    return icbm
+
+  def test_target_follows_the_car_up_while_on_the_gas(self):
+    icbm = self._icbm(gas=True, cluster=35, road=65)
+    assert icbm.v_target >= 65, "the set speed must not be left behind at 35 while doing 65"
+    assert icbm.gas_handoff_active
+
+  def test_it_only_ever_raises(self):
+    """On the gas but below the set speed -- e.g. accelerating within a hold -- changes nothing."""
+    icbm = self._icbm(gas=True, cluster=70, road=45, limit=70)
+    assert icbm.v_target <= 70
+
+  def test_no_handoff_without_the_pedal(self):
+    icbm = self._icbm(gas=False, cluster=35, road=65)
+    assert not icbm.gas_handoff_active
+    assert icbm.v_target <= LIMIT + 1, "with the pedal up the planner's target governs"
+
+  def test_icbm_stays_ready_through_a_gas_override(self):
+    """The readiness check is what used to stand ICBM down; gasPressedOverride is the only event
+    carrying ET.OVERRIDE_LONGITUDINAL, so it is safe to single out."""
+    icbm = self._icbm(gas=True, cluster=35, road=65)
+    assert icbm.is_ready
+
+  def test_a_non_gas_override_still_stands_icbm_down(self):
+    """override without the pedal is something else entirely and must keep its old meaning."""
+    icbm = fresh()
+    for _ in range(20):
+      icbm.run(make_cs(35, v_ego=65, gas_pressed=False), CC_override, make_lp(LIMIT), False)
+    assert not icbm.is_ready
+    assert not icbm.gas_handoff_active
+
+  def test_the_baseline_is_not_touched(self):
+    """Using the throttle is not the same statement as pressing SET. Treating it as a hold would
+    rewrite the driver's number on every overtake."""
+    icbm = self._icbm(gas=True, cluster=35, road=80)
+    assert icbm.v_baseline == 0
+    assert icbm.override_state == OverrideState.auto

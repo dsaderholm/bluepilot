@@ -56,7 +56,11 @@ class Drive:
 
   def step(self, target, source=PlanSource.speedLimitAssist, buttons=(),
            lead=UnconfirmedLeadState.inactive, lead_target=0.0):
+    # BluePilot: gasPressed/brakePressed exist on every real CarState. Omitting them here meant an
+    # AttributeError the device could never raise, the moment the controller read one.
     cs = NS(vEgo=self.v_ego * MPH,
+            gasPressed=False,
+            brakePressed=False,
             cruiseState=NS(available=True, enabled=True, speedCluster=self.cluster * MPH,
                            standstill=False, speed=self.cluster * MPH),
             buttonEvents=buttons)

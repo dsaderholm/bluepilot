@@ -311,6 +311,11 @@ class IntelligentCruiseButtonManagement:
     self.pinned_hold = 0
     self.pinned_hold_prev = 0
 
+    # BluePilot: the driver is on the throttle, so ACC is not driving and the set speed is free to
+    # follow. See apply_gas_handoff.
+    self.gas_pressed = False
+    self.gas_handoff_active = False
+
     # BluePilot: radar-blind lead detector currently owns the target
     self.unconfirmed_lead_commanding = False
     self.unconfirmed_lead_state = UnconfirmedLeadState.inactive
@@ -381,6 +386,7 @@ class IntelligentCruiseButtonManagement:
     # lowers the target -- so the only thing this can meter is the RESTORING half, which returns
     # the set speed after the hazard has cleared and has no reason to be abrupt.
     self.v_target = self.apply_target_rise_limit(v_ego_conv)
+    self.v_target = self.apply_gas_handoff(CS, v_ego_conv)
 
   def apply_target_drop_limit(self, v_ego_conv: int) -> int:
     """BluePilot: cap how far below the set speed ICBM may command in one step.
@@ -518,6 +524,40 @@ class IntelligentCruiseButtonManagement:
 
     return min(self.v_target, ceiling)
 
+  def apply_gas_handoff(self, CS: car.CarState, v_ego_conv: int) -> int:
+    """BluePilot: keep the set speed with the car while the driver is accelerating on the pedal.
+
+    Without this, using the throttle leaves the set speed behind. controlsd raises
+    gasPressedOverride, which clears longActive, which sets cruiseControl.override, which fails
+    ICBM's readiness check -- so ICBM stops commanding for as long as the pedal is down. Accelerate
+    from a 35 zone onto a 65 road and the number is still 35 when you lift, at which point Ford's
+    ACC decelerates you back to it. Then the rise limiter walks it up five at a time.
+
+    Reported as entrance ramps being painfully slow. That was read as a ramp problem; most of it is
+    this, and it happens on any manual acceleration.
+
+    Only ever RAISES, and only to the speed the driver has actually reached. The set speed is a
+    ceiling, not a demand: moving it while the driver owns the throttle commands nothing at all, and
+    it means lifting off is a handoff rather than a pullback. Whatever the number should really be
+    is then settled by the ordinary path -- the drop limiter walks it back toward the speed-limit or
+    curve target by coasting, which is exactly what it exists for.
+
+    Deliberately does NOT touch the baseline. Pressing the accelerator is not the same statement as
+    pressing SET: it usually means "past this one", not "my cruising number is now 78". Treating it
+    as a hold would silently rewrite the driver's number on every overtake.
+    """
+    self.gas_handoff_active = bool(self.gas_pressed and CS.cruiseState.enabled and v_ego_conv > 0)
+    if not self.gas_handoff_active:
+      return self.v_target
+
+    # Past the rise limiter on purpose. That limiter exists to stop ACC lunging when the target
+    # jumps up, and ACC is not driving here -- metering the number would just recreate the lag.
+    if v_ego_conv > self.v_target:
+      self.rise_anchor = 0
+      self.rise_stall_frames = 0
+      return v_ego_conv
+    return self.v_target
+
   def update_state_machine(self) -> custom.IntelligentCruiseButtonManagement.SendButtonState:
     self.pre_active_timer = max(0, self.pre_active_timer - 1)
 
@@ -574,7 +614,14 @@ class IntelligentCruiseButtonManagement:
   def update_readiness(self, CS: car.CarState, CC: car.CarControl) -> None:
     update_manual_button_timers(CS, self.cruise_button_timers)
 
-    ready = CC.enabled and not CC.cruiseControl.override and not CC.cruiseControl.cancel and not CC.cruiseControl.resume
+    # BluePilot: gasPressedOverride is the ONLY event carrying ET.OVERRIDE_LONGITUDINAL, so on this
+    # car cruiseControl.override means precisely "the driver is on the throttle" -- nothing else.
+    # ICBM stays ready through it so the set speed can follow the car up; see apply_gas_handoff.
+    # Any OTHER reason the override appears must still stand ICBM down, hence the gasPressed test
+    # rather than simply dropping the term.
+    gas_override = CC.cruiseControl.override and CS.gasPressed
+    ready = (CC.enabled and (not CC.cruiseControl.override or gas_override)
+             and not CC.cruiseControl.cancel and not CC.cruiseControl.resume)
     button_pressed = any(self.cruise_button_timers[k] > 0 for k in self.cruise_button_timers)
 
     # BluePilot: Clear button timers when cruise is disabled to prevent stale presses
@@ -872,6 +919,7 @@ class IntelligentCruiseButtonManagement:
     self.is_metric = is_metric
     self.lead_present = lead_present
     self.pinned_hold = int(pinned_hold)
+    self.gas_pressed = bool(CS.gasPressed)
 
     self.update_params()
     self.update_calculations(CS, LP_SP)
