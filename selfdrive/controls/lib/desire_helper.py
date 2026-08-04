@@ -112,10 +112,18 @@ class DesireHelper:
         # BluePilot: cancelling the blinker calls it off, if it is early enough to go back. Stock
         # never looks at the blinker again once this state is entered, so a change could not be
         # called off at all. See AutoLaneChangeController.should_cancel.
-        if self.alc.should_cancel(one_blinker, self.lane_change_timer):
-          self.alc.cancelled = True
-          self.lane_change_state = LaneChangeState.off
-          self.lane_change_direction = LaneChangeDirection.none
+        if not self.alc.reverting and self.alc.should_cancel(one_blinker, self.lane_change_timer):
+          going_left = self.lane_change_direction == LaneChangeDirection.left
+          # The lane we would go BACK into is the one on the other side. See begin_revert.
+          return_blocked = carstate.rightBlindspot if going_left else carstate.leftBlindspot
+          if self.alc.begin_revert(return_blocked):
+            # A lane change the other way IS this one reversed, and the model already knows how to
+            # do that. Stays in laneChangeStarting so the desire keeps steering -- back, now.
+            self.lane_change_direction = (LaneChangeDirection.right if going_left
+                                          else LaneChangeDirection.left)
+          else:
+            self.lane_change_state = LaneChangeState.off
+            self.lane_change_direction = LaneChangeDirection.none
         else:
           # fade out over .5s
           self.lane_change_ll_prob = max(self.lane_change_ll_prob - 2 * DT_MDL, 0.0)
@@ -143,6 +151,9 @@ class DesireHelper:
 
     if self.lane_change_state in (LaneChangeState.off, LaneChangeState.preLaneChange):
       self.lane_change_timer = 0.0
+      # BluePilot: the reverse crossing is over. Cleared here rather than where it is set so every
+      # way out of a lane change -- completed, timed out, lateral dropped -- releases the latch.
+      self.alc.reverting = False
     else:
       self.lane_change_timer += DT_MDL
 

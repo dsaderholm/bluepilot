@@ -613,6 +613,13 @@ class HudRendererBP(HudRendererSP):
         line = f"your changes: {int(lc['changes'])}, {float(lc.get('seconds', 0)):.1f}s each"
         if int(lc.get("abandoned", 0)):
           line += f", {int(lc['abandoned'])} abandoned"
+        # Cancelled was being counted and saved and never shown, which left the one question a
+        # drive can answer about the cancel unanswerable: "turning off my blinker mid lane change
+        # doesn't really seem to cancel." A zero here means the cancel never fired and the window
+        # is the thing to change; a number means it fired and the car went anyway, which is a
+        # different fault with a different fix.
+        if int(lc.get("cancelled", 0)):
+          line += f", {int(lc['cancelled'])} cancelled"
         lines.append(line)
       if float(d.get("accOnsetMax", 0)) > 0:
         m = float(d["accOnsetMax"])

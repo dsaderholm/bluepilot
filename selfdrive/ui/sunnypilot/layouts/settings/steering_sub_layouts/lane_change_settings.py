@@ -58,16 +58,27 @@ class LaneChangeSettingsLayout(Widget):
     # stopped being beside it.
     self._cancel_window = option_item_sp(
       title=lambda: tr("Cancel By Turning The Blinker Off"),
-      description=lambda: tr("How long after a lane change starts that cancelling the blinker "
-                             "calls it off and returns to your lane. Stock openpilot cannot be "
-                             "cancelled at all -- once it begins, the blinker is never looked at "
-                             "again. Past this window it finishes instead, because going back "
-                             "from most of the way across is a second lane change rather than an "
-                             "undo. Off restores the stock behavior."),
+      description=lambda: tr("How long after a lane change starts that turning the blinker off "
+                             "calls it off. Stock openpilot cannot be cancelled at all -- once it "
+                             "begins, the blinker is never looked at again. Past this window it "
+                             "finishes instead, because going back from most of the way across is "
+                             "a second lane change rather than an undo. Off restores the stock "
+                             "behavior."),
       param="AutoLaneChangeCancelWindow",
       min_value=0, max_value=5, value_change_step=1,
       label_callback=lambda v: tr("Off") if v == 0 else f"{v} s",
       inline=True)
+
+    self._revert = toggle_item_sp(
+      title=lambda: tr("Steer Back When Cancelled"),
+      description=lambda: tr("Return to the lane you started in, instead of just stopping. "
+                             "Without this, cancelling only releases the steering, and the car "
+                             "settles into whichever lane it is nearest -- which part way across "
+                             "is usually the new one, so the change completes anyway. A lane "
+                             "change the other way is the same maneuver in reverse, so that is "
+                             "what it does. If the blind spot is lit on the side you would return "
+                             "to, it finishes the original change instead."),
+      param="AutoLaneChangeRevert")
 
     self._bsm_hold = option_item_sp(
       title=lambda: tr("Wait After Blind Spot Clears"),
@@ -86,6 +97,7 @@ class LaneChangeSettingsLayout(Widget):
       LineSeparatorSP(40),
       self._bsm_delay,
       self._cancel_window,
+      self._revert,
       self._bsm_hold,
     ]
 
@@ -114,3 +126,6 @@ class LaneChangeSettingsLayout(Widget):
     # The hold only does anything while the delay itself is on, so it follows it rather than
     # sitting live above a switched-off feature.
     self._bsm_hold.action_item.set_enabled(bsm_usable and self._bsm_delay.action_item.get_state())
+    # Steering back is only reachable while there is a window in which to cancel at all.
+    self._revert.action_item.set_enabled(
+      ui_state.params.get("AutoLaneChangeCancelWindow", return_default=True) > 0)

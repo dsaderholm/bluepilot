@@ -141,6 +141,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // Seconds after a lane change starts during which cancelling the blinker aborts it and
     // returns to the original lane. 0 = the stock behavior, which cannot be cancelled at all.
     {"AutoLaneChangeCancelWindow", {PERSISTENT | BACKUP, INT, "2"}},
+    {"AutoLaneChangeRevert", {PERSISTENT | BACKUP, BOOL, "1"}},
     // What the driver's own lane changes measured: how long one really takes, and how often
     // they abandon a signal. Both replace guesses inside passing assist.
     {"LaneChangeStats", {PERSISTENT | BACKUP, JSON}},

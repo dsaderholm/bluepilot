@@ -72,6 +72,31 @@ DEFAULT_BSM_HOLD_S = 3
 # started in, which is the part a driver could plausibly change their mind during.
 DEFAULT_CANCEL_WINDOW_S = 2
 
+# ...AND THAT REASONING WAS CONFIRMED FROM THE ROAD, THE HARD WAY.
+#
+# Reported after a drive: "turning off my blinker mid lane change doesn't really seem to cancel.
+# They usually just go into the lane anyway."
+#
+# The paragraph above predicted precisely this and then shipped the version it describes as not
+# working. Clearing the desire does not steer back; it makes the planner re-center on whichever lane
+# it now believes it is in. Two seconds into a measured ~3.8 s change is past HALF WAY across, so
+# re-centering picks the NEW lane and the change completes. The cancel was firing and doing nothing
+# visible -- which is exactly what "doesn't really seem to cancel" looks like from the seat.
+#
+# So the window was never the problem and shortening it would only have made the cancel work in a
+# narrower slice of a maneuver the driver cannot time that precisely anyway.
+#
+# WHAT ACTUALLY GOES BACK. openpilot has no reverse-lane-change desire, but it does not need one: a
+# lane change in the opposite direction IS the reverse of this one, and the model already knows how
+# to do that. So a cancel flips the direction and runs the crossing back, which is what was asked
+# for -- "when my blinker stops, it should stop trying to change lanes and go back to where it was."
+#
+# THE RETURN SIDE IS CHECKED FIRST. We came from that lane seconds ago, so it is nearly always
+# clear, but "nearly always" is not a thing to steer on: somebody may have moved up into it. With
+# the blind spot lit on the return side, finishing the change we started is the safer of two
+# imperfect options, so it falls back to the old behavior of simply releasing the desire.
+DEFAULT_REVERT = True
+
 # BluePilot: MEASURE THE DRIVER'S OWN LANE CHANGES, because they are the only real ones.
 #
 # Passing assist cannot steer, so every constant it holds about what a lane change IS came from
@@ -114,7 +139,13 @@ class AutoLaneChangeController:
     self.auto_lane_change_allowed = False
     self.prev_lane_change = False
     self.lane_change_cancel_window = float(DEFAULT_CANCEL_WINDOW_S)
+    self.revert_enabled = bool(DEFAULT_REVERT)
+    # True from the moment a cancel decides to steer back until the reverse crossing completes.
+    # Latched because the blinker is OFF throughout a revert, which is the same condition that
+    # triggered the cancel -- without this it would re-cancel itself on every frame.
+    self.reverting = False
     self.cancelled = False
+    self._reverted = False
 
     # See LANE_CHANGE_STATS_WRITE_S. Counts this drive; totals carried in from previous ones.
     self.changes_completed = 0
@@ -150,6 +181,8 @@ class AutoLaneChangeController:
     self.lane_change_bsm_hold = float(self.params.get("AutoLaneChangeBsmHoldTime", return_default=True))
     # BluePilot: see DEFAULT_CANCEL_WINDOW_S.
     self.lane_change_cancel_window = float(self.params.get("AutoLaneChangeCancelWindow", return_default=True))
+    # BluePilot: see DEFAULT_REVERT.
+    self.revert_enabled = self.params.get_bool("AutoLaneChangeRevert")
 
   def update_params(self) -> None:
     if self.param_read_counter % 50 == 0:
@@ -188,13 +221,19 @@ class AutoLaneChangeController:
       # system's abort count has to be judged against.
       self.changes_abandoned += 1
     elif prev == log.LaneChangeState.laneChangeStarting and state == log.LaneChangeState.off:
-      self.changes_cancelled += 1
+      # NOT counted as a cancel here any more -- see begin_revert, which counts at the decision.
+      # This transition also covers lateral going inactive, the change timing out and the
+      # blinker-pause gate, none of which is the driver calling it off.
       self._change_started_s = 0.0
     elif prev == log.LaneChangeState.laneChangeFinishing and state != log.LaneChangeState.laneChangeFinishing:
-      if self._change_started_s > 0.0:
+      if self._change_started_s > 0.0 and not self._reverted:
         self.changes_completed += 1
         # Running mean, so one unusually slow change cannot stand in for the drive.
         self.change_seconds += (self._change_started_s - self.change_seconds) / self.changes_completed
+      # A revert reaches here too, having gone back rather than across. It is already counted as a
+      # cancel, and folding it into the duration mean would bias the one number passing assist
+      # takes from these measurements.
+      self._reverted = False
       self._change_started_s = 0.0
 
     self._save_stats()
@@ -249,6 +288,28 @@ class AutoLaneChangeController:
     if self.lane_change_cancel_window <= 0.0:
       return False
     return not one_blinker and elapsed_s < self.lane_change_cancel_window
+
+  def begin_revert(self, return_blocked: bool) -> bool:
+    """The driver called it off. Steer back, or merely stop steering across?
+
+    Returns True if the caller should flip the lane change direction and run the crossing in
+    reverse. False keeps the original behavior -- release the desire and let the planner re-center
+    -- which is right when the lane we came from is no longer clear.
+
+    Counts the cancel HERE rather than watching for a laneChangeStarting -> off transition, because
+    a revert does not produce that transition: it completes through laneChangeFinishing like any
+    other crossing. Counting on the transition also quietly counted things that are not driver
+    cancels at all -- lateral going inactive, the change timing out, the blinker-pause gate -- so
+    doing it at the decision is both necessary and more honest.
+    """
+    self.cancelled = True
+    self.changes_cancelled += 1
+    if not self.revert_enabled or return_blocked:
+      return False
+    self.reverting = True
+    # So the reverse crossing is not also counted as a lane change the driver made.
+    self._reverted = True
+    return True
 
   def update_allowed(self) -> bool:
     # Auto lane change allowed if:

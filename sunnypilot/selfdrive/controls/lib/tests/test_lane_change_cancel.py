@@ -102,18 +102,19 @@ class TestItIsActuallyWiredIn:
   """
 
   @staticmethod
-  def _dh(window=DEFAULT_CANCEL_WINDOW_S, timer=AutoLaneChangeMode.TWO_SECONDS):
+  def _dh(window=DEFAULT_CANCEL_WINDOW_S, timer=AutoLaneChangeMode.TWO_SECONDS, revert=True):
     from openpilot.selfdrive.controls.lib.desire_helper import DesireHelper
     dh = DesireHelper()
     dh.alc.lane_change_set_timer = timer
     dh.alc.lane_change_cancel_window = float(window)
+    dh.alc.revert_enabled = bool(revert)
     dh.alc.read_params = lambda: None      # keep the test's values through update_params
     return dh
 
   @staticmethod
-  def _cs(left=False, right=False, v=30.0):
-    return NS(vEgo=v, leftBlinker=left, rightBlinker=right, leftBlindspot=False,
-              rightBlindspot=False, steeringPressed=False, steeringTorque=0.0, brakePressed=False)
+  def _cs(left=False, right=False, v=30.0, left_bs=False, right_bs=False):
+    return NS(vEgo=v, leftBlinker=left, rightBlinker=right, leftBlindspot=left_bs,
+              rightBlindspot=right_bs, steeringPressed=False, steeringTorque=0.0, brakePressed=False)
 
   def _start(self, dh):
     """Signal left and run until the change is actually underway."""
@@ -123,13 +124,76 @@ class TestItIsActuallyWiredIn:
         return
     raise AssertionError("never reached laneChangeStarting")
 
-  def test_dropping_the_blinker_stops_a_change_in_progress(self):
+  def test_dropping_the_blinker_steers_back(self):
+    """From the road: "turning off my blinker mid lane change doesn't really seem to cancel. They
+    usually just go into the lane anyway."
+
+    Releasing the desire was never going to go back -- it re-centers on whichever lane the planner
+    now believes it is in, and two seconds into a ~3.8 s change that is the NEW one. So the cancel
+    fired and nothing visible happened, which from the seat is indistinguishable from no cancel.
+
+    A lane change the other way IS this one reversed, so that is what it does now.
+    """
     dh = self._dh()
     self._start(dh)
+    assert dh.desire == log.Desire.laneChangeLeft
     dh.update(self._cs(), True, 0.5)          # stalk off
+    assert dh.alc.reverting
+    assert dh.lane_change_direction == LaneChangeDirection.right, "not steering back"
+    assert dh.desire == log.Desire.laneChangeRight, "stopped steering instead of returning"
+
+  def test_the_revert_does_not_cancel_itself_every_frame(self):
+    """The trap this latch exists for: the blinker is OFF for the whole reverse crossing, which is
+    the same condition that triggered the cancel. Without the latch it re-cancels every frame and
+    flips direction back and forth."""
+    dh = self._dh()
+    self._start(dh)
+    dh.update(self._cs(), True, 0.5)
+    for _ in range(int(1.0 / DT_MDL)):
+      dh.update(self._cs(), True, 0.5)
+      assert dh.lane_change_direction == LaneChangeDirection.right, "flipped back mid-revert"
+    assert dh.alc.changes_cancelled == 1, "counted the same cancel more than once"
+
+  def test_the_reverse_crossing_finishes_and_releases(self):
+    """It has to end, and end in a state a new lane change can start from."""
+    dh = self._dh()
+    self._start(dh)
+    dh.update(self._cs(), True, 0.5)
+    for _ in range(int(8.0 / DT_MDL)):
+      dh.update(self._cs(), True, 0.0)        # model: no lane change happening any more
+    assert dh.lane_change_state == LaneChangeState.off
+    assert not dh.alc.reverting, "latched on -- the next cancel would be ignored"
+    assert dh.desire == log.Desire.none
+
+  def test_a_blocked_return_lane_finishes_the_change_instead(self):
+    """We came from that lane seconds ago so it is nearly always clear -- but "nearly always" is
+    not something to steer on. With the blind spot lit on the return side, going back is the worse
+    of two imperfect options, so it falls back to simply releasing the desire."""
+    dh = self._dh()
+    self._start(dh)                            # changing LEFT, so the return side is the RIGHT
+    dh.update(self._cs(right_bs=True), True, 0.5)
+    assert not dh.alc.reverting
+    assert dh.lane_change_state == LaneChangeState.off
+    assert dh.desire == log.Desire.none
+    assert dh.alc.changes_cancelled == 1, "still the driver calling it off, and still counted"
+
+  def test_the_other_blind_spot_does_not_stop_a_revert(self):
+    """The lane we are heading INTO being occupied is not a reason to refuse to go back -- it is a
+    reason to go back. Checking the wrong side here would invert the whole gate."""
+    dh = self._dh()
+    self._start(dh)                            # changing LEFT
+    dh.update(self._cs(left_bs=True), True, 0.5)
+    assert dh.alc.reverting
+    assert dh.lane_change_direction == LaneChangeDirection.right
+
+  def test_turning_the_revert_off_restores_the_old_cancel(self):
+    dh = self._dh(revert=False)
+    self._start(dh)
+    dh.update(self._cs(), True, 0.5)
+    assert not dh.alc.reverting
     assert dh.lane_change_state == LaneChangeState.off
     assert dh.lane_change_direction == LaneChangeDirection.none
-    assert dh.desire == log.Desire.none, "still steering across after being called off"
+    assert dh.desire == log.Desire.none
 
   def test_it_keeps_going_while_the_blinker_is_held(self):
     dh = self._dh()
@@ -160,8 +224,12 @@ class TestItIsActuallyWiredIn:
     So the window where this bites is a cancel between 0.5 s and the end of the cancel window, on a
     change the model has not registered. That is not an exotic case; it is the early, tentative
     lane change this whole feature exists to let the driver call off.
+
+    Run with the revert OFF, because that is the path this is about: the revert keeps the state in
+    laneChangeStarting and never takes the else branch on the deciding frame, so it cannot be undone
+    this way. The fall-through only ever threatened the plain release-the-desire cancel.
     """
-    dh = self._dh()
+    dh = self._dh(revert=False)
     self._start(dh)
     # Hold the blinker until the lane-line fade has run out. The change is underway and stock's
     # first condition is now permanently satisfied for the rest of this state.
