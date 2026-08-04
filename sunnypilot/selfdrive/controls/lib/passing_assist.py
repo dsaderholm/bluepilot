@@ -1244,10 +1244,16 @@ class PassingAssistDetector:
     """The side WE are lighting the blinker for, or none.
 
     Answers none until this actuates, so nothing below changes today -- see `self.actuating`.
+
+    EITHER dry run, not just the passing one. Keep-right signals too, and checking only `maneuver`
+    left the identical self-abort bug in the other machine -- a returning-right maneuver would see
+    its own blinker, call it driver input, and cancel itself. The fix was written twice and applied
+    once, which is the failure mode `live_maneuver` exists to prevent.
     """
     if not self.actuating:
       return Side.none
-    return self.maneuver.side if self.maneuver.blinker_on else Side.none
+    live, _ = self.live_maneuver
+    return live.side if live.blinker_on else Side.none
 
   def _driver_override(self, CS) -> bool:
     """Is the DRIVER taking over -- as opposed to us watching our own blinker?

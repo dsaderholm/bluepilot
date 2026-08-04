@@ -2354,3 +2354,19 @@ class TestTheChime:
     det.params = _KeepRightOnParams(PassingAssistChime=False)
     run(det, 4)
     assert det.chime_enabled is False
+
+  def test_keep_right_does_not_abort_its_own_maneuver_either(self):
+    """The same bug, in the other dry run. It was fixed once and written twice: `_own_blinker`
+    checked only the passing maneuver, so a keep-right maneuver signaling right would see its own
+    blinker, call it driver input, and cancel itself."""
+    det = PassingAssistDetector()
+    det.params = _KeepRightOnParams()
+    det.actuating = True
+    det.keep_right_maneuver.side = Side.right
+    det.keep_right_maneuver.phase = Phase.signaling
+    assert det.maneuver.phase == Phase.idle, "the passing dry run must be idle for this to test it"
+    assert not det._driver_override(NS(leftBlinker=False, rightBlinker=True,
+                                       brakePressed=False, steeringPressed=False))
+    # ...and the other side is still the driver.
+    assert det._driver_override(NS(leftBlinker=True, rightBlinker=False,
+                                   brakePressed=False, steeringPressed=False))
