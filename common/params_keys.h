@@ -326,6 +326,11 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // Display units. Below mid -> low, below high -> mid, at/above high -> high.
     {"SpeedLimitOffsetMidThreshold", {PERSISTENT | BACKUP, INT, "30"}},
     {"SpeedLimitOffsetHighThreshold", {PERSISTENT | BACKUP, INT, "65"}},
+    // BluePilot: what to do when no source knows the limit here. 0 = stand down and let the set
+    // speed govern, 1 = keep the last known limit (upstream behavior, and the default nowhere).
+    // Defaults to standing down: reported from the road that leaving I-215 carried the freeway's
+    // 70 down the ramp and along a residential street until OSM had data again.
+    {"SpeedLimitFallback", {PERSISTENT | BACKUP, INT, "0"}},
     {"SpeedLimitAutoFollow", {PERSISTENT | BACKUP, BOOL, "1"}},
     // Ceiling for what SLA may request, in display units (mph/kph). Well under Ford ACC's 110 mph cap.
     {"SpeedLimitMaxSetSpeed", {PERSISTENT | BACKUP, INT, "85"}},

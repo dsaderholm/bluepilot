@@ -26,6 +26,18 @@ class OffsetType(IntEnumBase):
   bySpeed = 3
 
 
+class Fallback(IntEnumBase):
+  """BluePilot: what to do when no source has a speed limit for where we are.
+
+  Upstream has no choice here -- the last known limit is kept indefinitely. Reported from the road
+  on 2026-08-04: leaving I-215, the set speed stayed at 70 the whole way down the off-ramp and
+  along the surface street, until OSM finally had a limit again near Intermountain Christian
+  School. The freeway's number had been driving a residential road for a mile.
+  """
+  setSpeed = 0    # stand down; the driver's set speed governs and the sign reads "---"
+  lastKnown = 1   # keep the previous limit until a new one appears (upstream behavior)
+
+
 class Mode(IntEnumBase):
   off = 0
   information = 1

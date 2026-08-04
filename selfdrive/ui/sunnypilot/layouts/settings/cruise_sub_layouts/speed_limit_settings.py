@@ -75,7 +75,11 @@ class SpeedLimitSettingsLayout(Widget):
       description="",
       buttons=SPEED_LIMIT_OFFSET_TYPE_BUTTONS,
       param="SpeedLimitOffsetType",
-      button_width=450,
+      # 4 buttons, not the 3 this row was sized for. MultipleButtonActionSP lays them out as
+      # len(buttons) * button_width with no wrapping and no fit check, so leaving 450 here pushed
+      # the row from 1350 px to 1800 and "By Limit" rendered off the right edge of the screen --
+      # reported from the car, invisible to every test we had.
+      button_width=380,
     )
 
     self._speed_limit_value_offset = option_item_sp(
@@ -86,6 +90,16 @@ class SpeedLimitSettingsLayout(Widget):
       description=self._get_offset_description,
       label_callback=self._get_offset_label,
     )
+
+    self._speed_limit_fallback = multiple_button_item_sp(
+      title=lambda: tr("When No Limit Is Known"),
+      description=tr("What to do where no map or sign can say what the limit is. Set Speed stands "
+                     "down and leaves your own number alone; Last Known keeps the previous limit "
+                     "until a new one appears. Coming off a freeway, Last Known carries the "
+                     "freeway's number down the ramp and along the next road."),
+      buttons=[tr("Set Speed"), tr("Last Known")],
+      param="SpeedLimitFallback",
+      button_width=380)
 
     # BluePilot: one offset per speed band. A single number is wrong at both ends of the range and
     # the percentage option is the same mistake in disguise -- 10% is 2.5 mph in a 25 and 7 in a
@@ -147,6 +161,8 @@ class SpeedLimitSettingsLayout(Widget):
       LineSeparatorSP(40),
       self._speed_limit_auto_follow,
       self._speed_limit_max_set_speed,
+      LineSeparatorSP(40),
+      self._speed_limit_fallback,
       LineSeparatorSP(40),
       self._speed_limit_offset_type,
       self._speed_limit_value_offset,

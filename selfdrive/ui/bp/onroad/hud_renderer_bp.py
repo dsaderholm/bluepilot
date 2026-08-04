@@ -8,8 +8,10 @@ from openpilot.selfdrive.ui.bp.onroad.exp_button_bp import ExpButtonBP
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.selfdrive.ui.bp.lib.ui_debug_logger import bp_ui_log
+from cereal import custom
 
 LateralMode = ControllerStateBP.LateralMode
+SpeedLimitSource = custom.LongitudinalPlanSP.SpeedLimit.Source
 
 # BluePilot: Y center for speed display (matching upstream hardcoded values)
 SPEED_CENTER_Y = 180
@@ -133,6 +135,17 @@ TSR_PILL_INK = rl.Color(226, 206, 110, 255)
 # two-digit number, and "PIN" competing with "HOLD" reads as two labels for one thing.
 PIN_DOT_RADIUS = 9
 PIN_DOT_COLOR = rl.Color(255, 214, 120, 255)
+
+# BluePilot: sunnypilot's "AHEAD" box hangs off the bottom of the speed-limit sign, in the same
+# rows our stack occupies. Its geometry, from SpeedLimitRenderer._draw_ahead_info: 170x160 at
+# sign_rect.y + sign_rect.height + 10, horizontally centred on the sign.
+#
+# Our pills are 268 px wide from the left margin and reach x+328; the AHEAD box starts at x+271.
+# 57 px of overlap, and it wins because the speed-limit renderer draws after us. Reported from the
+# car. Rather than narrow the pills -- they were widened deliberately so "BRAKE 1.4" is legible at
+# a glance -- the stack starts below the box whenever the box is there.
+AHEAD_BOX_HEIGHT = 160
+AHEAD_BOX_GAP = 10
 
 
 class HudRendererBP(HudRendererSP):
@@ -394,6 +407,24 @@ class HudRendererBP(HudRendererSP):
       except Exception:
         pass
 
+  def _ahead_box_visible(self) -> bool:
+    """Is sunnypilot's AHEAD box on screen, so our stack has to start below it?
+
+    The condition is read off the speed-limit renderer we already own a reference to, mirroring
+    SpeedLimitRenderer._draw_ahead_info. Duplicated rather than shared because that file is
+    upstream's and editing it buys a merge conflict on every future update for a layout question
+    that is entirely ours. If the box ever stops appearing where we expect, this is the first thing
+    to re-check against that method.
+    """
+    try:
+      slr = self.speed_limit_renderer
+      return bool(slr.speed_limit_ahead_valid
+                  and slr.speed_limit_ahead > 0
+                  and slr.speed_limit_ahead != slr.speed_limit
+                  and slr.speed_limit_source == SpeedLimitSource.map)
+    except Exception:
+      return False
+
   def _draw_acc_status(self, rect: rl.Rectangle) -> None:
     """BluePilot: a compact line under the MAX box -- what ACC is asking for, what ICBM is doing.
 
@@ -415,6 +446,8 @@ class HudRendererBP(HudRendererSP):
     set_speed_width = UI_CONFIG.set_speed_width_metric if ui_state.is_metric else UI_CONFIG.set_speed_width_imperial
     x = rect.x + 60 + (UI_CONFIG.set_speed_width_imperial - set_speed_width) // 2
     y = rect.y + 45 + UI_CONFIG.set_speed_height + 16
+    if self._ahead_box_visible():
+      y += AHEAD_BOX_HEIGHT + AHEAD_BOX_GAP
 
     if self._icbm_baseline and not lamps_only:
       y += self._draw_hold_badge(x, y, set_speed_width) + STACK_GAP

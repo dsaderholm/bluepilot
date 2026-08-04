@@ -14,7 +14,7 @@ from openpilot.common.params import Params
 from openpilot.common.realtime import DT_MDL
 from openpilot.sunnypilot import PARAMS_UPDATE_PERIOD, get_sanitize_int_param
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit import LIMIT_MAX_MAP_DATA_AGE, LIMIT_ADAPT_ACC, MAX_FIX_AGE_S
-from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.common import Policy, OffsetType
+from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.common import Policy, OffsetType, Fallback
 
 SpeedLimitSource = custom.LongitudinalPlanSP.SpeedLimit.Source
 
@@ -72,6 +72,7 @@ class SpeedLimitResolver:
     self.offset_high = self.params.get("SpeedLimitOffsetHigh", return_default=True)
     self.offset_mid_threshold = self.params.get("SpeedLimitOffsetMidThreshold", return_default=True)
     self.offset_high_threshold = self.params.get("SpeedLimitOffsetHighThreshold", return_default=True)
+    self.fallback = self.params.get("SpeedLimitFallback", return_default=True)
 
     self.speed_limit = 0.
     self.speed_limit_last = 0.
@@ -92,6 +93,15 @@ class SpeedLimitResolver:
 
   @property
   def speed_limit_last_valid(self) -> bool:
+    """Is the REMEMBERED limit still something to act on?
+
+    Under Fallback.setSpeed it is not, the moment the live limit goes away. That is the whole fix:
+    a limit is a fact about the road you are on, and once no source can say what road that is,
+    continuing to assert the last one is a guess dressed as data. Everything downstream reads this
+    -- Speed Limit Assist stands down and the sign shows "---" -- which is the honest display.
+    """
+    if self.fallback == int(Fallback.setSpeed) and not self.speed_limit_valid:
+      return False
     return self.speed_limit_last > 0.
 
   def update_params(self):
@@ -105,6 +115,7 @@ class SpeedLimitResolver:
       self.offset_high = self.params.get("SpeedLimitOffsetHigh", return_default=True)
       self.offset_mid_threshold = self.params.get("SpeedLimitOffsetMidThreshold", return_default=True)
       self.offset_high_threshold = self.params.get("SpeedLimitOffsetHighThreshold", return_default=True)
+      self.fallback = self.params.get("SpeedLimitFallback", return_default=True)
 
   def _get_speed_limit_offset(self) -> float:
     if self.offset_type == OffsetType.off:

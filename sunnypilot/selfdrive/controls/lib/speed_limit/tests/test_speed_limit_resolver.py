@@ -15,7 +15,7 @@ from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit import LIMIT_MAX_MA
 
 from openpilot.common.constants import CV
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.speed_limit_resolver import SpeedLimitResolver, ALL_SOURCES
-from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.common import Policy, OffsetType
+from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.common import Policy, OffsetType, Fallback
 
 SpeedLimitSource = custom.LongitudinalPlanSP.SpeedLimit.Source
 
@@ -188,3 +188,34 @@ class TestBandedOffset:
   def test_other_offset_types_are_untouched(self):
     r = self._resolver(offset_type=int(OffsetType.off))
     assert r._get_speed_limit_offset() == 0
+
+
+class TestNoLimitFallback:
+  """BluePilot: leaving I-215, the set speed stayed at 70 down the ramp and along a residential
+  street until OSM had data again. The last known limit was driving a road it knew nothing about."""
+
+  @staticmethod
+  def _resolver(fallback, limit, last):
+    r = SpeedLimitResolver()
+    r.fallback = int(fallback)
+    r.speed_limit = limit
+    r.speed_limit_last = last
+    return r
+
+  def test_set_speed_drops_the_stale_limit_immediately(self):
+    r = self._resolver(Fallback.setSpeed, 0.0, 70 * CV.MPH_TO_MS)
+    assert not r.speed_limit_valid
+    assert not r.speed_limit_last_valid, "the freeway's limit must not survive leaving the freeway"
+
+  def test_last_known_keeps_it(self):
+    r = self._resolver(Fallback.lastKnown, 0.0, 70 * CV.MPH_TO_MS)
+    assert r.speed_limit_last_valid, "upstream behaviour must still be selectable"
+
+  def test_a_live_limit_is_valid_under_either_fallback(self):
+    for fb in (Fallback.setSpeed, Fallback.lastKnown):
+      r = self._resolver(fb, 35 * CV.MPH_TO_MS, 70 * CV.MPH_TO_MS)
+      assert r.speed_limit_valid and r.speed_limit_last_valid
+
+  def test_no_limit_ever_seen_is_invalid_either_way(self):
+    for fb in (Fallback.setSpeed, Fallback.lastKnown):
+      assert not self._resolver(fb, 0.0, 0.0).speed_limit_last_valid
