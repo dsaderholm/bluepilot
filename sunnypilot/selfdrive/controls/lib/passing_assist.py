@@ -1119,9 +1119,7 @@ class PassingAssistDetector:
     # keep-right delay would be several seconds of telling traffic behind about a manoeuvre that
     # may not happen.
     kr_side = self.suggestion if self.reason == Reason.keepRight else Side.none
-    kr_rear = (self.rear.right.demands_abort if self.keep_right_manoeuvre.side == Side.right
-               else self.rear.left.demands_abort if self.keep_right_manoeuvre.side == Side.left
-               else False)
+    kr_rear = self._must_abort(self.keep_right_manoeuvre.side)
     self.keep_right_manoeuvre.update(clear=kr_side, suggested=kr_side, confirming=False,
                                      confirmed=kr_side != Side.none, driver_override=override,
                                      collision_abort=kr_rear)
@@ -1135,12 +1133,27 @@ class PassingAssistDetector:
       # Exactly the inputs the detector already treats as the driver taking over. Reusing the same
       # test rather than restating it means the dry run cannot disagree with the gate above it.
       driver_override=override,
-      # The narrow tier: something arriving behind, which is the only thing that may reverse a
-      # crossing already begun. Answers False with no rear sensor rather than guessing.
-      collision_abort=(self.rear.left.demands_abort if self.manoeuvre.side == Side.left
-                       else self.rear.right.demands_abort if self.manoeuvre.side == Side.right
-                       else False),
+      # The narrow tier: what may reverse a crossing already begun, as opposed to merely refusing
+      # to start one.
+      collision_abort=self._must_abort(self.manoeuvre.side),
     )
+
+  def _must_abort(self, side: int) -> bool:
+    """Is there something in that lane worth REVERSING a crossing for?
+
+    Two things, and the second was missing until a whole-drive test walked into it. Something
+    arriving fast behind is the obvious one. Traffic coming the OTHER WAY in the lane being crossed
+    into is the more serious one, and the rule that gates cannot abort a committed crossing was
+    swallowing it -- correctly for every other gate, catastrophically for this one. "A car cannot
+    un-change lanes on a change of mind" is true; meeting someone head-on is not a change of mind.
+    """
+    if side == Side.left:
+      rear, adjacent = self.rear.left, self.adjacent.left
+    elif side == Side.right:
+      rear, adjacent = self.rear.right, self.adjacent.right
+    else:
+      return False
+    return rear.demands_abort or (self.oncoming_veto and adjacent.blocks_oncoming)
 
   @property
   def live_manoeuvre(self):
