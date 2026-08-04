@@ -13,7 +13,7 @@ from openpilot.common.gps import get_gps_location_service
 from openpilot.common.params import Params
 from openpilot.common.realtime import DT_MDL
 from openpilot.sunnypilot import PARAMS_UPDATE_PERIOD, get_sanitize_int_param
-from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit import LIMIT_MAX_MAP_DATA_AGE, LIMIT_ADAPT_ACC
+from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit import LIMIT_MAX_MAP_DATA_AGE, LIMIT_ADAPT_ACC, MAX_FIX_AGE_S
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.common import Policy, OffsetType
 
 SpeedLimitSource = custom.LongitudinalPlanSP.SpeedLimit.Source
@@ -136,13 +136,26 @@ class SpeedLimitResolver:
     gps_data = sm[self._gps_location_service]
     map_data = sm['liveMapDataSP']
 
-    distance_since_fix = self.v_ego * (time.monotonic() - gps_data.unixTimestampMillis * 1e-3)
+    # BluePilot: this is the FIXME below, and it is a clock-epoch mix-up. time.monotonic() counts
+    # seconds since BOOT (~1e4); unixTimestampMillis * 1e-3 counts seconds since 1970 (~1.8e9).
+    # Subtracting them gave a "fix age" of about -1.8 billion seconds, so distance_since_fix came
+    # out around -5e10 m, distance_to_speed_limit_ahead became astronomically large, and the
+    # early-adoption test below could never be true. The feature has never once run.
+    #
+    # Clamped as well as corrected: the device clock is GPS-disciplined (system/timed.py), so it
+    # can be wrong early in a boot, and a bad clock must degrade to "no correction" rather than to
+    # a wrong one. Beyond a couple of seconds the fix is stale and extrapolating from it is guesswork.
+    fix_age = time.time() - gps_data.unixTimestampMillis * 1e-3
+    fix_age = min(max(fix_age, 0.0), MAX_FIX_AGE_S)
+    distance_since_fix = self.v_ego * fix_age
     distance_to_speed_limit_ahead = max(0., map_data.speedLimitAheadDistance - distance_since_fix)
 
     self.limit_solutions[SpeedLimitSource.map] = speed_limit
     self.distance_solutions[SpeedLimitSource.map] = 0.
 
-    # FIXME-SP: this is not working as expected
+    # Start easing down BEFORE the sign, so the new limit is met at the sign rather than a
+    # hundred metres past it -- and at LIMIT_ADAPT_ACC = -1.0 m/s^2, which is deliberately under
+    # the 1.3 m/s^2 that lights the stop lamps. Coast in, do not brake at the boundary.
     if 0. < next_speed_limit < self.v_ego:
       adapt_time = (next_speed_limit - self.v_ego) / LIMIT_ADAPT_ACC
       adapt_distance = self.v_ego * adapt_time + 0.5 * LIMIT_ADAPT_ACC * adapt_time ** 2

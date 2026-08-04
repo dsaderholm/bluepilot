@@ -56,6 +56,7 @@ DEFAULT_TARGETS = [
   "sunnypilot/selfdrive/car/intelligent_cruise_button_management/tests/",
   "opendbc_repo/opendbc/sunnypilot/car/ford/tests/",
   "sunnypilot/selfdrive/controls/lib/tests/test_unconfirmed_lead.py",
+  "sunnypilot/selfdrive/controls/lib/speed_limit/tests/",
   "selfdrive/car/tests/test_structs_capnp_parity.py",
   "selfdrive/ui/bp/onroad/tests/",
   "system/tests/test_sentry_disabled_by_default.py",
