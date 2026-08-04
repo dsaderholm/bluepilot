@@ -307,14 +307,19 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"SpeedLimitMaxSetSpeed", {PERSISTENT | BACKUP, INT, "85"}},
 
     // Smart Cruise Control
+    // BluePilot: both curve controllers default ON, and the vision tuning leans toward slowing
+    // more than stock. The owner's stated objective is to minimise how often they have to take
+    // over, explicitly accepting a slower car for it -- and lateral demand goes as v^2, so taking
+    // 7% off the corner speed removes ~13% of the steering the PSCM has to find. The two are
+    // min()'d in the planner, never summed, so running both cannot compound into a double slowdown.
     {"MapTargetVelocities", {CLEAR_ON_ONROAD_TRANSITION, STRING}},
-    {"SmartCruiseControlMap", {PERSISTENT | BACKUP, BOOL, "0"}},
-    {"SmartCruiseControlVision", {PERSISTENT | BACKUP, BOOL, "0"}},
+    {"SmartCruiseControlMap", {PERSISTENT | BACKUP, BOOL, "1"}},
+    {"SmartCruiseControlVision", {PERSISTENT | BACKUP, BOOL, "1"}},
     // BluePilot: SCC-Vision curve aggressiveness, split by speed regime and blended across
     // 30-60 mph, mirroring FordAngleLow/HighSpeedFactor. 100 = stock behavior for that regime,
     // higher = slows earlier and harder for a given curve, lower = carries more speed through.
-    {"SmartCruiseControlVisionLowSpeedFactor", {PERSISTENT | BACKUP, INT, "100"}},
-    {"SmartCruiseControlVisionHighSpeedFactor", {PERSISTENT | BACKUP, INT, "100"}},
+    {"SmartCruiseControlVisionLowSpeedFactor", {PERSISTENT | BACKUP, INT, "115"}},
+    {"SmartCruiseControlVisionHighSpeedFactor", {PERSISTENT | BACKUP, INT, "105"}},
     // BluePilot: how early the curve cycle starts, independent of how much it slows. 100 = stock.
     // Higher starts sooner, which spreads the same speed change over more distance.
     // Raised from 100 on 2026-08-01: reported as triggering too late on real drives, most
@@ -324,6 +329,12 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // 140 step -- 0.93 m/s^2 and 1030 m -- after the value had already moved to 170.)
     // 200 is the clip ceiling in vision_controller._EARLINESS_MAX; there is no headroom above it.
     {"SmartCruiseControlVisionEarliness", {PERSISTENT | BACKUP, INT, "170"}},
+    // BluePilot: SCC-Map deceleration target, tenths of m/s^2, magnitude. Unlike SCC-Vision this
+    // single value sets BOTH how hard it slows and how early it starts, because the trigger is
+    // "am I within the distance needed to reach the corner speed at this rate" -- gentler means a
+    // longer distance means an earlier start. 12 = the stock -1.2 m/s^2, deliberately just under
+    // the 1.3 that lights the stop lamps. Lower it to begin ramps sooner and more gently.
+    {"SmartCruiseControlMapDecel", {PERSISTENT | BACKUP, INT, "8"}},
 
     // Torque lateral control custom params
     {"CustomTorqueParams", {PERSISTENT | BACKUP , BOOL}},

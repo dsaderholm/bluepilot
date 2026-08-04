@@ -188,8 +188,24 @@ class CruiseLayout(Widget):
 
     self.scc_m_toggle = toggle_item_sp(
       title=tr("Smart Cruise Control - Map"),
-      description=tr("Use map data to estimate the appropriate speed to drive through turns ahead."),
+      description=tr("Use map data to estimate the appropriate speed to drive through turns ahead. "
+                     "Unlike the camera-based control above, this knows a turn is coming before it "
+                     "can be seen, so it is the one that works on a freeway exit ramp that is still "
+                     "straight where you join it."),
       param="SmartCruiseControlMap")
+
+    # BluePilot: SCC-Map's one knob, and it really is one knob -- see the map_controller comment.
+    self.scc_m_decel = option_item_sp(
+      title=tr("Map Curve Braking Rate"),
+      description=tr("How hard to slow for a turn the map knows about. This also sets how early it "
+                     "starts: a gentler rate needs more distance, so the set speed begins falling "
+                     "sooner. Lower this if exit ramps come up too fast. Above 1.3 m/s2 the stop "
+                     "lamps light, so values past that trade the BRAKE LAMPS readout for a later, "
+                     "harder slowdown."),
+      param="SmartCruiseControlMapDecel",
+      min_value=4, max_value=25, value_change_step=1,
+      label_callback=lambda v: f"{v / 10:.1f} m/s2",
+      inline=True)
 
     self.custom_acc_toggle = toggle_item_sp(
       title=tr("Custom ACC Speed Increments"),
@@ -253,6 +269,7 @@ class CruiseLayout(Widget):
       self.scc_v_high_speed_factor,
       self.scc_v_earliness,
       self.scc_m_toggle,
+      self.scc_m_decel,
 
       SectionHeader(tr("Other")),
       self.dec_toggle,

@@ -20,6 +20,21 @@ TO_RADIANS = math.pi / 180
 TO_DEGREES = 180 / math.pi
 TARGET_JERK = -0.6  # m/s^3 There's some jounce limits that are not consistent so we're fudging this some
 TARGET_ACCEL = -1.2  # m/s^2 should match up with the long planner limit
+# BluePilot: TARGET_ACCEL above is the shipped default, and it is BOTH knobs at once -- how hard
+# SCC-Map slows AND how early it starts. The trigger test is "am I within the distance needed to
+# reach the corner speed at this deceleration", so a gentler target lengthens that distance and the
+# cycle begins further out. There is no separate earliness control to add, unlike SCC-Vision where
+# threshold and magnitude really are independent.
+#
+# Worked example, 70 mph into a 30 mph loop ramp: at -1.2 m/s^2 the required distance is ~330 m; at
+# -0.8 it is ~500 m. On a ramp with a straight first section that difference decides whether the
+# set speed starts falling while you can still do something gentle about it.
+#
+# The value that matters for the stop lamps is 1.3 m/s^2 (UN R13-H). The stock -1.2 sits just under
+# it deliberately. Going past 1.3 here is asking for the brake lights, which is sometimes the right
+# trade on a tight ramp and should be a decision rather than an accident.
+SCC_MAP_DECEL_MIN = 0.4   # m/s^2, magnitude. Gentler than this and the trigger distance is absurd.
+SCC_MAP_DECEL_MAX = 2.5
 TARGET_OFFSET = 1.0  # seconds - This controls how soon before the curve you reach the target velocity. It also helps
                      # reach the target velocity when inaccuracies in the distance modeling logic would cause overshoot.
                      # The value is multiplied against the target velocity to determine the additional distance. This is
@@ -74,6 +89,7 @@ class SmartCruiseControlMap:
     self.params = Params()
     self.mem_params = Params("/dev/shm/params") if platform.system() != "Darwin" else self.params
     self.enabled = self.params.get_bool("SmartCruiseControlMap")
+    self.target_accel = TARGET_ACCEL
     self.long_enabled = False
     self.long_override = False
     self.is_enabled = False
@@ -99,6 +115,11 @@ class SmartCruiseControlMap:
   def update_params(self):
     if self.frame % int(PARAMS_UPDATE_PERIOD / DT_MDL) == 0:
       self.enabled = self.params.get_bool("SmartCruiseControlMap")
+      # BluePilot: stored as tenths of m/s^2, magnitude. Negated here because every use below wants
+      # the signed deceleration, and clipped so a bad param cannot make the trigger distance
+      # infinite (which would read as "SCC-Map never fires") or slam the brakes.
+      decel = self.params.get("SmartCruiseControlMapDecel", return_default=True) / 10.
+      self.target_accel = -min(max(decel, SCC_MAP_DECEL_MIN), SCC_MAP_DECEL_MAX)
 
   def update_calculations(self) -> None:
     self.last_position = coordinate_from_param("LastGPSPosition", self.mem_params) or Coordinate(0.0, 0.0)
@@ -141,7 +162,7 @@ class SmartCruiseControlMap:
 
       d = forward_distances[i]
 
-      a_diff = (self.a_ego - TARGET_ACCEL)
+      a_diff = (self.a_ego - self.target_accel)
       accel_t = abs(a_diff / TARGET_JERK)
       min_accel_v = calculate_velocity(accel_t, TARGET_JERK, self.a_ego, self.v_ego)
 
@@ -166,8 +187,8 @@ class SmartCruiseControlMap:
         max_d = calculate_distance(t, TARGET_JERK, self.a_ego, self.v_ego)
 
         # calculate additional time needed based on target accel
-        t = abs((min_accel_v - tv) / TARGET_ACCEL)
-        max_d += calculate_distance(t, 0, TARGET_ACCEL, min_accel_v)
+        t = abs((min_accel_v - tv) / self.target_accel)
+        max_d += calculate_distance(t, 0, self.target_accel, min_accel_v)
 
       if d < max_d + tv * TARGET_OFFSET:
         valid_velocities.append((float(tv), tlat, tlon))
