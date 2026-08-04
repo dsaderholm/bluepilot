@@ -138,7 +138,12 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // --- sunnypilot params --- //
     {"ApiCache_DriveStats", {PERSISTENT, JSON}},
     {"AutoLaneChangeBsmDelay", {PERSISTENT | BACKUP, BOOL, "0"}},
-    {"AutoLaneChangeTimer", {PERSISTENT | BACKUP, INT, "0"}},
+    // BluePilot: 3 == AutoLaneChangeMode.ONE_SECOND, not upstream's 0 (Nudge). The owner's own
+    // habit -- "I put the blinker on, wait a second, and then change lanes" -- and the default
+    // matters rather than just the setting, because a param never written reads its default: on a
+    // device where this control has not been touched, upstream's 0 means no timed lane change
+    // happens at all. Still fully adjustable in the UI, Off through 3 s.
+    {"AutoLaneChangeTimer", {PERSISTENT | BACKUP, INT, "3"}},
     {"BlinkerLateralReengageDelay", {PERSISTENT | BACKUP, INT, "0"}},  // seconds
     {"BlinkerMinLateralControlSpeed", {PERSISTENT | BACKUP, INT, "20"}},  // MPH or km/h
     {"BlinkerPauseLateralControl", {PERSISTENT | BACKUP, INT, "0"}},
