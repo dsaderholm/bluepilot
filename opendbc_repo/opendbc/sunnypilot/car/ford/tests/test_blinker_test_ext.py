@@ -162,25 +162,37 @@ class TestBlinkerTestTermination:
     assert ext.bt_params.value == 0, "request param was not self-cleared"
     assert set(run(ext, 400)) == {SIGNAL_NONE}
 
-  def test_pressing_again_during_the_verdict_does_not_deadlock(self):
-    """Found on the car: "I was pressing that button pretty soon after each other."
+  def test_pressing_again_during_the_verdict_runs_the_test_again(self):
+    """Measured on the car as "the other three buttons don't work", and measured here as a 7.5 s
+    dead window: four seconds of pulse plus three of verdict, with every button inert.
 
-    DONE is terminal until the request reads 0, and the ONLY thing that ever writes 0 is this
-    module disarming itself. A press that landed inside the verdict window therefore left a live
-    request that nothing would ever clear -- state stuck at DONE, every later press ignored, no way
-    back short of a reboot. The press is dropped now, but the machine has to come home.
+    Dropping that press was the worst of the options. It is the one input that says the driver has
+    finished reading the result, so it should start the next test, not be thrown away -- which is
+    what made the buttons feel broken rather than busy.
     """
     ext = make_ext(SIGNAL_LEFT)
     run(ext, POLL_FRAMES + int(PULSE_DURATION_S / DT_CTRL) + 10)
     assert ext.bt_state == 2
 
-    ext.bt_params.value = SIGNAL_RIGHT          # the second press
+    ext.bt_params.value = SIGNAL_RIGHT          # the second press, mid-verdict
     run(ext, POLL_FRAMES + 2)
-    assert ext.bt_blocked == 4, "the dropped press should say why"
-    assert ext.bt_params.value == 0, "a press during DONE must be cleared, not left live"
+    assert ext.bt_state == 1, "the press was dropped instead of starting the next test"
+    assert ext.bt_commanded == SIGNAL_RIGHT
 
-    run(ext, int(DONE_HOLD_S / DT_CTRL) + 4)
-    assert ext.bt_state == 0, "never returned to idle -- the test is dead until reboot"
+  def test_but_a_param_we_cannot_clear_never_starts_a_second_pulse(self):
+    """The other disaster, and the reason preemption is gated rather than free.
+
+    If our disarm write silently fails, the request reads non-zero forever -- indistinguishable
+    from a driver leaning on the button, unless you track whether the store has ever accepted a
+    write. Without that, "a press restarts the test" means a failed write flashes the lamp until
+    the ignition goes off.
+    """
+    ext = make_ext(SIGNAL_LEFT)
+    ext.bt_params.put = lambda *a, **k: None    # writes silently fail
+    run(ext, POLL_FRAMES + int((PULSE_DURATION_S + DONE_HOLD_S) / DT_CTRL) + 40)
+    assert ext.bt_state != 1, "a stuck request started another pulse"
+    out = run(ext, int(PULSE_DURATION_S / DT_CTRL))
+    assert all(v == SIGNAL_NONE for v in out), "lamp commanded again on a stuck param"
 
   def test_spamming_cannot_hold_the_machine_hostage(self):
     """The reported symptom, and the reason DONE is a clock rather than a condition: "if I do them

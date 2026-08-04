@@ -131,6 +131,13 @@ class BlinkerTestExt:
     self._bt_lamp_prev = False
     self._bt_command_frames_left = 0
     self._bt_done_frames = 0
+    # Has the request param been SEEN at zero since the last pulse was armed?
+    #
+    # This is what separates "the driver pressed again" from "our disarm write failed", and those
+    # two need opposite handling. Without it the module had to pick one disaster: trust the param
+    # and a failed write restarts the lamp forever, or distrust it and a second press deadlocks the
+    # buttons until reboot. The car produced the second one.
+    self._bt_saw_clear = True
     self._bt_frame = 0
 
   @property
@@ -143,6 +150,14 @@ class BlinkerTestExt:
     except (ValueError, TypeError):
       return SIGNAL_NONE
 
+  def _verdict_press(self) -> bool:
+    """Is there a genuinely NEW press waiting while the verdict is on screen?
+
+    Reading zero here is the proof that our disarm write landed; only after that can a non-zero
+    read mean a driver rather than a param we cannot clear. See _bt_saw_clear.
+    """
+    return self._read_request() != SIGNAL_NONE and self._bt_saw_clear
+
   def _disarm(self) -> None:
     """Clear the request so a pulse can never repeat on its own."""
     # int, NOT str -- see the note in bluepilot.py::_request_blinker_test. Writing "0" here raised
@@ -151,6 +166,13 @@ class BlinkerTestExt:
       self.bt_params.put("FordBlinkerTest", 0)
     except Exception:  # noqa: BLE001 - a param write failure must not stop the timeout above
       pass
+    # READ IT BACK NOW. This is the only proof the store took the write, and it has to be taken
+    # here rather than waiting for a later poll to notice a zero -- that is a race the driver wins
+    # by pressing again, which is precisely when the answer matters. See _bt_saw_clear.
+    try:
+      self._bt_saw_clear = self._read_request() == SIGNAL_NONE
+    except Exception:  # noqa: BLE001 - unreadable is not proof of anything
+      self._bt_saw_clear = False
 
   def update_blinker_test(self, CS) -> int:
     """Advance the state machine. Returns the TurnLghtSwtch_D_Stat value to transmit, or
@@ -223,18 +245,41 @@ class BlinkerTestExt:
         self.bt_state = 0
         self.bt_blocked = 0
         self._disarm()
-      elif self._bt_frame % int(PARAMS_POLL_S / DT_CTRL) == 0 and self._read_request():
-        self.bt_blocked = 4
-        self._disarm()
-      return SIGNAL_NONE
+      elif self._bt_frame % int(PARAMS_POLL_S / DT_CTRL) == 0 and self._verdict_press():
+        # A FRESH PRESS PREEMPTS THE VERDICT rather than being dropped.
+        #
+        # Measured before this: a hold locked the buttons for 7.5 s and a tap for 6.75 s -- four
+        # seconds of pulse and three of verdict, during which every button was dead. That is the
+        # whole of "the other three buttons don't work", and dropping the press made it worse by
+        # wasting the one input that says the driver has finished reading.
+        #
+        # Safe because the request param is a ONE-SHOT: it is cleared the moment a pulse ends, so a
+        # non-zero read here is a new click and not a stale one. A stuck param cannot repeat,
+        # because nothing but the UI ever writes a value.
+        self.bt_state = 0
+        self.bt_blocked = 0
+      if self.bt_state == 2:
+        return SIGNAL_NONE
+      # ...otherwise fall through and arm on this same frame, which is already a poll frame.
 
     # ---- idle: look for a request, at a low rate ----
     if self._bt_frame % int(PARAMS_POLL_S / DT_CTRL) != 0:
       return SIGNAL_NONE
 
     request = self._read_request()
+    if request == SIGNAL_NONE:
+      # Proof the store is taking our writes. Until this is seen, a non-zero read cannot be told
+      # apart from our own disarm having silently failed. See _bt_saw_clear.
+      self._bt_saw_clear = True
+
     if request not in (SIGNAL_LEFT, SIGNAL_RIGHT, SIGNAL_TAP_LEFT, SIGNAL_TAP_RIGHT):
       self.bt_blocked = 0
+      return SIGNAL_NONE
+
+    # A request we can never clear must not start a second pulse. This is the runaway guard, and it
+    # is the only thing between a failed param write and a lamp that pulses until the ignition
+    # goes off.
+    if not self._bt_saw_clear:
       return SIGNAL_NONE
 
     # Gates. Each records why so a refused request is visible rather than silently ignored.
@@ -250,6 +295,7 @@ class BlinkerTestExt:
 
     self.bt_blocked = 0
     self.bt_state = 1
+    self._bt_saw_clear = False
     tap = request in (SIGNAL_TAP_LEFT, SIGNAL_TAP_RIGHT)
     self.bt_commanded = SIGNAL_LEFT if request in (SIGNAL_LEFT, SIGNAL_TAP_LEFT) else SIGNAL_RIGHT
     self.bt_watching = self.bt_commanded
