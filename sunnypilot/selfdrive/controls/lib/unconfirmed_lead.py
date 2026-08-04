@@ -325,6 +325,18 @@ class UnconfirmedLeadDetector:
 
     # ---- ACTIVE (vision lead): hold the request until something resolves it ----
     if self.state == State.active:
+      # The driver braking ends it immediately. This is the alert doing its job -- it exists to buy
+      # reaction time, and once the driver reacts there is nothing left to warn about. Continuing
+      # to shout at someone already on the pedal is the fastest way to teach them to ignore it.
+      #
+      # It did stop before, but only indirectly: braking cancels ACC, long_enabled goes false a
+      # frame or two later, and the reset above catches it. Depending on cruise state to propagate
+      # is a poor way to silence an alarm, and it would fail outright on any brake press that did
+      # not disengage.
+      if CS.brakePressed:
+        self._release()
+        return
+
       # The good outcome: the deceleration bought a radar detection Ford will actually follow.
       #
       # Two ways that happens, and only having the first was a bug. _ford_tracks requires the lead

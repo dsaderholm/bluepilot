@@ -252,3 +252,26 @@ class TestReleaseWhenFordStartsBraking:
     run(det, ev, 60, d_rel=lambda i: 100. - i * 0.5)
     det.update(make_sm(d_rel=70., radar=True, ford_braking=False), TRAJ, CRUISE_MS, True, ev)
     assert det.state == State.active
+
+
+class TestDriverBrakingEndsIt:
+  """The alert exists to buy reaction time. Once the driver is on the pedal it has done its job,
+  and continuing is the fastest way to teach someone to ignore it."""
+
+  def test_braking_releases_immediately_and_stops_alerting(self):
+    det, ev = UnconfirmedLeadDetector(), FakeEvents()
+    run(det, ev, 60, d_rel=lambda i: 100. - i * 0.5)
+    assert det.state == State.active
+    before = len(ev.fired)
+    det.update(make_sm(d_rel=70., brake=True), TRAJ, CRUISE_MS, True, ev)
+    assert det.state != State.active
+    det.update(make_sm(d_rel=65., brake=True), TRAJ, CRUISE_MS, True, ev)
+    assert len(ev.fired) == before, "kept alerting while the driver was braking"
+
+  def test_it_does_not_need_cruise_to_drop_out_first(self):
+    """It stopped before only because braking cancels ACC and long_enabled went false a frame
+    later. Depending on cruise state to propagate is a poor way to silence an alarm."""
+    det, ev = UnconfirmedLeadDetector(), FakeEvents()
+    run(det, ev, 60, d_rel=lambda i: 100. - i * 0.5)
+    det.update(make_sm(d_rel=70., brake=True), TRAJ, CRUISE_MS, True, ev)  # long_enabled STILL True
+    assert det.state != State.active
