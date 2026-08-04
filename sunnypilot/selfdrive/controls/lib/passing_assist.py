@@ -259,6 +259,9 @@ class PassingAssistDetector:
     self.lead_d_rel = 0.0
     self.lead_v_lead = 0.0
     self.speed_deficit = 0.0
+    # See leadRadarConfirmed in custom.capnp. Recorded, not gated on.
+    self.lead_radar_confirmed = False
+    self.lead_model_prob = 0.0
     self.lead_ttc = 0.0
     self.lead_d_path = 0.0
     self.trigger = Trigger.none
@@ -624,6 +627,8 @@ class PassingAssistDetector:
   def _lead_state(self, lead, v_cruise: float) -> None:
     """Record what the lead is doing, whichever trigger ends up using it."""
     self.has_lead = bool(lead.status)
+    self.lead_radar_confirmed = bool(getattr(lead, 'radar', False))
+    self.lead_model_prob = float(getattr(lead, 'modelProb', 0.0))
     self.lead_d_rel = float(lead.dRel)
     self.lead_v_lead = float(lead.vLead)
     self.speed_deficit = float(v_cruise - lead.vLead)
@@ -1091,6 +1096,8 @@ class PassingAssistDetector:
     # Saturates rather than wraps: a UInt16 rolling over to 0 would read as a clean drive, which is
     # the exact opposite of what a huge abort count means.
     passingAssist.manoeuvreAborts = min(pa.manoeuvre.aborts, 65535)
+    passingAssist.leadRadarConfirmed = pa.lead_radar_confirmed
+    passingAssist.leadModelProb = float(pa.lead_model_prob)
     for dest, side in ((passingAssist.adjacentLeft, pa.adjacent.left),
                        (passingAssist.adjacentRight, pa.adjacent.right)):
       dest.available = side.available

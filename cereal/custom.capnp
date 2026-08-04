@@ -576,6 +576,20 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     # have found.
     manoeuvreAborts @46 :UInt16;
 
+    # BluePilot: was the lead this decision rests on RADAR-confirmed, or the camera model alone?
+    #
+    # radard picks leads camera-first: modelV2 proposes, and a matching radar track refines it. With
+    # no matching track and a confident model, get_RadarState_from_vision returns a lead with
+    # radar=False whose vLead is the MODEL's velocity estimate rather than Doppler. That is a much
+    # weaker basis for "this car is 4 mph slower than I asked for", which is the entire judgement
+    # here.
+    #
+    # NOT gated on -- deliberately. Requiring radar would throw away the earlier detection that is
+    # the whole point of deciding before Ford's ACC brakes, and whether vision-only leads actually
+    # produce bad passes is a question for drive data, not argument. Logged so it can be answered.
+    leadRadarConfirmed @47 :Bool;
+    leadModelProb @48 :Float32;
+
     enum Manoeuvre {
       idle @0;         # nothing warranted
       confirming @1;   # a slower vehicle is being confirmed, timer running

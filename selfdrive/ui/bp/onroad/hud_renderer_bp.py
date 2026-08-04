@@ -458,9 +458,15 @@ class HudRendererBP(HudRendererSP):
       self._pa_main = "WOULD BE DONE"
       self._pa_sub = "blinker off"
 
-    # Aborts are the number this whole dry run exists to produce, so they are on screen rather
-    # than only in the log -- a drive where this climbs is a drive that answered the question.
-    if pa.manoeuvreAborts:
+    # A sequence resting on a camera-only lead is worth seeing AS IT HAPPENS, not just in a log:
+    # that lead's speed is the model's guess rather than the radar's measurement, and "4 mph
+    # slower" is the entire judgement. Takes priority over the abort count -- it says something
+    # about THIS manoeuvre, where the count is about the drive.
+    if not pa.leadRadarConfirmed:
+      self._pa_sub_detail = "camera only -- speed not radar-measured"
+    elif pa.manoeuvreAborts:
+      # The number this whole dry run exists to produce, on screen rather than only in the log --
+      # a drive where this climbs is a drive that answered the question.
       self._pa_sub_detail = f"{pa.manoeuvreAborts} backed out this drive"
     return True
 
