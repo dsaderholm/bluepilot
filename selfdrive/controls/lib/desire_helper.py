@@ -109,8 +109,16 @@ class DesireHelper:
 
       # LaneChangeState.laneChangeStarting
       elif self.lane_change_state == LaneChangeState.laneChangeStarting:
-        # fade out over .5s
-        self.lane_change_ll_prob = max(self.lane_change_ll_prob - 2 * DT_MDL, 0.0)
+        # BluePilot: cancelling the blinker calls it off, if it is early enough to go back. Stock
+        # never looks at the blinker again once this state is entered, so a change could not be
+        # called off at all. See AutoLaneChangeController.should_cancel.
+        if self.alc.should_cancel(one_blinker, self.lane_change_timer):
+          self.alc.cancelled = True
+          self.lane_change_state = LaneChangeState.off
+          self.lane_change_direction = LaneChangeDirection.none
+        else:
+          # fade out over .5s
+          self.lane_change_ll_prob = max(self.lane_change_ll_prob - 2 * DT_MDL, 0.0)
 
         # 98% certainty
         if lane_change_prob < 0.02 and self.lane_change_ll_prob < 0.01:

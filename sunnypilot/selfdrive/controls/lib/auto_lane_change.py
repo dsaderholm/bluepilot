@@ -50,6 +50,28 @@ ONE_SECOND_DELAY = -1
 # Default 3 s rather than 1. At a 10 mph overtaking difference that is ~13 m of extra separation.
 DEFAULT_BSM_HOLD_S = 3
 
+# BluePilot: how long after a lane change begins that CANCELLING THE BLINKER calls it off.
+#
+# Stock behavior is that it cannot be called off at all. Once laneChangeStarting is entered, the
+# blinker is never looked at again -- the state machine runs to completion on the model's own
+# lane-change probability. Reported from the car: "there is no way to cancel it."
+#
+# Which makes the existing lane change the MANUAL VERSION of passing assist, and the same design
+# rule applies: abort criteria narrow as driver intent strengthens. The driver chose this maneuver,
+# so a gate must not undo it -- but the driver withdrawing that choice is the strongest signal
+# there is, and it was being ignored.
+#
+# WHY A WINDOW RATHER THAN ANY TIME. Reverting is itself a maneuver, and there is a point where it
+# is worse than finishing: most of the way across, "go back" means a second crossing through the
+# space you just left. openpilot has no reverse-lane-change desire either -- clearing the desire
+# makes the planner re-center on whatever lane it now believes it is in, which late in the change
+# is the NEW one. So cancelling late would not go back, it would finish while confusing the
+# planner about why.
+#
+# Two seconds covers the part of a ~4 s change where the car is still substantially in the lane it
+# started in, which is the part a driver could plausibly change their mind during.
+DEFAULT_CANCEL_WINDOW_S = 2
+
 
 class AutoLaneChangeController:
   def __init__(self, desire_helper):
@@ -67,6 +89,8 @@ class AutoLaneChangeController:
     self.prev_brake_pressed = False
     self.auto_lane_change_allowed = False
     self.prev_lane_change = False
+    self.lane_change_cancel_window = float(DEFAULT_CANCEL_WINDOW_S)
+    self.cancelled = False
 
     self.read_params()
 
@@ -83,6 +107,8 @@ class AutoLaneChangeController:
     self.lane_change_set_timer = self.params.get("AutoLaneChangeTimer", return_default=True)
     # BluePilot: see DEFAULT_BSM_HOLD_S.
     self.lane_change_bsm_hold = float(self.params.get("AutoLaneChangeBsmHoldTime", return_default=True))
+    # BluePilot: see DEFAULT_CANCEL_WINDOW_S.
+    self.lane_change_cancel_window = float(self.params.get("AutoLaneChangeCancelWindow", return_default=True))
 
   def update_params(self) -> None:
     if self.param_read_counter % 50 == 0:
@@ -101,6 +127,17 @@ class AutoLaneChangeController:
       # The nudgeless special case folds in: its threshold is 0.05, so this lands at 0.05 - hold
       # and still yields `hold` seconds of wait. See DEFAULT_BSM_HOLD_S.
       self.lane_change_wait_timer = self.lane_change_delay - self.lane_change_bsm_hold
+
+  def should_cancel(self, one_blinker: bool, elapsed_s: float) -> bool:
+    """Has the driver called off a lane change already underway? See DEFAULT_CANCEL_WINDOW_S.
+
+    Lives here rather than in desire_helper so the upstream file carries one line rather than a
+    policy. Answers False past the window, which is the point of no return -- reverting from most
+    of the way across is a second crossing, not an undo.
+    """
+    if self.lane_change_cancel_window <= 0.0:
+      return False
+    return not one_blinker and elapsed_s < self.lane_change_cancel_window
 
   def update_allowed(self) -> bool:
     # Auto lane change allowed if:

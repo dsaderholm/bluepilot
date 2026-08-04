@@ -138,6 +138,9 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // --- sunnypilot params --- //
     {"ApiCache_DriveStats", {PERSISTENT, JSON}},
     {"AutoLaneChangeBsmDelay", {PERSISTENT | BACKUP, BOOL, "0"}},
+    // Seconds after a lane change starts during which cancelling the blinker aborts it and
+    // returns to the original lane. 0 = the stock behavior, which cannot be cancelled at all.
+    {"AutoLaneChangeCancelWindow", {PERSISTENT | BACKUP, INT, "2"}},
     {"AutoLaneChangeTimer", {PERSISTENT | BACKUP, INT, "0"}},
     {"BlinkerLateralReengageDelay", {PERSISTENT | BACKUP, INT, "0"}},  // seconds
     {"BlinkerMinLateralControlSpeed", {PERSISTENT | BACKUP, INT, "20"}},  // MPH or km/h

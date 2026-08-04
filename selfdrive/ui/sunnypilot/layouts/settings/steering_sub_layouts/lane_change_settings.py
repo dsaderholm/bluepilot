@@ -56,6 +56,19 @@ class LaneChangeSettingsLayout(Widget):
     # DEFAULT_BSM_HOLD_S in auto_lane_change.py -- the original arithmetic gave exactly one second
     # regardless of the delay above, which moved the car over onto a vehicle that had only just
     # stopped being beside it.
+    self._cancel_window = option_item_sp(
+      title=lambda: tr("Cancel By Turning The Blinker Off"),
+      description=lambda: tr("How long after a lane change starts that cancelling the blinker "
+                             "calls it off and returns to your lane. Stock openpilot cannot be "
+                             "cancelled at all -- once it begins, the blinker is never looked at "
+                             "again. Past this window it finishes instead, because going back "
+                             "from most of the way across is a second lane change rather than an "
+                             "undo. Off restores the stock behavior."),
+      param="AutoLaneChangeCancelWindow",
+      min_value=0, max_value=5, value_change_step=1,
+      label_callback=lambda v: tr("Off") if v == 0 else f"{v} s",
+      inline=True)
+
     self._bsm_hold = option_item_sp(
       title=lambda: tr("Wait After Blind Spot Clears"),
       description=lambda: tr("How long to keep waiting after the blind spot indicator goes out. "
@@ -72,6 +85,7 @@ class LaneChangeSettingsLayout(Widget):
       self._lane_change_timer,
       LineSeparatorSP(40),
       self._bsm_delay,
+      self._cancel_window,
       self._bsm_hold,
     ]
 
