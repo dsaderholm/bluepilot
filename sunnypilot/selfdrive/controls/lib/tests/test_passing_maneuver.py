@@ -206,7 +206,7 @@ class TestNothingHappensWhenNothingShould:
     assert not m.blinker_on and not m.steering_active
     assert m.aborts == 0
 
-  def test_a_driver_signalling_never_starts_a_sequence(self):
+  def test_a_driver_signaling_never_starts_a_sequence(self):
     """They are already doing it themselves -- with sunnypilot's own lane change, which stays the
     driver's tool. The dry run must not shadow it."""
     m = run(PassingManeuver(), 3.0, clear=Side.left, suggested=Side.left, confirmed=True, override=True)
