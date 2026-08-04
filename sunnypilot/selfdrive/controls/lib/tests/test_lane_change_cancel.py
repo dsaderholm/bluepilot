@@ -421,3 +421,92 @@ class TestMeasurementCannotStopTheCar:
     TestItIsActuallyWiredIn()._start(dh)
     assert dh.lane_change_state == LaneChangeState.laneChangeStarting
     assert dh.desire == log.Desire.laneChangeLeft
+
+
+class TestTheBlinkerTurnsItselfOff:
+  """His BCM is set through FORScan to flash eight times from a tap -- the maximum -- and that tap
+  is how he starts a nudgeless lane change in the first place.
+
+  So on this car the signal going out is usually NOT a decision. It is a clock finishing. With the
+  revert wired up that distinction stops being academic: reading a timeout as a cancel would reverse
+  a lane change nobody called off.
+
+  His real gesture is a nudge of the stalk back the other way, which kills the flash without
+  starting the other side -- so it looks identical in carState and is separated only by WHEN.
+  """
+
+  @staticmethod
+  def _alc(window=4, one_touch=5.5):
+    from openpilot.sunnypilot.selfdrive.controls.lib.auto_lane_change import AutoLaneChangeController
+    alc = AutoLaneChangeController(_DH())
+    alc.lane_change_cancel_window = float(window)
+    alc.lane_change_one_touch_s = float(one_touch)
+    return alc
+
+  def test_an_early_blinker_off_is_a_cancel(self):
+    """Nudged off while watching the car start to move."""
+    alc = self._alc()
+    assert alc.should_cancel(False, 1.5, False, 2.5)
+
+  def test_the_eighth_flash_is_not(self):
+    """Same inputs to carState, five seconds later. The only thing separating them is how long the
+    signal had been on, which is why that has to be measured."""
+    alc = self._alc()
+    assert not alc.should_cancel(False, 1.5, False, 5.5)
+
+  def test_nor_is_one_just_short_of_the_timeout(self):
+    """The margin exists because 1.5 Hz is nominal, not guaranteed."""
+    alc = self._alc()
+    assert not alc.should_cancel(False, 1.5, False, 4.9)
+
+  def test_a_stalk_pushed_the_other_way_always_cancels(self):
+    """Unambiguous however long it has been on -- nobody's blinker times out INTO the other side."""
+    alc = self._alc()
+    assert alc.should_cancel(True, 1.5, True, 5.5)
+
+  def test_the_window_still_bounds_everything(self):
+    alc = self._alc(window=4)
+    assert not alc.should_cancel(False, 4.5, False, 1.0)
+    assert not alc.should_cancel(True, 4.5, True, 1.0), "reversal ignored the point of no return"
+
+  def test_his_actual_timeline_does_not_self_cancel(self):
+    """The whole scenario, in the numbers he gave: tap, one second delay, change starts, eight
+    flashes end at about 5.5 s -- which is 4.5 s into the change. Outside a four second window, and
+    caught by the one-touch guard even if it were not."""
+    alc = self._alc(window=4, one_touch=5.5)
+    assert not alc.should_cancel(False, 4.5, False, 5.5)
+
+  def test_and_a_longer_window_still_would_not(self):
+    """The guard is what makes the window safe to lengthen at all. Without it, five seconds would
+    put the eighth flash inside and the car would reverse itself on a timer."""
+    alc = self._alc(window=5, one_touch=5.5)
+    assert not alc.should_cancel(False, 4.5, False, 5.5)
+
+  def test_the_held_time_survives_the_blinker_going_out(self):
+    """The number the guard reads is sampled on the FALLING EDGE, and it has to be, because by the
+    time anything asks the question the signal is already off and a live timer has been reset to
+    zero -- which reads as "it just came on", the exact opposite of a timeout.
+
+    Every test above hands should_cancel the value directly, so none of them touches the code that
+    produces it. Mutation-checked: removing the falling-edge sample passed all of them.
+    """
+    alc = self._alc()
+    for _ in range(int(3.0 / DT_MDL)):
+      alc.update_blinker_timer(True)
+    assert 2.9 < alc.blinker_held_s < 3.1
+    alc.update_blinker_timer(False)
+    assert 2.9 < alc.blinker_last_held_s < 3.1, "the held time was lost at the moment it is needed"
+    assert alc.blinker_held_s == 0.0
+    # ...and it stays put for the frames that follow, which is when should_cancel actually runs.
+    for _ in range(10):
+      alc.update_blinker_timer(False)
+    assert 2.9 < alc.blinker_last_held_s < 3.1
+
+  def test_a_fresh_signal_starts_the_clock_over(self):
+    alc = self._alc()
+    for _ in range(int(3.0 / DT_MDL)):
+      alc.update_blinker_timer(True)
+    alc.update_blinker_timer(False)
+    for _ in range(int(1.0 / DT_MDL)):
+      alc.update_blinker_timer(True)
+    assert 0.9 < alc.blinker_held_s < 1.1, "the second signal inherited the first one's age"

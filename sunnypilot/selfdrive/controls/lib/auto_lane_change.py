@@ -68,9 +68,20 @@ DEFAULT_BSM_HOLD_S = 3
 # is the NEW one. So cancelling late would not go back, it would finish while confusing the
 # planner about why.
 #
-# Two seconds covers the part of a ~4 s change where the car is still substantially in the lane it
-# started in, which is the part a driver could plausibly change their mind during.
-DEFAULT_CANCEL_WINDOW_S = 2
+# FOUR SECONDS, AND THE ROAD PICKED THE NUMBER. Two was reasoned from how far across the car would
+# be; what it left out was how long a person takes to decide.
+#
+# His sequence, measured rather than assumed: a stalk tap starts eight flashes, the change begins
+# one second later, and he cancels by nudging the stalk back while WATCHING the car start to move.
+# That reaction lands somewhere past two seconds -- so the window closed before the gesture arrived
+# and the cancel never ran. "Turning off my blinker mid lane change doesn't really seem to cancel"
+# was, in the end, mostly this.
+#
+# Four is what the timing allows rather than a round number. The blinker times out on its own at
+# about 5.5 s, which is 4.5 s into a change that started at 1.0 s, so a four second window shuts
+# half a second before the eighth flash could ever be mistaken for a decision. See
+# DEFAULT_ONE_TOUCH_S, which catches it anyway if the flash rate is not quite what we think.
+DEFAULT_CANCEL_WINDOW_S = 4
 
 # ...AND THAT REASONING WAS CONFIRMED FROM THE ROAD, THE HARD WAY.
 #
@@ -83,8 +94,9 @@ DEFAULT_CANCEL_WINDOW_S = 2
 # re-centering picks the NEW lane and the change completes. The cancel was firing and doing nothing
 # visible -- which is exactly what "doesn't really seem to cancel" looks like from the seat.
 #
-# So the window was never the problem and shortening it would only have made the cancel work in a
-# narrower slice of a maneuver the driver cannot time that precisely anyway.
+# That is half the story, and the half that was visible from a desk. The other half is above: the
+# window was ALSO too short for a human reaction. Both were true, which is why the first fix helped
+# and did not settle it -- a cancel that goes back is worth nothing if it never fires.
 #
 # WHAT ACTUALLY GOES BACK. openpilot has no reverse-lane-change desire, but it does not need one: a
 # lane change in the opposite direction IS the reverse of this one, and the model already knows how
@@ -96,6 +108,28 @@ DEFAULT_CANCEL_WINDOW_S = 2
 # the blind spot lit on the return side, finishing the change we started is the safer of two
 # imperfect options, so it falls back to the old behavior of simply releasing the desire.
 DEFAULT_REVERT = True
+
+# --- the blinker turns itself off on this car, and that is not a cancel ---
+#
+# His BCM is set through FORScan to flash EIGHT times from a tap -- the maximum -- and that tap is
+# how he starts a nudgeless lane change in the first place. Eight flashes is roughly five and a half
+# seconds, after which the lamp stops because it has finished.
+#
+# With the revert wired up that becomes dangerous rather than merely wrong: a signal expiring on
+# schedule would read as "go back", and the car would reverse a lane change nobody cancelled. The
+# window makes it worse the longer it gets, because a longer window is more likely to still be open
+# when the eighth flash lands.
+#
+# His actual cancel is a slight nudge of the stalk back the other way, which kills the flash without
+# starting the other side. That happens EARLY -- while he is watching the car begin to move -- and
+# early is exactly what separates it from a timeout. So: a blinker that goes out well before the
+# one-touch would have finished is a decision; one that goes out on schedule is a clock.
+#
+# Set this to however long YOUR one-touch flash lasts. Eight flashes at about 1.5 Hz is 5.5 s.
+DEFAULT_ONE_TOUCH_S = 5.5
+# How far ahead of the timeout a blinker-off still counts as deliberate. Wide enough that a normal
+# reaction lands inside it, tight enough that the eighth flash never does.
+ONE_TOUCH_MARGIN_S = 0.75
 
 # BluePilot: MEASURE THE DRIVER'S OWN LANE CHANGES, because they are the only real ones.
 #
@@ -139,6 +173,12 @@ class AutoLaneChangeController:
     self.auto_lane_change_allowed = False
     self.prev_lane_change = False
     self.lane_change_cancel_window = float(DEFAULT_CANCEL_WINDOW_S)
+    self.lane_change_one_touch_s = float(DEFAULT_ONE_TOUCH_S)
+    # How long the blinker has been on, and what it read at the moment it went out. See
+    # DEFAULT_ONE_TOUCH_S -- the second one is the whole test, and it has to be sampled on the
+    # falling edge because by the time anything asks, the timer has already been reset.
+    self.blinker_held_s = 0.0
+    self.blinker_last_held_s = 0.0
     self.revert_enabled = bool(DEFAULT_REVERT)
     # True from the moment a cancel decides to steer back until the reverse crossing completes.
     # Latched because the blinker is OFF throughout a revert, which is the same condition that
@@ -183,6 +223,9 @@ class AutoLaneChangeController:
     self.lane_change_cancel_window = float(self.params.get("AutoLaneChangeCancelWindow", return_default=True))
     # BluePilot: see DEFAULT_REVERT.
     self.revert_enabled = self.params.get_bool("AutoLaneChangeRevert")
+    # BluePilot: see DEFAULT_ONE_TOUCH_S.
+    self.lane_change_one_touch_s = float(self.params.get("AutoLaneChangeOneTouchTime",
+                                                         return_default=True))
 
   def update_params(self) -> None:
     if self.param_read_counter % 50 == 0:
@@ -278,16 +321,45 @@ class AutoLaneChangeController:
       # and still yields `hold` seconds of wait. See DEFAULT_BSM_HOLD_S.
       self.lane_change_wait_timer = self.lane_change_delay - self.lane_change_bsm_hold
 
-  def should_cancel(self, one_blinker: bool, elapsed_s: float) -> bool:
+  def should_cancel(self, one_blinker: bool, elapsed_s: float,
+                    reversed_side: bool = False, blinker_held_s: float = 0.0) -> bool:
     """Has the driver called off a lane change already underway? See DEFAULT_CANCEL_WINDOW_S.
 
     Lives here rather than in desire_helper so the upstream file carries one line rather than a
     policy. Answers False past the window, which is the point of no return -- reverting from most
     of the way across is a second crossing, not an undo.
+
+    TWO GESTURES, and the first one is why this originally did nothing.
+
+    REVERSING THE STALK is the cancel. On this car the driver's own report -- "turning off my
+    blinker mid lane change doesn't really seem to cancel, they usually just go into the lane
+    anyway" -- had a simpler cause than the planner theory it was first blamed on: he cancels by
+    tapping the OTHER way, and `one_blinker` is `left != right`, so it stays TRUE the whole time.
+    The old test needed it to go false. It never did, so the cancel never ran once.
+
+    THE SIGNAL GOING OUT ON ITS OWN IS NOT A CANCEL. His BCM is set, via FORScan, to flash eight
+    times from a tap -- which is how he starts a nudgeless lane change in the first place. Eight
+    flashes is about five and a half seconds, and then the lamp stops because it has finished, not
+    because anybody changed their mind. With the revert wired up, treating that as a cancel would
+    steer the car back mid-change for no reason at all. So a blinker that has been on long enough
+    to be the one-touch expiring is ignored; one that goes out early is a deliberate cancel, which
+    is what a driver pushing the stalk the other way to kill it looks like.
     """
     if self.lane_change_cancel_window <= 0.0:
       return False
-    return not one_blinker and elapsed_s < self.lane_change_cancel_window
+    if elapsed_s >= self.lane_change_cancel_window:
+      return False
+    if reversed_side:
+      return True
+    return not one_blinker and blinker_held_s < (self.lane_change_one_touch_s - ONE_TOUCH_MARGIN_S)
+
+  def update_blinker_timer(self, one_blinker: bool) -> None:
+    """How long the signal has been on, sampled across the falling edge. See DEFAULT_ONE_TOUCH_S."""
+    if one_blinker:
+      self.blinker_held_s += DT_MDL
+    elif self.blinker_held_s > 0.0:
+      self.blinker_last_held_s = self.blinker_held_s
+      self.blinker_held_s = 0.0
 
   def begin_revert(self, return_blocked: bool) -> bool:
     """The driver called it off. Steer back, or merely stop steering across?

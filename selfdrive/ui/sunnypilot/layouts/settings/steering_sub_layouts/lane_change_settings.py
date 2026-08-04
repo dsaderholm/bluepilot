@@ -69,6 +69,20 @@ class LaneChangeSettingsLayout(Widget):
       label_callback=lambda v: tr("Off") if v == 0 else f"{v} s",
       inline=True)
 
+    self._one_touch = option_item_sp(
+      title=lambda: tr("Your One-Touch Flash Time"),
+      description=lambda: tr("How long your blinker keeps flashing from a tap of the stalk. Set in "
+                             "the body module, not here -- this only has to match it. It is what "
+                             "tells a cancel apart from the flashes simply running out: turn the "
+                             "signal off early and the lane change is called off, but let it "
+                             "finish on its own and nothing happens. Get this wrong in the low "
+                             "direction and a finished flash can look like you changing your "
+                             "mind."),
+      param="AutoLaneChangeOneTouchTime",
+      min_value=0, max_value=10, value_change_step=1,
+      label_callback=lambda v: tr("Off") if v == 0 else f"{v} s",
+      inline=True)
+
     self._revert = toggle_item_sp(
       title=lambda: tr("Steer Back When Cancelled"),
       description=lambda: tr("Return to the lane you started in, instead of just stopping. "
@@ -97,6 +111,7 @@ class LaneChangeSettingsLayout(Widget):
       LineSeparatorSP(40),
       self._bsm_delay,
       self._cancel_window,
+      self._one_touch,
       self._revert,
       self._bsm_hold,
     ]
@@ -127,5 +142,6 @@ class LaneChangeSettingsLayout(Widget):
     # sitting live above a switched-off feature.
     self._bsm_hold.action_item.set_enabled(bsm_usable and self._bsm_delay.action_item.get_state())
     # Steering back is only reachable while there is a window in which to cancel at all.
-    self._revert.action_item.set_enabled(
-      ui_state.params.get("AutoLaneChangeCancelWindow", return_default=True) > 0)
+    cancellable = ui_state.params.get("AutoLaneChangeCancelWindow", return_default=True) > 0
+    self._revert.action_item.set_enabled(cancellable)
+    self._one_touch.action_item.set_enabled(cancellable)

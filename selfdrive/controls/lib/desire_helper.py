@@ -68,6 +68,9 @@ class DesireHelper:
     self.lane_turn_controller.update_params()
     v_ego = carstate.vEgo
     one_blinker = carstate.leftBlinker != carstate.rightBlinker
+    # BluePilot: see AutoLaneChangeController.should_cancel -- the blinker on this car turns itself
+    # off after its one-touch flashes, and how long it was on is what separates that from a cancel.
+    self.alc.update_blinker_timer(one_blinker)
     below_lane_change_speed = v_ego < LANE_CHANGE_SPEED_MIN
 
     # Lane turn controller update
@@ -112,7 +115,13 @@ class DesireHelper:
         # BluePilot: cancelling the blinker calls it off, if it is early enough to go back. Stock
         # never looks at the blinker again once this state is entered, so a change could not be
         # called off at all. See AutoLaneChangeController.should_cancel.
-        if not self.alc.reverting and self.alc.should_cancel(one_blinker, self.lane_change_timer):
+        # A stalk pushed the OTHER way is unambiguous; a blinker simply going out is only a cancel
+        # if it went out early. See should_cancel.
+        reversed_side = one_blinker and (
+          (carstate.rightBlinker and self.lane_change_direction == LaneChangeDirection.left) or
+          (carstate.leftBlinker and self.lane_change_direction == LaneChangeDirection.right))
+        if not self.alc.reverting and self.alc.should_cancel(
+            one_blinker, self.lane_change_timer, reversed_side, self.alc.blinker_last_held_s):
           going_left = self.lane_change_direction == LaneChangeDirection.left
           # The lane we would go BACK into is the one on the other side. See begin_revert.
           return_blocked = carstate.rightBlindspot if going_left else carstate.leftBlindspot
