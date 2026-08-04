@@ -469,6 +469,11 @@ class PassingAssistDetector:
     self.longest_ignored_s = 0.0
     self._episode_taken = False
     self._prev_suggesting = False
+    # Totals carried in from previous drives. See lifetimeDrives -- this drive's counts are added
+    # to these when published, never written back into them, so the 30 s save cannot double-count.
+    self._life_drives = 0
+    self._life_passes = 0
+    self._life_agreed = 0
     self.closing_in = False
     self.lead_accel = 0.0
     self.lead_braking_enabled = True
@@ -508,6 +513,9 @@ class PassingAssistDetector:
           last = self.params.get("PassingAssistLastDrive")
           if last:
             self.acc_onset_max = max(self.acc_onset_max, float(last.get("accOnsetMax", 0.0)))
+            self._life_drives = int(last.get("lifetimeDrives", 0))
+            self._life_passes = int(last.get("lifetimePasses", 0))
+            self._life_agreed = int(last.get("lifetimeAgreed", 0))
         except Exception:  # noqa: BLE001 - a missing or malformed param must not reach the planner
           pass
       self.min_speed_ms = self.params.get("PassingAssistMinSpeed", return_default=True) * CV.MPH_TO_MS
@@ -818,6 +826,9 @@ class PassingAssistDetector:
         "driverPassesAgreed": int(self.driver_passes_agreed),
         "driverPassLead": round(self.driver_pass_lead_s, 1),
         "driverPassMiss": int(self.driver_pass_miss_reason),
+        "lifetimeDrives": int(self.lifetime[0]),
+        "lifetimePasses": int(self.lifetime[1]),
+        "lifetimeAgreed": int(self.lifetime[2]),
         "suggestionsMade": int(self.suggestions_made),
         "suggestionsTaken": int(self.suggestions_taken),
         "longestIgnored": round(self.longest_ignored, 1),
@@ -944,6 +955,18 @@ class PassingAssistDetector:
     else:
       key = int(self.blocked_by)
       self._miss_reasons[key] = self._miss_reasons.get(key, 0) + 1
+
+  @property
+  def lifetime(self) -> tuple[int, int, int]:
+    """(drives, passes, agreed) including this drive.
+
+    Computed rather than accumulated, so the periodic save is idempotent: writing it ten times in a
+    drive must not count the drive ten times, and a counter that drifts upward every save would be
+    worse than not having one.
+    """
+    return (self._life_drives + (1 if self.driver_passes else 0),
+            self._life_passes + self.driver_passes,
+            self._life_agreed + self.driver_passes_agreed)
 
   @property
   def longest_ignored(self) -> float:
@@ -1597,6 +1620,10 @@ class PassingAssistDetector:
     passingAssist.suggestionsMade = min(pa.suggestions_made, 65535)
     passingAssist.suggestionsTaken = min(pa.suggestions_taken, 65535)
     passingAssist.longestIgnoredSeconds = float(pa.longest_ignored)
+    life_drives, life_passes, life_agreed = pa.lifetime
+    passingAssist.lifetimeDrives = min(life_drives, 65535)
+    passingAssist.lifetimePasses = min(life_passes, 65535)
+    passingAssist.lifetimeAgreed = min(life_agreed, 65535)
     passingAssist.manoeuvreStandDown = float(max(pa.manoeuvre.standdown_remaining,
                                                  pa.keep_right_manoeuvre.standdown_remaining))
     passingAssist.driverChangeStandDown = float(pa.driver_change_standdown)

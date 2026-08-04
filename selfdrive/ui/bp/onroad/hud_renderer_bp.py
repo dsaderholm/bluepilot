@@ -501,6 +501,12 @@ class HudRendererBP(HudRendererSP):
       # not the same event: one is the system changing its mind before moving, the other is a
       # crossing reversed because something was arriving. A single figure would hide the second
       # inside the first, and the second is the one that must never be dropped for space.
+      # The total is what actually decides anything -- one drive's seven passes swing by a third
+      # on a single odd stretch of road. Shown only once there is more of it than the drive in
+      # front of it, or it is just the same number twice.
+      if pa.lifetimeDrives > 1 and pa.lifetimePasses > pa.driverPasses:
+        lines.append(f"all {pa.lifetimeDrives} drives: {pa.lifetimePasses} passed, "
+                     f"{pa.lifetimeAgreed} agreed")
       # The other error direction, second only to agreement: suggestions nobody acted on.
       if pa.suggestionsMade:
         line = f"suggested {pa.suggestionsMade}, taken {pa.suggestionsTaken}"
@@ -551,6 +557,9 @@ class HudRendererBP(HudRendererSP):
         lines.append(line)
       if int(d.get("suggestionsMade", 0)):
         lines.append(f"suggested {int(d['suggestionsMade'])}, taken {int(d['suggestionsTaken'])}")
+      if int(d.get("lifetimeDrives", 0)) > 1:
+        lines.append(f"all {int(d['lifetimeDrives'])} drives: {int(d['lifetimePasses'])} passed, "
+                     f"{int(d['lifetimeAgreed'])} agreed")
       share = float(d.get("topBlockedShare", 0))
       if share > 0.05:
         # The int is the Blocked ordinal. Mapped through the same table the live panel uses, so

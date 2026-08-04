@@ -70,7 +70,7 @@ SCENES = [
    "THIS DRIVE", "you passed 7, agreed 6 (11s early), missed on oncoming traffic that side",
    0.0, False, INFO),
   ("stopped: the previous drive, kept across parking",
-   "LAST DRIVE", "oncoming: 62 at 410ft  -  ACC braked by 449ft  -  3 backed out",
+   "LAST DRIVE", "all 14 drives: 96 passed, 89 agreed  -  oncoming: 62 at 410ft",
    0.0, False, INFO),
   ("worst case for width: everything at once",
    "WOULD BE CHANGING RIGHT",
@@ -129,6 +129,7 @@ def main(outdir):
     "worst case: a drive summary with every line it can produce", "THIS DRIVE",
     ns["_fit_sub"](fitter, [
       "you passed 7, agreed 6 (11s early), missed on oncoming traffic that side",
+      "all 14 drives: 96 passed, 89 agreed",
       "suggested 12, taken 6, longest ignored 34s",
       "2 reversed mid-change",
       "mostly: oncoming traffic that side 62%",

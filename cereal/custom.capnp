@@ -711,6 +711,14 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     suggestionsTaken @74 :UInt16;
     longestIgnoredSeconds @75 :Float32;
 
+    # ...ACCUMULATED ACROSS DRIVES, which is the only scale at which any of it decides anything.
+    # Seven passes says nothing -- one unusual road, one odd bit of traffic, and the ratio swings
+    # by a third. Eighty says whether this is ready to be trusted with a blinker, and that is the
+    # question the whole phase exists to answer. Carried in the same param as the drive summary.
+    lifetimeDrives @76 :UInt16;
+    lifetimePasses @77 :UInt16;
+    lifetimeAgreed @78 :UInt16;
+
     enum Manoeuvre {
       idle @0;         # nothing warranted
       confirming @1;   # a slower vehicle is being confirmed, timer running

@@ -1978,3 +1978,50 @@ class TestSuggestionsNobodyTook:
     det = run(PassingAssistDetector(), STUCK_FRAMES + int(10.0 / DT_MDL))
     run(det, 2, blinker=True)
     assert det.longest_ignored == 0.0
+
+
+class TestLifetimeTotals:
+  """One drive decides nothing. Seven passes swing by a third on a single odd stretch of road;
+  eighty is what says whether this can be trusted with a blinker, and that is the question the
+  whole phase exists to answer."""
+
+  @staticmethod
+  def _det(last=None):
+    class _P(_KeepRightOnParams):
+      def get(self, key, block=False, return_default=False):
+        return last if key == "PassingAssistLastDrive" else super().get(key)
+
+      def put(self, key, val):
+        self.written = val
+    det = PassingAssistDetector()
+    det.params = _P()
+    return det
+
+  def test_this_drive_adds_to_what_came_before(self):
+    det = self._det({"lifetimeDrives": 11, "lifetimePasses": 77, "lifetimeAgreed": 72})
+    run(det, STUCK_FRAMES)
+    run(det, 2, blinker=True)
+    assert det.lifetime == (12, 78, 73)
+
+  def test_a_drive_with_no_passes_is_not_counted_as_a_drive(self):
+    """Otherwise a week of short trips inflates the denominator and the ratio looks worse than the
+    driving was."""
+    det = self._det({"lifetimeDrives": 11, "lifetimePasses": 77, "lifetimeAgreed": 72})
+    run(det, STUCK_FRAMES, status=False)
+    assert det.lifetime == (11, 77, 72)
+
+  def test_the_periodic_save_cannot_count_the_drive_twice(self):
+    """It is written every 30 s. Accumulating on write rather than computing would make the totals
+    climb with the length of the drive rather than with what happened in it."""
+    det = self._det({"lifetimeDrives": 3, "lifetimePasses": 20, "lifetimeAgreed": 18})
+    run(det, STUCK_FRAMES)
+    run(det, 2, blinker=True)
+    first = det.lifetime
+    run(det, int(120.0 / DT_MDL), status=False)      # several saves go by
+    assert det.lifetime == first
+
+  def test_it_starts_from_nothing_on_a_fresh_device(self):
+    det = self._det(None)
+    run(det, STUCK_FRAMES)
+    run(det, 2, blinker=True)
+    assert det.lifetime == (1, 1, 1)
