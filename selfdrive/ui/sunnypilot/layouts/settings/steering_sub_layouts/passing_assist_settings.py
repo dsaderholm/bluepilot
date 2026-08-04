@@ -85,7 +85,8 @@ class PassingAssistSettingsLayout(Widget):
       description=tr("How long the turn signal would be on before the lane change starts. Nothing "
                      "is actuated yet -- this drives the dry run on screen, which shows the whole "
                      "sequence a fully automatic pass would go through so it can be judged from a "
-                     "real drive before anything is wired to a control."),
+                     "real drive before anything is wired to a control. Defaults to 1 s, which is "
+                     "how the owner drives; Utah asks for 2 before a lane change."),
       param="PassingAssistBlinkerLead",
       min_value=0, max_value=5, value_change_step=1,
       label_callback=lambda v: f"{v} s",
