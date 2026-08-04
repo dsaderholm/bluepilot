@@ -36,6 +36,12 @@ struct IntelligentCruiseButtonManagement {
   # HOLD badge greys out while this is set, because otherwise the press silently does nothing
   # lasting and the driver has no way to tell why.
   holdSuppressed @5 :Bool;
+  # BluePilot: WHICH mechanism last captured the hold. Diagnostic, and a deliberately temporary
+  # one: ICBM has two independent ways to notice the driver moved the set speed, and every drive
+  # so far suggests only the fallback ever fires. If a real drive confirms that, the press path and
+  # its hand-picked settle timers -- the source of most of this feature's defects -- can be
+  # deleted outright rather than kept "just in case". Remove this field once that is answered.
+  baselineSource @6 :BaselineSource;
 
   enum IntelligentCruiseButtonManagementState {
     inactive @0;      # No button press or default state
@@ -56,6 +62,13 @@ struct IntelligentCruiseButtonManagement {
     none @0;
     increase @1;
     decrease @2;
+  }
+
+  enum BaselineSource {
+    none @0;            # no hold captured this drive
+    press @1;           # a real ButtonEvent reached MANUAL_OVERRIDE_BUTTONS -- the primary path
+    fallbackIdle @2;    # set speed moved while ICBM had been silent long enough to rule itself out
+    fallbackCounter @3; # set speed moved AGAINST the button ICBM was holding
   }
 }
 

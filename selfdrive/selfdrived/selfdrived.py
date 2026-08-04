@@ -605,6 +605,7 @@ class SelfdriveD(CruiseHelper):
     icbm.overrideState = self.icbm.override_state
     icbm.vBaseline = float(self.icbm.v_baseline)
     icbm.holdSuppressed = self.icbm.hold_suppressed
+    icbm.baselineSource = self.icbm.baseline_source
 
     self.pm.send('selfdriveStateSP', ss_sp_msg)
 

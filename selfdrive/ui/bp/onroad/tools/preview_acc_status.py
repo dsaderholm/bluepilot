@@ -67,7 +67,8 @@ def load_shipped_drawing_code():
   exec(compile(ast.Module(body=methods, type_ignores=[]), "<methods>", "exec"), ns)
 
   for required in ("HOLD_HEIGHT", "HOLD_FILL", "ACC_PILL_WIDTH", "ACC_STATUS_COLORS", "STACK_GAP",
-                   "LAMP_PILL_WIDTH", "LAMP_ON_FILL", "HOLD_LOCKED_FILL"):
+                   "LAMP_PILL_WIDTH", "LAMP_ON_FILL", "HOLD_LOCKED_FILL",
+                   "HOLD_TAG_SIZE"):
     assert required in ns, f"{required} did not survive extraction -- the preview would be a lie"
   return ns
 
@@ -116,7 +117,7 @@ def main(outdir):
       _font_bold=fonts["bold"], _font_semi_bold=fonts["semi"],
       _icbm_baseline=hold, _icbm_arrow=arrow, _acc_state=acc, _acc_accel=mag,
       _brakes_on=lamps, _show_brake_status=True, _lamp_data_available=True,
-      _icbm_hold_locked=locked,
+      _icbm_hold_locked=locked, _icbm_source_tag="C",
       _draw_arrow=ns["_draw_arrow"],
     )
     rl.begin_texture_mode(tex)

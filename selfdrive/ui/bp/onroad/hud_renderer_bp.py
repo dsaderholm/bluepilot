@@ -59,6 +59,21 @@ HOLD_FILL = rl.Color(30, 78, 176, 235)
 HOLD_LOCKED_FILL = rl.Color(84, 90, 98, 225)
 HOLD_LOCKED_EDGE = rl.Color(140, 148, 156, 235)
 HOLD_LOCKED_LABEL = rl.Color(178, 186, 194, 255)
+# BluePilot: TEMPORARY diagnostic. ICBM has two independent ways to notice the driver moved the set
+# speed -- a real ButtonEvent, and a fallback that infers it from the set speed moving on its own.
+# Every drive so far suggests only the fallback ever fires on this car. Rather than read a route to
+# find out, the badge carries a one-letter tag so the owner can just say which appeared:
+#   P = press path (the primary one)     I = fallback, ICBM was idle
+#   C = fallback, set speed moved against ICBM's own command
+# If P never shows up, the press path and its hand-picked settle timers -- the source of most of
+# this feature's defects -- get deleted. DELETE THIS AND baselineSource once that is answered.
+# Keyed on the RAW integer, like overrideState and sendButton above. A capnp enum does not
+# stringify to its name here -- str() gives "1" -- so a name-keyed map silently never matches and
+# the tag never appears, which reads as "the press path never fired". That is a false answer to the
+# exact question this field exists to settle, and a test caught it rather than a drive.
+BASELINE_SOURCE_TAG = {1: "P", 2: "I", 3: "C"}
+HOLD_TAG_SIZE = 26
+HOLD_TAG_COLOR = rl.Color(255, 214, 120, 255)
 HOLD_EDGE = rl.Color(130, 185, 255, 255)
 HOLD_LABEL_COLOR = rl.Color(175, 210, 255, 255)
 HOLD_HEIGHT = 124
@@ -121,6 +136,7 @@ class HudRendererBP(HudRendererSP):
     self._icbm_baseline = 0   # the driver's held set speed; 0 = no hold
     self._icbm_arrow = ""     # "+" / "-" while ICBM is actively moving the set speed, else ""
     self._icbm_hold_locked = False  # something else owns the target; a press cannot change the hold
+    self._icbm_source_tag = ""      # TEMPORARY: which mechanism captured the hold, see the tag map
     self._lamp_data_available = False  # the BCM/brake-system lamp signal is actually being decoded
     self._acc_status_failed = False   # latched on any error; keeps a display bug off the screen
     self.speed_right = 0
@@ -220,6 +236,7 @@ class HudRendererBP(HudRendererSP):
       if icbm.overrideState.raw == 1 and icbm.vBaseline > 0:
         self._icbm_baseline = round(icbm.vBaseline)
         self._icbm_hold_locked = bool(icbm.holdSuppressed)
+        self._icbm_source_tag = BASELINE_SOURCE_TAG.get(icbm.baselineSource.raw, "")
     except Exception:
       pass
 
@@ -376,6 +393,13 @@ class HudRendererBP(HudRendererSP):
     value_width = measure_text_cached(self._font_bold, value, HOLD_VALUE_SIZE).x
     rl.draw_text_ex(self._font_bold, value, rl.Vector2(center_x - value_width / 2, y + 46),
                     HOLD_VALUE_SIZE, 0, COLORS.WHITE)
+    # TEMPORARY diagnostic tag. Top-right corner: the only free space on the badge, and well clear
+    # of the number, which a bottom placement was not -- the 66 px value overlaps that row.
+    if self._icbm_source_tag:
+      tag_width = measure_text_cached(self._font_semi_bold, self._icbm_source_tag, HOLD_TAG_SIZE).x
+      rl.draw_text_ex(self._font_semi_bold, self._icbm_source_tag,
+                      rl.Vector2(x + width - tag_width - 14, y + 12), HOLD_TAG_SIZE, 0,
+                      HOLD_TAG_COLOR)
     return HOLD_HEIGHT
 
   @staticmethod

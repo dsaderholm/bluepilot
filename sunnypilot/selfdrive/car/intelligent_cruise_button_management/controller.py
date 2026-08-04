@@ -19,6 +19,7 @@ State = custom.IntelligentCruiseButtonManagement.IntelligentCruiseButtonManageme
 SendButtonState = custom.IntelligentCruiseButtonManagement.SendButtonState
 OverrideState = custom.IntelligentCruiseButtonManagement.OverrideState
 UnconfirmedLeadState = custom.LongitudinalPlanSP.UnconfirmedLead.State
+BaselineSource = custom.IntelligentCruiseButtonManagement.BaselineSource
 
 # BluePilot: states in which the radar-blind lead detector owns the target outright.
 # There is no longer a companion "...and this one also cancels the driver's baseline" list: a
@@ -261,6 +262,10 @@ class IntelligentCruiseButtonManagement:
     self.v_cluster_at_press = 0      # set speed when the driver's press was seen
     self.press_suppressed = False    # the press happened while a curve/lead owned the target
     self.baseline_diverged = False   # has the baseline ever actually differed from SLA?
+    # BluePilot: which mechanism last captured the hold. Diagnostic and deliberately temporary --
+    # see the capnp comment. Not cleared by clear_baseline: the question is "did the press path
+    # EVER fire this drive", so it has to survive the hold it describes.
+    self.baseline_source = BaselineSource.none
     self.cruise_enabled_prev = False
     self.cruise_enabled = False      # current engagement; hold_suppressed reads it
     self.v_target_valid = False
@@ -616,6 +621,7 @@ class IntelligentCruiseButtonManagement:
         self.press_suppressed = self.hold_suppressed
       if not self.press_suppressed:
         self.v_baseline = self.v_cruise_cluster
+        self.baseline_source = BaselineSource.press
       # Only the FIRST press of a sequence sets the reference. Re-arming it on every press would
       # move the goalposts to wherever the set speed had already got to, so "has it moved yet"
       # could never become true while the driver kept pressing.
@@ -627,10 +633,11 @@ class IntelligentCruiseButtonManagement:
 
     # Fallback: set speed moved, ICBM has been silent long enough that it cannot be responsible.
     # Runs before the manual-only guard below so it can CREATE a baseline, not just update one.
+    fallback_idle = self.icbm_idle_frames >= ADOPT_IDLE_FRAMES
+    fallback_counter = self.counter_move_accum >= COUNTER_MOVE_UNITS
     if (cruise_enabled and self.cruise_cycle_frames == 0
         and self.v_cruise_cluster != self.v_cruise_cluster_prev
-        and (self.icbm_idle_frames >= ADOPT_IDLE_FRAMES
-             or self.counter_move_accum >= COUNTER_MOVE_UNITS)):
+        and (fallback_idle or fallback_counter)):
       if self.override_state != OverrideState.manual:
         self.v_target_overridden = self.v_target_raw
         self.baseline_diverged = False
@@ -642,6 +649,9 @@ class IntelligentCruiseButtonManagement:
       # caught: the hold still fell 70 -> 50 with the press path already fixed.
       if not self.hold_suppressed:
         self.v_baseline = self.v_cruise_cluster
+        # Idle wins the label when both hold: it is the weaker claim, so recording it keeps the
+        # question honest rather than flattering the newer mechanism.
+        self.baseline_source = BaselineSource.fallbackIdle if fallback_idle else                                BaselineSource.fallbackCounter
       self.press_settle_frames = PRESS_SETTLE_MAX_FRAMES
       self.cluster_stable_frames = 0
       # Spent. The stand-down now suppresses ICBM's output, so nothing is left to move against.

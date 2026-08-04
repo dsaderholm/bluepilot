@@ -111,6 +111,9 @@ class IntelligentCruiseButtonManagement:
   )
   vBaseline: float = auto_field()
   holdSuppressed: bool = auto_field()
+  baselineSource: 'IntelligentCruiseButtonManagement.BaselineSource' = field(
+    default_factory=lambda: IntelligentCruiseButtonManagement.BaselineSource.none
+  )
 
   class IntelligentCruiseButtonManagementState(StrEnum):
     inactive = auto()
@@ -121,6 +124,12 @@ class IntelligentCruiseButtonManagement:
 
   # BluePilot: mirrors custom.capnp's OverrideState. Values are spelled out rather than auto()
   # because a member named `auto` would rebind the enum.auto callable for the rest of the body.
+  class BaselineSource(StrEnum):
+    none = "none"
+    press = "press"
+    fallbackIdle = "fallbackIdle"
+    fallbackCounter = "fallbackCounter"
+
   class OverrideState(StrEnum):
     auto = "auto"
     manual = "manual"

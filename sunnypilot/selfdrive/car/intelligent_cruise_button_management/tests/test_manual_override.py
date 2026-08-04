@@ -30,6 +30,7 @@ SendButtonState = custom.IntelligentCruiseButtonManagement.SendButtonState
 UnconfirmedLeadState = custom.LongitudinalPlanSP.UnconfirmedLead.State
 PlanSource = custom.LongitudinalPlanSP.LongitudinalPlanSource
 ButtonType = car.CarState.ButtonEvent.Type
+BaselineSource = custom.IntelligentCruiseButtonManagement.BaselineSource
 
 MPH = 0.44704
 LIMIT = 55    # what SLA wants: posted limit + the configured offset
@@ -1165,3 +1166,39 @@ class TestTheBadgeGreysWhenCruiseIsOff:
     for _ in range(60):
       icbm.run(make_cs(DRIVER, enabled=True), CC, make_lp(LIMIT), False)
     assert not icbm.hold_suppressed
+
+
+class TestBaselineSourceIsRecorded:
+  """TEMPORARY diagnostic. ICBM has two independent ways to notice the driver moved the set speed,
+  and every drive so far suggests only the fallback fires on this car. This records which, so one
+  ordinary drive answers it instead of inference -- and if the press path never appears, it and its
+  hand-picked settle timers get deleted.
+
+  Delete this class along with the field once that is settled.
+  """
+
+  def test_a_real_button_event_records_the_press_path(self):
+    icbm = fresh()
+    set_baseline(icbm)
+    assert icbm.baseline_source == BaselineSource.press
+
+  def test_movement_against_an_icbm_command_records_the_counter_fallback(self):
+    """The case that rescued the deadlock: ICBM commanding down, set speed goes up anyway."""
+    icbm = fresh()
+    for _ in range(300):                       # past CRUISE_CYCLE_SETTLE_FRAMES, ICBM decreasing
+      icbm.run(make_cs(DRIVER), CC, make_lp(LIMIT), False)
+    assert icbm.cruise_button == SendButtonState.decrease
+    icbm.run(make_cs(DRIVER + 5), CC, make_lp(LIMIT), False)
+    assert icbm.override_state == OverrideState.manual
+    assert icbm.baseline_source == BaselineSource.fallbackCounter
+
+  def test_it_survives_the_hold_being_cleared(self):
+    """The question is whether the press path EVER fires on a drive, so the answer has to outlive
+    the hold it describes -- clear_baseline must not reset it."""
+    icbm = fresh()
+    set_baseline(icbm)
+    assert icbm.baseline_source == BaselineSource.press
+    icbm.run(make_cs(DRIVER, enabled=False), CC, make_lp(LIMIT), False)
+    icbm.run(make_cs(DRIVER, enabled=True), CC, make_lp(LIMIT), False)
+    assert icbm.override_state == OverrideState.auto, "precondition: hold was cleared"
+    assert icbm.baseline_source == BaselineSource.press, "the diagnostic was wiped with the hold"
