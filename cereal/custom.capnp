@@ -779,6 +779,12 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     #
     # This is the measurement that turns the reported I-15 fault into a diagnosis rather than three
     # mitigations and a hope.
+    # BluePilot: the model's own uncertainty about where the road edge is, which is the third and
+    # least visible of the three terms that decide whether a lane exists beside us. Published
+    # because "No lane to move into" was being reported on roads with an obvious empty lane, and
+    # nothing on screen could say which term refused it. See MAX_ROAD_EDGE_STD -- an invented 0.5.
+    leftEdgeStd @82 :Float32;
+    rightEdgeStd @83 :Float32;
     oncomingSeenSeconds @80 :Float32;        # refused while actually watching a vehicle
     oncomingRememberedSeconds @81 :Float32;  # refused on memory alone, nothing in view
 

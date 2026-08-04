@@ -90,7 +90,26 @@ class OvertakeProgress:
       return False
     return -side.v_rel < min_gain_ms
 
-  def update(self, v_ego: float, left, right, settle_s: float) -> None:
+  def update(self, v_ego: float, left, right, settle_s: float,
+             since_lane_change_s: float = 1e3) -> None:
+    # A CAR BESIDE YOU IS NOT A PASS. Reported from the road: "it's been saying slow pass even
+    # though I'm in the far right lane."
+    #
+    # Exactly right, and the fault is in the name rather than the arithmetic. _grinding asks "is
+    # there a vehicle in an adjacent lane, close, that I am not gaining on" -- which in the right
+    # lane of a highway, with traffic in the left lane running about your speed, is true almost
+    # continuously. It measured being ALONGSIDE someone and called it overtaking them.
+    #
+    # A crawl only means something in the context of a pass that was wanted. `settle_s` is the time
+    # since the last suggestion and was already computed here to LABEL a crawl; it should have been
+    # gating one. Outside that window there is no pass underway, so there is nothing to be slow at.
+    #
+    # EITHER signal will do, and it needs both. Gating on the suggestion alone would stop measuring
+    # the passes he makes himself -- which are most of them, and the ones the crawl number was
+    # wanted for. A lane change he just made is the other evidence that a pass is underway, and it
+    # is the only one available while this system suggests nothing at all.
+    #
+    # What is still excluded, correctly, is sitting in a lane doing neither.
     if v_ego < MIN_V_EGO_MS:
       self._reset()
       return
@@ -104,8 +123,12 @@ class OvertakeProgress:
       return
 
     if self.crawl_seconds == 0.0:
-      # Latched at the START of the crawl. Deciding this per-frame would let a long crawl change
-      # its own provenance as the settle timer ran out underneath it.
+      # AT THE START ONLY, for both the gate and the label, and for the same reason: deciding
+      # either per frame would let a long crawl change its own provenance as the timer ran out
+      # underneath it. A 40 s grind that began right after a suggestion is one event, not thirty
+      # seconds of event followed by ten seconds of something else.
+      if settle_s >= AFTER_SUGGESTION_S and since_lane_change_s >= AFTER_SUGGESTION_S:
+        return
       self.crawl_after_suggestion = settle_s < AFTER_SUGGESTION_S
       self.crawl_side = Side.left if left_grinding else Side.right
 

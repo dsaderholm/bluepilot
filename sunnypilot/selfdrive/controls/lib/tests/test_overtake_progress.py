@@ -28,9 +28,10 @@ def lane(occupied=True, d_rel=25.0, v_rel=-0.5, available=True):
 EMPTY = lane(occupied=False)
 
 
-def run(op, seconds, left=EMPTY, right=EMPTY, v_ego=CRUISE_MS, settle_s=0.0):
+def run(op, seconds, left=EMPTY, right=EMPTY, v_ego=CRUISE_MS, settle_s=0.0,
+        since_lane_change_s=0.0):
   for _ in range(max(1, int(round(seconds / DT_MDL)))):
-    op.update(v_ego, left, right, settle_s)
+    op.update(v_ego, left, right, settle_s, since_lane_change_s)
   return op
 
 
@@ -99,10 +100,27 @@ class TestItStaysQuietOtherwise:
 class TestProvenance:
   """crawlAfterSuggestion labels the data; it must never behave like a gate."""
 
-  def test_a_crawl_with_no_recent_suggestion_is_still_measured(self):
-    op = run(OvertakeProgress(), 10.0, left=lane(), settle_s=AFTER_SUGGESTION_S + 100)
-    assert op.crawling, "a gate here would have discarded the most interesting crawls"
-    assert not op.crawl_after_suggestion
+  def test_a_car_beside_you_is_not_a_pass(self):
+    """Reversed on road evidence: "it's been saying slow pass even though I'm in the far right
+    lane."
+
+    This used to assert that a crawl with no suggestion behind it was still measured, on the
+    reasoning that those were the most interesting ones. They were not interesting, they were the
+    right lane of a highway with traffic alongside -- _grinding asks "is a car close and am I not
+    gaining on it", which is true almost continuously there. It measured being ALONGSIDE someone
+    and called it overtaking them.
+    """
+    op = run(OvertakeProgress(), 10.0, left=lane(),
+             settle_s=AFTER_SUGGESTION_S + 100, since_lane_change_s=AFTER_SUGGESTION_S + 100)
+    assert not op.crawling, "a car beside us with no pass underway counted as a slow pass"
+    assert op.crawl_events == 0
+
+  def test_but_a_pass_the_driver_made_himself_still_counts(self):
+    """The over-correction to avoid. Gating on the suggestion alone would stop measuring the passes
+    he makes on his own -- which are most of them, and the ones this number was wanted for."""
+    op = run(OvertakeProgress(), 10.0, left=lane(),
+             settle_s=AFTER_SUGGESTION_S + 100, since_lane_change_s=2.0)
+    assert op.crawling
 
   def test_a_crawl_soon_after_a_suggestion_is_labeled(self):
     op = run(OvertakeProgress(), 10.0, left=lane(), settle_s=1.0)

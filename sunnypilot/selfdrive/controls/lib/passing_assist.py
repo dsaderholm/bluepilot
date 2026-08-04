@@ -454,6 +454,8 @@ class PassingAssistDetector:
     self.right_line_prob = 0.0
     self.left_edge_gap = 0.0
     self.right_edge_gap = 0.0
+    self.left_edge_std = 1e3
+    self.right_edge_std = 1e3
     self.left_geometry_ok = False
     self.right_geometry_ok = False
     self.right_widening_m = 0.0
@@ -497,6 +499,10 @@ class PassingAssistDetector:
     self.min_speed_ms = DEFAULT_MIN_SPEED_MPH * CV.MPH_TO_MS
     self.exit_standdown_s = float(DEFAULT_EXIT_STANDDOWN_S)
     self.driver_change_standdown = 0.0
+    # Time SINCE the last one, as opposed to the stand-down counting down. See OvertakeProgress:
+    # a lane change he just made is the evidence that a pass is underway, and it is the only such
+    # evidence available while this system suggests nothing itself.
+    self.since_driver_change_s = 1e3
     self.driver_change_was_exit = False
     self._driver_blinker = None       # side currently being signaled, or None
     self._signalled_over_widening = False
@@ -669,6 +675,10 @@ class PassingAssistDetector:
 
     left_std = float(stds[RE_LEFT]) if len(stds) > RE_LEFT else 1e3
     right_std = float(stds[RE_RIGHT]) if len(stds) > RE_RIGHT else 1e3
+    # Kept so the panel can say WHICH of the three terms refused a side. All three are invented
+    # numbers, and "No lane to move into" on a road with an obvious empty lane beside it is the
+    # report they produced -- unanswerable, because none of the values that decided it were shown.
+    self.left_edge_std, self.right_edge_std = left_std, right_std
 
     self._road_widening(model, right_std)
 
@@ -1040,6 +1050,7 @@ class PassingAssistDetector:
     """
     self.driver_change_was_exit = was_exit
     self.driver_change_standdown = self.exit_standdown_s if was_exit else float(SETTLE_AFTER_CHANGE_S)
+    self.since_driver_change_s = 0.0
     self._signalled_over_widening = False
     self.right_lane_age_s = 0.0
 
@@ -1217,7 +1228,8 @@ class PassingAssistDetector:
     # grinding is happening in the other lane, where the lead-based gates have nothing to say -- so
     # hanging this off the decision path would have measured only the crawls that began while a
     # fresh suggestion was still live, which is the subset least in need of measuring.
-    self.overtake.update(CS.vEgo, self.adjacent.left, self.adjacent.right, self._settle_s)
+    self.overtake.update(CS.vEgo, self.adjacent.left, self.adjacent.right, self._settle_s,
+                         self.since_driver_change_s)
 
     # Counted AFTER every gate has run, so blocked_by is final for this frame. Only while a
     # slower car is actually spotted -- an empty road is not evidence about anything -- and only
@@ -1414,6 +1426,7 @@ class PassingAssistDetector:
     # Advances every cycle regardless of the gates below, so it measures real elapsed time rather
     # than time-spent-in-a-particular-branch.
     self._settle_s = min(self._settle_s + DT_MDL, 1e3)  # capped; only the threshold matters
+    self.since_driver_change_s = min(self.since_driver_change_s + DT_MDL, 1e3)
 
     # The longest either lane has gone unpassed. Only counts once a side has actually been passed
     # at least once -- see tick_overtaken: an unvisited lane reads 0, which is "never", not "quiet
@@ -1760,6 +1773,8 @@ class PassingAssistDetector:
     passingAssist.rightLineProb = float(pa.right_line_prob)
     passingAssist.leftEdgeGap = float(pa.left_edge_gap)
     passingAssist.rightEdgeGap = float(pa.right_edge_gap)
+    passingAssist.leftEdgeStd = float(min(pa.left_edge_std, 1e3))
+    passingAssist.rightEdgeStd = float(min(pa.right_edge_std, 1e3))
     passingAssist.leftGeometryOk = pa.left_geometry_ok
     passingAssist.rightGeometryOk = pa.right_geometry_ok
     passingAssist.leftBlindspot = pa.left_blindspot

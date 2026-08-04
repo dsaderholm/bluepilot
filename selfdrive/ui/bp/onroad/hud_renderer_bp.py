@@ -194,6 +194,23 @@ AHEAD_BOX_HEIGHT = 160
 AHEAD_BOX_GAP = 10
 
 
+def _lane_why(tag: str, prob: float, gap: float, std: float, metric: bool) -> str:
+  """Which of the three geometry terms refused this side, and by how much.
+
+  Ordered the way the gate evaluates them, so the first failure named is the one to act on. All
+  three are invented constants -- this readout exists so a drive can replace them with measurements
+  instead of an argument.
+  """
+  if std > 0.5:
+    return f"{tag} edge +-{min(std, 9.9):.1f}"
+  if prob < 0.6:
+    return f"{tag} paint {prob:.2f}"
+  if gap < 3.0:
+    w = gap if metric else gap * 3.28084
+    return f"{tag} gap {w:.1f}{'m' if metric else 'ft'}"
+  return f"{tag} ok"
+
+
 class HudRendererBP(HudRendererSP):
   """BluePilot HudRenderer with brake status display.
 
@@ -839,6 +856,13 @@ class HudRendererBP(HudRendererSP):
           self._pa_sub_detail = (f"want {pa.referenceSpeed * conv:.0f}"
                                  f"  lead {pa.leadVLead * conv:.0f}"
                                  f"  [{pa.referenceSource}]")
+        elif blocked == 'noLaneAvailable':
+          # THE SAME LESSON, A FOURTH TIME. Three invented thresholds decide this -- paint
+          # confidence, drivable width, and the model's certainty about where the road edge is --
+          # and not one of the values feeding them was on screen. "No lane to move into" was
+          # reported from a road with an obvious empty lane beside it, and neither of us could say
+          # which term refused it. Name the failing one, per side, with its number.
+          self._pa_sub_detail = f"{_lane_why('L', pa.leftLineProb, pa.leftEdgeGap, pa.leftEdgeStd, ui_state.is_metric)}     {_lane_why('R', pa.rightLineProb, pa.rightEdgeGap, pa.rightEdgeStd, ui_state.is_metric)}"
         elif blocked == 'closingIn' and pa.minApproachActive > 0:
           # Auto derives this from what the car's own ACC has been measured doing, so the number is
           # different per car and changes as it learns. Without showing it, "Waiting to get closer"
