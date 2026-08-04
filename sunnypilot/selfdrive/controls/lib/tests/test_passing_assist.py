@@ -203,24 +203,45 @@ class TestPassingAssistGates:
     assert det.blocked_by == Blocked.nothingSlower
     assert 0.5 < det.approach_seconds < 1.5
 
-  def test_one_missed_radar_frame_does_not_erase_the_confirmation(self):
-    """It used to. A single frame without a lead zeroed the timer, so a car at the edge of radar
-    range that blinked in and out reset the clock faster than it could ever run."""
+  def test_an_intermittent_radar_track_still_confirms(self):
+    """The reported failure, and the one a decay rate alone did NOT fix: "it would go in and out of
+    range and so the pass would keep resetting."
+
+    Decaying three times faster than it accumulates means a track has to survive 75% of frames just
+    to break even -- below that the timer never reaches the threshold however long the car sits
+    there. A grace window is what makes a dropped return genuinely free. At 50% here, which is far
+    worse than any real radar.
+    """
     det = PassingAssistDetector()
-    run(det, int(20.0 / DT_MDL))
-    before = det.approach_seconds
-    run(det, 1, status=False)
-    assert 0.0 < det.approach_seconds < before
-    assert before - det.approach_seconds < 0.2, "one frame should cost a fraction of a second"
+    for i in range(STUCK_FRAMES * 2):
+      det.update(make_sm(status=(i % 2 == 0)), CRUISE_MS, True)
+    assert det.suggestion == Side.left
+    assert det.reason == Reason.passing
+
+  def test_a_lead_hovering_at_the_look_ahead_distance_still_confirms(self):
+    """Same failure at the range boundary rather than the tracking one."""
+    det = PassingAssistDetector()
+    for i in range(STUCK_FRAMES * 2):
+      det.update(make_sm(d_rel=215.0 if i % 2 == 0 else 225.0), CRUISE_MS, True)
+    assert det.suggestion == Side.left
 
   def test_a_lead_that_is_really_gone_still_clears_it(self):
-    """The other half. Decay is not a memory: sustained absence must reach zero, or a car that
-    left would keep a stale confirmation alive behind it."""
+    """The other half. The grace window is not a memory: sustained absence must reach zero, or a
+    car that left would keep a stale confirmation alive behind it."""
     det = PassingAssistDetector()
-    run(det, int(20.0 / DT_MDL))
-    run(det, int(1.0 / DT_MDL), status=False)
+    run(det, STUCK_FRAMES)
+    assert det.approach_seconds > 0
+    run(det, int(2.0 / DT_MDL), status=False)
     assert det.approach_seconds == 0.0
     assert not det.lead_is_slow
+
+  def test_a_brief_dropout_costs_nothing_at_all(self):
+    det = PassingAssistDetector()
+    run(det, STUCK_FRAMES)
+    before = det.approach_seconds
+    run(det, 3, status=False)
+    assert det.approach_seconds == before, "inside the grace window a lost return must be free"
+
 
 
 class TestSpeedBoundary:

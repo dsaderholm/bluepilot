@@ -21,17 +21,24 @@ Side = custom.LongitudinalPlanSP.PassingAssist.Side
 Phase = custom.LongitudinalPlanSP.PassingAssist.Manoeuvre
 
 
-def run(m, seconds, *, suggested=Side.none, confirming=False, confirmed=False, override=False):
+def run(m, seconds, *, clear=Side.none, suggested=Side.none, confirming=False, confirmed=False,
+        override=False):
   for _ in range(max(1, int(round(seconds / DT_MDL)))):
-    m.update(suggested=suggested, confirming=confirming, confirmed=confirmed, driver_override=override)
+    m.update(clear=clear, suggested=suggested, confirming=confirming, confirmed=confirmed,
+             driver_override=override)
   return m
 
 
-def armed(lead_s=1.0):
-  """A machine that has just entered `signalling`, which is where everything interesting happens."""
+def armed(lead_s=1.0, confirmed=True):
+  """A machine that has just entered `signalling`, which is where everything interesting happens.
+
+  `confirmed=True` by default so most cases exercise the gates rather than the confirmation clock;
+  the overlap itself is tested explicitly in TestTheClocksOverlap.
+  """
   m = PassingManoeuvre()
   m.blinker_lead_s = lead_s
-  m.update(suggested=Side.left, confirming=False, confirmed=True, driver_override=False)
+  m.update(clear=Side.left, suggested=Side.left if confirmed else Side.none,
+           confirming=not confirmed, confirmed=confirmed, driver_override=False)
   assert m.phase == Phase.signalling
   return m
 
@@ -45,17 +52,17 @@ class TestTheHappyPath:
     run(m, 0.5, confirmed=True)
     assert m.phase == Phase.waiting, "confirmed but gated is its own state, not 'still deciding'"
 
-    run(m, 0.5, suggested=Side.left, confirmed=True)
+    run(m, 0.5, clear=Side.left, suggested=Side.left, confirmed=True)
     assert m.phase == Phase.signalling
     assert m.side == Side.left
     assert m.blinker_on and not m.steering_active
 
-    run(m, 0.6, suggested=Side.left, confirmed=True)
+    run(m, 0.6, clear=Side.left, suggested=Side.left, confirmed=True)
     assert m.phase == Phase.changing
     assert m.blinker_on, "the signal stays on THROUGH the crossing -- that is how a person signals"
     assert m.steering_active
 
-    run(m, CHANGE_DURATION_S, suggested=Side.left, confirmed=True)
+    run(m, CHANGE_DURATION_S, clear=Side.left, suggested=Side.left, confirmed=True)
     assert m.phase == Phase.finishing
     assert not m.blinker_on, "signal must go out when the change completes"
     assert not m.steering_active
@@ -66,9 +73,9 @@ class TestTheHappyPath:
 
   def test_the_signal_hold_is_the_configured_one(self):
     m = armed(lead_s=2.0)
-    run(m, 1.5, suggested=Side.left, confirmed=True)
+    run(m, 1.5, clear=Side.left, suggested=Side.left, confirmed=True)
     assert m.phase == Phase.signalling
-    run(m, 0.6, suggested=Side.left, confirmed=True)
+    run(m, 0.6, clear=Side.left, suggested=Side.left, confirmed=True)
     assert m.phase == Phase.changing
 
 
@@ -77,7 +84,7 @@ class TestBackingOut:
 
   def test_a_gate_going_red_during_the_signal_aborts_and_is_counted(self):
     m = armed()
-    run(m, 0.3, suggested=Side.left, confirmed=True)
+    run(m, 0.3, clear=Side.left, suggested=Side.left, confirmed=True)
     run(m, DT_MDL, suggested=Side.none, confirmed=True)
     assert m.phase == Phase.waiting
     assert not m.blinker_on, "blinker must go out with the abort"
@@ -88,8 +95,8 @@ class TestBackingOut:
     """Signalling left and then quietly starting to go right would be the worst outcome available:
     the traffic behind was told one thing and the car did another."""
     m = armed()
-    run(m, 0.3, suggested=Side.left, confirmed=True)
-    run(m, DT_MDL, suggested=Side.right, confirmed=True)
+    run(m, 0.3, clear=Side.left, suggested=Side.left, confirmed=True)
+    run(m, DT_MDL, clear=Side.right, suggested=Side.right, confirmed=True)
     assert m.aborts == 1
     assert m.phase != Phase.changing
 
@@ -98,9 +105,9 @@ class TestBackingOut:
     m = armed()
     run(m, DT_MDL, suggested=Side.none, confirmed=True)
     assert m.aborts == 1
-    run(m, DT_MDL, suggested=Side.left, confirmed=True)
+    run(m, DT_MDL, clear=Side.left, suggested=Side.left, confirmed=True)
     assert m.phase == Phase.signalling
-    run(m, 1.1, suggested=Side.left, confirmed=True)
+    run(m, 1.1, clear=Side.left, suggested=Side.left, confirmed=True)
     assert m.phase == Phase.changing
     assert m.aborts == 1, "recovering is not a second abort"
 
@@ -111,13 +118,64 @@ class TestBackingOut:
     assert m.side == Side.none
 
 
+class TestTheClocksOverlap:
+  """The owner, on being told the blinker waited for the confirmation: "That doesn't seem right.
+  It should come on instantly telling drivers I want to change lanes... I want this to realize the
+  car is slow faster than I can and change lanes as fast as possible."
+
+  So the signal goes on the moment a slow car is spotted with somewhere to go, and the confirmation
+  runs underneath it. The crossing waits for whichever clock finishes LAST, not for their sum.
+  """
+
+  def test_the_blinker_comes_on_before_the_confirmation_finishes(self):
+    m = PassingManoeuvre()
+    m.update(clear=Side.left, suggested=Side.none, confirming=True, confirmed=False,
+             driver_override=False)
+    assert m.phase == Phase.signalling
+    assert m.blinker_on
+    assert not m.steering_active, "signalling, not moving"
+
+  def test_it_does_not_move_until_confirmed(self):
+    """Signal early, commit late. A 1 s signal lead must not let an unconfirmed car be passed."""
+    m = armed(lead_s=1.0, confirmed=False)
+    run(m, 3.0, clear=Side.left, suggested=Side.none, confirming=True)
+    assert m.phase == Phase.signalling, "the signal lead alone must not start a crossing"
+    assert m.aborts == 0
+
+  def test_and_moves_as_soon_as_both_are_satisfied(self):
+    m = armed(lead_s=1.0, confirmed=False)
+    run(m, 1.5, clear=Side.left, suggested=Side.none, confirming=True)
+    assert m.phase == Phase.signalling
+    run(m, DT_MDL, clear=Side.left, suggested=Side.left, confirmed=True)
+    assert m.phase == Phase.changing
+
+  def test_the_wait_is_the_longer_clock_not_their_sum(self):
+    """2 s of confirming and 1 s of signalling is 2 s in total, not 3. That second is the whole
+    point -- it is a second of Ford ACC not braking for a car we had already decided to pass."""
+    m = PassingManoeuvre()
+    m.blinker_lead_s = 1.0
+    run(m, 1.9, clear=Side.left, suggested=Side.none, confirming=True)
+    assert m.phase == Phase.signalling
+    assert m.phase_seconds >= 1.0, "blinker has already been up for its full lead"
+    run(m, DT_MDL, clear=Side.left, suggested=Side.left, confirmed=True)
+    assert m.phase == Phase.changing, "should move the instant confirmation lands, not a second after"
+
+  def test_a_car_that_turns_out_not_to_be_slow_drops_the_signal(self):
+    """The honest cost of signalling early, and exactly what the abort count is for."""
+    m = armed(lead_s=1.0, confirmed=False)
+    run(m, 0.5, clear=Side.left, suggested=Side.none, confirming=True)
+    run(m, DT_MDL, clear=Side.none, suggested=Side.none)
+    assert not m.blinker_on
+    assert m.aborts == 1
+
+
 class TestThePointOfNoReturn:
   """A real car cannot un-change lanes halfway across. A model that pretended otherwise would
   report a clean sequence that reality could not have delivered."""
 
   def test_a_gate_cannot_call_it_off_once_crossing(self):
     m = armed()
-    run(m, 1.1, suggested=Side.left, confirmed=True)
+    run(m, 1.1, clear=Side.left, suggested=Side.left, confirmed=True)
     assert m.phase == Phase.changing
     run(m, 0.5, suggested=Side.none)
     assert m.phase == Phase.changing, "a gate must not abort a crossing that has begun"
@@ -126,17 +184,17 @@ class TestThePointOfNoReturn:
   def test_the_driver_always_can(self):
     """Not a gate -- the driver taking their car back, at any phase including mid-crossing."""
     m = armed()
-    run(m, 1.1, suggested=Side.left, confirmed=True)
+    run(m, 1.1, clear=Side.left, suggested=Side.left, confirmed=True)
     assert m.phase == Phase.changing
-    run(m, DT_MDL, suggested=Side.left, confirmed=True, override=True)
+    run(m, DT_MDL, clear=Side.left, suggested=Side.left, confirmed=True, override=True)
     assert m.phase == Phase.idle
     assert not m.blinker_on and not m.steering_active
 
   def test_a_driver_takeover_is_not_counted_as_an_abort(self):
     """It is the correct outcome, and counting it would poison the one metric that matters."""
     m = armed()
-    run(m, 0.3, suggested=Side.left, confirmed=True)
-    run(m, DT_MDL, suggested=Side.left, confirmed=True, override=True)
+    run(m, 0.3, clear=Side.left, suggested=Side.left, confirmed=True)
+    run(m, DT_MDL, clear=Side.left, suggested=Side.left, confirmed=True, override=True)
     assert m.phase == Phase.idle
     assert m.aborts == 0
 
@@ -151,7 +209,7 @@ class TestNothingHappensWhenNothingShould:
   def test_a_driver_signalling_never_starts_a_sequence(self):
     """They are already doing it themselves -- with sunnypilot's own lane change, which stays the
     driver's tool. The dry run must not shadow it."""
-    m = run(PassingManoeuvre(), 3.0, suggested=Side.left, confirmed=True, override=True)
+    m = run(PassingManoeuvre(), 3.0, clear=Side.left, suggested=Side.left, confirmed=True, override=True)
     assert m.phase == Phase.idle
     assert m.aborts == 0
 

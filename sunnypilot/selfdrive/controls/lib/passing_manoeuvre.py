@@ -39,10 +39,15 @@ Phase = custom.LongitudinalPlanSP.PassingAssist.Manoeuvre
 # How long the blinker is held before lateral motion begins. The owner's own habit: "I put the
 # blinker on, wait a second, and then change lanes."
 #
-# Deliberately NOT stacked on top of the confirmation time. The confirmation keeps running during
-# this hold -- both clocks overlap -- because the whole design goal is that Ford's ACC brakes as
-# little as possible, and 2 s of confirming followed by 1 s of signalling would be three seconds of
-# closing on a car we had already decided to pass.
+# The signal goes on the MOMENT a slow car is spotted with a clear lane beside it -- not once the
+# confirmation finishes. The owner, on being told otherwise: "It should come on instantly telling
+# drivers I want to change lanes... I want this to realize the car is slow faster than I can and
+# change lanes as fast as possible."
+#
+# So the two clocks OVERLAP. The blinker is lit while the confirmation is still running underneath
+# it, and the crossing begins when both are satisfied -- max(confirm, lead), not confirm + lead. If
+# the confirmation fails or a gate closes before then, the signal goes out and it is counted as an
+# abort, which is the honest cost of signalling early and exactly what the count is for.
 DEFAULT_BLINKER_LEAD_S = 1
 
 # A nominal lane change, used only to give the dry run a plausible duration for the phase nothing
@@ -87,10 +92,12 @@ class PassingManoeuvre:
       self.phase = phase
       self.phase_seconds = 0.0
 
-  def update(self, *, suggested: int, confirming: bool, confirmed: bool, driver_override: bool) -> None:
+  def update(self, *, clear: int, suggested: int, confirming: bool, confirmed: bool,
+             driver_override: bool) -> None:
     """One frame.
 
-    `suggested`  -- the detector's side this frame, Side.none when any gate says no.
+    `clear`      -- a slow car is spotted and this side is clear RIGHT NOW. Lights the blinker.
+    `suggested`  -- the same, AND the confirmation has completed. Commits to moving.
     `confirming` -- a slower vehicle is being confirmed, timer still running.
     `confirmed`  -- that timer has completed, so anything still stopping us is a gate.
     `driver_override` -- the driver is signalling, braking or steering. Always wins.
@@ -119,18 +126,21 @@ class PassingManoeuvre:
     if self.phase == Phase.signalling:
       # A gate going red here is exactly the failure this module exists to count: the signal was
       # already shown to traffic behind before the sequence backed out.
-      if suggested == Side.none or suggested != self.side:
+      if clear == Side.none or clear != self.side:
         self.aborts += 1
         self.side = Side.none
         self._to(Phase.waiting if confirmed else Phase.confirming if confirming else Phase.idle)
         return
-      if self.phase_seconds >= self.blinker_lead_s:
+      # BOTH clocks, not one after the other: the signal has been up long enough AND the car is
+      # confirmed slow. Whichever finishes last is what the driver waits for.
+      if self.phase_seconds >= self.blinker_lead_s and suggested == self.side:
         self._to(Phase.changing)
       return
 
     # ---- idle / confirming / waiting: not yet committed to anything ----
-    if suggested != Side.none:
-      self.side = suggested
+    # `clear`, not `suggested`. Signal the instant there is a slow car and somewhere to go.
+    if clear != Side.none:
+      self.side = clear
       self._to(Phase.signalling)
       return
 
