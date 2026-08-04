@@ -510,7 +510,9 @@ class HudRendererBP(HudRendererSP):
       if pa.emergencyAborts:
         lines.append(f"{pa.emergencyAborts} reversed mid-change")
       # The most useful line here, so it goes first: what actually stopped the passes.
-      if pa.wantedSeconds > 5.0 and pa.topBlockedShare > 0.05:
+      # A minute of evidence, not five seconds. A percentage over six seconds of data is noise
+      # dressed as a finding, and this line is meant to decide what gets worked on next.
+      if pa.wantedSeconds > 60.0 and pa.topBlockedShare > 0.05:
         reason = _BLOCKED_TEXT.get(str(pa.topBlockedBy), str(pa.topBlockedBy))
         lines.append(f"mostly: {reason.lower()} {pa.topBlockedShare * 100:.0f}%")
       if pa.accBrakingOnsetMax > 0:
