@@ -32,6 +32,7 @@ Blocked = custom.LongitudinalPlanSP.PassingAssist.Blocked
 Reason = custom.LongitudinalPlanSP.PassingAssist.Reason
 Trigger = custom.LongitudinalPlanSP.PassingAssist.Trigger
 RefSource = custom.LongitudinalPlanSP.PassingAssist.ReferenceSource
+Phase = custom.LongitudinalPlanSP.PassingAssist.Manoeuvre
 
 CRUISE_MS = 31.0            # ~70 mph set speed
 SLOW_LEAD_MS = 24.0         # ~54 mph lead -> ~7 m/s deficit, over the 8 mph default
@@ -1524,3 +1525,48 @@ class TestPublishTheNewFields:
     pa = self._published(det)
     assert pa.manoeuvreAborts == 65535
     assert pa.crawlEvents == 65535
+
+
+class TestKeepRightManoeuvre:
+  """Moving back over is half of what the finished system does and had no dry run at all -- the
+  readout went straight from "MOVE RIGHT" to nothing."""
+
+  def test_deciding_to_move_right_starts_its_own_sequence(self):
+    det = run(keep_right_det(), KEEP_RIGHT_FRAMES, status=False, **IN_LEFT_LANE)
+    assert det.suggestion == Side.right
+    live, reason = det.live_manoeuvre
+    assert reason == Reason.keepRight
+    assert live is det.keep_right_manoeuvre
+    assert live.blinker_on
+
+  def test_the_passing_machine_stays_out_of_it(self):
+    """Separate machines so the abort counts stay separate -- that number is the readiness metric
+    for each manoeuvre, and one combined figure would not say which was unstable."""
+    det = run(keep_right_det(), KEEP_RIGHT_FRAMES, status=False, **IN_LEFT_LANE)
+    assert det.manoeuvre.phase == Phase.idle
+    assert det.manoeuvre.aborts == 0
+
+  def test_it_signals_when_decided_rather_than_early(self):
+    """Unlike passing, where signalling early beats ACC to the brakes. Nothing is being raced when
+    moving back over, and a blinker lit through the whole keep-right delay would be several seconds
+    of announcing a manoeuvre that may not happen."""
+    det = keep_right_det()
+    run(det, int(4.0 / DT_MDL), status=False, **IN_LEFT_LANE)
+    assert det.suggestion == Side.none, "delay has not elapsed"
+    assert not det.keep_right_manoeuvre.blinker_on
+    assert det.keep_right_manoeuvre.phase == Phase.idle
+
+  def test_a_pass_takes_the_screen_back(self):
+    """Only one can run: keep-right is evaluated solely on frames where no pass is warranted."""
+    det = run(keep_right_det(), KEEP_RIGHT_FRAMES, status=False, **IN_LEFT_LANE)
+    assert det.live_manoeuvre[1] == Reason.keepRight
+    run(det, STUCK_FRAMES, **IN_LEFT_LANE)     # a slow lead appears
+    assert det.reason == Reason.passing
+    assert det.live_manoeuvre[1] == Reason.passing
+
+  def test_the_driver_taking_over_ends_it(self):
+    det = run(keep_right_det(), KEEP_RIGHT_FRAMES, status=False, **IN_LEFT_LANE)
+    assert det.keep_right_manoeuvre.blinker_on
+    run(det, 2, status=False, blinker=True, **IN_LEFT_LANE)
+    assert det.keep_right_manoeuvre.phase == Phase.idle
+    assert det.keep_right_manoeuvre.aborts == 0, "a takeover is the right outcome, not an abort"

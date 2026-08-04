@@ -551,12 +551,15 @@ class HudRendererBP(HudRendererSP):
       return False   # nothing committed yet; the verdict display below is the better readout
 
     side = str(pa.manoeuvreSide).upper()
+    keep_right = str(pa.manoeuvreReason) == 'keepRight'
     self._pa_alert = True
     self._pa_color = rl.Color(190, 150, 235, 255)   # not the green of a real suggestion
 
     if phase == 'signalling':
       self._pa_main = f"WOULD SIGNAL {side}"
-      self._pa_sub = "waiting before moving"
+      # Keep-right and passing look identical on this line otherwise, and they mean opposite
+      # things: one is going round something, the other is getting out of the way.
+      self._pa_sub = "moving back over" if keep_right else "waiting before moving"
       self._pa_progress = min(1.0, pa.manoeuvreSeconds / max(self._pa_blinker_lead, 0.1))
     elif phase == 'changing':
       self._pa_main = f"WOULD BE CHANGING {side}"

@@ -54,6 +54,8 @@ from openpilot.sunnypilot.selfdrive.controls.lib.adjacent_lane import (
 )
 from openpilot.sunnypilot.selfdrive.controls.lib.overtake_progress import OvertakeProgress
 from openpilot.sunnypilot.selfdrive.controls.lib.passing_manoeuvre import PassingManoeuvre
+
+Phase = custom.LongitudinalPlanSP.PassingAssist.Manoeuvre
 from openpilot.sunnypilot.selfdrive.controls.lib.rear_approach import RearApproach
 
 Side = custom.LongitudinalPlanSP.PassingAssist.Side
@@ -400,6 +402,10 @@ class PassingAssistDetector:
     self._lead_braking_s = 1e3
     # The dry run: what a fully-automatic pass would be doing right now. Actuates nothing.
     self.manoeuvre = PassingManoeuvre()
+    # Keep-right's own dry run. A separate machine rather than a mode on the one above, so its
+    # abort count stays its own -- that number is the readiness metric for each manoeuvre, and one
+    # combined figure would say something is unstable without saying which.
+    self.keep_right_manoeuvre = PassingManoeuvre()
     # Is a pass grinding? The one case that may ever earn the set-speed actuator. Measures only.
     self.overtake = OvertakeProgress()
 
@@ -416,6 +422,7 @@ class PassingAssistDetector:
       self.strict_two_way = self.params.get_bool("PassingAssistStrictTwoWay")
       self.oncoming_memory_s = float(self.params.get("PassingAssistOncomingMemory", return_default=True))
       self.manoeuvre.blinker_lead_s = float(self.params.get("PassingAssistBlinkerLead", return_default=True))
+      self.keep_right_manoeuvre.blinker_lead_s = self.manoeuvre.blinker_lead_s
       self.min_approach_m = float(self.params.get("PassingAssistMinApproach", return_default=True))
       self.min_speed_ms = self.params.get("PassingAssistMinSpeed", return_default=True) * CV.MPH_TO_MS
       self.overtake.crawl_time_s = float(self.params.get("PassingAssistCrawlTime", return_default=True))
@@ -864,6 +871,17 @@ class PassingAssistDetector:
     if self.wanted_seconds > 0.0:
       self._save_drive_summary()
 
+    override = bool(CS.leftBlinker or CS.rightBlinker or CS.brakePressed or CS.steeringPressed)
+
+    # Keep-right signals when it has DECIDED, not when it first sees somewhere to go -- unlike
+    # passing, where the whole point of signalling early is beating Ford's ACC to the brakes.
+    # Nothing is being raced here: moving back over is never urgent, and a blinker lit through the
+    # keep-right delay would be several seconds of telling traffic behind about a manoeuvre that
+    # may not happen.
+    kr_side = self.suggestion if self.reason == Reason.keepRight else Side.none
+    self.keep_right_manoeuvre.update(clear=kr_side, suggested=kr_side, confirming=False,
+                                     confirmed=kr_side != Side.none, driver_override=override)
+
     confirmed = self.approach_seconds >= self.persistence_s
     self.manoeuvre.update(
       clear=self.clear_side,
@@ -872,8 +890,22 @@ class PassingAssistDetector:
       confirmed=confirmed,
       # Exactly the inputs the detector already treats as the driver taking over. Reusing the same
       # test rather than restating it means the dry run cannot disagree with the gate above it.
-      driver_override=bool(CS.leftBlinker or CS.rightBlinker or CS.brakePressed or CS.steeringPressed),
+      driver_override=override,
     )
+
+  @property
+  def live_manoeuvre(self):
+    """Whichever dry run is actually running, and what it is for.
+
+    Only one can ever be: keep-right is evaluated solely on the frames where no pass is warranted.
+    Passing wins a tie on principle rather than necessity -- if that assumption ever breaks, the
+    more urgent manoeuvre should be the one on screen.
+    """
+    if self.manoeuvre.phase != Phase.idle:
+      return self.manoeuvre, Reason.passing
+    if self.keep_right_manoeuvre.phase != Phase.idle:
+      return self.keep_right_manoeuvre, Reason.keepRight
+    return self.manoeuvre, Reason.none
 
   def _decide(self, sm, v_cruise: float, long_enabled: bool, speed_limit_target: float = 0.0) -> None:
     """
@@ -1298,11 +1330,14 @@ class PassingAssistDetector:
     passingAssist.referenceSource = pa.reference_source
 
     # The dry run. See passing_manoeuvre.py.
-    passingAssist.manoeuvre = pa.manoeuvre.phase
-    passingAssist.manoeuvreSeconds = float(pa.manoeuvre.phase_seconds)
-    passingAssist.manoeuvreSide = pa.manoeuvre.side
-    passingAssist.blinkerWouldBeOn = pa.manoeuvre.blinker_on
-    passingAssist.steeringWouldBeActive = pa.manoeuvre.steering_active
+    live, live_reason = pa.live_manoeuvre
+    passingAssist.manoeuvre = live.phase
+    passingAssist.manoeuvreSeconds = float(live.phase_seconds)
+    passingAssist.manoeuvreSide = live.side
+    passingAssist.manoeuvreReason = live_reason
+    passingAssist.blinkerWouldBeOn = live.blinker_on
+    passingAssist.steeringWouldBeActive = live.steering_active
+    passingAssist.keepRightAborts = min(pa.keep_right_manoeuvre.aborts, 65535)
     # Saturates rather than wraps: a UInt16 rolling over to 0 would read as a clean drive, which is
     # the exact opposite of what a huge abort count means.
     passingAssist.manoeuvreAborts = min(pa.manoeuvre.aborts, 65535)

@@ -648,6 +648,16 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     topBlockedShare @60 :Float32;    # its share, 0..1
     clearShare @61 :Float32;         # share where nothing was stopping it at all
 
+    # BluePilot: WHICH manoeuvre the fields above describe. Passing and keep-right are mutually
+    # exclusive by construction -- keep-right is only ever evaluated on the frames where no pass is
+    # warranted -- so they share one set of state fields and are told apart by this.
+    #
+    # Their ABORT COUNTS stay separate, though, because that number is the readiness metric for
+    # each. Lumping them together would say a gate somewhere is unstable without saying which
+    # manoeuvre it belongs to, which is most of the value.
+    manoeuvreReason @62 :Reason;
+    keepRightAborts @63 :UInt16;
+
     enum Manoeuvre {
       idle @0;         # nothing warranted
       confirming @1;   # a slower vehicle is being confirmed, timer running
