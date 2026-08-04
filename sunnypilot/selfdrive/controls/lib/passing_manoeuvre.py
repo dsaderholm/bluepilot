@@ -108,6 +108,11 @@ class PassingManoeuvre:
   def aborting(self) -> bool:
     return self.phase == Phase.aborting
 
+  @property
+  def standdown_remaining(self) -> float:
+    """Seconds until a new sequence may start after a reversal. See ABORT_STANDDOWN_S."""
+    return max(0.0, ABORT_STANDDOWN_S - self._standdown_s)
+
   def _to(self, phase) -> None:
     if phase != self.phase:
       self.phase = phase

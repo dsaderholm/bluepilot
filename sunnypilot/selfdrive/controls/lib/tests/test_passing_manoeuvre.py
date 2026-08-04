@@ -297,3 +297,17 @@ class TestCollisionAbort:
     run(m, 3.0, clear=Side.left, suggested=Side.left, confirmed=True, collision=False)
     assert m.emergency_aborts == 0
     assert m.phase in (Phase.changing, Phase.finishing)
+
+  def test_the_stand_down_is_visible_while_it_runs(self):
+    """Without this the panel contradicts itself. The detector still says a pass is warranted and
+    the lane is clear -- both true -- so with nothing said here the screen falls through to a green
+    PASS LEFT seconds after the car backed out of exactly that pass."""
+    m = armed()
+    run(m, DT_MDL, clear=Side.left, suggested=Side.left, confirmed=True, collision=True)
+    run(m, ABORT_DURATION_S + 1.0, clear=Side.left, suggested=Side.left, confirmed=True)
+    assert m.phase == Phase.waiting
+    assert m.standdown_remaining > 0.0, "nothing on the wire to say why it is refusing"
+
+  def test_and_is_zero_when_nothing_has_been_reversed(self):
+    m = run(PassingManoeuvre(), 5.0, clear=Side.left, suggested=Side.left, confirmed=True)
+    assert m.standdown_remaining == 0.0

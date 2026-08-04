@@ -676,6 +676,12 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     # BluePilot: the close-in distance actually in force, after Auto has resolved. 0 = no hold.
     minApproachActive @67 :Float32;
 
+    # Seconds left of the stand-down after a crossing was reversed. Published because without it
+    # the panel contradicts itself: the detector still says a pass is warranted and clear, the dry
+    # run is refusing to start one, and with nothing to say otherwise the screen shows a green
+    # PASS LEFT seconds after the car backed out of exactly that.
+    manoeuvreStandDown @68 :Float32;
+
     enum Manoeuvre {
       idle @0;         # nothing warranted
       confirming @1;   # a slower vehicle is being confirmed, timer running

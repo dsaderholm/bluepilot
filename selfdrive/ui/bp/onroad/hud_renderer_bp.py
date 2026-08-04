@@ -466,6 +466,11 @@ class HudRendererBP(HudRendererSP):
                      f"{'pass' if pa.crawlEvents == 1 else 'passes'}, worst {pa.crawlLongestSeconds:.0f}s")
       if pa.manoeuvreAborts:
         lines.append(f"{pa.manoeuvreAborts} backed out")
+      # Kept separate from the line above, and named differently, because they are not the same
+      # event: one is the system changing its mind before moving, the other is a crossing reversed
+      # because something was arriving. A single figure would hide the second inside the first.
+      if pa.emergencyAborts:
+        lines.append(f"{pa.emergencyAborts} reversed mid-change")
       # The most useful line here, so it goes first: what actually stopped the passes.
       if pa.wantedSeconds > 5.0 and pa.topBlockedShare > 0.05:
         reason = _BLOCKED_TEXT.get(str(pa.topBlockedBy), str(pa.topBlockedBy))
@@ -554,6 +559,16 @@ class HudRendererBP(HudRendererSP):
     except (AttributeError, KeyError):
       return False
     if phase in ('idle', 'confirming', 'waiting'):
+      # ...unless a crossing was just reversed. The detector still says a pass is warranted and
+      # the lane is clear -- both true -- so with nothing said here the screen falls through to a
+      # green PASS LEFT seconds after the car backed out of exactly that pass. Contradicting
+      # yourself on the one readout a driver is meant to trust is worse than saying nothing.
+      if pa.manoeuvreStandDown > 0.0:
+        self._pa_main = "BACKED OUT"
+        self._pa_sub = f"waiting {pa.manoeuvreStandDown:.0f}s before trying again"
+        self._pa_color = rl.Color(235, 90, 80, 255)
+        self._pa_alert = True
+        return True
       return False   # nothing committed yet; the verdict display below is the better readout
 
     side = str(pa.manoeuvreSide).upper()

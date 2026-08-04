@@ -50,6 +50,8 @@ SCENES = [
    "WOULD BE CHANGING LEFT", "blinker on, steering across", 0.5, True, PURPLE),
   ("dry run: backing out, something arriving behind",
    "WOULD BACK OUT", "something arriving behind", 0.0, True, RED),
+  ("just reversed a crossing, standing down",
+   "BACKED OUT", "waiting 8s before trying again", 0.0, True, RED),
   ("keep right: signalling",
    "WOULD SIGNAL RIGHT", "moving back over", 0.6, True, PURPLE),
   ("a pass that is grinding",
