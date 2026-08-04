@@ -895,7 +895,7 @@ class PassingAssistDetector:
     side = 'left' if CS.leftBlinker else 'right' if CS.rightBlinker else None
     if side is not None:
       if self._driver_blinker != side:
-        if side == 'left' and self.lead_is_slow:
+        if side == 'left' and self.has_lead:
           self._record_driver_pass()
         self._driver_blinker = side
         self._signalled_over_widening = False
@@ -919,6 +919,16 @@ class PassingAssistDetector:
 
     Sampled on the RISING EDGE of the stalk, not afterwards: the driver-active gate blanks the
     suggestion on the very next frame, so a moment later there is nothing left to compare against.
+
+    COUNTED ON ANY LEAD, not only one already judged slow enough. That distinction is the whole
+    value of the miss reason. Requiring lead_is_slow meant a pass the system never even considered
+    -- a car below the deficit threshold, or one it had lost -- incremented nothing at all, so the
+    single most damning failure was the one failure the readiness score could not express. It now
+    lands as a miss against nothingSlower, which is exactly the calibration question worth asking.
+
+    The cost is that a left-hand change made for some other reason, with a lead ahead, counts as a
+    pass. Accepted: with a car in front, passing is overwhelmingly the reason, and a metric that
+    flatters itself by discarding its own misses is worth nothing.
     """
     self.driver_passes += 1
     if self.suggestion == Side.left and self.reason == Reason.passing:

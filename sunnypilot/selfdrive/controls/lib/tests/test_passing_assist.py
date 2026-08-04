@@ -1879,11 +1879,14 @@ class TestAgreementWithTheDriver:
     assert det.blocked_by == Blocked.driverActive
     assert det.driver_passes_agreed == 1, "sampled after the gate had already blanked it"
 
-  def test_signalling_with_nothing_slow_ahead_is_not_a_pass(self):
-    """Changing lanes for an exit, a junction or the sake of it must not count against agreement."""
+  def test_a_car_going_our_own_speed_counts_as_a_pass_it_disagreed_with(self):
+    """It used to be excluded, on the reasoning that changing lanes past a car keeping pace is not
+    really a pass. That reasoning hid the failure that matters most: a deficit threshold set too
+    high would have discarded every pass it caused and reported a perfect score."""
     det = run(PassingAssistDetector(), STUCK_FRAMES, v_lead=CRUISE_MS)
     run(det, 2, blinker=True, v_lead=CRUISE_MS)
-    assert det.driver_passes == 0
+    assert det.driver_passes == 1
+    assert det.driver_passes_agreed == 0
 
   def test_a_right_hand_signal_is_not_counted(self):
     """Ambiguous by nature -- an exit, a keep-right or a pass on the right all look identical, and
@@ -1942,3 +1945,21 @@ class TestSuggestionsNobodyTook:
     run(det, int(2.0 / DT_MDL), v_lead=CRUISE_MS)
     assert det.suggestions_made == 2
     assert det.longest_ignored_s == long_one
+
+  def test_a_car_it_never_judged_slow_still_counts_as_a_pass(self):
+    """The hole this closes, and it was the worst one available: requiring the lead to be judged
+    slow meant a pass the system never considered incremented nothing at all. A deficit threshold
+    set too high would have shown up as a perfect score."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, v_lead=CRUISE_MS - 1.0)   # ~2 mph, under 4
+    assert not det.lead_is_slow
+    run(det, 2, blinker=True, v_lead=CRUISE_MS - 1.0)
+    assert det.driver_passes == 1
+    assert det.driver_passes_agreed == 0
+    assert det.driver_pass_miss_reason == int(Blocked.nothingSlower)
+
+  def test_signalling_with_an_empty_road_is_still_not_a_pass(self):
+    """The line has to be somewhere. No lead at all means no car was passed, whatever the stalk
+    was for -- an exit, a junction, moving over for someone merging."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, status=False)
+    run(det, 2, blinker=True, status=False)
+    assert det.driver_passes == 0
