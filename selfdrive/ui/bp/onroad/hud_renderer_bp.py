@@ -10,7 +10,6 @@ from openpilot.selfdrive.ui.bp.onroad.exp_button_bp import ExpButtonBP
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.selfdrive.ui.bp.lib.ui_debug_logger import bp_ui_log
-from cereal import custom
 from openpilot.system.ui.lib.application import gui_app
 
 LateralMode = ControllerStateBP.LateralMode
