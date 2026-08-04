@@ -56,7 +56,11 @@ DEFAULT_TARGETS = [
   "sunnypilot/selfdrive/car/intelligent_cruise_button_management/tests/",
   "opendbc_repo/opendbc/sunnypilot/car/ford/tests/",
   "sunnypilot/selfdrive/controls/lib/tests/test_unconfirmed_lead.py",
-  "sunnypilot/selfdrive/controls/lib/speed_limit/tests/",
+  # Named files, not the directory: test_speed_limit_assist.py in the same folder imports the
+  # sunnylink/API stack (jwt and friends) and cannot collect without the device environment.
+  # Listing the folder pulled it in and broke collection for everything.
+  "sunnypilot/selfdrive/controls/lib/speed_limit/tests/test_upcoming_limit.py",
+  "sunnypilot/selfdrive/controls/lib/speed_limit/tests/test_speed_limit_resolver.py",
   "selfdrive/car/tests/test_structs_capnp_parity.py",
   "selfdrive/ui/bp/onroad/tests/",
   "system/tests/test_sentry_disabled_by_default.py",

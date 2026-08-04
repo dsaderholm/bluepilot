@@ -67,7 +67,7 @@ Environment (already set up): `../.venv-bp312`, a 3.12.13 venv. Recreate with:
 ```bash
 uv python install 3.12
 uv venv --python 3.12 ../.venv-bp312
-uv pip install --python ../.venv-bp312/Scripts/python.exe pytest pycapnp numpy zstandard requests tqdm crcmod-plus sympy pyserial raylib ruff
+uv pip install --python ../.venv-bp312/Scripts/python.exe pytest pytest-mock pycapnp numpy zstandard requests tqdm crcmod-plus sympy pyserial raylib ruff pycryptodome sentry-sdk
 ```
 
 ## What offline tests do NOT cover
