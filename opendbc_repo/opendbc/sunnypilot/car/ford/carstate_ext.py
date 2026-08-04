@@ -17,7 +17,7 @@ from openpilot.common.swaglog import cloudlog
 
 
 # BluePilot: Traffic_RecognitnData (0x3CD) signal map, capnp field -> CAN signal. Logged whole so
-# the camera's actual behaviour can be read from a route. wrongWayAlert is handled separately
+# the camera's actual behavior can be read from a route. wrongWayAlert is handled separately
 # because it is the one Bool.
 _TSR_SIGNALS = (
   ("vLimit1", "TsrVLim1MsgTxt_D_Rq"),

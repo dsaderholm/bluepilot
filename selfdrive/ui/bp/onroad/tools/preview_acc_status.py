@@ -121,7 +121,7 @@ def main(outdir):
       _draw_arrow=ns["_draw_arrow"],
     )
     rl.begin_texture_mode(tex)
-    # Mid-grey stands in for road: bright enough to catch anything relying on a dark backdrop.
+    # Mid-gray stands in for road: bright enough to catch anything relying on a dark backdrop.
     rl.draw_rectangle_gradient_v(0, 0, W, H, rl.Color(96, 100, 106, 255), rl.Color(52, 55, 60, 255))
     rl.draw_rectangle_gradient_v(0, 0, W, HEADER_H, rl.Color(0, 0, 0, 114), rl.Color(0, 0, 0, 0))
 

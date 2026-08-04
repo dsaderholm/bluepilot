@@ -165,7 +165,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // Small enough and every zone-to-zone drift throws away the driver's number; large enough
     // and a 55-zone baseline follows them into a 35 zone.
     {"IcbmBaselineResetDelta", {PERSISTENT | BACKUP, INT, "10"}},
-    // BluePilot: furthest a vision-only lead is considered for the radar-blind decel, in metres.
+    // BluePilot: furthest a vision-only lead is considered for the radar-blind decel, in meters.
     // Ford ACC handles close leads itself; the case this exists for is a stopped car far ahead.
     {"IcbmLeadMaxDistance", {PERSISTENT | BACKUP, INT, "180"}},
     // BluePilot: time-to-collision bound for the radar-blind lead trigger, in tenths of a second.
@@ -187,7 +187,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // controller that then has to drive -- Ford ACC reads resume as "go", accelerates toward the
     // set speed, and brakes hard when its radar finds the lead still a few feet away.
     {"IcbmResumeGateEnabled", {PERSISTENT | BACKUP, BOOL, "1"}},
-    {"IcbmResumeMinGap", {PERSISTENT | BACKUP, INT, "6"}},        // metres of lead gap
+    {"IcbmResumeMinGap", {PERSISTENT | BACKUP, INT, "6"}},        // meters of lead gap
     {"IcbmResumeMinLeadSpeed", {PERSISTENT | BACKUP, INT, "5"}},  // mph the lead must be doing
     {"DeviceBootMode", {PERSISTENT | BACKUP, INT, "0"}},
     {"DevUIInfo", {PERSISTENT | BACKUP, INT, "0"}},
@@ -308,7 +308,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
 
     // Smart Cruise Control
     // BluePilot: both curve controllers default ON, and the vision tuning leans toward slowing
-    // more than stock. The owner's stated objective is to minimise how often they have to take
+    // more than stock. The owner's stated objective is to minimize how often they have to take
     // over, explicitly accepting a slower car for it -- and lateral demand goes as v^2, so taking
     // 7% off the corner speed removes ~13% of the steering the PSCM has to find. The two are
     // min()'d in the planner, never summed, so running both cannot compound into a double slowdown.
@@ -326,14 +326,14 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // BluePilot's own writeup of angle control, that gain is a CALIBRATION: path_angle is derived
     // as curvature * v_ego * gain, which is pure geometry, and the gain exists only because the
     // PSCM continuously compensates for yaw, sway and roll against a factory model of the vehicle
-    // it believes it is installed in. A correctly dialled gain means the car tracks the path it
+    // it believes it is installed in. A correctly dialed gain means the car tracks the path it
     // was asked to -- there is no steering deficit for a lower corner speed to make up.
     //
     // (The over-aggressive-model problem is real but belongs to CURVATURE mode: desired curvature
     // swinging about predicted on straights, which is what the blend ratio addresses. Angle mode
     // zeroes c2/c3 and does not have it.)
     //
-    // So these are set from the objective alone -- minimise takeovers, slower is explicitly
+    // So these are set from the objective alone -- minimize takeovers, slower is explicitly
     // acceptable -- and a flat modest bump is the honest expression of that. If the angle gains
     // move after the alignment, these do NOT need to move with them.
     {"SmartCruiseControlVisionLowSpeedFactor", {PERSISTENT | BACKUP, INT, "110"}},
@@ -394,7 +394,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"enable_lane_full_mode_curv", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"custom_profile_curv", {PERSISTENT | BACKUP, INT, "0"}},
     {"LC_PID_gain_UI_curv", {PERSISTENT | BACKUP, FLOAT, "3.0"}},
-        // BluePilot: the owner's dialled-in values, not the upstream 1.0. These are a CALIBRATION,
+        // BluePilot: the owner's dialed-in values, not the upstream 1.0. These are a CALIBRATION,
     // not a detune. path_angle = curvature * v_ego * gain, which is pure geometry; the gain exists
     // because the PSCM continuously compensates for yaw/sway/roll against a factory model of the
     // vehicle it thinks it is in. This car is a Fusion carrying an Edge PSCM and Edge rack on

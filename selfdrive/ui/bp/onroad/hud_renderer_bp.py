@@ -55,7 +55,7 @@ HOLD_FILL = rl.Color(30, 78, 176, 235)
 # BluePilot: while a curve, map point or hazard owns the target, a set-speed press cannot change
 # the hold -- it gives a momentary bump the suppressor reclaims within about a second. That is
 # deliberate, but it means the press does not do what a press normally does, so the badge goes
-# grey to say so. Without it the button silently has no lasting effect and looks broken.
+# gray to say so. Without it the button silently has no lasting effect and looks broken.
 HOLD_LOCKED_FILL = rl.Color(84, 90, 98, 225)
 HOLD_LOCKED_EDGE = rl.Color(140, 148, 156, 235)
 HOLD_LOCKED_LABEL = rl.Color(178, 186, 194, 255)
@@ -67,7 +67,7 @@ HOLD_VALUE_SIZE = 66
 # Dark ink on the filled ACCEL/BRAKE pills; they are bright enough that white text greys out.
 ACC_INK = rl.Color(10, 14, 20, 255)
 # States with no magnitude to report: no number, no intensity bar. They are still filled -- the
-# colour IS the reading for these two.
+# color IS the reading for these two.
 QUIET_ACC_STATES = ("COAST", "PRE-BRAKE")
 ACC_PILL_WIDTH = 268   # wider than the MAX column: "BRAKE 1.4" does not fit 172 px legibly
 ACC_PILL_HEIGHT = 78
@@ -76,7 +76,7 @@ ACC_LABEL_MIN_SIZE = 26  # floor for the shrink-to-fit above; below this it stop
 ACC_VALUE_SIZE = 34
 ACC_MAX_MAG = 2.5      # m/s^2 that fills the intensity bar
 STACK_GAP = 12
-# BluePilot: the stop lamps themselves, as their own readout rather than only as a speed colour.
+# BluePilot: the stop lamps themselves, as their own readout rather than only as a speed color.
 #
 # This is a REAL signal, not an inference: BCM_Lamp_Stat_FD1's StopLghtOn_B_Stat is the body
 # control module reporting actual lamp state, with BrakeSysFeatures_2's BrkLamp_B_Rq as fallback.
@@ -113,9 +113,9 @@ class HudRendererBP(HudRendererSP):
     # BluePilot: Ford ACC asking for brakes, which is not the same event as the lamps lighting.
     # Light applications decelerate without ever reaching the stop-lamp threshold.
     self._acc_braking = False
-    # BluePilot: what Ford ACC is asking for, and what ICBM is doing about it. The speed colours
+    # BluePilot: what Ford ACC is asking for, and what ICBM is doing about it. The speed colors
     # above say what traffic behind you sees; these say what the systems are requesting. Those are
-    # different facts, which is why this is a separate readout rather than more colours.
+    # different facts, which is why this is a separate readout rather than more colors.
     self._acc_state = ""      # "ACCEL" / "COAST" / "BRAKE", "" when unknown
     self._acc_accel = 0.0     # m/s^2, signed
     self._icbm_baseline = 0   # the driver's held set speed; 0 = no hold
@@ -429,7 +429,7 @@ class HudRendererBP(HudRendererSP):
     """BluePilot: what Ford ACC is asking for, and how hard."""
     rect = rl.Rectangle(x, y, ACC_PILL_WIDTH, ACC_PILL_HEIGHT)
 
-    # All four states are filled: the colour is the reading, and its position on the green-to-red
+    # All four states are filled: the color is the reading, and its position on the green-to-red
     # scale is what makes the pill glanceable. COAST is muted in ACC_STATUS_COLORS rather than
     # given a different treatment here, so the scale stays continuous.
     rl.draw_rectangle_rounded(rect, 0.42, 10, ACC_STATUS_COLORS.get(self._acc_state, COLORS.WHITE))
@@ -457,7 +457,7 @@ class HudRendererBP(HudRendererSP):
                       rl.Vector2(x + ACC_PILL_WIDTH - 22 - value_width, y + 20),
                       ACC_VALUE_SIZE, 0, ink)
       # Intensity as its own bar rather than as a fill behind the text: clipping a rounded rect
-      # leaves a hard vertical seam that reads as a rendering fault, and it forced the ink colour
+      # leaves a hard vertical seam that reads as a rendering fault, and it forced the ink color
       # to change halfway across the pill.
       bar_width, bar_height = ACC_PILL_WIDTH - 44, 7
       bar_x, bar_y = x + 22, y + ACC_PILL_HEIGHT - 16
@@ -503,7 +503,7 @@ class HudRendererBP(HudRendererSP):
     )
     self.speed_right = speed_pos.x + speed_text_size.x
 
-    # BluePilot: colour the speed by what the brakes are doing, if brake status is enabled.
+    # BluePilot: color the speed by what the brakes are doing, if brake status is enabled.
     #   red   -> stop lamps are lit: traffic behind you is being told you are slowing
     #   amber -> ACC is asking for brakes but the lamps have not lit, i.e. a light application
     #            below the stop-lamp threshold. This is the "slowed without anyone noticing"

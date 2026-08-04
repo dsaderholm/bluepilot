@@ -119,7 +119,7 @@ class CruiseLayout(Widget):
                      "how far the posted limit has to move before your number is discarded and "
                      "Speed Limit Assist takes over again. Curves and lead vehicles never discard "
                      "it. You can also hand it back at any time by setting the speed to exactly "
-                     "the limit, or by cancelling and re-engaging."),
+                     "the limit, or by canceling and re-engaging."),
       param="IcbmBaselineResetDelta",
       min_value=0, max_value=30, value_change_step=1,
       label_callback=lambda v: tr("Never") if v == 0 else self._speed_step_label(v),
@@ -133,7 +133,7 @@ class CruiseLayout(Widget):
       description=tr("How early to slow for a vehicle the camera sees but the radar has not "
                      "confirmed -- most importantly a stopped car ahead. Measured as how many "
                      "seconds away it is. Higher reacts sooner. This is the control that changes "
-                     "behaviour; the distance limit below rarely comes into play."),
+                     "behavior; the distance limit below rarely comes into play."),
       param="IcbmLeadMaxTtc",
       min_value=10, max_value=80, value_change_step=5,
       # Stored in tenths of a second, so the raw number is 10x what the driver should read.
@@ -241,7 +241,7 @@ class CruiseLayout(Widget):
     # ten controls, and flat they read as a wall of unrelated numbers -- there was no way to tell
     # which ones affect the set speed, which affect hazards, and which only matter at a stop.
     #
-    # Behaviour settings live here, next to the feature that owns them; the display side of the
+    # Behavior settings live here, next to the feature that owns them; the display side of the
     # same work (Show Ford ACC Status) stays in the BluePilot panel with the other display
     # toggles. That split is deliberate: this panel changes what the car does, that one changes
     # what you are shown.

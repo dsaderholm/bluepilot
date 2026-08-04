@@ -26,7 +26,7 @@ there is not. Reusing it means no new tuning, and it keeps this off ICBM's targe
 limiter, which is scoped to routine speed-limit and curve changes.
 
 Thresholds here are starting values reviewed before first drive, not derived constants. The
-range-sweep requirement is the main defence against bridge, overpass and guardrail false
+range-sweep requirement is the main defense against bridge, overpass and guardrail false
 positives, and along with the usable detection range it should be refitted from real drive logs.
 """
 
@@ -83,7 +83,7 @@ STOPPED_LEAD_PERSISTENCE_S = 0.3   # enough to reject a single bad model frame, 
 #
 # So above CONFIDENT_MODEL_PROB on a stopped target, trade kinematic evidence for classifier
 # evidence and require only enough sweep to show the range is closing at all. Not zero: a few
-# metres costs ~0.14 s at 65 mph and is the only guard left against a model that latches onto a
+# meters costs ~0.14 s at 65 mph and is the only guard left against a model that latches onto a
 # static structure and holds it -- the signature test_persistence_alone_does_not_trigger covers.
 CONFIDENT_MODEL_PROB = 0.85
 CONFIDENT_RANGE_SWEEP_M = 4.0
@@ -108,7 +108,7 @@ LEAD_LOST_S = 0.5          # candidate gone this long -> released
 # in longitudinal_planner only decides whether the planner consumes it. It is the same signal that
 # stops the car under openpilot longitudinal with experimental mode, which is reported to work well
 # on this vehicle for signs and signals -- the reason for running stock Ford ACC is the rest of
-# op long's behaviour, not this part of it.
+# op long's behavior, not this part of it.
 #
 # This is the only signal available for the case the lead trigger structurally cannot catch: a sign
 # or signal with no vehicle at it produces no lead, so there is no dRel, vRel or TTC to gate on.

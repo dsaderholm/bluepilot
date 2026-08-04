@@ -40,7 +40,7 @@ struct IntelligentCruiseButtonManagement {
   # dead code -- every drive appeared to show only the fallback firing, and deleting the press path
   # and its hand-picked settle timers would have removed the source of most of this feature's
   # defects. The answer was no: a badge tag on a real 5 mph hold showed the press path firing
-  # first, with the fallback relabelling it a frame later. The press path stays.
+  # first, with the fallback relabeling it a frame later. The press path stays.
   #
   # The on-screen tag is gone now that its question is answered. The field stays: it costs a byte,
   # it is the only way to tell the two capture paths apart in a route, and a capnp field number

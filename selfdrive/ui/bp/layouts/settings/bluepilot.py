@@ -137,7 +137,7 @@ class BluePilotLayout(Widget):
       enabled=self._pinion_yaw_sensor_supported,
     )
 
-    # Lane line status color toggle (issue #109: option to keep lane lines grey instead of green when engaged)
+    # Lane line status color toggle (issue #109: option to keep lane lines gray instead of green when engaged)
     self._disable_lane_line_status_color = toggle_item(
       lambda: tr("Disable Lane Line Status Color"),
       lambda: tr("Keep lane lines grey instead of changing to green when engaged."),
@@ -185,7 +185,7 @@ class BluePilotLayout(Widget):
     # Brake status toggle
     self._show_brake_status = toggle_item(
       lambda: tr("Show Ford ACC Status"),
-      lambda: tr("Colour the current speed red when the stop lamps are lit and amber when ACC is "
+      lambda: tr("Color the current speed red when the stop lamps are lit and amber when ACC is "
                  "braking without lighting them, and show under the MAX box what ACC is asking "
                  "for (ACCEL / COAST / BRAKE, in m/s2) plus what ICBM is doing to the set speed."),
       initial_state=self._safe_get_bool(self._params, "ShowBrakeStatus"),

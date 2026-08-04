@@ -60,7 +60,7 @@ RE_ARM_ON_CRUISE_CYCLE = True  # cancel (or any disengage) followed by re-engage
 # to be remembered across the transition rather than read on the cycle frame.
 RESUME_BUTTONS = (ButtonType.resumeCruise,)
 RESUME_PRESS_MEMORY_FRAMES = 150  # 1.5 s at 100 Hz, generous next to the engage delay
-# ...but the button event must not be DEPENDED on, so RESUME is also recognised from BEHAVIOUR.
+# ...but the button event must not be DEPENDED on, so RESUME is also recognized from BEHAVIOR.
 #
 # Read the reasoning below carefully, because an earlier version of this comment got it backwards
 # and the wrong version is more persuasive than the right one. It claimed baselineSource read "I"
@@ -72,9 +72,9 @@ RESUME_PRESS_MEMORY_FRAMES = 150  # 1.5 s at 100 Hz, generous next to the engage
 # button keeps stepping the set speed for seconds afterwards. Instrumented on a real 5 mph hold --
 # press at the button event, still press at idle 67, overwritten to fallback at idle 128. The
 # BaselineSource.press guard at the fallback site (see "NEVER downgrade a press") is what stops
-# the relabelling now.
+# the relabeling now.
 #
-# So the behavioural path below is belt-and-braces, not a replacement. It matters because RESUME
+# So the behavioral path below is belt-and-braces, not a replacement. It matters because RESUME
 # has to survive even a frame where the event is missed or arrives outside the memory window --
 # not because the events never come.
 #
@@ -169,10 +169,10 @@ CRUISE_CYCLE_STABLE_FRAMES = 40  # 0.4 s unchanged => the resume jump has landed
 #
 # That assumption is wrong, and it matters. UN R13-H lights the lamps above 1.3 m/s^2 of
 # automatically commanded braking -- so there is a band where ACC uses the friction brakes without
-# signalling anything. Coasting is not the only quiet option.
+# signaling anything. Coasting is not the only quiet option.
 #
 # Which splits one constraint into two, and they want different things:
-#   signalling  -> the lamps. Governed by 1.3 m/s^2, shown by the BRAKE LAMPS readout.
+#   signaling  -> the lamps. Governed by 1.3 m/s^2, shown by the BRAKE LAMPS readout.
 #   pad wear    -> whether the friction brakes are used at all. That is AccBrkDecel_B_Rq, which is
 #                  what puts the ACC pill into BRAKE.
 #
@@ -222,7 +222,7 @@ RISE_STEP_SETTLE_MARGIN = 4  # display units (mph/kph)
 # what is holding the car back. Very often it is not: behind slower traffic, on a climb, or while
 # ACC is braking for a lead, v_ego simply never gets there and the ceiling never advances -- so
 # ICBM could not raise the set speed again for the rest of the drive. Reported as being stuck at a
-# low set speed while travelling well below it, with no curve in sight.
+# low set speed while traveling well below it, with no curve in sight.
 #
 # Raising the set speed in that situation is harmless: it is a ceiling, not a demand, and ACC stays
 # gap-limited behind the lead either way. So once the cluster has sat at the ceiling this long,
@@ -446,7 +446,7 @@ class IntelligentCruiseButtonManagement:
                                so their number replaces it. Above or below the posted limit; the
                                baseline wins either way and SLA does not pull them back.
       curve / map / lead    -> min(planned, baseline). A curve target is a physics limit and is
-                               honoured as-is; the baseline only ever caps, never raises it. This
+                               honored as-is; the baseline only ever caps, never raises it. This
                                is what keeps SCC slowing you down while overridden.
 
     Because the baseline is a value rather than a mode, everything downstream -- the state machine,
@@ -481,7 +481,7 @@ class IntelligentCruiseButtonManagement:
     # curve, or leaving a low-limit zone. That only happens on an open road, where the set speed is
     # what ACC chases. With a lead ahead ACC is gap-limited: it follows the car in front and the
     # set speed is a ceiling it never reaches, so raising it changes nothing about how the car
-    # drives. Metering there bought no safety and cost real behaviour -- it is what left the set
+    # drives. Metering there bought no safety and cost real behavior -- it is what left the set
     # speed stuck low behind traffic, since actual speed could never catch up to release the step.
     #
     # The owner's framing, which is the right one: behind a car, set the speed to anything, because

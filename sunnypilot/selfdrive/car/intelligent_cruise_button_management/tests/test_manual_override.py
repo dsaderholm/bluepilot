@@ -4,7 +4,7 @@ Copyright (c) 2021-, Haibin Wen, sunnypilot, and a number of other contributors.
 This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 
-BluePilot: behavioural tests for the ICBM driver baseline.
+BluePilot: behavioral tests for the ICBM driver baseline.
 
 A set-speed press means "for this speed limit I want a different number", not "stop managing my
 cruise". Two real defects came from getting that wrong: ICBM dragging the set speed back down to
@@ -88,16 +88,17 @@ def set_baseline(icbm, to=DRIVER):
 
 def settle(icbm, target, cluster=DRIVER, frames=150, source=PlanSource.speedLimitAssist):
   """Default runs past PRESS_SETTLE_FRAMES: ICBM stands down for 0.6 s after a driver press, so
-  a shorter settle would assert on the stand-down rather than on steady-state behaviour."""
+  a shorter settle would assert on the stand-down rather than on steady-state behavior."""
   for _ in range(frames):
     icbm.run(make_cs(cluster), CC, make_lp(target, source=source), False)
 
 
 def cycle_with_set(icbm, road_speed=48, off_frames=200, source=PlanSource.speedLimitAssist):
   """Cancel, then SET. Ford puts the set speed at the CURRENT VEHICLE SPEED, and that is how the
-  behavioural detector tells SET from RESUME -- CS.buttonEvents delivers nothing on this car, so
-  the button is not available to ask. road_speed must differ from the set speed before the cancel,
-  or the two are genuinely indistinguishable."""
+  behavioral detector tells SET from RESUME without needing a button event. (This car DOES deliver
+  button events -- an earlier version of this docstring said otherwise, and that claim nearly got
+  the press path deleted.) road_speed must differ from the set speed before the cancel, or the two
+  are genuinely indistinguishable."""
   for _ in range(off_frames):
     icbm.run(make_cs(DRIVER, v_ego=road_speed, enabled=False), CC, make_lp(LIMIT, source=source), False)
   for _ in range(300):                       # past CRUISE_CYCLE_SETTLE_FRAMES either way
@@ -946,7 +947,7 @@ class TestResumeWindowEndsWhenTheJumpLands:
 
 
 class TestRiseLimiterCannotStallForever:
-  """Reported: ICBM stuck at a low set speed while travelling well below it, no curve involved.
+  """Reported: ICBM stuck at a low set speed while traveling well below it, no curve involved.
 
   The rise limiter only advanced its ceiling once ACTUAL vehicle speed reached it, which assumes
   the set speed is what is holding the car back. Behind slower traffic, on a climb, or while ACC
@@ -974,7 +975,7 @@ class TestRiseLimiterCannotStallForever:
 
 
 class TestTheHoldSurvivesADisengagement:
-  """Reported: hold set, cruise cancelled to make a turn, RESUME pressed, hold gone.
+  """Reported: hold set, cruise canceled to make a turn, RESUME pressed, hold gone.
 
   Neither clearing rule was gated on cruise being engaged. Turning off a road changes the posted
   limit, which fired the 10 mph limit-change rule -- so the hold was destroyed silently, mid-turn,
@@ -1227,8 +1228,8 @@ class TestResumeIsRecognisedWithoutAButtonEvent:
   cancel-and-resume even when no resumeCruise ButtonEvent ever arrives.
 
   Do not read this as "this car delivers no button events". It does -- baselineSource on a real
-  5 mph hold showed the press path capturing first, with the fallback relabelling it a frame
-  later. An earlier reading of "always I" was that relabelling, not a dead press path, and acting
+  5 mph hold showed the press path capturing first, with the fallback relabeling it a frame
+  later. An earlier reading of "always I" was that relabeling, not a dead press path, and acting
   on it would have deleted working code.
 
   What this class actually pins down is that the resume path must not DEPEND on a button event.
@@ -1276,7 +1277,7 @@ class TestPressIsNotRelabelledByTheFallback:
   """
 
   def test_a_realistic_press_and_hold_still_reads_as_press(self):
-    """5 mph jumps with stationary gaps -- the car's actual behaviour, not one step per frame."""
+    """5 mph jumps with stationary gaps -- the car's actual behavior, not one step per frame."""
     icbm = fresh()
     icbm.run(make_cs(LIMIT, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT), False)
     assert icbm.baseline_source == BaselineSource.press
@@ -1289,7 +1290,7 @@ class TestPressIsNotRelabelledByTheFallback:
     icbm.run(make_cs(cluster, buttons=(ACCEL_RELEASE,)), CC, make_lp(LIMIT), False)
     settle(icbm, LIMIT, cluster=cluster, frames=200)
     assert icbm.baseline_source == BaselineSource.press, \
-      "the fallback relabelled a press; the diagnostic answers the wrong question again"
+      "the fallback relabeled a press; the diagnostic answers the wrong question again"
     assert icbm.v_baseline == cluster
 
   def test_the_fallback_still_labels_itself_when_it_is_the_only_one(self):

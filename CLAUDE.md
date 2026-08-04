@@ -79,14 +79,14 @@ Anything needing compiled extensions, a real CAN bus, or a display. Two specific
   device on "waiting to start". This happened for real when an upstream merge added a second
   `Traffic_RecognitnData` registration. `test_can_parser_messages.py` now stubs `CANParser`/`DBC`
   and asserts on the argument lists across all flag combinations. **Anything that builds a parser
-  or runs at car init needs a test of this shape** — the behavioural suite never reaches it.
+  or runs at car init needs a test of this shape** — the behavioral suite never reaches it.
 - **Settings screens rendering.** Structure and names can be checked statically (see below), but
   nothing renders them offline.
 
 Onroad HUD drawing *is* checkable, and the check is **trustworthy**:
 `selfdrive/ui/bp/onroad/tools/preview_acc_status.py` renders the shipped drawing methods to PNG at
 device scale. The owner confirmed on 2026-08-03, after driving it, that the car looks *exactly*
-like the preview renders -- colours, sizes, spacing, all of it.
+like the preview renders -- colors, sizes, spacing, all of it.
 
 So treat a preview render as the answer, not an approximation. Iterate on it until it looks right
 and ship that; do not caveat UI work with "we won't know until you drive it", and do not ask the
@@ -119,7 +119,7 @@ anything else.
 Management is in scope whatever layer owns the file, bug or feature, without asking. ICBM itself
 lives under `sunnypilot/`, most of what it reads is sunnypilot's, and the whole point of this fork
 is making it work properly on this car -- so "that is upstream's file" is not a reason to leave ICBM
-behaviour broken. The same goes for anything ICBM depends on: `cruise_ext.py`'s button timers feed
+behavior broken. The same goes for anything ICBM depends on: `cruise_ext.py`'s button timers feed
 the press stand-down, so they are ICBM's business too.
 
 The rule is about bugs that are *not ours*. A boot-splash warning is not ours. ICBM always is.
@@ -235,8 +235,31 @@ Two things that decided the design:
   If it did, every engagement would create a hold and SLA would never manage a limit unless the
   driver explicitly handed it back each drive. `+` is already the deliberate "I want a different
   number" gesture, so SET is left meaning "engage and manage it".
-- **Tap moves the set speed 1 mph, press-and-hold moves it 5 mph** — the car's behaviour, not
+- **Tap moves the set speed 1 mph, press-and-hold moves it 5 mph** — the car's behavior, not
   openpilot's. Model set-speed movement as 5 mph jumps with stationary gaps, never a 1 mph ramp.
+
+## Language and units — US
+
+The owner is in the United States (Utah). Everything written here is **US English**: comments,
+docstrings, commit messages, settings labels, alert text.
+
+This was not being followed. A single pass on 2026-08-04 corrected 60 instances of *behaviour*,
+*metres*, *colour*, *signalling*, *minimise*, *grey*, *dialled* and friends that had accumulated
+across this branch. It reads as someone else's codebase, and upstream openpilot is US English
+throughout, so the mixture is worse than either convention alone.
+
+Units have a split that matters, and it is **not** a style choice:
+
+- **Internally, SI.** Speeds are m/s, distances metres, accelerations m/s². That is openpilot's
+  convention end to end and changing it would break every interface. Do not "fix" it.
+- **Anything a driver reads, US customary.** mph, feet, miles. The conversion happens at the
+  display boundary via `CV.MS_TO_MPH` and the `is_metric` param.
+- **Comments describing driver-facing behavior should use mph**, even when the code beside them is
+  in m/s — "below 6 mph" is the useful statement; "below 2.68 m/s" is not. Give both when the
+  constant itself is SI.
+
+Dates in comments: **ISO `YYYY-MM-DD`**. Not because it is US style — it is not — but because
+`08-04` is genuinely ambiguous across readers and this file already records dated decisions.
 
 ## Car
 

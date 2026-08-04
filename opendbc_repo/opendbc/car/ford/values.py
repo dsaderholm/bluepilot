@@ -168,7 +168,7 @@ class CAR(Platforms):
   # steerRatio is MEASURED, not from a spec sheet: paramsd learned 17.23 (std 0.010, valid) while
   # running Edge's wheelbase of 2.824. The vehicle model uses steerRatio * wheelbase, so 17.23 is
   # rescaled to 17.07 here for the Fusion's 2.85 -- otherwise correcting the wheelbase would
-  # silently change the steering behaviour that value was learned to produce.
+  # silently change the steering behavior that value was learned to produce.
   #
   # mass is CURB weight; openpilot adds STD_CARGO_KG itself (Edge: 1933 here shows as 2069 in
   # CarParams). 1731 kg = 3816 lb, 2020 Titanium AWD.

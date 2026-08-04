@@ -65,7 +65,7 @@ class Drive:
     self.icbm.run(cs, CC, lp, False)
 
     # ICBM holds the state for many frames but only puts a frame on the wire every SEND_PERIOD,
-    # then the cluster responds CLUSTER_LAG later. Modelling the throttle matters: applying a
+    # then the cluster responds CLUSTER_LAG later. Modeling the throttle matters: applying a
     # step every frame would move the set speed 5x faster relative to the dead time and turn a
     # 1-2 mph settle into a large oscillation that the car does not actually have.
     step = 0

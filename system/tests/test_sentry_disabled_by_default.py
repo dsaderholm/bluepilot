@@ -3,7 +3,7 @@ BluePilot fork: crash/log reporting must stay OPT-IN.
 
 This exists for merges, not for the code. Upstream edits system/sentry.py often -- DSN changes,
 noise filters, integrations -- so the opt-in guard at the top of init() is exactly the kind of
-small local change that gets dropped when a conflict is resolved in upstream's favour. Nothing
+small local change that gets dropped when a conflict is resolved in upstream's favor. Nothing
 about that failure is visible: the fork keeps working and quietly starts transmitting again.
 
 So assert the property rather than trusting the diff. If a rebase or merge loses the guard, this

@@ -76,7 +76,7 @@ def test_no_duplicate_messages(flags, enable_bsm, transmission):
 
 
 def test_tsr_message_present_when_the_flag_is_set():
-  """The flag comes from the camera fingerprint, not the platform, so it has to be honoured on
+  """The flag comes from the camera fingerprint, not the platform, so it has to be honored on
   CANFD too -- deleting the flag-gated branch to fix the duplicate would have broken that."""
   for flags in (FordFlags.TSR, FordFlags.TSR | FordFlags.CANFD):
     _pt, cam = _collect_messages(flags, enable_bsm=False)

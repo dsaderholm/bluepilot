@@ -47,7 +47,7 @@ def setup_sm_mock(mocker: MockerFixture):
   }, mocker)
   # BluePilot: time.time(), not time.monotonic(). The field is a UNIX timestamp -- gpsLocation
   # publishes GPS time -- and feeding it a boot-relative clock is the same epoch confusion the
-  # resolver itself had. It cancelled out while the code was also using monotonic, so these tests
+  # resolver itself had. It canceled out while the code was also using monotonic, so these tests
   # passed against broken code and the stale-data test below passed for the wrong reason.
   gps_data = create_mock({
     'unixTimestampMillis': time.time() * 1e3,

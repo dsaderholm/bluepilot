@@ -159,7 +159,7 @@ class SpeedLimitResolver:
     self.distance_solutions[SpeedLimitSource.map] = 0.
 
     # Start easing down BEFORE the sign, so the new limit is met at the sign rather than a
-    # hundred metres past it -- and at LIMIT_ADAPT_ACC = -1.0 m/s^2, which is deliberately under
+    # hundred meters past it -- and at LIMIT_ADAPT_ACC = -1.0 m/s^2, which is deliberately under
     # the 1.3 m/s^2 that lights the stop lamps. Coast in, do not brake at the boundary.
     if 0. < next_speed_limit < self.v_ego:
       adapt_time = (next_speed_limit - self.v_ego) / LIMIT_ADAPT_ACC
