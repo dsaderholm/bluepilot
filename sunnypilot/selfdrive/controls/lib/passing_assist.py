@@ -502,6 +502,18 @@ class PassingAssistDetector:
       self.oncoming_memory_s = float(self.params.get("PassingAssistOncomingMemory", return_default=True))
       self.maneuver.blinker_lead_s = float(self.params.get("PassingAssistBlinkerLead", return_default=True))
       self.keep_right_maneuver.blinker_lead_s = self.maneuver.blinker_lead_s
+
+      # The crossing takes as long as this car's own lane changes take -- measured from the
+      # driver's nudgeless ones, because that is the exact maneuver passing assist would perform.
+      # A guess only until there has been one.
+      try:
+        lc = self.params.get("LaneChangeStats")
+        measured = float(lc.get("seconds", 0.0)) if lc else 0.0
+        if measured > 0.5:
+          self.maneuver.change_duration_s = measured
+          self.keep_right_maneuver.change_duration_s = measured
+      except Exception:  # noqa: BLE001 - a malformed param must not reach the planner
+        pass
       self.min_approach_setting = float(self.params.get("PassingAssistMinApproach", return_default=True))
 
       # Carry the last drive's measurement across the ignition cycle. Without this, Auto is off for

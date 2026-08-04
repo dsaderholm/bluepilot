@@ -50,10 +50,17 @@ Phase = custom.LongitudinalPlanSP.PassingAssist.Maneuver
 # abort, which is the honest cost of signaling early and exactly what the count is for.
 DEFAULT_BLINKER_LEAD_S = 1
 
-# A nominal lane change, used only to give the dry run a plausible duration for the phase nothing
-# can measure. openpilot's own LANE_CHANGE_TIME_MAX is 10 s as an upper bound; a comfortable
-# highway lane change is around four. Nothing depends on this being right -- it changes how long
-# the readout says "crossing" and nothing else.
+# How long the crossing takes -- a FALLBACK only, used until the car has measured its own.
+#
+# Settled with the owner: passing assist must not have its own steering. When it acts, it drives
+# the SAME lane change sunnypilot already performs -- same model, same lateral tuning, same
+# lane_change_factor -- with the trigger coming from the system instead of the stalk. "I do like
+# how nudgeless lane changes work right now, and would like passing assist ones to match."
+#
+# So the honest duration is not a number chosen here at all; it is whatever his own nudgeless
+# changes take, which auto_lane_change.py measures and stores. This value is what the dry run uses
+# before there is a measurement, and it is superseded the moment there is one -- which also means
+# that if lateral tuning is ever retuned, the dry run follows without anyone remembering to.
 CHANGE_DURATION_S = 4.0
 
 # How long the completed state is held so it is readable, before returning to idle.
@@ -81,6 +88,8 @@ class PassingManeuver:
     self.phase_seconds = 0.0
     self.side = Side.none
     self.blinker_lead_s = float(DEFAULT_BLINKER_LEAD_S)
+    # Replaced by the measured duration of the driver's own lane changes. See CHANGE_DURATION_S.
+    self.change_duration_s = float(CHANGE_DURATION_S)
     # The number this module exists to produce. Counts sequences that reached `signaling` and then
     # backed out -- a blinker shown to traffic behind for a maneuver that did not happen.
     self.aborts = 0
@@ -163,7 +172,7 @@ class PassingManeuver:
 
     if self.phase == Phase.changing:
       # Committed against gates. Only the clock, or something arriving behind, ends this.
-      if self.phase_seconds >= CHANGE_DURATION_S:
+      if self.phase_seconds >= self.change_duration_s:
         self._to(Phase.finishing)
       return
 

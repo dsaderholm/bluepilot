@@ -23,6 +23,7 @@ from types import SimpleNamespace as NS
 from cereal import custom
 from openpilot.common.constants import CV
 from openpilot.common.realtime import DT_MDL
+from openpilot.sunnypilot.selfdrive.controls.lib.passing_maneuver import CHANGE_DURATION_S
 from openpilot.sunnypilot.selfdrive.controls.lib.passing_assist import (
   PassingAssistDetector, MIN_LANE_WIDTH_M, DEFAULT_MIN_SPEED_MPH, MAX_WIDENING_M,
 )
@@ -2053,3 +2054,46 @@ class TestLifetimeTotals:
     run(det, STUCK_FRAMES)
     run(det, 2, blinker=True)
     assert det.lifetime == (1, 1, 1)
+
+
+class TestTheCrossingUsesTheCarsOwnDuration:
+  """Settled with the owner: passing assist must not have its own steering. When it acts it drives
+  the SAME lane change sunnypilot already performs -- same model, same lateral tuning, same
+  lane_change_factor -- with the trigger coming from the system instead of the stalk.
+
+  So the crossing duration is not a number chosen in passing_maneuver.py. It is whatever his own
+  nudgeless changes take, which auto_lane_change.py measures.
+  """
+
+  @staticmethod
+  def _det(stats):
+    class _P(_KeepRightOnParams):
+      def get(self, key, block=False, return_default=False):
+        return stats if key == "LaneChangeStats" else super().get(key)
+    det = PassingAssistDetector()
+    det.params = _P()
+    return det
+
+  def test_the_measured_duration_replaces_the_guess(self):
+    det = self._det({"changes": 12, "seconds": 3.1})
+    run(det, 2)
+    assert det.maneuver.change_duration_s == 3.1
+    assert det.keep_right_maneuver.change_duration_s == 3.1
+
+  def test_with_nothing_measured_the_fallback_stands(self):
+    det = self._det(None)
+    run(det, 2)
+    assert det.maneuver.change_duration_s == CHANGE_DURATION_S
+
+  def test_a_nonsense_measurement_is_ignored(self):
+    """A stored zero or a fraction of a second is a bug somewhere, not a lane change, and taking
+    it would make the dry run claim the crossing finished instantly."""
+    det = self._det({"changes": 1, "seconds": 0.2})
+    run(det, 2)
+    assert det.maneuver.change_duration_s == CHANGE_DURATION_S
+
+  def test_retuning_the_laterals_carries_through_without_anyone_remembering(self):
+    """The point of taking it from a measurement rather than a constant."""
+    det = self._det({"changes": 30, "seconds": 5.4})
+    run(det, 2)
+    assert det.maneuver.change_duration_s == 5.4
