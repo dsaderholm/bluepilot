@@ -27,12 +27,19 @@ radar reports left-POSITIVE -- hence the flip, which is the same one `_update_le
 Radar messages arrive at about 8.3 Hz and the display runs at 20, so an unsmoothed marker visibly
 steps. Each side keeps its own filters and resets them when that lane goes from empty to occupied,
 because lerping from the previous car's position would drag the marker across the screen.
+
+THE FLICKER, AND WHY IT IS FIXED HERE AND NOT IN THE DETECTOR
+Two boundaries the detector reports honestly at 20 Hz, both of which look wrong on screen: a
+vehicle sitting exactly on the pass threshold, and a track blinking in and out at the edge of
+radar range. Neither is a detection fault -- see marker_hold.py, which holds and debounces the
+picture while the decision and the log keep the raw per-frame truth.
 """
 
 import pyray as rl
 
 from openpilot.common.constants import CV
 from openpilot.common.filter_simple import FirstOrderFilter
+from openpilot.selfdrive.ui.bp.onroad.marker_hold import MarkerHold
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.text_measure import measure_text_cached
@@ -61,54 +68,76 @@ class AdjacentLaneRenderer:
     # jitter, and a marker that settled at a different rate would look like a different sensor.
     self._d_filters = [FirstOrderFilter(0, 0.4, dt, initialized=False) for _ in range(2)]
     self._y_filters = [FirstOrderFilter(0, 0.5, dt, initialized=False) for _ in range(2)]
-    self._was_occupied = [False, False]
+    # Dropout hold and colour debounce, one per side. See marker_hold.py.
+    self._holds = [MarkerHold(), MarkerHold()]
+    # Last drawn values, so a held marker keeps showing the vehicle it belonged to rather than
+    # freezing on whatever the filters happened to contain.
+    self._last = [None, None]
 
   def draw(self, sm, model_renderer, rect: rl.Rectangle) -> None:
     """Called from the model renderer, which owns the projection and the path geometry."""
     if not sm.valid.get('longitudinalPlanSP', False):
-      self._was_occupied = [False, False]
+      self._clear()
       return
 
     try:
       pa = sm['longitudinalPlanSP'].passingAssist
       sides = (pa.adjacentLeft, pa.adjacentRight)
     except (KeyError, AttributeError):
-      self._was_occupied = [False, False]
+      self._clear()
       return
 
     blocking = str(pa.blockedBy) == 'adjacentSlow'
+    dt = 1 / gui_app.target_fps
 
     for i, side in enumerate(sides):
-      if not (side.available and side.occupied) or side.dRel > MAX_DRAW_D_REL:
-        self._was_occupied[i] = False
+      # Out of drawing range counts as not occupied, not as unavailable: the vehicle is real, we
+      # simply will not place a marker that far out. That way it fades like any other dropout.
+      occupied = bool(side.occupied) and side.dRel <= MAX_DRAW_D_REL
+      draw, alpha, fresh = self._holds[i].update(dt, bool(side.available), occupied, blocking)
+
+      if not draw:
+        self._last[i] = None
         continue
 
-      # Reset rather than lerp when the lane goes from empty to occupied: the previous value
-      # belongs to a different vehicle, and animating between them draws a car that never existed.
-      if not self._was_occupied[i]:
-        self._d_filters[i] = FirstOrderFilter(side.dRel, 0.4, 1 / gui_app.target_fps)
-        self._y_filters[i] = FirstOrderFilter(side.yRel, 0.5, 1 / gui_app.target_fps)
-      self._was_occupied[i] = True
+      if occupied:
+        # Reset rather than lerp when the marker is starting from nothing: the previous value
+        # belongs to a different vehicle, and animating between them draws a car that never existed.
+        if fresh:
+          self._d_filters[i] = FirstOrderFilter(side.dRel, 0.4, dt)
+          self._y_filters[i] = FirstOrderFilter(side.yRel, 0.5, dt)
+        d_rel = self._d_filters[i].update(side.dRel)
+        y_rel = self._y_filters[i].update(side.yRel)
+        # Speed and distance are frozen at the last good frame while held. Nothing is extrapolated:
+        # a held marker shows what was last actually measured, going dim, not a guess about where
+        # the car has got to since.
+        self._last[i] = (d_rel, y_rel, float(side.vAbs), float(side.dRel))
+      elif self._last[i] is None:
+        continue
 
-      d_rel = self._d_filters[i].update(side.dRel)
-      y_rel = self._y_filters[i].update(side.yRel)
-
+      d_rel, y_rel, v_abs, d_text = self._last[i]
       point = model_renderer.project_ground_point(d_rel, y_rel)
       if point is None:
         continue
 
-      self._draw_marker(point, side, blocking, rect)
+      self._draw_marker(point, v_abs, d_text, self._holds[i].blocking, alpha, rect)
 
-  def _draw_marker(self, point, side, blocking: bool, rect: rl.Rectangle) -> None:
+  def _clear(self) -> None:
+    for h in self._holds:
+      h.reset()
+    self._last = [None, None]
+
+  def _draw_marker(self, point, v_abs: float, d_rel: float, blocking: bool, alpha: float,
+                   rect: rl.Rectangle) -> None:
     """One line: the vehicle's speed, then its distance. Speed first because it is the decision.
 
     Absolute speed, not closing rate. "62" is a number the driver can compare against their own
     without arithmetic; "-8" needs the set speed held in mind to mean anything.
     """
     conv = CV.MS_TO_KPH if ui_state.is_metric else CV.MS_TO_MPH
-    dist = side.dRel if ui_state.is_metric else side.dRel * 3.28084
+    dist = d_rel if ui_state.is_metric else d_rel * 3.28084
     unit = "m" if ui_state.is_metric else "ft"
-    text = f"{side.vAbs * conv:.0f}  |  {dist:.0f}{unit}"
+    text = f"{v_abs * conv:.0f}  |  {dist:.0f}{unit}"
 
     size = measure_text_cached(self._font, text, FONT_SIZE, 0)
     w, h = size.x + PADDING * 2, size.y + PADDING * 2
@@ -119,11 +148,14 @@ class AdjacentLaneRenderer:
     x = max(rect.x + 10, min(x, rect.x + rect.width - w - 10))
     y = max(rect.y + 10, min(y, rect.y + rect.height - h - 10))
 
+    def fade(c: rl.Color) -> rl.Color:
+      return rl.Color(c.r, c.g, c.b, int(c.a * alpha))
+
     color = BLOCKING if blocking else NEUTRAL
     box = rl.Rectangle(int(x), int(y), w, h)
-    rl.draw_rectangle_rounded(box, 0.3, 10, BOX_FILL)
-    rl.draw_rectangle_rounded_lines_ex(box, 0.3, 10, BORDER, color)
+    rl.draw_rectangle_rounded(box, 0.3, 10, fade(BOX_FILL))
+    rl.draw_rectangle_rounded_lines_ex(box, 0.3, 10, BORDER, fade(color))
     rl.draw_text_ex(self._font, text, rl.Vector2(int(x + PADDING + 2), int(y + PADDING + 2)),
-                    FONT_SIZE, 0, rl.Color(0, 0, 0, 180))
+                    FONT_SIZE, 0, fade(rl.Color(0, 0, 0, 180)))
     rl.draw_text_ex(self._font, text, rl.Vector2(int(x + PADDING), int(y + PADDING)),
-                    FONT_SIZE, 0, rl.Color(255, 255, 255, 255))
+                    FONT_SIZE, 0, fade(rl.Color(255, 255, 255, 255)))
