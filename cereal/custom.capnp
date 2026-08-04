@@ -36,11 +36,15 @@ struct IntelligentCruiseButtonManagement {
   # HOLD badge greys out while this is set, because otherwise the press silently does nothing
   # lasting and the driver has no way to tell why.
   holdSuppressed @5 :Bool;
-  # BluePilot: WHICH mechanism last captured the hold. Diagnostic, and a deliberately temporary
-  # one: ICBM has two independent ways to notice the driver moved the set speed, and every drive
-  # so far suggests only the fallback ever fires. If a real drive confirms that, the press path and
-  # its hand-picked settle timers -- the source of most of this feature's defects -- can be
-  # deleted outright rather than kept "just in case". Remove this field once that is answered.
+  # BluePilot: WHICH mechanism last captured the hold. Added to settle whether the press path was
+  # dead code -- every drive appeared to show only the fallback firing, and deleting the press path
+  # and its hand-picked settle timers would have removed the source of most of this feature's
+  # defects. The answer was no: a badge tag on a real 5 mph hold showed the press path firing
+  # first, with the fallback relabelling it a frame later. The press path stays.
+  #
+  # The on-screen tag is gone now that its question is answered. The field stays: it costs a byte,
+  # it is the only way to tell the two capture paths apart in a route, and a capnp field number
+  # cannot be reused once retired anyway.
   baselineSource @6 :BaselineSource;
 
   enum IntelligentCruiseButtonManagementState {

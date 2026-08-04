@@ -1222,13 +1222,17 @@ class TestBaselineSourceIsRecorded:
 
 
 class TestResumeIsRecognisedWithoutAButtonEvent:
-  """The reported bug, and the reason it survived every timing fix: this car does not deliver
-  set-speed button events at all. baselineSource read "I" on every capture of a real drive, meaning
-  the press path never fires -- and resumeCruise arrives by the same route, so the hold could never
-  survive a cancel no matter how the resume-memory window was tuned.
+  """The reported bug, and the reason it survived every timing fix: the hold has to survive a
+  cancel-and-resume even when no resumeCruise ButtonEvent ever arrives.
 
+  Do not read this as "this car delivers no button events". It does -- baselineSource on a real
+  5 mph hold showed the press path capturing first, with the fallback relabelling it a frame
+  later. An earlier reading of "always I" was that relabelling, not a dead press path, and acting
+  on it would have deleted working code.
+
+  What this class actually pins down is that the resume path must not DEPEND on a button event.
   Ford separates the two itself, in the set speed: RESUME restores the previous value, SET jumps to
-  the current road speed. No button event needed.
+  the current road speed. That is enough to tell them apart with no button event at all.
   """
 
   def test_resume_keeps_the_hold_with_no_button_event_at_all(self):

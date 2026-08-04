@@ -60,21 +60,29 @@ def unconfirmed_lead_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.Su
 def model_stop_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
   """BluePilot: the driving model wants to stop -- a sign or signal -- and Ford ACC will not.
 
-  Distinct from the radar-blind lead alert because the driver's task is different: there is no
-  vehicle ahead to look for, and Ford's ACC has no floor below 20 mph, so the stop itself is
-  entirely the driver's. Raised at trigger and held for as long as the model keeps asking.
+  Presented identically to unconfirmed_lead_alert, on purpose. This started out as a quieter
+  PROMPT on the theory that it would fire at every sign and signal in town and sharing the loud
+  presentation would train the driver to tune out the lead alert. That theory did not survive
+  contact: the trigger needs cruise engaged above 25 mph with no lead present, which in practice
+  is highway driving, and the owner went weeks without ever seeing this alert once. It is rare,
+  not constant, so there is no fatigue argument to trade against clarity.
 
-  A PROMPT, not a warning, and deliberately not the FCW presentation. This fires at every sign and
-  signal, which in town is constantly. Sharing a visual and chime with unconfirmed_lead_alert --
-  an actual stopped car the radar cannot see -- would train the driver to tune out the one that
-  matters. The driver does still have to brake, so it stays audible and mid-sized; it just stops
-  claiming to be an emergency.
+  The severity argument runs the other way too. A radar-blind lead has an escape: keep closing and
+  Ford's radar may acquire it, which is exactly what the detector's release conditions wait for. A
+  stop sign has no such rescue -- Ford's ACC will never see it, at any range, ever. The driver is
+  the only thing that stops the car, with certainty rather than probability.
+
+  Note what VisualAlert.fcw actually does on this car: it is not decoration. It reaches the Ford
+  carcontroller, which sets FcwVisblWarn_B_Rq and FcwAudioWarn_B_Rq in ACCDATA_3 -- the cluster's
+  own collision warning and Ford's own chime. That is the loudest thing this fork can command, and
+  it is why the lead alert feels different in kind. It is also the debatable part of matching them:
+  the cluster will show a collision warning with no vehicle ahead.
   """
   return Alert(
-    "Stop ahead - cruise will not stop",
-    "Model detected a stop. Brake to complete it.",
-    AlertStatus.userPrompt, AlertSize.mid,
-    Priority.MID, VisualAlert.none, AudibleAlertSP.promptSingleHigh, 2.)
+    "Stop ahead - BRAKE",
+    "Cruise will not stop for a sign or signal.",
+    AlertStatus.critical, AlertSize.mid,
+    Priority.HIGH, VisualAlert.fcw, AudibleAlertSP.warningImmediate, 2.)
 
 
 def speed_limit_auto_set_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:

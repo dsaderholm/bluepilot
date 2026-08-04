@@ -67,8 +67,7 @@ def load_shipped_drawing_code():
   exec(compile(ast.Module(body=methods, type_ignores=[]), "<methods>", "exec"), ns)
 
   for required in ("HOLD_HEIGHT", "HOLD_FILL", "ACC_PILL_WIDTH", "ACC_STATUS_COLORS", "STACK_GAP",
-                   "LAMP_PILL_WIDTH", "LAMP_ON_FILL", "HOLD_LOCKED_FILL",
-                   "HOLD_TAG_SIZE"):
+                   "LAMP_PILL_WIDTH", "LAMP_ON_FILL", "HOLD_LOCKED_FILL"):
     assert required in ns, f"{required} did not survive extraction -- the preview would be a lie"
   return ns
 
@@ -100,6 +99,7 @@ def _draw_speed_limit_sign(f_semi, f_bold, x, y, limit):
 
 
 def main(outdir):
+  os.makedirs(outdir, exist_ok=True)
   ns = load_shipped_drawing_code()
   print(f"HOLD_HEIGHT={ns['HOLD_HEIGHT']} "
         f"ACC_PILL={ns['ACC_PILL_WIDTH']}x{ns['ACC_PILL_HEIGHT']} STACK_GAP={ns['STACK_GAP']}")
@@ -117,7 +117,7 @@ def main(outdir):
       _font_bold=fonts["bold"], _font_semi_bold=fonts["semi"],
       _icbm_baseline=hold, _icbm_arrow=arrow, _acc_state=acc, _acc_accel=mag,
       _brakes_on=lamps, _show_brake_status=True, _lamp_data_available=True,
-      _icbm_hold_locked=locked, _icbm_source_tag="C",
+      _icbm_hold_locked=locked,
       _draw_arrow=ns["_draw_arrow"],
     )
     rl.begin_texture_mode(tex)
@@ -144,6 +144,11 @@ def main(outdir):
     path = os.path.join(outdir, f"acc_status_{i}.png")
     rl.export_image(img, path.encode())
     rl.unload_image(img)
+    # Verify rather than announce. raylib's export_image returns void and only complains on
+    # stderr, so a missing outdir produced six "wrote ..." lines and zero files -- a preview tool
+    # that reports success on failure is worse than no preview tool.
+    if not os.path.isfile(path):
+      raise SystemExit(f"export failed: {path} was not written (see the raylib FILEIO warning)")
     print("wrote", path)
   rl.close_window()
 
