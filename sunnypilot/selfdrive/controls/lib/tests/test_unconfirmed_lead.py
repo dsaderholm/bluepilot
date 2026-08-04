@@ -185,3 +185,29 @@ class TestFordDoesNotTrackStationaryReturns:
     det, ev = UnconfirmedLeadDetector(), FakeEvents()
     run(det, ev, 60, d_rel=lambda i: 100. - i * 0.5, prob=0.55)
     assert det.state != State.active
+
+
+class TestReleaseIsReachableForAStoppedLead:
+  """Reported: "it never confirms the lead with Ford so it continues yelling at me".
+
+  The release required _ford_tracks, which needs the lead moving above 6 mph. A stopped car never
+  is -- so for the exact case this feature exists for, the release was unreachable and it stayed
+  active indefinitely, re-raising its alert every cycle while Ford was visibly handling the car.
+  """
+
+  def test_stopped_lead_releases_once_we_reach_the_acc_floor(self):
+    det, ev = UnconfirmedLeadDetector(), FakeEvents()
+    run(det, ev, 60, d_rel=lambda i: 100. - i * 0.5)
+    assert det.state == State.active
+    # Slowed to Ford's floor with the radar now returning the stopped car: Ford's stop-and-go
+    # regime owns it from here, and this detector's whole output is a floor it has now reached.
+    for _ in range(10):
+      det.update(make_sm(d_rel=40., radar=True, v_rel=-8.9, v_ego=8.9), TRAJ, CRUISE_MS, True, ev)
+    assert det.state != State.active, "stayed active with nothing left to do; alert never stops"
+
+  def test_it_does_not_release_early_at_speed(self):
+    """Still closing at 65 mph with the lead stopped is not resolution -- must stay active."""
+    det, ev = UnconfirmedLeadDetector(), FakeEvents()
+    run(det, ev, 60, d_rel=lambda i: 100. - i * 0.5)
+    det.update(make_sm(d_rel=70., radar=True), TRAJ, CRUISE_MS, True, ev)
+    assert det.state == State.active

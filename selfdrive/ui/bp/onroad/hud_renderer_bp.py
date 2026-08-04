@@ -220,7 +220,12 @@ class HudRendererBP(HudRendererSP):
     if sm.valid['carStateBP']:
       try:
         bls = sm['carStateBP'].brakeLightStatus
-        if bls.accDataAvailable:
+        # BluePilot: ACCDATA is broadcast by the camera whether or not ACC is engaged, and its
+        # request fields do not zero when it is off -- so the pill was reporting BRAKE with cruise
+        # not even running. Reported from the road. The readout describes what ACC is DOING, which
+        # is meaningless unless ACC is actually driving.
+        cruise_on = ui_state.sm['carState'].cruiseState.enabled
+        if bls.accDataAvailable and cruise_on:
           # The friction-brake bits win outright: they mean the pads are being used, whatever the
           # propulsion request says. Otherwise the two m/s^2 requests decide between them.
           # accAccelRequest is AccBrkTot_A_Rq -- the BRAKE total, despite the name -- so it cannot

@@ -306,10 +306,20 @@ class UnconfirmedLeadDetector:
     # ---- ACTIVE (vision lead): hold the request until something resolves it ----
     if self.state == State.active:
       # The good outcome: the deceleration bought a radar detection Ford will actually follow.
-      # Gated on _ford_tracks, not on lead.radar: releasing because "radar sees it" would hand a
-      # STOPPED object straight back to a system that filters stationary returns out, and ACC
-      # would then accelerate toward it.
-      if self._ford_tracks(lead, v_ego):
+      #
+      # Two ways that happens, and only having the first was a bug. _ford_tracks requires the lead
+      # to be MOVING above 6 mph, which a stopped car never is -- so for the exact case this
+      # feature exists for, the release was unreachable. It stayed active indefinitely, re-raising
+      # its alert every cycle while Ford was visibly handling the car itself. Reported as "it
+      # never confirms the lead so it keeps yelling at me".
+      #
+      # The second way: we have slowed to ACC's floor with the lead radar-confirmed. Below ~20 mph
+      # Ford is in its stop-and-go regime and does follow stationary vehicles -- which the owner
+      # observed directly, ACC stopping for the car. At that point this detector has done
+      # everything it can do anyway; its whole output is a set-speed floor it has now reached.
+      radar_has_it = bool(lead.status and lead.radar)
+      ford_took_over = self._ford_tracks(lead, v_ego) or (radar_has_it and v_ego <= ACC_FLOOR_MS)
+      if ford_took_over:
         # Ford ACC owns it now and can follow to a full stop, which this never could.
         self._release()
         return

@@ -923,3 +923,30 @@ class TestResumeWindowEndsWhenTheJumpLands:
     for _ in range(60):                        # stable, but the jump has not happened yet
       icbm.run(make_cs(LIMIT, enabled=True), CC, make_lp(LIMIT), False)
     assert icbm.cruise_cycle_frames > 0, "window closed before the resume jump could land"
+
+
+class TestRiseLimiterCannotStallForever:
+  """Reported: ICBM stuck at a low set speed while travelling well below it, no curve involved.
+
+  The rise limiter only advanced its ceiling once ACTUAL vehicle speed reached it, which assumes
+  the set speed is what is holding the car back. Behind slower traffic, on a climb, or while ACC
+  brakes for a lead, v_ego never gets there -- so the ceiling froze and the set speed could not be
+  raised again for the rest of the drive.
+  """
+
+  @staticmethod
+  def _held_below(icbm, cluster, v_ego, frames):
+    for _ in range(frames):
+      icbm.run(make_cs(cluster, v_ego=v_ego), CC, make_lp(DRIVER), False)
+
+  def test_ceiling_advances_even_if_actual_speed_never_catches_up(self):
+    icbm = fresh(max_rise=5)
+    # Target 70, set speed 50, but the car is stuck at 40 behind traffic and never speeds up.
+    self._held_below(icbm, cluster=50, v_ego=40, frames=400)
+    assert icbm.v_target > 50, "rise limiter never released; set speed can never recover"
+
+  def test_it_still_meters_when_the_car_is_actually_accelerating(self):
+    """The timeout must not turn the limiter off -- one step at a time is still the point."""
+    icbm = fresh(max_rise=5)
+    icbm.run(make_cs(50, v_ego=50), CC, make_lp(DRIVER), False)
+    assert icbm.v_target <= 55, "limiter let the whole rise through in one step"

@@ -169,6 +169,17 @@ DROP_STEP_SETTLE_MARGIN = 2  # display units (mph/kph)
 # waiting for actual speed to catch up turns that back into a series of short presses.
 DEFAULT_MAX_TARGET_RISE = 5  # display units (mph/kph)
 RISE_STEP_SETTLE_MARGIN = 2  # display units (mph/kph)
+# ...but never wait forever. Requiring actual speed to reach the ceiling assumes the SET SPEED is
+# what is holding the car back. Very often it is not: behind slower traffic, on a climb, or while
+# ACC is braking for a lead, v_ego simply never gets there and the ceiling never advances -- so
+# ICBM could not raise the set speed again for the rest of the drive. Reported as being stuck at a
+# low set speed while travelling well below it, with no curve in sight.
+#
+# Raising the set speed in that situation is harmless: it is a ceiling, not a demand, and ACC stays
+# gap-limited behind the lead either way. So once the cluster has sat at the ceiling this long,
+# advance regardless. When the car IS accelerating, v_ego catches up well inside this and the
+# timeout never binds -- it only rescues the stalled case.
+RISE_STEP_STALL_FRAMES = 300  # 3 s at 100 Hz
 
 
 SEND_BUTTONS = {
@@ -232,6 +243,7 @@ class IntelligentCruiseButtonManagement:
     self.drop_anchor = 0
     self.max_target_rise = DEFAULT_MAX_TARGET_RISE
     self.rise_anchor = 0
+    self.rise_stall_frames = 0   # cluster sitting at the ceiling with actual speed not catching up
 
     # BluePilot: radar-blind lead detector currently owns the target
     self.unconfirmed_lead_commanding = False
@@ -388,9 +400,14 @@ class IntelligentCruiseButtonManagement:
     if self.v_target <= ceiling:
       return self.v_target  # the whole requested rise fits inside one step
 
-    if self.v_cruise_cluster >= ceiling and v_ego_conv >= ceiling - RISE_STEP_SETTLE_MARGIN:
+    at_ceiling = self.v_cruise_cluster >= ceiling
+    self.rise_stall_frames = self.rise_stall_frames + 1 if at_ceiling else 0
+    caught_up = v_ego_conv >= ceiling - RISE_STEP_SETTLE_MARGIN
+    stalled = self.rise_stall_frames >= RISE_STEP_STALL_FRAMES
+    if at_ceiling and (caught_up or stalled):
       self.rise_anchor = self.v_cruise_cluster
       ceiling = self.rise_anchor + self.max_target_rise
+      self.rise_stall_frames = 0
 
     return min(self.v_target, ceiling)
 
