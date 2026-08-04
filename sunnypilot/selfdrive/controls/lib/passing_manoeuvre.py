@@ -59,6 +59,19 @@ CHANGE_DURATION_S = 4.0
 # How long the completed state is held so it is readable, before returning to idle.
 FINISH_HOLD_S = 1.5
 
+# How long backing out of a crossing takes. Roughly the same as the crossing itself -- it is the
+# same manoeuvre in reverse, from wherever we had got to.
+ABORT_DURATION_S = 2.5
+
+# ...and then STAND DOWN. Without this the machine returns to idle with every input unchanged --
+# slow car still there, lane still clear once the vehicle behind has gone past -- and immediately
+# signals again. Backing out of a crossing and re-signalling three seconds later is worse than
+# either doing it or not: whoever just went past has no idea what this car is doing.
+#
+# Long enough for the situation that caused it to actually resolve. A vehicle that arrived fast
+# enough to force an abort is past and gone well inside this.
+ABORT_STANDDOWN_S = 10.0
+
 
 class PassingManoeuvre:
   """The dry run. One instance, fed once per frame from the detector."""
@@ -71,6 +84,10 @@ class PassingManoeuvre:
     # The number this module exists to produce. Counts sequences that reached `signalling` and then
     # backed out -- a blinker shown to traffic behind for a manoeuvre that did not happen.
     self.aborts = 0
+    # Crossings REVERSED because something arrived behind, counted apart from the above: one is
+    # changing our mind, the other is avoiding a collision, and averaging them hides the second.
+    self.emergency_aborts = 0
+    self._standdown_s = 1e3
 
   @property
   def blinker_on(self) -> bool:
@@ -84,8 +101,12 @@ class PassingManoeuvre:
 
   @property
   def committed(self) -> bool:
-    """Past the point where a gate may still call it off."""
+    """Past the point where a GATE may still call it off. An arriving vehicle still can."""
     return self.phase in (Phase.changing, Phase.finishing)
+
+  @property
+  def aborting(self) -> bool:
+    return self.phase == Phase.aborting
 
   def _to(self, phase) -> None:
     if phase != self.phase:
@@ -93,7 +114,7 @@ class PassingManoeuvre:
       self.phase_seconds = 0.0
 
   def update(self, *, clear: int, suggested: int, confirming: bool, confirmed: bool,
-             driver_override: bool) -> None:
+             driver_override: bool, collision_abort: bool = False) -> None:
     """One frame.
 
     `clear`      -- a slow car is spotted and this side is clear RIGHT NOW. Lights the blinker.
@@ -101,6 +122,7 @@ class PassingManoeuvre:
     `confirming` -- a slower vehicle is being confirmed, timer still running.
     `confirmed`  -- that timer has completed, so anything still stopping us is a gate.
     `driver_override` -- the driver is signalling, braking or steering. Always wins.
+    `collision_abort` -- something is ARRIVING behind. The only input that can reverse a crossing.
     """
     self.phase_seconds += DT_MDL
 
@@ -111,8 +133,31 @@ class PassingManoeuvre:
       self.side = Side.none
       return
 
+    # ABORT CRITERIA NARROW AS THE MANOEUVRE PROGRESSES, which is the whole shape of this.
+    #
+    # A gate going red stops a sequence that has not moved yet and is powerless once the crossing
+    # begins, because a car cannot un-change lanes on a change of mind. A vehicle ARRIVING behind
+    # is a different question with a different answer: continuing would put us in front of it, so
+    # reversing is worth doing from anywhere.
+    #
+    # Never fires with no rear sensor -- see RearApproachSide.demands_abort, which answers False
+    # when unavailable rather than guessing in either direction.
+    if collision_abort and self.phase in (Phase.signalling, Phase.changing):
+      self.emergency_aborts += 1
+      self._standdown_s = 0.0
+      self._to(Phase.aborting)
+      return
+
+    self._standdown_s = min(self._standdown_s + DT_MDL, 1e3)
+
+    if self.phase == Phase.aborting:
+      self.side = Side.none
+      if self.phase_seconds >= ABORT_DURATION_S:
+        self._to(Phase.idle)
+      return
+
     if self.phase == Phase.changing:
-      # Committed. Only the clock ends this.
+      # Committed against gates. Only the clock, or something arriving behind, ends this.
       if self.phase_seconds >= CHANGE_DURATION_S:
         self._to(Phase.finishing)
       return
@@ -138,8 +183,9 @@ class PassingManoeuvre:
       return
 
     # ---- idle / confirming / waiting: not yet committed to anything ----
-    # `clear`, not `suggested`. Signal the instant there is a slow car and somewhere to go.
-    if clear != Side.none:
+    # `clear`, not `suggested`. Signal the instant there is a slow car and somewhere to go --
+    # unless we have just been forced out of one, see ABORT_STANDDOWN_S.
+    if clear != Side.none and self._standdown_s >= ABORT_STANDDOWN_S:
       self.side = clear
       self._to(Phase.signalling)
       return

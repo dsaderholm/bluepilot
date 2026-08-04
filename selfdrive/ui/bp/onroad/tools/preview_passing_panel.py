@@ -34,6 +34,7 @@ BLUE = (140, 190, 230)
 GREY = (170, 175, 180)
 PURPLE = (190, 150, 235)
 INFO = (150, 205, 235)
+RED = (235, 90, 80)
 
 SCENES = [
   ("building toward a pass",
@@ -47,6 +48,10 @@ SCENES = [
    0.4, True, PURPLE),
   ("dry run: crossing",
    "WOULD BE CHANGING LEFT", "blinker on, steering across", 0.5, True, PURPLE),
+  ("dry run: backing out, something arriving behind",
+   "WOULD BACK OUT", "something arriving behind", 0.0, True, RED),
+  ("keep right: signalling",
+   "WOULD SIGNAL RIGHT", "moving back over", 0.6, True, PURPLE),
   ("a pass that is grinding",
    "SLOW PASS  14s", "barely gaining on the car left", 0.0, True, AMBER),
   ("held: the car ahead slammed on",

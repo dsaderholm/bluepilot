@@ -879,8 +879,12 @@ class PassingAssistDetector:
     # keep-right delay would be several seconds of telling traffic behind about a manoeuvre that
     # may not happen.
     kr_side = self.suggestion if self.reason == Reason.keepRight else Side.none
+    kr_rear = (self.rear.right.demands_abort if self.keep_right_manoeuvre.side == Side.right
+               else self.rear.left.demands_abort if self.keep_right_manoeuvre.side == Side.left
+               else False)
     self.keep_right_manoeuvre.update(clear=kr_side, suggested=kr_side, confirming=False,
-                                     confirmed=kr_side != Side.none, driver_override=override)
+                                     confirmed=kr_side != Side.none, driver_override=override,
+                                     collision_abort=kr_rear)
 
     confirmed = self.approach_seconds >= self.persistence_s
     self.manoeuvre.update(
@@ -891,6 +895,11 @@ class PassingAssistDetector:
       # Exactly the inputs the detector already treats as the driver taking over. Reusing the same
       # test rather than restating it means the dry run cannot disagree with the gate above it.
       driver_override=override,
+      # The narrow tier: something arriving behind, which is the only thing that may reverse a
+      # crossing already begun. Answers False with no rear sensor rather than guessing.
+      collision_abort=(self.rear.left.demands_abort if self.manoeuvre.side == Side.left
+                       else self.rear.right.demands_abort if self.manoeuvre.side == Side.right
+                       else False),
     )
 
   @property
@@ -1338,6 +1347,8 @@ class PassingAssistDetector:
     passingAssist.blinkerWouldBeOn = live.blinker_on
     passingAssist.steeringWouldBeActive = live.steering_active
     passingAssist.keepRightAborts = min(pa.keep_right_manoeuvre.aborts, 65535)
+    passingAssist.emergencyAborts = min(
+      pa.manoeuvre.emergency_aborts + pa.keep_right_manoeuvre.emergency_aborts, 65535)
     # Saturates rather than wraps: a UInt16 rolling over to 0 would read as a clean drive, which is
     # the exact opposite of what a huge abort count means.
     passingAssist.manoeuvreAborts = min(pa.manoeuvre.aborts, 65535)

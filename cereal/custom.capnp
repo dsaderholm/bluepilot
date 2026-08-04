@@ -658,6 +658,12 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     manoeuvreReason @62 :Reason;
     keepRightAborts @63 :UInt16;
 
+    # BluePilot: crossings REVERSED because something was arriving behind, as opposed to sequences
+    # that merely backed out before moving. Counted apart from manoeuvreAborts because they are not
+    # the same event at all: one is the system changing its mind, the other is the system avoiding
+    # a collision. Averaging them would hide the second inside the first.
+    emergencyAborts @64 :UInt16;
+
     enum Manoeuvre {
       idle @0;         # nothing warranted
       confirming @1;   # a slower vehicle is being confirmed, timer running
@@ -665,6 +671,7 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       signalling @3;   # blinker would be on, holding before any movement
       changing @4;     # crossing. COMMITTED: gates can no longer call it off, only the driver can
       finishing @5;    # across, blinker out
+      aborting @6;     # backing out of a crossing already begun -- something arrived behind us
     }
   }
 

@@ -565,6 +565,12 @@ class HudRendererBP(HudRendererSP):
       self._pa_main = f"WOULD BE CHANGING {side}"
       self._pa_sub = "blinker on, steering across"
       self._pa_progress = min(1.0, pa.manoeuvreSeconds / 4.0)
+    elif phase == 'aborting':
+      # Red, alone among these. Every other phase is the system going about its business; this one
+      # is it getting out of the way of something, and it should not look like the others.
+      self._pa_main = "WOULD BACK OUT"
+      self._pa_sub = "something arriving behind"
+      self._pa_color = rl.Color(235, 90, 80, 255)
     else:
       self._pa_main = "WOULD BE DONE"
       self._pa_sub = "blinker off"

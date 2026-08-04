@@ -14,7 +14,7 @@ mid-signal on the road.
 from cereal import custom
 from openpilot.common.realtime import DT_MDL
 from openpilot.sunnypilot.selfdrive.controls.lib.passing_manoeuvre import (
-  PassingManoeuvre, CHANGE_DURATION_S, FINISH_HOLD_S,
+  PassingManoeuvre, CHANGE_DURATION_S, FINISH_HOLD_S, ABORT_DURATION_S, ABORT_STANDDOWN_S,
 )
 
 Side = custom.LongitudinalPlanSP.PassingAssist.Side
@@ -22,10 +22,10 @@ Phase = custom.LongitudinalPlanSP.PassingAssist.Manoeuvre
 
 
 def run(m, seconds, *, clear=Side.none, suggested=Side.none, confirming=False, confirmed=False,
-        override=False):
+        override=False, collision=False):
   for _ in range(max(1, int(round(seconds / DT_MDL)))):
     m.update(clear=clear, suggested=suggested, confirming=confirming, confirmed=confirmed,
-             driver_override=override)
+             driver_override=override, collision_abort=collision)
   return m
 
 
@@ -217,3 +217,83 @@ class TestNothingHappensWhenNothingShould:
     m = run(PassingManoeuvre(), 5.0, confirming=True)
     assert m.phase == Phase.confirming
     assert not m.blinker_on
+
+
+class TestCollisionAbort:
+  """Roadmap feature #1, and the only one of the five that REDUCES risk rather than adding
+  convenience. It has to exist before automatic lane changes do: a car that cannot back out should
+  not be initiating.
+
+  The shape is that abort criteria narrow as the manoeuvre progresses. A gate going red stops a
+  sequence that has not moved and is powerless once the crossing begins -- a car cannot un-change
+  lanes on a change of mind. A vehicle ARRIVING behind is a different question, and reversing is
+  worth doing from anywhere.
+  """
+
+  def test_it_reverses_a_crossing_already_underway(self):
+    m = armed()
+    run(m, 1.1, clear=Side.left, suggested=Side.left, confirmed=True)
+    assert m.phase == Phase.changing
+    run(m, DT_MDL, clear=Side.left, suggested=Side.left, confirmed=True, collision=True)
+    assert m.phase == Phase.aborting
+    assert m.emergency_aborts == 1
+    assert not m.steering_active and not m.blinker_on
+
+  def test_it_also_stops_one_that_has_not_moved_yet(self):
+    m = armed()
+    run(m, DT_MDL, clear=Side.left, suggested=Side.left, confirmed=True, collision=True)
+    assert m.phase == Phase.aborting
+    assert m.emergency_aborts == 1
+
+  def test_it_is_counted_apart_from_an_ordinary_backout(self):
+    """One is the system changing its mind, the other is avoiding a collision. Averaging them
+    would hide the second inside the first, which is the number that matters."""
+    m = armed()
+    run(m, DT_MDL, clear=Side.left, suggested=Side.left, confirmed=True, collision=True)
+    assert m.emergency_aborts == 1
+    assert m.aborts == 0
+
+  def test_the_abort_finishes_and_returns_to_idle(self):
+    m = armed()
+    run(m, 1.1, clear=Side.left, suggested=Side.left, confirmed=True)
+    run(m, DT_MDL, clear=Side.left, suggested=Side.left, confirmed=True, collision=True)
+    run(m, ABORT_DURATION_S + 0.2, clear=Side.left, suggested=Side.left, confirmed=True)
+    # `waiting`, not idle: a pass is still warranted and something is still stopping it -- the
+    # stand-down. Reporting idle there would say the system had lost interest, which is wrong.
+    assert m.phase == Phase.waiting
+    assert m.side == Side.none
+    assert not m.blinker_on
+
+  def test_it_does_not_immediately_try_again(self):
+    """Every input is unchanged after an abort -- slow car still there, lane clear again once the
+    vehicle behind has gone past -- so without a stand-down it re-signals within seconds. Backing
+    out and then signalling again is worse than either doing it or not: whoever just went past has
+    no idea what this car is doing."""
+    m = armed()
+    run(m, DT_MDL, clear=Side.left, suggested=Side.left, confirmed=True, collision=True)
+    run(m, ABORT_DURATION_S + 3.0, clear=Side.left, suggested=Side.left, confirmed=True)
+    assert m.phase not in (Phase.signalling, Phase.changing), "re-signalled during the stand-down"
+    assert not m.blinker_on
+
+  def test_and_works_again_once_the_stand_down_expires(self):
+    m = armed()
+    run(m, DT_MDL, clear=Side.left, suggested=Side.left, confirmed=True, collision=True)
+    run(m, ABORT_STANDDOWN_S + 1.0, clear=Side.left, suggested=Side.left, confirmed=True)
+    assert m.phase in (Phase.signalling, Phase.changing)
+
+  def test_a_gate_still_cannot_reverse_a_crossing(self):
+    """The narrow tier must stay narrow. If an ordinary gate could do this, every flickering
+    blind-spot reading would throw the car back mid-manoeuvre."""
+    m = armed()
+    run(m, 1.1, clear=Side.left, suggested=Side.left, confirmed=True)
+    run(m, 0.5, clear=Side.none, suggested=Side.none)
+    assert m.phase == Phase.changing
+    assert m.emergency_aborts == 0
+
+  def test_nothing_fires_without_a_rear_sensor(self):
+    """The whole thing hangs off demands_abort, which answers False when unavailable rather than
+    guessing -- so on a car with no rear radar this path is inert, not trigger-happy."""
+    m = armed()
+    run(m, 3.0, clear=Side.left, suggested=Side.left, confirmed=True, collision=False)
+    assert m.emergency_aborts == 0
+    assert m.phase in (Phase.changing, Phase.finishing)
