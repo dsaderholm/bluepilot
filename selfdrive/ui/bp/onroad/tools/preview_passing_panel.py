@@ -86,8 +86,9 @@ def load_shipped_drawing_code():
   """
   tree = ast.parse(open(HUD, encoding="utf-8").read())
   cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "HudRendererBP")
-  method = next(n for n in cls.body
-                if isinstance(n, ast.FunctionDef) and n.name == "_draw_passing_assist")
+  wanted = ("_draw_passing_assist", "_fit_sub")
+  methods = [n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name in wanted]
+  assert len(methods) == len(wanted), f"expected {wanted}, found {[m.name for m in methods]}"
 
   consts = [n for n in tree.body
             if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") in
@@ -100,7 +101,14 @@ def load_shipped_drawing_code():
     "measure_text_cached": lambda font, text, size, spacing=0: rl.measure_text_ex(font, text, size, spacing),
   }
   exec(compile(ast.Module(body=consts, type_ignores=[]), HUD, "exec"), ns)
-  exec(compile(ast.Module(body=[method], type_ignores=[]), HUD, "exec"), ns)
+  # The fitter's limits are class attributes, so lift them too rather than restating the numbers
+  # here -- a preview carrying its own copy of a threshold stops testing the shipped one.
+  limits = [n for n in cls.body
+            if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") in
+            ("MAX_SUB_WIDTH", "SUB_SIZE")]
+  assert len(limits) == 2, "MAX_SUB_WIDTH / SUB_SIZE moved"
+  exec(compile(ast.Module(body=limits, type_ignores=[]), HUD, "exec"), ns)
+  exec(compile(ast.Module(body=methods, type_ignores=[]), HUD, "exec"), ns)
   return ns
 
 
@@ -111,6 +119,22 @@ def main(outdir):
   rl.init_window(W, H, b"passing panel preview")
   font = rl.load_font_ex(os.path.join(FONTS, "Inter-Bold.ttf").encode(), 200, None, 0)
   rl.set_texture_filter(font.texture, rl.TextureFilter.TEXTURE_FILTER_BILINEAR)
+
+  # The worst case is BUILT BY THE SHIPPED CODE rather than written out here. Hand-writing it got
+  # the answer wrong twice -- once too long, once not matching what the fitter actually emits --
+  # and a preview that disagrees with the car is worse than no preview.
+  fitter = types.SimpleNamespace(_font_bold=font, MAX_SUB_WIDTH=ns["MAX_SUB_WIDTH"],
+                                 SUB_SIZE=ns["SUB_SIZE"])
+  SCENES.append((
+    "worst case: a drive summary with every line it can produce", "THIS DRIVE",
+    ns["_fit_sub"](fitter, [
+      "2 reversed mid-change",
+      "mostly: oncoming traffic that side 62%",
+      "oncoming: 62 at 410ft",
+      "ACC braked by 449ft",
+      "7 backed out",
+      "4 slow passes, worst 21s",
+    ]), 0.0, False, INFO))
 
   tex = rl.load_render_texture(W, H)
   rect = rl.Rectangle(0, 0, W, H)
@@ -142,6 +166,14 @@ def main(outdir):
     print(f"{i:2d}  {p.width:6.0f} x {p.height:5.0f}   {cap}")
 
   print(f"\nwidest panel {widest:.0f} of {W - 40} available")
+  # The panel clamps its own box to the screen, so a too-long line does not widen it -- the TEXT
+  # runs off both ends instead while the box still looks fine. Measuring the text is the only check
+  # that catches that, and a six-item drive summary is what proved it the hard way.
+  for scene in SCENES:
+    cap, main_text, sub = scene[0], scene[1], scene[2]
+    for label, size in ((main_text, 52), (sub, 30)):
+      w = rl.measure_text_ex(font, label, size, 0).x
+      assert w <= W - 40 - 72, f"text overflows its panel in {cap!r}: {w:.0f}px"
   assert widest <= W - 40, "a panel is wider than the screen allows"
   rl.close_window()
   print(f"wrote {len(SCENES)} PNGs to {outdir}")

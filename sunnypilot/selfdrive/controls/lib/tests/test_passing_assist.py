@@ -1805,3 +1805,33 @@ class TestGateOrder:
     drive would look like it was mostly waiting to be sure when it was mostly being refused."""
     det = run(PassingAssistDetector(), STUCK_FRAMES, edges=(-2.3, 2.4))
     assert det.blocked_by == Blocked.noLaneAvailable
+
+
+class TestNoRearSensingAtAll:
+  """The owner's car has no BLIS routed and no rear radar. He believes that means "passes will
+  never happen" -- it does not, and which of those two is true matters more than almost anything
+  else here, because one of them means the whole feature is dead on his car today.
+
+  The design is deliberate and documented in rear_approach.py: an UNAVAILABLE side does not block.
+  Blocking would disable passing outright on a car with no rear radar and hide the real reason;
+  answering "clear" would be a lie. So it neither blocks nor claims to have checked -- it suggests,
+  and says on the panel that it could not look.
+  """
+
+  def test_a_pass_is_still_suggested_with_nothing_watching_behind(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES, blis_avail=False)
+    assert det.suggestion == Side.left
+    assert det.reason == Reason.passing
+
+  def test_and_it_is_marked_as_unchecked_rather_than_clear(self):
+    """Level 2: the driver is responsible, which is exactly why a suggestion made with no rear
+    sensing must be legible as one rather than passing for a checked one."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, blis_avail=False)
+    assert not det.blindspot_available
+    assert not det.rear.left.available and not det.rear.right.available
+
+  def test_an_occupied_blind_spot_still_blocks_when_it_IS_available(self):
+    """The other half: unavailable must not become a blanket ignore."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, left_bs=True, right_bs=True)
+    assert det.suggestion == Side.none
+    assert det.blocked_by == Blocked.blindspotOccupied

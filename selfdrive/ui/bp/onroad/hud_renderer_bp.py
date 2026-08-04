@@ -439,6 +439,28 @@ class HudRendererBP(HudRendererSP):
         pass
 
 
+  # Widest the sub-line may be. The panel clamps its own box to the screen but the text is drawn
+  # from its own measured width, so anything longer does not wrap or shrink -- it runs off both
+  # ends and is unreadable. The drive summary grew to six possible items without anyone checking,
+  # and a preview render of the worst case is what caught it.
+  MAX_SUB_WIDTH = 960
+  SUB_SIZE = 30
+
+  def _fit_sub(self, lines: list[str]) -> str:
+    """Join as many lines as actually fit, in the order given.
+
+    Measured rather than counted: the items vary from "7 backed out" to "mostly: oncoming traffic
+    that side 62%", and any fixed count is either wasteful or wrong. Callers pass them in priority
+    order, so what gets dropped is the least useful thing rather than the last thing.
+    """
+    out: list[str] = []
+    for line in lines:
+      candidate = "  -  ".join(out + [line])
+      if out and measure_text_cached(self._font_bold, candidate, self.SUB_SIZE).x > self.MAX_SUB_WIDTH:
+        break
+      out.append(line)
+    return "  -  ".join(out)
+
   def _draw_drive_summary(self, pa, sm) -> bool:
     """What this drive actually measured, shown while stopped. Returns True if it owns the line.
 
@@ -460,15 +482,12 @@ class HudRendererBP(HudRendererSP):
       if pa.wantedSeconds <= 0.0 and not pa.crawlEvents and not pa.manoeuvreAborts:
         return self._draw_last_drive()
 
+      # Priority order, most useful first -- see _fit_sub, which drops from the end.
       lines = []
-      if pa.crawlEvents:
-        lines.append(f"{pa.crawlEvents} slow "
-                     f"{'pass' if pa.crawlEvents == 1 else 'passes'}, worst {pa.crawlLongestSeconds:.0f}s")
-      if pa.manoeuvreAborts:
-        lines.append(f"{pa.manoeuvreAborts} backed out")
-      # Kept separate from the line above, and named differently, because they are not the same
-      # event: one is the system changing its mind before moving, the other is a crossing reversed
-      # because something was arriving. A single figure would hide the second inside the first.
+      # Kept separate from the ordinary backouts below, and named differently, because they are
+      # not the same event: one is the system changing its mind before moving, the other is a
+      # crossing reversed because something was arriving. A single figure would hide the second
+      # inside the first, and the second is the one that must never be dropped for space.
       if pa.emergencyAborts:
         lines.append(f"{pa.emergencyAborts} reversed mid-change")
       # The most useful line here, so it goes first: what actually stopped the passes.
@@ -478,6 +497,11 @@ class HudRendererBP(HudRendererSP):
       if pa.accBrakingOnsetMax > 0:
         d = pa.accBrakingOnsetMax if ui_state.is_metric else pa.accBrakingOnsetMax * 3.28084
         lines.append(f"ACC braked by {d:.0f}{'m' if ui_state.is_metric else 'ft'}")
+      if pa.manoeuvreAborts:
+        lines.append(f"{pa.manoeuvreAborts} backed out")
+      if pa.crawlEvents:
+        lines.append(f"{pa.crawlEvents} slow "
+                     f"{'pass' if pa.crawlEvents == 1 else 'passes'}, worst {pa.crawlLongestSeconds:.0f}s")
     except (AttributeError, KeyError):
       return False
 
@@ -488,7 +512,7 @@ class HudRendererBP(HudRendererSP):
     # Assembled here, NOT via _pa_sub_detail. That field is folded into _pa_sub at the end of
     # _update_passing_assist, and every method here returns before reaching it -- so anything left
     # in it is silently dropped. Cost me three readouts before a preview render showed it.
-    self._pa_sub = "  -  ".join(lines)
+    self._pa_sub = self._fit_sub(lines)
     self._pa_color = rl.Color(150, 205, 235, 255)
     return True
 
@@ -526,7 +550,7 @@ class HudRendererBP(HudRendererSP):
     if not lines:
       return False
     self._pa_main = "LAST DRIVE"
-    self._pa_sub = "  -  ".join(lines)
+    self._pa_sub = self._fit_sub(lines)
     self._pa_color = rl.Color(150, 205, 235, 255)
     return True
 
