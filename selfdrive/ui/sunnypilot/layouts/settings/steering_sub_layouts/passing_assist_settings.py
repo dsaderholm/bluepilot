@@ -91,7 +91,7 @@ class PassingAssistSettingsLayout(Widget):
                      "detection starts calling turn pockets and driveways passing lanes."),
       param="PassingAssistMinSpeed",
       min_value=20, max_value=60, value_change_step=5,
-      label_callback=lambda v: f"{v} mph",
+      label_callback=self._speed_label,
       inline=True)
 
     self._confirm_time = option_item_sp(
@@ -146,7 +146,8 @@ class PassingAssistSettingsLayout(Widget):
                      "to brake at, plus a margin, and re-learns it every drive."),
       param="PassingAssistMinApproach",
       min_value=-1, max_value=200, value_change_step=10,
-      label_callback=lambda v: tr("Auto") if v < 0 else tr("Off") if v == 0 else f"{v} m",
+      label_callback=lambda v: (tr("Auto") if v < 0 else tr("Off") if v == 0
+                                else self._distance_label(v)),
       inline=True)
 
     self._max_distance = option_item_sp(

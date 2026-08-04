@@ -92,3 +92,19 @@ def test_close_in_is_off_while_measuring():
   lead time -- the number that measures the entire claimed benefit. Right for the finished system,
   wrong for measuring it."""
   assert _defaults().get("PassingAssistMinApproach") == "0"
+
+
+@pytest.mark.parametrize("path", LAYOUTS, ids=lambda p: p.name)
+def test_no_label_hardcodes_a_unit(path):
+  """A setting shown in metres while the panel reads it back in feet is worse than either alone --
+  you set 150 and the car says 492, and nothing on screen connects the two.
+
+  Two controls did exactly that: the close-in distance printed metres beside a panel printing feet,
+  and the minimum speed printed mph regardless of the driver's choice. Both had a unit-aware helper
+  sitting a few lines above them.
+
+  Only distance and speed are checked. Seconds and minutes are the same in both systems.
+  """
+  src = path.read_text(encoding="utf-8")
+  bad = [m.group(0) for m in re.finditer(r'label_callback=lambda[^\n]*?f"[^"]*\{[^}]*\}\s*(?:m|ft|mph|km/h)"', src)]
+  assert not bad, "labels stating a distance or speed unit without asking which the driver uses:\n  " + "\n  ".join(bad)
