@@ -83,8 +83,16 @@ Anything needing compiled extensions, a real CAN bus, or a display. Two specific
 - **Settings screens rendering.** Structure and names can be checked statically (see below), but
   nothing renders them offline.
 
-Onroad HUD drawing *is* checkable: `selfdrive/ui/bp/onroad/tools/preview_acc_status.py` renders the
-shipped drawing methods to PNG at device scale. Use it rather than guessing at sizes.
+Onroad HUD drawing *is* checkable, and the check is **trustworthy**:
+`selfdrive/ui/bp/onroad/tools/preview_acc_status.py` renders the shipped drawing methods to PNG at
+device scale. The owner confirmed on 2026-08-03, after driving it, that the car looks *exactly*
+like the preview renders -- colours, sizes, spacing, all of it.
+
+So treat a preview render as the answer, not an approximation. Iterate on it until it looks right
+and ship that; do not caveat UI work with "we won't know until you drive it", and do not ask the
+owner to judge a layout you have not rendered. It calls the real drawing methods out of
+hud_renderer_bp.py rather than reimplementing them, which is why it stays accurate -- keep it that
+way, and add a scene to SCENES whenever a new state is introduced.
 
 ## Before saying a branch is safe to flash
 
