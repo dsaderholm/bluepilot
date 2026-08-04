@@ -946,7 +946,8 @@ class TestRiseLimiterCannotStallForever:
     assert icbm.v_target > 50, "rise limiter never released; set speed can never recover"
 
   def test_it_still_meters_when_the_car_is_actually_accelerating(self):
-    """The timeout must not turn the limiter off -- one step at a time is still the point."""
+    """The timeout and the settle margin must not turn the limiter off -- one step at a time is
+    still the point, however short the wait between steps gets."""
     icbm = fresh(max_rise=5)
     icbm.run(make_cs(50, v_ego=50), CC, make_lp(DRIVER), False)
     assert icbm.v_target <= 55, "limiter let the whole rise through in one step"

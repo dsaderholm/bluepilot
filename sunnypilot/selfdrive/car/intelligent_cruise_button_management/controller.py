@@ -168,7 +168,18 @@ DROP_STEP_SETTLE_MARGIN = 2  # display units (mph/kph)
 # drop slammed the set speed back up as fast as the car could take it. Capping each step and
 # waiting for actual speed to catch up turns that back into a series of short presses.
 DEFAULT_MAX_TARGET_RISE = 5  # display units (mph/kph)
-RISE_STEP_SETTLE_MARGIN = 2  # display units (mph/kph)
+# How close actual speed must get to the current ceiling before the next +5 is allowed. This is
+# the DELAY BETWEEN STEPS, and it is the knob for "the increments are right but it is too slow".
+#
+# 4, not 2. The ceiling sits at anchor+5, so a margin of 2 made the car climb 3 mph before earning
+# the next step; at 4 it needs 1. Reported as the 5 mph increments feeling right with too long a
+# wait between them.
+#
+# Letting the set speed run further ahead of actual speed is safe here in a way the original
+# comment did not credit: it is a ceiling, not a demand. Ford's ACC accelerates at its own pace and
+# is capped at roughly 30% of manual braking authority in the other direction -- it does not lunge
+# because the number above it got bigger.
+RISE_STEP_SETTLE_MARGIN = 4  # display units (mph/kph)
 # ...but never wait forever. Requiring actual speed to reach the ceiling assumes the SET SPEED is
 # what is holding the car back. Very often it is not: behind slower traffic, on a climb, or while
 # ACC is braking for a lead, v_ego simply never gets there and the ceiling never advances -- so
