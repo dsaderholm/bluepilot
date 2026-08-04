@@ -185,7 +185,7 @@ class TestPassingAssistGeometry:
     # left line -1.85 to left edge -5.6 is 3.75 m
     assert abs(det.left_edge_gap - 3.75) < 0.01
 
-  def test_undivided_road_still_reports_a_lane(self):
+  def test_oncoming_any_side_road_still_reports_a_lane(self):
     """The known false positive, asserted deliberately rather than left implicit.
 
     An oncoming lane is geometrically identical to a passing lane. This test documents that phase 1
@@ -731,7 +731,7 @@ class TestAdjacentLaneGate:
 
 
 class TestOncomingVeto:
-  """A two-lane undivided road passes every geometry test as though the oncoming lane were a
+  """A two-lane oncoming_any_side road passes every geometry test as though the oncoming lane were a
   passing lane. This is the gate that stops it, and it is the only one here guarding against a
   dangerous suggestion rather than a merely wasted one."""
 
@@ -740,7 +740,7 @@ class TestOncomingVeto:
 
   def test_oncoming_traffic_stops_the_pass(self):
     det = run(PassingAssistDetector(), STUCK_FRAMES, tracks=self.ONCOMING)
-    assert det.adjacent.undivided
+    assert det.adjacent.oncoming_any_side
     assert det.suggestion == Side.none
     assert det.blocked_by == Blocked.oncomingLane
 
@@ -761,10 +761,10 @@ class TestOncomingVeto:
     det = run(PassingAssistDetector(), STUCK_FRAMES, tracks=self.ONCOMING, ovtk_msg=2, ovtk_status=2)
     assert det.blocked_by == Blocked.oncomingLane
 
-  def test_a_four_lane_undivided_road_keeps_the_other_side(self):
+  def test_a_four_lane_oncoming_any_side_road_keeps_the_other_side(self):
     """The case the per-side veto exists for, and the reason it is not a whole-road one.
 
-    Left lane of a four-lane undivided arterial: the oncoming lane is one over to the LEFT, and an
+    Left lane of a four-lane oncoming_any_side arterial: the oncoming lane is one over to the LEFT, and an
     ordinary through lane is one over to the RIGHT. Giving up on both would throw away every
     arterial in the state to protect against a lane that is only on one side.
     """
@@ -784,7 +784,7 @@ class TestOncomingVeto:
 
   def test_a_divided_highway_is_unaffected(self):
     det = run(PassingAssistDetector(), STUCK_FRAMES)
-    assert not det.adjacent.undivided
+    assert not det.adjacent.oncoming_any_side
     assert det.suggestion == Side.left
 
   def test_the_veto_can_be_turned_off(self):
@@ -798,7 +798,7 @@ class TestOncomingVeto:
     det.params = _Off()
     for _ in range(STUCK_FRAMES):
       det.update(make_sm(tracks=self.ONCOMING), CRUISE_MS, True)
-    assert det.adjacent.undivided     # still measured and logged
+    assert det.adjacent.oncoming_any_side     # still measured and logged
     assert det.suggestion == Side.left  # but not acted on
 
 
@@ -818,7 +818,7 @@ class TestKeepRightOncoming:
     assert det.keep_right_seconds == 0.0
 
   def test_opposing_traffic_on_the_LEFT_does_not_stop_keep_right(self):
-    # An ordinary undivided road: they are on the left, the lane to our right is ours, and moving
+    # An ordinary oncoming_any_side road: they are on the left, the lane to our right is ours, and moving
     # over is exactly the right thing to do.
     det = run(keep_right_det(), KEEP_RIGHT_FRAMES, status=False, v_ego=CRUISE_MS,
               tracks=[track(90, 3.7, -27.0 - CRUISE_MS)], **IN_LEFT_LANE)

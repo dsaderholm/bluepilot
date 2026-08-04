@@ -296,7 +296,7 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
   #      this was the failure mode that decided whether the idea was viable at all. Both the
   #      painted-line evidence (lineProb) and the drivable-width evidence (edgeGap) are recorded
   #      separately so they can be compared as discriminators rather than assumed equivalent.
-  #      ANSWERED by the radar rather than by either of them -- see undividedRoad below. These two
+  #      ANSWERED by the radar rather than by either of them -- see oncomingAnySide below. These two
   #      are still logged because the question of which geometry channel discriminates better is
   #      independently useful, and because the radar veto needs something to be audited against.
   #   2. Does this market's camera populate Traffic_RecognitnData's overtaking fields at all?
@@ -325,7 +325,7 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     # geometry evidence, per side. lineProb is the model's confidence in a painted line BEYOND
     # ego's own lane line; edgeGap is metres of drivable width between ego's lane line and the
     # road edge. On a divided highway in the left lane, edgeGap collapses to the shoulder. On an
-    # undivided road it does NOT -- the oncoming lane is drivable width -- which is exactly the
+    # oncoming_any_side road it does NOT -- the oncoming lane is drivable width -- which is exactly the
     # discrimination this is here to measure.
     leftLineProb @7 :Float32;
     rightLineProb @8 :Float32;
@@ -426,7 +426,7 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     # BluePilot: does this road carry traffic the other way?
     #
     # The question the whole design was built around and could not answer. modelV2 publishes lane
-    # geometry, not direction of travel, so on a two-lane undivided road the oncoming lane passes
+    # geometry, not direction of travel, so on a two-lane oncoming_any_side road the oncoming lane passes
     # every geometry test as a passing lane. Map data cannot settle it either: mapd v1.12.0 ships
     # here and writes no oneway tag and no lane count.
     #
@@ -435,8 +435,12 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     # can produce. Held for a while after the last sighting rather than read per frame, because one
     # oncoming car is evidence about the ROAD, and the road does not become one-way again once it
     # has passed.
-    undividedRoad @37 :Bool;        # a sighting is still in memory: treat the left lane as theirs
-    undividedSeconds @38 :Float32;  # how much of that memory is left
+    # NAMED PER SIDE, because that is all this ever knew. It was "undividedRoad", which claimed
+    # something about the whole road; the veto has always been per side, and on a four-lane
+    # undivided road in the left lane the oncoming lane is one to the left while an ordinary
+    # through lane is one to the right, and the right stays available.
+    oncomingAnySide @37 :Bool;         # a sighting on EITHER side is still in memory
+    oncomingSecondsLeft @38 :Float32;  # how much of that memory is left
     oncomingSeen @39 :Bool;         # ever this drive, whether or not the memory has expired
 
     # BluePilot: ACC had pressurised the brakes but was not yet slowing the car. A weaker claim
