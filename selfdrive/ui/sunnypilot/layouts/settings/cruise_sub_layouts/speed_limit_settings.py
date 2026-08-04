@@ -101,6 +101,16 @@ class SpeedLimitSettingsLayout(Widget):
       param="SpeedLimitFallback",
       button_width=380)
 
+    self._lookahead_higher = option_item_sp(
+      title=tr("Speed Up Early For Faster Roads"),
+      description=tr("How far ahead of a higher speed limit to start raising the set speed, so the "
+                     "car is already up to speed where the faster road begins instead of crawling "
+                     "up after the sign. Never applies before the sign is reached. 0 turns it off."),
+      param="SpeedLimitLookaheadHigher",
+      min_value=0, max_value=15, value_change_step=1,
+      label_callback=lambda v: tr("Off") if v == 0 else f"{v} s",
+      inline=True)
+
     # BluePilot: one offset per speed band. A single number is wrong at both ends of the range and
     # the percentage option is the same mistake in disguise -- 10% is 2.5 mph in a 25 and 7 in a
     # 70, which is roughly backwards from how anyone drives.
@@ -163,6 +173,7 @@ class SpeedLimitSettingsLayout(Widget):
       self._speed_limit_max_set_speed,
       LineSeparatorSP(40),
       self._speed_limit_fallback,
+      self._lookahead_higher,
       LineSeparatorSP(40),
       self._speed_limit_offset_type,
       self._speed_limit_value_offset,

@@ -313,8 +313,13 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"RoadNameToggle", {PERSISTENT | BACKUP, BOOL, "0"}},
 
     // Speed Limit
-    {"SpeedLimitMode", {PERSISTENT | BACKUP, INT, "1"}},
-    {"SpeedLimitOffsetType", {PERSISTENT | BACKUP, INT, "0"}},
+    // BluePilot: assist (3), not information (1). ICBM exists to drive the set speed toward the
+    // posted limit; shipping "show me a sign and do nothing" would leave the whole feature inert.
+    {"SpeedLimitMode", {PERSISTENT | BACKUP, INT, "3"}},
+    // BluePilot: bySpeed (3). Shipping "off" would mean the banded offsets below never apply and the
+    // car drives every posted limit exactly, which is not how anyone drives and not what was asked
+    // for. The bands themselves are the owner's stated habit -- see SpeedLimitOffsetLow.
+    {"SpeedLimitOffsetType", {PERSISTENT | BACKUP, INT, "3"}},
     {"SpeedLimitPolicy", {PERSISTENT | BACKUP, INT, "3"}},
     {"SpeedLimitValueOffset", {PERSISTENT | BACKUP, INT, "0"}},
     // BluePilot: bidirectional Speed Limit Assist. When set, SLA follows the limit in both
