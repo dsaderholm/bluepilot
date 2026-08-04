@@ -724,6 +724,18 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     lifetimePasses @77 :UInt16;
     lifetimeAgreed @78 :UInt16;
 
+    # BluePilot: HOW WRONG the deficit threshold was, when it was wrong.
+    #
+    # "missed on nothing slower ahead" says the threshold rejected a car the driver went round. It
+    # does not say by how much, and that is the whole calibration question -- 4 mph is an invented
+    # number and the only thing that can settle it is what he actually passes. A car he passed that
+    # this called 3.6 mph slower argues for lowering it; one at 0.5 argues that he simply wanted
+    # past, and no threshold would have agreed.
+    #
+    # The MEAN of those, so a single unusual pass cannot move it, and in mph because that is the
+    # unit the setting is in -- a figure the driver could act on directly rather than convert.
+    missedDeficitMph @79 :Float32;
+
     enum Maneuver {
       idle @0;         # nothing warranted
       confirming @1;   # a slower vehicle is being confirmed, timer running

@@ -71,7 +71,7 @@ SCENES = [
   ("held: you just took an exit yourself",
    "You just changed lanes", "no rear data", 0.0, False, GREY),
   ("stopped: what this drive measured",
-   "THIS DRIVE", "7 passes, 6 agreed (11s early)  -  missed on oncoming traffic that side",
+   "THIS DRIVE", "7 passes, 6 agreed (11s early)  -  missed cars 2.4 mph slower",
    0.0, False, INFO),
   ("stopped: the previous drive, kept across parking",
    "LAST DRIVE", "14 drives: 96 passed, 89 agreed  -  oncoming: 62 at 410ft",

@@ -2097,3 +2097,43 @@ class TestTheCrossingUsesTheCarsOwnDuration:
     det = self._det({"changes": 30, "seconds": 5.4})
     run(det, 2)
     assert det.maneuver.change_duration_s == 5.4
+
+
+class TestHowWrongTheThresholdWas:
+  """"Missed on nothing slower ahead" says the threshold rejected a car the driver went round. It
+  does not say by how much, and that is the entire calibration question -- 4 mph is invented and
+  the only thing that can settle it is what he actually passes.
+
+  A car he passed that this called 3.6 mph slower argues for lowering the threshold. One at 0.5
+  argues he simply wanted past, and no threshold would have agreed.
+  """
+
+  def test_it_records_what_the_deficit_really_was(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES, v_lead=CRUISE_MS - 1.2)   # ~2.7 mph
+    run(det, 2, blinker=True, v_lead=CRUISE_MS - 1.2)
+    assert det.driver_passes_agreed == 0
+    assert 2.0 < det.missed_deficit_mph < 3.5
+
+  def test_it_is_a_mean_so_one_odd_pass_cannot_move_it(self):
+    det = PassingAssistDetector()
+    for v in (CRUISE_MS - 1.34, CRUISE_MS - 1.34, CRUISE_MS - 0.1):   # 3, 3, 0.2 mph
+      run(det, STUCK_FRAMES, v_lead=v)
+      run(det, 2, blinker=True, v_lead=v)
+      run(det, int(3.0 / DT_MDL), status=False)
+    assert det.driver_passes == 3
+    assert 1.8 < det.missed_deficit_mph < 2.6, "one 0.2 mph pass should not dominate two at 3"
+
+  def test_a_pass_refused_for_another_reason_is_not_averaged_in(self):
+    """A blind spot says nothing about whether 4 mph is right, and averaging it would bury the
+    cases that do."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, left_bs=True, right_bs=True)
+    run(det, 2, blinker=True, left_bs=True, right_bs=True)
+    assert det.driver_passes == 1
+    assert det.missed_deficit_mph == 0.0
+
+  def test_agreed_passes_contribute_nothing(self):
+    """It measures the threshold's mistakes. A pass it agreed with is not one."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES)
+    run(det, 2, blinker=True)
+    assert det.driver_passes_agreed == 1
+    assert det.missed_deficit_mph == 0.0

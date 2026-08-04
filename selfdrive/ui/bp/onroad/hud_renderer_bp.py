@@ -513,7 +513,11 @@ class HudRendererBP(HudRendererSP):
         if agreed < pa.driverPasses:
           miss = int(pa.driverPassMissReason)
           name = _BLOCKED_ORDER[miss] if miss < len(_BLOCKED_ORDER) else ""
-          if name:
+          if name == "nothingSlower" and pa.missedDeficitMph > 0:
+            # Names the number to change rather than the symptom. "Missed on nothing slower" is a
+            # complaint; "they were 2.4 mph slower" is an instruction.
+            lines.append(f"missed cars {pa.missedDeficitMph:.1f} mph slower")
+          elif name:
             lines.append(f"missed on {_BLOCKED_TEXT.get(name, name).lower()}")
 
       # The total is what actually decides anything -- one drive's seven passes swing by a third on

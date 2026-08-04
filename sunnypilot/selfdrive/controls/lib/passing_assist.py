@@ -463,6 +463,9 @@ class PassingAssistDetector:
     self.driver_pass_lead_s = 0.0
     self._suggest_held_s = 0.0
     self._miss_reasons: dict[int, int] = {}
+    # See missedDeficitMph -- what the deficit actually was on the passes the threshold rejected.
+    self.missed_deficit_mph = 0.0
+    self._missed_deficit_n = 0
     # See suggestionsMade in custom.capnp -- the other error direction.
     self.suggestions_made = 0
     self.suggestions_taken = 0
@@ -838,6 +841,7 @@ class PassingAssistDetector:
         "driverPassesAgreed": int(self.driver_passes_agreed),
         "driverPassLead": round(self.driver_pass_lead_s, 1),
         "driverPassMiss": int(self.driver_pass_miss_reason),
+        "missedDeficit": round(self.missed_deficit_mph, 1),
         "lifetimeDrives": int(self.lifetime[0]),
         "lifetimePasses": int(self.lifetime[1]),
         "lifetimeAgreed": int(self.lifetime[2]),
@@ -972,6 +976,12 @@ class PassingAssistDetector:
     else:
       key = int(self.blocked_by)
       self._miss_reasons[key] = self._miss_reasons.get(key, 0) + 1
+      # Only for the threshold's own refusals. A pass refused for a blind spot says nothing about
+      # whether 4 mph is the right number, and averaging it in would bury the cases that do.
+      if key == int(Blocked.nothingSlower) and self.has_lead:
+        self._missed_deficit_n += 1
+        mph = float(self.speed_deficit) * CV.MS_TO_MPH
+        self.missed_deficit_mph += (mph - self.missed_deficit_mph) / self._missed_deficit_n
 
   @property
   def lifetime(self) -> tuple[int, int, int]:
@@ -1652,6 +1662,7 @@ class PassingAssistDetector:
     passingAssist.driverPassesAgreed = min(pa.driver_passes_agreed, 65535)
     passingAssist.driverPassLeadSeconds = float(pa.driver_pass_lead_s)
     passingAssist.driverPassMissReason = pa.driver_pass_miss_reason
+    passingAssist.missedDeficitMph = float(pa.missed_deficit_mph)
     passingAssist.suggestionsMade = min(pa.suggestions_made, 65535)
     passingAssist.suggestionsTaken = min(pa.suggestions_taken, 65535)
     passingAssist.longestIgnoredSeconds = float(pa.longest_ignored)
