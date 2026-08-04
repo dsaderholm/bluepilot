@@ -89,6 +89,13 @@ STACK_GAP = 12
 # Deliberately distinct from the ACC pill above it. That one says what the system is ASKING for;
 # this says what traffic behind you is actually being shown, and light applications below the
 # lamp threshold are exactly the case where the two disagree.
+#
+# DO NOT merge these two, however alike the pills look when both go red. Confirmed with the owner
+# on 2026-08-04: he relies on this as a standalone check he can trust. It is the only readout in
+# that column that is a MEASURED FACT rather than a request -- StopLghtOn_B_Stat is the body module
+# reporting actual lamp state, whatever lit them. Everything above it is something the system wants.
+# Folding the two together would trade the one number that needs no interpretation for a tidier
+# stack, and he verified this one against the ground behind the car at night before trusting it.
 LAMP_PILL_WIDTH = 268
 LAMP_PILL_HEIGHT = 56
 LAMP_LABEL_SIZE = 32
