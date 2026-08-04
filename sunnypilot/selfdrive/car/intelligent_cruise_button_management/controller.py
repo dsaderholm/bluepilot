@@ -693,9 +693,18 @@ class IntelligentCruiseButtonManagement:
       # caught: the hold still fell 70 -> 50 with the press path already fixed.
       if not self.hold_suppressed:
         self.v_baseline = self.v_cruise_cluster
-        # Idle wins the label when both hold: it is the weaker claim, so recording it keeps the
-        # question honest rather than flattering the newer mechanism.
-        self.baseline_source = BaselineSource.fallbackIdle if fallback_idle else                                BaselineSource.fallbackCounter
+        # NEVER downgrade a press. The question this field exists to answer is "does the press
+        # path fire at all on this car", and a last-writer-wins field answers a different one.
+        #
+        # It read "I" on every drive and I concluded the press path was dead. It is not: a press
+        # arms the stand-down, ICBM goes idle by definition, and the driver's held button keeps
+        # stepping the set speed for seconds afterwards -- so the idle fallback fires and relabels
+        # a capture the press path had already made. Instrumented: press at the button event, still
+        # press after the first 5 mph jump at idle 67, overwritten to fallback at idle 128.
+        #
+        # I nearly deleted a working code path on that reading.
+        if self.baseline_source != BaselineSource.press:
+          self.baseline_source = BaselineSource.fallbackIdle if fallback_idle else                                  BaselineSource.fallbackCounter
       self.press_settle_frames = PRESS_SETTLE_MAX_FRAMES
       self.cluster_stable_frames = 0
       # Spent. The stand-down now suppresses ICBM's output, so nothing is left to move against.

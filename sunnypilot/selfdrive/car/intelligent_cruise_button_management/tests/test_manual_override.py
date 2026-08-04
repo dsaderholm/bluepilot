@@ -1258,3 +1258,38 @@ class TestResumeIsRecognisedWithoutAButtonEvent:
     cycle_with_resume(icbm, off_frames=20, source=PlanSource.speedLimitAssist)
     assert icbm.override_state == OverrideState.manual, "the turn still costs the hold"
     assert icbm.v_baseline == DRIVER
+
+
+class TestPressIsNotRelabelledByTheFallback:
+  """The diagnostic read "I" on every drive and I concluded the press path was dead, and came close
+  to deleting it. It is not dead -- the label was being overwritten.
+
+  A press arms the stand-down, which makes ICBM idle by definition, and the driver's HELD button
+  keeps stepping the set speed for seconds afterwards. Past ADOPT_IDLE_FRAMES the idle fallback
+  fires and relabels a capture the press path had already made. The field answered "what captured
+  it last" when the question was "did the press path fire at all".
+  """
+
+  def test_a_realistic_press_and_hold_still_reads_as_press(self):
+    """5 mph jumps with stationary gaps -- the car's actual behaviour, not one step per frame."""
+    icbm = fresh()
+    icbm.run(make_cs(LIMIT, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT), False)
+    assert icbm.baseline_source == BaselineSource.press
+    cluster = LIMIT
+    for _ in range(3):
+      for _ in range(60):                      # long enough to pass ADOPT_IDLE_FRAMES
+        icbm.run(make_cs(cluster), CC, make_lp(LIMIT), False)
+      cluster += 5
+      icbm.run(make_cs(cluster), CC, make_lp(LIMIT), False)
+    icbm.run(make_cs(cluster, buttons=(ACCEL_RELEASE,)), CC, make_lp(LIMIT), False)
+    settle(icbm, LIMIT, cluster=cluster, frames=200)
+    assert icbm.baseline_source == BaselineSource.press, \
+      "the fallback relabelled a press; the diagnostic answers the wrong question again"
+    assert icbm.v_baseline == cluster
+
+  def test_the_fallback_still_labels_itself_when_it_is_the_only_one(self):
+    icbm = fresh()
+    for _ in range(300):
+      icbm.run(make_cs(DRIVER), CC, make_lp(LIMIT), False)
+    icbm.run(make_cs(DRIVER + 5), CC, make_lp(LIMIT), False)
+    assert icbm.baseline_source == BaselineSource.fallbackCounter
