@@ -526,7 +526,13 @@ class HudRendererBP(HudRendererSP):
         lines.append(f"{pa.lifetimeDrives} drives: {pa.lifetimePasses} passed, "
                      f"{pa.lifetimeAgreed} agreed")
       # The other error direction: suggestions nobody acted on.
-      if pa.suggestionsMade:
+      #
+      # SHOWN AT ZERO TOO, once a pass has actually been wanted. Hiding it made "it suggested
+      # nothing" look exactly like "that line does not exist", which is the difference between a
+      # feature working correctly on a quiet road and a feature that is broken. Reported from the
+      # car as "I heard zero chimes, but maybe I never turned it on?" -- a question the panel
+      # should have answered without anyone having to ask it.
+      if pa.suggestionsMade or pa.wantedSeconds > 0.0:
         line = f"suggested {pa.suggestionsMade}, taken {pa.suggestionsTaken}"
         if pa.longestIgnoredSeconds > 5.0:
           line += f", longest ignored {pa.longestIgnoredSeconds:.0f}s"
@@ -577,7 +583,7 @@ class HudRendererBP(HudRendererSP):
         if int(d.get("driverPassesAgreed", 0)):
           line += f" ({float(d['driverPassLead']):.0f}s early)"
         lines.append(line)
-      if int(d.get("suggestionsMade", 0)):
+      if int(d.get("suggestionsMade", 0)) or float(d.get("wantedSeconds", 0)) > 0:
         lines.append(f"suggested {int(d['suggestionsMade'])}, taken {int(d['suggestionsTaken'])}")
       if int(d.get("lifetimeDrives", 0)) > 1:
         lines.append(f"all {int(d['lifetimeDrives'])} drives: {int(d['lifetimePasses'])} passed, "
