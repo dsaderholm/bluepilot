@@ -142,6 +142,17 @@ COUNTER_MOVE_UNITS = 2  # display units (mph/kph) moved against ICBM's own comma
 # movement. Without this window, CNCL + RES+ built a HOLD at the resumed speed and destroyed the
 # only route this car has back to Speed Limit Assist.
 CRUISE_CYCLE_SETTLE_FRAMES = 250  # 2.5 s at 100 Hz, past the resume jump on this car
+# BluePilot: the same protection for the gas handoff, and it is not optional.
+#
+# While the handoff runs, the set speed climbs with the car -- and to the fallback that is
+# uncommanded movement, because ICBM sits in HOLDING for most of it (target and cluster are equal
+# by construction) rather than visibly pressing. The fallback therefore adopted the overtake as a
+# driver press and left a hold at the speed the driver passed at, which is the one number they
+# certainly did not choose. Caught by test_the_overtake_never_creates_a_hold, not by a drive.
+#
+# Outlasts the release because the cluster lags: this car was measured 60+ frames behind a press,
+# so movement is still arriving well after the pedal comes up.
+GAS_HANDOFF_SETTLE_FRAMES = 150  # 1.5 s at 100 Hz
 # ...but end it as soon as the set speed has actually settled, rather than always serving the full
 # 2.5 s. The window exists to let the resume jump land, and that is over the moment the number
 # stops moving. Reported on the road as having to wait after RESUME before pressing up would take
@@ -315,6 +326,7 @@ class IntelligentCruiseButtonManagement:
     # follow. See apply_gas_handoff.
     self.gas_pressed = False
     self.gas_handoff_active = False
+    self.gas_handoff_frames = 0   # >0 while handoff movement may still be reaching the cluster
 
     # BluePilot: radar-blind lead detector currently owns the target
     self.unconfirmed_lead_commanding = False
@@ -748,7 +760,7 @@ class IntelligentCruiseButtonManagement:
     # Runs before the manual-only guard below so it can CREATE a baseline, not just update one.
     fallback_idle = self.icbm_idle_frames >= ADOPT_IDLE_FRAMES
     fallback_counter = self.counter_move_accum >= COUNTER_MOVE_UNITS
-    if (cruise_enabled and self.cruise_cycle_frames == 0
+    if (cruise_enabled and self.cruise_cycle_frames == 0 and self.gas_handoff_frames == 0
         and self.v_cruise_cluster != self.v_cruise_cluster_prev
         and (fallback_idle or fallback_counter)):
       if self.override_state != OverrideState.manual:
@@ -950,6 +962,12 @@ class IntelligentCruiseButtonManagement:
         self.press_settle_frames = PRESS_SETTLE_MAX_FRAMES
     else:
       self.press_settle_frames = max(0, self.press_settle_frames - 1)
+    # Re-armed every frame the pedal is down, then decays -- so the window covers the whole
+    # acceleration however long it lasts, plus the cluster lag after the driver lifts.
+    if self.gas_handoff_active:
+      self.gas_handoff_frames = GAS_HANDOFF_SETTLE_FRAMES
+    else:
+      self.gas_handoff_frames = max(0, self.gas_handoff_frames - 1)
     # unconditional: the resume jump settles on its own clock, held button or not
     self.cruise_cycle_frames = max(0, self.cruise_cycle_frames - 1)
     self.resume_press_frames = max(0, self.resume_press_frames - 1)

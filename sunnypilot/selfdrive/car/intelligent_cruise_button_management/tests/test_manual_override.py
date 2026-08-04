@@ -1358,3 +1358,58 @@ class TestGasPedalHandoff:
     icbm = self._icbm(gas=True, cluster=35, road=80)
     assert icbm.v_baseline == 0
     assert icbm.override_state == OverrideState.auto
+
+
+class TestOvertakeReturnsToTheDriversNumber:
+  """BluePilot: the question the gas handoff has to answer.
+
+  Hold at 70, floor it to 85 to pass, lift. The handoff raised the set speed to 85 so lifting off
+  did not brake -- but the driver wants their 70 back, not to cruise at the speed they overtook at.
+  Nothing new was added for this: the baseline IS "what I had it set to", and the drop limiter is
+  already the thing that walks an inflated set speed back down by coasting. These tests exist to
+  prove that rather than assume it, because the handoff is what made the number inflate.
+  """
+  HOLD = 70
+  PASS_SPEED = 85
+
+  def _pass_and_release(self, icbm, limit=LIMIT):
+    # on the gas, accelerating past the hold
+    for _ in range(60):
+      icbm.run(make_cs(self.PASS_SPEED, v_ego=self.PASS_SPEED, gas_pressed=True),
+               CC_override, make_lp(limit), False)
+    raised = icbm.v_target
+    # pedal released, still travelling fast; ACC now owns it again
+    cluster = max(icbm.v_target, self.PASS_SPEED)
+    for _ in range(400):
+      cluster = max(self.HOLD, cluster - 0.02)   # ACC coasts the car and cluster back down
+      icbm.run(make_cs(round(cluster), v_ego=round(cluster)), CC, make_lp(limit), False)
+    return raised, icbm
+
+  def test_a_hold_survives_the_overtake_and_is_returned_to(self):
+    icbm = fresh()
+    set_baseline(icbm, self.HOLD)
+    settle(icbm, LIMIT)
+    assert icbm.v_baseline == self.HOLD
+
+    raised, icbm = self._pass_and_release(icbm)
+    assert raised >= self.PASS_SPEED, "the handoff should have carried the set speed up"
+    assert icbm.v_baseline == self.HOLD, "the overtake must not rewrite the driver's number"
+    assert icbm.v_target == self.HOLD, "and the set speed must come back to it"
+
+  def test_without_a_hold_it_returns_to_the_speed_limit_target(self):
+    icbm = fresh()
+    settle(icbm, LIMIT)
+    _, icbm = self._pass_and_release(icbm)
+    assert icbm.override_state == OverrideState.auto
+    assert icbm.v_target == LIMIT
+
+  def test_the_overtake_never_creates_a_hold(self):
+    """The fallback adopts uncommanded set-speed movement. During the handoff ICBM IS commanding,
+    so it must not credit its own work to the driver -- that would strand a 85 mph hold."""
+    icbm = fresh()
+    settle(icbm, LIMIT)
+    for _ in range(200):
+      icbm.run(make_cs(self.PASS_SPEED, v_ego=self.PASS_SPEED, gas_pressed=True),
+               CC_override, make_lp(LIMIT), False)
+    assert icbm.v_baseline == 0, "the throttle is not a press"
+    assert icbm.baseline_source == BaselineSource.none
