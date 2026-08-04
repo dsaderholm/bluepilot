@@ -256,6 +256,7 @@ class IntelligentCruiseButtonManagement:
     self.max_target_rise = DEFAULT_MAX_TARGET_RISE
     self.rise_anchor = 0
     self.rise_stall_frames = 0   # cluster sitting at the ceiling with actual speed not catching up
+    self.lead_present = False    # a vehicle ahead; the set speed is then a ceiling, not a demand
 
     # BluePilot: radar-blind lead detector currently owns the target
     self.unconfirmed_lead_commanding = False
@@ -399,6 +400,22 @@ class IntelligentCruiseButtonManagement:
     """
     if self.max_target_rise <= 0:  # 0 disables the limiter
       self.rise_anchor = 0
+      return self.v_target
+
+    # Behind a vehicle the set speed does not bind, so there is nothing to meter.
+    #
+    # This limiter exists to stop the car lunging when the target jumps back up -- coming out of a
+    # curve, or leaving a low-limit zone. That only happens on an open road, where the set speed is
+    # what ACC chases. With a lead ahead ACC is gap-limited: it follows the car in front and the
+    # set speed is a ceiling it never reaches, so raising it changes nothing about how the car
+    # drives. Metering there bought no safety and cost real behaviour -- it is what left the set
+    # speed stuck low behind traffic, since actual speed could never catch up to release the step.
+    #
+    # The owner's framing, which is the right one: behind a car, set the speed to anything, because
+    # that car is probably driving correctly. It is only with no one ahead that the number matters.
+    if self.lead_present:
+      self.rise_anchor = 0
+      self.rise_stall_frames = 0
       return self.v_target
 
     if self.v_target <= self.v_cruise_cluster:
@@ -660,11 +677,13 @@ class IntelligentCruiseButtonManagement:
     self.reanchor_overridden = False
     self.counter_move_accum = 0
 
-  def run(self, CS: car.CarState, CC: car.CarControl, LP_SP: custom.LongitudinalPlanSP, is_metric: bool) -> None:
+  def run(self, CS: car.CarState, CC: car.CarControl, LP_SP: custom.LongitudinalPlanSP, is_metric: bool,
+          lead_present: bool = False) -> None:
     if self.CP_SP.pcmCruiseSpeed:
       return
 
     self.is_metric = is_metric
+    self.lead_present = lead_present
 
     self.update_params()
     self.update_calculations(CS, LP_SP)

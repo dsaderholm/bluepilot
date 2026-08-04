@@ -1000,3 +1000,30 @@ class TestTheHoldSurvivesADisengagement:
     assert icbm.override_state == OverrideState.manual, "re-anchor did not take"
     settle(icbm, 60, cluster=DRIVER, frames=200)   # now a real 35 mph jump from the re-anchor
     assert icbm.override_state == OverrideState.auto, "limit rule never fired after resuming"
+
+
+class TestRiseLimiterOnlyMattersWithNoLead:
+  """The owner's rule, which is a better discriminator than any timer: behind a car, set the speed
+  to anything, because that car is probably driving correctly. ACC is gap-limited there and the set
+  speed is a ceiling it never reaches. It is only with nobody ahead that the number is what the car
+  chases -- and that is the only case the limiter was ever protecting.
+  """
+
+  def test_behind_a_lead_the_rise_is_not_metered(self):
+    icbm = fresh(max_rise=5)
+    icbm.run(make_cs(50, v_ego=45), CC, make_lp(DRIVER), False, True)
+    assert icbm.v_target == DRIVER, "metered the set speed behind a lead, where it cannot bind"
+
+  def test_with_no_lead_it_still_meters(self):
+    icbm = fresh(max_rise=5)
+    icbm.run(make_cs(50, v_ego=45), CC, make_lp(DRIVER), False, False)
+    assert icbm.v_target <= 55, "open road rise was not metered"
+
+  def test_a_lead_appearing_releases_a_stuck_step(self):
+    """The stall this replaces: held below the ceiling with no lead, then traffic appears."""
+    icbm = fresh(max_rise=5)
+    for _ in range(100):
+      icbm.run(make_cs(50, v_ego=45), CC, make_lp(DRIVER), False, False)
+    assert icbm.v_target <= 55
+    icbm.run(make_cs(50, v_ego=45), CC, make_lp(DRIVER), False, True)
+    assert icbm.v_target == DRIVER

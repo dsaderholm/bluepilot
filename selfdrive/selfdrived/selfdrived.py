@@ -488,7 +488,11 @@ class SelfdriveD(CruiseHelper):
           self.events.add(EventName.personalityChanged)
         self.experimental_mode_switched = False
 
-    self.icbm.run(CS, self.sm['carControl'], self.sm['longitudinalPlanSP'], self.is_metric)
+    # BluePilot: whether anything is ahead. With a lead, ACC is gap-limited and the set speed is a
+    # ceiling that never binds, so ICBM's rise limiter has nothing to meter -- see
+    # apply_target_rise_limit. radarState is already subscribed above.
+    lead_present = bool(self.sm['radarState'].leadOne.status) if self.sm.valid['radarState'] else False
+    self.icbm.run(CS, self.sm['carControl'], self.sm['longitudinalPlanSP'], self.is_metric, lead_present)
 
   def data_sample(self):
     _car_state = messaging.recv_one(self.car_state_sock)
