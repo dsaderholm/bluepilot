@@ -93,6 +93,26 @@ def settle(icbm, target, cluster=DRIVER, frames=150, source=PlanSource.speedLimi
     icbm.run(make_cs(cluster), CC, make_lp(target, source=source), False)
 
 
+def cycle_with_set(icbm, road_speed=48, off_frames=200, source=PlanSource.speedLimitAssist):
+  """Cancel, then SET. Ford puts the set speed at the CURRENT VEHICLE SPEED, and that is how the
+  behavioural detector tells SET from RESUME -- CS.buttonEvents delivers nothing on this car, so
+  the button is not available to ask. road_speed must differ from the set speed before the cancel,
+  or the two are genuinely indistinguishable."""
+  for _ in range(off_frames):
+    icbm.run(make_cs(DRIVER, v_ego=road_speed, enabled=False), CC, make_lp(LIMIT, source=source), False)
+  for _ in range(300):                       # past CRUISE_CYCLE_SETTLE_FRAMES either way
+    icbm.run(make_cs(road_speed, v_ego=road_speed, enabled=True), CC, make_lp(LIMIT, source=source), False)
+
+
+def cycle_with_resume(icbm, off_frames=200, source=PlanSource.speedLimitAssist):
+  """Cancel, then RESUME: the set speed comes back to exactly what it was."""
+  before = icbm.v_cruise_cluster
+  for _ in range(off_frames):
+    icbm.run(make_cs(before, enabled=False), CC, make_lp(LIMIT, source=source), False)
+  for _ in range(300):
+    icbm.run(make_cs(before, enabled=True), CC, make_lp(LIMIT, source=source), False)
+
+
 class TestBaselineCapture:
   def test_press_records_the_driver_speed(self):
     icbm = fresh()
@@ -217,8 +237,7 @@ class TestBaselineReset:
   def test_cruise_cycle_discards_it(self):
     icbm = fresh()
     set_baseline(icbm)
-    icbm.run(make_cs(DRIVER, enabled=False), CC, make_lp(LIMIT), False)
-    icbm.run(make_cs(DRIVER, enabled=True), CC, make_lp(LIMIT), False)
+    cycle_with_set(icbm)
     assert icbm.override_state == OverrideState.auto
     assert icbm.v_baseline == 0
 
@@ -451,8 +470,7 @@ class TestReturningToTheLimitHandsItBack:
     set_baseline(icbm)
     settle(icbm, LIMIT)
     assert icbm.override_state == OverrideState.manual
-    icbm.run(make_cs(DRIVER, enabled=False), CC, make_lp(LIMIT), False)
-    icbm.run(make_cs(DRIVER, enabled=True), CC, make_lp(LIMIT), False)
+    cycle_with_set(icbm)
     assert icbm.override_state == OverrideState.auto
     assert icbm.v_baseline == 0
 
@@ -626,9 +644,7 @@ class TestResumeDoesNotCreateAHold:
     set_baseline(icbm)
     settle(icbm, LIMIT)
     assert icbm.override_state == OverrideState.manual
-    icbm.run(make_cs(DRIVER, buttons=(self.SET_CRUISE,), enabled=False), CC, make_lp(LIMIT), False)
-    for _ in range(20):
-      icbm.run(make_cs(LIMIT, enabled=True), CC, make_lp(LIMIT), False)
+    cycle_with_set(icbm, road_speed=LIMIT)
     assert icbm.override_state == OverrideState.auto, "resume rebuilt the HOLD it just cleared"
     assert icbm.v_baseline == 0
 
@@ -879,20 +895,22 @@ class TestResumeKeepsTheHoldAndSetGivesItBack:
     icbm = fresh()
     set_baseline(icbm)
     settle(icbm, LIMIT)
-    self._cycle_back_on(icbm, SET_PRESS)
+    cycle_with_set(icbm)
     assert icbm.override_state == OverrideState.auto, "SET kept the hold"
     assert icbm.v_baseline == 0
 
-  def test_a_stale_resume_press_does_not_keep_it(self):
-    """The memory window has to expire, or a RESUME from minutes ago revives a dead hold."""
+  def test_a_stale_resume_press_is_overruled_by_behaviour(self):
+    """The button event is no longer what decides -- it cannot be, since this car does not deliver
+    it. A RESUME press from minutes ago followed by a set speed landing on the ROAD SPEED is a SET,
+    whatever the stale event says."""
     icbm = fresh()
     set_baseline(icbm)
     settle(icbm, LIMIT)
     icbm.run(make_cs(DRIVER, enabled=False, buttons=(RESUME_PRESS,)), CC, make_lp(LIMIT), False)
     for _ in range(400):                       # far longer than RESUME_PRESS_MEMORY_FRAMES
-      icbm.run(make_cs(DRIVER, enabled=False), CC, make_lp(LIMIT), False)
-    for _ in range(30):
-      icbm.run(make_cs(DRIVER, enabled=True), CC, make_lp(LIMIT), False)
+      icbm.run(make_cs(DRIVER, v_ego=48, enabled=False), CC, make_lp(LIMIT), False)
+    for _ in range(300):                       # set speed lands on ROAD speed => it was a SET
+      icbm.run(make_cs(48, v_ego=48, enabled=True), CC, make_lp(LIMIT), False)
     assert icbm.override_state == OverrideState.auto
 
 
@@ -1198,7 +1216,45 @@ class TestBaselineSourceIsRecorded:
     icbm = fresh()
     set_baseline(icbm)
     assert icbm.baseline_source == BaselineSource.press
-    icbm.run(make_cs(DRIVER, enabled=False), CC, make_lp(LIMIT), False)
-    icbm.run(make_cs(DRIVER, enabled=True), CC, make_lp(LIMIT), False)
+    cycle_with_set(icbm)
     assert icbm.override_state == OverrideState.auto, "precondition: hold was cleared"
     assert icbm.baseline_source == BaselineSource.press, "the diagnostic was wiped with the hold"
+
+
+class TestResumeIsRecognisedWithoutAButtonEvent:
+  """The reported bug, and the reason it survived every timing fix: this car does not deliver
+  set-speed button events at all. baselineSource read "I" on every capture of a real drive, meaning
+  the press path never fires -- and resumeCruise arrives by the same route, so the hold could never
+  survive a cancel no matter how the resume-memory window was tuned.
+
+  Ford separates the two itself, in the set speed: RESUME restores the previous value, SET jumps to
+  the current road speed. No button event needed.
+  """
+
+  def test_resume_keeps_the_hold_with_no_button_event_at_all(self):
+    icbm = fresh()
+    set_baseline(icbm)
+    settle(icbm, LIMIT)
+    assert icbm.v_baseline == DRIVER
+    cycle_with_resume(icbm)                    # note: no buttons= anywhere
+    assert icbm.override_state == OverrideState.manual, "RESUME lost the hold again"
+    assert icbm.v_baseline == DRIVER
+
+  def test_set_still_hands_it_back_with_no_button_event(self):
+    icbm = fresh()
+    set_baseline(icbm)
+    settle(icbm, LIMIT)
+    cycle_with_set(icbm, road_speed=48)
+    assert icbm.override_state == OverrideState.auto, "SET kept the hold"
+
+  def test_a_turn_onto_a_slower_road_then_resume(self):
+    """The exact sequence reported: hold, cancel to turn, resume. The posted limit changing during
+    the turn must not matter, and neither must the missing button event."""
+    icbm = fresh()
+    set_baseline(icbm)
+    settle(icbm, LIMIT)
+    for _ in range(300):                       # turning, cruise off, new road's limit is lower
+      icbm.run(make_cs(DRIVER, enabled=False), CC, make_lp(35), False)
+    cycle_with_resume(icbm, off_frames=20, source=PlanSource.speedLimitAssist)
+    assert icbm.override_state == OverrideState.manual, "the turn still costs the hold"
+    assert icbm.v_baseline == DRIVER

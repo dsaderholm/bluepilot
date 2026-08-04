@@ -60,6 +60,17 @@ RE_ARM_ON_CRUISE_CYCLE = True  # cancel (or any disengage) followed by re-engage
 # to be remembered across the transition rather than read on the cycle frame.
 RESUME_BUTTONS = (ButtonType.resumeCruise,)
 RESUME_PRESS_MEMORY_FRAMES = 150  # 1.5 s at 100 Hz, generous next to the engage delay
+# ...but the button event cannot be relied on, so RESUME is also recognised from BEHAVIOUR.
+#
+# The baselineSource diagnostic came back "I" every single time on this car: the press path never
+# fires, so CS.buttonEvents is not delivering set-speed buttons at all -- flashed SCCM firmware,
+# most likely. resumeCruise arrives by the same route, which is why holds kept vanishing on RESUME
+# no matter how the timing was adjusted. It was never a timing problem.
+#
+# Ford distinguishes the two itself, in the set speed: RESUME restores the PREVIOUS set speed, SET
+# jumps to the CURRENT VEHICLE SPEED. So once the number settles after re-engaging, whichever it
+# landed on says which button was pressed -- no button event required.
+RESUME_MATCH_TOLERANCE = 2  # display units; Ford resumes to the exact previous value
 # The baseline applies to the speed-limit/cruise component only. A curve target is a physics limit,
 # not something to add an offset to -- SCC-Vision asking for 40 means 40, whatever the baseline is.
 BASELINE_SOURCES = (LongitudinalPlanSource.cruise, LongitudinalPlanSource.speedLimitAssist)
@@ -255,6 +266,8 @@ class IntelligentCruiseButtonManagement:
     self.cruise_button_prev = SendButtonState.none
     self.resume_press_frames = 0     # >0 while a RESUME press is recent enough to have re-engaged
     self.reanchor_overridden = False  # a resume kept the hold; re-measure the limit rule from here
+    self.v_cluster_before_disengage = 0  # set speed when cruise last dropped; RESUME restores it
+    self.cycle_decision_pending = False  # waiting for the set speed to say whether it was RESUME
     self.v_cluster_at_cycle = 0      # set speed when cruise was re-engaged; the resume jump moves it
     self.press_settle_frames = 0     # >0 while ICBM stands down after a driver press
     self.cluster_stable_frames = 0   # how long the set speed has been unchanged
@@ -572,17 +585,48 @@ class IntelligentCruiseButtonManagement:
     if any(b.type.raw in RESUME_BUTTONS and b.pressed for b in CS.buttonEvents):
       self.resume_press_frames = RESUME_PRESS_MEMORY_FRAMES
 
-    # Re-engaging. RESUME keeps the hold, anything else (SET) hands the set speed back to SLA.
+    # Remember the set speed while engaged; at the moment cruise drops this is what RESUME will
+    # restore, and comparing against it is how RESUME is told from SET without a button event.
+    # Frozen while a decision is pending, because it IS the evidence for that decision. Updating
+    # it on the frames between the cycle and the verdict overwrites the pre-cancel speed with the
+    # post-engage one, both sides of the comparison become equal, and every cycle reads as a
+    # resume. Instrumented and confirmed: correct at the cycle frame, clobbered on the next.
+    #
+    # Same shape as press_suppressed needing to be latched -- evidence gathered at an instant must
+    # not be re-derived later from a world that has moved on.
+    if cruise_enabled and not cruise_cycled and not self.cycle_decision_pending:
+      self.v_cluster_before_disengage = self.v_cruise_cluster
+    elif not cruise_enabled:
+      self.cycle_decision_pending = False
+
+    # Re-engaging. RESUME keeps the hold, SET hands the set speed back to SLA. The button event
+    # settles it when it arrives; otherwise the decision waits for the set speed to land.
     if RE_ARM_ON_CRUISE_CYCLE and cruise_cycled:
-      if self.resume_press_frames == 0:
-        self.clear_baseline()
-      else:
-        # Hold survived a RESUME. Re-anchor the limit-change reference to wherever we are now.
+      if self.resume_press_frames > 0:
         self.reanchor_overridden = True
+        self.cycle_decision_pending = False
+      else:
+        # Only worth deferring when there is a hold at stake. Otherwise the very first engagement
+        # of a drive leaves a decision pending that fires 2.5 s later and wipes a hold created in
+        # the meantime -- which is what eight tests caught.
+        self.cycle_decision_pending = self.v_baseline > 0
       self.cruise_cycle_frames = CRUISE_CYCLE_SETTLE_FRAMES
       self.v_cluster_at_cycle = self.v_cruise_cluster
       self.resume_press_frames = 0
       return
+
+    # Decide once the resume jump has landed. Deferring is the point: clearing on the cycle frame
+    # threw the hold away before the evidence existed.
+    if self.cycle_decision_pending:
+      landed = (self.v_cruise_cluster != self.v_cluster_at_cycle
+                and self.cluster_stable_frames >= CRUISE_CYCLE_STABLE_FRAMES)
+      if landed or self.cruise_cycle_frames == 0:
+        resumed = abs(self.v_cruise_cluster - self.v_cluster_before_disengage) <= RESUME_MATCH_TOLERANCE
+        if resumed:
+          self.reanchor_overridden = True
+        else:
+          self.clear_baseline()
+        self.cycle_decision_pending = False
 
     # While the driver is pressing, the baseline follows the cluster. It therefore settles wherever
     # they stop, and holding the button through several increments records the final speed rather

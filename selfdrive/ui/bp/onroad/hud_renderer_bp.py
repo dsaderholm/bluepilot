@@ -306,7 +306,12 @@ class HudRendererBP(HudRendererSP):
     # HUD elements use the (possibly offset) rect for positioning
     if self.is_cruise_available:
       self._draw_set_speed(rect)
-      self._draw_acc_status(rect)
+    # BluePilot: the ACC readouts describe what ACC is doing, so they follow cruise availability.
+    # The brake lamps do not -- they are a fact about the car regardless of what is driving it, and
+    # the owner asked for them visible whenever the setting is on. Drawn outside that gate, and
+    # positioned by the same stack so it lands where the ACC pill would have been when there is no
+    # ACC pill to sit under.
+    self._draw_acc_status(rect)
     self._draw_current_speed(rect)
 
     button_x = rect.x + rect.width - UI_CONFIG.border_size - UI_CONFIG.button_size
@@ -334,16 +339,21 @@ class HudRendererBP(HudRendererSP):
     the target moved (SmartCruiseControl shows a curve, SpeedLimit shows the sign). Neither says
     what the car is doing about it, and nothing at all showed ICBM's state.
     """
-    if self._acc_status_failed or (not self._acc_state and not self._icbm_baseline):
+    lamps_only = not self.is_cruise_available
+    if self._acc_status_failed:
+      return
+    if lamps_only and not (self._show_brake_status and self._lamp_data_available):
+      return
+    if not lamps_only and not self._acc_state and not self._icbm_baseline        and not (self._show_brake_status and self._lamp_data_available):
       return
 
     set_speed_width = UI_CONFIG.set_speed_width_metric if ui_state.is_metric else UI_CONFIG.set_speed_width_imperial
     x = rect.x + 60 + (UI_CONFIG.set_speed_width_imperial - set_speed_width) // 2
     y = rect.y + 45 + UI_CONFIG.set_speed_height + 16
 
-    if self._icbm_baseline:
+    if self._icbm_baseline and not lamps_only:
       y += self._draw_hold_badge(x, y, set_speed_width) + STACK_GAP
-    if self._acc_state:
+    if self._acc_state and not lamps_only:
       y += self._draw_acc_pill(x, y) + STACK_GAP
     # Shown whenever brake status is on, in both states -- an indicator that only appears when lit
     # cannot be told apart from one that is broken, and "are my lamps on right now" is a question
