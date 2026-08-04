@@ -465,6 +465,11 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       oncoming @6 :Bool;
       oncomingDRel @7 :Float32;
       oncomingVAbs @8 :Float32;   # negative: its ground speed is towards us
+      # Where it is, so it can be DRAWN rather than only counted. The whole reason the oncoming
+      # veto is hard to trust is that nothing shows what it saw -- a marker over a real car on the
+      # far carriageway and a marker over empty tarmac are the same log line and completely
+      # different bugs.
+      oncomingYRel @11 :Float32;
       # The two facts that decide whether this side is refused, logged because they are what a
       # disputed decision comes down to and neither is visible from the road.
       #

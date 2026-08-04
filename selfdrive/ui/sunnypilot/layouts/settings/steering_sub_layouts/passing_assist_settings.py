@@ -274,6 +274,15 @@ class PassingAssistSettingsLayout(Widget):
                      "being suggested."),
       param="ShowAdjacentLanes")
 
+    self._show_oncoming = toggle_item_sp(
+      title=tr("Show Oncoming Speeds"),
+      description=tr("Mark vehicles coming the other way as well, in red. Only ever appears where "
+                     "the opposing carriageway is within radar reach -- on a divided highway it "
+                     "should stay empty, and a marker there is worth telling me about. Drawn only "
+                     "while a vehicle is actually being seen, never from the memory that keeps "
+                     "the road classified afterwards."),
+      param="ShowOncomingSpeeds")
+
     # ORDERED THE WAY A DRIVER ARRIVES AT A QUESTION, not the order these were built in. They were
     # added one at a time over a long session and the first section had drifted to nine controls,
     # three of which were not about when to suggest a pass at all -- the exit stand-down is about
@@ -322,6 +331,7 @@ class PassingAssistSettingsLayout(Widget):
       SectionHeader(tr("On Screen")),
       self._show_panel,
       self._show_next_lane,
+      self._show_oncoming,
     ]
 
   def _render(self, rect):

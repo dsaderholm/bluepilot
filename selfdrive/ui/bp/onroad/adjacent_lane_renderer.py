@@ -48,6 +48,10 @@ from openpilot.system.ui.lib.text_measure import measure_text_cached
 # following that car", which is the opposite of what it means.
 NEUTRAL = rl.Color(150, 205, 235, 255)     # a car is there, and it is not what is blocking a pass
 BLOCKING = rl.Color(240, 175, 60, 255)     # this lane is why no pass is being suggested
+# Oncoming gets its own colour and is never confusable with the two above. It is not a lane you
+# might move into, it is a lane that is theirs -- a different KIND of fact, not a worse version of
+# the same one.
+ONCOMING = rl.Color(235, 90, 80, 255)
 BOX_FILL = rl.Color(30, 32, 36, 225)
 
 FONT_SIZE = 44
@@ -90,6 +94,8 @@ class AdjacentLaneRenderer:
     blocking = str(pa.blockedBy) == 'adjacentSlow'
     dt = 1 / gui_app.target_fps
 
+    self._draw_oncoming(pa, model_renderer, rect)
+
     for i, side in enumerate(sides):
       # Out of drawing range counts as not occupied, not as unavailable: the vehicle is real, we
       # simply will not place a marker that far out. That way it fades like any other dropout.
@@ -127,8 +133,32 @@ class AdjacentLaneRenderer:
       h.reset()
     self._last = [None, None]
 
+  def _draw_oncoming(self, pa, model_renderer, rect: rl.Rectangle) -> None:
+    """Mark vehicles coming the other way, if the driver asked for them.
+
+    Drawn from the LIVE sighting, never from the veto's memory. The veto deliberately outlives the
+    car that caused it -- meeting someone tells you about the road, not just that moment -- but a
+    marker floating over empty tarmac for the next ninety seconds would be a lie about where a
+    vehicle is, and this exists precisely to be believed about position.
+    """
+    if not ui_state.params.get_bool("ShowOncomingSpeeds"):
+      return
+    for side in (pa.adjacentLeft, pa.adjacentRight):
+      if not (side.available and side.oncoming) or side.oncomingDRel <= 0:
+        continue
+      if side.oncomingDRel > MAX_DRAW_D_REL:
+        continue
+      point = model_renderer.project_ground_point(side.oncomingDRel, side.oncomingYRel)
+      if point is None:
+        continue
+      # Unfiltered, unlike the same-direction markers. A closing speed near 130 mph crosses the
+      # whole range in a couple of seconds, so a smoothing filter tuned for a car being overtaken
+      # would lag it badly enough to draw it somewhere it is not.
+      self._draw_marker(point, abs(side.oncomingVAbs), side.oncomingDRel, False, 1.0, rect,
+                        colour=ONCOMING, prefix="<< ")
+
   def _draw_marker(self, point, v_abs: float, d_rel: float, blocking: bool, alpha: float,
-                   rect: rl.Rectangle) -> None:
+                   rect: rl.Rectangle, colour=None, prefix: str = "") -> None:
     """One line: the vehicle's speed, then its distance. Speed first because it is the decision.
 
     Absolute speed, not closing rate. "62" is a number the driver can compare against their own
@@ -137,7 +167,7 @@ class AdjacentLaneRenderer:
     conv = CV.MS_TO_KPH if ui_state.is_metric else CV.MS_TO_MPH
     dist = d_rel if ui_state.is_metric else d_rel * 3.28084
     unit = "m" if ui_state.is_metric else "ft"
-    text = f"{v_abs * conv:.0f}  |  {dist:.0f}{unit}"
+    text = f"{prefix}{v_abs * conv:.0f}  |  {dist:.0f}{unit}"
 
     size = measure_text_cached(self._font, text, FONT_SIZE, 0)
     w, h = size.x + PADDING * 2, size.y + PADDING * 2
@@ -151,7 +181,7 @@ class AdjacentLaneRenderer:
     def fade(c: rl.Color) -> rl.Color:
       return rl.Color(c.r, c.g, c.b, int(c.a * alpha))
 
-    color = BLOCKING if blocking else NEUTRAL
+    color = colour if colour is not None else (BLOCKING if blocking else NEUTRAL)
     box = rl.Rectangle(int(x), int(y), w, h)
     rl.draw_rectangle_rounded(box, 0.3, 10, fade(BOX_FILL))
     rl.draw_rectangle_rounded_lines_ex(box, 0.3, 10, BORDER, fade(color))

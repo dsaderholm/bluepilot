@@ -306,6 +306,10 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // Separate from PassingAssistAdjacentLane above, which is the detection itself: turning the
     // display off must not stop the gate working, and turning the gate off must not leave a
     // display showing stale numbers.
+    // BluePilot: draw oncoming vehicles too, in their own colour. Separate from the
+    // same-direction markers because the roads differ: this only ever appears where the
+    // opposing carriageway is within radar reach, which on a divided highway it is not.
+    {"ShowOncomingSpeeds", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"ShowAdjacentLanes", {PERSISTENT | BACKUP, BOOL, "0"}},
     // BluePilot: never suggest a pass on a road the radar has seen oncoming traffic on. DEFAULT
     // ON, and it is the only gate here that guards against a genuinely dangerous suggestion rather

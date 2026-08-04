@@ -320,6 +320,7 @@ class AdjacentLaneSide:
     self.v_abs = NO_SPEED        # absolute speed of the nearest vehicle in that lane
     self.oncoming = False        # something on this side is travelling the other way, right now
     self.oncoming_d_rel = 0.0
+    self.oncoming_y_rel = 0.0
     self.oncoming_v_abs = NO_SPEED
     # Corroboration for the veto. See ONCOMING_FRAMES.
     self._oncoming_hits = 0
@@ -385,7 +386,8 @@ class AdjacentLaneSide:
     elif not self.occupied:
       self.d_rel, self.y_rel, self.v_rel, self.v_abs = 0.0, 0.0, 0.0, NO_SPEED
 
-  def observe_oncoming(self, d_rel: float, v_abs: float, memory_s: float, adjacent: bool) -> None:
+  def observe_oncoming(self, d_rel: float, y_rel: float, v_abs: float, memory_s: float,
+                       adjacent: bool) -> None:
     """Record a vehicle travelling the other way on this side.
 
     Latches the memory only once ONCOMING_FRAMES returns have corroborated each other. The
@@ -396,6 +398,7 @@ class AdjacentLaneSide:
     self.available = True
     self.oncoming = True
     self.oncoming_d_rel = float(d_rel)
+    self.oncoming_y_rel = float(y_rel)
     self.oncoming_v_abs = float(v_abs)
     self._oncoming_gap_s = 0.0
     self._oncoming_hits += 1
@@ -615,7 +618,7 @@ class AdjacentLane:
         # lane -- on anything with a centre turn lane the opposing traffic is two lanes out, and
         # bounding this to the adjacent band meant those roads produced no veto at all.
         if self._on_our_carriageway(model, side, lat, p.dRel):
-          obj.observe_oncoming(p.dRel, v_abs, memory_s, adjacent)
+          obj.observe_oncoming(p.dRel, p.yRel, v_abs, memory_s, adjacent)
           self.oncoming_seen = True
         continue
 

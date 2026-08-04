@@ -808,3 +808,34 @@ class TestUnusableRoadEdge:
   def test_and_a_trusted_edge_still_excludes_the_far_carriageway(self):
     adj = upd(AdjacentLane(), FakeSM([self._onc(self.FAR)], left_edge=-6.0), V_EGO, MAX_D)
     assert not adj.oncoming_any_side
+
+
+class TestOncomingPosition:
+  """Oncoming vehicles are now DRAWN, not just counted, so where they are has to survive.
+
+  The reason it matters is the I-15 report: a marker over a real car on the far carriageway and a
+  marker over empty tarmac are the same log line and completely different bugs. Position is what
+  tells them apart.
+  """
+
+  def test_the_position_is_carried_through(self):
+    adj = upd(AdjacentLane(), FakeSM([track(90, 3.7, v_rel=-27.0 - V_EGO)]), V_EGO, MAX_D)
+    assert adj.left.oncoming
+    assert adj.left.oncoming_d_rel == 90
+    assert adj.left.oncoming_y_rel == 3.7, "drawn from this, so a wrong sign puts it in the median"
+
+  def test_the_right_hand_side_keeps_its_own_sign(self):
+    """Radar yRel is left-POSITIVE and the camera frame is not. Getting this backwards would put
+    every oncoming marker on the wrong side of the car, which is the failure most likely to be
+    read as 'the detection is broken' when the detection was fine."""
+    adj = upd(AdjacentLane(), FakeSM([track(90, -3.7, v_rel=-27.0 - V_EGO)]), V_EGO, MAX_D)
+    assert adj.right.oncoming
+    assert adj.right.oncoming_y_rel == -3.7
+
+  def test_position_is_recorded_from_the_first_sighting(self):
+    """Before corroboration completes, so a veto that does fire can be drawn where it was seen
+    rather than where it happened to be three frames later."""
+    adj = AdjacentLane()
+    adj.update(FakeSM([track(120, 3.7, v_rel=-27.0 - V_EGO)]), V_EGO, MAX_D)
+    assert not adj.oncoming_any_side, "not corroborated yet"
+    assert adj.left.oncoming_d_rel == 120

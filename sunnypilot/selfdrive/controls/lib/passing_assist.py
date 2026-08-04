@@ -1669,6 +1669,7 @@ class PassingAssistDetector:
       dest.oncoming = side.oncoming
       dest.oncomingDRel = float(side.oncoming_d_rel)
       dest.oncomingVAbs = float(side.oncoming_v_abs)
+      dest.oncomingYRel = float(side.oncoming_y_rel)
       dest.oncomingAdjacent = side.oncoming_adjacent_seconds > 0.0
       dest.sameDirectionRecent = side.same_direction_recent
     passingAssist.oncomingAnySide = pa.adjacent.oncoming_any_side
