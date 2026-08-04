@@ -120,9 +120,14 @@ class DesireHelper:
           # fade out over .5s
           self.lane_change_ll_prob = max(self.lane_change_ll_prob - 2 * DT_MDL, 0.0)
 
-        # 98% certainty
-        if lane_change_prob < 0.02 and self.lane_change_ll_prob < 0.01:
-          self.lane_change_state = LaneChangeState.laneChangeFinishing
+          # 98% certainty
+          # BluePilot: inside the else, so a cancel is not undone by it on the way out. Both of its
+          # conditions can be true on the frame the stalk drops -- the fade has run out half a
+          # second in, and lane_change_prob is the model's confidence a change is happening, which
+          # dips exactly when the driver has thought better of one. It then set the state straight
+          # back to laneChangeFinishing and the cancel did nothing.
+          if lane_change_prob < 0.02 and self.lane_change_ll_prob < 0.01:
+            self.lane_change_state = LaneChangeState.laneChangeFinishing
 
       # LaneChangeState.laneChangeFinishing
       elif self.lane_change_state == LaneChangeState.laneChangeFinishing:

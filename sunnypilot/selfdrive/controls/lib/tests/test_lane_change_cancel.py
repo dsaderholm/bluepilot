@@ -148,6 +148,34 @@ class TestItIsActuallyWiredIn:
     assert dh.lane_change_state == LaneChangeState.laneChangeStarting
     assert dh.desire == log.Desire.laneChangeLeft
 
+  def test_a_cancel_is_not_undone_by_the_completion_check_below_it(self):
+    """Every other test here feeds lane_change_prob=0.5, which hides this.
+
+    The cancel sets the state to `off` and then FALLS THROUGH to stock's "98% certainty" check,
+    which is still inside the same branch and can set the state straight back to
+    laneChangeFinishing. Both its conditions are reachable at cancel time: lane_change_ll_prob
+    reaches zero half a second into the change, and lane_change_prob is the MODEL's confidence that
+    a change is happening -- which is low precisely while a gentle change has not moved the car yet.
+
+    So the window where this bites is a cancel between 0.5 s and the end of the cancel window, on a
+    change the model has not registered. That is not an exotic case; it is the early, tentative
+    lane change this whole feature exists to let the driver call off.
+    """
+    dh = self._dh()
+    self._start(dh)
+    # Hold the blinker until the lane-line fade has run out. The change is underway and stock's
+    # first condition is now permanently satisfied for the rest of this state.
+    for _ in range(int(1.0 / DT_MDL)):
+      dh.update(self._cs(left=True), True, 0.5)
+    assert dh.lane_change_state == LaneChangeState.laneChangeStarting
+    assert dh.lane_change_ll_prob < 0.01
+
+    # Now the driver drops the stalk on a frame where the model's confidence has dipped. Both of
+    # stock's conditions and the cancel are true together, which is the collision.
+    dh.update(self._cs(), True, 0.0)
+    assert dh.lane_change_state == LaneChangeState.off, "the completion check undid the cancel"
+    assert dh.desire == log.Desire.none
+
   def test_off_leaves_the_stock_behavior_exactly_as_it_was(self):
     dh = self._dh(window=0)
     self._start(dh)
