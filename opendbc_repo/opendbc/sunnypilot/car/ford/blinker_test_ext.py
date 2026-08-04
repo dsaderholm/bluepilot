@@ -66,7 +66,24 @@ PULSE_DURATION_S = 4.0        # long enough for several flash cycles at ~1.5 Hz
 TAP_COMMAND_S = 0.25          # about the length of a real stalk tap
 # ...then STOP COMMANDING AND KEEP WATCHING. Flashes after we have gone quiet are the BCM running
 # its own pattern, which is the entire measurement.
-OBSERVE_AFTER_S = 6.0
+OBSERVE_AFTER_S = 3.0
+
+# How long the verdict stays on screen before the machine re-arms itself.
+#
+# THIS USED TO DEPEND ON THE REQUEST PARAM READING ZERO, and that is what made all four buttons go
+# dead. Reported: "if I do them in rapid succession, it just will stop working for a little bit",
+# and "I do tap right, it will work once and then all four buttons will stop working."
+#
+# The old exit from DONE was: poll every half second, and leave only if the request reads 0. A press
+# during the verdict window writes a request, so that poll sees non-zero, drops the press and clears
+# it -- and the next press half a second later does the same. Pressing repeatedly, which is exactly
+# what anyone does when a button looks like it did nothing, held the machine in DONE for as long as
+# they kept trying. The state that was supposed to prevent runaway pulses instead punished
+# impatience.
+#
+# A clock cannot be held open by pressing a button. Three seconds is long enough to read a two-word
+# verdict and a flash count, and it expires whatever the param says.
+DONE_HOLD_S = 3.0
 # Match every other sender of Steering_Data_FD1: CarControllerParams.BUTTONS_STEP, 20 Hz against the
 # SCCM's own 10 Hz copy of the same frame.
 #
@@ -113,6 +130,7 @@ class BlinkerTestExt:
     self.bt_watching = SIGNAL_NONE
     self._bt_lamp_prev = False
     self._bt_command_frames_left = 0
+    self._bt_done_frames = 0
     self._bt_frame = 0
 
   @property
@@ -184,6 +202,7 @@ class BlinkerTestExt:
         self.bt_state = 2
         self.bt_commanded = SIGNAL_NONE
         self.bt_frames_left = 0
+        self._bt_done_frames = int(DONE_HOLD_S / DT_CTRL)
         self._disarm()
         return SIGNAL_NONE
 
@@ -193,33 +212,27 @@ class BlinkerTestExt:
         return SIGNAL_NONE
       return self.bt_commanded if send_frame else SIGNAL_NONE
 
+    # ---- showing the verdict: a clock, not a condition. See DONE_HOLD_S ----
+    #
+    # Runs EVERY frame rather than on the poll, and depends on nothing the driver can do. Presses
+    # that land in here are still dropped -- queueing would light a lamp seconds after the button,
+    # with nothing on screen connecting the two -- but they can no longer extend the wait.
+    if self.bt_state == 2:
+      self._bt_done_frames -= 1
+      if self._bt_done_frames <= 0:
+        self.bt_state = 0
+        self.bt_blocked = 0
+        self._disarm()
+      elif self._bt_frame % int(PARAMS_POLL_S / DT_CTRL) == 0 and self._read_request():
+        self.bt_blocked = 4
+        self._disarm()
+      return SIGNAL_NONE
+
     # ---- idle: look for a request, at a low rate ----
     if self._bt_frame % int(PARAMS_POLL_S / DT_CTRL) != 0:
       return SIGNAL_NONE
 
     request = self._read_request()
-
-    # DONE is terminal until the request goes back to 0. Without this, a param write that failed
-    # (or a UI that keeps rewriting the value) re-arms the machine the moment the pulse ends and
-    # the lamp flashes forever -- the timeout stops each pulse but nothing stops the next one.
-    # Requiring the request to clear first is what makes "one deliberate request, one pulse" true
-    # rather than merely intended.
-    if self.bt_state == 2:
-      if request == SIGNAL_NONE:
-        self.bt_state = 0
-        self.bt_blocked = 0
-      else:
-        # A press that landed inside the verdict window. It must be CLEARED, not merely ignored:
-        # the only thing that ever moves this machine out of DONE is the request reading 0, and
-        # nothing else in the system writes 0 -- so leaving a live request here deadlocked the
-        # test permanently, and the only way out was a reboot. Pressing twice quickly is exactly
-        # what a driver does when the first press looks like it did nothing.
-        #
-        # Dropped rather than queued, deliberately. Queueing would mean a lamp lighting some
-        # seconds after the button, with nothing on screen connecting the two.
-        self.bt_blocked = 4
-        self._disarm()
-      return SIGNAL_NONE
     if request not in (SIGNAL_LEFT, SIGNAL_RIGHT, SIGNAL_TAP_LEFT, SIGNAL_TAP_RIGHT):
       self.bt_blocked = 0
       return SIGNAL_NONE

@@ -13,7 +13,7 @@ from types import SimpleNamespace as NS
 from opendbc.car import DT_CTRL
 from opendbc.sunnypilot.car.ford.blinker_test_ext import (
   BlinkerTestExt, SIGNAL_NONE, SIGNAL_LEFT, SIGNAL_RIGHT, PULSE_DURATION_S, STANDSTILL_V_EGO,
-  BUTTONS_STEP, SIGNAL_TAP_LEFT, TAP_COMMAND_S,
+  BUTTONS_STEP, SIGNAL_TAP_LEFT, TAP_COMMAND_S, DONE_HOLD_S,
 )
 
 
@@ -179,15 +179,35 @@ class TestBlinkerTestTermination:
     assert ext.bt_blocked == 4, "the dropped press should say why"
     assert ext.bt_params.value == 0, "a press during DONE must be cleared, not left live"
 
-    run(ext, POLL_FRAMES + 2)
+    run(ext, int(DONE_HOLD_S / DT_CTRL) + 4)
     assert ext.bt_state == 0, "never returned to idle -- the test is dead until reboot"
+
+  def test_spamming_cannot_hold_the_machine_hostage(self):
+    """The reported symptom, and the reason DONE is a clock rather than a condition: "if I do them
+    in rapid succession, it just will stop working for a little bit", and "all four buttons will
+    stop working."
+
+    The old exit needed a poll to see the request at zero. Every press wrote one, so pressing
+    repeatedly -- exactly what anyone does when a button looks like it did nothing -- held the
+    machine in DONE for as long as they kept trying. The state meant to prevent runaway pulses
+    instead punished impatience.
+    """
+    ext = make_ext(SIGNAL_LEFT)
+    run(ext, POLL_FRAMES + int(PULSE_DURATION_S / DT_CTRL) + 10)
+    assert ext.bt_state == 2
+    # Press about twice a second for the whole verdict window and a bit beyond.
+    for _ in range(int((DONE_HOLD_S + 1.0) / 0.5)):
+      ext.bt_params.value = SIGNAL_RIGHT
+      run(ext, int(0.5 / DT_CTRL))
+    assert ext.bt_state != 2, "pressing the button kept the verdict window open indefinitely"
 
   def test_and_a_press_after_that_still_works(self):
     """The point of the above: the feature survives being pressed twice."""
     ext = make_ext(SIGNAL_LEFT)
     run(ext, POLL_FRAMES + int(PULSE_DURATION_S / DT_CTRL) + 10)
     ext.bt_params.value = SIGNAL_RIGHT
-    run(ext, 2 * POLL_FRAMES + 4)               # dropped, then back to idle
+    run(ext, POLL_FRAMES + 2)                        # dropped
+    run(ext, int(DONE_HOLD_S / DT_CTRL) + 4)         # then home on its own clock
 
     ext.bt_params.value = SIGNAL_RIGHT          # a fresh, deliberate press
     assert SIGNAL_RIGHT in run(ext, POLL_FRAMES + 20)
@@ -271,7 +291,7 @@ class TestFlashCounting:
     flash(ext, cycles=4, side='left')
     first = ext.bt_flashes
     assert first > 0
-    run(ext, int(PULSE_DURATION_S / DT_CTRL) + 10)   # let it finish
+    run(ext, int((PULSE_DURATION_S + DONE_HOLD_S) / DT_CTRL) + 20)   # finish, then re-arm
     ext.bt_params.value = SIGNAL_LEFT                # ask again
     run(ext, POLL_FRAMES * 3)
     assert ext.bt_flashes < first or ext.bt_flashes == 0, "the second run inherited the first"
