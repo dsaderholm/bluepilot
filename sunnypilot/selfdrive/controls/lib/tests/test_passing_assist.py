@@ -1963,3 +1963,18 @@ class TestSuggestionsNobodyTook:
     det = run(PassingAssistDetector(), STUCK_FRAMES, status=False)
     run(det, 2, blinker=True, status=False)
     assert det.driver_passes == 0
+
+  def test_a_suggestion_still_standing_is_already_visible(self):
+    """It used to be recorded only when the suggestion ENDED, so one still up when the drive ended
+    was never counted. A system offering a single enormous unacted pass per drive would have
+    reported a spotless record -- the exact opposite of what that behaviour means."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES + int(25.0 / DT_MDL))
+    assert det.suggestions_made == 1
+    assert det.suggestions_taken == 0
+    assert det.longest_ignored > 20.0
+    assert det.longest_ignored_s == 0.0, "the episode has not ended, so nothing is banked yet"
+
+  def test_and_a_taken_one_is_not_counted_while_it_runs(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES + int(10.0 / DT_MDL))
+    run(det, 2, blinker=True)
+    assert det.longest_ignored == 0.0

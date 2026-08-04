@@ -820,7 +820,7 @@ class PassingAssistDetector:
         "driverPassMiss": int(self.driver_pass_miss_reason),
         "suggestionsMade": int(self.suggestions_made),
         "suggestionsTaken": int(self.suggestions_taken),
-        "longestIgnored": round(self.longest_ignored_s, 1),
+        "longestIgnored": round(self.longest_ignored, 1),
         "oncomingDRel": round(self._last_oncoming[0], 1),
         "oncomingVAbs": round(self._last_oncoming[1], 1),
       })
@@ -944,6 +944,18 @@ class PassingAssistDetector:
     else:
       key = int(self.blocked_by)
       self._miss_reasons[key] = self._miss_reasons.get(key, 0) + 1
+
+  @property
+  def longest_ignored(self) -> float:
+    """The longest a suggestion has stood unacted -- INCLUDING one still standing.
+
+    Recorded only on the falling edge before, which meant a suggestion that was still up when the
+    drive ended was never counted at all. A system that offered one enormous unacted pass per drive
+    and nothing else would have reported a spotless record, which is the exact opposite of what
+    that behaviour means.
+    """
+    live = self._suggest_held_s if (self._prev_suggesting and not self._episode_taken) else 0.0
+    return max(self.longest_ignored_s, live)
 
   @property
   def driver_pass_miss_reason(self) -> int:
@@ -1584,7 +1596,7 @@ class PassingAssistDetector:
     passingAssist.driverPassMissReason = pa.driver_pass_miss_reason
     passingAssist.suggestionsMade = min(pa.suggestions_made, 65535)
     passingAssist.suggestionsTaken = min(pa.suggestions_taken, 65535)
-    passingAssist.longestIgnoredSeconds = float(pa.longest_ignored_s)
+    passingAssist.longestIgnoredSeconds = float(pa.longest_ignored)
     passingAssist.manoeuvreStandDown = float(max(pa.manoeuvre.standdown_remaining,
                                                  pa.keep_right_manoeuvre.standdown_remaining))
     passingAssist.driverChangeStandDown = float(pa.driver_change_standdown)
