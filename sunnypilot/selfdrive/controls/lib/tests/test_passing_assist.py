@@ -203,11 +203,67 @@ class TestPassingAssistGates:
     assert det.blocked_by == Blocked.nothingSlower
     assert 0.5 < det.approach_seconds < 1.5
 
-  def test_confirmation_resets_when_lead_drops(self):
+  def test_one_missed_radar_frame_does_not_erase_the_confirmation(self):
+    """It used to. A single frame without a lead zeroed the timer, so a car at the edge of radar
+    range that blinked in and out reset the clock faster than it could ever run."""
     det = PassingAssistDetector()
     run(det, int(20.0 / DT_MDL))
-    assert det.approach_seconds > 19.0
+    before = det.approach_seconds
     run(det, 1, status=False)
+    assert 0.0 < det.approach_seconds < before
+    assert before - det.approach_seconds < 0.2, "one frame should cost a fraction of a second"
+
+  def test_a_lead_that_is_really_gone_still_clears_it(self):
+    """The other half. Decay is not a memory: sustained absence must reach zero, or a car that
+    left would keep a stale confirmation alive behind it."""
+    det = PassingAssistDetector()
+    run(det, int(20.0 / DT_MDL))
+    run(det, int(1.0 / DT_MDL), status=False)
+    assert det.approach_seconds == 0.0
+    assert not det.lead_is_slow
+
+
+class TestSpeedBoundary:
+  """Reported from the car: "when a car is going in between the speed I want to pass at and the
+  speed I don't. Same with it coming in and out of radar range."
+
+  Raised as a complaint about the visualisation, and half of it was. The other half was a genuine
+  refusal to pass -- every frame below the threshold zeroed the confirmation timer, so a vehicle
+  sitting on the line never accumulated two seconds and never produced a suggestion. Not late:
+  never. And a car only slightly slower than you is the case this feature most obviously exists
+  for.
+  """
+
+  # Deficit either side of the 4 mph default, by well under the 1 mph hysteresis band.
+  JUST_OVER = CRUISE_MS - 4.3 * CV.MPH_TO_MS
+  JUST_UNDER = CRUISE_MS - 3.8 * CV.MPH_TO_MS
+
+  def test_a_vehicle_hovering_on_the_threshold_is_still_passed(self):
+    det = PassingAssistDetector()
+    for i in range(STUCK_FRAMES):
+      v = self.JUST_OVER if i % 2 == 0 else self.JUST_UNDER
+      det.update(make_sm(v_lead=v), CRUISE_MS, True)
+    assert det.lead_is_slow
+    assert det.suggestion == Side.left
+    assert det.reason == Reason.passing
+
+  def test_a_vehicle_that_is_genuinely_not_slower_is_never_passed(self):
+    """The hysteresis must not become a licence to pass anything. Below the band, and it never
+    latches in the first place."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, v_lead=self.JUST_UNDER)
+    assert not det.lead_is_slow
+    assert det.suggestion == Side.none
+    assert det.blocked_by == Blocked.nothingSlower
+
+  def test_it_takes_a_clear_margin_to_release(self):
+    """Once judged slow it stays judged slow until meaningfully faster -- that is the whole point
+    of latching it. Two mph clear of the threshold is meaningfully faster."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES)
+    assert det.lead_is_slow
+    run(det, 3, v_lead=self.JUST_UNDER)
+    assert det.lead_is_slow, "released inside the noise band -- the chatter is back"
+    run(det, 3, v_lead=CRUISE_MS - 2.0 * CV.MPH_TO_MS)
+    assert not det.lead_is_slow
     assert det.approach_seconds == 0.0
 
   def test_closing_and_pacing_are_the_same_situation(self):

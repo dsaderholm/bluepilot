@@ -118,6 +118,34 @@ DEFAULT_MIN_DEFICIT_MPH = 4
 # behaviour this exists to remove. Long enough only to reject a single bad frame of lead tracking.
 DEFAULT_PERSISTENCE_S = 2
 
+# --- and why that timer is no longer destroyed by one bad frame ---
+#
+# Both of these come from the same report: "when a car is going in between the speed I want to pass
+# at and the speed I don't. Same with it coming in and out of radar range."
+#
+# That was raised as a cosmetic complaint about the display, and half of it was. The other half was
+# a real refusal to pass. Every failing frame used to zero the confirmation timer outright, so a
+# vehicle sitting exactly on the threshold -- or blinking at the edge of radar range -- reset the
+# clock faster than it could ever run, and NEVER produced a suggestion. Not late: never. The one
+# case a passing aid most obviously exists for is a car only slightly slower than you.
+#
+# HYSTERESIS fixes the speed boundary. Once a vehicle has been judged slow enough to be worth
+# passing it stays judged slow until it is a clear margin FASTER than the threshold, so a car
+# hovering on the line is decided once instead of re-decided every frame. 1 mph is chosen against
+# the same measurement noise that set the 4 mph threshold: ordinary traffic varies by about that
+# much, so this is the width of the noise, not a second judgement.
+DEFICIT_HYSTERESIS_MPH = 1
+
+# DECAY fixes the dropout. A frame that fails a sanity bound now costs a few frames of accumulated
+# confidence instead of all of it, so one missed radar return is worth a fraction of a second
+# rather than starting over. At 3x, a full 2 s of confirmation survives a ~0.12 s gap (one missed
+# message at 8.3 Hz) with room to spare, and is still wiped by ~0.7 s of genuine absence -- which
+# is what a car actually leaving looks like.
+#
+# Deliberately NOT applied to the deficit test itself: a lead that is genuinely faster than the
+# release threshold is a changed situation, not a noisy one, and should reset properly.
+CONFIRM_DECAY_RATE = 3.0
+
 # --- the one question ---
 # "Is there a vehicle in my lane slow enough to cost me speed?"
 #
@@ -205,6 +233,9 @@ class PassingAssistDetector:
     self.reason = Reason.none
     self.approach_seconds = 0.0
     self.keep_right_seconds = 0.0
+    # Latched by the hysteresis above: is the lead currently judged slow enough to be worth
+    # passing. Latched rather than recomputed so the answer cannot chatter frame to frame.
+    self.lead_is_slow = False
 
     self.has_lead = False
     self.lead_d_rel = 0.0
@@ -516,15 +547,35 @@ class PassingAssistDetector:
     # against the path. See MAX_LEAD_D_PATH_M for why this is no longer lead.dPath.
     self.lead_d_path = abs(-float(lead.yRel) - path_offset(model, float(lead.dRel))) if model is not None else 0.0
     if self.lead_d_path > MAX_LEAD_D_PATH_M or lead.dRel > self.max_distance_m:
+      # Out of the band for a moment: decay, do not erase. A lead that has genuinely wandered out
+      # of our lane keeps failing and is gone within a second anyway.
+      self._decay_confirmation()
+      return False
+
+    # See DEFICIT_HYSTERESIS_MPH. Harder to become slow than to stay slow.
+    threshold = self.min_deficit_ms - (DEFICIT_HYSTERESIS_MPH * CV.MPH_TO_MS if self.lead_is_slow else 0.0)
+    self.lead_is_slow = self.speed_deficit >= threshold
+    if not self.lead_is_slow:
       self.approach_seconds = 0.0
       return False
 
-    if self.speed_deficit < self.min_deficit_ms:
-      self.approach_seconds = 0.0
-      return False
-
-    self.approach_seconds += DT_MDL
+    # CAPPED at the threshold, which matters now that failing frames decay instead of erasing:
+    # uncapped, a lead followed for five minutes would carry five minutes of credit and take over
+    # a minute of absence to clear. The field means "confirmation progress" -- there is nothing to
+    # be more confirmed than confirmed -- which is also what makes the progress bar 0..1 honestly.
+    self.approach_seconds = min(self.approach_seconds + DT_MDL, self.persistence_s)
     return self.approach_seconds >= self.persistence_s
+
+  def _decay_confirmation(self) -> None:
+    """A failing frame costs a few frames of confidence, not all of it. See CONFIRM_DECAY_RATE."""
+    self.approach_seconds = max(0.0, self.approach_seconds - CONFIRM_DECAY_RATE * DT_MDL)
+    if self.approach_seconds == 0.0:
+      self.lead_is_slow = False
+
+  def _clear_confirmation(self) -> None:
+    """A changed situation rather than a noisy one: start over properly."""
+    self.approach_seconds = 0.0
+    self.lead_is_slow = False
 
   def _lead_state(self, lead, v_cruise: float) -> None:
     """Record what the lead is doing, whichever trigger ends up using it."""
@@ -654,25 +705,25 @@ class PassingAssistDetector:
       # Suspended beats every other gate, including the ones that would report something more
       # specific. The driver has said "not here", and a panel reporting "no lane to move into"
       # while suspended would misrepresent why it is silent.
-      self.approach_seconds = 0.0
+      self._clear_confirmation()
       self.keep_right_seconds = 0.0
       self._reset_outputs(Blocked.suspended)
       return
 
     if not self.enabled:
-      self.approach_seconds = 0.0
+      self._clear_confirmation()
       self.keep_right_seconds = 0.0
       self._reset_outputs(Blocked.disabled)
       return
 
     if not long_enabled:
-      self.approach_seconds = 0.0
+      self._clear_confirmation()
       self.keep_right_seconds = 0.0
       self._reset_outputs(Blocked.notEngaged)
       return
 
     if CS.vEgo < MIN_V_EGO_MS:
-      self.approach_seconds = 0.0
+      self._clear_confirmation()
       self.keep_right_seconds = 0.0
       self._reset_outputs(Blocked.tooSlow)
       return
@@ -680,13 +731,15 @@ class PassingAssistDetector:
     # The driver is already doing something about it. Suggesting a pass mid-manoeuvre is noise,
     # and it would corrupt the confirmation timer for the far more interesting no-input case.
     if CS.leftBlinker or CS.rightBlinker or CS.brakePressed or CS.steeringPressed:
-      self.approach_seconds = 0.0
+      self._clear_confirmation()
       self.keep_right_seconds = 0.0
       self._reset_outputs(Blocked.driverActive)
       return
 
     if not lead.status:
-      self.approach_seconds = 0.0
+      # A single missed radar return is the same car, not a different situation -- so decay rather
+      # than erase, exactly as for the range bound above. Sustained absence still clears it.
+      self._decay_confirmation()
       self.has_lead = False
       self.lead_ttc = NO_TTC_S
       self._reset_outputs(Blocked.noLead)
