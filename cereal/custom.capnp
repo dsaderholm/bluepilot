@@ -736,6 +736,19 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     # unit the setting is in -- a figure the driver could act on directly rather than convert.
     missedDeficitMph @79 :Float32;
 
+    # BluePilot: when oncoming refuses a pass, is it SEEING traffic or REMEMBERING it?
+    #
+    # The veto holds for 90 s after a sighting, which is the right shape for a two-lane road and
+    # the reason one bad detection can silence the feature for a mile and a half. Splitting the
+    # time tells the two apart, and they need opposite fixes: mostly-seen means the detection is
+    # doing its job and the road really is two-way, mostly-remembered means one sighting is
+    # carrying the whole refusal and the memory is too long -- or, on I-15, that a phantom is.
+    #
+    # This is the measurement that turns the reported I-15 fault into a diagnosis rather than three
+    # mitigations and a hope.
+    oncomingSeenSeconds @80 :Float32;        # refused while actually watching a vehicle
+    oncomingRememberedSeconds @81 :Float32;  # refused on memory alone, nothing in view
+
     enum Maneuver {
       idle @0;         # nothing warranted
       confirming @1;   # a slower vehicle is being confirmed, timer running

@@ -2137,3 +2137,43 @@ class TestHowWrongTheThresholdWas:
     run(det, 2, blinker=True)
     assert det.driver_passes_agreed == 1
     assert det.missed_deficit_mph == 0.0
+
+
+class TestWhichHalfOfTheOncomingVetoWorks:
+  """When oncoming refuses a pass, is it SEEING traffic or REMEMBERING it? The two need opposite
+  fixes -- mostly-seen means the detection is right and the road really is two-way; mostly-
+  remembered means one sighting is carrying the whole refusal.
+
+  This is the measurement that turns the reported I-15 fault into a diagnosis rather than three
+  mitigations and a hope.
+  """
+
+  ONCOMING = [track(90, 3.7, -27.0 - CRUISE_MS)]
+
+  def test_watching_a_vehicle_counts_as_seen(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES, tracks=self.ONCOMING)
+    assert det.blocked_by == Blocked.oncomingLane
+    assert det.oncoming_seen_seconds > 0.5
+    assert det.oncoming_remembered_seconds == 0.0
+
+  def test_the_tail_after_it_has_gone_counts_as_remembered(self):
+    """The 90 s window outliving the vehicle is the intended behavior on a two-lane road, and is
+    also exactly what one phantom detection would look like on a divided one."""
+    det = run(PassingAssistDetector(), 3, tracks=self.ONCOMING)
+    seen = det.oncoming_seen_seconds
+    run(det, STUCK_FRAMES + int(5.0 / DT_MDL))
+    assert det.blocked_by == Blocked.oncomingLane
+    assert det.oncoming_seen_seconds == seen, "nothing in view should add no seen time"
+    assert det.oncoming_remembered_seconds > 4.0
+
+  def test_a_clear_road_counts_neither(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES)
+    assert det.oncoming_seen_seconds == 0.0
+    assert det.oncoming_remembered_seconds == 0.0
+
+  def test_a_refusal_for_another_reason_counts_neither(self):
+    """It measures the oncoming veto, not refusals in general."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, edges=(-2.3, 2.4))
+    assert det.blocked_by == Blocked.noLaneAvailable
+    assert det.oncoming_seen_seconds == 0.0
+    assert det.oncoming_remembered_seconds == 0.0

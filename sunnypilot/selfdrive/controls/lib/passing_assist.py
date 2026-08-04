@@ -402,6 +402,10 @@ class PassingAssistDetector:
     self.wanted_seconds = 0.0
     self._last_drive_write_s = 0.0
     self._last_oncoming = (0.0, 0.0)
+    # See oncomingSeenSeconds -- how much of the oncoming veto is a live sighting and how much is
+    # the tail of its memory.
+    self.oncoming_seen_seconds = 0.0
+    self.oncoming_remembered_seconds = 0.0
     self.suspended_seconds = 0.0
     self.reference_speed = 0.0
     self.reference_source = RefSource.cluster
@@ -848,6 +852,8 @@ class PassingAssistDetector:
         "suggestionsMade": int(self.suggestions_made),
         "suggestionsTaken": int(self.suggestions_taken),
         "longestIgnored": round(self.longest_ignored, 1),
+        "oncomingSeen": round(self.oncoming_seen_seconds, 1),
+        "oncomingRemembered": round(self.oncoming_remembered_seconds, 1),
         "oncomingDRel": round(self._last_oncoming[0], 1),
         "oncomingVAbs": round(self._last_oncoming[1], 1),
       })
@@ -1165,6 +1171,24 @@ class PassingAssistDetector:
       collision_abort=self._must_abort(self.maneuver.side),
     )
 
+  def _record_oncoming_refusal(self, on_the_left: bool) -> None:
+    """Account for one frame of the oncoming veto. See oncomingSeenSeconds.
+
+    Called from BOTH places that report oncomingLane, which is the whole reason it is a method.
+    That veto has two returns -- an early one before the sign check, and again in the per-side
+    priority chain -- and the early one is what fires in practice, so accounting written into the
+    chain alone records nothing. That trap is documented in test_passing_assist.py and I walked
+    into it anyway; a shared helper makes it impossible to feed only one.
+    """
+    side = self.adjacent.left if on_the_left else self.adjacent.right
+    if side.oncoming_d_rel > 0:
+      self._last_oncoming = (float(side.oncoming_d_rel), float(side.oncoming_v_abs))
+    # `oncoming` is this frame's sighting; the memory outlives it by up to the full window.
+    if side.oncoming:
+      self.oncoming_seen_seconds += DT_MDL
+    else:
+      self.oncoming_remembered_seconds += DT_MDL
+
   def _must_abort(self, side: int) -> bool:
     """Is there something in that lane worth REVERSING a crossing for?
 
@@ -1409,6 +1433,7 @@ class PassingAssistDetector:
     # explains the whole road. Reaching this line means geometry offered something, so oncoming is
     # necessarily what took it away.
     if not ((self.left_geometry_ok and not onc_left) or (self.right_geometry_ok and not onc_right)):
+      self._record_oncoming_refusal(onc_left)
       self._reset_outputs(Blocked.oncomingLane)
       return
 
@@ -1451,9 +1476,7 @@ class PassingAssistDetector:
       # "two-way road" understands the feature is off for this whole road.
       if (self.left_geometry_ok and onc_left) or (self.right_geometry_ok and onc_right):
         blocked = Blocked.oncomingLane
-        side = self.adjacent.left if onc_left else self.adjacent.right
-        if side.oncoming_d_rel > 0:
-          self._last_oncoming = (float(side.oncoming_d_rel), float(side.oncoming_v_abs))
+        self._record_oncoming_refusal(onc_left)
       elif ((self.left_geometry_ok and not self.left_blindspot and self.rear.left.blocks_lane_change) or
             (self.right_geometry_ok and not self.right_blindspot and self.rear.right.blocks_lane_change)):
         blocked = Blocked.rearApproaching
@@ -1663,6 +1686,8 @@ class PassingAssistDetector:
     passingAssist.driverPassLeadSeconds = float(pa.driver_pass_lead_s)
     passingAssist.driverPassMissReason = pa.driver_pass_miss_reason
     passingAssist.missedDeficitMph = float(pa.missed_deficit_mph)
+    passingAssist.oncomingSeenSeconds = float(pa.oncoming_seen_seconds)
+    passingAssist.oncomingRememberedSeconds = float(pa.oncoming_remembered_seconds)
     passingAssist.suggestionsMade = min(pa.suggestions_made, 65535)
     passingAssist.suggestionsTaken = min(pa.suggestions_taken, 65535)
     passingAssist.longestIgnoredSeconds = float(pa.longest_ignored)

@@ -595,6 +595,11 @@ class HudRendererBP(HudRendererSP):
         lines.append(f"{n} slow {'pass' if n == 1 else 'passes'}, worst {float(d['crawlLongest']):.0f}s")
       if d.get("aborts"):
         lines.append(f"{int(d['aborts'])} backed out")
+      # Which half of the oncoming veto did the work. Mostly-remembered on a divided highway is
+      # the I-15 fault stated as a number rather than a complaint.
+      seen, remembered = float(d.get("oncomingSeen", 0)), float(d.get("oncomingRemembered", 0))
+      if seen + remembered > 5.0:
+        lines.append(f"oncoming: {seen:.0f}s seen, {remembered:.0f}s remembered")
       if float(d.get("oncomingDRel", 0)) > 0:
         od = float(d["oncomingDRel"])
         ov = abs(float(d["oncomingVAbs"])) * (3.6 if ui_state.is_metric else 2.23694)
