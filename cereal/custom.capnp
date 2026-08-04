@@ -517,12 +517,16 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       radar @2;     # a rear-facing radar object list
     }
 
-    # BluePilot: LiveMapDataSP.roadName at decision time. Recorded because it is the cheapest
-    # candidate for the divided-highway gate that geometry cannot provide: mapd already publishes
-    # it and the UI already renders it, so if it carries a usable interstate identifier the
-    # oncoming-lane problem is solvable today without forking mapd or waiting for navigation.
-    # Logged before being trusted -- what pfeiferj's mapd puts here for a US interstate is
-    # unverified, and a filter written against a guessed format would silently never match.
+    # BluePilot: LiveMapDataSP.roadName at decision time.
+    #
+    # ORIGINAL PURPOSE SOLVED, kept for a smaller one. This was the cheapest candidate for the
+    # divided-highway gate that geometry cannot provide, back when nothing else could tell an
+    # oncoming lane from a passing lane. The front radar answers that directly now -- see
+    # adjacent_lane.py -- so this is no longer load-bearing and no filter is written against it.
+    #
+    # It stays because it is the only human-readable label on a decision: when a drive log shows
+    # the oncoming veto firing where it should not have, this says which road that was. Cheap and
+    # unambiguous in a way coordinates are not.
     roadName @22 :Text;
 
     enum Reason {

@@ -291,7 +291,6 @@ class PassingAssistDetector:
     # spend its first settle period refusing to suggest a return.
     self._settle_s = 1e3
     self._lka_prev = False
-    self._right_bs_prev = False
     self.max_distance_m = float(DEFAULT_MAX_DISTANCE_M)
 
   def update_params(self) -> None:
