@@ -681,8 +681,10 @@ class HudRendererBP(HudRendererSP):
 
     sm = ui_state.sm
 
-    # The stationary blinker test owns the panel while it runs. The two cannot overlap -- passing
-    # assist needs 40 mph and the blinker test only runs stopped.
+    # The stationary blinker test owns the panel while it runs. The two barely overlap -- the
+    # blinker test only runs stopped, and passing assist needs PassingAssistMinSpeed, 30 mph by
+    # default -- but the drive summary IS a stopped state, so this has to come first outright. It
+    # is a deliberate action the driver is standing there waiting for a result from.
     if self._render_blinker_test(sm):
       return
 
@@ -716,9 +718,14 @@ class HudRendererBP(HudRendererSP):
     if self._draw_drive_summary(pa, sm):
       return
 
-    # A grinding pass outranks the dry run: it is happening NOW, in the other lane, and it is the
-    # one state the driver might actually want to do something about.
-    if self._draw_crawl(pa):
+    # ORDER MATTERS, and the obvious order is wrong. A grinding pass is happening now and is the
+    # one state a driver might act on, so it outranks the dry run -- but NOT while the car is
+    # committed. Once the manoeuvre is crossing, backing out, or standing down after a reversal, a
+    # slow-pass warning would suppress the only red state this panel has, which is the one that
+    # says something arrived behind us. Crawling and crossing can both be true at once: a slow pass
+    # IS a car close alongside being barely gained on.
+    committed = str(pa.manoeuvre) in ('changing', 'aborting') or pa.manoeuvreStandDown > 0.0
+    if not committed and self._draw_crawl(pa):
       return
 
     # The dry run takes the line whenever a sequence is actually running. It is strictly more
