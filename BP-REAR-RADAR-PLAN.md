@@ -83,7 +83,7 @@ and each stage stands on its own if the next never happens.
 | Stage | Cost | What | Gate to the next |
 |---|---|---|---|
 | **1. Drive what exists** | $0 | Flash the branch. Turn on the two On Screen toggles under Steering → Customize Passing Assist. Drive normally and read the panel. | Does the observer say sensible things on your roads? |
-| **2. BLIS via canbox** | $0 | Route `0x3A6`/`0x3A7` onto bus 0 (§12). Restart so the fingerprint takes. | Does `blindspotAvailable` go true and the "no blind spot data" caveat disappear? |
+| **2. BLIS via canbox** | price of the canbox | Route `0x3A6`/`0x3A7` onto bus 0 (§12). Restart so the fingerprint takes. | Does `blindspotAvailable` go true and the "no blind spot data" caveat disappear? |
 | **3. Buy and bench the radar** | $110–255 | `JX7T-9G768-AC` + pigtail + CANable 2.0 + 12 V supply. Power it on a bench, log what it emits (§8, §9). | **Does it emit detections with nothing sent to it?** |
 | **4. Fit it** | $70–110 | Teensy 4.0, dual-CAN board, loom, bracket. Bench → listen-only → transmit (§9). | — |
 
@@ -1572,6 +1572,11 @@ in §0 stands.
 Added 2026-08-03. Owner wants factory BLIS looped in for full coverage. Checked what that costs:
 **nothing in software.** It is a canbox configuration job and the entire chain downstream already
 exists and is tested.
+
+**"$0" MEANS NO CODE, NOT NO MONEY**, and that distinction was lost the first time this was
+summarized out loud. Every layer below already exists and is tested, so nothing has to be written
+-- but the routing has to happen in a canbox, and the canbox is a purchase. Corrected 2026-08-04
+after the owner pointed it out.
 
 ### It is already wired, end to end
 
