@@ -84,14 +84,29 @@ MAX_WIDENING_M = 2.5
 # --- geometry gates ---
 # Confidence that a painted line exists BEYOND ego's own lane line. Matches the 0.5 that ldw.py
 # uses for "lane visible"; raised slightly because acting on it is a stronger claim than warning.
-MIN_ADJACENT_LINE_PROB = 0.6
+# 0.3, DOWN FROM 0.6, and the old value was stricter than openpilot is about its own best data.
+#
+# ldw.py calls a lane "visible" at laneLineProbs > 0.5 -- but it tests indices 1 and 2, the EGO
+# lane's own lines, which are the two the model predicts most confidently. This tests 0 and 3, the
+# lines beyond them, which are inherently less certain: further away, more often occluded, and not
+# what the model is optimized for. Asking MORE of the worse-predicted lines was backwards, and the
+# result was "No lane to move into" on roads with an obvious empty lane beside them.
+#
+# Nothing here actuates, so the cost of being wrong in this direction is a suggestion that can be
+# looked at and judged. The cost of being wrong the other way is a feature that never speaks, which
+# is what a drive already went to finding out.
+MIN_ADJACENT_LINE_PROB = 0.3
 # Drivable width between ego's lane line and the road edge that counts as a real lane. A US lane
 # is 3.7 m; a wide shoulder is under 3. Sitting between them is deliberate -- too low and every
 # breakdown lane reads as passable.
 MIN_LANE_WIDTH_M = 3.0
 # Road edge measurements get unreliable at distance and in poor conditions. modelV2 publishes a
 # per-edge std; above this the edge gap is not trusted and the side is reported unavailable.
-MAX_ROAD_EDGE_STD = 0.5
+# 0.75, up from 0.5. The rest of this codebase treats roadEdgeStds on a 0..1 scale where 1 is
+# useless -- model_renderer_bp draws an edge at `clip(1.0 - std, 0, 1)` opacity. So the old 0.5
+# rejected any edge the UI itself would still draw at half strength, which on a real road is most
+# of them. This keeps the genuinely unusable ones out without discarding an ordinary highway.
+MAX_ROAD_EDGE_STD = 0.75
 
 # --- lead gates ---
 # Below this, passing is not the maneuver being considered.
@@ -684,12 +699,22 @@ class PassingAssistDetector:
 
     # Both channels must agree before a side is called available. Requiring agreement is the
     # conservative reading and keeps phase 2 honest if this ever stops being log-only.
-    self.left_geometry_ok = (self.left_line_prob >= MIN_ADJACENT_LINE_PROB and
-                             self.left_edge_gap >= MIN_LANE_WIDTH_M and
-                             left_std <= MAX_ROAD_EDGE_STD)
-    self.right_geometry_ok = (self.right_line_prob >= MIN_ADJACENT_LINE_PROB and
-                              self.right_edge_gap >= MIN_LANE_WIDTH_M and
-                              right_std <= MAX_ROAD_EDGE_STD)
+    # ...OR THE RADAR HAS WATCHED SOMEBODY DRIVE DOWN IT. A vehicle travelling our way in that lane
+    # is proof the lane exists and is a travel lane -- better proof than any of the three geometry
+    # terms, because it is an observation rather than an inference about paint. adjacent.update()
+    # runs before this, so the reading is current.
+    #
+    # It cannot replace geometry, only add to it: an empty lane produces no traffic, and most lanes
+    # are empty most of the time. But when the model is unsure about paint it has no business
+    # refusing a lane the radar just watched a car use.
+    self.left_geometry_ok = ((self.left_line_prob >= MIN_ADJACENT_LINE_PROB and
+                              self.left_edge_gap >= MIN_LANE_WIDTH_M and
+                              left_std <= MAX_ROAD_EDGE_STD) or
+                             self.adjacent.left.same_direction_recent)
+    self.right_geometry_ok = ((self.right_line_prob >= MIN_ADJACENT_LINE_PROB and
+                               self.right_edge_gap >= MIN_LANE_WIDTH_M and
+                               right_std <= MAX_ROAD_EDGE_STD) or
+                              self.adjacent.right.same_direction_recent)
 
     # How long that lane has been there WITHOUT INTERRUPTION. See DEFAULT_MIN_LANE_AGE_S: a lane
     # that did not exist a moment ago and now does is an exit or an on-ramp, and this is the only

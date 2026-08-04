@@ -10,6 +10,9 @@ from openpilot.selfdrive.ui.bp.onroad.exp_button_bp import ExpButtonBP
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.selfdrive.ui.bp.lib.ui_debug_logger import bp_ui_log
+from openpilot.sunnypilot.selfdrive.controls.lib.passing_assist import (
+  MIN_ADJACENT_LINE_PROB, MIN_LANE_WIDTH_M, MAX_ROAD_EDGE_STD,
+)
 from openpilot.system.ui.lib.application import gui_app
 
 LateralMode = ControllerStateBP.LateralMode
@@ -201,11 +204,11 @@ def _lane_why(tag: str, prob: float, gap: float, std: float, metric: bool) -> st
   three are invented constants -- this readout exists so a drive can replace them with measurements
   instead of an argument.
   """
-  if std > 0.5:
+  if std > MAX_ROAD_EDGE_STD:
     return f"{tag} edge +-{min(std, 9.9):.1f}"
-  if prob < 0.6:
+  if prob < MIN_ADJACENT_LINE_PROB:
     return f"{tag} paint {prob:.2f}"
-  if gap < 3.0:
+  if gap < MIN_LANE_WIDTH_M:
     w = gap if metric else gap * 3.28084
     return f"{tag} gap {w:.1f}{'m' if metric else 'ft'}"
   return f"{tag} ok"

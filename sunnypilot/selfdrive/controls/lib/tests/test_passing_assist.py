@@ -2459,3 +2459,52 @@ class TestTheDriveHistory:
     det.params = p
     det.update_params()
     assert "PassingAssistHistory" not in p.store, "wrote an empty drive on a car that never drove"
+
+
+class TestTheGeometryGateActuallyOpens:
+  """From the road: "it just always says no lane to change into."
+
+  Nothing in this suite pinned the three thresholds -- every fixture sat well clear of all of them,
+  so 0.6/0.5/3.0 could be changed to anything and 1044 tests stayed green. That is the same blind
+  spot that has produced every real bug this week: the fixtures held constant exactly the thing
+  that was wrong.
+  """
+
+  def test_an_outer_line_the_model_is_unsure_about_still_counts(self):
+    """0.4 is below the old 0.6 and above the new 0.3. ldw calls a lane visible at 0.5 -- but for
+    the EGO lane's own lines, which the model predicts far better than these outer ones. Asking
+    more of the worse-predicted lines is what kept this shut."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, probs=(0.4, 0.99, 0.99, 0.2))
+    assert det.left_geometry_ok
+    assert det.suggestion == Side.left
+
+  def test_a_road_edge_the_ui_would_still_draw_counts(self):
+    """0.6 std: rejected before, accepted now. The rest of the codebase draws an edge at
+    clip(1 - std) opacity, so the old 0.5 threw away edges openpilot itself still believes in."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, edge_stds=(0.6, 0.6))
+    assert det.left_geometry_ok
+
+  def test_a_genuinely_useless_edge_is_still_refused(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES, edge_stds=(0.9, 0.9))
+    assert not det.left_geometry_ok
+
+  def test_paint_nobody_can_see_is_still_refused(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES, probs=(0.1, 0.99, 0.99, 0.1),
+              edges=(-2.2, 2.4))
+    assert not det.left_geometry_ok
+    assert det.blocked_by == Blocked.noLaneAvailable
+
+  def test_a_car_driving_down_that_lane_proves_it_exists(self):
+    """The path that needs no paint at all. A vehicle travelling our way in the next lane is an
+    observation, not an inference -- better evidence than any of the three geometry terms, and
+    available exactly when the model is least sure."""
+    det = keep_right_det()
+    # No paint, no usable edge -- geometry alone refuses this.
+    scene = dict(probs=(0.05, 0.99, 0.99, 0.05), edges=(-2.2, 2.4), edge_stds=(0.9, 0.9))
+    run(det, 4, **scene)
+    assert not det.left_geometry_ok
+    # ...now put a car in the left lane, going our way at our speed.
+    moving = dict(scene, tracks=(track(40.0, 3.7, v_rel=0.5),))
+    run(det, int(3.0 / DT_MDL), **moving)
+    assert det.adjacent.left.same_direction_recent, "the radar did not register the vehicle"
+    assert det.left_geometry_ok, "refused a lane the radar just watched a car drive down"
