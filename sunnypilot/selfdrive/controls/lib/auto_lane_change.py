@@ -80,6 +80,14 @@ DEFAULT_CANCEL_WINDOW_S = 2
 #   CHANGE_DURATION_S = 4.0 in passing_maneuver.py -- how long the crossing takes. Invented. Every
 #   change the driver makes measures the real thing, on this car, at his speeds.
 #
+#   THIS ONE CONVERGES FAST AND THEN STOPS BEING NEWS, which the owner pointed out: a nudgeless
+#   change takes the same time every time. Its shape comes from the model and the lateral tuning
+#   -- lane_change_factor_high_ang scales the requested curvature during a change, and on this car
+#   (angle branch) it is 1.0, so nothing softens it. Traffic does not enter into it. So expect one
+#   number after a handful of changes, and after that treat it as a REGRESSION DETECTOR: if it
+#   moves, somebody changed lateral tuning. The overtake duration is the one that genuinely varies,
+#   and that is measured separately in overtake_progress.py.
+#
 #   The abort count has no human baseline. If he abandons one signal in ten himself, then passing
 #   assist backing out one in ten is NORMAL and the number means nothing until compared. Without a
 #   baseline it is a figure with no scale.
