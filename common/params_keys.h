@@ -257,6 +257,9 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // to reject a single bad frame of lead tracking.
     {"PassingAssistBlinkerLead", {PERSISTENT | BACKUP, INT, "1"}},
     {"PassingAssistMinApproach", {PERSISTENT | BACKUP, INT, "0"}},
+    // The previous drive's measurements, so parking does not throw them away. Written
+    // periodically by the detector, read by the panel when the current drive has nothing yet.
+    {"PassingAssistLastDrive", {PERSISTENT | BACKUP, JSON}},
     {"PassingAssistMinSpeed", {PERSISTENT | BACKUP, INT, "30"}},
     {"PassingAssistConfirmTime", {PERSISTENT | BACKUP, INT, "2"}},
     {"PassingAssistCrawlTime", {PERSISTENT | BACKUP, INT, "8"}},

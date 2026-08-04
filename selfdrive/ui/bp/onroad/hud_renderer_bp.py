@@ -1,5 +1,6 @@
 import pyray as rl
 from openpilot.common.params import Params
+from cereal import custom
 from opendbc.car.structs import ControllerStateBP
 from openpilot.bluepilot.ui.lib.bp_shaders import draw_shader_circle_gradient
 from openpilot.selfdrive.ui.onroad.hud_renderer import UI_CONFIG, FONT_SIZES, COLORS
@@ -152,6 +153,13 @@ PIN_DOT_COLOR = rl.Color(255, 214, 120, 255)
 # "nothingSlower" or "noLaneAvailable" in front of someone at 70 mph is a failure of the display, not
 # a shorthand. Anything unmapped falls through to the raw name so a new state is visible rather
 # than silently blank.
+# Ordinal -> name, straight off the schema rather than hand-listed. The last-drive summary stores
+# the Blocked value as an int in a param, and a hand-written order here would silently mislabel
+# every stored reason the moment a new one is added to the enum.
+_BLOCKED_ORDER = tuple(
+  name for name, _ in sorted(
+    custom.LongitudinalPlanSP.PassingAssist.Blocked.schema.enumerants.items(), key=lambda kv: kv[1]))
+
 _BLOCKED_TEXT = {
   'disabled': "Passing assist off",
   'notEngaged': "Cruise not engaged",
@@ -444,6 +452,13 @@ class HudRendererBP(HudRendererSP):
     try:
       if sm['carState'].vEgo > 0.3:
         return False
+
+      # Nothing measured yet this drive: show the last one instead. Parking used to throw these
+      # away entirely, and they are the whole output of this phase -- read off this panel at a
+      # traffic light or not at all.
+      if pa.wantedSeconds <= 0.0 and not pa.crawlEvents and not pa.manoeuvreAborts:
+        return self._draw_last_drive()
+
       lines = []
       if pa.crawlEvents:
         lines.append(f"{pa.crawlEvents} slow "
@@ -467,6 +482,39 @@ class HudRendererBP(HudRendererSP):
     # Assembled here, NOT via _pa_sub_detail. That field is folded into _pa_sub at the end of
     # _update_passing_assist, and every method here returns before reaching it -- so anything left
     # in it is silently dropped. Cost me three readouts before a preview render showed it.
+    self._pa_sub = "  -  ".join(lines)
+    self._pa_color = rl.Color(150, 205, 235, 255)
+    return True
+
+  def _draw_last_drive(self) -> bool:
+    """The previous drive's numbers, from the param the detector writes. Returns True if shown."""
+    try:
+      d = self._bp_params.get("PassingAssistLastDrive")
+      if not d or float(d.get("wantedSeconds", 0)) <= 5.0:
+        return False
+      lines = []
+      share = float(d.get("topBlockedShare", 0))
+      if share > 0.05:
+        # The int is the Blocked ordinal. Mapped through the same table the live panel uses, so
+        # the wording cannot drift between "what stopped it" and "what stopped it last time".
+        name = _BLOCKED_ORDER[int(d["topBlockedBy"])] if int(d["topBlockedBy"]) < len(_BLOCKED_ORDER) else ""
+        if name:
+          lines.append(f"mostly: {_BLOCKED_TEXT.get(name, name).lower()} {share * 100:.0f}%")
+      if d.get("crawlEvents"):
+        n = int(d["crawlEvents"])
+        lines.append(f"{n} slow {'pass' if n == 1 else 'passes'}, worst {float(d['crawlLongest']):.0f}s")
+      if d.get("aborts"):
+        lines.append(f"{int(d['aborts'])} backed out")
+      if float(d.get("accOnsetMax", 0)) > 0:
+        m = float(d["accOnsetMax"])
+        v = m if ui_state.is_metric else m * 3.28084
+        lines.append(f"ACC braked by {v:.0f}{'m' if ui_state.is_metric else 'ft'}")
+    except Exception:  # noqa: BLE001 - a malformed param must never blank the panel
+      return False
+
+    if not lines:
+      return False
+    self._pa_main = "LAST DRIVE"
     self._pa_sub = "  -  ".join(lines)
     self._pa_color = rl.Color(150, 205, 235, 255)
     return True

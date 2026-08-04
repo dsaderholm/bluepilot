@@ -106,6 +106,16 @@ MAX_ROAD_EDGE_STD = 0.5
 # works from a vehicle's ABSOLUTE ground speed, so a car coming the other way is just as obvious at
 # 30 as at 70.
 DEFAULT_MIN_SPEED_MPH = 30
+
+# How often the drive's measurements are written to a param so they survive being parked.
+#
+# They are the whole output of phase 1 and they used to live only in RAM: park, screen off, gone.
+# Everything measured here is read off a panel at a traffic light or not at all -- there is no log
+# digging in this workflow -- so a number that evaporates at the end of a drive was never taken.
+#
+# 30 s rather than on shutdown because there is no reliable shutdown hook here, and a drive that
+# ends with a yanked ignition is exactly the drive worth keeping.
+LAST_DRIVE_WRITE_S = 30
 # In our lane, not an adjacent-lane return. Measured from the MODEL PATH, not from the car's
 # straight-ahead axis, and computed here rather than read off radarState.
 #
@@ -335,6 +345,7 @@ class PassingAssistDetector:
     # Seconds per blocked reason, counted only while a pass was actually wanted. See wantedSeconds.
     self._block_seconds: dict[int, float] = {}
     self.wanted_seconds = 0.0
+    self._last_drive_write_s = 0.0
     self.suspended_seconds = 0.0
     self.reference_speed = 0.0
     self.reference_source = RefSource.cluster
@@ -684,6 +695,32 @@ class PassingAssistDetector:
     # `confirmed` there for what actually commits the car to moving.
     return True
 
+  def _save_drive_summary(self) -> None:
+    """Persist what this drive measured. See LAST_DRIVE_WRITE_S.
+
+    Nothing depends on this succeeding -- it is a convenience for reading numbers after the fact,
+    and a param write must never be able to take the planner down.
+    """
+    self._last_drive_write_s += DT_MDL
+    if self._last_drive_write_s < LAST_DRIVE_WRITE_S:
+      return
+    self._last_drive_write_s = 0.0
+
+    top_key, top_share = self.top_blocked
+    try:
+      self.params.put("PassingAssistLastDrive", {
+        "wantedSeconds": round(self.wanted_seconds, 1),
+        "topBlockedBy": int(top_key),
+        "topBlockedShare": round(top_share, 3),
+        "clearShare": round(self.clear_share, 3),
+        "crawlEvents": int(self.overtake.crawl_events),
+        "crawlLongest": round(self.overtake.crawl_longest, 1),
+        "aborts": int(self.manoeuvre.aborts),
+        "accOnsetMax": round(self.acc_onset_max, 1),
+      })
+    except Exception:  # noqa: BLE001 - a param write failure must never reach the planner
+      pass
+
   @property
   def top_blocked(self) -> tuple[int, float]:
     """The reason that consumed most of the time a pass was wanted, and its share.
@@ -821,6 +858,11 @@ class PassingAssistDetector:
       self.wanted_seconds += DT_MDL
       key = int(self.blocked_by)
       self._block_seconds[key] = self._block_seconds.get(key, 0.0) + DT_MDL
+
+    # Only once there is something worth keeping, so an idle commute cannot overwrite the drive
+    # that actually produced numbers.
+    if self.wanted_seconds > 0.0:
+      self._save_drive_summary()
 
     confirmed = self.approach_seconds >= self.persistence_s
     self.manoeuvre.update(
