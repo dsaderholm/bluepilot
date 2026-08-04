@@ -24,7 +24,7 @@ from cereal import custom
 from openpilot.common.constants import CV
 from openpilot.common.realtime import DT_MDL
 from openpilot.sunnypilot.selfdrive.controls.lib.passing_assist import (
-  PassingAssistDetector, MIN_LANE_WIDTH_M, MIN_V_EGO_MS, MAX_WIDENING_M,
+  PassingAssistDetector, MIN_LANE_WIDTH_M, DEFAULT_MIN_SPEED_MPH, MAX_WIDENING_M,
 )
 
 Side = custom.LongitudinalPlanSP.PassingAssist.Side
@@ -305,7 +305,7 @@ class TestSpeedBoundary:
     assert det.blocked_by == Blocked.nothingSlower
 
   def test_below_min_speed_blocks(self):
-    det = run(PassingAssistDetector(), STUCK_FRAMES, v_ego=MIN_V_EGO_MS - 1.0)
+    det = run(PassingAssistDetector(), STUCK_FRAMES, v_ego=DEFAULT_MIN_SPEED_MPH * CV.MPH_TO_MS - 1.0)
     assert det.blocked_by == Blocked.tooSlow
 
   def test_driver_input_blocks_and_resets(self):
@@ -420,7 +420,7 @@ _STUB_PARAM_DEFAULTS = {
   "PassingAssistMinDeficit": 4, "PassingAssistConfirmTime": 2,
   "PassingAssistKeepRightDelay": 10, "PassingAssistSettleTime": 20,
   "PassingAssistMaxDistance": 220, "PassingAssistSuspendMinutes": 15,
-  "PassingAssistOncomingMemory": 90, "PassingAssistBlinkerLead": 1, "PassingAssistMinApproach": 0, "PassingAssistCrawlTime": 8, "PassingAssistMinLaneAge": 15,
+  "PassingAssistOncomingMemory": 90, "PassingAssistBlinkerLead": 1, "PassingAssistMinApproach": 0, "PassingAssistMinSpeed": 30, "PassingAssistCrawlTime": 8, "PassingAssistMinLaneAge": 15,
 }
 
 
@@ -1405,3 +1405,72 @@ class TestLeadBraking:
     det = run(PassingAssistDetector(), STUCK_FRAMES, status=False)
     assert not det.lead_braking_hold
     assert det.blocked_by != Blocked.leadBraking
+
+
+class TestWhereTheTimeWent:
+  """blockedBy says what is stopping a pass right now. This says where the drive's time actually
+  went, which is the question that decides what to build next -- and it is invisible from the
+  panel, where every reason looks equally common because each is only on screen for a moment.
+  """
+
+  def test_an_empty_road_is_not_evidence_about_anything(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES, status=False)
+    assert det.wanted_seconds == 0.0
+    assert det.top_blocked == (int(Blocked.none), 0.0)
+
+  def test_a_car_going_our_speed_is_not_evidence_either(self):
+    """A pass was never wanted, so nothing that happened counts toward why one did not happen."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, v_lead=CRUISE_MS)
+    assert det.wanted_seconds == 0.0
+
+  def test_the_binding_gate_is_named(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES, left_bs=True, edges=(-2.3, 2.4))
+    key, share = det.top_blocked
+    assert det.wanted_seconds > 0
+    assert key == int(Blocked.noLaneAvailable)
+    assert share > 0.9
+
+  def test_a_clean_drive_reports_clear_rather_than_a_gate(self):
+    """Nothing stopping it must NOT win the "what stopped it" question -- that would hide the real
+    answer behind good news on any drive that mostly worked."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES)
+    assert det.clear_share > 0.5
+    assert det.top_blocked[0] == int(Blocked.none), "no gate should be named when none was binding"
+
+  def test_the_dominant_gate_wins_over_a_brief_one(self):
+    det = PassingAssistDetector()
+    # 4 s: the first 2 are the confirmation and are not attributed to any gate, so 2 s of blind
+    # spot land in the histogram.
+    run(det, int(4.0 / DT_MDL), left_bs=True, right_bs=True)
+    run(det, int(6.0 / DT_MDL), left_bs=True, edges=(-2.3, 2.4))  # no lane, for much longer
+    key, share = det.top_blocked
+    assert key == int(Blocked.noLaneAvailable)
+    assert 0.7 < share < 1.0
+
+
+class TestMinimumSpeed:
+  """The 40 mph floor failed in the case it most mattered: stuck behind something slow, ACC drags
+  you below it, and the system goes quiet exactly when a pass is most obviously wanted."""
+
+  def test_a_tractor_on_a_back_road_is_now_passed(self):
+    """35 mph behind something doing 25 -- the case the old floor threw away."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES,
+              v_lead=11.0, v_ego=15.6, set_speed=24.6)   # ~25 / ~35 / ~55 mph
+    assert det.suggestion == Side.left
+    assert det.reason == Reason.passing
+
+  def test_still_silent_at_walking_pace(self):
+    """The floor still has a job: below it the geometry stops meaning what it says, because a turn
+    pocket or a driveway looks exactly like a lane."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, v_lead=5.0, v_ego=8.0, set_speed=24.6)
+    assert det.suggestion == Side.none
+    assert det.blocked_by == Blocked.tooSlow
+
+  def test_the_floor_is_adjustable(self):
+    class _Slow(_KeepRightOnParams):
+      def get(self, key, block=False, return_default=False):
+        return 20 if key == "PassingAssistMinSpeed" else super().get(key)
+    det = PassingAssistDetector()
+    det.params = _Slow()
+    run(det, STUCK_FRAMES, v_lead=5.0, v_ego=10.0, set_speed=24.6)
+    assert det.blocked_by != Blocked.tooSlow

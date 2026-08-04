@@ -450,6 +450,10 @@ class HudRendererBP(HudRendererSP):
                      f"{'pass' if pa.crawlEvents == 1 else 'passes'}, worst {pa.crawlLongestSeconds:.0f}s")
       if pa.manoeuvreAborts:
         lines.append(f"{pa.manoeuvreAborts} backed out")
+      # The most useful line here, so it goes first: what actually stopped the passes.
+      if pa.wantedSeconds > 5.0 and pa.topBlockedShare > 0.05:
+        reason = _BLOCKED_TEXT.get(str(pa.topBlockedBy), str(pa.topBlockedBy))
+        lines.append(f"mostly: {reason.lower()} {pa.topBlockedShare * 100:.0f}%")
       if pa.accBrakingOnsetMax > 0:
         d = pa.accBrakingOnsetMax if ui_state.is_metric else pa.accBrakingOnsetMax * 3.28084
         lines.append(f"ACC braked by {d:.0f}{'m' if ui_state.is_metric else 'ft'}")

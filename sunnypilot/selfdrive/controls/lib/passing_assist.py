@@ -92,7 +92,20 @@ MIN_LANE_WIDTH_M = 3.0
 MAX_ROAD_EDGE_STD = 0.5
 
 # --- lead gates ---
-MIN_V_EGO_MS = 40 * CV.MPH_TO_MS  # below this, passing is not the manoeuvre being considered
+# Below this, passing is not the manoeuvre being considered.
+#
+# WAS 40 AND THAT WAS TOO HIGH, which the owner spotted: "do we really need the 40 mph rule anymore
+# with everything else we've implemented?" It fails in exactly the case it most matters. Stuck
+# behind a tractor on a 55 road, ACC drags you down to 30 -- and passing assist goes silent right
+# when a pass is most obviously wanted. The rule was written to keep the system out of town, and
+# town is already excluded by CRUISE HAVING TO BE ENGAGED, which the gate above enforces.
+#
+# 30 rather than lower because the geometry below it stops meaning what it says: at 20 mph a lot of
+# what the model calls a lane is a turn pocket, a driveway or a parking aisle, and none of the
+# tests here can tell those from a passing lane. Oncoming detection is unaffected either way -- it
+# works from a vehicle's ABSOLUTE ground speed, so a car coming the other way is just as obvious at
+# 30 as at 70.
+DEFAULT_MIN_SPEED_MPH = 30
 # In our lane, not an adjacent-lane return. Measured from the MODEL PATH, not from the car's
 # straight-ahead axis, and computed here rather than read off radarState.
 #
@@ -319,6 +332,9 @@ class PassingAssistDetector:
     self.acc_onset_d_rel = 0.0
     # Drive-level: the earliest ACC has ever started. See accBrakingOnsetMax.
     self.acc_onset_max = 0.0
+    # Seconds per blocked reason, counted only while a pass was actually wanted. See wantedSeconds.
+    self._block_seconds: dict[int, float] = {}
+    self.wanted_seconds = 0.0
     self.suspended_seconds = 0.0
     self.reference_speed = 0.0
     self.reference_source = RefSource.cluster
@@ -365,6 +381,7 @@ class PassingAssistDetector:
     self._lka_prev = False
     self.max_distance_m = float(DEFAULT_MAX_DISTANCE_M)
     self.min_approach_m = float(DEFAULT_MIN_APPROACH_M)
+    self.min_speed_ms = DEFAULT_MIN_SPEED_MPH * CV.MPH_TO_MS
     self.closing_in = False
     self.lead_accel = 0.0
     self.lead_braking_enabled = True
@@ -389,6 +406,7 @@ class PassingAssistDetector:
       self.oncoming_memory_s = float(self.params.get("PassingAssistOncomingMemory", return_default=True))
       self.manoeuvre.blinker_lead_s = float(self.params.get("PassingAssistBlinkerLead", return_default=True))
       self.min_approach_m = float(self.params.get("PassingAssistMinApproach", return_default=True))
+      self.min_speed_ms = self.params.get("PassingAssistMinSpeed", return_default=True) * CV.MPH_TO_MS
       self.overtake.crawl_time_s = float(self.params.get("PassingAssistCrawlTime", return_default=True))
       self.lead_braking_enabled = self.params.get_bool("PassingAssistLeadBrakingHold")
       self.settle_time_s = float(self.params.get("PassingAssistSettleTime", return_default=True))
@@ -666,6 +684,25 @@ class PassingAssistDetector:
     # `confirmed` there for what actually commits the car to moving.
     return True
 
+  @property
+  def top_blocked(self) -> tuple[int, float]:
+    """The reason that consumed most of the time a pass was wanted, and its share.
+
+    Excludes `none` -- "nothing was stopping it" is reported separately as clearShare, and letting
+    it win here would hide the actual answer behind the good news on any drive that mostly worked.
+    """
+    blocked = {k: v for k, v in self._block_seconds.items() if k != int(Blocked.none)}
+    if not blocked or self.wanted_seconds <= 0.0:
+      return int(Blocked.none), 0.0
+    key = max(blocked, key=lambda k: blocked[k])
+    return key, blocked[key] / self.wanted_seconds
+
+  @property
+  def clear_share(self) -> float:
+    if self.wanted_seconds <= 0.0:
+      return 0.0
+    return self._block_seconds.get(int(Blocked.none), 0.0) / self.wanted_seconds
+
   def _lead_gap(self) -> None:
     """One frame where the lead failed a bound or was not there at all.
 
@@ -774,6 +811,17 @@ class PassingAssistDetector:
     # fresh suggestion was still live, which is the subset least in need of measuring.
     self.overtake.update(CS.vEgo, self.adjacent.left, self.adjacent.right, self._settle_s)
 
+    # Counted AFTER every gate has run, so blocked_by is final for this frame. Only while a
+    # slower car is actually spotted -- an empty road is not evidence about anything -- and only
+    # once the CONFIRMATION HAS COMPLETED. Before that, blocked_by reads nothingSlower, which here
+    # means "still deciding" rather than "a gate stopped it"; counting those frames would have put
+    # two seconds of ordinary confirmation at the top of every drive's list and buried the real
+    # answer under it.
+    if self.lead_is_slow and self.approach_seconds >= self.persistence_s:
+      self.wanted_seconds += DT_MDL
+      key = int(self.blocked_by)
+      self._block_seconds[key] = self._block_seconds.get(key, 0.0) + DT_MDL
+
     confirmed = self.approach_seconds >= self.persistence_s
     self.manoeuvre.update(
       clear=self.clear_side,
@@ -868,7 +916,7 @@ class PassingAssistDetector:
       self._reset_outputs(Blocked.notEngaged)
       return
 
-    if CS.vEgo < MIN_V_EGO_MS:
+    if CS.vEgo < self.min_speed_ms:
       self._clear_confirmation()
       self.keep_right_seconds = 0.0
       self._reset_outputs(Blocked.tooSlow)
@@ -1190,6 +1238,11 @@ class PassingAssistDetector:
     passingAssist.accPrechargeAtDecision = pa.acc_precharge_at_decision
     passingAssist.accBrakingOnsetDRel = float(pa.acc_onset_d_rel)
     passingAssist.accBrakingOnsetMax = float(pa.acc_onset_max)
+    top_key, top_share = pa.top_blocked
+    passingAssist.wantedSeconds = float(pa.wanted_seconds)
+    passingAssist.topBlockedBy = top_key
+    passingAssist.topBlockedShare = float(top_share)
+    passingAssist.clearShare = float(pa.clear_share)
 
     passingAssist.crawlSeconds = float(pa.overtake.crawl_seconds)
     passingAssist.crawlLongestSeconds = float(pa.overtake.crawl_longest)

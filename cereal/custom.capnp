@@ -635,6 +635,19 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     # approach. Sizing a safety margin off a typical case is how it stops being a margin.
     accBrakingOnsetMax @57 :Float32;
 
+    # BluePilot: WHEN A PASS WAS WANTED, WHAT STOPPED IT -- over the whole drive.
+    #
+    # blockedBy says what is stopping it right now, which is the wrong question for deciding what
+    # to build next. This says where the time actually went: seconds counted per reason, but only
+    # while a slower car was spotted, so an empty road contributes nothing. "62% blind spot" and
+    # "62% two-way road" point at completely different work, and neither is visible from watching
+    # the panel, where every reason looks equally common because each one is only ever on screen
+    # for a moment.
+    wantedSeconds @58 :Float32;      # total time a pass was warranted
+    topBlockedBy @59 :Blocked;       # the reason that consumed the most of it
+    topBlockedShare @60 :Float32;    # its share, 0..1
+    clearShare @61 :Float32;         # share where nothing was stopping it at all
+
     enum Manoeuvre {
       idle @0;         # nothing warranted
       confirming @1;   # a slower vehicle is being confirmed, timer running

@@ -70,6 +70,18 @@ class PassingAssistSettingsLayout(Widget):
       label_callback=self._speed_label,
       inline=True)
 
+    self._min_speed = option_item_sp(
+      title=tr("Only Above"),
+      description=tr("Below this speed a pass is not the manoeuvre being considered. Kept low on "
+                     "purpose: stuck behind a tractor on a 55 road your cruise drags you down to "
+                     "30, and that is exactly when a pass is most obviously wanted. Town driving "
+                     "is already excluded by needing cruise engaged. Much below 30 the lane "
+                     "detection starts calling turn pockets and driveways passing lanes."),
+      param="PassingAssistMinSpeed",
+      min_value=20, max_value=60, value_change_step=5,
+      label_callback=lambda v: f"{v} mph",
+      inline=True)
+
     self._confirm_time = option_item_sp(
       title=tr("Confirm For"),
       description=tr("How long that vehicle must be seen before a pass is suggested. Short by "
@@ -253,6 +265,7 @@ class PassingAssistSettingsLayout(Widget):
 
       SectionHeader(tr("When To Suggest A Pass")),
       self._min_deficit,
+      self._min_speed,
       self._confirm_time,
       self._blinker_lead,
       self._lead_braking,
