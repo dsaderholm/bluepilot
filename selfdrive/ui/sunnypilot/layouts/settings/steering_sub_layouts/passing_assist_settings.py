@@ -274,19 +274,29 @@ class PassingAssistSettingsLayout(Widget):
                      "being suggested."),
       param="ShowAdjacentLanes")
 
+    # ORDERED THE WAY A DRIVER ARRIVES AT A QUESTION, not the order these were built in. They were
+    # added one at a time over a long session and the first section had drifted to nine controls,
+    # three of which were not about when to suggest a pass at all -- the exit stand-down is about
+    # the driver's own lane change, the signal lead is about the manoeuvre, and the slow-pass timer
+    # is about a pass already underway. Each read sensibly on its own and the screen as a whole did
+    # not, which is a thing only reading it end to end can catch.
+    #
+    # The order follows the sequence itself: decide, move, check the lane, check for oncoming,
+    # come back right. Then the things that are about the DRIVER rather than the manoeuvre, then
+    # what appears on screen.
     return [
       self._enabled,
 
-      SectionHeader(tr("When To Suggest A Pass")),
+      SectionHeader(tr("Deciding To Pass")),
       self._min_deficit,
       self._min_speed,
-      self._exit_standdown,
-      self._confirm_time,
-      self._blinker_lead,
-      self._lead_braking,
-      self._crawl_time,
       self._max_distance,
+      self._confirm_time,
+      self._lead_braking,
+
+      SectionHeader(tr("Moving Over")),
       self._min_approach,
+      self._blinker_lead,
 
       SectionHeader(tr("The Lane You Would Move Into")),
       self._adjacent_lane,
@@ -302,8 +312,12 @@ class PassingAssistSettingsLayout(Widget):
       self._min_lane_age,
       self._settle_time,
 
-      SectionHeader(tr("Pausing")),
+      SectionHeader(tr("When You Take Over")),
+      self._exit_standdown,
       self._suspend_minutes,
+
+      SectionHeader(tr("A Pass That Drags")),
+      self._crawl_time,
 
       SectionHeader(tr("On Screen")),
       self._show_panel,
