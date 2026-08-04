@@ -517,8 +517,7 @@ class SelfdriveD(CruiseHelper):
         return 0
       lat, lon = float(gps.latitude), float(gps.longitude)
 
-      if self.params.get_bool("IcbmPinHoldRequest"):
-        self.params.put_bool("IcbmPinHoldRequest", False)
+      if self.pinned_holds.request_pending():
         # v_baseline is display units already, and 0 when no hold is held -- toggle() reads that as
         # "nothing to pin" and says so rather than pinning a zero.
         self.pinned_holds.toggle(lat, lon, int(self.icbm.v_baseline))

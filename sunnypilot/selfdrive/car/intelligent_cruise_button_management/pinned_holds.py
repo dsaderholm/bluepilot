@@ -47,6 +47,8 @@ import json
 import math
 
 from openpilot.common.params import Params
+from openpilot.common.realtime import DT_CTRL
+from openpilot.sunnypilot import PARAMS_UPDATE_PERIOD
 
 # Earth radius, matching smart_cruise_control/map_controller.py so the two agree on what a metre is.
 R_EARTH = 6373000.0
@@ -65,7 +67,17 @@ MIN_RADIUS_M = 15
 # on the opposite carriageway. Beyond a couple of hundred metres a point stops meaning a place.
 MAX_RADIUS_M = 250
 
-MAX_PINS = 200  # a JSON param read at 20 Hz; this is a sanity bound, not an expected count
+MAX_PINS = 200  # sanity bound on a JSON param, not an expected count
+
+# BluePilot: this is read from selfdrived, whose step() runs at 100 Hz. Reading three params --
+# one of them a JSON blob that grows with the pin count -- on every one of those is 300 reads a
+# second for settings that change when someone opens a menu. Every other param reader in this
+# fork gates on PARAMS_UPDATE_PERIOD and this one was the outlier; the device is already thermally
+# tight enough that BluePilot 7.0 shipped with UI concessions for it.
+_SETTINGS_PERIOD_FRAMES = max(int(PARAMS_UPDATE_PERIOD / DT_CTRL), 1)
+# The pin request is a button press and cannot wait three seconds, but it does not need 100 Hz
+# either. 10 Hz is below the threshold where a tap feels delayed and is a tenth of the cost.
+_REQUEST_PERIOD_FRAMES = max(int(0.1 / DT_CTRL), 1)
 
 
 def distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -89,9 +101,17 @@ class PinnedHolds:
     self.enabled = False
     self.radius = DEFAULT_RADIUS_M
     self._raw = None
+    self.frame = -1
 
   def update_params(self) -> None:
-    """Re-read on change only. The param is JSON and this is called at control rate."""
+    """Re-read on the standard settings cadence, then only re-parse if the JSON actually changed.
+
+    Two gates on purpose: the frame counter keeps us off the param store at control rate, and the
+    raw comparison keeps us out of json.loads when someone has merely opened the settings screen.
+    """
+    self.frame += 1
+    if self.frame % _SETTINGS_PERIOD_FRAMES != 0:
+      return
     self.enabled = self.params.get_bool("IcbmPinnedHoldsEnabled")
     self.radius = min(max(int(self.params.get("IcbmPinnedHoldRadius", return_default=True)),
                           MIN_RADIUS_M), MAX_RADIUS_M)
@@ -169,6 +189,15 @@ class PinnedHolds:
     self.pins.append({"lat": round(lat, 6), "lon": round(lon, 6), "speed": int(speed)})
     self._save()
     return "added"
+
+  def request_pending(self) -> bool:
+    """Has the HOLD badge been tapped? Polled at 10 Hz, not at control rate -- see the constants."""
+    if self.frame % _REQUEST_PERIOD_FRAMES != 0:
+      return False
+    if not self.params.get_bool("IcbmPinHoldRequest"):
+      return False
+    self.params.put_bool("IcbmPinHoldRequest", False)
+    return True
 
   def clear(self) -> None:
     self.pins = []

@@ -335,10 +335,20 @@ class CruiseLayout(Widget):
   def _has_pinned_holds() -> bool:
     return bool(CruiseLayout._pinned_holds())
 
+  # Label callbacks run on every render frame while this screen is up, so the raw string is
+  # compared before json.loads is allowed to run. Same mistake as the control-loop reader had,
+  # cheaper here only because a settings screen is transient.
+  _pins_raw = object()
+  _pins_cache: list = []
+
   @staticmethod
   def _pinned_holds() -> list:
     from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management.pinned_holds import PinnedHolds
-    return PinnedHolds._parse(ui_state.params.get("IcbmPinnedHolds"))
+    raw = ui_state.params.get("IcbmPinnedHolds")
+    if raw != CruiseLayout._pins_raw:   # value, not identity: params.get returns a fresh object
+      CruiseLayout._pins_raw = raw
+      CruiseLayout._pins_cache = PinnedHolds._parse(raw)
+    return CruiseLayout._pins_cache
 
   @staticmethod
   def _pinned_hold_count_label() -> str:
