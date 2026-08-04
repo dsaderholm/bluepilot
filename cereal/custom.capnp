@@ -557,6 +557,7 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       suspended @11;         # driver paused it -- construction zone, weather, unfamiliar road
       adjacentSlow @12;      # the lane is there and clear behind, but full of traffic no faster
       oncomingLane @13;      # two-way road: the lane to the left is theirs, not a passing lane
+      closingIn @14;         # deliberately holding off: still closing, ACC has not had to brake
     }
 
     # BluePilot: the manoeuvre this WOULD perform, run as a dry run. Nothing actuates; see
@@ -589,6 +590,20 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     # produce bad passes is a question for drive data, not argument. Logged so it can be answered.
     leadRadarConfirmed @47 :Bool;
     leadModelProb @48 :Float32;
+
+    # BluePilot: HOW FAR BACK does Ford's ACC actually start shedding speed for this lead?
+    #
+    # The whole design is built on deciding before it does, and the margin was estimated rather
+    # than known -- Ford's gap setting is a time headway and ACC eases off well before reaching it,
+    # so "about 70 m" was a guess with a wide error bar. This measures it: the distance to the lead
+    # the first time ACC requested deceleration during this approach, held until the approach ends.
+    #
+    # It settles the look-ahead question directly. If this comes back at 150 m on real roads, a
+    # 220 m look-ahead has 70 m of margin and is right. If it comes back at 250 m, the look-ahead
+    # is too short and every pass starts behind an ACC that has already braked -- which is the one
+    # outcome this feature exists to avoid. Zero means ACC never asked during the approach, which
+    # is the good case and the one to hope for.
+    accBrakingOnsetDRel @49 :Float32;
 
     enum Manoeuvre {
       idle @0;         # nothing warranted

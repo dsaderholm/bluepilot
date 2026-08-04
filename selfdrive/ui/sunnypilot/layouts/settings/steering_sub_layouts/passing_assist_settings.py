@@ -91,6 +91,19 @@ class PassingAssistSettingsLayout(Widget):
       label_callback=lambda v: f"{v} s",
       inline=True)
 
+    self._min_approach = option_item_sp(
+      title=tr("Close In Before Passing"),
+      description=tr("Hold off until the car ahead is this close, instead of pulling out as soon "
+                     "as it is spotted -- which is how people actually drive. Abandoned instantly "
+                     "if Ford's cruise starts slowing for that car, at any distance, so setting "
+                     "it too aggressive costs a late pass rather than braking. Off by default: "
+                     "the right value sits just beyond where your cruise starts braking, and that "
+                     "distance is being measured on your drives before it gets a default."),
+      param="PassingAssistMinApproach",
+      min_value=0, max_value=200, value_change_step=10,
+      label_callback=lambda v: tr("Off") if v == 0 else f"{v} m",
+      inline=True)
+
     self._max_distance = option_item_sp(
       title=tr("Look Ahead"),
       description=tr("How far ahead to notice a slower vehicle. Higher decides earlier, which is "
@@ -222,6 +235,7 @@ class PassingAssistSettingsLayout(Widget):
       self._confirm_time,
       self._blinker_lead,
       self._max_distance,
+      self._min_approach,
 
       SectionHeader(tr("The Lane You Would Move Into")),
       self._adjacent_lane,

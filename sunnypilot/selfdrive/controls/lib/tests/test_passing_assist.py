@@ -418,7 +418,7 @@ _STUB_PARAM_DEFAULTS = {
   "PassingAssistMinDeficit": 4, "PassingAssistConfirmTime": 2,
   "PassingAssistKeepRightDelay": 10, "PassingAssistSettleTime": 20,
   "PassingAssistMaxDistance": 220, "PassingAssistSuspendMinutes": 15,
-  "PassingAssistOncomingMemory": 90, "PassingAssistBlinkerLead": 1, "PassingAssistMinLaneAge": 15,
+  "PassingAssistOncomingMemory": 90, "PassingAssistBlinkerLead": 1, "PassingAssistMinApproach": 0, "PassingAssistMinLaneAge": 15,
 }
 
 
@@ -1297,3 +1297,59 @@ class TestPublish:
     """The blocked reason the driver sees most often, and the one whose name just changed."""
     det = run(PassingAssistDetector(), STUCK_FRAMES, v_lead=CRUISE_MS)
     assert str(self._published(det).blockedBy) == 'nothingSlower'
+
+
+class TestClosingIn:
+  """The owner: "I would like to get as close to the car as I can before making the lane change,
+  as long as Ford ACC brakes the least amount."
+
+  Two requirements pulling opposite ways. The resolution is the ACC override, not the distance --
+  which is why the override is tested harder than the distance is.
+  """
+
+  @staticmethod
+  def _det(approach_m):
+    det = PassingAssistDetector()
+    det.params = _KeepRightOnParams(PassingAssistMinApproach=approach_m)
+    return det
+
+  def test_off_by_default_nothing_changes(self):
+    """0 must be genuinely off, not 'hold until 0 m away'."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, d_rel=200.0)
+    assert not det.closing_in
+    assert det.suggestion == Side.left
+
+  def test_it_waits_while_still_a_long_way_back(self):
+    det = run(self._det(150), STUCK_FRAMES, d_rel=200.0)
+    assert det.closing_in
+    assert det.suggestion == Side.none
+    assert det.blocked_by == Blocked.closingIn
+
+  def test_and_goes_the_moment_it_is_close_enough(self):
+    """The confirmation ran underneath the hold, so reaching the distance starts the manoeuvre at
+    once rather than beginning a fresh two-second wait -- which would hand the time straight back."""
+    det = self._det(150)
+    run(det, STUCK_FRAMES, d_rel=200.0)
+    assert det.suggestion == Side.none
+    run(det, 2, d_rel=140.0)
+    assert det.suggestion == Side.left, "should not restart the confirmation after the hold"
+
+  def test_acc_braking_abandons_the_hold_at_any_distance(self):
+    """The safety valve, and the reason 'as close as possible' is safe to ask for. Set the hold
+    absurdly tight: the moment ACC asks for deceleration it goes anyway."""
+    det = run(self._det(20), STUCK_FRAMES, d_rel=200.0, acc_braking=True)
+    assert not det.closing_in
+    assert det.suggestion == Side.left
+
+  def test_precharge_counts_too(self):
+    """Brakes pressurised for that lead is ACC deciding it will need them. Waiting past that point
+    is waiting until braking is already committed."""
+    det = run(self._det(20), STUCK_FRAMES, d_rel=200.0, acc_precharge=True)
+    assert not det.closing_in
+    assert det.suggestion == Side.left
+
+  def test_the_hold_never_applies_without_a_slow_car(self):
+    """closingIn must mean "waiting to pass this one", never leak into an empty road."""
+    det = run(self._det(150), STUCK_FRAMES, v_lead=CRUISE_MS, d_rel=200.0)
+    assert not det.closing_in
+    assert det.blocked_by != Blocked.closingIn

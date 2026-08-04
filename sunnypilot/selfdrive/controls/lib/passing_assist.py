@@ -180,6 +180,28 @@ RANGE_HYSTERESIS_M = 20.0
 # Distance is the honest limit, and it means what it says: how far ahead to look. Beyond the reach
 # of lead tracking there is nothing to decide on anyway.
 DEFAULT_MAX_DISTANCE_M = 220
+
+# --- how LATE to pull out ---
+#
+# The owner: "I would like to get as close to the car as I can before making the lane change, as
+# long as Ford ACC brakes the least amount."
+#
+# Those two pull opposite ways and the resolution is the escape valve below, not the number. Left
+# alone, this system notices a slower car at the look-ahead distance and moves over immediately,
+# which is not how anyone drives -- a person closes on the car and THEN pulls out. So this holds
+# the manoeuvre until the lead is within this distance.
+#
+# WITH ONE OVERRIDE THAT MATTERS MORE THAN THE NUMBER: the hold is abandoned the instant Ford's ACC
+# asks for any deceleration, at any distance. That is what makes "as close as possible" safe to
+# ask for -- get it too aggressive and the failure is not a late pass, it is ACC braking, and the
+# system goes the moment that starts. It self-corrects toward the latest distance that still costs
+# nothing.
+#
+# DEFAULT 0 = OFF, and deliberately so: the right value is a little beyond where ACC actually
+# starts braking, and nobody knows that number yet. accBrakingOnsetDRel is being logged to measure
+# it. Guessing a default here would be picking the one number this feature is most sensitive to,
+# blind, when a drive can just tell us.
+DEFAULT_MIN_APPROACH_M = 0
 # Kept only for the log -- how long until we reach this lead at the current closing rate. Nothing
 # gates on it.
 MIN_APPROACH_CLOSING_MS = 1.0
@@ -268,6 +290,9 @@ class PassingAssistDetector:
     self.acc_braking_at_decision = False
     self.acc_precharge_at_decision = False
     self.acc_braking_available = False
+    # See accBrakingOnsetDRel in custom.capnp -- the margin this whole design assumes, measured
+    # rather than estimated. 0 means ACC never asked for deceleration during this approach.
+    self.acc_onset_d_rel = 0.0
     self.suspended_seconds = 0.0
     self.reference_speed = 0.0
     self.reference_source = RefSource.cluster
@@ -313,6 +338,8 @@ class PassingAssistDetector:
     self._settle_s = 1e3
     self._lka_prev = False
     self.max_distance_m = float(DEFAULT_MAX_DISTANCE_M)
+    self.min_approach_m = float(DEFAULT_MIN_APPROACH_M)
+    self.closing_in = False
     # The dry run: what a fully-automatic pass would be doing right now. Actuates nothing.
     self.manoeuvre = PassingManoeuvre()
 
@@ -329,6 +356,7 @@ class PassingAssistDetector:
       self.strict_two_way = self.params.get_bool("PassingAssistStrictTwoWay")
       self.oncoming_memory_s = float(self.params.get("PassingAssistOncomingMemory", return_default=True))
       self.manoeuvre.blinker_lead_s = float(self.params.get("PassingAssistBlinkerLead", return_default=True))
+      self.min_approach_m = float(self.params.get("PassingAssistMinApproach", return_default=True))
       self.settle_time_s = float(self.params.get("PassingAssistSettleTime", return_default=True))
       self.suspend_minutes = self.params.get("PassingAssistSuspendMinutes", return_default=True)
       self.max_distance_m = float(self.params.get("PassingAssistMaxDistance", return_default=True))
@@ -623,6 +651,8 @@ class PassingAssistDetector:
     self.approach_seconds = 0.0
     self.lead_is_slow = False
     self._lead_gap_s = 0.0
+    # The approach is over, so the next one measures its own onset rather than inheriting this one.
+    self.acc_onset_d_rel = 0.0
 
   def _lead_state(self, lead, v_cruise: float) -> None:
     """Record what the lead is doing, whichever trigger ends up using it."""
@@ -829,6 +859,26 @@ class PassingAssistDetector:
       self._lead_state(lead, v_cruise)
 
     spotted = self.lead_is_slow if in_grace else self._should_pass(lead, v_cruise, sm['modelV2'])
+
+    # FIRST frame of this approach on which ACC asked for deceleration, recorded as a distance.
+    # Latched: what matters is where it started, not that it is still going.
+    if spotted and self.acc_braking_at_decision and self.acc_onset_d_rel == 0.0:
+      self.acc_onset_d_rel = float(self.lead_d_rel)
+
+    # Hold off while we are still a long way back -- see DEFAULT_MIN_APPROACH_M. The confirmation
+    # timer keeps running underneath, so when the distance is reached the manoeuvre starts at once
+    # rather than beginning a fresh two-second wait.
+    #
+    # The ACC override is the whole point: any deceleration request, at any distance, abandons the
+    # hold immediately. Waiting is only free while it is costing nothing.
+    self.closing_in = bool(spotted and self.min_approach_m > 0.0 and
+                           self.lead_d_rel > self.min_approach_m and
+                           not self.acc_braking_at_decision and not self.acc_precharge_at_decision)
+    if self.closing_in:
+      self.keep_right_seconds = 0.0
+      self._reset_outputs(Blocked.closingIn)
+      return
+
     if not spotted:
       self._reset_outputs(Blocked.nothingSlower)
       self._keep_right()
@@ -1083,6 +1133,7 @@ class PassingAssistDetector:
     passingAssist.accBrakingAtDecision = pa.acc_braking_at_decision
     passingAssist.accBrakingAvailable = pa.acc_braking_available
     passingAssist.accPrechargeAtDecision = pa.acc_precharge_at_decision
+    passingAssist.accBrakingOnsetDRel = float(pa.acc_onset_d_rel)
     passingAssist.suspendedSeconds = float(pa.suspended_seconds)
     passingAssist.referenceSpeed = float(pa.reference_speed)
     passingAssist.referenceSource = pa.reference_source

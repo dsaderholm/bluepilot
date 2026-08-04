@@ -166,6 +166,7 @@ _BLOCKED_TEXT = {
   'suspended': "Paused",
   'adjacentSlow': "Next lane is no faster",
   'oncomingLane': "Two-way road - no passing",
+  'closingIn': "Closing in",
 }
 
 # BluePilot: sunnypilot's "AHEAD" box hangs off the bottom of the speed-limit sign, in the same
