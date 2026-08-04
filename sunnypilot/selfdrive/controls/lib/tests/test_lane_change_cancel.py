@@ -165,6 +165,25 @@ class TestItIsActuallyWiredIn:
     assert not dh.alc.reverting, "latched on -- the next cancel would be ignored"
     assert dh.desire == log.Desire.none
 
+  def test_a_revert_the_model_never_settles_still_ends(self):
+    """The revert leaves laneChangeStarting on the MODEL's judgment -- lane_change_prob dropping --
+    not on a clock of its own. So a model that keeps insisting a change is underway would hold the
+    car in a reverse crossing indefinitely, and the only thing underneath it is stock's 10 s
+    LANE_CHANGE_TIME_MAX.
+
+    That backstop has to actually catch it, and it has to release the latch on the way out -- a
+    revert that ended with `reverting` still true would make the NEXT cancel do nothing.
+    """
+    dh = self._dh()
+    self._start(dh)
+    dh.update(self._cs(), True, 0.5)
+    assert dh.alc.reverting
+    for _ in range(int(15.0 / DT_MDL)):
+      dh.update(self._cs(), True, 0.5)      # model never concedes the change is over
+    assert dh.lane_change_state == LaneChangeState.off, "ran past the timeout still steering"
+    assert not dh.alc.reverting, "latch held -- the next cancel would be ignored"
+    assert dh.desire == log.Desire.none
+
   def test_a_blocked_return_lane_finishes_the_change_instead(self):
     """We came from that lane seconds ago so it is nearly always clear -- but "nearly always" is
     not something to steer on. With the blind spot lit on the return side, going back is the worse
@@ -291,6 +310,32 @@ class TestMeasuringRealLaneChanges:
     assert dh.alc.changes_cancelled == 1
     assert dh.alc.changes_completed == 0
     assert dh.alc.changes_abandoned == 0
+
+  def test_lateral_dropping_out_is_not_a_cancel(self):
+    """Cancels used to be counted off a laneChangeStarting -> off transition, which is also what
+    lateral going inactive, the change timing out and the blinker-pause gate all produce. None of
+    those is the driver calling it off, and counting them inflates the one number that says whether
+    the cancel is working."""
+    dh = self._dh()
+    TestItIsActuallyWiredIn()._start(dh)
+    dh.update(TestItIsActuallyWiredIn._cs(left=True), False, 0.5)   # lateral_active False
+    assert dh.lane_change_state == LaneChangeState.off
+    assert dh.alc.changes_cancelled == 0, "counted a dropout as the driver cancelling"
+
+  def test_a_reverse_crossing_is_not_a_lane_change_made(self):
+    """A revert completes through laneChangeFinishing like any other crossing, so it would
+    otherwise land in changes_completed AND in the duration mean -- which is the number passing
+    assist takes its crossing time from. It went back, not across."""
+    dh = self._dh()
+    TestItIsActuallyWiredIn()._start(dh)
+    dh.update(TestItIsActuallyWiredIn._cs(), True, 0.5)             # cancel -> revert
+    assert dh.alc.reverting
+    for _ in range(int(8.0 / DT_MDL)):
+      dh.update(TestItIsActuallyWiredIn._cs(), True, 0.0)
+    assert dh.lane_change_state == LaneChangeState.off
+    assert dh.alc.changes_cancelled == 1
+    assert dh.alc.changes_completed == 0, "the way back counted as a change made"
+    assert dh.alc.change_seconds == 0.0, "the way back polluted the duration mean"
 
   def test_measuring_never_touches_the_maneuver(self):
     """It reads the parent's state and writes none of it. If this is ever the reason a lane change
