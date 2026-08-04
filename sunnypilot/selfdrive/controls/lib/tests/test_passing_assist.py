@@ -200,7 +200,7 @@ class TestPassingAssistGates:
     waiting period, which is the behaviour this whole design exists to remove."""
     det = run(PassingAssistDetector(), int(1.0 / DT_MDL))
     assert det.suggestion == Side.none
-    assert det.blocked_by == Blocked.notStuck
+    assert det.blocked_by == Blocked.nothingSlower
     assert 0.5 < det.approach_seconds < 1.5
 
   def test_confirmation_resets_when_lead_drops(self):
@@ -223,7 +223,7 @@ class TestPassingAssistGates:
     # 0.4 m/s is under 1 mph. The threshold is 2 mph now, so this has to be smaller than the
     # 1.0 m/s this test used when the threshold was 8.
     det = run(PassingAssistDetector(), STUCK_FRAMES, v_lead=CRUISE_MS - 0.4)
-    assert det.blocked_by == Blocked.notStuck
+    assert det.blocked_by == Blocked.nothingSlower
 
   def test_below_min_speed_blocks(self):
     det = run(PassingAssistDetector(), STUCK_FRAMES, v_ego=MIN_V_EGO_MS - 1.0)
@@ -338,7 +338,7 @@ DELAY_FRAMES = int(11.0 / DT_MDL)   # clears the delay alone, NOT the age
 # a single new param raised KeyError in nine unrelated tests at once, none of which were about the
 # new param. Defaults live in params_keys.h; these mirror them.
 _STUB_PARAM_DEFAULTS = {
-  "PassingAssistMinDeficit": 4, "PassingAssistStuckTime": 2,
+  "PassingAssistMinDeficit": 4, "PassingAssistConfirmTime": 2,
   "PassingAssistKeepRightDelay": 10, "PassingAssistSettleTime": 20,
   "PassingAssistMaxDistance": 220, "PassingAssistSuspendMinutes": 15,
   "PassingAssistOncomingMemory": 90, "PassingAssistMinLaneAge": 15,
@@ -569,7 +569,7 @@ class TestLeadInLaneGate:
   def test_an_off_path_return_is_rejected(self):
     # A radar return a lane over is not a reason to pass. Before the fix this suggested anyway.
     det = run(PassingAssistDetector(), STUCK_FRAMES, lead_y=3.7)
-    assert det.blocked_by == Blocked.notStuck
+    assert det.blocked_by == Blocked.nothingSlower
     assert det.suggestion == Side.none
 
   def test_a_lead_on_a_curve_is_still_in_our_lane(self):
@@ -1178,3 +1178,45 @@ class TestLkaButtonPause:
     run(det, STUCK_FRAMES, lka=False)
     assert det.suspended_seconds == 0.0
     assert det.suggestion == Side.left
+
+
+class TestPublish:
+  """publish() is forty lines of field copying into capnp and had no test at all.
+
+  That is the one place a rename lands silently: the detector keeps its Python attribute, the
+  schema gets the new field name, and the assignment in between raises only on the car. It also
+  owns the confirmSeconds/approachSeconds duplicate, which nothing else can check.
+  """
+
+  @staticmethod
+  def _published(det):
+    msg = custom.LongitudinalPlanSP.new_message()
+    det.publish(msg.passingAssist)
+    return msg.passingAssist
+
+  def test_every_field_assignment_survives_the_schema(self):
+    """Catches a field renamed in custom.capnp without its publish() line, which is an
+    AttributeError on the device and nothing at all offline."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES)
+    pa = self._published(det)
+    assert str(pa.suggestion) == 'left'
+    assert str(pa.reason) == 'passing'
+    assert str(pa.blockedBy) == 'none'
+
+  def test_confirm_seconds_is_the_confirmation_timer(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES)
+    # Float32 on the wire against a Float64 accumulator, so a tolerance rather than equality.
+    assert abs(self._published(det).confirmSeconds - det.approach_seconds) < 1e-4
+
+  def test_the_deprecated_alias_still_matches(self):
+    """approachSeconds @29 duplicates confirmSeconds @2. The ordinal cannot be reclaimed, so the
+    field stays and keeps being written -- but the two must never drift, or a log becomes
+    ambiguous about which one meant anything."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES)
+    pa = self._published(det)
+    assert pa.approachSeconds == pa.confirmSeconds
+
+  def test_nothing_slower_ahead_is_reported_as_such(self):
+    """The blocked reason the driver sees most often, and the one whose name just changed."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, v_lead=CRUISE_MS)
+    assert str(self._published(det).blockedBy) == 'nothingSlower'

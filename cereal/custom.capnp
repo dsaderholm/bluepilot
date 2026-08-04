@@ -311,7 +311,10 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
   struct PassingAssist {
     suggestion @0 :Side;
     blockedBy @1 :Blocked;
-    stuckSeconds @2 :Float32;     # continuous time held below set speed by this lead
+    # How long the slower vehicle has been CONTINUOUSLY confirmed -- not how long we have been
+    # stuck behind it. The distinction is the whole design: waiting to be held up means waiting for
+    # Ford's ACC to brake first, and the point is to have moved over before it does.
+    confirmSeconds @2 :Float32;
 
     # lead evidence
     hasLead @3 :Bool;
@@ -365,7 +368,14 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
 
     # BluePilot: which situation produced the suggestion.
     trigger @27 :Trigger;
-    leadTtc @28 :Float32;       # seconds to reach the lead at the current closing rate
+    # Seconds to reach the lead at the current closing rate. Nothing gates on it -- distance
+    # replaced it -- and it is kept only so the drive data can answer whether TTC would have been
+    # the better gate after all.
+    leadTtc @28 :Float32;
+
+    # DEPRECATED: an exact duplicate of confirmSeconds @2, from before that field was renamed.
+    # Ordinals cannot be reclaimed without renumbering every field after it, so it stays and keeps
+    # being written -- old logs would otherwise silently start reading zero. Read confirmSeconds.
     approachSeconds @29 :Float32;
 
     # BluePilot: was Ford's ACC already asking for brakes when we decided?
@@ -535,7 +545,7 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       tooSlow @3;
       driverActive @4;      # blinker, brake or steering input -- driver already acting
       noLead @5;
-      notStuck @6;          # lead present but not holding us back, or not for long enough
+      nothingSlower @6;     # no vehicle ahead slow enough to be worth passing, or not yet confirmed
       noLaneAvailable @7;   # geometry says there is nowhere to go on either side
       blindspotOccupied @8; # geometry was fine, BLIS was not
       overtakeRestricted @9; # TSR reports a no-overtaking zone in force

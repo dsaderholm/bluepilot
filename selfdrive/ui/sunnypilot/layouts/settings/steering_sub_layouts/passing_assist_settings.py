@@ -70,12 +70,12 @@ class PassingAssistSettingsLayout(Widget):
       label_callback=self._speed_label,
       inline=True)
 
-    self._stuck_time = option_item_sp(
+    self._confirm_time = option_item_sp(
       title=tr("Confirm For"),
       description=tr("How long that vehicle must be seen before a pass is suggested. Short by "
                      "design -- this rejects a bad frame of radar tracking, it is not a waiting "
                      "period. Waiting is the behaviour this feature exists to remove."),
-      param="PassingAssistStuckTime",
+      param="PassingAssistConfirmTime",
       min_value=1, max_value=20, value_change_step=1,
       label_callback=lambda v: f"{v} s",
       inline=True)
@@ -208,7 +208,7 @@ class PassingAssistSettingsLayout(Widget):
 
       SectionHeader(tr("When To Suggest A Pass")),
       self._min_deficit,
-      self._stuck_time,
+      self._confirm_time,
       self._max_distance,
 
       SectionHeader(tr("The Lane You Would Move Into")),

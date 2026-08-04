@@ -267,7 +267,7 @@ class PassingAssistDetector:
     if self.frame % int(PARAMS_UPDATE_PERIOD / DT_MDL) == 0:
       self.enabled = self.params.get_bool("PassingAssistLogEnabled")
       self.min_deficit_ms = self.params.get("PassingAssistMinDeficit", return_default=True) * CV.MPH_TO_MS
-      self.persistence_s = float(self.params.get("PassingAssistStuckTime", return_default=True))
+      self.persistence_s = float(self.params.get("PassingAssistConfirmTime", return_default=True))
       self.keep_right_enabled = self.params.get_bool("PassingAssistKeepRight")
       self.keep_right_delay_s = float(self.params.get("PassingAssistKeepRightDelay", return_default=True))
       self.min_lane_age_s = float(self.params.get("PassingAssistMinLaneAge", return_default=True))
@@ -502,6 +502,13 @@ class PassingAssistDetector:
     situation at two moments -- about to brake, or already braked -- and treating them separately is
     what made the old version wait for a state this driver never reaches.
 
+    THE GOAL IS TO NEVER BE STUCK, and the measure of that is how little Ford's ACC has to brake.
+    So the only timer left in this path is a CONFIRMATION timer -- long enough that radar noise
+    cannot trigger a manoeuvre, and no longer -- rather than a "have we suffered enough yet" timer.
+    Every frame it costs is a frame nearer ACC deciding to shed speed for a car we were always
+    going to pass, which is the expensive sequence: brake, then win the speed back in the next
+    lane. trigger/accBrakingAtDecision is what measures whether we beat it.
+
     So: in our lane, slower than the SET speed by a margin worth the manoeuvre, near enough to be
     real. The margin is the judgement; everything else is a sanity bound.
     """
@@ -671,7 +678,7 @@ class PassingAssistDetector:
       return
 
     # The driver is already doing something about it. Suggesting a pass mid-manoeuvre is noise,
-    # and it would corrupt the stuck timer for the far more interesting no-input case.
+    # and it would corrupt the confirmation timer for the far more interesting no-input case.
     if CS.leftBlinker or CS.rightBlinker or CS.brakePressed or CS.steeringPressed:
       self.approach_seconds = 0.0
       self.keep_right_seconds = 0.0
@@ -689,7 +696,7 @@ class PassingAssistDetector:
     self._lead_state(lead, v_cruise)
 
     if not self._should_pass(lead, v_cruise, sm['modelV2']):
-      self._reset_outputs(Blocked.notStuck)
+      self._reset_outputs(Blocked.nothingSlower)
       self._keep_right()
       return
 
@@ -900,7 +907,7 @@ class PassingAssistDetector:
     passingAssist.suggestion = pa.suggestion
     passingAssist.blockedBy = pa.blocked_by
     # One timer now. The field keeps its name so older logs stay comparable.
-    passingAssist.stuckSeconds = float(pa.approach_seconds)
+    passingAssist.confirmSeconds = float(pa.approach_seconds)
     passingAssist.hasLead = pa.has_lead
     passingAssist.leadDRel = float(pa.lead_d_rel)
     passingAssist.leadVLead = float(pa.lead_v_lead)

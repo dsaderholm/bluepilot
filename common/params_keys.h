@@ -255,6 +255,9 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // BluePilot: how long a slower lead must persist before suggesting, in seconds. Short by
     // design -- waiting is the behaviour this exists to remove, and the only job of this timer is
     // to reject a single bad frame of lead tracking.
+    {"PassingAssistConfirmTime", {PERSISTENT | BACKUP, INT, "2"}},
+    // Renamed to PassingAssistConfirmTime. Declared only so params_migration can read a value
+    // stored before the rename; nothing in the UI or controls references it.
     {"PassingAssistStuckTime", {PERSISTENT | BACKUP, INT, "2"}},
     // How far ahead to look for a slower vehicle, in metres. Distance, not time: a time bound
     // shrinks as the speed difference shrinks, so it would notice a gently slower car LATER than a
@@ -617,6 +620,9 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"FordHighSpeedFactor_ang", {PERSISTENT | BACKUP, FLOAT, "0.87"}},
     {"FordHighSpeedDampening_ang", {PERSISTENT | BACKUP, FLOAT, "1.0"}},
     {"BPLateralSchemeParamsMigratedV1", {PERSISTENT | BACKUP, STRING, "0"}},
+    // STRING, not BOOL -- see the note in params_migration: a BOOL marker made put("1") raise, so
+    // the marker never stuck and the migration re-ran (and re-clobbered) on every boot.
+    {"BPPassingAssistRenameMigrated", {PERSISTENT | BACKUP, STRING, "0"}},
 
     {"disable_BP_lat_UI", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"disable_BP_long_UI", {PERSISTENT | BACKUP, BOOL, "0"}},

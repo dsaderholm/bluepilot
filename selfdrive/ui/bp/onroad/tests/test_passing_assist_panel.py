@@ -49,9 +49,9 @@ class TestLiveEnumBehaviour:
   def test_str_returns_the_bare_name(self):
     """The panel maps blockedBy through a dict keyed on bare names. If str() ever returned a repr
     instead, every state would fall through to the raw-name branch and read as gibberish."""
-    pa = make_plan(suggestion='left', blockedBy='notStuck', reason='passing')
+    pa = make_plan(suggestion='left', blockedBy='nothingSlower', reason='passing')
     assert str(pa.suggestion) == 'left'
-    assert str(pa.blockedBy) == 'notStuck'
+    assert str(pa.blockedBy) == 'nothingSlower'
     assert str(pa.reason) == 'passing'
 
   def test_int_on_a_live_enum_raises(self):
@@ -63,9 +63,9 @@ class TestLiveEnumBehaviour:
 
   def test_numeric_fields_are_still_plain_numbers(self):
     # commanded/overtakeMsg etc. are UInt8, not enums: int() on these is safe and used.
-    pa = make_plan(stuckSeconds=12.5, overtakeMsg=2, keepRightSeconds=3.0)
+    pa = make_plan(confirmSeconds=12.5, overtakeMsg=2, keepRightSeconds=3.0)
     assert int(pa.overtakeMsg) == 2
-    assert pa.stuckSeconds == pytest.approx(12.5)
+    assert pa.confirmSeconds == pytest.approx(12.5)
 
 
 class TestEveryStateRenders:

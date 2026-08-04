@@ -149,7 +149,7 @@ TSR_PILL_INK = rl.Color(226, 206, 110, 255)
 PIN_DOT_RADIUS = 9
 PIN_DOT_COLOR = rl.Color(255, 214, 120, 255)
 # BluePilot: blockedBy -> what a driver should read. The enum names are for the log; putting
-# "notStuck" or "noLaneAvailable" in front of someone at 70 mph is a failure of the display, not
+# "nothingSlower" or "noLaneAvailable" in front of someone at 70 mph is a failure of the display, not
 # a shorthand. Anything unmapped falls through to the raw name so a new state is visible rather
 # than silently blank.
 _BLOCKED_TEXT = {
@@ -158,7 +158,7 @@ _BLOCKED_TEXT = {
   'tooSlow': "Below 40 mph",
   'driverActive': "You are driving",
   'noLead': "Road ahead clear",
-  'notStuck': "Nothing slower ahead",
+  'nothingSlower': "Nothing slower ahead",
   'noLaneAvailable': "No lane to move into",
   'blindspotOccupied': "Blind spot not clear",
   'overtakeRestricted': "No-passing zone",
@@ -231,7 +231,7 @@ class HudRendererBP(HudRendererSP):
     self._pa_progress = 0.0
     self._pa_alert = False
     self._pa_color = COLORS.WHITE
-    self._pa_stuck_target = float(self._bp_params.get("PassingAssistStuckTime", return_default=True) or 25)
+    self._pa_confirm_target = float(self._bp_params.get("PassingAssistConfirmTime", return_default=True) or 2)
     # BluePilot: suggestions are transient -- a glance at the wrong moment misses one entirely, and
     # "I saw nothing" is indistinguishable from "it never ran". A per-drive count makes the answer
     # readable at any time without watching continuously or opening a log.
@@ -262,7 +262,7 @@ class HudRendererBP(HudRendererSP):
       if self._show_passing_assist:
         # Needed as the progress-bar denominator, so the bar means "how close to the threshold
         # you actually configured" rather than to a hardcoded guess.
-        self._pa_stuck_target = float(self._bp_params.get("PassingAssistStuckTime", return_default=True) or 25)
+        self._pa_confirm_target = float(self._bp_params.get("PassingAssistConfirmTime", return_default=True) or 2)
 
     # 7.0 reads the lateral mode from controllerStateBP rather than re-deriving it from params.
     if self._show_lateral_control:
@@ -425,9 +425,9 @@ class HudRendererBP(HudRendererSP):
   def _update_passing_assist(self) -> None:
     """BluePilot: build the passing-assist panel state.
 
-    Written to be read at a glance at speed, not decoded. Enum names like "notStuck" are what the
+    Written to be read at a glance at speed, not decoded. Enum names like "nothingSlower" are what the
     log records and are the wrong thing to put in front of a driver, so every state maps to plain
-    words; the stuck timer becomes a progress bar because a bar answers "is it nearly there" in
+    words; the confirmation timer becomes a progress bar because a bar answers "is it nearly there" in
     peripheral vision and a number does not.
 
     Three things have to be legible without study: is it running, is it building toward something,
@@ -496,10 +496,10 @@ class HudRendererBP(HudRendererSP):
     else:
       blocked = str(pa.blockedBy)
       self._pa_color = rl.Color(170, 175, 180, 255)
-      if blocked == 'notStuck' and pa.stuckSeconds > 0:
+      if blocked == 'nothingSlower' and pa.confirmSeconds > 0:
         # The one state that is genuinely "working on it". Show the bar, not the arithmetic.
         self._pa_main = "Slower car ahead"
-        self._pa_progress = min(1.0, pa.stuckSeconds / max(self._pa_stuck_target, 1.0))
+        self._pa_progress = min(1.0, pa.confirmSeconds / max(self._pa_confirm_target, 1.0))
       else:
         self._pa_main = _BLOCKED_TEXT.get(blocked, blocked)
         # Show the two numbers actually being compared. "Nothing slower ahead" with a visibly
@@ -507,13 +507,13 @@ class HudRendererBP(HudRendererSP):
         # make it a glance instead. Reference is the speed the driver asked for, which with ICBM
         # running is NOT the number on the dash.
         conv = 2.23694 if not ui_state.is_metric else 3.6
-        if blocked == 'notStuck' and pa.hasLead and pa.referenceSpeed > 0:
+        if blocked == 'nothingSlower' and pa.hasLead and pa.referenceSpeed > 0:
           self._pa_sub_detail = (f"want {pa.referenceSpeed * conv:.0f}"
                                  f"  lead {pa.leadVLead * conv:.0f}"
                                  f"  [{pa.referenceSource}]")
         elif blocked == 'oncomingLane':
           # Say how long the veto has left, so a driver who has just turned off a two-lane road
-          # onto a divided one can see it counting down rather than wonder if it is stuck.
+          # onto a divided one can see it counting down rather than wonder if it has hung.
           self._pa_sub_detail = f"seen {pa.undividedSeconds:.0f}s of memory left"
         elif blocked == 'adjacentSlow':
           # Same reasoning as above: show the comparison, not just its verdict. Which side is
