@@ -20,7 +20,7 @@ from openpilot.system.ui.widgets.network import NavButton
 from openpilot.system.ui.widgets.scroller_tici import Scroller
 
 SPEED_LIMIT_MODE_BUTTONS = [tr("Off"), tr("Info"), tr("Warning"), tr("Assist")]
-SPEED_LIMIT_OFFSET_TYPE_BUTTONS = [tr("None"), tr("Fixed"), tr("%")]
+SPEED_LIMIT_OFFSET_TYPE_BUTTONS = [tr("None"), tr("Fixed"), tr("%"), tr("By Limit")]
 
 SPEED_LIMIT_MODE_DESCRIPTIONS = [
   tr("Off: Disables the Speed Limit functions."),
@@ -33,6 +33,7 @@ SPEED_LIMIT_OFFSET_DESCRIPTIONS = [
   tr("None: No Offset"),
   tr("Fixed: Adds a fixed offset [Speed Limit + Offset]"),
   tr("Percent: Adds a percent offset [Speed Limit + (Offset % Speed Limit)]"),
+  tr("By Limit: A different offset for slow, medium and fast roads [Speed Limit + band offset]"),
 ]
 
 
@@ -86,6 +87,41 @@ class SpeedLimitSettingsLayout(Widget):
       label_callback=self._get_offset_label,
     )
 
+    # BluePilot: one offset per speed band. A single number is wrong at both ends of the range and
+    # the percentage option is the same mistake in disguise -- 10% is 2.5 mph in a 25 and 7 in a
+    # 70, which is roughly backwards from how anyone drives.
+    self._offset_low = option_item_sp(
+      title=tr("Offset on Slow Roads"),
+      description=tr("Added to limits below the first breakpoint."),
+      param="SpeedLimitOffsetLow",
+      min_value=-15, max_value=25, label_callback=self._band_label, inline=True)
+
+    self._offset_mid = option_item_sp(
+      title=tr("Offset on Medium Roads"),
+      description=tr("Added to limits between the two breakpoints."),
+      param="SpeedLimitOffsetMid",
+      min_value=-15, max_value=25, label_callback=self._band_label, inline=True)
+
+    self._offset_high = option_item_sp(
+      title=tr("Offset on Fast Roads"),
+      description=tr("Added to limits at or above the second breakpoint."),
+      param="SpeedLimitOffsetHigh",
+      min_value=-15, max_value=25, label_callback=self._band_label, inline=True)
+
+    self._offset_mid_threshold = option_item_sp(
+      title=tr("Slow / Medium Breakpoint"),
+      description=tr("Posted limits below this use the slow-road offset."),
+      param="SpeedLimitOffsetMidThreshold",
+      min_value=15, max_value=60, value_change_step=5,
+      label_callback=self._band_label, inline=True)
+
+    self._offset_high_threshold = option_item_sp(
+      title=tr("Medium / Fast Breakpoint"),
+      description=tr("Posted limits at or above this use the fast-road offset."),
+      param="SpeedLimitOffsetHighThreshold",
+      min_value=35, max_value=85, value_change_step=5,
+      label_callback=self._band_label, inline=True)
+
     # BluePilot: bidirectional following and its ceiling
     self._speed_limit_auto_follow = toggle_item_sp(
       title=tr("Automatic Speed Limit Following"),
@@ -113,7 +149,12 @@ class SpeedLimitSettingsLayout(Widget):
       self._speed_limit_max_set_speed,
       LineSeparatorSP(40),
       self._speed_limit_offset_type,
-      self._speed_limit_value_offset
+      self._speed_limit_value_offset,
+      self._offset_low,
+      self._offset_mid,
+      self._offset_high,
+      self._offset_mid_threshold,
+      self._offset_high_threshold,
     ]
     return items
 
@@ -125,6 +166,11 @@ class SpeedLimitSettingsLayout(Widget):
   @staticmethod
   def _get_mode_description():
     return get_highlighted_description(ui_state.params, "SpeedLimitMode", SPEED_LIMIT_MODE_DESCRIPTIONS)
+
+  @staticmethod
+  def _band_label(value: int) -> str:
+    """Display units, following the driver's mph/km-h choice like every other speed control."""
+    return f'{value} {"km/h" if ui_state.is_metric else "mph"}'
 
   @staticmethod
   def _get_offset_description():
@@ -176,7 +222,15 @@ class SpeedLimitSettingsLayout(Widget):
       self._speed_limit_mode.action_item.set_enabled_buttons(None)
 
     offset_type = ui_state.params.get("SpeedLimitOffsetType", return_default=True)
-    self._speed_limit_value_offset.set_visible(offset_type != int(SpeedLimitOffsetType.off))
+    by_speed = offset_type == int(SpeedLimitOffsetType.bySpeed)
+    # The single-value control and the banded ones are alternatives, never both: showing five live
+    # controls next to one that no longer does anything is how a setting gets adjusted for an hour
+    # with no effect.
+    self._speed_limit_value_offset.set_visible(
+      offset_type not in (int(SpeedLimitOffsetType.off), int(SpeedLimitOffsetType.bySpeed)))
+    for item in (self._offset_low, self._offset_mid, self._offset_high,
+                 self._offset_mid_threshold, self._offset_high_threshold):
+      item.set_visible(by_speed)
 
   def _render(self, rect):
     if self._current_panel == PanelType.POLICY:

@@ -13,8 +13,9 @@ from pytest_mock import MockerFixture
 from cereal import custom
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit import LIMIT_MAX_MAP_DATA_AGE
 
+from openpilot.common.constants import CV
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.speed_limit_resolver import SpeedLimitResolver, ALL_SOURCES
-from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.common import Policy
+from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.common import Policy, OffsetType
 
 SpeedLimitSource = custom.LongitudinalPlanSP.SpeedLimit.Source
 
@@ -146,3 +147,44 @@ class TestSpeedLimitResolverValidation:
     resolver._get_from_map_data(sm_mock)
     assert resolver.limit_solutions[SpeedLimitSource.map] == 0.
     assert resolver.distance_solutions[SpeedLimitSource.map] == 0.
+
+
+class TestBandedOffset:
+  """BluePilot: one offset per speed band, the owner's own habit as the default -- 2 over in a
+  20-25, 5 over from 30-60, 10 over at 65+."""
+
+  @staticmethod
+  def _resolver(**overrides):
+    r = SpeedLimitResolver()
+    r.offset_type = int(OffsetType.bySpeed)
+    r.is_metric = False
+    r.offset_low, r.offset_mid, r.offset_high = 2, 5, 10
+    r.offset_mid_threshold, r.offset_high_threshold = 30, 65
+    for k, v in overrides.items():
+      setattr(r, k, v)
+    return r
+
+  @pytest.mark.parametrize("limit_mph,expected_mph", [
+    (20, 2), (25, 2),          # slow band
+    (29, 2),                   # just under the first breakpoint
+    (30, 5), (45, 5), (60, 5),  # medium band
+    (64, 5),                   # just under the second
+    (65, 10), (80, 10),        # fast band
+  ])
+  def test_band_boundaries(self, limit_mph, expected_mph):
+    r = self._resolver(speed_limit=limit_mph * CV.MPH_TO_MS)
+    assert round(r._get_speed_limit_offset() * CV.MS_TO_MPH) == expected_mph
+
+  def test_offset_keys_off_the_posted_limit_not_the_car(self):
+    """Keying on v_ego would make the offset drift as the car slowed for traffic."""
+    fast = self._resolver(speed_limit=70 * CV.MPH_TO_MS, v_ego=5.0)
+    assert round(fast._get_speed_limit_offset() * CV.MS_TO_MPH) == 10
+
+  def test_metric_units_are_honoured_end_to_end(self):
+    r = self._resolver(is_metric=True, speed_limit=50 * CV.KPH_TO_MS)
+    # 50 km/h sits above the 30 breakpoint and below 65, so the medium band applies.
+    assert round(r._get_speed_limit_offset() * CV.MS_TO_KPH) == 5
+
+  def test_other_offset_types_are_untouched(self):
+    r = self._resolver(offset_type=int(OffsetType.off))
+    assert r._get_speed_limit_offset() == 0

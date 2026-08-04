@@ -315,6 +315,17 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"SpeedLimitValueOffset", {PERSISTENT | BACKUP, INT, "0"}},
     // BluePilot: bidirectional Speed Limit Assist. When set, SLA follows the limit in both
     // directions instead of only lowering, and never requests above SpeedLimitMaxSetSpeed.
+    // BluePilot: one offset per speed band (SpeedLimitOffsetType = bySpeed). Defaults are the
+    // owner's own habit, stated 2026-08-04: 2 over in a 20-25, 5 over from 30-60, 10 over at 65+.
+    // A single fixed offset is wrong at both ends of that range, and the percentage option is the
+    // same mistake wearing a disguise -- 10% of 25 is 2.5 and 10% of 70 is 7, which is roughly
+    // backwards from how anyone drives.
+    {"SpeedLimitOffsetLow", {PERSISTENT | BACKUP, INT, "2"}},
+    {"SpeedLimitOffsetMid", {PERSISTENT | BACKUP, INT, "5"}},
+    {"SpeedLimitOffsetHigh", {PERSISTENT | BACKUP, INT, "10"}},
+    // Display units. Below mid -> low, below high -> mid, at/above high -> high.
+    {"SpeedLimitOffsetMidThreshold", {PERSISTENT | BACKUP, INT, "30"}},
+    {"SpeedLimitOffsetHighThreshold", {PERSISTENT | BACKUP, INT, "65"}},
     {"SpeedLimitAutoFollow", {PERSISTENT | BACKUP, BOOL, "1"}},
     // Ceiling for what SLA may request, in display units (mph/kph). Well under Ford ACC's 110 mph cap.
     {"SpeedLimitMaxSetSpeed", {PERSISTENT | BACKUP, INT, "85"}},

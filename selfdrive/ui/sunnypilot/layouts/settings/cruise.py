@@ -16,6 +16,8 @@ from openpilot.system.ui.sunnypilot.widgets.list_view import toggle_item_sp, opt
 from openpilot.selfdrive.ui.bp.widgets.section_header import SectionHeader
 from openpilot.system.ui.widgets import Widget
 from openpilot.system.ui.widgets.scroller_tici import Scroller
+from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
+from openpilot.system.ui.lib.application import gui_app
 
 
 class PanelType(IntEnum):
@@ -182,6 +184,14 @@ class CruiseLayout(Widget):
       label_callback=self._distance_label,
       inline=True)
 
+    # BluePilot: a pin can only be removed by driving back to it, which is fine for the one you
+    # just made and useless for one set 50 miles away. This is the escape hatch.
+    self.icbm_clear_pins = simple_button_item_sp(
+      button_text=self._pinned_hold_count_label,
+      button_width=400,
+      enabled=self._has_pinned_holds,
+      callback=self._clear_pinned_holds)
+
     self.icbm_resume_gate = toggle_item_sp(
       title=tr("Wait For The Car Ahead Before Resuming"),
       description=tr("Wait for the vehicle ahead to actually move before resuming from a stop. "
@@ -282,6 +292,7 @@ class CruiseLayout(Widget):
       SectionHeader(tr("Resuming From A Stop")),
       self.icbm_pinned_holds,
       self.icbm_pinned_hold_radius,
+      self.icbm_clear_pins,
       self.icbm_resume_gate,
       self.icbm_resume_min_gap,
       self.icbm_resume_min_lead_speed,
@@ -319,6 +330,33 @@ class CruiseLayout(Widget):
     self._current_panel = panel
     if panel == PanelType.SLA:
       self._speed_limit_layout.show_event()
+
+  @staticmethod
+  def _has_pinned_holds() -> bool:
+    return bool(CruiseLayout._pinned_holds())
+
+  @staticmethod
+  def _pinned_holds() -> list:
+    from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management.pinned_holds import PinnedHolds
+    return PinnedHolds._parse(ui_state.params.get("IcbmPinnedHolds"))
+
+  @staticmethod
+  def _pinned_hold_count_label() -> str:
+    n = len(CruiseLayout._pinned_holds())
+    return tr("Clear All ({n})").format(n=n) if n else tr("None Pinned")
+
+  def _clear_pinned_holds(self) -> None:
+    """Confirmed, because it is irreversible and the button sits next to two harmless toggles."""
+    from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management.pinned_holds import PinnedHolds
+    holds = PinnedHolds(ui_state.params)
+    holds.update_params()
+    if not holds.pins:
+      return
+    dialog = ConfirmDialog(
+      tr("Remove all {n} pinned holds? This cannot be undone.").format(n=len(holds.pins)),
+      tr("Remove All"),
+      callback=lambda result: holds.clear() if result else None)
+    gui_app.push_widget(dialog)
 
   @staticmethod
   def _distance_label(value: int) -> str:

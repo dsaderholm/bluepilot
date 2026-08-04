@@ -20,6 +20,10 @@ class OffsetType(IntEnumBase):
   off = 0
   fixed = 1
   percentage = 2
+  # BluePilot: one offset per speed band, because that is how people actually drive. A single
+  # number is wrong at both ends -- +10 is reckless in a 25 and pointless on a freeway -- and the
+  # percentage option has the same problem in a less obvious form, which is why nobody uses it.
+  bySpeed = 3
 
 
 class Mode(IntEnumBase):

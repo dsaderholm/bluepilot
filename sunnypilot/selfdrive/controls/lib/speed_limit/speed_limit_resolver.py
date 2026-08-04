@@ -67,6 +67,11 @@ class SpeedLimitResolver:
       self.params
     )
     self.offset_value = self.params.get("SpeedLimitValueOffset", return_default=True)
+    self.offset_low = self.params.get("SpeedLimitOffsetLow", return_default=True)
+    self.offset_mid = self.params.get("SpeedLimitOffsetMid", return_default=True)
+    self.offset_high = self.params.get("SpeedLimitOffsetHigh", return_default=True)
+    self.offset_mid_threshold = self.params.get("SpeedLimitOffsetMidThreshold", return_default=True)
+    self.offset_high_threshold = self.params.get("SpeedLimitOffsetHighThreshold", return_default=True)
 
     self.speed_limit = 0.
     self.speed_limit_last = 0.
@@ -95,6 +100,11 @@ class SpeedLimitResolver:
       self.is_metric = self.params.get_bool("IsMetric")
       self.offset_type = self.params.get("SpeedLimitOffsetType", return_default=True)
       self.offset_value = self.params.get("SpeedLimitValueOffset", return_default=True)
+      self.offset_low = self.params.get("SpeedLimitOffsetLow", return_default=True)
+      self.offset_mid = self.params.get("SpeedLimitOffsetMid", return_default=True)
+      self.offset_high = self.params.get("SpeedLimitOffsetHigh", return_default=True)
+      self.offset_mid_threshold = self.params.get("SpeedLimitOffsetMidThreshold", return_default=True)
+      self.offset_high_threshold = self.params.get("SpeedLimitOffsetHighThreshold", return_default=True)
 
   def _get_speed_limit_offset(self) -> float:
     if self.offset_type == OffsetType.off:
@@ -103,6 +113,18 @@ class SpeedLimitResolver:
       return float(self.offset_value * (CV.KPH_TO_MS if self.is_metric else CV.MPH_TO_MS))
     elif self.offset_type == OffsetType.percentage:
       return float(self.offset_value * 0.01 * self.speed_limit)
+    elif self.offset_type == OffsetType.bySpeed:
+      # Banded by the POSTED limit, not by current speed: the offset is a statement about the road,
+      # and keying it on v_ego would make it drift as the car slowed for traffic.
+      to_display = CV.MS_TO_KPH if self.is_metric else CV.MS_TO_MPH
+      limit = self.speed_limit * to_display
+      if limit < self.offset_mid_threshold:
+        offset = self.offset_low
+      elif limit < self.offset_high_threshold:
+        offset = self.offset_mid
+      else:
+        offset = self.offset_high
+      return float(offset * (CV.KPH_TO_MS if self.is_metric else CV.MPH_TO_MS))
     else:
       raise NotImplementedError("Offset not supported")
 
