@@ -355,37 +355,47 @@ class TestTheTap:
 
 
 class TestBlinkMode:
-  """The lamp mirrors our frames one for one -- "one frame still does one flash, even if I spam the
-  button" -- so the SEND RATE is the FLASH RATE.
+  """The lamp mirrors our frames one for one, so the SEND RATE is the FLASH RATE -- and the send
+  DURATION is the on-time.
 
-  Which means the gateway's contradicting frames were never the enemy: they are the other half of a
-  blink. Pace our frames at blinker rate and the result is a blinker.
+  The first version sent one frame per cycle. From the car: "it does them in groups of four, with
+  the fog light only coming on for a fraction of a second for each blink." Right rhythm, no duty
+  cycle -- a single frame buys only the milliseconds before the gateway's next frame clears it.
   """
 
-  def test_it_sends_at_blink_rate_not_bus_rate(self):
+  def _sends(self, seconds):
     ext = make_ext(SIGNAL_BLINK_LEFT)
-    out = run(ext, POLL_FRAMES + int(BLINK_COUNT * BLINK_PERIOD_S / DT_CTRL))
-    sends = [i for i, v in enumerate(out) if v == SIGNAL_LEFT]
-    assert sends, "never commanded at all"
-    gaps = [(b - a) * DT_CTRL for a, b in zip(sends, sends[1:])]
-    assert gaps, "only one frame -- that is edge mode, not blink mode"
-    assert all(abs(g - BLINK_PERIOD_S) < 0.02 for g in gaps), \
-      f"frames are not paced at the blink rate: {sorted(set(round(g, 3) for g in gaps))}"
+    out = run(ext, POLL_FRAMES + int(seconds / DT_CTRL))
+    return [i for i, v in enumerate(out) if v == SIGNAL_LEFT]
 
-  def test_it_sends_about_one_frame_per_blink(self):
-    """Eight blinks means eight frames -- not eighty, which is what the four second hold sends and
-    why that one strobes."""
-    ext = make_ext(SIGNAL_BLINK_LEFT)
-    out = run(ext, POLL_FRAMES + int((BLINK_COUNT * BLINK_PERIOD_S + 1.5) / DT_CTRL))
-    assert BLINK_COUNT - 1 <= out.count(SIGNAL_LEFT) <= BLINK_COUNT + 1, \
-      f"sent {out.count(SIGNAL_LEFT)} frames for {BLINK_COUNT} blinks"
+  def test_each_blink_is_a_burst_not_a_single_frame(self):
+    sends = self._sends(BLINK_COUNT * BLINK_PERIOD_S)
+    runs, cur = [], [sends[0]]
+    for a, b in zip(sends, sends[1:]):
+      (cur.append(b) if b - a == 1 else (runs.append(cur), cur := [b]))
+    runs.append(cur)
+    longest = max(len(r) for r in runs) * DT_CTRL
+    assert longest > 0.2, f"longest burst is {longest:.3f}s -- that is a blip, not a blink"
 
-  def test_a_hold_still_sends_far_more(self):
-    """The control, and the contrast that explains the reported symptom: the same duration at bus
-    rate is dozens of frames, hence dozens of flashes."""
-    ext = make_ext(SIGNAL_LEFT)
-    out = run(ext, POLL_FRAMES + int(PULSE_DURATION_S / DT_CTRL))
-    assert out.count(SIGNAL_LEFT) > 5 * BLINK_COUNT
+  def test_the_lamp_is_dark_for_the_rest_of_each_cycle(self):
+    """A blinker is on AND off. Sending throughout would be the four second hold, which the car
+    reports as really fast flashing."""
+    sends = set(self._sends(BLINK_COUNT * BLINK_PERIOD_S))
+    span = max(sends) - min(sends)
+    duty = len(sends) / span
+    assert 0.3 < duty < 0.8, f"duty cycle {duty:.2f} -- not a blink pattern"
+
+  def test_the_rhythm_is_the_blink_rate(self):
+    sends = self._sends(BLINK_COUNT * BLINK_PERIOD_S)
+    starts = [sends[0]] + [b for a, b in zip(sends, sends[1:]) if b - a > 1]
+    gaps = [(b - a) * DT_CTRL for a, b in zip(starts, starts[1:])]
+    assert gaps, "only one burst"
+    assert all(abs(g - BLINK_PERIOD_S) < 0.02 for g in gaps), f"bursts not at blink rate: {gaps}"
+
+  def test_it_stops_after_the_right_number_of_blinks(self):
+    sends = self._sends(BLINK_COUNT * BLINK_PERIOD_S + 2.0)
+    starts = [sends[0]] + [b for a, b in zip(sends, sends[1:]) if b - a > 1]
+    assert len(starts) == BLINK_COUNT, f"{len(starts)} blinks, expected {BLINK_COUNT}"
 
   def test_blink_obeys_every_gate(self):
     for kw in ({"v_ego": 5.0}, {"engaged": True}, {"left_blinker": True}):

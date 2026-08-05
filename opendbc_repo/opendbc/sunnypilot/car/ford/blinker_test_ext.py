@@ -180,7 +180,25 @@ EDGE_OBSERVE_S = 8.0
 # costs one press to falsify: if the lamp blinks at 1.5 Hz, commanding the signal works today, with
 # no canbox and no new hardware.
 BLINK_PERIOD_S = 0.667
-BLINK_COUNT = 8               # match the one-touch he set in FORScan, so the two are comparable
+BLINK_COUNT = 7               # his FORScan one-touch is SEVEN, confirmed 2026-08-04
+
+# How much of each cycle the lamp should be LIT. This is the half the first attempt got wrong.
+#
+# From the car: "it does them in groups of four, with the fog light only coming on for a fraction
+# of a second for each blink." The rhythm was right and the blink was not a blink -- one frame
+# lights the lamp and the gateway's next frame clears it, so a single frame per cycle buys only the
+# few milliseconds between the two. Correct rate, no duty cycle.
+#
+# So each blink is now a BURST: send continuously for the on-phase, then go silent for the rest. The
+# lamp is only dark during the gaps the gateway wins, which is the most on-time this signal can
+# physically produce.
+#
+# HONEST ABOUT WHAT THIS CAN BE. A four second hold is this same burst run continuously, and he
+# described that as "really fast flashing" -- so a burst will flicker too. The bet is that 0.35 s of
+# flicker at a distance reads as ON, the way any PWM lamp does, while four seconds of it reads as a
+# fault. If it still looks wrong, this signal cannot hold a lamp and the canbox on MS-CAN is the
+# remaining route. That is the end of what this path can be asked.
+BLINK_ON_S = 0.35
 
 # How long the verdict stays on screen before the machine re-arms itself.
 #
@@ -363,7 +381,9 @@ class BlinkerTestExt:
         # to begin. The test caught a 0.16 s gap among 0.66 s ones.
         elapsed = self._bt_blink_total - self.bt_frames_left
         period = int(BLINK_PERIOD_S / DT_CTRL)
-        return self.bt_commanded if elapsed > 0 and elapsed % period == 0 else SIGNAL_NONE
+        # Send throughout the on-phase, not once per cycle. See BLINK_ON_S -- one frame per cycle
+        # got the rhythm right and left no duty cycle at all.
+        return self.bt_commanded if (elapsed % period) < int(BLINK_ON_S / DT_CTRL) else SIGNAL_NONE
       return self.bt_commanded if send_frame else SIGNAL_NONE
 
     # ---- showing the verdict: a clock, not a condition. See DONE_HOLD_S ----
@@ -446,7 +466,11 @@ class BlinkerTestExt:
     observe = EDGE_OBSERVE_S if edge else OBSERVE_AFTER_S
     if self.bt_blinking:
       # One frame per blink, for as many blinks as the one-touch does. See BLINK_PERIOD_S.
-      self._bt_command_frames_left = int(BLINK_COUNT * BLINK_PERIOD_S / DT_CTRL)
+      # BLINK_COUNT whole periods, computed from the SAME integer period the send condition uses.
+      # Deriving them separately rounded differently and opened a truncated extra burst at the end
+      # -- a short odd blink after the intended ones, which is what a test caught and may well be
+      # the "small break after four" reported from the car.
+      self._bt_command_frames_left = BLINK_COUNT * int(BLINK_PERIOD_S / DT_CTRL)
       self.bt_frames_left = self._bt_command_frames_left + int(1.0 / DT_CTRL)
       self._bt_blink_total = self.bt_frames_left
     else:
