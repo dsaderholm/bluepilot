@@ -368,22 +368,12 @@ class TestBlinkMode:
     out = run(ext, POLL_FRAMES + int(seconds / DT_CTRL))
     return [i for i, v in enumerate(out) if v == SIGNAL_LEFT]
 
-  def test_each_blink_is_a_burst_not_a_single_frame(self):
+  def test_one_frame_per_blink(self):
+    """The body module holds the lamp itself: "the blinker didn't briefly turn on, it stayed on for
+    the normal amount." So one frame per cycle is a whole blink, and bursting frames to hold it on
+    was solving a problem the main lamp does not have."""
     sends = self._sends(BLINK_COUNT * BLINK_PERIOD_S)
-    runs, cur = [], [sends[0]]
-    for a, b in zip(sends, sends[1:]):
-      (cur.append(b) if b - a == 1 else (runs.append(cur), cur := [b]))
-    runs.append(cur)
-    longest = max(len(r) for r in runs) * DT_CTRL
-    assert longest > 0.2, f"longest burst is {longest:.3f}s -- that is a blip, not a blink"
-
-  def test_the_lamp_is_dark_for_the_rest_of_each_cycle(self):
-    """A blinker is on AND off. Sending throughout would be the four second hold, which the car
-    reports as really fast flashing."""
-    sends = set(self._sends(BLINK_COUNT * BLINK_PERIOD_S))
-    span = max(sends) - min(sends)
-    duty = len(sends) / span
-    assert 0.3 < duty < 0.8, f"duty cycle {duty:.2f} -- not a blink pattern"
+    assert all(b - a > 1 for a, b in zip(sends, sends[1:])),       "consecutive frames -- that is a burst, and the lamp does not need one"
 
   def test_the_rhythm_is_the_blink_rate(self):
     sends = self._sends(BLINK_COUNT * BLINK_PERIOD_S)

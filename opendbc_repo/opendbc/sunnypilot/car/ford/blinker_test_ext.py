@@ -180,25 +180,35 @@ EDGE_OBSERVE_S = 8.0
 # costs one press to falsify: if the lamp blinks at 1.5 Hz, commanding the signal works today, with
 # no canbox and no new hardware.
 BLINK_PERIOD_S = 0.667
-BLINK_COUNT = 7               # his FORScan one-touch is SEVEN, confirmed 2026-08-04
+# SEVEN IS A BENCH-TEST NUMBER, NOT THE FEATURE'S NUMBER.
+#
+# It matches the one-touch he set in FORScan, which is the point: pressing this button and flicking
+# the stalk should now produce the same thing, so any difference is ours.
+#
+# The feature will not want a count at all. From him: "7 blinks should be used for a regular lane
+# change how I do it now, but who knows what passing assist will want, like if the lane change will
+# take longer." Exactly right, and it is the advantage this has over the stalk -- a one-touch is a
+# fixed number of blinks decided in FORScan, while sending frames ourselves means signaling for
+# however long the maneuver actually takes and stopping when it ends.
+#
+# So whatever consumes this later takes a DURATION and keeps sending until the crossing completes.
+# The count lives here, in the bench test, where the only job is comparability.
+BLINK_COUNT = 7
 
-# How much of each cycle the lamp should be LIT. This is the half the first attempt got wrong.
+# ONE FRAME PER BLINK IS CORRECT, and the reason is that the body module holds the lamp itself.
 #
-# From the car: "it does them in groups of four, with the fog light only coming on for a fraction
-# of a second for each blink." The rhythm was right and the blink was not a blink -- one frame
-# lights the lamp and the gateway's next frame clears it, so a single frame per cycle buys only the
-# few milliseconds between the two. Correct rate, no duty cycle.
+# Briefly got this wrong by reading the wrong lamp. The report was "the fog light only coming on for
+# a fraction of a second for each blink", which looked like a duty-cycle failure -- so each blink
+# became a burst of frames to hold the lamp on. Then, plainly: "the blinker didn't briefly turn on,
+# it stayed on for the normal amount, just the fog light didn't."
 #
-# So each blink is now a BURST: send continuously for the on-phase, then go silent for the rest. The
-# lamp is only dark during the gaps the gateway wins, which is the most on-time this signal can
-# physically produce.
+# So the MAIN lamp already gets a full, normal on-time from a single frame. The BCM runs its own
+# lamp timing from one command; it does not need us to hold anything. The cornering lamp is a
+# separate circuit with its own shorter trigger, and it is a diagnostic rather than the thing being
+# controlled -- which is exactly what made it so useful for counting events earlier, and exactly
+# what made it misleading here.
 #
-# HONEST ABOUT WHAT THIS CAN BE. A four second hold is this same burst run continuously, and he
-# described that as "really fast flashing" -- so a burst will flicker too. The bet is that 0.35 s of
-# flicker at a distance reads as ON, the way any PWM lamp does, while four seconds of it reads as a
-# fault. If it still looks wrong, this signal cannot hold a lamp and the canbox on MS-CAN is the
-# remaining route. That is the end of what this path can be asked.
-BLINK_ON_S = 0.35
+# One frame, one proper blink. Nothing to hold.
 
 # How long the verdict stays on screen before the machine re-arms itself.
 #
@@ -339,6 +349,15 @@ class BlinkerTestExt:
 
     # ---- active pulse: timeout is checked FIRST, before anything that could throw or block ----
     if self.bt_state == 1:
+      # A press DURING a running test is dropped, not honored, and that is a known annoyance rather
+      # than a design: "it still seems like there is a delay between when I can test it." A blink
+      # is seven cycles, so the buttons are inert for about five seconds and then again for the
+      # three second verdict.
+      #
+      # Two attempts at interrupting it broke working tests, because while a pulse runs the request
+      # param still holds the value that started it -- a leftover is indistinguishable from a new
+      # press without more bookkeeping than this is worth today. The verdict window IS preemptible,
+      # which recovers most of the wait. Left as it is deliberately, with the reason written down.
       self.bt_frames_left -= 1
 
       self._bt_command_frames_left = max(0, self._bt_command_frames_left - 1)
@@ -381,9 +400,8 @@ class BlinkerTestExt:
         # to begin. The test caught a 0.16 s gap among 0.66 s ones.
         elapsed = self._bt_blink_total - self.bt_frames_left
         period = int(BLINK_PERIOD_S / DT_CTRL)
-        # Send throughout the on-phase, not once per cycle. See BLINK_ON_S -- one frame per cycle
-        # got the rhythm right and left no duty cycle at all.
-        return self.bt_commanded if (elapsed % period) < int(BLINK_ON_S / DT_CTRL) else SIGNAL_NONE
+        # ONE frame per cycle. The body module holds the lamp for a normal blink by itself.
+        return self.bt_commanded if elapsed % period == 0 else SIGNAL_NONE
       return self.bt_commanded if send_frame else SIGNAL_NONE
 
     # ---- showing the verdict: a clock, not a condition. See DONE_HOLD_S ----
