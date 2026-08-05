@@ -564,6 +564,9 @@ class PassingAssistDetector:
     self.left_edge_std = 1e3
     self.right_edge_std = 1e3
     self.left_geometry_ok = False
+    # Which geometry term refuses the LEFT side, counted over the whole drive. See _record_refusal.
+    self._geo_refusals = [0, 0, 0, 0]
+    self._geo_sums = [0.0, 0.0, 0.0, 0.0]
     self.right_geometry_ok = False
     self.right_widening_m = 0.0
     self.right_widening = False
@@ -864,10 +867,55 @@ class PassingAssistDetector:
     # that did not exist a moment ago and now does is an exit or an on-ramp, and this is the only
     # test here that can tell that apart from a through lane -- every other one asks what the lane
     # looks like, and they look identical.
+    self._record_refusal(left_std)
+
     if self.right_geometry_ok:
       self.right_lane_age_s = min(self.right_lane_age_s + DT_MDL, 1e3)
     else:
       self.right_lane_age_s = 0.0
+
+  # The four terms of the left-hand gate, in the order it evaluates them. Index is what gets
+  # published; the panel turns it back into a word.
+  GEO_EDGE_STD, GEO_PAINT, GEO_WIDTH, GEO_BEYOND = 0, 1, 2, 3
+
+  def _record_refusal(self, left_std: float) -> None:
+    """Tally which term refuses the LEFT side, and its value, across the drive.
+
+    WHY THIS IS AGGREGATED RATHER THAN SHOWN LIVE. The per-side reason is already on the panel, and
+    asking him to read "L paint 0.31" off a screen at 70 mph earned exactly the answer it deserved:
+    "and you expect me to read all of that while driving?" He does not read the panel live and has
+    said so repeatedly -- he reads the summary at a stop and reports it back.
+
+    So the diagnosis has to survive to the end of the drive as one sentence. Five drives, twenty-one
+    passes, zero suggestions, and no idea which of four numbers is responsible is the situation this
+    exists to end -- in one drive, without him reading anything at speed.
+
+    LEFT ONLY. It is the side a pass is made to; the right side is legitimately a shoulder most of
+    the time he is driving, so mixing them in would bury the signal in the expected answer.
+    """
+    if self.left_geometry_ok:
+      return
+    # First failing term, in the gate's own order -- the one to act on.
+    if left_std > MAX_ROAD_EDGE_STD:
+      idx, val = self.GEO_EDGE_STD, left_std
+    elif self.left_line_prob < MIN_ADJACENT_LINE_PROB:
+      idx, val = self.GEO_PAINT, self.left_line_prob
+    elif not (MIN_LANE_WIDTH_M <= self.left_lane_width <= MAX_LANE_WIDTH_M):
+      idx, val = self.GEO_WIDTH, self.left_lane_width
+    else:
+      idx, val = self.GEO_BEYOND, self.left_edge_beyond
+    self._geo_refusals[idx] += 1
+    self._geo_sums[idx] += val
+
+  @property
+  def geo_refusal(self) -> tuple[int, float, float]:
+    """(term, its mean value, share of refused frames) for whatever refuses the left side most."""
+    total = sum(self._geo_refusals)
+    if not total:
+      return 0, 0.0, 0.0
+    idx = max(range(4), key=lambda i: self._geo_refusals[i])
+    n = self._geo_refusals[idx]
+    return idx, (self._geo_sums[idx] / n if n else 0.0), n / total
 
   def _lka_toggle(self, car_state_bp) -> bool:
     """Rising edge of the stalk-end LKA button.
@@ -1967,6 +2015,10 @@ class PassingAssistDetector:
     passingAssist.leftLaneWidth = float(pa.left_lane_width)
     passingAssist.rightLaneWidth = float(pa.right_lane_width)
     passingAssist.leftEdgeBeyond = float(pa.left_edge_beyond)
+    geo_term, geo_value, geo_share = pa.geo_refusal
+    passingAssist.geoRefusedBy = int(geo_term)
+    passingAssist.geoRefusedValue = float(geo_value)
+    passingAssist.geoRefusedShare = float(geo_share)
     passingAssist.rightEdgeBeyond = float(pa.right_edge_beyond)
     passingAssist.leftEdgeStd = float(min(pa.left_edge_std, 1e3))
     passingAssist.rightEdgeStd = float(min(pa.right_edge_std, 1e3))

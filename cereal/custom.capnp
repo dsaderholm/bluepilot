@@ -805,6 +805,14 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     # it against missedDeficitMph rather than the panel keeping its own copy of a setting -- that
     # copy is how a readout ends up explaining a gate using a number the gate stopped using.
     minDeficitActive @89 :Float32;
+
+    # WHICH geometry term refuses the left side, over the whole drive, and by how much. The live
+    # per-side reason is on the panel already; this is the version that survives to a stop, because
+    # "and you expect me to read all of that while driving?" is a fair question and the answer is no.
+    # 0 edge-std, 1 paint, 2 width, 3 room-beyond -- the gate's own order.
+    geoRefusedBy @90 :UInt8;
+    geoRefusedValue @91 :Float32;
+    geoRefusedShare @92 :Float32;
     oncomingSeenSeconds @80 :Float32;        # refused while actually watching a vehicle
     oncomingRememberedSeconds @81 :Float32;  # refused on memory alone, nothing in view
 

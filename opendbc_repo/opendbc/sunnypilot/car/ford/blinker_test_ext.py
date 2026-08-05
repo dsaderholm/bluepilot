@@ -566,7 +566,21 @@ class BlinkerTestExt:
         if (self._bt_frame - self._bt_lamp_off_frame) * DT_CTRL > MEASURE_QUIET_S:
           self.bt_frames_left = 0
 
-      driver_stalk = (CS.out.leftBlinker or CS.out.rightBlinker) and not self.bt_measuring
+      # THE SIDE WE ARE COMMANDING DOES NOT COUNT AS THE DRIVER, while a run is in progress.
+      #
+      # carState.leftBlinker is TurnLghtSwtch_D_Stat off Steering_Data_FD1 -- the exact signal this
+      # writes. Whether our own value can come back around (the frame is the gateway's, and the
+      # gateway is evidently relaying our value to the body module, since the lamp lights) is not
+      # something this file can settle. What is certain is that while we are commanding a side,
+      # that side's reported switch position is not evidence about the driver, and treating it as
+      # such lets a run abort itself partway through.
+      #
+      # The opposite side still stops it instantly, which is the case that matters: the driver
+      # reaching for the stalk to go the other way. The arming check further down is unchanged and
+      # still refuses to start against any blinker at all.
+      driver_left = CS.out.leftBlinker and self.bt_commanded != SIGNAL_LEFT
+      driver_right = CS.out.rightBlinker and self.bt_commanded != SIGNAL_RIGHT
+      driver_stalk = (driver_left or driver_right) and not self.bt_measuring
       if self.bt_frames_left <= 0 or CS.out.vEgo > STANDSTILL_V_EGO or          driver_stalk or CS.out.cruiseState.enabled:
         # SAY WHY IT STOPPED. Every one of these ends a run that was already under way, and until
         # now all four ended it silently -- the panel then showed the flash count and "SIGNAL

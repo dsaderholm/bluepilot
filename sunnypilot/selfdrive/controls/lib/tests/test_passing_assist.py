@@ -2657,3 +2657,45 @@ class TestTheBackedOutChime:
     assert det.keep_right_maneuver.aborts >= 1, "keep-right did not back out"
     assert det.maneuver.aborts == 0, "this has to be the keep-right machine, not the other one"
     assert heard, "a keep-right reversal was silent"
+
+
+class TestWhyItNeverFired:
+  """Five drives, twenty-one passes, zero suggestions -- and no way to tell which of four constants
+  was responsible without reading numbers off a screen at 70 mph, which he does not do and has said
+  so: "and you expect me to read all of that while driving?"
+
+  So the drive keeps a tally and reports the answer as one sentence at a stop.
+  """
+
+  def test_it_names_the_paint_threshold_when_that_is_what_refuses(self):
+    det = keep_right_det()
+    run(det, int(20.0 / DT_MDL), v_lead=SLOW_LEAD_MS, probs=(0.31, 0.99, 0.99, 0.2))
+    term, value, share = det.geo_refusal
+    assert term == det.GEO_PAINT
+    assert abs(value - 0.31) < 0.01, "reported a number that is not the one that refused"
+    assert share > 0.9
+
+  def test_it_names_the_shoulder_when_that_is_what_refuses(self):
+    """Paint fine, width fine, no road left past the far line -- the shoulder case."""
+    det = keep_right_det()
+    run(det, int(20.0 / DT_MDL), v_lead=SLOW_LEAD_MS,
+        ll=(-5.5, -1.85, 1.85, 5.5), probs=(0.9, 0.99, 0.99, 0.2), edges=(-5.5, 2.4))
+    term, value, share = det.geo_refusal
+    assert term == det.GEO_BEYOND
+    assert share > 0.9
+
+  def test_the_first_failing_term_wins_not_the_last(self):
+    """Two terms failing at once has to report the one the gate reaches first, or the number named
+    is not the number to change."""
+    det = keep_right_det()
+    run(det, int(20.0 / DT_MDL), v_lead=SLOW_LEAD_MS,
+        probs=(0.1, 0.99, 0.99, 0.2), edge_stds=(0.9, 0.1))
+    term, _, _ = det.geo_refusal
+    assert term == det.GEO_EDGE_STD, "paint was blamed for a road edge nobody could measure"
+
+  def test_a_drive_where_the_left_lane_was_fine_reports_nothing(self):
+    det = keep_right_det()
+    run(det, int(20.0 / DT_MDL), v_lead=SLOW_LEAD_MS)
+    assert det.left_geometry_ok
+    _, _, share = det.geo_refusal
+    assert share == 0.0, "counted refusals on a drive that had none"

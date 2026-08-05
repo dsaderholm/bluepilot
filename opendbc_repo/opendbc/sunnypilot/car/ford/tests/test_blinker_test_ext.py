@@ -150,9 +150,16 @@ class TestBlinkerTestTermination:
     assert ext.bt_state == 2
 
   def test_driver_stalk_mid_pulse_stops_it(self):
+    """THE OTHER SIDE, deliberately. This used to use the same side the pulse was commanding, which
+    passed for the wrong reason: carState.leftBlinker is decoded from TurnLghtSwtch_D_Stat, the
+    exact signal this module writes, so a commanded LEFT reported back was being read as the driver
+    reaching for the stalk -- and a run could abort itself.
+
+    The driver going the OTHER way is the case the check exists for, and it still stops it at once.
+    """
     ext = make_ext(SIGNAL_LEFT)
     run(ext, POLL_FRAMES + 5)
-    assert ext.update_blinker_test(make_cs(left_blinker=True)) == SIGNAL_NONE
+    assert ext.update_blinker_test(make_cs(right_blinker=True)) == SIGNAL_NONE
     assert ext.bt_state == 2
 
   def test_engaging_cruise_mid_pulse_stops_it(self):
@@ -595,3 +602,42 @@ class TestTheRunawayGuardCanLetGo:
     out = run(ext, POLL_FRAMES + int(3.0 / DT_CTRL))
     assert ext.bt_state == 0, "armed against a store that cannot be cleared"
     assert all(v == SIGNAL_NONE for v in out), "commanded the lamp with no way to stop it"
+
+
+class TestARunDoesNotAbortItself:
+  """From the driveway, stopped with the parking brake on: "blink right did nothing... then two
+  flashes... waited, six... waited more, three. Only ever short a few blinks, never a gap."
+
+  Short, never gapped, varying with the wait is a run being CUT OFF. The standstill gate was the
+  first suspect and it is ruled out -- the car was not moving at all. That leaves the driver-stalk
+  check, which reads the very signal this module writes.
+
+  Whether the value can come back around is not settled here. These pin the part that is certain:
+  the side we are commanding cannot be read as the driver reaching for the stalk.
+  """
+
+  def test_the_commanded_side_reported_back_does_not_stop_the_run(self):
+    ext = make_ext(SIGNAL_BLINK_LEFT)
+    run(ext, POLL_FRAMES + 2)
+    assert ext.bt_state == 1, "never armed"
+    # the car now reports a LEFT switch -- which is what we are commanding
+    run(ext, int(2.0 / DT_CTRL), left_blinker=True, lamp_left=True)
+    assert ext.bt_state == 1, "our own commanded side aborted the run"
+
+  def test_the_other_side_still_stops_it_at_once(self):
+    """The case the check exists for: the driver reaching for the stalk to go the other way."""
+    ext = make_ext(SIGNAL_BLINK_LEFT)
+    run(ext, POLL_FRAMES + 2)
+    assert ext.bt_state == 1
+    run(ext, 4, right_blinker=True)
+    assert ext.bt_state == 2, "the driver signalling the other way did not stop it"
+    assert ext.bt_blocked == 3, "stopped without saying it was the stalk"
+
+  def test_a_stop_records_which_gate_did_it(self):
+    """Every one of these ends a run already under way, and all four used to do it silently -- the
+    panel then showed a flash count under SIGNAL WORKS, which reads as the car half-ignoring us."""
+    ext = make_ext(SIGNAL_BLINK_LEFT)
+    run(ext, POLL_FRAMES + 2)
+    run(ext, 4, v_ego=5.0)
+    assert ext.bt_state == 2
+    assert ext.bt_blocked == 1, "car moved, and the panel would have blamed the signal"

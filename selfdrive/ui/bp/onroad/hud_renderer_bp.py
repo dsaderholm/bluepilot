@@ -218,6 +218,16 @@ _BT_STOPPED = {
 }
 
 
+# The left gate's four terms, in the order it evaluates them. Named for a driver rather than for
+# the code: "paint" is the model's confidence in a line beyond ours, "room past it" is how much
+# road is left outside the lane we would move into.
+_GEO_TERMS = ("edge unsure", "paint", "lane width", "room past it")
+
+
+def _feet(m: float, metric: bool) -> str:
+  return f"{m:.1f}m" if metric else f"{m * 3.28084:.1f}ft"
+
+
 def _suggested_deficit(missed_mph: float, active_mph: float) -> float | None:
   """What the speed bar would have had to be to accept the passes he made and it refused.
 
@@ -232,33 +242,6 @@ def _suggested_deficit(missed_mph: float, active_mph: float) -> float | None:
     return None
   suggested = float(int(missed_mph))
   return suggested if suggested >= 1.0 else None
-
-
-def _lane_why(tag: str, prob: float, width: float, beyond: float, std: float, metric: bool) -> str:
-  """Which of the geometry terms refused this side, and by how much.
-
-  Ordered the way the gate evaluates them, so the first failure named is the one to act on. All
-  of them are invented constants -- this readout exists so a drive can replace them with
-  measurements instead of an argument.
-
-  "shoulder" is the one worth spelling out rather than printing a number for: it is the term that
-  fires when the model put the far lane line on the road edge, which is what it does when there is
-  no lane out there, and it is the case that had this suggesting a move into a barrier wall.
-  """
-  def _d(m: float) -> str:
-    return f"{m:.1f}m" if metric else f"{m * 3.28084:.1f}ft"
-
-  if std > MAX_ROAD_EDGE_STD:
-    return f"{tag} edge +-{min(std, 9.9):.1f}"
-  if prob < MIN_ADJACENT_LINE_PROB:
-    return f"{tag} paint {prob:.2f}"
-  if width < MIN_LANE_WIDTH_M:
-    return f"{tag} narrow {_d(width)}"
-  if width > MAX_LANE_WIDTH_M:
-    return f"{tag} wide {_d(width)}"
-  if beyond < MIN_EDGE_BEYOND_LINE_M:
-    return f"{tag} shoulder {_d(max(beyond, 0.0))}"
-  return f"{tag} ok"
 
 
 class HudRendererBP(HudRendererSP):
@@ -618,6 +601,19 @@ class HudRendererBP(HudRendererSP):
       # feature working correctly on a quiet road and a feature that is broken. Reported from the
       # car as "I heard zero chimes, but maybe I never turned it on?" -- a question the panel
       # should have answered without anyone having to ask it.
+      # WHY IT NEVER FIRED, as one sentence, at a stop. Five drives, twenty-one passes and zero
+      # suggestions is a number with no next step attached; "left refused: paint 0.31 (86%)" names
+      # the one of four constants to change. Placed above the counts because it is the finding and
+      # they are the symptom.
+      #
+      # Only once there is enough of it to mean anything, and only when it is actually the thing
+      # standing in the way -- on a road where a pass was never wanted, the left side being refused
+      # is not news.
+      if pa.wantedSeconds > 30.0 and pa.geoRefusedShare > 0.5 and not pa.suggestionsMade:
+        term = _GEO_TERMS[pa.geoRefusedBy] if pa.geoRefusedBy < len(_GEO_TERMS) else "?"
+        v = pa.geoRefusedValue
+        shown = f"{v:.2f}" if pa.geoRefusedBy in (0, 1) else _feet(v, ui_state.is_metric)
+        lines.append(f"left refused: {term} {shown} ({pa.geoRefusedShare * 100:.0f}%)")
       if pa.suggestionsMade or pa.wantedSeconds > 0.0:
         line = f"suggested {pa.suggestionsMade}, taken {pa.suggestionsTaken}"
         if pa.longestIgnoredSeconds > 5.0:
@@ -934,17 +930,14 @@ class HudRendererBP(HudRendererSP):
           self._pa_sub_detail = (f"want {pa.referenceSpeed * conv:.0f}"
                                  f"  lead {pa.leadVLead * conv:.0f}"
                                  f"  [{pa.referenceSource}]")
-        elif blocked == 'noLaneAvailable':
-          # THE SAME LESSON, A FOURTH TIME. Three invented thresholds decide this -- paint
-          # confidence, drivable width, and the model's certainty about where the road edge is --
-          # and not one of the values feeding them was on screen. "No lane to move into" was
-          # reported from a road with an obvious empty lane beside it, and neither of us could say
-          # which term refused it. Name the failing one, per side, with its number.
-          left_why = _lane_why('L', pa.leftLineProb, pa.leftLaneWidth, pa.leftEdgeBeyond,
-                               pa.leftEdgeStd, ui_state.is_metric)
-          right_why = _lane_why('R', pa.rightLineProb, pa.rightLaneWidth, pa.rightEdgeBeyond,
-                                pa.rightEdgeStd, ui_state.is_metric)
-          self._pa_sub_detail = f"{left_why}     {right_why}"
+        # NO PER-SIDE GEOMETRY HERE ANY MORE. It used to print "L paint 0.31     R shoulder
+        # 0.3ft" live, which is four numbers to parse at 70 mph in service of a question that
+        # cannot be acted on until the car is parked anyway.
+        #
+        # "I love having good visual information on the screen, but only for at-a-glance
+        # information. The rest I just want to dump onto you." The moving car gets the verdict;
+        # the drive summary carries the diagnosis, as one sentence, at a stop -- see
+        # geoRefusedBy and _record_refusal.
         elif blocked == 'closingIn' and pa.minApproachActive > 0:
           # Auto derives this from what the car's own ACC has been measured doing, so the number is
           # different per car and changes as it learns. Without showing it, "Waiting to get closer"
