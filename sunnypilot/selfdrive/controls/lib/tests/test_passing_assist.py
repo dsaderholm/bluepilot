@@ -94,8 +94,16 @@ class FakeSubMaster:
 def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., lead_y=0.0, status=True,
             left_bs=False, right_bs=False, blis_avail=True,
             # geometry: ego lane lines at -1.85/+1.85, road edges default to one clear lane left
+            #
+            # The left edge is 1.5 m PAST the far-left line, not 0.1 m short of it as it was. The
+            # old numbers put the road edge and the outermost lane line on top of each other, which
+            # is what the model does when there is NO lane out there -- so the fixture that stood
+            # for "one clear lane left" was drawing the shoulder case, and every gate written
+            # against it inherited that. The right side keeps the shoulder geometry deliberately:
+            # edge at 2.4 is barely past ego's own line, so the default road is one lane plus a
+            # shoulder, which is the road this gets driven on.
             ll=(-5.5, -1.85, 1.85, 5.5), probs=(0.9, 0.99, 0.99, 0.2),
-            edges=(-5.6, 2.4), edge_stds=(0.1, 0.1), right_edge_widen=0.0,
+            edges=(-7.0, 2.4), edge_stds=(0.1, 0.1), right_edge_widen=0.0,
             tsr_avail=True, ovtk_msg=1, ovtk_status=2,
             blinker=False, blinker_right=False, brake=False, steering=False, road_name="I 15", curve=0.0,
             acc_braking=False, acc_precharge=False, acc_propulsion=0.0,
@@ -184,8 +192,15 @@ class TestPassingAssistGeometry:
     det = run(PassingAssistDetector(), 1)
     assert det.left_edge_gap > 0
     assert det.right_edge_gap > 0
-    # left line -1.85 to left edge -5.6 is 3.75 m
-    assert abs(det.left_edge_gap - 3.75) < 0.01
+    # left line -1.85 out to left edge -7.0 is 5.15 m -- the next lane AND its shoulder, which is
+    # the reason this number is published and no longer gated on.
+    assert abs(det.left_edge_gap - 5.15) < 0.01
+    # ...and the two halves it is made of, each positive on both sides. If either came out negative
+    # a side would be silently unavailable forever with nothing in a log to say why.
+    assert abs(det.left_lane_width - 3.65) < 0.01    # -1.85 to the far-left line at -5.5
+    assert abs(det.left_edge_beyond - 1.5) < 0.01    # -5.5 out to the edge at -7.0
+    assert det.right_lane_width > 0
+    assert det.right_edge_beyond < 0, "the default right side is a shoulder, and reads as one"
 
   def test_two_way_road_still_reports_a_lane(self):
     """The known false positive, asserted deliberately rather than left implicit.
@@ -343,7 +358,7 @@ class TestPassingAssistBlindspot:
 
   def test_falls_through_to_right_when_left_occupied(self):
     det = run(PassingAssistDetector(), STUCK_FRAMES, left_bs=True,
-              probs=(0.9, 0.99, 0.99, 0.9), edges=(-5.6, 5.7))
+              probs=(0.9, 0.99, 0.99, 0.9), edges=(-7.0, 7.0))
     assert det.suggestion == Side.right
 
   def test_unavailable_blindspot_is_recorded(self):
@@ -413,7 +428,10 @@ IN_LEFT_LANE = dict(probs=(0.1, 0.99, 0.99, 0.9), edges=(-2.2, 9.3))
 
 # Two lanes each way, sitting in the left. Keep-right works here now: nothing about the geometry
 # says exit, so the widening and lane-age gates carry it instead of a blanket refusal.
-TWO_LANE_ROAD = dict(probs=(0.1, 0.99, 0.99, 0.9), edges=(-2.2, 5.7))
+# The right edge is 3 m past the far-right line, not 0.2 m past it. A road edge sitting on the
+# outermost lane line is what the model gives when there is NO lane out there, so the old
+# numbers described a shoulder while claiming to describe a two-lane road.
+TWO_LANE_ROAD = dict(probs=(0.1, 0.99, 0.99, 0.9), edges=(-2.2, 8.5))
 
 # No lane to our right at all: painted line gone and no drivable width to the edge. Used to age a
 # lane up from zero.
@@ -800,7 +818,7 @@ class TestOncomingVeto:
     arterial in the state to protect against a lane that is only on one side.
     """
     det = run(PassingAssistDetector(), STUCK_FRAMES, tracks=self.ONCOMING,
-              probs=(0.9, 0.99, 0.99, 0.9), edges=(-5.6, 5.7))
+              probs=(0.9, 0.99, 0.99, 0.9), edges=(-7.0, 7.0))
     assert det.adjacent.left.blocks_oncoming
     assert not det.adjacent.right.blocks_oncoming
     assert det.suggestion == Side.right
@@ -972,7 +990,7 @@ class TestLaneAge:
     """They are scoped to keep-right. Overtaking on the right is a different decision and the
     driver is choosing to make it."""
     det = run(PassingAssistDetector(), STUCK_FRAMES, left_bs=True,
-              probs=(0.9, 0.99, 0.99, 0.9), edges=(-5.6, 5.7))
+              probs=(0.9, 0.99, 0.99, 0.9), edges=(-7.0, 7.0))
     assert det.suggestion == Side.right
     assert det.reason == Reason.passing
 
@@ -2472,15 +2490,26 @@ class TestTheGeometryGateActuallyOpens:
     AASHTO gives interstate right shoulders as 10 ft, and 12 ft where truck volumes are high --
     3.05 to 3.66 m. The old 3.0 m bar was written believing "a wide shoulder is under 3", which is
     simply not true of the roads this drives on, so a standard shoulder read as a lane.
+
+    ...AND THEN 3.5 DID NOT HOLD EITHER: "it just keeps trying to go into the shoulder."
+
+    So this is now the WIDEST shoulder AASHTO gives, 12 ft, which is exactly as wide as the lane in
+    the next test. Nothing about width separates those two and no threshold on it ever could -- the
+    pair below differs in one number only, where the ROAD EDGE is, and that is the whole test.
+
+    The geometry is what the model does with no lane out there: laneLines always has four entries,
+    so the far one gets put on the strongest feature left, which is the road edge itself. On screen
+    that is the red line on the barrier wall -- "so it's obvious that's a shoulder."
     """
-    det = run(PassingAssistDetector(), STUCK_FRAMES,
-              probs=(0.1, 0.99, 0.99, 0.9), edges=(-2.2, 1.85 + 3.05))   # 10 ft shoulder
-    assert not det.right_geometry_ok, "a 10 ft shoulder counted as a lane to move into"
+    det = run(PassingAssistDetector(), STUCK_FRAMES, probs=(0.1, 0.99, 0.99, 0.9),
+              ll=(-5.5, -1.85, 1.85, 1.85 + 3.66), edges=(-2.2, 1.85 + 3.66))  # 12 ft shoulder
+    assert not det.right_geometry_ok, "a 12 ft shoulder counted as a lane to move into"
+    assert det.right_lane_width > MIN_LANE_WIDTH_M, "width was never the thing that refused it"
 
   def test_but_a_real_lane_beside_it_still_is(self):
-    """3.5 has to leave a 12 ft lane through, or the gate is shut for a different reason."""
-    det = run(PassingAssistDetector(), STUCK_FRAMES,
-              probs=(0.1, 0.99, 0.99, 0.9), edges=(-2.2, 1.85 + 3.66))   # 12 ft lane
+    """The same 12 ft of pavement with the road edge a shoulder further out. It is a lane."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, probs=(0.1, 0.99, 0.99, 0.9),
+              ll=(-5.5, -1.85, 1.85, 1.85 + 3.66), edges=(-2.2, 1.85 + 3.66 + 3.05))
     assert det.right_geometry_ok
 
   def test_a_genuinely_useless_edge_is_still_refused(self):

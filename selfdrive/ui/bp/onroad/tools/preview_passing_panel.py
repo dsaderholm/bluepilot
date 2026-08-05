@@ -56,6 +56,11 @@ SCENES = [
    "WOULD BACK OUT", "something arriving behind", 0.0, True, RED),
   ("just reversed a crossing, standing down",
    "BACKED OUT", "waiting 8s before trying again", 0.0, True, RED),
+  # The other side of the same clock, and the reason it must not read as the one above: nothing
+  # actuates, so a completed dry run leaves every reason to go still true and would restart itself
+  # forever -- "would be changing right, would be done, over and over again".
+  ("a run that went all the way through, standing down",
+   "WOULD BE DONE", "holding 24s before looking again", 0.0, True, PURPLE),
   ("keep right: signaling",
    "WOULD SIGNAL RIGHT", "moving back over", 0.6, True, PURPLE),
   ("a pass that is grinding",
@@ -66,6 +71,13 @@ SCENES = [
    "Waiting to get closer", "until 512ft  -  now 640ft", 0.0, False, GREY),
   ("blocked: oncoming traffic on the left",
    "ONCOMING LEFT", "saw 62 at 410ft  -  74s left", 0.0, False, GREY),
+  # The readout that answers the shoulder. "L ok  R shoulder 0.1m" is the panel saying, in the one
+  # place he can read it while driving, that the model put the far lane line ON the road edge --
+  # the red line at the barrier wall -- so there is no lane out there, only pavement.
+  ("refused: the space to the right is a shoulder, not a lane",
+   "No lane to move into", "L ok     R shoulder 0.3ft", 0.0, False, GREY),
+  ("refused: the paint beyond our lane is not visible enough",
+   "No lane to move into", "L paint 0.31     R narrow 8.2ft", 0.0, False, GREY),
   ("keep right",
    "MOVE RIGHT  >>>", "no rear data", 0.0, True, BLUE),
   ("held: you just took an exit yourself",

@@ -33,6 +33,7 @@ ROOT = _repo_root()
 TARGETS = [
   ("selfdrive/ui/bp/layouts/settings/bluepilot.py", "tr"),
   ("selfdrive/ui/sunnypilot/layouts/settings/cruise.py", "tr"),
+  ("selfdrive/ui/sunnypilot/layouts/settings/steering_sub_layouts/blinker_settings.py", "tr"),
   ("selfdrive/ui/bp/onroad/hud_renderer_bp.py", "all"),
 ]
 

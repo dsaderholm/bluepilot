@@ -785,6 +785,21 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     # nothing on screen could say which term refused it. See MAX_ROAD_EDGE_STD -- an invented 0.5.
     leftEdgeStd @82 :Float32;
     rightEdgeStd @83 :Float32;
+
+    # ...and the two that actually separate a lane from a shoulder. edgeGap above measures ego's
+    # lane line out to the road edge, which on an interior lane is the next lane PLUS its shoulder
+    # and on the outermost lane is the shoulder alone -- one number for two different things, which
+    # is why no threshold on it could ever work. laneWidth is the candidate lane by itself, and
+    # edgeBeyond is how much road is left past its far line. When the model has no lane out there it
+    # puts that far line on the road edge itself, so edgeBeyond collapses to zero and says so.
+    leftLaneWidth @84 :Float32;
+    rightLaneWidth @85 :Float32;
+    leftEdgeBeyond @86 :Float32;
+    rightEdgeBeyond @87 :Float32;
+
+    # ...and whether that stand-down follows a run that COMPLETED rather than one that backed
+    # out. Same clock, opposite news.
+    maneuverStandDownComplete @88 :Bool;
     oncomingSeenSeconds @80 :Float32;        # refused while actually watching a vehicle
     oncomingRememberedSeconds @81 :Float32;  # refused on memory alone, nothing in view
 

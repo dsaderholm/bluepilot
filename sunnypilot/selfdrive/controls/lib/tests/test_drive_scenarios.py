@@ -80,11 +80,29 @@ class TestAnOrdinaryInterstatePass:
     #    remember what it is buying.
     drive(det, 20.0, status=False, **IN_LEFT_LANE)
     assert det.suggestion == Side.none, "still settling from the pass"
-    drive(det, 12.0, status=False, **IN_LEFT_LANE)
+    # Stepped one frame at a time to the MOMENT it asks, rather than driving a fixed block and
+    # looking afterwards. A fixed block used to work and no longer does, for a good reason: the
+    # sequence now runs through and stands down instead of re-arming forever, so a 12 s window
+    # ends with the machine idle after a completed run. Asserting on the moment it asks is what
+    # this step was always trying to say.
+    for _ in range(int(round(20.0 / DT_MDL))):
+      drive(det, DT_MDL, status=False, **IN_LEFT_LANE)
+      if det.suggestion == Side.right:
+        break
     assert det.suggestion == Side.right
     assert det.reason == Reason.keepRight
     assert det.keep_right_maneuver.phase == Phase.signaling
     assert det.maneuver.phase == Phase.idle, "the passing machine must stay out of a keep-right"
+
+    # ...and it says it ONCE. This is the loop from the road -- "would be changing right, would be
+    # done, over and over again" -- and the reason it happened is that a dry run changes nothing,
+    # so the sequence that just finished is still just as justified as when it started.
+    drive(det, 8.0, status=False, **IN_LEFT_LANE)
+    assert not det.keep_right_maneuver.blinker_on, "the run should have completed"
+    assert det.keep_right_maneuver.standdown_remaining > 0.0
+    assert det.keep_right_maneuver.standdown_after_completion, "not a reversal -- it ran through"
+    drive(det, 2.0, status=False, **IN_LEFT_LANE)
+    assert not det.keep_right_maneuver.blinker_on, "and it started straight over again"
 
   def test_the_drive_leaves_a_usable_record(self):
     det = keep_right_det()

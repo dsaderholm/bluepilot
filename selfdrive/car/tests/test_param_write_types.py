@@ -32,6 +32,9 @@ KEYS_H = ROOT / "common" / "params_keys.h"
 
 SOURCES = [
   "selfdrive/ui/bp/layouts/settings/bluepilot.py",
+  # The FordBlinkerTest write moved out of bluepilot.py and this list had to move with it --
+  # that write to an INT key is the exact bug this file exists for.
+  "selfdrive/ui/sunnypilot/layouts/settings/steering_sub_layouts/blinker_settings.py",
   "selfdrive/ui/sunnypilot/layouts/settings/cruise.py",
   "opendbc_repo/opendbc/sunnypilot/car/ford/blinker_test_ext.py",
   "sunnypilot/selfdrive/controls/lib/passing_assist.py",

@@ -112,7 +112,39 @@ MIN_ADJACENT_LINE_PROB = 0.5
 # 3.5 rejects a 10 ft shoulder and accepts a 12 ft lane, which is the only gap there is. It does
 # NOT separate a 12 ft shoulder from a 12 ft lane, because nothing about width can -- that case is
 # what the radar evidence below is for, and why width alone must never be the whole test.
-MIN_LANE_WIDTH_M = 3.5
+#
+# AND THEN IT KEPT HAPPENING ANYWAY: "it just keeps trying to go into the shoulder", and then the
+# observation that solves it -- "I can see a red line on the right of the shoulder, where the
+# barrier wall is, so it's obvious that's a shoulder."
+#
+# The model was never confused. It drew the road edge on the wall, on screen, correctly. The gate
+# was measuring the wrong distance. edge_gap is ego's lane line out to the road edge, which is the
+# next lane PLUS its shoulder from an interior lane and the shoulder ALONE from the outermost one.
+# One number for two different quantities: no threshold on it can separate them, and 3.5 m only
+# ever moved which of the two cases got it wrong.
+#
+# So this is now the width of the CANDIDATE LANE ITSELF, ego's line out to the next line beyond it,
+# and 3.0 is back because it no longer has a shoulder folded into it. It accepts a 10 ft work-zone
+# lane, which is a real lane. Separating lane from shoulder is MIN_EDGE_BEYOND_LINE_M's job.
+MIN_LANE_WIDTH_M = 3.0
+# ...and an upper bound, because an unbounded one is how a parking area or a gore point reads as a
+# very generous lane. Nothing 16 ft wide is a lane.
+MAX_LANE_WIDTH_M = 5.0
+# How much road has to remain BEYOND the far line of the lane we would move into.
+#
+# This is the test that answers the shoulder, and it works because of what the model does when
+# there is no lane out there: laneLines always has four entries whether or not four lines exist, so
+# on the outermost lane the model puts the far one on the only strong feature left -- the road edge
+# itself, the red line at the barrier. Far line and road edge land on top of each other and this
+# collapses to zero. Beside a real lane, the road edge is a shoulder's width past its far line.
+#
+# 0.8 m, and deliberately not a shoulder width. This is a DEGENERACY test -- is the model's "lane
+# line" just the road edge wearing a different name -- not a claim about how wide the shoulder past
+# a real lane must be. AASHTO's right shoulder is 10 ft and would work here, but the INSIDE shoulder
+# on a 4-lane divided road is 4 ft, and the same number has to serve both sides. 0.8 sits between
+# the degenerate case, where the two land on top of each other, and the narrowest real shoulder
+# either of them can have.
+MIN_EDGE_BEYOND_LINE_M = 0.8
 # Road edge measurements get unreliable at distance and in poor conditions. modelV2 publishes a
 # per-edge std; above this the edge gap is not trusted and the side is reported unavailable.
 # 0.75, up from 0.5. The rest of this codebase treats roadEdgeStds on a 0..1 scale where 1 is
@@ -502,6 +534,10 @@ class PassingAssistDetector:
     self.right_line_prob = 0.0
     self.left_edge_gap = 0.0
     self.right_edge_gap = 0.0
+    self.left_lane_width = 0.0
+    self.right_lane_width = 0.0
+    self.left_edge_beyond = 0.0
+    self.right_edge_beyond = 0.0
     self.left_edge_std = 1e3
     self.right_edge_std = 1e3
     self.left_geometry_ok = False
@@ -665,12 +701,42 @@ class PassingAssistDetector:
     the nearest point, because that is where the measurement is most reliable and because a lane
     that exists beside us now is what matters -- not one 50 m ahead.
     """
-    try:
-      line_y = model.laneLines[line_idx].y[0]
-      edge_y = model.roadEdges[edge_idx].y[0]
-    except (IndexError, AttributeError):
+    line_y = PassingAssistDetector._near_y(model.laneLines, line_idx)
+    edge_y = PassingAssistDetector._near_y(model.roadEdges, edge_idx)
+    if line_y is None or edge_y is None:
       return 0.0
     return abs(edge_y - line_y)
+
+  @staticmethod
+  def _near_y(series, idx: int) -> float | None:
+    """y of the nearest point of one modelV2 polyline, or None if it is not there.
+
+    None rather than 0.0 because 0.0 is a legal position -- straight under the car -- and every
+    caller here is measuring a distance BETWEEN two of these. A missing line that reads as 0.0
+    silently becomes a several-meter gap to whatever it is subtracted from.
+    """
+    try:
+      return float(series[idx].y[0])
+    except (IndexError, AttributeError, TypeError):
+      return None
+
+  @staticmethod
+  def _lane_and_beyond(model, near_line: int, far_line: int, edge_idx: int,
+                       sign: float) -> tuple[float, float]:
+    """Width of the lane beyond ego's own, and how much road is left past it. Meters.
+
+    y runs negative to the left, so `sign` is -1 on the left and +1 on the right; both come back
+    positive, and a far line INSIDE ego's own line or a road edge INSIDE the far line comes back
+    negative, which is a refusal rather than an absolute value that hides the disagreement.
+    """
+    near_y = PassingAssistDetector._near_y(model.laneLines, near_line)
+    far_y = PassingAssistDetector._near_y(model.laneLines, far_line)
+    edge_y = PassingAssistDetector._near_y(model.roadEdges, edge_idx)
+    if near_y is None or far_y is None:
+      return 0.0, 0.0
+    width = sign * (far_y - near_y)
+    beyond = 0.0 if edge_y is None else sign * (edge_y - far_y)
+    return width, beyond
 
   def _road_widening(self, model, right_std: float) -> None:
     """Does the road open up to our right between here and ~75 m ahead?
@@ -723,6 +789,10 @@ class PassingAssistDetector:
     self.right_line_prob = float(probs[LL_FAR_RIGHT]) if len(probs) > LL_FAR_RIGHT else 0.0
     self.left_edge_gap = self._edge_gap(model, LL_LEFT, RE_LEFT)
     self.right_edge_gap = self._edge_gap(model, LL_RIGHT, RE_RIGHT)
+    self.left_lane_width, self.left_edge_beyond = self._lane_and_beyond(model, LL_LEFT, LL_FAR_LEFT,
+                                                                       RE_LEFT, -1.0)
+    self.right_lane_width, self.right_edge_beyond = self._lane_and_beyond(model, LL_RIGHT,
+                                                                         LL_FAR_RIGHT, RE_RIGHT, 1.0)
 
     left_std = float(stds[RE_LEFT]) if len(stds) > RE_LEFT else 1e3
     right_std = float(stds[RE_RIGHT]) if len(stds) > RE_RIGHT else 1e3
@@ -747,11 +817,19 @@ class PassingAssistDetector:
     #
     # Geometry alone from here. If it refuses a real lane, the panel now names which of the three
     # terms did it and by how much -- that is a number to fix, where this was a gate with no floor.
+    #
+    # AND EDGE GAP IS NO LONGER IN THE GATE, for the reason written at MIN_LANE_WIDTH_M: it adds the
+    # candidate lane to its shoulder and reports the sum, so from the outermost lane it reports a
+    # shoulder and calls it drivable width. It is still published, because it is the number that
+    # shows the sum is not the same as its parts, but the two quantities that mean something on
+    # their own are the lane's own width and the road left past it.
     self.left_geometry_ok = (self.left_line_prob >= MIN_ADJACENT_LINE_PROB and
-                             self.left_edge_gap >= MIN_LANE_WIDTH_M and
+                             MIN_LANE_WIDTH_M <= self.left_lane_width <= MAX_LANE_WIDTH_M and
+                             self.left_edge_beyond >= MIN_EDGE_BEYOND_LINE_M and
                              left_std <= MAX_ROAD_EDGE_STD)
     self.right_geometry_ok = (self.right_line_prob >= MIN_ADJACENT_LINE_PROB and
-                              self.right_edge_gap >= MIN_LANE_WIDTH_M and
+                              MIN_LANE_WIDTH_M <= self.right_lane_width <= MAX_LANE_WIDTH_M and
+                              self.right_edge_beyond >= MIN_EDGE_BEYOND_LINE_M and
                               right_std <= MAX_ROAD_EDGE_STD)
 
     # How long that lane has been there WITHOUT INTERRUPTION. See DEFAULT_MIN_LANE_AGE_S: a lane
@@ -1844,6 +1922,10 @@ class PassingAssistDetector:
     passingAssist.rightLineProb = float(pa.right_line_prob)
     passingAssist.leftEdgeGap = float(pa.left_edge_gap)
     passingAssist.rightEdgeGap = float(pa.right_edge_gap)
+    passingAssist.leftLaneWidth = float(pa.left_lane_width)
+    passingAssist.rightLaneWidth = float(pa.right_lane_width)
+    passingAssist.leftEdgeBeyond = float(pa.left_edge_beyond)
+    passingAssist.rightEdgeBeyond = float(pa.right_edge_beyond)
     passingAssist.leftEdgeStd = float(min(pa.left_edge_std, 1e3))
     passingAssist.rightEdgeStd = float(min(pa.right_edge_std, 1e3))
     passingAssist.leftGeometryOk = pa.left_geometry_ok
@@ -1919,6 +2001,11 @@ class PassingAssistDetector:
     passingAssist.lifetimeAgreed = min(life_agreed, 65535)
     passingAssist.maneuverStandDown = float(max(pa.maneuver.standdown_remaining,
                                                  pa.keep_right_maneuver.standdown_remaining))
+    # Whichever of the two is actually holding the clock is the one whose reason gets reported.
+    standing = (pa.keep_right_maneuver
+                if pa.keep_right_maneuver.standdown_remaining > pa.maneuver.standdown_remaining
+                else pa.maneuver)
+    passingAssist.maneuverStandDownComplete = bool(standing.standdown_after_completion)
     passingAssist.driverChangeStandDown = float(pa.driver_change_standdown)
     passingAssist.driverChangeWasExit = pa.driver_change_was_exit
     passingAssist.emergencyAborts = min(

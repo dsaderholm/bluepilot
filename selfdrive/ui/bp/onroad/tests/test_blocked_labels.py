@@ -89,7 +89,8 @@ def test_geometry_thresholds_mirrored():
         return ast.literal_eval(node.value)
     raise AssertionError(f"{name} not found -- this test would pass on anything")
 
-  for name in ("MIN_ADJACENT_LINE_PROB", "MIN_LANE_WIDTH_M", "MAX_ROAD_EDGE_STD"):
+  for name in ("MIN_ADJACENT_LINE_PROB", "MIN_LANE_WIDTH_M", "MAX_LANE_WIDTH_M",
+               "MIN_EDGE_BEYOND_LINE_M", "MAX_ROAD_EDGE_STD"):
     ui_val, gate_val = value_of(HUD, name), value_of(gate, name)
     assert ui_val == gate_val, (
       f"{name} drifted: the panel says {ui_val}, the gate uses {gate_val}")

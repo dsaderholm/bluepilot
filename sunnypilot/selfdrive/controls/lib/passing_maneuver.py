@@ -90,6 +90,25 @@ ABORT_DURATION_S = 2.5
 # doing it.
 ABORT_STANDDOWN_S = 10.0
 
+# ...and the same after a sequence RUNS ALL THE WAY THROUGH, which is a different problem with the
+# same shape.
+#
+# From the road: "it got stuck in an endless cycle of would be changing right, would be done, and it
+# just kept saying that over and over again."
+#
+# It was doing exactly what it was told. A real pass ends with the car in the other lane and the
+# slow vehicle behind it, so the reason to pass is gone and nothing re-arms. This one actuates
+# NOTHING -- at the end of the dry run the car is still in the same lane behind the same car, every
+# input reads the same as it did a moment ago, and `clear` is still set. So finishing dropped to
+# idle and the next frame started the whole sequence again. Forever.
+#
+# 30 s because the readout is the product here and it has to be readable at a glance: long enough
+# that a completed run reads as one event, short enough that a second slow car on the same stretch
+# still gets one. It is the ONLY number in this file that exists because nothing is wired up --
+# when a control is, a completed pass really will have moved the car, and this should come down to
+# the detector's own SETTLE_AFTER_CHANGE_S.
+COMPLETE_STANDDOWN_S = 30.0
+
 
 class PassingManeuver:
   """The dry run. One instance, fed once per frame from the detector."""
@@ -108,6 +127,9 @@ class PassingManeuver:
     # changing our mind, the other is avoiding a collision, and averaging them hides the second.
     self.emergency_aborts = 0
     self._standdown_s = 1e3
+    # Which duration the current stand-down is measured against: a reversal and a completed run
+    # both stop the next sequence, for different lengths of time and different reasons.
+    self._standdown_target = ABORT_STANDDOWN_S
 
   @property
   def blinker_on(self) -> bool:
@@ -130,8 +152,15 @@ class PassingManeuver:
 
   @property
   def standdown_remaining(self) -> float:
-    """Seconds until a new sequence may start after a reversal. See ABORT_STANDDOWN_S."""
-    return max(0.0, ABORT_STANDDOWN_S - self._standdown_s)
+    """Seconds until a new sequence may start, after a reversal or after one that ran through."""
+    return max(0.0, self._standdown_target - self._standdown_s)
+
+  @property
+  def standdown_after_completion(self) -> bool:
+    """...and WHICH of those two it is. The screen must not call a completed run a reversal --
+    "BACKED OUT" for a sequence that ran cleanly start to finish is the display contradicting the
+    thing it just showed, which is the failure mode this whole panel keeps having."""
+    return self._standdown_target == COMPLETE_STANDDOWN_S
 
   def _to(self, phase) -> None:
     if phase != self.phase:
@@ -170,6 +199,7 @@ class PassingManeuver:
     if collision_abort and self.phase in (Phase.signaling, Phase.changing):
       self.emergency_aborts += 1
       self._standdown_s = 0.0
+      self._standdown_target = ABORT_STANDDOWN_S
       self._to(Phase.aborting)
       return
 
@@ -190,6 +220,10 @@ class PassingManeuver:
     if self.phase == Phase.finishing:
       self.side = Side.none
       if self.phase_seconds >= FINISH_HOLD_S:
+        # See COMPLETE_STANDDOWN_S: nothing moved, so every reason to go is still true and the
+        # next frame would start the same sequence over. This is what stops the loop.
+        self._standdown_s = 0.0
+        self._standdown_target = COMPLETE_STANDDOWN_S
         self._to(Phase.idle)
       return
 
@@ -210,7 +244,7 @@ class PassingManeuver:
     # ---- idle / confirming / waiting: not yet committed to anything ----
     # `clear`, not `suggested`. Signal the instant there is a slow car and somewhere to go --
     # unless we have just been forced out of one, see ABORT_STANDDOWN_S.
-    if clear != Side.none and self._standdown_s >= ABORT_STANDDOWN_S:
+    if clear != Side.none and self._standdown_s >= self._standdown_target:
       self.side = clear
       self._to(Phase.signaling)
       return

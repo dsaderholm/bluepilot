@@ -202,24 +202,36 @@ AHEAD_BOX_GAP = 10
 # test_geometry_thresholds_mirrored keeps them honest: it fails if either copy moves without the
 # other, which is the only real objection to duplicating them.
 MIN_ADJACENT_LINE_PROB = 0.5
-MIN_LANE_WIDTH_M = 3.5
+MIN_LANE_WIDTH_M = 3.0
+MAX_LANE_WIDTH_M = 5.0
+MIN_EDGE_BEYOND_LINE_M = 0.8
 MAX_ROAD_EDGE_STD = 0.5
 
 
-def _lane_why(tag: str, prob: float, gap: float, std: float, metric: bool) -> str:
-  """Which of the three geometry terms refused this side, and by how much.
+def _lane_why(tag: str, prob: float, width: float, beyond: float, std: float, metric: bool) -> str:
+  """Which of the geometry terms refused this side, and by how much.
 
   Ordered the way the gate evaluates them, so the first failure named is the one to act on. All
-  three are invented constants -- this readout exists so a drive can replace them with measurements
-  instead of an argument.
+  of them are invented constants -- this readout exists so a drive can replace them with
+  measurements instead of an argument.
+
+  "shoulder" is the one worth spelling out rather than printing a number for: it is the term that
+  fires when the model put the far lane line on the road edge, which is what it does when there is
+  no lane out there, and it is the case that had this suggesting a move into a barrier wall.
   """
+  def _d(m: float) -> str:
+    return f"{m:.1f}m" if metric else f"{m * 3.28084:.1f}ft"
+
   if std > MAX_ROAD_EDGE_STD:
     return f"{tag} edge +-{min(std, 9.9):.1f}"
   if prob < MIN_ADJACENT_LINE_PROB:
     return f"{tag} paint {prob:.2f}"
-  if gap < MIN_LANE_WIDTH_M:
-    w = gap if metric else gap * 3.28084
-    return f"{tag} gap {w:.1f}{'m' if metric else 'ft'}"
+  if width < MIN_LANE_WIDTH_M:
+    return f"{tag} narrow {_d(width)}"
+  if width > MAX_LANE_WIDTH_M:
+    return f"{tag} wide {_d(width)}"
+  if beyond < MIN_EDGE_BEYOND_LINE_M:
+    return f"{tag} shoulder {_d(max(beyond, 0.0))}"
   return f"{tag} ok"
 
 
@@ -710,9 +722,18 @@ class HudRendererBP(HudRendererSP):
       # green PASS LEFT seconds after the car backed out of exactly that pass. Contradicting
       # yourself on the one readout a driver is meant to trust is worse than saying nothing.
       if pa.maneuverStandDown > 0.0:
-        self._pa_main = "BACKED OUT"
-        self._pa_sub = f"waiting {pa.maneuverStandDown:.0f}s before trying again"
-        self._pa_color = rl.Color(235, 90, 80, 255)
+        # ...or a run that went all the way through, which shares the clock and nothing else.
+        # Reported as "BACKED OUT" it would be a flat lie about a sequence that worked, and it is
+        # the more common of the two now that a completed run stands down at all -- see
+        # COMPLETE_STANDDOWN_S, and the loop that made it necessary.
+        if pa.maneuverStandDownComplete:
+          self._pa_main = "WOULD BE DONE"
+          self._pa_sub = f"holding {pa.maneuverStandDown:.0f}s before looking again"
+          self._pa_color = rl.Color(190, 150, 235, 255)
+        else:
+          self._pa_main = "BACKED OUT"
+          self._pa_sub = f"waiting {pa.maneuverStandDown:.0f}s before trying again"
+          self._pa_color = rl.Color(235, 90, 80, 255)
         self._pa_alert = True
         return True
       return False   # nothing committed yet; the verdict display below is the better readout
@@ -874,7 +895,11 @@ class HudRendererBP(HudRendererSP):
           # and not one of the values feeding them was on screen. "No lane to move into" was
           # reported from a road with an obvious empty lane beside it, and neither of us could say
           # which term refused it. Name the failing one, per side, with its number.
-          self._pa_sub_detail = f"{_lane_why('L', pa.leftLineProb, pa.leftEdgeGap, pa.leftEdgeStd, ui_state.is_metric)}     {_lane_why('R', pa.rightLineProb, pa.rightEdgeGap, pa.rightEdgeStd, ui_state.is_metric)}"
+          left_why = _lane_why('L', pa.leftLineProb, pa.leftLaneWidth, pa.leftEdgeBeyond,
+                               pa.leftEdgeStd, ui_state.is_metric)
+          right_why = _lane_why('R', pa.rightLineProb, pa.rightLaneWidth, pa.rightEdgeBeyond,
+                                pa.rightEdgeStd, ui_state.is_metric)
+          self._pa_sub_detail = f"{left_why}     {right_why}"
         elif blocked == 'closingIn' and pa.minApproachActive > 0:
           # Auto derives this from what the car's own ACC has been measured doing, so the number is
           # different per car and changes as it learns. Without showing it, "Waiting to get closer"

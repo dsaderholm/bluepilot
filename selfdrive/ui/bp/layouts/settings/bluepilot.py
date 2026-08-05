@@ -5,7 +5,7 @@ from openpilot.common.params_pyx import UnknownKeyName
 from openpilot.common.swaglog import cloudlog
 from openpilot.system.ui.widgets import Widget, DialogResult
 from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
-from openpilot.system.ui.widgets.list_view import toggle_item, multiple_button_item, button_item, dual_button_item, ButtonAction, ListItem
+from openpilot.system.ui.widgets.list_view import toggle_item, multiple_button_item, button_item, ButtonAction, ListItem
 from openpilot.system.ui.widgets.scroller_tici import Scroller
 from openpilot.system.ui.widgets.option_dialog import MultiOptionDialog
 from openpilot.system.ui.lib.application import gui_app
@@ -32,14 +32,6 @@ from openpilot.selfdrive.ui.bp.onroad.augmented_road_view_bp import GaugeStyle
 
 class BluePilotLayout(Widget):
   """BluePilot settings layout for TICI UI."""
-
-  def _request_blinker_test(self, side: int) -> None:
-    """Arm one turn-signal pulse. Every real gate lives in the car controller, not here -- a UI
-    that could be dismissed or crash must not be what stops a lamp."""
-    # int, NOT str. Params enforces the registered type: PYTHON_2_CPP has (int, INT) and no
-    # (str, INT), so writing "1" to an INT key raises TypeError. This used to be caught and logged,
-    # which meant the button silently did nothing.
-    self._params.put("FordBlinkerTest", int(side))
 
   @staticmethod
   def _safe_get_bool(params: Params, key: str, default: bool = False) -> bool:
@@ -201,69 +193,9 @@ class BluePilotLayout(Widget):
       icon="warning.png"
     )
 
-    # BluePilot: stationary turn-signal actuation test. Requests a single 4 s pulse; the car
-    # controller refuses unless stopped, cruise off and the driver's stalk idle, and it times out
-    # and self-clears regardless. Result appears in the onroad debug readout above.
-
-    # The other way of asking, and the one the car may prefer. See TAP_COMMAND_S in
-    # blinker_test_ext: a quarter second of command, then silence. If the body module runs its own
-    # one-touch flash from that, the rate and the count are the car's own and nothing has to
-    # contend with the steering column module for control of a held signal.
-    # One CAN frame, the smallest ask there is. See EDGE_FRAMES in blinker_test_ext: openpilot does
-    # not send this frame at all normally, so even a "tap" injects five of them into the gateway's
-    # stream -- five rising edges where a stalk tap is one event.
-    # The one that should look like a real signal. See BLINK_PERIOD_S: the lamp mirrors our frames
-    # one for one, so pacing them at blinker rate makes the gateway's own "off" frames the other
-    # half of each blink instead of the enemy.
-    # Command nothing; time HIS flasher. See MEASURE_WINDOW_S -- the FMVSS band is 1-2 Hz, which is
-    # a factor of two wide, and his car knows the exact answer.
-    # ONE button, not two. dual_button_item forced a left and a right, so it rendered the same
-    # thing twice -- "why are there two measure right blinker buttons? Obviously they are both
-    # going to be the same." There is no side to choose: it watches whichever lamp the driver uses.
-    self._blinker_measure = button_item(
-      lambda: tr("Measure My Blinker"),
-      lambda: tr("Watch"),
-      lambda: tr("Press Watch, then use your own turn signal stalk within 12 seconds. Nothing is "
-                 "sent to the car -- it only watches your lamp and reports how many times it "
-                 "flashed and how far apart, on the driving screen. Enable Show Passing Assist to "
-                 "see the result."),
-      callback=lambda: self._request_blinker_test(9),
-    )
-
-    self._blink_period = int_control_item(
-      lambda: tr("Blink Spacing If Unmeasurable (ms)"),
-      lambda: tr("Normally ignored. openpilot watches your lamp and blinks in step with it, so "
-                 "the rhythm is your car's own and needs no setting. This is only used if your "
-                 "car never reports its lamp, leaving nothing to follow -- then it falls back to "
-                 "this fixed spacing."),
-      param="FordBlinkerBlinkPeriod",
-      min_value=500,
-      max_value=1500,
-      step=25,
-    )
-
-    self._blinker_blink_buttons = dual_button_item(
-      lambda: tr("Blink Left"),
-      lambda: tr("Blink Right"),
-      left_callback=lambda: self._request_blinker_test(7),
-      right_callback=lambda: self._request_blinker_test(8),
-      description=lambda: tr("Sends one message per blink instead of as fast as the bus allows. "
-                             "Your lamp follows each message exactly once, so the rate we send at "
-                             "is the rate it flashes. This should look like an ordinary turn "
-                             "signal -- eight blinks, same as your stalk."),
-    )
-
-    self._blinker_edge_buttons = dual_button_item(
-      lambda: tr("One Frame Left"),
-      lambda: tr("One Frame Right"),
-      left_callback=lambda: self._request_blinker_test(5),
-      right_callback=lambda: self._request_blinker_test(6),
-      description=lambda: tr("Sends exactly one message. Your lamp flashes exactly once, which "
-                             "is how we learned it mirrors each message one for one rather than "
-                             "latching. Kept as the reference: if this ever stops giving one "
-                             "clean flash, something below it has changed."),
-    )
-
+    # THE BLINKER CONTROLS ARE NOT HERE ANY MORE. They moved to Steering > Customize Blinker --
+    # see steering_sub_layouts/blinker_settings.py. "Let's move all your settings out of Blue
+    # Pilot, please", and they belong next to the things that decide when to signal.
 
     # Hide onroad border toggle
     self._hide_onroad_border = toggle_item(
@@ -768,13 +700,6 @@ class BluePilotLayout(Widget):
         self._show_hands_free_ui,
         self._steer_angle_curvature,
         self._vbatt_pause_charging,
-        # Ordered the way the job is done: establish his car's rhythm, reproduce it, then the
-        # reference and the fallback knob. It read bottom-up before -- the diagnostic first, the
-        # measurement last -- which is part of "it's also not obvious what those are even doing".
-        self._blinker_measure,
-        self._blinker_blink_buttons,
-        self._blinker_edge_buttons,
-        self._blink_period,
       ]) +
       _section(tr("Audio"), [
         self._use_custom_sounds,

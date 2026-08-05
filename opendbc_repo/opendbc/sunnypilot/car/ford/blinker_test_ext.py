@@ -207,7 +207,15 @@ EDGE_OBSERVE_S = 2.0
 # Made a setting because the right value is a property of HIS car's flasher, not of this code, and
 # because he is testing in a driveway where a knob beats waiting for a rebuild. See
 # FordBlinkerBlinkPeriod.
-DEFAULT_BLINK_PERIOD_S = 1.0
+#
+# 0.76 IS NO LONGER A GUESS. He ran the measure mode and reported it: "Looks like my blinker is
+# 760 ms." That is his own Ford's flasher, timed on his own car, and it replaces both ends of the
+# reasoning above -- 1.5 Hz was the fast end of legal and 1.0 s the slow end, and the real answer
+# was 1.32 Hz, between them and closer to the fast one.
+#
+# Changing this default only reaches a device where the key was never written. HIS was written, by
+# hand, during the same testing -- so this does not touch his car and is not meant to. He sets it.
+DEFAULT_BLINK_PERIOD_S = 0.76
 
 # --- OR STOP GUESSING AND TIME HIS OWN FLASHER ---
 #

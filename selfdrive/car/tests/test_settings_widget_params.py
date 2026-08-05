@@ -58,6 +58,7 @@ LAYOUTS = [
   "selfdrive/ui/sunnypilot/layouts/settings/steering_sub_layouts/passing_assist_settings.py",
   "selfdrive/ui/sunnypilot/layouts/settings/steering_sub_layouts/lane_change_settings.py",
   "selfdrive/ui/bp/layouts/settings/bluepilot.py",
+  "selfdrive/ui/sunnypilot/layouts/settings/steering_sub_layouts/blinker_settings.py",
 ]
 
 # Widgets that write via Params.put(), which type-checks. Toggles are absent on purpose -- see the
