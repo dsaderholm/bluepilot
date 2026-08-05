@@ -99,6 +99,9 @@ DEFAULT_TARGETS = [
   # migration on 2026-08-08.
   "selfdrive/car/tests/test_params_keys_unique.py",
   "selfdrive/car/tests/test_no_int_on_capnp_enums.py",
+  # A sub-panel that builds a back button and never draws it opens and cannot be left. Found by
+  # hand on the last check before a drive, in a panel added the same day.
+  "selfdrive/car/tests/test_sub_layouts_have_a_way_out.py",
   # The value behind every +/- control. The widget needs pyray and cannot collect here, which
   # is why its logic lives in param_value_cache.py -- there was nothing to test before, and
   # nothing caught the read that wiped his angle tuning.

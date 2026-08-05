@@ -26,6 +26,8 @@ flasher, then reproduce it.
 """
 from collections.abc import Callable
 
+import pyray as rl
+
 from openpilot.common.params import Params
 from openpilot.system.ui.lib.multilang import tr
 from openpilot.system.ui.widgets.list_view import button_item, dual_button_item
@@ -119,7 +121,15 @@ class BlinkerSettingsLayout(Widget):
     ]
 
   def _render(self, rect):
-    self._scroller.render(rect)
+    # The back button has to be DRAWN, not just constructed. Without these two lines the panel is
+    # a room with no door: Customize Blinker opens, and nothing on screen leaves it. Every sibling
+    # under steering_sub_layouts does exactly this, which is why it reads as boilerplate and is
+    # the easiest thing in the file to leave out.
+    self._back_button.set_position(self._rect.x, self._rect.y + 20)
+    self._back_button.render()
+    content_rect = rl.Rectangle(rect.x, rect.y + self._back_button.rect.height + 40,
+                                rect.width, rect.height - self._back_button.rect.height - 40)
+    self._scroller.render(content_rect)
 
   def show_event(self):
     self._scroller.show_event()
