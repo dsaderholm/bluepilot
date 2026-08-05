@@ -1115,11 +1115,17 @@ class PassingAssistDetector:
       # A boot with no driving leaves LastDrive untouched, so without this the same drive is
       # archived again every time the car is started and the history fills with one drive.
       #
-      # COMPARED WITHOUT THE STAMP. The stored entry carries a build and the incoming one does not,
-      # so a straight == never matches once stamping exists and every boot re-archives. Caught by
-      # this file's own duplicate test, which failed the moment the stamp was added -- and by the
-      # test written FOR the stamp asserting the wrong number, which the older one did not.
-      if hist and {k: v for k, v in hist[-1].items() if k != "build"} == last:
+      # COMPARED ON WHAT BOTH SIDES ACTUALLY SHARE. The stored entry has a build and no timeline;
+      # the incoming one has a timeline and no build. A straight == never matches, and every start
+      # of the car appends the same drive again.
+      #
+      # This is the SECOND time in a day that adding a field to one side and not the other broke
+      # this check, which is why the exclusion list is named once and used on both sides rather
+      # than written out at each call.
+      def comparable(d):
+        return {k: v for k, v in d.items() if k not in ("build", "timeline")}
+
+      if hist and comparable(hist[-1]) == comparable(last):
         return
       # STAMP THE BUILD. Asked directly: "are we keeping logs from previous versions or wiping
       # them with each commit since you keep changing things?"
@@ -1133,7 +1139,12 @@ class PassingAssistDetector:
       #
       # Short SHA only. It is enough to sort drives into builds and to look up what changed, and it
       # costs eight characters in a param that already holds twenty-three numbers per drive.
-      last = dict(last)
+      # THE TIMELINE DOES NOT GO IN THE HISTORY. It rides in LastDrive, where it is the record of
+      # the drive just finished and gets read once. Archiving it too would put three hundred entries
+      # into each of twenty drives -- 129 KB in a single PERSISTENT | BACKUP param, rewritten in
+      # full every time a drive ends, to hold a sequence nobody is going to read a fortnight later.
+      # History is for aggregates; the timeline is for the drive he is describing.
+      last = {k: v for k, v in last.items() if k != "timeline"}
       try:
         last["build"] = str(self.params.get("GitCommit") or "")[:8]
       except Exception:  # noqa: BLE001 - an unstamped drive is still worth keeping

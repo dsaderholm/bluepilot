@@ -2831,3 +2831,37 @@ class TestTheTimelineIsARing:
     assert n > 0, "recorded nothing at all -- this would pass on a dead timeline"
     run(det, int(60.0 / DT_MDL), status=False)
     assert len(det._timeline) == n, "a state that never changed still wrote entries"
+
+  def test_the_timeline_does_not_go_into_the_history(self):
+    """It rides in LastDrive and is read once. Archiving it puts three hundred entries into each of
+    twenty drives -- 129 KB in one PERSISTENT | BACKUP param, rewritten whenever a drive ends, to
+    hold a sequence nobody reads a fortnight later.
+    """
+    class P:
+      def __init__(s): s.store = {"GitCommit": "abcdef1234567890"}
+      def get(s, k, *a, **kw): return s.store.get(k)
+      def get_bool(s, k, *a, **kw): return bool(s.store.get(k))
+      def put(s, k, v, block=False): s.store[k] = v
+    p = P()
+    det = keep_right_det()
+    det.params = p
+    det._archive_drive({"driverPasses": 3, "timeline": [[1.0, 0, 0, 0, 0]] * 300})
+    stored = p.store["PassingAssistHistory"][-1]
+    assert "timeline" not in stored
+    assert stored["driverPasses"] == 3 and stored["build"] == "abcdef12"
+
+  def test_stripping_the_timeline_does_not_break_the_repeat_check(self):
+    """Two things are now removed before comparing. Getting either wrong re-archives the same drive
+    on every start of the car."""
+    class P:
+      def __init__(s): s.store = {"GitCommit": "abcdef1234567890"}
+      def get(s, k, *a, **kw): return s.store.get(k)
+      def get_bool(s, k, *a, **kw): return bool(s.store.get(k))
+      def put(s, k, v, block=False): s.store[k] = v
+    p = P()
+    det = keep_right_det()
+    det.params = p
+    drive = {"driverPasses": 3, "timeline": [[1.0, 0, 0, 0, 0]]}
+    det._archive_drive(drive)
+    det._archive_drive(drive)
+    assert len(p.store["PassingAssistHistory"]) == 1
