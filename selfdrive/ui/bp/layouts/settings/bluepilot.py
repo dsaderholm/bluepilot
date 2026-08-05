@@ -768,10 +768,13 @@ class BluePilotLayout(Widget):
         self._show_hands_free_ui,
         self._steer_angle_curvature,
         self._vbatt_pause_charging,
-        self._blinker_edge_buttons,
-        self._blinker_blink_buttons,
-        self._blink_period,
+        # Ordered the way the job is done: establish his car's rhythm, reproduce it, then the
+        # reference and the fallback knob. It read bottom-up before -- the diagnostic first, the
+        # measurement last -- which is part of "it's also not obvious what those are even doing".
         self._blinker_measure,
+        self._blinker_blink_buttons,
+        self._blinker_edge_buttons,
+        self._blink_period,
       ]) +
       _section(tr("Audio"), [
         self._use_custom_sounds,

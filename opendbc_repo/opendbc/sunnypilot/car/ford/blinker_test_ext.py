@@ -222,6 +222,10 @@ DEFAULT_BLINK_PERIOD_S = 1.0
 # The driver-stalk gate is deliberately not applied to this mode -- the driver signalling is the
 # entire point rather than a reason to refuse.
 MEASURE_WINDOW_S = 12.0
+# ...but stop as soon as he clearly has. Two seconds dark after at least one measured interval means
+# the stalk is done, and holding the machine for the rest of the window is the exact annoyance the
+# blink sequence just had fixed.
+MEASURE_QUIET_S = 2.0
 
 # --- CLOSED LOOP: WAIT FOR THE LAMP, DO NOT GUESS AT IT ---
 #
@@ -411,7 +415,6 @@ class BlinkerTestExt:
     self.bt_flashes_after = 0
     self.bt_watching = SIGNAL_NONE
     self.bt_blinking = False
-    self._bt_blink_total = 0
     self._bt_lamp_off_frame = 0
     self._bt_lamp_on_frame = 0
     self._bt_guard_s = float(BLINK_AFTER_LAMP_OFF_S)
@@ -520,18 +523,20 @@ class BlinkerTestExt:
         self.bt_lamp_seen = True
       # Rising edges only. The lamp is a square wave; counting the level would count frames.
       if lamp and not self._bt_lamp_prev:
-        # Interval since the previous rising edge. This is the measurement in measure mode, and
-        # harmless bookkeeping otherwise.
-        elapsed_frames = self._bt_frame - self._bt_last_edge
-        if self._bt_last_edge and elapsed_frames * DT_CTRL < 3.0:
-          self._bt_intervals.append(elapsed_frames * DT_CTRL)
-          self.bt_measured_ms = int(1000 * sum(self._bt_intervals) / len(self._bt_intervals))
-        self._bt_last_edge = self._bt_frame
+        self._bt_lamp_on_frame = self._bt_frame
         self.bt_flashes += 1
         if not commanding:
           self.bt_flashes_after += 1
-      if lamp and not self._bt_lamp_prev:
-        self._bt_lamp_on_frame = self._bt_frame
+        # ONLY WHILE MEASURING. Timing our own commanded flashes sets measuredPeriodMs on a blink
+        # test too, and the panel renders that as "YOUR BLINKER" -- so a commanded test would
+        # report itself as a measurement of his stalk. Two rising-edge blocks sat here doing
+        # different halves of this, which is how it went unnoticed.
+        if self.bt_measuring:
+          gap = (self._bt_frame - self._bt_last_edge) * DT_CTRL
+          if self._bt_last_edge and gap < 3.0:
+            self._bt_intervals.append(gap)
+            self.bt_measured_ms = int(1000 * sum(self._bt_intervals) / len(self._bt_intervals))
+        self._bt_last_edge = self._bt_frame
       if self._bt_lamp_prev and not lamp:
         self._bt_lamp_off_frame = self._bt_frame
         # The on-time we just watched. See BLINK_GUARD_MIN_S -- a symmetric flasher wants the same
@@ -546,6 +551,13 @@ class BlinkerTestExt:
       # The driver's stalk ends every mode except MEASURING, where it is the input being measured.
       # Adding that exemption at the arming gate only meant the window closed on its own first
       # frame -- caught by a test rather than by another trip to the driveway.
+      # MEASURING ENDS WHEN HE STOPS. Otherwise it holds the machine for the full twelve seconds
+      # plus the verdict -- the same "I still need to wait a little bit in between tests" that was
+      # just fixed for blinking, in the mode he reaches for first.
+      if self.bt_measuring and self._bt_intervals and self._bt_lamp_off_frame:
+        if (self._bt_frame - self._bt_lamp_off_frame) * DT_CTRL > MEASURE_QUIET_S:
+          self.bt_frames_left = 0
+
       driver_stalk = (CS.out.leftBlinker or CS.out.rightBlinker) and not self.bt_measuring
       if self.bt_frames_left <= 0 or CS.out.vEgo > STANDSTILL_V_EGO or          driver_stalk or CS.out.cruiseState.enabled:
         self.bt_state = 2
@@ -710,7 +722,6 @@ class BlinkerTestExt:
       # A short tail only. There is nothing to observe after a blink -- the lamp follows our frames
       # and stops when we do -- so a full second here was a second of dead buttons for nothing.
       self.bt_frames_left = self._bt_command_frames_left + int(0.3 / DT_CTRL)
-      self._bt_blink_total = self.bt_frames_left
     else:
       self.bt_frames_left = int(((TAP_COMMAND_S + observe) if tap else PULSE_DURATION_S) / DT_CTRL)
     self.bt_lamp_seen = False

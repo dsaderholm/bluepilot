@@ -13,7 +13,7 @@ from types import SimpleNamespace as NS
 from opendbc.car import DT_CTRL
 from opendbc.sunnypilot.car.ford.blinker_test_ext import (
   BlinkerTestExt, SIGNAL_NONE, SIGNAL_LEFT, SIGNAL_RIGHT, PULSE_DURATION_S, STANDSTILL_V_EGO,
-  BUTTONS_STEP, SIGNAL_TAP_LEFT, TAP_COMMAND_S, DONE_HOLD_S, SIGNAL_BLINK_LEFT, SIGNAL_MEASURE, DEFAULT_BLINK_PERIOD_S, BLINK_COUNT,
+  BUTTONS_STEP, SIGNAL_TAP_LEFT, TAP_COMMAND_S, DONE_HOLD_S, SIGNAL_BLINK_LEFT, SIGNAL_MEASURE, MEASURE_QUIET_S, DEFAULT_BLINK_PERIOD_S, BLINK_COUNT,
 )
 
 
@@ -456,6 +456,25 @@ class TestBlinkMode:
         assert (i - last) * DT_CTRL < 2.0, f"stayed busy {(i - last) * DT_CTRL:.1f}s after the last blink"
         return
     raise AssertionError("still commanding three seconds after the last blink")
+
+  def test_a_commanded_blink_is_not_reported_as_a_measurement(self):
+    """The panel shows measuredPeriodMs as "YOUR BLINKER". Timing our OWN commanded flashes set it
+    on a blink test too, so a commanded sequence would have reported itself as a measurement of his
+    stalk. Scoped to measure mode."""
+    ext = make_ext(SIGNAL_BLINK_LEFT)
+    self._drive_with_a_fake_bcm(ext, 25.0)
+    assert ext.bt_measured_ms == 0, "a commanded blink produced a stalk measurement"
+
+  def test_measuring_stops_when_the_driver_does(self):
+    """Same annoyance as the blink window, in the mode he reaches for first: holding the machine
+    for the full twelve seconds after he has clearly finished."""
+    ext = make_ext(SIGNAL_MEASURE)
+    run(ext, POLL_FRAMES + 2)
+    assert ext.bt_state == 1
+    TestMeasureMode._flash(ext, cycles=4, period_s=0.9)
+    assert ext.bt_measured_ms > 0
+    run(ext, int(MEASURE_QUIET_S / DT_CTRL) + 40, left_blinker=True)
+    assert ext.bt_state != 1, "still holding the machine long after the stalk stopped"
 
   def test_blink_obeys_every_gate(self):
     for kw in ({"v_ego": 5.0}, {"engaged": True}, {"left_blinker": True}):
