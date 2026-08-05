@@ -609,7 +609,11 @@ class HudRendererBP(HudRendererSP):
       # Only once there is enough of it to mean anything, and only when it is actually the thing
       # standing in the way -- on a road where a pass was never wanted, the left side being refused
       # is not news.
-      if pa.wantedSeconds > 30.0 and pa.geoRefusedShare > 0.5 and not pa.suggestionsMade:
+      # NOT gated on having suggested nothing. It was, and one suggestion anywhere in a drive
+      # would have taken the diagnosis away -- on a drive that refused four hundred times and
+      # suggested once, the line is still the most useful thing on the screen. He has very little
+      # testing time; losing the answer to a technicality costs a day.
+      if pa.wantedSeconds > 30.0 and pa.geoRefusedShare > 0.5:
         term = _GEO_TERMS[pa.geoRefusedBy] if pa.geoRefusedBy < len(_GEO_TERMS) else "?"
         v = pa.geoRefusedValue
         shown = f"{v:.2f}" if pa.geoRefusedBy in (0, 1) else _feet(v, ui_state.is_metric)

@@ -2757,3 +2757,27 @@ class TestTheHistoryKnowsWhichBuildMadeIt:
     det._archive_drive(drive)
     assert len(p.store["PassingAssistHistory"]) == 1, (
       "the stamp changed the stored shape, so a re-boot archives the same drive again")
+
+  def test_town_driving_does_not_pollute_the_tally(self):
+    """The tally used to run on every frame of every road. A commute of residential streets -- no
+    passing lane, no pass wanted -- would swamp the highway frames the question is about, and the
+    summary would have named whichever term refuses a side street.
+    """
+    det = keep_right_det()
+    # miles of road with no lead at all and no lane either side
+    run(det, int(120.0 / DT_MDL), status=False, probs=(0.05, 0.99, 0.99, 0.05), edges=(-2.2, 2.4))
+    _, _, share = det.geo_refusal
+    assert share == 0.0, "counted refusals on a road where no pass was ever wanted"
+
+  def test_a_drive_like_his_produces_the_line(self):
+    """End to end: the values the summary needs must actually arrive together. wantedSeconds is the
+    gate on showing it, and it only accumulates once a slow lead is CONFIRMED -- so a tally with no
+    wanted time attached would publish a diagnosis the panel never shows.
+    """
+    det = keep_right_det()
+    run(det, int(60.0 / DT_MDL), v_lead=SLOW_LEAD_MS, probs=(0.31, 0.99, 0.99, 0.2))
+    term, value, share = det.geo_refusal
+    assert det.blocked_by == Blocked.noLaneAvailable
+    assert det.wanted_seconds > 30.0, "the panel gate would never open"
+    assert share > 0.5, "no single term dominates, so there is nothing to report"
+    assert term == det.GEO_PAINT and abs(value - 0.31) < 0.01

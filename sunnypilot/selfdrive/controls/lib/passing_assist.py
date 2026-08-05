@@ -867,8 +867,6 @@ class PassingAssistDetector:
     # that did not exist a moment ago and now does is an exit or an on-ramp, and this is the only
     # test here that can tell that apart from a through lane -- every other one asks what the lane
     # looks like, and they look identical.
-    self._record_refusal(left_std)
-
     if self.right_geometry_ok:
       self.right_lane_age_s = min(self.right_lane_age_s + DT_MDL, 1e3)
     else:
@@ -878,7 +876,7 @@ class PassingAssistDetector:
   # published; the panel turns it back into a word.
   GEO_EDGE_STD, GEO_PAINT, GEO_WIDTH, GEO_BEYOND = 0, 1, 2, 3
 
-  def _record_refusal(self, left_std: float) -> None:
+  def _record_refusal(self) -> None:
     """Tally which term refuses the LEFT side, and its value, across the drive.
 
     WHY THIS IS AGGREGATED RATHER THAN SHOWN LIVE. The per-side reason is already on the panel, and
@@ -896,8 +894,8 @@ class PassingAssistDetector:
     if self.left_geometry_ok:
       return
     # First failing term, in the gate's own order -- the one to act on.
-    if left_std > MAX_ROAD_EDGE_STD:
-      idx, val = self.GEO_EDGE_STD, left_std
+    if self.left_edge_std > MAX_ROAD_EDGE_STD:
+      idx, val = self.GEO_EDGE_STD, self.left_edge_std
     elif self.left_line_prob < MIN_ADJACENT_LINE_PROB:
       idx, val = self.GEO_PAINT, self.left_line_prob
     elif not (MIN_LANE_WIDTH_M <= self.left_lane_width <= MAX_LANE_WIDTH_M):
@@ -1819,6 +1817,12 @@ class PassingAssistDetector:
     self.keep_right_seconds = 0.0
 
     if not (self.left_geometry_ok or self.right_geometry_ok):
+      # HERE, not in _geometry. Tallying on every frame of every road meant a commute's worth of
+      # town driving -- where there genuinely is no passing lane and no pass is wanted -- swamped
+      # the handful of highway frames the question is about, and the summary would have named
+      # whichever term refuses a residential street. This branch is reached only when a pass IS
+      # warranted and geometry is the thing standing in the way, which is exactly the question.
+      self._record_refusal()
       self._reset_outputs(Blocked.noLaneAvailable)
       return
 

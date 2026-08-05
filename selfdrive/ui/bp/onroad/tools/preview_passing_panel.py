@@ -71,18 +71,19 @@ SCENES = [
    "Waiting to get closer", "until 512ft  -  now 640ft", 0.0, False, GREY),
   ("blocked: oncoming traffic on the left",
    "ONCOMING LEFT", "saw 62 at 410ft  -  74s left", 0.0, False, GREY),
-  # The readout that answers the shoulder. "L ok  R shoulder 0.1m" is the panel saying, in the one
-  # place he can read it while driving, that the model put the far lane line ON the road edge --
-  # the red line at the barrier wall -- so there is no lane out there, only pavement.
-  ("refused: the space to the right is a shoulder, not a lane",
-   "No lane to move into", "L ok     R shoulder 0.3ft", 0.0, False, GREY),
-  ("refused: the paint beyond our lane is not visible enough",
-   "No lane to move into", "L paint 0.31     R narrow 8.2ft", 0.0, False, GREY),
-  # The same worst case AFTER _fit_sub. Unfitted it measures 1355px against a 1008px panel and runs
-  # off both edges -- taking the two geometry numbers, which sit at the front, off the left one.
-  ("the refusal line, with the caveats it has room for",
+  # THE MOVING CAR GETS THE VERDICT AND NOTHING ELSE. These three scenes used to print the four
+  # per-side geometry numbers here, which is what earned "and you expect me to read all of that
+  # while driving?" The diagnosis moved to the drive summary -- see the "why it never fired" scene.
+  ("refused: nowhere to go on either side",
+   "No lane to move into", "no rear data  -  3 this drive", 0.0, False, GREY),
+  # The worst case the caveat line can still reach. Unfitted, with the geometry numbers it used to
+  # carry, it measured 1355px against a 1008px panel and ran off both edges.
+  ("refused, with every caveat the line has room for",
    "No lane to move into",
-   "L paint 0.31     R shoulder 0.3ft  -  no rear data  -  3 this drive", 0.0, False, GREY),
+   "no sign data  -  no rear data  -  no next-lane data  -  oncoming seen  -  3 this drive",
+   0.0, False, GREY),
+  ("paused by tapping the panel",
+   "PASSING PAUSED", "resumes in 8 min  -  tap to resume now", 0.0, False, AMBER),
   ("keep right",
    "MOVE RIGHT  >>>", "no rear data", 0.0, True, BLUE),
   ("held: you just took an exit yourself",
@@ -99,6 +100,10 @@ SCENES = [
    "YOUR BLINKER", "7 flashes, 940 ms apart", 0.0, True, INFO),
   ("blinker test: the hold, counting flashes",
    "SIGNAL WORKS", "6 flashes", 0.0, True, GREEN),
+  # New: a run stopped by one of its own gates. It used to end silently and the panel then showed
+  # the flash count under SIGNAL WORKS, which reads as a car that half-ignored us.
+  ("blinker test: a run stopped before it finished",
+   "STOPPED - CAR MOVED", "2 of 7 blinks - press again when stopped", 0.0, True, AMBER),
   ("blinker test: the tap, where the car ran its own pattern",
    "SIGNAL WORKS", "9 flashes, 8 on its own", 0.0, True, GREEN),
   # The step this used to stop one short of: the drive measures how wrong the bar was, and now
