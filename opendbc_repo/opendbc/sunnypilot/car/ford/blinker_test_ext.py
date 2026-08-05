@@ -224,9 +224,21 @@ BLINK_COUNT = 7
 # fast flashing". There is no send pattern that satisfies both, because one wants an edge and the
 # other wants a level.
 #
-# So it stays. The main signal is what other drivers read, and a cornering lamp is a convenience
-# that is usually speed-gated anyway -- UNVERIFIED here, and checkable from the car in one signal at
-# speed rather than by anyone reasoning about it.
+# AND IT IS MOOT, WHICH IS THE ACTUAL ANSWER. Ford cornering lamps activate only BELOW 25 mph
+# (FORScan forum; F150 forum). PassingAssistMinSpeed is 30 mph and every highway lane change is far
+# above 25, so the cornering lamp cannot fire during any change this system would command. The only
+# place the brief flicker appears is a stationary bench test, which is the one place it does not
+# matter.
+#
+# There is also nothing to command it WITH. The only fog signals in the DBC are
+# FogLghtFrontOn_B_Stat and FogLghtRearOn_B_Stat, both `_B_Stat`, both on BodyInfo_3_FD1 and both
+# the body module reporting OUTWARD to the camera. No request signal exists, so it cannot be driven
+# directly however anyone reaches the bus.
+#
+# What a canbox on MS-CAN might do is present a CLEAN sustained switch state to the body module
+# rather than adding frames to a contended stream -- which is what a held stalk does, and would give
+# a normal blink and a lit cornering lamp together. Plausible, unverified, and not worth buying
+# hardware for a lamp that is off above 25 mph.
 
 # How long the verdict stays on screen before the machine re-arms itself.
 #
