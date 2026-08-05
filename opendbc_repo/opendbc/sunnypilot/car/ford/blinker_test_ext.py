@@ -157,7 +157,14 @@ EDGE_FRAMES = 1
 #
 # Costs nothing to be generous: a press during the window preempts it, so the driver is never made
 # to wait out a measurement they have finished with.
-EDGE_OBSERVE_S = 8.0
+# 2.0, DOWN FROM 8.0. Eight seconds was to watch for a self-generated one-touch after the single
+# frame -- and the car has since settled that no such thing happens: one frame is one flash, always.
+# So it was six seconds of waiting for something proven impossible, and it is most of "there is a
+# delay between when I can test it": measured at 11.75 s before the buttons came back.
+#
+# Two is enough to catch a late flash if the body module ever surprises us, and short enough that
+# pressing twice in a row is not a chore.
+EDGE_OBSERVE_S = 2.0
 
 # --- STOP FIGHTING THE CONTENTION AND USE IT ---
 #
@@ -530,7 +537,9 @@ class BlinkerTestExt:
       # -- a short odd blink after the intended ones, which is what a test caught and may well be
       # the "small break after four" reported from the car.
       self._bt_command_frames_left = BLINK_COUNT * int(BLINK_PERIOD_S / DT_CTRL)
-      self.bt_frames_left = self._bt_command_frames_left + int(1.0 / DT_CTRL)
+      # A short tail only. There is nothing to observe after a blink -- the lamp follows our frames
+      # and stops when we do -- so a full second here was a second of dead buttons for nothing.
+      self.bt_frames_left = self._bt_command_frames_left + int(0.3 / DT_CTRL)
       self._bt_blink_total = self.bt_frames_left
     else:
       self.bt_frames_left = int(((TAP_COMMAND_S + observe) if tap else PULSE_DURATION_S) / DT_CTRL)
