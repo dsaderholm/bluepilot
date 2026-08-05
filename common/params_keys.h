@@ -15,6 +15,9 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"AthenadPid", {PERSISTENT, INT}},
     {"AthenadUploadQueue", {PERSISTENT, JSON}},
     {"AthenadRecentlyViewedRoutes", {PERSISTENT, STRING}},
+    // BluePilot: which generation of changed shipped defaults this device has taken.
+    // See _BP_REDEFAULTED in sunnypilot/system/params_migration.py.
+    {"BPDefaultsGeneration", {PERSISTENT | BACKUP, STRING}},
     {"BootCount", {PERSISTENT, INT}},
     {"CalibrationParams", {PERSISTENT, BYTES}},
     {"CameraDebugExpGain", {CLEAR_ON_MANAGER_START, STRING}},

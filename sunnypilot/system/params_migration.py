@@ -47,6 +47,59 @@ def _migrate_car_platform_bundle(_params):
   cloudlog.info(f"params_migration: CarPlatformBundle migrated {old_platform!r} -> {new_platform!r}")
 
 
+# BluePilot: params whose SHIPPED DEFAULT changed on this branch, cleared so the new one applies.
+#
+# "I never want you to change settings anymore, just defaults." This is the defaults half, and the
+# whole point is that it CLEARS rather than writes -- `remove` makes the next read fall through to
+# params_keys.h, so a default is stated in exactly one place. Writing the value here would make
+# this file a second source of truth and guarantee the two drift.
+#
+# Deliberately the narrowest list that changes anything. Only keys whose params_keys.h value moved
+# AND that are likely already stored on the car appear. Excluded on purpose:
+#   - FordLow/HighSpeedFactor_ang, FordPrefLateralControl -- his own steering tune. The defaults now
+#     match what he runs, but clearing them is this file reaching into his lateral settings, which
+#     is exactly what he asked it to stop doing.
+#   - GreenLightAlert, LeadDepartAlert, ShowBrakeStatus -- already on for him; clearing changes
+#     nothing and only creates a chance to get it wrong.
+#   - Everything added this session (the offset bands, lookahead, SCC-Map decel, pinned holds).
+#     Those keys have never been written, so they already take their default with no help.
+#
+# ONCE PER GENERATION, not every boot, or he could never turn one of these off and keep it -- the
+# opposite of what a settings screen is for.
+#
+# The generation string is branch-distinct on purpose. passing-assist-phase1 carries its own list
+# and counts "1", "2", ...; sharing the counter would make the two branches re-run each other's
+# migration on every switch. When they merge, union the lists and pick one counter.
+BP_DEFAULTS_GENERATION: str = "icbm-1"
+
+_BP_REDEFAULTED = (
+  # off -> assist. ICBM's whole job is driving the set speed toward the posted limit, and
+  # "information" means show a sign and do nothing.
+  "SpeedLimitMode",
+  # off -> by-limit. Without this the banded offsets never apply and the car drives every posted
+  # limit exactly, which is not how he drives and not what he asked for.
+  "SpeedLimitOffsetType",
+  # off -> on. The map curve controller, which is the only thing that can see an off-ramp bend
+  # before the camera does.
+  "SmartCruiseControlMap",
+  # off -> on. Camera curve control; on for him already in all likelihood, but it is the pair to
+  # SCC-Map and shipping one without the other is not a state anyone chose.
+  "SmartCruiseControlVision",
+)
+
+
+def _migrate_bp_redefaulted(_params):
+  if _params.get("BPDefaultsGeneration") == BP_DEFAULTS_GENERATION:
+    return
+  try:
+    for key in _BP_REDEFAULTED:
+      _params.remove(key)
+    _params.put("BPDefaultsGeneration", BP_DEFAULTS_GENERATION, block=True)
+    cloudlog.info(f"params_migration: took the new defaults for {len(_BP_REDEFAULTED)} settings")
+  except Exception as e:
+    cloudlog.exception(f"Error applying new defaults: {e}")
+
+
 BP_LATERAL_SCHEME_PARAMS_MIGRATION_VERSION: str = "1"
 
 # (old key, new key) -- old keys stay declared in common/params_keys.h (harmless orphans) so their
@@ -129,3 +182,6 @@ def run_migration(_params):
 
   # BluePilot: split lateral-tuning params by control scheme (curvature vs angle)
   _migrate_bp_lateral_scheme_params(_params)
+
+  # BluePilot: take shipped defaults that changed, without touching anything he set himself
+  _migrate_bp_redefaulted(_params)

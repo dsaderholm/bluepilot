@@ -67,6 +67,7 @@ DEFAULT_TARGETS = [
   "selfdrive/car/tests/test_structs_capnp_parity.py",
   "selfdrive/ui/bp/onroad/tests/",
   "system/tests/test_sentry_disabled_by_default.py",
+  "sunnypilot/system/tests/test_redefault_migration.py",
   # The value behind every +/- control. The widget needs pyray and cannot collect here, which
   # is why its logic lives in param_value_cache.py -- there was nothing to test before, and
   # nothing caught the read that wiped his angle tuning.
