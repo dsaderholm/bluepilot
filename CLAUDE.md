@@ -53,6 +53,19 @@ about branches.
 After the merge lands, rebase the other worktrees onto it and run their tests too. `git worktree
 list` shows them.
 
+**A fix belongs to the branch that owns the code, not to the branch you happened to find it from.**
+Stated as a rule on 2026-08-05: *"don't fix any ICBM related stuff on this branch, it should only
+be fixed on the ICBM branch."*
+
+So when work on a feature branch turns up a bug in ICBM, the BluePilot settings page, or anything
+else `icbm-manual-override-and-tuning` owns: `cd` to that worktree, fix it there, commit, push,
+then rebase this branch onto it. Do NOT fix it in place. Fixing it in place strands the fix on a
+branch that has not merged -- so a device flashed from ICBM still has the bug -- and guarantees a
+conflict on the next rebase against the eventual real fix.
+
+This does not narrow what may be fixed. Anything related to what is being built is in scope
+whatever layer owns it; the rule is only about WHERE the commit lands.
+
 Then:
 
 1. **No conflicts, tests green** → show them the summary, commit, push, and give them the
