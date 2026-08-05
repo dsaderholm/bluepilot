@@ -953,28 +953,32 @@ Constraints for whichever is chosen:
 
 ---
 
-## 9a. The spare front pair -- and why it does not help -- 2026-08-04
+## 9a. The spare pair from the ESR install -- what it is and is not -- 2026-08-04
 
-The owner still has the second CAN pair from the ESR install: *"It's the front radar wires, they
-run to the front only. My old radar required two can busses, my new one requires one."*
+The owner still has the second CAN pair from the old ESR: *"My old radar required two can busses,
+my new one requires one."* Which is the physical consequence of the DBC evidence in section 8 --
+`BU_: Gateway ESR` is two nodes, so something had to feed it, and that feed was the second pair.
+`BU_: MRR` is one node and needs no feed, so the pair went idle at the switch.
 
-That matches the DBC evidence in section 8 exactly, and is the physical consequence of it. The ESR
-has two nodes -- `BU_: Gateway ESR` -- so something has to feed it vehicle data, which is a second
-bus at the radar. The MRR has one node, `BU_: MRR`, and every message is FROM the radar, so it
-needs no feed and the second pair went idle when he switched.
+He asked the right question about it: **does it reach the comma 3X and give us extra bandwidth?**
 
-**It does not help the rear radar, and this section exists so nobody re-discovers that hopefully.**
-The value of a spare run is entirely its ROUTE, and this one goes to the front bumper. A rear radar
-needs a pair reaching the rear bumper; there is no sense in which a front run shortens that.
+**No, and the limit is transceivers rather than wire.** `fordcan.py` defines exactly three buses --
+`main` (offset+0), `radar` (offset+1), `camera` (offset+2) -- and the panda has three CAN
+transceivers. The Ford port occupies all of them. A spare pair arriving at the comma has no port to
+land on, so it cannot become a fourth channel however good the wire is.
 
-It was written up here as four hopeful questions before he answered the first one. That was the same
-mistake as the canbox: assuming a capability, then planning around the assumption. The correction is
-kept rather than deleted because the shape of the error is worth more than the paragraph was.
+Two things that remain worth knowing, and neither should be assumed:
 
-What it IS good for: a second FRONT-facing sensor, wired and terminated, if one is ever wanted. That
-is not on any roadmap.
+1. **Where does the pair terminate at the comma end** -- at the connector, or spliced into an
+   existing bus? If it is a second tap onto bus 0 for the ESR's benefit, it is not a channel at all.
+2. **Does the 3X harness expose anything unused?** Stated here as a question because nobody has
+   looked, and guessing at a capability is what produced four wrong claims on 2026-08-04.
 
-## 9. Wiring## 9. Wiring
+What it does NOT solve is the thing section 4 exists for. Bus 1 runs at 60-73 % and the rear
+radar's raw output is another 37-45 %, so the feeder MCU still has to REDUCE 64 detection frames to
+a digest small enough to fit. That is compute, and no amount of spare copper performs it.
+
+## 9. Wiring## 9. Wiring## 9. Wiring
 
 Added 2026-08-03. Confidence: **high** on topology and bus numbering (verified in-tree),
 **medium** on the connector, which is not publicly documented.
