@@ -2699,3 +2699,61 @@ class TestWhyItNeverFired:
     assert det.left_geometry_ok
     _, _, share = det.geo_refusal
     assert share == 0.0, "counted refusals on a drive that had none"
+
+
+class TestTheHistoryKnowsWhichBuildMadeIt:
+  """Asked directly: "are we keeping logs from previous versions or wiping them with each commit
+  since you keep changing things?"
+
+  Kept -- the key is PERSISTENT and nothing clears it. Which is the problem: the thresholds this
+  measures move between drives, so a run from before the geometry was rewritten is not comparable
+  to one from after, and nothing in the record said which was which. Twenty drives of that mixture
+  reads as noise in the gates rather than as two different gates.
+  """
+
+  @staticmethod
+  def _det_with(store):
+    det = keep_right_det()
+    det.params = store
+    return det
+
+  def test_each_archived_drive_carries_the_build(self):
+    class P:
+      def __init__(s): s.store = {"GitCommit": "abcdef1234567890"}
+      def get(s, k, *a, **kw): return s.store.get(k)
+      def get_bool(s, k, *a, **kw): return bool(s.store.get(k))
+      def put(s, k, v, block=False): s.store[k] = v
+    p = P()
+    det = self._det_with(p)
+    det._archive_drive({"driverPasses": 3})
+    assert p.store["PassingAssistHistory"][-1]["build"] == "abcdef12"
+
+  def test_a_drive_is_still_kept_when_the_build_cannot_be_read(self):
+    class P:
+      def __init__(s): s.store = {}
+      def get(s, k, *a, **kw):
+        if k == "GitCommit":
+          raise RuntimeError("unreadable")
+        return s.store.get(k)
+      def get_bool(s, k, *a, **kw): return False
+      def put(s, k, v, block=False): s.store[k] = v
+    p = P()
+    det = self._det_with(p)
+    det._archive_drive({"driverPasses": 3})
+    assert p.store["PassingAssistHistory"][-1]["driverPasses"] == 3
+
+  def test_stamping_does_not_break_the_repeat_check(self):
+    """A boot with no driving must not archive the same drive again -- the comparison is against
+    the unstamped value that was passed in."""
+    class P:
+      def __init__(s): s.store = {"GitCommit": "abcdef1234567890"}
+      def get(s, k, *a, **kw): return s.store.get(k)
+      def get_bool(s, k, *a, **kw): return bool(s.store.get(k))
+      def put(s, k, v, block=False): s.store[k] = v
+    p = P()
+    det = self._det_with(p)
+    drive = {"driverPasses": 3}
+    det._archive_drive(drive)
+    det._archive_drive(drive)
+    assert len(p.store["PassingAssistHistory"]) == 1, (
+      "the stamp changed the stored shape, so a re-boot archives the same drive again")

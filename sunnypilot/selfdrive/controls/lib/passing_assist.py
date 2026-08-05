@@ -1099,8 +1099,30 @@ class PassingAssistDetector:
       hist = self.params.get("PassingAssistHistory") or []
       # A boot with no driving leaves LastDrive untouched, so without this the same drive is
       # archived again every time the car is started and the history fills with one drive.
-      if hist and hist[-1] == last:
+      #
+      # COMPARED WITHOUT THE STAMP. The stored entry carries a build and the incoming one does not,
+      # so a straight == never matches once stamping exists and every boot re-archives. Caught by
+      # this file's own duplicate test, which failed the moment the stamp was added -- and by the
+      # test written FOR the stamp asserting the wrong number, which the older one did not.
+      if hist and {k: v for k, v in hist[-1].items() if k != "build"} == last:
         return
+      # STAMP THE BUILD. Asked directly: "are we keeping logs from previous versions or wiping
+      # them with each commit since you keep changing things?"
+      #
+      # Kept -- the key is PERSISTENT and nothing clears it, so a fortnight survives any number of
+      # updates. Which is exactly the problem: the thresholds this measures move between drives, so
+      # a run from before the geometry was rewritten is not comparable to one from after, and until
+      # now nothing in the record said which was which. Twenty drives of that is worse than five
+      # honest ones, because the mixture reads as noise in the gates rather than as two different
+      # gates.
+      #
+      # Short SHA only. It is enough to sort drives into builds and to look up what changed, and it
+      # costs eight characters in a param that already holds twenty-three numbers per drive.
+      last = dict(last)
+      try:
+        last["build"] = str(self.params.get("GitCommit") or "")[:8]
+      except Exception:  # noqa: BLE001 - an unstamped drive is still worth keeping
+        pass
       hist.append(last)
       self.params.put("PassingAssistHistory", hist[-DRIVE_HISTORY_MAX:])
     except Exception:  # noqa: BLE001 - a param failure must never reach the planner
