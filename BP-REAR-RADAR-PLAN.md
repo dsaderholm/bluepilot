@@ -953,6 +953,30 @@ Constraints for whichever is chosen:
 
 ---
 
+## 9a. THERE IS ALREADY A SPARE BUS RUN -- 2026-08-04
+
+From the owner: *"I do have another bus wired to my radar that I stopped using when I switched to
+the edge radar. The wires are sitting there unused since the new radar doesn't require it."*
+
+That is potentially the single most expensive item in section 9 already solved, and it should be
+established BEFORE anything is bought, because it changes what to buy.
+
+**Do not plan around it until these are answered**, and do not assume the answers -- assuming a
+capability instead of checking it is what produced three wrong claims on 2026-08-04 alone:
+
+1. **Where does it physically run to and from?** A spare pair at the FRONT radar position does not
+   help a rear radar unless the run passes through the cabin to the back. The value is entirely in
+   the route, not in the existence of the wire.
+2. **Is it a twisted pair?** CAN needs one. An untwisted pair over a long run in a car is a
+   different proposition.
+3. **Is it terminated, and at what?** A bus needs 120 ohm termination at both ends. A stub hanging
+   off an existing bus is not a private bus.
+4. **Does it carry power as well, and what gauge?** The MRR needs 12 V, and that is the other half
+   of the loom cost.
+
+If it runs front-to-rear as a twisted pair, the rear radar's private bus is mostly built and
+section 9's loom estimate is largely wrong in the good direction.
+
 ## 9. Wiring
 
 Added 2026-08-03. Confidence: **high** on topology and bus numbering (verified in-tree),
