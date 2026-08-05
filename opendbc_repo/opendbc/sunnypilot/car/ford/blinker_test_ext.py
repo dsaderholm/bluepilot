@@ -222,6 +222,45 @@ DEFAULT_BLINK_PERIOD_S = 1.0
 # The driver-stalk gate is deliberately not applied to this mode -- the driver signalling is the
 # entire point rather than a reason to refuse.
 MEASURE_WINDOW_S = 12.0
+
+# --- CLOSED LOOP: WAIT FOR THE LAMP, DO NOT GUESS AT IT ---
+#
+# "So why were some blinks getting missed at random times, sometimes missing 1, and sometimes
+# missing 2?"
+#
+# Absorption alone does not explain RANDOM. A fixed on-time against a fixed send period gives a
+# regular pattern -- every other one, forever. Random misses in runs of one and two are a BEAT: the
+# body module's flasher has its own natural cycle, our fixed period does not divide into it, so our
+# commands drift through its phase. Land during its ON phase and the command is swallowed; land
+# during OFF and a new flash starts. As the phase walks you get one miss, then two, then none --
+# and the starting phase depends on exactly when the button was pressed, which is why every attempt
+# looked different and why it seemed to depend on the ignition.
+#
+# No fixed period fixes a beat. Matching the measured rate only slows the drift.
+#
+# So stop opening the loop. BodyInfo_3_FD1 reports the lamp, and this module already watches it:
+# send the next command a moment after the lamp goes OUT. That is self-clocking -- it cannot drift
+# out of phase because it has no phase of its own, it matches the car's natural rate exactly with
+# nothing to configure, and it works on any Ford whatever its flasher does.
+#
+# HOW LONG TO WAIT AFTER IT GOES DARK -- measured, not chosen.
+#
+# A fixed small guard is wrong twice over. Too short and it lands inside the module's own refractory
+# tail and is absorbed anyway; too long and the blink is slower than the car's. And the right value
+# is a property of this flasher, which is the thing this whole exercise keeps rediscovering.
+#
+# But we can SEE it. The lamp's ON duration is right there in the report, and a standard automotive
+# flasher is symmetric -- SAE J590b specifies the on-time percentage, near half. So waiting for as
+# long as the lamp was just lit reproduces the car's own rhythm exactly, with nothing configured
+# and nothing assumed about Ford.
+#
+# Clamped because one bad reading should not stall the sequence or machine-gun it.
+BLINK_GUARD_MIN_S = 0.15
+BLINK_GUARD_MAX_S = 0.90
+BLINK_AFTER_LAMP_OFF_S = 0.35   # until an on-time has actually been observed
+# If the lamp never reports at all -- no BodyInfo_3_FD1, a car without it -- fall back to the fixed
+# period rather than sending nothing. Open loop is worse than closed; it is much better than dead.
+BLINK_OPEN_LOOP_TIMEOUT_S = 1.6
 # SEVEN IS A BENCH-TEST NUMBER, NOT THE FEATURE'S NUMBER.
 #
 # It matches the one-touch he set in FORScan, which is the point: pressing this button and flicking
@@ -360,6 +399,11 @@ class BlinkerTestExt:
     self.bt_watching = SIGNAL_NONE
     self.bt_blinking = False
     self._bt_blink_total = 0
+    self._bt_lamp_off_frame = 0
+    self._bt_lamp_on_frame = 0
+    self._bt_guard_s = float(BLINK_AFTER_LAMP_OFF_S)
+    self._bt_last_blink_cmd = 0
+    self._bt_blinks_sent = 0
     self._bt_lamp_prev = False
     self._bt_command_frames_left = 0
     self._bt_done_frames = 0
@@ -473,6 +517,15 @@ class BlinkerTestExt:
         self.bt_flashes += 1
         if not commanding:
           self.bt_flashes_after += 1
+      if lamp and not self._bt_lamp_prev:
+        self._bt_lamp_on_frame = self._bt_frame
+      if self._bt_lamp_prev and not lamp:
+        self._bt_lamp_off_frame = self._bt_frame
+        # The on-time we just watched. See BLINK_GUARD_MIN_S -- a symmetric flasher wants the same
+        # again as its off-time, so this IS the car's own rhythm.
+        if self._bt_lamp_on_frame:
+          lit_s = (self._bt_frame - self._bt_lamp_on_frame) * DT_CTRL
+          self._bt_guard_s = min(max(lit_s, BLINK_GUARD_MIN_S), BLINK_GUARD_MAX_S)
       self._bt_lamp_prev = lamp
 
       # Any of these ends the pulse immediately. Standstill is re-checked every frame, not just at
@@ -496,13 +549,20 @@ class BlinkerTestExt:
       # Blink mode sends ONE frame per period rather than at the bus rate -- the lamp mirrors our
       # frames one for one, so the send rate IS the flash rate. See BLINK_PERIOD_S.
       if self.bt_blinking:
-        # Counted from the START of this pulse, not off the free-running frame counter: the arming
-        # frame already sent one, so a global modulo puts the first gap wherever the pulse happened
-        # to begin. The test caught a 0.16 s gap among 0.66 s ones.
-        elapsed = self._bt_blink_total - self.bt_frames_left
-        period = int(self.bt_blink_period_s / DT_CTRL)
-        # ONE frame per cycle. The body module holds the lamp for a normal blink by itself.
-        return self.bt_commanded if elapsed % period == 0 else SIGNAL_NONE
+        # CLOSED LOOP. See BLINK_AFTER_LAMP_OFF_S -- command the next blink a moment after the lamp
+        # goes out, so there is no phase to drift and nothing to configure.
+        since_cmd = (self._bt_frame - self._bt_last_blink_cmd) * DT_CTRL
+        if self._bt_blinks_sent >= BLINK_COUNT:
+          return SIGNAL_NONE
+        dark_for = (self._bt_frame - self._bt_lamp_off_frame) * DT_CTRL if self._bt_lamp_off_frame else 0.0
+        ready = (self._bt_lamp_off_frame and dark_for >= self._bt_guard_s
+                 and self._bt_lamp_off_frame > self._bt_last_blink_cmd)
+        # ...unless the lamp never reports, in which case fall back to the fixed period.
+        if not ready and since_cmd < BLINK_OPEN_LOOP_TIMEOUT_S:
+          return SIGNAL_NONE
+        self._bt_last_blink_cmd = self._bt_frame
+        self._bt_blinks_sent += 1
+        return self.bt_commanded
       return self.bt_commanded if send_frame else SIGNAL_NONE
 
     # ---- showing the verdict: a clock, not a condition. See DONE_HOLD_S ----
@@ -610,7 +670,13 @@ class BlinkerTestExt:
                                                           return_default=True)) / 1000.0
       except Exception:  # noqa: BLE001 - a bad param must not stop a parked bench test
         self.bt_blink_period_s = float(DEFAULT_BLINK_PERIOD_S)
-      self._bt_command_frames_left = BLINK_COUNT * int(self.bt_blink_period_s / DT_CTRL)
+      # Generous: the loop stops itself after BLINK_COUNT blinks, so this is only a backstop.
+      self._bt_command_frames_left = int(BLINK_COUNT * 2.0 / DT_CTRL)
+      self._bt_lamp_off_frame = 0
+      self._bt_lamp_on_frame = 0
+      self._bt_guard_s = float(BLINK_AFTER_LAMP_OFF_S)
+      self._bt_last_blink_cmd = self._bt_frame
+      self._bt_blinks_sent = 0
       # A short tail only. There is nothing to observe after a blink -- the lamp follows our frames
       # and stops when we do -- so a full second here was a second of dead buttons for nothing.
       self.bt_frames_left = self._bt_command_frames_left + int(0.3 / DT_CTRL)

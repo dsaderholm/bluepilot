@@ -377,17 +377,66 @@ class TestBlinkMode:
     sends = self._sends(BLINK_COUNT * DEFAULT_BLINK_PERIOD_S)
     assert all(b - a > 1 for a, b in zip(sends, sends[1:])),       "consecutive frames -- that is a burst, and the lamp does not need one"
 
-  def test_the_rhythm_is_the_blink_rate(self):
-    sends = self._sends(BLINK_COUNT * DEFAULT_BLINK_PERIOD_S)
-    starts = [sends[0]] + [b for a, b in zip(sends, sends[1:]) if b - a > 1]
-    gaps = [(b - a) * DT_CTRL for a, b in zip(starts, starts[1:])]
-    assert gaps, "only one burst"
-    assert all(abs(g - DEFAULT_BLINK_PERIOD_S) < 0.02 for g in gaps), f"bursts not at blink rate: {gaps}"
+  def _drive_with_a_fake_bcm(self, ext, seconds, on_s=0.45, refractory_s=0.0):
+    """A body module that lights the lamp for on_s when commanded -- and IGNORES commands while it
+    is still lit, which is the absorption that caused the missed blinks.
 
-  def test_it_stops_after_the_right_number_of_blinks(self):
-    sends = self._sends(BLINK_COUNT * DEFAULT_BLINK_PERIOD_S + 2.0)
-    starts = [sends[0]] + [b for a, b in zip(sends, sends[1:]) if b - a > 1]
-    assert len(starts) == BLINK_COUNT, f"{len(starts)} blinks, expected {BLINK_COUNT}"
+    refractory_s extends the deaf period past the lamp going out, so a naive sender can be shown
+    drifting into it.
+    """
+    lamp_until = -1
+    deaf_until = -1
+    commands, absorbed = [], 0
+    for i in range(int(seconds / DT_CTRL)):
+      lit = i < lamp_until
+      out = ext.update_blinker_test(make_cs(lamp_left=lit))
+      if out == SIGNAL_LEFT:
+        if i < deaf_until:
+          absorbed += 1
+        else:
+          commands.append(i)
+          lamp_until = i + int(on_s / DT_CTRL)
+          deaf_until = lamp_until + int(refractory_s / DT_CTRL)
+    return commands, absorbed
+
+  def test_no_command_is_ever_absorbed(self):
+    """The reported fault: "some blinks getting missed at random times, sometimes missing 1, and
+    sometimes missing 2." A fixed send period beats against the body module's own cycle and drifts
+    through its ON phase. Waiting for the lamp to go out has no phase to drift."""
+    ext = make_ext(SIGNAL_BLINK_LEFT)
+    run(ext, POLL_FRAMES + 1)
+    _, absorbed = self._drive_with_a_fake_bcm(ext, 20.0, on_s=0.45, refractory_s=0.15)
+    assert absorbed == 0, f"{absorbed} commands landed while the lamp was still lit"
+
+  def test_it_still_stops_after_the_right_number(self):
+    ext = make_ext(SIGNAL_BLINK_LEFT)
+    run(ext, POLL_FRAMES + 1)
+    commands, _ = self._drive_with_a_fake_bcm(ext, 25.0)
+    assert len(commands) == BLINK_COUNT, f"{len(commands)} blinks, expected {BLINK_COUNT}"
+
+  def test_it_follows_a_flasher_SLOWER_than_any_fixed_period(self):
+    """The test that actually proves closing the loop was necessary.
+
+    A body module deaf for 1.2 s -- lit 0.9, then a 0.3 s tail -- outlasts the 1.0 s fixed period
+    entirely, so an open-loop sender is absorbed on every single blink no matter what number is
+    configured. Waiting for the lamp cannot be, because it has no number.
+
+    Mutation-checked: reverting to the fixed period fails this and nothing else, which is why it is
+    here. The earlier version used a flasher fast enough that both approaches worked.
+    """
+    ext = make_ext(SIGNAL_BLINK_LEFT)
+    run(ext, POLL_FRAMES + 1)
+    commands, absorbed = self._drive_with_a_fake_bcm(ext, 40.0, on_s=0.9, refractory_s=0.3)
+    assert absorbed == 0, f"{absorbed} commands swallowed by a flasher slower than the period"
+    assert len(commands) == BLINK_COUNT, f"{len(commands)} blinks got through, expected {BLINK_COUNT}"
+    gaps = [(b - a) * DT_CTRL for a, b in zip(commands, commands[1:])]
+    assert gaps and all(g > 1.2 for g in gaps), f"outran a 1.2s-deaf flasher: {gaps}"
+
+  def test_a_car_that_never_reports_a_lamp_still_blinks(self):
+    """Open loop is worse than closed. It is much better than sending nothing at all."""
+    ext = make_ext(SIGNAL_BLINK_LEFT)
+    out = run(ext, POLL_FRAMES + int(8.0 / DT_CTRL))
+    assert out.count(SIGNAL_LEFT) >= 3, "no lamp feedback meant no blinks at all"
 
   def test_blink_obeys_every_gate(self):
     for kw in ({"v_ego": 5.0}, {"engaged": True}, {"left_blinker": True}):
