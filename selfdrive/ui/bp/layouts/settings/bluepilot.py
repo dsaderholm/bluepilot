@@ -220,6 +220,21 @@ class BluePilotLayout(Widget):
     # blinker_test_ext: a quarter second of command, then silence. If the body module runs its own
     # one-touch flash from that, the rate and the count are the car's own and nothing has to
     # contend with the steering column module for control of a held signal.
+    # One CAN frame, the smallest ask there is. See EDGE_FRAMES in blinker_test_ext: openpilot does
+    # not send this frame at all normally, so even a "tap" injects five of them into the gateway's
+    # stream -- five rising edges where a stalk tap is one event.
+    self._blinker_edge_buttons = dual_button_item(
+      lambda: tr("One Frame Left"),
+      lambda: tr("One Frame Right"),
+      left_callback=lambda: self._request_blinker_test(5),
+      right_callback=lambda: self._request_blinker_test(6),
+      description=lambda: tr("Sends a single message and nothing else, then watches. This is the "
+                             "smallest request that can be made -- if your car flashes properly "
+                             "from it, the body module is triggering on the edge and everything "
+                             "longer has been re-triggering it. If nothing happens, that is an "
+                             "answer too."),
+    )
+
     self._blinker_tap_buttons = dual_button_item(
       lambda: tr("Tap Left Signal"),
       lambda: tr("Tap Right Signal"),
@@ -737,6 +752,7 @@ class BluePilotLayout(Widget):
         self._vbatt_pause_charging,
         self._blinker_test_buttons,
         self._blinker_tap_buttons,
+        self._blinker_edge_buttons,
       ]) +
       _section(tr("Audio"), [
         self._use_custom_sounds,

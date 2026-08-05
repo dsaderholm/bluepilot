@@ -65,7 +65,8 @@ from openpilot.common.params import Params
 # Values of TurnLghtSwtch_D_Stat, per the DBC and carstate.py's decode (== 1 left, == 2 right).
 SIGNAL_NONE, SIGNAL_LEFT, SIGNAL_RIGHT = 0, 1, 2
 
-SIGNAL_TAP_LEFT, SIGNAL_TAP_RIGHT = 3, 4   # request values only; the COMMAND is still 1/2
+SIGNAL_TAP_LEFT, SIGNAL_TAP_RIGHT = 3, 4    # request values only; the COMMAND is still 1/2
+SIGNAL_EDGE_LEFT, SIGNAL_EDGE_RIGHT = 5, 6  # ONE frame -- see EDGE_FRAMES
 
 PULSE_DURATION_S = 4.0        # long enough for several flash cycles at ~1.5 Hz
 
@@ -98,6 +99,36 @@ TAP_COMMAND_S = 0.25          # about the length of a real stalk tap
 # ...then STOP COMMANDING AND KEEP WATCHING. Flashes after we have gone quiet are the BCM running
 # its own pattern, which is the entire measurement.
 OBSERVE_AFTER_S = 3.0
+
+# --- one frame. the last untried thing, and the smallest possible ask ---
+#
+# openpilot does not transmit Steering_Data_FD1 at all on a normal frame -- carcontroller only
+# appends it when this module returns something. So a "tap" is not a tap: at 0.25 s and one send
+# every BUTTONS_STEP it is FIVE separate CAN frames injected into the gateway's continuous stream
+# of "stalk is off". Five rising edges. A real stalk tap is one mechanical event.
+#
+# If the body module triggers its one-touch on an edge, five edges in a quarter second is five
+# retriggers -- which looks exactly like what the car does. One frame is the minimum perturbation
+# anyone can make, and nobody has tried it.
+#
+# AND THERE IS NOW A REASON TO EXPECT IT TO WORK, from the owner: "how does ICBM reliably control
+# stuff on the steering wheel?"
+#
+# ICBM drives the cruise buttons through THIS EXACT FRAME, on this bus, against the same gateway
+# transmissions -- and it is completely reliable. So contention is not the difference. Edge versus
+# level is:
+#
+#   a button press is an EVENT. One frame saying "pressed" is complete in itself and the receiver
+#   latches it; later frames saying "not pressed" do not undo it, they are merely the absence of a
+#   new press. Contradicting traffic is harmless.
+#
+#   TurnLghtSwtch_D_Stat is a LEVEL. It states where the stalk IS. Left, then Off, then Left is not
+#   a request for a signal -- it is a stalk being flicked, and that is exactly what the lamp does.
+#
+# Which says the way to command this signal is to treat it the way ICBM treats a button: one frame,
+# one edge, then silence. If the body module latches a one-touch from that, everything longer has
+# simply been re-triggering it -- and the erratic flashing was never contention at all.
+EDGE_FRAMES = 1
 
 # How long the verdict stays on screen before the machine re-arms itself.
 #
@@ -310,7 +341,8 @@ class BlinkerTestExt:
       # apart from our own disarm having silently failed. See _bt_saw_clear.
       self._bt_saw_clear = True
 
-    if request not in (SIGNAL_LEFT, SIGNAL_RIGHT, SIGNAL_TAP_LEFT, SIGNAL_TAP_RIGHT):
+    if request not in (SIGNAL_LEFT, SIGNAL_RIGHT, SIGNAL_TAP_LEFT, SIGNAL_TAP_RIGHT,
+                       SIGNAL_EDGE_LEFT, SIGNAL_EDGE_RIGHT):
       self.bt_blocked = 0
       return SIGNAL_NONE
 
@@ -334,12 +366,17 @@ class BlinkerTestExt:
     self.bt_blocked = 0
     self.bt_state = 1
     self._bt_saw_clear = False
-    tap = request in (SIGNAL_TAP_LEFT, SIGNAL_TAP_RIGHT)
-    self.bt_commanded = SIGNAL_LEFT if request in (SIGNAL_LEFT, SIGNAL_TAP_LEFT) else SIGNAL_RIGHT
+    tap = request in (SIGNAL_TAP_LEFT, SIGNAL_TAP_RIGHT, SIGNAL_EDGE_LEFT, SIGNAL_EDGE_RIGHT)
+    edge = request in (SIGNAL_EDGE_LEFT, SIGNAL_EDGE_RIGHT)
+    self.bt_commanded = (SIGNAL_LEFT if request in (SIGNAL_LEFT, SIGNAL_TAP_LEFT, SIGNAL_EDGE_LEFT)
+                         else SIGNAL_RIGHT)
     self.bt_watching = self.bt_commanded
     # A tap commands briefly then watches in silence; a hold commands throughout. Same counter for
     # both, so the two runs are directly comparable with one variable changed.
-    self._bt_command_frames_left = int((TAP_COMMAND_S if tap else PULSE_DURATION_S) / DT_CTRL)
+    # EDGE_FRAMES is counted in SENDS, not control frames -- the send is rate-limited to
+    # BUTTONS_STEP, so one send needs the window to stay open that long.
+    self._bt_command_frames_left = (EDGE_FRAMES * BUTTONS_STEP if edge else
+                                    int((TAP_COMMAND_S if tap else PULSE_DURATION_S) / DT_CTRL))
     self.bt_frames_left = int(((TAP_COMMAND_S + OBSERVE_AFTER_S) if tap
                                else PULSE_DURATION_S) / DT_CTRL)
     self.bt_lamp_seen = False
