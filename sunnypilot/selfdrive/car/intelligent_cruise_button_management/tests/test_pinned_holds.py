@@ -27,10 +27,14 @@ class FakeParams:
   def get_bool(self, key, *a, **k):
     return bool(self.store.get(key, False))
 
-  def put(self, key, value):
+  # block=, because the real signature has it: params_pyx is `put(self, key, dat, bool block =
+  # False)`. A stub without it turns any caller that passes block=True into a TypeError that the
+  # caller's own except-clause swallows -- so the param silently never gets written and the test
+  # reports a bug that exists only in the harness. That cost a drive once already.
+  def put(self, key, value, block=False):
     self.store[key] = value
 
-  def put_bool(self, key, value):
+  def put_bool(self, key, value, block=False):
     self.store[key] = bool(value)
 
 

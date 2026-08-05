@@ -278,7 +278,13 @@ class BluePilotLayout(Widget):
     # Ensure default is persisted so consumers read the correct value on first load
     try:
       if self._safe_get(self._params, "FordPrefRadarOverlaySize") is None:
-        self._params.put("FordPrefRadarOverlaySize", str(overlay_size_idx))
+        # int, NOT str. Both keys are registered INT, and Params.put type-checks through
+        # PYTHON_2_CPP -- which has (int, INT) and no (str, INT), so this raises TypeError.
+        # The except below only catches UnknownKeyName, so it escapes _initialize_items and
+        # takes the whole BluePilot page down. Only reachable where the key has never been
+        # written, because _safe_get uses a plain get() and gets None rather than the default:
+        # a fresh device, or one whose params have just been cleared.
+        self._params.put("FordPrefRadarOverlaySize", int(overlay_size_idx))
     except UnknownKeyName:
       pass
     self._radar_overlay_size_btn = multiple_button_item(
@@ -319,7 +325,13 @@ class BluePilotLayout(Widget):
     # Ensure default is persisted so consumers read the correct value on first load
     try:
       if self._safe_get(self._params, "FordPrefHybridDriveGaugeSize") is None:
-        self._params.put("FordPrefHybridDriveGaugeSize", str(gauge_size_idx))
+        # int, NOT str. Both keys are registered INT, and Params.put type-checks through
+        # PYTHON_2_CPP -- which has (int, INT) and no (str, INT), so this raises TypeError.
+        # The except below only catches UnknownKeyName, so it escapes _initialize_items and
+        # takes the whole BluePilot page down. Only reachable where the key has never been
+        # written, because _safe_get uses a plain get() and gets None rather than the default:
+        # a fresh device, or one whose params have just been cleared.
+        self._params.put("FordPrefHybridDriveGaugeSize", int(gauge_size_idx))
     except UnknownKeyName:
       pass
     # Map 1/2 to button index 0/1
