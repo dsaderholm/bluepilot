@@ -72,3 +72,44 @@ whether passing assist works.
   every reason to go still true, because nothing actuates and the car never moved. A finished run
   now stands down 30 s, and the panel says `WOULD BE DONE / holding 24s before looking again`
   in purple -- distinct from the red `BACKED OUT`, which is a different thing.
+
+---
+
+## Every timer that can hold it back, in one place
+
+Audit finding, 2026-08-05. Four of these are settings you can see; three are constants in the code.
+You cannot predict the behaviour from the settings screen alone, which is the actual problem.
+
+| What it waits for | Where | Value |
+|---|---|---|
+| A car has to look slower this long before it counts | Confirm For | 1 s |
+| Blinker on this long before moving | Signal Before Moving | 1 s |
+| After suggesting a pass, before it will think about moving right | Settle After A Pass | 20 s |
+| ...and then the right lane has to stay clear this long | Wait Before Moving Right | 10 s |
+| ...and have existed this long at all | Lane Must Have Been There | 15 s |
+| After you take an exit yourself | Stay Quiet After You Take An Exit | 45 s |
+| After ANY lane change you make, to let the model re-settle | `SETTLE_AFTER_CHANGE_S` | 4 s |
+| After a crossing backs out because something arrived behind | `ABORT_STANDDOWN_S` | 10 s |
+| After a dry run completes | `COMPLETE_STANDDOWN_S` | 30 s |
+
+They do NOT all overlap. Settle-after-a-pass and wait-before-moving-right run one after the other,
+so the real delay before a keep-right suggestion is **30 s**, not 20 or 10. Nothing on the settings
+screen says that.
+
+The last one exists only because nothing actuates -- see the note in `passing_maneuver.py`. When a
+control is wired up it should come down to `SETTLE_AFTER_CHANGE_S`.
+
+## One decision to make before it actuates
+
+**Two settings will govern the same moment.** `Signal Before Moving` (here, 1 s) and
+sunnypilot's `Auto Lane Change by Blinker` (Steering > Customize Lane Change) both control how long
+the blinker is on before the car starts moving across. Passing assist deliberately does not have its
+own steering -- it drives the same lane change sunnypilot already performs -- so the moment it
+actuates, **both timers apply and the longer one silently wins.**
+
+Nothing is broken today, because nothing actuates. The choice, when it does:
+
+1. Passing assist sets sunnypilot's timer for the duration of its own maneuver, and
+   `Signal Before Moving` is the only control. **Recommended** -- one setting, one meaning.
+2. `Signal Before Moving` is deleted and sunnypilot's is used for both. Fewer settings, but then
+   your manual nudgeless changes and passing assist's cannot have different lead times.
