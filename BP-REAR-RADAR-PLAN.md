@@ -953,31 +953,28 @@ Constraints for whichever is chosen:
 
 ---
 
-## 9a. THERE IS ALREADY A SPARE BUS RUN -- 2026-08-04
+## 9a. The spare front pair -- and why it does not help -- 2026-08-04
 
-From the owner: *"I do have another bus wired to my radar that I stopped using when I switched to
-the edge radar. The wires are sitting there unused since the new radar doesn't require it."*
+The owner still has the second CAN pair from the ESR install: *"It's the front radar wires, they
+run to the front only. My old radar required two can busses, my new one requires one."*
 
-That is potentially the single most expensive item in section 9 already solved, and it should be
-established BEFORE anything is bought, because it changes what to buy.
+That matches the DBC evidence in section 8 exactly, and is the physical consequence of it. The ESR
+has two nodes -- `BU_: Gateway ESR` -- so something has to feed it vehicle data, which is a second
+bus at the radar. The MRR has one node, `BU_: MRR`, and every message is FROM the radar, so it
+needs no feed and the second pair went idle when he switched.
 
-**Do not plan around it until these are answered**, and do not assume the answers -- assuming a
-capability instead of checking it is what produced three wrong claims on 2026-08-04 alone:
+**It does not help the rear radar, and this section exists so nobody re-discovers that hopefully.**
+The value of a spare run is entirely its ROUTE, and this one goes to the front bumper. A rear radar
+needs a pair reaching the rear bumper; there is no sense in which a front run shortens that.
 
-1. **Where does it physically run to and from?** A spare pair at the FRONT radar position does not
-   help a rear radar unless the run passes through the cabin to the back. The value is entirely in
-   the route, not in the existence of the wire.
-2. **Is it a twisted pair?** CAN needs one. An untwisted pair over a long run in a car is a
-   different proposition.
-3. **Is it terminated, and at what?** A bus needs 120 ohm termination at both ends. A stub hanging
-   off an existing bus is not a private bus.
-4. **Does it carry power as well, and what gauge?** The MRR needs 12 V, and that is the other half
-   of the loom cost.
+It was written up here as four hopeful questions before he answered the first one. That was the same
+mistake as the canbox: assuming a capability, then planning around the assumption. The correction is
+kept rather than deleted because the shape of the error is worth more than the paragraph was.
 
-If it runs front-to-rear as a twisted pair, the rear radar's private bus is mostly built and
-section 9's loom estimate is largely wrong in the good direction.
+What it IS good for: a second FRONT-facing sensor, wired and terminated, if one is ever wanted. That
+is not on any roadmap.
 
-## 9. Wiring
+## 9. Wiring## 9. Wiring
 
 Added 2026-08-03. Confidence: **high** on topology and bus numbering (verified in-tree),
 **medium** on the connector, which is not publicly documented.
