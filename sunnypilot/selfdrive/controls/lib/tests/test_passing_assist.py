@@ -2493,17 +2493,20 @@ class TestTheGeometryGateActuallyOpens:
     assert not det.left_geometry_ok
     assert det.blocked_by == Blocked.noLaneAvailable
 
-  def test_a_car_driving_down_that_lane_proves_it_exists(self):
-    """The path that needs no paint at all. A vehicle travelling our way in the next lane is an
-    observation, not an inference -- better evidence than any of the three geometry terms, and
-    available exactly when the model is least sure."""
+  def test_traffic_in_a_lane_does_not_make_it_a_lane(self):
+    """Reversed on road evidence, twice: "it just keeps trying to go into the shoulder."
+
+    This used to OR `same_direction_recent` into the geometry gate, on the reasoning that a vehicle
+    driving our way proves the lane exists. True, and still wrong here -- it made a side available
+    with NO geometry at all, so any misplaced track opened the right-hand side from the rightmost
+    lane. The adjacent band is 2.0-5.5 m from the path, the radar is mounted off-center with no
+    correction, its lateral estimate degrades with range, and path_offset is a model output. Any of
+    those can put a car from another lane into that band.
+    """
     det = keep_right_det()
-    # No paint, no usable edge -- geometry alone refuses this.
     scene = dict(probs=(0.05, 0.99, 0.99, 0.05), edges=(-2.2, 2.4), edge_stds=(0.9, 0.9))
-    run(det, 4, **scene)
-    assert not det.left_geometry_ok
-    # ...now put a car in the left lane, going our way at our speed.
     moving = dict(scene, tracks=(track(40.0, 3.7, v_rel=0.5),))
     run(det, int(3.0 / DT_MDL), **moving)
     assert det.adjacent.left.same_direction_recent, "the radar did not register the vehicle"
-    assert det.left_geometry_ok, "refused a lane the radar just watched a car drive down"
+    assert not det.left_geometry_ok, "traffic alone opened a side with no geometry"
+

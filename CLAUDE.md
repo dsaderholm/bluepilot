@@ -205,28 +205,26 @@ owner to judge a layout you have not rendered. It calls the real drawing methods
 hud_renderer_bp.py rather than reimplementing them, which is why it stays accurate -- keep it that
 way, and add a scene to SCENES whenever a new state is introduced.
 
-## Changing a shipped default? Bump the generation, or the car will never see it
+## NEVER write or clear the owner's settings
 
-Every `Params` key here is `PERSISTENT`. Once a value is stored on the device, the default in
-`params_keys.h` stops meaning anything on that car -- so editing a default and stopping there is
-WORSE than not editing it: the code, the comments and the settings screen all now describe behavior
-the car does not have.
+Two migrations used to. One set the on-screen toggles and keep-right to what a measurement drive
+wanted; the other cleared keys whose shipped default had changed so the new one would take. Both
+were written to save him setup. Both silently replaced choices he had made, and on 2026-08-04 he
+found out: *"all my settings in the blue pilot section got wiped out. Let's not have it overwrite
+settings anymore. Just tell me what settings to change each time."*
 
-`sunnypilot/system/params_migration.py` fixes this, but only if it is told:
+Both are deleted. The rule now:
 
-1. Change the default in `common/params_keys.h`.
-2. Add the key to `_BP_REDEFAULTED`.
-3. **Bump `BP_DEFAULTS_GENERATION`.** Nothing happens without this -- the migration is keyed to it.
+- **A setting he picked is data. A default I picked is a suggestion.** A suggestion does not get to
+  overwrite data on a car he drives to work.
+- Changing a default in `params_keys.h` only affects devices where the key was never written. That
+  is the whole mechanism, and it is fine -- **TELL HIM the setting to change**, in the message, and
+  let him decide.
+- Migrations that RENAME a key or carry a value forward are still fine. They preserve intent rather
+  than override it. The line is whether he would be surprised.
 
-It CLEARS rather than writes, so `params_keys.h` stays the only place a default is stated. It runs
-once per generation, not every boot, so a setting the owner deliberately tunes still survives --
-but the generation it is added in WILL discard whatever is stored, deliberate or not. That is the
-trade he asked for: *"you need to have this fork reset all the settings to your new defaults every
-time."*
-
-Also update `_STUB_PARAM_DEFAULTS` in `test_passing_assist.py` if the key is in it.
-`test_stub_param_defaults.py` fails if you forget, which is the point -- a drifted stub means the
-whole suite is green about a configuration no car ships.
+If a default change matters enough that the feature is wrong without it, that is a reason to say so
+plainly, not a reason to reach into his car.
 
 ## Before saying a branch is safe to flash
 

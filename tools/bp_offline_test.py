@@ -86,7 +86,6 @@ DEFAULT_TARGETS = [
   # Guards the stub the whole passing-assist suite runs against. Named, like its neighbours --
   # the folder holds device-only tests that cannot collect here.
   "selfdrive/car/tests/test_stub_param_defaults.py",
-  "sunnypilot/system/tests/test_redefault_migration.py",
   "selfdrive/ui/bp/layouts/settings/tests/",
   "selfdrive/ui/bp/onroad/tests/",
   "system/tests/test_sentry_disabled_by_default.py",

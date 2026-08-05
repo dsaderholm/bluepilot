@@ -735,22 +735,24 @@ class PassingAssistDetector:
 
     # Both channels must agree before a side is called available. Requiring agreement is the
     # conservative reading and keeps phase 2 honest if this ever stops being log-only.
-    # ...OR THE RADAR HAS WATCHED SOMEBODY DRIVE DOWN IT. A vehicle travelling our way in that lane
-    # is proof the lane exists and is a travel lane -- better proof than any of the three geometry
-    # terms, because it is an observation rather than an inference about paint. adjacent.update()
-    # runs before this, so the reading is current.
+    # THE RADAR EVIDENCE PATH IS GONE, and it was mine. "A vehicle travelling our way in that lane
+    # proves the lane exists" is true and was still the wrong thing to OR into this gate: it made a
+    # side available with no geometry at all, and the road answered immediately -- "it just keeps
+    # trying to go into the shoulder", from the rightmost lane, twice.
     #
-    # It cannot replace geometry, only add to it: an empty lane produces no traffic, and most lanes
-    # are empty most of the time. But when the model is unsure about paint it has no business
-    # refusing a lane the radar just watched a car use.
-    self.left_geometry_ok = ((self.left_line_prob >= MIN_ADJACENT_LINE_PROB and
-                              self.left_edge_gap >= MIN_LANE_WIDTH_M and
-                              left_std <= MAX_ROAD_EDGE_STD) or
-                             self.adjacent.left.same_direction_recent)
-    self.right_geometry_ok = ((self.right_line_prob >= MIN_ADJACENT_LINE_PROB and
-                               self.right_edge_gap >= MIN_LANE_WIDTH_M and
-                               right_std <= MAX_ROAD_EDGE_STD) or
-                              self.adjacent.right.same_direction_recent)
+    # The band is 2.0 to 5.5 m from the PATH, and both ends of that are approximate: the radar is
+    # mounted off-center with no correction, its lateral estimate degrades with range, and
+    # path_offset is a model output. Any of those can put a vehicle from our own lane or the next
+    # one but one into the right-hand band, and then a shoulder reads as a lane.
+    #
+    # Geometry alone from here. If it refuses a real lane, the panel now names which of the three
+    # terms did it and by how much -- that is a number to fix, where this was a gate with no floor.
+    self.left_geometry_ok = (self.left_line_prob >= MIN_ADJACENT_LINE_PROB and
+                             self.left_edge_gap >= MIN_LANE_WIDTH_M and
+                             left_std <= MAX_ROAD_EDGE_STD)
+    self.right_geometry_ok = (self.right_line_prob >= MIN_ADJACENT_LINE_PROB and
+                              self.right_edge_gap >= MIN_LANE_WIDTH_M and
+                              right_std <= MAX_ROAD_EDGE_STD)
 
     # How long that lane has been there WITHOUT INTERRUPTION. See DEFAULT_MIN_LANE_AGE_S: a lane
     # that did not exist a moment ago and now does is an exit or an on-ramp, and this is the only
