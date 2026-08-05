@@ -229,10 +229,11 @@ class BluePilotLayout(Widget):
     )
 
     self._blink_period = int_control_item(
-      lambda: tr("Blink Spacing (ms)"),
-      lambda: tr("Time between blinks when openpilot operates the signal. Measure your own "
-                 "blinker first and set this to match it. Federal rules allow 1 to 2 flashes per "
-                 "second, which is a wide band -- your car sits at one specific value."),
+      lambda: tr("Blink Spacing If Unmeasurable (ms)"),
+      lambda: tr("Normally ignored. openpilot watches your lamp and blinks in step with it, so "
+                 "the rhythm is your car's own and needs no setting. This is only used if your "
+                 "car never reports its lamp, leaving nothing to follow -- then it falls back to "
+                 "this fixed spacing."),
       param="FordBlinkerBlinkPeriod",
       min_value=500,
       max_value=1500,

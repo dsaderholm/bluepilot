@@ -258,9 +258,18 @@ MEASURE_WINDOW_S = 12.0
 BLINK_GUARD_MIN_S = 0.15
 BLINK_GUARD_MAX_S = 0.90
 BLINK_AFTER_LAMP_OFF_S = 0.35   # until an on-time has actually been observed
-# If the lamp never reports at all -- no BodyInfo_3_FD1, a car without it -- fall back to the fixed
-# period rather than sending nothing. Open loop is worse than closed; it is much better than dead.
-BLINK_OPEN_LOOP_TIMEOUT_S = 1.6
+# WHAT THE SETTING IS FOR, NOW THAT THE LOOP IS CLOSED.
+#
+# Asked directly: "so I shouldn't need to adjust blink spacing if it can measure it?" Right -- with
+# the lamp reporting, the rhythm is the car's own and nothing needs configuring.
+#
+# It still has one job: if the lamp never reports -- no BodyInfo_3_FD1, a wiring fault, a car
+# without it -- there is nothing to close the loop on, and the choice is an open-loop period or no
+# blinker at all. So the setting becomes the OPEN-LOOP spacing, used only in that case.
+#
+# Left wired rather than deleted because it was found doing nothing: read from the param and never
+# used, with the fallback on a hardcoded constant. A control that does nothing is the same fault as
+# a readout nobody renders, and this session has already produced three of those.
 # SEVEN IS A BENCH-TEST NUMBER, NOT THE FEATURE'S NUMBER.
 #
 # It matches the one-touch he set in FORScan, which is the point: pressing this button and flicking
@@ -557,8 +566,14 @@ class BlinkerTestExt:
         dark_for = (self._bt_frame - self._bt_lamp_off_frame) * DT_CTRL if self._bt_lamp_off_frame else 0.0
         ready = (self._bt_lamp_off_frame and dark_for >= self._bt_guard_s
                  and self._bt_lamp_off_frame > self._bt_last_blink_cmd)
-        # ...unless the lamp never reports, in which case fall back to the fixed period.
-        if not ready and since_cmd < BLINK_OPEN_LOOP_TIMEOUT_S:
+        # ...unless the lamp never reports AT ALL, in which case fall back to the fixed period.
+        #
+        # Gated on never having seen it, not on a timeout. As a timeout it RACED the closed loop:
+        # a flasher slower than the configured spacing would have the fallback fire while the loop
+        # was still correctly waiting for the lamp, putting the command straight back into the
+        # refractory window the loop exists to avoid. A test caught it immediately, which is the
+        # only reason this is not another trip to the driveway.
+        if not ready and (self.bt_lamp_seen or since_cmd < self.bt_blink_period_s):
           return SIGNAL_NONE
         self._bt_last_blink_cmd = self._bt_frame
         self._bt_blinks_sent += 1

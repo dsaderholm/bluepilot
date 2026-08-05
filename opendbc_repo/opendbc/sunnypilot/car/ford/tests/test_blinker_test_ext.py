@@ -499,3 +499,17 @@ class TestMeasureMode:
     run(ext, int(4.0 / DT_CTRL), left_blinker=True)      # a long quiet gap
     self._flash(ext, cycles=3, period_s=0.9)
     assert abs(ext.bt_measured_ms - first) < 60, "a pause between taps polluted the mean"
+
+  def test_the_spacing_setting_governs_the_open_loop_fallback(self):
+    """It was read from the param and never used -- the fallback ran on a hardcoded constant. A
+    control that does nothing is the same fault as a readout nobody renders.
+
+    Only reachable with no lamp feedback, which is the only time an open loop happens at all.
+    """
+    ext = make_ext(SIGNAL_BLINK_LEFT)
+    ext.bt_params.get = lambda k, **kw: 600 if k == "FordBlinkerBlinkPeriod" else 7
+    out = run(ext, POLL_FRAMES + int(6.0 / DT_CTRL))       # lamp never lights
+    sends = [i for i, v in enumerate(out) if v == SIGNAL_LEFT]
+    gaps = [(b - a) * DT_CTRL for a, b in zip(sends, sends[1:])]
+    assert gaps, "no fallback blinks at all"
+    assert all(abs(g - 0.6) < 0.05 for g in gaps), f"setting ignored: gaps {gaps}"
