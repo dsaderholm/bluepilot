@@ -204,17 +204,6 @@ class BluePilotLayout(Widget):
     # BluePilot: stationary turn-signal actuation test. Requests a single 4 s pulse; the car
     # controller refuses unless stopped, cruise off and the driver's stalk idle, and it times out
     # and self-clears regardless. Result appears in the onroad debug readout above.
-    self._blinker_test_buttons = dual_button_item(
-      lambda: tr("Test Left Signal"),
-      lambda: tr("Test Right Signal"),
-      left_callback=lambda: self._request_blinker_test(1),
-      right_callback=lambda: self._request_blinker_test(2),
-      description=lambda: tr("Parked test: ask openpilot to operate the turn signal and report "
-                             "whether the car actually lit the lamp, and HOW MANY TIMES it "
-                             "flashed. Press once and let it finish -- pressing repeatedly is "
-                             "what makes it flash fast. Only runs while stopped with cruise off. "
-                             "Enable Show Passing Assist to see the result."),
-    )
 
     # The other way of asking, and the one the car may prefer. See TAP_COMMAND_S in
     # blinker_test_ext: a quarter second of command, then silence. If the body module runs its own
@@ -242,24 +231,12 @@ class BluePilotLayout(Widget):
       lambda: tr("One Frame Right"),
       left_callback=lambda: self._request_blinker_test(5),
       right_callback=lambda: self._request_blinker_test(6),
-      description=lambda: tr("Sends a single message and nothing else, then watches. This is the "
-                             "smallest request that can be made -- if your car flashes properly "
-                             "from it, the body module is triggering on the edge and everything "
-                             "longer has been re-triggering it. If nothing happens, that is an "
-                             "answer too."),
+      description=lambda: tr("Sends exactly one message. Your lamp flashes exactly once, which "
+                             "is how we learned it mirrors each message one for one rather than "
+                             "latching. Kept as the reference: if this ever stops giving one "
+                             "clean flash, something below it has changed."),
     )
 
-    self._blinker_tap_buttons = dual_button_item(
-      lambda: tr("Tap Left Signal"),
-      lambda: tr("Tap Right Signal"),
-      left_callback=lambda: self._request_blinker_test(3),
-      right_callback=lambda: self._request_blinker_test(4),
-      description=lambda: tr("The same test, but asking the way the stalk does: a brief nudge, "
-                             "then nothing. If your car flashes on by itself afterwards, that is "
-                             "the body module running the one-touch pattern you set in FORScan -- "
-                             "and it is the better way to signal, because the car owns the rate "
-                             "and the count instead of openpilot holding the switch."),
-    )
 
     # Hide onroad border toggle
     self._hide_onroad_border = toggle_item(
@@ -764,8 +741,6 @@ class BluePilotLayout(Widget):
         self._show_hands_free_ui,
         self._steer_angle_curvature,
         self._vbatt_pause_charging,
-        self._blinker_test_buttons,
-        self._blinker_tap_buttons,
         self._blinker_edge_buttons,
         self._blinker_blink_buttons,
       ]) +

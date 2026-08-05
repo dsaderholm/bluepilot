@@ -69,6 +69,15 @@ SIGNAL_TAP_LEFT, SIGNAL_TAP_RIGHT = 3, 4    # request values only; the COMMAND i
 SIGNAL_EDGE_LEFT, SIGNAL_EDGE_RIGHT = 5, 6    # ONE frame -- see EDGE_FRAMES
 SIGNAL_BLINK_LEFT, SIGNAL_BLINK_RIGHT = 7, 8  # one frame per blink -- see BLINK_PERIOD_S
 
+# THE HOLD AND THE TAP NO LONGER HAVE BUTTONS -- 2026-08-04.
+#
+# Both answered their question and both misbehave on this car, so leaving them one press away was
+# a trap rather than a diagnostic: the hold flashes the lamp at the send rate, and the tap strobes
+# the cornering lamps with it. Neither is something to hand a driver.
+#
+# The code and its tests stay. They are what established that the lamp mirrors frames one for one,
+# and restoring either button is one line if a future question needs them. Deleting the mechanism
+# would throw away the measurement that explains everything below.
 PULSE_DURATION_S = 4.0        # long enough for several flash cycles at ~1.5 Hz
 
 # --- WHAT THE CAR ACTUALLY SAID, 2026-08-04 ---
