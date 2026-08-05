@@ -4,6 +4,10 @@ from opendbc.car.common.conversions import Conversions as CV
 from openpilot.common.params import Params
 from opendbc.car.ford.fordcan import CanBus
 from opendbc.car.ford.values import DBC, CarControllerParams, FordFlags
+
+# BluePilot: below this the car is stopped whatever VehStop_D_Stat says. Well under any
+# real motion and above the quantisation of Veh_V_ActlBrk, which is reported in km/h.
+STANDSTILL_SPEED = 0.1  # m/s
 from opendbc.car.interfaces import CarStateBase
 from opendbc.sunnypilot.car.ford.mads import MadsCarState
 from opendbc.sunnypilot.car.ford.carstate_ext import CarStateExt
@@ -66,7 +70,25 @@ class CarState(CarStateBase, MadsCarState, CarStateExt):
                          cp.vl["Cluster_Info_3_FD1"]["DISPLAY_SPEED_OFFSET"]) * CV.KPH_TO_MS
 
     ret.yawRate = cp.vl["Yaw_Data_FD1"]["VehYaw_W_Actl"]
-    ret.standstill = cp.vl["DesiredTorqBrk"]["VehStop_D_Stat"] == 1
+    # BluePilot: OR'd with actual speed, because trusting VehStop_D_Stat alone breaks resuming ACC
+    # from a stop on this car.
+    #
+    # Reported: "openpilot unavailable pedal pressed" whenever RES is pressed at a complete stop
+    # with the brake held, where stock Ford ACC resumes happily. selfdrived raises pedalPressed on
+    # `brakePressed and (not prev_brakePressed or not standstill)` -- with the brake HELD the first
+    # term is false, so the event can only come from standstill reading false while the car is
+    # stopped. VehStop_D_Stat is a status enum with NoDataExists and Faulty values (2 and 3), and on
+    # this retrofit it evidently is not settling on 1.
+    #
+    # controlsd already refuses to trust it alone for lateral -- `abs(vEgo) <= 0.3 or standstill`.
+    # This applies the same reasoning at the source: a car reading zero road speed is stopped,
+    # whatever a status byte says. vEgoRaw rather than vEgo because it is the direct wheel-speed
+    # reading and does not lag through the Kalman filter.
+    #
+    # Every other consumer of standstill is improved or unaffected by it being true when the car
+    # genuinely is not moving: the speedTooLow guard, the steer-warning suppression and the driver
+    # monitor all want it true at a stop.
+    ret.standstill = cp.vl["DesiredTorqBrk"]["VehStop_D_Stat"] == 1 or ret.vEgoRaw < STANDSTILL_SPEED
 
     # gas pedal
     ret.gasPressed = cp.vl["EngVehicleSpThrottle"]["ApedPos_Pc_ActlArb"] / 100. > 1e-6
