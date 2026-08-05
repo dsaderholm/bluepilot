@@ -1,13 +1,13 @@
 # Settings to check before a test drive
 
-Nothing in this fork writes your settings any more. Two migrations used to -- one set the on-screen
-toggles to what a measurement drive wanted, the other cleared keys whose shipped default had
-changed -- and between them they wiped the BluePilot section. Both are gone, and
-`sunnypilot/system/params_migration.py` now carries a rule against adding another.
+**Defaults I change land on your device on their own.** That is what `_migrate_bp_redefaulted` is
+for, and each one is listed here so a silent change is still a readable one. What does NOT get
+touched is anything you set yourself -- the migration that used to reach into the passing-assist
+display toggles is gone for good.
 
-So this file is the replacement: what to set, and why. **A value marked "default" is already right
-on a device where you have never touched that control** -- it is listed so you can confirm rather
-than hunt.
+So this file is the record, not a chore list. **A value marked "default" needs nothing from you** --
+it is listed so you can confirm rather than hunt. Anything marked **SET THIS** is one I cannot apply
+for you, because you have already written a value to that key by hand.
 
 Everything below is on the device, in the settings menu. No SSH.
 
@@ -20,7 +20,7 @@ controls now sit with everything else that decides when to signal.
 
 | Control | Set to | Why |
 |---|---|---|
-| Blink Spacing If Unmeasurable | **760 ms** | Your own flasher, measured with Measure My Blinker. Shipped default is now 760 too, but your device already has a value written by hand -- set it. |
+| Blink Spacing If Unmeasurable | **760 ms** (applied) | Your own flasher, measured with Measure My Blinker. This one IS applied for you -- it is in `_BP_REDEFAULTED`, generation 2, so it lands whatever you had stored. |
 
 The buttons need the car **stopped, cruise off, and your own stalk idle**. They self-clear.
 
@@ -61,6 +61,13 @@ whether passing assist works.
   far line. Where the model has no lane out there it puts the far "lane line" on the road edge --
   the red line on the barrier wall -- and that now reads as `R shoulder 0.3ft` on the panel instead
   of as an invitation.
+- **The blinker buttons that worked "sometimes".** A permanent latch with a millisecond-wide
+  trigger. When a pulse ends the request param is cleared and read straight back, to prove the
+  store took the write. Press a button in that gap and the read-back returns *your* press instead
+  of the zero -- so the guard concludes the store is broken and refuses every request from then on.
+  Nothing else ever writes that key, so it never read zero again and the buttons stayed dead until
+  the ignition cycled. Pressing again could not help; pressing again was the cause. It now retries
+  the clear instead of latching, so at worst you lose the one press that landed in the seam.
 - **The loop.** "Would be changing right, would be done", over and over. A completed dry run left
   every reason to go still true, because nothing actuates and the car never moved. A finished run
   now stands down 30 s, and the panel says `WOULD BE DONE / holding 24s before looking again`

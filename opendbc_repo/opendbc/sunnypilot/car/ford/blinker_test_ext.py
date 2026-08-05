@@ -660,7 +660,27 @@ class BlinkerTestExt:
     # A request we can never clear must not start a second pulse. This is the runaway guard, and it
     # is the only thing between a failed param write and a lamp that pulses until the ignition
     # goes off.
+    #
+    # AND IT USED TO LATCH FOREVER, which is the whole of "working sometimes" and "I think a delay
+    # was preventing them from working". The race is small and its consequence was permanent:
+    #
+    #   pulse ends -> _disarm() writes 0 -> HE PRESSES A BUTTON HERE -> _disarm() reads back, sees
+    #   his 7 instead of our 0, concludes the store rejected the write, sets _bt_saw_clear False.
+    #
+    # After that the only line that could set it True again is the one above, which needs a poll to
+    # read SIGNAL_NONE -- and the param is now his 7, and nothing else ever writes this key. So it
+    # never reads zero, the guard never lifts, and every button is dead until the ignition cycles.
+    # Pressing again could not help; pressing again was the cause. The wait between tests he keeps
+    # describing is the window: press late and it works, press on the seam and it stops working.
+    #
+    # RETRY THE CLEAR instead of latching. If the store is healthy the very next poll proves it and
+    # the buttons come back; if it is genuinely broken the retry fails too and the guard still
+    # holds, so nothing about the safety property changes. The cost is that the press which landed
+    # in the seam is discarded rather than run -- one lost press instead of all of them, and the
+    # discard is the correct call anyway, because that press cannot be told apart from a stale
+    # value we failed to clear.
     if not self._bt_saw_clear:
+      self._disarm()
       return SIGNAL_NONE
 
     # Gates. Each records why so a refused request is visible rather than silently ignored.

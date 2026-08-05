@@ -103,6 +103,9 @@ DEFAULT_TARGETS = [
   # is why its logic lives in param_value_cache.py -- there was nothing to test before, and
   # nothing caught the read that wiped his angle tuning.
   "selfdrive/ui/bp/widgets/tests/",
+  # The changed-defaults migration. Back after being deleted for a day: "I always want you to
+  # write defaults, but not tweaks I've made to other settings."
+  "sunnypilot/system/tests/test_redefault_migration.py",
 ]
 
 

@@ -551,3 +551,47 @@ class TestMeasureMode:
     gaps = [(b - a) * DT_CTRL for a, b in zip(sends, sends[1:])]
     assert gaps, "no fallback blinks at all"
     assert all(abs(g - 0.6) < 0.05 for g in gaps), f"setting ignored: gaps {gaps}"
+
+
+class TestTheRunawayGuardCanLetGo:
+  """From the road, three times now: "occasionally pressing blink left or blink right is absolutely
+  nothing", "I still need to wait a little bit in between tests", "working sometimes, but I think a
+  delay was preventing them from working".
+
+  One race, and its consequence was permanent. _disarm writes 0 and reads it straight back to prove
+  the store took the write. If a button is pressed in between, the read-back returns HIS value
+  instead of our zero, the guard concludes the store is broken and latches. Nothing else ever
+  writes that key, so it never reads zero again, the guard never lifts, and every button is dead
+  until the ignition cycles.
+
+  These are about the latch, not the race -- the race is a millisecond wide and cannot be provoked
+  reliably. The poisoned state is set up directly, which is also exactly what it looks like after
+  the race.
+  """
+
+  def test_the_guard_clears_the_request_instead_of_sitting_on_it(self):
+    ext = make_ext(SIGNAL_BLINK_LEFT)
+    ext._bt_saw_clear = False           # what the race leaves behind
+    run(ext, POLL_FRAMES + 2)
+    assert ext.bt_params.value == SIGNAL_NONE, "a request it will not run must not be left standing"
+    assert ext._bt_saw_clear, "the store answered, so the guard had no business staying up"
+
+  def test_the_next_press_works(self):
+    """The one that matters. Before this, every press after the race did nothing, forever."""
+    ext = make_ext(SIGNAL_BLINK_LEFT)
+    ext._bt_saw_clear = False
+    run(ext, POLL_FRAMES + 2)           # the poisoned press is discarded here
+    ext.bt_params.value = SIGNAL_LEFT   # he presses again
+    out = run(ext, POLL_FRAMES + int(1.0 / DT_CTRL), lamp_left=False)
+    assert ext.bt_state == 1, "still refusing after the store proved it works"
+    assert any(v == SIGNAL_LEFT for v in out), "armed but never commanded the lamp"
+
+  def test_a_store_that_really_is_broken_still_holds_it_down(self):
+    """The guard's actual job. If the write genuinely cannot land, retrying must not become a way
+    in -- a request we can never clear must never start a pulse."""
+    ext = make_ext(SIGNAL_LEFT)
+    ext.bt_params.put = lambda *a, **kw: None     # writes vanish
+    ext._bt_saw_clear = False
+    out = run(ext, POLL_FRAMES + int(3.0 / DT_CTRL))
+    assert ext.bt_state == 0, "armed against a store that cannot be cleared"
+    assert all(v == SIGNAL_NONE for v in out), "commanded the lamp with no way to stop it"
