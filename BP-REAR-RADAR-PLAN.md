@@ -1578,6 +1578,13 @@ summarized out loud. Every layer below already exists and is tested, so nothing 
 -- but the routing has to happen in a canbox, and the canbox is a purchase. Corrected 2026-08-04
 after the owner pointed it out.
 
+**A CANBOX CANNOT REPLACE THE FEEDER MICROCONTROLLER.** Claimed otherwise on 2026-08-04 and it was
+wrong. A canbox ROUTES messages between buses; the Teensy's job is REDUCTION -- turning 64
+MRR_Detection frames into one small digest. Routing the radar's raw output onto a bus openpilot
+reads makes the bus-load problem worse, which is the whole reason §4 exists. Unless a given box is
+programmable enough to filter and summarize, and none is known to be, the two do different jobs and
+both are needed.
+
 ### It is already wired, end to end
 
 | Layer | State |
