@@ -27,6 +27,7 @@ from openpilot.sunnypilot.selfdrive.controls.lib.passing_maneuver import CHANGE_
 from openpilot.sunnypilot.selfdrive.controls.lib.passing_assist import (
   PassingAssistDetector, MIN_LANE_WIDTH_M, DEFAULT_MIN_SPEED_MPH, MAX_WIDENING_M,
   DEFAULT_PERSISTENCE_S, DRIVE_HISTORY_MAX, CHIME_MIN_INTERVAL_S,
+  TIMELINE_MAX,
 )
 
 Side = custom.LongitudinalPlanSP.PassingAssist.Side
@@ -2781,3 +2782,52 @@ class TestTheHistoryKnowsWhichBuildMadeIt:
     assert det.wanted_seconds > 30.0, "the panel gate would never open"
     assert share > 0.5, "no single term dominates, so there is nothing to report"
     assert term == det.GEO_PAINT and abs(value - 0.31) < 0.01
+
+
+class TestTheTimelineIsARing:
+  """His report is ordered -- "first it did this, then I waited, then it did that" -- and everything
+  stored until now was an aggregate, which throws the order away. So the drive keeps a list of state
+  changes, and a list on a device needs a bound that is actually enforced.
+
+  The soak test cannot prove this on its own: a thirty-minute drive produces fewer changes than the
+  cap, so removing the cap passes it. This drives long enough to overflow.
+  """
+
+  @staticmethod
+  def _churn(det, seconds):
+    """Force a state change roughly twice a second by making and unmaking a slow lead."""
+    for i in range(int(seconds / DT_MDL)):
+      slow = (i // int(0.5 / DT_MDL)) % 2 == 0
+      det.update(make_sm(v_lead=SLOW_LEAD_MS if slow else CRUISE_MS, status=slow), CRUISE_MS, True)
+
+  def test_it_stops_at_the_cap(self):
+    det = keep_right_det()
+    self._churn(det, TIMELINE_MAX * 1.5)
+    assert len(det._timeline) <= TIMELINE_MAX, (
+      f"grew to {len(det._timeline)}; a list on the device with no bound")
+
+  def test_it_keeps_the_NEWEST_entries(self):
+    """The tail is the interesting part -- a drive that overflowed was eventful, and what he is
+    describing is most likely the end of it. Dropping the newest would keep the boring start.
+    """
+    det = keep_right_det()
+    self._churn(det, TIMELINE_MAX * 1.5)
+    if len(det._timeline) < TIMELINE_MAX:
+      return
+    assert det._timeline[0][0] > 0.0, "kept the oldest entries and dropped the recent ones"
+    assert det._timeline[-1][0] == max(r[0] for r in det._timeline)
+
+  def test_a_steady_state_records_nothing(self):
+    """One entry per CHANGE. Per frame would be twenty a second and unreadable.
+
+    An EMPTY road, deliberately. With a slow lead in front the state is not steady at all -- the dry
+    run completes, stands down thirty seconds, and runs again, which is COMPLETE_STANDDOWN_S working
+    and shows up here as a handful of entries a minute. The first version of this test used that
+    scene and was simply wrong about what it was watching.
+    """
+    det = keep_right_det()
+    run(det, int(30.0 / DT_MDL), status=False)
+    n = len(det._timeline)
+    assert n > 0, "recorded nothing at all -- this would pass on a dead timeline"
+    run(det, int(60.0 / DT_MDL), status=False)
+    assert len(det._timeline) == n, "a state that never changed still wrote entries"

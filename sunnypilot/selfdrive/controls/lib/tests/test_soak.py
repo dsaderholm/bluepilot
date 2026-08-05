@@ -27,6 +27,7 @@ import random
 from cereal import custom
 from openpilot.common.realtime import DT_MDL
 from openpilot.sunnypilot.selfdrive.controls.lib.passing_assist import PassingAssistDetector
+from openpilot.sunnypilot.selfdrive.controls.lib.passing_assist import TIMELINE_MAX
 from openpilot.sunnypilot.selfdrive.controls.lib.tests.test_passing_assist import (
   CRUISE_MS, make_sm, track, keep_right_det,
 )
@@ -173,8 +174,19 @@ def test_nothing_grows_without_bound_over_a_long_drive():
   late = _containers(det)
 
   assert late, "found no containers at all -- this test would pass on anything"
+  # A container with a documented cap is checked against ITS cap rather than the blanket one, or
+  # this test degenerates into "no ring buffer may be larger than 64". Everything else converges
+  # because it is keyed by an enum; the timeline is a deliberate bounded ring and has to be allowed
+  # to reach its own size -- and still caught if it ever stops being bounded.
+  capped = {"_timeline": TIMELINE_MAX}
   for name, n in late.items():
-    assert n <= 64, f"{name} reached {n} entries; something accumulates per frame"
-  # Fifteen times the frames must not mean fifteen times the size.
+    limit = capped.get(name, 64)
+    assert n <= limit, f"{name} reached {n} entries against a cap of {limit}; something accumulates"
+  # Fifteen times the frames must not mean fifteen times the size -- for the containers that
+  # CONVERGE. A ring buffer does not converge, it fills: the timeline holds one entry per state
+  # change, so more driving legitimately means more entries until it reaches its cap, and the cap
+  # above is the check that matters for it.
   for name, n in late.items():
+    if name in capped:
+      continue
     assert n <= max(early.get(name, 0), 1) * 8, f"{name} grew {early.get(name, 0)} -> {n}"

@@ -57,6 +57,39 @@ def history() -> int:
   return 0
 
 
+SIDES = ("none", "left", "right")
+PHASES = ("idle", "confirming", "waiting", "signaling", "changing", "finishing", "aborting")
+
+
+def _name(names, i):
+  return names[i] if 0 <= i < len(names) else str(i)
+
+
+def timeline() -> int:
+  """The drive as a sequence, so a spoken report can be lined up against it.
+
+  The stored numbers are all aggregates, and his report is ordered -- "first it did this, then I
+  waited, then it did that". Without this, "it kept saying would be changing right over and over"
+  and the drive summary are two facts that cannot be put beside each other.
+  """
+  from cereal import custom
+  blocked_names = [e for e in custom.LongitudinalPlanSP.PassingAssist.Blocked.schema.enumerants]
+
+  d = _params().get("PassingAssistLastDrive") or {}
+  rows = d.get("timeline") or []
+  if not rows:
+    print("no timeline stored -- the drive has to have wanted a pass at least once")
+    return 0
+  print(f"{len(rows)} state changes over {d.get('elapsed', 0):.0f}s")
+  print()
+  print(f"{'time':>8}  {'decided':<7} {'blocked by':<18} {'pass':<11} keep-right")
+  for t, sug, blk, mv, kr in rows:
+    mins, secs = divmod(float(t), 60)
+    print(f"{int(mins):>5}:{secs:04.1f}  {_name(SIDES, sug):<7} "
+          f"{_name(blocked_names, blk):<18} {_name(PHASES, mv):<11} {_name(PHASES, kr)}")
+  return 0
+
+
 def live(seconds: float) -> int:
   import cereal.messaging as messaging
 
@@ -115,8 +148,12 @@ def main() -> int:
                                formatter_class=argparse.RawDescriptionHelpFormatter)
   ap.add_argument("--live", type=float, metavar="SECONDS", default=None,
                   help="watch the live decision instead of the stored drives")
+  ap.add_argument("--timeline", action="store_true",
+                  help="the last drive as an ordered list of state changes")
   args = ap.parse_args()
-  return live(args.live) if args.live else history()
+  if args.live:
+    return live(args.live)
+  return timeline() if args.timeline else history()
 
 
 if __name__ == "__main__":

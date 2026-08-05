@@ -276,6 +276,20 @@ LAST_DRIVE_WRITE_S = 30
 # several drives to answer -- whether the agreement ratio is settling, whether the oncoming veto is
 # rare or constant, what a genuinely quiet lane looks like.
 DRIVE_HISTORY_MAX = 20
+
+# --- a timeline, so a spoken report can be lined up with what actually happened ---
+#
+# "I will still dictate into my phone what is happening while I'm driving and what it did wrong and
+# give that to you after each drive." That report is the best data this project gets, and it is
+# ORDERED -- "first it did this, then I waited, then it did that". Everything stored until now was
+# an aggregate, which throws the order away, so a narrative and the numbers could not be put side
+# by side. "It kept saying would be changing right over and over" and "14 keep-right sequences
+# between 12:03 and 12:06" are the same fact, and only one of them can be acted on.
+#
+# One entry per CHANGE, not per frame -- a steady state produces nothing at all. 300 covers a long
+# commute with room to spare; a drive that overflows it was eventful enough that the tail is the
+# interesting part, so the oldest go.
+TIMELINE_MAX = 300
 # In our lane, not an adjacent-lane return. Measured from the MODEL PATH, not from the car's
 # straight-ahead axis, and computed here rather than read off radarState.
 #
@@ -534,6 +548,9 @@ class PassingAssistDetector:
     # Seconds per blocked reason, counted only while a pass was actually wanted. See wantedSeconds.
     self._block_seconds: dict[int, float] = {}
     self.wanted_seconds = 0.0
+    self.elapsed_s = 0.0
+    self._timeline: list = []
+    self._timeline_prev: tuple = ()
     self._last_drive_write_s = 0.0
     self._last_oncoming = (0.0, 0.0)
     # See oncomingSeenSeconds -- how much of the oncoming veto is a live sighting and how much is
@@ -1126,6 +1143,22 @@ class PassingAssistDetector:
     except Exception:  # noqa: BLE001 - a param failure must never reach the planner
       pass
 
+  def _record_timeline(self) -> None:
+    """Append one entry whenever the visible state changes. See TIMELINE_MAX.
+
+    The tuple is deliberately the four things a driver would narrate: what it decided, what stopped
+    it, and what each of the two machines was doing. A change in any of them is an event he might
+    mention; a change in none of them is not.
+    """
+    now = (int(self.suggestion), int(self.blocked_by),
+           int(self.maneuver.phase), int(self.keep_right_maneuver.phase))
+    if now == self._timeline_prev:
+      return
+    self._timeline_prev = now
+    self._timeline.append([round(self.elapsed_s, 1), *now])
+    if len(self._timeline) > TIMELINE_MAX:
+      del self._timeline[0]
+
   def _save_drive_summary(self) -> None:
     """Persist what this drive measured. See LAST_DRIVE_WRITE_S.
 
@@ -1140,6 +1173,10 @@ class PassingAssistDetector:
     top_key, top_share = self.top_blocked
     try:
       self.params.put("PassingAssistLastDrive", {
+        # See TIMELINE_MAX. Written with the rest rather than on its own schedule so a drive that
+        # ends with a yanked ignition keeps whatever the last periodic write had.
+        "timeline": list(self._timeline),
+        "elapsed": round(self.elapsed_s, 1),
         "wantedSeconds": round(self.wanted_seconds, 1),
         "topBlockedBy": int(top_key),
         "topBlockedShare": round(top_share, 3),
@@ -1494,6 +1531,13 @@ class PassingAssistDetector:
     # means "still deciding" rather than "a gate stopped it"; counting those frames would have put
     # two seconds of ordinary confirmation at the top of every drive's list and buried the real
     # answer under it.
+    # Clock and timeline first, and NOT gated on a pass being wanted. The events he narrates
+    # include the ones that happened when nothing was warranted -- "it kept saying would be
+    # changing right" on an empty road is exactly such an event, and gating this the way
+    # wanted_seconds is gated would have thrown that away.
+    self.elapsed_s += DT_MDL
+    self._record_timeline()
+
     if self.lead_is_slow and self.approach_seconds >= self.persistence_s:
       self.wanted_seconds += DT_MDL
       key = int(self.blocked_by)
