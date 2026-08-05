@@ -208,6 +208,16 @@ MIN_EDGE_BEYOND_LINE_M = 0.8
 MAX_ROAD_EDGE_STD = 0.5
 
 
+# Why a blinker run that was already going got stopped. Every one of these is the test working --
+# none is a fault of the car or of the signal -- which is exactly why they must not be reported as
+# a flash count and left to look like one.
+_BT_STOPPED = {
+  'notStationary': "STOPPED - CAR MOVED",
+  'cruiseEngaged': "STOPPED - CRUISE ON",
+  'driverSignalling': "STOPPED - YOUR STALK",
+}
+
+
 def _suggested_deficit(missed_mph: float, active_mph: float) -> float | None:
   """What the speed bar would have had to be to accept the passes he made and it refused.
 
@@ -998,7 +1008,17 @@ class HudRendererBP(HudRendererSP):
       caveats.append(f"{self._pa_count} this drive")
     if self._pa_sub_detail:
       caveats.insert(0, self._pa_sub_detail)
-    self._pa_sub = "  -  ".join(caveats)
+    # FITTED, like the drive summary. This joined everything unconditionally, and the worst case
+    # measures 1355px against a 1008px panel -- so it ran off BOTH edges, and the two things at the
+    # front of the list, the geometry numbers, went off the left one first.
+    #
+    # Which is the whole of "it still just says no lane to move into all the time" plus "at some
+    # point the entire UI went off the screen". The reason was computed correctly, published
+    # correctly, and drawn 170px past the edge of the display on either side.
+    #
+    # Priority order is already right: the detail is inserted at the front, so what gets dropped
+    # is "no sign data" and friends rather than the number that explains the refusal.
+    self._pa_sub = self._fit_sub(caveats)
 
   def _render(self, rect: rl.Rectangle) -> None:
     # BluePilot: Draw header gradient at full content width (not offset by confidence ball)
@@ -1326,6 +1346,19 @@ class HudRendererBP(HudRendererSP):
         self._pa_main = "YOUR BLINKER"
         self._pa_sub = f"{bt.flashes} flashes, {bt.measuredPeriodMs} ms apart"
         self._pa_color = rl.Color(150, 205, 235, 255)
+        self._pa_alert = True
+        return True
+      # A RUN THAT WAS CUT SHORT SAYS SO, before anything else. Reported six times in one drive as
+      # "it only did two flashes", "only six", "only three" -- short, never gapped, varying with
+      # how long he waited. That is a run being stopped, not a car dropping blinks, and the most
+      # likely stopper is the first one here: the gate is 0.3 m/s, which is below a creep, so
+      # testing at a light ends the run the moment the car rolls. Correct behaviour, reported as
+      # "SIGNAL WORKS, 2 flashes", which reads as the car half-ignoring us.
+      reason = str(bt.blockedReason)
+      if reason != 'none' and bt.blinksWanted:
+        self._pa_main = _BT_STOPPED.get(reason, "STOPPED")
+        self._pa_sub = f"{bt.blinksSent} of {bt.blinksWanted} blinks - press again when stopped"
+        self._pa_color = rl.Color(255, 200, 60, 255)
         self._pa_alert = True
         return True
       # Held after the pulse so the answer is readable without watching all four seconds.

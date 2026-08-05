@@ -93,3 +93,20 @@ def test_the_blinker_test_can_never_own_the_panel_in_motion():
   before = body[:first_true]
   assert "vEgo" in before, (
     "the blinker test can own the panel while the car is moving -- it must check speed first")
+
+
+def test_every_multi_item_sub_line_is_width_fitted():
+    """The panel draws its sub-line from its own measured width -- it does not wrap and does not
+    shrink, so anything past MAX_SUB_WIDTH runs off BOTH edges.
+
+    One assignment joined its items unconditionally. Its worst case measures 1355px against a
+    1008px panel, and the two items at the front of that list are the geometry numbers that explain
+    a refusal -- so the single most useful thing on the screen was the first thing off it. Reported
+    as "it still just says no lane to move into all the time" and "at some point the entire UI went
+    off the screen".
+
+    Read from source: hud_renderer_bp imports pyray, which does not load offline everywhere.
+    """
+    bad = [ln.strip() for ln in SRC.splitlines()
+           if "self._pa_sub = " in ln and ".join(" in ln and "_fit_sub" not in ln]
+    assert not bad, "sub-line built by joining a list without fitting it to the panel:\n  " + "\n  ".join(bad)

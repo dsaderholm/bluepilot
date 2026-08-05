@@ -390,6 +390,8 @@ class CarStateExt:
     blinker_test.blockedReason = int(getattr(self, 'bt_blocked', 0))
     blinker_test.flashes = min(int(getattr(self, 'bt_flashes', 0)), 255)
     blinker_test.flashesAfter = min(int(getattr(self, 'bt_flashes_after', 0)), 255)
+    blinker_test.blinksSent = min(int(getattr(self, 'bt_blinks_sent', 0)), 255)
+    blinker_test.blinksWanted = min(int(getattr(self, 'bt_blinks_wanted', 0)), 255)
     blinker_test.measuredPeriodMs = min(int(getattr(self, 'bt_measured_ms', 0)), 65535)
 
     brake_light_status.dataAvailable = False

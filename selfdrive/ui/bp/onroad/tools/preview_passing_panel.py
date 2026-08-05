@@ -78,6 +78,11 @@ SCENES = [
    "No lane to move into", "L ok     R shoulder 0.3ft", 0.0, False, GREY),
   ("refused: the paint beyond our lane is not visible enough",
    "No lane to move into", "L paint 0.31     R narrow 8.2ft", 0.0, False, GREY),
+  # The same worst case AFTER _fit_sub. Unfitted it measures 1355px against a 1008px panel and runs
+  # off both edges -- taking the two geometry numbers, which sit at the front, off the left one.
+  ("the refusal line, with the caveats it has room for",
+   "No lane to move into",
+   "L paint 0.31     R shoulder 0.3ft  -  no rear data  -  3 this drive", 0.0, False, GREY),
   ("keep right",
    "MOVE RIGHT  >>>", "no rear data", 0.0, True, BLUE),
   ("held: you just took an exit yourself",

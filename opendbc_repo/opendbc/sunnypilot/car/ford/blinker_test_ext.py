@@ -568,6 +568,25 @@ class BlinkerTestExt:
 
       driver_stalk = (CS.out.leftBlinker or CS.out.rightBlinker) and not self.bt_measuring
       if self.bt_frames_left <= 0 or CS.out.vEgo > STANDSTILL_V_EGO or          driver_stalk or CS.out.cruiseState.enabled:
+        # SAY WHY IT STOPPED. Every one of these ends a run that was already under way, and until
+        # now all four ended it silently -- the panel then showed the flash count and "SIGNAL
+        # WORKS", which reads as a car that half-ignored us.
+        #
+        # From the road: "I tapped blink right and it only did two flashes... waited a bit, did a
+        # blink right and it only did six... waited more, three. It was only ever short a few
+        # blinks. It never had a gap." Short, never gapped, and varying with how long he waited is
+        # the exact signature of a run being CUT OFF rather than dropping blinks.
+        #
+        # And the cause is almost certainly the first branch. STANDSTILL_V_EGO is 0.3 m/s, which is
+        # 0.7 mph -- below a creep. Testing at a traffic light, any roll at all ends the run
+        # wherever it had got to. The gate is right; operating a lamp other drivers read while the
+        # car is moving is not something to soften. Being silent about it was the bug.
+        if CS.out.vEgo > STANDSTILL_V_EGO:
+          self.bt_blocked = 1
+        elif CS.out.cruiseState.enabled:
+          self.bt_blocked = 2
+        elif driver_stalk:
+          self.bt_blocked = 3
         self.bt_state = 2
         self.bt_commanded = SIGNAL_NONE
         self.bt_frames_left = 0
@@ -765,6 +784,10 @@ class BlinkerTestExt:
     CS.bt_seconds_remaining = self.bt_seconds_remaining
     CS.bt_lamp_seen = self.bt_lamp_seen
     CS.bt_blocked = self.bt_blocked
+    # How far the run actually got. See blinksSent -- a truncated count on its own cannot be told
+    # apart from a car that ignored half the request.
+    CS.bt_blinks_sent = self._bt_blinks_sent if self.bt_blinking else 0
+    CS.bt_blinks_wanted = BLINK_COUNT if self.bt_blinking else 0
     CS.bt_flashes = self.bt_flashes
     CS.bt_flashes_after = self.bt_flashes_after
     CS.bt_measured_ms = self.bt_measured_ms

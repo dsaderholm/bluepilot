@@ -1259,6 +1259,13 @@ struct CarStateBP @0xb057204d7deadf3f {
     # car's actual rate rather than the FMVSS band, which is a factor of two wide.
     measuredPeriodMs @9 :UInt16;
 
+    # BluePilot: blinks COMMANDED, and how many were asked for. A run cut short reports a low
+    # flash count and nothing else, which is indistinguishable from a car that ignored us -- and
+    # the most common reason it gets cut short is the car creeping at a light, which is the gate
+    # working correctly. "It only did two flashes" was that, six times in one drive.
+    blinksSent @10 :UInt8;
+    blinksWanted @11 :UInt8;
+
     enum State {
       idle @0;
       pulsing @1;
