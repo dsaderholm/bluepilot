@@ -95,18 +95,31 @@ MAX_WIDENING_M = 2.5
 # Nothing here actuates, so the cost of being wrong in this direction is a suggestion that can be
 # looked at and judged. The cost of being wrong the other way is a feature that never speaks, which
 # is what a drive already went to finding out.
-MIN_ADJACENT_LINE_PROB = 0.3
+MIN_ADJACENT_LINE_PROB = 0.5
 # Drivable width between ego's lane line and the road edge that counts as a real lane. A US lane
 # is 3.7 m; a wide shoulder is under 3. Sitting between them is deliberate -- too low and every
 # breakdown lane reads as passable.
-MIN_LANE_WIDTH_M = 3.0
+# 3.5, RAISED from 3.0, and 3.0 is what suggested moving into a shoulder.
+#
+# Reported: "it said it would be changing right even though I was in the furthest right lane, which
+# means it would have run me right into the shoulder."
+#
+# The old comment claimed "a US lane is 3.7 m; a wide shoulder is under 3." The second half is
+# simply wrong for the roads this drives on: AASHTO gives interstate right shoulders as 10 ft, and
+# 12 ft where truck volumes are high -- 3.05 to 3.66 m. So a standard shoulder cleared a 3.0 m bar
+# comfortably and read as a lane.
+#
+# 3.5 rejects a 10 ft shoulder and accepts a 12 ft lane, which is the only gap there is. It does
+# NOT separate a 12 ft shoulder from a 12 ft lane, because nothing about width can -- that case is
+# what the radar evidence below is for, and why width alone must never be the whole test.
+MIN_LANE_WIDTH_M = 3.5
 # Road edge measurements get unreliable at distance and in poor conditions. modelV2 publishes a
 # per-edge std; above this the edge gap is not trusted and the side is reported unavailable.
 # 0.75, up from 0.5. The rest of this codebase treats roadEdgeStds on a 0..1 scale where 1 is
 # useless -- model_renderer_bp draws an edge at `clip(1.0 - std, 0, 1)` opacity. So the old 0.5
 # rejected any edge the UI itself would still draw at half strength, which on a real road is most
 # of them. This keeps the genuinely unusable ones out without discarding an ordinary highway.
-MAX_ROAD_EDGE_STD = 0.75
+MAX_ROAD_EDGE_STD = 0.5
 
 # --- lead gates ---
 # Below this, passing is not the maneuver being considered.

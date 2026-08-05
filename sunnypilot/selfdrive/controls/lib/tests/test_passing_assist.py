@@ -2470,19 +2470,23 @@ class TestTheGeometryGateActuallyOpens:
   that was wrong.
   """
 
-  def test_an_outer_line_the_model_is_unsure_about_still_counts(self):
-    """0.4 is below the old 0.6 and above the new 0.3. ldw calls a lane visible at 0.5 -- but for
-    the EGO lane's own lines, which the model predicts far better than these outer ones. Asking
-    more of the worse-predicted lines is what kept this shut."""
-    det = run(PassingAssistDetector(), STUCK_FRAMES, probs=(0.4, 0.99, 0.99, 0.2))
-    assert det.left_geometry_ok
-    assert det.suggestion == Side.left
+  def test_a_standard_shoulder_is_not_a_lane(self):
+    """The one that mattered, from the road: "it said it would be changing right even though I was
+    in the furthest right lane, which means it would have run me right into the shoulder."
 
-  def test_a_road_edge_the_ui_would_still_draw_counts(self):
-    """0.6 std: rejected before, accepted now. The rest of the codebase draws an edge at
-    clip(1 - std) opacity, so the old 0.5 threw away edges openpilot itself still believes in."""
-    det = run(PassingAssistDetector(), STUCK_FRAMES, edge_stds=(0.6, 0.6))
-    assert det.left_geometry_ok
+    AASHTO gives interstate right shoulders as 10 ft, and 12 ft where truck volumes are high --
+    3.05 to 3.66 m. The old 3.0 m bar was written believing "a wide shoulder is under 3", which is
+    simply not true of the roads this drives on, so a standard shoulder read as a lane.
+    """
+    det = run(PassingAssistDetector(), STUCK_FRAMES,
+              probs=(0.1, 0.99, 0.99, 0.9), edges=(-2.2, 1.85 + 3.05))   # 10 ft shoulder
+    assert not det.right_geometry_ok, "a 10 ft shoulder counted as a lane to move into"
+
+  def test_but_a_real_lane_beside_it_still_is(self):
+    """3.5 has to leave a 12 ft lane through, or the gate is shut for a different reason."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES,
+              probs=(0.1, 0.99, 0.99, 0.9), edges=(-2.2, 1.85 + 3.66))   # 12 ft lane
+    assert det.right_geometry_ok
 
   def test_a_genuinely_useless_edge_is_still_refused(self):
     det = run(PassingAssistDetector(), STUCK_FRAMES, edge_stds=(0.9, 0.9))

@@ -67,3 +67,29 @@ def test_the_blinker_test_owns_the_panel_outright():
   for a result from. Nothing here may talk over it."""
   a, b = _order("_render_blinker_test", "_draw_drive_summary")
   assert a < b
+
+
+def test_the_blinker_test_can_never_own_the_panel_in_motion():
+  """From a drive: "all the feedback went away on the screen and it just kept beeping."
+
+  _render_blinker_test returns True for any non-idle blinker-test state and the caller returns
+  immediately, so it silently owns the whole panel. That was harmless only for as long as nothing
+  published the state -- it read 0 forever and the branch never fired. Wiring the verdict through
+  to the message made it live, and a state left non-idle then hid every passing-assist readout for
+  the rest of the drive while the planner carried on chiming into a blank screen.
+
+  Removing the guard broke no test when this was written, which is how it reached the car. The
+  check is on the CAR, not the state: a stuck, stale or unpublished value must not be able to cost
+  the driver their instruments.
+  """
+  tree = ast.parse(SRC)
+  fn = next((n for n in ast.walk(tree)
+             if isinstance(n, ast.FunctionDef) and n.name == "_render_blinker_test"), None)
+  assert fn is not None, "_render_blinker_test not found -- this test would pass on anything"
+
+  body = ast.get_source_segment(SRC, fn) or ""
+  first_true = body.find("return True")
+  assert first_true > 0, "no `return True` -- the method no longer owns the panel; delete this test"
+  before = body[:first_true]
+  assert "vEgo" in before, (
+    "the blinker test can own the panel while the car is moving -- it must check speed first")

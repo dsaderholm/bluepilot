@@ -201,9 +201,9 @@ AHEAD_BOX_GAP = 10
 #
 # test_geometry_thresholds_mirrored keeps them honest: it fails if either copy moves without the
 # other, which is the only real objection to duplicating them.
-MIN_ADJACENT_LINE_PROB = 0.3
-MIN_LANE_WIDTH_M = 3.0
-MAX_ROAD_EDGE_STD = 0.75
+MIN_ADJACENT_LINE_PROB = 0.5
+MIN_LANE_WIDTH_M = 3.5
+MAX_ROAD_EDGE_STD = 0.5
 
 
 def _lane_why(tag: str, prob: float, gap: float, std: float, metric: bool) -> str:
@@ -1215,7 +1215,26 @@ class HudRendererBP(HudRendererSP):
 
   def _render_blinker_test(self, sm) -> bool:
     """Show blinker-test state while a pulse runs, or its verdict just after. Returns True if it
-    owns the line this frame."""
+    owns the line this frame.
+
+    STANDSTILL ONLY, and that guard is not belt-and-braces -- its absence blanked the whole panel
+    on a drive. Reported: "all the feedback went away on the screen and it just kept beeping."
+
+    This function returns True for any non-idle blinker-test state and the caller returns
+    immediately, so it silently owns the line. That was harmless for as long as nothing published
+    the state -- it read 0 forever and this never fired. Wiring the verdict through to the message
+    made the path live, and a state left non-idle then hid every passing-assist readout for the
+    rest of the drive while the planner carried on chiming into a blank screen.
+
+    The test itself refuses to run above STANDSTILL_V_EGO, so there is no case where this should
+    own the panel in motion. Checking the car rather than the state means a stuck, stale or
+    unpublished value cannot cost the driver their instruments.
+    """
+    try:
+      if float(sm['carState'].vEgo) > 0.5:
+        return False
+    except (KeyError, AttributeError, TypeError):
+      pass
     try:
       bt = sm['carStateBP'].blinkerTest
     except (KeyError, AttributeError):
