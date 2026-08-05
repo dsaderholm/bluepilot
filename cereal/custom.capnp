@@ -800,6 +800,11 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     # ...and whether that stand-down follows a run that COMPLETED rather than one that backed
     # out. Same clock, opposite news.
     maneuverStandDownComplete @88 :Bool;
+
+    # The deficit threshold the drive actually ran with, mph. Published so the summary can compare
+    # it against missedDeficitMph rather than the panel keeping its own copy of a setting -- that
+    # copy is how a readout ends up explaining a gate using a number the gate stopped using.
+    minDeficitActive @89 :Float32;
     oncomingSeenSeconds @80 :Float32;        # refused while actually watching a vehicle
     oncomingRememberedSeconds @81 :Float32;  # refused on memory alone, nothing in view
 

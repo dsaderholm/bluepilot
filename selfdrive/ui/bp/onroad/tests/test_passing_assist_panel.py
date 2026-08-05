@@ -102,3 +102,52 @@ class TestRearApproachOverCapnp:
     pa = msg.as_reader().passingAssist
     assert str(pa.rearLeft.source) == 'radar'
     assert str(pa.rearRight.source) == 'blis'
+
+
+def _load_fn(name):
+  """Pull one pure function out of hud_renderer_bp without importing it.
+
+  The renderer needs pyray, which does not load offline on every platform, so every guard in this
+  folder reads the source instead. This compiles a single top-level def and nothing else -- the
+  function under test has no imports of its own, which is what makes it safe to lift.
+  """
+  tree = ast.parse(HUD_SRC.read_text(encoding="utf-8"))
+  fn = next((n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == name), None)
+  assert fn is not None, f"{name} not found -- this test would pass on anything"
+  ns: dict = {}
+  exec(compile(ast.Module(body=[fn], type_ignores=[]), "<hud>", "exec"), ns)  # noqa: S102
+  return ns[name]
+
+
+_suggested_deficit = _load_fn("_suggested_deficit")
+
+
+class TestTheSettingSuggestion:
+  """The drive already measured exactly how wrong the speed bar was -- these are passes HE made
+  that the bar alone refused -- and then stopped one step short of saying what to set it to.
+
+  Every competitor that adapts to its driver does it silently: Hyundai's HDA2 machine-learns ACC
+  habits, Tesla folds it into a speed profile, and neither tells you what it changed. This says the
+  number and writes nothing, which is the same rule params_migration.py runs on.
+  """
+
+  def test_it_names_a_lower_bar_when_real_passes_were_refused(self):
+    assert _suggested_deficit(2.4, 4.0) == 2.0
+
+  def test_it_rounds_DOWN_not_to_nearest(self):
+    """2.6 rounded to nearest is 3, which still refuses the 2.6 mph passes it was derived from --
+    a recommendation that does not fix the thing it was measured from is worse than silence."""
+    assert _suggested_deficit(2.6, 4.0) == 2.0
+
+  def test_it_says_nothing_when_the_bar_is_already_low_enough(self):
+    assert _suggested_deficit(3.0, 3.0) is None
+    assert _suggested_deficit(4.5, 4.0) is None
+
+  def test_it_does_not_recommend_removing_the_threshold(self):
+    """Rounding 0.6 down gives 0, and a bar of zero is not a threshold -- it is every car ahead
+    counting as slower, which is a different feature and not one anybody asked for."""
+    assert _suggested_deficit(0.6, 4.0) is None
+
+  def test_nothing_measured_means_nothing_suggested(self):
+    assert _suggested_deficit(0.0, 4.0) is None
+    assert _suggested_deficit(2.0, 0.0) is None

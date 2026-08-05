@@ -1985,6 +1985,7 @@ class PassingAssistDetector:
     passingAssist.steeringWouldBeActive = live.steering_active
     passingAssist.keepRightAborts = min(pa.keep_right_maneuver.aborts, 65535)
     passingAssist.minApproachActive = float(pa.min_approach_m)
+    passingAssist.minDeficitActive = float(pa.min_deficit_ms * CV.MS_TO_MPH)
     passingAssist.driverPasses = min(pa.driver_passes, 65535)
     passingAssist.driverPassesAgreed = min(pa.driver_passes_agreed, 65535)
     passingAssist.driverPassLeadSeconds = float(pa.driver_pass_lead_s)

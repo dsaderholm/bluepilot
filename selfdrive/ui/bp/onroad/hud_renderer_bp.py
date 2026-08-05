@@ -208,6 +208,22 @@ MIN_EDGE_BEYOND_LINE_M = 0.8
 MAX_ROAD_EDGE_STD = 0.5
 
 
+def _suggested_deficit(missed_mph: float, active_mph: float) -> float | None:
+  """What the speed bar would have had to be to accept the passes he made and it refused.
+
+  Returns None when there is nothing to say -- a bar already at or below what was missed, or a
+  suggestion that would land at zero, which is not a threshold but the absence of one.
+
+  ROUNDED DOWN, and to a whole mph because that is what the setting takes. Rounding to nearest
+  would recommend a bar that still refuses the very passes it was derived from, which is the one
+  outcome that would make this line worse than silence.
+  """
+  if missed_mph <= 0.0 or active_mph <= 0.0 or missed_mph >= active_mph:
+    return None
+  suggested = float(int(missed_mph))
+  return suggested if suggested >= 1.0 else None
+
+
 def _lane_why(tag: str, prob: float, width: float, beyond: float, std: float, metric: bool) -> str:
   """Which of the geometry terms refused this side, and by how much.
 
@@ -556,7 +572,26 @@ class HudRendererBP(HudRendererSP):
           if name == "nothingSlower" and pa.missedDeficitMph > 0:
             # Names the number to change rather than the symptom. "Missed on nothing slower" is a
             # complaint; "they were 2.4 mph slower" is an instruction.
-            lines.append(f"missed cars {pa.missedDeficitMph:.1f} mph slower")
+            #
+            # ...and then TAKE THE LAST STEP, which this stopped one short of. Every competitor
+            # that adapts to a driver does it by quietly retuning itself -- Hyundai's HDA2
+            # machine-learns ACC habits, Tesla folds it into a speed profile. Neither tells you
+            # what it changed. Here the measurement is already exact: these are passes HE made that
+            # the speed bar alone refused, so the bar is provably too high by the difference.
+            #
+            # Says the number, does not write it. A default I picked is a suggestion; a setting he
+            # picked is data -- see params_migration.py. The one thing it must never become is a
+            # system that retunes itself and mentions it nowhere.
+            #
+            # ONE ITEM, not two. _fit_sub drops whole items to make the line fit, and a
+            # recommendation that can be dropped independently of the measurement it came from
+            # would appear as a bare instruction with nothing behind it -- or, more often, not at
+            # all, since it sits behind two other items in priority order.
+            miss = f"missed cars {pa.missedDeficitMph:.1f} mph slower"
+            suggest = _suggested_deficit(pa.missedDeficitMph, pa.minDeficitActive)
+            if suggest is not None:
+              miss += f", try {suggest:.0f}"
+            lines.append(miss)
           elif name:
             lines.append(f"missed on {_BLOCKED_TEXT.get(name, name).lower()}")
 

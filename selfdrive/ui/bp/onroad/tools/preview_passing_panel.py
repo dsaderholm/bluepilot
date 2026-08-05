@@ -96,6 +96,10 @@ SCENES = [
    "SIGNAL WORKS", "6 flashes", 0.0, True, GREEN),
   ("blinker test: the tap, where the car ran its own pattern",
    "SIGNAL WORKS", "9 flashes, 8 on its own", 0.0, True, GREEN),
+  # The step this used to stop one short of: the drive measures how wrong the bar was, and now
+  # says what to set it to. Nothing writes it.
+  ("stopped: the drive measured a better threshold than the one it ran with",
+   "THIS DRIVE", "9 passes, 5 agreed  -  missed cars 2.4 mph slower, try 2", 0.0, False, INFO),
   ("stopped: a drive that wanted a pass and never got one",
    "THIS DRIVE", "suggested 0, taken 0  -  mostly: two-way road 78%", 0.0, False, INFO),
   ("stopped: who overtook you, and the longest quiet stretch",
