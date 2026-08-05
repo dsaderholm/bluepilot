@@ -209,6 +209,24 @@ BLINK_COUNT = 7
 # what made it misleading here.
 #
 # One frame, one proper blink. Nothing to hold.
+#
+# THE CORNERING LAMP IS NOT GOING TO MATCH, AND SHOULD NOT BE CHASED. He has the FORScan feature
+# that lights the fog lamp on the signalling side, and under a commanded blink it comes on only for
+# a fraction of a second.
+#
+# The two lamps are driven differently and the difference is the whole reason this works at all.
+# The main lamp LATCHES from one command and the body module runs its own blink timing. The
+# cornering lamp appears to follow the switch LEVEL, so it is lit only for the milliseconds between
+# our frame and the gateway's next "off".
+#
+# Which puts them in direct conflict: holding the level long enough to keep the fog lamp lit is
+# precisely what makes the main blinker strobe -- the four second hold, already observed as "really
+# fast flashing". There is no send pattern that satisfies both, because one wants an edge and the
+# other wants a level.
+#
+# So it stays. The main signal is what other drivers read, and a cornering lamp is a convenience
+# that is usually speed-gated anyway -- UNVERIFIED here, and checkable from the car in one signal at
+# speed rather than by anyone reasoning about it.
 
 # How long the verdict stays on screen before the machine re-arms itself.
 #
