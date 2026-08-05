@@ -143,7 +143,6 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"AutoLaneChangeCancelWindow", {PERSISTENT | BACKUP, INT, "4"}},
     {"AutoLaneChangeRevert", {PERSISTENT | BACKUP, BOOL, "1"}},
     {"AutoLaneChangeOneTouchTime", {PERSISTENT | BACKUP, FLOAT, "5.5"}},
-    {"BPDefaultsGeneration", {PERSISTENT | BACKUP, STRING}},
     // What the driver's own lane changes measured: how long one really takes, and how often
     // they abandon a signal. Both replace guesses inside passing assist.
     {"LaneChangeStats", {PERSISTENT | BACKUP, JSON}},

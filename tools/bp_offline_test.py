@@ -105,7 +105,6 @@ DEFAULT_TARGETS = [
   "selfdrive/ui/bp/widgets/tests/",
   # The changed-defaults migration. Back after being deleted for a day: "I always want you to
   # write defaults, but not tweaks I've made to other settings."
-  "sunnypilot/system/tests/test_redefault_migration.py",
 ]
 
 
