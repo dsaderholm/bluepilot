@@ -65,3 +65,31 @@ def test_none_states_a_number_the_code_can_change():
   setting's value, so it must not claim one."""
   numeric = {k: v for k, v in _labels().items() if re.search(r"\d", v)}
   assert not numeric, f"labels stating a number that a setting can change: {numeric}"
+
+
+def test_geometry_thresholds_mirrored():
+  """The UI states the three geometry thresholds itself rather than importing them -- that file is
+  controls, this is UI, and pulling a planner module into the UI process to read three floats is a
+  dependency that buys nothing. See ACC_PROPULSION_INACTIVE for the same call made earlier.
+
+  The only real objection to duplicating a constant is drift, so this removes it. Without it the
+  panel would go on explaining a gate using numbers the gate had stopped using -- which is exactly
+  the failure that produced "No lane to move into" with nothing on screen to say why.
+
+  Read from the SOURCE, not by importing: hud_renderer_bp pulls in pyray, which cannot load
+  offline on every platform. Every other guard in this file does the same.
+  """
+  gate = (ROOT / "sunnypilot" / "selfdrive" / "controls" / "lib"
+          / "passing_assist.py").read_text(encoding="utf-8")
+
+  def value_of(src, name):
+    for node in ast.walk(ast.parse(src)):
+      if isinstance(node, ast.Assign) and any(
+          isinstance(t, ast.Name) and t.id == name for t in node.targets):
+        return ast.literal_eval(node.value)
+    raise AssertionError(f"{name} not found -- this test would pass on anything")
+
+  for name in ("MIN_ADJACENT_LINE_PROB", "MIN_LANE_WIDTH_M", "MAX_ROAD_EDGE_STD"):
+    ui_val, gate_val = value_of(HUD, name), value_of(gate, name)
+    assert ui_val == gate_val, (
+      f"{name} drifted: the panel says {ui_val}, the gate uses {gate_val}")

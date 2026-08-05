@@ -10,9 +10,6 @@ from openpilot.selfdrive.ui.bp.onroad.exp_button_bp import ExpButtonBP
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.selfdrive.ui.bp.lib.ui_debug_logger import bp_ui_log
-from openpilot.sunnypilot.selfdrive.controls.lib.passing_assist import (
-  MIN_ADJACENT_LINE_PROB, MIN_LANE_WIDTH_M, MAX_ROAD_EDGE_STD,
-)
 from openpilot.system.ui.lib.application import gui_app
 
 LateralMode = ControllerStateBP.LateralMode
@@ -195,6 +192,18 @@ _BLOCKED_TEXT = {
 # a glance -- the stack starts below the box whenever the box is there.
 AHEAD_BOX_HEIGHT = 160
 AHEAD_BOX_GAP = 10
+
+
+# BluePilot: the three thresholds that decide whether a lane exists beside us, mirrored from
+# passing_assist.py. Duplicated rather than imported for the same reason ACC_PROPULSION_INACTIVE
+# above is -- that file is controls and this is UI, and pulling a planner module into the UI
+# process to read three floats is a dependency that buys nothing.
+#
+# test_geometry_thresholds_mirrored keeps them honest: it fails if either copy moves without the
+# other, which is the only real objection to duplicating them.
+MIN_ADJACENT_LINE_PROB = 0.3
+MIN_LANE_WIDTH_M = 3.0
+MAX_ROAD_EDGE_STD = 0.75
 
 
 def _lane_why(tag: str, prob: float, gap: float, std: float, metric: bool) -> str:
