@@ -87,6 +87,11 @@ class LongitudinalPlannerSP:
     # matters. Still no target and no return value; the only thing that leaves here is a sound.
     if self.passing_assist.suggestion_started and self.passing_assist.chime_enabled:
       self.events_sp.add(EventNameSP.passingAssistSuggested)
+    # ...and the lower one when it backs out. Same toggle: a driver who wants to be told what it is
+    # doing wants both halves, and a control that announces only the successes would be worse than
+    # no control at all.
+    if self.passing_assist.abort_started and self.passing_assist.chime_enabled:
+      self.events_sp.add(EventNameSP.passingAssistBackedOut)
 
     # Speed Limit Assist
     has_speed_limit = self.resolver.speed_limit_valid or self.resolver.speed_limit_last_valid

@@ -2539,3 +2539,121 @@ class TestTheGeometryGateActuallyOpens:
     assert det.adjacent.left.same_direction_recent, "the radar did not register the vehicle"
     assert not det.left_geometry_ok, "traffic alone opened a side with no geometry"
 
+
+class TestTheBackedOutChime:
+  """"I'll keep reporting back to you instances where it messed up. That's why I like that it makes
+  a sound. That helps me to know what it is doing without always looking at it."
+
+  The sound is the reporting channel, and it covered exactly one event -- a decision, the case that
+  went right. A sequence that lit the blinker and then withdrew it was silent, so `aborts`, the one
+  number this whole dry run exists to produce, was the one thing he could not notice without
+  staring at the screen and therefore could not report.
+
+  Every test here has to catch the machine DURING `signaling`, which is about a second wide. Once
+  the crossing starts a gate can no longer stop it -- a car cannot un-change lanes on a change of
+  mind -- so blocking a second too late provokes nothing at all.
+  """
+
+  @staticmethod
+  def _to_signaling(det, **kw):
+    for _ in range(int(10.0 / DT_MDL)):
+      det.update(make_sm(v_lead=SLOW_LEAD_MS, **kw), CRUISE_MS, True)
+      if det.maneuver.phase == Phase.signaling:
+        return True
+    return False
+
+  def test_a_reversal_makes_a_sound(self):
+    det = keep_right_det()
+    assert self._to_signaling(det), "never got as far as showing a blinker"
+    heard = False
+    for _ in range(int(3.0 / DT_MDL)):        # the lane fills while the blinker is up
+      det.update(make_sm(v_lead=SLOW_LEAD_MS, left_bs=True), CRUISE_MS, True)
+      heard = heard or det.abort_started
+    assert det.maneuver.aborts >= 1, "did not actually back out"
+    assert heard, "backed out silently"
+
+  def test_it_sounds_once_per_reversal_not_once_per_frame(self):
+    det = keep_right_det()
+    assert self._to_signaling(det)
+    n = 0
+    for _ in range(int(6.0 / DT_MDL)):
+      det.update(make_sm(v_lead=SLOW_LEAD_MS, left_bs=True), CRUISE_MS, True)
+      n += det.abort_started
+    assert n == 1, f"sounded {n} times for one reversal"
+
+  def test_a_strobing_gate_cannot_produce_a_strobing_tone(self):
+    """"It just kept beeping over and over" is a failure this feature has already had once. A gate
+    flickering signal-abort-signal is worth hearing about, at twelve seconds apart rather than at
+    whatever rate the gate manages."""
+    det = keep_right_det()
+    n = 0
+    for i in range(int(30.0 / DT_MDL)):
+      blocked = (i // int(0.6 / DT_MDL)) % 2 == 1     # the lane fills and clears, on and on
+      det.update(make_sm(v_lead=SLOW_LEAD_MS, left_bs=blocked), CRUISE_MS, True)
+      n += det.abort_started
+    assert det.maneuver.aborts > n, "the test did not actually provoke repeated reversals"
+    assert n <= 3, f"sounded {n} times in 30 s"
+
+  def test_a_clean_drive_stays_quiet(self):
+    det = keep_right_det()
+    n = 0
+    for _ in range(int(20.0 / DT_MDL)):
+      det.update(make_sm(v_lead=SLOW_LEAD_MS), CRUISE_MS, True)
+      n += det.abort_started
+    assert det.maneuver.aborts == 0
+    assert n == 0, "made a backed-out noise on a drive that never backed out"
+
+  def test_it_goes_quiet_again_after_the_reversal_is_over(self):
+    """An EDGE, not a level. Testing the count against zero instead of against what was already
+    reported passes every test above -- the interval hides it -- and then chimes every twelve
+    seconds for the rest of the drive because one reversal happened at the start of it.
+    """
+    det = keep_right_det()
+    assert self._to_signaling(det)
+    for _ in range(int(3.0 / DT_MDL)):
+      det.update(make_sm(v_lead=SLOW_LEAD_MS, left_bs=True), CRUISE_MS, True)
+    assert det.maneuver.aborts >= 1
+    n = 0
+    for _ in range(int(40.0 / DT_MDL)):        # a long clean stretch after it
+      det.update(make_sm(v_lead=SLOW_LEAD_MS), CRUISE_MS, True)
+      n += det.abort_started
+    assert n == 0, f"kept announcing an old reversal {n} times"
+
+  def test_a_suppressed_reversal_is_dropped_rather_than_queued(self):
+    """A tone that arrives twelve seconds after the thing it describes is worse than no tone -- he
+    would look up at a screen showing something else entirely and report the wrong event.
+    """
+    det = keep_right_det()
+    assert self._to_signaling(det)
+    n = 0
+    for i in range(int(12.0 / DT_MDL)):        # two reversals inside one interval
+      blocked = (i // int(0.6 / DT_MDL)) % 2 == 1
+      det.update(make_sm(v_lead=SLOW_LEAD_MS, left_bs=blocked), CRUISE_MS, True)
+      n += det.abort_started
+    assert det.maneuver.aborts >= 2, "the test did not provoke a second reversal"
+    assert n == 1
+    for _ in range(int(30.0 / DT_MDL)):        # nothing further happens
+      det.update(make_sm(v_lead=SLOW_LEAD_MS), CRUISE_MS, True)
+      n += det.abort_started
+    assert n == 1, "the suppressed reversal was saved up and played later"
+
+  def test_a_keep_right_that_backs_out_sounds_the_same(self):
+    """Two machines run side by side and each keeps its own abort count. To a driver they are one
+    event -- it showed a blinker and then withdrew it -- so reporting only the passing machine's
+    reversals would be silence for half the cases with nothing saying why.
+    """
+    det = keep_right_det()
+    reached = False
+    for _ in range(int(60.0 / DT_MDL)):
+      det.update(make_sm(status=False, **IN_LEFT_LANE), CRUISE_MS, True)
+      if det.keep_right_maneuver.phase == Phase.signaling:
+        reached = True
+        break
+    assert reached, "keep-right never got as far as showing a blinker"
+    heard = False
+    for _ in range(int(3.0 / DT_MDL)):
+      det.update(make_sm(status=False, right_bs=True, **IN_LEFT_LANE), CRUISE_MS, True)
+      heard = heard or det.abort_started
+    assert det.keep_right_maneuver.aborts >= 1, "keep-right did not back out"
+    assert det.maneuver.aborts == 0, "this has to be the keep-right machine, not the other one"
+    assert heard, "a keep-right reversal was silent"

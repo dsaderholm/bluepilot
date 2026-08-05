@@ -60,12 +60,13 @@ class PassingAssistSettingsLayout(Widget):
       param="PassingAssistLogEnabled")
 
     self._chime = toggle_item_sp(
-      title=tr("Chime When It Decides"),
-      description=tr("A short tone the moment a pass is worked out, so you hear it instead of "
-                     "having to be looking at the screen. Nothing else changes -- the panel still "
-                     "shows which side and why. Ford sounds one before a BlueCruise lane change "
-                     "for the same reason: at the moment a car moves, nobody is reading a "
-                     "display."),
+      title=tr("Chime When It Decides Or Backs Out"),
+      description=tr("Two short tones, so you can tell what it did without looking. A higher one "
+                     "the moment a pass is worked out. A LOWER one when it lights the blinker and "
+                     "then withdraws it, which is the case worth telling me about and the one you "
+                     "could not hear before. Neither covers the screen. Ford sounds one before a "
+                     "BlueCruise lane change for the same reason: at the moment a car moves, "
+                     "nobody is reading a display."),
       param="PassingAssistChime")
 
     # --- deciding a pass is wanted ---

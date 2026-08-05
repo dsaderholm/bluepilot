@@ -236,6 +236,29 @@ MIN_STEER_TAKEOVER_S = 0.7
 CHIME_SETTLE_S = 0.5
 CHIME_MIN_INTERVAL_S = 8.0
 
+# --- ...and a DIFFERENT sound when it backs out ---
+#
+# "I'll keep reporting back to you instances where it messed up. That's why I like that it makes a
+# sound. That helps me to know what it is doing without always looking at it."
+#
+# Which means the sound is the reporting channel, and it covered exactly one event: a decision.
+# The successful case. A sequence that lit the blinker and then withdrew it made no noise at all --
+# so the one number this whole dry run exists to produce, `aborts`, was the one thing he could not
+# notice without staring at the screen, and therefore could not report.
+#
+# A LOWER TONE, not a repeat of the same one. Two events that sound identical are one event as far
+# as an eyes-front driver is concerned, and the distinction being made here -- it went, versus it
+# changed its mind -- is exactly the distinction worth hearing.
+#
+# NO SETTLE TIME, unlike the suggestion chime. That guard exists because a suggestion is a STATE
+# that can flicker; an abort is a discrete event that has already happened, and waiting half a
+# second to announce it would only make it later.
+#
+# Its own interval, and a longer one. A gate strobing signal-abort-signal is worth hearing about,
+# but at 12 s apart rather than at whatever rate the gate is managing -- "it just kept beeping over
+# and over" is the failure this file has already had once.
+ABORT_CHIME_MIN_INTERVAL_S = 12.0
+
 LAST_DRIVE_WRITE_S = 30
 
 # How many drives of summaries to keep. See _archive_drive.
@@ -606,6 +629,11 @@ class PassingAssistDetector:
     self.suggestions_taken = 0
     # True for the single frame the chime should sound. See CHIME_SETTLE_S.
     self.suggestion_started = False
+    # True for the single frame the lower "backed out" tone should sound. See
+    # ABORT_CHIME_MIN_INTERVAL_S.
+    self.abort_started = False
+    self._since_abort_chime_s = 1e3
+    self._aborts_seen = 0
     self._chime_held_s = 0.0
     self._since_chime_s = 1e3
     self.chime_enabled = True
@@ -1124,6 +1152,20 @@ class PassingAssistDetector:
                                self._since_chime_s >= CHIME_MIN_INTERVAL_S)
     if self.suggestion_started:
       self._since_chime_s = 0.0
+
+    # Counted from BOTH machines and BOTH kinds of reversal. A keep-right that backs out is the
+    # same event to a driver as a pass that does, and the emergency count is the one that matters
+    # most -- reporting it as silence because it lives in a different counter would be absurd.
+    aborts = (self.maneuver.aborts + self.maneuver.emergency_aborts +
+              self.keep_right_maneuver.aborts + self.keep_right_maneuver.emergency_aborts)
+    self._since_abort_chime_s = min(self._since_abort_chime_s + DT_MDL, 1e4)
+    self.abort_started = (aborts > self._aborts_seen and
+                          self._since_abort_chime_s >= ABORT_CHIME_MIN_INTERVAL_S)
+    # Advanced whether or not it sounded, so a suppressed abort is skipped rather than queued --
+    # a tone that arrives twelve seconds after the thing it describes is worse than no tone.
+    self._aborts_seen = aborts
+    if self.abort_started:
+      self._since_abort_chime_s = 0.0
     if suggesting and not self._prev_suggesting:
       self.suggestions_made += 1
       self._episode_taken = False

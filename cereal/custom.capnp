@@ -983,6 +983,7 @@ struct OnroadEventSP @0xda96579883444c35 {
     # something noticed at the time rather than a counter read afterwards, which is exactly what
     # the agreement measurement needs -- a chime, then whether you would have gone anyway.
     passingAssistSuggested @27;
+    passingAssistBackedOut @28;
   }
 }
 

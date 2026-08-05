@@ -54,6 +54,11 @@ whether passing assist works.
 
 ## What changed since the last drive
 
+- **A second, lower chime when it backs out.** The sound was only ever the good news -- a decision.
+  A sequence that lit the blinker and then withdrew it made no noise, which meant the one number
+  this whole phase exists to produce was the one thing you could not notice without looking. Higher
+  tone = it decided. Lower tone = it changed its mind. Same toggle, now called "Chime When It
+  Decides Or Backs Out", and the lower one is limited to once per 12 s however hard a gate strobes.
 - **The shoulder.** Two width thresholds failed at this in a row, and width was the wrong question:
   the gate measured your lane line out to the road edge, which is the next lane *plus* its shoulder
   from an interior lane and the shoulder *alone* from the rightmost one -- one number for two
