@@ -47,8 +47,18 @@ TARGET_ACCEL = -1.2  # m/s^2 should match up with the long planner limit
 # there", and vetoing on it would disable the one thing SCC-Map is for: seeing around a bend the
 # camera cannot.
 #
-# The model plans roughly 10 s ahead, so its useful horizon in metres scales with speed.
-MODEL_HORIZON_S = 10.0
+# 4 s, not the model's full 10 s plan. Reported from a drive that exits were not slowing enough.
+#
+# The model PLANS 10 s ahead, but that is not the same as being able to see a curve 10 s away. On a
+# freeway approaching an exit the camera is looking down the freeway, not around the ramp -- so it
+# reports a straight road and the veto fired. SCC-Map triggers 500 m out at -0.8 m/s^2, and a 10 s
+# horizon is 313 m at 70 mph, so the veto was suppressing the map for the entire final approach.
+#
+# That is this failsafe defeating the exact case SCC-Map exists for, which is the risk named when it
+# was written and then not bounded tightly enough. At 4 s the veto only reaches 125 m -- close
+# enough that the camera genuinely has the curve in frame, and a phantom curve right in front of you
+# is still caught.
+MODEL_HORIZON_S = 4.0
 # Predicted lateral acceleration below this means the camera is looking at a straight road. Well
 # under _ENTERING_PRED_LAT_ACC_TH (1.3) in vision_controller: this is not "is there a curve worth
 # slowing for", it is "is there a curve at all".

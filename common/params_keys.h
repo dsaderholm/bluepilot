@@ -389,16 +389,18 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // acceptable -- and a flat modest bump is the honest expression of that. If the angle gains
     // move after the alignment, these do NOT need to move with them.
     {"SmartCruiseControlVisionLowSpeedFactor", {PERSISTENT | BACKUP, INT, "110"}},
-    {"SmartCruiseControlVisionHighSpeedFactor", {PERSISTENT | BACKUP, INT, "110"}},
+    {"SmartCruiseControlVisionHighSpeedFactor", {PERSISTENT | BACKUP, INT, "100"}},
     // BluePilot: how early the curve cycle starts, independent of how much it slows. 100 = stock.
-    // Higher starts sooner, which spreads the same speed change over more distance.
-    // Raised from 100 on 2026-08-01: reported as triggering too late on real drives, most
-    // noticeably on freeway off-ramps. Went to 140 first, then to the current 170. At 170 the
-    // entering threshold drops from 1.3 to 0.76 m/s^2, so at 70 mph it reacts to roughly a
-    // 1280 m radius instead of 740 m. (An earlier version of this comment still described the
-    // 140 step -- 0.93 m/s^2 and 1030 m -- after the value had already moved to 170.)
-    // 200 is the clip ceiling in vision_controller._EARLINESS_MAX; there is no headroom above it.
-    {"SmartCruiseControlVisionEarliness", {PERSISTENT | BACKUP, INT, "170"}},
+    //
+    // Went 100 -> 140 -> 170 while SCC-Map did not exist, because off-ramps triggered too late and
+    // vision was the only thing that could catch them. Reported from a drive on 2026-08-04 that the
+    // car now slows hard for gentle interstate sweepers: at 170 the entering threshold falls to
+    // 0.76 m/s^2, which at 70 mph is a 1281 m radius -- a bend you can barely feel. Stock is 754 m.
+    //
+    // Back to 110 (829 m). The ramps that justified 170 belong to SCC-Map now, which sees them from
+    // the map rather than waiting for the camera, so the earliness was buying nothing and costing
+    // every sweeper on I-15.
+    {"SmartCruiseControlVisionEarliness", {PERSISTENT | BACKUP, INT, "110"}},
     // BluePilot: SCC-Map deceleration target, tenths of m/s^2, magnitude. Unlike SCC-Vision this
     // single value sets BOTH how hard it slows and how early it starts, because the trigger is
     // "am I within the distance needed to reach the corner speed at this rate" -- gentler means a
