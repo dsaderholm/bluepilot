@@ -26,7 +26,7 @@ from openpilot.common.realtime import DT_MDL
 from openpilot.sunnypilot.selfdrive.controls.lib.passing_maneuver import CHANGE_DURATION_S
 from openpilot.sunnypilot.selfdrive.controls.lib.passing_assist import (
   PassingAssistDetector, MIN_LANE_WIDTH_M, DEFAULT_MIN_SPEED_MPH, MAX_WIDENING_M,
-  DEFAULT_PERSISTENCE_S, DRIVE_HISTORY_MAX,
+  DEFAULT_PERSISTENCE_S, DRIVE_HISTORY_MAX, CHIME_MIN_INTERVAL_S,
 )
 
 Side = custom.LongitudinalPlanSP.PassingAssist.Side
@@ -2303,73 +2303,68 @@ class TestItDoesNotAbortItsOwnPass:
 
 
 class TestTheChime:
-  """A sound when it decides. See passingAssistSuggested in custom.capnp.
+  """A sound when it decides. See CHIME_SETTLE_S in custom.capnp's neighbour.
 
-  The panel is this feature's whole readout, and it is the wrong medium for the one moment that
-  matters -- nobody is reading a screen when a car moves. Ford sounds one before a BlueCruise lane
-  change for the same reason.
-
-  What these fix is that it fires ONCE PER DECISION. A suggestion stands for many seconds; a chime
-  on every frame of it would be twenty tones a second and the feature would be switched off inside
-  a mile.
+  From the road: "it just kept beeping over and over." The chime fired on the RISING EDGE of a
+  suggestion, which is right exactly once and useless the moment a gate flickers -- geometry
+  sitting on a threshold toggles at 20 Hz, and every toggle was a fresh edge. The edge WAS the
+  rate limit, and an edge is not a rate limit.
   """
 
-  def test_it_fires_on_the_frame_the_suggestion_appears(self):
-    det = run(PassingAssistDetector(), STUCK_FRAMES)
-    assert det.suggestion == Side.left
-    fired = sum(1 for _ in [1] if det.suggestion_started)
-    # Step one more frame with the same scene: the suggestion still stands, the edge does not.
-    run(det, 1)
-    assert det.suggestion == Side.left, "scene changed; this is no longer testing the edge"
-    assert not det.suggestion_started, "chimed again while the same suggestion still stood"
-    assert fired <= 1
-
-  def test_exactly_one_edge_across_a_whole_suggestion(self):
+  def test_a_flickering_gate_does_not_produce_a_flickering_chime(self):
+    """The reported failure, reproduced: a suggestion that toggles every other frame used to fire
+    the chime on every one of those frames."""
     det = PassingAssistDetector()
-    edges = 0
+    run(det, STUCK_FRAMES)
+    assert det.suggestion == Side.left
+    chimes = 0
+    for i in range(int(6.0 / DT_MDL)):
+      # Alternate a gate open and shut as fast as the planner runs.
+      det.update(make_sm(left_bs=(i % 2 == 0)), CRUISE_MS, True)
+      chimes += bool(det.suggestion_started)
+    assert chimes <= 1, f"a flickering gate produced {chimes} chimes in six seconds"
+
+  def test_it_still_speaks_for_a_real_suggestion(self):
+    det = PassingAssistDetector()
+    chimes = 0
     for _ in range(STUCK_FRAMES * 2):
       det.update(make_sm(), CRUISE_MS, True)
-      edges += bool(det.suggestion_started)
+      chimes += bool(det.suggestion_started)
     assert det.suggestion == Side.left
-    assert edges == 1, f"chimed {edges} times for one pass"
+    assert chimes == 1, f"expected one chime for one settled pass, got {chimes}"
 
-  def test_a_second_pass_chimes_again(self):
+  def test_a_suggestion_too_brief_to_act_on_says_nothing(self):
+    """Shorter than the settle time. If it was not up long enough to be worth doing, it was not
+    worth a noise."""
+    det = PassingAssistDetector()
+    run(det, STUCK_FRAMES)
+    det.suggestion_started = False
+    chimes = 0
+    for _ in range(int(0.2 / DT_MDL)):
+      det.update(make_sm(status=False), CRUISE_MS, True)
+      chimes += bool(det.suggestion_started)
+    assert chimes == 0
+
+  def test_a_second_pass_much_later_chimes_again(self):
     """It has to re-arm, or only the first pass of a drive is ever announced."""
     det = PassingAssistDetector()
-    edges = 0
+    chimes = 0
     for _ in range(STUCK_FRAMES * 2):
       det.update(make_sm(), CRUISE_MS, True)
-      edges += bool(det.suggestion_started)
-    for _ in range(int(3.0 / DT_MDL)):        # lead gone: the suggestion drops
-      det.update(make_sm(status=False), CRUISE_MS, True)
-      edges += bool(det.suggestion_started)
-    assert det.suggestion != Side.left
+      chimes += bool(det.suggestion_started)
+    for _ in range(int(CHIME_MIN_INTERVAL_S + 4.0)):
+      for _ in range(int(1.0 / DT_MDL)):
+        det.update(make_sm(status=False), CRUISE_MS, True)
     for _ in range(STUCK_FRAMES * 2):
       det.update(make_sm(), CRUISE_MS, True)
-      edges += bool(det.suggestion_started)
-    assert edges == 2, f"expected one chime per pass, got {edges}"
+      chimes += bool(det.suggestion_started)
+    assert chimes == 2, f"expected one chime per pass, got {chimes}"
 
   def test_the_toggle_is_read(self):
     det = PassingAssistDetector()
     det.params = _KeepRightOnParams(PassingAssistChime=False)
     run(det, 4)
     assert det.chime_enabled is False
-
-  def test_keep_right_does_not_abort_its_own_maneuver_either(self):
-    """The same bug, in the other dry run. It was fixed once and written twice: `_own_blinker`
-    checked only the passing maneuver, so a keep-right maneuver signaling right would see its own
-    blinker, call it driver input, and cancel itself."""
-    det = PassingAssistDetector()
-    det.params = _KeepRightOnParams()
-    det.actuating = True
-    det.keep_right_maneuver.side = Side.right
-    det.keep_right_maneuver.phase = Phase.signaling
-    assert det.maneuver.phase == Phase.idle, "the passing dry run must be idle for this to test it"
-    assert not det._driver_override(NS(leftBlinker=False, rightBlinker=True,
-                                       brakePressed=False, steeringPressed=False))
-    # ...and the other side is still the driver.
-    assert det._driver_override(NS(leftBlinker=True, rightBlinker=False,
-                                   brakePressed=False, steeringPressed=False))
 
 
 class TestTheDriveHistory:

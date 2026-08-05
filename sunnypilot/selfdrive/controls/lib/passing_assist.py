@@ -184,6 +184,26 @@ MIN_STEER_TAKEOVER_S = 0.7
 #
 # 30 s rather than on shutdown because there is no reliable shutdown hook here, and a drive that
 # ends with a yanked ignition is exactly the drive worth keeping.
+# --- how often the chime may speak ---
+#
+# From the road: "it just kept beeping over and over."
+#
+# The chime fired on the RISING EDGE of a suggestion, which is correct exactly once and useless the
+# moment a gate flickers. Geometry that sits on a threshold toggles at 20 Hz, and every toggle was
+# a fresh rising edge, so a marginal lane produced a tone several times a second. The edge was the
+# whole rate limit and an edge is not a rate limit.
+#
+# Two guards, because they stop different things. The suggestion has to HOLD before it is worth
+# announcing -- half a second kills flicker outright and also means the tone only ever marks a
+# decision that stayed decided. And a hard interval bounds the worst case whatever the gates do:
+# even if a suggestion legitimately comes and goes, nobody needs to hear about it twice in eight
+# seconds.
+#
+# Deliberately not tied to the confirmation time. That is about believing the radar; this is about
+# not being irritating, and the two have no reason to move together.
+CHIME_SETTLE_S = 0.5
+CHIME_MIN_INTERVAL_S = 8.0
+
 LAST_DRIVE_WRITE_S = 30
 
 # How many drives of summaries to keep. See _archive_drive.
@@ -548,8 +568,10 @@ class PassingAssistDetector:
     # See suggestionsMade in custom.capnp -- the other error direction.
     self.suggestions_made = 0
     self.suggestions_taken = 0
-    # True for the single frame a suggestion appears. See passingAssistSuggested.
+    # True for the single frame the chime should sound. See CHIME_SETTLE_S.
     self.suggestion_started = False
+    self._chime_held_s = 0.0
+    self._since_chime_s = 1e3
     self.chime_enabled = True
     self.longest_ignored_s = 0.0
     self._episode_taken = False
@@ -1013,9 +1035,15 @@ class PassingAssistDetector:
     suggesting = self.suggestion != Side.none and self.reason == Reason.passing
     if suggesting:
       self._suggest_held_s += DT_MDL
-    # See passingAssistSuggested -- one frame, on the rising edge, so the chime fires once per
-    # decision rather than for every frame the suggestion stands.
-    self.suggestion_started = suggesting and not self._prev_suggesting
+    # See CHIME_SETTLE_S. Not the rising edge: an edge fires again every time a gate flickers, and
+    # a marginal lane flickers at 20 Hz. The suggestion has to hold, and then not repeat for a
+    # while, before the car says anything out loud.
+    self._chime_held_s = self._chime_held_s + DT_MDL if suggesting else 0.0
+    self._since_chime_s = min(self._since_chime_s + DT_MDL, 1e4)
+    self.suggestion_started = (self._chime_held_s >= CHIME_SETTLE_S and
+                               self._since_chime_s >= CHIME_MIN_INTERVAL_S)
+    if self.suggestion_started:
+      self._since_chime_s = 0.0
     if suggesting and not self._prev_suggesting:
       self.suggestions_made += 1
       self._episode_taken = False
