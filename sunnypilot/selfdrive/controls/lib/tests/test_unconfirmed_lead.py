@@ -275,3 +275,58 @@ class TestDriverBrakingEndsIt:
     run(det, ev, 60, d_rel=lambda i: 100. - i * 0.5)
     det.update(make_sm(d_rel=70., brake=True), TRAJ, CRUISE_MS, True, ev)  # long_enabled STILL True
     assert det.state != State.active
+
+
+class TestFordBrakingRelease:
+  """Reported: "Ford ACC was definitely braking for it. The warning was still on the screen."
+
+  Ford asks for deceleration on two channels. AccBrkDecel_B_Rq is a discrete flag; AccBrkTot_A_Rq is
+  the deceleration it actually wants, in m/s^2. Checking only the flag left the warning up while the
+  car was visibly slowing -- and the ACC pill, which reads both, was showing BRAKE at the same time.
+  """
+  from openpilot.sunnypilot.selfdrive.controls.lib.unconfirmed_lead import (
+    UnconfirmedLeadDetector, FORD_BRAKING_DECEL,
+  )
+
+  @staticmethod
+  def _sm(decel_flag=False, brake_total=0.0, available=True, valid=True):
+    """A real class, not a SimpleNamespace with __getitem__ stuck on it -- Python looks dunders up
+    on the TYPE, so that fake is not subscriptable and every test raises instead of asserting."""
+    from types import SimpleNamespace as NS
+
+    class FakeSubMaster:
+      def __init__(self):
+        self.valid = {"carStateBP": valid}
+        self._data = {"carStateBP": NS(brakeLightStatus=NS(
+          accDataAvailable=available, accDecelRequest=decel_flag,
+          accAccelRequest=brake_total, accPrechargeRequest=False))}
+
+      def __getitem__(self, key):
+        return self._data[key]
+
+    return FakeSubMaster()
+
+  def test_the_discrete_flag_still_releases(self):
+    assert self.UnconfirmedLeadDetector._ford_is_braking(self._sm(decel_flag=True))
+
+  def test_deceleration_without_the_flag_now_releases(self):
+    """The reported bug. Ford asking for real braking on the magnitude channel alone."""
+    assert self.UnconfirmedLeadDetector._ford_is_braking(self._sm(brake_total=-1.0))
+
+  def test_trim_sized_noise_does_not_release(self):
+    """ACC trims constantly at small values; without a deadband any noise reads as a takeover."""
+    assert not self.UnconfirmedLeadDetector._ford_is_braking(
+      self._sm(brake_total=-self.FORD_BRAKING_DECEL / 2))
+
+  def test_acceleration_does_not_release(self):
+    assert not self.UnconfirmedLeadDetector._ford_is_braking(self._sm(brake_total=1.0))
+
+  def test_no_acc_data_does_not_release(self):
+    """Missing data means "cannot tell", which must read as not-braking so the detector keeps
+    working rather than silently standing down."""
+    assert not self.UnconfirmedLeadDetector._ford_is_braking(
+      self._sm(decel_flag=True, available=False))
+
+  def test_invalid_socket_does_not_release(self):
+    assert not self.UnconfirmedLeadDetector._ford_is_braking(
+      self._sm(decel_flag=True, valid=False))

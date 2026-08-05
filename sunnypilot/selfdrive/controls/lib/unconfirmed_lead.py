@@ -95,6 +95,10 @@ DEFAULT_MAX_TTC_S = 7.0    # fallback; tunable via IcbmLeadMaxTtc (tenths of a s
 MAX_V_REL_MS = -2.0        # genuinely closing, not sensor noise
 MAX_D_PATH_M = 1.2         # in-path, not an adjacent lane or roadside return
 MIN_V_EGO_MS = 25 * CV.MPH_TO_MS  # below this a floor request is meaningless
+# Deceleration on AccBrkTot_A_Rq above which Ford counts as having taken the lead over. Matches
+# ACC_DEADBAND in the onroad ACC pill so the readout and the release agree -- ACC trims constantly
+# at small values, and without a deadband any noise would read as a takeover.
+FORD_BRAKING_DECEL = 0.15  # m/s^2
 
 # --- release gates ---
 # Release margin above the trigger TTC. Relative, not absolute: the trigger is tunable, and a
@@ -171,10 +175,20 @@ class UnconfirmedLeadDetector:
   def _ford_is_braking(sm) -> bool:
     """Is stock ACC actively asking for brakes right now?
 
-    The one unambiguous "Ford has this" signal. AccBrkDecel_B_Rq comes from the ACCDATA the camera
-    sends, so it is stock ACC's own request even though openpilot is not the longitudinal
-    controller. If it is set, something with more authority than a set-speed nudge is already
-    slowing the car and there is nothing for this detector to add.
+    TWO signals, not one, and the second is the fix for a real report: "Ford ACC was definitely
+    braking for it, the warning was still on the screen."
+
+    AccBrkDecel_B_Rq is a discrete flag. AccBrkTot_A_Rq -- confusingly named accAccelRequest here,
+    but it is the BRAKE total -- is the deceleration Ford is actually asking for, in m/s^2. Ford can
+    ask for real deceleration on the magnitude channel without setting the flag, and checking only
+    the flag meant the detector kept warning while the car was visibly slowing for the same lead.
+    The ACC pill has always used both (see hud_renderer_bp: accDecelRequest OR accAccelRequest below
+    -ACC_DEADBAND), so the screen could read BRAKE while this said Ford had not taken over. Two
+    readouts of the same fact disagreeing is worse than either being wrong.
+
+    Precharge is deliberately NOT included, matching the pill: it pressurises the system without
+    commanding meaningful deceleration, and treating it as a takeover would release the warning
+    before anything had actually slowed.
 
     Defensive: carStateBP is BluePilot-conditional and absent on other platforms. Missing data
     means "cannot tell", which must read as not-braking so the detector keeps working.
@@ -182,8 +196,10 @@ class UnconfirmedLeadDetector:
     try:
       if not sm.valid['carStateBP']:
         return False
-      return bool(sm['carStateBP'].brakeLightStatus.accDataAvailable and
-                  sm['carStateBP'].brakeLightStatus.accDecelRequest)
+      bls = sm['carStateBP'].brakeLightStatus
+      if not bls.accDataAvailable:
+        return False
+      return bool(bls.accDecelRequest or bls.accAccelRequest < -FORD_BRAKING_DECEL)
     except (KeyError, AttributeError):
       return False
 
