@@ -67,7 +67,8 @@ SIGNAL_NONE, SIGNAL_LEFT, SIGNAL_RIGHT = 0, 1, 2
 
 SIGNAL_TAP_LEFT, SIGNAL_TAP_RIGHT = 3, 4    # request values only; the COMMAND is still 1/2
 SIGNAL_EDGE_LEFT, SIGNAL_EDGE_RIGHT = 5, 6    # ONE frame -- see EDGE_FRAMES
-SIGNAL_BLINK_LEFT, SIGNAL_BLINK_RIGHT = 7, 8  # one frame per blink -- see BLINK_PERIOD_S
+SIGNAL_BLINK_LEFT, SIGNAL_BLINK_RIGHT = 7, 8  # one frame per blink -- see DEFAULT_BLINK_PERIOD_S
+SIGNAL_MEASURE = 9                            # command NOTHING and time the driver's own stalk
 
 # THE HOLD AND THE TAP NO LONGER HAVE BUTTONS -- 2026-08-04.
 #
@@ -186,7 +187,41 @@ EDGE_OBSERVE_S = 2.0
 # is also the one remaining hypothesis that fits ALL the evidence rather than most of it, and it
 # costs one press to falsify: if the lamp blinks at 1.5 Hz, commanding the signal works today, with
 # no canbox and no new hardware.
-BLINK_PERIOD_S = 0.667
+# 1.0 s, SLOWED FROM 0.667, and it is a setting now because this is the one number the car has to
+# tell us.
+#
+# From the road: "when it does eventually do all seven together, they are too fast -- there's not
+# enough space in between", and "sometimes the gap is more than one blink, or it's just blinking one
+# less, so 5."
+#
+# ONE CAUSE FOR BOTH. The body module lights the lamp for its own fixed on-time from each command.
+# Send the next one while it is still lit and there is nothing for it to do -- the command is
+# ABSORBED, which is a missed blink and reads as a gap. Whatever does land then has only the
+# leftover off-time, which is why the blinks that do appear look crowded. Too fast and randomly
+# short are the same fault seen twice.
+#
+# FMVSS 108 requires 1-2 Hz and SAE J590b sets the on-time percentage, so 0.667 s was 1.5 Hz --
+# legal, and at the fast end with the least margin against absorption. 1.0 s is the slow end of
+# legal and the most room the body module can be given.
+#
+# Made a setting because the right value is a property of HIS car's flasher, not of this code, and
+# because he is testing in a driveway where a knob beats waiting for a rebuild. See
+# FordBlinkerBlinkPeriod.
+DEFAULT_BLINK_PERIOD_S = 1.0
+
+# --- OR STOP GUESSING AND TIME HIS OWN FLASHER ---
+#
+# "I want it to match Ford's rate as well as you can." The best anyone can do from a desk is the
+# FMVSS band, 1-2 Hz, which is a factor of two wide. His car knows the exact answer and has been
+# telling us all along: BodyInfo_3_FD1 reports the lamp, and the flash counter already watches it.
+#
+# So this mode commands NOTHING. It watches while the driver flicks their own stalk, counts the
+# rising edges and reports the mean interval between them. That number IS his Ford's rate, measured
+# on his car, and it can be typed straight into the setting.
+#
+# The driver-stalk gate is deliberately not applied to this mode -- the driver signalling is the
+# entire point rather than a reason to refuse.
+MEASURE_WINDOW_S = 12.0
 # SEVEN IS A BENCH-TEST NUMBER, NOT THE FEATURE'S NUMBER.
 #
 # It matches the one-touch he set in FORScan, which is the point: pressing this button and flicking
@@ -313,6 +348,11 @@ class BlinkerTestExt:
     self.bt_frames_left = 0
     self.bt_blocked = 0        # mirrors capnp Blocked
     self.bt_lamp_seen = False
+    self.bt_blink_period_s = float(DEFAULT_BLINK_PERIOD_S)
+    self.bt_measuring = False
+    self.bt_measured_ms = 0        # mean interval between the driver's own flashes
+    self._bt_last_edge = 0
+    self._bt_intervals: list = []
     # HOW MANY TIMES the lamp lit, not merely whether it did. See the note above TAP_COMMAND_S:
     # "really fast" is not a measurement, and two runs of this test settled nothing because of it.
     self.bt_flashes = 0
@@ -415,11 +455,21 @@ class BlinkerTestExt:
       # Watch the side we ASKED for. bt_commanded is cleared for transmission during a tap's
       # observe phase, so it is the wrong thing to watch once we go quiet -- which is exactly when
       # the interesting flashes happen.
-      lamp = lamp_left if self.bt_watching == SIGNAL_LEFT else lamp_right
+      if self.bt_measuring:
+        lamp = lamp_left or lamp_right
+      else:
+        lamp = lamp_left if self.bt_watching == SIGNAL_LEFT else lamp_right
       if lamp:
         self.bt_lamp_seen = True
       # Rising edges only. The lamp is a square wave; counting the level would count frames.
       if lamp and not self._bt_lamp_prev:
+        # Interval since the previous rising edge. This is the measurement in measure mode, and
+        # harmless bookkeeping otherwise.
+        elapsed_frames = self._bt_frame - self._bt_last_edge
+        if self._bt_last_edge and elapsed_frames * DT_CTRL < 3.0:
+          self._bt_intervals.append(elapsed_frames * DT_CTRL)
+          self.bt_measured_ms = int(1000 * sum(self._bt_intervals) / len(self._bt_intervals))
+        self._bt_last_edge = self._bt_frame
         self.bt_flashes += 1
         if not commanding:
           self.bt_flashes_after += 1
@@ -427,8 +477,11 @@ class BlinkerTestExt:
 
       # Any of these ends the pulse immediately. Standstill is re-checked every frame, not just at
       # the start: if the car begins rolling mid-pulse the signal drops at once.
-      if self.bt_frames_left <= 0 or CS.out.vEgo > STANDSTILL_V_EGO or \
-         CS.out.leftBlinker or CS.out.rightBlinker or CS.out.cruiseState.enabled:
+      # The driver's stalk ends every mode except MEASURING, where it is the input being measured.
+      # Adding that exemption at the arming gate only meant the window closed on its own first
+      # frame -- caught by a test rather than by another trip to the driveway.
+      driver_stalk = (CS.out.leftBlinker or CS.out.rightBlinker) and not self.bt_measuring
+      if self.bt_frames_left <= 0 or CS.out.vEgo > STANDSTILL_V_EGO or          driver_stalk or CS.out.cruiseState.enabled:
         self.bt_state = 2
         self.bt_commanded = SIGNAL_NONE
         self.bt_frames_left = 0
@@ -447,7 +500,7 @@ class BlinkerTestExt:
         # frame already sent one, so a global modulo puts the first gap wherever the pulse happened
         # to begin. The test caught a 0.16 s gap among 0.66 s ones.
         elapsed = self._bt_blink_total - self.bt_frames_left
-        period = int(BLINK_PERIOD_S / DT_CTRL)
+        period = int(self.bt_blink_period_s / DT_CTRL)
         # ONE frame per cycle. The body module holds the lamp for a normal blink by itself.
         return self.bt_commanded if elapsed % period == 0 else SIGNAL_NONE
       return self.bt_commanded if send_frame else SIGNAL_NONE
@@ -492,7 +545,7 @@ class BlinkerTestExt:
 
     if request not in (SIGNAL_LEFT, SIGNAL_RIGHT, SIGNAL_TAP_LEFT, SIGNAL_TAP_RIGHT,
                        SIGNAL_EDGE_LEFT, SIGNAL_EDGE_RIGHT,
-                       SIGNAL_BLINK_LEFT, SIGNAL_BLINK_RIGHT):
+                       SIGNAL_BLINK_LEFT, SIGNAL_BLINK_RIGHT, SIGNAL_MEASURE):
       self.bt_blocked = 0
       return SIGNAL_NONE
 
@@ -509,13 +562,29 @@ class BlinkerTestExt:
     if CS.out.cruiseState.enabled:
       self.bt_blocked = 2
       return SIGNAL_NONE
-    if CS.out.leftBlinker or CS.out.rightBlinker:
+    # ...except when MEASURING, where the driver using their stalk is the whole point.
+    if (CS.out.leftBlinker or CS.out.rightBlinker) and request != SIGNAL_MEASURE:
       self.bt_blocked = 3
       return SIGNAL_NONE
 
     self.bt_blocked = 0
     self.bt_state = 1
     self._bt_saw_clear = False
+    self._bt_last_edge = 0
+    self._bt_intervals = []
+    self.bt_measured_ms = 0
+    self.bt_measuring = request == SIGNAL_MEASURE
+    if self.bt_measuring:
+      # Commands nothing at all. Watches, counts and times.
+      self.bt_commanded = SIGNAL_NONE
+      self.bt_watching = SIGNAL_NONE
+      self._bt_command_frames_left = 0
+      self.bt_frames_left = int(MEASURE_WINDOW_S / DT_CTRL)
+      self.bt_lamp_seen = False
+      self.bt_flashes = 0
+      self.bt_flashes_after = 0
+      self._bt_lamp_prev = False
+      return SIGNAL_NONE
     tap = request in (SIGNAL_TAP_LEFT, SIGNAL_TAP_RIGHT, SIGNAL_EDGE_LEFT, SIGNAL_EDGE_RIGHT)
     edge = request in (SIGNAL_EDGE_LEFT, SIGNAL_EDGE_RIGHT)
     self.bt_blinking = request in (SIGNAL_BLINK_LEFT, SIGNAL_BLINK_RIGHT)
@@ -536,7 +605,12 @@ class BlinkerTestExt:
       # Deriving them separately rounded differently and opened a truncated extra burst at the end
       # -- a short odd blink after the intended ones, which is what a test caught and may well be
       # the "small break after four" reported from the car.
-      self._bt_command_frames_left = BLINK_COUNT * int(BLINK_PERIOD_S / DT_CTRL)
+      try:
+        self.bt_blink_period_s = float(self.bt_params.get("FordBlinkerBlinkPeriod",
+                                                          return_default=True)) / 1000.0
+      except Exception:  # noqa: BLE001 - a bad param must not stop a parked bench test
+        self.bt_blink_period_s = float(DEFAULT_BLINK_PERIOD_S)
+      self._bt_command_frames_left = BLINK_COUNT * int(self.bt_blink_period_s / DT_CTRL)
       # A short tail only. There is nothing to observe after a blink -- the lamp follows our frames
       # and stops when we do -- so a full second here was a second of dead buttons for nothing.
       self.bt_frames_left = self._bt_command_frames_left + int(0.3 / DT_CTRL)
@@ -558,6 +632,7 @@ class BlinkerTestExt:
     CS.bt_blocked = self.bt_blocked
     CS.bt_flashes = self.bt_flashes
     CS.bt_flashes_after = self.bt_flashes_after
+    CS.bt_measured_ms = self.bt_measured_ms
 
   @staticmethod
   def _lamp_state(CS) -> tuple[bool, bool]:

@@ -1233,6 +1233,10 @@ struct CarStateBP @0xb057204d7deadf3f {
     # once we have gone quiet are the body module running its own one-touch pattern, which is the
     # thing worth knowing -- it means the car owns the rate and the count, not us.
     flashesAfter @8 :UInt8;
+    # BluePilot: the mean interval between the DRIVER's own flashes, measured off the body module's
+    # lamp report while commanding nothing. This is the number to set the blink period to -- his
+    # car's actual rate rather than the FMVSS band, which is a factor of two wide.
+    measuredPeriodMs @9 :UInt16;
 
     enum State {
       idle @0;

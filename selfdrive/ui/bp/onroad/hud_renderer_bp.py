@@ -1257,6 +1257,13 @@ class HudRendererBP(HudRendererSP):
       # erratic case is many times that, and telling them apart by eye is what left this question
       # open across two drives. `after` is the tap measurement: flashes once we stopped commanding
       # are the car running its own one-touch pattern.
+      if bt.measuredPeriodMs:
+        # Measure mode: his own flasher, timed. The number to put in the setting.
+        self._pa_main = "YOUR BLINKER"
+        self._pa_sub = f"{bt.flashes} flashes, {bt.measuredPeriodMs} ms apart"
+        self._pa_color = rl.Color(150, 205, 235, 255)
+        self._pa_alert = True
+        return True
       if ok:
         self._pa_sub = f"{bt.flashes} flashes"
         if bt.flashesAfter:

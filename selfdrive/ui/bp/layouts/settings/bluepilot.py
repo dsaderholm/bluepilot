@@ -215,6 +215,30 @@ class BluePilotLayout(Widget):
     # The one that should look like a real signal. See BLINK_PERIOD_S: the lamp mirrors our frames
     # one for one, so pacing them at blinker rate makes the gateway's own "off" frames the other
     # half of each blink instead of the enemy.
+    # Command nothing; time HIS flasher. See MEASURE_WINDOW_S -- the FMVSS band is 1-2 Hz, which is
+    # a factor of two wide, and his car knows the exact answer.
+    self._blinker_measure = dual_button_item(
+      lambda: tr("Measure My Blinker"),
+      lambda: tr("Measure My Blinker"),
+      left_callback=lambda: self._request_blinker_test(9),
+      right_callback=lambda: self._request_blinker_test(9),
+      description=lambda: tr("Press this, then use your own turn signal stalk. Nothing is sent to "
+                             "the car -- it just watches your lamp and reports how many times it "
+                             "flashed and how far apart. That is your Ford's real rate, and it is "
+                             "what Blink should be set to."),
+    )
+
+    self._blink_period = int_control_item(
+      lambda: tr("Blink Spacing (ms)"),
+      lambda: tr("Time between blinks when openpilot operates the signal. Measure your own "
+                 "blinker first and set this to match it. Federal rules allow 1 to 2 flashes per "
+                 "second, which is a wide band -- your car sits at one specific value."),
+      param="FordBlinkerBlinkPeriod",
+      min_value=500,
+      max_value=1500,
+      step=25,
+    )
+
     self._blinker_blink_buttons = dual_button_item(
       lambda: tr("Blink Left"),
       lambda: tr("Blink Right"),
@@ -743,6 +767,8 @@ class BluePilotLayout(Widget):
         self._vbatt_pause_charging,
         self._blinker_edge_buttons,
         self._blinker_blink_buttons,
+        self._blink_period,
+        self._blinker_measure,
       ]) +
       _section(tr("Audio"), [
         self._use_custom_sounds,

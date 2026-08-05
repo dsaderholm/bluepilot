@@ -13,7 +13,7 @@ from types import SimpleNamespace as NS
 from opendbc.car import DT_CTRL
 from opendbc.sunnypilot.car.ford.blinker_test_ext import (
   BlinkerTestExt, SIGNAL_NONE, SIGNAL_LEFT, SIGNAL_RIGHT, PULSE_DURATION_S, STANDSTILL_V_EGO,
-  BUTTONS_STEP, SIGNAL_TAP_LEFT, TAP_COMMAND_S, DONE_HOLD_S, SIGNAL_BLINK_LEFT, BLINK_PERIOD_S, BLINK_COUNT,
+  BUTTONS_STEP, SIGNAL_TAP_LEFT, TAP_COMMAND_S, DONE_HOLD_S, SIGNAL_BLINK_LEFT, SIGNAL_MEASURE, DEFAULT_BLINK_PERIOD_S, BLINK_COUNT,
 )
 
 
@@ -22,6 +22,8 @@ class FakeParams:
     self.value = value
 
   def get(self, key, block=False, return_default=False):
+    if key == "FordBlinkerBlinkPeriod":
+      return 1000
     return self.value
 
   def put(self, key, val, block=False):
@@ -372,18 +374,18 @@ class TestBlinkMode:
     """The body module holds the lamp itself: "the blinker didn't briefly turn on, it stayed on for
     the normal amount." So one frame per cycle is a whole blink, and bursting frames to hold it on
     was solving a problem the main lamp does not have."""
-    sends = self._sends(BLINK_COUNT * BLINK_PERIOD_S)
+    sends = self._sends(BLINK_COUNT * DEFAULT_BLINK_PERIOD_S)
     assert all(b - a > 1 for a, b in zip(sends, sends[1:])),       "consecutive frames -- that is a burst, and the lamp does not need one"
 
   def test_the_rhythm_is_the_blink_rate(self):
-    sends = self._sends(BLINK_COUNT * BLINK_PERIOD_S)
+    sends = self._sends(BLINK_COUNT * DEFAULT_BLINK_PERIOD_S)
     starts = [sends[0]] + [b for a, b in zip(sends, sends[1:]) if b - a > 1]
     gaps = [(b - a) * DT_CTRL for a, b in zip(starts, starts[1:])]
     assert gaps, "only one burst"
-    assert all(abs(g - BLINK_PERIOD_S) < 0.02 for g in gaps), f"bursts not at blink rate: {gaps}"
+    assert all(abs(g - DEFAULT_BLINK_PERIOD_S) < 0.02 for g in gaps), f"bursts not at blink rate: {gaps}"
 
   def test_it_stops_after_the_right_number_of_blinks(self):
-    sends = self._sends(BLINK_COUNT * BLINK_PERIOD_S + 2.0)
+    sends = self._sends(BLINK_COUNT * DEFAULT_BLINK_PERIOD_S + 2.0)
     starts = [sends[0]] + [b for a, b in zip(sends, sends[1:]) if b - a > 1]
     assert len(starts) == BLINK_COUNT, f"{len(starts)} blinks, expected {BLINK_COUNT}"
 
@@ -392,3 +394,59 @@ class TestBlinkMode:
       ext = make_ext(SIGNAL_BLINK_LEFT)
       out = run(ext, POLL_FRAMES + 20, **kw)
       assert all(v == SIGNAL_NONE for v in out), f"blink mode ignored {kw}"
+
+
+class TestMeasureMode:
+  """"I want it to match Ford's rate as well as you can."
+
+  The best anyone can do from a desk is the FMVSS band, 1-2 Hz, which is a factor of two wide. His
+  car knows the exact number and has been reporting it all along on BodyInfo_3_FD1. So this mode
+  commands nothing and times his own stalk.
+  """
+
+  @staticmethod
+  def _flash(ext, cycles, period_s, on_frac=0.5):
+    """Drive the machine while the DRIVER's lamp blinks at a known rate."""
+    half = int(period_s * on_frac / DT_CTRL)
+    off = int(period_s / DT_CTRL) - half
+    for _ in range(cycles):
+      for _ in range(half):
+        ext.update_blinker_test(make_cs(lamp_left=True, left_blinker=True))
+      for _ in range(off):
+        ext.update_blinker_test(make_cs(lamp_left=False, left_blinker=True))
+
+  def test_it_measures_the_real_interval(self):
+    ext = make_ext(SIGNAL_MEASURE)
+    run(ext, POLL_FRAMES + 2)
+    assert ext.bt_measuring, "never armed -- the driver-stalk gate probably refused it"
+    self._flash(ext, cycles=6, period_s=0.9)
+    assert abs(ext.bt_measured_ms - 900) < 60, f"measured {ext.bt_measured_ms} ms, expected ~900"
+
+  def test_it_commands_nothing_at_all(self):
+    """The whole point: it must not touch the lamp it is measuring."""
+    ext = make_ext(SIGNAL_MEASURE)
+    out = run(ext, POLL_FRAMES + int(3.0 / DT_CTRL), lamp_left=True, left_blinker=True)
+    assert all(v == SIGNAL_NONE for v in out), "measure mode transmitted something"
+
+  def test_the_drivers_stalk_does_not_block_it(self):
+    """Every other mode refuses while the driver is signalling. Here that is the input."""
+    ext = make_ext(SIGNAL_MEASURE)
+    run(ext, POLL_FRAMES + 2, left_blinker=True)
+    assert ext.bt_state == 1
+    assert ext.bt_blocked == 0
+
+  def test_it_still_refuses_to_run_while_moving(self):
+    ext = make_ext(SIGNAL_MEASURE)
+    run(ext, POLL_FRAMES + 2, v_ego=5.0, left_blinker=True)
+    assert ext.bt_state != 1
+
+  def test_a_long_pause_is_not_counted_as_an_interval(self):
+    """Two separate stalk taps are not one slow blinker. A gap far longer than any flash period is
+    the driver stopping, and averaging it in would report a rate no car has."""
+    ext = make_ext(SIGNAL_MEASURE)
+    run(ext, POLL_FRAMES + 2)
+    self._flash(ext, cycles=4, period_s=0.9)
+    first = ext.bt_measured_ms
+    run(ext, int(4.0 / DT_CTRL), left_blinker=True)      # a long quiet gap
+    self._flash(ext, cycles=3, period_s=0.9)
+    assert abs(ext.bt_measured_ms - first) < 60, "a pause between taps polluted the mean"
