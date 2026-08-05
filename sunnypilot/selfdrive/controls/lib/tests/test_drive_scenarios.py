@@ -144,3 +144,81 @@ class TestATwoLaneHighwayWithOncomingTraffic:
     assert det.driver_passes == 1
     assert det.driver_passes_agreed == 0
     assert det.driver_pass_miss_reason == int(Blocked.oncomingLane)
+
+
+class TestTheOutermostLaneWithABarrier:
+  """I-15, and the report that came back twice: "it just keeps trying to go into the shoulder",
+  from the furthest right lane, with a red line on screen where the barrier wall is.
+
+  test_passing_assist.py covers right_geometry_ok directly. That is the unit, not the outcome --
+  what he saw was the whole detector arriving at MOVE RIGHT, and there was no test standing between
+  the gate and that. Every path that can suggest a side is walked here instead of the one that
+  happened to be wrong.
+
+  The geometry is what the model produces when there is no lane out there: laneLines always has
+  four entries, so the outermost one lands on the strongest feature left, which is the road edge
+  itself. Shoulder width is AASHTO's widest, 12 ft, so nothing about width can refuse it.
+  """
+
+  # ego's right line at +1.85, "far right line" on the barrier 12 ft beyond it, road edge there too
+  RIGHTMOST_LANE = dict(ll=(-5.5, -1.85, 1.85, 1.85 + 3.66),
+                        probs=(0.9, 0.99, 0.99, 0.9),
+                        edges=(-7.0, 1.85 + 3.66))
+
+  # ...and the mirror image: leftmost lane, median barrier just past the fog line. A 4 ft inside
+  # shoulder, which is the narrowest case the degeneracy test has to survive without refusing
+  # honest left lanes.
+  LEFTMOST_LANE = dict(ll=(-1.85 - 3.66, -1.85, 1.85, 5.5),
+                       probs=(0.9, 0.99, 0.99, 0.9),
+                       edges=(-1.85 - 3.66, 7.0))
+
+  def test_a_slow_car_ahead_never_sends_us_into_the_shoulder(self):
+    det = keep_right_det()
+    drive(det, 30.0, v_lead=SLOW_LEAD_MS, **self.RIGHTMOST_LANE)
+    assert not det.right_geometry_ok
+    assert det.suggestion != Side.right, "suggested moving into the shoulder"
+    assert not det.keep_right_maneuver.blinker_on, "signalled into the shoulder"
+    assert det.maneuver.side != Side.right
+
+  def test_and_neither_does_keep_right_with_no_lead_at_all(self):
+    """The path that actually fired on the road -- keep-right, not a pass. It has its own gate and
+    its own maneuver, and reading one does not tell you about the other."""
+    det = keep_right_det()
+    drive(det, 60.0, status=False, **self.RIGHTMOST_LANE)
+    assert det.suggestion != Side.right
+    assert det.reason != Reason.keepRight
+    assert not det.keep_right_maneuver.blinker_on
+
+  def test_the_left_side_is_still_offered_from_that_lane(self):
+    """The refusal has to be about the shoulder, not about the road. If this also goes quiet the
+    fix is just a feature that never speaks, which is the trade that produced the shoulder in the
+    first place."""
+    det = keep_right_det()
+    drive(det, 30.0, v_lead=SLOW_LEAD_MS, **self.RIGHTMOST_LANE)
+    assert det.left_geometry_ok, "refused a genuine lane to the left"
+    assert det.suggestion == Side.left
+
+  def test_the_median_is_not_a_passing_lane_either(self):
+    """Same fault, opposite side, and worse: a pass to the left is the suggestion this thing exists
+    to make, so nothing downstream would look twice at it."""
+    det = keep_right_det()
+    drive(det, 30.0, v_lead=SLOW_LEAD_MS, **self.LEFTMOST_LANE)
+    assert not det.left_geometry_ok, "offered the median as a passing lane"
+    assert det.suggestion != Side.left
+    assert not det.maneuver.blinker_on
+
+  def test_a_missing_road_edge_refuses_rather_than_assumes(self):
+    """modelV2 does not always give two road edges. With nothing to measure past the far line,
+    the honest answer is no -- an unmeasured shoulder must not read as an empty lane."""
+    det = keep_right_det()
+    scene = dict(self.RIGHTMOST_LANE)
+    drive(det, 20.0, v_lead=SLOW_LEAD_MS, **scene)
+    before = det.left_geometry_ok
+    assert before
+    det2 = keep_right_det()
+    for _ in range(int(20.0 / DT_MDL)):
+      sm = make_sm(v_lead=SLOW_LEAD_MS, **scene)
+      sm.data['modelV2'].roadEdges = sm.data['modelV2'].roadEdges[:1]   # right edge gone
+      det2.update(sm, CRUISE_MS, True)
+    assert not det2.right_geometry_ok
+    assert det2.suggestion != Side.right
