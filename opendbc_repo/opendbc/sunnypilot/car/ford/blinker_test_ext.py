@@ -210,6 +210,17 @@ BLINK_COUNT = 7
 #
 # One frame, one proper blink. Nothing to hold.
 #
+# KEEP THIS EVEN IF THE CANBOX WORKS. His words: "if I do get the canbox to work, would still want
+# this logic to be a fallback."
+#
+# Right, and for a better reason than redundancy. This path needs no hardware at all -- it is the
+# frame openpilot already transmits, on a bus it already owns. A canbox is a purchase, a wiring
+# job, and a third-party device that can fail, be unplugged, or stop being configured correctly
+# after a reset. A signal that works with nothing added is the floor to fall back to.
+#
+# So whatever consumes a commanded blinker later should take a SOURCE rather than assume one, and
+# this stays as the source that needs nothing. Do not delete it when a nicer route appears.
+#
 # THE CORNERING LAMP IS NOT GOING TO MATCH, AND SHOULD NOT BE CHASED. He has the FORScan feature
 # that lights the fog lamp on the signalling side, and under a commanded blink it comes on only for
 # a fraction of a second.
