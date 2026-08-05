@@ -2,6 +2,7 @@ import pyray as rl
 from collections.abc import Callable
 
 from openpilot.common.params import Params
+from openpilot.selfdrive.ui.bp.widgets.param_value_cache import ParamValueCache
 from openpilot.system.ui.widgets import Widget
 from openpilot.system.ui.widgets.list_view import ListItem, ItemAction
 from openpilot.system.ui.widgets.button import Button, ButtonStyle
@@ -32,6 +33,12 @@ class FloatControlAction(ItemAction):
     self.suffix = suffix
     self.integer = integer
     self.params = Params()
+    # See param_value_cache.py. Every read and write of this setting goes through it: the store is
+    # read rarely rather than every frame, our own write is believed immediately rather than being
+    # raced by the next read, and a value that could not be read stays None rather than becoming
+    # min_value. Those three together were "all my angle tuning got wiped ... and I also couldn't
+    # tweak it while driving" -- one bug wearing two faces.
+    self._cache = ParamValueCache(self.params, param, integer=integer)
     
     # Create +/- buttons
     self._minus_button = Button(
@@ -51,32 +58,38 @@ class FloatControlAction(ItemAction):
     
     self._font = gui_app.font(FontWeight.NORMAL)
   
-  def _get_value(self) -> float:
-    """Get current parameter value."""
-    try:
-      return float(self.params.get(self.param, return_default=True))
-    except (TypeError, ValueError):
-      return self.min_value
-  
+  def _get_value(self) -> float | None:
+    """Current value, or None if the store has never given us one.
+
+    None rather than min_value, and every caller below has to cope with it. The old fallback
+    returned the single most destructive value in range on a transient read failure.
+    """
+    return self._cache.get()
+
   def _set_value(self, value: float):
     """Set parameter value."""
     # Clamp to min/max
     value = max(self.min_value, min(self.max_value, value))
-    stored = int(round(value)) if self.integer else value
-    self.params.put(self.param, stored, block=False)
+    self._cache.set(value)
     if self.callback:
       self.callback(value)
-  
+
+  def _step_by(self, delta: float):
+    """Nudge by one step -- and do NOTHING if we could not read what we are nudging.
+
+    This is the line that stops a bad read from being committed as a real setting.
+    """
+    current = self._get_value()
+    if current is None:
+      return
+    self._set_value(current + delta)
+
   def _increment(self):
-    """Increment value by step."""
-    current = self._get_value()
-    self._set_value(current + self.step)
-  
+    self._step_by(self.step)
+
   def _decrement(self):
-    """Decrement value by step."""
-    current = self._get_value()
-    self._set_value(current - self.step)
-  
+    self._step_by(-self.step)
+
   def _decimals(self) -> int:
     """Infer display precision from step size so small steps are shown correctly."""
     if self.integer:
@@ -89,14 +102,18 @@ class FloatControlAction(ItemAction):
       return 2
     return 1
 
+  def _value_text(self, current_value: float | None) -> str:
+    # An unreadable setting SAYS SO. Printing a number we do not have is what made a display fault
+    # look to him like a settings change.
+    if current_value is None:
+      return "--"
+    if self.suffix == "V":
+      return f"{current_value:.1f}{self.suffix}"
+    return f"{current_value:.{self._decimals()}f}{self.suffix}"
+
   def _render(self, rect: rl.Rectangle) -> bool:
     current_value = self._get_value()
-    # Format value based on suffix
-    if self.suffix == "V":
-      value_text = f"{current_value:.1f}{self.suffix}"
-    else:
-      decimals = self._decimals()
-      value_text = f"{current_value:.{decimals}f}{self.suffix}"
+    value_text = self._value_text(current_value)
     
     # Calculate layout - reduce spacing to 1/3 of original
     # Original was BUTTON_SIZE (80) + BUTTON_SPACING (20) = 100 per side
@@ -120,7 +137,8 @@ class FloatControlAction(ItemAction):
     
     # Minus button on left
     minus_rect = rl.Rectangle(start_x, button_y, BUTTON_SIZE, BUTTON_SIZE)
-    self._minus_button.set_enabled(current_value > self.min_value and is_enabled)
+    self._minus_button.set_enabled(current_value is not None and is_enabled
+                                   and current_value > self.min_value)
     self._minus_button.render(minus_rect)
     
     # Value in center
@@ -142,19 +160,15 @@ class FloatControlAction(ItemAction):
     
     # Plus button on right
     plus_rect = rl.Rectangle(start_x + BUTTON_SIZE + BUTTON_SPACING + value_width + BUTTON_SPACING, button_y, BUTTON_SIZE, BUTTON_SIZE)
-    self._plus_button.set_enabled(current_value < self.max_value and is_enabled)
+    self._plus_button.set_enabled(current_value is not None and is_enabled
+                                  and current_value < self.max_value)
     self._plus_button.render(plus_rect)
     
     return False
   
   def _handle_mouse_release(self, mouse_pos: MousePos):
     """Handle mouse clicks on buttons."""
-    current_value = self._get_value()
-    if self.suffix == "V":
-      value_text = f"{current_value:.1f}{self.suffix}"
-    else:
-      decimals = self._decimals()
-      value_text = f"{current_value:.{decimals}f}{self.suffix}"
+    value_text = self._value_text(self._get_value())
     
     button_y = self._rect.y + (self._rect.height - BUTTON_SIZE) / 2
     
