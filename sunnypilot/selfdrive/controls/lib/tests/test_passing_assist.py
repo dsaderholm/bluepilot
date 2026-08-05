@@ -456,7 +456,7 @@ class _KeepRightOnParams:
       return bool(self.values[key])
     return key != "PassingAssistSuspend"
 
-  def put_bool(self, key, val):
+  def put_bool(self, key, val, block=False):
     pass
 
 
@@ -1112,7 +1112,7 @@ class _SuspendParams:
   def get_bool(self, key, block=False):
     return self.suspend if key == "PassingAssistSuspend" else True
 
-  def put_bool(self, key, val):
+  def put_bool(self, key, val, block=False):
     if key == "PassingAssistSuspend":
       self.suspend = bool(val)
 
@@ -1772,7 +1772,7 @@ class TestAutoCloseIn:
           return self.last
         return super().get(key)
 
-      def put(self, key, val):
+      def put(self, key, val, block=False):
         pass
     det = PassingAssistDetector()
     det.params = _P()
@@ -2077,7 +2077,7 @@ class TestLifetimeTotals:
       def get(self, key, block=False, return_default=False):
         return last if key == "PassingAssistLastDrive" else super().get(key)
 
-      def put(self, key, val):
+      def put(self, key, val, block=False):
         self.written = val
     det = PassingAssistDetector()
     det.params = _P()

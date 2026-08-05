@@ -177,6 +177,25 @@ DEFAULT_ONCOMING_MEMORY_S = 90
 # edge would still produce a jittery clear.
 DEBOUNCE_FRAMES = 3
 
+# --- there has to be ROOM, not just a speed advantage ---
+#
+# From the road: "it tried to pass when there was obviously a car in the lane over from me... I
+# could see the car in the other lane just a little bit in front of me."
+#
+# blocks_move only ever asked whether that lane was FASTER than the vehicle we are stuck behind. A
+# car a few meters ahead in the target lane, travelling normally, is faster than a slow lead by a
+# wide margin -- so it did not block, and the pass was offered into the space that car occupies.
+#
+# On a car with blind-spot monitoring that gate would have caught it. This car has none, which is
+# exactly why a geometric check cannot be left out: every other gate here is about SPEED, and none
+# of them asks whether the space is free.
+#
+# Expressed as time rather than distance so it scales with the road. One second of travel is the
+# gap this refuses to squeeze into -- at 70 mph that is about 31 m, at 40 mph about 18 m. The floor
+# stops it collapsing to nothing in traffic.
+MIN_ADJACENT_GAP_S = 1.0
+MIN_ADJACENT_GAP_M = 18.0
+
 # --- being overtaken, seen by a forward-looking radar. See overtakenSeconds in custom.capnp. ---
 #
 # A vehicle that passes us was behind us a moment ago. It appears CLOSE and travelling AWAY, and no
@@ -539,7 +558,7 @@ class AdjacentLaneSide:
       return False
     return self.oncoming_seconds > 0.0 and not self.same_direction_recent
 
-  def blocks_move(self, beat_speed: float, margin: float) -> bool:
+  def blocks_move(self, beat_speed: float, margin: float, v_ego: float = 0.0) -> bool:
     """Would moving into this lane actually gain anything?
 
     Not "is it occupied" -- a car in the target lane is fine if it is moving well. The test is
@@ -558,6 +577,10 @@ class AdjacentLaneSide:
     """
     if not self.available or not self.occupied:
       return False
+    # NO ROOM beats any speed argument. See MIN_ADJACENT_GAP_S -- a vehicle this close in the lane
+    # we would move into is occupying the space, and how fast it is going does not change that.
+    if 0.0 < self.d_rel < max(MIN_ADJACENT_GAP_M, v_ego * MIN_ADJACENT_GAP_S):
+      return True
     return (self.v_abs - beat_speed) < margin
 
 

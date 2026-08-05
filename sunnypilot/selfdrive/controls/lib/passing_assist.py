@@ -531,6 +531,7 @@ class PassingAssistDetector:
     # a lane change he just made is the evidence that a pass is underway, and it is the only such
     # evidence available while this system suggests nothing itself.
     self.since_driver_change_s = 1e3
+    self.last_v_ego = 0.0
     self.driver_change_was_exit = False
     self._driver_blinker = None       # side currently being signaled, or None
     self._signalled_over_widening = False
@@ -1419,6 +1420,7 @@ class PassingAssistDetector:
     self.frame += 1
 
     CS = sm['carState']
+    self.last_v_ego = float(CS.vEgo)
     lead = sm['radarState'].leadOne
 
     v_cruise = self._reference_speed(CS, sm, v_cruise, speed_limit_target)
@@ -1648,8 +1650,8 @@ class PassingAssistDetector:
     # asking whether it is faster than what we are stuck behind -- a queue crawling at 45 is still
     # worth moving into if the lead is doing 40 and we want 70. The margin is the same deficit that
     # decided the pass was worth wanting, so one knob governs both halves of the judgment.
-    adj_left = self.adjacent.left.blocks_move(self.lead_v_lead, self.min_deficit_ms)
-    adj_right = self.adjacent.right.blocks_move(self.lead_v_lead, self.min_deficit_ms)
+    adj_left = self.adjacent.left.blocks_move(self.lead_v_lead, self.min_deficit_ms, CS.vEgo)
+    adj_right = self.adjacent.right.blocks_move(self.lead_v_lead, self.min_deficit_ms, CS.vEgo)
 
     left_ok = (self.left_geometry_ok and not onc_left and not self.left_blindspot and
                not self.rear.left.blocks_lane_change and not adj_left)
@@ -1762,7 +1764,8 @@ class PassingAssistDetector:
     #
     # Expressed as the passing threshold read backwards -- slower than the set speed by the deficit
     # margin -- so the two behaviors cannot disagree about what "slow" means.
-    if self.adjacent.right.blocks_move(self.reference_speed - self.min_deficit_ms, 0.0):
+    if self.adjacent.right.blocks_move(self.reference_speed - self.min_deficit_ms, 0.0,
+                                       self.last_v_ego):
       self.keep_right_seconds = 0.0
       return
 

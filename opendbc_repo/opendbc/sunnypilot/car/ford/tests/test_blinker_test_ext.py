@@ -24,7 +24,11 @@ class FakeParams:
   def get(self, key, block=False, return_default=False):
     return self.value
 
-  def put(self, key, val):
+  def put(self, key, val, block=False):
+    # MATCHES THE REAL SIGNATURE: params_pyx is `put(self, key, dat, bool block = False)`.
+    # Without `block` here, a caller that passes it raised TypeError, which the module's own
+    # except-clause swallowed -- so the param silently never cleared and the whole test harness
+    # reported a bug that only existed in the stub.
     self.value = int(val)
 
 

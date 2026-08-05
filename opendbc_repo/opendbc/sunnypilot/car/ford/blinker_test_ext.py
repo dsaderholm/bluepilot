@@ -4,6 +4,37 @@ BluePilot: stationary bench test for turn-signal actuation on Ford.
 ONE QUESTION: if openpilot writes TurnLghtSwtch_D_Stat into the Steering_Data_FD1 frame it already
 transmits, does the BCM actually light the lamp?
 
+READ THE DBC BEFORE GOING FURTHER -- 2026-08-04, and it should have been read first.
+
+  BO_ 131 Steering_Data_FD1: 8 GWM
+   SG_ TurnLghtSwtch_D_Stat : 5|2@0+ (1,0) [0|3] "SED"  IPMA_ADAS,PSCM
+
+The frame is sent by the GATEWAY, and this signal is addressed to IPMA_ADAS and PSCM -- the camera
+and the steering module. The body module is not a listed receiver. This is not a lamp command; it
+is a status broadcast telling the ADAS modules that the driver has signalled.
+
+The only turn-lamp signals that exist are on the body module's own frame -- TurnLghtLeft_D_Rq,
+TurnLghtLeftOn_B_Stat -- and they are the BCM reporting OUTWARD, addressed to CMR_DSMC and
+IPMA_ADAS. Nothing in this DBC lets anyone ask the BCM for a lamp.
+
+Which reframes every symptom. Writing this signal means contradicting the gateway about where the
+driver's physical stalk is, on a frame the gateway is also sending. The lamp responding at all is
+most likely the gateway relaying our value onward to the body module over MS-CAN, in alternation
+with the real stalk position it relays from the column. That is a fight no send rate wins, and it
+matches what the car does: "test left signal does weird fast flashing, same with test right."
+
+The value table closes the other door too:
+
+  VAL_ 131 TurnLghtSwtch_D_Stat 3 "Unused_Treat_As_Off" 2 "Right" 1 "Left" 0 "Off"
+
+There is no momentary or one-touch encoding to send. Value 3 is explicitly to be treated as off, so
+the tap can only ever be a very short Left -- which is exactly what it measured: one flash, no
+latch.
+
+CONCLUSION: commanding the turn signal through this signal is probably not possible on this car,
+and the remaining honest options are a different message entirely (none is documented here) or the
+canbox on MS-CAN, where the body module actually lives. Do not spend more effort on send rates.
+
 It matters because desire_helper's entire lane-change state machine keys off
 carState.leftBlinker/rightBlinker, which are decoded from the SCCM's copy of that same message on
 bus 0 (carstate.py). openpilot cannot self-receive its own transmissions -- panda returns them at
@@ -163,7 +194,14 @@ class BlinkerTestExt:
     # int, NOT str -- see the note in bluepilot.py::_request_blinker_test. Writing "0" here raised
     # TypeError, so DONE could never be cleared and a second pulse could never be armed.
     try:
-      self.bt_params.put("FordBlinkerTest", 0)
+      # block=True, and it has to be. put() defaults to putNonBlocking, so the read-back below
+      # raced the write and usually returned the OLD value -- which set _bt_saw_clear False and
+      # left the runaway guard holding every button down until some later poll happened to see a
+      # zero. That is "tap left will do one signal and then stop working for a while."
+      #
+      # A blocking write is acceptable here and nowhere else in this file: this path only runs at
+      # standstill, once, in response to a button the driver is standing there waiting on.
+      self.bt_params.put("FordBlinkerTest", 0, block=True)
     except Exception:  # noqa: BLE001 - a param write failure must not stop the timeout above
       pass
     # READ IT BACK NOW. This is the only proof the store took the write, and it has to be taken
