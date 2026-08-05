@@ -223,6 +223,20 @@ class BluePilotLayout(Widget):
     # One CAN frame, the smallest ask there is. See EDGE_FRAMES in blinker_test_ext: openpilot does
     # not send this frame at all normally, so even a "tap" injects five of them into the gateway's
     # stream -- five rising edges where a stalk tap is one event.
+    # The one that should look like a real signal. See BLINK_PERIOD_S: the lamp mirrors our frames
+    # one for one, so pacing them at blinker rate makes the gateway's own "off" frames the other
+    # half of each blink instead of the enemy.
+    self._blinker_blink_buttons = dual_button_item(
+      lambda: tr("Blink Left"),
+      lambda: tr("Blink Right"),
+      left_callback=lambda: self._request_blinker_test(7),
+      right_callback=lambda: self._request_blinker_test(8),
+      description=lambda: tr("Sends one message per blink instead of as fast as the bus allows. "
+                             "Your lamp follows each message exactly once, so the rate we send at "
+                             "is the rate it flashes. This should look like an ordinary turn "
+                             "signal -- eight blinks, same as your stalk."),
+    )
+
     self._blinker_edge_buttons = dual_button_item(
       lambda: tr("One Frame Left"),
       lambda: tr("One Frame Right"),
@@ -753,6 +767,7 @@ class BluePilotLayout(Widget):
         self._blinker_test_buttons,
         self._blinker_tap_buttons,
         self._blinker_edge_buttons,
+        self._blinker_blink_buttons,
       ]) +
       _section(tr("Audio"), [
         self._use_custom_sounds,

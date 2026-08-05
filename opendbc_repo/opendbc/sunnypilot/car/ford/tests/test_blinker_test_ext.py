@@ -13,7 +13,7 @@ from types import SimpleNamespace as NS
 from opendbc.car import DT_CTRL
 from opendbc.sunnypilot.car.ford.blinker_test_ext import (
   BlinkerTestExt, SIGNAL_NONE, SIGNAL_LEFT, SIGNAL_RIGHT, PULSE_DURATION_S, STANDSTILL_V_EGO,
-  BUTTONS_STEP, SIGNAL_TAP_LEFT, TAP_COMMAND_S, DONE_HOLD_S,
+  BUTTONS_STEP, SIGNAL_TAP_LEFT, TAP_COMMAND_S, DONE_HOLD_S, SIGNAL_BLINK_LEFT, BLINK_PERIOD_S, BLINK_COUNT,
 )
 
 
@@ -352,3 +352,43 @@ class TestTheTap:
       ext = make_ext(SIGNAL_TAP_LEFT)
       out = run(ext, POLL_FRAMES + 20, **kw)
       assert all(v == SIGNAL_NONE for v in out), f"a tap ignored {kw}"
+
+
+class TestBlinkMode:
+  """The lamp mirrors our frames one for one -- "one frame still does one flash, even if I spam the
+  button" -- so the SEND RATE is the FLASH RATE.
+
+  Which means the gateway's contradicting frames were never the enemy: they are the other half of a
+  blink. Pace our frames at blinker rate and the result is a blinker.
+  """
+
+  def test_it_sends_at_blink_rate_not_bus_rate(self):
+    ext = make_ext(SIGNAL_BLINK_LEFT)
+    out = run(ext, POLL_FRAMES + int(BLINK_COUNT * BLINK_PERIOD_S / DT_CTRL))
+    sends = [i for i, v in enumerate(out) if v == SIGNAL_LEFT]
+    assert sends, "never commanded at all"
+    gaps = [(b - a) * DT_CTRL for a, b in zip(sends, sends[1:])]
+    assert gaps, "only one frame -- that is edge mode, not blink mode"
+    assert all(abs(g - BLINK_PERIOD_S) < 0.02 for g in gaps), \
+      f"frames are not paced at the blink rate: {sorted(set(round(g, 3) for g in gaps))}"
+
+  def test_it_sends_about_one_frame_per_blink(self):
+    """Eight blinks means eight frames -- not eighty, which is what the four second hold sends and
+    why that one strobes."""
+    ext = make_ext(SIGNAL_BLINK_LEFT)
+    out = run(ext, POLL_FRAMES + int((BLINK_COUNT * BLINK_PERIOD_S + 1.5) / DT_CTRL))
+    assert BLINK_COUNT - 1 <= out.count(SIGNAL_LEFT) <= BLINK_COUNT + 1, \
+      f"sent {out.count(SIGNAL_LEFT)} frames for {BLINK_COUNT} blinks"
+
+  def test_a_hold_still_sends_far_more(self):
+    """The control, and the contrast that explains the reported symptom: the same duration at bus
+    rate is dozens of frames, hence dozens of flashes."""
+    ext = make_ext(SIGNAL_LEFT)
+    out = run(ext, POLL_FRAMES + int(PULSE_DURATION_S / DT_CTRL))
+    assert out.count(SIGNAL_LEFT) > 5 * BLINK_COUNT
+
+  def test_blink_obeys_every_gate(self):
+    for kw in ({"v_ego": 5.0}, {"engaged": True}, {"left_blinker": True}):
+      ext = make_ext(SIGNAL_BLINK_LEFT)
+      out = run(ext, POLL_FRAMES + 20, **kw)
+      assert all(v == SIGNAL_NONE for v in out), f"blink mode ignored {kw}"

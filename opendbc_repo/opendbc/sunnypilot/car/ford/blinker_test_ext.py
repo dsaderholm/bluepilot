@@ -66,7 +66,8 @@ from openpilot.common.params import Params
 SIGNAL_NONE, SIGNAL_LEFT, SIGNAL_RIGHT = 0, 1, 2
 
 SIGNAL_TAP_LEFT, SIGNAL_TAP_RIGHT = 3, 4    # request values only; the COMMAND is still 1/2
-SIGNAL_EDGE_LEFT, SIGNAL_EDGE_RIGHT = 5, 6  # ONE frame -- see EDGE_FRAMES
+SIGNAL_EDGE_LEFT, SIGNAL_EDGE_RIGHT = 5, 6    # ONE frame -- see EDGE_FRAMES
+SIGNAL_BLINK_LEFT, SIGNAL_BLINK_RIGHT = 7, 8  # one frame per blink -- see BLINK_PERIOD_S
 
 PULSE_DURATION_S = 4.0        # long enough for several flash cycles at ~1.5 Hz
 
@@ -111,7 +112,19 @@ OBSERVE_AFTER_S = 3.0
 # retriggers -- which looks exactly like what the car does. One frame is the minimum perturbation
 # anyone can make, and nobody has tried it.
 #
-# AND THERE IS NOW A REASON TO EXPECT IT TO WORK, from the owner: "how does ICBM reliably control
+# CONFIRMED FROM THE CAR, 2026-08-04, by a second signal nobody thought to use:
+#
+#   "One frame left did do one signal... I notice that the difference between TAP left signal and
+#   one frame left when I spam the button is TAP left signal will like strobe my fog light and one
+#   frame left won't. I have the feature on where it will turn on my left fog light and right fog
+#   light when I use my blinker."
+#
+# The cornering lamp follows the turn signal, so it is an INDEPENDENT counter of how many discrete
+# signal events the body module saw. The tap strobing it and a single frame not is direct evidence
+# that each frame we send is its own event: five frames, five events. A four second hold is roughly
+# eighty, which is the fast flashing.
+#
+# AND THE REASON TO EXPECT IT, from the owner: "how does ICBM reliably control
 # stuff on the steering wheel?"
 #
 # ICBM drives the cruise buttons through THIS EXACT FRAME, on this bus, against the same gateway
@@ -129,6 +142,36 @@ OBSERVE_AFTER_S = 3.0
 # one edge, then silence. If the body module latches a one-touch from that, everything longer has
 # simply been re-triggering it -- and the erratic flashing was never contention at all.
 EDGE_FRAMES = 1
+# ...and watch LONG ENOUGH to count a whole one-touch. His BCM is set to eight flashes, which at
+# about 1.5 Hz is 5.3 s -- longer than the 3 s window the tap used, so an edge that DID trigger a
+# full sequence would have been reported as a partial count and read as a failure.
+#
+# Costs nothing to be generous: a press during the window preempts it, so the driver is never made
+# to wait out a measurement they have finished with.
+EDGE_OBSERVE_S = 8.0
+
+# --- STOP FIGHTING THE CONTENTION AND USE IT ---
+#
+# From the car, and it is the whole answer: "one frame still does one flash, even if I spam the
+# button." The lamp is not latching anything. It mirrors our frames ONE FOR ONE.
+#
+# Which explains every observation with a single rule -- THE FLASH RATE EQUALS OUR SEND RATE:
+#
+#   one frame                      one flash
+#   five frames in a quarter second  a strobe, and his cornering lamp strobes with it
+#   four seconds at 20 Hz          about eighty frames, and "really fast flashing"
+#
+# So the gateway's "off" frames were never the enemy. They are the other half of a blink. Our frame
+# turns the lamp on, the gateway's next frame turns it off, and if our frames are paced at blinker
+# rate the result IS a blinker. Three sessions were spent trying to win a contest whose loser was
+# doing half the work.
+#
+# 1.5 Hz is the rate a Ford blinks at, so this should be indistinguishable from the real thing. It
+# is also the one remaining hypothesis that fits ALL the evidence rather than most of it, and it
+# costs one press to falsify: if the lamp blinks at 1.5 Hz, commanding the signal works today, with
+# no canbox and no new hardware.
+BLINK_PERIOD_S = 0.667
+BLINK_COUNT = 8               # match the one-touch he set in FORScan, so the two are comparable
 
 # How long the verdict stays on screen before the machine re-arms itself.
 #
@@ -190,6 +233,8 @@ class BlinkerTestExt:
     self.bt_flashes = 0
     self.bt_flashes_after = 0
     self.bt_watching = SIGNAL_NONE
+    self.bt_blinking = False
+    self._bt_blink_total = 0
     self._bt_lamp_prev = False
     self._bt_command_frames_left = 0
     self._bt_done_frames = 0
@@ -301,6 +346,15 @@ class BlinkerTestExt:
       # what the car does WITHOUT us.
       if not commanding:
         return SIGNAL_NONE
+      # Blink mode sends ONE frame per period rather than at the bus rate -- the lamp mirrors our
+      # frames one for one, so the send rate IS the flash rate. See BLINK_PERIOD_S.
+      if self.bt_blinking:
+        # Counted from the START of this pulse, not off the free-running frame counter: the arming
+        # frame already sent one, so a global modulo puts the first gap wherever the pulse happened
+        # to begin. The test caught a 0.16 s gap among 0.66 s ones.
+        elapsed = self._bt_blink_total - self.bt_frames_left
+        period = int(BLINK_PERIOD_S / DT_CTRL)
+        return self.bt_commanded if elapsed > 0 and elapsed % period == 0 else SIGNAL_NONE
       return self.bt_commanded if send_frame else SIGNAL_NONE
 
     # ---- showing the verdict: a clock, not a condition. See DONE_HOLD_S ----
@@ -342,7 +396,8 @@ class BlinkerTestExt:
       self._bt_saw_clear = True
 
     if request not in (SIGNAL_LEFT, SIGNAL_RIGHT, SIGNAL_TAP_LEFT, SIGNAL_TAP_RIGHT,
-                       SIGNAL_EDGE_LEFT, SIGNAL_EDGE_RIGHT):
+                       SIGNAL_EDGE_LEFT, SIGNAL_EDGE_RIGHT,
+                       SIGNAL_BLINK_LEFT, SIGNAL_BLINK_RIGHT):
       self.bt_blocked = 0
       return SIGNAL_NONE
 
@@ -368,7 +423,9 @@ class BlinkerTestExt:
     self._bt_saw_clear = False
     tap = request in (SIGNAL_TAP_LEFT, SIGNAL_TAP_RIGHT, SIGNAL_EDGE_LEFT, SIGNAL_EDGE_RIGHT)
     edge = request in (SIGNAL_EDGE_LEFT, SIGNAL_EDGE_RIGHT)
-    self.bt_commanded = (SIGNAL_LEFT if request in (SIGNAL_LEFT, SIGNAL_TAP_LEFT, SIGNAL_EDGE_LEFT)
+    self.bt_blinking = request in (SIGNAL_BLINK_LEFT, SIGNAL_BLINK_RIGHT)
+    self.bt_commanded = (SIGNAL_LEFT if request in (SIGNAL_LEFT, SIGNAL_TAP_LEFT, SIGNAL_EDGE_LEFT,
+                                                    SIGNAL_BLINK_LEFT)
                          else SIGNAL_RIGHT)
     self.bt_watching = self.bt_commanded
     # A tap commands briefly then watches in silence; a hold commands throughout. Same counter for
@@ -377,8 +434,14 @@ class BlinkerTestExt:
     # BUTTONS_STEP, so one send needs the window to stay open that long.
     self._bt_command_frames_left = (EDGE_FRAMES * BUTTONS_STEP if edge else
                                     int((TAP_COMMAND_S if tap else PULSE_DURATION_S) / DT_CTRL))
-    self.bt_frames_left = int(((TAP_COMMAND_S + OBSERVE_AFTER_S) if tap
-                               else PULSE_DURATION_S) / DT_CTRL)
+    observe = EDGE_OBSERVE_S if edge else OBSERVE_AFTER_S
+    if self.bt_blinking:
+      # One frame per blink, for as many blinks as the one-touch does. See BLINK_PERIOD_S.
+      self._bt_command_frames_left = int(BLINK_COUNT * BLINK_PERIOD_S / DT_CTRL)
+      self.bt_frames_left = self._bt_command_frames_left + int(1.0 / DT_CTRL)
+      self._bt_blink_total = self.bt_frames_left
+    else:
+      self.bt_frames_left = int(((TAP_COMMAND_S + observe) if tap else PULSE_DURATION_S) / DT_CTRL)
     self.bt_lamp_seen = False
     self.bt_flashes = 0
     self.bt_flashes_after = 0
