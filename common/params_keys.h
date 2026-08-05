@@ -647,7 +647,6 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // STRING, not BOOL -- see the note in params_migration: a BOOL marker made put("1") raise, so
     // the marker never stuck and the migration re-ran (and re-clobbered) on every boot.
     {"BPPassingAssistRenameMigrated", {PERSISTENT | BACKUP, STRING, "0"}},
-    {"BPPassingAssistTestingMigrated", {PERSISTENT | BACKUP, STRING, "0"}},
 
     {"disable_BP_lat_UI", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"disable_BP_long_UI", {PERSISTENT | BACKUP, BOOL, "0"}},
