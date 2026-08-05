@@ -98,3 +98,58 @@ class TestTheListItself:
     for key in _BP_REDEFAULTED:
       assert key in declared, f"{key} is not declared in params_keys.h"
     assert "BPDefaultsGeneration" in declared
+
+
+class TestTheOtherBranchCannotUndoThis:
+  """The first draft used a branch-distinct generation string on the reasoning that it would stop
+  the two branches re-running each other's migration. It did the exact opposite.
+
+  Both branches write the SAME BPDefaultsGeneration key. With a single value in it, a boot on
+  passing-assist leaves "2" behind, this branch sees a value that is not "icbm-1", and re-runs --
+  clearing settings he had deliberately changed since. Every branch switch, forever, in both
+  directions. So the marker holds a SET of applied ids instead.
+  """
+
+  OTHER_BRANCH = "2"   # what a boot on passing-assist-phase1 writes
+
+  def test_a_setting_he_changed_survives_a_round_trip_through_the_other_branch(self):
+    p = FakeParams({"BPDefaultsGeneration": BP_DEFAULTS_GENERATION, "SpeedLimitMode": 1})
+    _migrate_bp_redefaulted(p)
+    assert p.removed == [], "cleared on an ordinary boot"
+
+    # he flashes the other branch, whose migration adds its own id, and comes back
+    p.store["BPDefaultsGeneration"] = f"{self.OTHER_BRANCH},{BP_DEFAULTS_GENERATION}"
+    _migrate_bp_redefaulted(p)
+    assert p.removed == [], "the other branch's marker made this one run again"
+    assert p.store["SpeedLimitMode"] == 1, "his setting did not survive the round trip"
+
+  def test_it_adds_its_id_without_dropping_the_other_branch(self):
+    p = FakeParams({"BPDefaultsGeneration": self.OTHER_BRANCH})
+    _migrate_bp_redefaulted(p)
+    assert set(p.written["BPDefaultsGeneration"].split(",")) == {self.OTHER_BRANCH,
+                                                                BP_DEFAULTS_GENERATION}
+
+  def test_a_device_that_has_never_run_either_still_applies(self):
+    p = FakeParams({k: "stale" for k in _BP_REDEFAULTED})
+    _migrate_bp_redefaulted(p)
+    assert set(p.removed) == set(_BP_REDEFAULTED)
+
+
+class TestOneBadKeyDoesNotCostTheRest:
+  def test_the_remaining_keys_are_still_cleared(self):
+    """One try around the whole loop meant an unknown key abandoned every key after it AND skipped
+    the marker -- so the migration retried on every boot, which is the one thing it must never do.
+    """
+    p = FakeParams({k: "stale" for k in _BP_REDEFAULTED})
+    first = _BP_REDEFAULTED[0]
+    real_remove = p.remove
+
+    def remove(key):
+      if key == first:
+        raise RuntimeError("unknown key")
+      real_remove(key)
+    p.remove = remove
+
+    _migrate_bp_redefaulted(p)
+    assert set(p.removed) == set(_BP_REDEFAULTED[1:]), "one bad key took the rest with it"
+    assert "BPDefaultsGeneration" in p.written, "the marker was skipped, so this runs again on every boot"

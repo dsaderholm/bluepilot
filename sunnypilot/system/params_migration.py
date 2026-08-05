@@ -67,9 +67,18 @@ def _migrate_car_platform_bundle(_params):
 # ONCE PER GENERATION, not every boot, or he could never turn one of these off and keep it -- the
 # opposite of what a settings screen is for.
 #
-# The generation string is branch-distinct on purpose. passing-assist-phase1 carries its own list
-# and counts "1", "2", ...; sharing the counter would make the two branches re-run each other's
-# migration on every switch. When they merge, union the lists and pick one counter.
+# The generation id is branch-distinct, and the marker holds a SET of the ids that have been
+# applied rather than the last one written.
+#
+# That second half is the whole point and the first draft got it backwards. Both branches write the
+# same BPDefaultsGeneration key, so with a single value each branch's boot INVALIDATES the other's
+# marker: flash passing-assist, come back to this branch, and its migration runs again -- clearing
+# settings he had deliberately changed since. Branch-distinct ids did not prevent that, they
+# guaranteed it. Demonstrated before this was written: SpeedLimitMode set back to "information"
+# survived a normal boot and did not survive a round trip through the other branch.
+#
+# As a set, neither branch can invalidate the other, applying twice is a no-op, and merging the two
+# branches needs nothing more than both ids being present.
 BP_DEFAULTS_GENERATION: str = "icbm-1"
 
 _BP_REDEFAULTED = (
@@ -88,16 +97,33 @@ _BP_REDEFAULTED = (
 )
 
 
-def _migrate_bp_redefaulted(_params):
-  if _params.get("BPDefaultsGeneration") == BP_DEFAULTS_GENERATION:
-    return
+def _applied_generations(_params) -> set[str]:
+  """Which generation ids this device has already taken. See BP_DEFAULTS_GENERATION."""
   try:
-    for key in _BP_REDEFAULTED:
+    raw = _params.get("BPDefaultsGeneration") or ""
+  except Exception:  # noqa: BLE001 - unreadable means "none applied", which is the safe reading
+    return set()
+  return {g for g in str(raw).split(",") if g}
+
+
+def _migrate_bp_redefaulted(_params):
+  applied = _applied_generations(_params)
+  if BP_DEFAULTS_GENERATION in applied:
+    return
+  # Per key, not one try around the loop. A single unknown or unreadable key used to abandon the
+  # rest of the list AND skip the marker, so the whole migration retried on every boot -- and a
+  # migration that runs every boot is the one thing this must never be.
+  for key in _BP_REDEFAULTED:
+    try:
       _params.remove(key)
-    _params.put("BPDefaultsGeneration", BP_DEFAULTS_GENERATION, block=True)
+    except Exception as e:  # noqa: BLE001
+      cloudlog.exception(f"params_migration: could not clear {key}: {e}")
+  try:
+    _params.put("BPDefaultsGeneration", ",".join(sorted(applied | {BP_DEFAULTS_GENERATION})),
+                block=True)
     cloudlog.info(f"params_migration: took the new defaults for {len(_BP_REDEFAULTED)} settings")
-  except Exception as e:
-    cloudlog.exception(f"Error applying new defaults: {e}")
+  except Exception as e:  # noqa: BLE001
+    cloudlog.exception(f"Error recording the defaults generation: {e}")
 
 
 BP_LATERAL_SCHEME_PARAMS_MIGRATION_VERSION: str = "1"
