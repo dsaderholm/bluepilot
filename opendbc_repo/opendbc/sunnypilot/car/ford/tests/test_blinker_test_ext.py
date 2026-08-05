@@ -378,6 +378,9 @@ class TestBlinkMode:
     assert all(b - a > 1 for a, b in zip(sends, sends[1:])),       "consecutive frames -- that is a burst, and the lamp does not need one"
 
   def _drive_with_a_fake_bcm(self, ext, seconds, on_s=0.45, refractory_s=0.0):
+    # NOTE: call this from frame zero, before the machine has armed. The arming frame returns the
+    # FIRST blink, so a harness that starts afterwards silently misses it -- which is how the
+    # eighth flash hid: seven counted here, eight seen on the car.
     """A body module that lights the lamp for on_s when commanded -- and IGNORES commands while it
     is still lit, which is the absorption that caused the missed blinks.
 
@@ -404,13 +407,11 @@ class TestBlinkMode:
     sometimes missing 2." A fixed send period beats against the body module's own cycle and drifts
     through its ON phase. Waiting for the lamp to go out has no phase to drift."""
     ext = make_ext(SIGNAL_BLINK_LEFT)
-    run(ext, POLL_FRAMES + 1)
     _, absorbed = self._drive_with_a_fake_bcm(ext, 20.0, on_s=0.45, refractory_s=0.15)
     assert absorbed == 0, f"{absorbed} commands landed while the lamp was still lit"
 
   def test_it_still_stops_after_the_right_number(self):
     ext = make_ext(SIGNAL_BLINK_LEFT)
-    run(ext, POLL_FRAMES + 1)
     commands, _ = self._drive_with_a_fake_bcm(ext, 25.0)
     assert len(commands) == BLINK_COUNT, f"{len(commands)} blinks, expected {BLINK_COUNT}"
 
@@ -425,7 +426,6 @@ class TestBlinkMode:
     here. The earlier version used a flasher fast enough that both approaches worked.
     """
     ext = make_ext(SIGNAL_BLINK_LEFT)
-    run(ext, POLL_FRAMES + 1)
     commands, absorbed = self._drive_with_a_fake_bcm(ext, 40.0, on_s=0.9, refractory_s=0.3)
     assert absorbed == 0, f"{absorbed} commands swallowed by a flasher slower than the period"
     assert len(commands) == BLINK_COUNT, f"{len(commands)} blinks got through, expected {BLINK_COUNT}"
@@ -437,6 +437,25 @@ class TestBlinkMode:
     ext = make_ext(SIGNAL_BLINK_LEFT)
     out = run(ext, POLL_FRAMES + int(8.0 / DT_CTRL))
     assert out.count(SIGNAL_LEFT) >= 3, "no lamp feedback meant no blinks at all"
+
+  def test_the_machine_frees_up_as_soon_as_the_blinks_finish(self):
+    """From the car: "I still need to wait a little bit in between tests", "occasionally pressing
+    blink left or blink right is absolutely nothing", and counts of two, three and four.
+
+    All one bug. The command window is a 14 s backstop for a sequence that finishes in six, and the
+    machine sat in it -- so a press landing in that dead window was dropped, and a later one
+    arrived mid-sequence. Measured at 17.3 s before the buttons came back.
+    """
+    ext = make_ext(SIGNAL_BLINK_LEFT)
+    commands, _ = self._drive_with_a_fake_bcm(ext, 25.0)
+    last = commands[-1]
+    # It must leave the pulse within a second or so of the final blink, not fourteen.
+    for i in range(last, last + int(3.0 / DT_CTRL)):
+      ext.update_blinker_test(make_cs())
+      if ext.bt_state != 1:
+        assert (i - last) * DT_CTRL < 2.0, f"stayed busy {(i - last) * DT_CTRL:.1f}s after the last blink"
+        return
+    raise AssertionError("still commanding three seconds after the last blink")
 
   def test_blink_obeys_every_gate(self):
     for kw in ({"v_ego": 5.0}, {"engaged": True}, {"left_blinker": True}):

@@ -255,6 +255,10 @@ MEASURE_WINDOW_S = 12.0
 # and nothing assumed about Ford.
 #
 # Clamped because one bad reading should not stall the sequence or machine-gun it.
+# ...times this. A symmetric flasher would want the full on-time again, but the car is a little
+# quicker than that -- "a tiny bit too slow in between maybe" -- so the off-time is slightly shorter
+# than the on-time on this Ford. Trimmed rather than guessed at a new absolute number.
+BLINK_GUARD_SCALE = 0.82
 BLINK_GUARD_MIN_S = 0.15
 BLINK_GUARD_MAX_S = 0.90
 BLINK_AFTER_LAMP_OFF_S = 0.35   # until an on-time has actually been observed
@@ -533,7 +537,7 @@ class BlinkerTestExt:
         # The on-time we just watched. See BLINK_GUARD_MIN_S -- a symmetric flasher wants the same
         # again as its off-time, so this IS the car's own rhythm.
         if self._bt_lamp_on_frame:
-          lit_s = (self._bt_frame - self._bt_lamp_on_frame) * DT_CTRL
+          lit_s = (self._bt_frame - self._bt_lamp_on_frame) * DT_CTRL * BLINK_GUARD_SCALE
           self._bt_guard_s = min(max(lit_s, BLINK_GUARD_MIN_S), BLINK_GUARD_MAX_S)
       self._bt_lamp_prev = lamp
 
@@ -562,6 +566,15 @@ class BlinkerTestExt:
         # goes out, so there is no phase to drift and nothing to configure.
         since_cmd = (self._bt_frame - self._bt_last_blink_cmd) * DT_CTRL
         if self._bt_blinks_sent >= BLINK_COUNT:
+          # DONE MEANS DONE. The command window is a generous backstop -- 14 s for a sequence that
+          # finishes in six -- and leaving the machine sitting in it is the whole of "I still need
+          # to wait a little bit in between tests", "occasionally pressing does absolutely nothing",
+          # and the truncated counts: a press landing in that dead window was dropped, and the next
+          # one arrived mid-sequence.
+          #
+          # Close it as soon as the last lamp goes dark, so the wait is the test and nothing more.
+          if not lamp:
+            self.bt_frames_left = min(self.bt_frames_left, int(0.4 / DT_CTRL))
           return SIGNAL_NONE
         dark_for = (self._bt_frame - self._bt_lamp_off_frame) * DT_CTRL if self._bt_lamp_off_frame else 0.0
         ready = (self._bt_lamp_off_frame and dark_for >= self._bt_guard_s
@@ -691,7 +704,9 @@ class BlinkerTestExt:
       self._bt_lamp_on_frame = 0
       self._bt_guard_s = float(BLINK_AFTER_LAMP_OFF_S)
       self._bt_last_blink_cmd = self._bt_frame
-      self._bt_blinks_sent = 0
+      # The arming frame below returns a command, so it IS the first blink. Not counting it is
+      # where "blink left did eight flashes" came from, against a BLINK_COUNT of seven.
+      self._bt_blinks_sent = 1
       # A short tail only. There is nothing to observe after a blink -- the lamp follows our frames
       # and stops when we do -- so a full second here was a second of dead buttons for nothing.
       self.bt_frames_left = self._bt_command_frames_left + int(0.3 / DT_CTRL)

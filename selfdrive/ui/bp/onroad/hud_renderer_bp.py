@@ -1241,6 +1241,17 @@ class HudRendererBP(HudRendererSP):
       return False
 
     state = str(bt.state)
+    # MEASURING has no commanded side and no progress -- it is waiting for the driver. Reported as
+    # "measure my blinker didn't seem to do anything at all", because this fell through to the
+    # pulsing branch below, which reads bt.commanded (zero here) and cheerfully announced
+    # "SIGNAL RIGHT" while a progress bar filled against a pulse that was not running.
+    if bt.commanded == 0 and state == 'pulsing':
+      self._pa_main = "FLICK YOUR STALK"
+      self._pa_sub = (f"{bt.flashes} flashes so far" if bt.flashes else "watching your blinker...")
+      self._pa_progress = 0.0
+      self._pa_color = rl.Color(150, 205, 235, 255)
+      self._pa_alert = True
+      return True
     if state == 'pulsing':
       side = "LEFT" if bt.commanded == 1 else "RIGHT"
       self._pa_main = f"SIGNAL {side}"
@@ -1250,6 +1261,13 @@ class HudRendererBP(HudRendererSP):
       self._pa_alert = True
       return True
     if state == 'done':
+      if bt.measuredPeriodMs:
+        # Measure mode's whole output: his own flasher, timed. The number the blink follows.
+        self._pa_main = "YOUR BLINKER"
+        self._pa_sub = f"{bt.flashes} flashes, {bt.measuredPeriodMs} ms apart"
+        self._pa_color = rl.Color(150, 205, 235, 255)
+        self._pa_alert = True
+        return True
       # Held after the pulse so the answer is readable without watching all four seconds.
       ok = bool(bt.lampSeen)
       self._pa_main = "SIGNAL WORKS" if ok else "SIGNAL DID NOT WORK"
@@ -1257,13 +1275,6 @@ class HudRendererBP(HudRendererSP):
       # erratic case is many times that, and telling them apart by eye is what left this question
       # open across two drives. `after` is the tap measurement: flashes once we stopped commanding
       # are the car running its own one-touch pattern.
-      if bt.measuredPeriodMs:
-        # Measure mode: his own flasher, timed. The number to put in the setting.
-        self._pa_main = "YOUR BLINKER"
-        self._pa_sub = f"{bt.flashes} flashes, {bt.measuredPeriodMs} ms apart"
-        self._pa_color = rl.Color(150, 205, 235, 255)
-        self._pa_alert = True
-        return True
       if ok:
         self._pa_sub = f"{bt.flashes} flashes"
         if bt.flashesAfter:

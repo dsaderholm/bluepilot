@@ -217,15 +217,17 @@ class BluePilotLayout(Widget):
     # half of each blink instead of the enemy.
     # Command nothing; time HIS flasher. See MEASURE_WINDOW_S -- the FMVSS band is 1-2 Hz, which is
     # a factor of two wide, and his car knows the exact answer.
-    self._blinker_measure = dual_button_item(
+    # ONE button, not two. dual_button_item forced a left and a right, so it rendered the same
+    # thing twice -- "why are there two measure right blinker buttons? Obviously they are both
+    # going to be the same." There is no side to choose: it watches whichever lamp the driver uses.
+    self._blinker_measure = button_item(
       lambda: tr("Measure My Blinker"),
-      lambda: tr("Measure My Blinker"),
-      left_callback=lambda: self._request_blinker_test(9),
-      right_callback=lambda: self._request_blinker_test(9),
-      description=lambda: tr("Press this, then use your own turn signal stalk. Nothing is sent to "
-                             "the car -- it just watches your lamp and reports how many times it "
-                             "flashed and how far apart. That is your Ford's real rate, and it is "
-                             "what Blink should be set to."),
+      lambda: tr("Watch"),
+      lambda: tr("Press Watch, then use your own turn signal stalk within 12 seconds. Nothing is "
+                 "sent to the car -- it only watches your lamp and reports how many times it "
+                 "flashed and how far apart, on the driving screen. Enable Show Passing Assist to "
+                 "see the result."),
+      callback=lambda: self._request_blinker_test(9),
     )
 
     self._blink_period = int_control_item(
