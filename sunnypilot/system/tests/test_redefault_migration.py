@@ -12,8 +12,13 @@ import pathlib
 import re
 
 from openpilot.sunnypilot.system.params_migration import (
-  _BP_REDEFAULTED, BP_DEFAULTS_GENERATION, _migrate_bp_redefaulted,
+  _BP_REDEFAULT_GROUPS, _migrate_bp_redefaulted,
 )
+
+# Flattened for the tests that do not care which branch a key came from.
+_BP_REDEFAULTED = tuple(k for _, keys in _BP_REDEFAULT_GROUPS for k in keys)
+_GENERATIONS = tuple(g for g, _ in _BP_REDEFAULT_GROUPS)
+BP_DEFAULTS_GENERATION = _GENERATIONS[0]
 
 
 class FakeParams:
@@ -50,7 +55,7 @@ class TestItClearsRatherThanWrites:
     p = FakeParams({k: "stale" for k in _BP_REDEFAULTED})
     _migrate_bp_redefaulted(p)
     assert set(p.written) == {"BPDefaultsGeneration"}
-    assert p.written["BPDefaultsGeneration"] == BP_DEFAULTS_GENERATION
+    assert set(p.written["BPDefaultsGeneration"].split(",")) == set(_GENERATIONS)
 
   def test_it_touches_nothing_outside_the_list(self):
     """The list is the contract. Anything he tuned himself has to come through untouched."""
@@ -113,12 +118,12 @@ class TestTheOtherBranchCannotUndoThis:
   OTHER_BRANCH = "2"   # what a boot on passing-assist-phase1 writes
 
   def test_a_setting_he_changed_survives_a_round_trip_through_the_other_branch(self):
-    p = FakeParams({"BPDefaultsGeneration": BP_DEFAULTS_GENERATION, "SpeedLimitMode": 1})
+    p = FakeParams({"BPDefaultsGeneration": ",".join(_GENERATIONS), "SpeedLimitMode": 1})
     _migrate_bp_redefaulted(p)
     assert p.removed == [], "cleared on an ordinary boot"
 
     # he flashes the other branch, whose migration adds its own id, and comes back
-    p.store["BPDefaultsGeneration"] = f"{self.OTHER_BRANCH},{BP_DEFAULTS_GENERATION}"
+    p.store["BPDefaultsGeneration"] = ",".join((self.OTHER_BRANCH,) + _GENERATIONS)
     _migrate_bp_redefaulted(p)
     assert p.removed == [], "the other branch's marker made this one run again"
     assert p.store["SpeedLimitMode"] == 1, "his setting did not survive the round trip"
@@ -126,8 +131,8 @@ class TestTheOtherBranchCannotUndoThis:
   def test_it_adds_its_id_without_dropping_the_other_branch(self):
     p = FakeParams({"BPDefaultsGeneration": self.OTHER_BRANCH})
     _migrate_bp_redefaulted(p)
-    assert set(p.written["BPDefaultsGeneration"].split(",")) == {self.OTHER_BRANCH,
-                                                                BP_DEFAULTS_GENERATION}
+    assert set(p.written["BPDefaultsGeneration"].split(",")) == ({self.OTHER_BRANCH}
+                                                                | set(_GENERATIONS))
 
   def test_a_device_that_has_never_run_either_still_applies(self):
     p = FakeParams({k: "stale" for k in _BP_REDEFAULTED})
@@ -153,3 +158,23 @@ class TestOneBadKeyDoesNotCostTheRest:
     _migrate_bp_redefaulted(p)
     assert set(p.removed) == set(_BP_REDEFAULTED[1:]), "one bad key took the rest with it"
     assert "BPDefaultsGeneration" in p.written, "the marker was skipped, so this runs again on every boot"
+
+
+class TestTheGroupsThemselves:
+  def test_no_generation_id_is_reused(self):
+    """Two groups sharing an id means the second never runs on a device that took the first."""
+    assert len(_GENERATIONS) == len(set(_GENERATIONS))
+
+  def test_no_key_appears_in_two_groups(self):
+    """It would be cleared again by the second group on a device that took only the first, which is
+    the re-clearing this whole shape exists to prevent."""
+    assert len(_BP_REDEFAULTED) == len(set(_BP_REDEFAULTED))
+
+  def test_a_group_already_taken_is_skipped_while_a_new_one_runs(self):
+    """The point of separate groups. A branch adding its own must not re-clear this branch's."""
+    first_gen, first_keys = _BP_REDEFAULT_GROUPS[0]
+    p = FakeParams({"BPDefaultsGeneration": first_gen, **{k: "his value" for k in _BP_REDEFAULTED}})
+    _migrate_bp_redefaulted(p)
+    assert not (set(p.removed) & set(first_keys)), "re-cleared a group this device already took"
+    for _, keys in _BP_REDEFAULT_GROUPS[1:]:
+      assert set(keys) <= set(p.removed), "a group it had never taken was skipped"

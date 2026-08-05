@@ -79,9 +79,17 @@ def _migrate_car_platform_bundle(_params):
 #
 # As a set, neither branch can invalidate the other, applying twice is a no-op, and merging the two
 # branches needs nothing more than both ids being present.
-BP_DEFAULTS_GENERATION: str = "icbm-1"
-
-_BP_REDEFAULTED = (
+# ONE GROUP PER BRANCH, each with its own id, and a device takes each group exactly once.
+#
+# Not one merged list with one id, which was the obvious shape and is wrong for the same reason the
+# single-valued marker was: passing-assist would carry this branch's four keys in its own list, so
+# a device that took them here would take them AGAIN on its first boot over there -- clearing
+# whatever he had changed in between. Separate groups make each set of defaults a thing that
+# happens once on this device, whatever order the branches are flashed in.
+#
+# A branch adds a tuple here and nothing else. Merging branches is concatenation.
+_BP_REDEFAULT_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+ ("icbm-1", (
   # off -> assist. ICBM's whole job is driving the set speed toward the posted limit, and
   # "information" means show a sign and do nothing.
   "SpeedLimitMode",
@@ -94,6 +102,7 @@ _BP_REDEFAULTED = (
   # off -> on. Camera curve control; on for him already in all likelihood, but it is the pair to
   # SCC-Map and shipping one without the other is not a state anyone chose.
   "SmartCruiseControlVision",
+ )),
 )
 
 
@@ -108,20 +117,28 @@ def _applied_generations(_params) -> set[str]:
 
 def _migrate_bp_redefaulted(_params):
   applied = _applied_generations(_params)
-  if BP_DEFAULTS_GENERATION in applied:
+  taken: set[str] = set()
+  cleared = 0
+  for generation, keys in _BP_REDEFAULT_GROUPS:
+    if generation in applied:
+      continue
+    # Per key, not one try around the loop. A single unknown or unreadable key used to abandon the
+    # rest of the list AND skip the marker, so the whole migration retried on every boot -- and a
+    # migration that runs every boot is the one thing this must never be.
+    for key in keys:
+      try:
+        _params.remove(key)
+        cleared += 1
+      except Exception as e:  # noqa: BLE001
+        cloudlog.exception(f"params_migration: could not clear {key}: {e}")
+    taken.add(generation)
+
+  if not taken:
     return
-  # Per key, not one try around the loop. A single unknown or unreadable key used to abandon the
-  # rest of the list AND skip the marker, so the whole migration retried on every boot -- and a
-  # migration that runs every boot is the one thing this must never be.
-  for key in _BP_REDEFAULTED:
-    try:
-      _params.remove(key)
-    except Exception as e:  # noqa: BLE001
-      cloudlog.exception(f"params_migration: could not clear {key}: {e}")
   try:
-    _params.put("BPDefaultsGeneration", ",".join(sorted(applied | {BP_DEFAULTS_GENERATION})),
-                block=True)
-    cloudlog.info(f"params_migration: took the new defaults for {len(_BP_REDEFAULTED)} settings")
+    _params.put("BPDefaultsGeneration", ",".join(sorted(applied | taken)), block=True)
+    cloudlog.info(f"params_migration: took the new defaults for {cleared} settings "
+                  f"({', '.join(sorted(taken))})")
   except Exception as e:  # noqa: BLE001
     cloudlog.exception(f"Error recording the defaults generation: {e}")
 
