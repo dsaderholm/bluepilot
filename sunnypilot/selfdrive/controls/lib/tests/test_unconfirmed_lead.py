@@ -62,13 +62,14 @@ class _SM(dict):
     return {k: True for k in self}
 
 
-def run(det, ev, frames, slow_down=False, **kw):
-  """slow_down is DEC's has_slow_down() for the frame -- the model-stop trigger. It is a separate
-  argument rather than part of make_sm because the detector receives it from the planner, not from
-  the SubMaster."""
+def run(det, ev, frames, slow_down=False, stop_dist=float('inf'), **kw):
+  """slow_down is DEC's has_slow_down() for the frame -- the model-stop trigger -- and stop_dist is
+  its trajectory endpoint. Separate arguments rather than part of make_sm because the detector
+  receives both from the planner, not from the SubMaster."""
   for i in range(frames):
     sm = make_sm(**{k: (v(i) if callable(v) else v) for k, v in kw.items()})
-    det.update(sm, TRAJ, CRUISE_MS, True, ev, slow_down(i) if callable(slow_down) else slow_down)
+    det.update(sm, TRAJ, CRUISE_MS, True, ev, slow_down(i) if callable(slow_down) else slow_down,
+               stop_dist(i) if callable(stop_dist) else stop_dist)
 
 
 class TestUnconfirmedLead:
@@ -149,6 +150,42 @@ class TestUnconfirmedLead:
     for _ in range(40):
       det.update(make_sm(status=False, accel=-2.5), TRAJ, CRUISE_MS, True, ev)
     assert det.state != State.active
+
+  def test_it_brakes_at_trigger_even_before_the_model_asks_to(self):
+    """The whole point of the geometry term, and the thing he asked to be sure of.
+
+    DEC triggers because the trajectory SHORTENED, which happens before the model starts asking to
+    decelerate. So at the moment of trigger desiredAcceleration is typically still ~0, and pacing
+    the request off that alone would command no change at all -- arriving late for precisely the
+    reason DEC's signal was chosen for being early.
+
+    65 mph with the stop 155 m out needs v^2/2d = 2.7 m/s^2; over the 4 s horizon that is a request
+    around 41 mph, immediately.
+    """
+    det, ev = UnconfirmedLeadDetector(), FakeEvents()
+    run(det, ev, 20, slow_down=True, stop_dist=155., status=False, accel=0.)
+    assert det.state == State.active and det.trigger == Trigger.modelStop
+    assert det.v_target < CRUISE_MS - 8., \
+      f"asked for {det.v_target / 0.44704:.0f} mph from {CRUISE_MS / 0.44704:.0f} -- too little, too late"
+    assert 17. < det.v_target < 20., f"expected ~18.3 m/s (41 mph), got {det.v_target:.1f}"
+
+  def test_a_closer_stop_is_asked_for_harder(self):
+    """Monotonic in distance, which is what makes this a profile rather than a step."""
+    targets = []
+    for d in (200., 155., 90., 50.):
+      det, ev = UnconfirmedLeadDetector(), FakeEvents()
+      run(det, ev, 20, slow_down=True, stop_dist=d, status=False, accel=0.)
+      targets.append(det.v_target)
+    assert targets == sorted(targets, reverse=True), f"not monotonic in distance: {targets}"
+    assert targets[-1] == ACC_FLOOR_MS, "a stop 50 m out at 65 mph should be asking for the floor"
+
+  def test_a_degenerate_endpoint_does_not_slam_the_request(self):
+    """v^2/2d explodes as d goes to zero. Below MIN_STOP_DISTANCE_M the geometry term is dropped and
+    the acceleration estimate carries it, rather than the floor being commanded off a garbage
+    endpoint."""
+    det, ev = UnconfirmedLeadDetector(), FakeEvents()
+    run(det, ev, 20, slow_down=True, stop_dist=0.0, status=False, accel=-0.5)
+    assert det.v_target > ACC_FLOOR_MS, "a zero endpoint went straight to the floor"
 
   def test_model_stop_without_lead_triggers(self):
     det, ev = UnconfirmedLeadDetector(), FakeEvents()

@@ -208,6 +208,12 @@ class DynamicExperimentalController:
   def urgency(self) -> float:
     return self._urgency
 
+  def endpoint_x(self) -> float:
+    """Distance to the model's furthest predicted point, metres. inf when the trajectory is not a
+    full TRAJECTORY_SIZE. With has_slow_down() true this is roughly where the model expects to be
+    stopped, which is what paces the request."""
+    return self._endpoint_x
+
   def set_mpc_fcw_crash_cnt(self) -> None:
     """Set MPC FCW crash count"""
     self._mpc_fcw_crash_cnt = self._mpc.crash_cnt

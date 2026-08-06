@@ -30,6 +30,8 @@ range-sweep requirement is the main defense against bridge, overpass and guardra
 positives, and along with the usable detection range it should be refitted from real drive logs.
 """
 
+import math
+
 from cereal import custom, log
 from openpilot.common.constants import CV
 from openpilot.common.params import Params
@@ -139,11 +141,19 @@ LEAD_LOST_S = 0.5          # candidate gone this long -> released
 #
 # DEC computes it in _update_calculations, which runs unconditionally at the top of its update().
 # So this is live whether or not DEC is enabled and whatever mode it has chosen.
-MODEL_STOP_PERSISTENCE_S = 1.0
+# Short on purpose. DEC's urgency is already Kalman-filtered over a 5-sample window with a 0.85
+# smoothing factor, so a full second of persistence on top is double-filtering -- and it is paid in
+# distance at exactly the moment distance is the scarce thing: at 65 mph one second is 29 m out of
+# the ~155 m available. This is only here to reject a single-frame glitch.
+MODEL_STOP_PERSISTENCE_S = 0.3
 MODEL_STOP_RELEASE_S = 0.5
 # Horizon used to turn the model's desired acceleration into a set-speed target. Matches SCC-V's
 # _NO_OVERSHOOT_TIME_HORIZON so the two produce comparably paced requests.
 MODEL_STOP_HORIZON_S = 4.0
+# Below this the geometry term is nonsense -- v^2/2d explodes and the request would slam to the
+# floor on a near-zero endpoint. The acceleration term still applies there, which is the half of
+# _model_stop_target that is any good close in.
+MIN_STOP_DISTANCE_M = 5.0
 
 
 class UnconfirmedLeadDetector:
@@ -154,8 +164,10 @@ class UnconfirmedLeadDetector:
     self.d_rel = 0.0
     self.ttc = 0.0
 
-    # DEC's answer to "is the model planning to stop for something ahead", supplied by the planner.
+    # DEC's answer to "is the model planning to stop for something ahead", supplied by the planner,
+    # and how far ahead it expects to be stopped.
     self.model_slow_down = False
+    self.model_stop_distance = float('inf')
     # model_should_stop is logging only -- see the capnp comment. It is kept because it is genuinely
     # informative at the END of a stop, but nothing may gate on it: it is false at every speed this
     # path can run at. See the model stop intent block above.
@@ -298,7 +310,8 @@ class UnconfirmedLeadDetector:
       self.state = State.inactive
 
   def update(self, sm, v_desired_trajectory, v_cruise_cluster: float, long_enabled: bool,
-             events_sp: EventsSP, model_slow_down: bool = False) -> None:
+             events_sp: EventsSP, model_slow_down: bool = False,
+             model_stop_distance: float = float('inf')) -> None:
     """
     Args:
       sm: SubMaster with radarState and carState
@@ -311,6 +324,9 @@ class UnconfirmedLeadDetector:
         short of what it should see at this speed. The stop-sign / red-light trigger; see the model
         stop intent block above. Defaults False so a caller that does not supply it simply never
         fires the model path, rather than firing it on stale state.
+      model_stop_distance: DEC's trajectory endpoint (m) -- roughly where the model expects to be
+        stopped. Paces the request; see _model_stop_target. Defaults inf, which falls back to the
+        acceleration estimate alone.
     """
     self.update_params()
     self.frame += 1
@@ -325,6 +341,7 @@ class UnconfirmedLeadDetector:
     # Diagnostics for the stop-sign / red-light question. Logged unconditionally, including while
     # this detector is inactive, because the interesting case is exactly when there is no lead.
     self.model_slow_down = bool(model_slow_down)
+    self.model_stop_distance = float(model_stop_distance)
     model_action = sm['modelV2'].action
     self.model_should_stop = bool(model_action.shouldStop)
     self.model_desired_accel = float(model_action.desiredAcceleration)
@@ -487,15 +504,35 @@ class UnconfirmedLeadDetector:
       events_sp.add(EventNameSP.unconfirmedLeadBraking)
 
   def _model_stop_target(self, v_ego: float) -> float:
-    """Set-speed target from the model's own desired deceleration.
+    """Set-speed target for a stop the radar cannot see.
 
     The MPC plan is no use here: with no lead, it plans normally and shows no deceleration at all,
-    because in ACC mode the planner never consumes the model's stop intent. So the target is built
-    from modelV2.action.desiredAcceleration directly -- projected over a fixed horizon, floored at
-    what Ford's ACC can hold, and never allowed to request above current speed.
+    because in ACC mode the planner never consumes the model's stop intent.
 
-    This paces the request by how hard the model wants to stop: gentle for a distant sign, sharper
-    for one already close.
+    Two independent estimates, and the request is whichever asks for more, because they fail at
+    opposite ends of the approach:
+
+    GEOMETRY -- how hard you must decelerate to be stopped at the point where the model stops
+    predicting road: a = v^2 / 2d, applied over the horizon. This is what makes the request early.
+    The trigger is a trajectory that has shortened, and the trajectory shortens BEFORE the model
+    starts asking to slow down, so at the moment of trigger the acceleration estimate below is
+    typically still ~0 and on its own would command no change at all -- arriving late for exactly
+    the reason DEC's signal was chosen for being early. At 65 mph with the endpoint at 155 m this
+    asks for 41 mph immediately.
+
+    ACCELERATION -- modelV2.action.desiredAcceleration projected over the same horizon. This is the
+    one that keeps working once the endpoint is close and the geometry term saturates at the floor,
+    and it is the better estimate of how hard the model actually intends to brake.
+
+    Floored at what Ford's ACC can hold, and never allowed to request above current speed.
     """
     projected = v_ego + self.model_desired_accel * MODEL_STOP_HORIZON_S
+
+    # inf when the trajectory was not full-length; small values are meaningless and would divide
+    # into an enormous deceleration.
+    d = self.model_stop_distance
+    if math.isfinite(d) and d > MIN_STOP_DISTANCE_M:
+      geometric = v_ego - (v_ego * v_ego / (2. * d)) * MODEL_STOP_HORIZON_S
+      projected = min(projected, geometric)
+
     return max(min(projected, v_ego), ACC_FLOOR_MS)

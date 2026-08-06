@@ -67,7 +67,7 @@ class LongitudinalPlannerSP:
     # runs dec.update -- is called at the top of LongitudinalPlanner.update, before update_targets.
     self.unconfirmed_lead.update(sm, self.v_desired_trajectory, v_cruise_cluster,
                                  long_enabled and not long_override, self.events_sp,
-                                 self.dec.has_slow_down())
+                                 self.dec.has_slow_down(), self.dec.endpoint_x())
 
     # Speed Limit Assist
     has_speed_limit = self.resolver.speed_limit_valid or self.resolver.speed_limit_last_valid
