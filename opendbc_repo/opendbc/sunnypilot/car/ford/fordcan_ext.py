@@ -244,7 +244,7 @@ def create_acc_ui_msg(packer, CAN: CanBus, CP, main_on: bool, enabled: bool, fcw
 
 
 def create_lkas_ui_msg(packer, CAN: CanBus, main_on: bool, enabled: bool, hands: int,
-                       hud_control, stock_values: dict):
+                       hud_control, stock_values: dict, passing_side: int = 0):
   """
   Creates a CAN message for the Ford IPC IPMA/LKAS status.
 
@@ -273,9 +273,31 @@ def create_lkas_ui_msg(packer, CAN: CanBus, main_on: bool, enabled: bool, hands:
   lines = 0
 
   if hud_control is not None:
+    # BluePilot: THE CLUSTER SAYS WHICH WAY IT WANTS TO GO.
+    #
+    # His idea: "my LKA display just shows green on both sides of my car all the time... what if we
+    # hijacked this, and showed what this system is wanting to do on there?" The signal turns out to
+    # be far richer than the green/not-green it currently gets used for -- LaActvStats_D_Dsply is a
+    # five-by-five matrix with an independent state per side, so the two lines can differ.
+    #
+    # The line on the side it wants OPENS -- Suppress, so it dims away -- which reads as "that side
+    # is clear to cross" and, crucially, CANNOT be mistaken for a warning. Using the Warning state
+    # would be more visible and would look exactly like lane departure, and a display that cries
+    # wolf about drifting when it means "I would like to pass" is worse than no display.
+    #
+    # DEPARTURE ALWAYS WINS, twice over, and the redundancy is deliberate. The branch order below
+    # already settles it -- Depart is tested before open -- so the `not ...Depart` here changes
+    # nothing today and a mutation removing it passes every test. It stays because the thing it
+    # protects against is somebody REORDERING those branches later, which no test can see coming and
+    # which would silently hide a lane-departure warning behind a passing suggestion.
+    left_open = passing_side == 1 and not hud_control.leftLaneDepart
+    right_open = passing_side == 2 and not hud_control.rightLaneDepart
+
     # Determine left lane status independently
     if hud_control.leftLaneDepart:
       left_status = 4   # Intervene (Yellow)
+    elif left_open:
+      left_status = 2   # Suppress -- the line opens toward the side it wants
     elif hud_control.leftLaneVisible:
       left_status = 1   # Available
     else:
@@ -284,6 +306,8 @@ def create_lkas_ui_msg(packer, CAN: CanBus, main_on: bool, enabled: bool, hands:
     # Determine right lane status independently
     if hud_control.rightLaneDepart:
       right_status = 20  # Intervene (Yellow)
+    elif right_open:
+      right_status = 10  # Suppress
     elif hud_control.rightLaneVisible:
       right_status = 5   # Available
     else:

@@ -113,7 +113,11 @@ class LateralCurvExt:
   def __init__(self, CP, CP_SP):
     # SubMaster for model data, live parameters, and selfdrive state
     # liveDelay is consumed by LateralAngleExt (variable lookup time); harmless for curvature mode.
-    self.sm = messaging.SubMaster(['modelV2', 'liveParameters', 'selfdriveState', 'radarState', 'liveDelay'])
+    # BluePilot: longitudinalPlanSP carries the passing-assist verdict, which the cluster's lane
+    # display shows -- see create_lkas_ui_msg. Subscribing here because this is the SubMaster the
+    # car controller already updates every frame.
+    self.sm = messaging.SubMaster(['modelV2', 'liveParameters', 'selfdriveState', 'radarState', 'liveDelay',
+                                   'longitudinalPlanSP'])
     self.VM = VehicleModel(CP)
     self.model = None
     self.lp = None

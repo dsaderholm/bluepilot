@@ -664,6 +664,10 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"ShowBrakeStatus", {PERSISTENT | BACKUP, BOOL, "1"}},
     // BluePilot: the passing-assist panel. Every gate, the dry run of the maneuver and the drive
     // summary all land here -- it is the whole feature's readout. Nothing acts; this only displays.
+    // BluePilot: show the passing-assist side on the CLUSTER, by opening the lane line on the
+    // side it wants. Off by default -- it repurposes a lane-departure display, so the driver
+    // decides whether that indicator is allowed to also mean this.
+    {"ShowPassingInCluster", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"ShowPassingAssist", {PERSISTENT | BACKUP, BOOL, "1"}},
     // BluePilot: one-shot stationary turn-signal actuation test. 0 off, 1 left, 2 right.
     // NOT persistent and NOT backed up: cleared on manager start and self-cleared when the pulse

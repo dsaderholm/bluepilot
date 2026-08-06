@@ -288,6 +288,15 @@ class PassingAssistSettingsLayout(Widget):
                      "the road classified afterwards."), "ShowOncomingSpeeds"),
       param="ShowOncomingSpeeds")
 
+    self._show_in_cluster = toggle_item_sp(
+      title=tr("Show It On The Dash"),
+      description=recommended(tr("Use the instrument cluster's own lane lines to show which way it "
+                                 "wants to go: the line on that side fades out, so the lane opens "
+                                 "toward the gap. Lane departure always wins -- if you are actually "
+                                 "drifting, that shows instead. Off by default because it borrows a "
+                                 "safety display."), "ShowPassingInCluster"),
+      param="ShowPassingInCluster")
+
     # ORDERED THE WAY A DRIVER ARRIVES AT A QUESTION, not the order these were built in. They were
     # added one at a time over a long session and the first section had drifted to nine controls,
     # three of which were not about when to suggest a pass at all -- the exit stand-down is about
@@ -337,6 +346,7 @@ class PassingAssistSettingsLayout(Widget):
       self._show_panel,
       self._show_next_lane,
       self._show_oncoming,
+      self._show_in_cluster,
     ]
 
   def _render(self, rect):

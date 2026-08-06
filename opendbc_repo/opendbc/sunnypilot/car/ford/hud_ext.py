@@ -133,10 +133,15 @@ class HudExt:
     self.distance_bar_frame = 0
     self.main_on_last = False
     self.lkas_enabled_last = False
+    # BluePilot: the cluster's lane display doubles as the passing-assist indicator. See
+    # create_lkas_ui_msg -- the line on the side it wants OPENS.
+    self.passing_side_last = 0
+    self.show_passing_in_cluster = False
 
   def update_hud_params(self, params, CP):
     """Read HUD-related Params from the UI. Called each frame."""
     self.send_hands_free_cluster_msg = params.get_bool("send_hands_free_cluster_msg")
+    self.show_passing_in_cluster = params.get_bool("ShowPassingInCluster")
     # Block hands-free UI on CAN vehicles — only CAN FD supports the cluster message
     if not (CP.flags & FordFlags.CANFD):
       self.send_hands_free_cluster_msg = False
@@ -185,15 +190,33 @@ class HudExt:
     steer_alert = hud_control.visualAlert in (VisualAlert.steerRequired, VisualAlert.ldw)
     standstill = CS.out.cruiseState.standstill
 
+    # BluePilot: which side passing assist wants, for the cluster's lane display. 0 none, 1 left,
+    # 2 right -- the Side enum's own ordering, read straight through.
+    #
+    # Behind a toggle because it repurposes a safety indicator, and off by default for the same
+    # reason: the driver decides whether his lane-departure display is also allowed to mean this.
+    passing_side = 0
+    if self.show_passing_in_cluster:
+      try:
+        passing_side = int(self.sm['longitudinalPlanSP'].passingAssist.suggestion)
+      except Exception:  # noqa: BLE001 - a missing planner must never stop the cluster updating
+        passing_side = 0
+
     # Determine if UI state changed
     send_ui = ((self.main_on_last != main_on) or
+               # ...INCLUDING the passing side, which is what makes this usable: the message is
+               # otherwise sent at 1 Hz, and a suggestion that took a second to appear would be a
+               # second stale by the time it did.
+               (self.passing_side_last != passing_side) or
                (self.lkas_enabled_last != CC.latActive) or
                (self.steer_alert_last != steer_alert))
 
     # LKAS UI msg at 1Hz or if UI state changes
     if (frame % CarControllerParams.LKAS_UI_STEP) == 0 or send_ui:
       can_sends.append(fordcan_ext.create_lkas_ui_msg(
-        packer, CAN, main_on, CC.latActive, self.hands, hud_control, CS.lkas_status_stock_values))
+        packer, CAN, main_on, CC.latActive, self.hands, hud_control, CS.lkas_status_stock_values,
+        passing_side))
+      self.passing_side_last = passing_side
 
     # ACC UI msg at 5Hz or if UI state changes
     send_bars = False
