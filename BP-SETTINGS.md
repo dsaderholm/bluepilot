@@ -52,6 +52,34 @@ whether passing assist works.
 
 ---
 
+## Settings whose shipped default MOVED while this was being built
+
+Found 2026-08-06 by a guard that walks every revision of `params_keys.h`. Your car keeps the first
+value it ever booted for a key, so for these ten the code says one thing and your device may hold
+another. **Nothing can apply them for you** -- the migration list is closed at your request -- so
+these are yours to check, in Steering > Customize Passing Assist unless noted.
+
+Worth checking, in this order:
+
+| Control | Should be | If it moved, it went |
+|---|---|---|
+| Slower By At Least | **4 mph** | 8 -> 2 -> 4. A device holding 8 has twice the bar the screen claims. |
+| Confirm For | **1 s** | Seeded from an older key that went 25 -> 10 -> 2 s. A device holding 25 waits twenty-five seconds. |
+| Show The Onroad Panel | **On** | 0 -> 1. If this were off you would see nothing at all -- you clearly see it, so yours is on. |
+| Show Next Lane Speeds | **On** | 0 -> 1 |
+| Show Oncoming Speeds | **On** | 0 -> 1 |
+| Keep Right Except To Pass | **On** | 1 -> 0 -> 1 |
+| Close In Before Passing | **Off (0)** | 0 -> -1 -> 0, where -1 is Auto |
+| Look Ahead / approach window | **60 s** | 9 -> 25 -> 60 s |
+| Avoid The Outermost Lane | **Off** | 1 -> 0 |
+| Auto Lane Change by Blinker (Customize **Lane Change**) | **0 s** | 0 -> 3 -> 0. A 3 there puts a three second wait on every stalk lane change -- you would have noticed, so yours is almost certainly 0. |
+
+None of these is what stops it suggesting -- your drive got past all of them sixty times and was
+refused by the lane geometry. But two of them, the deficit and the confirm time, would be wrong by a
+factor of two or more, and everything the panel says about them would be a lie.
+
+---
+
 ## What changed since the last drive
 
 - **A second, lower chime when it backs out.** The sound was only ever the good news -- a decision.
