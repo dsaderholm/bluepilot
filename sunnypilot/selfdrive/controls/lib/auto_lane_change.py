@@ -159,6 +159,21 @@ ONE_TOUCH_MARGIN_S = 0.75
 # The same argument kills signalling the revert itself, which was floated here and is withdrawn:
 # a crossing back into the lane he never left is not a lane change, and announcing one is the same
 # false message. Returning to your own lane is what the drivers around you already expect.
+#
+# WITH ONE EXCEPTION, which is his and is worth writing down before it is lost -- 2026-08-06:
+# *"one day I'll want it to signal back if I cancel a fully automatic passing assist lane change."*
+#
+# The asymmetry is WHO SIGNALLED. Everything above is about a change the DRIVER started: he owns the
+# stalk, the car has nothing to correct, and adding a signal invents a message. A fully automatic
+# pass is the opposite -- the car turned the signal ON itself and told the traffic beside him it was
+# coming over. Abort that and the signal is now a lie the CAR told, so at minimum the car owes
+# turning it off, and briefly indicating the way back is honest rather than invented: it really is
+# making that movement, and it really did announce the first one.
+#
+# So the rule is not "never signal a revert". It is: whoever made the claim clears it up. Nothing to
+# build yet -- passing assist actuates nothing until BLIS, the rear radar, and his explicit
+# go-ahead -- but the phase lock is now a component (see blinker_phase_lock) precisely so this can
+# be a consumer of it rather than a second implementation.
 OPPOSITE_SWITCH_WINDOW_S = 1.5
 
 # BluePilot: MEASURE THE DRIVER'S OWN LANE CHANGES, because they are the only real ones.
