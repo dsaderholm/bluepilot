@@ -313,11 +313,12 @@ class PassingAssistSettingsLayout(Widget):
     self._lane_display_test = button_item(
       lambda: tr("Show Me The Lane Lines"),
       lambda: tr("Walk"),
-      lambda: tr("Press Walk with the car stopped, then watch the cluster's LEFT lane line. It "
-                 "steps through every look that display can draw, three seconds each, naming each "
-                 "one on this screen. The right line stays normal green to compare against. Only "
-                 "one of them has ever actually appeared on your cluster. Tell me what each looked "
-                 "like and the dash display gets the one that reads best."),
+      lambda: tr("Press Walk with the car stopped. Nine steps, three seconds each, about half a "
+                 "minute -- this screen names each one while your dash shows it. Steps 1-6: watch "
+                 "the LEFT lane line; the right one stays normal green to compare against. Steps "
+                 "7-9: watch the hands-on-wheel indicator, and on step 8 listen for a chime. Only "
+                 "one of these has ever actually appeared on your cluster before. Tell me what "
+                 "each one looked like and the dash display gets the ones that read best."),
       callback=self._request_lane_display_test,
     )
 
