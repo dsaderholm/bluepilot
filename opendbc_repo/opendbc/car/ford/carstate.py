@@ -74,9 +74,12 @@ class CarState(CarStateBase, MadsCarState, CarStateExt):
     # BluePilot: OR'd with actual speed. Confirmed on the road 2026-08-05 -- standstill was reading
     # FALSE on this car while it was stopped, so anything gated on it silently never ran.
     #
-    # Ford is the only brand in opendbc that derives standstill from a discrete status signal
-    # rather than from wheel speed. Chrysler, Honda, Hyundai, GM and Mazda all compare a speed
-    # against a threshold; only here is it a bus message that some other module has to volunteer.
+    # Ford derives standstill from a discrete status signal rather than from wheel speed, which
+    # almost every other brand in opendbc does not: Chrysler, Honda, Hyundai, GM, Mazda and Nissan
+    # all compare a speed against a threshold. PSA is the one other exception (VEHICLE_STANDSTILL
+    # off HS2_DYN_UCF_MDD_32D), so "the only brand" -- which this comment said until it was
+    # checked -- was wrong. It is unusual, not unique, and the point stands either way: it is a bus
+    # message some other module has to volunteer rather than something derived from data we have.
     # VehStop_D_Stat comes from ABS_ESC, its DBC start value is 2 (NoDataExists), and the DBC marks
     # it transmitted on only two of the four platforms it documents -- so it is an optional signal,
     # not a guaranteed one. This retrofit kept the Fusion's own ABS; swapping the camera downstream
