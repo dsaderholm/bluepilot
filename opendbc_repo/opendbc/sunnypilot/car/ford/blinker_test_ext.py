@@ -30,10 +30,36 @@ WHAT IS ACTUALLY PROVEN, and it is not nothing: one commanded frame produces exa
 lamp mirrors frames one for one and latches nothing, and his flasher runs at 760 ms. That is the
 whole mechanism, established here, and it stands.
 
-WHERE IT GOES NEXT: the canbox, on MS-CAN, where the body module actually lives. NOT asserted to
-work -- that message is not in this DBC and this project has been wrong about this car's
-capabilities four separate times by reasoning instead of reading. It is the only remaining avenue
-that is not a fight over a signal someone else owns.
+WHERE IT GOES NEXT -- AND IT IS NOT THE CANBOX. Researched properly 2026-08-06, after saying it
+probably was.
+
+The chain is: multifunction switch (a discrete input) -> SCCM -> SCCM reports TurnLghtSwtch_D_Stat
+on HS-CAN -> gateway relays -> BCM lights the lamp and runs its own flash pattern. The SCCM is the
+only legitimate originator of that signal, and everything else on any bus is a relay or a status
+report of a decision already made.
+
+  * There is no lamp COMMAND anywhere in this DBC. Five turn-lamp signals exist in the whole file,
+    on two messages, both sent by GWM: the switch position on 131, and TurnLghtLeft/Right_D_Rq plus
+    the two On_B_Stat on 947, addressed OUTWARD to CMR_DSMC and IPMA_ADAS.
+  * The best public Ford MS-CAN reverse engineering (roncapat/Ford-Fiesta-MK5-MS-CAN-bus) documents
+    turn signals as STATUS only -- 0x265 bits in byte 1 -- and no command message. A canbox on the
+    body bus would be downstream of the decision, reading what the BCM already did.
+  * AND THE CANBOX WOULD NOT FIX THE HALF THAT MATTERS ANYWAY. desire_helper gates the entire
+    lane-change state machine on `carstate.leftBlinker != carstate.rightBlinker`, and carstate reads
+    that from the SCCM's own copy of Steering_Data_FD1 on bus 0. Lighting the lamp by some other
+    route leaves openpilot still seeing no blinker, so no lane change would start.
+
+THE PLACE THAT WORKS IS THE SCCM'S SWITCH INPUT -- parallel the stalk contacts. Then the SCCM sees a
+real deflection and everything downstream is genuinely correct at once: the BCM runs its own
+seven-flash pattern at the car's own rate, the cancel behavior is the car's, and carState.leftBlinker
+reads true so desire_helper engages. One injection point, both problems, no contention with anybody.
+
+What has to be measured before building it: whether the stalk is a plain contact-to-ground or a
+resistor ladder, which decides whether this is a transistor or an analog switch with a matched
+resistor. And it needs a hardware self-clear -- a stuck output is a turn signal that never goes off,
+which is worse than the feature not existing.
+
+Shares its microcontroller with the rear-radar feeder that is already planned.
 
 AND IT BLOCKS NOTHING. The blinker is needed when passing assist ACTUATES, which is gated behind
 BLIS, the rear radar, and his explicit go-ahead. It was never on the critical path for the phase-1
