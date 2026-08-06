@@ -59,8 +59,10 @@ def _migrate_car_platform_bundle(_params):
 #   - FordLow/HighSpeedFactor_ang, FordPrefLateralControl -- his own steering tune. The defaults now
 #     match what he runs, but clearing them is this file reaching into his lateral settings, which
 #     is exactly what he asked it to stop doing.
-#   - GreenLightAlert, LeadDepartAlert, ShowBrakeStatus -- already on for him; clearing changes
-#     nothing and only creates a chance to get it wrong.
+#   - ShowBrakeStatus -- he can see the brake pill on the road, so this one demonstrably already
+#     holds the value he wants. Clearing it would land on the same 1 and gain nothing.
+#     (GreenLightAlert and LeadDepartAlert were excluded here too, on the same "already on for him"
+#     reasoning, and that was wrong -- see icbm-2.)
 #   - Everything added this session (the offset bands, lookahead, SCC-Map decel, pinned holds).
 #     Those keys have never been written, so they already take their default with no help.
 #
@@ -102,6 +104,23 @@ _BP_REDEFAULT_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
   # off -> on. Camera curve control; on for him already in all likelihood, but it is the pair to
   # SCC-Map and shipping one without the other is not a state anyone chose.
   "SmartCruiseControlVision",
+ )),
+ ("icbm-2", (
+  # off -> on, both of them. These were excluded from icbm-1 on the reasoning that they were
+  # "already on for him". They were not, and there was never any evidence they were -- the shipped
+  # default was read as though it were the stored value.
+  #
+  # Both arrived from upstream sunnypilot defaulting to "0" (Green Traffic Light Alert #1287, Lead
+  # Departure Alert #1302) and were flipped to "1" here. That flip cannot reach this car on its own:
+  # manager.py writes EVERY unset param to disk at boot ("set unset params to their default value"),
+  # so the upstream 0 was materialized the first time he booted a build containing those features,
+  # and PERSISTENT | BACKUP has kept it ever since. Changing params_keys.h after that point is
+  # writing to a file nobody reads.
+  #
+  # Confirmed on the road 2026-08-05: stopped at a clear red light at night, no lead, MADS on --
+  # every gate in e2e_alerts_helper satisfied -- and nothing fired.
+  "GreenLightAlert",
+  "LeadDepartAlert",
  )),
 )
 

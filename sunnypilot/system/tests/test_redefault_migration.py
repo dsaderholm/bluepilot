@@ -10,6 +10,9 @@ or running more than once.
 """
 import pathlib
 import re
+import subprocess
+
+import pytest
 
 from openpilot.sunnypilot.system.params_migration import (
   _BP_REDEFAULT_GROUPS, _migrate_bp_redefaulted,
@@ -169,6 +172,57 @@ class TestTheGroupsThemselves:
     """It would be cleared again by the second group on a device that took only the first, which is
     the re-clearing this whole shape exists to prevent."""
     assert len(_BP_REDEFAULTED) == len(set(_BP_REDEFAULTED))
+
+  def test_every_flipped_default_is_accounted_for(self):
+    """The bug this exists to catch, found on the road rather than here.
+
+    GreenLightAlert and LeadDepartAlert were flipped 0 -> 1 in params_keys.h and left out of a
+    group, on the assumption they were "already on for him". They were not. manager.py writes every
+    unset param to disk at boot, so upstream's 0 had been materialized long before the flip, and
+    PERSISTENT | BACKUP kept it. The flip reached a file nobody reads, and he sat at a clear red
+    light with nothing on screen.
+
+    So: diff our shipped defaults against upstream's, and require every difference to be either
+    cleared by a group or excluded here ON PURPOSE. Changing a default and forgetting the migration
+    is invisible any other way -- everything reads correct, and only the car disagrees.
+    """
+    root = pathlib.Path(__file__).resolve().parents[3]
+    try:
+      base = subprocess.run(["git", "merge-base", "HEAD", "upstream/bp-7.0"], cwd=root,
+                            capture_output=True, text=True, timeout=30, check=True).stdout.strip()
+      upstream_src = subprocess.run(["git", "show", f"{base}:common/params_keys.h"], cwd=root,
+                                    capture_output=True, text=True, timeout=30, check=True).stdout
+    except (OSError, subprocess.SubprocessError) as e:
+      pytest.skip(f"needs the upstream remote to compare against: {e}")
+
+    entry = re.compile(r'\{"(\w+)",\s*\{[^}]*?,\s*\w+,\s*"([^"]*)"\s*\}\s*\}')
+    def defaults(src: str) -> dict[str, str]:
+      return {m.group(1): m.group(2) for m in entry.finditer(src)}
+
+    theirs = defaults(upstream_src)
+    ours = defaults((root / "common" / "params_keys.h").read_text(encoding="utf-8"))
+    assert len(theirs) > 100, "the upstream file did not parse; the regex has gone stale"
+
+    # Keys we ship a different default for AND deliberately do not clear. Every entry needs a
+    # reason, because "it is probably fine" is exactly how the two alerts got missed.
+    deliberately_not_cleared = {
+      # His own steering tune, arrived at on the road. The defaults were moved to match what he
+      # runs; clearing is this file reaching into lateral settings, which he asked it to stop doing.
+      "FordLowSpeedFactor_ang", "FordHighSpeedFactor_ang", "FordPrefLateralControl",
+      # He can see the brake pill working, so this already holds the value he wants.
+      "ShowBrakeStatus",
+    }
+
+    flipped = {k for k in theirs.keys() & ours.keys() if theirs[k] != ours[k]}
+    unaccounted = flipped - set(_BP_REDEFAULTED) - deliberately_not_cleared
+    assert not unaccounted, (
+      f"shipped default changed with no migration and no stated reason: {sorted(unaccounted)}. "
+      "The stored value on the car wins, so this change reaches nothing. Add the key to a new "
+      "group in _BP_REDEFAULT_GROUPS, or to deliberately_not_cleared with why.")
+
+    # And the reverse: an exclusion or a cleared key that no longer differs is stale bookkeeping.
+    stale = (set(_BP_REDEFAULTED) | deliberately_not_cleared) & (theirs.keys() - flipped)
+    assert not stale, f"listed as a changed default, but it now matches upstream: {sorted(stale)}"
 
   def test_a_group_already_taken_is_skipped_while_a_new_one_runs(self):
     """The point of separate groups. A branch adding its own must not re-clear this branch's."""
