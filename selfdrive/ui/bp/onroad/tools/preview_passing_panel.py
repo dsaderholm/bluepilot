@@ -102,6 +102,8 @@ SCENES = [
    "SIGNAL WORKS", "6 flashes", 0.0, True, GREEN),
   # New: a run stopped by one of its own gates. It used to end silently and the panel then showed
   # the flash count under SIGNAL WORKS, which reads as a car that half-ignored us.
+  ("blinker test: pressed again before the car stopped flashing",
+   "WAITING FOR THE LAMP", "the car is still flashing from the last one", 0.0, True, AMBER),
   ("blinker test: the loop lost the lamp mid-run",
    "LOST THE LAMP", "3 of 7 blinks - the car stopped reporting it", 0.0, True, AMBER),
   ("blinker test: a run stopped before it finished",

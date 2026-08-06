@@ -15,6 +15,7 @@ from opendbc.sunnypilot.car.ford.blinker_test_ext import (
   BlinkerTestExt, SIGNAL_NONE, SIGNAL_LEFT, SIGNAL_RIGHT, PULSE_DURATION_S, STANDSTILL_V_EGO,
   BUTTONS_STEP, SIGNAL_TAP_LEFT, TAP_COMMAND_S, DONE_HOLD_S, SIGNAL_BLINK_LEFT, SIGNAL_MEASURE, MEASURE_QUIET_S, DEFAULT_BLINK_PERIOD_S, BLINK_COUNT,
   BLINK_STALL_S,
+  LAMP_SETTLE_S, LAMP_WAIT_MAX_S,
 )
 
 
@@ -697,3 +698,67 @@ class TestOneMissedLampEdgeDoesNotEndTheRun:
     which is why the fallback below it is gated on never having seen the lamp at all. This one has
     to sit far enough out that it cannot do the same."""
     assert BLINK_STALL_S > 2 * DEFAULT_BLINK_PERIOD_S
+
+
+class TestItWillNotStartIntoTheCarsOwnFlashing:
+  """The invariant he found, which is the one that explains everything: "if I wait long enough in
+  between tests, the blinker works flawlessly. If I don't wait enough, I'll get less blinks or
+  sometimes a gap."
+
+  The fault depends on the gap between TESTS, so state survives from one run into the next -- and
+  the only thing that does is the lamp. His BCM flashes seven times from one stalk deflection, so
+  the module is still working through its own pattern when a run ends. Starting into that means the
+  closed loop is watching edges the CAR is producing.
+
+  The arming gate watched TurnLghtSwtch_D_Stat, which is the STALK, and the stalk is idle the whole
+  time the BCM is finishing a pattern nobody is asking for any more.
+  """
+
+  def test_it_holds_off_while_the_lamp_is_still_going(self):
+    ext = make_ext(SIGNAL_BLINK_LEFT)
+    run(ext, POLL_FRAMES + 2, lamp_left=True)
+    assert ext.bt_state == 0, "armed into the car's own flashing"
+    assert ext.bt_blocked == 5, "held off without saying the lamp was busy"
+
+  def test_the_request_is_HELD_not_dropped(self):
+    """He cannot see the panel from inside the settings menu, so a refusal is invisible and reads
+    as a dead button. The press has to survive the wait and then run."""
+    ext = make_ext(SIGNAL_BLINK_LEFT)
+    run(ext, POLL_FRAMES + 2, lamp_left=True)
+    assert ext.bt_params.value == SIGNAL_BLINK_LEFT, "the press was thrown away"
+    run(ext, int((LAMP_SETTLE_S + 0.2) / DT_CTRL))
+    run(ext, POLL_FRAMES + 2)
+    assert ext.bt_state == 1, "the held request never ran"
+
+  def test_but_a_lamp_that_never_settles_does_not_hold_it_forever(self):
+    """Holding against a stuck lamp is how one ends up pulsing long after anybody asked."""
+    ext = make_ext(SIGNAL_BLINK_LEFT)
+    run(ext, int((LAMP_WAIT_MAX_S + 2.0) / DT_CTRL), lamp_left=True)
+    assert ext.bt_state == 0
+    assert ext.bt_params.value == SIGNAL_NONE, "a request nobody can run was left armed"
+
+  def test_a_gap_between_flashes_is_not_the_pattern_ending(self):
+    """The lamp is dark for half of every cycle. Arming in one of those gaps is the same fault."""
+    ext = make_ext(SIGNAL_BLINK_LEFT)
+    run(ext, POLL_FRAMES + 2, lamp_left=True)
+    run(ext, int(0.4 / DT_CTRL))                       # a plausible off-phase
+    assert ext.bt_state == 0, "armed in the gap between two of the car's own flashes"
+
+  def test_and_starts_once_the_lamp_has_actually_settled(self):
+    ext = make_ext(SIGNAL_BLINK_LEFT)
+    run(ext, POLL_FRAMES + 2, lamp_left=True)
+    run(ext, int((LAMP_SETTLE_S + 0.2) / DT_CTRL))     # the pattern has ended
+    run(ext, POLL_FRAMES + 2)
+    assert ext.bt_state == 1, "still refusing after the lamp went quiet"
+
+  def test_a_fresh_start_does_not_have_to_wait(self):
+    """Nothing has flashed since boot, so there is nothing to settle from."""
+    ext = make_ext(SIGNAL_BLINK_LEFT)
+    run(ext, POLL_FRAMES + 2)
+    assert ext.bt_state == 1
+
+  def test_measuring_is_exempt(self):
+    """It commands nothing, and the driver's own lamp is exactly what it is there to watch."""
+    ext = make_ext(SIGNAL_MEASURE)
+    run(ext, POLL_FRAMES + 2, lamp_left=True)
+    assert ext.bt_state == 1, "refused to watch the lamp because the lamp was lit"

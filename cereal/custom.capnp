@@ -1288,6 +1288,7 @@ struct CarStateBP @0xb057204d7deadf3f {
       cruiseEngaged @2;      # never fight a live lane-change decision
       driverSignalling @3;   # the driver's own stalk wins, always
       resultStillShowing @4; # pressed again while the last verdict was still up; press once more
+      lampStillFlashing @5;  # the car is still running its own flash pattern from the last test
     }
   }
 

@@ -298,6 +298,41 @@ BLINK_AFTER_LAMP_OFF_S = 0.35   # until an on-time has actually been observed
 # this is past three of them. It only ever fires when the loop is genuinely stuck, and it recovers
 # it in well under the command window instead of losing the rest of the run.
 BLINK_STALL_S = 2.5
+
+# --- AND DO NOT START WHILE THE LAMP IS STILL BUSY ---
+#
+# This is the invariant that was missing, and he found it: "if I wait long enough in between tests,
+# the blinker works flawlessly. If I don't wait enough, I'll get less blinks or sometimes a gap."
+#
+# The fault depends on the gap between TESTS, not on anything inside a run -- so state is surviving
+# from one run into the next, and only one thing here does. The lamp. His BCM is set through FORScan
+# to flash seven times from a single stalk deflection, so when a run ends the body module is still
+# working through its own sequence. Start the next one into that and the closed loop is watching
+# edges the CAR is producing rather than ones we asked for: our first command lands while the lamp
+# is already lit and is absorbed, and the pacing tracks somebody else's rhythm.
+#
+# So the arming gate has to watch the LAMP, not just the driver's stalk. It has always checked
+# TurnLghtSwtch_D_Stat, which is where the stalk is -- and the stalk is idle the whole time the BCM
+# is finishing a flash pattern nobody is asking for any more.
+#
+# Long enough to be sure the pattern has ENDED rather than being between flashes: a full period plus
+# margin. At his measured 760 ms a gap this long cannot occur inside a sequence.
+LAMP_SETTLE_S = 1.2
+
+# ...and it WAITS rather than refusing, which is the difference between a fix and a new rule to
+# remember.
+#
+# "You said I was supposed to look at some visualization or something for the blinker? I mean that
+# would be hard because I'm pushing the button in the menu, so how would I see that?"
+#
+# Exactly right, and it settles the design. The buttons are in the settings menu and the readout is
+# on the driving screen, so a refusal is INVISIBLE at the moment it happens -- he would press, get
+# nothing, and be worse off than with a short run. A request that quietly waits for the lamp and
+# then runs needs no readout and no rule: press it, it works, a second later than you expected.
+#
+# Bounded, because a lamp that never goes quiet must not leave a request armed indefinitely. Past
+# this the request is dropped the same way any other refusal drops it.
+LAMP_WAIT_MAX_S = 8.0
 # WHAT THE SETTING IS FOR, NOW THAT THE LOOP IS CLOSED.
 #
 # Asked directly: "so I shouldn't need to adjust blink spacing if it can measure it?" Right -- with
@@ -448,6 +483,8 @@ class BlinkerTestExt:
     self.bt_watching = SIGNAL_NONE
     self.bt_blinking = False
     self._bt_lamp_off_frame = 0
+    self._bt_lamp_quiet_frames = int(LAMP_SETTLE_S / DT_CTRL)   # nothing has flashed yet
+    self._bt_wait_frames = 0
     self._bt_lamp_on_frame = 0
     self._bt_guard_s = float(BLINK_AFTER_LAMP_OFF_S)
     self._bt_last_blink_cmd = 0
@@ -519,6 +556,13 @@ class BlinkerTestExt:
     """
     self._bt_frame += 1
     send_frame = (self._bt_frame % BUTTONS_STEP) == 0
+
+    # How long the lamps have BOTH been dark, tracked every frame whatever state we are in -- the
+    # arming gate below needs it, and by then the previous run is long over. See LAMP_SETTLE_S.
+    if getattr(CS, 'turn_lamp_left', False) or getattr(CS, 'turn_lamp_right', False):
+      self._bt_lamp_quiet_frames = 0
+    else:
+      self._bt_lamp_quiet_frames += 1
     # THE VERDICT HAS TO GET OUT OF THIS OBJECT. This machine lives in the CarController; the
     # carStateBP message is built in CarState. Nothing bridged them, so `state`, `lampSeen`,
     # `secondsRemaining` and `blockedReason` were read by the panel and written by nobody -- the
@@ -753,6 +797,25 @@ class BlinkerTestExt:
     if (CS.out.leftBlinker or CS.out.rightBlinker) and request != SIGNAL_MEASURE:
       self.bt_blocked = 3
       return SIGNAL_NONE
+    # THE LAMP, not just the stalk. See LAMP_SETTLE_S -- the body module is still running its own
+    # seven flashes from the last test, the stalk is idle throughout, and starting into that is the
+    # whole of "if I don't wait enough, I'll get less blinks or sometimes a gap".
+    #
+    # HOLD the request rather than dropping it: he cannot see the panel from inside the settings
+    # menu, so a refusal is invisible and reads as a dead button. This just runs a moment later.
+    #
+    # Measuring is exempt for the same reason as above: it commands nothing, and the driver's own
+    # lamp is what it is there to watch.
+    if request != SIGNAL_MEASURE and self._bt_lamp_quiet_frames < int(LAMP_SETTLE_S / DT_CTRL):
+      self._bt_wait_frames += int(PARAMS_POLL_S / DT_CTRL)
+      if self._bt_wait_frames > int(LAMP_WAIT_MAX_S / DT_CTRL):
+        # A lamp that never settles is a fault of its own, and holding a request forever against it
+        # is how a lamp ends up pulsing long after anybody asked.
+        self._bt_wait_frames = 0
+        self._disarm()
+      self.bt_blocked = 5
+      return SIGNAL_NONE
+    self._bt_wait_frames = 0
 
     self.bt_blocked = 0
     self.bt_state = 1

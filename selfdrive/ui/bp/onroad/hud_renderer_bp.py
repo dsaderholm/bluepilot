@@ -217,6 +217,12 @@ _BT_STOPPED = {
   'driverSignalling': "STOPPED - YOUR STALK",
 }
 
+# Held, not stopped: the car is still running its own flash pattern from the last press and this one
+# will go as soon as it is quiet. Shown for completeness -- he presses these from inside the
+# settings menu, where none of this is visible, which is exactly why the request WAITS rather than
+# being refused.
+_BT_WAITING = "WAITING FOR THE LAMP"
+
 
 # The left gate's four terms, in the order it evaluates them. Named for a driver rather than for
 # the code: "paint" is the model's confidence in a line beyond ours, "room past it" is how much
@@ -1321,6 +1327,12 @@ class HudRendererBP(HudRendererSP):
       return False
 
     state = str(bt.state)
+    if state == 'idle' and str(bt.blockedReason) == 'lampStillFlashing':
+      self._pa_main = _BT_WAITING
+      self._pa_sub = "the car is still flashing from the last one"
+      self._pa_color = rl.Color(255, 200, 60, 255)
+      self._pa_alert = True
+      return True
     # MEASURING has no commanded side and no progress -- it is waiting for the driver. Reported as
     # "measure my blinker didn't seem to do anything at all", because this fell through to the
     # pulsing branch below, which reads bt.commanded (zero here) and cheerfully announced
