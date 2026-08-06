@@ -133,7 +133,7 @@ SCENES = [
   ("lane walk: refused because the car was moving",
    "STOP THE CAR FIRST", "the lane walk only runs stopped", 0.0, True, AMBER),
   ("stopped: is his cancel gesture even visible to the state machine",
-   "THIS DRIVE", "cancel gesture: 0 reached the other side, 4 just went out", 0.0, False, INFO),
+   "THIS DRIVE", "cancel gesture: 0 reached the other side, 4 just went out (1 steering)", 0.0, False, INFO),
   ("worst case for width: everything at once",
    "WOULD BE CHANGING RIGHT",
    "blinker on, steering across  -  camera only, speed not radar-measured", 0.6, True, PURPLE),

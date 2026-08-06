@@ -744,7 +744,13 @@ class HudRendererBP(HudRendererSP):
       # ambiguous -- see OPPOSITE_SWITCH_WINDOW_S in auto_lane_change.
       saw_opp, saw_out = int(lc.get("sawOpposite", 0)), int(lc.get("sawSignalOut", 0))
       if saw_opp or saw_out:
-        lines.append(f"cancel gesture: {saw_opp} reached the other side, {saw_out} just went out")
+        line = f"cancel gesture: {saw_opp} reached the other side, {saw_out} just went out"
+        # Of the ones that just went out, how many had his hands on the wheel -- which separates
+        # "he is doing the change himself" from "he is asking the car to stop". See should_cancel.
+        hands = int(lc.get("signalOutSteering", 0))
+        if saw_out:
+          line += f" ({hands} steering)"
+        lines.append(line)
       if float(d.get("accOnsetMax", 0)) > 0:
         m = float(d["accOnsetMax"])
         v = m if ui_state.is_metric else m * 3.28084

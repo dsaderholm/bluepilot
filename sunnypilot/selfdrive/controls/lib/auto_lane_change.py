@@ -215,6 +215,8 @@ class AutoLaneChangeController:
     # reads as "of the changes you tried to call off, this many reached the opposite detent".
     self.changes_saw_opposite = 0   # the switch read the other side while a change was underway
     self.changes_saw_signal_out = 0 # the signal simply went out instead, which cancels nothing
+    # Of those, how many had his hands doing the work. See should_cancel.
+    self.changes_signal_out_while_steering = 0
     self._saw_opposite_this_change = False
     self._saw_signal_out_this_change = False
     self.change_seconds = 0.0       # running mean of how long a completed one took
@@ -336,6 +338,7 @@ class AutoLaneChangeController:
         # first time either of these is non-zero, and a lifetime total would bury that.
         "sawOpposite": self.changes_saw_opposite,
         "sawSignalOut": self.changes_saw_signal_out,
+        "signalOutSteering": self.changes_signal_out_while_steering,
       })
     except Exception:  # noqa: BLE001 - a param write must never reach the model process
       pass
@@ -354,7 +357,8 @@ class AutoLaneChangeController:
       self.lane_change_wait_timer = self.lane_change_delay - self.lane_change_bsm_hold
 
   def should_cancel(self, one_blinker: bool, elapsed_s: float,
-                    reversed_side: bool = False, blinker_held_s: float = 0.0) -> bool:
+                    reversed_side: bool = False, blinker_held_s: float = 0.0,
+                    steering_pressed: bool = False) -> bool:
     """Has the driver called off a lane change already underway? See DEFAULT_CANCEL_WINDOW_S.
 
     Lives here rather than in desire_helper so the upstream file carries one line rather than a
@@ -400,9 +404,18 @@ class AutoLaneChangeController:
     elif not one_blinker and blinker_held_s == 0.0 and elapsed_s > 0.0:
       # The signal is out mid-change and nothing replaced it. See OPPOSITE_SWITCH_WINDOW_S: if this
       # is what his nudge looks like from here, his cancel gesture is invisible to the state machine.
+      #
+      # WHETHER HE IS STEERING splits the two gestures that look identical from here, and it is the
+      # discriminator the one-touch-length heuristic should have been. Hold-and-release is him doing
+      # the change HIMSELF -- "sometimes I grab the steering wheel to bypass the nudgeless lane
+      # changes with a faster lane change myself" -- so there is torque on the wheel. A nudge-cancel
+      # is him asking the car to stop, so there is not. Recorded rather than acted on: which of
+      # these his nudge actually produces is still unmeasured.
       if not self._saw_signal_out_this_change:
         self._saw_signal_out_this_change = True
         self.changes_saw_signal_out += 1
+        if steering_pressed:
+          self.changes_signal_out_while_steering += 1
 
     if self.lane_change_cancel_window <= 0.0:
       return False

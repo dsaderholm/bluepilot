@@ -141,7 +141,8 @@ class DesireHelper:
           (carstate.rightBlinker and self.lane_change_direction == LaneChangeDirection.left) or
           (carstate.leftBlinker and self.lane_change_direction == LaneChangeDirection.right))
         if not self.alc.reverting and self.alc.should_cancel(
-            one_blinker, self.lane_change_timer, reversed_side, self.alc.blinker_last_held_s):
+            one_blinker, self.lane_change_timer, reversed_side, self.alc.blinker_last_held_s,
+            carstate.steeringPressed):
           going_left = self.lane_change_direction == LaneChangeDirection.left
           # The lane we would go BACK into is the one on the other side. See begin_revert.
           return_blocked = carstate.rightBlindspot if going_left else carstate.leftBlindspot
