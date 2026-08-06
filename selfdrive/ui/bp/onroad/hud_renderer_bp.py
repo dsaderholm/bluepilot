@@ -210,6 +210,15 @@ MAX_ROAD_EDGE_STD = 0.5
 # Why a blinker run that was already going got stopped. Every one of these is the test working --
 # none is a fault of the car or of the signal -- which is exactly why they must not be reported as
 # a flash count and left to look like one.
+# Mirrors lane_display_test_ext.LANE_TEST_STEPS, in order. See _render_lane_display_test.
+_LDT_LABELS = (
+  "BOTH GREEN",
+  "LEFT: NONE",
+  "LEFT: SUPPRESS",
+  "LEFT: WARNING",
+  "LEFT: INTERVENE",
+)
+
 _BT_STOPPED = {
   'notStationary': "STOPPED - CAR MOVED",
   'cruiseEngaged': "STOPPED - CRUISE ON",
@@ -858,6 +867,13 @@ class HudRendererBP(HudRendererSP):
     if self._render_blinker_test(sm):
       return
 
+    # Same claim on the panel, same reason: a stationary test the driver is standing there watching
+    # for. It goes first because its whole output is a word the driver has to read off this screen
+    # while looking at the cluster -- if anything else owned the line, the walk would be five
+    # unlabeled pictures.
+    if self._render_lane_display_test(sm):
+      return
+
     if not sm.valid.get('longitudinalPlanSP', False):
       return
 
@@ -1310,6 +1326,44 @@ class HudRendererBP(HudRendererSP):
       rl.draw_rectangle_rounded(
         rl.Rectangle(bar_x, bar_y, max(bar_height, bar_width * frac), bar_height), 1.0, 6, ACC_INK)
     return ACC_PILL_HEIGHT
+
+  def _render_lane_display_test(self, sm) -> bool:
+    """Name the lane-display state the cluster is being sent right now. True while a walk runs.
+
+    The labels are duplicated from lane_display_test_ext.LANE_TEST_STEPS rather than imported --
+    the UI process does not import opendbc car code -- and test_lane_display_test_labels_match
+    fails if they drift apart. Written down because a walk that names the steps wrongly is worse
+    than no walk: it produces confident, wrong answers.
+    """
+    try:
+      if float(sm['carState'].vEgo) > 0.5:
+        return False
+    except (KeyError, AttributeError, TypeError):
+      pass
+    try:
+      ldt = sm['carStateBP'].laneDisplayTest
+    except (KeyError, AttributeError):
+      return False
+
+    step = int(ldt.step)
+    if step == 0:
+      if int(ldt.blockedReason) == 1:
+        self._pa_main = "STOP THE CAR FIRST"
+        self._pa_sub = "the lane walk only runs stopped"
+        self._pa_color = rl.Color(255, 200, 60, 255)
+        self._pa_alert = True
+        return True
+      return False
+
+    if step > len(_LDT_LABELS):
+      return False
+
+    self._pa_main = _LDT_LABELS[step - 1]
+    self._pa_sub = f"watch the LEFT line  --  {step} of {len(_LDT_LABELS)}"
+    self._pa_progress = 0.0
+    self._pa_color = rl.Color(150, 205, 235, 255)
+    self._pa_alert = True
+    return True
 
   def _render_blinker_test(self, sm) -> bool:
     """Show blinker-test state while a pulse runs, or its verdict just after. Returns True if it

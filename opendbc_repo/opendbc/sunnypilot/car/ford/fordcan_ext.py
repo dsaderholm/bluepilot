@@ -244,7 +244,8 @@ def create_acc_ui_msg(packer, CAN: CanBus, CP, main_on: bool, enabled: bool, fcw
 
 
 def create_lkas_ui_msg(packer, CAN: CanBus, main_on: bool, enabled: bool, hands: int,
-                       hud_control, stock_values: dict, passing_side: int = 0):
+                       hud_control, stock_values: dict, passing_side: int = 0,
+                       lane_test: tuple | None = None):
   """
   Creates a CAN message for the Ford IPC IPMA/LKAS status.
 
@@ -301,6 +302,11 @@ def create_lkas_ui_msg(packer, CAN: CanBus, main_on: bool, enabled: bool, hands:
     # The departure branches below therefore stay, tested first, and are simply unreachable while
     # engaged. That ordering is belt and braces against ldw.py's condition changing upstream, which
     # test_ldw_does_not_run_while_steering will catch first.
+    #
+    # SUPPRESS MEANS ONE THING. It used to be the "line opens" hint AND the fallback for a lane the
+    # model cannot see, which made the two indistinguishable -- on worn paint the hint would appear
+    # by itself and mean nothing. An unseen lane now sends None, which is what upstream sends for it
+    # and what is actually true, leaving Suppress to carry the suggestion alone.
     left_open = passing_side == 1 and not hud_control.leftLaneDepart
     right_open = passing_side == 2 and not hud_control.rightLaneDepart
 
@@ -312,7 +318,7 @@ def create_lkas_ui_msg(packer, CAN: CanBus, main_on: bool, enabled: bool, hands:
     elif hud_control.leftLaneVisible:
       left_status = 1   # Available
     else:
-      left_status = 2   # Suppress
+      left_status = 0   # None -- no line to draw, same as upstream
 
     # Determine right lane status independently
     if hud_control.rightLaneDepart:
@@ -322,10 +328,17 @@ def create_lkas_ui_msg(packer, CAN: CanBus, main_on: bool, enabled: bool, hands:
     elif hud_control.rightLaneVisible:
       right_status = 5   # Available
     else:
-      right_status = 10  # Suppress
+      right_status = 0   # None
 
     # Combine left and right lane status
     lines = left_status + right_status
+
+  # The display test overrides everything, including the departure branches above. It only ever runs
+  # at a standstill, where none of them can be true, and it has to be able to SEND the departure
+  # states -- learning what they look like is the entire point. See lane_display_test_ext.
+  if lane_test is not None:
+    left_state, right_state = lane_test
+    lines = int(left_state) + 5 * int(right_state)
 
   values = {s: stock_values[s] for s in [
     "FeatConfigIpmaActl",

@@ -22,9 +22,11 @@ put the feature in one menu and its only result in another.
 from collections.abc import Callable
 import pyray as rl
 
+from openpilot.common.params import Params
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.multilang import tr
 from openpilot.system.ui.sunnypilot.widgets.list_view import toggle_item_sp, option_item_sp
+from openpilot.system.ui.widgets.list_view import button_item
 from openpilot.selfdrive.ui.bp.widgets.section_header import SectionHeader
 from openpilot.system.ui.widgets.network import NavButton
 from openpilot.system.ui.widgets.scroller_tici import Scroller
@@ -36,6 +38,7 @@ from openpilot.selfdrive.ui.bp.settings_defaults import recommended
 class PassingAssistSettingsLayout(Widget):
   def __init__(self, back_btn_callback: Callable):
     super().__init__()
+    self._params = Params()
     self._back_button = NavButton(tr("Back"))
     self._back_button.set_click_callback(back_btn_callback)
 
@@ -50,6 +53,12 @@ class PassingAssistSettingsLayout(Widget):
   @staticmethod
   def _distance_label(value: int) -> str:
     return f"{value} m" if ui_state.is_metric else f"{round(value * 3.28084 / 10) * 10} ft"
+
+  def _request_lane_display_test(self) -> None:
+    """Arm the standstill lane-display walk. The standstill gate lives in the car controller, not
+    here, for the same reason the blinker test's does -- a menu must not be what stops it."""
+    # int, NOT str: Params enforces the registered type and writing "1" to an INT key raises.
+    self._params.put("FordLaneDisplayTest", 1)
 
   def _initialize_items(self):
     # --- the feature itself ---
@@ -298,6 +307,19 @@ class PassingAssistSettingsLayout(Widget):
                               "ShowPassingInCluster"),
       param="ShowPassingInCluster")
 
+    # The walk that reads the cluster's vocabulary off the car. It sits directly under the toggle it
+    # serves: the only reason to run it is to find out what "the line fades out" actually looks like
+    # on this cluster, and only two of the five states have ever been sent to it.
+    self._lane_display_test = button_item(
+      lambda: tr("Show Me The Lane Lines"),
+      lambda: tr("Walk"),
+      lambda: tr("Press Walk with the car stopped, then watch the cluster's LEFT lane line. It "
+                 "steps through all five looks it can draw, three seconds each, naming each one on "
+                 "this screen. The right line stays normal green to compare against. Tell me what "
+                 "each looked like and the dash display gets the one that reads best."),
+      callback=self._request_lane_display_test,
+    )
+
     # ORDERED THE WAY A DRIVER ARRIVES AT A QUESTION, not the order these were built in. They were
     # added one at a time over a long session and the first section had drifted to nine controls,
     # three of which were not about when to suggest a pass at all -- the exit stand-down is about
@@ -348,6 +370,7 @@ class PassingAssistSettingsLayout(Widget):
       self._show_next_lane,
       self._show_oncoming,
       self._show_in_cluster,
+      self._lane_display_test,
     ]
 
   def _render(self, rect):

@@ -137,6 +137,8 @@ class HudExt:
     # create_lkas_ui_msg -- the line on the side it wants OPENS.
     self.passing_side_last = 0
     self.show_passing_in_cluster = False
+    # BluePilot: the standstill lane-display walk's current (left, right) override, or None.
+    self.lane_test_last = None
 
   def update_hud_params(self, params, CP):
     """Read HUD-related Params from the UI. Called each frame."""
@@ -167,7 +169,8 @@ class HudExt:
       steer_alert = hud_control.visualAlert in (VisualAlert.steerRequired, VisualAlert.ldw)
       self.hands = 1 if steer_alert else 0
 
-  def update_hud(self, CC, CS, hud_control, main_on, fcw_alert, frame, packer, CAN, CP):
+  def update_hud(self, CC, CS, hud_control, main_on, fcw_alert, frame, packer, CAN, CP,
+                 lane_test=None):
     """Generate LKAS UI and ACC UI CAN messages.
 
     Called each frame from CarController.update() after DM state is computed.
@@ -182,6 +185,8 @@ class HudExt:
       packer: CAN packer
       CAN: Ford CAN bus config
       CP: CarParams
+      lane_test: (left, right) LaActvStats states from the standstill display walk, or None. See
+        lane_display_test_ext -- while a walk runs it owns the lane display outright.
 
     Returns:
       List of CAN sends for UI messages.
@@ -203,7 +208,12 @@ class HudExt:
         passing_side = 0
 
     # Determine if UI state changed
-    send_ui = ((self.main_on_last != main_on) or
+    # A walk step must land on the cluster the moment it changes, and the step BEFORE it has to be
+    # replaced when the walk ends -- at 1 Hz the last state would linger for up to a second and get
+    # written down as the next one.
+    lane_test_changed = lane_test != self.lane_test_last
+
+    send_ui = (lane_test_changed or (self.main_on_last != main_on) or
                # ...INCLUDING the passing side, which is what makes this usable: the message is
                # otherwise sent at 1 Hz, and a suggestion that took a second to appear would be a
                # second stale by the time it did.
@@ -215,8 +225,9 @@ class HudExt:
     if (frame % CarControllerParams.LKAS_UI_STEP) == 0 or send_ui:
       can_sends.append(fordcan_ext.create_lkas_ui_msg(
         packer, CAN, main_on, CC.latActive, self.hands, hud_control, CS.lkas_status_stock_values,
-        passing_side))
+        passing_side, lane_test))
       self.passing_side_last = passing_side
+      self.lane_test_last = lane_test
 
     # ACC UI msg at 5Hz or if UI state changes
     send_bars = False

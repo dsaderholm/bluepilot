@@ -12,6 +12,7 @@ from openpilot.common.params import Params
 from opendbc.sunnypilot.car.ford.lateral_curv_ext import LateralCurvExt, PrimaryLateralControl
 from opendbc.sunnypilot.car.ford.lateral_angle_ext import LateralAngleExt
 from opendbc.sunnypilot.car.ford.blinker_test_ext import BlinkerTestExt
+from opendbc.sunnypilot.car.ford.lane_display_test_ext import LaneDisplayTestExt
 from opendbc.sunnypilot.car.ford.longitudinal_ext import LongitudinalExt
 from opendbc.sunnypilot.car.ford.hud_ext import HudExt
 from opendbc.sunnypilot.car.ford import fordcan_ext
@@ -73,7 +74,7 @@ def apply_creep_compensation(accel: float, v_ego: float) -> float:
 # and enhanced HUD messaging.
 # Init order: CarControllerBase first (sets self.CP, self.frame), then ext classes.
 class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, LongitudinalExt, HudExt,
-                    BlinkerTestExt, IntelligentCruiseButtonManagementInterface):
+                    BlinkerTestExt, LaneDisplayTestExt, IntelligentCruiseButtonManagementInterface):
   def __init__(self, dbc_names, CP, CP_SP):
     CarControllerBase.__init__(self, dbc_names, CP, CP_SP)
     # BluePilot: initialize extension classes
@@ -82,6 +83,7 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
     LongitudinalExt.__init__(self, CP, CP_SP)
     HudExt.__init__(self, CP, CP_SP)
     BlinkerTestExt.__init__(self)
+    LaneDisplayTestExt.__init__(self)
     # ICBM: base class sets state used at runtime, init for robustness
     # IntelligentCruiseButtonManagementInterface.__init__(self, CP, CP_SP)
 
@@ -131,6 +133,9 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
     # BluePilot: stationary turn-signal actuation test. Returns SIGNAL_NONE on every normal frame,
     # in which case create_button_msg keeps passing the driver's own switch position through
     # untouched. Only an explicitly requested, standstill-gated pulse returns anything else.
+    # BluePilot: stationary cluster lane-display walk. None on every normal frame.
+    lane_test = LaneDisplayTestExt.update_lane_display_test(self, CS)
+
     turn_signal = BlinkerTestExt.update_blinker_test(self, CS)
     # update_blinker_test rate-limits itself to BUTTONS_STEP -- see its docstring. The rate lives
     # there rather than here because this file cannot be tested offline, and sending this frame too
@@ -300,7 +305,7 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
     # BluePilot: HUD message generation via HudExt
     # Handles LKAS UI (1Hz), ACC UI (5Hz), bar persistence, and TJA/hands-free messaging.
     hud_can_sends = HudExt.update_hud(self, CC, CS, hud_control, main_on, fcw_alert,
-                                       self.frame, self.packer, self.CAN, self.CP)
+                                       self.frame, self.packer, self.CAN, self.CP, lane_test)
     can_sends.extend(hud_can_sends)
 
     new_actuators = actuators.as_builder()

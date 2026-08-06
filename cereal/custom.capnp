@@ -1233,6 +1233,14 @@ struct CarStateBP @0xb057204d7deadf3f {
   # create_button_msg, so reading it costs nothing -- no new message, parser entry or DBC work.
   lkaButtonPressed @7 :Bool;
 
+  # BluePilot: the standstill walk that reads the cluster's lane-display vocabulary off the car.
+  #
+  # LaActvStats_D_Dsply has five states per side and passing assist's hint is built from them, but
+  # only Available and Intervene have ever been transmitted by code that has run on this car. None,
+  # Suppress and Warning are unmeasured. This walks all five on the left line against a known-green
+  # right line so each can be named. See lane_display_test_ext.
+  laneDisplayTest @8 :LaneDisplayTest;
+
   # BluePilot: bench test for whether openpilot can operate the turn signal on this car.
   #
   # Standing question, because desire_helper's whole lane-change state machine keys off
@@ -1248,6 +1256,14 @@ struct CarStateBP @0xb057204d7deadf3f {
   #
   # Note the lamps FLASH, so lampLeft/lampRight toggle at the flash rate while commanded; a
   # consumer wants to latch over a flash period rather than read a single frame.
+  struct LaneDisplayTest {
+    # 0 idle; 1..N the step being shown, indexing lane_display_test_ext.LANE_TEST_STEPS.
+    step @0 :UInt8;
+    secondsRemaining @1 :Float32;
+    # 0 none, 1 refused because the car was moving.
+    blockedReason @2 :UInt8;
+  }
+
   struct BlinkerTest {
     state @0 :State;
     commanded @1 :UInt8;      # what we put in TurnLghtSwtch_D_Stat: 0 none, 1 left, 2 right

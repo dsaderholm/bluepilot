@@ -378,6 +378,13 @@ class CarStateExt:
     # are the baseline that proves the signal decodes at all when the DRIVER uses the stalk.
     dat.carStateBP.lkaButtonPressed = bool(getattr(self, 'lka_button_pressed', False))
 
+    # BluePilot: the standstill cluster lane-display walk. Defaulted the same way, for the same
+    # reason -- a car that never runs it publishes a clean idle.
+    lane_display_test = dat.carStateBP.laneDisplayTest
+    lane_display_test.step = min(int(getattr(self, 'ldt_step', 0)), 255)
+    lane_display_test.secondsRemaining = float(getattr(self, 'ldt_seconds_remaining', 0.0))
+    lane_display_test.blockedReason = min(int(getattr(self, 'ldt_blocked', 0)), 255)
+
     blinker_test.lampLeft = bool(getattr(self, 'turn_lamp_left', False))
     blinker_test.lampRight = bool(getattr(self, 'turn_lamp_right', False))
     # The rest of the verdict, stashed here by BlinkerTestExt -- see its _publish_to. Defaulted so

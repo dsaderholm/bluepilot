@@ -56,13 +56,13 @@ def _sections() -> dict[str, list[str]]:
 def test_every_control_built_is_on_the_screen():
   """The failure this catches is silent: a control constructed, given a param and a description,
   and never added to the list. It works, it is tested, and no driver can ever reach it."""
-  built = set(re.findall(r"self\.(_\w+) = (?:toggle|option)_item_sp\(", SRC))
+  built = set(re.findall(r"self\.(_\w+) = (?:toggle_item_sp|option_item_sp|button_item)\(", SRC))
   shown = set(_returned_items())
   assert not (built - shown), f"built but unreachable: {sorted(built - shown)}"
 
 
 def test_nothing_is_shown_that_was_never_built():
-  built = set(re.findall(r"self\.(_\w+) = (?:toggle|option)_item_sp\(", SRC))
+  built = set(re.findall(r"self\.(_\w+) = (?:toggle_item_sp|option_item_sp|button_item)\(", SRC))
   shown = {i for i in _returned_items() if not i.startswith("#")}
   assert not (shown - built), f"listed but never built: {sorted(shown - built)}"
 
@@ -83,3 +83,47 @@ def test_no_section_has_grown_into_a_list():
 def test_the_master_switch_comes_first():
   """Everything below it is inert when it is off, so it cannot sit under a heading among equals."""
   assert _returned_items()[0] == "_enabled"
+
+
+def test_every_name_it_imports_actually_lives_where_it_says():
+  """A settings screen is not importable offline -- pyray needs a display -- so a wrong import path
+  raises nothing here and takes the whole panel out on the car instead.
+
+  This caught `button_item` being imported from `system.ui.sunnypilot.widgets.list_view`, where it
+  does not exist; it lives in `system.ui.widgets.list_view`. Nothing in 1226 tests noticed, because
+  the failure is at import time on a device with a screen. See [[bluepilot-untestable-surfaces]] --
+  when the surface cannot be executed, assert on its source instead.
+  """
+  import ast
+  import pathlib
+
+  root = pathlib.Path(__file__).resolve()
+  while not (root / "common" / "params_keys.h").exists():
+    root = root.parent
+
+  missing = []
+  for node in ast.walk(ast.parse(SRC)):
+    if not isinstance(node, ast.ImportFrom) or not node.module:
+      continue
+    if not node.module.startswith("openpilot."):
+      continue
+    mod = root / pathlib.Path(*node.module.split(".")[1:])
+    path = mod.with_suffix(".py") if mod.with_suffix(".py").exists() else mod / "__init__.py"
+    if not path.exists():
+      missing.append(f"{node.module} (no such module)")
+      continue
+    defined = set()
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    for sub in ast.walk(tree):
+      if isinstance(sub, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+        defined.add(sub.name)
+      elif isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Store):
+        defined.add(sub.id)
+      elif isinstance(sub, ast.ImportFrom | ast.Import):
+        for a in sub.names:
+          defined.add(a.asname or a.name.split(".")[0])
+    for a in node.names:
+      if a.name != "*" and a.name not in defined:
+        missing.append(f"{a.name} from {node.module}")
+
+  assert not missing, f"imported but not defined there: {sorted(missing)}"

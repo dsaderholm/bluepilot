@@ -675,6 +675,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // NOT persistent and NOT backed up: cleared on manager start and self-cleared when the pulse
     // ends, so it cannot survive a reboot and cannot repeat without a fresh deliberate request.
     {"FordBlinkerTest", {CLEAR_ON_MANAGER_START | CLEAR_ON_IGNITION_ON, INT, "0"}},
+    {"FordLaneDisplayTest", {CLEAR_ON_MANAGER_START | CLEAR_ON_IGNITION_ON, INT, "0"}},
     {"FordBlinkerBlinkPeriod", {PERSISTENT | BACKUP, INT, "760"}},
     {"FordPrefHybridPowerFlowAlternate", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"mici_hide_onroad_fade", {PERSISTENT | BACKUP, BOOL, "0"}},

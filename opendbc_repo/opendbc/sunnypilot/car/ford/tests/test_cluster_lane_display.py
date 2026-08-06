@@ -75,9 +75,21 @@ def test_a_departure_on_the_OTHER_side_still_shows_both():
   assert lines(passing_side=LEFT, right_depart=True) == (SUPPRESS, INTERVENE)
 
 
-def test_an_invisible_lane_line_is_unchanged_by_any_of_this():
-  assert lines(left_visible=False) == (SUPPRESS, AVAIL)
+def test_an_unseen_lane_is_NOT_the_suggestion_state():
+  """SUPPRESS MEANS ONE THING.
+
+  This used to send Suppress both for "the line opens toward the gap" and for "the model cannot see
+  that line", which made them the same picture. On worn paint -- I-15 in the rain, a repaved
+  stretch, a lane line that just stops -- the hint would appear on its own and mean nothing, and
+  every time it appeared for real the driver had no way to tell which of the two it was.
+
+  An unseen lane sends None, which is what upstream sends for it and what is actually true, leaving
+  Suppress to carry the suggestion by itself. Note the second assertion: the suggestion is NOT
+  drawn on a side whose line was never there to open.
+  """
+  assert lines(left_visible=False) == (NONE, AVAIL)
   assert lines(passing_side=LEFT, left_visible=False) == (SUPPRESS, AVAIL)
+  assert lines(left_visible=False) != lines(passing_side=LEFT, left_visible=False)
 
 
 def test_ldw_does_not_run_while_steering():
