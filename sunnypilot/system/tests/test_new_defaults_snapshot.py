@@ -99,6 +99,31 @@ class TestAnUntouchedSettingTakesTheNewDefault:
 
 
 class TestASettingHeChoseIsHisForever:
+  def test_a_value_he_tuned_BEFORE_this_shipped_is_still_his(self):
+    """The case every other test in this class misses, and the one that describes his car today.
+
+    All of these start from stored == default and have him edit while the mechanism is watching.
+    But everything he has actually tuned -- his ICBM numbers, the 100 mph ceiling, the curve feel he
+    drove to find -- was set long before this existed, so the edit is never observed. Seeding that
+    only RECORDED bought exactly one boot: on the second, stored == remembered read as "untouched"
+    and the value was cleared. Not only when a default had moved, either -- any stored value that
+    differed from the shipped one, which is the definition of a setting he chose.
+    """
+    p = FakeParams({KEY: "6"}, {KEY: "8"})   # shipped 8, he runs 6, default never moves
+    for _ in range(3):
+      boot(p)
+      assert p.store[KEY] == "6", "a value he set before this shipped was reset to the default"
+    assert KEY in set(json.loads(p.store[BP_DEFAULTS_OWNED_KEY])["keys"])
+
+  def test_a_value_he_tuned_before_survives_the_default_moving_afterwards(self):
+    p = FakeParams({KEY: "6"}, {KEY: "8"})
+    boot(p)
+    for new in ("12", "15", "3"):
+      p.defaults[KEY] = new
+      boot(p)
+      assert p.store[KEY] == "6", f"his value was lost when the default moved to {new}"
+    assert KEY not in p.removed
+
   def test_his_value_survives_a_moved_default(self):
     p = FakeParams({KEY: "8"}, {KEY: "8"})
     boot(p)

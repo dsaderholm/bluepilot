@@ -226,7 +226,24 @@ def _migrate_bp_new_defaults(_params):
       stored = str(stored.decode() if isinstance(stored, bytes) else stored)
 
       if key not in remembered:
-        remembered[key] = stored            # first sight: assume it is his, change nothing
+        # FIRST SIGHT, and the seeding has to claim as well as record.
+        #
+        # manager.py has already written the shipped default to every declared key on a car that has
+        # been driven, so a stored value that DIFFERS from it can only be one he set himself. There
+        # is no later boot on which that becomes visible again -- from the next boot on, stored ==
+        # remembered looks exactly like "untouched", and the elif below would hand his value away.
+        #
+        # Recording alone was not enough. It bought exactly one boot: everything he had tuned before
+        # this shipped -- his whole ICBM tune, the 100 mph ceiling, the curve feel he drove to find
+        # -- was reset to the shipped default on the second boot, and not only when a default had
+        # moved. That is the wipe that already happened to him once.
+        #
+        # A key untouched since BEFORE a default moved in some earlier build can hold a stale
+        # default and get claimed here too. That costs staleness on a setting he can still change
+        # himself, which is the side this file already says every ambiguous case must fall on.
+        remembered[key] = stored
+        if stored != shipped:
+          owned.add(key)
       elif stored != remembered[key]:
         owned.add(key)                      # he moved it: his from here on
       elif stored != shipped:
