@@ -337,21 +337,33 @@ class AutoLaneChangeController:
     tapping the OTHER way, and `one_blinker` is `left != right`, so it stays TRUE the whole time.
     The old test needed it to go false. It never did, so the cancel never ran once.
 
-    THE SIGNAL GOING OUT ON ITS OWN IS NOT A CANCEL. His BCM is set, via FORScan, to flash eight
-    times from a tap -- which is how he starts a nudgeless lane change in the first place. Eight
-    flashes is about five and a half seconds, and then the lamp stops because it has finished, not
-    because anybody changed their mind. With the revert wired up, treating that as a cancel would
-    steer the car back mid-change for no reason at all. So a blinker that has been on long enough
-    to be the one-touch expiring is ignored; one that goes out early is a deliberate cancel, which
-    is what a driver pushing the stalk the other way to kill it looks like.
+    THE SIGNAL GOING OUT IS NOT A CANCEL AT ALL, and the version that tried to tell "early" from
+    "the one-touch expiring" was wrong about how he drives:
+
+      "If I manually put the blinker on to do a nudged lane change instead of tapping the blinker,
+      and put the blinker off, it will put me back into the lane I was just in."
+
+    Holding the stalk and releasing it is a THIRD lifetime the one-touch heuristic never accounted
+    for -- shorter than eight flashes, and not a cancel by any reading. It steered him back into the
+    lane he had just left, and his conclusion was that he would have to signal the full amount every
+    time, which he immediately followed with the reason that is no good:
+
+      "Sometimes I grab the steering wheel to bypass the nudgeless lane changes with a faster lane
+      change myself, which means I'll use the blinker less."
+
+    A feature that requires a longer signal from a driver who is deliberately using shorter ones is
+    a feature fighting its owner. So the blinker going out means nothing here, however long it was
+    on, and REVERSING THE STALK is the only cancel -- which is what he said he does anyway, and the
+    only gesture with one possible meaning.
+
+    blinker_held_s and the one-touch length stay: nothing else reads them yet, they cost a float,
+    and they are the measurement that would be needed if this ever wants a third gesture.
     """
     if self.lane_change_cancel_window <= 0.0:
       return False
     if elapsed_s >= self.lane_change_cancel_window:
       return False
-    if reversed_side:
-      return True
-    return not one_blinker and blinker_held_s < (self.lane_change_one_touch_s - ONE_TOUCH_MARGIN_S)
+    return reversed_side
 
   def update_blinker_timer(self, one_blinker: bool) -> None:
     """How long the signal has been on, sampled across the falling edge. See DEFAULT_ONE_TOUCH_S."""

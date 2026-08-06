@@ -37,30 +37,30 @@ def run(op, seconds, left=EMPTY, right=EMPTY, v_ego=CRUISE_MS, settle_s=0.0,
 
 class TestItFiresOnARealGrind:
   def test_barely_gaining_on_a_close_car_counts(self):
-    op = run(OvertakeProgress(), 10.0, left=lane(d_rel=20.0, v_rel=-0.4))
+    op = run(OvertakeProgress(), 10.0, right=lane(d_rel=20.0, v_rel=-0.4))
     assert op.crawling
-    assert op.crawl_side == Side.left
+    assert op.crawl_side == Side.right
     assert op.crawl_events == 1
 
   def test_matching_their_speed_exactly_is_the_worst_case_not_an_exempt_one(self):
     """Sitting in the passing lane gaining nothing at all is the situation this exists for."""
-    op = run(OvertakeProgress(), 10.0, left=lane(v_rel=0.0))
+    op = run(OvertakeProgress(), 10.0, right=lane(v_rel=0.0))
     assert op.crawling
 
   def test_losing_ground_counts_too(self):
-    op = run(OvertakeProgress(), 10.0, left=lane(v_rel=0.6))
+    op = run(OvertakeProgress(), 10.0, right=lane(v_rel=0.6))
     assert op.crawling
 
   def test_the_longest_crawl_survives_the_crawl_ending(self):
     """The number a drive is judged on -- it must outlive the event that produced it."""
-    op = run(OvertakeProgress(), 12.0, left=lane())
+    op = run(OvertakeProgress(), 12.0, right=lane())
     run(op, 5.0)
     assert op.crawl_seconds == 0.0
     assert op.crawl_longest >= 12.0 - DT_MDL
 
   def test_one_crawl_is_one_event(self):
     """Counted once per crawl, not once per frame past the threshold."""
-    op = run(OvertakeProgress(), 25.0, left=lane())
+    op = run(OvertakeProgress(), 25.0, right=lane())
     assert op.crawl_events == 1
 
 
@@ -71,29 +71,29 @@ class TestItStaysQuietOtherwise:
 
   def test_passing_a_car_properly_is_not_a_crawl(self):
     """The whole point of the threshold: gaining at a decent clip is an overtake working."""
-    op = run(OvertakeProgress(), 20.0, left=lane(v_rel=-(SLOW_GAIN_MPH + 5) * CV.MPH_TO_MS))
+    op = run(OvertakeProgress(), 20.0, right=lane(v_rel=-(SLOW_GAIN_MPH + 5) * CV.MPH_TO_MS))
     assert not op.crawling
     assert op.crawl_seconds == 0.0
 
   def test_a_car_far_ahead_in_the_next_lane_is_not_a_crawl(self):
     """Beyond the close range this is just traffic somewhere ahead, not a stuck overtake."""
-    op = run(OvertakeProgress(), 20.0, left=lane(d_rel=CLOSE_M + 30))
+    op = run(OvertakeProgress(), 20.0, right=lane(d_rel=CLOSE_M + 30))
     assert not op.crawling
 
   def test_below_passing_speed_nothing_is_measured(self):
     """In town, sitting beside someone at a light is not a pass taking too long."""
-    op = run(OvertakeProgress(), 20.0, left=lane(), v_ego=10.0)
+    op = run(OvertakeProgress(), 20.0, right=lane(), v_ego=10.0)
     assert not op.crawling and op.crawl_events == 0
 
   def test_an_unavailable_side_is_not_a_crawl(self):
     """Same rule as everywhere else here: no data must never read as data."""
-    op = run(OvertakeProgress(), 20.0, left=lane(available=False))
+    op = run(OvertakeProgress(), 20.0, right=lane(available=False))
     assert not op.crawling
 
   def test_a_break_in_the_grind_restarts_the_clock(self):
-    op = run(OvertakeProgress(), 7.0, left=lane())
+    op = run(OvertakeProgress(), 7.0, right=lane())
     run(op, 1.0)
-    run(op, 7.0, left=lane())
+    run(op, 7.0, right=lane())
     assert not op.crawling, "two short grinds are not one long one"
 
 
@@ -110,7 +110,7 @@ class TestProvenance:
     gaining on it", which is true almost continuously there. It measured being ALONGSIDE someone
     and called it overtaking them.
     """
-    op = run(OvertakeProgress(), 10.0, left=lane(),
+    op = run(OvertakeProgress(), 10.0, right=lane(),
              settle_s=AFTER_SUGGESTION_S + 100, since_lane_change_s=AFTER_SUGGESTION_S + 100)
     assert not op.crawling, "a car beside us with no pass underway counted as a slow pass"
     assert op.crawl_events == 0
@@ -118,12 +118,12 @@ class TestProvenance:
   def test_but_a_pass_the_driver_made_himself_still_counts(self):
     """The over-correction to avoid. Gating on the suggestion alone would stop measuring the passes
     he makes on his own -- which are most of them, and the ones this number was wanted for."""
-    op = run(OvertakeProgress(), 10.0, left=lane(),
+    op = run(OvertakeProgress(), 10.0, right=lane(),
              settle_s=AFTER_SUGGESTION_S + 100, since_lane_change_s=2.0)
     assert op.crawling
 
   def test_a_crawl_soon_after_a_suggestion_is_labeled(self):
-    op = run(OvertakeProgress(), 10.0, left=lane(), settle_s=1.0)
+    op = run(OvertakeProgress(), 10.0, right=lane(), settle_s=1.0)
     assert op.crawl_after_suggestion
 
   def test_the_label_is_latched_at_the_start(self):
@@ -131,6 +131,49 @@ class TestProvenance:
     ran out underneath it -- so a 40 s grind that began right after a suggestion would end up
     filed as unrelated."""
     op = OvertakeProgress()
-    run(op, 1.0, left=lane(), settle_s=1.0)
-    run(op, 20.0, left=lane(), settle_s=AFTER_SUGGESTION_S + 100)
+    run(op, 1.0, right=lane(), settle_s=1.0)
+    run(op, 20.0, right=lane(), settle_s=AFTER_SUGGESTION_S + 100)
     assert op.crawl_after_suggestion
+
+
+class TestWhatIsActuallyASlowPass:
+  """His correction, and it reframed the whole thing rather than adjusting it:
+
+    "A slow pass would only matter if I'm passing on the left. If I'm passing on the right, I should
+    just stay in the right lane. There's no eagerness to get out."
+    "I kept getting slow pass warnings saying barely gaining on the car on the left, but obviously I
+    wouldn't be gaining on the car on the left because the cars on the left are going faster."
+
+  Every fixture in this file used to put the vehicle on the LEFT, which is the geometry of being
+  overtaken rather than of overtaking. The tests encoded the bug and passed.
+  """
+
+  def test_a_car_on_the_left_is_never_a_slow_pass(self):
+    """Left-lane traffic doing about your speed, which on a highway is continuous."""
+    op = run(OvertakeProgress(), 25.0, left=lane(v_rel=0.0))
+    assert not op.crawling
+    assert op.crawl_events == 0
+
+  def test_a_car_pulling_away_is_not_a_pass_at_all(self):
+    """They are 10 mph faster. -v_rel is -10, comfortably under the 5 mph bar, so the old test
+    counted every vehicle overtaking us as one we were failing to overtake."""
+    op = run(OvertakeProgress(), 25.0, right=lane(v_rel=10 * CV.MPH_TO_MS))
+    assert not op.crawling
+
+  def test_but_drifting_back_slightly_mid_pass_still_counts(self):
+    """Alongside a lorry that creeps ahead by a mile an hour is the case worth naming, and a hard
+    floor at zero would drop it."""
+    op = run(OvertakeProgress(), 25.0, right=lane(v_rel=1 * CV.MPH_TO_MS))
+    assert op.crawling
+
+  def test_passing_on_the_right_is_deliberately_silent(self):
+    """Undertaking has no lane to hurry back to. The car being passed would be on the LEFT, and
+    that side is not watched."""
+    op = run(OvertakeProgress(), 25.0, left=lane(v_rel=-0.4))
+    assert not op.crawling
+
+  def test_the_real_case_still_fires(self):
+    """In the left lane, barely gaining on the car you are passing, which is on your right."""
+    op = run(OvertakeProgress(), 25.0, right=lane(d_rel=20.0, v_rel=-0.4))
+    assert op.crawling
+    assert op.crawl_side == Side.right

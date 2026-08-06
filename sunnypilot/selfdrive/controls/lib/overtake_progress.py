@@ -42,9 +42,24 @@ MIN_D_REL_M = 3.0
 # Gaining on them slower than this is a grind. ~5 mph: at that rate, moving from 45 m behind to 45 m
 # ahead of a lorry takes the better part of half a minute, spent in the other lane.
 #
-# Includes gaining at zero or negative, which is the worst version -- matching their speed exactly,
-# or losing ground, while sitting in the passing lane.
+# Includes gaining at zero, which is the worst version -- matching their speed exactly while sitting
+# in the passing lane.
 SLOW_GAIN_MPH = 5
+
+# ...but NOT while they pull away from you, which is not a slow pass at all.
+#
+# From the road: "I kept getting slow pass warnings saying barely gaining on the car on the left,
+# but obviously I wouldn't be gaining on the car on the left because the cars on the left are going
+# faster."
+#
+# The test was `-v_rel < min_gain`, and -v_rel is how much faster we are. A car doing 10 mph more
+# than us satisfies that easily -- it is very much less than five. So every vehicle overtaking US
+# counted as a vehicle we were failing to overtake, which on a highway is most of them.
+#
+# A small negative band survives because a genuinely stuck pass does drift: alongside a lorry that
+# creeps ahead by a mile an hour is exactly the case worth naming. Losing more than that means they
+# are passing you, and there is nothing to be slow at.
+SLOW_LOSS_MPH = 2
 
 # Below this a "pass" is not the maneuver in question. Same floor the detector uses.
 MIN_V_EGO_MS = 40 * CV.MPH_TO_MS
@@ -88,7 +103,9 @@ class OvertakeProgress:
       return False
     if not (MIN_D_REL_M < side.d_rel < CLOSE_M):
       return False
-    return -side.v_rel < min_gain_ms
+    # BOTH ENDS. Below the loss floor they are pulling away, which is them passing us.
+    gain = -side.v_rel
+    return -SLOW_LOSS_MPH * CV.MPH_TO_MS < gain < min_gain_ms
 
   def update(self, v_ego: float, left, right, settle_s: float,
              since_lane_change_s: float = 1e3) -> None:
@@ -114,11 +131,21 @@ class OvertakeProgress:
       self._reset()
       return
 
+    # THE RIGHT SIDE ONLY, and this is his correction rather than a refinement of mine:
+    #
+    #   "A slow pass would only matter if I'm passing on the left. If I'm passing on the right, I
+    #   should just stay in the right lane. There's no eagerness to get out."
+    #
+    # Passing on the left puts the car you are passing on your RIGHT. That is the whole of it. A
+    # vehicle on the LEFT is either overtaking you or you are in the wrong lane, and neither is a
+    # pass you are being slow at -- so watching that side produced a warning about traffic doing
+    # nothing but going past, continuously, on every highway.
+    #
+    # Undertaking on the right is deliberately silent. There is no lane to hurry back to.
     min_gain = SLOW_GAIN_MPH * CV.MPH_TO_MS
-    left_grinding = self._grinding(left, min_gain)
     right_grinding = self._grinding(right, min_gain)
 
-    if not (left_grinding or right_grinding):
+    if not right_grinding:
       self._reset()
       return
 
@@ -130,7 +157,10 @@ class OvertakeProgress:
       if settle_s >= AFTER_SUGGESTION_S and since_lane_change_s >= AFTER_SUGGESTION_S:
         return
       self.crawl_after_suggestion = settle_s < AFTER_SUGGESTION_S
-      self.crawl_side = Side.left if left_grinding else Side.right
+      # Always the car on the right -- see above. Kept as a field because the panel and the drive
+      # summary both read it, and because a rear radar will eventually make the left side mean
+      # something different.
+      self.crawl_side = Side.right
 
     self.crawl_seconds += DT_MDL
     self.crawl_longest = max(self.crawl_longest, self.crawl_seconds)

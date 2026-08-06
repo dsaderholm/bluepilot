@@ -45,7 +45,7 @@ def controller(window=DEFAULT_CANCEL_WINDOW_S):
 class TestCancelling:
   def test_dropping_the_blinker_early_calls_it_off(self):
     alc = controller()
-    assert alc.should_cancel(one_blinker=False, elapsed_s=0.5)
+    assert alc.should_cancel(one_blinker=True, elapsed_s=0.5, reversed_side=True)
 
   def test_holding_the_blinker_does_not(self):
     """The ordinary case, and by far the most common -- this must not fire on a normal change."""
@@ -57,23 +57,23 @@ class TestCancelling:
     the space you just left, not an undo -- and openpilot has no reverse-lane-change desire, so
     clearing it late makes the planner re-center on the lane it has mostly reached anyway."""
     alc = controller()
-    assert not alc.should_cancel(one_blinker=False, elapsed_s=DEFAULT_CANCEL_WINDOW_S + 0.1)
+    assert not alc.should_cancel(one_blinker=True, elapsed_s=DEFAULT_CANCEL_WINDOW_S + 0.1, reversed_side=True)
 
   def test_right_on_the_boundary_finishes(self):
     alc = controller()
-    assert not alc.should_cancel(one_blinker=False, elapsed_s=DEFAULT_CANCEL_WINDOW_S)
+    assert not alc.should_cancel(one_blinker=True, elapsed_s=DEFAULT_CANCEL_WINDOW_S, reversed_side=True)
 
   def test_zero_restores_the_stock_behavior(self):
     """Off must mean genuinely uncancellable, the way it shipped -- not "cancellable for zero
     seconds", which would be the same thing but by accident."""
     alc = controller(window=0)
-    assert not alc.should_cancel(one_blinker=False, elapsed_s=0.0)
-    assert not alc.should_cancel(one_blinker=False, elapsed_s=0.5)
+    assert not alc.should_cancel(one_blinker=True, elapsed_s=0.0, reversed_side=True)
+    assert not alc.should_cancel(one_blinker=True, elapsed_s=0.5, reversed_side=True)
 
   def test_a_longer_window_extends_it(self):
     alc = controller(window=5)
-    assert alc.should_cancel(one_blinker=False, elapsed_s=4.5)
-    assert not alc.should_cancel(one_blinker=False, elapsed_s=5.5)
+    assert alc.should_cancel(one_blinker=True, elapsed_s=4.5, reversed_side=True)
+    assert not alc.should_cancel(one_blinker=True, elapsed_s=5.5, reversed_side=True)
 
   def test_the_window_is_read_from_the_setting(self):
     """Not a constant behind a setting that never reaches it -- the failure this whole fork keeps
@@ -91,7 +91,7 @@ class TestItDoesNotDisturbAnythingElse:
     """Deliberate. A stalk that bounces off for a frame IS the driver cancelling as far as this can
     tell, and the failure direction is right: it stops a maneuver rather than starting one."""
     alc = controller()
-    assert alc.should_cancel(one_blinker=False, elapsed_s=DT_MDL)
+    assert alc.should_cancel(one_blinker=True, elapsed_s=DT_MDL, reversed_side=True)
 
 
 class TestItIsActuallyWiredIn:
@@ -137,7 +137,7 @@ class TestItIsActuallyWiredIn:
     dh = self._dh()
     self._start(dh)
     assert dh.desire == log.Desire.laneChangeLeft
-    dh.update(self._cs(), True, 0.5)          # stalk off
+    dh.update(self._cs(right=True), True, 0.5)          # stalk pushed the other way -- the cancel
     assert dh.alc.reverting
     assert dh.lane_change_direction == LaneChangeDirection.right, "not steering back"
     assert dh.desire == log.Desire.laneChangeRight, "stopped steering instead of returning"
@@ -148,7 +148,7 @@ class TestItIsActuallyWiredIn:
     flips direction back and forth."""
     dh = self._dh()
     self._start(dh)
-    dh.update(self._cs(), True, 0.5)
+    dh.update(self._cs(right=True), True, 0.5)
     for _ in range(int(1.0 / DT_MDL)):
       dh.update(self._cs(), True, 0.5)
       assert dh.lane_change_direction == LaneChangeDirection.right, "flipped back mid-revert"
@@ -158,7 +158,7 @@ class TestItIsActuallyWiredIn:
     """It has to end, and end in a state a new lane change can start from."""
     dh = self._dh()
     self._start(dh)
-    dh.update(self._cs(), True, 0.5)
+    dh.update(self._cs(right=True), True, 0.5)
     for _ in range(int(8.0 / DT_MDL)):
       dh.update(self._cs(), True, 0.0)        # model: no lane change happening any more
     assert dh.lane_change_state == LaneChangeState.off
@@ -176,7 +176,7 @@ class TestItIsActuallyWiredIn:
     """
     dh = self._dh()
     self._start(dh)
-    dh.update(self._cs(), True, 0.5)
+    dh.update(self._cs(right=True), True, 0.5)
     assert dh.alc.reverting
     for _ in range(int(15.0 / DT_MDL)):
       dh.update(self._cs(), True, 0.5)      # model never concedes the change is over
@@ -190,7 +190,7 @@ class TestItIsActuallyWiredIn:
     of two imperfect options, so it falls back to simply releasing the desire."""
     dh = self._dh()
     self._start(dh)                            # changing LEFT, so the return side is the RIGHT
-    dh.update(self._cs(right_bs=True), True, 0.5)
+    dh.update(self._cs(right=True, right_bs=True), True, 0.5)
     assert not dh.alc.reverting
     assert dh.lane_change_state == LaneChangeState.off
     assert dh.desire == log.Desire.none
@@ -201,14 +201,14 @@ class TestItIsActuallyWiredIn:
     reason to go back. Checking the wrong side here would invert the whole gate."""
     dh = self._dh()
     self._start(dh)                            # changing LEFT
-    dh.update(self._cs(left_bs=True), True, 0.5)
+    dh.update(self._cs(right=True, left_bs=True), True, 0.5)
     assert dh.alc.reverting
     assert dh.lane_change_direction == LaneChangeDirection.right
 
   def test_turning_the_revert_off_restores_the_old_cancel(self):
     dh = self._dh(revert=False)
     self._start(dh)
-    dh.update(self._cs(), True, 0.5)
+    dh.update(self._cs(right=True), True, 0.5)
     assert not dh.alc.reverting
     assert dh.lane_change_state == LaneChangeState.off
     assert dh.lane_change_direction == LaneChangeDirection.none
@@ -227,7 +227,7 @@ class TestItIsActuallyWiredIn:
     self._start(dh)
     for _ in range(int(1.5 / DT_MDL)):
       dh.update(self._cs(left=True), True, 0.5)
-    dh.update(self._cs(), True, 0.5)
+    dh.update(self._cs(right=True), True, 0.5)
     assert dh.lane_change_state == LaneChangeState.laneChangeStarting
     assert dh.desire == log.Desire.laneChangeLeft
 
@@ -259,14 +259,14 @@ class TestItIsActuallyWiredIn:
 
     # Now the driver drops the stalk on a frame where the model's confidence has dipped. Both of
     # stock's conditions and the cancel are true together, which is the collision.
-    dh.update(self._cs(), True, 0.0)
+    dh.update(self._cs(right=True), True, 0.0)
     assert dh.lane_change_state == LaneChangeState.off, "the completion check undid the cancel"
     assert dh.desire == log.Desire.none
 
   def test_off_leaves_the_stock_behavior_exactly_as_it_was(self):
     dh = self._dh(window=0)
     self._start(dh)
-    dh.update(self._cs(), True, 0.5)
+    dh.update(self._cs(right=True), True, 0.5)
     assert dh.lane_change_state == LaneChangeState.laneChangeStarting
 
 
@@ -306,7 +306,7 @@ class TestMeasuringRealLaneChanges:
     """Three different events. Lumping any two would hide the one that says something."""
     dh = self._dh()
     TestItIsActuallyWiredIn()._start(dh)
-    dh.update(TestItIsActuallyWiredIn._cs(), True, 0.5)
+    dh.update(TestItIsActuallyWiredIn._cs(right=True), True, 0.5)
     assert dh.alc.changes_cancelled == 1
     assert dh.alc.changes_completed == 0
     assert dh.alc.changes_abandoned == 0
@@ -328,7 +328,7 @@ class TestMeasuringRealLaneChanges:
     assist takes its crossing time from. It went back, not across."""
     dh = self._dh()
     TestItIsActuallyWiredIn()._start(dh)
-    dh.update(TestItIsActuallyWiredIn._cs(), True, 0.5)             # cancel -> revert
+    dh.update(TestItIsActuallyWiredIn._cs(right=True), True, 0.5)             # cancel -> revert
     assert dh.alc.reverting
     for _ in range(int(8.0 / DT_MDL)):
       dh.update(TestItIsActuallyWiredIn._cs(), True, 0.0)
@@ -443,21 +443,28 @@ class TestTheBlinkerTurnsItselfOff:
     alc.lane_change_one_touch_s = float(one_touch)
     return alc
 
-  def test_an_early_blinker_off_is_a_cancel(self):
-    """Nudged off while watching the car start to move."""
-    alc = self._alc()
-    assert alc.should_cancel(False, 1.5, False, 2.5)
+  def test_a_blinker_going_out_is_not_a_cancel_however_long_it_was_on(self):
+    """The heuristic this replaces tried to tell "nudged off early" from "the one-touch expiring"
+    by how long the lamp had been lit. It missed a third case entirely -- holding the stalk and
+    releasing it, which is shorter than eight flashes and is not a cancel:
 
-  def test_the_eighth_flash_is_not(self):
-    """Same inputs to carState, five seconds later. The only thing separating them is how long the
-    signal had been on, which is why that has to be measured."""
-    alc = self._alc()
-    assert not alc.should_cancel(False, 1.5, False, 5.5)
+      "If I manually put the blinker on to do a nudged lane change instead of tapping the blinker,
+      and put the blinker off, it will put me back into the lane I was just in."
 
-  def test_nor_is_one_just_short_of_the_timeout(self):
-    """The margin exists because 1.5 Hz is nominal, not guaranteed."""
+    Every duration, none of them a cancel.
+    """
     alc = self._alc()
-    assert not alc.should_cancel(False, 1.5, False, 4.9)
+    for held in (0.5, 2.5, 4.9, 5.5, 9.0):
+      assert not alc.should_cancel(False, 1.5, False, held), f"blinker off after {held}s cancelled"
+
+  def test_and_it_does_not_demand_a_longer_signal(self):
+    """His conclusion was that he would have to signal the full amount every time, followed
+    immediately by the reason that is no good: "sometimes I grab the steering wheel to bypass the
+    nudgeless lane changes with a faster lane change myself, which means I'll use the blinker
+    less." A feature requiring more signal from a driver deliberately using less is one fighting
+    its owner."""
+    alc = self._alc()
+    assert not alc.should_cancel(False, 0.5, False, 0.2), "a brief signal read as a cancel"
 
   def test_a_stalk_pushed_the_other_way_always_cancels(self):
     """Unambiguous however long it has been on -- nobody's blinker times out INTO the other side."""
@@ -466,7 +473,6 @@ class TestTheBlinkerTurnsItselfOff:
 
   def test_the_window_still_bounds_everything(self):
     alc = self._alc(window=4)
-    assert not alc.should_cancel(False, 4.5, False, 1.0)
     assert not alc.should_cancel(True, 4.5, True, 1.0), "reversal ignored the point of no return"
 
   def test_his_actual_timeline_does_not_self_cancel(self):
@@ -510,3 +516,39 @@ class TestTheBlinkerTurnsItselfOff:
     for _ in range(int(1.0 / DT_MDL)):
       alc.update_blinker_timer(True)
     assert 0.9 < alc.blinker_held_s < 1.1, "the second signal inherited the first one's age"
+
+
+class TestHoldingTheStalkAndLettingGo:
+  """The case the old heuristic had no room for, reported from the road:
+
+    "If I manually put the blinker on to do a nudged lane change instead of tapping the blinker,
+    and put the blinker off, it will put me back into the lane I was just in."
+
+  A held-and-released stalk is shorter than the one-touch and is not a cancel by any reading. It
+  steered him back into the lane he had just left.
+  """
+
+  def test_a_held_stalk_released_mid_change_does_not_steer_back(self):
+    dh = TestItIsActuallyWiredIn._dh()
+    TestItIsActuallyWiredIn()._start(dh)
+    assert dh.desire == log.Desire.laneChangeLeft
+    for _ in range(int(1.0 / DT_MDL)):
+      dh.update(TestItIsActuallyWiredIn._cs(), True, 0.5)      # let go of the stalk
+      assert not dh.alc.reverting, "released stalk read as a cancel"
+    assert dh.lane_change_direction == LaneChangeDirection.left, "steered back into the old lane"
+
+  def test_and_the_change_still_completes(self):
+    dh = TestItIsActuallyWiredIn._dh()
+    TestItIsActuallyWiredIn()._start(dh)
+    for _ in range(int(6.0 / DT_MDL)):
+      dh.update(TestItIsActuallyWiredIn._cs(), True, 0.0)      # stalk released, model settles
+    assert dh.alc.changes_completed == 1
+    assert dh.alc.changes_cancelled == 0
+
+  def test_the_other_way_on_the_stalk_still_cancels(self):
+    """The one gesture with a single possible meaning, and the one he says he actually uses."""
+    dh = TestItIsActuallyWiredIn._dh()
+    TestItIsActuallyWiredIn()._start(dh)
+    dh.update(TestItIsActuallyWiredIn._cs(right=True), True, 0.5)
+    assert dh.alc.reverting
+    assert dh.lane_change_direction == LaneChangeDirection.right
