@@ -58,7 +58,12 @@ DEFAULT_TARGETS = [
   # (that directory glob already covers test_button_mapping.py)
   "sunnypilot/selfdrive/controls/lib/tests/test_unconfirmed_lead.py",
   "sunnypilot/selfdrive/controls/lib/smart_cruise_control/tests/test_map_model_veto.py",
+  # Named files, not selfdrive/ui/tests/ -- test_raylib_ui.py, test_soundd.py, test_feedbackd.py
+  # and test_translations.py all need raylib or the device and break collection for the folder.
+  # That is also how test_settings_recommend_defaults.py sat here unrun on the day it was written:
+  # the suite total did not move and nothing said why. test_bp_tests_are_registered guards it now.
   "selfdrive/ui/tests/test_settings_fit.py",
+  "selfdrive/ui/tests/test_settings_recommend_defaults.py",
   # Named files, not the directory: test_speed_limit_assist.py in the same folder imports the
   # sunnylink/API stack (jwt and friends) and cannot collect without the device environment.
   # Listing the folder pulled it in and broke collection for everything.

@@ -97,3 +97,56 @@ def test_button_row_fits_on_screen(row):
     f"wrap or clip -- the rightmost buttons render off the edge and cannot be tapped. "
     f"Use button_width <= {MAX_ROW_WIDTH // count}."
   )
+
+
+def test_bp_tests_are_registered():
+  """BluePilot: a test file the runner never collects is worse than no test at all.
+
+  test_settings_recommend_defaults.py was written, passed when run by name, and was not in
+  DEFAULT_TARGETS -- so the suite total did not move and nothing anywhere said why. The only reason
+  it was caught is that the count was expected to go up and did not.
+
+  selfdrive/ui/tests/ cannot be globbed (raylib and device deps live beside these), so new files
+  there must be added by name, and "add it by name" is exactly the step that gets forgotten. This
+  scans for test files carrying the BluePilot marker in their module docstring and checks each one
+  is covered by a DEFAULT_TARGETS entry -- a name or a parent directory.
+  """
+  runner = REPO / "tools" / "bp_offline_test.py"
+  tree = ast.parse(runner.read_text(encoding="utf-8"), filename=str(runner))
+  targets: list[str] = []
+  for node in ast.walk(tree):
+    if isinstance(node, ast.Assign) and any(
+        isinstance(t, ast.Name) and t.id == "DEFAULT_TARGETS" for t in node.targets):
+      targets = [e.value for e in node.value.elts
+                 if isinstance(e, ast.Constant) and isinstance(e.value, str)]
+  assert targets, "could not read DEFAULT_TARGETS; this guard has gone stale"
+
+  def covered(rel: str) -> bool:
+    return any(rel == t or rel.startswith(t.rstrip("/") + "/") for t in targets)
+
+  missing = []
+  for path in REPO.rglob("test_*.py"):
+    if any(p in {".git", "__pycache__", "node_modules"} for p in path.parts):
+      continue
+    try:
+      mod = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    except (SyntaxError, UnicodeDecodeError, OSError):
+      continue
+    doc = ast.get_docstring(mod)
+    if not doc or "BluePilot" not in doc:
+      continue
+    # Must actually contain tests. bluepilot/test_web_routes.py is named like a test file and
+    # carries the marker, but it is a hand-run script with no test functions -- pytest collects
+    # nothing from it, so demanding it be registered would be demanding a no-op.
+    has_tests = any(isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef) and n.name.startswith("test_")
+                    for n in ast.walk(mod))
+    if not has_tests:
+      continue
+    rel = path.relative_to(REPO).as_posix()
+    if not covered(rel):
+      missing.append(rel)
+
+  assert not missing, (
+    f"BluePilot test files the runner never collects: {sorted(missing)}. Add each to "
+    "DEFAULT_TARGETS in tools/bp_offline_test.py -- by name if its directory holds tests that "
+    "need the device.")
