@@ -233,9 +233,11 @@ class TestTheGroupsThemselves:
       # His lateral tune, set on the settings screen. Excluded by name in _BP_NEVER_TRACKED so a
       # prefix change can never quietly pull it in.
       "FordLowSpeedFactor_ang", "FordHighSpeedFactor_ang", "FordPrefLateralControl",
-      # He confirmed on 2026-08-05 that these three work on the car -- he turned them on himself,
-      # so whatever is stored is already what he wants.
-      "ShowBrakeStatus", "GreenLightAlert", "LeadDepartAlert",
+      # He confirmed on 2026-08-05 that both work on the car -- he turned them on himself, so
+      # whatever is stored is already what he wants. They carry no tracked prefix and are not worth
+      # inventing one for. (ShowBrakeStatus was here too until "Show" became a tracked prefix; the
+      # overlap assertion below is what caught that it had to move.)
+      "GreenLightAlert", "LeadDepartAlert",
     }
 
     moved = {k for k, vals in ever.items() if len(vals) > 1}

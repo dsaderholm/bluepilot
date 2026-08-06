@@ -176,7 +176,17 @@ BP_DEFAULTS_OWNED_KEY = "BPDefaultsOwned"
 
 # Prefixes this fork ships defaults for. Anything the OWNER's own tune lives in is excluded by name
 # below -- being wrong there costs him a steering tune he found on the road.
-_BP_TRACKED_PREFIXES = ("Icbm", "SmartCruiseControl", "SpeedLimit")
+#
+# PassingAssist and Show are here even though no such key exists on this branch, because the branch
+# that owns them cannot usefully add them: it rebases onto this one, so a prefix added over there
+# would be reverted by the next rebase. Seven PassingAssist* defaults and five Show* defaults have
+# already moved with nothing tracking them, which meant the new value could not reach his car and
+# the only recourse was a hand-written note in a test. This is where that stops.
+#
+# Adding a prefix does NOT retroactively fix a key that is already stale -- pessimistic seeding
+# claims anything currently differing from its shipped default as his. It fixes every move from
+# here on, which is the part that was unbounded.
+_BP_TRACKED_PREFIXES = ("Icbm", "SmartCruiseControl", "SpeedLimit", "PassingAssist", "Show")
 _BP_NEVER_TRACKED = frozenset({
   # His lateral tune. The defaults happen to match what he runs; that is not a reason to manage it.
   "FordLowSpeedFactor_ang", "FordHighSpeedFactor_ang", "FordHighSpeedDampening_ang",
