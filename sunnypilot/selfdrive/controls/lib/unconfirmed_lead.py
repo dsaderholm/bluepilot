@@ -108,16 +108,30 @@ LEAD_LOST_S = 0.5          # candidate gone this long -> released
 
 # --- model stop intent (stop signs, red lights) ---
 #
-# modelV2.action.shouldStop is published every cycle whatever the longitudinal mode is; is_e2e()
-# in longitudinal_planner only decides whether the planner consumes it. It is the same signal that
-# stops the car under openpilot longitudinal with experimental mode, which is reported to work well
-# on this vehicle for signs and signals -- the reason for running stock Ford ACC is the rest of
-# op long's behavior, not this part of it.
-#
 # This is the only signal available for the case the lead trigger structurally cannot catch: a sign
 # or signal with no vehicle at it produces no lead, so there is no dRel, vRel or TTC to gate on.
 # Persistence and the speed floor are therefore the whole filter, which is why it is separately
 # switchable via IcbmModelStopEnabled.
+#
+# NOT modelV2.action.shouldStop, which is what this used to gate on and is why it never once fired.
+# shouldStop does not mean "there is a stop line ahead". Both branches of get_action_from_model in
+# modeld require the car to be ALREADY STOPPED:
+#
+#   should_stop = (v_ego < 0.3 and desired_accel < 0.1)              # model_output has 'action'
+#   should_stop = (v_now < vEgoStopping and a_target < 0.1)          # via get_accel_from_plan
+#
+# vEgoStopping is 0.3 m/s. So shouldStop can only be true below 0.67 mph, while this path requires
+# MIN_V_EGO_MS (25 mph) to do anything -- mutually exclusive by a factor of thirty-seven. It means
+# "stopped, stay stopped", and under experimental mode what actually slows the car for a red light
+# is action.desiredAcceleration; shouldStop only decides the hold at the end.
+#
+# So gate on the deceleration the model is asking for, which is the same quantity _model_stop_target
+# already builds the request from. With no lead and nothing on radar, a sustained request this hard
+# is the model seeing something it wants to stop for.
+MODEL_STOP_DECEL_MS2 = -1.0
+# Hysteresis. Releasing at the trigger value would chatter on the way down, where the model's
+# request naturally eases as the car slows.
+MODEL_STOP_RELEASE_DECEL_MS2 = -0.4
 MODEL_STOP_PERSISTENCE_S = 1.0
 MODEL_STOP_RELEASE_S = 0.5
 # Horizon used to turn the model's desired acceleration into a set-speed target. Matches SCC-V's
@@ -133,7 +147,8 @@ class UnconfirmedLeadDetector:
     self.d_rel = 0.0
     self.ttc = 0.0
 
-    # Logging only -- see the capnp comment. Nothing reads these to make a decision.
+    # model_should_stop is logging only -- see the capnp comment. It is kept because it is genuinely
+    # informative at the END of a stop, but nothing may gate on it; see MODEL_STOP_DECEL_MS2.
     self.model_should_stop = False
     self.model_desired_accel = 0.0
     self.has_lead = False
@@ -327,7 +342,10 @@ class UnconfirmedLeadDetector:
 
     # ---- ACTIVE (model stop): resolve on the model letting go ----
     if self.state == State.active and self.trigger == Trigger.modelStop:
-      if self.model_should_stop:
+      # Same signal as the trigger, with hysteresis. This used to read model_should_stop, which is
+      # false at every speed this path can run at -- so the clear timer ran the moment it triggered
+      # and would have released it half a second later even if the trigger had ever fired.
+      if self.model_desired_accel <= MODEL_STOP_RELEASE_DECEL_MS2:
         self._model_clear_s = 0.0
       else:
         self._model_clear_s += DT_MDL
@@ -408,7 +426,7 @@ class UnconfirmedLeadDetector:
     if self.model_stop_enabled and not candidate:
       # Same distinction as the lead path: a stationary radar return does not mean Ford is on it.
       radar_has_it = self._ford_tracks(lead, v_ego)
-      model_candidate = (self.model_should_stop and not radar_has_it and
+      model_candidate = (self.model_wants_to_stop and not radar_has_it and
                          v_ego >= MIN_V_EGO_MS and not CS.brakePressed)
       if model_candidate:
         self._model_stop_s += DT_MDL
@@ -451,6 +469,12 @@ class UnconfirmedLeadDetector:
       self._lost_s = 0.0
       # Alert at trigger, not at the floor: the whole deceleration is the driver's reaction time.
       events_sp.add(EventNameSP.unconfirmedLeadBraking)
+
+  @property
+  def model_wants_to_stop(self) -> bool:
+    """The model asking for real deceleration. See MODEL_STOP_DECEL_MS2 for why this is not
+    modelV2.action.shouldStop."""
+    return self.model_desired_accel <= MODEL_STOP_DECEL_MS2
 
   def _model_stop_target(self, v_ego: float) -> float:
     """Set-speed target from the model's own desired deceleration.

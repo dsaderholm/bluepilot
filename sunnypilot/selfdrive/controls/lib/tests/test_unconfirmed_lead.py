@@ -35,13 +35,18 @@ class FakeEvents:
 
 
 def make_sm(d_rel=100., v_rel=-29., prob=0.9, status=True, radar=False,
-            should_stop=False, accel=0., v_ego=CRUISE_MS, brake=False, d_path=0.2,
+            accel=0., v_ego=CRUISE_MS, brake=False, d_path=0.2,
             ford_braking=False):
   sm = {
     'carState': NS(vEgo=v_ego, brakePressed=brake),
     'radarState': NS(leadOne=NS(dRel=d_rel, vRel=v_rel, modelProb=prob, status=status,
                                 radar=radar, dPath=d_path)),
-    'modelV2': NS(action=NS(shouldStop=should_stop, desiredAcceleration=accel)),
+    # shouldStop is DERIVED here, exactly as modeld derives it, rather than being a free knob.
+    # As a knob it let every model-stop test set shouldStop=True at 65 mph -- a state modeld can
+    # never emit -- so the suite proved the path worked while the car did nothing at every red
+    # light.
+    'modelV2': NS(action=NS(shouldStop=bool(v_ego < 0.3 and accel < 0.1),
+                            desiredAcceleration=accel)),
     'carStateBP': NS(brakeLightStatus=NS(accDataAvailable=True, accDecelRequest=ford_braking)),
   }
   # SubMaster exposes .valid; the detector must tolerate carStateBP being absent on other platforms
@@ -104,9 +109,35 @@ class TestUnconfirmedLead:
     assert det.state == State.active
     assert det.trigger == Trigger.visionLead
 
+  def test_shouldstop_is_never_true_where_this_path_runs(self):
+    """The bug the old fixture hid, stated as an assertion.
+
+    modeld: should_stop = (v_ego < 0.3 and desired_accel < 0.1). The model-stop path requires
+    MIN_V_EGO_MS (25 mph). Anything gating on shouldStop above that speed is dead code, and this
+    fails the moment someone reintroduces it.
+    """
+    sm = make_sm(status=False, accel=-2., v_ego=MIN_V_EGO_MS)
+    assert not sm['modelV2'].action.shouldStop
+    assert make_sm(status=False, accel=-2., v_ego=0.1)['modelV2'].action.shouldStop, \
+      "the fixture no longer models modeld; the guard above proves nothing"
+
+  def test_model_stop_triggers_on_deceleration_not_shouldstop(self):
+    """What the car should have been doing at every red light."""
+    det, ev = UnconfirmedLeadDetector(), FakeEvents()
+    run(det, ev, 40, status=False, accel=-1.5)
+    assert not det.model_should_stop, "triggered on a signal that is false here"
+    assert det.state == State.active and det.trigger == Trigger.modelStop
+
+  def test_gentle_deceleration_is_not_a_stop(self):
+    """Above the release threshold but below the trigger: the model easing off is not a red light,
+    and treating it as one would drop the set speed on every mild request."""
+    det, ev = UnconfirmedLeadDetector(), FakeEvents()
+    run(det, ev, 40, status=False, accel=-0.5)
+    assert det.state != State.active
+
   def test_model_stop_without_lead_triggers(self):
     det, ev = UnconfirmedLeadDetector(), FakeEvents()
-    run(det, ev, 40, status=False, should_stop=True, accel=-1.5)
+    run(det, ev, 40, status=False, accel=-1.5)
     assert det.state == State.active
     assert det.trigger == Trigger.modelStop
     assert det.v_target >= ACC_FLOOR_MS
@@ -114,20 +145,20 @@ class TestUnconfirmedLead:
   def test_model_stop_never_requests_below_floor(self):
     # Ford ACC cannot hold below 20 mph. Requesting lower is meaningless, so it must clamp.
     det, ev = UnconfirmedLeadDetector(), FakeEvents()
-    run(det, ev, 40, status=False, should_stop=True, accel=-8.)
+    run(det, ev, 40, status=False, accel=-8.)
     assert det.v_target == ACC_FLOOR_MS
 
   def test_model_stop_releases_when_model_lets_go(self):
     det, ev = UnconfirmedLeadDetector(), FakeEvents()
-    run(det, ev, 40, status=False, should_stop=True, accel=-1.5)
-    run(det, ev, 15, status=False, should_stop=False)
+    run(det, ev, 40, status=False, accel=-1.5)
+    run(det, ev, 15, status=False, accel=0.)
     assert det.state in (State.restoring, State.inactive)
 
   def test_radar_confirmed_moving_lead_suppresses_model_stop(self):
     # Ford ACC handles what it actually tracks, so there is nothing to add -- but only while the
     # lead is moving fast enough for Ford to track it.
     det, ev = UnconfirmedLeadDetector(), FakeEvents()
-    run(det, ev, 60, status=True, radar=True, v_rel=-5., should_stop=True, accel=-2.)
+    run(det, ev, 60, status=True, radar=True, v_rel=-5., accel=-2.)
     assert det.state == State.inactive
 
 
@@ -179,7 +210,7 @@ class TestFordDoesNotTrackStationaryReturns:
 
   def test_speed_gate_blocks_low_speed_trigger(self):
     det, ev = UnconfirmedLeadDetector(), FakeEvents()
-    run(det, ev, 40, status=False, should_stop=True, accel=-2., v_ego=MIN_V_EGO_MS - 2.)
+    run(det, ev, 40, status=False, accel=-2., v_ego=MIN_V_EGO_MS - 2.)
     assert det.state == State.inactive
 
   def test_disengage_clears_state_and_pending_restore(self):

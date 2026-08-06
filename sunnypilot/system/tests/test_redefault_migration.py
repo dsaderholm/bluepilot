@@ -214,33 +214,44 @@ class TestTheGroupsThemselves:
         seen_here += 1
       assert seen_here > 100, f"{rev[:9]} parsed only {seen_here} keys; the regex has gone stale"
 
-    # Keys whose default has moved AND that deliberately are not cleared. Every entry needs a
-    # reason, because "it is probably fine" is exactly how the model-stop path stayed off.
-    deliberately_not_cleared = {
-      # His own steering tune, arrived at on the road. The defaults were moved to match what he
-      # runs; clearing is this file reaching into lateral settings, which he asked it to stop doing.
+    # Keys whose shipped default moved and which are therefore NOT reaching his car. Since
+    # 2026-08-05 the migration is closed -- *"I don't like ... having you change defaults anymore.
+    # I will do it."* -- so this is not an excuse list, it is the standing answer to "which settings
+    # do I have to tell him to toggle himself". Every entry needs a reason.
+    his_to_toggle = {
+      # Lateral tune he set himself on the settings screen. Whatever is stored IS his tune.
       "FordLowSpeedFactor_ang", "FordHighSpeedFactor_ang", "FordPrefLateralControl",
-      # He confirmed on 2026-08-05 that these three work on the car, so whatever is stored is
-      # already the value he wants -- he turned them on himself. Clearing gains nothing.
+      # He confirmed on 2026-08-05 that these three work on the car -- he turned them on himself.
       "ShowBrakeStatus", "GreenLightAlert", "LeadDepartAlert",
-      # Curve feel. He drove the current behavior on 2026-08-05 and called it good, so whatever is
-      # stored is a tested state and the shipped numbers are not. Clearing would hand him a curve
-      # tune he has never driven, which is the opposite of the point. Revisit only against a
-      # readout of what the car actually holds.
+      # Curve feel. He drove the current behavior on 2026-08-05 and called it good, so what is
+      # stored is a tested state and the shipped numbers are not. Do not chase these.
       "SmartCruiseControlVisionEarliness", "SmartCruiseControlVisionLowSpeedFactor",
       "SmartCruiseControlVisionHighSpeedFactor",
+      # Ceiling he asked for explicitly (100 mph). Shipped 85 first.
+      "SpeedLimitMaxSetSpeed",
+      # --- ICBM keys added on this branch whose default then moved. Each is a toggle or a number
+      # on the ICBM settings screen, and each is his to set. ---
+      # 1 -> 0 -> 1. Red lights and stop signs. Deliberately shipped off for a stretch. He says it
+      # was on for his last drive, and the reason nothing happened was the shouldStop bug in
+      # unconfirmed_lead, not this key.
+      "IcbmModelStopEnabled",
+      "IcbmResumeGateEnabled",   # 0 -> 1, standstill resume gate
+      "IcbmLeadMaxDistance",     # 120 -> 180 m, how far the radar-blind detector looks
+      "IcbmLeadMaxTtc",          # 40 -> 70 (4.0 -> 7.0 s)
+      "IcbmMaxTargetDrop",       # 8 -> 12, how fast the set speed may fall
     }
 
     moved = {k for k, vals in ever.items() if len(vals) > 1}
-    unaccounted = moved - set(_BP_REDEFAULTED) - deliberately_not_cleared
+    unaccounted = moved - set(_BP_REDEFAULTED) - his_to_toggle
     assert not unaccounted, (
-      f"shipped default moved with no migration and no stated reason: {sorted(unaccounted)}. "
-      "A device that booted the older value still holds it, so this change reaches nothing. Add "
-      "the key to a new group in _BP_REDEFAULT_GROUPS, or to deliberately_not_cleared with why.")
+      f"shipped default moved and is unaccounted for: {sorted(unaccounted)}. His car still holds "
+      "the value it booted first, so this change reaches nothing there. Add the key to "
+      "his_to_toggle with a reason AND tell him which toggle to flip -- do not add a migration "
+      "group, that list is closed.")
 
     # And the reverse: bookkeeping for a key whose default never actually moved is noise that makes
     # the real entries harder to trust.
-    stale = (set(_BP_REDEFAULTED) | deliberately_not_cleared) - moved
+    stale = (set(_BP_REDEFAULTED) | his_to_toggle) - moved
     assert not stale, f"listed as a changed default, but it has only ever had one: {sorted(stale)}"
 
   def test_a_group_already_taken_is_skipped_while_a_new_one_runs(self):

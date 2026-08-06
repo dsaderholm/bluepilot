@@ -242,12 +242,13 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     dRel @3 :Float32;
     ttc @4 :Float32;
 
-    # BluePilot: the driving model's own stop intent, logged only -- nothing acts on it yet.
-    # modelV2.action.shouldStop is published every cycle whatever the longitudinal mode is;
-    # is_e2e() in the planner only decides whether the planner consumes it. So on a car running
-    # stock ACC with experimental mode unavailable, this is still the model saying "I would stop
-    # here". shouldStop with NO lead present is the candidate signature for a red light or stop
-    # sign, which is the one case the radar-blind lead trigger above can never catch.
+    # BluePilot: the driving model's own stop intent. LOGGED ONLY -- nothing gates on
+    # modelShouldStop, and nothing may. It does not mean "there is a stop line ahead": modeld
+    # computes it as (v_ego < 0.3 m/s and desired_accel < 0.1), so it means "already stopped, stay
+    # stopped" and is false at every speed the model-stop path can run at. Gating on it is exactly
+    # why that path never fired once on the road. See MODEL_STOP_DECEL_MS2 in unconfirmed_lead.py.
+    #
+    # modelDesiredAccel is the one that carries the intent, and is what the trigger reads.
     modelShouldStop @5 :Bool;
     modelDesiredAccel @6 :Float32;
     hasLead @7 :Bool;

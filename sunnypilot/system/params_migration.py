@@ -54,17 +54,19 @@ def _migrate_car_platform_bundle(_params):
 # params_keys.h, so a default is stated in exactly one place. Writing the value here would make
 # this file a second source of truth and guarantee the two drift.
 #
-# Deliberately the narrowest list that changes anything. Only keys whose params_keys.h value moved
-# AND that are likely already stored on the car appear. Excluded on purpose:
-#   - FordLow/HighSpeedFactor_ang, FordPrefLateralControl -- his own steering tune. The defaults now
-#     match what he runs, but clearing them is this file reaching into his lateral settings, which
-#     is exactly what he asked it to stop doing.
-#   - ShowBrakeStatus -- he can see the brake pill on the road, so this one demonstrably already
-#     holds the value he wants. Clearing it would land on the same 1 and gain nothing.
-#     (GreenLightAlert and LeadDepartAlert were excluded here too, on the same "already on for him"
-#     reasoning, and that was wrong -- see icbm-2.)
-#   - Everything added this session (the offset bands, lookahead, SCC-Map decel, pinned holds).
-#     Those keys have never been written, so they already take their default with no help.
+# CLOSED LIST. 2026-08-05: *"I don't like running commands or having you change defaults anymore.
+# I will do it."* icbm-1 already ran on the car and stays because removing it changes nothing there,
+# but NOTHING NEW GOES IN HERE. He manages his own settings from the settings screen.
+#
+# That does not make the underlying problem go away, it moves who acts on it. A shipped default only
+# ever reaches a device that has never stored the key, and manager.py's "set unset params to their
+# default value" loop stores every declared key on the first boot that knows about it. So on his car
+# a changed default reaches NOTHING -- including for keys added on this branch, where "it has never
+# been written" is true exactly once and false from his next flash onward.
+#
+# The obligation is therefore to TELL HIM, in the message that ships the change: this default moved,
+# your car still has the old value, here is the toggle. Never to reach in and clear it.
+# test_every_default_that_ever_moved_is_accounted_for keeps the list of which keys those are.
 #
 # ONCE PER GENERATION, not every boot, or he could never turn one of these off and keep it -- the
 # opposite of what a settings screen is for.
@@ -104,34 +106,6 @@ _BP_REDEFAULT_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
   # off -> on. Camera curve control; on for him already in all likelihood, but it is the pair to
   # SCC-Map and shipping one without the other is not a state anyone chose.
   "SmartCruiseControlVision",
- )),
- ("icbm-2", (
-  # Keys ADDED on this branch whose default I then changed again. icbm-1 skipped these on the
-  # reasoning that a new key "has never been written, so it already takes its default with no
-  # help". That is true exactly once. manager.py writes every unset param to disk at boot, so the
-  # value shipping on the day he first flashed a build containing the key is the value frozen on
-  # his car -- and he has flashed this branch after nearly every fix. Every later edit to
-  # params_keys.h since then has gone to a file nobody reads.
-  #
-  # THE ONE THAT MATTERS. Shipped 1, then deliberately shipped 0 ("ship the model-stop path off",
-  # 2ed220b6a), then back to 1. If he flashed anywhere in that window he has a stored 0, and
-  # model_stop_enabled is the outermost gate in unconfirmed_lead -- a false there skips the entire
-  # block, so the car does nothing at a red light or a stop sign and there is no alert to say why.
-  # That is the standing "I still haven't seen it do anything for traffic lights and stop signs".
-  "IcbmModelStopEnabled",
-  # 0 -> 1. The standstill resume gate, shipped off for one commit and enabled the next.
-  "IcbmResumeGateEnabled",
-  # 120 -> 180 m and 40 -> 70 (4.0 -> 7.0 s TTC). A stale pair here does not disable anything, it
-  # quietly shortens how far ahead the radar-blind detector is allowed to look -- which reads as
-  # "it warned me late" rather than as a setting being wrong.
-  "IcbmLeadMaxDistance",
-  "IcbmLeadMaxTtc",
-  # 85 -> 100 mph. He asked for 100 explicitly; at a stored 85 the ceiling clips.
-  "SpeedLimitMaxSetSpeed",
-  # 8 -> 12. How fast ICBM is allowed to walk the set speed DOWN. Frozen at 8 the car gives up
-  # ground more slowly than every curve controller feeding it expects, which is the shape of the
-  # open "still took an exit ramp going 80" report.
-  "IcbmMaxTargetDrop",
  )),
 )
 
