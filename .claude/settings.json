@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "f=$(python -c \"import json,sys;d=json.load(sys.stdin);print(d.get('tool_input',{}).get('file_path') or (d.get('tool_response') or {}).get('filePath') or '')\" 2>/dev/null); case \"$f\" in *.py) ;; *) exit 0 ;; esac; [ -f tools/bp_offline_test.py ] || exit 0; out=$(python tools/bp_offline_test.py 2>&1) || { printf 'bp_offline_test FAILED after editing %s\n\n' \"$f\"; printf '%s\n' \"$out\" | grep -E \"FAILED|Error|assert|failed\" | head -20; exit 2; }",
+            "command": "f=$(python -c \"import json,sys;d=json.load(sys.stdin);print(d.get('tool_input',{}).get('file_path') or (d.get('tool_response') or {}).get('filePath') or '')\" 2>/dev/null); case \"$f\" in *.py) ;; *) exit 0 ;; esac; d=$(dirname \"$f\"); i=0; while [ $i -lt 20 ] && [ ! -f \"$d/tools/bp_offline_test.py\" ]; do n=$(dirname \"$d\"); [ \"$n\" = \"$d\" ] && break; d=$n; i=$((i+1)); done; [ -f \"$d/tools/bp_offline_test.py\" ] || exit 0; out=$(cd \"$d\" && python tools/bp_offline_test.py 2>&1) || { printf 'bp_offline_test FAILED after editing %s\\n\\n' \"$f\"; printf '%s\\n' \"$out\" | grep -E \"FAILED|Error|assert|failed\" | head -20; exit 2; }; exit 0",
             "timeout": 180,
             "asyncRewake": true,
             "statusMessage": "bp_offline_test",
