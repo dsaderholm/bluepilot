@@ -73,6 +73,7 @@ DEFAULT_TARGETS = [
   "selfdrive/ui/bp/onroad/tests/",
   "system/tests/test_sentry_disabled_by_default.py",
   "sunnypilot/system/tests/test_redefault_migration.py",
+  "sunnypilot/system/tests/test_new_defaults_snapshot.py",
   # A duplicate params_keys.h entry is silently dropped by the unordered_map rather than being
   # an error, and two long-lived branches adding the same key in different places is how it
   # happens. BPDefaultsGeneration is about to be exactly that.

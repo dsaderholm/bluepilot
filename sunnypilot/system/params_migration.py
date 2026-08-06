@@ -147,6 +147,105 @@ def _migrate_bp_redefaulted(_params):
     cloudlog.exception(f"Error recording the defaults generation: {e}")
 
 
+# BluePilot: take a new shipped default ONLY for settings he has never touched.
+#
+# 2026-08-05, and this is the actual rule rather than the blunt version above: *"If I have never
+# changed a value, great, I will get the new default. If I have, then it shouldn't change."*
+#
+# That is not expressible with the generation lists. manager.py's "set unset params to their default
+# value" loop writes every declared key to disk on the first boot that knows about it, so by the
+# time anything can look, "never touched" and "deliberately set to exactly that" are the same bytes
+# on disk. The generation approach could only clear blindly, which is why the list had to be closed.
+#
+# The missing information is what the default WAS when he was last handed one. Record it, and the
+# comparison becomes exact:
+#
+#   stored != remembered  ->  he changed it. His now, permanently; never considered again.
+#   stored == remembered  ->  untouched. If the shipped default has since moved, clear the key so
+#                             the next read falls through to params_keys.h, and remember the new one.
+#
+# SEEDING IS DELIBERATELY PESSIMISTIC. On the first boot with this mechanism there is no record, so
+# every tracked key is assumed to be HIS and nothing is cleared. It costs one boot of staleness and
+# it cannot ever overwrite something he chose -- the wrong side of that trade is the one that loses
+# a tune he drove to find. From the boot after, this tracks exactly.
+#
+# The one indistinguishable case is him setting a value to exactly the default he already had, which
+# is harmless: the outcome is the same number either way.
+BP_DEFAULTS_SNAPSHOT_KEY = "BPDefaultsSnapshot"
+BP_DEFAULTS_OWNED_KEY = "BPDefaultsOwned"
+
+# Prefixes this fork ships defaults for. Anything the OWNER's own tune lives in is excluded by name
+# below -- being wrong there costs him a steering tune he found on the road.
+_BP_TRACKED_PREFIXES = ("Icbm", "SmartCruiseControl", "SpeedLimit")
+_BP_NEVER_TRACKED = frozenset({
+  # His lateral tune. The defaults happen to match what he runs; that is not a reason to manage it.
+  "FordLowSpeedFactor_ang", "FordHighSpeedFactor_ang", "FordHighSpeedDampening_ang",
+  "FordPrefLateralControl", "lane_change_factor_high_ang",
+})
+
+
+def _bp_tracked_keys(_params) -> list[str]:
+  try:
+    keys = [k.decode() if isinstance(k, bytes) else str(k) for k in _params.all_keys()]
+  except Exception:  # noqa: BLE001
+    return []
+  return sorted(k for k in keys
+                if k.startswith(_BP_TRACKED_PREFIXES) and k not in _BP_NEVER_TRACKED)
+
+
+def _load_json_param(_params, key) -> dict:
+  try:
+    raw = _params.get(key)
+    if isinstance(raw, bytes):
+      raw = raw.decode()
+    if isinstance(raw, dict):
+      return raw
+    return json.loads(raw) if raw else {}
+  except Exception:  # noqa: BLE001 - unreadable means "no record", which seeds pessimistically
+    return {}
+
+
+def _migrate_bp_new_defaults(_params):
+  """Hand over shipped defaults that moved, for settings he has not personally set."""
+  remembered = _load_json_param(_params, BP_DEFAULTS_SNAPSHOT_KEY)
+  owned = set(_load_json_param(_params, BP_DEFAULTS_OWNED_KEY).get("keys", []))
+
+  took: list[str] = []
+  for key in _bp_tracked_keys(_params):
+    if key in owned:
+      continue
+    # Per key. One unreadable key must not abandon the rest, and must not skip the write below --
+    # a migration that fails to record its state runs again every boot, which is the one thing this
+    # must never do.
+    try:
+      shipped = _params.get_default_value(key)
+      if shipped is None:
+        continue
+      shipped = str(shipped)
+      stored = _params.get(key)
+      stored = str(stored.decode() if isinstance(stored, bytes) else stored)
+
+      if key not in remembered:
+        remembered[key] = stored            # first sight: assume it is his, change nothing
+      elif stored != remembered[key]:
+        owned.add(key)                      # he moved it: his from here on
+      elif stored != shipped:
+        _params.remove(key)                 # untouched and the default moved: hand it over
+        remembered[key] = shipped
+        took.append(key)
+    except Exception as e:  # noqa: BLE001
+      cloudlog.exception(f"params_migration: could not evaluate default for {key}: {e}")
+
+  try:
+    _params.put(BP_DEFAULTS_SNAPSHOT_KEY, json.dumps(remembered), block=True)
+    _params.put(BP_DEFAULTS_OWNED_KEY, json.dumps({"keys": sorted(owned)}), block=True)
+    if took:
+      cloudlog.info(f"params_migration: took new defaults for {len(took)} untouched settings: "
+                    f"{', '.join(took)}")
+  except Exception as e:  # noqa: BLE001
+    cloudlog.exception(f"Error recording the defaults snapshot: {e}")
+
+
 BP_LATERAL_SCHEME_PARAMS_MIGRATION_VERSION: str = "1"
 
 # (old key, new key) -- old keys stay declared in common/params_keys.h (harmless orphans) so their
@@ -230,5 +329,11 @@ def run_migration(_params):
   # BluePilot: split lateral-tuning params by control scheme (curvature vs angle)
   _migrate_bp_lateral_scheme_params(_params)
 
-  # BluePilot: take shipped defaults that changed, without touching anything he set himself
+  # BluePilot: the legacy generation lists. Closed -- icbm-1 has already run on the car, and the
+  # snapshot pass below supersedes this entirely for anything new.
   _migrate_bp_redefaulted(_params)
+
+  # BluePilot: hand over shipped defaults that moved, for settings he never set himself.
+  # MUST run before manager.py's "set unset params to their default value" loop, which it does --
+  # manager calls run_migration first and then materializes whatever this cleared.
+  _migrate_bp_new_defaults(_params)
