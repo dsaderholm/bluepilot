@@ -133,9 +133,9 @@ class HudExt:
     self.distance_bar_frame = 0
     self.main_on_last = False
     self.lkas_enabled_last = False
-    # BluePilot: the cluster's lane display doubles as the passing-assist indicator. See
-    # create_lkas_ui_msg -- the line on the side it wants OPENS.
-    self.passing_side_last = 0
+    # BluePilot: the cluster's lane display IS the passing-assist indicator while openpilot
+    # steers. See create_lkas_ui_msg -- each line is a four-level meter for its own side.
+    self.passing_last = fordcan_ext.CLUSTER_PASSING_IDLE
     self.show_passing_in_cluster = False
     # BluePilot: the standstill lane-display walk's current raw LaActvStats override, or None.
     self.lane_test_last = None
@@ -195,17 +195,30 @@ class HudExt:
     steer_alert = hud_control.visualAlert in (VisualAlert.steerRequired, VisualAlert.ldw)
     standstill = CS.out.cruiseState.standstill
 
-    # BluePilot: which side passing assist wants, for the cluster's lane display. 0 none, 1 left,
-    # 2 right -- the Side enum's own ordering, read straight through.
+    # BluePilot: everything the cluster's lane display is being asked to say, built here rather
+    # than in the message builder so that a planner that is missing, stale or mid-restart costs the
+    # cluster nothing. 0 none, 1 left, 2 right throughout -- the Side enum's own ordering, read
+    # straight through, so no mapping table can drift.
     #
-    # Behind a toggle because it repurposes a safety indicator, and off by default for the same
-    # reason: the driver decides whether his lane-departure display is also allowed to mean this.
-    passing_side = 0
+    # Behind a toggle because it repurposes a safety indicator: the driver decides whether his
+    # lane display is also allowed to mean this.
+    passing = fordcan_ext.CLUSTER_PASSING_IDLE
     if self.show_passing_in_cluster:
       try:
-        passing_side = int(self.sm['longitudinalPlanSP'].passingAssist.suggestion)
+        pa = self.sm['longitudinalPlanSP'].passingAssist
+        # Past deciding and actually going. `waiting` and `confirming` are still deliberating, and
+        # a line that went to Intervene while the machine was only thinking about it would promise
+        # a lane change that may never come.
+        moving = str(pa.maneuver) in ("signaling", "changing", "finishing", "aborting")
+        passing = fordcan_ext.ClusterPassing(
+          suggestion=int(pa.suggestion),
+          maneuver_side=int(pa.maneuverSide),
+          maneuver_moving=moving,
+          oncoming_left=bool(pa.adjacentLeft.oncoming),
+          oncoming_right=bool(pa.adjacentRight.oncoming),
+        )
       except Exception:  # noqa: BLE001 - a missing planner must never stop the cluster updating
-        passing_side = 0
+        passing = fordcan_ext.CLUSTER_PASSING_IDLE
 
     # Determine if UI state changed
     # A walk step must land on the cluster the moment it changes, and the step BEFORE it has to be
@@ -217,7 +230,7 @@ class HudExt:
                # ...INCLUDING the passing side, which is what makes this usable: the message is
                # otherwise sent at 1 Hz, and a suggestion that took a second to appear would be a
                # second stale by the time it did.
-               (self.passing_side_last != passing_side) or
+               (self.passing_last != passing) or
                (self.lkas_enabled_last != CC.latActive) or
                (self.steer_alert_last != steer_alert))
 
@@ -225,8 +238,8 @@ class HudExt:
     if (frame % CarControllerParams.LKAS_UI_STEP) == 0 or send_ui:
       can_sends.append(fordcan_ext.create_lkas_ui_msg(
         packer, CAN, main_on, CC.latActive, self.hands, hud_control, CS.lkas_status_stock_values,
-        passing_side, lane_test))
-      self.passing_side_last = passing_side
+        passing, lane_test))
+      self.passing_last = passing
       self.lane_test_last = lane_test
 
     # ACC UI msg at 5Hz or if UI state changes

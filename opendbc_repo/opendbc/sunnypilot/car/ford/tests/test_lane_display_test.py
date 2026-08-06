@@ -182,7 +182,7 @@ def sent(lane_test, **hud_kwargs):
   fields.update(hud_kwargs)
   hud = NS(**fields)
   fordcan_ext.create_lkas_ui_msg(packer, NS(camera=2, main=0, radar=1), True, True, 0, hud,
-                                 dict(STOCK), 0, lane_test)
+                                 dict(STOCK), None, lane_test)
   return packer.values["LaActvStats_D_Dsply"]
 
 

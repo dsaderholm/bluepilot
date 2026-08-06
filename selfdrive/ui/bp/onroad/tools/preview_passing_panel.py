@@ -122,6 +122,14 @@ SCENES = [
   ("stopped: who overtook you, and the longest quiet stretch",
    "THIS DRIVE", "passed by 12, quiet 94s  -  your changes: 23, 3.8s each, 2 cancelled",
    0.0, False, INFO),
+  # The standstill lane-display walk. Six of these, one per step -- widest label and widest
+  # subtitle are both here, so if these fit the whole walk fits.
+  ("lane walk: the step that is the point of the exercise",
+   "LEFT: SUPPRESS", "watch the LEFT line  --  3 of 6", 0.0, True, INFO),
+  ("lane walk: the longest label",
+   "LANE ASSIST OFF", "watch the whole display  --  6 of 6", 0.0, True, INFO),
+  ("lane walk: refused because the car was moving",
+   "STOP THE CAR FIRST", "the lane walk only runs stopped", 0.0, True, AMBER),
   ("worst case for width: everything at once",
    "WOULD BE CHANGING RIGHT",
    "blinker on, steering across  -  camera only, speed not radar-measured", 0.6, True, PURPLE),

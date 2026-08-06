@@ -1359,8 +1359,12 @@ class HudRendererBP(HudRendererSP):
     if step > len(_LDT_LABELS):
       return False
 
-    self._pa_main = _LDT_LABELS[step - 1]
-    self._pa_sub = f"watch the LEFT line  --  {step} of {len(_LDT_LABELS)}"
+    label = _LDT_LABELS[step - 1]
+    # Where to look. "Watch the left line" is wrong for LA_Off, which is a whole-display value --
+    # and being told to watch the wrong thing is how a walk produces a confident wrong answer.
+    where = "watch the LEFT line" if label.startswith("LEFT:") else "watch the whole display"
+    self._pa_main = label
+    self._pa_sub = f"{where}  --  {step} of {len(_LDT_LABELS)}"
     self._pa_progress = 0.0
     self._pa_color = rl.Color(150, 205, 235, 255)
     self._pa_alert = True

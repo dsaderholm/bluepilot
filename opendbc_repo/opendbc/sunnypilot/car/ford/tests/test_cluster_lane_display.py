@@ -1,21 +1,26 @@
-"""BluePilot: the cluster's lane lines as a passing-assist indicator.
+"""BluePilot: the cluster's lane display as the passing-assist instrument.
 
 His idea: *"my LKA display just shows green on both sides of my car all the time, no matter what.
-What if we hijacked this, and showed what this system is wanting to do on there?"*
+What if we hijacked this, and showed what this system is wanting to do on there?"* -- then, once it
+was clear how much the signal could carry: *"this entire screen on my car can be reused for passing
+assist or other features... I'm fine if we overhaul that screen to make it more useful."*
 
-The signal turns out to be far richer than the green/not-green it gets used for.
-`LaActvStats_D_Dsply` is a five-by-five matrix -- an independent state per side, from the DBC:
+`LaActvStats_D_Dsply` is a five-by-five matrix, an independent state per side, from the DBC:
 
     value = left + 5 * right,  each of {None 0, Available 1, Suppress 2, Warning 3, Intervene 4}
 
-So the line on the side it wants can OPEN while the other stays put. Suppress rather than Warning
-deliberately: Warning is what lane departure looks like, and a display that cries wolf about
-drifting when it means "I would like to pass" is worse than no display at all.
+plus LA_Off (30), which is whole-display and outside the matrix.
+
+So each line becomes a four-level meter for its own side rather than a lane marker, and the pair
+reads as a direction and an intensity at once. Nothing openpilot already said here was given up:
+green still means the lane is held, a line still disappears when the model cannot see it, departure
+still warns, and LA_Off -- which BluePilot had stopped sending entirely -- says nothing is running.
 """
 
 from types import SimpleNamespace as NS
 
 from opendbc.sunnypilot.car.ford import fordcan_ext
+from opendbc.sunnypilot.car.ford.fordcan_ext import ClusterPassing
 
 
 class FakePacker:
@@ -35,61 +40,124 @@ STOCK = dict.fromkeys([
 
 LEFT, RIGHT = 1, 2
 NONE, AVAIL, SUPPRESS, WARN, INTERVENE = 0, 1, 2, 3, 4
+LA_OFF = 30
 
 
-def lines(passing_side=0, left_depart=False, right_depart=False,
-          left_visible=True, right_visible=True):
+def pa(suggestion=0, maneuver_side=0, maneuver_moving=False,
+       oncoming_left=False, oncoming_right=False):
+  return ClusterPassing(suggestion, maneuver_side, maneuver_moving, oncoming_left, oncoming_right)
+
+
+def raw(passing=None, steering=True, main_on=True, left_depart=False, right_depart=False,
+        left_visible=True, right_visible=True):
   packer = FakePacker()
   hud = NS(leftLaneDepart=left_depart, rightLaneDepart=right_depart,
            leftLaneVisible=left_visible, rightLaneVisible=right_visible)
-  fordcan_ext.create_lkas_ui_msg(packer, NS(camera=2, main=0, radar=1), True, True, 0, hud,
-                                 dict(STOCK), passing_side)
-  v = packer.values["LaActvStats_D_Dsply"]
-  return v % 5, v // 5          # (left state, right state)
+  fordcan_ext.create_lkas_ui_msg(packer, NS(camera=2, main=0, radar=1), main_on, steering, 0, hud,
+                                 dict(STOCK), passing)
+  return packer.values["LaActvStats_D_Dsply"]
 
 
-def test_both_lines_are_normal_when_nothing_is_suggested():
+def lines(**kwargs):
+  """(left state, right state). Only meaningful for values inside the 5x5 matrix."""
+  v = raw(**kwargs)
+  assert v <= 24, f"{v} is a whole-display value, not a per-side pair"
+  return v % 5, v // 5
+
+
+# --- what openpilot already said here, kept ------------------------------------------------------
+
+def test_green_on_both_sides_means_openpilot_is_holding_the_lane():
   assert lines() == (AVAIL, AVAIL)
 
 
-def test_the_line_opens_on_the_side_it_wants():
-  assert lines(passing_side=LEFT) == (SUPPRESS, AVAIL)
-  assert lines(passing_side=RIGHT) == (AVAIL, SUPPRESS)
-
-
-def test_it_is_never_the_WARNING_state():
-  """Warning is what lane departure looks like. Borrowing it would make the cluster cry wolf about
-  drifting when it means "I would like to pass", which is worse than showing nothing."""
-  for side in (LEFT, RIGHT):
-    left, right = lines(passing_side=side)
-    assert WARN not in (left, right)
-
-
-def test_lane_departure_always_wins():
-  """If the car is genuinely leaving its lane, nothing about a passing suggestion may hide it."""
-  assert lines(passing_side=LEFT, left_depart=True) == (INTERVENE, AVAIL)
-  assert lines(passing_side=RIGHT, right_depart=True) == (AVAIL, INTERVENE)
-
-
-def test_a_departure_on_the_OTHER_side_still_shows_both():
-  assert lines(passing_side=LEFT, right_depart=True) == (SUPPRESS, INTERVENE)
-
-
-def test_an_unseen_lane_is_NOT_the_suggestion_state():
-  """SUPPRESS MEANS ONE THING.
-
-  This used to send Suppress both for "the line opens toward the gap" and for "the model cannot see
-  that line", which made them the same picture. On worn paint -- I-15 in the rain, a repaved
-  stretch, a lane line that just stops -- the hint would appear on its own and mean nothing, and
-  every time it appeared for real the driver had no way to tell which of the two it was.
-
-  An unseen lane sends None, which is what upstream sends for it and what is actually true, leaving
-  Suppress to carry the suggestion by itself. Note the second assertion: the suggestion is NOT
-  drawn on a side whose line was never there to open.
-  """
+def test_a_line_the_model_cannot_see_is_not_drawn():
+  """Worth keeping for its own sake: a lost lane line is exactly when lateral gets worse, and it is
+  visible at a glance without reading anything."""
   assert lines(left_visible=False) == (NONE, AVAIL)
-  assert lines(passing_side=LEFT, left_visible=False) == (SUPPRESS, AVAIL)
-  assert lines(left_visible=False) != lines(passing_side=LEFT, left_visible=False)
+  assert lines(right_visible=False) == (AVAIL, NONE)
+  assert raw(left_visible=False, right_visible=False) == 0
+
+
+def test_green_is_not_shown_when_nothing_is_steering():
+  """The bug this fixes is his own observation -- "green on both sides all the time, NO MATTER
+  WHAT". BluePilot took main_on and enabled as arguments and used neither, so the lines went green
+  whenever the model saw paint. Green that is on when nothing is steering cannot also mean
+  openpilot has the wheel, which is the meaning everything else here is built on."""
+  assert raw(steering=False, main_on=True) == 0
+  assert raw(steering=False, main_on=False) == LA_OFF
+
+
+def test_lane_assist_off_is_sent_again():
+  """Upstream's value for nothing running. BluePilot never transmitted it at all."""
+  assert raw(steering=False, main_on=False) == LA_OFF
+
+
+def test_lane_departure_still_warns_when_openpilot_is_not_steering():
+  assert raw(steering=False, main_on=False, left_depart=True) == 3
+  assert raw(steering=False, main_on=False, right_depart=True) == 15
+
+
+# --- what passing assist adds --------------------------------------------------------------------
+
+def test_the_line_gives_way_on_the_side_it_wants():
+  assert lines(passing=pa(suggestion=LEFT)) == (SUPPRESS, AVAIL)
+  assert lines(passing=pa(suggestion=RIGHT)) == (AVAIL, SUPPRESS)
+
+
+def test_the_line_goes_to_intervene_once_it_is_actually_going():
+  """A suggestion and a committed lane change are different promises and must not look the same.
+  Suppress is "you could"; Intervene is "the blinker is on and I am crossing"."""
+  assert lines(passing=pa(maneuver_side=LEFT, maneuver_moving=True)) == (INTERVENE, AVAIL)
+  assert lines(passing=pa(maneuver_side=RIGHT, maneuver_moving=True)) == (AVAIL, INTERVENE)
+
+
+def test_a_maneuver_still_deciding_does_not_promise_a_lane_change():
+  """maneuver_moving is false through `confirming` and `waiting`. A line that went to Intervene
+  while the machine was only thinking about it would promise a change that may never come."""
+  assert lines(passing=pa(maneuver_side=LEFT, maneuver_moving=False)) == (AVAIL, AVAIL)
+
+
+def test_oncoming_traffic_is_the_one_thing_that_gets_to_shout():
+  """Warning is the departure look. For a passing suggestion that would be crying wolf, which is
+  why it was refused before. For opposing traffic in the lane we were about to move into, it is
+  the literally correct thing to say."""
+  assert lines(passing=pa(oncoming_left=True)) == (WARN, AVAIL)
+  assert lines(passing=pa(oncoming_right=True)) == (AVAIL, WARN)
+
+
+def test_oncoming_outranks_both_the_suggestion_and_the_maneuver():
+  assert lines(passing=pa(suggestion=LEFT, oncoming_left=True)) == (WARN, AVAIL)
+  assert lines(passing=pa(maneuver_side=LEFT, maneuver_moving=True,
+                          oncoming_left=True)) == (WARN, AVAIL)
+
+
+def test_the_two_sides_are_independent():
+  """The whole reason this display can carry more than one thing at a time."""
+  assert lines(passing=pa(suggestion=LEFT, oncoming_right=True)) == (SUPPRESS, WARN)
+
+
+def test_every_level_is_a_different_picture():
+  """A meter whose steps look alike is not a meter. These are the four things one side can say."""
+  side = {
+    "normal": lines()[0],
+    "wants to go": lines(passing=pa(suggestion=LEFT))[0],
+    "going": lines(passing=pa(maneuver_side=LEFT, maneuver_moving=True))[0],
+    "do not go": lines(passing=pa(oncoming_left=True))[0],
+    "cannot see it": lines(left_visible=False)[0],
+  }
+  assert len(set(side.values())) == len(side), side
+
+
+def test_no_passing_state_at_all_is_the_plain_display():
+  assert lines(passing=None) == (AVAIL, AVAIL)
+
+
+def test_passing_assist_cannot_paint_anything_while_openpilot_is_not_steering():
+  """It only suggests while engaged, so this is belt and braces -- but the not-steering branch is
+  openpilot's own status and passing assist has no business overwriting it."""
+  assert raw(passing=pa(suggestion=LEFT, oncoming_right=True),
+             steering=False, main_on=False) == LA_OFF
 
 
 def test_ldw_does_not_run_while_steering():
@@ -98,7 +166,8 @@ def test_ldw_does_not_run_while_steering():
   "Lane departures aren't going to happen at all when openpilot is on, so we can repurpose this
   display for an actual use." Correct, and structurally so: ldw.py gates on `not CC.latActive`, so
   departure is not merely unlikely while engaged -- it is not computed. That is what makes borrowing
-  the display free rather than a trade.
+  the display free rather than a trade, and it is why the departure branches live in the
+  not-steering case and nowhere else.
 
   If upstream ever drops that condition, the two uses start competing for the same lines and this
   fails before anybody has to notice it on the road.
@@ -109,5 +178,5 @@ def test_ldw_does_not_run_while_steering():
     root = root.parent
   src = (root / "selfdrive" / "controls" / "lib" / "ldw.py").read_text(encoding="utf-8")
   assert "not CC.latActive" in src, (
-    "ldw.py no longer suppresses lane departure while steering -- the cluster display is now "
-    "shared between departure warnings and passing suggestions, and one will hide the other")
+    "ldw.py no longer gates lane departure on `not CC.latActive`. Departure and passing assist can "
+    "now both want the cluster's lane lines at once -- decide which wins before shipping this.")
