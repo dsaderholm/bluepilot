@@ -229,6 +229,9 @@ class AutoLaneChangeController:
     self.changes_signal_out_while_steering = 0
     self._saw_opposite_this_change = False
     self._saw_signal_out_this_change = False
+    # Latched for the whole change. See should_cancel: sampled at the instant the signal drops, one
+    # relaxed frame would read as "he asked the car to stop" mid hold-and-release.
+    self._steered_this_change = False
     self.change_seconds = 0.0       # running mean of how long a completed one took
     self._prev_state = log.LaneChangeState.off
     self._change_started_s = 0.0
@@ -294,6 +297,11 @@ class AutoLaneChangeController:
   def _update_stats(self) -> None:
     state = self.DH.lane_change_state
     prev, self._prev_state = self._prev_state, state
+
+    if state == log.LaneChangeState.off:
+      # Cleared at the end of a sequence rather than the start of the crossing, so the latch spans
+      # preLaneChange -- where the nudge lives -- through to the end. See update_blinker_timer.
+      self._steered_this_change = False
 
     if state in (log.LaneChangeState.laneChangeStarting, log.LaneChangeState.laneChangeFinishing):
       self._change_started_s += DT_MDL
@@ -402,8 +410,27 @@ class AutoLaneChangeController:
     on, and REVERSING THE STALK is the only cancel -- which is what he said he does anyway, and the
     only gesture with one possible meaning.
 
-    blinker_held_s and the one-touch length stay: nothing else reads them yet, they cost a float,
-    and they are the measurement that would be needed if this ever wants a third gesture.
+    THE THIRD GESTURE, added 2026-08-06, because the two above left him with no way to stop a change
+    at all: *"So this feature is dead? It will just continue making the lane change if I turn the
+    blinker off? I will still have to fight with it to stop it?"* It would have, and that is not
+    acceptable. The tap is ruled out on safety (see OPPOSITE_SWITCH_WINDOW_S) and his own nudge may
+    never reach switch position 2, which between them would leave no cancel at all.
+
+    So the signal going out IS a cancel again -- under a test that survives both cases that killed
+    the previous attempt. Three-way, not two:
+
+      held ~= the one-touch length   ->  it expired on schedule. A clock, not a decision. NO.
+      held short AND he is steering  ->  hold-and-release: he is doing the change HIMSELF and does
+                                         not want steering back into the lane he came from. NO.
+      held short and he is NOT       ->  he asked the car to stop. CANCEL.
+
+    Duration alone was the old test and it was wrong, because hold-and-release is short too. Torque
+    alone would be wrong as well, because a one-touch expiring while he sits there hands-off looks
+    identical. Together they separate all three, and both were already being measured.
+
+    The torque is LATCHED across the whole change rather than sampled when the signal drops -- he
+    steers with one hand while the other leaves the stalk, and a single relaxed frame landing on
+    that instant must not read as "he asked the car to stop".
     """
     # Counted before either early return, because the QUESTION is whether the gesture is visible
     # at all -- a nudge past the cancel window is still evidence about his stalk's detents.
@@ -431,10 +458,27 @@ class AutoLaneChangeController:
       return False
     if elapsed_s >= self.lane_change_cancel_window:
       return False
-    return reversed_side
+    if reversed_side:
+      return True
 
-  def update_blinker_timer(self, one_blinker: bool) -> None:
-    """How long the signal has been on, sampled across the falling edge. See DEFAULT_ONE_TOUCH_S."""
+    # The signal is out. blinker_held_s is blinker_last_held_s, sampled on the falling edge by
+    # update_blinker_timer, which desire_helper calls before the state machine -- so it is this
+    # change's number rather than a stale one.
+    if one_blinker or blinker_held_s <= 0.0:
+      return False
+    expired = blinker_held_s >= self.lane_change_one_touch_s - ONE_TOUCH_MARGIN_S
+    return not expired and not self._steered_this_change
+
+  def update_blinker_timer(self, one_blinker: bool, steering_pressed: bool = False) -> None:
+    """How long the signal has been on, sampled across the falling edge. See DEFAULT_ONE_TOUCH_S.
+
+    Also latches the driver's torque for the whole sequence, and it has to be latched HERE rather
+    than in should_cancel. A nudged lane change is triggered by torque during preLaneChange, and
+    should_cancel does not run until laneChangeStarting -- so a latch that started there would miss
+    the nudge entirely, see him hands-off as the stalk released, and steer him back into the lane he
+    had just left. That is the exact harm this whole path exists to avoid.
+    """
+    self._steered_this_change = self._steered_this_change or steering_pressed
     if one_blinker:
       self.blinker_held_s += DT_MDL
     elif self.blinker_held_s > 0.0:

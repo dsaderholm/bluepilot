@@ -112,14 +112,19 @@ class TestItIsActuallyWiredIn:
     return dh
 
   @staticmethod
-  def _cs(left=False, right=False, v=30.0, left_bs=False, right_bs=False):
+  def _cs(left=False, right=False, v=30.0, left_bs=False, right_bs=False, pressed=False):
     return NS(vEgo=v, leftBlinker=left, rightBlinker=right, leftBlindspot=left_bs,
-              rightBlindspot=right_bs, steeringPressed=False, steeringTorque=0.0, brakePressed=False)
+              rightBlindspot=right_bs, steeringPressed=pressed, steeringTorque=0.0,
+              brakePressed=False)
 
-  def _start(self, dh):
-    """Signal left and run until the change is actually underway."""
+  def _start(self, dh, pressed=False):
+    """Signal left and run until the change is actually underway.
+
+    pressed=True models a NUDGED change -- he puts torque on the wheel to trigger it, which is what
+    "a nudged lane change" means and what the torque latch has to see. See update_blinker_timer.
+    """
     for _ in range(int(4.0 / DT_MDL)):
-      dh.update(self._cs(left=True), True, 0.5)
+      dh.update(self._cs(left=True, pressed=pressed), True, 0.5)
       if dh.lane_change_state == LaneChangeState.laneChangeStarting:
         return
     raise AssertionError("never reached laneChangeStarting")
@@ -455,17 +460,31 @@ class TestTheBlinkerTurnsItselfOff:
     Every duration, none of them a cancel.
     """
     alc = self._alc()
+    alc._steered_this_change = True         # his hands are on the wheel; he is doing it himself
     for held in (0.5, 2.5, 4.9, 5.5, 9.0):
       assert not alc.should_cancel(False, 1.5, False, held), f"blinker off after {held}s cancelled"
+
+  def test_nor_when_the_one_touch_simply_ran_out(self):
+    """A clock, not a decision -- and the case torque alone could not have separated, because he can
+    sit there hands-off while his own one-touch expires mid-change."""
+    alc = self._alc(one_touch=5.5)
+    for held in (4.8, 5.5, 9.0):
+      assert not alc.should_cancel(False, 1.5, False, held), f"a {held}s one-touch read as a cancel"
 
   def test_and_it_does_not_demand_a_longer_signal(self):
     """His conclusion was that he would have to signal the full amount every time, followed
     immediately by the reason that is no good: "sometimes I grab the steering wheel to bypass the
     nudgeless lane changes with a faster lane change myself, which means I'll use the blinker
     less." A feature requiring more signal from a driver deliberately using less is one fighting
-    its owner."""
+    its owner. So a SHORT signal is fine -- what says "not a cancel" is his hands, not its length."""
     alc = self._alc()
+    alc._steered_this_change = True
     assert not alc.should_cancel(False, 0.5, False, 0.2), "a brief signal read as a cancel"
+
+  def test_but_a_short_signal_with_hands_OFF_stops_the_change(self):
+    """The third gesture. Early, deliberate, and he is not the one steering."""
+    alc = self._alc(one_touch=5.5)
+    assert alc.should_cancel(False, 1.5, False, 2.0), "his nudge-cancel was ignored"
 
   def test_a_stalk_pushed_the_other_way_always_cancels(self):
     """Unambiguous however long it has been on -- nobody's blinker times out INTO the other side."""
@@ -530,21 +549,33 @@ class TestHoldingTheStalkAndLettingGo:
   """
 
   def test_a_held_stalk_released_mid_change_does_not_steer_back(self):
+    """He TORQUES THE WHEEL to trigger a nudged change -- that is what makes it nudged -- and the
+    latch carries that across the stalk being released. The torque happens in preLaneChange, before
+    should_cancel ever runs, which is why the latch lives in update_blinker_timer."""
     dh = TestItIsActuallyWiredIn._dh()
-    TestItIsActuallyWiredIn()._start(dh)
+    TestItIsActuallyWiredIn()._start(dh, pressed=True)
     assert dh.desire == log.Desire.laneChangeLeft
     for _ in range(int(1.0 / DT_MDL)):
-      dh.update(TestItIsActuallyWiredIn._cs(), True, 0.5)      # let go of the stalk
+      dh.update(TestItIsActuallyWiredIn._cs(), True, 0.5)      # let go of the stalk AND the wheel
       assert not dh.alc.reverting, "released stalk read as a cancel"
     assert dh.lane_change_direction == LaneChangeDirection.left, "steered back into the old lane"
 
   def test_and_the_change_still_completes(self):
     dh = TestItIsActuallyWiredIn._dh()
-    TestItIsActuallyWiredIn()._start(dh)
+    TestItIsActuallyWiredIn()._start(dh, pressed=True)
     for _ in range(int(6.0 / DT_MDL)):
       dh.update(TestItIsActuallyWiredIn._cs(), True, 0.0)      # stalk released, model settles
     assert dh.alc.changes_completed == 1
     assert dh.alc.changes_cancelled == 0
+
+  def test_but_hands_off_and_the_signal_killed_IS_a_cancel(self):
+    """The other side of the same gesture, and the reason this rule exists: if he never touched the
+    wheel and deliberately put the signal out early, he is asking the car to stop. Without this he
+    has no way to stop a change at all -- "I will still have to fight with it to stop it?" """
+    dh = TestItIsActuallyWiredIn._dh()
+    TestItIsActuallyWiredIn()._start(dh)                        # hands off throughout
+    dh.update(TestItIsActuallyWiredIn._cs(), True, 0.5)         # signal out, still hands off
+    assert dh.alc.reverting, "hands-off signal-out did not stop the change"
 
   def test_the_other_way_on_the_stalk_still_cancels(self):
     """The one gesture with a single possible meaning, and the one he says he actually uses."""

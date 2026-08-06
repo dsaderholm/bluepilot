@@ -90,7 +90,7 @@ class DesireHelper:
     one_blinker = carstate.leftBlinker != carstate.rightBlinker
     # BluePilot: see AutoLaneChangeController.should_cancel -- the blinker on this car turns itself
     # off after its one-touch flashes, and how long it was on is what separates that from a cancel.
-    self.alc.update_blinker_timer(one_blinker)
+    self.alc.update_blinker_timer(one_blinker, carstate.steeringPressed)
     below_lane_change_speed = v_ego < LANE_CHANGE_SPEED_MIN
 
     # Lane turn controller update
