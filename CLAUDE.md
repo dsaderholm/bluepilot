@@ -211,6 +211,39 @@ upstream merge broke them before:
 
 If it goes wrong: `git reset --hard pre-upstream-<sha>`.
 
+## Name a feature for what it DOES, never for ICBM
+
+ICBM is an **actuator adapter**, not a feature. It exists because stock Ford ACC will not take a
+longitudinal command, so the planner's desired speed has to be translated into cruise-button
+presses. The moment openpilot alpha/e2e longitudinal works on this car, ICBM is deleted outright.
+
+So `Icbm*` is reserved for things that die with it: button injection and the button contract, the
+target drop/rise limiters (they only exist to make Ford coast instead of brake), the custom
+press increments, the standstill resume gate, the 20 mph floor, the radar-blind lead detector and
+the model-stop path. Every one of those solves a problem that disappears.
+
+**Anything meant to outlive that gets its own name.** `SpeedLimit*`, `SmartCruiseControl*`,
+`PassingAssist*` are right: they say what the feature is. A radar-detector integration is a
+`RadarDetector*` thing — it has nothing to do with cruise buttons and must keep working when they
+are gone. Naming it `Icbm*` files a durable feature under the scaffolding and guarantees it gets
+deleted with it, or kept for the wrong reason.
+
+The line to apply: **would this still make sense if openpilot were driving the car directly?** If
+yes, it is not an ICBM feature, whatever module it currently lives in.
+
+**Known violations, deliberately left alone for now.** `IcbmPinnedHolds*` and
+`IcbmBaselineResetDelta` are the HOLD concept, which is a planner idea that happens to live in the
+button layer — "aim at my number instead of the posted limit, and keep everything else working
+against it" needs no buttons at all. They are misnamed. Renaming a `PERSISTENT` key discards its
+stored value, so this waits until holds actually move into the planner, and is done through the
+`_BP_LATERAL_SCHEME_PARAM_RENAMES` machinery in `params_migration.py` that already exists for
+exactly this.
+
+**A new prefix has a second obligation.** `_BP_TRACKED_PREFIXES` in `sunnypilot/system/params_migration.py`
+lists the prefixes whose shipped defaults can reach the car. A key outside it never receives a
+changed default and nothing says so — that already happened to seven `PassingAssist*` keys. Add the
+prefix in the same commit that introduces it.
+
 ## The ICBM button contract
 
 Settled on the road, 2026-08-03. Do not change these meanings without asking — they are muscle
