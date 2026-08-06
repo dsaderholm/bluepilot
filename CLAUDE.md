@@ -215,9 +215,17 @@ If it goes wrong: `git reset --hard pre-upstream-<sha>`.
 
 ICBM is an **actuator adapter**, not a feature. It exists because stock Ford ACC will not take a
 longitudinal command, so the planner's desired speed has to be translated into cruise-button
-presses. The moment openpilot alpha/e2e longitudinal works on this car, ICBM is deleted outright.
+presses.
 
-So `Icbm*` is reserved for things that die with it: button injection and the button contract, the
+**It is one side of a toggle that already exists**, not a stage the fork will graduate from.
+`interfaces_ext.py` makes the alpha-long toggle authoritative on every Ford platform --
+`openpilotLongitudinalControl = bool(alpha_long)`, and `intelligentCruiseButtonManagementAvailable`
+is True for the case where it is off. So the owner can switch between openpilot longitudinal and
+Ford ACC offroad, today, and switch back. Whether openpilot long beats stock Ford ACC on this car is
+an open empirical question -- Ford's radar ACC is mature and well tuned for following, openpilot
+wins on stopped vehicles, signs and signals -- so assume BOTH paths stay live indefinitely.
+
+So `Icbm*` is reserved for things that are meaningless when the toggle is on: button injection and the button contract, the
 target drop/rise limiters (they only exist to make Ford coast instead of brake), the custom
 press increments, the standstill resume gate, the 20 mph floor, the radar-blind lead detector and
 the model-stop path. Every one of those solves a problem that disappears.
