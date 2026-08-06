@@ -41,12 +41,17 @@ except ImportError:
                 return value.decode(encoding) if isinstance(value, bytes) else str(value)
             return value
 
-        def put(self, key, value):
+        # block=, matching params_pyx: `put(self, key, dat, bool block = False)`. A stub without
+        # it turns any caller passing block=True into a TypeError, which that caller's own except
+        # swallows -- so the write silently never happens and the test reports a bug that exists
+        # only in the harness. Sixth instance of this shape in this project; one cost a driveway
+        # session.
+        def put(self, key, value, block=False):
             if isinstance(value, str):
                 value = value.encode()
             self._params[key] = value
 
-        def put_bool(self, key, value):
+        def put_bool(self, key, value, block=False):
             self._params[key] = b"1" if value else b"0"
 
     # Replace in sys.modules
