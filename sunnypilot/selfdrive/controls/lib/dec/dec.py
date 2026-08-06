@@ -197,6 +197,17 @@ class DynamicExperimentalController:
   def active(self) -> bool:
     return self._active
 
+  # BluePilot: read by the radar-blind detector for the stop-sign / red-light case. It is the same
+  # question -- "is the model planning to stop for something ahead" -- and this answer is already
+  # filtered, speed-scaled and proven on the road, so duplicating the reasoning would only give the
+  # two copies a chance to disagree. Computed from modelV2 alone, so it is meaningful whatever mode
+  # DEC is in and whether or not DEC is even enabled.
+  def has_slow_down(self) -> bool:
+    return self._has_slow_down
+
+  def urgency(self) -> float:
+    return self._urgency
+
   def set_mpc_fcw_crash_cnt(self) -> None:
     """Set MPC FCW crash count"""
     self._mpc_fcw_crash_cnt = self._mpc.crash_cnt

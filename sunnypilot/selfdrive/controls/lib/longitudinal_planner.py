@@ -63,8 +63,11 @@ class LongitudinalPlannerSP:
     # already accounts for vision-only leads, and reports on its own channel so it bypasses ICBM's
     # target-drop rate limiter. v_desired_trajectory is one cycle stale here (mpc.update runs after
     # update_targets), which at 20 Hz is 50 ms and immaterial to a multi-second deceleration.
+    # dec.has_slow_down() is this frame's, not last frame's: LongitudinalPlannerSP.update -- which
+    # runs dec.update -- is called at the top of LongitudinalPlanner.update, before update_targets.
     self.unconfirmed_lead.update(sm, self.v_desired_trajectory, v_cruise_cluster,
-                                 long_enabled and not long_override, self.events_sp)
+                                 long_enabled and not long_override, self.events_sp,
+                                 self.dec.has_slow_down())
 
     # Speed Limit Assist
     has_speed_limit = self.resolver.speed_limit_valid or self.resolver.speed_limit_last_valid
