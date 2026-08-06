@@ -1,9 +1,11 @@
 """BluePilot: the standstill walk that reads the cluster's lane-display vocabulary off the car.
 
-Only two of `LaActvStats_D_Dsply`'s five states have ever been sent to this cluster -- Available
-(upstream's engaged-and-visible value, the always-green line) and Intervene (upstream's lane
-departure value). None, Suppress and Warning are unmeasured, and the passing hint is built on
-Suppress. This walks all five so they can be named instead of guessed at.
+Exactly ONE of `LaActvStats_D_Dsply`'s states has provably rendered on this cluster: Available, the
+always-green line. Upstream's Intervene branch sits inside `if enabled:` and ldw.py gates departure
+on `not CC.latActive`, so upstream can never reach it; its Warning and LA_Off values live in the
+branch for cruise main off. BluePilot sends the engaged-style values unconditionally, so it reaches
+none of those either. The passing hint is built on Suppress, which nothing has ever sent. This
+walks them all so they can be named instead of guessed at.
 """
 
 from types import SimpleNamespace as NS
@@ -68,24 +70,34 @@ def test_it_walks_every_state_in_order():
   for o in seen:
     if not ordered or ordered[-1] != o:
       ordered.append(o)
-  assert ordered == [(left, right) for left, right, _ in LANE_TEST_STEPS]
+  assert ordered == [value for value, _ in LANE_TEST_STEPS]
 
 
 def test_the_first_step_is_the_known_baseline():
-  """Both sides Available -- the value upstream already sends while engaged, so it is the one look
-  we know is green. If step 1 draws nothing, the finding is that the cluster will not render this
-  at a standstill, and the walk says so about itself rather than returning five blanks."""
-  assert LANE_TEST_STEPS[0][:2] == (1, 1)
+  """Both sides Available -- the one look we know is green, because it is what gets sent for a
+  visible lane today. If step 1 draws nothing, the finding is that the cluster will not render this
+  at a standstill, and the walk says so about itself rather than returning blanks."""
+  assert LANE_TEST_STEPS[0][0] == 1 + 5 * 1
 
 
-def test_the_right_line_stays_green_throughout():
-  """Every step is a side-by-side against a known-good line. A walk where both sides changed would
-  give five pictures with nothing to compare them to."""
-  assert {right for _, right, _ in LANE_TEST_STEPS} == {1}
+def test_the_right_line_stays_green_for_every_per_side_step():
+  """Each of those is a side-by-side against a known-good line. A walk where both sides changed
+  would give pictures with nothing to compare them to. LA_Off is whole-display and exempt."""
+  for value, label in LANE_TEST_STEPS:
+    if value > 24:
+      continue
+    assert value // 5 == 1, label
 
 
-def test_each_state_is_visited_exactly_once():
-  assert sorted(left for left, _, _ in LANE_TEST_STEPS) == [0, 1, 2, 3, 4]
+def test_each_per_side_state_is_visited_exactly_once():
+  assert sorted(v % 5 for v, _ in LANE_TEST_STEPS if v <= 24) == [0, 1, 2, 3, 4]
+
+
+def test_it_also_asks_what_lane_assist_OFF_looks_like():
+  """30 is upstream's LA_Off and does not decompose as left + 5*right -- it is a whole-display
+  value outside the 5x5 matrix. BluePilot never sends it, which is part of why the lines are green
+  whether or not anything is steering, so what it draws is worth knowing."""
+  assert 30 in [v for v, _ in LANE_TEST_STEPS]
 
 
 def test_each_step_is_held_long_enough_to_look_up_and_back():
@@ -171,23 +183,22 @@ def sent(lane_test, **hud_kwargs):
   hud = NS(**fields)
   fordcan_ext.create_lkas_ui_msg(packer, NS(camera=2, main=0, radar=1), True, True, 0, hud,
                                  dict(STOCK), 0, lane_test)
-  v = packer.values["LaActvStats_D_Dsply"]
-  return v % 5, v // 5
+  return packer.values["LaActvStats_D_Dsply"]
 
 
 def test_the_override_reaches_the_wire_for_every_step():
-  for left, right, _ in LANE_TEST_STEPS:
-    assert sent((left, right)) == (left, right)
+  for value, label in LANE_TEST_STEPS:
+    assert sent(value) == value, label
 
 
 def test_the_walk_outranks_the_departure_branches():
   """Sending the departure states is the entire point -- it only runs stopped, where a real
   departure cannot be happening."""
-  assert sent((3, 1), leftLaneDepart=True) == (3, 1)
+  assert sent(8, leftLaneDepart=True) == 8
 
 
 def test_no_override_leaves_the_normal_display_untouched():
-  assert sent(None) == (1, 1)
+  assert sent(None) == 1 + 5 * 1
 
 
 def test_the_screen_labels_match_what_is_actually_sent():
@@ -201,4 +212,4 @@ def test_the_screen_labels_match_what_is_actually_sent():
   src = (root / "selfdrive" / "ui" / "bp" / "onroad" / "hud_renderer_bp.py").read_text(encoding="utf-8")
   block = src.split("_LDT_LABELS = (", 1)[1].split(")", 1)[0]
   ui_labels = [ln.strip().strip('",') for ln in block.splitlines() if ln.strip().startswith('"')]
-  assert ui_labels == [label for _, _, label in LANE_TEST_STEPS]
+  assert ui_labels == [label for _, label in LANE_TEST_STEPS]

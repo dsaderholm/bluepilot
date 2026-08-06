@@ -314,9 +314,10 @@ class PassingAssistSettingsLayout(Widget):
       lambda: tr("Show Me The Lane Lines"),
       lambda: tr("Walk"),
       lambda: tr("Press Walk with the car stopped, then watch the cluster's LEFT lane line. It "
-                 "steps through all five looks it can draw, three seconds each, naming each one on "
-                 "this screen. The right line stays normal green to compare against. Tell me what "
-                 "each looked like and the dash display gets the one that reads best."),
+                 "steps through every look that display can draw, three seconds each, naming each "
+                 "one on this screen. The right line stays normal green to compare against. Only "
+                 "one of them has ever actually appeared on your cluster. Tell me what each looked "
+                 "like and the dash display gets the one that reads best."),
       callback=self._request_lane_display_test,
     )
 

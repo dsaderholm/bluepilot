@@ -4,21 +4,31 @@ BluePilot: read the cluster's lane-display vocabulary off the actual car.
 WHY THIS EXISTS
 ---------------
 `LaActvStats_D_Dsply` has five states per side, and passing assist's cluster hint is built out of
-them. Of those five, only two have ever been transmitted by code that has run on this car:
+them. Exactly ONE of those has provably rendered on this car:
 
-  * upstream `create_lkas_ui_msg` sends **Available** (1 / 5) when engaged and the lane is visible
-    -- that is the always-green line he described, so Available is green and this is a fact, not an
-    inference;
-  * it sends **Intervene** (4 / 20) for lane departure, which upstream's own comment labels yellow.
+  * **Available** (1 / 5) -- what `create_lkas_ui_msg` sends for a visible lane. That is the
+    always-green line he described, so Available is green, and this is a fact rather than an
+    inference.
 
-**None**, **Suppress** and **Warning** have never been sent. Nobody knows what his 2020 Fusion
-draws for them, and the passing hint currently rests on Suppress -- one of the unknowns. Guessing at
-an unmeasured car display is exactly the mistake the blinker work made four times over.
+Everything else is unmeasured, and one of them is not what it looks like. Upstream's departure
+branch sends **Intervene**, but it sits inside `if enabled:` and `ldw.py` gates departure on
+`not CC.latActive` -- so upstream can never reach it. Its Warning states (3 / 15) and its
+**LA_Off** (30) live in the `else` branch, for cruise main off entirely.
 
-This walks the five states on the LEFT line while holding the RIGHT line at Available, so every
-step is a side-by-side comparison against a line whose appearance is known. Five words back from
-the driveway and the mapping stops being a guess. The sides are symmetric in the value table, so
-there is nothing to learn from repeating it mirrored.
+BluePilot dropped upstream's `enabled` / `main_on` structure and computes the engaged-style values
+unconditionally, which is very likely his "green on both sides of my car all the time, no matter
+what": the lines go green whenever the model sees paint, engaged or not, and LA_Off is never sent
+at all. It also makes Intervene the departure look in every state -- reachable, but ours, and
+almost certainly never seen.
+
+So four of five states plus LA_Off are guesses, and the passing hint rests on Suppress, one of the
+guesses. Guessing at an unmeasured car display is exactly the mistake the blinker work made four
+times over.
+
+This walks them on the LEFT line while holding the RIGHT line at Available, so every step is a
+side-by-side comparison against a line whose appearance is known. The sides are symmetric in the
+value table, so there is nothing to learn from repeating it mirrored. LA_Off is the exception and
+comes last: it is a whole-display value outside the 5x5 matrix, so it is sent raw.
 
 The first step is deliberately the baseline, both sides Available. If step 1 does not draw two
 green lines, the finding is that the cluster will not render this graphic at a standstill and the
@@ -41,14 +51,19 @@ DT_CTRL = 0.01
 # the whole walk is under half a minute.
 LANE_TEST_STEP_S = 3.0
 
-# (left state, right state, what the screen calls it). Right is pinned to Available -- the known
-# green -- so each step reads as "left looks like THIS next to a normal line".
+# (raw LaActvStats_D_Dsply value, what the screen calls it). Raw rather than a (left, right) pair
+# because LA_Off is 30, which does not decompose as left + 5*right -- the signal is [0|31] and the
+# matrix only covers 0..24. Everything else here pins the right line to Available, the known green,
+# so each step reads as "left looks like THIS next to a normal line".
 LANE_TEST_STEPS = (
-  (1, 1, "BOTH GREEN"),
-  (0, 1, "LEFT: NONE"),
-  (2, 1, "LEFT: SUPPRESS"),
-  (3, 1, "LEFT: WARNING"),
-  (4, 1, "LEFT: INTERVENE"),
+  (1 + 5 * 1, "BOTH GREEN"),
+  (0 + 5 * 1, "LEFT: NONE"),
+  (2 + 5 * 1, "LEFT: SUPPRESS"),
+  (3 + 5 * 1, "LEFT: WARNING"),
+  (4 + 5 * 1, "LEFT: INTERVENE"),
+  # Upstream's value for lane assist not running. BluePilot never sends it, which is part of why
+  # the lines are green regardless of whether anything is steering.
+  (30, "LANE ASSIST OFF"),
 )
 
 # Published step index: 0 is idle, 1..len(LANE_TEST_STEPS) is the step being shown.
@@ -90,7 +105,7 @@ class LaneDisplayTestExt:
       self.ldt_params.put("FordLaneDisplayTest", 0, block=True)
 
   def update_lane_display_test(self, CS):
-    """Advance the walk by one cycle and return the (left, right) override, or None when idle.
+    """Advance the walk by one cycle and return the raw LaActvStats override, or None when idle.
 
     Called every frame from CarController.update() before the HUD messages are built.
     """
@@ -135,8 +150,7 @@ class LaneDisplayTestExt:
     return self._current_override()
 
   def _current_override(self):
-    left, right, _ = LANE_TEST_STEPS[self.ldt_step - 1]
-    return left, right
+    return LANE_TEST_STEPS[self.ldt_step - 1][0]
 
   def _abort(self) -> None:
     self.ldt_step = LANE_TEST_IDLE

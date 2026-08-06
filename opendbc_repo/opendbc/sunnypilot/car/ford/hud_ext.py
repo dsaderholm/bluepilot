@@ -137,7 +137,7 @@ class HudExt:
     # create_lkas_ui_msg -- the line on the side it wants OPENS.
     self.passing_side_last = 0
     self.show_passing_in_cluster = False
-    # BluePilot: the standstill lane-display walk's current (left, right) override, or None.
+    # BluePilot: the standstill lane-display walk's current raw LaActvStats override, or None.
     self.lane_test_last = None
 
   def update_hud_params(self, params, CP):
@@ -185,7 +185,7 @@ class HudExt:
       packer: CAN packer
       CAN: Ford CAN bus config
       CP: CarParams
-      lane_test: (left, right) LaActvStats states from the standstill display walk, or None. See
+      lane_test: raw LaActvStats value from the standstill display walk, or None. See
         lane_display_test_ext -- while a walk runs it owns the lane display outright.
 
     Returns:
