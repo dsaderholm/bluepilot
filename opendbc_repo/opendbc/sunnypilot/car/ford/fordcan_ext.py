@@ -250,12 +250,15 @@ def create_acc_ui_msg(packer, CAN: CanBus, CP, main_on: bool, enabled: bool, fcw
 #   suggestion      Side it wants to move to now: 0 none, 1 left, 2 right.
 #   maneuver_side   Side a maneuver has committed to, once it is past deciding.
 #   maneuver_moving True from the blinker going on until the sequence lets go.
+#   pass_in_play    A pass is being considered or executed AT ALL -- see _passing_line, this is
+#                   what keeps the oncoming warning from firing on every car on a two-lane road.
 #   oncoming_left   A vehicle detected RIGHT NOW coming at us in that lane. Live sighting only --
 #   oncoming_right  the 90 s memory is a decision input, and a line held yellow for a minute and a
 #                   half down every canyon road is noise, not information.
-ClusterPassing = namedtuple("ClusterPassing",
-                            "suggestion maneuver_side maneuver_moving oncoming_left oncoming_right")
-CLUSTER_PASSING_IDLE = ClusterPassing(0, 0, False, False, False)
+ClusterPassing = namedtuple(
+  "ClusterPassing",
+  "suggestion maneuver_side maneuver_moving pass_in_play oncoming_left oncoming_right")
+CLUSTER_PASSING_IDLE = ClusterPassing(0, 0, False, False, False, False)
 
 # LaActvStats_D_Dsply, per side. The names are the DBC's.
 LANE_NONE, LANE_AVAILABLE, LANE_SUPPRESS, LANE_WARNING, LANE_INTERVENE = 0, 1, 2, 3, 4
@@ -272,10 +275,17 @@ def _passing_line(side: int, visible: bool, pa: ClusterPassing) -> int:
   order a driver needs it in: a hazard outranks a commitment, a commitment outranks a wish.
   """
   oncoming = pa.oncoming_left if side == 1 else pa.oncoming_right
-  if oncoming:
+  if oncoming and pa.pass_in_play:
     # DO NOT GO THERE. The departure look is the car's own vocabulary for danger on a side, and for
     # opposing traffic in the lane we were about to take it is the literally correct thing to say --
     # unlike a passing suggestion, which is what made borrowing it wrong before.
+    #
+    # ONLY WHILE A PASS IS IN PLAY, and that gate is the whole difference between a warning and
+    # wallpaper. Oncoming traffic is not an event on US-6 or a canyon road, it is the road working
+    # normally, and warning about every car coming the other way would hold the left line yellow
+    # for most of the drive. Nobody reads a light that is always on. This fires when it is the
+    # ANSWER to a question the car was actually asking -- and it stays true while oncoming is the
+    # thing refusing the pass, which is exactly when it is worth knowing.
     return LANE_WARNING
   if pa.maneuver_moving and pa.maneuver_side == side:
     return LANE_INTERVENE   # going now: blinker on, or already crossing

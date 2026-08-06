@@ -43,9 +43,14 @@ NONE, AVAIL, SUPPRESS, WARN, INTERVENE = 0, 1, 2, 3, 4
 LA_OFF = 30
 
 
-def pa(suggestion=0, maneuver_side=0, maneuver_moving=False,
+def pa(suggestion=0, maneuver_side=0, maneuver_moving=False, pass_in_play=None,
        oncoming_left=False, oncoming_right=False):
-  return ClusterPassing(suggestion, maneuver_side, maneuver_moving, oncoming_left, oncoming_right)
+  # Defaults to whatever the other fields imply, so a test that is not about the gate does not have
+  # to restate it -- and a test that IS about the gate says so explicitly.
+  if pass_in_play is None:
+    pass_in_play = bool(suggestion or maneuver_moving)
+  return ClusterPassing(suggestion, maneuver_side, maneuver_moving, pass_in_play,
+                        oncoming_left, oncoming_right)
 
 
 def raw(passing=None, steering=True, main_on=True, left_depart=False, right_depart=False,
@@ -122,8 +127,27 @@ def test_oncoming_traffic_is_the_one_thing_that_gets_to_shout():
   """Warning is the departure look. For a passing suggestion that would be crying wolf, which is
   why it was refused before. For opposing traffic in the lane we were about to move into, it is
   the literally correct thing to say."""
-  assert lines(passing=pa(oncoming_left=True)) == (WARN, AVAIL)
-  assert lines(passing=pa(oncoming_right=True)) == (AVAIL, WARN)
+  assert lines(passing=pa(pass_in_play=True, oncoming_left=True)) == (WARN, AVAIL)
+  assert lines(passing=pa(pass_in_play=True, oncoming_right=True)) == (AVAIL, WARN)
+
+
+def test_oncoming_says_NOTHING_when_no_pass_is_in_play():
+  """The gate that keeps this a warning instead of wallpaper.
+
+  Oncoming traffic is not an event on a two-lane road, it is the road working normally. Warning
+  about every car coming the other way would hold the left line yellow for most of a drive down
+  US-6, and nobody reads a light that is always on. It fires when it is the ANSWER to a question
+  the car was actually asking.
+  """
+  assert lines(passing=pa(pass_in_play=False, oncoming_left=True)) == (AVAIL, AVAIL)
+  assert lines(passing=pa(pass_in_play=False, oncoming_right=True)) == (AVAIL, AVAIL)
+
+
+def test_it_still_warns_while_oncoming_is_the_thing_refusing_the_pass():
+  """The case that matters most and the one a naive gate would lose: oncoming BLOCKS the pass, so
+  the suggestion goes back to none. If the warning needed a standing suggestion it would vanish at
+  exactly the moment it became the answer. `waiting` keeps pass_in_play true."""
+  assert lines(passing=pa(suggestion=0, pass_in_play=True, oncoming_left=True)) == (WARN, AVAIL)
 
 
 def test_oncoming_outranks_both_the_suggestion_and_the_maneuver():
@@ -143,7 +167,7 @@ def test_every_level_is_a_different_picture():
     "normal": lines()[0],
     "wants to go": lines(passing=pa(suggestion=LEFT))[0],
     "going": lines(passing=pa(maneuver_side=LEFT, maneuver_moving=True))[0],
-    "do not go": lines(passing=pa(oncoming_left=True))[0],
+    "do not go": lines(passing=pa(pass_in_play=True, oncoming_left=True))[0],
     "cannot see it": lines(left_visible=False)[0],
   }
   assert len(set(side.values())) == len(side), side

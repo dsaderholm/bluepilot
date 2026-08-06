@@ -209,11 +209,17 @@ class HudExt:
         # Past deciding and actually going. `waiting` and `confirming` are still deliberating, and
         # a line that went to Intervene while the machine was only thinking about it would promise
         # a lane change that may never come.
-        moving = str(pa.maneuver) in ("signaling", "changing", "finishing", "aborting")
+        phase = str(pa.maneuver)
+        moving = phase in ("signaling", "changing", "finishing", "aborting")
+        # A pass is on the table: the machine is past idle, or a suggestion is standing. `waiting`
+        # counts and matters most -- that is the state where a gate is what is stopping us, and
+        # oncoming is one of the gates.
+        in_play = phase != "idle" or int(pa.suggestion) != 0
         passing = fordcan_ext.ClusterPassing(
           suggestion=int(pa.suggestion),
           maneuver_side=int(pa.maneuverSide),
           maneuver_moving=moving,
+          pass_in_play=in_play,
           oncoming_left=bool(pa.adjacentLeft.oncoming),
           oncoming_right=bool(pa.adjacentRight.oncoming),
         )
