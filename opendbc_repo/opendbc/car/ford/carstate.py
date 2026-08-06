@@ -228,6 +228,19 @@ class CarState(CarStateBase, MadsCarState, CarStateExt):
     ret.stockFcw = bool(cp_cam.vl["ACCDATA_3"]["FcwVisblWarn_B_Rq"])
     ret.stockAeb = bool(cp_cam.vl["ACCDATA_2"]["CmbbBrkDecel_B_Rq"])
 
+    # BluePilot: WHEN the gateway's own copy of this frame last arrived, in nanoseconds.
+    #
+    # This is the whole of the blinker fix. Steering_Data_FD1 is sent by the GATEWAY at 10 Hz
+    # carrying the driver's real stalk position, and openpilot writes its own copy of the same frame
+    # to command a signal -- so both claim the switch and the body module obeys whichever landed
+    # last. Four attempts to pace our frames failed because they had no phase relationship to the
+    # contender: each command owned the switch for somewhere between 0 and 100 ms at random, which
+    # is exactly "sometimes six flashes, sometimes four, sometimes none".
+    #
+    # Knowing when the gateway's frame arrived turns that from luck into control: send immediately
+    # after it and our value owns the switch for very nearly the whole 100 ms until the next one.
+    self.steering_data_ts = cp.ts_nanos["Steering_Data_FD1"]["TurnLghtSwtch_D_Stat"]
+
     # button presses
     ret.leftBlinker = cp.vl["Steering_Data_FD1"]["TurnLghtSwtch_D_Stat"] == 1
     ret.rightBlinker = cp.vl["Steering_Data_FD1"]["TurnLghtSwtch_D_Stat"] == 2

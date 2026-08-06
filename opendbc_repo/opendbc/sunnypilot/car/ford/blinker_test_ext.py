@@ -400,6 +400,24 @@ LAMP_SETTLE_S = 1.2
 # Bounded, because a lamp that never goes quiet must not leave a request armed indefinitely. Past
 # this the request is dropped the same way any other refusal drops it.
 LAMP_WAIT_MAX_S = 8.0
+
+# --- PHASE LOCK: send straight after the gateway, not on a clock of our own ---
+#
+# The fix, and the thing all four earlier attempts missed. They paced off the LAMP, which is itself
+# a product of the contention and therefore circular, or off a fixed clock with no relationship to
+# the contender at all.
+#
+# The gateway sends Steering_Data_FD1 at 10 Hz -- carstate registers it at exactly that rate -- and
+# openpilot RECEIVES every one of those frames. CANParser.ts_nanos gives the arrival time. Send our
+# copy immediately after each of the gateway's and our value owns the switch for very nearly the
+# whole 100 ms until the next one, instead of for a random slice of it.
+#
+# So a blink is not one frame any more. It is "assert on every gateway frame for the on-time, then
+# say nothing for the off-time", which produces a solid lamp rather than a coin flip.
+GATEWAY_PERIOD_S = 0.1          # Steering_Data_FD1, ("Steering_Data_FD1", 10) in carstate.py
+# ...and if the gateway ever stops arriving, fall back to that period so a blink still happens
+# rather than the sequence hanging. Half a second is five missed frames -- far past jitter.
+GATEWAY_LOST_S = 0.5
 # WHAT THE SETTING IS FOR, NOW THAT THE LOOP IS CLOSED.
 #
 # Asked directly: "so I shouldn't need to adjust blink spacing if it can measure it?" Right -- with
@@ -552,6 +570,9 @@ class BlinkerTestExt:
     self._bt_lamp_off_frame = 0
     self._bt_lamp_quiet_frames = int(LAMP_SETTLE_S / DT_CTRL)   # nothing has flashed yet
     self._bt_wait_frames = 0
+    self._bt_gw_ts = 0
+    self._bt_gw_frame = 0
+    self._bt_gw_count = 0
     self._bt_lamp_on_frame = 0
     self._bt_guard_s = float(BLINK_AFTER_LAMP_OFF_S)
     self._bt_last_blink_cmd = 0
@@ -750,36 +771,37 @@ class BlinkerTestExt:
       # Blink mode sends ONE frame per period rather than at the bus rate -- the lamp mirrors our
       # frames one for one, so the send rate IS the flash rate. See BLINK_PERIOD_S.
       if self.bt_blinking:
-        # CLOSED LOOP. See BLINK_AFTER_LAMP_OFF_S -- command the next blink a moment after the lamp
-        # goes out, so there is no phase to drift and nothing to configure.
-        since_cmd = (self._bt_frame - self._bt_last_blink_cmd) * DT_CTRL
+        # PHASE-LOCKED. See GATEWAY_PERIOD_S. Everything below this used to chase the lamp; it now
+        # rides the gateway's own frame, which is the thing we are actually contending with.
         if self._bt_blinks_sent >= BLINK_COUNT:
-          # DONE MEANS DONE. The command window is a generous backstop -- 14 s for a sequence that
-          # finishes in six -- and leaving the machine sitting in it is the whole of "I still need
-          # to wait a little bit in between tests", "occasionally pressing does absolutely nothing",
-          # and the truncated counts: a press landing in that dead window was dropped, and the next
-          # one arrived mid-sequence.
-          #
-          # Close it as soon as the last lamp goes dark, so the wait is the test and nothing more.
+          # DONE MEANS DONE. Close as soon as the lamp goes dark so the wait is the test and
+          # nothing more -- a press landing in a dead window used to be dropped, and the next one
+          # arrived mid-sequence.
           if not lamp:
             self.bt_frames_left = min(self.bt_frames_left, int(0.4 / DT_CTRL))
           return SIGNAL_NONE
-        dark_for = (self._bt_frame - self._bt_lamp_off_frame) * DT_CTRL if self._bt_lamp_off_frame else 0.0
-        ready = (self._bt_lamp_off_frame and dark_for >= self._bt_guard_s
-                 and self._bt_lamp_off_frame > self._bt_last_blink_cmd)
-        # ...unless the lamp never reports AT ALL, in which case fall back to the fixed period.
-        #
-        # Gated on never having seen it, not on a timeout. As a timeout it RACED the closed loop:
-        # a flasher slower than the configured spacing would have the fallback fire while the loop
-        # was still correctly waiting for the lamp, putting the command straight back into the
-        # refractory window the loop exists to avoid. A test caught it immediately, which is the
-        # only reason this is not another trip to the driveway.
-        # See BLINK_STALL_S. A lamp report that misses one falling edge used to end the run.
-        stalled = since_cmd >= BLINK_STALL_S
-        if not ready and not stalled and (self.bt_lamp_seen or since_cmd < self.bt_blink_period_s):
+
+        # A NEW GATEWAY FRAME, or long enough that it has clearly stopped arriving.
+        gw_ts = getattr(CS, "steering_data_ts", 0)
+        fresh = gw_ts != self._bt_gw_ts
+        if fresh:
+          self._bt_gw_ts = gw_ts
+          self._bt_gw_frame = self._bt_frame
+        lost = (self._bt_frame - self._bt_gw_frame) * DT_CTRL > GATEWAY_LOST_S
+        if not fresh and not lost:
           return SIGNAL_NONE
+
+        # ON for half the period, OFF for the other half, both counted in GATEWAY frames -- which
+        # is the only clock that matters here, because it is the clock our contender runs on.
+        slot = max(1, int(round(self.bt_blink_period_s / 2.0 / GATEWAY_PERIOD_S)))
+        self._bt_gw_count += 1
+        phase = (self._bt_gw_count - 1) % (slot * 2)
+        if phase >= slot:
+          return SIGNAL_NONE
+        if phase == 0:
+          # One blink per ON phase, however many frames hold it up.
+          self._bt_blinks_sent += 1
         self._bt_last_blink_cmd = self._bt_frame
-        self._bt_blinks_sent += 1
         return self.bt_commanded
       return self.bt_commanded if send_frame else SIGNAL_NONE
 
@@ -935,7 +957,10 @@ class BlinkerTestExt:
       self._bt_last_blink_cmd = self._bt_frame
       # The arming frame below returns a command, so it IS the first blink. Not counting it is
       # where "blink left did eight flashes" came from, against a BLINK_COUNT of seven.
-      self._bt_blinks_sent = 1
+      # Phase counter starts clean so the first gateway frame after arming begins an ON slot.
+      self._bt_gw_count = 0
+      self._bt_gw_frame = self._bt_frame
+      self._bt_blinks_sent = 0
       # A short tail only. There is nothing to observe after a blink -- the lamp follows our frames
       # and stops when we do -- so a full second here was a second of dead buttons for nothing.
       self.bt_frames_left = self._bt_command_frames_left + int(0.3 / DT_CTRL)

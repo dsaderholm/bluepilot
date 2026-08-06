@@ -13,9 +13,9 @@ from types import SimpleNamespace as NS
 from opendbc.car import DT_CTRL
 from opendbc.sunnypilot.car.ford.blinker_test_ext import (
   BlinkerTestExt, SIGNAL_NONE, SIGNAL_LEFT, SIGNAL_RIGHT, PULSE_DURATION_S, STANDSTILL_V_EGO,
-  BUTTONS_STEP, SIGNAL_TAP_LEFT, TAP_COMMAND_S, DONE_HOLD_S, SIGNAL_BLINK_LEFT, SIGNAL_MEASURE, MEASURE_QUIET_S, DEFAULT_BLINK_PERIOD_S, BLINK_COUNT,
+  BUTTONS_STEP, SIGNAL_TAP_LEFT, TAP_COMMAND_S, DONE_HOLD_S, SIGNAL_BLINK_LEFT, SIGNAL_MEASURE, DEFAULT_BLINK_PERIOD_S, BLINK_COUNT,
   BLINK_STALL_S,
-  LAMP_SETTLE_S, LAMP_WAIT_MAX_S,
+  LAMP_SETTLE_S, LAMP_WAIT_MAX_S, GATEWAY_PERIOD_S,
 )
 
 
@@ -37,11 +37,15 @@ class FakeParams:
 
 
 def make_cs(v_ego=0.0, engaged=False, left_blinker=False, right_blinker=False,
-            lamp_left=False, lamp_right=False):
+            lamp_left=False, lamp_right=False, gw_ts=0):
   cs = NS(out=NS(vEgo=v_ego, cruiseState=NS(enabled=engaged),
                  leftBlinker=left_blinker, rightBlinker=right_blinker))
   cs.turn_lamp_left = lamp_left
   cs.turn_lamp_right = lamp_right
+  # WHEN the gateway's own Steering_Data_FD1 last arrived. The blink loop rides this rather than a
+  # clock of its own -- see GATEWAY_PERIOD_S. A fixture that never advances it is a car whose
+  # gateway has stopped talking, which is a case worth testing but not the normal one.
+  cs.steering_data_ts = gw_ts
   return cs
 
 
@@ -51,10 +55,15 @@ def make_ext(request=0):
   return ext
 
 
-def run(ext, frames, **kw):
+GATEWAY_FRAMES = int(GATEWAY_PERIOD_S / DT_CTRL)   # control frames between gateway messages
+
+
+def run(ext, frames, *, gateway=True, **kw):
+  """Advance the machine, simulating the gateway's 10 Hz Steering_Data_FD1 unless told not to."""
   out = []
-  for _ in range(frames):
-    out.append(ext.update_blinker_test(make_cs(**kw)))
+  for i in range(frames):
+    ts = ((i // GATEWAY_FRAMES) + 1) * int(GATEWAY_PERIOD_S * 1e9) if gateway else 0
+    out.append(ext.update_blinker_test(make_cs(gw_ts=ts, **kw)))
   return out
 
 
@@ -366,131 +375,74 @@ class TestTheTap:
 
 
 class TestBlinkMode:
-  """The lamp mirrors our frames one for one, so the SEND RATE is the FLASH RATE -- and the send
-  DURATION is the on-time.
+  """PHASE-LOCKED to the gateway, which is what the four earlier attempts all missed.
 
-  The first version sent one frame per cycle. From the car: "it does them in groups of four, with
-  the fog light only coming on for a fraction of a second for each blink." Right rhythm, no duty
-  cycle -- a single frame buys only the milliseconds before the gateway's next frame clears it.
+  Steering_Data_FD1 is sent by the GATEWAY at 10 Hz carrying the driver's real stalk position, and
+  openpilot writes its own copy of the same frame to command a signal. Both claim the switch and the
+  body module obeys whichever landed last -- so a command with no phase relationship to the gateway
+  owns the switch for somewhere between 0 and 100 ms at random. That is exactly the reported fault:
+  "6 blinks, then 1 and 4 more, then 4 and 2 more, then zero... it just seems random."
+
+  Sending immediately after each gateway frame makes that deterministic: our value holds the switch
+  for very nearly the whole 100 ms until the next one. A blink is therefore no longer one frame; it
+  is every gateway frame for the on-time.
   """
 
-  def _sends(self, seconds):
-    ext = make_ext(SIGNAL_BLINK_LEFT)
-    out = run(ext, POLL_FRAMES + int(seconds / DT_CTRL))
+  @staticmethod
+  def _sends(out):
     return [i for i, v in enumerate(out) if v == SIGNAL_LEFT]
 
-  def test_one_frame_per_blink(self):
-    """The body module holds the lamp itself: "the blinker didn't briefly turn on, it stayed on for
-    the normal amount." So one frame per cycle is a whole blink, and bursting frames to hold it on
-    was solving a problem the main lamp does not have."""
-    sends = self._sends(BLINK_COUNT * DEFAULT_BLINK_PERIOD_S)
-    assert all(b - a > 1 for a, b in zip(sends, sends[1:])),       "consecutive frames -- that is a burst, and the lamp does not need one"
-
-  def _drive_with_a_fake_bcm(self, ext, seconds, on_s=0.45, refractory_s=0.0):
-    # NOTE: call this from frame zero, before the machine has armed. The arming frame returns the
-    # FIRST blink, so a harness that starts afterwards silently misses it -- which is how the
-    # eighth flash hid: seven counted here, eight seen on the car.
-    """A body module that lights the lamp for on_s when commanded -- and IGNORES commands while it
-    is still lit, which is the absorption that caused the missed blinks.
-
-    refractory_s extends the deaf period past the lamp going out, so a naive sender can be shown
-    drifting into it.
-    """
-    lamp_until = -1
-    deaf_until = -1
-    commands, absorbed = [], 0
-    for i in range(int(seconds / DT_CTRL)):
-      lit = i < lamp_until
-      out = ext.update_blinker_test(make_cs(lamp_left=lit))
-      if out == SIGNAL_LEFT:
-        if i < deaf_until:
-          absorbed += 1
-        else:
-          commands.append(i)
-          lamp_until = i + int(on_s / DT_CTRL)
-          deaf_until = lamp_until + int(refractory_s / DT_CTRL)
-    return commands, absorbed
-
-  def test_no_command_is_ever_absorbed(self):
-    """The reported fault: "some blinks getting missed at random times, sometimes missing 1, and
-    sometimes missing 2." A fixed send period beats against the body module's own cycle and drifts
-    through its ON phase. Waiting for the lamp to go out has no phase to drift."""
+  def test_a_command_goes_out_on_every_gateway_frame_of_an_on_phase(self):
+    """The point. One frame per blink leaves the gateway to overwrite it after a random slice of
+    100 ms; holding across the whole phase is what makes the lamp solid."""
     ext = make_ext(SIGNAL_BLINK_LEFT)
-    _, absorbed = self._drive_with_a_fake_bcm(ext, 20.0, on_s=0.45, refractory_s=0.15)
-    assert absorbed == 0, f"{absorbed} commands landed while the lamp was still lit"
-
-  def test_it_still_stops_after_the_right_number(self):
-    ext = make_ext(SIGNAL_BLINK_LEFT)
-    commands, _ = self._drive_with_a_fake_bcm(ext, 25.0)
-    assert len(commands) == BLINK_COUNT, f"{len(commands)} blinks, expected {BLINK_COUNT}"
-
-  def test_it_follows_a_flasher_SLOWER_than_any_fixed_period(self):
-    """The test that actually proves closing the loop was necessary.
-
-    A body module deaf for 1.2 s -- lit 0.9, then a 0.3 s tail -- outlasts the 1.0 s fixed period
-    entirely, so an open-loop sender is absorbed on every single blink no matter what number is
-    configured. Waiting for the lamp cannot be, because it has no number.
-
-    Mutation-checked: reverting to the fixed period fails this and nothing else, which is why it is
-    here. The earlier version used a flasher fast enough that both approaches worked.
-    """
-    ext = make_ext(SIGNAL_BLINK_LEFT)
-    commands, absorbed = self._drive_with_a_fake_bcm(ext, 40.0, on_s=0.9, refractory_s=0.3)
-    assert absorbed == 0, f"{absorbed} commands swallowed by a flasher slower than the period"
-    assert len(commands) == BLINK_COUNT, f"{len(commands)} blinks got through, expected {BLINK_COUNT}"
-    gaps = [(b - a) * DT_CTRL for a, b in zip(commands, commands[1:])]
-    assert gaps and all(g > 1.2 for g in gaps), f"outran a 1.2s-deaf flasher: {gaps}"
-
-  def test_a_car_that_never_reports_a_lamp_still_blinks(self):
-    """Open loop is worse than closed. It is much better than sending nothing at all."""
-    ext = make_ext(SIGNAL_BLINK_LEFT)
-    out = run(ext, POLL_FRAMES + int(8.0 / DT_CTRL))
-    assert out.count(SIGNAL_LEFT) >= 3, "no lamp feedback meant no blinks at all"
-
-  def test_the_machine_frees_up_as_soon_as_the_blinks_finish(self):
-    """From the car: "I still need to wait a little bit in between tests", "occasionally pressing
-    blink left or blink right is absolutely nothing", and counts of two, three and four.
-
-    All one bug. The command window is a 14 s backstop for a sequence that finishes in six, and the
-    machine sat in it -- so a press landing in that dead window was dropped, and a later one
-    arrived mid-sequence. Measured at 17.3 s before the buttons came back.
-    """
-    ext = make_ext(SIGNAL_BLINK_LEFT)
-    commands, _ = self._drive_with_a_fake_bcm(ext, 25.0)
-    last = commands[-1]
-    # It must leave the pulse within a second or so of the final blink, not fourteen.
-    for i in range(last, last + int(3.0 / DT_CTRL)):
-      ext.update_blinker_test(make_cs())
-      if ext.bt_state != 1:
-        assert (i - last) * DT_CTRL < 2.0, f"stayed busy {(i - last) * DT_CTRL:.1f}s after the last blink"
-        return
-    raise AssertionError("still commanding three seconds after the last blink")
-
-  def test_a_commanded_blink_is_not_reported_as_a_measurement(self):
-    """The panel shows measuredPeriodMs as "YOUR BLINKER". Timing our OWN commanded flashes set it
-    on a blink test too, so a commanded sequence would have reported itself as a measurement of his
-    stalk. Scoped to measure mode."""
-    ext = make_ext(SIGNAL_BLINK_LEFT)
-    self._drive_with_a_fake_bcm(ext, 25.0)
-    assert ext.bt_measured_ms == 0, "a commanded blink produced a stalk measurement"
-
-  def test_measuring_stops_when_the_driver_does(self):
-    """Same annoyance as the blink window, in the mode he reaches for first: holding the machine
-    for the full twelve seconds after he has clearly finished."""
-    ext = make_ext(SIGNAL_MEASURE)
     run(ext, POLL_FRAMES + 2)
-    assert ext.bt_state == 1
-    TestMeasureMode._flash(ext, cycles=4, period_s=0.9)
-    assert ext.bt_measured_ms > 0
-    run(ext, int(MEASURE_QUIET_S / DT_CTRL) + 40, left_blinker=True)
-    assert ext.bt_state != 1, "still holding the machine long after the stalk stopped"
+    sends = self._sends(run(ext, int(1.0 / DT_CTRL)))
+    assert len(sends) >= 3, f"only {len(sends)} commands in a second; the lamp will flicker"
+    gaps = [b - a for a, b in zip(sends, sends[1:])]
+    assert all(g == GATEWAY_FRAMES for g in gaps[:2]), (
+      f"not locked to the gateway's own frames: {gaps[:4]}")
 
-  def test_blink_obeys_every_gate(self):
-    for kw in ({"v_ego": 5.0}, {"engaged": True}, {"left_blinker": True}):
-      ext = make_ext(SIGNAL_BLINK_LEFT)
-      out = run(ext, POLL_FRAMES + 20, **kw)
-      assert all(v == SIGNAL_NONE for v in out), f"blink mode ignored {kw}"
+  def test_nothing_is_sent_between_gateway_frames(self):
+    """Sending off our own clock is what produced the erratic counts. Every command has to ride an
+    arrival, or it lands at a random point in the gateway's cycle and gets overwritten."""
+    ext = make_ext(SIGNAL_BLINK_LEFT)
+    run(ext, POLL_FRAMES + 2)
+    out = run(ext, int(1.0 / DT_CTRL))
+    for i in self._sends(out):
+      assert i % GATEWAY_FRAMES == 0, "a command was sent between two gateway frames"
 
+  def test_on_and_off_split_the_period(self):
+    ext = make_ext(SIGNAL_BLINK_LEFT)
+    ext.bt_params.get = lambda k, **kw: 800 if k == "FordBlinkerBlinkPeriod" else 7
+    run(ext, POLL_FRAMES + 2)
+    sends = self._sends(run(ext, int(2.0 / DT_CTRL)))
+    # 800 ms period -> 400 ms on, 400 ms off -> four gateway frames each way
+    runs, cur = [], 1
+    for a, b in zip(sends, sends[1:]):
+      if b - a == GATEWAY_FRAMES:
+        cur += 1
+      else:
+        runs.append(cur); cur = 1
+    runs.append(cur)
+    # The SECOND run: arming consumes part of the first phase, so it is short by construction.
+    assert runs[1] == 4, f"on-phase was {runs[1]} gateway frames, wanted 4 for an 800 ms period"
+
+  def test_it_stops_after_the_right_number_of_blinks(self):
+    ext = make_ext(SIGNAL_BLINK_LEFT)
+    run(ext, POLL_FRAMES + 2)
+    out = run(ext, int(20.0 / DT_CTRL))
+    sends = self._sends(out)
+    blinks = 1 + sum(1 for a, b in zip(sends, sends[1:]) if b - a > GATEWAY_FRAMES)
+    assert blinks == BLINK_COUNT, f"{blinks} blinks, wanted {BLINK_COUNT}"
+
+  def test_a_gateway_that_stops_talking_does_not_hang_the_run(self):
+    """If the frame we lock to disappears, a blink still has to happen -- a sequence that waits
+    forever for a contender that has gone quiet is worse than one that free-runs."""
+    ext = make_ext(SIGNAL_BLINK_LEFT)
+    run(ext, POLL_FRAMES + 2)
+    out = run(ext, int(3.0 / DT_CTRL), gateway=False)
+    assert self._sends(out), "nothing was sent at all once the gateway went quiet"
 
 class TestMeasureMode:
   """"I want it to match Ford's rate as well as you can."
@@ -547,19 +499,26 @@ class TestMeasureMode:
     self._flash(ext, cycles=3, period_s=0.9)
     assert abs(ext.bt_measured_ms - first) < 60, "a pause between taps polluted the mean"
 
-  def test_the_spacing_setting_governs_the_open_loop_fallback(self):
-    """It was read from the param and never used -- the fallback ran on a hardcoded constant. A
-    control that does nothing is the same fault as a readout nobody renders.
-
-    Only reachable with no lamp feedback, which is the only time an open loop happens at all.
+  def test_the_spacing_setting_governs_the_slot_length(self):
+    """The setting still decides the rhythm, but it now sizes the ON and OFF phases in GATEWAY
+    frames rather than spacing single commands -- see GATEWAY_PERIOD_S. A shorter period has to
+    produce shorter phases, or the control does nothing.
     """
-    ext = make_ext(SIGNAL_BLINK_LEFT)
-    ext.bt_params.get = lambda k, **kw: 600 if k == "FordBlinkerBlinkPeriod" else 7
-    out = run(ext, POLL_FRAMES + int(6.0 / DT_CTRL))       # lamp never lights
-    sends = [i for i, v in enumerate(out) if v == SIGNAL_LEFT]
-    gaps = [(b - a) * DT_CTRL for a, b in zip(sends, sends[1:])]
-    assert gaps, "no fallback blinks at all"
-    assert all(abs(g - 0.6) < 0.05 for g in gaps), f"setting ignored: gaps {gaps}"
+    def phases(period_ms):
+      ext = make_ext(SIGNAL_BLINK_LEFT)
+      ext.bt_params.get = lambda k, **kw: period_ms if k == "FordBlinkerBlinkPeriod" else 7
+      run(ext, POLL_FRAMES + 2)
+      sends = [i for i, v in enumerate(run(ext, int(4.0 / DT_CTRL))) if v == SIGNAL_LEFT]
+      runs, cur = [], 1
+      for a, b in zip(sends, sends[1:]):
+        if b - a == GATEWAY_FRAMES:
+          cur += 1
+        else:
+          runs.append(cur); cur = 1
+      runs.append(cur)
+      return runs
+
+    assert phases(1000)[1] > phases(600)[1], "the spacing setting no longer changes anything"
 
 
 class TestTheRunawayGuardCanLetGo:
