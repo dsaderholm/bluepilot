@@ -238,7 +238,13 @@ class TestTheGroupsThemselves:
       "IcbmResumeGateEnabled",   # 0 -> 1, standstill resume gate
       "IcbmLeadMaxDistance",     # 120 -> 180 m, how far the radar-blind detector looks
       "IcbmLeadMaxTtc",          # 40 -> 70 (4.0 -> 7.0 s)
-      "IcbmMaxTargetDrop",       # 8 -> 12, how fast the set speed may fall
+      # 8 -> 12. NOT a response-rate limit, though the name reads like one: it is the step size
+      # that keeps Ford COASTING instead of braking, because stock ACC treats one large drop in set
+      # speed as a reason to brake hard and a series of small ones as a reason to coast. Net
+      # deceleration is the same either way. So it cannot make anything happen earlier, and raising
+      # it to chase the exit-ramp problem -- which I suggested -- would only trade coasting for
+      # braking.
+      "IcbmMaxTargetDrop",
     }
 
     moved = {k for k, vals in ever.items() if len(vals) > 1}
