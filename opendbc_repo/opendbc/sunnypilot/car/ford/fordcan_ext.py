@@ -285,11 +285,22 @@ def create_lkas_ui_msg(packer, CAN: CanBus, main_on: bool, enabled: bool, hands:
     # would be more visible and would look exactly like lane departure, and a display that cries
     # wolf about drifting when it means "I would like to pass" is worse than no display.
     #
-    # DEPARTURE ALWAYS WINS, twice over, and the redundancy is deliberate. The branch order below
-    # already settles it -- Depart is tested before open -- so the `not ...Depart` here changes
-    # nothing today and a mutation removing it passes every test. It stays because the thing it
-    # protects against is somebody REORDERING those branches later, which no test can see coming and
-    # which would silently hide a lane-departure warning behind a passing suggestion.
+    # THE TWO USES CANNOT COLLIDE, and that is structural rather than a judgement about acceptable
+    # risk. His point: "lane departures aren't going to happen at all when openpilot is on, so we
+    # can repurpose this display for an actual use."
+    #
+    # Exactly right, and stronger than it sounds. ldw.py line 21:
+    #
+    #     ldw_allowed = CS.vEgo > LDW_MIN_SPEED and not recent_blinker and not CC.latActive
+    #
+    # openpilot does not COMPUTE lane departure while it is steering -- the thing keeping the car in
+    # its lane does not also warn about leaving it. So leftLaneDepart is false for the whole time
+    # this display could want to say anything, and passing assist needs cruise engaged before it
+    # suggests at all. Neither can be true when the other is.
+    #
+    # The departure branches below therefore stay, tested first, and are simply unreachable while
+    # engaged. That ordering is belt and braces against ldw.py's condition changing upstream, which
+    # test_ldw_does_not_run_while_steering will catch first.
     left_open = passing_side == 1 and not hud_control.leftLaneDepart
     right_open = passing_side == 2 and not hud_control.rightLaneDepart
 

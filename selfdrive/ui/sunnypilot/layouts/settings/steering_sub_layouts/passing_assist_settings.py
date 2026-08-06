@@ -292,9 +292,10 @@ class PassingAssistSettingsLayout(Widget):
       title=tr("Show It On The Dash"),
       description=recommended(tr("Use the instrument cluster's own lane lines to show which way it "
                                  "wants to go: the line on that side fades out, so the lane opens "
-                                 "toward the gap. Lane departure always wins -- if you are actually "
-                                 "drifting, that shows instead. Off by default because it borrows a "
-                                 "safety display."), "ShowPassingInCluster"),
+                                 "toward the gap. It cannot cover a lane departure warning -- "
+                                 "openpilot does not watch for departures while it is steering, so "
+                                 "that display is idle exactly when this uses it."),
+                              "ShowPassingInCluster"),
       param="ShowPassingInCluster")
 
     # ORDERED THE WAY A DRIVER ARRIVES AT A QUESTION, not the order these were built in. They were

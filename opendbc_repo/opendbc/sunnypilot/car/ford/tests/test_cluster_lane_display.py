@@ -78,3 +78,24 @@ def test_a_departure_on_the_OTHER_side_still_shows_both():
 def test_an_invisible_lane_line_is_unchanged_by_any_of_this():
   assert lines(left_visible=False) == (SUPPRESS, AVAIL)
   assert lines(passing_side=LEFT, left_visible=False) == (SUPPRESS, AVAIL)
+
+
+def test_ldw_does_not_run_while_steering():
+  """The claim this whole feature rests on, asserted against openpilot's own source.
+
+  "Lane departures aren't going to happen at all when openpilot is on, so we can repurpose this
+  display for an actual use." Correct, and structurally so: ldw.py gates on `not CC.latActive`, so
+  departure is not merely unlikely while engaged -- it is not computed. That is what makes borrowing
+  the display free rather than a trade.
+
+  If upstream ever drops that condition, the two uses start competing for the same lines and this
+  fails before anybody has to notice it on the road.
+  """
+  import pathlib
+  root = pathlib.Path(__file__).resolve()
+  while not (root / "common" / "params_keys.h").exists():
+    root = root.parent
+  src = (root / "selfdrive" / "controls" / "lib" / "ldw.py").read_text(encoding="utf-8")
+  assert "not CC.latActive" in src, (
+    "ldw.py no longer suppresses lane departure while steering -- the cluster display is now "
+    "shared between departure warnings and passing suggestions, and one will hide the other")
