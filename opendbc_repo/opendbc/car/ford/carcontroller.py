@@ -130,12 +130,14 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
     # BluePilot: compute DM state (TJA message, warning, hands level)
     HudExt.update_dm(self, hud_control, main_on, CS.out.cruiseState.standstill, self.frame)
 
-    # BluePilot: stationary turn-signal actuation test. Returns SIGNAL_NONE on every normal frame,
-    # in which case create_button_msg keeps passing the driver's own switch position through
-    # untouched. Only an explicitly requested, standstill-gated pulse returns anything else.
     # BluePilot: stationary cluster lane-display walk. None on every normal frame.
     lane_test = LaneDisplayTestExt.update_lane_display_test(self, CS)
 
+    # BluePilot: stationary turn-signal actuation test, and THE ONLY THING IN THIS FORK THAT EVER
+    # COMMANDS THE TURN SIGNAL. Returns SIGNAL_NONE on every normal frame, in which case
+    # create_button_msg keeps passing the driver's own switch position through untouched. Only an
+    # explicitly requested, standstill-gated pulse returns anything else -- so nothing openpilot
+    # does on the road, a lane change or a revert included, moves his blinker.
     turn_signal = BlinkerTestExt.update_blinker_test(self, CS)
     # update_blinker_test rate-limits itself to BUTTONS_STEP -- see its docstring. The rate lives
     # there rather than here because this file cannot be tested offline, and sending this frame too
