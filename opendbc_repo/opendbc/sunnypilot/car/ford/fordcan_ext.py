@@ -298,7 +298,7 @@ def _passing_line(side: int, visible: bool, pa: ClusterPassing) -> int:
 
 def create_lkas_ui_msg(packer, CAN: CanBus, main_on: bool, enabled: bool, hands: int,
                        hud_control, stock_values: dict, passing: 'ClusterPassing | None' = None,
-                       lane_test: int | None = None):
+                       lane_test=None):  # LaneTestOverride(lines, hands); see lane_display_test_ext
   """
   Creates a CAN message for the Ford IPC IPMA/LKAS status.
 
@@ -374,9 +374,14 @@ def create_lkas_ui_msg(packer, CAN: CanBus, main_on: bool, enabled: bool, hands:
   # The display test overrides everything, including the departure branches above. It only ever runs
   # at a standstill, where none of them can be true, and it has to be able to SEND the departure
   # states -- learning what they look like is the entire point. Raw, because LA_Off is 30, outside
-  # the 5x5 matrix. See lane_display_test_ext.
+  # the 5x5 matrix.
+  #
+  # It owns `hands` too. Those are the only two signals in this message the fork authors rather than
+  # passes through, and a walk that changed one while leaving the other stale would be measuring two
+  # things at once. See lane_display_test_ext.
   if lane_test is not None:
-    lines = int(lane_test)
+    lines = int(lane_test.lines)
+    hands = int(lane_test.hands)
 
   values = {s: stock_values[s] for s in [
     "FeatConfigIpmaActl",

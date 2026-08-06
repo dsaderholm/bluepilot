@@ -25,7 +25,12 @@ So four of five states plus LA_Off are guesses, and the passing hint rests on Su
 guesses. Guessing at an unmeasured car display is exactly the mistake the blinker work made four
 times over.
 
-This walks them on the LEFT line while holding the RIGHT line at Available, so every step is a
+It also walks `LaHandsOff_D_Dsply`, the only other signal in this message the fork authors rather
+than passes through. BluePilot drives it 0 or 1 and nothing else, so Level2 -- which the DBC labels
+"with chime" -- has never been sent. An audible channel through the car's own speakers is worth
+knowing about before anything is designed around it.
+
+The lane steps walk the LEFT line while holding the RIGHT line at Available, so every step is a
 side-by-side comparison against a line whose appearance is known. The sides are symmetric in the
 value table, so there is nothing to learn from repeating it mirrored. LA_Off is the exception and
 comes last: it is a whole-display value outside the 5x5 matrix, so it is sent raw.
@@ -40,6 +45,8 @@ that cries wolf is worse than no display. See [[fusion-ipc-is-lka-only]] for why
 the only cluster channel this car has.
 """
 
+from collections import namedtuple
+
 try:
   from openpilot.common.params import Params
 except ImportError:  # pragma: no cover - opendbc is importable without openpilot
@@ -47,23 +54,42 @@ except ImportError:  # pragma: no cover - opendbc is importable without openpilo
 
 DT_CTRL = 0.01
 
+# What the walk substitutes into the cluster message for one step. Both fields, because the walk
+# covers both signals this fork authors and a step that changed one while leaving the other stale
+# would be measuring two things at once.
+LaneTestOverride = namedtuple("LaneTestOverride", "lines hands")
+
 # Seconds each state is held. Long enough to look up, see it and look back down; short enough that
 # the whole walk is under half a minute.
 LANE_TEST_STEP_S = 3.0
 
-# (raw LaActvStats_D_Dsply value, what the screen calls it). Raw rather than a (left, right) pair
-# because LA_Off is 30, which does not decompose as left + 5*right -- the signal is [0|31] and the
-# matrix only covers 0..24. Everything else here pins the right line to Available, the known green,
-# so each step reads as "left looks like THIS next to a normal line".
+# (raw LaActvStats_D_Dsply, LaHandsOff_D_Dsply, what the screen calls it).
+#
+# LaActvStats raw rather than a (left, right) pair because LA_Off is 30, which does not decompose
+# as left + 5*right -- the signal is [0|31] and the matrix only covers 0..24. The lane steps pin
+# the right line to Available, the known green, so each reads as "left looks like THIS next to a
+# normal line"; the hands steps hold both lines there so the only thing changing is the indicator.
+BOTH_GREEN = 1 + 5 * 1
+HANDS_ON = 0
+
 LANE_TEST_STEPS = (
-  (1 + 5 * 1, "BOTH GREEN"),
-  (0 + 5 * 1, "LEFT: NONE"),
-  (2 + 5 * 1, "LEFT: SUPPRESS"),
-  (3 + 5 * 1, "LEFT: WARNING"),
-  (4 + 5 * 1, "LEFT: INTERVENE"),
-  # Upstream's value for lane assist not running. BluePilot never sends it, which is part of why
-  # the lines are green regardless of whether anything is steering.
-  (30, "LANE ASSIST OFF"),
+  (BOTH_GREEN, HANDS_ON, "BOTH GREEN"),
+  (0 + 5 * 1, HANDS_ON, "LEFT: NONE"),
+  (2 + 5 * 1, HANDS_ON, "LEFT: SUPPRESS"),
+  (3 + 5 * 1, HANDS_ON, "LEFT: WARNING"),
+  (4 + 5 * 1, HANDS_ON, "LEFT: INTERVENE"),
+  # Upstream's value for lane assist not running. BluePilot never sent it, which is part of why the
+  # lines were green regardless of whether anything was steering.
+  (30, HANDS_ON, "LANE ASSIST OFF"),
+
+  # LaHandsOff_D_Dsply, the ONLY other signal in IPMA_Data this fork authors rather than passes
+  # through. BluePilot drives it 0 or 1 and nothing else, so Level2 and Suppressed have never been
+  # transmitted -- and per the DBC, Level2 is "with chime". If that is real it is an audible channel
+  # through the car's own speakers that nothing is using. Worth knowing before designing around it,
+  # for exactly the reason the lane states were worth knowing.
+  (BOTH_GREEN, 1, "HANDS: LEVEL 1"),
+  (BOTH_GREEN, 2, "HANDS: LEVEL 2  (listen)"),
+  (BOTH_GREEN, 3, "HANDS: SUPPRESSED"),
 )
 
 # Published step index: 0 is idle, 1..len(LANE_TEST_STEPS) is the step being shown.
@@ -105,7 +131,7 @@ class LaneDisplayTestExt:
       self.ldt_params.put("FordLaneDisplayTest", 0, block=True)
 
   def update_lane_display_test(self, CS):
-    """Advance the walk by one cycle and return the raw LaActvStats override, or None when idle.
+    """Advance the walk by one cycle and return this step's override, or None when idle.
 
     Called every frame from CarController.update() before the HUD messages are built.
     """
@@ -150,7 +176,8 @@ class LaneDisplayTestExt:
     return self._current_override()
 
   def _current_override(self):
-    return LANE_TEST_STEPS[self.ldt_step - 1][0]
+    lines, hands, _ = LANE_TEST_STEPS[self.ldt_step - 1]
+    return LaneTestOverride(lines, hands)
 
   def _abort(self) -> None:
     self.ldt_step = LANE_TEST_IDLE

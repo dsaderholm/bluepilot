@@ -218,6 +218,9 @@ _LDT_LABELS = (
   "LEFT: WARNING",
   "LEFT: INTERVENE",
   "LANE ASSIST OFF",
+  "HANDS: LEVEL 1",
+  "HANDS: LEVEL 2  (listen)",
+  "HANDS: SUPPRESSED",
 )
 
 _BT_STOPPED = {
@@ -1362,7 +1365,12 @@ class HudRendererBP(HudRendererSP):
     label = _LDT_LABELS[step - 1]
     # Where to look. "Watch the left line" is wrong for LA_Off, which is a whole-display value --
     # and being told to watch the wrong thing is how a walk produces a confident wrong answer.
-    where = "watch the LEFT line" if label.startswith("LEFT:") else "watch the whole display"
+    if label.startswith("LEFT:"):
+      where = "watch the LEFT line"
+    elif label.startswith("HANDS:"):
+      where = "the hands-on-wheel indicator"
+    else:
+      where = "watch the whole display"
     self._pa_main = label
     self._pa_sub = f"{where}  --  {step} of {len(_LDT_LABELS)}"
     self._pa_progress = 0.0

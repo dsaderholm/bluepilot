@@ -125,9 +125,11 @@ SCENES = [
   # The standstill lane-display walk. Six of these, one per step -- widest label and widest
   # subtitle are both here, so if these fit the whole walk fits.
   ("lane walk: the step that is the point of the exercise",
-   "LEFT: SUPPRESS", "watch the LEFT line  --  3 of 6", 0.0, True, INFO),
+   "LEFT: SUPPRESS", "watch the LEFT line  --  3 of 9", 0.0, True, INFO),
   ("lane walk: the longest label",
-   "LANE ASSIST OFF", "watch the whole display  --  6 of 6", 0.0, True, INFO),
+   "LANE ASSIST OFF", "watch the whole display  --  6 of 9", 0.0, True, INFO),
+  ("lane walk: the hands indicator, the step with a sound in it",
+   "HANDS: LEVEL 2  (listen)", "the hands-on-wheel indicator  --  8 of 9", 0.0, True, INFO),
   ("lane walk: refused because the car was moving",
    "STOP THE CAR FIRST", "the lane walk only runs stopped", 0.0, True, AMBER),
   ("worst case for width: everything at once",

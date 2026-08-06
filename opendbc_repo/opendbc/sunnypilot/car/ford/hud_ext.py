@@ -137,7 +137,7 @@ class HudExt:
     # steers. See create_lkas_ui_msg -- each line is a four-level meter for its own side.
     self.passing_last = fordcan_ext.CLUSTER_PASSING_IDLE
     self.show_passing_in_cluster = False
-    # BluePilot: the standstill lane-display walk's current raw LaActvStats override, or None.
+    # BluePilot: the standstill lane-display walk's current override, or None.
     self.lane_test_last = None
 
   def update_hud_params(self, params, CP):
@@ -185,7 +185,7 @@ class HudExt:
       packer: CAN packer
       CAN: Ford CAN bus config
       CP: CarParams
-      lane_test: raw LaActvStats value from the standstill display walk, or None. See
+      lane_test: LaneTestOverride from the standstill display walk, or None. See
         lane_display_test_ext -- while a walk runs it owns the lane display outright.
 
     Returns:
