@@ -584,6 +584,8 @@ class PassingAssistDetector:
     # Which geometry term refuses the LEFT side, counted over the whole drive. See _record_refusal.
     self._geo_refusals = [0, 0, 0, 0]
     self._geo_sums = [0.0, 0.0, 0.0, 0.0]
+    # ...and the SPREAD, not just the mean. See geo_refusal_loosen_to.
+    self._geo_hist = [[0] * 10 for _ in range(4)]
     self.right_geometry_ok = False
     self.right_widening_m = 0.0
     self.right_widening = False
@@ -892,6 +894,9 @@ class PassingAssistDetector:
   # The four terms of the left-hand gate, in the order it evaluates them. Index is what gets
   # published; the panel turns it back into a word.
   GEO_EDGE_STD, GEO_PAINT, GEO_WIDTH, GEO_BEYOND = 0, 1, 2, 3
+  # Plausible full range of each term, for bucketing. Not the threshold -- the range the measurement
+  # itself lives in, so a bucket means the same thing whatever the threshold is set to today.
+  GEO_SPAN = (2.0, 1.0, 8.0, 4.0)
 
   def _record_refusal(self) -> None:
     """Tally which term refuses the LEFT side, and its value, across the drive.
@@ -921,6 +926,36 @@ class PassingAssistDetector:
       idx, val = self.GEO_BEYOND, self.left_edge_beyond
     self._geo_refusals[idx] += 1
     self._geo_sums[idx] += val
+    # Ten buckets across the term's plausible range. A mean says "paint averaged 0.31" and cannot
+    # answer the only question worth asking -- what would I have to set it to. Half the refusals
+    # could be at 0.45 and half at 0.17, and 0.30 would fix neither cleanly.
+    span = self.GEO_SPAN[idx]
+    self._geo_hist[idx][min(9, max(0, int(val / span * 10)))] += 1
+
+  @property
+  def geo_refusal_loosen_to(self) -> float:
+    """Where the dominant term would have to sit to admit FOUR FIFTHS of the refusals.
+
+    The number to change the constant to, which a mean cannot give. paint averaging 0.31 could be
+    tightly clustered -- in which case 0.30 fixes almost everything -- or half at 0.45 and half at
+    0.17, where 0.30 fixes half and nothing else. This is the twentieth percentile for the terms
+    that need a value ABOVE them, which is every one of them except the road-edge std.
+    """
+    idx, _, _ = self.geo_refusal
+    hist = self._geo_hist[idx]
+    total = sum(hist)
+    if not total:
+      return 0.0
+    want = total * (0.8 if idx == self.GEO_EDGE_STD else 0.2)
+    seen = 0
+    for i, n in enumerate(hist):
+      seen += n
+      if seen >= want:
+        # Lower edge of the bucket for a minimum, upper for a maximum -- the conservative side of
+        # the bucket in each direction, so the reported number actually admits the share it claims.
+        edge = i if idx != self.GEO_EDGE_STD else i + 1
+        return round(edge / 10.0 * self.GEO_SPAN[idx], 3)
+    return round(self.GEO_SPAN[idx], 3)
 
   @property
   def geo_refusal(self) -> tuple[int, float, float]:
@@ -1195,6 +1230,7 @@ class PassingAssistDetector:
         "geoRefusedBy": int(self.geo_refusal[0]),
         "geoRefusedValue": round(self.geo_refusal[1], 3),
         "geoRefusedShare": round(self.geo_refusal[2], 3),
+        "geoLoosenTo": self.geo_refusal_loosen_to,
         "wantedSeconds": round(self.wanted_seconds, 1),
         "topBlockedBy": int(top_key),
         "topBlockedShare": round(top_share, 3),
@@ -2107,6 +2143,7 @@ class PassingAssistDetector:
     passingAssist.geoRefusedBy = int(geo_term)
     passingAssist.geoRefusedValue = float(geo_value)
     passingAssist.geoRefusedShare = float(geo_share)
+    passingAssist.geoLoosenTo = float(pa.geo_refusal_loosen_to)
     passingAssist.rightEdgeBeyond = float(pa.right_edge_beyond)
     passingAssist.leftEdgeStd = float(min(pa.left_edge_std, 1e3))
     passingAssist.rightEdgeStd = float(min(pa.right_edge_std, 1e3))

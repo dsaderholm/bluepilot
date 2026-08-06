@@ -91,6 +91,7 @@ def timeline() -> int:
   if share > 0:
     term = GEO_TERMS[int(d.get("geoRefusedBy", 0))]
     print(f"left side refused by: {term} = {d.get('geoRefusedValue')}  ({share * 100:.0f}% of refusals)")
+    print(f"  would need to be {d.get('geoLoosenTo')} to admit four fifths of them")
   print()
   print(f"{'time':>8}  {'decided':<7} {'blocked by':<18} {'pass':<11} keep-right")
   for t, sug, blk, mv, kr in rows:

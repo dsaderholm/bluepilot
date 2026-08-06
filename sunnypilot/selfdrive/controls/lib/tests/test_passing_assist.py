@@ -2890,3 +2890,35 @@ class TestTheTimelineIsARing:
     assert saved["geoRefusedBy"] == det.GEO_PAINT
     assert abs(saved["geoRefusedValue"] - 0.31) < 0.01
     assert saved["geoRefusedShare"] > 0.5
+
+  def test_it_reports_where_the_threshold_would_have_to_sit(self):
+    """A mean names the constant; it does not say what to set it to. Refusals clustered at 0.31
+    are fixed by 0.30; refusals split between 0.45 and 0.17 are not, and the mean is the same.
+    """
+    det = keep_right_det()
+    run(det, int(30.0 / DT_MDL), v_lead=SLOW_LEAD_MS, probs=(0.31, 0.99, 0.99, 0.2))
+    term, _, _ = det.geo_refusal
+    assert term == det.GEO_PAINT
+    loosen = det.geo_refusal_loosen_to
+    assert 0.0 < loosen <= 0.31, f"reported {loosen}, which would not admit the refused frames"
+
+  def test_a_split_distribution_reports_the_LOW_end_not_the_middle(self):
+    """The case a mean cannot express. Half the refusals well below the mean means the mean fixes
+    half of them, so the number to report is the one that admits four fifths."""
+    # THREE TO ONE, deliberately. With an even split the median and the twentieth percentile land
+    # close enough that reporting either passes -- which is a test that cannot tell the difference
+    # between the number to set and the middle of the range.
+    det = keep_right_det()
+    run(det, int(30.0 / DT_MDL), v_lead=SLOW_LEAD_MS, probs=(0.45, 0.99, 0.99, 0.2))
+    run(det, int(10.0 / DT_MDL), v_lead=SLOW_LEAD_MS, probs=(0.15, 0.99, 0.99, 0.2))
+    _, mean, _ = det.geo_refusal
+    loosen = det.geo_refusal_loosen_to
+    assert loosen < mean, f"reported the mean ({mean:.2f}) rather than the low end ({loosen:.2f})"
+    assert loosen <= 0.2, (
+      f"{loosen:.2f} is the middle of the spread, not the value that admits four fifths of it")
+
+  def test_nothing_refused_reports_nothing(self):
+    det = keep_right_det()
+    run(det, int(20.0 / DT_MDL), v_lead=SLOW_LEAD_MS)
+    assert det.left_geometry_ok
+    assert det.geo_refusal_loosen_to == 0.0

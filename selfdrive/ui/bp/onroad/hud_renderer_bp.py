@@ -952,8 +952,12 @@ class HudRendererBP(HudRendererSP):
         # question standing between the feature and working at all, and it means one look answers
         # what otherwise costs an SSH session. The numbers stay in the drive summary.
         elif blocked == 'noLaneAvailable' and pa.geoRefusedShare > 0.0:
+          # THE WORD AND THE NUMBER. A word alone names the constant; it does not say what to set
+          # it to, and a drive that produces "paint" and nothing else still costs a second drive to
+          # act on. geoLoosenTo is where that term would have to sit to admit four fifths of the
+          # refusals -- so "paint 0.31" read off the screen at a light is the entire answer.
           term = (_GEO_TERMS[pa.geoRefusedBy] if pa.geoRefusedBy < len(_GEO_TERMS) else "?")
-          self._pa_sub_detail = f"left: {term}"
+          self._pa_sub_detail = f"left: {term} {pa.geoLoosenTo:.2f}"
         elif blocked == 'closingIn' and pa.minApproachActive > 0:
           # Auto derives this from what the car's own ACC has been measured doing, so the number is
           # different per car and changes as it learns. Without showing it, "Waiting to get closer"

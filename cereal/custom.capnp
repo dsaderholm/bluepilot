@@ -813,6 +813,11 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     geoRefusedBy @90 :UInt8;
     geoRefusedValue @91 :Float32;
     geoRefusedShare @92 :Float32;
+
+    # ...and where that term would have to sit to admit four fifths of the refusals. The number to
+    # SET, which a mean cannot give: a mean of 0.31 could be tightly clustered, or half at 0.45 and
+    # half at 0.17, and only one of those is fixed by 0.30.
+    geoLoosenTo @93 :Float32;
     oncomingSeenSeconds @80 :Float32;        # refused while actually watching a vehicle
     oncomingRememberedSeconds @81 :Float32;  # refused on memory alone, nothing in view
 
