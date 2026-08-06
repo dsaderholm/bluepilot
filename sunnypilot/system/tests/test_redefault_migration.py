@@ -62,10 +62,12 @@ class TestItClearsRatherThanWrites:
 
   def test_it_touches_nothing_outside_the_list(self):
     """The list is the contract. Anything he tuned himself has to come through untouched."""
-    p = FakeParams({"FordLowSpeedFactor_ang": "0.92", "IcbmMaxTargetDrop": "12"})
+    # IcbmMaxTargetRise, not ...Drop: Drop is now cleared by icbm-2, and an example key that
+    # quietly joins a group turns this test into a tautology.
+    p = FakeParams({"FordLowSpeedFactor_ang": "0.92", "IcbmMaxTargetRise": "5"})
     _migrate_bp_redefaulted(p)
     assert "FordLowSpeedFactor_ang" not in p.removed
-    assert "IcbmMaxTargetDrop" not in p.removed
+    assert "IcbmMaxTargetRise" not in p.removed
     assert p.store["FordLowSpeedFactor_ang"] == "0.92"
 
 
@@ -173,56 +175,73 @@ class TestTheGroupsThemselves:
     the re-clearing this whole shape exists to prevent."""
     assert len(_BP_REDEFAULTED) == len(set(_BP_REDEFAULTED))
 
-  def test_every_flipped_default_is_accounted_for(self):
+  def test_every_default_that_ever_moved_is_accounted_for(self):
     """The bug this exists to catch, found on the road rather than here.
 
-    GreenLightAlert and LeadDepartAlert were flipped 0 -> 1 in params_keys.h and left out of a
-    group, on the assumption they were "already on for him". They were not. manager.py writes every
-    unset param to disk at boot, so upstream's 0 had been materialized long before the flip, and
-    PERSISTENT | BACKUP kept it. The flip reached a file nobody reads, and he sat at a clear red
-    light with nothing on screen.
+    A default is only ever read on a device that has NEVER stored the key. manager.py's
+    "set unset params to their default value" loop writes every declared key to disk at boot, and
+    these are PERSISTENT | BACKUP, so that first boot freezes the value shipping that day. Every
+    later edit to params_keys.h goes to a file nobody reads.
 
-    So: diff our shipped defaults against upstream's, and require every difference to be either
-    cleared by a group or excluded here ON PURPOSE. Changing a default and forgetting the migration
-    is invisible any other way -- everything reads correct, and only the car disagrees.
+    The first version of this test compared against upstream only, which missed the case that
+    actually cost a drive: IcbmModelStopEnabled was ADDED on this branch at 1, deliberately shipped
+    at 0 for a stretch, and set back to 1. It never differed from upstream -- upstream has never
+    heard of it -- so an upstream diff called it clean while the car sat at red lights doing
+    nothing. What matters is not "does it differ from upstream" but "has this value ever moved
+    under a device that might have booted the older one".
+
+    So: walk every revision of params_keys.h on this branch, and require any key that has ever held
+    more than one default to be either cleared by a group or excluded here ON PURPOSE.
     """
     root = pathlib.Path(__file__).resolve().parents[3]
     try:
       base = subprocess.run(["git", "merge-base", "HEAD", "upstream/bp-7.0"], cwd=root,
                             capture_output=True, text=True, timeout=30, check=True).stdout.strip()
-      upstream_src = subprocess.run(["git", "show", f"{base}:common/params_keys.h"], cwd=root,
-                                    capture_output=True, text=True, timeout=30, check=True).stdout
+      revs = [base] + subprocess.run(
+        ["git", "log", "--reverse", "--format=%H", f"{base}..HEAD", "--", "common/params_keys.h"],
+        cwd=root, capture_output=True, text=True, timeout=30, check=True).stdout.split()
     except (OSError, subprocess.SubprocessError) as e:
       pytest.skip(f"needs the upstream remote to compare against: {e}")
 
     entry = re.compile(r'\{"(\w+)",\s*\{[^}]*?,\s*\w+,\s*"([^"]*)"\s*\}\s*\}')
-    def defaults(src: str) -> dict[str, str]:
-      return {m.group(1): m.group(2) for m in entry.finditer(src)}
+    ever: dict[str, set[str]] = {}
+    for rev in revs:
+      src = subprocess.run(["git", "show", f"{rev}:common/params_keys.h"], cwd=root,
+                           capture_output=True, text=True, timeout=30, check=True).stdout
+      seen_here = 0
+      for m in entry.finditer(src):
+        ever.setdefault(m.group(1), set()).add(m.group(2))
+        seen_here += 1
+      assert seen_here > 100, f"{rev[:9]} parsed only {seen_here} keys; the regex has gone stale"
 
-    theirs = defaults(upstream_src)
-    ours = defaults((root / "common" / "params_keys.h").read_text(encoding="utf-8"))
-    assert len(theirs) > 100, "the upstream file did not parse; the regex has gone stale"
-
-    # Keys we ship a different default for AND deliberately do not clear. Every entry needs a
-    # reason, because "it is probably fine" is exactly how the two alerts got missed.
+    # Keys whose default has moved AND that deliberately are not cleared. Every entry needs a
+    # reason, because "it is probably fine" is exactly how the model-stop path stayed off.
     deliberately_not_cleared = {
       # His own steering tune, arrived at on the road. The defaults were moved to match what he
       # runs; clearing is this file reaching into lateral settings, which he asked it to stop doing.
       "FordLowSpeedFactor_ang", "FordHighSpeedFactor_ang", "FordPrefLateralControl",
-      # He can see the brake pill working, so this already holds the value he wants.
-      "ShowBrakeStatus",
+      # He confirmed on 2026-08-05 that these three work on the car, so whatever is stored is
+      # already the value he wants -- he turned them on himself. Clearing gains nothing.
+      "ShowBrakeStatus", "GreenLightAlert", "LeadDepartAlert",
+      # Curve feel. He drove the current behavior on 2026-08-05 and called it good, so whatever is
+      # stored is a tested state and the shipped numbers are not. Clearing would hand him a curve
+      # tune he has never driven, which is the opposite of the point. Revisit only against a
+      # readout of what the car actually holds.
+      "SmartCruiseControlVisionEarliness", "SmartCruiseControlVisionLowSpeedFactor",
+      "SmartCruiseControlVisionHighSpeedFactor",
     }
 
-    flipped = {k for k in theirs.keys() & ours.keys() if theirs[k] != ours[k]}
-    unaccounted = flipped - set(_BP_REDEFAULTED) - deliberately_not_cleared
+    moved = {k for k, vals in ever.items() if len(vals) > 1}
+    unaccounted = moved - set(_BP_REDEFAULTED) - deliberately_not_cleared
     assert not unaccounted, (
-      f"shipped default changed with no migration and no stated reason: {sorted(unaccounted)}. "
-      "The stored value on the car wins, so this change reaches nothing. Add the key to a new "
-      "group in _BP_REDEFAULT_GROUPS, or to deliberately_not_cleared with why.")
+      f"shipped default moved with no migration and no stated reason: {sorted(unaccounted)}. "
+      "A device that booted the older value still holds it, so this change reaches nothing. Add "
+      "the key to a new group in _BP_REDEFAULT_GROUPS, or to deliberately_not_cleared with why.")
 
-    # And the reverse: an exclusion or a cleared key that no longer differs is stale bookkeeping.
-    stale = (set(_BP_REDEFAULTED) | deliberately_not_cleared) & (theirs.keys() - flipped)
-    assert not stale, f"listed as a changed default, but it now matches upstream: {sorted(stale)}"
+    # And the reverse: bookkeeping for a key whose default never actually moved is noise that makes
+    # the real entries harder to trust.
+    stale = (set(_BP_REDEFAULTED) | deliberately_not_cleared) - moved
+    assert not stale, f"listed as a changed default, but it has only ever had one: {sorted(stale)}"
 
   def test_a_group_already_taken_is_skipped_while_a_new_one_runs(self):
     """The point of separate groups. A branch adding its own must not re-clear this branch's."""

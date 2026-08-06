@@ -106,21 +106,32 @@ _BP_REDEFAULT_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
   "SmartCruiseControlVision",
  )),
  ("icbm-2", (
-  # off -> on, both of them. These were excluded from icbm-1 on the reasoning that they were
-  # "already on for him". They were not, and there was never any evidence they were -- the shipped
-  # default was read as though it were the stored value.
+  # Keys ADDED on this branch whose default I then changed again. icbm-1 skipped these on the
+  # reasoning that a new key "has never been written, so it already takes its default with no
+  # help". That is true exactly once. manager.py writes every unset param to disk at boot, so the
+  # value shipping on the day he first flashed a build containing the key is the value frozen on
+  # his car -- and he has flashed this branch after nearly every fix. Every later edit to
+  # params_keys.h since then has gone to a file nobody reads.
   #
-  # Both arrived from upstream sunnypilot defaulting to "0" (Green Traffic Light Alert #1287, Lead
-  # Departure Alert #1302) and were flipped to "1" here. That flip cannot reach this car on its own:
-  # manager.py writes EVERY unset param to disk at boot ("set unset params to their default value"),
-  # so the upstream 0 was materialized the first time he booted a build containing those features,
-  # and PERSISTENT | BACKUP has kept it ever since. Changing params_keys.h after that point is
-  # writing to a file nobody reads.
-  #
-  # Confirmed on the road 2026-08-05: stopped at a clear red light at night, no lead, MADS on --
-  # every gate in e2e_alerts_helper satisfied -- and nothing fired.
-  "GreenLightAlert",
-  "LeadDepartAlert",
+  # THE ONE THAT MATTERS. Shipped 1, then deliberately shipped 0 ("ship the model-stop path off",
+  # 2ed220b6a), then back to 1. If he flashed anywhere in that window he has a stored 0, and
+  # model_stop_enabled is the outermost gate in unconfirmed_lead -- a false there skips the entire
+  # block, so the car does nothing at a red light or a stop sign and there is no alert to say why.
+  # That is the standing "I still haven't seen it do anything for traffic lights and stop signs".
+  "IcbmModelStopEnabled",
+  # 0 -> 1. The standstill resume gate, shipped off for one commit and enabled the next.
+  "IcbmResumeGateEnabled",
+  # 120 -> 180 m and 40 -> 70 (4.0 -> 7.0 s TTC). A stale pair here does not disable anything, it
+  # quietly shortens how far ahead the radar-blind detector is allowed to look -- which reads as
+  # "it warned me late" rather than as a setting being wrong.
+  "IcbmLeadMaxDistance",
+  "IcbmLeadMaxTtc",
+  # 85 -> 100 mph. He asked for 100 explicitly; at a stored 85 the ceiling clips.
+  "SpeedLimitMaxSetSpeed",
+  # 8 -> 12. How fast ICBM is allowed to walk the set speed DOWN. Frozen at 8 the car gives up
+  # ground more slowly than every curve controller feeding it expects, which is the shape of the
+  # open "still took an exit ramp going 80" report.
+  "IcbmMaxTargetDrop",
  )),
 )
 
