@@ -454,8 +454,9 @@ class UnconfirmedLeadDetector:
       return
 
     # ---- model stop intent: the only signal for a sign or signal with no vehicle at it ----
-    # Evaluated before the lead path so a real lead always takes precedence: if there is something
-    # to see, the lead trigger's geometry filters are strictly better evidence than shouldStop.
+    # Gated on `not candidate` so a real lead always takes precedence: if there is something to
+    # see, the lead trigger's geometry filters are strictly better evidence than a shortened
+    # trajectory, which cannot tell a stop line from a vehicle.
     if self.model_stop_enabled and not candidate:
       # Same distinction as the lead path: a stationary radar return does not mean Ford is on it.
       radar_has_it = self._ford_tracks(lead, v_ego)

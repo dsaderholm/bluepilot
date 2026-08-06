@@ -60,12 +60,21 @@ def unconfirmed_lead_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.Su
 def model_stop_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
   """BluePilot: the driving model wants to stop -- a sign or signal -- and Ford ACC will not.
 
-  Presented identically to unconfirmed_lead_alert, on purpose. This started out as a quieter
-  PROMPT on the theory that it would fire at every sign and signal in town and sharing the loud
-  presentation would train the driver to tune out the lead alert. That theory did not survive
-  contact: the trigger needs cruise engaged above 25 mph with no lead present, which in practice
-  is highway driving, and the owner went weeks without ever seeing this alert once. It is rare,
-  not constant, so there is no fatigue argument to trade against clarity.
+  Presented identically to unconfirmed_lead_alert, on purpose -- but READ THIS BEFORE TRUSTING
+  THAT. This started out as a quieter PROMPT on the theory that it would fire at every sign and
+  signal in town and sharing the loud presentation would train the driver to tune out the lead
+  alert. It was made loud because "the owner went weeks without ever seeing this alert once".
+
+  That evidence was worthless. He never saw it because the trigger gated on
+  modelV2.action.shouldStop, which is false at every speed this path can run at -- the alert was
+  unreachable, not rare. Corrected 2026-08-05, and the frequency is now genuinely UNKNOWN: the
+  trigger is DEC's slow-down detection, and on a 35-45 mph arterial with cruise set and no car
+  ahead, every red light qualifies.
+
+  So the fatigue argument is live again and has never been tested. What still stands on its own,
+  independent of frequency, is the severity argument below -- which is why this ships loud for a
+  first drive rather than being quietly downgraded on a guess. If it fires several times a trip,
+  drop it to a PROMPT.
 
   The severity argument runs the other way too. A radar-blind lead has an escape: keep closing and
   Ford's radar may acquire it, which is exactly what the detector's release conditions wait for. A
