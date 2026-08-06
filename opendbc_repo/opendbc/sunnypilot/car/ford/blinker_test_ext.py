@@ -1,6 +1,47 @@
 """
 BluePilot: stationary bench test for turn-signal actuation on Ford.
 
+STOP HERE. DO NOT ASK HIM TO TEST THIS AGAIN -- 2026-08-06.
+=========================================================
+"I'm really getting tired of testing these blinkers for you every time... this is driving me mad
+testing this every single time and not working."
+
+Four fixes were attempted across two days -- a guard derived from the observed on-time, a disarm
+retry, a stall watchdog, and a lamp-settle gate. Every one was a PACING fix. Every one was plausible,
+partially right, and did not fix it. The counts stayed erratic: 6, then 1+4, then 4+2, then 0.
+
+The cause is not pacing, and this file said so on 2026-08-04 before any of them were written:
+
+  BO_ 131 Steering_Data_FD1: 8 GWM        <- the GATEWAY sends this frame
+   SG_ TurnLghtSwtch_D_Stat ...           <- the signal we write into it
+
+We are writing the driver's STALK POSITION onto a frame the gateway is transmitting ten times a
+second with the real position, which is off. The body module sees a switch flickering between our
+value and the gateway's depending on which frame landed last. No send schedule wins that, because
+the contention is the mechanism rather than a symptom of bad timing -- and the "break then more
+blinks" he reports is the stall watchdog recovering from exactly that.
+
+There is no lamp command on this bus either. TurnLghtLeft_D_Rq and TurnLghtRight_D_Rq are on
+BO_ 947 BodyInfo_3_FD1, also sent by GWM, addressed OUTWARD to CMR_DSMC and IPMA_ADAS. Nothing on
+the powertrain bus asks the BCM for a lamp; those signals are the gateway reporting what the BCM
+already decided.
+
+WHAT IS ACTUALLY PROVEN, and it is not nothing: one commanded frame produces exactly one flash, the
+lamp mirrors frames one for one and latches nothing, and his flasher runs at 760 ms. That is the
+whole mechanism, established here, and it stands.
+
+WHERE IT GOES NEXT: the canbox, on MS-CAN, where the body module actually lives. NOT asserted to
+work -- that message is not in this DBC and this project has been wrong about this car's
+capabilities four separate times by reasoning instead of reading. It is the only remaining avenue
+that is not a fight over a signal someone else owns.
+
+AND IT BLOCKS NOTHING. The blinker is needed when passing assist ACTUATES, which is gated behind
+BLIS, the rear radar, and his explicit go-ahead. It was never on the critical path for the phase-1
+observer, and letting it consume test drives was the mistake -- not any single one of the four
+fixes. Leave the buttons; they cost nothing sitting there. Do not spend his driving on them.
+
+
+
 ONE QUESTION: if openpilot writes TurnLghtSwtch_D_Stat into the Steering_Data_FD1 frame it already
 transmits, does the BCM actually light the lamp?
 
