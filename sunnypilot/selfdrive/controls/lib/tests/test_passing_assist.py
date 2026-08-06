@@ -2865,3 +2865,28 @@ class TestTheTimelineIsARing:
     det._archive_drive(drive)
     det._archive_drive(drive)
     assert len(p.store["PassingAssistHistory"]) == 1
+
+  def test_the_refusal_reaches_the_stored_summary(self):
+    """It was published live and never stored, so the one number explaining a drive with sixty
+    refusals and zero suggestions could only be read off a RUNNING car. "I guess I need to go back
+    to my car?" was the cost of that omission, and the answer should have been no.
+    """
+    # WRAPS the real stub rather than replacing it -- every setting still reads its own default,
+    # which a bare fake returning None turns into `None * float` several gates later.
+    det = keep_right_det()
+    real = det.params
+
+    class P:
+      def __init__(s): s.store = {}
+      def get(s, k, *a, **kw): return s.store[k] if k in s.store else real.get(k, *a, **kw)
+      def get_bool(s, k, *a, **kw): return real.get_bool(k, *a, **kw)
+      def put(s, k, v, block=False): s.store[k] = v
+      def remove(s, k): s.store.pop(k, None)
+    p = P()
+    det.params = p
+    run(det, int(60.0 / DT_MDL), v_lead=SLOW_LEAD_MS, probs=(0.31, 0.99, 0.99, 0.2))
+    saved = p.store.get("PassingAssistLastDrive")
+    assert saved, "nothing was stored at all"
+    assert saved["geoRefusedBy"] == det.GEO_PAINT
+    assert abs(saved["geoRefusedValue"] - 0.31) < 0.01
+    assert saved["geoRefusedShare"] > 0.5

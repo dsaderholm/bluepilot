@@ -52,7 +52,12 @@ def history() -> int:
   print(f"{len(hist)} drives\n")
   for i, d in enumerate(hist, 1):
     build = d.get("build", "?")
-    print(f"--- drive {i}  build {build}")
+    share = float(d.get("geoRefusedShare", 0))
+    why = ""
+    if share > 0:
+      why = (f"  [left refused by {GEO_TERMS[int(d.get('geoRefusedBy', 0))]} = "
+             f"{d.get('geoRefusedValue')}, {share * 100:.0f}%]")
+    print(f"--- drive {i}  build {build}{why}")
     print(json.dumps({k: v for k, v in d.items() if k != "build"}, sort_keys=True))
   return 0
 
@@ -81,6 +86,11 @@ def timeline() -> int:
     print("no timeline stored -- the drive has to have wanted a pass at least once")
     return 0
   print(f"{len(rows)} state changes over {d.get('elapsed', 0):.0f}s")
+  # The headline, printed FIRST because it is the answer to why nothing was ever suggested.
+  share = float(d.get("geoRefusedShare", 0))
+  if share > 0:
+    term = GEO_TERMS[int(d.get("geoRefusedBy", 0))]
+    print(f"left side refused by: {term} = {d.get('geoRefusedValue')}  ({share * 100:.0f}% of refusals)")
   print()
   print(f"{'time':>8}  {'decided':<7} {'blocked by':<18} {'pass':<11} keep-right")
   for t, sug, blk, mv, kr in rows:

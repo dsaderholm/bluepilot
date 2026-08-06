@@ -1188,6 +1188,13 @@ class PassingAssistDetector:
         # ends with a yanked ignition keeps whatever the last periodic write had.
         "timeline": list(self._timeline),
         "elapsed": round(self.elapsed_s, 1),
+        # WHICH geometry term refused the left side, and by how much. Published live since it was
+        # written and never stored, so the one number that explains a drive with sixty refusals and
+        # zero suggestions could only be read off a running car -- "I guess I need to go back to my
+        # car?" is the cost of that, and the answer was no, it was my omission.
+        "geoRefusedBy": int(self.geo_refusal[0]),
+        "geoRefusedValue": round(self.geo_refusal[1], 3),
+        "geoRefusedShare": round(self.geo_refusal[2], 3),
         "wantedSeconds": round(self.wanted_seconds, 1),
         "topBlockedBy": int(top_key),
         "topBlockedShare": round(top_share, 3),
