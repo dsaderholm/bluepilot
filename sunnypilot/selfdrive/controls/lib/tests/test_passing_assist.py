@@ -451,7 +451,7 @@ DELAY_FRAMES = int(11.0 / DT_MDL)   # clears the delay alone, NOT the age
 _STUB_PARAM_DEFAULTS = {
   "PassingAssistMinDeficit": 4, "PassingAssistConfirmTime": 1,
   "PassingAssistKeepRightDelay": 10, "PassingAssistSettleTime": 20,
-  "PassingAssistMaxDistance": 220, "PassingAssistSuspendMinutes": 15,
+  "PassingAssistMaxDistance": 220,
   "PassingAssistOncomingMemory": 90, "PassingAssistBlinkerLead": 1, "PassingAssistMinApproach": 0, "PassingAssistMinSpeed": 30, "PassingAssistExitStandDown": 45, "PassingAssistCrawlTime": 8, "PassingAssistMinLaneAge": 15,
 }
 
@@ -473,7 +473,7 @@ class _KeepRightOnParams:
     # test of a toggle's OFF state quietly asserted nothing.
     if key in self.values:
       return bool(self.values[key])
-    return key != "PassingAssistSuspend"
+    return True
 
   def put_bool(self, key, val, block=False):
     pass
@@ -1136,56 +1136,6 @@ class _SuspendParams:
       self.suspend = bool(val)
 
 
-class TestSuspend:
-  def _det(self, minutes=15):
-    det = PassingAssistDetector()
-    det.params = _SuspendParams(minutes)
-    return det
-
-  def test_tap_suspends_and_blocks_everything(self):
-    det = self._det()
-    run(det, STUCK_FRAMES)
-    assert det.suggestion == Side.left
-    det.params.suspend = True
-    det.update(make_sm(), CRUISE_MS, True)
-    assert det.suspended_seconds > 0
-    assert det.blocked_by == Blocked.suspended
-    assert det.suggestion == Side.none
-
-  def test_request_is_consumed_so_it_cannot_retrigger(self):
-    det = self._det()
-    det.params.suspend = True
-    det.update(make_sm(), CRUISE_MS, True)
-    assert not det.params.suspend, "one-shot request was not cleared"
-
-  def test_second_tap_resumes_immediately(self):
-    det = self._det()
-    det.params.suspend = True
-    det.update(make_sm(), CRUISE_MS, True)
-    assert det.suspended_seconds > 0
-    det.params.suspend = True
-    det.update(make_sm(), CRUISE_MS, True)
-    assert det.suspended_seconds == 0.0
-
-  def test_counts_down_and_resumes_on_its_own(self):
-    """A pause you must remember to undo is one that disables the feature for a month."""
-    det = self._det(minutes=0.02)   # ~1.2 s
-    det.params.suspend = True
-    det.update(make_sm(), CRUISE_MS, True)
-    assert det.suspended_seconds > 0
-    for _ in range(int(2.0 / DT_MDL)):
-      det.update(make_sm(), CRUISE_MS, True)
-    assert det.suspended_seconds == 0.0
-    run(det, STUCK_FRAMES)
-    assert det.suggestion == Side.left, "did not resume after the countdown"
-
-  def test_timers_do_not_accumulate_while_paused(self):
-    det = self._det()
-    det.params.suspend = True
-    det.update(make_sm(), CRUISE_MS, True)
-    run(det, STUCK_FRAMES)
-    assert det.approach_seconds == 0.0
-    assert det.approach_seconds == 0.0
 
 
 class TestSetSpeedIsTheClusterSpeed:
@@ -1303,51 +1253,6 @@ class TestLookAheadDistance:
     assert det.suggestion == Side.none
 
 
-class TestLkaButtonPause:
-  """The stalk-end LKA button, bound to the same pause as the panel tap.
-
-  Free input: it does nothing on this car and openpilot already passes the signal through, so
-  reading it costs no new message, parser entry or DBC work.
-  """
-
-  def _det(self):
-    det = PassingAssistDetector()
-    det.params = _SuspendParams()
-    return det
-
-  def test_press_pauses(self):
-    det = self._det()
-    run(det, STUCK_FRAMES)
-    assert det.suggestion == Side.left
-    det.update(make_sm(lka=True), CRUISE_MS, True)
-    assert det.suspended_seconds > 0
-    assert det.blocked_by == Blocked.suspended
-
-  def test_second_press_resumes(self):
-    det = self._det()
-    det.update(make_sm(lka=True), CRUISE_MS, True)
-    assert det.suspended_seconds > 0
-    det.update(make_sm(lka=False), CRUISE_MS, True)   # release
-    det.update(make_sm(lka=True), CRUISE_MS, True)    # press again
-    assert det.suspended_seconds == 0.0
-
-  def test_holding_the_button_is_one_request_not_many(self):
-    """Level, not edge, would toggle every cycle for as long as it is held -- roughly 20 times a
-    second, leaving the final state a coin flip."""
-    det = self._det()
-    det.update(make_sm(lka=True), CRUISE_MS, True)
-    first = det.suspended_seconds
-    assert first > 0
-    for _ in range(40):
-      det.update(make_sm(lka=True), CRUISE_MS, True)
-    assert det.suspended_seconds > 0, "held button toggled the pause back off"
-    assert det.suspended_seconds < first, "countdown should still be running"
-
-  def test_not_pressed_changes_nothing(self):
-    det = self._det()
-    run(det, STUCK_FRAMES, lka=False)
-    assert det.suspended_seconds == 0.0
-    assert det.suggestion == Side.left
 
 
 class TestPublish:
@@ -1843,14 +1748,6 @@ class TestGateOrder:
   Sixteen reasons now, added over a dozen commits. Each pair below is a deliberate ordering, not an
   accident of where the code happened to grow.
   """
-
-  def test_paused_outranks_everything(self):
-    """The driver said "not here". A panel reporting some geometric reason while suspended would
-    misrepresent why it is silent."""
-    det = keep_right_det()
-    run(det, 2, lka=True)
-    run(det, STUCK_FRAMES, left_bs=True, right_bs=True, edges=(-2.3, 2.4), lead_accel=-4.0)
-    assert det.blocked_by == Blocked.suspended
 
   def test_your_own_lane_change_outranks_you_are_driving(self):
     """The stand-down outlasts the stalk, so "you are driving" would read as not having noticed
@@ -2922,3 +2819,92 @@ class TestTheTimelineIsARing:
     run(det, int(20.0 / DT_MDL), v_lead=SLOW_LEAD_MS)
     assert det.left_geometry_ok
     assert det.geo_refusal_loosen_to == 0.0
+
+
+class TestLkaButtonTurnsItOnAndOff:
+  """"I want this fully turned on and off with the LKA button. Not pause. But have it automatically
+  turn on at speed or whatever, but then when I turn it off, leave it off until I turn it on."
+
+  It used to start a fifteen minute countdown. A countdown always comes back on its own, which is
+  the one thing he said he did not want -- so the button writes the same key the settings toggle
+  writes, and OFF stays off across ignition cycles until he presses it again.
+
+  "Automatically turn on at speed" needs nothing extra: enabled is not active. Once it is on, the
+  speed gate decides when it does anything, exactly as before.
+  """
+
+  @staticmethod
+  def _det():
+    """Wraps the real stub so every other setting keeps its default -- a bare fake returning None
+    turns into `None * float` several gates later, which is a harness bug wearing a real one's
+    costume."""
+    det = keep_right_det()
+    real = det.params
+
+    class P:
+      def __init__(s): s.store = {}
+      def get(s, k, *a, **kw): return s.store[k] if k in s.store else real.get(k, *a, **kw)
+      def get_bool(s, k, *a, **kw):
+        return s.store[k] if k in s.store else real.get_bool(k, *a, **kw)
+      def put(s, k, v, block=False): s.store[k] = v
+      def put_bool(s, k, v, block=False): s.store[k] = bool(v)
+      def remove(s, k): s.store.pop(k, None)
+    det.params = P()
+    return det
+
+  def test_a_press_turns_it_off(self):
+    det = self._det()
+    run(det, STUCK_FRAMES, v_lead=SLOW_LEAD_MS)
+    assert det.suggestion == Side.left
+    run(det, 3, v_lead=SLOW_LEAD_MS, lka=True)
+    assert not det.enabled
+    assert det.blocked_by == Blocked.disabled
+
+  def test_and_it_STAYS_off(self):
+    """The whole request. A pause expires; this must not."""
+    det = self._det()
+    run(det, 3, v_lead=SLOW_LEAD_MS, lka=True)
+    run(det, int(60.0 / DT_MDL), v_lead=SLOW_LEAD_MS)
+    assert not det.enabled, "it came back on by itself"
+    assert det.blocked_by == Blocked.disabled
+
+  def test_it_writes_where_the_settings_screen_reads(self):
+    """One state, two ways to reach it. A separate flag would let the menu and the panel disagree
+    about whether the feature is on."""
+    det = self._det()
+    run(det, 3, v_lead=SLOW_LEAD_MS, lka=True)
+    assert det.params.store["PassingAssistLogEnabled"] is False
+
+  def test_a_second_press_turns_it_back_on_and_it_works(self):
+    det = self._det()
+    run(det, 3, v_lead=SLOW_LEAD_MS, lka=True)
+    assert not det.enabled
+    run(det, 3, v_lead=SLOW_LEAD_MS)
+    run(det, 3, v_lead=SLOW_LEAD_MS, lka=True)
+    assert det.enabled
+    assert det.params.store["PassingAssistLogEnabled"] is True
+    run(det, STUCK_FRAMES, v_lead=SLOW_LEAD_MS)
+    assert det.suggestion == Side.left, "back on, but not working"
+
+  def test_holding_the_button_is_one_press_not_many(self):
+    """The signal reads Pressed for as long as it is held. Level-triggered, a held button would
+    toggle at 20 Hz and land on whichever state the frame count happened to end on."""
+    det = self._det()
+    run(det, int(3.0 / DT_MDL), v_lead=SLOW_LEAD_MS, lka=True)
+    assert not det.enabled, "a held button toggled it back on again"
+
+  def test_not_pressed_changes_nothing(self):
+    det = self._det()
+    run(det, STUCK_FRAMES, v_lead=SLOW_LEAD_MS)
+    assert det.enabled and det.suggestion == Side.left
+
+  def test_the_toggle_write_blocks(self):
+    """block=True, and a stub cannot prove it -- put_bool defaults to putNonBlocking, and the
+    periodic param refresh re-reads this key, so a non-blocking write can lose to its own read-back
+    and the button appears dead. That is the same race that made the +/- settings controls look
+    broken. Asserted from source because no fake here reproduces the timing.
+    """
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parents[1] / "passing_assist.py").read_text(encoding="utf-8")
+    assert 'put_bool("PassingAssistLogEnabled", self.enabled, block=True)' in src, (
+      "the LKA toggle no longer writes blocking; the button will intermittently do nothing")

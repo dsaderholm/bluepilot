@@ -10,7 +10,6 @@ from openpilot.selfdrive.ui.bp.onroad.exp_button_bp import ExpButtonBP
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.selfdrive.ui.bp.lib.ui_debug_logger import bp_ui_log
-from openpilot.system.ui.lib.application import gui_app
 
 LateralMode = ControllerStateBP.LateralMode
 SpeedLimitSource = custom.LongitudinalPlanSP.SpeedLimit.Source
@@ -874,11 +873,17 @@ class HudRendererBP(HudRendererSP):
       self._pa_count = 0
       self._pa_suggesting_prev = False
 
-    if pa.suspendedSeconds > 0:
-      mins = int(pa.suspendedSeconds // 60) + 1
-      self._pa_main = "PASSING PAUSED"
-      self._pa_sub = f"resumes in {mins} min  -  tap to resume now"
-      self._pa_color = rl.Color(255, 180, 60, 255)
+    # TURNED OFF, and it says so rather than going blank. He turned it off with the LKA button and
+    # it stays off across ignition cycles -- "leave it off until I turn it on" -- so an empty panel
+    # would be indistinguishable from a quiet road, and from a broken feature.
+    #
+    # NO PANEL TAP any more. It used to toggle the pause, and he is right that it does not belong:
+    # "MADS and stuff don't have panel controls." A full-panel target that disables a feature is an
+    # accidental press waiting to happen, and the physical button is the precedent that fits.
+    if str(pa.blockedBy) == 'disabled':
+      self._pa_main = "PASSING ASSIST OFF"
+      self._pa_sub = "LKA button turns it back on"
+      self._pa_color = rl.Color(170, 175, 180, 255)
       return
 
     suggestion = str(pa.suggestion)
@@ -1455,7 +1460,6 @@ class HudRendererBP(HudRendererSP):
       y += sub_dims.y + 6
 
     self._pa_panel_rect = panel
-    self._handle_panel_tap(panel)
 
     if self._pa_progress > 0:
       # A bar answers "nearly there?" without reading digits, which a number never does at speed.
@@ -1464,22 +1468,6 @@ class HudRendererBP(HudRendererSP):
       rl.draw_rectangle_rounded(track, 1.0, 6, rl.Color(255, 255, 255, 50))
       fill = rl.Rectangle(track.x, track.y, max(8.0, bar_w * self._pa_progress), 8)
       rl.draw_rectangle_rounded(fill, 1.0, 6, self._pa_color)
-
-  def _handle_panel_tap(self, panel: rl.Rectangle) -> None:
-    """Tap the panel to pause passing assist, tap again to resume.
-
-    The panel is the control because it is the thing already on screen saying what the system is
-    doing -- no menu to find, and a target big enough to hit without looking away from the road.
-    Sets a one-shot param; the countdown itself lives in the detector, so a UI crash mid-pause
-    cannot leave the system disabled.
-    """
-    for ev in gui_app.mouse_events:
-      if ev.left_released and rl.check_collision_point_rec(ev.pos, panel):
-        try:
-          self._bp_params.put_bool("PassingAssistSuspend", True)
-        except Exception:  # noqa: BLE001 - a failed tap must never take the HUD down
-          pass
-        break
 
   def _draw_lateral_control_overlay(self, center_x: float, center_y: float, wheel_size: int) -> None:
     """Draw the current lateral control mode over the steering wheel icon."""

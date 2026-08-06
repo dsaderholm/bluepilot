@@ -263,16 +263,6 @@ class PassingAssistSettingsLayout(Widget):
       inline=True)
 
     # --- pausing ---
-    self._suspend_minutes = option_item_sp(
-      title=tr("Pause For"),
-      description=recommended(tr("How long a pause lasts. Pause by tapping the onroad panel or pressing the "
-                     "LKA button on the stalk -- for construction zones, weather, or anywhere the "
-                     "lane markings are unusual. It resumes on its own so it cannot be left "
-                     "switched off and forgotten. Tap again to resume immediately."), "PassingAssistSuspendMinutes", lambda v: f"{v} min"),
-      param="PassingAssistSuspendMinutes",
-      min_value=1, max_value=120, value_change_step=1,
-      label_callback=lambda v: f"{v} min",
-      inline=True)
 
     # --- what you see ---
     self._show_panel = toggle_item_sp(
@@ -339,7 +329,6 @@ class PassingAssistSettingsLayout(Widget):
 
       SectionHeader(tr("When You Take Over")),
       self._exit_standdown,
-      self._suspend_minutes,
 
       SectionHeader(tr("A Pass That Drags")),
       self._crawl_time,

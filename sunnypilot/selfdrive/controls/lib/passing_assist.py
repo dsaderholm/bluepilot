@@ -566,7 +566,6 @@ class PassingAssistDetector:
     # passing us. Tracked at drive level because the per-side clock resets on every overtake, so the
     # live value can never say how quiet the road got.
     self.overtaken_quietest_s = 0.0
-    self.suspended_seconds = 0.0
     self.reference_speed = 0.0
     self.reference_source = RefSource.cluster
 
@@ -616,7 +615,6 @@ class PassingAssistDetector:
     self.strict_two_way = True
     self.oncoming_memory_s = float(DEFAULT_ONCOMING_MEMORY_S)
     self.settle_time_s = float(DEFAULT_SETTLE_TIME_S)
-    self.suspend_minutes = 15
     # Starts settled: at boot we have not just passed anyone, and a fresh detector must not
     # spend its first settle period refusing to suggest a return.
     self._settle_s = 1e3
@@ -732,7 +730,6 @@ class PassingAssistDetector:
       self.overtake.crawl_time_s = float(self.params.get("PassingAssistCrawlTime", return_default=True))
       self.lead_braking_enabled = self.params.get_bool("PassingAssistLeadBrakingHold")
       self.settle_time_s = float(self.params.get("PassingAssistSettleTime", return_default=True))
-      self.suspend_minutes = self.params.get("PassingAssistSuspendMinutes", return_default=True)
       self.max_distance_m = float(self.params.get("PassingAssistMaxDistance", return_default=True))
       self.chime_enabled = self.params.get_bool("PassingAssistChime")
 
@@ -981,31 +978,41 @@ class PassingAssistDetector:
     self._lka_prev = pressed
     return edge
 
-  def _update_suspend(self, lka_edge: bool = False) -> None:
-    """Consume a tap and run the countdown.
+  def _update_enable(self, lka_edge: bool = False) -> None:
+    """The LKA button turns the feature ON and OFF. Not a pause.
 
-    The request arrives as a one-shot param the UI sets and this clears, rather than a param the UI
-    holds -- so the timing lives here where DT_MDL is, and the UI cannot leave the system off by
-    crashing mid-suspend. A second tap while suspended cancels it, because the same control turning
-    a thing off and back on is the only one that can be operated without looking.
+    "I want this fully turned on and off with the LKA button. Not pause. But have it automatically
+    turn on at speed or whatever, but then when I turn it off, leave it off until I turn it on."
+
+    So the button writes the SAME key the settings toggle writes. One state, two ways to reach it:
+    the screen shows what the button did, and the button changes what the screen shows. A separate
+    "running" flag beside the settings toggle would be two sources of truth for one question, and
+    the panel would eventually disagree with the menu about whether the feature was on.
+
+    OFF IS STICKY, which is the whole request. PassingAssistLogEnabled is PERSISTENT | BACKUP, so
+    it survives the ignition and stays off across drives until he presses the button again. That is
+    the difference from the timed suspend this replaces -- a countdown always came back on its own,
+    and coming back on its own is exactly what he does not want.
+
+    "Automatically turn on at speed" needs nothing here: enabled is not the same as active. Once it
+    is on, the speed gate below (Only Above, 30 mph) decides when it actually does anything, which
+    it already did.
+
+    Writing a settings key from here is the one case where that is right: it is HIS press, on HIS
+    control, asking for exactly this. The rule against writing settings is about changing values he
+    chose without being asked -- not about a button doing what a button is for.
     """
-    try:
-      requested = self.params.get_bool("PassingAssistSuspend")
-    except (AttributeError, TypeError):
-      requested = False
-    # The stalk button and the panel tap are the same request by different routes.
-    requested = requested or lka_edge
-    if requested:
-      try:
-        self.params.put_bool("PassingAssistSuspend", False)
-      except (AttributeError, TypeError):
-        pass
-      # Toggle: tapping while suspended resumes immediately.
-      self.suspended_seconds = 0.0 if self.suspended_seconds > 0 else self.suspend_minutes * 60.0
+    if not lka_edge:
       return
-
-    if self.suspended_seconds > 0:
-      self.suspended_seconds = max(0.0, self.suspended_seconds - DT_MDL)
+    try:
+      self.enabled = not self.enabled
+      # block=True, and it has to be. put_bool defaults to putNonBlocking, and the periodic param
+      # refresh re-reads this key -- so a non-blocking write can lose to its own read-back and the
+      # button appears not to work. Exactly the race that made the +/- settings controls look dead.
+      # Acceptable here and almost nowhere else: this runs once, on a deliberate press.
+      self.params.put_bool("PassingAssistLogEnabled", self.enabled, block=True)
+    except (AttributeError, TypeError):
+      pass
 
   def _acc_braking(self, car_state_bp) -> None:
     """Is Ford's ACC already SLOWING THE CAR for this lead?
@@ -1797,16 +1804,10 @@ class PassingAssistDetector:
     # waiting on the driveway instead of expiring on the ramp.
     self._track_driver_change(CS)
 
-    self._update_suspend(self._lka_toggle(car_state_bp))
-    if self.suspended_seconds > 0:
-      # Suspended beats every other gate, including the ones that would report something more
-      # specific. The driver has said "not here", and a panel reporting "no lane to move into"
-      # while suspended would misrepresent why it is silent.
-      self._clear_confirmation()
-      self.keep_right_seconds = 0.0
-      self._reset_outputs(Blocked.suspended)
-      return
+    self._update_enable(self._lka_toggle(car_state_bp))
 
+    # OFF beats every other gate, and reports as `disabled` rather than as something more specific.
+    # He turned it off; a panel saying "no lane to move into" would misrepresent why it is silent.
     if not self.enabled:
       self._clear_confirmation()
       self.keep_right_seconds = 0.0
@@ -2190,7 +2191,9 @@ class PassingAssistDetector:
     passingAssist.crawlAfterSuggestion = pa.overtake.crawl_after_suggestion
     passingAssist.leadAccel = float(pa.lead_accel)
     passingAssist.leadBrakingHold = pa.lead_braking_hold
-    passingAssist.suspendedSeconds = float(pa.suspended_seconds)
+    # suspendedSeconds is retired -- the LKA button is an on/off now, not a countdown. The capnp
+    # field stays because an ordinal cannot be reused; it publishes zero forever.
+    passingAssist.suspendedSeconds = 0.0
     passingAssist.referenceSpeed = float(pa.reference_speed)
     passingAssist.referenceSource = pa.reference_source
 
