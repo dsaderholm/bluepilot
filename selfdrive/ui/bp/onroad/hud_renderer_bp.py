@@ -737,6 +737,14 @@ class HudRendererBP(HudRendererSP):
         if int(lc.get("cancelled", 0)):
           line += f", {int(lc['cancelled'])} cancelled"
         lines.append(line)
+      # Is his cancel gesture visible to the state machine at all? "I usually just cancel the one
+      # touch by slightly moving my blinker back towards the right, which cancels it, but doesn't
+      # trigger the right." If that nudge never reaches the opposite switch position, reversed_side
+      # is never true and the cancel is a no-op. Shown as a pair because either number alone is
+      # ambiguous -- see OPPOSITE_SWITCH_WINDOW_S in auto_lane_change.
+      saw_opp, saw_out = int(lc.get("sawOpposite", 0)), int(lc.get("sawSignalOut", 0))
+      if saw_opp or saw_out:
+        lines.append(f"cancel gesture: {saw_opp} reached the other side, {saw_out} just went out")
       if float(d.get("accOnsetMax", 0)) > 0:
         m = float(d["accOnsetMax"])
         v = m if ui_state.is_metric else m * 3.28084

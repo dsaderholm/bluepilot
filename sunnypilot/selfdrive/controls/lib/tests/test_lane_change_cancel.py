@@ -390,7 +390,8 @@ class TestStatsSurviveABadParam:
     alc = self._alc(lambda *a, **k: None)
     alc._stats_write_s = LANE_CHANGE_STATS_WRITE_S
     alc._save_stats()
-    assert alc.written[-1] == {"changes": 1, "abandoned": 0, "cancelled": 0, "seconds": 4.0}
+    assert alc.written[-1] == {"changes": 1, "abandoned": 0, "cancelled": 0, "seconds": 4.0,
+                               "sawOpposite": 0, "sawSignalOut": 0}
 
   def test_the_lifetime_mean_weights_by_how_many_changes(self):
     """Not a mean of means: 5 changes at 3.0 s and 1 at 9.0 s is 4.0 s, not 6.0."""

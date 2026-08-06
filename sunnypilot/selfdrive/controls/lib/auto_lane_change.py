@@ -125,11 +125,31 @@ DEFAULT_REVERT = True
 # early is exactly what separates it from a timeout. So: a blinker that goes out well before the
 # one-touch would have finished is a decision; one that goes out on schedule is a clock.
 #
-# Set this to however long YOUR one-touch flash lasts. Eight flashes at about 1.5 Hz is 5.5 s.
+# Set this to however long YOUR one-touch flash lasts. HIS IS SEVEN FLASHES, set in FORScan --
+# a car configuration he chose, not a stock value, so do not "correct" this toward a stock count.
+# The blinker test measured his flash period at 760 ms, and 7 x 0.76 = 5.32 s.
 DEFAULT_ONE_TOUCH_S = 5.5
 # How far ahead of the timeout a blinker-off still counts as deliberate. Wide enough that a normal
-# reaction lands inside it, tight enough that the eighth flash never does.
+# reaction lands inside it, tight enough that the last flash never does.
 ONE_TOUCH_MARGIN_S = 0.75
+
+# BluePilot: DOES HIS CANCEL GESTURE REACH THE OPPOSITE SWITCH POSITION AT ALL?
+#
+# 2026-08-06: *"I usually just cancel the one touch by slightly moving my blinker back towards the
+# right (if I originally did left), which cancels it, but doesn't trigger the right. It's a very
+# precise process."*
+#
+# That is not the gesture should_cancel was built for. It answers `reversed_side`, and leftBlinker /
+# rightBlinker are TurnLghtSwtch_D_Stat -- the SWITCH position from the SCCM, 1 left and 2 right.
+# If his nudge returns the stalk to centre (0) without ever reaching 2, reversed_side is never true,
+# the blinker simply goes out, and going out was deliberately made to mean nothing. His cancel would
+# then be a no-op: the lane change carries on.
+#
+# Whether the switch reaches 2 for a frame is a fact about his stalk's detents, not something to
+# reason out -- the gateway sends this at 10 Hz, so a nudge shorter than about 100 ms may never be
+# transmitted at all. So COUNT IT rather than guess, and let one drive answer: how many changes saw
+# the opposite position, against how many had the signal simply go out mid-change.
+OPPOSITE_SWITCH_WINDOW_S = 1.5
 
 # BluePilot: MEASURE THE DRIVER'S OWN LANE CHANGES, because they are the only real ones.
 #
@@ -191,6 +211,12 @@ class AutoLaneChangeController:
     self.changes_completed = 0
     self.changes_abandoned = 0      # signalled, then thought better of it before moving
     self.changes_cancelled = 0      # called off mid-change
+    # See OPPOSITE_SWITCH_WINDOW_S. Both counted per lane change, at most once each, so the pair
+    # reads as "of the changes you tried to call off, this many reached the opposite detent".
+    self.changes_saw_opposite = 0   # the switch read the other side while a change was underway
+    self.changes_saw_signal_out = 0 # the signal simply went out instead, which cancels nothing
+    self._saw_opposite_this_change = False
+    self._saw_signal_out_this_change = False
     self.change_seconds = 0.0       # running mean of how long a completed one took
     self._prev_state = log.LaneChangeState.off
     self._change_started_s = 0.0
@@ -268,6 +294,8 @@ class AutoLaneChangeController:
       # This transition also covers lateral going inactive, the change timing out and the
       # blinker-pause gate, none of which is the driver calling it off.
       self._change_started_s = 0.0
+      self._saw_opposite_this_change = False
+      self._saw_signal_out_this_change = False
     elif prev == log.LaneChangeState.laneChangeFinishing and state != log.LaneChangeState.laneChangeFinishing:
       if self._change_started_s > 0.0 and not self._reverted:
         self.changes_completed += 1
@@ -304,6 +332,10 @@ class AutoLaneChangeController:
         "abandoned": self._base["abandoned"] + self.changes_abandoned,
         "cancelled": self._base["cancelled"] + self.changes_cancelled,
         "seconds": round(secs, 2),
+        # See OPPOSITE_SWITCH_WINDOW_S. Not carried across drives: the question is answered the
+        # first time either of these is non-zero, and a lifetime total would bury that.
+        "sawOpposite": self.changes_saw_opposite,
+        "sawSignalOut": self.changes_saw_signal_out,
       })
     except Exception:  # noqa: BLE001 - a param write must never reach the model process
       pass
@@ -359,6 +391,19 @@ class AutoLaneChangeController:
     blinker_held_s and the one-touch length stay: nothing else reads them yet, they cost a float,
     and they are the measurement that would be needed if this ever wants a third gesture.
     """
+    # Counted before either early return, because the QUESTION is whether the gesture is visible
+    # at all -- a nudge past the cancel window is still evidence about his stalk's detents.
+    if reversed_side:
+      if not self._saw_opposite_this_change:
+        self._saw_opposite_this_change = True
+        self.changes_saw_opposite += 1
+    elif not one_blinker and blinker_held_s == 0.0 and elapsed_s > 0.0:
+      # The signal is out mid-change and nothing replaced it. See OPPOSITE_SWITCH_WINDOW_S: if this
+      # is what his nudge looks like from here, his cancel gesture is invisible to the state machine.
+      if not self._saw_signal_out_this_change:
+        self._saw_signal_out_this_change = True
+        self.changes_saw_signal_out += 1
+
     if self.lane_change_cancel_window <= 0.0:
       return False
     if elapsed_s >= self.lane_change_cancel_window:
