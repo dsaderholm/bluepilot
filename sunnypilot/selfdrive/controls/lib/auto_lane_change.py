@@ -149,6 +149,16 @@ ONE_TOUCH_MARGIN_S = 0.75
 # reason out -- the gateway sends this at 10 Hz, so a nudge shorter than about 100 ms may never be
 # transmitted at all. So COUNT IT rather than guess, and let one drive answer: how many changes saw
 # the opposite position, against how many had the signal simply go out mid-change.
+#
+# AND DO NOT ASK HIM TO TAP THE OTHER WAY INSTEAD. His one-touch is seven flashes, so the tap
+# broadcasts a full lane change he is not making, to the traffic beside him, at the moment he is
+# already part-way across and correcting: *"it's too many flashes and will make drivers think I'm
+# going into the other lane."* That is a wrong signal to other road users, not an inconvenience,
+# and it rules the gesture out as a REQUIREMENT however easy it would be to detect.
+#
+# The same argument kills signalling the revert itself, which was floated here and is withdrawn:
+# a crossing back into the lane he never left is not a lane change, and announcing one is the same
+# false message. Returning to your own lane is what the drivers around you already expect.
 OPPOSITE_SWITCH_WINDOW_S = 1.5
 
 # BluePilot: MEASURE THE DRIVER'S OWN LANE CHANGES, because they are the only real ones.
