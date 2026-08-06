@@ -1,12 +1,17 @@
-"""BluePilot: taking a changed shipped default without touching anything the driver set.
+"""BluePilot: the LEGACY generation-list migration, plus the guard on which defaults are tracked.
 
-The rule this exists to enforce: *"I never want you to change settings anymore, just defaults."*
+_BP_REDEFAULT_GROUPS is closed. It cleared a fixed list of keys once per generation id, which was
+the best available before there was any way to tell "he never touched this" from "he set it to
+exactly that" -- and being unable to tell is why it had to stop. icbm-1 has already run on the car,
+so it stays and is still tested here; nothing new goes in it.
 
-Every settings key is PERSISTENT, so once a value is stored the default in params_keys.h stops
-meaning anything on that device -- a changed default reaches a car that has been driven exactly
-never, while the code and the settings screen describe behaviour it does not have. This migration
-closes that gap, and the test guards the two ways it could go wrong: writing a value it should not,
-or running more than once.
+What replaced it is _migrate_bp_new_defaults, tested in test_new_defaults_snapshot.py, implementing
+his actual rule: *"If I have never changed a value, great, I will get the new default. If I have,
+then it shouldn't change."*
+
+The guard at the bottom of this file survives the handover with a different question. It used to
+ask "was a migration written for this moved default"; it now asks "is this key tracked at all",
+because a default that moves outside the tracked prefixes still reaches his car exactly never.
 """
 import pathlib
 import re
@@ -62,8 +67,8 @@ class TestItClearsRatherThanWrites:
 
   def test_it_touches_nothing_outside_the_list(self):
     """The list is the contract. Anything he tuned himself has to come through untouched."""
-    # IcbmMaxTargetRise, not ...Drop: Drop is now cleared by icbm-2, and an example key that
-    # quietly joins a group turns this test into a tautology.
+    # Any key not in a group works as the example. IcbmMaxTargetDrop was briefly the wrong choice
+    # here -- it joined a group, which silently turned this test into a tautology.
     p = FakeParams({"FordLowSpeedFactor_ang": "0.92", "IcbmMaxTargetRise": "5"})
     _migrate_bp_redefaulted(p)
     assert "FordLowSpeedFactor_ang" not in p.removed
@@ -214,50 +219,37 @@ class TestTheGroupsThemselves:
         seen_here += 1
       assert seen_here > 100, f"{rev[:9]} parsed only {seen_here} keys; the regex has gone stale"
 
-    # Keys whose shipped default moved and which are therefore NOT reaching his car. Since
-    # 2026-08-05 the migration is closed -- *"I don't like ... having you change defaults anymore.
-    # I will do it."* -- so this is not an excuse list, it is the standing answer to "which settings
-    # do I have to tell him to toggle himself". Every entry needs a reason.
-    his_to_toggle = {
-      # Lateral tune he set himself on the settings screen. Whatever is stored IS his tune.
+    # A moved default is now handled automatically by _migrate_bp_new_defaults: untouched settings
+    # take it, ones he set stay his. So the question this guard asks changed. It is no longer "was a
+    # migration written" -- it is "is the key inside the tracked set at all". A default that moves
+    # for a key no prefix covers reaches his car exactly never, silently, which is the original bug
+    # wearing different clothes.
+    from openpilot.sunnypilot.system.params_migration import (
+      _BP_TRACKED_PREFIXES, _BP_NEVER_TRACKED,
+    )
+
+    # Moved defaults deliberately outside the tracked set. Each needs a reason.
+    untracked_on_purpose = {
+      # His lateral tune, set on the settings screen. Excluded by name in _BP_NEVER_TRACKED so a
+      # prefix change can never quietly pull it in.
       "FordLowSpeedFactor_ang", "FordHighSpeedFactor_ang", "FordPrefLateralControl",
-      # He confirmed on 2026-08-05 that these three work on the car -- he turned them on himself.
+      # He confirmed on 2026-08-05 that these three work on the car -- he turned them on himself,
+      # so whatever is stored is already what he wants.
       "ShowBrakeStatus", "GreenLightAlert", "LeadDepartAlert",
-      # Curve feel. He drove the current behavior on 2026-08-05 and called it good, so what is
-      # stored is a tested state and the shipped numbers are not. Do not chase these.
-      "SmartCruiseControlVisionEarliness", "SmartCruiseControlVisionLowSpeedFactor",
-      "SmartCruiseControlVisionHighSpeedFactor",
-      # Ceiling he asked for explicitly (100 mph). Shipped 85 first.
-      "SpeedLimitMaxSetSpeed",
-      # --- ICBM keys added on this branch whose default then moved. Each is a toggle or a number
-      # on the ICBM settings screen, and each is his to set. ---
-      # 1 -> 0 -> 1. Red lights and stop signs. Deliberately shipped off for a stretch. He says it
-      # was on for his last drive, and the reason nothing happened was the shouldStop bug in
-      # unconfirmed_lead, not this key.
-      "IcbmModelStopEnabled",
-      "IcbmResumeGateEnabled",   # 0 -> 1, standstill resume gate
-      "IcbmLeadMaxDistance",     # 120 -> 180 m, how far the radar-blind detector looks
-      "IcbmLeadMaxTtc",          # 40 -> 70 (4.0 -> 7.0 s)
-      # 8 -> 12. NOT a response-rate limit, though the name reads like one: it is the step size
-      # that keeps Ford COASTING instead of braking, because stock ACC treats one large drop in set
-      # speed as a reason to brake hard and a series of small ones as a reason to coast. Net
-      # deceleration is the same either way. So it cannot make anything happen earlier, and raising
-      # it to chase the exit-ramp problem -- which I suggested -- would only trade coasting for
-      # braking.
-      "IcbmMaxTargetDrop",
     }
 
     moved = {k for k, vals in ever.items() if len(vals) > 1}
-    unaccounted = moved - set(_BP_REDEFAULTED) - his_to_toggle
+    tracked = {k for k in moved if k.startswith(_BP_TRACKED_PREFIXES) and k not in _BP_NEVER_TRACKED}
+    unaccounted = moved - tracked - untracked_on_purpose
     assert not unaccounted, (
-      f"shipped default moved and is unaccounted for: {sorted(unaccounted)}. His car still holds "
-      "the value it booted first, so this change reaches nothing there. Add the key to "
-      "his_to_toggle with a reason AND tell him which toggle to flip -- do not add a migration "
-      "group, that list is closed.")
+      f"shipped default moved for a key nothing tracks: {sorted(unaccounted)}. It will not reach "
+      "his car and nothing will say so. Bring it under _BP_TRACKED_PREFIXES, or add it to "
+      "untracked_on_purpose with a reason.")
 
-    # And the reverse: bookkeeping for a key whose default never actually moved is noise that makes
-    # the real entries harder to trust.
-    stale = (set(_BP_REDEFAULTED) | his_to_toggle) - moved
+    overlap = tracked & untracked_on_purpose
+    assert not overlap, f"listed as untracked on purpose but the prefixes do track it: {sorted(overlap)}"
+
+    stale = untracked_on_purpose - moved
     assert not stale, f"listed as a changed default, but it has only ever had one: {sorted(stale)}"
 
   def test_a_group_already_taken_is_skipped_while_a_new_one_runs(self):
