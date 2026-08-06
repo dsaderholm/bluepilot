@@ -90,6 +90,29 @@ def timeline() -> int:
   return 0
 
 
+def dump() -> int:
+  """Every field of the live passingAssist message, once.
+
+  A GENERIC dump rather than a curated list, and that is the point. Thirty-five of the eighty-nine
+  published fields had no way to reach them off the car -- they were in the log, which is not a
+  channel anyone here uses. Curating them into this file would have fixed thirty-five and left the
+  next one to be discovered the same way. This one cannot go stale.
+  """
+  import cereal.messaging as messaging
+
+  sm = messaging.SubMaster(['longitudinalPlanSP'])
+  for _ in range(200):
+    sm.update(100)
+    if sm.updated['longitudinalPlanSP']:
+      d = sm['longitudinalPlanSP'].passingAssist.to_dict()
+      for k in sorted(d):
+        v = d[k]
+        print(f"  {k:28} {json.dumps(v) if isinstance(v, dict | list) else v}")
+      return 0
+  print("nothing published -- is the car on and openpilot running?")
+  return 1
+
+
 def live(seconds: float) -> int:
   import cereal.messaging as messaging
 
@@ -150,9 +173,13 @@ def main() -> int:
                   help="watch the live decision instead of the stored drives")
   ap.add_argument("--timeline", action="store_true",
                   help="the last drive as an ordered list of state changes")
+  ap.add_argument("--dump", action="store_true",
+                  help="every field of the live message, once -- nothing published is unreachable")
   args = ap.parse_args()
   if args.live:
     return live(args.live)
+  if args.dump:
+    return dump()
   return timeline() if args.timeline else history()
 
 

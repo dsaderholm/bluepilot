@@ -741,9 +741,12 @@ class HudRendererBP(HudRendererSP):
     except (AttributeError, KeyError):
       return False
 
-    side = "LEFT" if str(pa.crawlSide) == 'left' else "RIGHT"
+    # NO SIDE IN THE TEXT. Only one side can produce a slow pass now -- the car you are passing is
+    # on your right, by definition -- so naming it is noise at best. At worst it is the wording that
+    # made the old bug so confusing to report: "barely gaining on the car on the left" described
+    # traffic that was overtaking HIM, and reads as nonsense precisely because it was.
     self._pa_main = f"SLOW PASS  {pa.crawlSeconds:.0f}s"
-    self._pa_sub = f"barely gaining on the car {side.lower()}"
+    self._pa_sub = "barely gaining on the car you are passing"
     self._pa_color = rl.Color(240, 175, 60, 255)
     self._pa_alert = True
     return True

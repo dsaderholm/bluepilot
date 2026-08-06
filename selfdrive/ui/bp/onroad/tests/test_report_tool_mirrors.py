@@ -34,3 +34,14 @@ def test_the_term_names_match_the_panels():
   assert m, "_GEO_TERMS not found in the renderer"
   for term in re.findall(r'"([^"]+)"', m.group(1)):
     assert f'"{term}"' in TOOL, f"the panel says {term!r} and the report tool does not"
+
+
+def test_the_tool_can_dump_everything_published():
+  """Thirty-five of the eighty-nine published fields had no reader anywhere -- not the panel, not
+  the drive summary, not this tool. They were in the log, which is not a channel used here.
+
+  A generic dump is the only fix that does not go stale: curating the list would have reached those
+  thirty-five and left the next field to be discovered the same way.
+  """
+  assert "to_dict()" in TOOL, "the tool reads named fields only; a new one would be unreachable"
+  assert "--dump" in TOOL
