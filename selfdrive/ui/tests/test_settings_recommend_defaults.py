@@ -17,6 +17,10 @@ import pathlib
 UI_ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCREENS = (
   UI_ROOT / "sunnypilot" / "layouts" / "settings" / "cruise.py",
+  # BluePilot: the passing-assist screens, added when this branch picked the helper up. Twenty-three
+  # controls, and it is the screen he is most likely to be checking against a recommendation --
+  # every one of these numbers has been argued about at least once.
+  UI_ROOT / "sunnypilot" / "layouts" / "settings" / "steering_sub_layouts" / "passing_assist_settings.py",
 )
 ITEM_CALLS = {"option_item_sp", "toggle_item_sp"}
 

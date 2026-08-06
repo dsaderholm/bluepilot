@@ -29,6 +29,8 @@ from openpilot.selfdrive.ui.bp.widgets.section_header import SectionHeader
 from openpilot.system.ui.widgets.network import NavButton
 from openpilot.system.ui.widgets.scroller_tici import Scroller
 from openpilot.system.ui.widgets import Widget
+# BluePilot: every control states the value it ships with, read from params_keys.h at draw time.
+from openpilot.selfdrive.ui.bp.settings_defaults import recommended
 
 
 class PassingAssistSettingsLayout(Widget):
@@ -53,28 +55,28 @@ class PassingAssistSettingsLayout(Widget):
     # --- the feature itself ---
     self._enabled = toggle_item_sp(
       title=tr("Passing Assist (Log Only)"),
-      description=tr("Watch for a slower vehicle ahead and work out whether a pass is worth "
+      description=recommended(tr("Watch for a slower vehicle ahead and work out whether a pass is worth "
                      "making and which side is clear. Nothing acts on the answer: no alert, no "
                      "steering, no set speed change. It records what it would have said so the "
-                     "idea can be judged from real drives before anything is wired to it."),
+                     "idea can be judged from real drives before anything is wired to it."), "PassingAssistLogEnabled"),
       param="PassingAssistLogEnabled")
 
     self._chime = toggle_item_sp(
       title=tr("Chime When It Decides Or Backs Out"),
-      description=tr("Two short tones, so you can tell what it did without looking. A higher one "
+      description=recommended(tr("Two short tones, so you can tell what it did without looking. A higher one "
                      "the moment a pass is worked out. A LOWER one when it lights the blinker and "
                      "then withdraws it, which is the case worth telling me about and the one you "
                      "could not hear before. Neither covers the screen. Ford sounds one before a "
                      "BlueCruise lane change for the same reason: at the moment a car moves, "
-                     "nobody is reading a display."),
+                     "nobody is reading a display."), "PassingAssistChime"),
       param="PassingAssistChime")
 
     # --- deciding a pass is wanted ---
     self._min_deficit = option_item_sp(
       title=tr("Slower By At Least"),
-      description=tr("How far below your set speed a vehicle has to be before passing it is worth "
+      description=recommended(tr("How far below your set speed a vehicle has to be before passing it is worth "
                      "suggesting. Below about 3 you are inside ordinary traffic variation, so it "
-                     "starts firing on cars that are not really slower."),
+                     "starts firing on cars that are not really slower."), "PassingAssistMinDeficit", self._speed_label),
       param="PassingAssistMinDeficit",
       min_value=1, max_value=25, value_change_step=1,
       label_callback=self._speed_label,
@@ -82,11 +84,11 @@ class PassingAssistSettingsLayout(Widget):
 
     self._exit_standdown = option_item_sp(
       title=tr("Stay Quiet After You Take An Exit"),
-      description=tr("If you change lanes yourself into a lane that was opening up like an exit, "
+      description=recommended(tr("If you change lanes yourself into a lane that was opening up like an exit, "
                      "stay out of the way for this long. Being told to move out of your own exit "
                      "lane at the gore point is worse than useless. Any other lane change you "
                      "make only gets a few seconds, so pulling out to pass something manually "
-                     "hands control straight back."),
+                     "hands control straight back."), "PassingAssistExitStandDown", lambda v: tr("Off") if v == 0 else f"{v} s"),
       param="PassingAssistExitStandDown",
       min_value=0, max_value=120, value_change_step=15,
       label_callback=lambda v: tr("Off") if v == 0 else f"{v} s",
@@ -94,11 +96,11 @@ class PassingAssistSettingsLayout(Widget):
 
     self._min_speed = option_item_sp(
       title=tr("Only Above"),
-      description=tr("Below this speed a pass is not the maneuver being considered. Kept low on "
+      description=recommended(tr("Below this speed a pass is not the maneuver being considered. Kept low on "
                      "purpose: stuck behind a tractor on a 55 road your cruise drags you down to "
                      "30, and that is exactly when a pass is most obviously wanted. Town driving "
                      "is already excluded by needing cruise engaged. Much below 30 the lane "
-                     "detection starts calling turn pockets and driveways passing lanes."),
+                     "detection starts calling turn pockets and driveways passing lanes."), "PassingAssistMinSpeed", self._speed_label),
       param="PassingAssistMinSpeed",
       min_value=20, max_value=60, value_change_step=5,
       label_callback=self._speed_label,
@@ -106,9 +108,9 @@ class PassingAssistSettingsLayout(Widget):
 
     self._confirm_time = option_item_sp(
       title=tr("Confirm For"),
-      description=tr("How long that vehicle must be seen before a pass is suggested. Short by "
+      description=recommended(tr("How long that vehicle must be seen before a pass is suggested. Short by "
                      "design -- this rejects a bad frame of radar tracking, it is not a waiting "
-                     "period. Waiting is the behavior this feature exists to remove."),
+                     "period. Waiting is the behavior this feature exists to remove."), "PassingAssistConfirmTime", lambda v: f"{v} s"),
       param="PassingAssistConfirmTime",
       min_value=1, max_value=20, value_change_step=1,
       label_callback=lambda v: f"{v} s",
@@ -116,19 +118,19 @@ class PassingAssistSettingsLayout(Widget):
 
     self._lead_braking = toggle_item_sp(
       title=tr("Wait If The Car Ahead Slams On"),
-      description=tr("Do not start a pass while the vehicle in front is braking hard -- they are "
+      description=recommended(tr("Do not start a pass while the vehicle in front is braking hard -- they are "
                      "usually turning off, or braking for something ahead you cannot see yet. "
                      "Only a deliberate stop counts. A car merely slowing is the best reason "
-                     "there is to go round it, and this stays out of the way for that."),
+                     "there is to go round it, and this stays out of the way for that."), "PassingAssistLeadBrakingHold"),
       param="PassingAssistLeadBrakingHold")
 
     self._crawl_time = option_item_sp(
       title=tr("Call It A Slow Pass After"),
-      description=tr("How long grinding past a car you are barely faster than counts as a pass "
+      description=recommended(tr("How long grinding past a car you are barely faster than counts as a pass "
                      "that is taking too long. Measured only for now -- this is the one situation "
                      "where passing assist would ever be allowed to nudge your set speed, and the "
                      "size of that nudge should come from what your own drives show rather than "
-                     "from a guess."),
+                     "from a guess."), "PassingAssistCrawlTime", lambda v: f"{v} s"),
       param="PassingAssistCrawlTime",
       min_value=3, max_value=30, value_change_step=1,
       label_callback=lambda v: f"{v} s",
@@ -136,11 +138,11 @@ class PassingAssistSettingsLayout(Widget):
 
     self._blinker_lead = option_item_sp(
       title=tr("Signal Before Moving"),
-      description=tr("How long the turn signal would be on before the lane change starts. Nothing "
+      description=recommended(tr("How long the turn signal would be on before the lane change starts. Nothing "
                      "is actuated yet -- this drives the dry run on screen, which shows the whole "
                      "sequence a fully automatic pass would go through so it can be judged from a "
                      "real drive before anything is wired to a control. Defaults to 1 s, which is "
-                     "how the owner drives; Utah asks for 2 before a lane change."),
+                     "how the owner drives; Utah asks for 2 before a lane change."), "PassingAssistBlinkerLead", lambda v: f"{v} s"),
       param="PassingAssistBlinkerLead",
       min_value=0, max_value=5, value_change_step=1,
       label_callback=lambda v: f"{v} s",
@@ -148,12 +150,12 @@ class PassingAssistSettingsLayout(Widget):
 
     self._min_approach = option_item_sp(
       title=tr("Close In Before Passing"),
-      description=tr("Hold off until the car ahead is this close, instead of pulling out as soon "
+      description=recommended(tr("Hold off until the car ahead is this close, instead of pulling out as soon "
                      "as it is spotted -- which is how people actually drive. Abandoned instantly "
                      "if Ford's cruise starts slowing for that car, at any distance, so setting "
                      "it too aggressive costs a late pass rather than braking.\n"
                      "Auto uses the distance your own cruise has actually been measured starting "
-                     "to brake at, plus a margin, and re-learns it every drive."),
+                     "to brake at, plus a margin, and re-learns it every drive."), "PassingAssistMinApproach", self._distance_label),
       param="PassingAssistMinApproach",
       min_value=-1, max_value=200, value_change_step=10,
       label_callback=lambda v: (tr("Auto") if v < 0 else tr("Off") if v == 0
@@ -162,10 +164,10 @@ class PassingAssistSettingsLayout(Widget):
 
     self._max_distance = option_item_sp(
       title=tr("Look Ahead"),
-      description=tr("How far ahead to notice a slower vehicle. Higher decides earlier, which is "
+      description=recommended(tr("How far ahead to notice a slower vehicle. Higher decides earlier, which is "
                      "the whole point: it is what avoids stock ACC braking for a car you were "
                      "always going to pass. Beyond about 200 m there is rarely anything tracked "
-                     "to decide on."),
+                     "to decide on."), "PassingAssistMaxDistance", self._distance_label),
       param="PassingAssistMaxDistance",
       min_value=40, max_value=250, value_change_step=10,
       label_callback=self._distance_label,
@@ -174,29 +176,29 @@ class PassingAssistSettingsLayout(Widget):
     # --- the lane you would move into ---
     self._adjacent_lane = toggle_item_sp(
       title=tr("Check The Lane Before Suggesting It"),
-      description=tr("Use the front radar to see traffic in the next lane over, and stay quiet "
+      description=recommended(tr("Use the front radar to see traffic in the next lane over, and stay quiet "
                      "when that lane is already full of vehicles no faster than the car ahead of "
                      "you. Uses the radar already fitted to the car. If the radar is not "
-                     "reporting, the onroad panel says so rather than assuming the lane is clear."),
+                     "reporting, the onroad panel says so rather than assuming the lane is clear."), "PassingAssistAdjacentLane"),
       param="PassingAssistAdjacentLane")
 
     # --- oncoming traffic ---
     self._oncoming_veto = toggle_item_sp(
       title=tr("Never Pass Into Oncoming Traffic"),
-      description=tr("Watch the front radar for vehicles coming the other way. If any are seen, "
+      description=recommended(tr("Watch the front radar for vehicles coming the other way. If any are seen, "
                      "treat that side of the road as theirs and stop suggesting passes into it. "
                      "The camera cannot tell an oncoming lane from a passing lane by itself, so "
-                     "leave this on unless you only ever drive divided highways."),
+                     "leave this on unless you only ever drive divided highways."), "PassingAssistOncomingVeto"),
       param="PassingAssistOncomingVeto")
 
     self._oncoming_memory = option_item_sp(
       title=tr("Remember Oncoming Traffic For"),
-      description=tr("How long after meeting a vehicle that side of the road stays treated as "
+      description=recommended(tr("How long after meeting a vehicle that side of the road stays treated as "
                      "theirs. Per side, not per road: meeting someone on your left says nothing "
                      "about the lane on your right, and that one stays available. Long is safer "
                      "-- meeting a car tells you about the road, not just that moment, and on a "
                      "quiet road the gaps between meeting cars are exactly when a wrong "
-                     "suggestion would look most convincing."),
+                     "suggestion would look most convincing."), "PassingAssistOncomingMemory", lambda v: f"{v} s" if v < 60 else f"{v // 60} min" + (f" {v % 60} s" if v % 60 else "")),
       param="PassingAssistOncomingMemory",
       min_value=15, max_value=600, value_change_step=15,
       label_callback=lambda v: f"{v} s" if v < 60 else f"{v // 60} min" + (f" {v % 60} s" if v % 60 else ""),
@@ -208,32 +210,32 @@ class PassingAssistSettingsLayout(Widget):
     # raise on first use. The title carries the meaning instead.
     self._strict_two_way = toggle_item_sp(
       title=tr("Assume An Unknown Middle Lane Is A Turn Lane"),
-      description=tr("On a road with oncoming traffic, a center turn lane and an ordinary passing "
+      description=recommended(tr("On a road with oncoming traffic, a center turn lane and an ordinary passing "
                      "lane look identical to the sensors -- same width, same position, and the "
                      "paint differs only by color, which the camera does not report. On, it "
                      "assumes the worst until a vehicle is seen driving down that lane in your "
                      "direction, which is safer but quiets passing on two-lane highways with "
                      "alternating passing lanes such as US-6 and US-89. Off trades that "
-                     "back. Oncoming traffic seen in the next lane blocks a pass either way."),
+                     "back. Oncoming traffic seen in the next lane blocks a pass either way."), "PassingAssistStrictTwoWay"),
       param="PassingAssistStrictTwoWay")
 
     # --- returning right ---
     self._keep_right = toggle_item_sp(
       title=tr("Keep Right Except To Pass"),
-      description=tr("Also work out when you could return to a lane on your right because nothing "
+      description=recommended(tr("Also work out when you could return to a lane on your right because nothing "
                      "is holding you back. The hard part is that a camera cannot tell a through "
                      "lane from an exit-only one, so a suggestion here can mean take the exit. Two "
                      "things guard it: the road opening up ahead, and the lane having been "
                      "continuously there for a while. Both are unproven on real roads, which is "
                      "why this is on -- nothing acts on it, so a wrong suggestion costs a wrong "
-                     "line on screen and buys a measurement."),
+                     "line on screen and buys a measurement."), "PassingAssistKeepRight"),
       param="PassingAssistKeepRight")
 
     self._keep_right_delay = option_item_sp(
       title=tr("Wait Before Moving Right"),
-      description=tr("How long the lane to your right must stay clear before returning would be "
+      description=recommended(tr("How long the lane to your right must stay clear before returning would be "
                      "suggested. Longer avoids nagging during brief gaps while you overtake a "
-                     "line of vehicles."),
+                     "line of vehicles."), "PassingAssistKeepRightDelay", lambda v: f"{v} s"),
       param="PassingAssistKeepRightDelay",
       min_value=3, max_value=60, value_change_step=1,
       label_callback=lambda v: f"{v} s",
@@ -241,10 +243,10 @@ class PassingAssistSettingsLayout(Widget):
 
     self._min_lane_age = option_item_sp(
       title=tr("Lane Must Have Been There"),
-      description=tr("How long the lane on your right must have been continuously present before "
+      description=recommended(tr("How long the lane on your right must have been continuously present before "
                      "returning would be suggested. An exit lane appears out of nowhere; a "
                      "through lane has been beside you for miles. If the camera loses the lane "
-                     "briefly the clock restarts, which just costs a few quiet seconds."),
+                     "briefly the clock restarts, which just costs a few quiet seconds."), "PassingAssistMinLaneAge", lambda v: f"{v} s"),
       param="PassingAssistMinLaneAge",
       min_value=0, max_value=60, value_change_step=5,
       label_callback=lambda v: f"{v} s",
@@ -252,9 +254,9 @@ class PassingAssistSettingsLayout(Widget):
 
     self._settle_time = option_item_sp(
       title=tr("Settle After A Pass"),
-      description=tr("How long after suggesting a pass before suggesting a return. Without it, a "
+      description=recommended(tr("How long after suggesting a pass before suggesting a return. Without it, a "
                      "three-lane road with a slow left lane turns into a weave: move left, find it "
-                     "no faster, get told to move back."),
+                     "no faster, get told to move back."), "PassingAssistSettleTime", lambda v: f"{v} s"),
       param="PassingAssistSettleTime",
       min_value=5, max_value=90, value_change_step=5,
       label_callback=lambda v: f"{v} s",
@@ -263,10 +265,10 @@ class PassingAssistSettingsLayout(Widget):
     # --- pausing ---
     self._suspend_minutes = option_item_sp(
       title=tr("Pause For"),
-      description=tr("How long a pause lasts. Pause by tapping the onroad panel or pressing the "
+      description=recommended(tr("How long a pause lasts. Pause by tapping the onroad panel or pressing the "
                      "LKA button on the stalk -- for construction zones, weather, or anywhere the "
                      "lane markings are unusual. It resumes on its own so it cannot be left "
-                     "switched off and forgotten. Tap again to resume immediately."),
+                     "switched off and forgotten. Tap again to resume immediately."), "PassingAssistSuspendMinutes", lambda v: f"{v} min"),
       param="PassingAssistSuspendMinutes",
       min_value=1, max_value=120, value_change_step=1,
       label_callback=lambda v: f"{v} min",
@@ -275,25 +277,25 @@ class PassingAssistSettingsLayout(Widget):
     # --- what you see ---
     self._show_panel = toggle_item_sp(
       title=tr("Show The Onroad Panel"),
-      description=tr("Show what the observer would have suggested and, more usefully, which check "
+      description=recommended(tr("Show what the observer would have suggested and, more usefully, which check "
                      "stopped it. With nothing else wired up this readout IS the feature, so "
-                     "leaving it off means the observer runs and you never see the result."),
+                     "leaving it off means the observer runs and you never see the result."), "ShowPassingAssist"),
       param="ShowPassingAssist")
 
     self._show_next_lane = toggle_item_sp(
       title=tr("Show Next Lane Speeds"),
-      description=tr("Draw the speed and distance of the nearest vehicle in each lane beside you, "
+      description=recommended(tr("Draw the speed and distance of the nearest vehicle in each lane beside you, "
                      "over the car itself. Turns amber when that lane is the reason no pass is "
-                     "being suggested."),
+                     "being suggested."), "ShowAdjacentLanes"),
       param="ShowAdjacentLanes")
 
     self._show_oncoming = toggle_item_sp(
       title=tr("Show Oncoming Speeds"),
-      description=tr("Mark vehicles coming the other way as well, in red. Only ever appears where "
+      description=recommended(tr("Mark vehicles coming the other way as well, in red. Only ever appears where "
                      "the opposing carriageway is within radar reach -- on a divided highway it "
                      "should stay empty, and a marker there is worth telling me about. Drawn only "
                      "while a vehicle is actually being seen, never from the memory that keeps "
-                     "the road classified afterwards."),
+                     "the road classified afterwards."), "ShowOncomingSpeeds"),
       param="ShowOncomingSpeeds")
 
     # ORDERED THE WAY A DRIVER ARRIVES AT A QUESTION, not the order these were built in. They were

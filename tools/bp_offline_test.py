@@ -99,6 +99,11 @@ DEFAULT_TARGETS = [
   # migration on 2026-08-08.
   "selfdrive/car/tests/test_params_keys_unique.py",
   "selfdrive/car/tests/test_no_int_on_capnp_enums.py",
+  # Both written for passing assist and neither ever collected -- caught by
+  # test_bp_tests_are_registered, which is the only reason anyone noticed. A test that does not
+  # run is worse than no test: it reads as coverage.
+  "selfdrive/car/tests/test_passing_assist_screen.py",
+  "selfdrive/car/tests/test_settings_claims.py",
   # A sub-panel that builds a back button and never draws it opens and cannot be left. Found by
   # hand on the last check before a drive, in a panel added the same day.
   "selfdrive/car/tests/test_sub_layouts_have_a_way_out.py",
