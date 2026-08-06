@@ -126,6 +126,7 @@ about to do. So:
     survive a reboot and cannot repeat without a fresh, deliberate request.
 """
 
+from opendbc.sunnypilot.car.ford.blinker_phase_lock import BlinkerPhaseLock
 from opendbc.car import DT_CTRL
 from openpilot.common.params import Params
 
@@ -570,9 +571,7 @@ class BlinkerTestExt:
     self._bt_lamp_off_frame = 0
     self._bt_lamp_quiet_frames = int(LAMP_SETTLE_S / DT_CTRL)   # nothing has flashed yet
     self._bt_wait_frames = 0
-    self._bt_gw_ts = 0
-    self._bt_gw_frame = 0
-    self._bt_gw_count = 0
+    self._bt_lock = BlinkerPhaseLock()
     self._bt_lamp_on_frame = 0
     self._bt_guard_s = float(BLINK_AFTER_LAMP_OFF_S)
     self._bt_last_blink_cmd = 0
@@ -781,26 +780,12 @@ class BlinkerTestExt:
             self.bt_frames_left = min(self.bt_frames_left, int(0.4 / DT_CTRL))
           return SIGNAL_NONE
 
-        # A NEW GATEWAY FRAME, or long enough that it has clearly stopped arriving.
-        gw_ts = getattr(CS, "steering_data_ts", 0)
-        fresh = gw_ts != self._bt_gw_ts
-        if fresh:
-          self._bt_gw_ts = gw_ts
-          self._bt_gw_frame = self._bt_frame
-        lost = (self._bt_frame - self._bt_gw_frame) * DT_CTRL > GATEWAY_LOST_S
-        if not fresh and not lost:
+        # THE PHASE LOCK, which now lives in blinker_phase_lock so it is a component rather than
+        # test-only code -- and so it is testable, which tangled up in here it was not.
+        self._bt_lock.period_s = self.bt_blink_period_s
+        if not self._bt_lock.should_send(self._bt_frame, getattr(CS, "steering_data_ts", 0)):
           return SIGNAL_NONE
-
-        # ON for half the period, OFF for the other half, both counted in GATEWAY frames -- which
-        # is the only clock that matters here, because it is the clock our contender runs on.
-        slot = max(1, int(round(self.bt_blink_period_s / 2.0 / GATEWAY_PERIOD_S)))
-        self._bt_gw_count += 1
-        phase = (self._bt_gw_count - 1) % (slot * 2)
-        if phase >= slot:
-          return SIGNAL_NONE
-        if phase == 0:
-          # One blink per ON phase, however many frames hold it up.
-          self._bt_blinks_sent += 1
+        self._bt_blinks_sent = self._bt_lock.blinks_sent
         self._bt_last_blink_cmd = self._bt_frame
         return self.bt_commanded
       return self.bt_commanded if send_frame else SIGNAL_NONE
@@ -958,8 +943,7 @@ class BlinkerTestExt:
       # The arming frame below returns a command, so it IS the first blink. Not counting it is
       # where "blink left did eight flashes" came from, against a BLINK_COUNT of seven.
       # Phase counter starts clean so the first gateway frame after arming begins an ON slot.
-      self._bt_gw_count = 0
-      self._bt_gw_frame = self._bt_frame
+      self._bt_lock.arm(self._bt_frame)
       self._bt_blinks_sent = 0
       # A short tail only. There is nothing to observe after a blink -- the lamp follows our frames
       # and stops when we do -- so a full second here was a second of dead buttons for nothing.
