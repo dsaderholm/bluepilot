@@ -274,6 +274,30 @@ BLINK_GUARD_SCALE = 0.82
 BLINK_GUARD_MIN_S = 0.15
 BLINK_GUARD_MAX_S = 0.90
 BLINK_AFTER_LAMP_OFF_S = 0.35   # until an on-time has actually been observed
+
+# ...AND A WAY OUT IF THE LAMP NEVER REPORTS GOING DARK.
+#
+# This is the hole that fits every observation. The loop sends the next blink only when it has seen
+# a FALLING edge later than its own last command:
+#
+#     ready = lamp_off_frame and dark_for >= guard and lamp_off_frame > last_blink_cmd
+#     if not ready and (lamp_seen or since_cmd < period): return NONE
+#
+# Once `lamp_seen` is true there is NO timeout at all -- the fallback below it is gated on never
+# having seen the lamp, deliberately, because as a timeout it raced the loop. So a single missed
+# falling edge is terminal: `ready` can never become true again, nothing more is sent, and the run
+# ends wherever it had got to when the command window expires.
+#
+# That predicts exactly what the car does. Counts that are short but never gapped, because the run
+# stops rather than skipping. Spacing correct, because the blinks that did happen were paced by the
+# lamp. Random, because it depends on which cycle the miss lands in. Unaffected by waiting between
+# tests or by cycling the ignition, because nothing persists. "7, then nothing, then 2, then 6,
+# then 3, then 1" is that, five times.
+#
+# 2.5 s cannot race a healthy loop: his flasher is 760 ms and a whole cycle is under a second, so
+# this is past three of them. It only ever fires when the loop is genuinely stuck, and it recovers
+# it in well under the command window instead of losing the rest of the run.
+BLINK_STALL_S = 2.5
 # WHAT THE SETTING IS FOR, NOW THAT THE LOOP IS CLOSED.
 #
 # Asked directly: "so I shouldn't need to adjust blink spacing if it can measure it?" Right -- with
@@ -639,7 +663,9 @@ class BlinkerTestExt:
         # was still correctly waiting for the lamp, putting the command straight back into the
         # refractory window the loop exists to avoid. A test caught it immediately, which is the
         # only reason this is not another trip to the driveway.
-        if not ready and (self.bt_lamp_seen or since_cmd < self.bt_blink_period_s):
+        # See BLINK_STALL_S. A lamp report that misses one falling edge used to end the run.
+        stalled = since_cmd >= BLINK_STALL_S
+        if not ready and not stalled and (self.bt_lamp_seen or since_cmd < self.bt_blink_period_s):
           return SIGNAL_NONE
         self._bt_last_blink_cmd = self._bt_frame
         self._bt_blinks_sent += 1

@@ -1352,6 +1352,17 @@ class HudRendererBP(HudRendererSP):
       # testing at a light ends the run the moment the car rolls. Correct behaviour, reported as
       # "SIGNAL WORKS, 2 flashes", which reads as the car half-ignoring us.
       reason = str(bt.blockedReason)
+      # A short count with NO gate to blame is a different fault and has to read differently.
+      # Reported as "the readout does say what blink count it was, it's just not always 7" -- no
+      # stop reason, so nothing cut it off; it ran out of time waiting for a lamp report that never
+      # came. See BLINK_STALL_S. With the watchdog this should stop happening, and if it does not,
+      # this line is the difference between a run that was stopped and a run that lost the lamp.
+      if reason == 'none' and bt.blinksWanted and bt.blinksSent < bt.blinksWanted:
+        self._pa_main = "LOST THE LAMP"
+        self._pa_sub = f"{bt.blinksSent} of {bt.blinksWanted} blinks - the car stopped reporting it"
+        self._pa_color = rl.Color(255, 200, 60, 255)
+        self._pa_alert = True
+        return True
       if reason != 'none' and bt.blinksWanted:
         self._pa_main = _BT_STOPPED.get(reason, "STOPPED")
         self._pa_sub = f"{bt.blinksSent} of {bt.blinksWanted} blinks - press again when stopped"

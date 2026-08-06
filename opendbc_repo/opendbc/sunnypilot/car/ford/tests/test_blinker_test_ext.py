@@ -14,6 +14,7 @@ from opendbc.car import DT_CTRL
 from opendbc.sunnypilot.car.ford.blinker_test_ext import (
   BlinkerTestExt, SIGNAL_NONE, SIGNAL_LEFT, SIGNAL_RIGHT, PULSE_DURATION_S, STANDSTILL_V_EGO,
   BUTTONS_STEP, SIGNAL_TAP_LEFT, TAP_COMMAND_S, DONE_HOLD_S, SIGNAL_BLINK_LEFT, SIGNAL_MEASURE, MEASURE_QUIET_S, DEFAULT_BLINK_PERIOD_S, BLINK_COUNT,
+  BLINK_STALL_S,
 )
 
 
@@ -641,3 +642,58 @@ class TestARunDoesNotAbortItself:
     run(ext, 4, v_ego=5.0)
     assert ext.bt_state == 2
     assert ext.bt_blocked == 1, "car moved, and the panel would have blamed the signal"
+
+
+class TestOneMissedLampEdgeDoesNotEndTheRun:
+  """The shape that fits every observation: "7, then nothing, then 2, then 6, then 3, then 1... it
+  still seems really random what number of flashes it will do", with the readout agreeing with the
+  count and naming no stop reason.
+
+  No stop reason means no gate cut it off -- it ran out of time waiting. The loop sends the next
+  blink only on a falling edge later than its own last command, and once the lamp has been seen
+  there was no timeout at all, so a single missed falling edge was terminal: nothing more is sent
+  and the run ends wherever it had got to. Short but never gapped, correct spacing, random count,
+  unaffected by waiting or by cycling the ignition.
+  """
+
+  @staticmethod
+  def _blink(ext, cycles, period_s=0.76, on_s=0.4, miss_after=None):
+    """Drive the lamp like a real flasher, optionally dropping ONE falling edge."""
+    sent = []
+    lit = False
+    t_on = 0.0
+    for i in range(int(cycles * period_s * 2 / DT_CTRL)):
+      t = i * DT_CTRL
+      # the lamp follows our commands: light it when one goes out, hold for on_s
+      if sent and not lit and t - sent[-1] < DT_CTRL * 2:
+        lit, t_on = True, t
+      if lit and t - t_on >= on_s:
+        drop = miss_after is not None and len(sent) == miss_after
+        if not drop:
+          lit = False
+      out = ext.update_blinker_test(make_cs(lamp_left=lit))
+      if out == SIGNAL_LEFT:
+        sent.append(t)
+    return sent
+
+  def test_a_healthy_loop_is_paced_by_the_lamp(self):
+    ext = make_ext(SIGNAL_BLINK_LEFT)
+    run(ext, POLL_FRAMES + 2)
+    sent = self._blink(ext, cycles=10)
+    assert len(sent) >= BLINK_COUNT - 1, f"only {len(sent)} of {BLINK_COUNT}"
+    gaps = [b - a for a, b in zip(sent, sent[1:])]
+    assert gaps and all(g < BLINK_STALL_S for g in gaps), (
+      f"the watchdog paced a healthy loop instead of the lamp: {gaps}")
+
+  def test_a_missed_falling_edge_no_longer_ends_it(self):
+    """The lamp sticks on after the third command. Before the watchdog, that was the last blink."""
+    ext = make_ext(SIGNAL_BLINK_LEFT)
+    run(ext, POLL_FRAMES + 2)
+    sent = self._blink(ext, cycles=14, miss_after=3)
+    assert len(sent) > 3, f"stalled at {len(sent)} blinks on one missed edge"
+
+  def test_the_watchdog_cannot_fire_before_a_whole_cycle_has_passed(self):
+    """A timeout at the blink period raced the loop when the flasher was slower than configured --
+    which is why the fallback below it is gated on never having seen the lamp at all. This one has
+    to sit far enough out that it cannot do the same."""
+    assert BLINK_STALL_S > 2 * DEFAULT_BLINK_PERIOD_S
