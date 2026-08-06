@@ -74,8 +74,8 @@ SCENES = [
   # THE MOVING CAR GETS THE VERDICT AND NOTHING ELSE. These three scenes used to print the four
   # per-side geometry numbers here, which is what earned "and you expect me to read all of that
   # while driving?" The diagnosis moved to the drive summary -- see the "why it never fired" scene.
-  ("refused: nowhere to go on either side",
-   "No lane to move into", "no rear data  -  3 this drive", 0.0, False, GREY),
+  ("refused: nowhere to go on either side, with the reason in one word",
+   "No lane to move into", "left: paint  -  no rear data  -  3 this drive", 0.0, False, GREY),
   # The worst case the caveat line can still reach. Unfitted, with the geometry numbers it used to
   # carry, it measured 1355px against a 1008px panel and ran off both edges.
   ("refused, with every caveat the line has room for",

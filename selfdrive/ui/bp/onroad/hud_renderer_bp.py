@@ -943,14 +943,17 @@ class HudRendererBP(HudRendererSP):
           self._pa_sub_detail = (f"want {pa.referenceSpeed * conv:.0f}"
                                  f"  lead {pa.leadVLead * conv:.0f}"
                                  f"  [{pa.referenceSource}]")
-        # NO PER-SIDE GEOMETRY HERE ANY MORE. It used to print "L paint 0.31     R shoulder
-        # 0.3ft" live, which is four numbers to parse at 70 mph in service of a question that
-        # cannot be acted on until the car is parked anyway.
+        # ONE WORD, for the LEFT side, and nothing else. It used to print "L paint 0.31     R
+        # shoulder 0.3ft" -- four numbers to parse at 70 mph -- which earned "and you expect me to
+        # read all of that while driving?" and was removed outright.
         #
-        # "I love having good visual information on the screen, but only for at-a-glance
-        # information. The rest I just want to dump onto you." The moving car gets the verdict;
-        # the drive summary carries the diagnosis, as one sentence, at a stop -- see
-        # geoRefusedBy and _record_refusal.
+        # A single word is the other thing he said, though: "I love having good visual information
+        # on the screen, but only for at-a-glance information." This is glanceable, it is the only
+        # question standing between the feature and working at all, and it means one look answers
+        # what otherwise costs an SSH session. The numbers stay in the drive summary.
+        elif blocked == 'noLaneAvailable' and pa.geoRefusedShare > 0.0:
+          term = (_GEO_TERMS[pa.geoRefusedBy] if pa.geoRefusedBy < len(_GEO_TERMS) else "?")
+          self._pa_sub_detail = f"left: {term}"
         elif blocked == 'closingIn' and pa.minApproachActive > 0:
           # Auto derives this from what the car's own ACC has been measured doing, so the number is
           # different per car and changes as it learns. Without showing it, "Waiting to get closer"
