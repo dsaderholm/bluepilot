@@ -4,7 +4,28 @@
       "Read(//Users/anthony/Desktop/git_clones/bluepilot/**)",
       "Bash(git status:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(python tools/bp_offline_test.py:*)",
+      "Bash(git push:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=$(python -c \"import json,sys;d=json.load(sys.stdin);print(d.get('tool_input',{}).get('file_path') or (d.get('tool_response') or {}).get('filePath') or '')\" 2>/dev/null); case \"$f\" in *.py) ;; *) exit 0 ;; esac; [ -f tools/bp_offline_test.py ] || exit 0; out=$(python tools/bp_offline_test.py 2>&1) || { printf 'bp_offline_test FAILED after editing %s\n\n' \"$f\"; printf '%s\n' \"$out\" | grep -E \"FAILED|Error|assert|failed\" | head -20; exit 2; }",
+            "timeout": 180,
+            "asyncRewake": true,
+            "statusMessage": "bp_offline_test",
+            "rewakeSummary": "Offline suite failed"
+          }
+        ]
+      }
     ]
   }
 }
