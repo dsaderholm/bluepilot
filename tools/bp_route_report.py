@@ -98,9 +98,31 @@ def resolve(target: str) -> list[str] | str:
   return target
 
 
+def stream(target: str):
+  """Yield every message of a route, ONE SEGMENT AT A TIME.
+
+  Handing LogReader the whole segment list gets the process OOM-killed on the device -- bare
+  "Killed", no traceback -- because a 35 minute route is far more than a comma 3X holds at once.
+  Scoping the reader to a single segment keeps memory flat however long the drive was, and the
+  caller's running state spans them regardless since this is one continuous sequence.
+  """
+  from openpilot.tools.lib.logreader import LogReader
+
+  targets = resolve(target)
+  if isinstance(targets, str):
+    targets = [targets]
+
+  for i, seg in enumerate(targets):
+    if len(targets) > 1:
+      print(f"  segment {i + 1}/{len(targets)}", end="\r", file=sys.stderr, flush=True)
+    yield from LogReader(seg)
+
+  if len(targets) > 1:
+    print(" " * 30, end="\r", file=sys.stderr)
+
+
 def read(path: str) -> dict:
   """Walk the route once, accumulating everything. One pass -- these files are large."""
-  from openpilot.tools.lib.logreader import LogReader
 
   out = {
     "pa_frames": 0, "engaged_s": 0.0, "suggested": Counter(), "blocked": Counter(),
@@ -118,7 +140,7 @@ def read(path: str) -> dict:
   saw_pressed = False
   t0 = t1 = None
 
-  for msg in LogReader(resolve(path)):
+  for msg in stream(path):
     which = msg.which()
     t = msg.logMonoTime * 1e-9
     if t0 is None:

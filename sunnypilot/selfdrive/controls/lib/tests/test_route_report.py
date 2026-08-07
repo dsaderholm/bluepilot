@@ -46,11 +46,28 @@ def plan(t, suggestion="none", blocked="noLaneAvailable", maneuver="idle",
 
 def read(msgs):
   """Drive the reader with a canned message list instead of a file."""
-  RR.read.__globals__["LogReader"] = lambda _p: msgs
   import sys
-  fake = NS(LogReader=lambda _p: msgs)
-  sys.modules["openpilot.tools.lib.logreader"] = fake
+  sys.modules["openpilot.tools.lib.logreader"] = NS(LogReader=lambda _p: msgs)
   return RR.read("fake-route")
+
+
+def test_a_long_route_is_streamed_a_segment_at_a_time():
+  """A 35 minute route OOM-killed the device -- bare "Killed", no traceback -- because the whole
+  segment list went to one LogReader. stream() must open them one at a time, so peak memory is one
+  segment however long the drive was, while the caller's state still spans the whole route."""
+  import sys
+  opened = []
+  sys.modules["openpilot.tools.lib.logreader"] = NS(
+    LogReader=lambda p: (opened.append(p) or [car_state(len(opened))]))
+  # Restored, because a module-level monkeypatch left in place makes every later test read three
+  # segments where it expects one -- which fails as a wrong COUNT and looks like a reader bug.
+  real_resolve = RR.resolve
+  RR.resolve = lambda _t: ["/d/r--0/rlog", "/d/r--1/rlog", "/d/r--2/rlog"]
+  try:
+    list(RR.stream("r"))
+  finally:
+    RR.resolve = real_resolve
+  assert opened == ["/d/r--0/rlog", "/d/r--1/rlog", "/d/r--2/rlog"], opened
 
 
 # --- the gesture, which is the whole reason carState is walked at all ----------------------------
