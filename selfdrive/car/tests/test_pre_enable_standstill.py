@@ -64,3 +64,39 @@ def test_the_original_conditions_survive():
   src = ast.unparse(_guard().test)
   for term in ("brakePressed", "standstill"):
     assert term in src, f"{term} was dropped from the preEnableStandstill condition"
+
+
+def test_the_gate_is_actually_OPEN_on_his_car():
+  """The gate existing is not the same as the gate being open, and only one of those was checked.
+
+  The fix above only helps if `autoResumeSng` is TRUE on a 2020 Fusion. Ford derives it rather than
+  setting it outright -- `ret.autoResumeSng = ret.minEnableSpeed == -1.` -- so it depends on two
+  facts in two different files, neither of which the AST test above can see:
+
+    interfaces.py   minEnableSpeed defaults to -1 ("enable is done by stock ACC, so ignore this")
+    ford/interface.py  overrides it to 20 mph ONLY on the manual-transmission branch
+
+  His car is an automatic, so the default survives and autoResumeSng is True. If upstream ever
+  changes either link, preEnableStandstill starts firing at every red light again and the shape
+  test still passes -- it checks the condition's form, not whether it can ever be false here.
+  """
+  import pathlib
+  root = pathlib.Path(__file__).resolve()
+  while not (root / "common" / "params_keys.h").exists():
+    root = root.parent
+
+  base = (root / "opendbc_repo" / "opendbc" / "car" / "interfaces.py").read_text(encoding="utf-8")
+  assert "ret.minEnableSpeed = -1." in base, (
+    "minEnableSpeed no longer defaults to -1, so autoResumeSng may be False on Ford and "
+    "'Release Brake to Engage' would come back at every stop")
+
+  ford = (root / "opendbc_repo" / "opendbc" / "car" / "ford" / "interface.py").read_text(encoding="utf-8")
+  assert "ret.autoResumeSng = ret.minEnableSpeed == -1." in ford, (
+    "Ford no longer derives autoResumeSng from minEnableSpeed -- re-check that it is True for an "
+    "automatic before trusting the preEnableStandstill gate")
+
+  # The 20 mph override must stay on the MANUAL branch. If it ever moves out from under
+  # `transmissionType = manual`, an automatic gets a non-negative minEnableSpeed and the gate shuts.
+  manual_block = ford.split("TransmissionType.manual", 1)[1].split("\n\n", 1)[0]
+  assert "minEnableSpeed" in manual_block, (
+    "the 20 mph minEnableSpeed override is no longer inside the manual-transmission branch")
