@@ -128,6 +128,9 @@ def read(path: str) -> dict:
     "pa_frames": 0, "engaged_s": 0.0, "suggested": Counter(), "blocked": Counter(),
     "geo": None, "maneuvers": Counter(), "duration_s": 0.0,
     "lane_changes": 0, "opposite_switch": 0, "signal_out": 0, "signal_out_steering": 0,
+    # ...and the same question asked the OTHER way. See report(): the latched form said 22 of 23,
+    # which would suppress the cancel on nearly every change.
+    "signal_out_steering_at_drop": 0,
     "overtaken": 0, "route": path,
   }
 
@@ -136,6 +139,7 @@ def read(path: str) -> dict:
   # is visible here even if the state machine never happened to look on that frame.
   prev_dir = 0            # -1 left, +1 right, 0 none: the signal the driver had on
   in_change = False
+  pressed_now = False
   saw_opposite = False
   saw_pressed = False
   t0 = t1 = None
@@ -157,6 +161,7 @@ def read(path: str) -> dict:
           saw_opposite = True
         if cs.steeringPressed:
           saw_pressed = True
+        pressed_now = cs.steeringPressed
         if d == 0:
           out["lane_changes"] += 1
           if saw_opposite:
@@ -165,6 +170,8 @@ def read(path: str) -> dict:
             out["signal_out"] += 1
             if saw_pressed:
               out["signal_out_steering"] += 1
+            if pressed_now:
+              out["signal_out_steering_at_drop"] += 1
           in_change = False
 
     elif which == "longitudinalPlanSP":
@@ -220,7 +227,15 @@ def report(d: dict) -> str:
   else:
     L.append(f"  {d['lane_changes']} signalled lane changes")
     L.append(f"  {d['opposite_switch']} reached the OPPOSITE switch position")
-    L.append(f"  {d['signal_out']} just went out ({d['signal_out_steering']} of those while steering)")
+    L.append(f"  {d['signal_out']} just went out")
+    L.append(f"     of those, steering AT ANY POINT in the change: {d['signal_out_steering']}")
+    L.append(f"     of those, steering AT THE MOMENT it dropped:   "
+             f"{d['signal_out_steering_at_drop']}")
+    latched, at_drop = d["signal_out_steering"], d["signal_out_steering_at_drop"]
+    if d["signal_out"] and latched > at_drop:
+      L.append(f"  -> the two disagree by {latched - at_drop}. should_cancel latches torque across")
+      L.append("     the whole change, so it would suppress the cancel on all of them; sampling at")
+      L.append("     the drop would suppress only the smaller number.")
     if d["opposite_switch"] == 0 and d["signal_out"]:
       L.append("  -> the nudge never reaches position 2. His cancel is invisible to reversed_side,")
       L.append("     so the hands-off signal-out path is the one that has to catch it.")

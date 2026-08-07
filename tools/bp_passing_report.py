@@ -148,7 +148,7 @@ def live(seconds: float) -> int:
       seen_left_ok += 1
       continue
     # Same order as the gate. Whichever it hits first is the one to act on.
-    if pa.leftEdgeStd > 0.5:
+    if pa.leftEdgeStd > 1.2:
       term, val = GEO_TERMS[0], pa.leftEdgeStd
     elif pa.leftLineProb < 0.5:
       term, val = GEO_TERMS[1], pa.leftLineProb

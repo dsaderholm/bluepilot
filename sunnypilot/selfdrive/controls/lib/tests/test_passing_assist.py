@@ -2424,7 +2424,7 @@ class TestTheGeometryGateActuallyOpens:
     assert det.right_geometry_ok
 
   def test_a_genuinely_useless_edge_is_still_refused(self):
-    det = run(PassingAssistDetector(), STUCK_FRAMES, edge_stds=(0.9, 0.9))
+    det = run(PassingAssistDetector(), STUCK_FRAMES, edge_stds=(1.5, 1.5))
     assert not det.left_geometry_ok
 
   def test_paint_nobody_can_see_is_still_refused(self):
@@ -2444,7 +2444,7 @@ class TestTheGeometryGateActuallyOpens:
     those can put a car from another lane into that band.
     """
     det = keep_right_det()
-    scene = dict(probs=(0.05, 0.99, 0.99, 0.05), edges=(-2.2, 2.4), edge_stds=(0.9, 0.9))
+    scene = dict(probs=(0.05, 0.99, 0.99, 0.05), edges=(-2.2, 2.4), edge_stds=(1.5, 1.5))
     moving = dict(scene, tracks=(track(40.0, 3.7, v_rel=0.5),))
     run(det, int(3.0 / DT_MDL), **moving)
     assert det.adjacent.left.same_direction_recent, "the radar did not register the vehicle"
@@ -2600,7 +2600,7 @@ class TestWhyItNeverFired:
     is not the number to change."""
     det = keep_right_det()
     run(det, int(20.0 / DT_MDL), v_lead=SLOW_LEAD_MS,
-        probs=(0.1, 0.99, 0.99, 0.2), edge_stds=(0.9, 0.1))
+        probs=(0.1, 0.99, 0.99, 0.2), edge_stds=(1.5, 0.1))
     term, _, _ = det.geo_refusal
     assert term == det.GEO_EDGE_STD, "paint was blamed for a road edge nobody could measure"
 

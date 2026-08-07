@@ -204,7 +204,7 @@ MIN_ADJACENT_LINE_PROB = 0.5
 MIN_LANE_WIDTH_M = 3.0
 MAX_LANE_WIDTH_M = 5.0
 MIN_EDGE_BEYOND_LINE_M = 0.8
-MAX_ROAD_EDGE_STD = 0.5
+MAX_ROAD_EDGE_STD = 1.2
 
 
 # Why a blinker run that was already going got stopped. Every one of these is the test working --

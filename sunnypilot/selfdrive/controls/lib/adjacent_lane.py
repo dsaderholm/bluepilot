@@ -304,6 +304,20 @@ def path_offset(model, d_rel: float) -> float:
 # Matches passing_assist's threshold of the same name. Duplicated rather than imported because
 # importing it the other way round would be circular, and a road-edge reading this module cannot
 # trust is a different decision from one that module cannot trust.
+#
+# DELIBERATELY STILL 0.5 while passing_assist's went to 1.2 on 2026-08-06, and the divergence is the
+# point rather than drift. The two consumers want opposite things from the same number:
+#
+#   passing_assist   an untrusted edge REFUSES the pass, so a tight threshold is the permissive-to-
+#                    nothing direction -- it blocked every suggestion of a 34 minute drive.
+#   here             an untrusted edge NARROWS _on_our_carriageway to the adjacent band, which is
+#                    the CONSERVATIVE direction. Loosening it widens where opposing traffic is
+#                    looked for, and that is what produced "I was on I-15 for a while, and kept
+#                    saying two-way road" -- ninety seconds of veto per firing.
+#
+# So raising this one buys a scenery filter that trusts the edge more often, at the cost of the
+# false two-way vetoes that the narrow fallback was introduced to stop. Not worth trading blind;
+# it needs its own measurement, and the report's oncoming counters are where that comes from.
 MAX_ROAD_EDGE_STD = 0.5
 RE_LEFT, RE_RIGHT = 0, 1
 

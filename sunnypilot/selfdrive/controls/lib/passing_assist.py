@@ -147,11 +147,23 @@ MAX_LANE_WIDTH_M = 5.0
 MIN_EDGE_BEYOND_LINE_M = 0.8
 # Road edge measurements get unreliable at distance and in poor conditions. modelV2 publishes a
 # per-edge std; above this the edge gap is not trusted and the side is reported unavailable.
-# 0.75, up from 0.5. The rest of this codebase treats roadEdgeStds on a 0..1 scale where 1 is
-# useless -- model_renderer_bp draws an edge at `clip(1.0 - std, 0, 1)` opacity. So the old 0.5
-# rejected any edge the UI itself would still draw at half strength, which on a real road is most
-# of them. This keeps the genuinely unusable ones out without discarding an ordinary highway.
-MAX_ROAD_EDGE_STD = 0.5
+#
+# 1.2, MEASURED, from 34 minutes of his own driving on 2026-08-06 (route 0000031e). Every single
+# geometry refusal of that drive was this term, it measured 1.04, and 1.2 is where it would have to
+# sit to admit four fifths of them. Zero suggestions in 41091 planner frames.
+#
+# The comment here previously said "0.75, up from 0.5" while the value was 0.5 -- a change argued
+# for and never made -- and justified 0.5 by reading roadEdgeStds as a 0..1 scale "where 1 is
+# useless", inferred from model_renderer_bp drawing at `clip(1.0 - std, 0, 1)`. The road disagrees:
+# 1.04 is an ordinary reading, and the clip exists precisely because std is NOT bounded at 1. That
+# was a unit inferred from a rendering clamp rather than measured.
+#
+# WHAT THIS DOES NOT ESTABLISH, because _record_refusal takes the FIRST failing term in the gate's
+# own order and this one is checked first: nothing about paint, lane width or room-beyond. They were
+# never reached. Loosening this does not prove the lane is fine -- it lets the three checks that
+# actually judge that RUN for the first time, including the room-beyond test that exists to catch
+# exactly the shoulder he complained about. Expect the next drive to name a different term.
+MAX_ROAD_EDGE_STD = 1.2
 
 # --- lead gates ---
 # Below this, passing is not the maneuver being considered.
