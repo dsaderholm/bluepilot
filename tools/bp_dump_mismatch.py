@@ -100,8 +100,10 @@ def main() -> int:
         state["standstill"] = cs.standstill
         state["cruiseEnabled"] = cs.cruiseState.enabled
         state["cruiseStandstill"] = cs.cruiseState.standstill
-        if cs.buttonEvents:
-          state["buttons"] = ",".join(f"{b.type}{'+' if b.pressed else '-'}" for b in cs.buttonEvents)
+        # Per-frame, not sticky. Carrying the last-seen value forward made a single SET- release
+        # look like a button held down for the whole window on the first run of this.
+        state["buttons"] = ",".join(f"{b.type}{'+' if b.pressed else '-'}"
+                                    for b in cs.buttonEvents) if cs.buttonEvents else ""
       elif w == "carControl":
         cc = msg.carControl
         state["ccEnabled"] = cc.enabled

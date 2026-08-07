@@ -109,30 +109,37 @@ class CarState(CarStateBase, MadsCarState, CarStateExt):
     # ET.IMMEDIATE_DISABLE. It is not caused here; it was HIDDEN here. Previously pedalPressed
     # disengaged openpilot at every stop before anything else had the chance to go wrong.
     #
-    # CAUSE NOT YET KNOWN, and the first guess was worthless: "auto start-stop shuts the engine down
-    # at a standstill and an rx-checked PCM message lapses". This car does not have auto start-stop.
-    # That was asserted from what a 2020 Fusion generally has rather than from anything checkable,
-    # which is the same mistake as reading a shipped default as a stored one. Nothing in this repo
-    # says anything about start-stop either way -- there was never evidence to read.
+    # CAUSE FOUND 2026-08-06, from a route rather than from reasoning. Two earlier guesses -- auto
+    # start-stop, and a lapsing rx-checked message -- were both wrong. "It only happens when I press
+    # resume, never just stopping" is what ruled them out: a CAN message does not care about buttons.
     #
-    # What IS established: selfdrived raises controlsMismatch from exactly three places, and they are
-    # distinguishable in a log rather than by reasoning.
+    # The log shows selfdriveState.enabled going FALSE -> TRUE while pandaState.controlsAllowed stays
+    # FALSE, with carState.cruiseState.enabled TRUE the whole time and safetyRxChecksInvalid False.
+    # Two seconds of that is mismatch_counter >= 200, and controlsMismatch is ET.IMMEDIATE_DISABLE.
     #
-    #   1. safety_mismatch -- pandaState.safetyModel, safetyParam or alternativeExperience differs
-    #      from CarParams. interfaces_ext.py sets FordSafetyFlags.LONG_CONTROL in safetyParam from
-    #      the alpha-long toggle, so this pair has a real chance to disagree. Would fire constantly
-    #      rather than only at stops, which argues against it.
-    #   2. pandaState.safetyRxChecksInvalid -- a message in ford_rx_checks stopped arriving at its
-    #      declared rate, or failed its counter/checksum. Panda then drops controls_allowed
-    #      car-wide. ford.h's comment above ford_rx_checks documents this chain from a different
-    #      cause, which is why it was the first place to look.
-    #   3. mismatch_counter >= 200 -- two full seconds of openpilot enabled while panda says
-    #      controls are not allowed. Sustained, not a transient.
+    # openpilot and panda read the SAME signal -- EngBrakeData / CcStat_D_Actl, engaged on (4, 5).
+    # They disagree on the RULE:
     #
-    # Deciding between them needs the route, not more thinking: read pandaStates for
-    # safetyRxChecksInvalid, safetyModel and safetyParam across the stop, against selfdriveState
-    # enabled. Do NOT change panda safety before that -- it is the last place in the stack where a
-    # hypothesis is an acceptable basis for a patch.
+    #   openpilot   cruiseState.enabled is a LEVEL. True whenever the car says engaged.
+    #   panda       pcm_cruise_check (safety.h) allows only on a RISING EDGE:
+    #                 if (!cruise_engaged)                      controls_allowed = false;
+    #                 if (cruise_engaged && !cruise_engaged_prev) controls_allowed = true;
+    #
+    # So once controls_allowed has been cleared, ONLY a fresh off->on transition of Ford's cruise
+    # state can restore it. At a standstill Ford holds CcStat_D_Actl in (4,5) continuously -- the
+    # driver pressing SET or RES moves the set speed without ever leaving engaged -- so openpilot
+    # re-enables on the level and panda never sees an edge. That is exactly the reported shape.
+    #
+    # ford.h also calls speed_mismatch_check, which clears controls_allowed with no edge to restore
+    # it, so a single speed disagreement earlier in the drive can latch this off for good.
+    #
+    # NOT FIXED HERE, and not to be fixed by guessing. The two candidate fixes live in other
+    # people's safety-critical code -- openpilot declining to enable without controls_allowed, or
+    # panda's Ford mode allowing on level rather than edge -- and the second is a real safety
+    # loosening. Worth reporting upstream with this log.
+    #
+    # Workaround that costs nothing: CNCL then RES+ rather than SET at a stop. Cancelling drops
+    # CcStat_D_Actl out of (4,5), and resuming gives panda the rising edge it is waiting for.
     ret.standstill = cp.vl["DesiredTorqBrk"]["VehStop_D_Stat"] == 1 or ret.vEgoRaw < STANDSTILL_SPEED
 
     # gas pedal
