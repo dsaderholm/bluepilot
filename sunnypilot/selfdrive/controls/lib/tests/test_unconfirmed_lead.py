@@ -109,28 +109,54 @@ class TestUnconfirmedLead:
     assert ev.fired, "alert must fire at trigger, not at the floor"
     assert det.restore_set_speed == CRUISE_MS
 
-  def test_a_vision_lead_asks_for_the_floor_immediately(self):
-    """Reported 2026-08-06: it saw a stopped car early, walked the set speed down along the MPC
-    plan, and the brake when it came was hard.
+  def test_a_highway_stopped_car_goes_straight_to_the_floor(self):
+    """His objection, and the physics agrees: "it detects stopped cars late all the time and stopped
+    cars can be on roads faster than roads with traffic lights".
 
-    The set speed is a REQUEST, not a deceleration. Ford's ACC has its own bounded braking
-    authority, so asking for 20 the instant the lead is confirmed cannot make the stop harder than
-    Ford was ever going to make it -- it just starts it with the most distance in hand. The old
-    `>= ACC_FLOOR_MS` assertions passed either way, which is why this is stated as equality.
+    A stopped car at 180 m demands 3.65 m/s^2 at 80 mph and 2.41 at 65 -- at or past what Ford's ACC
+    delivers. There is no margin to ease into, so pacing there would be a frame wasted every frame.
     """
     det, ev = UnconfirmedLeadDetector(), FakeEvents()
     run(det, ev, 60, d_rel=lambda i: 175. - i * 0.5)
     assert det.trigger == Trigger.visionLead
     assert det.v_target == ACC_FLOOR_MS, (
-      f"asked for {det.v_target / 0.44704:.0f} mph instead of the 20 mph floor")
+      f"at 65 mph it asked for {det.v_target / 0.44704:.0f} mph -- no room to pace at this speed")
 
-  def test_it_stays_at_the_floor_while_active(self):
-    """Drifting back up mid-event would ask Ford to ease off a stopped car."""
+  def test_a_slow_road_paces_instead(self):
+    """The same range at 45 mph demands well under the brake-lamp threshold, so the ramp is free --
+    and it is what makes a false positive survivable.
+
+    Starts at 160 m rather than 180: at 45 mph the 7 s TTC cap is 141 m, so a lead further out is
+    rejected before urgency is ever consulted. Writing this test at highway distances made it fail
+    for a reason that had nothing to do with what it was testing."""
     det, ev = UnconfirmedLeadDetector(), FakeEvents()
-    run(det, ev, 60, d_rel=lambda i: 175. - i * 0.5)
-    run(det, ev, 20, d_rel=lambda i: 145. - i * 0.5)
+    slow = 20.12   # 45 mph
+    run(det, ev, 60, v_ego=slow, v_rel=-slow, d_rel=lambda i: 160. - i * 0.5)
     assert det.state == State.active
-    assert det.v_target == ACC_FLOOR_MS
+    assert det.v_target > ACC_FLOOR_MS, "paced range collapsed to the floor"
+    assert det.v_target < slow - 2., "asked for essentially nothing"
+
+  def test_the_paced_request_tightens_as_the_range_closes(self):
+    """The property that makes pacing safe: it converges on the floor by itself."""
+    slow = 20.12
+    seen = []
+    for start_d in (160., 140., 120.):
+      det, ev = UnconfirmedLeadDetector(), FakeEvents()
+      run(det, ev, 60, v_ego=slow, v_rel=-slow, d_rel=lambda i, x=start_d: x - i * 0.35)
+      if det.state == State.active:
+        seen.append(det.v_target)
+    assert len(seen) >= 2, "need several triggers at different ranges to compare"
+    assert seen == sorted(seen, reverse=True), f"not monotonic in range: {seen}"
+
+  def test_the_split_is_physics_not_a_speed_threshold(self):
+    """Same speed, different range: the urgency rule has to key on required deceleration, not on
+    how fast the car happens to be going."""
+    slow = 20.12
+    far, near = UnconfirmedLeadDetector(), UnconfirmedLeadDetector()
+    run(far, FakeEvents(), 60, v_ego=slow, v_rel=-slow, d_rel=lambda i: 160. - i * 0.5)
+    run(near, FakeEvents(), 60, v_ego=slow, v_rel=-slow, d_rel=lambda i: 95. - i * 0.5)
+    assert far.v_target > ACC_FLOOR_MS, "far lead at 45 mph should still be paced"
+    assert near.v_target == ACC_FLOOR_MS, "close lead at the SAME speed should be urgent"
 
   def test_ford_braking_toward_our_own_request_does_not_release(self):
     """The bug the owner caught before it reached the road.
@@ -236,15 +262,16 @@ class TestUnconfirmedLead:
     the request off that alone would command no change at all -- arriving late for precisely the
     reason DEC's signal was chosen for being early.
 
-    65 mph with the stop 155 m out needs v^2/2d = 2.7 m/s^2; over the 4 s horizon that is a request
-    around 41 mph, immediately.
+    65 mph with the stop 155 m out needs v^2/2d = 2.8 m/s^2, which is past URGENT_DECEL_MS2 -- so
+    since 2026-08-06 this asks for the FLOOR rather than pacing. The paced ramp he liked at red
+    lights happens at arterial speeds, where the same distance demands under 1.4.
     """
     det, ev = model_stop_detector(), FakeEvents()
     run(det, ev, 20, slow_down=True, stop_dist=155., status=False, accel=0.)
     assert det.state == State.active and det.trigger == Trigger.modelStop
     assert det.v_target < CRUISE_MS - 8., \
       f"asked for {det.v_target / 0.44704:.0f} mph from {CRUISE_MS / 0.44704:.0f} -- too little, too late"
-    assert 17. < det.v_target < 20., f"expected ~18.3 m/s (41 mph), got {det.v_target:.1f}"
+    assert det.v_target == ACC_FLOOR_MS, f"no room to pace at 65 mph/155 m, got {det.v_target:.1f}"
 
   def test_a_closer_stop_is_asked_for_harder(self):
     """Monotonic in distance, which is what makes this a profile rather than a step."""

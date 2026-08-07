@@ -179,6 +179,20 @@ MODEL_STOP_HORIZON_S = 4.0
 # floor on a near-zero endpoint. The acceleration term still applies there, which is the half of
 # _model_stop_target that is any good close in.
 MIN_STOP_DISTANCE_M = 5.0
+# Aim to be stopped SHORT of the lead, not at it. dRel is measured to the object.
+LEAD_STANDOFF_M = 5.0
+# Above this required deceleration there is no room left to pace: ask for the floor at once.
+#
+# His objection, and the numbers back it: "it detects stopped cars late all the time and stopped
+# cars can be on roads faster than roads with traffic lights". A stopped car at 180 m demands
+# 3.65 m/s^2 at 80 mph and 2.41 at 65 -- at or past what Ford's ACC will deliver, so every frame
+# spent easing into it is a frame wasted. At 45 mph the same 180 m demands 1.16, which is below the
+# threshold that even lights the brake lamps, and there the paced ramp is free.
+#
+# 2.0 m/s^2 is Ford ACC's comfortable working limit; 1.3 is where UN R13-H lights the stop lamps and
+# 3.5 is about all it has. So the split is physics, not a speed threshold -- highways go straight to
+# the floor, arterials pace and tighten, and nothing has to know which road it is on.
+URGENT_DECEL_MS2 = 2.0
 
 
 class UnconfirmedLeadDetector:
@@ -487,10 +501,10 @@ class UnconfirmedLeadDetector:
         self._release()
         return
 
-      # Hold the floor for as long as this is active. Same reasoning as the trigger: the request
-      # is not the deceleration, and letting it drift back up mid-event would ask Ford to ease off
-      # a stopped car.
-      self.v_target = ACC_FLOOR_MS
+      # Recomputed every cycle as the range closes, so the request tightens on its own and reaches
+      # the floor by ~90 m at 65 mph. It cannot drift back UP: dRel only shrinks while this is
+      # active, and a lead that stops closing releases through the TTC margin instead.
+      self.v_target = self._lead_target(v_ego, lead.dRel)
       # Re-raised every cycle, not once at trigger: this alert has to stay up for as long as the
       # driver is the only thing that can stop the car.
       events_sp.add(EventNameSP.unconfirmedLeadBraking)
@@ -548,10 +562,47 @@ class UnconfirmedLeadDetector:
       # speed is a request, not a deceleration -- asking for 20 immediately hands the whole problem
       # to a system with its own bounded authority, and it arrives with the maximum distance in
       # hand. Pacing the request only ever delays the response; it never softens the stop.
-      self.v_target = ACC_FLOOR_MS
+      self.v_target = self._lead_target(v_ego, lead.dRel)
       self._lost_s = 0.0
       # Alert at trigger, not at the floor: the whole deceleration is the driver's reaction time.
       events_sp.add(EventNameSP.unconfirmedLeadBraking)
+
+  @staticmethod
+  def _stopping_target(v_ego: float, distance_m: float) -> float:
+    """Set speed for a stop at `distance_m`: a = v^2/2d, applied over the horizon.
+
+    Shared by both triggers because the geometry is the same question -- a stopped car and a stop
+    line are both a fixed point you must not reach at speed. Floored at what Ford's ACC can hold and
+    never above current speed. Returns v_ego (no request) for a distance too small to be meaningful,
+    where v^2/2d explodes.
+    """
+    if not math.isfinite(distance_m) or distance_m <= MIN_STOP_DISTANCE_M:
+      return v_ego
+
+    # No margin left -- every frame spent easing in is a frame wasted. See URGENT_DECEL_MS2.
+    a_required = v_ego * v_ego / (2. * distance_m)
+    if a_required >= URGENT_DECEL_MS2:
+      return ACC_FLOOR_MS
+
+    return max(min(v_ego - a_required * MODEL_STOP_HORIZON_S, v_ego), ACC_FLOOR_MS)
+
+  def _lead_target(self, v_ego: float, d_rel: float) -> float:
+    """BluePilot: pace the lead request by geometry rather than dropping straight to the floor.
+
+    His call, 2026-08-06, after driving both. This is NOT a return to the MPC-plan pacing that
+    caused the hard brake -- that was openpilot's follow planner, a comfort curve that does not know
+    Ford is the actuator, and it dawdled. This asks what deceleration reaches zero at the car ahead,
+    and the answer is a large request IMMEDIATELY: at 65 mph with a lead at 155 m it asks for
+    40 mph, then 32 at 120 m, then the floor by 90 m.
+
+    Dropping straight to 20 spent the whole reduction at first sight and then held 20 while still
+    far away. Same braking authority where it matters, and a false positive -- a gantry, a bridge --
+    costs a modest speed change instead of slamming to 20 on a motorway. Two false positives on the
+    stop-sign path in one drive is what made that concrete, and he liked the paced feel there.
+
+    The standoff exists because dRel is measured to the object, and stopping AT it is not the goal.
+    """
+    return self._stopping_target(v_ego, d_rel - LEAD_STANDOFF_M)
 
   def _model_stop_target(self, v_ego: float) -> float:
     """Set-speed target for a stop the radar cannot see.
@@ -580,9 +631,5 @@ class UnconfirmedLeadDetector:
 
     # inf when the trajectory was not full-length; small values are meaningless and would divide
     # into an enormous deceleration.
-    d = self.model_stop_distance
-    if math.isfinite(d) and d > MIN_STOP_DISTANCE_M:
-      geometric = v_ego - (v_ego * v_ego / (2. * d)) * MODEL_STOP_HORIZON_S
-      projected = min(projected, geometric)
-
+    projected = min(projected, self._stopping_target(v_ego, self.model_stop_distance))
     return max(min(projected, v_ego), ACC_FLOOR_MS)
