@@ -72,6 +72,28 @@ def run(det, ev, frames, slow_down=False, stop_dist=float('inf'), **kw):
                stop_dist(i) if callable(stop_dist) else stop_dist)
 
 
+class _ForceModelStop:
+  """The shipped default for IcbmModelStopEnabled is now 0 -- the trigger over-fires on the road, so
+  the feature ships off. These tests are about the path's LOGIC, not about whether it is switched on,
+  so they force it rather than inheriting whatever params_keys.h currently says. A test that silently
+  changes meaning when a default moves is not testing what it claims to."""
+
+  def get_bool(self, key, *a, **k):
+    return True if key == "IcbmModelStopEnabled" else False
+
+  def get(self, key, *a, **k):
+    from openpilot.common.params import Params
+    return Params().get(key, *a, **k)
+
+
+def model_stop_detector():
+  det = UnconfirmedLeadDetector()
+  det.params = _ForceModelStop()
+  det.update_params()
+  det.model_stop_enabled = True
+  return det
+
+
 class TestUnconfirmedLead:
   def test_persistence_alone_does_not_trigger(self):
     # A lead held at constant range is the bridge/overpass signature: no closing sweep.
@@ -86,6 +108,29 @@ class TestUnconfirmedLead:
     assert det.trigger == Trigger.visionLead
     assert ev.fired, "alert must fire at trigger, not at the floor"
     assert det.restore_set_speed == CRUISE_MS
+
+  def test_a_vision_lead_asks_for_the_floor_immediately(self):
+    """Reported 2026-08-06: it saw a stopped car early, walked the set speed down along the MPC
+    plan, and the brake when it came was hard.
+
+    The set speed is a REQUEST, not a deceleration. Ford's ACC has its own bounded braking
+    authority, so asking for 20 the instant the lead is confirmed cannot make the stop harder than
+    Ford was ever going to make it -- it just starts it with the most distance in hand. The old
+    `>= ACC_FLOOR_MS` assertions passed either way, which is why this is stated as equality.
+    """
+    det, ev = UnconfirmedLeadDetector(), FakeEvents()
+    run(det, ev, 60, d_rel=lambda i: 175. - i * 0.5)
+    assert det.trigger == Trigger.visionLead
+    assert det.v_target == ACC_FLOOR_MS, (
+      f"asked for {det.v_target / 0.44704:.0f} mph instead of the 20 mph floor")
+
+  def test_it_stays_at_the_floor_while_active(self):
+    """Drifting back up mid-event would ask Ford to ease off a stopped car."""
+    det, ev = UnconfirmedLeadDetector(), FakeEvents()
+    run(det, ev, 60, d_rel=lambda i: 175. - i * 0.5)
+    run(det, ev, 20, d_rel=lambda i: 145. - i * 0.5)
+    assert det.state == State.active
+    assert det.v_target == ACC_FLOOR_MS
 
   def test_radar_acquisition_releases_into_restore(self):
     # The acquired lead must be MOVING. Ford only follows what it tracks, and its manual puts that
@@ -127,7 +172,7 @@ class TestUnconfirmedLead:
 
   def test_model_stop_triggers_on_dec_slow_down_not_shouldstop(self):
     """What the car should have been doing at every red light."""
-    det, ev = UnconfirmedLeadDetector(), FakeEvents()
+    det, ev = model_stop_detector(), FakeEvents()
     run(det, ev, 40, slow_down=True, status=False, accel=-1.5)
     assert not det.model_should_stop, "triggered on a signal that is false here"
     assert det.state == State.active and det.trigger == Trigger.modelStop
@@ -139,14 +184,14 @@ class TestUnconfirmedLead:
     things Ford ACC or SCC already handle. Treating it as a red light would drop the set speed
     toward the floor for an ordinary slowdown.
     """
-    det, ev = UnconfirmedLeadDetector(), FakeEvents()
+    det, ev = model_stop_detector(), FakeEvents()
     run(det, ev, 40, slow_down=False, status=False, accel=-2.5)
     assert det.state != State.active
 
   def test_a_caller_that_omits_the_signal_never_fires_the_model_path(self):
     """The default is False, so forgetting to pass it costs the feature -- not a phantom stop from
     whatever happened to be in the argument slot."""
-    det, ev = UnconfirmedLeadDetector(), FakeEvents()
+    det, ev = model_stop_detector(), FakeEvents()
     for _ in range(40):
       det.update(make_sm(status=False, accel=-2.5), TRAJ, CRUISE_MS, True, ev)
     assert det.state != State.active
@@ -162,7 +207,7 @@ class TestUnconfirmedLead:
     65 mph with the stop 155 m out needs v^2/2d = 2.7 m/s^2; over the 4 s horizon that is a request
     around 41 mph, immediately.
     """
-    det, ev = UnconfirmedLeadDetector(), FakeEvents()
+    det, ev = model_stop_detector(), FakeEvents()
     run(det, ev, 20, slow_down=True, stop_dist=155., status=False, accel=0.)
     assert det.state == State.active and det.trigger == Trigger.modelStop
     assert det.v_target < CRUISE_MS - 8., \
@@ -173,7 +218,7 @@ class TestUnconfirmedLead:
     """Monotonic in distance, which is what makes this a profile rather than a step."""
     targets = []
     for d in (200., 155., 90., 50.):
-      det, ev = UnconfirmedLeadDetector(), FakeEvents()
+      det, ev = model_stop_detector(), FakeEvents()
       run(det, ev, 20, slow_down=True, stop_dist=d, status=False, accel=0.)
       targets.append(det.v_target)
     assert targets == sorted(targets, reverse=True), f"not monotonic in distance: {targets}"
@@ -183,12 +228,12 @@ class TestUnconfirmedLead:
     """v^2/2d explodes as d goes to zero. Below MIN_STOP_DISTANCE_M the geometry term is dropped and
     the acceleration estimate carries it, rather than the floor being commanded off a garbage
     endpoint."""
-    det, ev = UnconfirmedLeadDetector(), FakeEvents()
+    det, ev = model_stop_detector(), FakeEvents()
     run(det, ev, 20, slow_down=True, stop_dist=0.0, status=False, accel=-0.5)
     assert det.v_target > ACC_FLOOR_MS, "a zero endpoint went straight to the floor"
 
   def test_model_stop_without_lead_triggers(self):
-    det, ev = UnconfirmedLeadDetector(), FakeEvents()
+    det, ev = model_stop_detector(), FakeEvents()
     run(det, ev, 40, slow_down=True, status=False, accel=-1.5)
     assert det.state == State.active
     assert det.trigger == Trigger.modelStop
@@ -196,12 +241,12 @@ class TestUnconfirmedLead:
 
   def test_model_stop_never_requests_below_floor(self):
     # Ford ACC cannot hold below 20 mph. Requesting lower is meaningless, so it must clamp.
-    det, ev = UnconfirmedLeadDetector(), FakeEvents()
+    det, ev = model_stop_detector(), FakeEvents()
     run(det, ev, 40, slow_down=True, status=False, accel=-8.)
     assert det.v_target == ACC_FLOOR_MS
 
   def test_model_stop_releases_when_model_lets_go(self):
-    det, ev = UnconfirmedLeadDetector(), FakeEvents()
+    det, ev = model_stop_detector(), FakeEvents()
     run(det, ev, 40, slow_down=True, status=False, accel=-1.5)
     run(det, ev, 15, slow_down=False, status=False, accel=0.)
     assert det.state in (State.restoring, State.inactive)
@@ -209,7 +254,7 @@ class TestUnconfirmedLead:
   def test_radar_confirmed_moving_lead_suppresses_model_stop(self):
     # Ford ACC handles what it actually tracks, so there is nothing to add -- but only while the
     # lead is moving fast enough for Ford to track it.
-    det, ev = UnconfirmedLeadDetector(), FakeEvents()
+    det, ev = model_stop_detector(), FakeEvents()
     run(det, ev, 60, slow_down=True, status=True, radar=True, v_rel=-5., accel=-2.)
     assert det.state == State.inactive
 

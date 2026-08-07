@@ -71,7 +71,12 @@ def model_stop_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaste
   trigger is DEC's slow-down detection, and on a 35-45 mph arterial with cruise set and no car
   ahead, every red light qualifies.
 
-  So the fatigue argument is live again and has never been tested. What still stands on its own,
+  TESTED 2026-08-06, and the answer is bad: with DEC's slow-down as the trigger it fired almost
+  continuously on open road. That is the fatigue case the original PROMPT choice was worried about,
+  arriving exactly as predicted. The feature now ships off; if its trigger is ever fixed, this
+  presentation has to be re-argued from scratch rather than inherited.
+
+  So the fatigue argument is live again and has never been tested at a CORRECT trigger. What still stands on its own,
   independent of frequency, is the severity argument below -- which is why this ships loud for a
   first drive rather than being quietly downgraded on a guess. If it fires several times a trip,
   drop it to a PROMPT.

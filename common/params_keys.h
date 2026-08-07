@@ -193,7 +193,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // from the UI at all until now, so leaving it off guaranteed it would never get tested.
     // It remains the weakest-evidence path here -- no lead means no dRel, vRel or TTC, so
     // persistence and the 20 mph ACC floor are its entire filter.
-    {"IcbmModelStopEnabled", {PERSISTENT | BACKUP, BOOL, "1"}},
+    {"IcbmModelStopEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},
     // BluePilot: hold off openpilot's standstill resume request until the lead has actually gone.
     // controlsd asserts resume from ITS OWN MPC plan, which on a stock-ACC car is not the
     // controller that then has to drive -- Ford ACC reads resume as "go", accelerates toward the

@@ -141,6 +141,18 @@ LEAD_LOST_S = 0.5          # candidate gone this long -> released
 #
 # DEC computes it in _update_calculations, which runs unconditionally at the top of its update().
 # So this is live whether or not DEC is enabled and whatever mode it has chosen.
+#
+# SHIPPED OFF as of 2026-08-06, because this trigger is still wrong. On the road it fired almost
+# continuously with no vehicle ahead and pulled the set speed to 20 every time, and he turned the
+# feature off. DEC's slow-down is the right question asked at the wrong sensitivity: DEC uses it to
+# pick blended mode, which is harmless when it is wrong, and a shortened trajectory happens for
+# traffic, crests, dips and curves as readily as for a stop line.
+#
+# Two triggers have now been tried and both were wrong -- shouldStop could never fire, DEC's
+# slow-down fires constantly. A third guess is not the answer. What this needs is a drive log with
+# the trajectory endpoint, urgency and desiredAcceleration recorded through actual red lights and
+# actual open road, so the separation can be measured instead of assumed. Until then the code stays
+# and the default stays off.
 # Short on purpose. DEC's urgency is already Kalman-filtered over a 5-sample window with a 0.85
 # smoothing factor, so a full second of persistence on top is double-filtering -- and it is paid in
 # distance at exactly the moment distance is the scarce thing: at 65 mph one second is 29 m out of
@@ -446,8 +458,10 @@ class UnconfirmedLeadDetector:
         self._release()
         return
 
-      # Still active: track the MPC's plan, floored. Never request below what Ford can hold.
-      self.v_target = max(float(v_desired_trajectory[-1]), ACC_FLOOR_MS)
+      # Hold the floor for as long as this is active. Same reasoning as the trigger: the request
+      # is not the deceleration, and letting it drift back up mid-event would ask Ford to ease off
+      # a stopped car.
+      self.v_target = ACC_FLOOR_MS
       # Re-raised every cycle, not once at trigger: this alert has to stay up for as long as the
       # driver is the only thing that can stop the car.
       events_sp.add(EventNameSP.unconfirmedLeadBraking)
@@ -499,7 +513,13 @@ class UnconfirmedLeadDetector:
       self.state = State.active
       self.trigger = Trigger.visionLead
       self.restore_set_speed = v_cruise_cluster
-      self.v_target = max(float(v_desired_trajectory[-1]), ACC_FLOOR_MS)
+      # STRAIGHT TO THE FLOOR, not the MPC's paced plan. Reported 2026-08-06: it saw a stopped car
+      # well ahead, walked the set speed down along the plan, and the brake when it came was hard.
+      # His reading, and it is right: Ford's ACC cannot brake harder than Ford's ACC brakes. The set
+      # speed is a request, not a deceleration -- asking for 20 immediately hands the whole problem
+      # to a system with its own bounded authority, and it arrives with the maximum distance in
+      # hand. Pacing the request only ever delays the response; it never softens the stop.
+      self.v_target = ACC_FLOOR_MS
       self._lost_s = 0.0
       # Alert at trigger, not at the floor: the whole deceleration is the driver's reaction time.
       events_sp.add(EventNameSP.unconfirmedLeadBraking)
