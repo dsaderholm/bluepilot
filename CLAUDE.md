@@ -77,8 +77,21 @@ Then:
 Then give them exactly this, and nothing more complicated:
 
 ```bash
-cd /data/openpilot && git pull && sudo reboot
+cd /data/openpilot && git fetch && git reset --hard origin/<branch> && sudo reboot
 ```
+
+**NOT `git pull`.** It fails on the car every time a branch is rebased, which is most updates here:
+rebasing gives every commit a new id, so pull tries to MERGE the rewritten branch into the device's
+older copy of itself and conflicts against its own history. It happened on 2026-08-06 and left him
+standing at the car with four conflicts and a half-finished merge:
+
+    "This is why I always just use the updater on SunnyPilot"
+
+Fair. The reset form is no harder to paste, works whether or not the branch was rewritten, and
+cannot half-apply. The device is a deployment with no local edits, so discarding them is free --
+and if that ever stops being true, the answer is still not `pull`.
+
+If he is already stuck mid-merge, `git merge --abort;` in front of it clears the state first.
 
 **Rules for this task, learned the hard way:**
 
