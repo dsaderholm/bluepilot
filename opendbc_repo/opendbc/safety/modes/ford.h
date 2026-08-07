@@ -445,7 +445,18 @@ static void ford_rx_hook(const CANPacket_t *msg) {
       // the wheels are measurably stopped. The consequence is that a brake press at a standstill
       // disengages on its rising edge rather than continuously -- which is the stock behavior for
       // every car whose standstill signal works, and what openpilot's own carState now reports.
-      bool stopped_by_speed = (vehicle_speed.values[0] / VEHICLE_SPEED_FACTOR) < 0.1;
+      // .max, not .values[0], and not .min either -- the accessor is the safety argument here.
+      //
+      // This file uses two idioms and the difference is not style. The three curvature limits take
+      // .min because a LOWER speed gives a tighter limit, so the lowest recent sample is the
+      // conservative read. Declaring "stopped" runs the other way: it RELAXES the brake clear
+      // below, so the conservative read is the HIGHEST recent sample. .max means every sample in
+      // the window was stopped; .values[0] would accept a single spurious zero.
+      //
+      // Costs nothing to be strict. At a genuine standstill every sample is zero, so this fixes
+      // the mismatch exactly as well -- and an earlier commit here chose .values[0] by matching the
+      // file's most common spelling rather than its meaning.
+      bool stopped_by_speed = (vehicle_speed.max / VEHICLE_SPEED_FACTOR) < 0.1;
       vehicle_moving = (((msg->data[3] >> 3) & 0x3U) != 1U) && !stopped_by_speed;
     }
 
