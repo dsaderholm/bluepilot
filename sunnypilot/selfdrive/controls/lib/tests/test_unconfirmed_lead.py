@@ -132,6 +132,38 @@ class TestUnconfirmedLead:
     assert det.state == State.active
     assert det.v_target == ACC_FLOOR_MS
 
+  def test_ford_braking_toward_our_own_request_does_not_release(self):
+    """The bug the owner caught before it reached the road.
+
+    This detector asks for 20 mph, so ACC brakes to reach 20 -- evidence it manufactured itself.
+    Releasing on that alone hands the set speed back moments after every trigger, with the stopped
+    car still there. Braking at 65 with no radar confirmation is exactly that case.
+    """
+    det, ev = UnconfirmedLeadDetector(), FakeEvents()
+    run(det, ev, 60, d_rel=lambda i: 175. - i * 0.5)
+    assert det.state == State.active
+    run(det, ev, 10, d_rel=145., ford_braking=True, radar=False, v_ego=CRUISE_MS)
+    assert det.state == State.active, "released on braking it caused itself"
+
+  def test_braking_with_a_radar_confirmed_lead_releases(self):
+    """His actual report: ACC braking because it saw the car, well above the floor, and the alert
+    kept firing. Chasing a set speed does not coincide with the radar acquiring a target."""
+    det, ev = UnconfirmedLeadDetector(), FakeEvents()
+    run(det, ev, 60, d_rel=lambda i: 175. - i * 0.5)
+    assert det.state == State.active
+    det.update(make_sm(d_rel=140., radar=True, v_rel=-29., ford_braking=True, v_ego=CRUISE_MS),
+               TRAJ, CRUISE_MS, True, ev)
+    assert det.state == State.restoring, "Ford braking for a radar-confirmed lead did not release"
+
+  def test_braking_at_the_floor_releases(self):
+    """Past the request there is nothing left for ACC to chase, so continued braking is following.
+    This is the stop-and-go regime where Ford does follow stationary vehicles."""
+    det, ev = UnconfirmedLeadDetector(), FakeEvents()
+    run(det, ev, 60, d_rel=lambda i: 175. - i * 0.5)
+    det.update(make_sm(d_rel=60., radar=False, ford_braking=True, v_ego=ACC_FLOOR_MS - 0.5),
+               TRAJ, CRUISE_MS, True, ev)
+    assert det.state == State.restoring
+
   def test_radar_acquisition_releases_into_restore(self):
     # The acquired lead must be MOVING. Ford only follows what it tracks, and its manual puts that
     # bound at 6 mph -- releasing on a stationary radar return hands the car back to a system that

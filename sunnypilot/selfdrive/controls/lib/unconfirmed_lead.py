@@ -18,12 +18,15 @@ Scope and limits, deliberately:
     own ACC takes over and can follow to a complete stop. That is a release condition, not a
     failure, and it is the expected resolution path.
 
-Target speed comes from openpilot's existing lead-follow MPC rather than a fixed step. The MPC
-already ingests vision-only leads -- process_lead() gates on lead.status, and radard publishes
-vision leads with status=True, radar=False -- so longitudinalPlan.speeds is already a
-geometry-scaled deceleration curve for this exact lead: gradual when there is distance, sharp when
-there is not. Reusing it means no new tuning, and it keeps this off ICBM's target-drop rate
-limiter, which is scoped to routine speed-limit and curve changes.
+Target speed is Ford's ACC floor, asked for the moment the lead is confirmed. This replaced pacing
+the request along the MPC's plan, which sounds gentler and is not: the set speed is a REQUEST, not
+a deceleration, and Ford's ACC brakes as hard as Ford's ACC brakes whatever number it is given.
+Pacing only delayed the response, and it spent the distance that would have made the stop gentle --
+reported from the road on 2026-08-06 as seeing the car early and still braking hard.
+
+The consequence to keep in mind when reading the release conditions: because this asks for 20, Ford
+starts braking to reach 20, so "is ACC braking" is evidence this detector MANUFACTURES. It is only
+meaningful paired with a reason -- see the release block.
 
 Thresholds here are starting values reviewed before first drive, not derived constants. The
 range-sweep requirement is the main defense against bridge, overpass and guardrail false
@@ -101,6 +104,10 @@ MIN_V_EGO_MS = 25 * CV.MPH_TO_MS  # below this a floor request is meaningless
 # ACC_DEADBAND in the onroad ACC pill so the readout and the release agree -- ACC trims constantly
 # at small values, and without a deadband any noise would read as a takeover.
 FORD_BRAKING_DECEL = 0.15  # m/s^2
+# How far above the requested set speed still counts as "at" it. ACC settles a little either side
+# of a request rather than landing exactly on it, and the alternative to a margin here is the alert
+# hanging on through the last 1-2 mph of every event.
+FORD_FOLLOW_MARGIN_MS = 1.0 * CV.MPH_TO_MS
 
 # --- release gates ---
 # Release margin above the trigger TTC. Relative, not absolute: the trigger is tunable, and a
@@ -423,24 +430,40 @@ class UnconfirmedLeadDetector:
 
       # The good outcome: the deceleration bought a radar detection Ford will actually follow.
       #
-      # Two ways that happens, and only having the first was a bug. _ford_tracks requires the lead
-      # to be MOVING above 6 mph, which a stopped car never is -- so for the exact case this
-      # feature exists for, the release was unreachable. It stayed active indefinitely, re-raising
-      # its alert every cycle while Ford was visibly handling the car itself. Reported as "it
-      # never confirms the lead so it keeps yelling at me".
+      # "IS FORD BRAKING" IS NOT THE QUESTION. It looked like it, and it is wrong, and the owner is
+      # the one who spotted why: this detector asks for 20 mph, so Ford brakes to REACH 20. Its own
+      # request produces the evidence it was reading as "Ford has taken over". On its own that
+      # releases moments after every trigger and hands the set speed back with the stopped car still
+      # sitting there -- the exact opposite of the feature. Braking has to be paired with something
+      # that says WHY Ford is braking.
       #
-      # The second way: we have slowed to ACC's floor with the lead radar-confirmed. Below ~20 mph
-      # Ford is in its stop-and-go regime and does follow stationary vehicles -- which the owner
-      # observed directly, ACC stopping for the car. At that point this detector has done
-      # everything it can do anyway; its whole output is a set-speed floor it has now reached.
-      # Third and most direct: stock ACC is asking for brakes. Reported from the road -- the alert
-      # kept firing while Ford was plainly slowing for the same car, still well above the floor, so
-      # neither of the conditions below had fired yet. If Ford is braking, this detector has
-      # nothing left to contribute and should get out of the way.
+      # Two pairings, and between them they cover both of the shapes seen on the road:
+      #
+      #   1. Radar-confirmed lead AND ACC braking. Chasing a set speed does not coincide with the
+      #      radar acquiring a target; the two together mean Ford is braking FOR something. This is
+      #      the case reported on 2026-08-06 -- "Ford ACC had started braking because it saw the
+      #      car, not just because it was going down to 20" -- where the alert kept firing while
+      #      Ford was visibly handling it, well above the floor.
+      #
+      #   2. ACC braking while already at or below what we asked for. Past the request there is
+      #      nothing left for ACC to chase, so continued braking can only be following. This is the
+      #      stop-and-go regime below ~20 mph where Ford does follow stationary vehicles, which the
+      #      owner observed directly.
+      #
+      # _ford_tracks stays as the third, independent way in: a lead moving fast enough that Ford
+      # was always going to follow it, no braking evidence required.
       radar_has_it = bool(lead.status and lead.radar)
-      ford_took_over = (self._ford_is_braking(sm)
-                        or self._ford_tracks(lead, v_ego)
-                        or (radar_has_it and v_ego <= ACC_FLOOR_MS))
+      ford_braking = self._ford_is_braking(sm)
+      at_or_below_request = v_ego <= self.v_target + FORD_FOLLOW_MARGIN_MS
+      ford_took_over = ((ford_braking and radar_has_it)
+                        or (ford_braking and at_or_below_request)
+                        # Third: at the floor with the radar holding it, Ford owns it whether or not
+                        # it happens to be commanding decel this instant -- holding 20 behind a
+                        # stopped car is following, not coasting. Dropping this term broke
+                        # test_stopped_lead_releases_once_we_reach_the_acc_floor, which is the exact
+                        # end state this feature is designed to reach.
+                        or (radar_has_it and at_or_below_request)
+                        or self._ford_tracks(lead, v_ego))
       if ford_took_over:
         # Ford ACC owns it now and can follow to a full stop, which this never could.
         self._release()
