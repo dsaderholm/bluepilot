@@ -149,7 +149,13 @@ LEAD_LOST_S = 0.5          # candidate gone this long -> released
 # DEC computes it in _update_calculations, which runs unconditionally at the top of its update().
 # So this is live whether or not DEC is enabled and whatever mode it has chosen.
 #
-# SHIPPED OFF as of 2026-08-06, because this trigger is still wrong. On the road it fired almost
+# SHIPPED OFF as of 2026-08-06 -- and note what that does and does not mean. The owner turned this
+# ON himself, so his stored value is HIS and the shipped default never reaches him. It worked on the
+# road that same evening: it slowed for red lights, the paced ramp below felt right to him, and it
+# produced two false positives. So the shipped-off default protects a device that has never had an
+# opinion; it says nothing about his car. Read the default as a default, never as the live value.
+#
+# The original reason for shipping it off: On the road it fired almost
 # continuously with no vehicle ahead and pulled the set speed to 20 every time, and he turned the
 # feature off. DEC's slow-down is the right question asked at the wrong sensitivity: DEC uses it to
 # pick blended mode, which is harmless when it is wrong, and a shortened trajectory happens for

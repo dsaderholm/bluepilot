@@ -75,43 +75,35 @@ def unconfirmed_lead_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.Su
 def model_stop_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
   """BluePilot: the driving model wants to stop -- a sign or signal -- and Ford ACC will not.
 
-  Presented identically to unconfirmed_lead_alert, on purpose -- but READ THIS BEFORE TRUSTING
-  THAT. This started out as a quieter PROMPT on the theory that it would fire at every sign and
-  signal in town and sharing the loud presentation would train the driver to tune out the lead
-  alert. It was made loud because "the owner went weeks without ever seeing this alert once".
+  DRIVEN 2026-08-06 and it works: it slowed for red lights, and the paced ramp out of
+  _model_stop_target felt right. It also produced two false positives in one drive, which is what
+  this presentation now has to survive.
 
-  That evidence was worthless. He never saw it because the trigger gated on
-  modelV2.action.shouldStop, which is false at every speed this path can run at -- the alert was
-  unreachable, not rare. Corrected 2026-08-05, and the frequency is now genuinely UNKNOWN: the
-  trigger is DEC's slow-down detection, and on a 35-45 mph arterial with cruise set and no car
-  ahead, every red light qualifies.
+  DOWNGRADED to match unconfirmed_lead_alert, which was downgraded the same day for the same reason.
+  Off: VisualAlert.fcw, which reaches the Ford carcontroller and lights the CLUSTER's own collision
+  warning and chime -- the thing he described as an "oh no, you're about to die warning" -- and
+  warningImmediate, the panic tone. On: AlertSize.mid, userPrompt, promptSingleHigh.
 
-  TESTED 2026-08-06, and the answer is bad: with DEC's slow-down as the trigger it fired almost
-  continuously on open road. That is the fatigue case the original PROMPT choice was worried about,
-  arriving exactly as predicted. The feature now ships off; if its trigger is ever fixed, this
-  presentation has to be re-argued from scratch rather than inherited.
+  Read the history before raising it again, because it has been argued both ways on bad evidence:
 
-  So the fatigue argument is live again and has never been tested at a CORRECT trigger. What still stands on its own,
-  independent of frequency, is the severity argument below -- which is why this ships loud for a
-  first drive rather than being quietly downgraded on a guess. If it fires several times a trip,
-  drop it to a PROMPT.
+    - It shipped quiet, on the theory it would fire at every signal in town.
+    - It was made LOUD because "the owner went weeks without ever seeing this alert once". That
+      evidence was worthless -- the trigger gated on modelV2.action.shouldStop, which is false at
+      every speed this path can run at. The alert was unreachable, not rare.
+    - With a working trigger it fires a few times a drive including false positives, which is the
+      fatigue case the original quiet choice was worried about. So quiet was right, for a reason
+      nobody had measured until now.
 
-  The severity argument runs the other way too. A radar-blind lead has an escape: keep closing and
-  Ford's radar may acquire it, which is exactly what the detector's release conditions wait for. A
-  stop sign has no such rescue -- Ford's ACC will never see it, at any range, ever. The driver is
-  the only thing that stops the car, with certainty rather than probability.
-
-  Note what VisualAlert.fcw actually does on this car: it is not decoration. It reaches the Ford
-  carcontroller, which sets FcwVisblWarn_B_Rq and FcwAudioWarn_B_Rq in ACCDATA_3 -- the cluster's
-  own collision warning and Ford's own chime. That is the loudest thing this fork can command, and
-  it is why the lead alert feels different in kind. It is also the debatable part of matching them:
-  the cluster will show a collision warning with no vehicle ahead.
+  The severity argument that pushed it loud still stands on its own: a radar-blind lead has an
+  escape, since Ford's radar may still acquire it, and a stop sign never does. But that argues for
+  the driver being told, not for the cluster's collision warning firing at an empty intersection --
+  and the car is now taking real action about it rather than only warning.
   """
   return Alert(
-    "Stop ahead - BRAKE",
+    "Slowing for a stop ahead",
     "Cruise will not stop for a sign or signal.",
-    AlertStatus.critical, AlertSize.mid,
-    Priority.HIGH, VisualAlert.fcw, AudibleAlertSP.warningImmediate, 2.)
+    AlertStatus.userPrompt, AlertSize.mid,
+    Priority.HIGH, VisualAlert.none, AudibleAlertSP.promptSingleHigh, 2.)
 
 
 def speed_limit_auto_set_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
