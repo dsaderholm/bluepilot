@@ -703,18 +703,38 @@ class AdjacentLane:
       obj = self.left if side == 'left' else self.right
       adjacent = abs_lat <= ADJACENT_MAX_M
 
-      # The sign of absolute ground speed sorts everything out here. Oncoming is checked FIRST,
-      # because it is the only one of the three that is a safety fact rather than a convenience one.
+      # NOTHING BEYOND THE ROAD EDGE IS TRAFFIC. His question, and it is the right one:
+      # *"It shouldn't pick up anything beyond the red line, right?"*
+      #
+      # This test already existed and was applied to ONCOMING ONLY, which left the same-direction
+      # and overtake paths with nothing but a speed threshold between them and the scenery. From a
+      # drive on 2026-08-06: *"it picked up an elevated sidewalk after the right shoulder"*, *"it
+      # kept seeing curbs as other cars, even though I could see a red line on the curb too"*, and
+      # a count of fifty vehicles having overtaken him in a few minutes.
+      #
+      # ground_speed() corrects the geometry that makes a close barrier read as moving, and it is
+      # exact -- but it is a fix for the SYMPTOM. The road edge is the actual boundary: beyond the
+      # edge of our own drivable surface is, by definition, not our road, whatever its range rate
+      # happens to compute to. Applied once here, before anything is classified.
+      #
+      # Fails open in the sense that matters: with no trusted edge, _on_our_carriageway narrows to
+      # the adjacent band rather than opening up, so an unseen edge costs coverage rather than
+      # letting the scenery back in.
+      if not self._on_our_carriageway(model, side, lat, p.dRel):
+        continue
+
+      # The sign of absolute ground speed sorts the rest out. Oncoming is checked FIRST, because it
+      # is the only one of the three that is a safety fact rather than a convenience one.
       # NOT v_ego + p.vRel -- see ground_speed(). That form reads a close barrier as a moving car.
       v_abs = ground_speed(v_ego, p.dRel, p.yRel, p.vRel)
 
       if v_abs < -MIN_ONCOMING_MS:
-        # Travelling the other way. Looked for across the FULL width of our road, not just the next
-        # lane -- on anything with a center turn lane the opposing traffic is two lanes out, and
-        # bounding this to the adjacent band meant those roads produced no veto at all.
-        if self._on_our_carriageway(model, side, lat, p.dRel):
-          obj.observe_oncoming(p.dRel, p.yRel, v_abs, memory_s, adjacent)
-          self.oncoming_seen = True
+        # Travelling the other way. Seen across the FULL width of our road, not just the next lane
+        # -- on anything with a center turn lane the opposing traffic is two lanes out, and bounding
+        # this to the adjacent band meant those roads produced no veto at all. That width is what
+        # the carriageway test above allows; it is the same test, hoisted.
+        obj.observe_oncoming(p.dRel, p.yRel, v_abs, memory_s, adjacent)
+        self.oncoming_seen = True
         continue
 
       # Roadside furniture, not traffic. See MIN_MOVING_MS -- this radar publishes barriers and

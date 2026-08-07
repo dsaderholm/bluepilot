@@ -747,9 +747,22 @@ class TestAdjacentLaneGate:
     assert det.suggestion == Side.left
 
   def test_right_lane_traffic_does_not_block_a_left_pass(self):
-    det = run(PassingAssistDetector(), STUCK_FRAMES, tracks=[track(60, -3.7, 0.0)])
+    """edges widened deliberately. The default fixture puts the right road edge at 2.4 m, so a
+    "vehicle" at 3.7 m to the right is off the drivable surface -- and this test used to assert it
+    was occupying a lane, which is the bug he reported: "it kept seeing curbs as other cars, even
+    though I could see a red line on the curb too." A right lane needs a right edge beyond it."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, edges=(-7.0, 7.0),
+              tracks=[track(60, -3.7, 0.0)])
     assert det.adjacent.right.occupied
     assert det.suggestion == Side.left
+
+  def test_nothing_beyond_the_road_edge_is_traffic(self):
+    """The elevated sidewalk past the right shoulder, and the fifty vehicles that overtook him in a
+    few minutes. Same geometry as above but with the default edge at 2.4 m, so the track sits
+    outside it -- and outside our drivable surface is not our road, whatever its range rate says."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, tracks=[track(60, -3.7, 0.0)])
+    assert not det.adjacent.right.occupied, "scenery past the road edge counted as a vehicle"
+    assert det.adjacent.right.overtaken_count == 0, "scenery counted as an overtake"
 
   def test_no_radar_data_does_not_block(self):
     det = PassingAssistDetector()
