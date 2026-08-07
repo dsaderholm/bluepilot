@@ -445,7 +445,7 @@ static void ford_rx_hook(const CANPacket_t *msg) {
       // the wheels are measurably stopped. The consequence is that a brake press at a standstill
       // disengages on its rising edge rather than continuously -- which is the stock behavior for
       // every car whose standstill signal works, and what openpilot's own carState now reports.
-      bool stopped_by_speed = ((float)vehicle_speed.values[0] / VEHICLE_SPEED_FACTOR) < 0.1f;
+      bool stopped_by_speed = (vehicle_speed.values[0] / VEHICLE_SPEED_FACTOR) < 0.1;
       vehicle_moving = (((msg->data[3] >> 3) & 0x3U) != 1U) && !stopped_by_speed;
     }
 
