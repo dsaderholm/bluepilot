@@ -2,7 +2,8 @@
 """
 BluePilot: read a drive's route log and answer the questions the panel would have.
 
-    python tools/bp_route_report.py <route-or-segment-dir-or-rlog>
+    python tools/bp_route_report.py latest        # the drive you just finished
+    python tools/bp_route_report.py <route-name-or-segment-dir-or-rlog>
 
 WHY THIS EXISTS
 ---------------
@@ -57,6 +58,19 @@ def _segment_key(p: str) -> int:
   return int(tail) if tail.isdigit() else 0
 
 
+def newest_route() -> str | None:
+  """The most recently written route on the device, by segment 0's mtime.
+
+  Because "which one was that drive" is a question after every single drive, and answering it by
+  reading an `ls` listing is a step that buys nothing -- the answer is almost always the last one.
+  """
+  segs = glob.glob(os.path.join(REALDATA, "*--0"))
+  if not segs:
+    return None
+  newest = max(segs, key=os.path.getmtime)
+  return os.path.basename(newest).rsplit("--", 1)[0]
+
+
 def resolve(target: str) -> list[str] | str:
   """Turn what a person would actually type into something LogReader accepts.
 
@@ -67,6 +81,11 @@ def resolve(target: str) -> list[str] | str:
   Returns a list of rlog paths when it can expand, or the original string to pass straight through.
   """
   # A directory: one segment.
+  if target == "latest":
+    found = newest_route()
+    if found is None:
+      return target
+    target = found
   if os.path.isdir(target):
     found = sorted(glob.glob(os.path.join(target, "rlog*")), key=_segment_key)
     return found or target
@@ -200,7 +219,7 @@ def report(d: dict) -> str:
 def main() -> int:
   ap = argparse.ArgumentParser(description=__doc__,
                                formatter_class=argparse.RawDescriptionHelpFormatter)
-  ap.add_argument("route", help="route name, segment directory, or an rlog file")
+  ap.add_argument("route", help="route name, 'latest', a segment directory, or an rlog file")
   args = ap.parse_args()
 
   try:

@@ -167,3 +167,14 @@ def test_a_route_name_is_recognized_as_one():
   import re
   assert re.fullmatch(r"[0-9a-f]{8}--[0-9a-f]+", "0000031e--69e3cd09d2")
   assert not re.fullmatch(r"[0-9a-f]{8}--[0-9a-f]+", "0000031e--69e3cd09d2--4")
+
+
+def test_latest_falls_back_rather_than_resolving_to_nothing():
+  """Off the device there is no realdata directory. 'latest' must stay a string LogReader can
+  complain about, not become an empty list that reads as a drive with no messages in it."""
+  assert RR.resolve("latest") == "latest"
+
+
+def test_the_route_name_is_recovered_from_segment_zero():
+  """newest_route strips only the trailing segment number, so a route name containing -- survives."""
+  assert "00000321--882fc7224f--0".rsplit("--", 1)[0] == "00000321--882fc7224f"
