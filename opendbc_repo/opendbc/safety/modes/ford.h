@@ -421,7 +421,32 @@ static void ford_rx_hook(const CANPacket_t *msg) {
     // Update in motion state from standstill signal
     if (msg->addr == FORD_DesiredTorqBrk) {
       // Signal: VehStop_D_Stat
-      vehicle_moving = ((msg->data[3] >> 3) & 0x3U) != 1U;
+      //
+      // BluePilot: AND'd with measured wheel speed, because on this car VehStop_D_Stat never
+      // reports 1 (Yes). Confirmed from the road twice over: openpilot's carState.standstill read
+      // false while stopped until it was OR'd with vEgoRaw the same way (see the standstill comment
+      // in opendbc/car/ford/carstate.py), and the standstill timer never appeared. The signal is
+      // sent by ABS_ESC, its DBC start value is 2 (NoDataExists), and the DBC marks it transmitted
+      // on only two of the four platforms it documents -- it is optional, and this retrofit kept
+      // the Fusion's own ABS.
+      //
+      // Left alone, vehicle_moving is permanently TRUE, and generic_rx_checks -- which runs AFTER
+      // this hook on every message -- then does:
+      //
+      //     if (brake_pressed && (!brake_pressed_prev || vehicle_moving)) controls_allowed = false;
+      //
+      // With the brake held at a standstill that clears controls_allowed on every single frame,
+      // wiping out whatever pcm_cruise_check had just set on the cruise rising edge. openpilot
+      // enables on that same edge and stays enabled, and two seconds later selfdrived raises
+      // controlsMismatch, which is ET.IMMEDIATE_DISABLE. Captured in a route on 2026-08-06:
+      // cruiseEn False->True at t+405.42 with controlsAllowed False straight through it.
+      //
+      // Direction of the change: this can only make vehicle_moving FALSE more often, and only when
+      // the wheels are measurably stopped. The consequence is that a brake press at a standstill
+      // disengages on its rising edge rather than continuously -- which is the stock behavior for
+      // every car whose standstill signal works, and what openpilot's own carState now reports.
+      bool stopped_by_speed = ((float)vehicle_speed.values[0] / VEHICLE_SPEED_FACTOR) < 0.1f;
+      vehicle_moving = (((msg->data[3] >> 3) & 0x3U) != 1U) && !stopped_by_speed;
     }
 
     // Update vehicle speed
