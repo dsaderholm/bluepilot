@@ -274,6 +274,18 @@ def _passing_line(side: int, visible: bool, pa: ClusterPassing) -> int:
   could only ever say "over there" and never how strongly or why. Read top to bottom this is the
   order a driver needs it in: a hazard outranks a commitment, a commitment outranks a wish.
   """
+  # MEASURED ON HIS CLUSTER, 2026-08-07, and it inverted the first mapping. The walk reported:
+  #
+  #   None      GRAY      Available  GREEN    Suppress  RED    Warning  YELLOW    LA_Off  both off
+  #
+  # Suppress is RED. The suggestion was built on it -- "the line gives way toward the gap" -- so a
+  # suggestion to move LEFT would have turned the left line red, which every driver reads as DO NOT
+  # GO LEFT. Precisely backwards, and it would have been shipped on the reasoning that Suppress
+  # sounds like dimming. Meanwhile the one thing that really means "do not go there", oncoming
+  # traffic, was on yellow.
+  #
+  # So they swap. Red carries the veto, yellow carries the suggestion. Gray stays with the unseen
+  # lane, where a dimmed line for a line the model cannot see is the honest picture.
   oncoming = pa.oncoming_left if side == 1 else pa.oncoming_right
   if oncoming and pa.pass_in_play:
     # DO NOT GO THERE. The departure look is the car's own vocabulary for danger on a side, and for
@@ -286,11 +298,11 @@ def _passing_line(side: int, visible: bool, pa: ClusterPassing) -> int:
     # for most of the drive. Nobody reads a light that is always on. This fires when it is the
     # ANSWER to a question the car was actually asking -- and it stays true while oncoming is the
     # thing refusing the pass, which is exactly when it is worth knowing.
-    return LANE_WARNING
+    return LANE_SUPPRESS    # RED on his cluster
   if pa.maneuver_moving and pa.maneuver_side == side:
     return LANE_INTERVENE   # going now: blinker on, or already crossing
   if pa.suggestion == side:
-    return LANE_SUPPRESS    # the lane is open -- the line gives way toward the gap
+    return LANE_WARNING     # YELLOW on his cluster -- attention on this side, not a veto
   if visible:
     return LANE_AVAILABLE   # normal
   return LANE_NONE          # nothing to draw

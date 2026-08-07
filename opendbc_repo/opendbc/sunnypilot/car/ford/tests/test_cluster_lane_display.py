@@ -42,6 +42,12 @@ LEFT, RIGHT = 1, 2
 NONE, AVAIL, SUPPRESS, WARN, INTERVENE = 0, 1, 2, 3, 4
 LA_OFF = 30
 
+# WHAT HIS CLUSTER ACTUALLY DRAWS, measured 2026-08-07 by walking the states at a standstill. Named
+# so the tests below read in colors rather than in DBC words, because the DBC words are what got the
+# first mapping backwards -- "Suppress" sounds like dimming and is RED.
+GRAY, GREEN, RED, YELLOW = NONE, AVAIL, SUPPRESS, WARN
+# Intervene was not reported and is still unmeasured; nothing here asserts its appearance.
+
 
 def pa(suggestion=0, maneuver_side=0, maneuver_moving=False, pass_in_play=None,
        oncoming_left=False, oncoming_right=False):
@@ -105,9 +111,11 @@ def test_lane_departure_still_warns_when_openpilot_is_not_steering():
 
 # --- what passing assist adds --------------------------------------------------------------------
 
-def test_the_line_gives_way_on_the_side_it_wants():
-  assert lines(passing=pa(suggestion=LEFT)) == (SUPPRESS, AVAIL)
-  assert lines(passing=pa(suggestion=RIGHT)) == (AVAIL, SUPPRESS)
+def test_the_side_it_wants_goes_YELLOW():
+  """Attention on that side. Yellow rather than red, because red is the veto -- see
+  test_oncoming_is_the_one_that_goes_RED, and the note by GRAY/GREEN/RED/YELLOW above."""
+  assert lines(passing=pa(suggestion=LEFT)) == (YELLOW, GREEN)
+  assert lines(passing=pa(suggestion=RIGHT)) == (GREEN, YELLOW)
 
 
 def test_the_line_goes_to_intervene_once_it_is_actually_going():
@@ -123,12 +131,12 @@ def test_a_maneuver_still_deciding_does_not_promise_a_lane_change():
   assert lines(passing=pa(maneuver_side=LEFT, maneuver_moving=False)) == (AVAIL, AVAIL)
 
 
-def test_oncoming_traffic_is_the_one_thing_that_gets_to_shout():
-  """Warning is the departure look. For a passing suggestion that would be crying wolf, which is
-  why it was refused before. For opposing traffic in the lane we were about to move into, it is
-  the literally correct thing to say."""
-  assert lines(passing=pa(pass_in_play=True, oncoming_left=True)) == (WARN, AVAIL)
-  assert lines(passing=pa(pass_in_play=True, oncoming_right=True)) == (AVAIL, WARN)
+def test_oncoming_is_the_one_that_goes_RED():
+  """The whole point of measuring. The first mapping had this backwards: the SUGGESTION was on the
+  state that draws red, so "move left" would have turned the left line red -- which every driver
+  reads as do not go left -- while opposing traffic, the one real veto, was on yellow."""
+  assert lines(passing=pa(pass_in_play=True, oncoming_left=True)) == (RED, GREEN)
+  assert lines(passing=pa(pass_in_play=True, oncoming_right=True)) == (GREEN, RED)
 
 
 def test_oncoming_says_NOTHING_when_no_pass_is_in_play():
@@ -147,18 +155,18 @@ def test_it_still_warns_while_oncoming_is_the_thing_refusing_the_pass():
   """The case that matters most and the one a naive gate would lose: oncoming BLOCKS the pass, so
   the suggestion goes back to none. If the warning needed a standing suggestion it would vanish at
   exactly the moment it became the answer. `waiting` keeps pass_in_play true."""
-  assert lines(passing=pa(suggestion=0, pass_in_play=True, oncoming_left=True)) == (WARN, AVAIL)
+  assert lines(passing=pa(suggestion=0, pass_in_play=True, oncoming_left=True)) == (RED, GREEN)
 
 
 def test_oncoming_outranks_both_the_suggestion_and_the_maneuver():
-  assert lines(passing=pa(suggestion=LEFT, oncoming_left=True)) == (WARN, AVAIL)
+  assert lines(passing=pa(suggestion=LEFT, oncoming_left=True)) == (RED, GREEN)
   assert lines(passing=pa(maneuver_side=LEFT, maneuver_moving=True,
-                          oncoming_left=True)) == (WARN, AVAIL)
+                          oncoming_left=True)) == (RED, GREEN)
 
 
 def test_the_two_sides_are_independent():
   """The whole reason this display can carry more than one thing at a time."""
-  assert lines(passing=pa(suggestion=LEFT, oncoming_right=True)) == (SUPPRESS, WARN)
+  assert lines(passing=pa(suggestion=LEFT, oncoming_right=True)) == (YELLOW, RED)
 
 
 def test_every_level_is_a_different_picture():
