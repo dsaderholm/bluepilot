@@ -117,21 +117,38 @@ class CarState(CarStateBase, MadsCarState, CarStateExt):
     # FALSE, with carState.cruiseState.enabled TRUE the whole time and safetyRxChecksInvalid False.
     # Two seconds of that is mismatch_counter >= 200, and controlsMismatch is ET.IMMEDIATE_DISABLE.
     #
-    # openpilot and panda read the SAME signal -- EngBrakeData / CcStat_D_Actl, engaged on (4, 5).
-    # They disagree on the RULE:
+    # THE LEVEL-VS-EDGE STORY WAS WRONG and is retracted; it nearly went upstream. openpilot does
+    # NOT enable on a bare level: both pcmEnable sites in car_specific.py require
+    # `CS.cruiseState.enabled and not CS_prev.cruiseState.enabled`, a rising edge, same as panda's
+    # pcm_cruise_check. cruiseState.enabled is a level in THIS file; what consumes it is not.
     #
-    #   openpilot   cruiseState.enabled is a LEVEL. True whenever the car says engaged.
-    #   panda       pcm_cruise_check (safety.h) allows only on a RISING EDGE:
-    #                 if (!cruise_engaged)                      controls_allowed = false;
-    #                 if (cruise_engaged && !cruise_engaged_prev) controls_allowed = true;
+    # IT IS OURS, and it is preEnabled. Verified in openpilot's own source:
     #
-    # So once controls_allowed has been cleared, ONLY a fresh off->on transition of Ford's cruise
-    # state can restore it. At a standstill Ford holds CcStat_D_Actl in (4,5) continuously -- the
-    # driver pressing SET or RES moves the set speed without ever leaving engaged -- so openpilot
-    # re-enables on the level and panda never sees an edge. That is exactly the reported shape.
+    #   car_specific.py     preEnableStandstill fires on `CS.brakePressed and CS.standstill`
+    #   events.py           it is typed ET.PRE_ENABLE
+    #   state.py:84         from disabled, ENABLE + PRE_ENABLE  ->  State.preEnabled
+    #   state.py:8-9        ENABLED_STATES includes preEnabled; ACTIVE_STATES does NOT
+    #
+    # So openpilot sits at enabled=True, active=False for as long as the brake is held. Panda has no
+    # reason to allow controls there, and two seconds of it is trivially exceeded.
+    #
+    # THIS IS WHY IT IS RESUME-ONLY, which is the observation that ruled out every CAN theory --
+    # "only when I press resume, never just stopping". preEnabled is reachable ONLY from disabled
+    # (state.py:84, inside the `elif self.state == State.disabled` branch), and preEnabled ->
+    # enabled happens the moment PRE_ENABLE stops firing (state.py:61). There is no enabled ->
+    # preEnabled path at all. Coming to a stop while already engaged therefore cannot produce it;
+    # only the ENABLE transition itself can, which is the resume press with the brake held.
+    #
+    # MADS DOES NOT COVER THIS, though it looks like it might: mads.py removes preEnableStandstill,
+    # but that whole block is gated on `not self.selfdrive.enabled and self.enabled` -- MADS on with
+    # cruise off. Cruise being enabled is precisely when the removal is skipped.
+    #
+    # And it became reachable on 2026-08-05, when standstill started reading true on this car. The
+    # combination `brakePressed and standstill` had never occurred here before.
     #
     # ford.h also calls speed_mismatch_check, which clears controls_allowed with no edge to restore
-    # it, so a single speed disagreement earlier in the drive can latch this off for good.
+    # it, so a single speed disagreement earlier in the drive can latch this off for good. That is a
+    # separate mechanism and still worth knowing; it is not this one.
     #
     # NOT FIXED HERE, and not to be fixed by guessing. The two candidate fixes live in other
     # people's safety-critical code -- openpilot declining to enable without controls_allowed, or
