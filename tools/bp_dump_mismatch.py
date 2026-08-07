@@ -88,7 +88,7 @@ def main() -> int:
     "buttons": "", "ccEnabled": None, "ccResume": None,
     "sdEnabled": None, "sdActive": None, "alert": "",
     "controlsAllowed": None, "rxChecksInvalid": None, "safetyModel": None, "safetyParam": None,
-    "altExperience": None, "events": "",
+    "altExperience": None, "events": "", "cruiseAvail": None, "latActive": None,
   }
   history: deque = deque(maxlen=4000)   # ~40 s at 100 Hz of carState
   hits = 0
@@ -110,6 +110,9 @@ def main() -> int:
         state["standstill"] = cs.standstill
         state["cruiseEnabled"] = cs.cruiseState.enabled
         state["cruiseStandstill"] = cs.cruiseState.standstill
+        # available is (3,4,5); enabled is (4,5). A dip to standby shows here as avail=True with
+        # cruiseEn=False -- the signature of a momentary dropout, and the thing a rising edge needs.
+        state["cruiseAvail"] = cs.cruiseState.available
         # Per-frame, not sticky. Carrying the last-seen value forward made a single SET- release
         # look like a button held down for the whole window on the first run of this.
         state["buttons"] = ",".join(f"{b.type}{'+' if b.pressed else '-'}"
@@ -118,6 +121,7 @@ def main() -> int:
         cc = msg.carControl
         state["ccEnabled"] = cc.enabled
         state["ccResume"] = cc.cruiseControl.resume
+        state["latActive"] = cc.latActive
       elif w == "selfdriveState":
         ss = msg.selfdriveState
         state["sdEnabled"] = ss.enabled
@@ -143,16 +147,27 @@ def main() -> int:
         print(f"\n===== controlsMismatch #{hits} at t+{t - t0:7.2f}s  ({os.path.basename(seg)}) =====")
         print(f"# {FIELDS_HELP}")
         lo = (t - t0) - args.window
+        # EngBrakeData -- which carries CcStat_D_Actl, the signal BOTH openpilot and panda derive
+        # cruise-engaged from -- is a 10 Hz message. So a single-frame dropout lasts exactly 100 ms
+        # and decimating carState 10:1 makes it invisible while still being visible to both
+        # consumers. That is very likely why the first pass showed cruiseEn=True throughout and no
+        # edge to explain the enable. Full rate near the transition, decimated further out.
+        fine_lo = (t - t0) - min(args.window, 1.0)
+        prev_sd = None
         shown = 0
         for ts, kind, snap in history:
           if ts < lo or kind != "carState":
             continue
           shown += 1
-          if shown % 10:        # carState is 100 Hz; 10 Hz is plenty to read
+          edge = snap["sdEnabled"] != prev_sd
+          prev_sd = snap["sdEnabled"]
+          if not edge and ts < fine_lo and shown % 10:
+            continue
+          if not edge and ts >= fine_lo and shown % 2:
             continue
           print(f"  t+{ts:7.2f} v={snap['vEgo']:>5} standstill={snap['standstill']!s:<5} "
-                f"cruiseEn={snap['cruiseEnabled']!s:<5} cruiseStand={snap['cruiseStandstill']!s:<5} "
-                f"| ccEn={snap['ccEnabled']!s:<5} ccResume={snap['ccResume']!s:<5} "
+                f"cruiseEn={snap['cruiseEnabled']!s:<5} cruiseAvail={snap['cruiseAvail']!s:<5} "
+                f"| ccEn={snap['ccEnabled']!s:<5} latAct={snap['latActive']!s:<5} "
                 f"| sdEn={snap['sdEnabled']!s:<5} sdActive={snap['sdActive']!s:<5} "
                 f"| cA={snap['controlsAllowed']!s:<5} rxInvalid={snap['rxChecksInvalid']!s:<5} "
                 f"| btn={snap['buttons']:<16} ev={snap['events']}")
