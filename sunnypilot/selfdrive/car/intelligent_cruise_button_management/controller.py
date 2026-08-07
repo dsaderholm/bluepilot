@@ -297,6 +297,7 @@ class IntelligentCruiseButtonManagement:
     self.v_cluster_at_press = 0      # set speed when the driver's press was seen
     self.press_suppressed = False    # the press happened while a curve/lead owned the target
     self.baseline_diverged = False   # has the baseline ever actually differed from SLA?
+    self.speed_limit_known = False   # did the resolver have a posted limit this frame?
     # BluePilot: which mechanism last captured the hold. Logged, no longer shown on screen -- the
     # badge tag that used to display it existed to settle whether the press path was dead, and it
     # is not (see RESUME_BUTTONS above). Kept because it is the only way to tell the two capture
@@ -374,6 +375,13 @@ class IntelligentCruiseButtonManagement:
     # Comparing post-limiter values is exactly how the original re-arm bug worked.
     self.v_target_raw = self.v_target
     self.plan_source = LP_SP.longitudinalPlanSource
+    # Did SLA have a posted limit at all this frame? Not the same as "is SLA the active source" --
+    # a limit can exist while a curve owns the target. See where baseline_diverged is seeded.
+    try:
+      resolver = LP_SP.speedLimit.resolver
+      self.speed_limit_known = bool(resolver.speedLimitValid or resolver.speedLimitLastValid)
+    except (AttributeError, KeyError):
+      self.speed_limit_known = False
     self.v_target = self.apply_baseline(self.v_target)
 
     v_ego_conv = round(CS.vEgo * speed_conv)
@@ -721,7 +729,19 @@ class IntelligentCruiseButtonManagement:
                               for b in CS.buttonEvents):
       if self.override_state != OverrideState.manual:
         self.v_target_overridden = self.v_target_raw
-        self.baseline_diverged = False
+        # Seeded from whether a posted limit exists at all, not flat False.
+        #
+        # Reported 2026-08-06: he held a speed on a road OpenStreetMap had no limit for; the limit
+        # was acquired later and matched his hold exactly, and the hold did not clear. The clear
+        # rule needs the baseline to have DIVERGED from SLA's target before bare equality counts,
+        # which stops a fresh hold being deleted on its first frame. But that flag was only ever
+        # set while speedLimitAssist was the active source -- and with no limit known, it never is.
+        # So the flag stayed False, the limit arrived matching, and the equality branch was skipped.
+        #
+        # A hold created where SLA has no number to offer has already diverged from it: there was
+        # nothing to agree with. Seeding True makes the first genuine agreement clear the hold,
+        # while a hold created against a known limit still has to leave and come back.
+        self.baseline_diverged = not self.speed_limit_known
       self.override_state = OverrideState.manual
       # A press while something ELSE is holding the set speed down must not redefine the hold.
       #
@@ -765,7 +785,19 @@ class IntelligentCruiseButtonManagement:
         and (fallback_idle or fallback_counter)):
       if self.override_state != OverrideState.manual:
         self.v_target_overridden = self.v_target_raw
-        self.baseline_diverged = False
+        # Seeded from whether a posted limit exists at all, not flat False.
+        #
+        # Reported 2026-08-06: he held a speed on a road OpenStreetMap had no limit for; the limit
+        # was acquired later and matched his hold exactly, and the hold did not clear. The clear
+        # rule needs the baseline to have DIVERGED from SLA's target before bare equality counts,
+        # which stops a fresh hold being deleted on its first frame. But that flag was only ever
+        # set while speedLimitAssist was the active source -- and with no limit known, it never is.
+        # So the flag stayed False, the limit arrived matching, and the equality branch was skipped.
+        #
+        # A hold created where SLA has no number to offer has already diverged from it: there was
+        # nothing to agree with. Seeding True makes the first genuine agreement clear the hold,
+        # while a hold created against a known limit still has to leave and come back.
+        self.baseline_diverged = not self.speed_limit_known
         self.v_cluster_at_press = self.v_cruise_cluster_prev
       self.override_state = OverrideState.manual
       # Same rule as the press path: under a curve or a lead, something other than the driver owns

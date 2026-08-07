@@ -61,9 +61,17 @@ def make_cs(cluster, v_ego=None, buttons=(), enabled=True, gas_pressed=False, br
 
 
 def make_lp(target, lead_state=UnconfirmedLeadState.inactive, lead_target=0.0,
-            source=PlanSource.speedLimitAssist):
+            source=PlanSource.speedLimitAssist, limit_known=True):
+  """limit_known defaults TRUE because that is the ordinary road: OSM has a limit for most places.
+
+  It was absent entirely at first, which made LP_SP.speedLimit raise and every test run as though no
+  limit were ever known -- the rarer case, silently, everywhere. Holding a fixture constant at the
+  wrong value is how the model-stop path passed its tests for weeks while doing nothing on the car.
+  """
   return NS(vTarget=target * MPH,
             longitudinalPlanSource=source,
+            speedLimit=NS(resolver=NS(speedLimitValid=limit_known,
+                                      speedLimitLastValid=limit_known)),
             unconfirmedLead=NS(state=lead_state, vTarget=lead_target * MPH))
 
 
@@ -1413,3 +1421,44 @@ class TestOvertakeReturnsToTheDriversNumber:
                CC_override, make_lp(LIMIT), False)
     assert icbm.v_baseline == 0, "the throttle is not a press"
     assert icbm.baseline_source == BaselineSource.none
+
+
+class TestAHoldMadeWhereNoLimitIsKnown:
+  """Reported 2026-08-06: he held a speed on a road OpenStreetMap had no limit for, the limit was
+  acquired later and matched his hold exactly, and the hold did not clear.
+
+  The clear rule requires the baseline to have DIVERGED from SLA's target before bare equality
+  counts -- otherwise a fresh hold is deleted on the frame it is created. But that flag was only
+  ever set while speedLimitAssist was the active source, and with no limit known it never is. A
+  hold made where SLA has no number has already diverged from it; there was nothing to agree with.
+  """
+
+  def _hold_with_no_limit(self, to=DRIVER):
+    icbm = fresh()
+    for _ in range(5):
+      icbm.run(make_cs(LIMIT), CC, make_lp(LIMIT, limit_known=False), False)
+    icbm.run(make_cs(LIMIT, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT, limit_known=False), False)
+    for cluster in range(LIMIT, to + 1):
+      icbm.run(make_cs(cluster, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT, limit_known=False), False)
+    icbm.run(make_cs(to, buttons=(ACCEL_RELEASE,)), CC, make_lp(LIMIT, limit_known=False), False)
+    return icbm
+
+  def test_the_hold_clears_when_the_acquired_limit_matches_it(self):
+    icbm = self._hold_with_no_limit()
+    assert icbm.v_baseline == DRIVER, "no hold was created"
+    # The limit is finally acquired and its target is exactly his number. Enough frames to outlast
+    # the press stand-down: update_manual_override returns early while press_settle_frames is set,
+    # so a shorter run passes for the wrong reason -- it never reaches the clear at all.
+    for _ in range(200):
+      icbm.run(make_cs(DRIVER), CC, make_lp(DRIVER, limit_known=True), False)
+    assert icbm.v_baseline == 0, "hold survived the limit arriving at exactly his number"
+
+  def test_a_hold_against_a_KNOWN_limit_still_has_to_leave_and_come_back(self):
+    """The guard this seeding must not break: a hold created at a speed that already equals SLA's
+    target must not be deleted on its first frame."""
+    icbm = fresh()
+    icbm.run(make_cs(LIMIT, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT), False)
+    icbm.run(make_cs(LIMIT, buttons=(ACCEL_RELEASE,)), CC, make_lp(LIMIT), False)
+    for _ in range(5):
+      icbm.run(make_cs(LIMIT), CC, make_lp(LIMIT), False)
+    assert icbm.baseline_diverged is False, "a hold at a known limit started already diverged"
