@@ -185,8 +185,8 @@ LEAD_STANDOFF_M = 5.0
 #
 # His objection, and the numbers back it: "it detects stopped cars late all the time and stopped
 # cars can be on roads faster than roads with traffic lights". A stopped car at 180 m demands
-# 3.65 m/s^2 at 80 mph and 2.41 at 65 -- at or past what Ford's ACC will deliver, so every frame
-# spent easing into it is a frame wasted. At 45 mph the same 180 m demands 1.16, which is below the
+# 3.55 m/s^2 at 80 mph and 2.35 at 65 -- at or past what Ford's ACC will deliver, so every frame
+# spent easing into it is a frame wasted. At 45 mph the same 180 m demands 1.12, which is below the
 # threshold that even lights the brake lamps, and there the paced ramp is free.
 #
 # 2.0 m/s^2 is Ford ACC's comfortable working limit; 1.3 is where UN R13-H lights the stop lamps and

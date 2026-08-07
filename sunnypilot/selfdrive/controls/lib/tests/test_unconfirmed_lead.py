@@ -262,7 +262,7 @@ class TestUnconfirmedLead:
     the request off that alone would command no change at all -- arriving late for precisely the
     reason DEC's signal was chosen for being early.
 
-    65 mph with the stop 155 m out needs v^2/2d = 2.8 m/s^2, which is past URGENT_DECEL_MS2 -- so
+    65 mph with the stop 155 m out needs v^2/2d = 2.7 m/s^2, which is past URGENT_DECEL_MS2 -- so
     since 2026-08-06 this asks for the FLOOR rather than pacing. The paced ramp he liked at red
     lights happens at arterial speeds, where the same distance demands under 1.4.
     """
