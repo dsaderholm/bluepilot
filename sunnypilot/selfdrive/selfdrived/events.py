@@ -43,18 +43,33 @@ def unconfirmed_lead_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.Su
   """BluePilot: a vision lead the radar has not confirmed, so stock ACC will not brake for it.
 
   Raised the moment the detector triggers rather than when the set speed reaches Ford's floor: the
-  whole deceleration is meant to be the driver's reaction time. Ford ACC holds 20 mph and will not
-  go below it, so past that point the driver is the only thing that can stop the car.
+  whole deceleration is meant to be the driver's reaction time.
+
+  DOWNGRADED 2026-08-06, and the reason is that the feature got BETTER, not that the risk got
+  smaller. It shipped as the loudest thing this fork can command -- AlertStatus.critical with
+  VisualAlert.fcw, which reaches the Ford carcontroller and lights the CLUSTER's own collision
+  warning and chime. That was right when the set speed only walked down along the MPC plan and the
+  driver really was the thing that had to stop the car.
+
+  It now asks for Ford's floor the instant it confirms, and two drives say the resulting
+  deceleration is right. So the alert's job changed from "brake NOW" to "I am slowing for something
+  the radar cannot see". His words, after two false positives in one drive: "we might want to dial
+  back the warning to not be a oh no, you're about to die warning".
+
+  What comes off: VisualAlert.fcw, so the cluster no longer shows a collision warning with nothing
+  ahead, and warningImmediate, which is the panic tone. What stays: AlertSize.mid so the distance is
+  still readable, and a prompt loud enough to look up for. At two false positives a drive, an
+  emergency tone is how the real one gets ignored.
   """
   ul = sm['longitudinalPlanSP'].unconfirmedLead
   dist = round(ul.dRel * (1.0 if metric else _METER_TO_FOOT))
   unit = "m" if metric else "ft"
 
   return Alert(
-    "Lead not confirmed by radar - BRAKE",
+    "Slowing - lead not confirmed by radar",
     f"Vision only at {dist} {unit}. Cruise will not stop for it.",
-    AlertStatus.critical, AlertSize.mid,
-    Priority.HIGH, VisualAlert.fcw, AudibleAlertSP.warningImmediate, 2.)
+    AlertStatus.userPrompt, AlertSize.mid,
+    Priority.HIGH, VisualAlert.none, AudibleAlertSP.promptSingleHigh, 2.)
 
 
 def model_stop_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
