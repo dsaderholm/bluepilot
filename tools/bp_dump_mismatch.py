@@ -12,6 +12,16 @@ selfdrived raises that event from exactly three places (selfdrived.py, ~line 361
   3. mismatch_counter >= 200 -- two seconds of openpilot ENABLED while panda says controls are not
                              allowed
 
+THE FIELD THAT DECIDES IT is selfdriveState.ACTIVE, which the first version of this script collected
+and then forgot to print. State.preEnabled counts as ENABLED (state.py: ENABLED_STATES includes it)
+but not as ACTIVE. preEnableStandstill fires on `brakePressed and standstill`, and standstill only
+started reading true on this car on 2026-08-05 -- so openpilot can now sit in preEnabled at a stop,
+reporting enabled=True with active=False, for as long as the brake is held. Panda has no reason to
+allow controls there, and two seconds of that is the mismatch.
+
+  enabled=True, active=False  -> preEnabled. Ours, from the standstill change. No upstream bug.
+  enabled=True, active=True   -> genuinely engaged while panda disallows. Upstream.
+
 "Only when I press resume" already argues for 3: a lapsing CAN message does not care whether a
 button was pressed, and a safety-config mismatch would fire constantly rather than at stops. This
 script exists to confirm that rather than believe it, and to show WHICH side moved first -- whether
@@ -78,7 +88,7 @@ def main() -> int:
     "buttons": "", "ccEnabled": None, "ccResume": None,
     "sdEnabled": None, "sdActive": None, "alert": "",
     "controlsAllowed": None, "rxChecksInvalid": None, "safetyModel": None, "safetyParam": None,
-    "altExperience": None,
+    "altExperience": None, "events": "",
   }
   history: deque = deque(maxlen=4000)   # ~40 s at 100 Hz of carState
   hits = 0
@@ -113,6 +123,8 @@ def main() -> int:
         state["sdEnabled"] = ss.enabled
         state["sdActive"] = ss.active
         state["alert"] = ss.alertText1
+      elif w == "onroadEvents":
+        state["events"] = ",".join(str(e.name) for e in msg.onroadEvents)
       elif w == "pandaStates":
         for ps in msg.pandaStates:
           state["controlsAllowed"] = ps.controlsAllowed
@@ -141,9 +153,9 @@ def main() -> int:
           print(f"  t+{ts:7.2f} v={snap['vEgo']:>5} standstill={snap['standstill']!s:<5} "
                 f"cruiseEn={snap['cruiseEnabled']!s:<5} cruiseStand={snap['cruiseStandstill']!s:<5} "
                 f"| ccEn={snap['ccEnabled']!s:<5} ccResume={snap['ccResume']!s:<5} "
-                f"| sdEn={snap['sdEnabled']!s:<5} "
+                f"| sdEn={snap['sdEnabled']!s:<5} sdActive={snap['sdActive']!s:<5} "
                 f"| cA={snap['controlsAllowed']!s:<5} rxInvalid={snap['rxChecksInvalid']!s:<5} "
-                f"| btn={snap['buttons']}")
+                f"| btn={snap['buttons']:<16} ev={snap['events']}")
         s = state
         print(f"  SAFETY CONFIG  model={s['safetyModel']} param={s['safetyParam']} "
               f"altExperience={s['altExperience']}")
