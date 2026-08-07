@@ -140,6 +140,12 @@ class CarState(CarStateBase, MadsCarState, CarStateExt):
     #
     # Workaround that costs nothing: CNCL then RES+ rather than SET at a stop. Cancelling drops
     # CcStat_D_Actl out of (4,5), and resuming gives panda the rising edge it is waiting for.
+    #
+    # "Costs nothing" is literal rather than a figure of speech, and it is worth knowing before this
+    # reads as a compromise. Against the button contract in CLAUDE.md, RES+ with cruise off is
+    # resumeCruise, which KEEPS his hold; SET- with cruise off is setCruise, which CLEARS it and
+    # hands the speed back to SLA. So the workaround is strictly better than the gesture it replaces
+    # -- he keeps the number he chose, which SET would have discarded anyway.
     ret.standstill = cp.vl["DesiredTorqBrk"]["VehStop_D_Stat"] == 1 or ret.vEgoRaw < STANDSTILL_SPEED
 
     # gas pedal
