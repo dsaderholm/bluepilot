@@ -142,3 +142,28 @@ def test_a_sane_overtake_rate_is_not_flagged():
   d = read([car_state(0.0), plan(0.0, overtaken=(1, 1)), car_state(600.0)])
   out = RR.report(d)
   assert "implausible" not in out
+
+
+# --- turning what a person types into what LogReader accepts -------------------------------------
+
+def test_segments_sort_by_number_not_by_name():
+  """--2 comes before --10. Lexically it does not, and a route walked out of order would report
+  lane changes and gestures in the wrong sequence while looking perfectly fine."""
+  paths = [f"/d/0000031e--abc--{n}/rlog" for n in (0, 1, 2, 10, 11, 35)]
+  assert sorted(paths, key=RR._segment_key) == paths
+  scrambled = [f"/d/0000031e--abc--{n}/rlog" for n in (10, 2, 35, 0)]
+  assert [RR._segment_key(p) for p in sorted(scrambled, key=RR._segment_key)] == [0, 2, 10, 35]
+
+
+def test_a_bare_route_name_is_passed_through_when_nothing_is_on_disk():
+  """Off the device there is no realdata directory, so it must hand the string to LogReader rather
+  than silently resolving to an empty list and reporting a drive with no messages in it."""
+  assert RR.resolve("0000031e--69e3cd09d2") == "0000031e--69e3cd09d2"
+
+
+def test_a_route_name_is_recognized_as_one():
+  """The shape LogReader rejects with "Segment range is not valid" -- which is exactly what is on
+  screen and in `ls` on the device, so it is what he will type."""
+  import re
+  assert re.fullmatch(r"[0-9a-f]{8}--[0-9a-f]+", "0000031e--69e3cd09d2")
+  assert not re.fullmatch(r"[0-9a-f]{8}--[0-9a-f]+", "0000031e--69e3cd09d2--4")

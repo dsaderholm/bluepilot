@@ -31,7 +31,9 @@ WHAT IT ANSWERS
 from __future__ import annotations
 
 import argparse
+import glob
 import os
+import re
 import sys
 from collections import Counter
 
@@ -44,6 +46,37 @@ GEO_TERMS = ("edge unsure", "paint", "lane width", "room past it")
 def _fmt_s(seconds: float) -> str:
   m, s = divmod(int(seconds), 60)
   return f"{m}m{s:02d}s" if m else f"{s}s"
+
+
+REALDATA = "/data/media/0/realdata"
+
+
+def _segment_key(p: str) -> int:
+  """Sort by segment NUMBER, not by name: --2 has to come before --10, and lexically it does not."""
+  tail = os.path.basename(os.path.dirname(p)).rsplit("--", 1)[-1]
+  return int(tail) if tail.isdigit() else 0
+
+
+def resolve(target: str) -> list[str] | str:
+  """Turn what a person would actually type into something LogReader accepts.
+
+  LogReader wants a SegmentRange -- a dongle-prefixed route name -- or explicit paths, and refuses
+  a bare route name with "Segment range is not valid". On the device the route name is exactly what
+  is on screen and in `ls`, so expand it here rather than making him type a path per segment.
+
+  Returns a list of rlog paths when it can expand, or the original string to pass straight through.
+  """
+  # A directory: one segment.
+  if os.path.isdir(target):
+    found = sorted(glob.glob(os.path.join(target, "rlog*")), key=_segment_key)
+    return found or target
+  # A bare route name, with or without the realdata prefix.
+  name = os.path.basename(target.rstrip("/"))
+  if re.fullmatch(r"[0-9a-f]{8}--[0-9a-f]+", name):
+    found = sorted(glob.glob(os.path.join(REALDATA, name + "--*", "rlog*")), key=_segment_key)
+    if found:
+      return found
+  return target
 
 
 def read(path: str) -> dict:
@@ -66,7 +99,7 @@ def read(path: str) -> dict:
   saw_pressed = False
   t0 = t1 = None
 
-  for msg in LogReader(path):
+  for msg in LogReader(resolve(path)):
     which = msg.which()
     t = msg.logMonoTime * 1e-9
     if t0 is None:
