@@ -515,9 +515,19 @@ class UnconfirmedLeadDetector:
     # see, the lead trigger's geometry filters are strictly better evidence than a shortened
     # trajectory, which cannot tell a stop line from a vehicle.
     if self.model_stop_enabled and not candidate:
-      # Same distinction as the lead path: a stationary radar return does not mean Ford is on it.
-      radar_has_it = self._ford_tracks(lead, v_ego)
-      model_candidate = (self.model_slow_down and not radar_has_it and
+      # ANY lead at all disqualifies this, not just one Ford is tracking.
+      #
+      # It used to ask _ford_tracks, which requires the lead to be moving above 6 mph. Cars queued
+      # at a red light are not moving, so this fired on them -- on exactly the case the block header
+      # says it does not handle: "a sign or signal with NO vehicle at it produces no lead". Reported
+      # 2026-08-06: "I'm getting slowing for stop sign or traffic light when I'm coming up to
+      # vehicles that are stopped at a stop sign or traffic light... cruise control is already doing
+      # that because it sees the cars."
+      #
+      # If there is a vehicle ahead then the vehicle is the thing to react to, and either Ford's own
+      # ACC or the lead path above owns it. This path is for the empty intersection, where there is
+      # nothing to measure and the model's trajectory is the only evidence there is.
+      model_candidate = (self.model_slow_down and not lead.status and
                          v_ego >= MIN_V_EGO_MS and not CS.brakePressed)
       if model_candidate:
         self._model_stop_s += DT_MDL

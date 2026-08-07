@@ -235,6 +235,29 @@ class TestUnconfirmedLead:
     assert not det.model_should_stop, "triggered on a signal that is false here"
     assert det.state == State.active and det.trigger == Trigger.modelStop
 
+  def test_a_lead_of_any_kind_suppresses_the_stop_path(self):
+    """Reported 2026-08-06: it fired approaching cars queued at a light, where Ford ACC was already
+    slowing because it could see them.
+
+    The gate used to be _ford_tracks, which requires the lead to be MOVING above 6 mph -- so a queue
+    of stopped cars did not count and this fired on them. That is precisely the case the block
+    header says it does not handle: "a sign or signal with NO vehicle at it produces no lead". If
+    there is a vehicle, the vehicle is the thing to react to.
+    """
+    for radar in (True, False):
+      det, ev = model_stop_detector(), FakeEvents()
+      # a stopped car ahead, holding range -- never an unconfirmed-lead candidate, but a lead
+      run(det, ev, 40, slow_down=True, stop_dist=120., accel=-1.5,
+          status=True, radar=radar, v_rel=-CRUISE_MS, d_rel=100.)
+      assert det.trigger != Trigger.modelStop, (
+        f"model stop fired with a lead present (radar={radar}) -- Ford already has it")
+
+  def test_the_stop_path_still_fires_at_an_empty_intersection(self):
+    """The narrowing must not cost the case the feature exists for."""
+    det, ev = model_stop_detector(), FakeEvents()
+    run(det, ev, 40, slow_down=True, stop_dist=120., accel=-1.5, status=False)
+    assert det.state == State.active and det.trigger == Trigger.modelStop
+
   def test_deceleration_alone_is_not_a_stop(self):
     """DEC's trajectory check is the trigger; the model's deceleration only paces the request.
 
