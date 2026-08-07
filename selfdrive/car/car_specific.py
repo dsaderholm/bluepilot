@@ -136,7 +136,24 @@ class CarSpecificEvents:
       events.add(EventName.steerOverride)
     if CS.steeringDisengage and not CS_prev.steeringDisengage:
       events.add(EventName.steerDisengage)
-    if CS.brakePressed and CS.standstill:
+    # BluePilot: not on a car that resumes from a stop by itself.
+    #
+    # preEnableStandstill means "Release Brake to Engage" -- it holds openpilot in State.preEnabled
+    # until the driver lifts off. That is right for a car openpilot cannot engage from a standstill.
+    # It is wrong for one that can: Ford's stock ACC resumes with the brake still held, and asking
+    # the driver to release first is the exact behavior the owner reported as broken.
+    #
+    # It also caused a controlsMismatch, confirmed from a route on 2026-08-06. preEnabled counts as
+    # ENABLED (state.py: ENABLED_STATES includes it) but panda has no reason to allow controls
+    # there, and selfdrived raises controlsMismatch after 200 frames of enabled-without-allowed.
+    # Most cars pass through preEnabled in well under two seconds; a driver holding the brake at a
+    # red light does not. The event is ET.IMMEDIATE_DISABLE, so it took the whole system down at
+    # every light. It only became reachable here when Ford's standstill started reading true --
+    # see the standstill comment in opendbc/car/ford/carstate.py.
+    #
+    # autoResumeSng already means exactly this and nothing in selfdrive/ was reading it; it is set
+    # per-platform in the car interfaces and is True for any Ford with an automatic transmission.
+    if CS.brakePressed and CS.standstill and not self.CP.autoResumeSng:
       events.add(EventName.preEnableStandstill)
     if CS.gasPressed:
       events.add(EventName.gasPressedOverride)

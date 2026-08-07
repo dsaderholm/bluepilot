@@ -70,6 +70,7 @@ DEFAULT_TARGETS = [
   "sunnypilot/selfdrive/controls/lib/speed_limit/tests/test_upcoming_limit.py",
   "sunnypilot/selfdrive/controls/lib/speed_limit/tests/test_speed_limit_resolver.py",
   "selfdrive/car/tests/test_structs_capnp_parity.py",
+  "selfdrive/car/tests/test_pre_enable_standstill.py",
   "selfdrive/ui/bp/onroad/tests/",
   "system/tests/test_sentry_disabled_by_default.py",
   "sunnypilot/system/tests/test_redefault_migration.py",
