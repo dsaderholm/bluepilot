@@ -214,11 +214,24 @@ def report(d: dict) -> str:
   if d["geo"]:
     term, value, share, loosen = d["geo"]
     name = GEO_TERMS[term] if 0 <= term < len(GEO_TERMS) else f"term {term}"
-    L.append("THE GEOMETRY GATE -- the number to change:")
+    L.append("THE GEOMETRY GATE:")
     L.append(f"  refused by:  {name}")
     L.append(f"  it measured: {value:.2f}")
     L.append(f"  that term carried {100 * share:.0f}% of the refusals")
-    L.append(f"  SET IT TO:   {loosen:.2f}   (admits four fifths of them)")
+    # A ZERO IS A MISSING VALUE, NOT A RECOMMENDATION. The histogram behind this arrived after some
+    # of the routes on the device, so an older drive reports the term and the mean correctly and
+    # has nothing to compute a percentile from. Printed as a number it read "SET IT TO: 0.00",
+    # which is a confident instruction to close the gate completely.
+    if loosen <= 0.0:
+      L.append("  SET IT TO:   -- not recorded on the build this drive ran; the term and the")
+      L.append("               measurement above are still good, the recommendation is absent")
+    else:
+      L.append(f"  SET IT TO:   {loosen:.2f}   (admits four fifths of them)")
+      # GEO_SPAN caps the histogram. Past it every refusal lands in the top bucket and the
+      # percentile can only answer "the ceiling", which is a floor on the truth rather than a value.
+      if value > loosen:
+        L.append(f"               NOTE: the mean ({value:.2f}) is above this, so the histogram")
+        L.append("               likely saturated -- treat it as a lower bound, not the answer")
     L.append("")
 
   L.append("HIS CANCEL GESTURE:")

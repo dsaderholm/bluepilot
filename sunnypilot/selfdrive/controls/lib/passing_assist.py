@@ -905,7 +905,11 @@ class PassingAssistDetector:
   GEO_EDGE_STD, GEO_PAINT, GEO_WIDTH, GEO_BEYOND = 0, 1, 2, 3
   # Plausible full range of each term, for bucketing. Not the threshold -- the range the measurement
   # itself lives in, so a bucket means the same thing whatever the threshold is set to today.
-  GEO_SPAN = (2.0, 1.0, 8.0, 4.0)
+  # Histogram range per term. Edge-std was 2.0 and SATURATED: a drive on 2026-08-06 averaged 6.44,
+  # so every refusal landed in the top bucket and the percentile could only ever answer "the top of
+  # the range". 8.0 covers what the model actually publishes. A value past the span is still
+  # possible and the report says so rather than quoting the ceiling as a recommendation.
+  GEO_SPAN = (8.0, 1.0, 8.0, 4.0)
 
   def _record_refusal(self) -> None:
     """Tally which term refuses the LEFT side, and its value, across the drive.

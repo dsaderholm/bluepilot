@@ -195,3 +195,31 @@ def test_latest_falls_back_rather_than_resolving_to_nothing():
 def test_the_route_name_is_recovered_from_segment_zero():
   """newest_route strips only the trailing segment number, so a route name containing -- survives."""
   assert "00000321--882fc7224f--0".rsplit("--", 1)[0] == "00000321--882fc7224f"
+
+
+def test_a_missing_recommendation_is_not_printed_as_zero():
+  """The histogram behind geoLoosenTo arrived after some routes on the device, so an older drive
+  reports the term and the mean correctly with nothing to compute a percentile from. Printed as a
+  number that read "SET IT TO: 0.00" -- a confident instruction to close the gate completely, on a
+  drive whose actual measurement was 6.44."""
+  d = read([plan(0.0, geo=(0, 6.44, 0.98, 0.0))])
+  out = RR.report(d)
+  assert "0.00" not in out
+  assert "not recorded" in out
+  assert "6.44" in out, "the measurement is still good and must survive"
+
+
+def test_a_saturated_histogram_is_flagged_as_a_lower_bound():
+  """Past GEO_SPAN every refusal lands in the top bucket, so the percentile can only answer 'the
+  ceiling'. A recommendation BELOW the mean it is derived from is the tell."""
+  d = read([plan(0.0, geo=(0, 6.44, 0.98, 2.0))])
+  out = RR.report(d)
+  assert "lower bound" in out
+
+
+def test_an_ordinary_recommendation_is_printed_plainly():
+  d = read([plan(0.0, geo=(0, 1.04, 1.0, 1.2))])
+  out = RR.report(d)
+  assert "1.20" in out
+  assert "lower bound" not in out
+  assert "not recorded" not in out
