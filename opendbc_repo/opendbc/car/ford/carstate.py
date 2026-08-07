@@ -103,6 +103,22 @@ class CarState(CarStateBase, MadsCarState, CarStateExt):
     # Every other consumer is improved or unaffected by it being true when the car genuinely is not
     # moving: the speedTooLow guard, the brake-hold path, the steer-warning suppression and the
     # longitudinal planner's accel-constraint reset all want it true at a stop.
+    #
+    # WHAT THIS EXPOSED, 2026-08-06. Resume at a stop works now, and "controls mismatch" started
+    # appearing at complete stops -- which takes everything down, since controlsMismatch is
+    # ET.IMMEDIATE_DISABLE. It is not caused here; it was HIDDEN here. Previously pedalPressed
+    # disengaged openpilot at every stop before anything else had the chance to go wrong.
+    #
+    # Prime suspect, UNCONFIRMED: auto start-stop. selfdrived raises controlsMismatch on
+    # pandaState.safetyRxChecksInvalid, and ford.h registers EngVehicleSpThrottle -- BO_ 516, sent
+    # by the PCM, carrying engine RPM -- as a 100 Hz rx check. If the engine shuts down at a
+    # standstill and that message lapses, the frequency check fails, panda drops controls_allowed
+    # car-wide, and openpilot disables immediately. ford.h's own comment above ford_rx_checks
+    # documents that exact chain arising from a different cause. Nothing in the Ford port handles an
+    # engine auto-stop.
+    #
+    # Cheap test before touching panda safety, which is the last place to act on a hypothesis: switch
+    # auto start-stop off at the dash button and see whether the mismatch stops.
     ret.standstill = cp.vl["DesiredTorqBrk"]["VehStop_D_Stat"] == 1 or ret.vEgoRaw < STANDSTILL_SPEED
 
     # gas pedal
