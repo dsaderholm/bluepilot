@@ -1219,8 +1219,11 @@ class PassingAssistDetector:
     it, and what each of the two machines was doing. A change in any of them is an event he might
     mention; a change in none of them is not.
     """
-    now = (int(self.suggestion), int(self.blocked_by),
-           int(self.maneuver.phase), int(self.keep_right_maneuver.phase))
+    # No int() here: these are this class's own attributes and are already plain ints. The calls
+    # were no-ops that made them read like the live-capnp kind, which is the distinction the
+    # enum guard exists to police -- so writing them the same way costs the guard its meaning.
+    now = (self.suggestion, self.blocked_by,
+           self.maneuver.phase, self.keep_right_maneuver.phase)
     if now == self._timeline_prev:
       return
     self._timeline_prev = now
@@ -1260,7 +1263,7 @@ class PassingAssistDetector:
         "clearShare": round(self.clear_share, 3),
         "crawlEvents": int(self.overtake.crawl_events),
         "crawlLongest": round(self.overtake.crawl_longest, 1),
-        "aborts": int(self.maneuver.aborts),
+        "aborts": self.maneuver.aborts,
         "accOnsetMax": round(self.acc_onset_max, 1),
         "driverPasses": int(self.driver_passes),
         "driverPassesAgreed": int(self.driver_passes_agreed),
@@ -1564,7 +1567,11 @@ class PassingAssistDetector:
     try:
       icbm = sm['selfdriveStateSP'].intelligentCruiseButtonManagement
       baseline = float(icbm.vBaseline)
-      if int(icbm.overrideState) == 1 and baseline > 0:
+      # str(), not int(). This is a LIVE capnp message, so overrideState is a _DynamicEnum and
+      # int() raises TypeError on the device -- caught by the except below, which means the driver's
+      # own held speed was silently never honored rather than crashing. The same call crashed the
+      # drive-summary panel outright on 2026-08-07; here it failed quietly, which is worse.
+      if str(icbm.overrideState) == "manual" and baseline > 0:
         held = max(baseline, cluster)
         self.reference_speed = held
         self.reference_source = RefSource.icbmHold if baseline >= cluster else RefSource.cluster

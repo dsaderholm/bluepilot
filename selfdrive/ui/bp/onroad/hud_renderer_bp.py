@@ -212,6 +212,10 @@ MAX_ROAD_EDGE_STD = 1.2
 # none is a fault of the car or of the signal -- which is exactly why they must not be reported as
 # a flash count and left to look like one.
 # Mirrors lane_display_test_ext.LANE_TEST_STEPS, in order. See _render_lane_display_test.
+# Mirrors lane_display_test_ext. 1 is "refused because the car was moving"; naming it stops a bare
+# 1 from being compared against a field whose neighbour of the same name is an enum.
+LANE_TEST_BLOCK_MOVING = 1
+
 _LDT_LABELS = (
   "BOTH GREEN",
   "LEFT: NONE",
@@ -1391,7 +1395,12 @@ class HudRendererBP(HudRendererSP):
 
     step = int(ldt.step)
     if step == 0:
-      if int(ldt.blockedReason) == 1:
+      # No int(). laneDisplayTest.blockedReason is a UInt8, so it already reads as one -- but
+      # BlinkerTest.blockedReason a few lines down is a real enum with the SAME field name, and the
+      # two are told apart only by which struct they came from. Writing this one the way an enum
+      # must never be written keeps the distinction visible, and the schema guard cannot
+      # distinguish them by name at all.
+      if ldt.blockedReason == LANE_TEST_BLOCK_MOVING:
         self._pa_main = "STOP THE CAR FIRST"
         self._pa_sub = "the lane walk only runs stopped"
         self._pa_color = rl.Color(255, 200, 60, 255)

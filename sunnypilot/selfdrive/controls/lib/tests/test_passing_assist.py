@@ -138,7 +138,10 @@ def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., lead_y=0.0, status=Tr
                                         overtakeStatus=ovtk_status)),
     'liveMapDataSP': NS(roadName=road_name),
     'selfdriveStateSP': NS(intelligentCruiseButtonManagement=NS(
-        vBaseline=icbm_hold, overrideState=1 if icbm_manual else 0)),
+        # The ENUMERANT NAME, which is what str() on a live capnp _DynamicEnum gives. It was 1/0
+        # here, and an int is exactly what the device never sends -- a fixture laxer than the real
+        # message, which is the shape of most of this file's real bugs.
+        vBaseline=icbm_hold, overrideState="manual" if icbm_manual else "auto")),
     # Front-radar object list. Empty by default: alive and reporting nothing beside us, which is
     # "the next lane is clear" -- NOT the same as the unavailable case, which tests remove the
     # service entirely to produce.
