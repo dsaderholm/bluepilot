@@ -110,7 +110,8 @@ def main() -> int:
   print()
 
   st = {"v": 0.0, "src": None, "mapV": 0.0, "mapAct": False, "visV": 0.0, "visAct": False,
-        "setSpeed": 0.0, "icbmV": 0.0, "icbmState": "?", "ovr": "?", "sup": False}
+        "setSpeed": 0.0, "icbmV": 0.0, "icbmState": "?", "ovr": "?", "sup": False,
+        "gas": False, "brake": False, "lead": 0.0}
   hist: deque = deque(maxlen=6000)
   map_active_frames = 0
   map_source_frames = 0
@@ -136,6 +137,14 @@ def main() -> int:
         if w == "carState":
           st["v"] = msg.carState.vEgo * MS_TO_MPH
           st["setSpeed"] = msg.carState.vCruiseCluster
+          # What the DRIVER and the traffic were doing. Added because he said "no cars ahead, not on
+          # the gas, I braked at some point" and then, correctly, "my memory isn't perfect here".
+          # It never should have rested on recollection: every one of these is in the log.
+          st["gas"] = msg.carState.gasPressed
+          st["brake"] = msg.carState.brakePressed
+        elif w == "radarState":
+          lead = msg.radarState.leadOne
+          st["lead"] = lead.dRel if lead.status else 0.0
         elif w == "longitudinalPlanSP":
           lp = msg.longitudinalPlanSP
           st["src"] = str(lp.longitudinalPlanSource)
@@ -169,7 +178,8 @@ def main() -> int:
         events += 1
         print(f"===== deceleration #{events}: {FAST_MPH:.0f} -> {SLOW_MPH:.0f} mph "
               f"at t+{t - t0:.1f}s  ({os.path.basename(seg)}) =====")
-        print("   time     mph   setSpd  source      sccMap    sccVis   icbmTgt icbm/override  sup")
+        print("   time     mph   setSpd  source      sccMap    sccVis   icbmTgt icbm/override  sup"
+              "  lead  G B")
         lo = (t - t0) - args.window
         shown = 0
         for ts, s in hist:
@@ -181,7 +191,8 @@ def main() -> int:
           m = f"{s['mapV']:5.0f}{'*' if s['mapAct'] else ' '}"
           v = f"{s['visV']:5.0f}{'*' if s['visAct'] else ' '}"
           print(f"  t+{ts:7.1f} {s['v']:6.1f} {s['setSpeed']:7.0f}  {str(s['src']):<10} {m}    {v}"
-                f"  {s['icbmV']:6.0f}  {s['icbmState']}/{s['ovr']:<8} {'Y' if s['sup'] else '.'}")
+                f"  {s['icbmV']:6.0f}  {s['icbmState']}/{s['ovr']:<8} {'Y' if s['sup'] else '.'}"
+                f"  {s['lead']:4.0f}  {'G' if s['gas'] else '.'} {'B' if s['brake'] else '.'}")
         print()
 
   print("===== summary =====")
