@@ -385,6 +385,7 @@ class IntelligentCruiseButtonManagement:
     self.v_target = self.apply_baseline(self.v_target)
 
     v_ego_conv = round(CS.vEgo * speed_conv)
+    # Reads self.plan_source, set just above -- SCC-Map is exempt. See the docstring.
     self.v_target = self.apply_target_drop_limit(v_ego_conv)
 
     # BluePilot: the radar-blind lead detector supersedes everything above, including the drop
@@ -418,7 +419,27 @@ class IntelligentCruiseButtonManagement:
 
     Only decreases are limited -- increases are what the driver or the ceiling asked for and are
     rate-limited naturally by ICBM emitting one button press per cycle.
+
+    SCC-MAP IS EXEMPT, and the reason is in map_controller.py rather than here. Its v_target is the
+    corner speed, and SmartCruiseControlMapDecel is not a rate applied to it -- it is the TRIGGER
+    DISTANCE. The test is "am I within the distance needed to reach the corner speed at this
+    deceleration", so the target appears at exactly the moment the deceleration has to begin. It
+    arrives with a deadline already attached, and metering it out afterwards spends road that was
+    already budgeted, which guarantees the corner speed is missed.
+
+    Measured on a freeway exit, 2026-08-07: SCC-Map asked for 39 mph at 67 and ICBM commanded 68,
+    then 56, then sat at 56 for 6.5 s waiting for the car to catch up before asking for 44. Twelve
+    seconds to work 80 down to 30, by which point the ramp was gone. Every step was correct and the
+    sum of them was far too slow.
+
+    SCC-Vision is NOT exempt and should not be. It ramps its own target through the ENTERING state
+    with a smooth deceleration, so its requests already arrive gradually -- coasting through those
+    is what this limiter is for, and it is the common case on ordinary roads.
     """
+    if self.plan_source == LongitudinalPlanSource.sccMap:
+      self.drop_anchor = 0
+      return self.v_target
+
     if self.max_target_drop <= 0:  # 0 disables the limiter
       self.drop_anchor = 0
       return self.v_target

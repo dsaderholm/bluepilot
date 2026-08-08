@@ -161,3 +161,35 @@ def test_taps_are_never_undone_at_any_lag():
       assert d.icbm.v_baseline == 57, f"lag {lag}: baseline {d.icbm.v_baseline}"
   finally:
     CLUSTER_LAG = original
+
+
+def test_freeway_exit_is_not_metered_into_plateaus():
+  """The 2026-08-07 report: "still does not slow anywhere close to enough on freeway exits".
+
+  From the log, SCC-Map asked for 39 mph at 67 and ICBM commanded 68, then 56, then sat at 56 for
+  6.5 s waiting for the car to reach it before asking for 44. Twelve seconds to work 80 down to 30,
+  and the ramp was gone.
+
+  SmartCruiseControlMapDecel is a TRIGGER DISTANCE, not a rate -- SCC-Map publishes the corner speed
+  at exactly the moment the deceleration has to start. Every metered step spends road that was
+  already budgeted, so the plateaus are the whole defect.
+  """
+  d = Drive()
+  d.cluster = d.v_ego = 80
+
+  # One frame is enough to see the difference: the limiter acts on the target, not over time.
+  d.step(39, source=PlanSource.sccMap)
+  assert d.icbm.v_target == 39, (
+    f"SCC-Map's corner speed was metered down to {d.icbm.v_target}; it arrives with a deadline")
+
+  # SCC-Vision must STILL be metered -- it ramps its own target through the ENTERING state, and
+  # coasting through ordinary curves is exactly what the limiter is for.
+  d2 = Drive()
+  d2.cluster = d2.v_ego = 80
+  d2.step(39, source=PlanSource.sccVision)
+  assert d2.icbm.v_target == 80 - DEFAULT_MAX_TARGET_DROP, (
+    f"curve target came through at {d2.icbm.v_target}; the drop limiter should still meter it")
+
+  # And end to end: the exit actually gets down to the corner speed.
+  d.cruise(1200, target=39, source=PlanSource.sccMap)
+  assert abs(d.cluster - 39) <= 1, f"exit slowing stalled at {d.cluster}"
