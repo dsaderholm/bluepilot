@@ -76,15 +76,25 @@ def main() -> int:
   except ImportError as e:
     sys.exit(f"could not import LogReader ({e}); run this from /data/openpilot on the device")
 
-  # Live check first: does mapd have anything to say right now? This is candidate A in one line.
+  # Live peek at mapd -- but ONLY meaningful while driving, and this is usually run parked.
+  #
+  # The first version printed "EMPTY, mapd is producing nothing" whenever the param was unset, which
+  # parked is exactly what you would expect whether mapd works or not. That is a conclusion the
+  # evidence does not support, and stating it would have sent the next hour after the wrong cause.
+  # The log-based count in the summary is the reliable answer; this is a bonus that only speaks up
+  # when it has something positive to say.
   try:
     from openpilot.common.params import Params
-    raw = Params("/dev/shm/params").get("MapTargetVelocities")
-    n = len(raw) if raw else 0
-    print(f"# MapTargetVelocities right now: {n} bytes"
-          f"{'  <-- EMPTY, mapd is producing nothing' if not n else ''}")
+    onroad = bool(Params().get_bool("IsOnroad"))
+    n = len(Params("/dev/shm/params").get("MapTargetVelocities") or b"")
+    if n:
+      print(f"# mapd is producing data right now: MapTargetVelocities = {n} bytes")
+    elif onroad:
+      print("# MapTargetVelocities is EMPTY while onroad -- mapd has nothing for this road")
+    else:
+      print("# parked, so the live mapd check proves nothing either way; see the summary instead")
   except Exception as e:  # noqa: BLE001
-    print(f"# could not read MapTargetVelocities ({e}) -- parked, or mapd not running")
+    print(f"# live mapd check unavailable ({e}); the summary below does not depend on it")
   print()
 
   st = {"v": 0.0, "src": None, "mapV": 0.0, "mapAct": False, "visV": 0.0, "visAct": False,
