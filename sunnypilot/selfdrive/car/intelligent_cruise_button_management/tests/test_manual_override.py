@@ -1462,3 +1462,54 @@ class TestAHoldMadeWhereNoLimitIsKnown:
     for _ in range(5):
       icbm.run(make_cs(LIMIT), CC, make_lp(LIMIT), False)
     assert icbm.baseline_diverged is False, "a hold at a known limit started already diverged"
+
+
+def in_zone(icbm, speed, frames, enabled=True, road_speed=48):
+  """Drive with a pinned hold of `speed` in range (0 means no pin here), cruise on or off."""
+  for _ in range(frames):
+    icbm.run(make_cs(road_speed, v_ego=road_speed, enabled=enabled), CC, make_lp(LIMIT), False,
+             pinned_hold=speed)
+
+
+class TestAPinnedHoldSurvivesCruiseBeingOff:
+  """The pin has to be there on the drives that START inside its radius.
+
+  That is a fresh boot in the driveway, a workplace lot within the radius, or any engagement made
+  after arriving -- and on this car it is most of them, since the pin exists for roads driven daily.
+  The edge used to be consumed the instant GPS matched, cruise state ignored, so by the time cruise
+  came on the pin was already marked as fired and the number silently never applied. Nothing showed
+  it: no alert, no event, and the pinned-holds tests only ever exercised the storage class.
+  """
+
+  def test_engaging_inside_a_pinned_zone_applies_the_pin(self):
+    icbm = fresh()
+    in_zone(icbm, 45, 200, enabled=False)          # parked or coasting in the zone, cruise off
+    in_zone(icbm, 45, 300, enabled=True)           # driver engages, still inside it
+    assert icbm.v_baseline == 45, "the pin was consumed while cruise was off"
+    assert icbm.override_state == OverrideState.manual
+    assert icbm.baseline_source == BaselineSource.pinned
+
+  def test_a_pin_entered_while_already_engaged_still_fires(self):
+    """The case that did work, kept as the counterweight: the fix must not trade one for the other."""
+    icbm = fresh()
+    in_zone(icbm, 0, 50, enabled=True)
+    in_zone(icbm, 45, 50, enabled=True)
+    assert icbm.v_baseline == 45
+    assert icbm.baseline_source == BaselineSource.pinned
+
+  def test_leaving_the_zone_with_cruise_off_still_re_arms_it(self):
+    """The drop to 0 must keep being tracked while disengaged, or a pin fires once per boot."""
+    icbm = fresh()
+    in_zone(icbm, 45, 200, enabled=False)
+    in_zone(icbm, 0, 100, enabled=False)           # drives out of range, cruise still off
+    in_zone(icbm, 45, 300, enabled=True)           # comes back and engages
+    assert icbm.v_baseline == 45, "the pin did not re-arm after leaving the radius"
+
+  def test_the_pin_that_applies_is_the_one_you_engaged_in(self):
+    """Two zones with different numbers, both passed through with cruise off."""
+    icbm = fresh()
+    in_zone(icbm, 45, 100, enabled=False)
+    in_zone(icbm, 0, 50, enabled=False)
+    in_zone(icbm, 50, 100, enabled=False)
+    in_zone(icbm, 50, 300, enabled=True)
+    assert icbm.v_baseline == 50, f"applied the wrong zone's number: {icbm.v_baseline}"

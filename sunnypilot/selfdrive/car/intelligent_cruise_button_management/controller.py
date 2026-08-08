@@ -968,11 +968,22 @@ class IntelligentCruiseButtonManagement:
 
     Leaving and re-entering re-arms it, which is what makes a pin useful on a road driven daily.
     """
+    # A hold is a number for cruise to drive to, so nothing is applied while cruise is off -- but
+    # the edge must not be CONSUMED there either. Recording it unconditionally meant a pin entered
+    # with cruise off was marked as already-fired, and since the engagement frame itself returns
+    # early (the cruise-cycle bookkeeping above), the pin was gone by the frame after. Every drive
+    # that began inside a pin's radius -- a fresh boot, a driveway or a workplace lot within 60 m of
+    # one -- silently lost it, which is most of the point of pinning a road you drive daily.
+    #
+    # Only the drop to 0 is tracked while disengaged, so leaving the radius still re-arms.
+    if not cruise_enabled:
+      if self.pinned_hold == 0:
+        self.pinned_hold_prev = 0
+      return False
+
     fired = self.pinned_hold > 0 and self.pinned_hold != self.pinned_hold_prev
     self.pinned_hold_prev = self.pinned_hold
-    # A hold is a number for cruise to drive to. With cruise off there is nothing to hold, and
-    # arming one here would have it discovered later at a speed nobody chose.
-    if not fired or not cruise_enabled:
+    if not fired:
       return False
 
     if self.override_state != OverrideState.manual:
