@@ -715,6 +715,31 @@ class HudRendererBP(HudRendererSP):
         lines.append(line)
       if int(d.get("suggestionsMade", 0)) or float(d.get("wantedSeconds", 0)) > 0:
         lines.append(f"suggested {int(d['suggestionsMade'])}, taken {int(d['suggestionsTaken'])}")
+      # WHY IT DID NOT SUGGEST THE PASSES HE MADE HIMSELF.
+      #
+      # Counted, saved and never drawn -- the same fault as the cancelled count further down, in
+      # the one readout that answers the question this feature is currently being tuned against.
+      # The LIVE panel does show it, which is what hid this: it is not missing, it is only missing
+      # at the moment he would read it. He does not read the panel at speed and has said so
+      # repeatedly -- see _record_refusal in passing_assist.py, which states the same rule and is
+      # the reason the geometry diagnosis was moved here in the first place.
+      miss = d.get("driverPassMiss")
+      if miss is not None and int(d.get("driverPasses", 0)):
+        name = str(miss) if isinstance(miss, str) else (
+          _BLOCKED_ORDER[int(miss)] if int(miss) < len(_BLOCKED_ORDER) else "")
+        if name and name != "none":
+          line = f"missed yours: {_BLOCKED_TEXT.get(name, name).lower()}"
+          # Stored in mph already, so no conversion here -- see missedDeficitMph. The reason says
+          # which gate refused; this says by how much, which is the number to move the setting to
+          # rather than a description of why it said no.
+          if float(d.get("missedDeficit", 0)) > 0:
+            line += f", deficit {float(d['missedDeficit']):.0f} mph"
+          lines.append(line)
+      # A suggestion nobody acted on, INCLUDING one still standing when the drive ended -- see
+      # longest_ignored. Also saved and never shown. Five seconds filters the ones he simply had
+      # not got to yet from the ones that stood there being ignored.
+      if float(d.get("longestIgnored", 0)) > 5.0:
+        lines.append(f"longest ignored {float(d['longestIgnored']):.0f}s")
       if int(d.get("lifetimeDrives", 0)) > 1:
         lines.append(f"all {int(d['lifetimeDrives'])} drives: {int(d['lifetimePasses'])} passed, "
                      f"{int(d['lifetimeAgreed'])} agreed")

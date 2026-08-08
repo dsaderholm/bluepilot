@@ -94,6 +94,12 @@ SCENES = [
   ("stopped: the previous drive, kept across parking",
    "LAST DRIVE", "14 drives: 96 passed, 89 agreed  -  oncoming: 62 at 410ft",
    0.0, False, INFO),
+  # The two readouts that were saved and never drawn. Sized as _fit_sub would actually emit them --
+  # it joins in priority order and BREAKS at the first line that does not fit, so what matters is
+  # that these two fit early enough to survive, not that a hand-joined superset renders.
+  ("stopped: last drive, with why it missed his own passes",
+   "LAST DRIVE", "missed yours: two-way road, deficit 4 mph  -  longest ignored 42s",
+   0.0, False, INFO),
   ("blinker test: watching the driver's own stalk",
    "FLICK YOUR STALK", "3 flashes so far", 0.0, True, INFO),
   ("blinker test: his flasher, measured",
