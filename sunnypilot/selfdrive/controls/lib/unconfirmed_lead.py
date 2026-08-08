@@ -374,8 +374,23 @@ class UnconfirmedLeadDetector:
     lead = sm['radarState'].leadOne
     v_ego = CS.vEgo
 
-    self.d_rel = lead.dRel
-    self.ttc = self._ttc(lead.dRel, lead.vRel)
+    # Only from a frame that actually carries a lead. Same dropped-frame hazard as the request
+    # below: radard publishes {"status": False} with every other field at its capnp default, so a
+    # blink reads dRel == 0. This pair is not just diagnostics -- d_rel is published as
+    # unconfirmedLead.dRel and is the number the ALERT shows the driver, so an ungated assignment
+    # flashes "Vision only at 0 ft" during the blink, at the moment he is most likely reading it.
+    # Holding the request but not the distance fixes half of one bug.
+    #
+    # ttc rides along for the same reason: _ttc(0, 0) is 0, which silently satisfies the TTC release
+    # check below rather than failing it. That happens to be the outcome we want during a blink, and
+    # a correct behavior resting on a degenerate input is one edit away from becoming a bug.
+    #
+    # The hold is scoped to ACTIVE rather than applied everywhere, so these do not go stale. Once
+    # the grace window releases within LEAD_LOST_S, the next frame takes the real value again --
+    # zero when there is genuinely nothing there, which is what the logs should say.
+    if lead.status or self.state != State.active:
+      self.d_rel = lead.dRel
+      self.ttc = self._ttc(lead.dRel, lead.vRel)
 
     # Diagnostics for the stop-sign / red-light question. Logged unconditionally, including while
     # this detector is inactive, because the interesting case is exactly when there is no lead.
@@ -504,7 +519,15 @@ class UnconfirmedLeadDetector:
       # Recomputed every cycle as the range closes, so the request tightens on its own and reaches
       # the floor by ~90 m at 65 mph. It cannot drift back UP: dRel only shrinks while this is
       # active, and a lead that stops closing releases through the TTC margin instead.
-      self.v_target = self._lead_target(v_ego, lead.dRel)
+      #
+      # Only while the lead is actually there. radard publishes {"status": False} with every other
+      # field left at its capnp default, so a single dropped frame inside the LEAD_LOST_S grace
+      # window above arrives as dRel == 0 -- which _stopping_target reads as "too close to be
+      # meaningful" and answers with v_ego. That is the request jumping from the floor back to 65 mph
+      # for the frames the radar blinks, with the alert still up, and it is the one direction the
+      # comment above promises cannot happen. Hold the last request instead.
+      if lead.status:
+        self.v_target = self._lead_target(v_ego, lead.dRel)
       # Re-raised every cycle, not once at trigger: this alert has to stay up for as long as the
       # driver is the only thing that can stop the car.
       events_sp.add(EventNameSP.unconfirmedLeadBraking)

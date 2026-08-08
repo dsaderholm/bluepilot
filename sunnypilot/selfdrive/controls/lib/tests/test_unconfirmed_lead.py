@@ -158,6 +158,42 @@ class TestUnconfirmedLead:
     assert far.v_target > ACC_FLOOR_MS, "far lead at 45 mph should still be paced"
     assert near.v_target == ACC_FLOOR_MS, "close lead at the SAME speed should be urgent"
 
+  def test_a_dropped_radar_frame_does_not_snap_the_request_back_up(self):
+    """radard publishes {"status": False} and leaves every other field at its capnp default, so a
+    single dropped frame arrives as dRel == 0 -- which the stopping geometry reads as "too close to
+    be meaningful" and answers with v_ego. Recomputing off that inside the LEAD_LOST_S grace window
+    turns a blink into a request for full cruise speed, while the alert is still telling the driver
+    a car is there. The request may only ever go DOWN while this is active.
+    """
+    det, ev = UnconfirmedLeadDetector(), FakeEvents()
+    run(det, ev, 60, v_ego=20.12, v_rel=-20.12, d_rel=lambda i: 160. - i * 0.5)
+    assert det.state == State.active and det.v_target > ACC_FLOOR_MS, "need a paced request to lose"
+    held = det.v_target
+
+    held_d_rel = det.d_rel
+
+    det.update(make_sm(status=False, d_rel=0., v_rel=0., v_ego=20.12), TRAJ, CRUISE_MS, True, ev)
+    assert det.state == State.active, "one dropped frame is inside the grace window"
+    assert det.v_target <= held, (
+      f"a radar blink raised the request from {held / 0.44704:.0f} to "
+      f"{det.v_target / 0.44704:.0f} mph")
+    # d_rel is published as unconfirmedLead.dRel and is the number the ALERT shows. Holding the
+    # request but not the distance would flash "Vision only at 0 ft" mid-event.
+    assert det.d_rel == held_d_rel, (
+      f"the alert distance collapsed from {held_d_rel:.0f} m to {det.d_rel:.0f} m on a blink")
+
+  def test_the_distance_does_not_go_stale_once_the_lead_is_really_gone(self):
+    """The hold above is scoped to ACTIVE so it cannot outlive the event. Once the grace window
+    releases, the logs must say zero rather than the last distance seen minutes ago."""
+    det, ev = UnconfirmedLeadDetector(), FakeEvents()
+    run(det, ev, 60, v_ego=20.12, v_rel=-20.12, d_rel=lambda i: 160. - i * 0.5)
+    assert det.state == State.active
+
+    for _ in range(120):   # well past LEAD_LOST_S
+      det.update(make_sm(status=False, d_rel=0., v_rel=0., v_ego=20.12), TRAJ, CRUISE_MS, True, ev)
+    assert det.state != State.active, "should have released after the grace window"
+    assert det.d_rel == 0., f"stale distance {det.d_rel:.0f} m survived the event"
+
   def test_ford_braking_toward_our_own_request_does_not_release(self):
     """The bug the owner caught before it reached the road.
 
