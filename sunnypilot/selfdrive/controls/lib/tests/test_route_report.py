@@ -223,3 +223,30 @@ def test_an_ordinary_recommendation_is_printed_plainly():
   assert "1.20" in out
   assert "lower bound" not in out
   assert "not recorded" not in out
+
+
+def init_data(**params):
+  return NS(logMonoTime=0, which=lambda: "initData",
+            initData=NS(params={k: v.encode() for k, v in params.items()}))
+
+
+def test_the_settings_the_drive_actually_booted_with_are_reported():
+  """"I had all passing assist options on... there was absolutely nothing on the screen." A setting
+  he believes is on is the thing to check against the record rather than against memory -- and
+  ShowPassingAssist is one of the keys whose changed default provably never reached his car."""
+  d = read([init_data(ShowPassingAssist="0"), plan(0.0)])
+  out = RR.report(d)
+  assert "ShowPassingAssist" in out
+  assert "OFF" in out
+  assert "draws nothing" in out
+
+
+def test_a_setting_that_is_on_is_not_flagged():
+  d = read([init_data(ShowPassingAssist="1"), plan(0.0)])
+  out = RR.report(d)
+  assert "draws nothing" not in out
+
+
+def test_a_route_with_no_params_recorded_still_reports():
+  d = read([plan(0.0)])
+  assert RR.report(d)

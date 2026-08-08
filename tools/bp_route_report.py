@@ -131,7 +131,7 @@ def read(path: str) -> dict:
     # ...and the same question asked the OTHER way. See report(): the latched form said 22 of 23,
     # which would suppress the cancel on nearly every change.
     "signal_out_steering_at_drop": 0,
-    "overtaken": 0, "route": path,
+    "overtaken": 0, "route": path, "params": {},
   }
 
   # Lane-change reconstruction. carState is 100 Hz, so the switch position is sampled far finer
@@ -174,6 +174,19 @@ def read(path: str) -> dict:
               out["signal_out_steering_at_drop"] += 1
           in_change = False
 
+    elif which == "initData":
+      # THE PARAMS AS THEY WERE AT BOOT. "I had all passing assist options on... there was
+      # absolutely nothing on the screen" is answerable from the route rather than by asking him to
+      # go read a settings screen and report it back -- and a setting he believes is on is exactly
+      # the thing worth checking against the record rather than against memory.
+      try:
+        for k in ("ShowPassingAssist", "PassingAssistEnabled", "ShowPassingInCluster",
+                  "ShowAdjacentLanes", "ShowOncomingSpeeds", "PassingAssistMinSpeed"):
+          if k in msg.initData.params:
+            out["params"][k] = bytes(msg.initData.params[k]).decode(errors="replace").strip()
+      except Exception:  # noqa: BLE001 - an older route without params is not a failure
+        pass
+
     elif which == "longitudinalPlanSP":
       pa = msg.longitudinalPlanSP.passingAssist
       out["pa_frames"] += 1
@@ -203,6 +216,15 @@ def report(d: dict) -> str:
   if not suggested:
     L.append("  none at all -- which is the thing to explain, not a quiet drive")
   L.append("")
+
+  if d["params"]:
+    L.append("SETTINGS AS THIS DRIVE BOOTED:")
+    for k, v in sorted(d["params"].items()):
+      shown = {"0": "OFF", "1": "on"}.get(v, v)
+      flag = "   <-- the panel draws nothing with this off" if (
+        k == "ShowPassingAssist" and v == "0") else ""
+      L.append(f"  {k:<24} {shown}{flag}")
+    L.append("")
 
   L.append("WHY IT REFUSED, most often first:")
   for reason, n in blocked.most_common(6):
