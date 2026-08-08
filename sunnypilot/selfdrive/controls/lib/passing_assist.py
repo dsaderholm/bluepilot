@@ -928,7 +928,20 @@ class PassingAssistDetector:
     """
     if self.left_geometry_ok:
       return
-    # First failing term, in the gate's own order -- the one to act on.
+    # First failing term. NOT the gate's own order, which is paint, width, beyond, edge-std -- this
+    # checks edge-std FIRST, and the difference decides what gets reported whenever more than one
+    # term fails at once.
+    #
+    # Deliberate, because these are not peers: left_edge_beyond is measured FROM the road edge, so
+    # an edge the model does not trust makes the term derived from it meaningless rather than
+    # merely false. Reporting "beyond" when the edge underneath it is unreliable would send him to
+    # tune the wrong constant.
+    #
+    # But it does mean the tally OVER-ATTRIBUTES to edge-std relative to a strict reading of the
+    # gate, and the 2026-08-07 drive is exactly the case where that matters: every suggestion was
+    # marginal on paint (0.52-0.59) AND edge-std (1.00-1.16) at the same time, so each of those
+    # refusals could as fairly have been called paint. Worth remembering before the next threshold
+    # moves on the strength of this number alone -- it names A binding term, not THE one.
     if self.left_edge_std > MAX_ROAD_EDGE_STD:
       idx, val = self.GEO_EDGE_STD, self.left_edge_std
     elif self.left_line_prob < MIN_ADJACENT_LINE_PROB:
