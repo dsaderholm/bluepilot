@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 """BluePilot: why the car does not slow enough for a freeway exit.
 
+FIRST RUN, 2026-08-06, and it moved the question. SCC-Map fires and wins (226 active frames, 127 as
+the plan source) -- so it is neither dead nor mistuned. On one deceleration it asked for 39 mph at
+67 mph and SCC-Vision asked for 30. And THE SET SPEED NEVER MOVED: 129 kph the whole twelve seconds.
+The slowdown that did happen came from Ford following traffic, not from us.
+
+So the planner was right and ICBM did not act on it. That is why this now prints ICBM's own state
+alongside -- its vTarget, its mode, the override state and holdSuppressed -- because the gap is
+between the plan and the buttons, not inside the plan.
+
 Standing report, unresolved across several drives: "It still does not slow down anywhere close to
 enough on freeway exits."
 
@@ -101,7 +110,7 @@ def main() -> int:
   print()
 
   st = {"v": 0.0, "src": None, "mapV": 0.0, "mapAct": False, "visV": 0.0, "visAct": False,
-        "setSpeed": 0.0}
+        "setSpeed": 0.0, "icbmV": 0.0, "icbmState": "?", "ovr": "?", "sup": False}
   hist: deque = deque(maxlen=6000)
   map_active_frames = 0
   map_source_frames = 0
@@ -137,6 +146,12 @@ def main() -> int:
           total += 1
           map_active_frames += 1 if st["mapAct"] else 0
           map_source_frames += 1 if st["src"] == "sccMap" else 0
+        elif w == "carControlSP":
+          icbm = msg.carControlSP.intelligentCruiseButtonManagement
+          st["icbmV"] = icbm.vTarget
+          st["icbmState"] = str(icbm.state)
+          st["ovr"] = str(icbm.overrideState)
+          st["sup"] = icbm.holdSuppressed
         else:
           continue
       except Exception as e:  # noqa: BLE001
@@ -154,7 +169,7 @@ def main() -> int:
         events += 1
         print(f"===== deceleration #{events}: {FAST_MPH:.0f} -> {SLOW_MPH:.0f} mph "
               f"at t+{t - t0:.1f}s  ({os.path.basename(seg)}) =====")
-        print("   time     mph   setSpd  source      sccMap    sccVis")
+        print("   time     mph   setSpd  source      sccMap    sccVis   icbmTgt icbm/override  sup")
         lo = (t - t0) - args.window
         shown = 0
         for ts, s in hist:
@@ -165,7 +180,8 @@ def main() -> int:
             continue
           m = f"{s['mapV']:5.0f}{'*' if s['mapAct'] else ' '}"
           v = f"{s['visV']:5.0f}{'*' if s['visAct'] else ' '}"
-          print(f"  t+{ts:7.1f} {s['v']:6.1f} {s['setSpeed']:7.0f}  {str(s['src']):<10} {m}    {v}")
+          print(f"  t+{ts:7.1f} {s['v']:6.1f} {s['setSpeed']:7.0f}  {str(s['src']):<10} {m}    {v}"
+                f"  {s['icbmV']:6.0f}  {s['icbmState']}/{s['ovr']:<8} {'Y' if s['sup'] else '.'}")
         print()
 
   print("===== summary =====")
