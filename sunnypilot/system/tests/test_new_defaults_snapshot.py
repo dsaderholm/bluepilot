@@ -210,3 +210,39 @@ class TestItDegradesSafely:
     p = FakeParams({KEY: "8"}, {KEY: None})
     _migrate_bp_new_defaults(p)
     assert p.removed == []
+
+
+class TestAKeyThatHasNeverBeenWritten:
+  """run_migration runs BEFORE manager.py writes shipped defaults, so an unset key is normal.
+
+  Every other test here starts from a store that already holds the key, which is what a driven car
+  looks like -- but not what a fresh flash, a Reset All Params, or a newly declared key looks like on
+  the boot that first sees it. Stringifying that None gives the literal "None", which matches no real
+  default, so pessimistic seeding claims the key as his and nothing can ever hand it a new default
+  again. That is this mechanism failing in exactly the way it was built to prevent.
+  """
+
+  def test_an_unset_key_is_not_claimed_as_his(self):
+    p = FakeParams({}, {KEY: "8"})
+    boot(p)
+    assert KEY not in set(json.loads(p.store[BP_DEFAULTS_OWNED_KEY])["keys"])
+    assert p.store[KEY] == "8"
+
+  def test_a_fresh_device_still_takes_later_defaults(self):
+    p = FakeParams({}, {KEY: "8"})
+    boot(p)                       # first boot: nothing stored, manager.py materializes 8
+    p.defaults[KEY] = "12"
+    boot(p)
+    assert p.store[KEY] == "12", "a fresh device was frozen out of every future default"
+
+  def test_a_newly_declared_key_on_a_driven_car_still_takes_later_defaults(self):
+    """The same shape on a car that has been driven for months: a key this branch has only just
+    added is unset on the boot that introduces it, alongside keys with a long history."""
+    p = FakeParams({KEY: "6"}, {KEY: "8"})
+    boot(p)                       # his tuned value is claimed, correctly
+    p.defaults[OTHER] = "40"      # a new build declares a key that has never existed here
+    boot(p)
+    p.defaults[OTHER] = "70"
+    boot(p)
+    assert p.store[KEY] == "6", "his tuned value was lost"
+    assert p.store[OTHER] == "70", "a newly declared key never received a moved default"
