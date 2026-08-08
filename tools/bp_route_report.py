@@ -346,7 +346,12 @@ def report(d: dict) -> str:
       L.append(f"  {line}")
     L.append("")
 
-  L.append("WHY IT REFUSED, most often first:")
+  # SAY THE DENOMINATOR. These are shares of EVERY planner frame, including the ones where no pass
+  # was wanted at all. The panel's "mostly: <reason> N%" is a share of WANTED time -- see
+  # top_blocked, which divides by wanted_seconds -- so the same reason legitimately carries two
+  # different numbers, and unlabelled they read as a disagreement rather than as two questions.
+  L.append(f"WHY IT REFUSED, most often first (share of all {total} planner frames --")
+  L.append(" the panel's percentage is a share of WANTED time and will be larger):")
   for reason, n in blocked.most_common(6):
     if reason == "none":
       continue
@@ -408,6 +413,13 @@ def report(d: dict) -> str:
     if d["opposite_switch"] == 0 and d["signal_out"]:
       L.append("  -> the nudge never reaches position 2. His cancel is invisible to reversed_side,")
       L.append("     so the hands-off signal-out path is the one that has to catch it.")
+      # signalOutSteering was unreachable and signal_out counted the WRONG changes before
+      # 2026-08-08 -- should_cancel tested blinker_held_s == 0.0, which selects changes where the
+      # signal was never on, so this counted NUDGELESS lane changes. A route recorded before that
+      # fix satisfies this branch for a reason that has nothing to do with his stalk, and the
+      # conclusion above does not hold for it.
+      L.append("     CAVEAT: on a route recorded before 2026-08-08 this count is nudgeless lane")
+      L.append("     changes, not his gesture -- re-measure before acting on it.")
     elif d["opposite_switch"]:
       L.append("  -> the nudge DOES reach the other side. reversed_side fires; the open question is")
       L.append("     only whether the 4 s window is long enough.")
