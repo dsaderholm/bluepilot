@@ -40,6 +40,10 @@ Wiring by color rather than by position is how that bites. Before connecting any
 adapter powered and the V1 unplugged, meter the ACC jack: one pin sits at ~12 V, one at ground, and
 the ESP data line idles high and twitches once the V1 is running. If this program sees nothing,
 suspect the pinout before suspecting the software.
+
+The bus is 5 V logic -- Valentine's own guidance is that any 5 V-safe TTL UART can read the stream,
+which is why the recommended adapter is an FTDI TTL-232R-5V rather than a 3.3 V part. Meter it
+anyway; the cost of being wrong is the adapter's receiver.
 """
 import argparse
 import collections

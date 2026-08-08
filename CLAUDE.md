@@ -316,6 +316,18 @@ Unverified: whether the V1 clears the bit when a higher-priority threat arrives.
 gate must read the priority band from respAlertData rather than trusting the global bit, and that
 means transmitting reqStartAlertData. Test before trusting the feature.
 
+**No other detector is an option, checked rather than assumed.** Vortex ranks the V1 Gen2 THIRD --
+behind the Uniden R8w and the Escort Redline 360c -- so it is not the best detector, it is the only
+one openpilot can read. Everything above it is Bluetooth or WiFi only, and the comma 3X has no
+Bluetooth at all (no controller, no BlueZ, no firmware, rfkill lists only wlan). Escort publishes no
+wired protocol anywhere in its line; searches for "Escort Serial Protocol" mostly return Valentine's
+ESP, which is a different company's document. Uniden's protocol is undocumented on every model.
+
+**The bus is 5 V logic.** Valentine's guidance is that any 5 V-safe TTL UART can read the stream,
+which is why the part is an FTDI TTL-232R-5V and not a 3.3 V one. Also note **Feature L** on the V1,
+which governs Legacy Concealed Display output versus ESP -- the first thing to check if the wire is
+powered and no ESP data appears.
+
 **Open, needs hardware:** the ACC jack data pin (6p4c RJ11, ACC is pin-reversed from MAIN -- meter
 it), whether the V1 emits ESP data with nothing asserting ESP mode, whether the time-slice timing
 holds from Python, and whether anything external ever sets the mute bit.
