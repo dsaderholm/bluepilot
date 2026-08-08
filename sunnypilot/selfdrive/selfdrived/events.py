@@ -88,7 +88,8 @@ def model_stop_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaste
   DOWNGRADED to match unconfirmed_lead_alert, which was downgraded the same day for the same reason.
   Off: VisualAlert.fcw, which reaches the Ford carcontroller and lights the CLUSTER's own collision
   warning and chime -- the thing he described as an "oh no, you're about to die warning" -- and
-  warningImmediate, the panic tone. On: AlertSize.mid, userPrompt, promptSingleHigh.
+  warningImmediate, the panic tone. On: AlertSize.mid, userPrompt, and the lower `prompt` tone --
+  see the note above the return for why this one is not promptSingleHigh like the lead alert.
 
   Read the history before raising it again, because it has been argued both ways on bad evidence:
 
