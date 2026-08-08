@@ -162,6 +162,7 @@ class SpeedLimitSettingsLayout(Widget):
       value_change_step=5,
       description=tr("Automatic speed limit following will never request above this speed, "
                      "regardless of the detected limit."),
+      label_callback=self._max_set_speed_label,
       inline=True)
 
     items = [
@@ -202,6 +203,13 @@ class SpeedLimitSettingsLayout(Widget):
   @staticmethod
   def _get_offset_description():
     return get_highlighted_description(ui_state.params, "SpeedLimitOffsetType", SPEED_LIMIT_OFFSET_DESCRIPTIONS)
+
+  @staticmethod
+  def _max_set_speed_label(value):
+    # BluePilot: stored in display units -- speed_limit_assist.py converts it with KPH_TO_MS or
+    # MPH_TO_MS depending on IsMetric -- so the label has to follow the driver's choice too.
+    # Without it the value renders as a bare "85", which is 137 km/h or 53 mph depending.
+    return f'{value} {tr("km/h") if ui_state.is_metric else tr("mph")}'
 
   @staticmethod
   def _get_offset_label(value):
