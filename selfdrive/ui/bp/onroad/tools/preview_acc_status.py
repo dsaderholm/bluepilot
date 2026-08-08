@@ -44,6 +44,26 @@ SCENES = [
    True, "TSR NO NAV DATA", True),
   ("you have set this hold here before -- tap to remember it", 45, 55, 45, "", "COAST", 0.0, False,
    False, "", False, True),
+  # BluePilot: radar detector. Deliberately NOT a mirror of the detector's own display -- band,
+  # strength bars, direction and bogey count are all on the windshield a few inches away, brighter
+  # and bigger. These scenes exist to check that what is here is only what the detector cannot say.
+  ("radar detector idle -- quiet, and the tap target for marking a spot", 70, 55, 0, "", "COAST",
+   0.0, False, False, "", False, False, {"on": True}),
+  ("this place is already marked", 70, 55, 0, "", "COAST", 0.0, False, False, "", False, False,
+   {"on": True, "marked": True}),
+  ("strong Ka ahead: openpilot is taking the set speed to 54", 54, 55, 0, "", "COAST", 0.0, False,
+   False, "", False, False, {"on": True, "band": "Ka", "acting": True, "target": 54}),
+  ("Ka showing but under your threshold -- detector talks, car does not", 70, 55, 0, "", "COAST",
+   0.0, False, False, "", False, False, {"on": True, "band": "Ka"}),
+  ("you muted it: the car takes that as a lockout and stands down", 70, 55, 0, "", "COAST", 0.0,
+   False, False, "", False, False, {"on": True, "band": "Ka", "muted": True}),
+  ("LASER -- marked on its own; you cannot react to it, so there is nothing to ask for", 70,
+   55, 0, "", "COAST", 0.0, False, False, "", False, False, {"on": True, "band": "LASER"}),
+  ("detector unplugged, fuse gone, cord loose -- must never look like a quiet road", 70, 55, 0, "",
+   "COAST", 0.0, False, False, "", False, False, {"on": True, "link": False}),
+  ("everything at once: hold, ACC braking, lamps, TSR down, Ka acting, spot marked", 54, 55, 70,
+   "-", "BRAKE", 1.4, True, True, "TSR NO NAV DATA", True, False,
+   {"on": True, "band": "Ka", "acting": True, "target": 54, "marked": True}),
 ]
 
 
@@ -57,7 +77,7 @@ def load_shipped_drawing_code():
   tree = ast.parse(open(HUD, encoding="utf-8").read())
   cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "HudRendererBP")
   wanted = ("_draw_hold_badge", "_draw_acc_pill", "_draw_arrow", "_draw_brake_lamp_pill",
-            "_draw_tsr_pill")
+            "_draw_tsr_pill", "_draw_radar_pill")
   methods = [n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name in wanted]
   assert len(methods) == len(wanted), f"expected {wanted}, found {[m.name for m in methods]}"
 
@@ -76,7 +96,9 @@ def load_shipped_drawing_code():
   exec(compile(ast.Module(body=methods, type_ignores=[]), "<methods>", "exec"), ns)
 
   for required in ("HOLD_HEIGHT", "HOLD_FILL", "ACC_PILL_WIDTH", "ACC_STATUS_COLORS", "STACK_GAP",
-                   "LAMP_PILL_WIDTH", "LAMP_ON_FILL", "HOLD_LOCKED_FILL"):
+                   "LAMP_PILL_WIDTH", "LAMP_ON_FILL", "HOLD_LOCKED_FILL",
+                   "RADAR_PILL_WIDTH", "RADAR_PILL_HEIGHT", "RADAR_BAND_FILL",
+                   "RADAR_ACTING_EDGE", "RADAR_NO_LINK_INK"):
     assert required in ns, f"{required} did not survive extraction -- the preview would be a lie"
   return ns
 
@@ -126,12 +148,17 @@ def main(outdir):
     tsr = scene[9] if len(scene) > 9 else ""
     pinned = scene[10] if len(scene) > 10 else False
     suggested = scene[11] if len(scene) > 11 else False
+    radar = scene[12] if len(scene) > 12 else {}
     stub = types.SimpleNamespace(
       _font_bold=fonts["bold"], _font_semi_bold=fonts["semi"],
       _icbm_baseline=hold, _icbm_arrow=arrow, _acc_state=acc, _acc_accel=mag,
       _brakes_on=lamps, _show_brake_status=True, _lamp_data_available=True,
       _icbm_hold_locked=locked, _tsr_fault=tsr, _icbm_pinned=pinned, _icbm_pin_suggested=suggested, _hold_rect=None,
       _draw_arrow=ns["_draw_arrow"],
+      _radar_enabled=radar.get("on", False), _radar_link=radar.get("link", True),
+      _radar_band=radar.get("band", ""), _radar_acting=radar.get("acting", False),
+      _radar_target=radar.get("target", 0), _radar_muted=radar.get("muted", False),
+      _radar_marked=radar.get("marked", False), _radar_rect=None,
     )
     rl.begin_texture_mode(tex)
     # Mid-gray stands in for road: bright enough to catch anything relying on a dark backdrop.
@@ -148,7 +175,10 @@ def main(outdir):
     if acc:
       cy += ns["_draw_acc_pill"](stub, x, cy) + ns["STACK_GAP"]
     cy += ns["_draw_brake_lamp_pill"](stub, x, cy) + ns["STACK_GAP"]
-    ns["_draw_tsr_pill"](stub, x, cy)
+    tsr_h = ns["_draw_tsr_pill"](stub, x, cy)
+    if tsr_h:
+      cy += tsr_h + ns["STACK_GAP"]
+    ns["_draw_radar_pill"](stub, x, cy)
 
     rl.draw_text_ex(fonts["med"], cap, rl.Vector2(60, H - 70), 34, 0, rl.Color(255, 255, 255, 210))
     rl.end_texture_mode()

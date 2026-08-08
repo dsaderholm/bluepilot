@@ -147,6 +147,34 @@ TSR_PILL_INK = rl.Color(226, 206, 110, 255)
 PIN_DOT_RADIUS = 9
 PIN_DOT_COLOR = rl.Color(255, 214, 120, 255)
 
+# BluePilot: radar detector readout. Same width as the ACC and lamp pills so the left column stays
+# one column; taller than the lamp pill because it carries an eight-segment bar graph rather than
+# a word.
+RADAR_PILL_WIDTH = 268
+RADAR_PILL_HEIGHT = 56
+RADAR_LABEL_SIZE = 32
+RADAR_VALUE_SIZE = 40
+RADAR_PAD = 16
+RADAR_IDLE_FILL = rl.Color(0, 0, 0, 150)
+RADAR_IDLE_EDGE = rl.Color(120, 126, 132, 190)
+RADAR_NO_LINK_EDGE = rl.Color(196, 176, 70, 205)   # matches the TSR pill: information, not alarm
+RADAR_NO_LINK_INK = rl.Color(226, 206, 110, 255)
+RADAR_MUTED_INK = rl.Color(150, 156, 162, 255)
+# Ka is the only band that moves the car, so it is the only one that gets a loud color. K and X are
+# shown because they are what the detector is showing, not because they mean anything here.
+RADAR_BAND_FILL = {
+  "Ka": rl.Color(228, 132, 24, 240),
+  "K": rl.Color(96, 88, 40, 210),
+  "X": rl.Color(70, 74, 80, 200),
+  "Ku": rl.Color(96, 88, 40, 210),
+  # Laser is red and unmissable on purpose. You cannot react to it -- by the time it alerts you
+  # have been measured -- so the only thing this readout can usefully do is tell you to mark the
+  # spot, which is the one defense that works next time.
+  "LASER": rl.Color(228, 40, 40, 245),
+}
+# The same green as the MAX label: in this corner green already means "openpilot is managing this".
+RADAR_ACTING_EDGE = rl.Color(128, 216, 166, 255)
+
 # BluePilot: sunnypilot's "AHEAD" box hangs off the bottom of the speed-limit sign, in the same
 # rows our stack occupies. Its geometry, from SpeedLimitRenderer._draw_ahead_info: 170x160 at
 # sign_rect.y + sign_rect.height + 10, horizontally centred on the sign.
@@ -625,6 +653,108 @@ class HudRendererBP(HudRendererSP):
       rl.draw_rectangle_rounded(
         rl.Rectangle(bar_x, bar_y, max(bar_height, bar_width * frac), bar_height), 1.0, 6, ACC_INK)
     return ACC_PILL_HEIGHT
+
+  def _draw_radar_pill(self, x: float, y: float) -> int:
+    """BluePilot: the radar detector, as a sibling of the ACC and lamp pills.
+
+    Deliberately a MIRROR of what is on the windshield rather than an interpretation of it. Band on
+    the left, direction in the middle, and the same eight-segment strength bar the detector itself
+    shows -- because the strength threshold is a setting the driver has to be able to check against
+    the device, and a readout that invented its own scale would make that impossible.
+
+    ALWAYS DRAWN WHILE THE FEATURE IS ON, including with no alert and including with the link down.
+    Two reasons, and the second is the one that matters:
+
+      - It is the tap target for marking a place. Marking has to work when NOTHING is alerting --
+        the case that actually matters is seeing a cruiser parked with nothing transmitting, or an
+        officer with a lidar gun, which the detector will usually miss entirely. A control that
+        appears only during an alert cannot mark the thing you most want marked.
+      - A dead link has to LOOK dead. If this vanished when the link dropped, a disconnected
+        detector would be indistinguishable from a quiet road, which is the single worst failure
+        this readout can have.
+
+    The acting edge is the same green as the MAX label, and that is not decoration: green in this
+    corner already means "openpilot is managing this number", so an alert that is moving the set
+    speed borrows the meaning rather than inventing a new one.
+    """
+    if not self._radar_enabled:
+      return 0
+
+    rect = rl.Rectangle(x, y, RADAR_PILL_WIDTH, RADAR_PILL_HEIGHT)
+    band = "" if self._radar_muted else self._radar_band
+    fill = RADAR_BAND_FILL.get(band, RADAR_IDLE_FILL)
+    if not self._radar_link:
+      fill = RADAR_IDLE_FILL
+
+    rl.draw_rectangle_rounded(rect, 0.42, 10, fill)
+    # The edge carries the state that the fill cannot: acting outranks alerting, because "this is
+    # changing your speed right now" is a different fact from "there is something out there".
+    if self._radar_acting:
+      edge = RADAR_ACTING_EDGE
+    elif not self._radar_link:
+      edge = RADAR_NO_LINK_EDGE
+    else:
+      edge = RADAR_IDLE_EDGE
+    rl.draw_rectangle_rounded_lines_ex(rect, 0.42, 10, 6, edge)
+
+    if not self._radar_link:
+      # No bars, no band, no direction. Showing an empty eight-segment graph here would read as
+      # "eight bars of nothing detected", which is exactly the lie this branch exists to avoid.
+      rl.draw_text_ex(self._font_semi_bold, "NO LINK", rl.Vector2(x + 20, y + 16),
+                      RADAR_LABEL_SIZE, 0, RADAR_NO_LINK_INK)
+      self._radar_rect = rect
+      return RADAR_PILL_HEIGHT
+
+    # Laser confirms; it does not ask.
+    #
+    # This said MARK IT for one iteration, which was wrong twice over. Laser is almost never a false
+    # alarm, so there is nothing for the driver to decide -- and it is the one alert you cannot
+    # react to, because by the time it fires you have already been measured. Prompting for a tap
+    # therefore asks for a distraction at the worst possible moment in exchange for a judgment call
+    # nobody needs to make. The mark happens on its own and this says so.
+    #
+    # "MARKED" rather than "LASER" for the same reason nothing else here mirrors the detector: the
+    # V1 is already shouting LASER a few inches away. That it has been RECORDED is the only part of
+    # this the detector cannot tell him.
+    if band == "LASER":
+      # Centred inline rather than through a helper: the preview tool builds its namespace from
+      # this class's methods and this file's top-level assignments, so a module-level helper would
+      # not survive extraction and the preview would diverge from the car.
+      prompt_w = measure_text_cached(self._font_bold, "MARKED", RADAR_VALUE_SIZE).x
+      rl.draw_text_ex(self._font_bold, "MARKED",
+                      rl.Vector2(x + (RADAR_PILL_WIDTH - prompt_w) / 2, y + 8),
+                      RADAR_VALUE_SIZE, 0, COLORS.WHITE)
+      self._radar_rect = rect
+      return RADAR_PILL_HEIGHT
+
+    ink = RADAR_MUTED_INK if self._radar_muted else COLORS.WHITE
+    rl.draw_text_ex(self._font_semi_bold, "RADAR", rl.Vector2(x + 20, y + 14),
+                    RADAR_LABEL_SIZE, 0, ink)
+
+    # NO NUMBER HERE, deliberately.
+    #
+    # It had one -- the set speed the alert was asking for -- and rendering the loaded scene killed
+    # it: while this is acting, that speed IS the MAX box two rows up, so the column showed 54 at
+    # the top and 54 at the bottom. The same fact twice is not a readout, it is noise in the one
+    # place noise costs the most.
+    #
+    # What is left is exactly what the detector cannot say and the MAX box cannot say: the fill
+    # means "your detector is alerting", the green edge means "openpilot is acting on it", and the
+    # dot means "this place is already marked". Band, strength, direction and bogey count are all on
+    # the windshield a few inches away, brighter and bigger.
+
+    # Right-hand side, vertically centred -- NOT the top-left corner the HOLD badge uses. That badge
+    # is 124 px tall so its dot clears the label; this pill is 56 and the dot landed on top of the
+    # R in RADAR. Same class of collision as the pin dot and the +/- arrow, found the same way, by
+    # rendering every readout at once rather than one state at a time.
+    if self._radar_marked:
+      rl.draw_circle(int(x + RADAR_PILL_WIDTH - RADAR_PAD - PIN_DOT_RADIUS),
+                     int(y + RADAR_PILL_HEIGHT / 2), PIN_DOT_RADIUS, PIN_DOT_COLOR)
+
+    # The tap target for marking. Recorded here because this is the only place that knows where the
+    # pill landed -- the same arrangement as _hold_rect.
+    self._radar_rect = rect
+    return RADAR_PILL_HEIGHT
 
   def _draw_lateral_control_overlay(self, center_x: float, center_y: float, wheel_size: int) -> None:
     """Draw the current lateral control mode over the steering wheel icon."""
