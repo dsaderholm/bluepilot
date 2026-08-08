@@ -43,6 +43,18 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 # The gate's own order. Mirrors GEO_EDGE_STD/PAINT/WIDTH/BEYOND in passing_assist.
 GEO_TERMS = ("edge unsure", "paint", "lane width", "room past it")
 
+# The gate's own thresholds, mirrored from passing_assist. Kept here so every term can be evaluated
+# INDEPENDENTLY from the per-frame values the planner already publishes.
+#
+# _record_refusal on the device takes the FIRST failing term in a fixed order, and edge-std is
+# checked first -- so a drive can only ever reveal one layer, and fixing it reveals the next. Three
+# drives in, edge-std has been 100%, 98% and 98% of refusals and the other three terms have never
+# been seen at all. Every input is in the log, so there is no reason to spend a drive per term.
+MIN_ADJACENT_LINE_PROB = 0.5
+MIN_LANE_WIDTH_M, MAX_LANE_WIDTH_M = 3.0, 5.0
+MIN_EDGE_BEYOND_LINE_M = 0.8
+MAX_ROAD_EDGE_STD = 1.2
+
 
 def _fmt_s(seconds: float) -> str:
   m, s = divmod(int(seconds), 60)
@@ -132,6 +144,8 @@ def read(path: str) -> dict:
     # which would suppress the cancel on nearly every change.
     "signal_out_steering_at_drop": 0,
     "overtaken": 0, "route": path, "params": {},
+    # Each term evaluated on its own, so one drive names every blocker instead of the first.
+    "geo_each": [0, 0, 0, 0], "geo_frames": 0,
   }
 
   # Lane-change reconstruction. carState is 100 Hz, so the switch position is sampled far finer
@@ -196,6 +210,19 @@ def read(path: str) -> dict:
       # Last wins: these are cumulative over the drive, not per-frame.
       out["geo"] = (int(pa.geoRefusedBy), float(pa.geoRefusedValue),
                     float(pa.geoRefusedShare), float(pa.geoLoosenTo))
+      # INDEPENDENT per-term evaluation. Only while the left side is actually refused, so ordinary
+      # driving with no lane to the left does not swamp it.
+      if not pa.leftGeometryOk:
+        out["geo_frames"] += 1
+        if float(pa.leftEdgeStd) > MAX_ROAD_EDGE_STD:
+          out["geo_each"][0] += 1
+        if float(pa.leftLineProb) < MIN_ADJACENT_LINE_PROB:
+          out["geo_each"][1] += 1
+        if not (MIN_LANE_WIDTH_M <= float(pa.leftLaneWidth) <= MAX_LANE_WIDTH_M):
+          out["geo_each"][2] += 1
+        if float(pa.leftEdgeBeyond) < MIN_EDGE_BEYOND_LINE_M:
+          out["geo_each"][3] += 1
+
       out["overtaken"] = max(out["overtaken"],
                              int(pa.adjacentLeft.overtakenCount) + int(pa.adjacentRight.overtakenCount))
 
@@ -254,6 +281,20 @@ def report(d: dict) -> str:
       if value > loosen:
         L.append(f"               NOTE: the mean ({value:.2f}) is above this, so the histogram")
         L.append("               likely saturated -- treat it as a lower bound, not the answer")
+    L.append("")
+
+  if d["geo_frames"]:
+    n = d["geo_frames"]
+    L.append(f"EVERY TERM, EVALUATED ON ITS OWN ({n} refused frames):")
+    L.append("  the device only records the FIRST to fail, so this is the part that says whether")
+    L.append("  fixing one reveals another or clears the way.")
+    for i, term in enumerate(GEO_TERMS):
+      c = d["geo_each"][i]
+      note = "   <-- would still refuse" if c > n * 0.5 else ("" if c else "   never")
+      L.append(f"  {term:<14} {100 * c / n:5.1f}%   ({c}){note}")
+    only_edge = d["geo_each"][0] and not any(d["geo_each"][1:])
+    if only_edge:
+      L.append("  -> edge-std ALONE. The other three pass; loosening it opens the gate outright.")
     L.append("")
 
   L.append("HIS CANCEL GESTURE:")

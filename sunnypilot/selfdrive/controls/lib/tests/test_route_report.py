@@ -35,9 +35,12 @@ def car_state(t, left=False, right=False, pressed=False):
 
 
 def plan(t, suggestion="none", blocked="noLaneAvailable", maneuver="idle",
-         geo=(1, 0.31, 0.86, 0.30), overtaken=(0, 0)):
+         geo=(1, 0.31, 0.86, 0.30), overtaken=(0, 0),
+         geometry_ok=True, edge_std=0.1, line_prob=0.99, lane_width=3.7, edge_beyond=1.5):
   pa = NS(suggestion=suggestion, blockedBy=blocked, maneuver=maneuver,
           geoRefusedBy=geo[0], geoRefusedValue=geo[1], geoRefusedShare=geo[2], geoLoosenTo=geo[3],
+          leftGeometryOk=geometry_ok, leftEdgeStd=edge_std, leftLineProb=line_prob,
+          leftLaneWidth=lane_width, leftEdgeBeyond=edge_beyond,
           adjacentLeft=NS(overtakenCount=overtaken[0]),
           adjacentRight=NS(overtakenCount=overtaken[1]))
   return NS(logMonoTime=int(t * 1e9), which=lambda: "longitudinalPlanSP",
@@ -250,3 +253,37 @@ def test_a_setting_that_is_on_is_not_flagged():
 def test_a_route_with_no_params_recorded_still_reports():
   d = read([plan(0.0)])
   assert RR.report(d)
+
+
+# --- every term on its own, so one drive names every blocker ------------------------------------
+
+def test_only_the_edge_refusing_is_called_out_as_such():
+  """Three drives showed edge-std at 100%, 98%, 98% -- but the device records only the FIRST
+  failing term and edge-std is checked first, so that number cannot distinguish "the only problem"
+  from "the first of four". Evaluated independently it can."""
+  d = read([plan(0.0, geometry_ok=False, edge_std=8.4)])
+  out = RR.report(d)
+  assert "edge-std ALONE" in out
+  assert "never" in out
+
+
+def test_a_second_blocker_hiding_behind_the_first_is_surfaced():
+  """The case worth spending a drive to learn, and now costing none: loosening edge-std would just
+  hand the refusal to paint."""
+  d = read([plan(0.0, geometry_ok=False, edge_std=8.4, line_prob=0.2)])
+  out = RR.report(d)
+  assert "edge-std ALONE" not in out
+  assert "would still refuse" in out
+
+
+def test_lane_width_is_judged_at_BOTH_ends():
+  """3.0 to 5.0. A shoulder is too narrow and a merge taper too wide, and only checking the low end
+  would call a widening shoulder a lane."""
+  assert "lane width" in RR.report(read([plan(0.0, geometry_ok=False, lane_width=2.0)]))
+  assert "lane width" in RR.report(read([plan(0.0, geometry_ok=False, lane_width=9.0)]))
+
+
+def test_frames_where_the_geometry_was_fine_are_not_counted():
+  """Ordinary driving with no lane to the left would otherwise swamp the sample."""
+  d = read([plan(0.0, geometry_ok=True, edge_std=8.4)])
+  assert d["geo_frames"] == 0
