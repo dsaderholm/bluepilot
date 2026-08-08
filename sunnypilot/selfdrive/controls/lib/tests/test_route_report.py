@@ -229,8 +229,11 @@ def test_an_ordinary_recommendation_is_printed_plainly():
 
 
 def init_data(**params):
-  return NS(logMonoTime=0, which=lambda: "initData",
-            initData=NS(params={k: v.encode() for k, v in params.items()}))
+  """initData.params is a capnp Map -- .entries, not dict access. Modelling it as a dict is what
+  hid the reader's bug: `k in params` raised, the bare except ate it, and the section printed
+  nothing while looking like a route that simply had no params recorded."""
+  entries = [NS(key=k, value=v.encode()) for k, v in params.items()]
+  return NS(logMonoTime=0, which=lambda: "initData", initData=NS(params=NS(entries=entries)))
 
 
 def test_the_settings_the_drive_actually_booted_with_are_reported():
@@ -283,7 +286,21 @@ def test_lane_width_is_judged_at_BOTH_ends():
   assert "lane width" in RR.report(read([plan(0.0, geometry_ok=False, lane_width=9.0)]))
 
 
-def test_frames_where_the_geometry_was_fine_are_not_counted():
-  """Ordinary driving with no lane to the left would otherwise swamp the sample."""
-  d = read([plan(0.0, geometry_ok=True, edge_std=8.4)])
+def test_frames_where_geometry_was_not_the_blocker_are_not_counted():
+  """Ordinary driving with no lane to the left would otherwise swamp the sample -- it did, at
+  41091 of 41091 frames. The default fixture blames noLaneAvailable, so this states the other
+  blocker explicitly."""
+  d = read([plan(0.0, blocked="tooSlow", geometry_ok=False, edge_std=8.4)])
   assert d["geo_frames"] == 0
+
+
+def test_the_geometry_terms_are_counted_only_where_geometry_was_the_blocker():
+  """`not leftGeometryOk` gave 41091 of 41091 frames on one route -- most of any drive has no lane
+  to the left and the gate is correctly False throughout, so percentages off that base describe the
+  ROAD rather than the gate. noLaneAvailable is the frames where everything else was ready."""
+  msgs = [plan(0.0, blocked="tooSlow", geometry_ok=False, line_prob=0.1),
+          plan(0.1, blocked="notEngaged", geometry_ok=False, line_prob=0.1),
+          plan(0.2, blocked="noLaneAvailable", geometry_ok=False, line_prob=0.1)]
+  d = read(msgs)
+  assert d["geo_frames"] == 1, "counted frames where something else was the blocker"
+  assert d["geo_each"][1] == 1

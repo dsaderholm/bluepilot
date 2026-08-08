@@ -193,13 +193,17 @@ def read(path: str) -> dict:
       # absolutely nothing on the screen" is answerable from the route rather than by asking him to
       # go read a settings screen and report it back -- and a setting he believes is on is exactly
       # the thing worth checking against the record rather than against memory.
+      # .entries, NOT dict access. initData.params is a capnp Map, so `k in params` and `params[k]`
+      # both raise -- and the bare except below swallowed it, so the whole section silently printed
+      # nothing and looked like "this route has no params" rather than "the reader is wrong".
+      want = ("ShowPassingAssist", "PassingAssistEnabled", "ShowPassingInCluster",
+              "ShowAdjacentLanes", "ShowOncomingSpeeds", "PassingAssistMinSpeed")
       try:
-        for k in ("ShowPassingAssist", "PassingAssistEnabled", "ShowPassingInCluster",
-                  "ShowAdjacentLanes", "ShowOncomingSpeeds", "PassingAssistMinSpeed"):
-          if k in msg.initData.params:
-            out["params"][k] = bytes(msg.initData.params[k]).decode(errors="replace").strip()
-      except Exception:  # noqa: BLE001 - an older route without params is not a failure
-        pass
+        for entry in msg.initData.params.entries:
+          if entry.key in want:
+            out["params"][entry.key] = bytes(entry.value).decode(errors="replace").strip()
+      except Exception as e:  # noqa: BLE001 - an older route without params is not a failure
+        out["params_error"] = f"{type(e).__name__}: {e}"
 
     elif which == "longitudinalPlanSP":
       pa = msg.longitudinalPlanSP.passingAssist
@@ -210,9 +214,14 @@ def read(path: str) -> dict:
       # Last wins: these are cumulative over the drive, not per-frame.
       out["geo"] = (int(pa.geoRefusedBy), float(pa.geoRefusedValue),
                     float(pa.geoRefusedShare), float(pa.geoLoosenTo))
-      # INDEPENDENT per-term evaluation. Only while the left side is actually refused, so ordinary
-      # driving with no lane to the left does not swamp it.
-      if not pa.leftGeometryOk:
+      # INDEPENDENT per-term evaluation, counted ONLY on frames where geometry was the thing that
+      # refused the pass.
+      #
+      # `not leftGeometryOk` was the wrong filter and produced a nonsense denominator -- 41091 of
+      # 41091 frames on one route, because most of any drive has no lane to the left and the gate is
+      # correctly False throughout. Percentages off that base describe the road, not the gate.
+      # noLaneAvailable is the frames where everything ELSE was ready and this is what stopped it.
+      if str(pa.blockedBy) == "noLaneAvailable":
         out["geo_frames"] += 1
         if float(pa.leftEdgeStd) > MAX_ROAD_EDGE_STD:
           out["geo_each"][0] += 1
@@ -244,6 +253,9 @@ def report(d: dict) -> str:
     L.append("  none at all -- which is the thing to explain, not a quiet drive")
   L.append("")
 
+  if d.get("params_error"):
+    L.append(f"SETTINGS: could not be read from this route -- {d['params_error']}")
+    L.append("")
   if d["params"]:
     L.append("SETTINGS AS THIS DRIVE BOOTED:")
     for k, v in sorted(d["params"].items()):
@@ -285,7 +297,7 @@ def report(d: dict) -> str:
 
   if d["geo_frames"]:
     n = d["geo_frames"]
-    L.append(f"EVERY TERM, EVALUATED ON ITS OWN ({n} refused frames):")
+    L.append(f"EVERY TERM, EVALUATED ON ITS OWN ({n} frames where geometry was the blocker):")
     L.append("  the device only records the FIRST to fail, so this is the part that says whether")
     L.append("  fixing one reveals another or clears the way.")
     for i, term in enumerate(GEO_TERMS):
