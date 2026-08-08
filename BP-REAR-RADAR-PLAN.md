@@ -39,9 +39,9 @@ the reasoning behind it; that memory is what is true today.
 
 ## 0. Verdict first
 
-**§6 (adjacent-lane traffic ahead) should be done first, and it works.** Confidence: **high** —
-measured, not reasoned. See §6 for the numbers. It needs no hardware, touches 5 files, and one
-of those changes is a single line.
+**§6 (adjacent-lane traffic ahead) is SHIPPED**, as of 2026-08-08 — all five files, plus the
+corroboration fix §6 records. Confidence: **high** — measured, not reasoned. See §6 for the
+numbers, which are still the rationale for the thresholds it runs on.
 
 **The rear radar is feasible but it is not a weekend.** Call it a month of evenings, and there
 is one hard blocker that must be resolved *before any hardware is bought beyond the radar
@@ -447,7 +447,26 @@ plan disturbs, because this plan does not create a second one.
 
 ---
 
-## 6. Adjacent-lane traffic ahead — verdict: **yes, and do it first**
+## 6. Adjacent-lane traffic ahead — **SHIPPED**
+
+> **Status, 2026-08-08: this is built and on the branch.** All five files below are done — the
+> `liveTracks` subscription, `adjacent_lane.py`, the `passing_assist.py` veto, the capnp fields and
+> the settings controls. The section is kept because the MEASUREMENTS are still the only record of
+> why the thresholds are what they are, and everything below the "Results" heading is still current.
+> Read it as the rationale for shipped code, not as a task.
+>
+> **What was still wrong when it was re-read on 2026-08-08**, and is now fixed: the module
+> corroborates every latched claim across radar messages EXCEPT the one that opens a maneuver.
+> `same_direction_seconds` — the only thing that releases the strict turn-lane veto — latched its
+> full ninety seconds from a single return, while the veto it overrides required three corroborating
+> messages. On a 1 + TWLTL + 1 arterial that made "that lane is safe to move into" three times
+> cheaper to establish than "that lane is oncoming traffic", which is the wrong direction for the
+> one gate in this module that opens rather than closes. It is the shape of the reported bug: three
+> of the six suggestions on the 2026-08-07 drive were into the center median turn lane.
+>
+> `SAME_DIRECTION_FRAMES` and `OVERTAKE_FRAMES` now apply the same per-message rule the oncoming
+> path already used, and the "Noise" paragraph below is the measurement that says it costs a genuine
+> sighting nothing.
 
 Confidence: **high**. This is measured, not argued.
 
@@ -597,7 +616,7 @@ openpilot **accommodates** this, and the digest architecture is why:
 
 **Bucket 1 — agent alone, verifiable at the desk.**
 
-- §6 in full: 5 files, 1 new, two one-line insertions. **~1 day.**
+- ~~§6 in full: 5 files, 1 new, two one-line insertions. **~1 day.**~~ Done 2026-08-08.
 - Rear radar openpilot side: 8 files, 3 new, everything else additive. **~1 day.**
 - Unit tests for both, `rear_approach.py` sign handling, the persistence filter, UI controls.
 
@@ -655,8 +674,8 @@ against the real thing. These have that exact shape:
 
 ### The honest verdict
 
-**§6: do it now.** One day, no hardware, measured to work, and it improves the lane-selection
-decision more than the settle timer it replaces.
+**§6: done.** No hardware, measured to work, and it improved the lane-selection decision more than
+the settle timer it replaced. What remains of it is tuning against road data, not building.
 
 **Rear radar: a month of evenings, gated on one bench test.** Not a weekend — the three-channel
 MCU alone is a project. But not "should not be started", either: the sensing case is sound, the
@@ -1663,6 +1682,48 @@ that if the rear radar bench test disappoints, the car still gained genuine blin
 for the cost of a configuration change.
 
 ---
+
+### Cross-traffic alert rides the same frame -- and cannot replace the rear radar -- 2026-08-08
+
+His question, and it is the right one to ask before spending money: *"I was just hoping the cross
+traffic thing could see farther back, if you know what I mean."* If CTA reaches further back than
+BLIS, maybe the canbox alone answers "is something closing" and the ESR is unnecessary.
+
+**It does not, and the reason is not range.** Read out of `ford_lincoln_base_pt.dbc`, `BO_ 934
+Side_Detect_L_Stat` carries the blind-spot signals and six `Cta*` signals in the SAME frame, from
+the same module and the same rear-corner radars. So the canbox that routes BLIS delivers
+cross-traffic for free, with no extra work -- that part is a genuine bonus.
+
+But every signal in that frame is a STATE, 1 to 3 bits wide:
+
+| Signal | Values |
+|---|---|
+| `SodDetctLeft_D_Stat` | Off / Alert_On / Flash_On / Sensor_Fault / Sensor_Blocked |
+| `SodAlrtLeft_D_Stat` | Off / On / Flash / Bulb_Proveout |
+| `Side_Detect_L_Illum` | lamp brightness, percent |
+| `SodWarnLeft_Prd_Rq` | flash period, milliseconds |
+| `CtaSnsLeft_D_Stat` | Clear / Blocked / System_Failure / Invalid |
+
+That is a **mirror lamp driver**. Ford's module does the detection and broadcasts its verdict,
+plus how bright to light the indicator and how fast to blink it.
+
+**THE LIMIT IS NOT THE SENSOR'S REACH. IT IS THAT ONLY THE CONCLUSION IS TRANSMITTED.** Whatever
+that radar physically sees, all that leaves the module is "alert on" for a zone Ford defined. There
+is no range and no range-rate anywhere in the frame, and "is something closing, and how fast"
+needs both. That is exactly what owning the ESR buys: tracks, not verdicts. It is the strongest
+argument in this document for the radar being a different thing rather than a redundant one.
+
+**One exception worth watching once the canbox is in.** `CtaAlrtLeft2_D_Stat` has `AlertZone1`
+through `AlertZone4` rather than a boolean -- four coarse zones, the only graded signal in the
+frame. Expectation is that it is about imminence while REVERSING and reads Off above walking pace,
+since Ford's CTA is a reverse feature. That is expectation, not measurement. Costs nothing to log
+those four zones at speed once the messages are on bus 0; if they update while driving forward it
+is a useful crumb, though still not a substitute for range and closing rate.
+
+**Not yet confirmed:** whether `enableBsm` is currently false on his car. `blindspotOccupied` has
+never once appeared in the refusal list across four analyzed drives, which is consistent with the
+messages not reaching bus 0, but it is not proof -- there may simply have been no blind-spot event
+during a candidate frame. One read of `CarParamsPersistent` settles it and has not been done.
 
 ## 13. Why the sunnypilot BSM delay moved over too close — it is one second, exactly
 

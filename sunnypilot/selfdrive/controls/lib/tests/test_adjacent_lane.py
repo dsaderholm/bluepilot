@@ -23,7 +23,8 @@ Four things here can be wrong in ways a drive would not reveal:
 from types import SimpleNamespace as NS
 
 from openpilot.sunnypilot.selfdrive.controls.lib.adjacent_lane import (
-  ONCOMING_FRAMES, MIN_ONCOMING_MS,
+  ONCOMING_FRAMES, MIN_ONCOMING_MS, OVERTAKE_FRAMES, SAME_DIRECTION_FRAMES,
+  SAME_DIRECTION_WINDOW_S,
   AdjacentLane, AdjacentLaneSide, ADJACENT_MIN_M, ADJACENT_MAX_M, DEBOUNCE_FRAMES, MIN_MOVING_MS,
   ONCOMING_MAX_M, SAME_DIRECTION_MIN_FRACTION, path_offset, ground_speed,
 )
@@ -91,6 +92,19 @@ def upd(adj, sm, v_ego=V_EGO, max_d=MAX_D, **kw):
 
 def feed(adj, tracks, frames=DEBOUNCE_FRAMES, **kw):
   for _ in range(frames):
+    adj.update(FakeSM(tracks, **kw), V_EGO, MAX_D)
+  return adj
+
+
+def went_past(adj, tracks, **kw):
+  """Apply one scene OVERTAKE_FRAMES times.
+
+  Same reason upd() exists for oncoming: an overtake is corroborated across messages now, so a
+  scene meaning "a car really did go by" has to show it more than once. A real overtaking vehicle
+  is inside OVERTAKE_MAX_D_REL_M for seconds, which is dozens of messages, so this is what the
+  radar does anyway -- see TestOvertakeCorroboration for what it buys.
+  """
+  for _ in range(OVERTAKE_FRAMES):
     adj.update(FakeSM(tracks, **kw), V_EGO, MAX_D)
   return adj
 
@@ -886,8 +900,7 @@ class TestBeingOvertaken:
   """
 
   def test_a_car_going_past_us_is_counted(self):
-    adj = AdjacentLane()
-    adj.update(FakeSM([track(18, 3.7, v_rel=8.0)]), V_EGO, MAX_D)
+    adj = went_past(AdjacentLane(), [track(18, 3.7, v_rel=8.0)])
     assert adj.left.overtaken_count == 1
     assert adj.left.overtaken_seconds == 0.0
     assert adj.left.overtaken_v_abs > V_EGO
@@ -916,18 +929,16 @@ class TestBeingOvertaken:
     assert adj.left.overtaken_count == 1
 
   def test_and_a_second_car_later_is_a_second_overtake(self):
-    adj = AdjacentLane()
-    adj.update(FakeSM([track(18, 3.7, v_rel=8.0)]), V_EGO, MAX_D)
+    adj = went_past(AdjacentLane(), [track(18, 3.7, v_rel=8.0)])
     for _ in range(int(4.0 / 0.05)):
       adj.update(FakeSM([]), V_EGO, MAX_D)
-    adj.update(FakeSM([track(18, 3.7, v_rel=8.0)]), V_EGO, MAX_D)
+    went_past(adj, [track(18, 3.7, v_rel=8.0)])
     assert adj.left.overtaken_count == 2
 
   def test_the_clock_runs_on_wall_time(self):
     """It has to count up with an EMPTY lane -- that is the whole measurement. A clock that only
     advanced while something was in view could never report a quiet lane."""
-    adj = AdjacentLane()
-    adj.update(FakeSM([track(18, 3.7, v_rel=8.0)]), V_EGO, MAX_D)
+    adj = went_past(AdjacentLane(), [track(18, 3.7, v_rel=8.0)])
     for _ in range(int(10.0 / 0.05)):
       adj.update(FakeSM([]), V_EGO, MAX_D)
     assert 9.0 < adj.left.overtaken_seconds < 11.0
@@ -945,8 +956,7 @@ class TestBeingOvertaken:
   def test_a_radar_dropout_does_not_reset_the_clock(self):
     """Same rule as the oncoming memory: how long since somebody passed us is a fact about the
     road, and losing the sensor is not evidence it changed."""
-    adj = AdjacentLane()
-    adj.update(FakeSM([track(18, 3.7, v_rel=8.0)]), V_EGO, MAX_D)
+    adj = went_past(AdjacentLane(), [track(18, 3.7, v_rel=8.0)])
     for _ in range(int(5.0 / 0.05)):
       adj.update(FakeSM([]), V_EGO, MAX_D)
     seen = adj.left.overtaken_seconds
@@ -955,8 +965,7 @@ class TestBeingOvertaken:
     assert adj.left.overtaken_seconds >= seen, "a dropout restarted the clock"
 
   def test_each_side_counts_its_own(self):
-    adj = AdjacentLane()
-    adj.update(FakeSM([track(18, -3.7, v_rel=8.0)]), V_EGO, MAX_D)
+    adj = went_past(AdjacentLane(), [track(18, -3.7, v_rel=8.0)])
     assert adj.right.overtaken_count == 1
     assert adj.left.overtaken_count == 0
 
@@ -967,3 +976,126 @@ class TestBeingOvertaken:
     for _ in range(ONCOMING_FRAMES + 2):
       adj.update(FakeSM([track(20, 3.7, v_rel=-27.0 - V_EGO)]), V_EGO, MAX_D)
     assert adj.left.overtaken_count == 0
+
+
+class TestCorroboration:
+  """Every latched claim here costs more than one radar message -- INCLUDING the one that opens a
+  maneuver rather than closing one.
+
+  `same_direction_seconds` is the only thing that releases the strict turn-lane veto, and it used
+  to latch its full ninety seconds from a SINGLE return while the veto it overrides required three
+  corroborating messages. So on the one road where the distinction decides anything -- a
+  1 + TWLTL + 1 arterial, where blocks_oncoming calls moving into the middle lane neither legal nor
+  survivable -- the claim "that lane is safe" was three times cheaper to establish than the claim
+  "that lane is oncoming traffic".
+
+  Every other gate in this module is built so that missing evidence costs coverage rather than
+  safety. This was the single place where a lone bad return bought a maneuver instead of blocking
+  one, and it is the shape of the reported bug: three of six suggestions on the 2026-08-07 drive
+  were into the center median turn lane.
+  """
+
+  @staticmethod
+  def _twltl(same_dir_speed=V_EGO):
+    """The ambiguous road: our lane, a two-way left-turn lane, then opposing traffic."""
+    left_edge, onc, _ = road(ego_offset_from_left=0, twltl=True, oncoming_lanes=1)
+    oncoming = track(100, -onc[0], v_rel=-27.0 - V_EGO)
+    vouching = track(60, LANE_W, v_rel=same_dir_speed - V_EGO)
+    return left_edge, oncoming, vouching
+
+  def _blocked_after(self, extra_tracks, messages, adj=None, left_edge=None, oncoming=None):
+    if adj is None:
+      left_edge, oncoming, _ = self._twltl()
+      adj = AdjacentLane()
+      # Establish the veto first, from opposing traffic alone.
+      for _ in range(ONCOMING_FRAMES):
+        adj.update(FakeSM([oncoming], left_edge=left_edge), V_EGO, MAX_D, strict=True)
+      assert adj.left.blocks_oncoming, "the veto under test was never established"
+    for _ in range(messages):
+      adj.update(FakeSM([oncoming, *extra_tracks], left_edge=left_edge), V_EGO, MAX_D, strict=True)
+    return adj
+
+  def test_one_sighting_does_not_unlock_a_turn_lane(self):
+    """The bug. One return in the middle lane used to buy ninety seconds of "this is a travel
+    lane", which is exactly long enough to offer the pass."""
+    _, _, vouching = self._twltl()
+    adj = self._blocked_after([vouching], messages=SAME_DIRECTION_FRAMES - 1)
+    assert not adj.left.same_direction_recent
+    assert adj.left.blocks_oncoming
+
+  def test_a_car_really_using_the_lane_still_unlocks_it(self):
+    """The other half, and the reason the threshold is low. A vehicle holding station beside us is
+    the slowest-changing target this radar ever has -- §6 of BP-REAR-RADAR-PLAN.md measured real
+    adjacent same-direction tracks living 4.97 to 28.73 s, so corroboration costs it nothing."""
+    _, _, vouching = self._twltl()
+    adj = self._blocked_after([vouching], messages=SAME_DIRECTION_FRAMES)
+    assert adj.left.same_direction_recent
+    assert not adj.left.blocks_oncoming
+
+  def test_one_message_cannot_corroborate_itself(self):
+    """The failure that made the oncoming rule real, applied to the other side of the decision.
+
+    This radar publishes a guardrail or a sign gantry as several tracks at once at slightly
+    different ranges. Counting per TRACK meant one such cluster satisfied three-way corroboration
+    in a single frame: no time passed and nothing was corroborated by anything.
+    """
+    _, _, vouching = self._twltl()
+    crowd = [track(50 + 10 * i, LANE_W, v_rel=0.0) for i in range(SAME_DIRECTION_FRAMES + 2)]
+    adj = self._blocked_after(crowd, messages=1)
+    assert not adj.left.same_direction_recent
+    assert adj.left.blocks_oncoming
+
+  def test_a_partial_count_expires_rather_than_accumulating(self):
+    """Otherwise single bad returns minutes apart eventually add up to a pass offered into a turn
+    lane -- the same reasoning as the oncoming window, in the direction that costs more."""
+    left_edge, oncoming, vouching = self._twltl()
+    adj = self._blocked_after([vouching], messages=SAME_DIRECTION_FRAMES - 1)
+    for _ in range(int((SAME_DIRECTION_WINDOW_S + 0.5) / 0.05)):
+      adj.update(FakeSM([oncoming], left_edge=left_edge), V_EGO, MAX_D, strict=True)
+    # One more sighting must now be the FIRST of a new run, not the last of the old one.
+    adj = self._blocked_after([vouching], messages=1, adj=adj, left_edge=left_edge,
+                              oncoming=oncoming)
+    assert not adj.left.same_direction_recent
+    assert adj.left.blocks_oncoming
+
+  def test_opening_a_maneuver_is_never_cheaper_than_refusing_one(self):
+    """The invariant behind all of the above, asserted directly so it survives future tuning.
+
+    Whatever these numbers move to, the evidence that lets the car change lanes must not be easier
+    to come by than the evidence that stops it.
+    """
+    assert SAME_DIRECTION_FRAMES >= ONCOMING_FRAMES
+
+
+class TestOvertakeCorroboration:
+  """OVERTAKE_REARM_S collapses a whole message to one count, so a real car is never a convoy. What
+  it cannot do is tell one flicker from one car -- and §6 measured a 0.12-0.48 s median lifetime for
+  adjacent-band tracks, which at 8.3 Hz is one or two messages.
+
+  This only feeds a readout today, but it is the readout the rear-radar decision gets made on, and
+  he has already reported it reading wrong once: fifty vehicles having overtaken him in a few
+  minutes, on a drive where the real number was nearer one.
+  """
+
+  def test_a_single_flicker_is_not_a_car(self):
+    adj = AdjacentLane()
+    adj.update(FakeSM([track(18, 3.7, v_rel=8.0)]), V_EGO, MAX_D)
+    adj.update(FakeSM([]), V_EGO, MAX_D)
+    assert adj.left.overtaken_count == 0
+
+  def test_sightings_have_to_be_consecutive(self):
+    """Two flickers a while apart are two flickers. A run broken by a message showing nothing
+    starts over rather than resuming."""
+    adj = AdjacentLane()
+    for _ in range(OVERTAKE_FRAMES + 2):
+      adj.update(FakeSM([track(18, 3.7, v_rel=8.0)]), V_EGO, MAX_D)
+      adj.update(FakeSM([]), V_EGO, MAX_D)
+    assert adj.left.overtaken_count == 0
+
+  def test_a_real_pass_is_still_counted_exactly_once(self):
+    """The cost side. A car going by is inside OVERTAKE_MAX_D_REL_M for seconds, which is dozens of
+    messages, so corroboration must not turn one pass into none -- or into two."""
+    adj = AdjacentLane()
+    for _ in range(int(1.5 / 0.05)):
+      adj.update(FakeSM([track(18, 3.7, v_rel=8.0)]), V_EGO, MAX_D)
+    assert adj.left.overtaken_count == 1

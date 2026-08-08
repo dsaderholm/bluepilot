@@ -230,6 +230,36 @@ ONCOMING_FRAMES = 3
 # shorter than an oncoming vehicle's time in view.
 ONCOMING_WINDOW_S = 1.5
 
+# --- and the same rule for the evidence that CANCELS that veto ---
+#
+# same_direction_seconds is the only thing that releases the strict turn-lane veto (see
+# blocks_oncoming case 2). It used to latch the full ninety seconds from ONE return, while the
+# veto it overrides required three corroborating messages -- so the claim "that lane is safe to
+# move into" was three times cheaper to establish than the claim "that lane is oncoming traffic".
+#
+# The asymmetry ran the wrong way on the one road where it decides anything. Every gate here is
+# built so that missing evidence costs coverage rather than safety, and this was the single place
+# where a lone bad return bought a maneuver instead of blocking one -- into a lane blocks_oncoming
+# itself calls neither legal nor survivable.
+#
+# Counted per MESSAGE for the reason in observe_oncoming: this radar publishes several returns at
+# once for one piece of scenery, so a per-track count corroborates nothing. Costs a genuine
+# sighting nothing either -- §6 of BP-REAR-RADAR-PLAN.md measured real adjacent same-direction
+# tracks living 4.97 to 28.73 s, against a 0.12-0.48 s median for the clutter, and a vehicle
+# holding station beside us is the slowest-changing target the radar ever has.
+SAME_DIRECTION_FRAMES = 3
+SAME_DIRECTION_WINDOW_S = 1.5
+
+# An overtake is one vehicle passing us, and OVERTAKE_REARM_S already collapses a whole message to
+# a single count. What it cannot do is tell one flicker from one car: a single spurious return at
+# close range with a positive range rate reads as somebody going by. Corroboration separates them,
+# and it is nearly free here too -- a real overtaking vehicle inside OVERTAKE_MAX_D_REL_M pulling
+# away at OVERTAKE_MIN_V_REL_MS stays in that window for seconds, which is dozens of messages.
+#
+# Two rather than three: this one only feeds a readout, so it is tuned to keep the count honest
+# without discarding a brief genuine pass.
+OVERTAKE_FRAMES = 2
+
 # Below this the line-of-sight geometry stops being trustworthy and the correction below would
 # amplify range-rate noise rather than remove a bias. cos 72 degrees; nothing in the adjacent-lane
 # band reaches it except very close alongside, where the radar is least reliable anyway.
@@ -374,8 +404,13 @@ class AdjacentLaneSide:
     # Corroboration for the veto. See ONCOMING_FRAMES.
     self._oncoming_hits = 0
     self._oncoming_gap_s = 0.0
-    # ONE COUNT PER MESSAGE, however many tracks that message carries. See observe_oncoming.
+    # ...and for the evidence that cancels it. See SAME_DIRECTION_FRAMES.
+    self._same_dir_hits = 0
+    self._same_dir_gap_s = 0.0
+    # ONE COUNT PER MESSAGE EACH, however many tracks that message carries. See observe_oncoming.
     self._counted_this_message = False
+    self._same_dir_counted_this_message = False
+    self._overtake_counted_this_message = False
     # Three latches, because three different facts decide whether this side is usable and they
     # expire independently.
     #
@@ -409,6 +444,9 @@ class AdjacentLaneSide:
     self.overtaken_count = 0
     self.overtaken_v_abs = 0.0
     self._overtake_rearm_s = 1e3
+    # See OVERTAKE_FRAMES. Consecutive messages showing a vehicle going by, so one flicker cannot
+    # report a car.
+    self._overtake_hits = 0
 
   def reset(self) -> None:
     """Radar gone. Everything measured goes with it -- EXCEPT the oncoming memory.
@@ -500,7 +538,16 @@ class AdjacentLaneSide:
 
     Re-armed rather than counted per frame -- one vehicle is one overtake, and a track that flickers
     at the threshold would otherwise report a convoy.
+
+    The re-arm collapses a message to one count but cannot tell one flicker from one car, so the
+    count also has to survive OVERTAKE_FRAMES consecutive messages before it is believed.
     """
+    if self._overtake_counted_this_message:
+      return
+    self._overtake_counted_this_message = True
+    self._overtake_hits += 1
+    if self._overtake_hits < OVERTAKE_FRAMES:
+      return
     if self._overtake_rearm_s < OVERTAKE_REARM_S:
       return
     self._overtake_rearm_s = 0.0
@@ -509,21 +556,51 @@ class AdjacentLaneSide:
     self.overtaken_v_abs = float(v_abs)
 
   def observe_same_direction(self, memory_s: float) -> None:
-    """A vehicle in the next lane going our way. The only positive evidence that lane is drivable."""
+    """A vehicle in the next lane going our way. The only positive evidence that lane is drivable.
+
+    Corroborated across MESSAGES before it latches, for the reasons at SAME_DIRECTION_FRAMES: this
+    is the one claim in the module that opens a maneuver rather than closing one, and it was the
+    only latch here a single return could set.
+    """
+    if self._same_dir_counted_this_message:
+      return
+    self._same_dir_counted_this_message = True
+    self._same_dir_hits += 1
+    self._same_dir_gap_s = 0.0
+    if self._same_dir_hits < SAME_DIRECTION_FRAMES:
+      return
     self.same_direction_seconds = float(memory_s)
 
-  def clear_oncoming(self) -> None:
+  def begin_message(self) -> None:
     """Start of a new liveTracks message. Called once per message, which is what makes it the right
-    place to re-arm the per-message corroboration gate -- see observe_oncoming."""
+    place to re-arm every per-message corroboration gate -- see observe_oncoming.
+
+    Named for the message rather than for oncoming because three separate counts re-arm here now.
+    While it was called clear_oncoming this looked like the oncoming path's private bookkeeping,
+    which is part of how the same-direction latch came to be the one uncorroborated claim in the
+    module: it was added beside corroborated ones without anything pointing at where corroboration
+    is actually wired up.
+    """
     self.oncoming = False
     self._counted_this_message = False
+    self._same_dir_counted_this_message = False
+    # Overtakes must be seen on CONSECUTIVE messages, so a message that showed nothing breaks the
+    # run. Read before the flag is cleared, because it still describes the message just finished.
+    if not self._overtake_counted_this_message:
+      self._overtake_hits = 0
+    self._overtake_counted_this_message = False
 
-  def decay_oncoming(self, dt: float) -> None:
+  def decay(self, dt: float) -> None:
+    """Wall time. Every held claim ages here, whatever the radar is doing."""
     # A partial count that stops being corroborated is discarded rather than carried forward, or
-    # single bad returns minutes apart would eventually add up to a veto.
+    # single bad returns minutes apart would eventually add up to a veto -- and, for the
+    # same-direction count, to a pass offered into a turn lane.
     self._oncoming_gap_s += dt
     if self._oncoming_gap_s > ONCOMING_WINDOW_S:
       self._oncoming_hits = 0
+    self._same_dir_gap_s += dt
+    if self._same_dir_gap_s > SAME_DIRECTION_WINDOW_S:
+      self._same_dir_hits = 0
     self.oncoming_seconds = max(0.0, self.oncoming_seconds - dt)
     self.oncoming_adjacent_seconds = max(0.0, self.oncoming_adjacent_seconds - dt)
     self.same_direction_seconds = max(0.0, self.same_direction_seconds - dt)
@@ -675,8 +752,8 @@ class AdjacentLane:
     # a cycle with no new message is not evidence of anything -- so the clock is wall time, not
     # radar time, and nothing except its own expiry clears it.
     self.left.strict = self.right.strict = strict
-    self.left.decay_oncoming(dt)
-    self.right.decay_oncoming(dt)
+    self.left.decay(dt)
+    self.right.decay(dt)
     self.left.tick_overtaken(dt)
     self.right.tick_overtaken(dt)
 
@@ -692,8 +769,8 @@ class AdjacentLane:
       self.reset()
       return
 
-    self.left.clear_oncoming()
-    self.right.clear_oncoming()
+    self.left.begin_message()
+    self.right.begin_message()
 
     best: dict[str, object] = {'left': None, 'right': None}
     for p in tracks:
