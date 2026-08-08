@@ -326,3 +326,18 @@ def test_unrelated_log_lines_are_not_dumped():
   d = read([log_message("some unrelated thing happened"), plan(0.0)])
   assert d["panel_error"] is None
   assert "THE PANEL CRASHED" not in RR.report(d)
+
+
+def test_the_header_names_the_route_that_was_actually_read():
+  """`route: latest` is the word he typed, not the drive it read. When latest picked a stale route,
+  identical numbers were the only clue -- against a report that otherwise looked perfectly fine."""
+  real_resolve = RR.resolve
+  RR.resolve = lambda _t: ["/d/00000322--abc--0/rlog", "/d/00000322--abc--1/rlog"]
+  try:
+    assert RR.resolved_name("latest") == "00000322--abc  (2 segments)"
+  finally:
+    RR.resolve = real_resolve
+
+
+def test_an_unresolvable_target_still_names_itself():
+  assert RR.resolved_name("0000031e--69e3cd09d2") == "0000031e--69e3cd09d2"

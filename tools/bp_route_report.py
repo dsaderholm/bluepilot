@@ -133,6 +133,19 @@ def stream(target: str):
     print(" " * 30, end="\r", file=sys.stderr)
 
 
+def resolved_name(target: str) -> str:
+  """What was ACTUALLY read, for the report's own header.
+
+  Printing back the word the user typed is worse than useless: `route: latest` told him nothing,
+  and when `latest` picked a stale route the identical numbers were the only clue -- which he had
+  to notice himself, against a report that looked perfectly well-formed.
+  """
+  paths = resolve(target)
+  if isinstance(paths, list) and paths:
+    return f"{os.path.basename(os.path.dirname(paths[0])).rsplit('--', 1)[0]}  ({len(paths)} segments)"
+  return str(target)
+
+
 def read(path: str) -> dict:
   """Walk the route once, accumulating everything. One pass -- these files are large."""
 
@@ -143,7 +156,7 @@ def read(path: str) -> dict:
     # ...and the same question asked the OTHER way. See report(): the latched form said 22 of 23,
     # which would suppress the cancel on nearly every change.
     "signal_out_steering_at_drop": 0,
-    "overtaken": 0, "route": path, "params": {},
+    "overtaken": 0, "route": resolved_name(path), "params": {},
     # Each term evaluated on its own, so one drive names every blocker instead of the first.
     "geo_each": [0, 0, 0, 0], "geo_frames": 0,
     # The panel's own crash. See hud_renderer_bp: one exception latches it off for the whole drive,
