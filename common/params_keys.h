@@ -166,7 +166,14 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"CustomAccLongPressIncrement", {PERSISTENT | BACKUP, INT, "5"}},
     {"CustomAccShortPressIncrement", {PERSISTENT | BACKUP, INT, "1"}},
     // BluePilot: max per-step ICBM set-speed decrement, in display units (mph/kph).
-    // Kept under Ford's ~10 mph aggressive-brake threshold so stock ACC coasts instead of braking.
+    // NOT kept under Ford's ~10 mph threshold, which is what an earlier version of this comment
+    // said while the value beside it was already 12. That guard was retired deliberately: the
+    // violent application it feared has a hard ceiling built into the car and cannot happen, and a
+    // cap that is too small does not prevent braking, it just spreads the deceleration out past
+    // turn-in. Proper cornering sheds the speed BEFORE the bend.
+    //
+    // SCC-Map is exempt from this limiter entirely -- see apply_target_drop_limit. Its target
+    // arrives with a deadline already attached, so metering it spends road that was budgeted.
     {"IcbmMaxTargetDrop", {PERSISTENT | BACKUP, INT, "12"}},
     // BluePilot: max per-step ICBM set-speed increment, in display units (mph/kph). ICBM holds the
     // button rather than tapping it, and Ford reads a held button as a continuous ramp, so without
@@ -188,12 +195,21 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"IcbmLeadMaxTtc", {PERSISTENT | BACKUP, INT, "70"}},
     // BluePilot: act on the driving model's own stop intent (stop signs, red lights) when no
     // lead explains it. Same floor-and-alert channel as the radar-blind lead case.
-    // Defaulted ON as of 2026-08-01, reversing the original "never run on a vehicle" caution:
-    // the owner asked twice why stop-sign slowing was not happening, and it could not be reached
-    // from the UI at all until now, so leaving it off guaranteed it would never get tested.
+    //
+    // ON, OFF, ON -- and the middle step is the useful part of the record. Shipped on 2026-08-01,
+    // shipped OFF again on 2026-08-06 because it "fired almost continuously with no vehicle
+    // ahead" and he turned it off himself. That cause was found on 2026-08-08: the trigger asked
+    // _ford_tracks, which requires a lead moving above 6 mph, so cars QUEUED at the light -- the
+    // one thing guaranteed to be present at a red light -- did not count as a lead and the path
+    // fired on them. It now requires no lead at all, which is what the design always said it was
+    // for: the empty intersection.
+    //
+    // Back ON, because the road evidence either side of that fix is good ("the red light thing
+    // worked... the slowing was actually perfect") and the only reported false positives are the
+    // class that has since been fixed.
     // It remains the weakest-evidence path here -- no lead means no dRel, vRel or TTC, so
     // persistence and the 20 mph ACC floor are its entire filter.
-    {"IcbmModelStopEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},
+    {"IcbmModelStopEnabled", {PERSISTENT | BACKUP, BOOL, "1"}},
     // BluePilot: hold off openpilot's standstill resume request until the lead has actually gone.
     // controlsd asserts resume from ITS OWN MPC plan, which on a stock-ACC car is not the
     // controller that then has to drive -- Ford ACC reads resume as "go", accelerates toward the
