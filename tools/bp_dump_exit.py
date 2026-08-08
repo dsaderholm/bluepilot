@@ -39,7 +39,10 @@ MS_TO_MPH = 2.23694
 # An "exit" for our purposes: was doing freeway speed, ended up well below it.
 FAST_MPH = 55.0
 SLOW_MPH = 45.0
-SOURCE = {0: "cruise", 1: "sccVision", 2: "sccMap", 3: "speedLimit"}
+# longitudinalPlanSource is a capnp ENUM, and str() on it gives the enumerant name directly --
+# "sccMap", "sccVision", "cruise", "speedLimitAssist". The first version called int() on it and died
+# with "int() argument must be ... not '_DynamicEnum'" after parsing a whole route. Verified against
+# the schema rather than assumed: str() -> 'sccMap', .raw -> 2.
 
 
 def find_segments(route: str | None) -> list[str]:
@@ -104,6 +107,7 @@ def main() -> int:
   map_source_frames = 0
   total = 0
   events = 0
+  bad = 0
   t0 = None
   armed = False
 
@@ -117,20 +121,28 @@ def main() -> int:
       if t0 is None:
         t0 = t
 
-      if w == "carState":
-        st["v"] = msg.carState.vEgo * MS_TO_MPH
-        st["setSpeed"] = msg.carState.vCruiseCluster
-      elif w == "longitudinalPlanSP":
-        lp = msg.longitudinalPlanSP
-        st["src"] = SOURCE.get(int(lp.longitudinalPlanSource), str(lp.longitudinalPlanSource))
-        st["mapV"] = lp.smartCruiseControl.map.vTarget * MS_TO_MPH
-        st["mapAct"] = lp.smartCruiseControl.map.active
-        st["visV"] = lp.smartCruiseControl.vision.vTarget * MS_TO_MPH
-        st["visAct"] = lp.smartCruiseControl.vision.active
-        total += 1
-        map_active_frames += 1 if st["mapAct"] else 0
-        map_source_frames += 1 if st["src"] == "sccMap" else 0
-      else:
+      # Wrapped because a route takes minutes to parse and one unexpected field should not throw
+      # all of it away -- which is exactly what happened on the first run.
+      try:
+        if w == "carState":
+          st["v"] = msg.carState.vEgo * MS_TO_MPH
+          st["setSpeed"] = msg.carState.vCruiseCluster
+        elif w == "longitudinalPlanSP":
+          lp = msg.longitudinalPlanSP
+          st["src"] = str(lp.longitudinalPlanSource)
+          st["mapV"] = lp.smartCruiseControl.map.vTarget * MS_TO_MPH
+          st["mapAct"] = lp.smartCruiseControl.map.active
+          st["visV"] = lp.smartCruiseControl.vision.vTarget * MS_TO_MPH
+          st["visAct"] = lp.smartCruiseControl.vision.active
+          total += 1
+          map_active_frames += 1 if st["mapAct"] else 0
+          map_source_frames += 1 if st["src"] == "sccMap" else 0
+        else:
+          continue
+      except Exception as e:  # noqa: BLE001
+        if not bad:
+          print(f"# skipping unreadable {w} frames: {e}")
+        bad += 1
         continue
 
       hist.append((t - t0, dict(st)))
@@ -161,6 +173,8 @@ def main() -> int:
   print(f"  SCC-Map ACTIVE            : {map_active_frames}")
   print(f"  SCC-Map was the SOURCE    : {map_source_frames}")
   print(f"  large decelerations found : {events}")
+  if bad:
+    print(f"  unreadable frames skipped : {bad}")
   print()
   if map_active_frames == 0:
     print("  -> CANDIDATE A. SCC-Map never became active anywhere in this route, so no amount of")
