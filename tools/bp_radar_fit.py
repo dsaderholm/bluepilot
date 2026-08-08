@@ -3,9 +3,9 @@
 
     python tools/bp_radar_fit.py radar_alerts.jsonl
 
-RadarDetectorMinBars ships at 6 of 8 with NO EVIDENCE BEHIND IT, which is why the set-speed change
-ships switched off. This is the thing that replaces the guess: it reads the encounter log written
-on the road and answers, for each candidate threshold, the only question that matters.
+RadarDetectorMinBars ships at 6 of 8 with NO EVIDENCE BEHIND IT. This is the thing that replaces the
+guess: it reads the encounter log written on the road and answers, for each candidate threshold, the
+only question that matters.
 
     How many seconds of warning would this threshold have given me, and how often would it have
     fired for nothing?
@@ -14,6 +14,17 @@ Both halves are needed. A low threshold buys warning time and costs false trigge
 quiet and may fire too late to be worth anything. Neither number can be reasoned out in advance --
 signal strength is not distance, and how far ahead a given bar count sits depends on the terrain and
 the road, which is exactly why this waits for real drives.
+
+ENCOUNTERS WHERE THE CAR ACTED ARE EXCLUDED FROM THE FIT, and this is not fastidiousness.
+
+Slowing changes the rate you close on the source, which changes how fast the bar count climbs --
+which is the exact quantity being measured. Including those encounters would fit the threshold to
+data the threshold itself produced, and the bias runs the flattering way: warning times look longer
+than they were, so any threshold looks better than it is. Third instance of the same trap in this
+feature; the other two are in locations.py.
+
+They are still counted and reported, because "how often did it fire" is worth knowing. They just do
+not get a vote on the number.
 
 WHAT COUNTS AS A FALSE TRIGGER: a Ka encounter you MUTED that still reached the threshold. Those are
 the ones where the car would have slowed for something you had already dismissed.
@@ -80,13 +91,18 @@ def main() -> int:
     print("Drive with RadarDetectorEnabled on for a couple of weeks and come back.")
     return 1
 
-  ka = [r for r in records if (r.get("bands_seen", 0) & BAND_KA) and not r.get("ever_muted")]
+  ka_all = [r for r in records if (r.get("bands_seen", 0) & BAND_KA) and not r.get("ever_muted")]
+  acted = [r for r in ka_all if r.get("ever_acted")]
+  ka = [r for r in ka_all if not r.get("ever_acted")]
   muted_ka = [r for r in records if (r.get("bands_seen", 0) & BAND_KA) and r.get("ever_muted")]
   non_ka = [r for r in records if not (r.get("bands_seen", 0) & BAND_KA)]
   print(f"\n  {len(records)} encounters logged: {len(ka)} unmuted Ka, {len(muted_ka)} muted Ka, "
         f"{len(non_ka)} non-Ka")
   print("  Non-Ka is context only -- the set-speed path gates on Ka before strength is consulted,")
   print("  so a K-band supermarket door at 8 bars cannot fire it however loud it gets.")
+  if acted:
+    print(f"  {len(acted)} Ka encounters EXCLUDED from the fit because the car slowed during them.")
+    print("  Slowing changes how fast the bars climb, so those measure the threshold's own effect.")
 
   bands = collections.Counter()
   for r in records:
@@ -129,8 +145,7 @@ def main() -> int:
     print("  bar knowing what it costs -- the columns above are the whole trade.")
   else:
     print(f"  Suggested RadarDetectorMinBars: {best}")
-    print(f"  (aiming {args.margin} mph under the limit; set it on the Speed Limit screen, then")
-    print("   turn on 'Slow Down For Strong Ka Alerts')")
+    print(f"  (aiming {args.margin} mph under the limit; set it on the Speed Limit screen)")
   print("\n  These are YOUR roads. Nothing here is a default anyone else should inherit.")
   return 0
 

@@ -238,10 +238,24 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // Reading the detector, logging alerts and showing them onroad. Harmless on its own -- nothing
     // here touches the set speed.
     {"RadarDetectorEnabled", {PERSISTENT | BACKUP, BOOL, "1"}},
-    // Whether a qualifying alert may actually lower the set speed. OFF on purpose: the strength
-    // threshold below has no evidence behind it yet, and it is meant to be refitted from logged Ka
-    // encounters before this is switched on. See radar_alert.py.
-    {"RadarDetectorSlowdownEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},
+    // Whether a qualifying alert may actually lower the set speed.
+    //
+    // Shipped OFF at first, turned ON when "every feature this fork builds ships on" landed. The
+    // reason for off was that RadarDetectorMinBars is a guess -- which is caution about the code,
+    // not a reason about the car, and that rule is explicit that only the latter counts. The action
+    // here is "aim 1 mph under the posted limit", so a wrong threshold means the car briefly drives
+    // at the speed limit when it did not need to. An annoyance, not a hazard.
+    //
+    // Shipping it on also fixes the failure the rule exists for. Off, this would sit waiting for him
+    // to remember to enable it after a fortnight of logging -- exactly how IcbmModelStopEnabled went
+    // unexercised while he asked twice why stop-sign slowing never happened.
+    //
+    // The real cost is that acting PERTURBS THE MEASUREMENT: slowing changes the closing rate, which
+    // changes how fast the bar count climbs, which is the quantity bp_radar_fit.py reads to pick the
+    // threshold. That is handled where it belongs -- the log records ever_acted per encounter and the
+    // fitter excludes those from the fit. Same manufactured-evidence trap as everywhere else in this
+    // feature; see the module docstring in locations.py.
+    {"RadarDetectorSlowdownEnabled", {PERSISTENT | BACKUP, BOOL, "1"}},
     // Signal strength, in front-panel bar-graph LEDs (0-8) -- the same number shown on the
     // detector, so the setting can be checked against the windshield rather than taken on faith.
     {"RadarDetectorMinBars", {PERSISTENT | BACKUP, INT, "6"}},

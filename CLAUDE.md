@@ -321,8 +321,10 @@ Anywhere this feature observes something it also influences, check for this firs
 wrongly is an annoyance; muting wrongly is a ticket, and it is silent.
 
 **Tools.** `tools/bp_radar_probe.py` is the first-contact diagnostic -- run it the day the hardware
-arrives. `tools/bp_radar_fit.py` fits `RadarDetectorMinBars` from `/data/radar_alerts.jsonl`; the
-shipped 6 is a guess, which is why `RadarDetectorSlowdownEnabled` ships off.
+arrives. `tools/bp_radar_fit.py` fits `RadarDetectorMinBars` from `/data/radar_alerts.jsonl`; the shipped 6 is
+a guess. It EXCLUDES encounters where the car acted, because slowing changes how fast the bars climb
+-- fitting a threshold to data that threshold produced, and the bias flatters. Third instance of the
+manufactured-evidence trap in this feature.
 
 **The USB adapter must be FTDI. Checked on the device 2026-08-07, not assumed.** AGNOS's kernel
 registers `ftdi_sio` and `option` and nothing else -- `CONFIG_USB_SERIAL_CP210X`, `CH341`, `PL2303`
