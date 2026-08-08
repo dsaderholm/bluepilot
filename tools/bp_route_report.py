@@ -146,6 +146,9 @@ def read(path: str) -> dict:
     "overtaken": 0, "route": path, "params": {},
     # Each term evaluated on its own, so one drive names every blocker instead of the first.
     "geo_each": [0, 0, 0, 0], "geo_frames": 0,
+    # The panel's own crash. See hud_renderer_bp: one exception latches it off for the whole drive,
+    # so this is the only record of WHY once the screen has gone quiet.
+    "panel_error": None,
   }
 
   # Lane-change reconstruction. carState is 100 Hz, so the switch position is sampled far finer
@@ -187,6 +190,16 @@ def read(path: str) -> dict:
             if pressed_now:
               out["signal_out_steering_at_drop"] += 1
           in_change = False
+
+    elif which in ("logMessage", "errorLogMessage") and out["panel_error"] is None:
+      # cloudlog lands here as text. Only the panel's own latch is wanted -- the drive is full of
+      # unrelated logging and dumping all of it would bury the one line that matters.
+      try:
+        text = str(msg.logMessage if which == "logMessage" else msg.errorLogMessage)
+        if "passing assist panel failed" in text:
+          out["panel_error"] = text[:4000]
+      except Exception:  # noqa: BLE001 - a malformed log line is not the report's problem
+        pass
 
     elif which == "initData":
       # THE PARAMS AS THEY WERE AT BOOT. "I had all passing assist options on... there was
@@ -252,6 +265,13 @@ def report(d: dict) -> str:
   if not suggested:
     L.append("  none at all -- which is the thing to explain, not a quiet drive")
   L.append("")
+
+  if d["panel_error"]:
+    L.append("THE PANEL CRASHED, and this is why:")
+    for line in d["panel_error"].splitlines():
+      L.append(f"  {line}")
+    L.append("  -> it latched off for the rest of the drive from this point")
+    L.append("")
 
   if d.get("params_error"):
     L.append(f"SETTINGS: could not be read from this route -- {d['params_error']}")

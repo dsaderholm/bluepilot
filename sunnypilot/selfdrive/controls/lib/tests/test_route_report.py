@@ -304,3 +304,25 @@ def test_the_geometry_terms_are_counted_only_where_geometry_was_the_blocker():
   d = read(msgs)
   assert d["geo_frames"] == 1, "counted frames where something else was the blocker"
   assert d["geo_each"][1] == 1
+
+
+def log_message(text, which="logMessage"):
+  return NS(logMonoTime=0, which=lambda: which,
+            **{which: text, "logMessage": text, "errorLogMessage": text})
+
+
+def test_the_panels_own_crash_is_surfaced():
+  """It latches off for the whole drive, so the cloudlog line is the only record of why. "Then I
+  just got passing assist error for the rest of my drive after stopping at a red light." """
+  d = read([log_message("passing assist panel failed, latched off: KeyError('carStateBP')"),
+            plan(0.0)])
+  out = RR.report(d)
+  assert "THE PANEL CRASHED" in out
+  assert "KeyError" in out
+
+
+def test_unrelated_log_lines_are_not_dumped():
+  """A drive is full of logging; pulling all of it in would bury the one line that matters."""
+  d = read([log_message("some unrelated thing happened"), plan(0.0)])
+  assert d["panel_error"] is None
+  assert "THE PANEL CRASHED" not in RR.report(d)
