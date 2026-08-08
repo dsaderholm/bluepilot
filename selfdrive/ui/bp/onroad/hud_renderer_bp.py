@@ -9,6 +9,7 @@ from openpilot.selfdrive.ui.bp.onroad.icbm_hud_state import read_icbm_hud_state
 from openpilot.selfdrive.ui.bp.onroad.exp_button_bp import ExpButtonBP
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.text_measure import measure_text_cached
+from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.ui.bp.lib.ui_debug_logger import bp_ui_log
 
 LateralMode = ControllerStateBP.LateralMode
@@ -405,7 +406,19 @@ class HudRendererBP(HudRendererSP):
         self._update_passing_assist()
       except Exception as e:
         self._pa_failed = True
-        self._pa_main, self._pa_sub, self._pa_progress, self._pa_alert = "", "", 0.0, False
+        # SAY SO ON THE SCREEN. This used to blank the panel and record the exception through
+        # bp_ui_log, which is gated on the BPUIDebugLog param and therefore off -- so a crashed
+        # panel and a panel with nothing to say looked identical, and a whole drive was spent
+        # wondering why "all passing assist options on" showed nothing. 2026-08-07.
+        #
+        # The latch itself stays: one bad frame must not be retried sixty times a second. What
+        # changes is that it is now visible, and cloudlogged rather than debug-logged, so the
+        # traceback reaches the route even with the debug param off.
+        self._pa_main = "PASSING ASSIST ERROR"
+        self._pa_sub = "it stopped updating -- the route has the reason"
+        self._pa_progress, self._pa_alert = 0.0, True
+        self._pa_color = rl.Color(235, 90, 80, 255)
+        cloudlog.exception(f"passing assist panel failed, latched off: {e}")
         bp_ui_log.state("HudRendererBP", "passing_assist_error", repr(e))
 
     bp_ui_log.state("HudRendererBP", "brakes_on", self._brakes_on)
