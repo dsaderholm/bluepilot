@@ -591,8 +591,17 @@ class HudRendererBP(HudRendererSP):
           line += f" ({pa.driverPassLeadSeconds:.0f}s early)"
         lines.append(line)
         if agreed < pa.driverPasses:
-          miss = int(pa.driverPassMissReason)
-          name = _BLOCKED_ORDER[miss] if miss < len(_BLOCKED_ORDER) else ""
+          # str(), NOT int(). A capnp enum read off a live message is a _DynamicEnum and int()
+          # raises TypeError on it -- which crashed this panel on the road, and because
+          # _draw_drive_summary only runs at a standstill it took a red light to reach: "then I
+          # just got passing assist error for the rest of my drive after stopping at a red light."
+          #
+          # str() gives the enumerant name directly, so the index and _BLOCKED_ORDER are not needed
+          # at all. The lookup was doing work to recover something capnp already had.
+          #
+          # The ICBM session hit this exact TypeError in bp_dump_exit.py two commits before this
+          # crashed, and I did not check my own code for it.
+          name = str(pa.driverPassMissReason)
           if name == "nothingSlower" and pa.missedDeficitMph > 0:
             # Names the number to change rather than the symptom. "Missed on nothing slower" is a
             # complaint; "they were 2.4 mph slower" is an instruction.
@@ -709,7 +718,11 @@ class HudRendererBP(HudRendererSP):
       if share > 0.05:
         # The int is the Blocked ordinal. Mapped through the same table the live panel uses, so
         # the wording cannot drift between "what stopped it" and "what stopped it last time".
-        name = _BLOCKED_ORDER[int(d["topBlockedBy"])] if int(d["topBlockedBy"]) < len(_BLOCKED_ORDER) else ""
+        # d is a decoded param here, not a live capnp message, so this int() is on a real number
+        # and is safe. Stated because it looks identical to the line above that was not.
+        top = d["topBlockedBy"]
+        name = str(top) if isinstance(top, str) else (
+          _BLOCKED_ORDER[int(top)] if int(top) < len(_BLOCKED_ORDER) else "")
         if name:
           lines.append(f"mostly: {_BLOCKED_TEXT.get(name, name).lower()} {share * 100:.0f}%")
       if d.get("crawlEvents"):

@@ -88,6 +88,7 @@ DEFAULT_TARGETS = [
   "selfdrive/car/tests/test_stub_param_defaults.py",
   "selfdrive/ui/bp/layouts/settings/tests/",
   "selfdrive/ui/bp/onroad/tests/",
+  "selfdrive/ui/bp/onroad/tests/test_no_int_on_capnp_enums.py",
   "system/tests/test_sentry_disabled_by_default.py",
   # Guards the policy stated in CLAUDE.md's "Params, defaults, and his settings": nothing may write
   # a settings key. It lived only on the passing assist branch, where the policy is not stated, so
