@@ -80,7 +80,8 @@ class RadarAlertLog:
     self.written = 0
     self.dropped_short = 0
 
-  def update(self, display, lat: float, lon: float, v_ego: float, acting: bool, now: float) -> None:
+  def update(self, display, lat: float, lon: float, v_ego: float, acting: bool, now: float,
+             speed_limit: float = 0.0) -> None:
     """One frame.
 
     Args:
@@ -92,6 +93,11 @@ class RadarAlertLog:
       v_ego: speed in m/s. SI here; the analysis converts.
       acting: whether the set-speed override was active this frame. The point of comparison for
         "would this threshold have fired, and how early".
+      speed_limit: the posted limit (m/s), 0 when unknown. Recorded because without it the log
+        cannot answer the question it exists for at any given speed: the warning budget only matters
+        relative to how much speed there was to shed, and that is v_ego minus the limit. Added after
+        the first version could tell you how many seconds of notice you got and not whether those
+        seconds were enough.
       now: monotonic seconds.
     """
     alerting = display is not None and display.searching and bool(display.bands)
@@ -142,6 +148,7 @@ class RadarAlertLog:
       "v_ego": round(v_ego, 2),
       "lat": round(lat, 6),
       "lon": round(lon, 6),
+      "limit": round(speed_limit, 2),
     }
 
     if (changed or due) and now - self._last_sample_t >= MIN_SAMPLE_INTERVAL_S:

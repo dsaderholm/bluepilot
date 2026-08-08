@@ -230,7 +230,8 @@ class SpeedLimitResolver:
     try:
       gps = sm[self._gps_location_service]
       self._radar_log.update(self.radar_display, gps.latitude, gps.longitude,
-                             v_ego, self.radar_alert.active, time.monotonic())
+                             v_ego, self.radar_alert.active, time.monotonic(),
+                             speed_limit=self.speed_limit)
     except Exception:  # noqa: BLE001 - see docstring
       pass
 
