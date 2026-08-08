@@ -281,6 +281,7 @@ class IntelligentCruiseButtonManagement:
     self.v_baseline = 0            # the driver's chosen speed; 0 = no baseline, follow SLA
     self.v_target_raw = 0
     self.plan_source = LongitudinalPlanSource.cruise
+    self.scc_map_requesting = False  # a mapped corner is asking; exempts the drop limiter
     self.baseline_reset_delta = DEFAULT_BASELINE_RESET_DELTA
     self.v_cruise_cluster_prev = 0
     self.icbm_idle_frames = 0
@@ -382,10 +383,23 @@ class IntelligentCruiseButtonManagement:
       self.speed_limit_known = bool(resolver.speedLimitValid or resolver.speedLimitLastValid)
     except (AttributeError, KeyError):
       self.speed_limit_known = False
+    # Is there a mapped corner ahead with a deadline on it? NOT "is SCC-Map the source this frame",
+    # which is a different and much less stable question: when the map and vision targets are close
+    # the plan source alternates between them frame by frame. Measured on the 2026-08-07 exit, the
+    # source read sccVision/sccMap/sccVision on three consecutive frames. Gating the drop-limiter
+    # bypass on that would have let it re-arm on every other frame and seeded a fresh anchor from
+    # the current cluster each time, so the exemption would flicker instead of apply.
+    #
+    # `active` is the map controller's own statement that it is asking for something, and it stays
+    # true across the whole approach.
+    try:
+      self.scc_map_requesting = bool(LP_SP.smartCruiseControl.map.active)
+    except (AttributeError, KeyError):
+      self.scc_map_requesting = False
     self.v_target = self.apply_baseline(self.v_target)
 
     v_ego_conv = round(CS.vEgo * speed_conv)
-    # Reads self.plan_source, set just above -- SCC-Map is exempt. See the docstring.
+    # Reads self.scc_map_requesting, set just above -- SCC-Map is exempt. See the docstring.
     self.v_target = self.apply_target_drop_limit(v_ego_conv)
 
     # BluePilot: the radar-blind lead detector supersedes everything above, including the drop
@@ -434,9 +448,11 @@ class IntelligentCruiseButtonManagement:
 
     SCC-Vision is NOT exempt and should not be. It ramps its own target through the ENTERING state
     with a smooth deceleration, so its requests already arrive gradually -- coasting through those
-    is what this limiter is for, and it is the common case on ordinary roads.
+    is what this limiter is for, and it is the common case on ordinary roads. The exemption is keyed
+    on SCC-Map ASKING, not on it winning the frame -- see where scc_map_requesting is set for why
+    the frame's plan source is the wrong test.
     """
-    if self.plan_source == LongitudinalPlanSource.sccMap:
+    if self.scc_map_requesting:
       self.drop_anchor = 0
       return self.v_target
 

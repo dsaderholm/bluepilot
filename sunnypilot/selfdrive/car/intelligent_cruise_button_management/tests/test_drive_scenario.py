@@ -55,7 +55,7 @@ class Drive:
     self._frame = 0
 
   def step(self, target, source=PlanSource.speedLimitAssist, buttons=(),
-           lead=UnconfirmedLeadState.inactive, lead_target=0.0):
+           lead=UnconfirmedLeadState.inactive, lead_target=0.0, map_active=None):
     # BluePilot: gasPressed/brakePressed exist on every real CarState. Omitting them here meant an
     # AttributeError the device could never raise, the moment the controller read one.
     cs = NS(vEgo=self.v_ego * MPH,
@@ -64,7 +64,16 @@ class Drive:
             cruiseState=NS(available=True, enabled=True, speedCluster=self.cluster * MPH,
                            standstill=False, speed=self.cluster * MPH),
             buttonEvents=buttons)
+    # smartCruiseControl.map.active is what exempts SCC-Map from the drop limiter, and it is NOT
+    # the same thing as being the plan source. On the real exit the source alternated
+    # sccVision/sccMap/sccVision on consecutive frames while the map column stayed starred --
+    # map.active was true on the vision frames too. So it is a separate knob here, defaulting to
+    # the common case and overridable for the alternation that exposed the difference.
+    map_on = (source == PlanSource.sccMap) if map_active is None else map_active
     lp = NS(vTarget=target * MPH, longitudinalPlanSource=source,
+            smartCruiseControl=NS(map=NS(active=map_on, vTarget=target * MPH),
+                                  vision=NS(active=source == PlanSource.sccVision,
+                                            vTarget=target * MPH)),
             unconfirmedLead=NS(state=lead, vTarget=lead_target * MPH))
     self.icbm.run(cs, CC, lp, False)
 
@@ -193,3 +202,29 @@ def test_freeway_exit_is_not_metered_into_plateaus():
   # And end to end: the exit actually gets down to the corner speed.
   d.cruise(1200, target=39, source=PlanSource.sccMap)
   assert abs(d.cluster - 39) <= 1, f"exit slowing stalled at {d.cluster}"
+
+
+def test_exit_exemption_survives_the_source_alternating():
+  """The plan source is NOT a stable signal, and gating the exemption on it does not work.
+
+  Found by reading the 2026-08-07 log rather than by any test. When the map and vision targets are
+  close, longitudinalPlanSource alternates between them frame by frame -- sccVision/sccMap/
+  sccVision on three consecutive frames at t+422 -- while smartCruiseControl.map stayed ACTIVE
+  through all of them (the map column is starred on the vision frames too). So "is SCC-Map the
+  source this frame" flickers while "is a mapped corner asking" does not.
+
+  Keyed on the source, the bypass re-arms the limiter on every other frame and re-seeds its anchor
+  from the current cluster, and the exemption never really applies. This drives that alternation
+  with the map controller active throughout, exactly as logged.
+  """
+  d = Drive()
+  d.cluster = d.v_ego = 80
+
+  for i in range(600):
+    src = PlanSource.sccMap if i % 2 else PlanSource.sccVision
+    d.step(39, source=src, map_active=True)
+    assert d.icbm.v_target == 39, (
+      f"frame {i} ({src}): target came through as {d.icbm.v_target}, not the corner speed -- the "
+      f"exemption is flickering with the plan source")
+
+  assert abs(d.cluster - 39) <= 1, f"exit slowing stalled at {d.cluster} under an alternating source"
