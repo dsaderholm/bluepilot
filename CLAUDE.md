@@ -318,6 +318,87 @@ Two things that decided the design:
 - **Tap moves the set speed 1 mph, press-and-hold moves it 5 mph** — the car's behavior, not
   openpilot's. Model set-speed movement as 5 mph jumps with stationary gaps, never a 1 mph ramp.
 
+## Params, defaults, and his settings
+
+**His rule, in his words: "If I have never changed a value, great, I will get the new default. If I
+have, then it shouldn't change."** Fix code freely. Only settings he personally chose are off limits.
+
+**A changed default cannot reach a driven car by itself.** `system/manager/manager.py` writes every
+unset param to disk at boot, so with `PERSISTENT | BACKUP` the value shipping the day he first
+flashed a build containing a key is the value frozen on his car. Every later edit to that default
+goes to a file nobody reads. This is true of keys new to the branch too -- "it has never been
+written, so it takes its default" holds exactly once, and is false from his next flash onward.
+
+`_migrate_bp_new_defaults` in `sunnypilot/system/params_migration.py` is what makes his rule work.
+`BPDefaultsSnapshot` records the default he was last handed; `BPDefaultsOwned` records what he has
+since changed. Comparing the two is the only way to tell "untouched" from "his", because on disk
+they are identical. Seeding is pessimistic -- a key with no record is assumed to be his -- and his
+lateral tune is excluded by name.
+
+- **New defaults just work now.** The old `_BP_REDEFAULT_GROUPS` generation lists are CLOSED; do not
+  add to them. Still name a changed default in the commit message so he knows what moved.
+- **A new prefix must join `_BP_TRACKED_PREFIXES`** in the same commit, or the key silently never
+  receives a moved default. Seven `PassingAssist*` keys went missing to exactly this.
+- **`run_migration` runs BEFORE manager.py materializes defaults**, so an unset key here means he has
+  never been handed the setting at all. It is not a value he chose. Getting this backwards claimed
+  every newly declared key as his, forever.
+
+**Every param ships with a control in the same commit.** A feature that cannot be turned on has not
+shipped -- `IcbmModelStopEnabled` was unreachable without SSH and he reported the feature as broken
+when it was merely unenableable. Cruise/ICBM controls live in
+`selfdrive/ui/sunnypilot/layouts/settings/cruise.py`: define the item in `_initialize_items()` AND
+register it in the returned `items` list, because a defined-but-unregistered item silently never
+renders. `selfdrive/ui/bp/settings_defaults.py`'s `recommended()` puts the shipped default into the
+description automatically. Put *why it defaults off* there too, since that is what he reads when
+deciding whether to try it.
+
+**A key declared `JSON` encodes itself.** `PYTHON_2_CPP` has `(dict, JSON)` and `(list, JSON)` and no
+`(str, JSON)`, so `put(key, json.dumps(x))` is a `TypeError`, and `get` returns the DECODED object so
+`json.loads` on it fails too. Pass the list or dict directly. This shipped pinned holds completely
+dead -- enabled by default, storing nothing, for its entire life -- because both directions were
+broken and therefore agreed with each other.
+
+## Facts that have been got wrong before
+
+Each of these was asserted confidently from reasoning and turned out to be false. Check the source.
+
+- **There are two "set speeds" and they legitimately disagree.**
+  `carState.cruiseState.speedCluster` (m/s) is the car's dash number, the one ICBM's buttons move.
+  `carState.vCruiseCluster` (kph) is openpilot's own v_cruise, and under ICBM
+  (`pcmCruiseSpeed` False) it tracks DRIVER button presses only. Reading the second as "the set
+  speed" produced three wrong conclusions in a row. In any diagnostic, print both, labeled.
+- **`SmartCruiseControlMapDecel` is a TRIGGER DISTANCE, not a rate.** `map_controller.py` publishes
+  the corner speed as a step, at exactly the moment braking must begin. A gentler value makes the
+  target appear EARLIER, not the slowing gentler. Anything that re-paces it downstream spends road
+  that was already budgeted -- which is what ICBM's drop limiter did on freeway exits.
+- **There is no MS-CAN on this car.** openpilot can read body state on bus 0 but can never command
+  it. Route anything needing body actuation to FORScan instead of designing around it.
+- **The Fusion IPC is LKA-only.** TJA, LCA, BlueCruise and Driver Alert draw nothing on his cluster;
+  the LKA states are the entire vocabulary available.
+- **Ford's angle gains are a PSCM calibration, not a detune**, and the take-over alert that looks
+  like they cause is a tracking-lag false positive.
+
+**Tests do not substitute for reading.** A review found four real bugs under 931 green tests, and
+each hid where a fixture held something constant. Stubs are the specific danger: `FakeParams.put`
+accepted any type, so the suite was more permissive than the device and a `TypeError` firing on
+every real write was invisible. A stub laxer than the thing it stands in for hides exactly the bugs
+it was built to catch.
+
+## Working with the owner
+
+- **He reports, I tune.** On-road reports are tuning input, not complaints to work around. His
+  observation of his own device beats my inference about it every time.
+- **Don't check in.** He has given open-ended permission; pick the work and report it done rather
+  than closing with "want me to...".
+- **Shell commands are fine.** What he dislikes is running them *in the car*, in 100-degree heat.
+  Diagnostics he can SSH into at home are welcome; "run this on your next drive" is not.
+- **Talk about the finished system.** Do not preface answers with what does not actuate yet; he is
+  always describing the finished behavior.
+- **23 controls on the settings screen is not a usability problem.** Do not consolidate unless asked.
+- **Report test results only when the result is news.** No sign-off with a suite total every message.
+- **Changes made on one branch reach the others because he rebases every time.** So CLAUDE.md is the
+  channel that actually travels between sessions; per-directory memory is not.
+
 ## Language and units — US
 
 The owner is in the United States (Utah). Everything written here is **US English**: comments,
