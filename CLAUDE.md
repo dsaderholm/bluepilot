@@ -256,6 +256,63 @@ lists the prefixes whose shipped defaults can reach the car. A key outside it ne
 changed default and nothing says so — that already happened to seven `PassingAssist*` keys. Add the
 prefix in the same commit that introduces it.
 
+## Radar detector (Valentine One Gen2, wired ESP bus)
+
+Branch `radar-detector`. Nothing here has met hardware yet -- everything is verified against
+Valentine's published spec and their own example packets, which is the strongest offline evidence
+available and is not the same as a bench test.
+
+**Why the V1 Gen2 and not his Uniden R4.** The R4's single Bluetooth link is its only data path, so
+openpilot can never read it. The V1 has a wired Accessory jack carrying ESP as a second, independent
+channel. That is the whole reason for the swap; range and directional arrows are a bonus. The cost
+is real and was accepted knowingly: the V1 has NO GPS, so it loses the R4's auto mute memory, its
+speed-camera database and its low-speed muting. openpilot replaces the first and third.
+
+**It is an SLA feature, not an ICBM one.** The module emits a speed-limit OFFSET OVERRIDE -- it
+replaces `SpeedLimitOffsetValue` while an alert holds -- and the resolver's
+`speed_limit_final = speed_limit + offset` does the rest. So it composes with his usual offset
+(+5 becomes -1, a 6 mph change from a 1 mph margin), and it carries **no ACC floor and no rate
+limiting**, because Ford's 20 mph minimum belongs to the button layer and disappears under alpha
+longitudinal.
+
+**Waze is deliberately out of scope.** Its live-map endpoint 403s to plain curl, to curl with full
+browser headers, and to a real Chrome same-origin fetch. Highway Radar evidently gets through, so it
+is reachable only by defeating bot protection -- an arms race that fails silently, and the failure
+mode is the car quietly not slowing. He keeps Highway Radar for Waze on a second phone.
+
+**The trap this feature keeps setting for itself: manufacturing its own evidence.** Same shape as
+"is Ford braking" in `unconfirmed_lead.py`, and it has come up twice here already:
+
+- muting a learned false alarm makes the detector quiet, which would count as a quiet pass, which
+  erodes the record that caused the mute. A suppressed pass is now discarded, not counted.
+- `update_pass` recorded an observation every 1 Hz cycle while alerting, so one drive-through logged
+  five alerts and five passes. Alerts and passes inflated together, pinning the hit ratio at 1.0 --
+  the definition of a false alarm -- so every real speed trap would have been muted. One pass is now
+  one observation, settled on the way out.
+
+Anywhere this feature observes something it also influences, check for this first.
+
+**Asymmetric evidence.** Warning about a place needs 3 observations; MUTING one needs 10. Warning
+wrongly is an annoyance; muting wrongly is a ticket, and it is silent.
+
+**Tools.** `tools/bp_radar_probe.py` is the first-contact diagnostic -- run it the day the hardware
+arrives. `tools/bp_radar_fit.py` fits `RadarDetectorMinBars` from `/data/radar_alerts.jsonl`; the
+shipped 6 is a guess, which is why `RadarDetectorSlowdownEnabled` ships off.
+
+**The USB adapter must be FTDI. Checked on the device 2026-08-07, not assumed.** AGNOS's kernel
+registers `ftdi_sio` and `option` and nothing else -- `CONFIG_USB_SERIAL_CP210X`, `CH341`, `PL2303`
+and even `USB_SERIAL_GENERIC` are all "is not set" in `/proc/config.gz`, and there is no
+`/lib/modules`, so nothing can be loaded later. A CP2102 or CH340 adapter will not enumerate at all,
+and the symptom would look exactly like a wiring fault.
+
+**`/dev/serial/by-id/` is never empty on this device.** The internal Quectel EG25-G LTE modem
+enumerates as ttyUSB0..3, so a naive "first serial port" pick returns the modem's AT command port.
+`find_port` excludes it and prefers a recognised bridge; see `PORT_EXCLUDE` in `transport.py`.
+
+**Open, needs hardware:** the ACC jack data pin (6p4c RJ11, ACC is pin-reversed from MAIN -- meter
+it), whether the V1 emits ESP data with nothing asserting ESP mode, whether the time-slice timing
+holds from Python, and whether anything external ever sets the mute bit.
+
 ## The ICBM button contract
 
 Settled on the road, 2026-08-03. Do not change these meanings without asking — they are muscle
