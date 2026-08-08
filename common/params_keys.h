@@ -217,6 +217,29 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // Set by tapping the on-screen HOLD badge; consumed by selfdrived, which is where the GPS fix
     // and the live baseline both are. Keeps the UI from needing either.
     {"IcbmPinHoldRequest", {CLEAR_ON_MANAGER_START, BOOL}},
+    // BluePilot: radar detector (Valentine One Gen2 on the wired ESP bus).
+    //
+    // Reading the detector, logging alerts and showing them onroad. Harmless on its own -- nothing
+    // here touches the set speed.
+    {"RadarDetectorEnabled", {PERSISTENT | BACKUP, BOOL, "1"}},
+    // Whether a qualifying alert may actually lower the set speed. OFF on purpose: the strength
+    // threshold below has no evidence behind it yet, and it is meant to be refitted from logged Ka
+    // encounters before this is switched on. See radar_alert.py.
+    {"RadarDetectorSlowdownEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},
+    // Signal strength, in front-panel bar-graph LEDs (0-8) -- the same number shown on the
+    // detector, so the setting can be checked against the windshield rather than taken on faith.
+    {"RadarDetectorMinBars", {PERSISTENT | BACKUP, INT, "6"}},
+    // How far under the posted limit to aim, in display units (mph here). Floored at Ford ACC's
+    // 20 mph minimum regardless.
+    {"RadarDetectorMargin", {PERSISTENT | BACKUP, INT, "1"}},
+    // Learn where the detector cries wolf and tell it to stay quiet there -- the V1 Gen2 has no GPS
+    // of its own, so this is the only way it gets lockouts at all.
+    //
+    // Its own toggle rather than folding into RadarDetectorEnabled, because this is the ONE thing
+    // in the feature that transmits on the accessory bus. If anything ever misbehaves on that wire,
+    // this switch stops openpilot talking without giving up the readout, the logging or the
+    // set-speed response.
+    {"RadarDetectorMuteFalseAlarms", {PERSISTENT | BACKUP, BOOL, "1"}},
     {"DeviceBootMode", {PERSISTENT | BACKUP, INT, "0"}},
     {"DevUIInfo", {PERSISTENT | BACKUP, INT, "0"}},
     {"EnableCopyparty", {PERSISTENT | BACKUP, BOOL}},

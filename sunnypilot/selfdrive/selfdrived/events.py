@@ -315,6 +315,30 @@ EVENTS_SP: dict[int, dict[str, Alert | AlertCallbackType]] = {
     ET.WARNING: unconfirmed_lead_alert,
   },
 
+  # BluePilot: a place the radar detector has learned police work, or one marked by hand.
+  #
+  # SHIPS AT PROMPT SEVERITY, and the reasoning is inherited rather than re-derived. The two alerts
+  # above were dialled back from emergencies to prompts on 2026-08-06 after two false positives in a
+  # single drive, on the principle that an emergency tone is how the real one gets ignored. This
+  # alert has that problem BY CONSTRUCTION: a marked place fires every time you drive past it, and a
+  # spot that goes stale keeps firing until the store decays it. So it starts where those two ended
+  # up, and it must never be escalated on the grounds that it is rare -- it is not rare, and
+  # "he never sees it" has already been wrong once in this file.
+  #
+  # No VisualAlert.fcw: nothing is ahead in the collision sense, and lighting the cluster's own
+  # warning for a remembered location would be a lie about what the car can see.
+  #
+  # Deliberately distinct in wording from a live detector alert. The detector is silent here -- that
+  # is the entire reason this exists -- so the driver has to be able to tell "I remember this place"
+  # from "something is transmitting right now", which call for different reactions.
+  EventNameSP.radarDetectorPlaceAhead: {
+    ET.WARNING: Alert(
+      "Police reported ahead",
+      "You have seen radar here before",
+      AlertStatus.userPrompt, AlertSize.mid,
+      Priority.LOW, VisualAlert.none, AudibleAlertSP.promptSingleHigh, 3.),
+  },
+
   EventNameSP.speedLimitAutoSet: {
     ET.WARNING: speed_limit_auto_set_alert,
   },

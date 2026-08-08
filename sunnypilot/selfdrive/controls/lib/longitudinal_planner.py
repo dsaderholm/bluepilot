@@ -16,6 +16,8 @@ from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.speed_limit_assist 
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.speed_limit_resolver import SpeedLimitResolver
 from openpilot.sunnypilot.selfdrive.controls.lib.unconfirmed_lead import UnconfirmedLeadDetector
 from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP
+
+EventNameSP = custom.OnroadEventSP.EventName
 from openpilot.sunnypilot.models.helpers import get_active_bundle
 
 DecState = custom.LongitudinalPlanSP.DynamicExperimentalControl.DynamicExperimentalControlState
@@ -68,6 +70,12 @@ class LongitudinalPlannerSP:
     self.unconfirmed_lead.update(sm, self.v_desired_trajectory, v_cruise_cluster,
                                  long_enabled and not long_override, self.events_sp,
                                  self.dec.has_slow_down(), self.dec.endpoint_x())
+
+    # BluePilot: a place the detector has learned police work, or one marked by hand. Raised here
+    # rather than in the resolver because this is what owns the alert sink -- the resolver only
+    # decides that there is something to say. Prompt severity by design; see events.py.
+    if self.resolver.radar_place_ahead is not None:
+      self.events_sp.add(EventNameSP.radarDetectorPlaceAhead)
 
     # Speed Limit Assist
     has_speed_limit = self.resolver.speed_limit_valid or self.resolver.speed_limit_last_valid

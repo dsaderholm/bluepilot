@@ -17,6 +17,10 @@ import pathlib
 UI_ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCREENS = (
   UI_ROOT / "sunnypilot" / "layouts" / "settings" / "cruise.py",
+  # Added when the radar detector's controls landed here. Covering only cruise.py meant this guard
+  # passed for nine settings it had never looked at, including the new ones -- a guard with a hole
+  # in it reads exactly like a guard, which is the failure mode it exists to prevent elsewhere.
+  UI_ROOT / "sunnypilot" / "layouts" / "settings" / "cruise_sub_layouts" / "speed_limit_settings.py",
 )
 ITEM_CALLS = {"option_item_sp", "toggle_item_sp"}
 
@@ -27,6 +31,10 @@ NO_RECOMMENDATION: dict[str, str] = {
   # "Recommended: On" would sit under text explaining the feature is unavailable on this car.
   "IntelligentCruiseButtonManagement": "description is assembled at runtime from car capability",
   "CustomAccIncrementsEnabled": "same -- enabled and described only when the car supports it",
+  # Its description is _get_offset_description, a runtime callable that changes with the selected
+  # offset type -- a percentage reads differently from a fixed value. There is no static string to
+  # append to, and the control it sits under (SpeedLimitOffsetType) decides what it even means.
+  "SpeedLimitValueOffset": "description is a runtime callable that varies with the offset type",
 }
 
 

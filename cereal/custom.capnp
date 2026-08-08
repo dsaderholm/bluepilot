@@ -421,6 +421,11 @@ struct OnroadEventSP @0xda96579883444c35 {
     unconfirmedLeadBraking @25;
     # BluePilot: model wants to stop (sign/signal) and Ford ACC will not
     modelStopBraking @26;
+    # BluePilot: approaching a place the radar detector has learned police work, or one the driver
+    # marked by hand. Deliberately NOT tied to a live alert -- the whole reason it exists is the
+    # case where the detector is silent: a cruiser parked with nothing transmitting, or a lidar
+    # position, which is the one thing you can never be warned about in the moment.
+    radarDetectorPlaceAhead @27;
   }
 }
 

@@ -186,7 +186,8 @@ BP_DEFAULTS_OWNED_KEY = "BPDefaultsOwned"
 # Adding a prefix does NOT retroactively fix a key that is already stale -- pessimistic seeding
 # claims anything currently differing from its shipped default as his. It fixes every move from
 # here on, which is the part that was unbounded.
-_BP_TRACKED_PREFIXES = ("Icbm", "SmartCruiseControl", "SpeedLimit", "PassingAssist", "Show")
+_BP_TRACKED_PREFIXES = ("Icbm", "SmartCruiseControl", "SpeedLimit", "PassingAssist", "Show",
+                        "RadarDetector")
 _BP_NEVER_TRACKED = frozenset({
   # His lateral tune. The defaults happen to match what he runs; that is not a reason to manage it.
   "FordLowSpeedFactor_ang", "FordHighSpeedFactor_ang", "FordHighSpeedDampening_ang",

@@ -15,10 +15,38 @@ from openpilot.common.realtime import DT_MDL
 from openpilot.sunnypilot import PARAMS_UPDATE_PERIOD, get_sanitize_int_param
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit import LIMIT_MAX_MAP_DATA_AGE, LIMIT_ADAPT_ACC, MAX_FIX_AGE_S
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.common import Policy, OffsetType, Fallback
+from openpilot.sunnypilot.selfdrive.controls.lib.radar_detector.alert_log import RadarAlertLog, file_writer
+from openpilot.sunnypilot.selfdrive.controls.lib.radar_detector.esp_protocol import BAND_LASER, DisplayData, mute_off, mute_on
+from openpilot.sunnypilot.selfdrive.controls.lib.radar_detector.locations import RadarLocations
+from openpilot.sunnypilot.selfdrive.controls.lib.radar_detector.radar_alert import RadarAlertDetector
+from openpilot.sunnypilot.selfdrive.controls.lib.radar_detector.transport import EspSerialReader
 
 SpeedLimitSource = custom.LongitudinalPlanSP.SpeedLimit.Source
 
 ALL_SOURCES = tuple(SpeedLimitSource.schema.enumerants.values())
+
+# BluePilot: how often to reconsider whether the radar detector's serial link should be up. Two
+# seconds at the 20 Hz model rate -- slow because the answer only changes when a setting is toggled
+# or something is plugged in, and opening a port is not a per-frame decision.
+_RADAR_LINK_CHECK_FRAMES = int(2.0 / DT_MDL)
+
+# Where encounters are written for later review. On /data because that is the writable partition
+# that survives a reboot, and it is meant to be pulled over SSH at home and then deleted -- nothing
+# uploads it. file_writer swallows every error, so a dev machine with no /data simply logs nothing.
+RADAR_LOG_PATH = "/data/radar_alerts.jsonl"
+# Learned places. Separate file from the raw encounter log: the log is a firehose meant to be read
+# once and deleted, while this is small, durable, and the thing the feature actually runs on.
+RADAR_PLACES_PATH = "/data/radar_places.json"
+# The same places as a map file, rewritten whenever the store is. Automatic rather than a command
+# to remember, because a map you have to generate is a map nobody looks at. Opens directly in
+# geojson.io, Google My Maps or QGIS.
+RADAR_PLACES_GEOJSON = "/data/radar_places.geojson"
+# Position matching cadence. 1 Hz -- see locations.py; 36 m of travel at 80 mph, far inside any
+# useful radius, and it keeps the haversines off the 20 Hz loop.
+_RADAR_MATCH_FRAMES = max(int(1.0 / DT_MDL), 1)
+# How often the learned store is decayed and written back. Two minutes: rare enough that the disk
+# write is irrelevant, often enough that a drive cut short by pulling the fuse loses almost nothing.
+_RADAR_SAVE_FRAMES = max(int(120.0 / DT_MDL), 1)
 
 
 class SpeedLimitResolver:
@@ -81,6 +109,177 @@ class SpeedLimitResolver:
     self.speed_limit_final_last = 0.
     self.speed_limit_offset = 0.
 
+    # BluePilot: radar detector. Lives here rather than in Speed Limit Assist because what it
+    # produces is an OFFSET -- the same kind of thing SpeedLimitOffsetType produces -- and the
+    # resolver is what owns turning a posted limit into a number to aim at.
+    #
+    # radar_display is written by the ESP transport and is None whenever the detector is not
+    # connected, not powered, or not yet built. None means "cannot tell", which the detector treats
+    # as a release rather than as a quiet road.
+    self.radar_alert = RadarAlertDetector(self.params)
+    self.radar_display: DisplayData | None = None
+    self._radar_reader: EspSerialReader | None = None
+    # Encounter log. Written from day one with the set-speed override switched off, because
+    # RadarDetectorMinBars cannot be chosen from first principles -- see alert_log.py.
+    self._radar_log = RadarAlertLog(file_writer(RADAR_LOG_PATH))
+    self._radar_places = RadarLocations(RADAR_PLACES_PATH)
+    # Whether WE are the reason the detector is quiet right now. Feeds the store so our own mute
+    # is never mistaken for evidence that a place has gone quiet on its own.
+    self._radar_muting = False
+    # Set for one match cycle when a learned place comes into range ahead; the planner turns it
+    # into the alert. Latched on the place so an approach announces once, not once a second.
+    self.radar_place_ahead: dict | None = None
+    self._radar_warned_key: tuple | None = None
+
+  def _update_radar_places(self, sm: messaging.SubMaster) -> None:
+    """Learn where the detector is right and where it cries wolf, and act on it.
+
+    Runs at 1 Hz, not the model rate. At 80 mph that is 36 m between checks, far inside any radius
+    worth using, and it keeps the position matching off the control loop -- see locations.py for
+    why that matters on hardware already carrying ICBM and Passing Assist.
+
+    The suppressed flag is the important one. While WE are muting the detector, its silence is not
+    evidence that the place is quiet -- it is evidence of nothing at all, and counting it would set
+    up a loop where our own mute erodes the record that caused it. See RadarLocations.observe.
+    """
+    # Cleared FIRST, every frame. This flag is read by the planner at 20 Hz but only written on the
+    # 1 Hz match cycle, so leaving it set meant one approach raised the alert on twenty consecutive
+    # frames -- the "once per approach" latch was working and the flag underneath it was not.
+    self.radar_place_ahead = None
+
+    if self.frame % _RADAR_MATCH_FRAMES != 0:
+      return
+    try:
+      gps = sm[self._gps_location_service]
+      lat, lon = gps.latitude, gps.longitude
+    except Exception:  # noqa: BLE001 - no fix, no message, no learning. Never an exception here.
+      return
+
+    d = self.radar_display
+    alerting = d is not None and d.searching and bool(d.bands)
+    self._radar_places.update_pass(lat, lon, alerting,
+                                   bands=d.bands if d else 0,
+                                   laser=bool(d.bands & BAND_LASER) if d else False,
+                                   suppressed=self._radar_muting)
+
+    # Laser marks itself, and it does so THROUGH update_pass above rather than with a second
+    # observe() call. That is what the laser flag on update_pass is for -- an extra observe here
+    # recorded the same drive-through twice, on top of the per-cycle inflation update_pass used to
+    # have. You cannot react to laser anyway (by the time it fires you have been measured), which is
+    # exactly why it is recorded automatically instead of prompting for a tap.
+
+    self._update_radar_mute(lat, lon)
+    self._announce_radar_place(lat, lon, getattr(gps, "bearingDeg", 0.0))
+
+    # Decay and persist on a slow cadence. Without this the whole store lives only in RAM and every
+    # reboot throws away everything learned, which would have been a quiet and thoroughly
+    # demoralising way for the feature to do nothing.
+    #
+    # save_async, not save: a full store is a couple of hundred kilobytes of JSON and encoding it
+    # inline would drop a frame on a 20 Hz loop. Only the snapshot happens here.
+    if self.frame % _RADAR_SAVE_FRAMES == 0:
+      self._radar_places.decay()
+      self._radar_places.save_async(RADAR_PLACES_GEOJSON)
+
+  def _announce_radar_place(self, lat: float, lon: float, bearing_deg: float) -> None:
+    """Flag a learned place we are heading into. Once per approach, not once a second.
+
+    The latch is keyed on the PLACE, not on a timer, so driving the same road twice announces twice
+    while sitting in traffic short of it announces once. It clears only when nothing is being
+    approached, which is also what makes two marks close together announce separately.
+
+    The event itself is raised by the planner, which owns the alert sink -- this only decides that
+    there is something to say. Same split as everything else here.
+    """
+    place = self._radar_places.approaching(lat, lon, bearing_deg, self.v_ego)
+    if place is None:
+      self._radar_warned_key = None
+      self.radar_place_ahead = None
+      return
+
+    key = (round(place["lat"], 5), round(place["lon"], 5))
+    self.radar_place_ahead = place if key != self._radar_warned_key else None
+    self._radar_warned_key = key
+
+  def _update_radar_mute(self, lat: float, lon: float) -> None:
+    """Tell the detector to go quiet at a learned false alarm, and to stop when we leave.
+
+    Edge-triggered: one packet on the way in and one on the way out, rather than a stream. The V1
+    treats reqMuteOn as a press of its own mute button, which lasts only until it stops tracking the
+    alerts it currently has, so this cannot get stuck on even if the unmute is lost.
+    """
+    if self._radar_reader is None:
+      self._radar_muting = False
+      return
+
+    want = (self.params.get_bool("RadarDetectorMuteFalseAlarms")
+            and self._radar_places.should_mute(lat, lon))
+    if want == self._radar_muting:
+      return
+    if self._radar_reader.send(mute_on() if want else mute_off()):
+      self._radar_muting = want
+
+  def _log_radar_encounter(self, sm: messaging.SubMaster, v_ego: float) -> None:
+    """Feed the encounter log. Never allowed to matter.
+
+    Wrapped whole rather than defensively field by field: this is a diagnostic, and there is no
+    failure in it worth taking down the process that is driving the car. A missing GPS service, a
+    message that has not arrived yet, a full filesystem -- all of them mean "no log entry", never
+    "no speed limit".
+    """
+    try:
+      gps = sm[self._gps_location_service]
+      self._radar_log.update(self.radar_display, gps.latitude, gps.longitude,
+                             v_ego, self.radar_alert.active, time.monotonic())
+    except Exception:  # noqa: BLE001 - see docstring
+      pass
+
+  def _update_radar_link(self) -> None:
+    """Bring the detector's serial link up or down, and refresh the latest front-panel state.
+
+    Three things are deliberately separated here, because they run at different rates and for
+    different reasons:
+
+    START/STOP is checked on a slow cadence. Opening a port and spawning a thread is not something
+    to reconsider at 20 Hz, and the answer only changes when someone toggles a setting or plugs
+    something in.
+
+    THE PORT MUST EXIST BEFORE A THREAD IS SPAWNED. Without that gate a resolver built anywhere --
+    including every offline test, on a machine with no /dev/serial at all -- would start a thread
+    that does nothing but fail to open and sleep. The gate also means plugging the adapter in later
+    is picked up on the next check rather than needing a reboot.
+
+    THE DISPLAY IS REFRESHED EVERY FRAME, because staleness is measured in tenths of a second and
+    reading it on the slow cadence would make a live link look intermittent.
+    """
+    if self.frame % _RADAR_LINK_CHECK_FRAMES == 0:
+      # Read the param here rather than borrowing radar_alert.enabled. That attribute is only
+      # populated once the detector's own update() has run, which happens AFTER this -- so the link
+      # would sit down for one check period at every boot, on an ordering dependency nothing states
+      # and no test would notice. Reading it directly costs one param read every two seconds.
+      want = self.params.get_bool("RadarDetectorEnabled")
+      if want and self._radar_reader is None and EspSerialReader.find_port() is not None:
+        self._radar_reader = EspSerialReader()
+        self._radar_reader.start()
+      elif not want and self._radar_reader is not None:
+        self._radar_reader.stop()
+        self._radar_reader = None
+
+    self.radar_display = self._radar_reader.display() if self._radar_reader is not None else None
+
+  @staticmethod
+  def _long_enabled(sm: messaging.SubMaster) -> bool:
+    """Is longitudinal engaged and ours right now?
+
+    Defensive in the same way as the rest of this fork's cross-message reads: a missing or invalid
+    carControl must mean "not engaged", so a radar alert can never override the offset on the
+    strength of data that is not actually there.
+    """
+    try:
+      return bool(sm.valid['carControl'] and sm['carControl'].enabled)
+    except (KeyError, AttributeError):
+      return False
+
   def update_speed_limit_states(self) -> None:
     self.speed_limit_final = self.speed_limit + self.speed_limit_offset
 
@@ -120,6 +319,19 @@ class SpeedLimitResolver:
       self.lookahead_higher = self.params.get("SpeedLimitLookaheadHigher", return_default=True)
 
   def _get_speed_limit_offset(self) -> float:
+    # BluePilot: a radar detector alert REPLACES the driver's offset for as long as it holds.
+    #
+    # Replaces rather than adds, and that is the point: someone running +5 over gets a 6 mph change
+    # out of a 1 mph margin, because the whole reason to slow down is that the number they normally
+    # choose is not the number they want to be doing right now. Adding the margin to their offset
+    # would leave them over the limit on exactly the roads where they run over it most.
+    #
+    # Deliberately ahead of the OffsetType.off branch: "no offset" is a statement about how they
+    # normally drive, not a refusal to respond to a radar alert.
+    radar_override = self.radar_alert.offset_override(self.is_metric)
+    if radar_override is not None:
+      return radar_override
+
     if self.offset_type == OffsetType.off:
       return 0
     elif self.offset_type == OffsetType.fixed:
@@ -266,6 +478,14 @@ class SpeedLimitResolver:
     self.update_params()
 
     self.speed_limit, self.distance, self.source = self._resolve_limit_sources(sm)
+
+    # BluePilot: must run BEFORE the offset is read, or the override is always one frame stale --
+    # which at a trigger boundary means the first frame of an alert still uses the driver's own
+    # offset. Cheap to get right here, invisible and annoying to debug later.
+    self._update_radar_link()
+    self.radar_alert.update(self.radar_display, v_ego, self._long_enabled(sm))
+    self._update_radar_places(sm)
+    self._log_radar_encounter(sm, v_ego)
     self.speed_limit_offset = self._get_speed_limit_offset()
 
     self.update_speed_limit_states()

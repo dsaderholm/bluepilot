@@ -57,6 +57,9 @@ DEFAULT_TARGETS = [
   "opendbc_repo/opendbc/sunnypilot/car/ford/tests/",
   # (that directory glob already covers test_button_mapping.py)
   "sunnypilot/selfdrive/controls/lib/tests/test_unconfirmed_lead.py",
+  # The Valentine One ESP decoder. Pure byte parsing, so it is fully checkable here -- and it has
+  # to be, because the alternative is discovering a misread byte layout on the road.
+  "sunnypilot/selfdrive/controls/lib/radar_detector/tests/",
   "sunnypilot/selfdrive/controls/lib/smart_cruise_control/tests/test_map_model_veto.py",
   # Named files, not selfdrive/ui/tests/ -- test_raylib_ui.py, test_soundd.py, test_feedbackd.py
   # and test_translations.py all need raylib or the device and break collection for the folder.
@@ -69,6 +72,9 @@ DEFAULT_TARGETS = [
   # Listing the folder pulled it in and broke collection for everything.
   "sunnypilot/selfdrive/controls/lib/speed_limit/tests/test_upcoming_limit.py",
   "sunnypilot/selfdrive/controls/lib/speed_limit/tests/test_speed_limit_resolver.py",
+  # The radar detector's offset override lives in the resolver, and the resolver's own tests do not
+  # reach it -- they were green before it existed and would stay green if it were wired backwards.
+  "sunnypilot/selfdrive/controls/lib/speed_limit/tests/test_radar_offset_override.py",
   "selfdrive/car/tests/test_structs_capnp_parity.py",
   "selfdrive/car/tests/test_pre_enable_standstill.py",
   "selfdrive/ui/bp/onroad/tests/",

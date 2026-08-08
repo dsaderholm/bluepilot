@@ -8,6 +8,7 @@ from collections.abc import Callable
 from enum import IntEnum
 
 import pyray as rl
+from openpilot.selfdrive.ui.bp.settings_defaults import recommended
 from openpilot.selfdrive.ui.sunnypilot.layouts.settings.cruise_sub_layouts.speed_limit_policy import SpeedLimitPolicyLayout
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.common import Mode as SpeedLimitMode
@@ -93,19 +94,20 @@ class SpeedLimitSettingsLayout(Widget):
 
     self._speed_limit_fallback = multiple_button_item_sp(
       title=lambda: tr("When No Limit Is Known"),
-      description=tr("What to do where no map or sign can say what the limit is. Set Speed stands "
+      description=recommended(tr("What to do where no map or sign can say what the limit is. Set Speed stands "
                      "down and leaves your own number alone; Last Known keeps the previous limit "
                      "until a new one appears. Coming off a freeway, Last Known carries the "
-                     "freeway's number down the ramp and along the next road."),
+                     "freeway's number down the ramp and along the next road."), "SpeedLimitFallback"),
       buttons=[tr("Set Speed"), tr("Last Known")],
       param="SpeedLimitFallback",
       button_width=380)
 
     self._lookahead_higher = option_item_sp(
       title=tr("Speed Up Early For Faster Roads"),
-      description=tr("How far ahead of a higher speed limit to start raising the set speed, so the "
+      description=recommended(tr("How far ahead of a higher speed limit to start raising the set speed, so the "
                      "car is already up to speed where the faster road begins instead of crawling "
                      "up after the sign. Never applies before the sign is reached. 0 turns it off."),
+                     "SpeedLimitLookaheadHigher", lambda v: tr("Off") if v == 0 else f"{v} s"),
       param="SpeedLimitLookaheadHigher",
       min_value=0, max_value=15, value_change_step=1,
       label_callback=lambda v: tr("Off") if v == 0 else f"{v} s",
@@ -116,32 +118,37 @@ class SpeedLimitSettingsLayout(Widget):
     # 70, which is roughly backwards from how anyone drives.
     self._offset_low = option_item_sp(
       title=tr("Offset on Slow Roads"),
-      description=tr("Added to limits below the first breakpoint."),
+      description=recommended(tr("Added to limits below the first breakpoint."),
+                              "SpeedLimitOffsetLow", self._band_label),
       param="SpeedLimitOffsetLow",
       min_value=-15, max_value=25, label_callback=self._band_label, inline=True)
 
     self._offset_mid = option_item_sp(
       title=tr("Offset on Medium Roads"),
-      description=tr("Added to limits between the two breakpoints."),
+      description=recommended(tr("Added to limits between the two breakpoints."),
+                              "SpeedLimitOffsetMid", self._band_label),
       param="SpeedLimitOffsetMid",
       min_value=-15, max_value=25, label_callback=self._band_label, inline=True)
 
     self._offset_high = option_item_sp(
       title=tr("Offset on Fast Roads"),
-      description=tr("Added to limits at or above the second breakpoint."),
+      description=recommended(tr("Added to limits at or above the second breakpoint."),
+                              "SpeedLimitOffsetHigh", self._band_label),
       param="SpeedLimitOffsetHigh",
       min_value=-15, max_value=25, label_callback=self._band_label, inline=True)
 
     self._offset_mid_threshold = option_item_sp(
       title=tr("Slow / Medium Breakpoint"),
-      description=tr("Posted limits below this use the slow-road offset."),
+      description=recommended(tr("Posted limits below this use the slow-road offset."),
+                              "SpeedLimitOffsetMidThreshold", self._band_label),
       param="SpeedLimitOffsetMidThreshold",
       min_value=15, max_value=60, value_change_step=5,
       label_callback=self._band_label, inline=True)
 
     self._offset_high_threshold = option_item_sp(
       title=tr("Medium / Fast Breakpoint"),
-      description=tr("Posted limits at or above this use the fast-road offset."),
+      description=recommended(tr("Posted limits at or above this use the fast-road offset."),
+                              "SpeedLimitOffsetHighThreshold", self._band_label),
       param="SpeedLimitOffsetHighThreshold",
       min_value=35, max_value=85, value_change_step=5,
       label_callback=self._band_label, inline=True)
@@ -149,9 +156,10 @@ class SpeedLimitSettingsLayout(Widget):
     # BluePilot: bidirectional following and its ceiling
     self._speed_limit_auto_follow = toggle_item_sp(
       title=tr("Automatic Speed Limit Following"),
-      description=tr("Follow detected speed limits in both directions without confirmation. "
+      description=recommended(tr("Follow detected speed limits in both directions without confirmation. "
                      "Stock behavior only ever lowers the set speed and requires you to confirm increases. "
                      "Every automatic change is announced on screen, and any cruise button press takes back control."),
+                     "SpeedLimitAutoFollow"),
       param="SpeedLimitAutoFollow")
 
     self._speed_limit_max_set_speed = option_item_sp(
@@ -160,9 +168,57 @@ class SpeedLimitSettingsLayout(Widget):
       min_value=25,
       max_value=100,
       value_change_step=5,
-      description=tr("Automatic speed limit following will never request above this speed, "
-                     "regardless of the detected limit."),
+      description=recommended(tr("Automatic speed limit following will never request above this speed, "
+                     "regardless of the detected limit."), "SpeedLimitMaxSetSpeed", self._band_label),
       inline=True)
+
+    # BluePilot: radar detector. These live on the speed limit screen rather than with the cruise
+    # settings because what the detector produces is an OFFSET -- the same kind of thing as the
+    # controls above it, and it replaces them while an alert holds. It has nothing to do with
+    # cruise buttons and keeps working when they are gone.
+    self._radar_detector_enabled = toggle_item_sp(
+      title=tr("Radar Detector"),
+      description=recommended(tr("Read alerts from a Valentine One Gen2 connected to the accessory jack "
+                     "and show them on screen. On its own this only displays and records -- it "
+                     "never changes how the car drives."), "RadarDetectorEnabled"),
+      param="RadarDetectorEnabled")
+
+    self._radar_detector_slowdown = toggle_item_sp(
+      title=tr("Slow Down For Strong Ka Alerts"),
+      description=recommended(tr("Aim below the posted limit while a strong Ka alert is ahead of you, "
+                     "replacing your usual offset until it clears. Muted alerts are ignored, so "
+                     "anywhere the detector has already learned to stay quiet stays quiet here "
+                     "too. Off until you have driven with the readout and picked a strength that "
+                     "matches your roads."), "RadarDetectorSlowdownEnabled"),
+      param="RadarDetectorSlowdownEnabled")
+
+    self._radar_detector_min_bars = option_item_sp(
+      title=tr("Alert Strength To Act On"),
+      description=recommended(tr("How strong a Ka alert has to be before the set speed moves, counted in "
+                     "the same signal bars the detector shows. Lower reacts sooner and further "
+                     "out; higher waits for the signal to be close and certain."), "RadarDetectorMinBars", lambda v: f"{v} of 8"),
+      param="RadarDetectorMinBars",
+      min_value=1, max_value=8, value_change_step=1,
+      label_callback=lambda v: f"{v} of 8",
+      inline=True)
+
+    self._radar_detector_margin = option_item_sp(
+      title=tr("Speed During An Alert"),
+      description=recommended(tr("How far below the posted limit to aim while an alert is active. This "
+                     "replaces your normal offset for as long as it lasts."), "RadarDetectorMargin", self._band_label),
+      param="RadarDetectorMargin",
+      min_value=0, max_value=15, value_change_step=1,
+      label_callback=self._band_label,
+      inline=True)
+
+    self._radar_detector_mute = toggle_item_sp(
+      title=tr("Learn And Mute False Alarms"),
+      description=recommended(tr("Remember the places your detector cries wolf -- the store doors and "
+                     "the signs -- and tell it to stay quiet there, the way your old detector's "
+                     "mute memory did. A place has to alert on nearly every pass before it counts, "
+                     "so somewhere police actually sit is never silenced. This is the only part of "
+                     "the feature that sends anything to the detector."), "RadarDetectorMuteFalseAlarms"),
+      param="RadarDetectorMuteFalseAlarms")
 
     items = [
       self._speed_limit_mode,
@@ -182,6 +238,12 @@ class SpeedLimitSettingsLayout(Widget):
       self._offset_high,
       self._offset_mid_threshold,
       self._offset_high_threshold,
+      LineSeparatorSP(40),
+      self._radar_detector_enabled,
+      self._radar_detector_mute,
+      self._radar_detector_slowdown,
+      self._radar_detector_min_bars,
+      self._radar_detector_margin,
     ]
     return items
 
