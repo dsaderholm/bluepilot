@@ -65,8 +65,14 @@ def unconfirmed_lead_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.Su
   dist = round(ul.dRel * (1.0 if metric else _METER_TO_FOOT))
   unit = "m" if metric else "ft"
 
+  # Deliberately NOT worded or sounded like model_stop_alert. Downgrading both on 2026-08-06 left
+  # them identical -- same status, same size, same tone, both opening with "Slowing" -- and he could
+  # not tell which had fired: "I'm not sure if the unconfirmed lead has the same warning and I'm just
+  # confused here". Two different causes need two different signatures, or the driver learns nothing
+  # from either. This one names a VEHICLE and keeps the higher tone, because it is the one with
+  # something solid in the road.
   return Alert(
-    "Slowing - lead not confirmed by radar",
+    "Vehicle ahead - radar has not confirmed it",
     f"Vision only at {dist} {unit}. Cruise will not stop for it.",
     AlertStatus.userPrompt, AlertSize.mid,
     Priority.HIGH, VisualAlert.none, AudibleAlertSP.promptSingleHigh, 2.)
@@ -82,7 +88,8 @@ def model_stop_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaste
   DOWNGRADED to match unconfirmed_lead_alert, which was downgraded the same day for the same reason.
   Off: VisualAlert.fcw, which reaches the Ford carcontroller and lights the CLUSTER's own collision
   warning and chime -- the thing he described as an "oh no, you're about to die warning" -- and
-  warningImmediate, the panic tone. On: AlertSize.mid, userPrompt, promptSingleHigh.
+  warningImmediate, the panic tone. On: AlertSize.mid, userPrompt, and the lower `prompt` tone --
+  see the note above the return for why this one is not promptSingleHigh like the lead alert.
 
   Read the history before raising it again, because it has been argued both ways on bad evidence:
 
@@ -99,11 +106,15 @@ def model_stop_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaste
   the driver being told, not for the cluster's collision warning firing at an empty intersection --
   and the car is now taking real action about it rather than only warning.
   """
+  # Distinct from unconfirmed_lead_alert on purpose -- see the note there. This one names a SIGN,
+  # carries no distance because there is no object to measure, and uses the lower tone: an empty
+  # intersection is the less urgent of the two, and the tone is what tells them apart when the
+  # driver is looking at the road rather than the screen.
   return Alert(
-    "Slowing for a stop ahead",
-    "Cruise will not stop for a sign or signal.",
+    "Stop sign or signal ahead",
+    "Cruise will not stop for it.",
     AlertStatus.userPrompt, AlertSize.mid,
-    Priority.HIGH, VisualAlert.none, AudibleAlertSP.promptSingleHigh, 2.)
+    Priority.MID, VisualAlert.none, AudibleAlertSP.prompt, 2.)
 
 
 def speed_limit_auto_set_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:

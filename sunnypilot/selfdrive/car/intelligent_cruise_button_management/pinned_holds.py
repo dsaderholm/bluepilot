@@ -142,10 +142,14 @@ class PinnedHolds:
     self.radius = min(max(int(self.params.get("IcbmPinnedHoldRadius", return_default=True)),
                           MIN_RADIUS_M), MAX_RADIUS_M)
     raw = self.params.get("IcbmPinnedHolds")
-    if raw == self._raw:
-      return
-    self._raw = raw
-    self.pins = self._parse(raw)
+    if raw != self._raw:
+      self._raw = raw
+      self.pins = self._parse(raw)
+
+    # Independently, not nested under the pins check. It used to return early when the pins param
+    # was unchanged, which is the state of a driver who has never pinned anything -- exactly the
+    # driver the suggestions exist for. Observations then never loaded at boot, so the count could
+    # only ever reach SUGGEST_AFTER within a single drive and the suggestion dot never appeared.
     obs_raw = self.params.get("IcbmHoldObservations")
     if obs_raw != self._obs_raw:
       self._obs_raw = obs_raw
@@ -159,7 +163,10 @@ class PinnedHolds:
     try:
       if isinstance(raw, bytes):
         raw = raw.decode("utf-8", errors="replace")
-      data = json.loads(raw)
+      # Params.get on a JSON key decodes for us, so the normal path arrives as a list already.
+      # Text still has to work: it is what a hand-edited param, a backup restore, or a test fixture
+      # looks like, and json.loads(list) is a TypeError that would read as "no pins" forever.
+      data = json.loads(raw) if isinstance(raw, str) else raw
       if not isinstance(data, list):
         return []
       out = []
@@ -290,8 +297,7 @@ class PinnedHolds:
     self._save_observations()
 
   def _save_observations(self) -> None:
-    self._obs_raw = json.dumps(self.observations)
-    self.params.put("IcbmHoldObservations", self._obs_raw)
+    self._obs_raw = self._store("IcbmHoldObservations", self.observations)
 
   def clear(self) -> None:
     self.pins = []
@@ -300,5 +306,21 @@ class PinnedHolds:
     self._save_observations()
 
   def _save(self) -> None:
-    self._raw = json.dumps(self.pins)
-    self.params.put("IcbmPinnedHolds", self._raw)
+    self._raw = self._store("IcbmPinnedHolds", self.pins)
+
+  def _store(self, key: str, value: list[dict]) -> list[dict]:
+    """Write one of the two JSON params, and return what to remember having written.
+
+    BOTH KEYS ARE DECLARED `JSON`, AND PARAMS DOES THE ENCODING ITSELF. Handing it json.dumps output
+    instead is a TypeError every single time: PYTHON_2_CPP has (dict, JSON) and (list, JSON) and no
+    (str, JSON) at all. That is how this feature shipped completely dead -- every toggle, every
+    observation and the settings screen's Clear All raised inside selfdrived's catch-all, nothing was
+    ever written, and there was no log line to say so.
+
+    Reading is the mirror image: Params.get on a JSON key hands back the DECODED list, never text, so
+    the cache compared here is a list and _parse has to accept one.
+    """
+    self.params.put(key, value)
+    # A copy, not the live list: observe_hold bumps a count in place, and a cache aliasing the same
+    # dicts would keep comparing equal to a store it no longer matches.
+    return [dict(e) for e in value]

@@ -116,24 +116,22 @@ BP_ANGLE_LIMITS = AngleSteeringLimits(
 
 
 def apply_bp_device_mount(car_docs, CP):
-  """BluePilot: Select comma3 mount type per vehicle.
+  """BluePilot: attach the comma device and the matching Ford harness.
 
-  Most Ford vehicles use the angled mount due to windshield angle.
-  Vehicles not in this list use the standard mount.
+  This used to pick between the angled and standard comma3 mount per vehicle, since Ford
+  windshield rakes vary. Upstream opendbc has since collapsed that taxonomy -- `Device` offers
+  only `four` and `Mount` only `mount`, so there is no angled variant left to select and the
+  per-vehicle list that chose between them went with it.
+
+  Kept as a function rather than folded back into ford/values.py::init_make so the hook there
+  stays a one-liner: it is an upstream file, and every line we touch is a merge conflict forever.
+
+  Until 2026-08-08 this still named `Device.threex_angled_mount`/`Device.threex`, which stopped
+  existing upstream. That is an AttributeError at import of opendbc.car.docs, so anything walking
+  PLATFORMS died -- including platform_list.py, which is how car_list.json is generated and which
+  bp_merge_upstream.py runs on every merge. Broken the same way on upstream/bp-7.0; reported there.
   """
-  from opendbc.car.ford.values import CAR, CarHarness, FordFlags
+  from opendbc.car.ford.values import CarHarness, FordFlags
   harness = CarHarness.ford_q4 if CP.flags & FordFlags.CANFD else CarHarness.ford_q3
-  if CP.carFingerprint in (
-    CAR.FORD_BRONCO_SPORT_MK1,
-    CAR.FORD_MAVERICK_MK1,
-    CAR.FORD_F_150_MK14,
-    CAR.FORD_F_150_LIGHTNING_MK1,
-    CAR.FORD_ESCAPE_MK4_5,
-    CAR.FORD_MUSTANG_MACH_E_MK1,
-    CAR.FORD_RANGER_MK2,
-    CAR.FORD_EDGE_MK2,
-  ):
-    car_docs.car_parts = CarParts([Device.threex_angled_mount, harness])
-  else:
-    car_docs.car_parts = CarParts([Device.threex, harness])
+  car_docs.car_parts = CarParts([Device.four, harness])
 

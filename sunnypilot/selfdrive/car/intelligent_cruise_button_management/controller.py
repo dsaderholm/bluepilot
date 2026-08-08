@@ -281,6 +281,7 @@ class IntelligentCruiseButtonManagement:
     self.v_baseline = 0            # the driver's chosen speed; 0 = no baseline, follow SLA
     self.v_target_raw = 0
     self.plan_source = LongitudinalPlanSource.cruise
+    self.scc_map_requesting = False  # a mapped corner is asking; exempts the drop limiter
     self.baseline_reset_delta = DEFAULT_BASELINE_RESET_DELTA
     self.v_cruise_cluster_prev = 0
     self.icbm_idle_frames = 0
@@ -382,9 +383,23 @@ class IntelligentCruiseButtonManagement:
       self.speed_limit_known = bool(resolver.speedLimitValid or resolver.speedLimitLastValid)
     except (AttributeError, KeyError):
       self.speed_limit_known = False
+    # Is there a mapped corner ahead with a deadline on it? NOT "is SCC-Map the source this frame",
+    # which is a different and much less stable question: when the map and vision targets are close
+    # the plan source alternates between them frame by frame. Measured on the 2026-08-07 exit, the
+    # source read sccVision/sccMap/sccVision on three consecutive frames. Gating the drop-limiter
+    # bypass on that would have let it re-arm on every other frame and seeded a fresh anchor from
+    # the current cluster each time, so the exemption would flicker instead of apply.
+    #
+    # `active` is the map controller's own statement that it is asking for something, and it stays
+    # true across the whole approach.
+    try:
+      self.scc_map_requesting = bool(LP_SP.smartCruiseControl.map.active)
+    except (AttributeError, KeyError):
+      self.scc_map_requesting = False
     self.v_target = self.apply_baseline(self.v_target)
 
     v_ego_conv = round(CS.vEgo * speed_conv)
+    # Reads self.scc_map_requesting, set just above -- SCC-Map is exempt. See the docstring.
     self.v_target = self.apply_target_drop_limit(v_ego_conv)
 
     # BluePilot: the radar-blind lead detector supersedes everything above, including the drop
@@ -418,7 +433,29 @@ class IntelligentCruiseButtonManagement:
 
     Only decreases are limited -- increases are what the driver or the ceiling asked for and are
     rate-limited naturally by ICBM emitting one button press per cycle.
+
+    SCC-MAP IS EXEMPT, and the reason is in map_controller.py rather than here. Its v_target is the
+    corner speed, and SmartCruiseControlMapDecel is not a rate applied to it -- it is the TRIGGER
+    DISTANCE. The test is "am I within the distance needed to reach the corner speed at this
+    deceleration", so the target appears at exactly the moment the deceleration has to begin. It
+    arrives with a deadline already attached, and metering it out afterwards spends road that was
+    already budgeted, which guarantees the corner speed is missed.
+
+    Measured on a freeway exit, 2026-08-07: SCC-Map asked for 39 mph at 67 and ICBM commanded 68,
+    then 56, then sat at 56 for 6.5 s waiting for the car to catch up before asking for 44. Twelve
+    seconds to work 80 down to 30, by which point the ramp was gone. Every step was correct and the
+    sum of them was far too slow.
+
+    SCC-Vision is NOT exempt and should not be. It ramps its own target through the ENTERING state
+    with a smooth deceleration, so its requests already arrive gradually -- coasting through those
+    is what this limiter is for, and it is the common case on ordinary roads. The exemption is keyed
+    on SCC-Map ASKING, not on it winning the frame -- see where scc_map_requesting is set for why
+    the frame's plan source is the wrong test.
     """
+    if self.scc_map_requesting:
+      self.drop_anchor = 0
+      return self.v_target
+
     if self.max_target_drop <= 0:  # 0 disables the limiter
       self.drop_anchor = 0
       return self.v_target
@@ -931,11 +968,22 @@ class IntelligentCruiseButtonManagement:
 
     Leaving and re-entering re-arms it, which is what makes a pin useful on a road driven daily.
     """
+    # A hold is a number for cruise to drive to, so nothing is applied while cruise is off -- but
+    # the edge must not be CONSUMED there either. Recording it unconditionally meant a pin entered
+    # with cruise off was marked as already-fired, and since the engagement frame itself returns
+    # early (the cruise-cycle bookkeeping above), the pin was gone by the frame after. Every drive
+    # that began inside a pin's radius -- a fresh boot, a driveway or a workplace lot within 60 m of
+    # one -- silently lost it, which is most of the point of pinning a road you drive daily.
+    #
+    # Only the drop to 0 is tracked while disengaged, so leaving the radius still re-arms.
+    if not cruise_enabled:
+      if self.pinned_hold == 0:
+        self.pinned_hold_prev = 0
+      return False
+
     fired = self.pinned_hold > 0 and self.pinned_hold != self.pinned_hold_prev
     self.pinned_hold_prev = self.pinned_hold
-    # A hold is a number for cruise to drive to. With cruise off there is nothing to hold, and
-    # arming one here would have it discovered later at a speed nobody chose.
-    if not fired or not cruise_enabled:
+    if not fired:
       return False
 
     if self.override_state != OverrideState.manual:

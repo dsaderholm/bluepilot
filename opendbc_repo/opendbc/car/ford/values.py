@@ -172,8 +172,14 @@ class CAR(Platforms):
   #
   # mass is CURB weight; openpilot adds STD_CARGO_KG itself (Edge: 1933 here shows as 2069 in
   # CarParams). 1731 kg = 3816 lb, 2020 Titanium AWD.
+  # BluePilot: year LAST in the name, and the package spelled out. CarDocs.__post_init__ derives
+  # model/year_list from the name via MODEL_YEARS_RE, which only matches a year at the end or before
+  # a comma -- "Fusion 2020 (ADAS retrofit)" parsed to no years at all, so the car could not be
+  # found by typing 2020 in the vehicle search (car_list.json's year field feeds search_tags).
+  # "Fusion (ADAS retrofit) 2020" keeps the retrofit marker and parses. Package is not Co-Pilot360
+  # Assist+, which this car does not have and never shipped with.
   FORD_FUSION_MK5 = FordPlatformConfig(
-    [FordCarDocs("Ford Fusion 2020 (ADAS retrofit)")],
+    [FordCarDocs("Ford Fusion (ADAS retrofit) 2020", "ADAS retrofit")],
     CarSpecs(mass=1731, wheelbase=2.85, steerRatio=17.07),
     flags=FordFlags.ALT_STEER_ANGLE,
   )

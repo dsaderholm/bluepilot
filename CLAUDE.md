@@ -107,6 +107,25 @@ way, and add a scene to SCENES whenever a new state is introduced.
 
 ## Do not fix UNRELATED upstream bugs in this fork
 
+**The test, stated by the owner on 2026-08-08: does this change what MY CAR does, what I SEE, or
+whether I can TAKE THE NEXT BluePilot?** Not "is it a real bug", and not "is this file ours". If the
+answer is no, report it upstream and leave it.
+
+**Staying upgradable outranks being right elsewhere.** Every upstream line this fork modifies is a
+merge conflict paid on every future update, forever. An update that feels like a chore is an update
+that gets deferred, and falling behind upstream costs more than any individual bug being correct.
+
+A worked set, from the branch review on 2026-08-08 where all four were proposed together:
+
+| Proposed | Verdict | Why |
+|---|---|---|
+| `apply_bp_device_mount` naming a `Device` member upstream deleted | **take** | AttributeError broke `car_list.json` generation, which `bp_merge_upstream.py` runs on every update -- it broke the upgrade path itself |
+| `FORD_FUSION_MK5` docs name parsing to no years | **take** | his car, unsearchable in his own vehicle picker |
+| `FORD_MONDEO_MK5` year format, same root cause | **drop** | not his car |
+| `IcbmResumeMinLeadSpeed` label showing km/h while the code uses `MPH_TO_MS` | **drop** | real, and ours by file -- but he is not metric, so it cannot affect his car |
+
+The last row is the one to internalize: **ours-by-file is not enough on its own.**
+
 This is a personal fork of BluePilot, which forks sunnypilot, which forks openpilot. A bug that
 belongs to one of those layers, and has nothing to do with the work here, should be **reported
 there, not patched here**.
@@ -115,14 +134,20 @@ Every upstream line this fork modifies is a merge conflict paid for on every fut
 That is worth it for something this car needs and free-riding on someone else's maintenance for
 anything else.
 
-**ICBM is the exception, and it is a broad one.** Anything touching Intelligent Cruise Button
-Management is in scope whatever layer owns the file, bug or feature, without asking. ICBM itself
-lives under `sunnypilot/`, most of what it reads is sunnypilot's, and the whole point of this fork
-is making it work properly on this car -- so "that is upstream's file" is not a reason to leave ICBM
-behavior broken. The same goes for anything ICBM depends on: `cruise_ext.py`'s button timers feed
-the press stand-down, so they are ICBM's business too.
+**What this fork BUILDS is the exception, and it is broad.** Not ICBM specifically -- ICBM is one
+of several things here, alongside passing assist, the radar detector, Speed Limit Assist and holds,
+and the Smart Cruise Control tuning. Anything touching any of them is in scope whatever layer owns
+the file, and so is anything they depend on: `cruise_ext.py`'s button timers feed ICBM's press
+stand-down, so they are ICBM's business too, and the same reasoning extends to each of the others.
+"That is upstream's file" is never on its own a reason to leave one of this fork's features broken.
 
-The rule is about bugs that are *not ours*. A boot-splash warning is not ours. ICBM always is.
+**But being one of ours is NOT sufficient.** Both halves of the test still have to hold -- it has to
+be something this fork builds, AND it has to reach his car. A bug in a feature we own that cannot
+affect him is still a drop, and the `IcbmResumeMinLeadSpeed` row in the table above is exactly that
+case: our feature, our file, real bug, dropped because he does not drive in metric.
+
+The rule is about bugs that are *not ours* and about ours that *cannot reach him*. A boot-splash
+warning is neither ours nor his. A metric-only label is ours but not his.
 
 Layers, outermost first — check which one a file belongs to before editing it:
 
@@ -375,6 +400,100 @@ Two things that decided the design:
   number" gesture, so SET is left meaning "engage and manage it".
 - **Tap moves the set speed 1 mph, press-and-hold moves it 5 mph** — the car's behavior, not
   openpilot's. Model set-speed movement as 5 mph jumps with stationary gaps, never a 1 mph ramp.
+
+## Params, defaults, and his settings
+
+**His rule, in his words: "If I have never changed a value, great, I will get the new default. If I
+have, then it shouldn't change."** Fix code freely. Only settings he personally chose are off limits.
+
+**A changed default cannot reach a driven car by itself.** `system/manager/manager.py` writes every
+unset param to disk at boot, so with `PERSISTENT | BACKUP` the value shipping the day he first
+flashed a build containing a key is the value frozen on his car. Every later edit to that default
+goes to a file nobody reads. This is true of keys new to the branch too -- "it has never been
+written, so it takes its default" holds exactly once, and is false from his next flash onward.
+
+`_migrate_bp_new_defaults` in `sunnypilot/system/params_migration.py` is what makes his rule work.
+`BPDefaultsSnapshot` records the default he was last handed; `BPDefaultsOwned` records what he has
+since changed. Comparing the two is the only way to tell "untouched" from "his", because on disk
+they are identical. Seeding is pessimistic -- a key with no record is assumed to be his -- and his
+lateral tune is excluded by name.
+
+- **New defaults just work now.** The old `_BP_REDEFAULT_GROUPS` generation lists are CLOSED; do not
+  add to them. Still name a changed default in the commit message so he knows what moved.
+- **A new prefix must join `_BP_TRACKED_PREFIXES`** in the same commit, or the key silently never
+  receives a moved default. Seven `PassingAssist*` keys went missing to exactly this.
+- **`run_migration` runs BEFORE manager.py materializes defaults**, so an unset key here means he has
+  never been handed the setting at all. It is not a value he chose. Getting this backwards claimed
+  every newly declared key as his, forever.
+
+**Every feature this fork builds ships ON.** Stated 2026-08-08: *"the recommendation for all
+features should be on."* A feature defaulting off is a recommendation to not use it, and it is also
+how one goes untested for weeks -- `IcbmModelStopEnabled` was unreachable from the UI, then shipped
+off, and he twice asked why stop-sign slowing never happened.
+
+This is about FEATURES, not preferences. Upstream's display toggles -- `ShowTurnSignals`,
+`StandstillTimer`, `RainbowMode` and that block -- are his to set and are left alone: he has already
+chosen the ones he wants, so moving their defaults buys his car nothing and modifies upstream lines
+forever.
+
+If something genuinely should not be on, the reason goes in the comment beside the key, and it needs
+to be a reason about the car rather than caution about the code.
+
+**Every param ships with a control in the same commit.** A feature that cannot be turned on has not
+shipped -- `IcbmModelStopEnabled` was unreachable without SSH and he reported the feature as broken
+when it was merely unenableable. Cruise/ICBM controls live in
+`selfdrive/ui/sunnypilot/layouts/settings/cruise.py`: define the item in `_initialize_items()` AND
+register it in the returned `items` list, because a defined-but-unregistered item silently never
+renders. `selfdrive/ui/bp/settings_defaults.py`'s `recommended()` puts the shipped default into the
+description automatically. Put *why it defaults off* there too, since that is what he reads when
+deciding whether to try it.
+
+**A key declared `JSON` encodes itself.** `PYTHON_2_CPP` has `(dict, JSON)` and `(list, JSON)` and no
+`(str, JSON)`, so `put(key, json.dumps(x))` is a `TypeError`, and `get` returns the DECODED object so
+`json.loads` on it fails too. Pass the list or dict directly. This shipped pinned holds completely
+dead -- enabled by default, storing nothing, for its entire life -- because both directions were
+broken and therefore agreed with each other.
+
+## Facts that have been got wrong before
+
+Each of these was asserted confidently from reasoning and turned out to be false. Check the source.
+
+- **There are two "set speeds" and they legitimately disagree.**
+  `carState.cruiseState.speedCluster` (m/s) is the car's dash number, the one ICBM's buttons move.
+  `carState.vCruiseCluster` (kph) is openpilot's own v_cruise, and under ICBM
+  (`pcmCruiseSpeed` False) it tracks DRIVER button presses only. Reading the second as "the set
+  speed" produced three wrong conclusions in a row. In any diagnostic, print both, labeled.
+- **`SmartCruiseControlMapDecel` is a TRIGGER DISTANCE, not a rate.** `map_controller.py` publishes
+  the corner speed as a step, at exactly the moment braking must begin. A gentler value makes the
+  target appear EARLIER, not the slowing gentler. Anything that re-paces it downstream spends road
+  that was already budgeted -- which is what ICBM's drop limiter did on freeway exits.
+- **There is no MS-CAN on this car.** openpilot can read body state on bus 0 but can never command
+  it. Route anything needing body actuation to FORScan instead of designing around it.
+- **The Fusion IPC is LKA-only.** TJA, LCA, BlueCruise and Driver Alert draw nothing on his cluster;
+  the LKA states are the entire vocabulary available.
+- **Ford's angle gains are a PSCM calibration, not a detune**, and the take-over alert that looks
+  like they cause is a tracking-lag false positive.
+
+**Tests do not substitute for reading.** A review found four real bugs under 931 green tests, and
+each hid where a fixture held something constant. Stubs are the specific danger: `FakeParams.put`
+accepted any type, so the suite was more permissive than the device and a `TypeError` firing on
+every real write was invisible. A stub laxer than the thing it stands in for hides exactly the bugs
+it was built to catch.
+
+## Working with the owner
+
+- **He reports, I tune.** On-road reports are tuning input, not complaints to work around. His
+  observation of his own device beats my inference about it every time.
+- **Don't check in.** He has given open-ended permission; pick the work and report it done rather
+  than closing with "want me to...".
+- **Shell commands are fine.** What he dislikes is running them *in the car*, in 100-degree heat.
+  Diagnostics he can SSH into at home are welcome; "run this on your next drive" is not.
+- **Talk about the finished system.** Do not preface answers with what does not actuate yet; he is
+  always describing the finished behavior.
+- **23 controls on the settings screen is not a usability problem.** Do not consolidate unless asked.
+- **Report test results only when the result is news.** No sign-off with a suite total every message.
+- **Changes made on one branch reach the others because he rebases every time.** So CLAUDE.md is the
+  channel that actually travels between sessions; per-directory memory is not.
 
 ## Language and units — US
 

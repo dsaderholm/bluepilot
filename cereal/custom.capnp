@@ -246,9 +246,11 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     # modelShouldStop, and nothing may. It does not mean "there is a stop line ahead": modeld
     # computes it as (v_ego < 0.3 m/s and desired_accel < 0.1), so it means "already stopped, stay
     # stopped" and is false at every speed the model-stop path can run at. Gating on it is exactly
-    # why that path never fired once on the road. See MODEL_STOP_DECEL_MS2 in unconfirmed_lead.py.
+    # why that path never fired once on the road.
     #
-    # modelDesiredAccel is the one that carries the intent, and is what the trigger reads.
+    # What the trigger actually reads is DEC's slow-down decision -- model_slow_down, from
+    # dec.has_slow_down() -- which carries its own hysteresis. modelDesiredAccel is not the trigger
+    # either; it paces the request inside _model_stop_target once the trigger has fired.
     modelShouldStop @5 :Bool;
     modelDesiredAccel @6 :Float32;
     hasLead @7 :Bool;

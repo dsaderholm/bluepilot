@@ -79,6 +79,9 @@ def build_sorted_car_list(platforms, footnotes) -> dict[str, dict[str, list[str]
 if __name__ == "__main__":
   platform_list = get_car_list()
 
-  with open(CAR_LIST_JSON_OUT, "w") as json_file:
+  # encoding pinned: ensure_ascii=False writes non-ASCII make names (Škoda) as real characters, so
+  # without this the locale codec decides. On Windows that is cp1252, which writes Š as a single
+  # 0x8A and makes the file invalid UTF-8 for everything that reads it back.
+  with open(CAR_LIST_JSON_OUT, "w", encoding="utf-8") as json_file:
     json.dump(platform_list, json_file, indent=2, ensure_ascii=False)
   print(f"Generated and written to {CAR_LIST_JSON_OUT}")

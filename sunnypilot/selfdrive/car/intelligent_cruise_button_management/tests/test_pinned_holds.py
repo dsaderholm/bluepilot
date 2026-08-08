@@ -15,6 +15,9 @@ from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management.pin
 LAT, LON = 40.7608, -111.8910
 FAR_LAT, FAR_LON = 40.7698, -111.8910
 
+# Declared JSON in common/params_keys.h, which decides what params_pyx will accept and return.
+JSON_KEYS = ("IcbmPinnedHolds", "IcbmHoldObservations")
+
 
 class FakeParams:
   def __init__(self, **kv):
@@ -31,11 +34,38 @@ class FakeParams:
   # False)`. A stub without it turns any caller that passes block=True into a TypeError that the
   # caller's own except-clause swallows -- so the param silently never gets written and the test
   # reports a bug that exists only in the harness. That cost a drive once already.
+  #
+  # The value TYPE is checked for the same reason, and it is not hypothetical: both pin params are
+  # declared JSON, params_pyx's PYTHON_2_CPP has (dict, JSON) and (list, JSON) and no (str, JSON),
+  # and this stub used to accept the json.dumps string the writer was handing it. So every test
+  # passed while every write on the car raised a TypeError into selfdrived's catch-all and no pin was
+  # ever stored. A stub that is more permissive than the device proves nothing.
   def put(self, key, value, block=False):
+    if key in JSON_KEYS and not isinstance(value, (list, dict)):
+      raise TypeError(f"Type mismatch while writing param {key}: proposed_type={type(value)} "
+                      f"expected_type=JSON")
     self.store[key] = value
 
   def put_bool(self, key, value, block=False):
     self.store[key] = bool(value)
+
+
+class DeviceParams(FakeParams):
+  """params_pyx end to end: a JSON key is TEXT in the store, encoded on write, decoded on read.
+
+  FakeParams hands back whatever it was given, which is what makes the parser tests readable -- but
+  it means nothing in those tests ever crosses the encode/decode boundary the device puts between a
+  write and the next boot's read. This one does, so a round trip here is the real one.
+  """
+
+  def put(self, key, value, block=False):
+    super().put(key, value, block)
+    if key in JSON_KEYS:
+      self.store[key] = json.dumps(value)
+
+  def get(self, key, *a, **k):
+    v = self.store.get(key)
+    return json.loads(v) if key in JSON_KEYS and isinstance(v, str) and v else v
 
 
 def fresh(**kv) -> PinnedHolds:
@@ -158,6 +188,51 @@ class TestToggle:
     ph.toggle(FAR_LAT, FAR_LON, 30)
     ph.clear()
     assert ph.pins == [] and ph.match(LAT, LON) == 0
+
+
+class TestItSurvivesTheDeviceStore:
+  """The round trip the car actually performs, across the JSON encode/decode Params does for us.
+
+  Everything else here reads and writes the same Python objects, so it cannot see the boundary where
+  this feature was entirely broken: the writer handed Params a json.dumps STRING for a key declared
+  JSON, which params_pyx rejects outright, and selfdrived's catch-all swallowed it. Enabled by
+  default, documented on the settings screen, and it had never stored a single pin.
+  """
+
+  def test_a_pin_survives_a_reboot(self):
+    p = DeviceParams()
+    ph = PinnedHolds(p)
+    ph.update_params()
+    assert ph.toggle(LAT, LON, 45) == "added"
+    assert isinstance(p.store["IcbmPinnedHolds"], str), "the store holds text, as the device does"
+
+    reloaded = PinnedHolds(p)
+    reloaded.update_params()
+    assert reloaded.match(LAT, LON) == 45, "the pin did not survive the param store"
+
+  def test_observations_survive_a_reboot(self):
+    p = DeviceParams()
+    ph = PinnedHolds(p)
+    ph.update_params()
+    for _ in range(SUGGEST_AFTER):
+      ph.observe_hold(LAT, LON, 45)
+
+    reloaded = PinnedHolds(p)
+    reloaded.update_params()
+    assert reloaded.suggestion(LAT, LON) == 45, "the evidence for a suggestion was lost on reboot"
+
+  def test_clear_all_does_not_raise(self):
+    """The settings-screen button, which has no try/except around it -- an exception here reaches
+    the UI rather than being quietly absorbed like the control-loop path."""
+    p = DeviceParams()
+    ph = PinnedHolds(p)
+    ph.update_params()
+    ph.toggle(LAT, LON, 45)
+    ph.clear()
+
+    reloaded = PinnedHolds(p)
+    reloaded.update_params()
+    assert reloaded.pins == []
 
 
 class TestSuggestions:

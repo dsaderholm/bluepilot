@@ -234,6 +234,20 @@ def _migrate_bp_new_defaults(_params):
         continue
       shipped = str(shipped)
       stored = _params.get(key)
+      if stored is None:
+        # NEVER WRITTEN, which is not the same thing as "he set it to something".
+        #
+        # run_migration runs BEFORE manager.py's "set unset params to their default value" loop, so
+        # an unset key here means he has never been handed this setting at all: a fresh flash, a
+        # Reset All Params, or -- the case that reaches a car that has been driven for months -- a
+        # key this branch has only just declared. Falling through would stringify None into the
+        # literal "None", which matches no real default, and claim the key as his forever. Every
+        # future default move would then be silently unable to reach it, which is the exact failure
+        # this file exists to end.
+        #
+        # Record what manager.py is about to hand him, and claim nothing.
+        remembered[key] = shipped
+        continue
       stored = str(stored.decode() if isinstance(stored, bytes) else stored)
 
       if key not in remembered:
