@@ -343,6 +343,19 @@ lateral tune is excluded by name.
   never been handed the setting at all. It is not a value he chose. Getting this backwards claimed
   every newly declared key as his, forever.
 
+**Every feature this fork builds ships ON.** Stated 2026-08-08: *"the recommendation for all
+features should be on."* A feature defaulting off is a recommendation to not use it, and it is also
+how one goes untested for weeks -- `IcbmModelStopEnabled` was unreachable from the UI, then shipped
+off, and he twice asked why stop-sign slowing never happened.
+
+This is about FEATURES, not preferences. Upstream's display toggles -- `ShowTurnSignals`,
+`StandstillTimer`, `RainbowMode` and that block -- are his to set and are left alone: he has already
+chosen the ones he wants, so moving their defaults buys his car nothing and modifies upstream lines
+forever.
+
+If something genuinely should not be on, the reason goes in the comment beside the key, and it needs
+to be a reason about the car rather than caution about the code.
+
 **Every param ships with a control in the same commit.** A feature that cannot be turned on has not
 shipped -- `IcbmModelStopEnabled` was unreachable without SSH and he reported the feature as broken
 when it was merely unenableable. Cruise/ICBM controls live in
