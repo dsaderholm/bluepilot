@@ -18,6 +18,8 @@ Plus the sign convention on lane geometry, which is easy to get backwards and im
 in a log after the fact.
 """
 
+import inspect
+import re
 from types import SimpleNamespace as NS
 
 from cereal import custom
@@ -1518,16 +1520,36 @@ class TestPublishTheNewFields:
     assert str(pa.maneuverSide) in ('none', 'left', 'right')
     assert str(pa.crawlSide) in ('none', 'left', 'right')
 
-  def test_every_new_field_round_trips(self):
-    """Names as well as types: a field renamed in the schema without its publish() line is an
-    AttributeError on the car and nothing at all offline."""
+  def test_every_field_in_the_schema_is_actually_published(self):
+    """EVERY field, read out of the schema -- not a list somebody has to remember to extend.
+
+    This was named test_every_new_field_round_trips and checked a hardcoded seventeen. The schema
+    has ninety-four. So the sixty-odd added since it was written were covered by its name and by
+    nothing else, and the next field would have been too: a reviewer reading the title would
+    reasonably conclude the case was handled.
+
+    A field declared and never assigned in publish() is the failure that matters, and it is silent
+    in the worst way -- capnp hands back the type's zero, so the reader gets 0.0 or `none` and every
+    consumer treats it as a real measurement. That is the same fault as the three drive-summary
+    numbers that were saved and never drawn, one layer further down.
+    """
     det = run(PassingAssistDetector(), STUCK_FRAMES)
     pa = self._published(det)
-    for name in ("wantedSeconds", "topBlockedShare", "clearShare", "crawlSeconds",
-                 "crawlLongestSeconds", "crawlEvents", "crawlAfterSuggestion",
-                 "leadAccel", "leadBrakingHold", "leadRadarConfirmed", "leadModelProb",
-                 "accBrakingOnsetDRel", "accBrakingOnsetMax", "maneuverSeconds",
-                 "maneuverAborts", "blinkerWouldBeOn", "steeringWouldBeActive"):
+    declared = set(pa.schema.fieldnames)
+    assert len(declared) > 80, f"schema reflection returned only {len(declared)} fields"
+
+    src = inspect.getsource(PassingAssistDetector.publish)
+    # Any REFERENCE, not just an assignment: the nested groups (adjacentLeft, rearRight and
+    # friends) are filled in place by iterating over them, so they are never on the left of an `=`
+    # and a stricter pattern reports all four as missing.
+    assigned = set(re.findall(r'passingAssist\.(\w+)', src))
+    missing = sorted(declared - assigned)
+    assert not missing, (
+      f"declared in custom.capnp but never assigned in publish(): {missing}. Each one reads as the "
+      f"type's zero on the car -- a measurement that is always 0.0 or 'none' and looks real.")
+
+    # ...and the other direction, which is an AttributeError on the device and nothing offline.
+    for name in sorted(assigned):
       getattr(pa, name)
 
   def test_counters_saturate_rather_than_wrap(self):
