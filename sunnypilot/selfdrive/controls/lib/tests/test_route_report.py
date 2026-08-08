@@ -36,11 +36,14 @@ def car_state(t, left=False, right=False, pressed=False):
 
 def plan(t, suggestion="none", blocked="noLaneAvailable", maneuver="idle",
          geo=(1, 0.31, 0.86, 0.30), overtaken=(0, 0),
-         geometry_ok=True, edge_std=0.1, line_prob=0.99, lane_width=3.7, edge_beyond=1.5):
+         geometry_ok=True, edge_std=0.1, line_prob=0.99, lane_width=3.7, edge_beyond=1.5,
+         r_edge_std=9.9, r_line_prob=0.11, r_lane_width=9.1, r_edge_beyond=9.2):
   pa = NS(suggestion=suggestion, blockedBy=blocked, maneuver=maneuver,
           geoRefusedBy=geo[0], geoRefusedValue=geo[1], geoRefusedShare=geo[2], geoLoosenTo=geo[3],
           leftGeometryOk=geometry_ok, leftEdgeStd=edge_std, leftLineProb=line_prob,
           leftLaneWidth=lane_width, leftEdgeBeyond=edge_beyond,
+          rightEdgeStd=r_edge_std, rightLineProb=r_line_prob,
+          rightLaneWidth=r_lane_width, rightEdgeBeyond=r_edge_beyond,
           adjacentLeft=NS(overtakenCount=overtaken[0]),
           adjacentRight=NS(overtakenCount=overtaken[1]))
   return NS(logMonoTime=int(t * 1e9), which=lambda: "longitudinalPlanSP",
@@ -361,7 +364,30 @@ def test_frames_with_no_suggestion_are_not_dumped():
 def test_cloudlog_about_the_panel_is_kept_even_without_the_latch_line():
   """The latch message did not appear in a route where the screen definitely showed the error, so
   the exact-phrase filter is itself a suspect. This says what cloudlog DID carry."""
-  d = read([log_message("HudRendererBP something unexpected"), plan(0.0)])
+  d = read([log_message('{"ctx": {}, "msg": "HudRendererBP something unexpected"}'), plan(0.0)])
   assert d["panel_error"] is None
   assert d["ui_log"]
   assert "cloudlog mentioned the panel" in RR.report(d)
+
+
+def test_a_right_side_suggestion_reports_the_RIGHT_lane():
+  """The first version printed left* for every row, so three right-side suggestions on 00000329
+  were reported against the left lane -- real numbers, wrong lane, indistinguishable from correct
+  ones. The fixture's right values are deliberately nothing like its left ones."""
+  d = read([plan(0.0, suggestion="right", blocked="none")])
+  g = d["suggestions"][0]
+  assert (g["edge_std"], g["prob"], g["width"], g["beyond"]) == (9.9, 0.11, 9.1, 9.2)
+
+
+def test_a_left_side_suggestion_still_reports_the_left_lane():
+  d = read([plan(0.0, suggestion="left", blocked="none")])
+  g = d["suggestions"][0]
+  assert (g["edge_std"], g["prob"], g["width"]) == (0.1, 0.99, 3.7)
+
+
+def test_the_branch_name_in_every_log_line_is_not_a_panel_match():
+  """cloudlog ctx carries the branch -- "passing-assist-phase1" -- so matching the whole blob
+  returned camerad and loggerd noise on every drive and buried what was being looked for."""
+  ctx = '{"ctx": {"branch": "passing-assist-phase1", "daemon": "camerad"}, "msg": "buffer ready"}'
+  d = read([log_message(ctx), plan(0.0)])
+  assert d["ui_log"] == []

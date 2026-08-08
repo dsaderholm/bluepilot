@@ -220,9 +220,13 @@ def read(path: str) -> dict:
         # Wider net, kept separate. The latch line did not appear in a route where the screen
         # definitely showed the error, so the filter itself is a suspect and this says what
         # cloudlog DID carry rather than only whether one exact phrase was present.
-        elif len(out["ui_log"]) < 20 and any(
-            w in text.lower() for w in ("passing", "hudrenderer", "panel")):
-          out["ui_log"].append(text[:300])
+        # The MESSAGE, never the context. Every cloudlog line carries ctx with the branch name in
+        # it -- "passing-assist-phase1" -- so matching the whole blob returned camerad and loggerd
+        # noise on every drive and buried the thing being looked for.
+        elif len(out["ui_log"]) < 20:
+          body = text.split('"msg"', 1)[-1] if '"msg"' in text else ""
+          if any(w in body.lower() for w in ("passing assist", "hudrenderer", "panel")):
+            out["ui_log"].append(body[:300])
       except Exception:  # noqa: BLE001 - a malformed log line is not the report's problem
         pass
 
@@ -270,11 +274,19 @@ def read(path: str) -> dict:
         if float(pa.leftEdgeBeyond) < MIN_EDGE_BEYOND_LINE_M:
           out["geo_each"][3] += 1
 
-      if str(pa.suggestion) != "none" and len(out["suggestions"]) < 40:
+      side = str(pa.suggestion)
+      if side != "none" and len(out["suggestions"]) < 40:
+        # THE SIDE IT SUGGESTED, not always the left. The first version printed left* for every
+        # row, so three right-side suggestions were reported against the left lane's geometry --
+        # numbers that were real, attached to the wrong lane, and impossible to tell apart from the
+        # correct ones.
+        r = side == "right"
         out["suggestions"].append({
-          "t": t, "side": str(pa.suggestion),
-          "edge_std": float(pa.leftEdgeStd), "prob": float(pa.leftLineProb),
-          "width": float(pa.leftLaneWidth), "beyond": float(pa.leftEdgeBeyond),
+          "t": t, "side": side,
+          "edge_std": float(pa.rightEdgeStd if r else pa.leftEdgeStd),
+          "prob": float(pa.rightLineProb if r else pa.leftLineProb),
+          "width": float(pa.rightLaneWidth if r else pa.leftLaneWidth),
+          "beyond": float(pa.rightEdgeBeyond if r else pa.leftEdgeBeyond),
         })
 
       out["overtaken"] = max(out["overtaken"],
