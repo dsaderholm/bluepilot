@@ -134,14 +134,20 @@ Every upstream line this fork modifies is a merge conflict paid for on every fut
 That is worth it for something this car needs and free-riding on someone else's maintenance for
 anything else.
 
-**ICBM is the exception, and it is a broad one.** Anything touching Intelligent Cruise Button
-Management is in scope whatever layer owns the file, bug or feature, without asking. ICBM itself
-lives under `sunnypilot/`, most of what it reads is sunnypilot's, and the whole point of this fork
-is making it work properly on this car -- so "that is upstream's file" is not a reason to leave ICBM
-behavior broken. The same goes for anything ICBM depends on: `cruise_ext.py`'s button timers feed
-the press stand-down, so they are ICBM's business too.
+**What this fork BUILDS is the exception, and it is broad.** Not ICBM specifically -- ICBM is one
+of several things here, alongside passing assist, the radar detector, Speed Limit Assist and holds,
+and the Smart Cruise Control tuning. Anything touching any of them is in scope whatever layer owns
+the file, and so is anything they depend on: `cruise_ext.py`'s button timers feed ICBM's press
+stand-down, so they are ICBM's business too, and the same reasoning extends to each of the others.
+"That is upstream's file" is never on its own a reason to leave one of this fork's features broken.
 
-The rule is about bugs that are *not ours*. A boot-splash warning is not ours. ICBM always is.
+**But being one of ours is NOT sufficient.** Both halves of the test still have to hold -- it has to
+be something this fork builds, AND it has to reach his car. A bug in a feature we own that cannot
+affect him is still a drop, and the `IcbmResumeMinLeadSpeed` row in the table above is exactly that
+case: our feature, our file, real bug, dropped because he does not drive in metric.
+
+The rule is about bugs that are *not ours* and about ours that *cannot reach him*. A boot-splash
+warning is neither ours nor his. A metric-only label is ours but not his.
 
 Layers, outermost first — check which one a file belongs to before editing it:
 
