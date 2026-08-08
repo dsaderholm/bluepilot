@@ -265,6 +265,19 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // to reject a single bad frame of lead tracking.
     {"PassingAssistBlinkerLead", {PERSISTENT | BACKUP, INT, "1"}},
     // -1 = Auto (from the measured ACC braking onset), 0 = off, otherwise meters.
+    //
+    // THE ONE DELIBERATE EXCEPTION to "every feature this fork builds ships on", and the reason is
+    // recorded here because that rule requires it. Reviewed 2026-08-08 and left off.
+    //
+    // Auto holds the suggestion until roughly where this car's ACC starts braking (~137 m,
+    // measured, re-learned every drive). That directly shortens driverPassLead -- the "11s early"
+    // figure in the drive summary, which is the entire measurement of whether passing assist is
+    // worth having. On, the feature grades its own exam: it would suggest later, agree with him
+    // more often, and report a smaller benefit, and none of those numbers would mean anything.
+    //
+    // Right for the finished system, wrong while phase 1 is still measuring. Turn it to -1 once
+    // the lead-time figure has settled across enough drives -- that is the condition, not a date.
+    // test_close_in_is_off_while_measuring pins it so this cannot be flipped by a blanket sweep.
     {"PassingAssistMinApproach", {PERSISTENT | BACKUP, INT, "0"}},
     // The previous drive's measurements, so parking does not throw them away. Written
     // periodically by the detector, read by the panel when the current drive has nothing yet.
