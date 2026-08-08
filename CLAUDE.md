@@ -107,6 +107,25 @@ way, and add a scene to SCENES whenever a new state is introduced.
 
 ## Do not fix UNRELATED upstream bugs in this fork
 
+**The test, stated by the owner on 2026-08-08: does this change what MY CAR does, what I SEE, or
+whether I can TAKE THE NEXT BluePilot?** Not "is it a real bug", and not "is this file ours". If the
+answer is no, report it upstream and leave it.
+
+**Staying upgradable outranks being right elsewhere.** Every upstream line this fork modifies is a
+merge conflict paid on every future update, forever. An update that feels like a chore is an update
+that gets deferred, and falling behind upstream costs more than any individual bug being correct.
+
+A worked set, from the branch review on 2026-08-08 where all four were proposed together:
+
+| Proposed | Verdict | Why |
+|---|---|---|
+| `apply_bp_device_mount` naming a `Device` member upstream deleted | **take** | AttributeError broke `car_list.json` generation, which `bp_merge_upstream.py` runs on every update -- it broke the upgrade path itself |
+| `FORD_FUSION_MK5` docs name parsing to no years | **take** | his car, unsearchable in his own vehicle picker |
+| `FORD_MONDEO_MK5` year format, same root cause | **drop** | not his car |
+| `IcbmResumeMinLeadSpeed` label showing km/h while the code uses `MPH_TO_MS` | **drop** | real, and ours by file -- but he is not metric, so it cannot affect his car |
+
+The last row is the one to internalize: **ours-by-file is not enough on its own.**
+
 This is a personal fork of BluePilot, which forks sunnypilot, which forks openpilot. A bug that
 belongs to one of those layers, and has nothing to do with the work here, should be **reported
 there, not patched here**.
