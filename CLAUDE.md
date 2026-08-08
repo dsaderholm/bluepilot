@@ -309,6 +309,13 @@ and the symptom would look exactly like a wiring fault.
 enumerates as ttyUSB0..3, so a naive "first serial port" pick returns the modem's AT command port.
 `find_port` excludes it and prefers a recognised bridge; see `PORT_EXCLUDE` in `transport.py`.
 
+**The mute bit is GLOBAL, and that may be a problem.** It reports that audio is muted, not which
+alert was muted. Vortex's recommended Gen2 setup enables Auto Mute (Advanced), which mutes X, K and
+Ku after three seconds -- so an auto-muted door opener could suppress our Ka gate on a real alert.
+Unverified: whether the V1 clears the bit when a higher-priority threat arrives. If it does not, the
+gate must read the priority band from respAlertData rather than trusting the global bit, and that
+means transmitting reqStartAlertData. Test before trusting the feature.
+
 **Open, needs hardware:** the ACC jack data pin (6p4c RJ11, ACC is pin-reversed from MAIN -- meter
 it), whether the V1 emits ESP data with nothing asserting ESP mode, whether the time-slice timing
 holds from Python, and whether anything external ever sets the mute bit.

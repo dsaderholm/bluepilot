@@ -19,7 +19,16 @@ WHAT IT ANSWERS, in the order the answers matter:
   4. Does the V1 talk unprompted?          -> whether ESP mode needs asserting
   5. Does the mute bit ever move?          -> whether anything external generates mutes
 
-Question 5 is the one that decides a real design point. The V1 Gen2 has no GPS, so it cannot mute
+Question 5 has TWO parts and the second is the one that could break the feature quietly.
+
+The mute bit is GLOBAL -- it says audio is muted, not which alert was muted. Vortex's recommended
+V1 Gen2 setup turns on Auto Mute (Advanced), which mutes X, K and Ku after three seconds. If that
+bit stays set while a real Ka alert arrives, our Ka gate sees `muted` and stands down on a genuine
+threat. Test it deliberately: sit near a K-band source until it auto-mutes, then trigger Ka, and
+watch whether the mute bit clears. If it does not, the gate needs to read the priority band from the
+alert table instead of trusting the global bit.
+
+Question 5's first part decides a different design point. The V1 Gen2 has no GPS, so it cannot mute
 itself by location; if nothing else on the bus ever sets that bit, openpilot muting learned false
 alarms is the ONLY thing that will ever produce one. Press the detector's Control Button while this
 runs and watch the mute count -- if it moves, the path works end to end.
