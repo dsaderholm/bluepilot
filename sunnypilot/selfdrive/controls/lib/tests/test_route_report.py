@@ -341,3 +341,27 @@ def test_the_header_names_the_route_that_was_actually_read():
 
 def test_an_unresolvable_target_still_names_itself():
   assert RR.resolved_name("0000031e--69e3cd09d2") == "0000031e--69e3cd09d2"
+
+
+def test_each_suggestion_frame_is_dumped_with_what_the_gate_saw():
+  """Six frames on 00000329, one of them at a two-way center turn lane. A count cannot say why it
+  was allowed; the four terms at that instant can."""
+  d = read([plan(0.0, suggestion="left", blocked="none",
+                 edge_std=0.4, line_prob=0.95, lane_width=3.6, edge_beyond=2.1)])
+  out = RR.report(d)
+  assert "IT SUGGESTED" in out
+  assert "3.60" in out and "0.40" in out
+
+
+def test_frames_with_no_suggestion_are_not_dumped():
+  d = read([plan(0.0, suggestion="none")])
+  assert d["suggestions"] == []
+
+
+def test_cloudlog_about_the_panel_is_kept_even_without_the_latch_line():
+  """The latch message did not appear in a route where the screen definitely showed the error, so
+  the exact-phrase filter is itself a suspect. This says what cloudlog DID carry."""
+  d = read([log_message("HudRendererBP something unexpected"), plan(0.0)])
+  assert d["panel_error"] is None
+  assert d["ui_log"]
+  assert "cloudlog mentioned the panel" in RR.report(d)

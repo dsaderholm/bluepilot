@@ -162,6 +162,12 @@ def read(path: str) -> dict:
     # The panel's own crash. See hud_renderer_bp: one exception latches it off for the whole drive,
     # so this is the only record of WHY once the screen has gone quiet.
     "panel_error": None,
+    # Every frame it actually suggested, with the geometry that let it through. Six frames on
+    # 00000329 and one of them put him at a two-way center turn lane, so "what did the gate see"
+    # is the whole question and a count cannot answer it.
+    "suggestions": [],
+    # Anything cloudlog said about the panel, whether or not it matched the latch message.
+    "ui_log": [],
   }
 
   # Lane-change reconstruction. carState is 100 Hz, so the switch position is sampled far finer
@@ -211,6 +217,12 @@ def read(path: str) -> dict:
         text = str(msg.logMessage if which == "logMessage" else msg.errorLogMessage)
         if "passing assist panel failed" in text:
           out["panel_error"] = text[:4000]
+        # Wider net, kept separate. The latch line did not appear in a route where the screen
+        # definitely showed the error, so the filter itself is a suspect and this says what
+        # cloudlog DID carry rather than only whether one exact phrase was present.
+        elif len(out["ui_log"]) < 20 and any(
+            w in text.lower() for w in ("passing", "hudrenderer", "panel")):
+          out["ui_log"].append(text[:300])
       except Exception:  # noqa: BLE001 - a malformed log line is not the report's problem
         pass
 
@@ -258,6 +270,13 @@ def read(path: str) -> dict:
         if float(pa.leftEdgeBeyond) < MIN_EDGE_BEYOND_LINE_M:
           out["geo_each"][3] += 1
 
+      if str(pa.suggestion) != "none" and len(out["suggestions"]) < 40:
+        out["suggestions"].append({
+          "t": t, "side": str(pa.suggestion),
+          "edge_std": float(pa.leftEdgeStd), "prob": float(pa.leftLineProb),
+          "width": float(pa.leftLaneWidth), "beyond": float(pa.leftEdgeBeyond),
+        })
+
       out["overtaken"] = max(out["overtaken"],
                              int(pa.adjacentLeft.overtakenCount) + int(pa.adjacentRight.overtakenCount))
 
@@ -296,6 +315,23 @@ def report(d: dict) -> str:
       flag = "   <-- the panel draws nothing with this off" if (
         k == "ShowPassingAssist" and v == "0") else ""
       L.append(f"  {k:<24} {shown}{flag}")
+    L.append("")
+
+  if d["suggestions"]:
+    L.append(f"IT SUGGESTED, and this is what the gate saw ({len(d['suggestions'])} frames):")
+    L.append("    t       side    edge   paint   width   beyond")
+    t0 = d["suggestions"][0]["t"]
+    for g in d["suggestions"]:
+      L.append(f"  {g['t'] - t0:6.1f}s  {g['side']:<6} {g['edge_std']:5.2f}  {g['prob']:5.2f}  "
+               f"{g['width']:5.2f}  {g['beyond']:5.2f}")
+    L.append("  a two-way center turn lane is correctly painted and correctly sized, so width and")
+    L.append("  paint cannot refuse it -- the road edge is the only term that could.")
+    L.append("")
+
+  if d["ui_log"] and not d["panel_error"]:
+    L.append("cloudlog mentioned the panel but not the latch message:")
+    for line in d["ui_log"][:6]:
+      L.append(f"  {line}")
     L.append("")
 
   L.append("WHY IT REFUSED, most often first:")
