@@ -317,6 +317,13 @@ class AutoLaneChangeController:
       # Cleared at the end of a sequence rather than the start of the crossing, so the latch spans
       # preLaneChange -- where the nudge lives -- through to the end. See update_blinker_timer.
       self._steered_this_change = False
+      # The same treatment, and they were not getting it. These were re-armed only on the
+      # laneChangeStarting -> off transition below, which is the ABORTED path; a change that ran
+      # through to laneChangeFinishing left them latched, so each counter could score at most once
+      # per drive after its first completed change. Every exit reaches state off, so clearing here
+      # covers both paths and cannot go stale.
+      self._saw_opposite_this_change = False
+      self._saw_signal_out_this_change = False
 
     if state in (log.LaneChangeState.laneChangeStarting, log.LaneChangeState.laneChangeFinishing):
       self._change_started_s += DT_MDL
@@ -329,8 +336,6 @@ class AutoLaneChangeController:
       # This transition also covers lateral going inactive, the change timing out and the
       # blinker-pause gate, none of which is the driver calling it off.
       self._change_started_s = 0.0
-      self._saw_opposite_this_change = False
-      self._saw_signal_out_this_change = False
     elif prev == log.LaneChangeState.laneChangeFinishing and state != log.LaneChangeState.laneChangeFinishing:
       if self._change_started_s > 0.0 and not self._reverted:
         self.changes_completed += 1
@@ -453,7 +458,20 @@ class AutoLaneChangeController:
       if not self._saw_opposite_this_change:
         self._saw_opposite_this_change = True
         self.changes_saw_opposite += 1
-    elif not one_blinker and blinker_held_s == 0.0 and elapsed_s > 0.0:
+    # `blinker_held_s > 0.0` MEANS THE SIGNAL WAS ON AND HAS NOW GONE OUT, which is the gesture.
+    #
+    # This read `== 0.0` and therefore counted the exact opposite: the parameter is named after
+    # self.blinker_held_s, the LIVE accumulator, which is zero once the signal drops -- but what is
+    # passed is self.blinker_last_held_s, which is set to the accumulated time on that same falling
+    # edge and is therefore non-zero. update_blinker_timer runs first, so by the time this is asked
+    # the swap has already happened.
+    #
+    # Measured: a change where he signals and then drops it scored 0, and a NUDGELESS change where
+    # he never signalled at all scored 1. So the panel's "N just went out" was counting torque-
+    # initiated changes, and the gesture it exists to detect could not register. Both halves of
+    # "cancel gesture: N reached the other side, M just went out" have to be trustworthy for the
+    # pair to mean anything, and the decision to withdraw the signalled revert rests on them.
+    elif not one_blinker and blinker_held_s > 0.0 and elapsed_s > 0.0:
       # The signal is out mid-change and nothing replaced it. See OPPOSITE_SWITCH_WINDOW_S: if this
       # is what his nudge looks like from here, his cancel gesture is invisible to the state machine.
       #

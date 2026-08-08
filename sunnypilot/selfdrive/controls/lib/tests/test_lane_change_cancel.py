@@ -584,3 +584,69 @@ class TestHoldingTheStalkAndLettingGo:
     dh.update(TestItIsActuallyWiredIn._cs(right=True), True, 0.5)
     assert dh.alc.reverting
     assert dh.lane_change_direction == LaneChangeDirection.right
+
+
+class TestTheGestureCounterCountsTheGesture:
+  """"cancel gesture: N reached the other side, M just went out" is the pair the decision to
+  withdraw the signalled revert rests on, and M was counting the opposite of its own description.
+
+  The parameter is named `blinker_held_s` after the LIVE accumulator, which is zero once the signal
+  drops. What is passed is `blinker_last_held_s`, set to the accumulated time on that same falling
+  edge by update_blinker_timer -- which desire_helper calls BEFORE the state machine, so the swap
+  has already happened by the time should_cancel asks. Testing it `== 0.0` therefore selected
+  changes where the signal had never been on at all.
+
+  Nothing caught it because no test asserted either counter ever incremented; the only reference in
+  this file was a zeroed baseline dict.
+  """
+
+  @staticmethod
+  def _drive(alc, one_blinker, elapsed, steering=False):
+    """desire_helper's order exactly: the timer, then the state machine."""
+    alc.update_blinker_timer(one_blinker, steering)
+    return alc.should_cancel(one_blinker, elapsed, False, alc.blinker_last_held_s, steering)
+
+  def _signalled_then_dropped(self, steering=False):
+    alc = controller()
+    for _ in range(30):
+      self._drive(alc, True, 0.0, steering)            # signalling, change not yet underway
+    for i in range(20):
+      self._drive(alc, False, 0.1 + i * DT_MDL, steering)   # stalk nudged back, change underway
+    return alc
+
+  def test_his_gesture_is_counted(self):
+    """The whole point. Signal on, then out mid-change -- measured at 0 before this."""
+    assert self._signalled_then_dropped().changes_saw_signal_out == 1
+
+  def test_a_nudgeless_change_is_not(self):
+    """It scored 1 before, which is how the counter read as working. A torque-initiated change with
+    no signal is not him calling anything off, and counting it would put a number on the panel that
+    says his gesture is visible when it is not."""
+    alc = controller()
+    for i in range(20):
+      self._drive(alc, False, 0.1 + i * DT_MDL)
+    assert alc.changes_saw_signal_out == 0
+
+  def test_whether_his_hands_were_on_the_wheel_is_recorded_with_it(self):
+    """The discriminator between "he is doing the change himself" and "he is asking the car to
+    stop". It lives inside the same branch, so it was unreachable for the same reason."""
+    assert self._signalled_then_dropped(steering=True).changes_signal_out_while_steering == 1
+    assert self._signalled_then_dropped(steering=False).changes_signal_out_while_steering == 0
+
+  def test_a_completed_change_re_arms_the_counters(self):
+    """They were re-armed only on the laneChangeStarting -> off path, which is the ABORTED one. A
+    change that ran through laneChangeFinishing left the latch set, so each counter could score at
+    most once per drive after its first completed change -- and a drive's worth of evidence
+    collapsed to a 1."""
+    alc = self._signalled_then_dropped()
+    assert alc.changes_saw_signal_out == 1
+    # Finish it and return to idle, the ordinary ending.
+    for st in (LaneChangeState.laneChangeStarting, LaneChangeState.laneChangeFinishing,
+               LaneChangeState.off):
+      alc.DH.lane_change_state = st
+      alc._update_stats()
+    for _ in range(30):
+      self._drive(alc, True, 0.0)
+    for i in range(20):
+      self._drive(alc, False, 0.1 + i * DT_MDL)
+    assert alc.changes_saw_signal_out == 2, "a completed change left the counter latched"
