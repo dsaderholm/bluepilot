@@ -323,6 +323,13 @@ Bluetooth at all (no controller, no BlueZ, no firmware, rfkill lists only wlan).
 wired protocol anywhere in its line; searches for "Escort Serial Protocol" mostly return Valentine's
 ESP, which is a different company's document. Uniden's protocol is undocumented on every model.
 
+**The external USB-C port IS a host port**, so a USB serial adapter enumerates. Confirmed from the
+device tree, not inferred: `/proc/device-tree/soc/ssusb@a800000/dwc3@a800000/dr_mode = host`, which
+is bus 2 -- the USB 3.0 root hub that sits idle while the LTE modem occupies bus 1. A plug test with
+a phone showed nothing, which is a false negative worth knowing about: most USB-C cables to hand are
+charge-only, and two USB-C devices also have to negotiate roles. The device tree is the better
+answer. The port is USB-C, so the FTDI cable needs a USB-C to USB-A OTG adapter.
+
 **The bus is 5 V logic.** Valentine's guidance is that any 5 V-safe TTL UART can read the stream,
 which is why the part is an FTDI TTL-232R-5V and not a 3.3 V one. Also note **Feature L** on the V1,
 which governs Legacy Concealed Display output versus ESP -- the first thing to check if the wire is
