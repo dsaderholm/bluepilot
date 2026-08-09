@@ -1,5 +1,5 @@
 """
-BluePilot: every Side_Detect_L/R_Stat signal, decoded onto carStateBP.
+FusionPilot: every Side_Detect_L/R_Stat signal, decoded onto carStateBP.
 
 Lives in its own file rather than inline in `carstate_ext.py` for one reason: **upstream rebase
 cost**. This is a signal table and a loop that belong entirely to this fork's blind-spot work, and

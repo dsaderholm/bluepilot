@@ -1,4 +1,4 @@
-"""BluePilot: the cluster's lane display as the passing-assist instrument.
+"""FusionPilot: the cluster's lane display as the passing-assist instrument.
 
 His idea: *"my LKA display just shows green on both sides of my car all the time, no matter what.
 What if we hijacked this, and showed what this system is wanting to do on there?"* -- then, once it

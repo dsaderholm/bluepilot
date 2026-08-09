@@ -1,4 +1,4 @@
-"""BluePilot: the phase lock, which is the thing that made the blinker work.
+"""FusionPilot: the phase lock, which is the thing that made the blinker work.
 
 Confirmed on the road 2026-08-06 after four earlier attempts failed. Until it was extracted from
 blinker_test_ext it had no coverage at all -- the mechanism the whole feature rests on was one of

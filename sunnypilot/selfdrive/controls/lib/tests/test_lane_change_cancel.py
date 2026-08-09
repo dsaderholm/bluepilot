@@ -1,5 +1,5 @@
 """
-BluePilot: calling off a lane change already underway.
+FusionPilot: calling off a lane change already underway.
 
 Reported from the car: "when I do a sunnypilot lane change there is no way to cancel it." True --
 once laneChangeStarting is entered, stock never looks at the blinker again and the state machine

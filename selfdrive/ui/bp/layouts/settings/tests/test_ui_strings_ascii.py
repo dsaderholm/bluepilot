@@ -1,5 +1,5 @@
 """
-BluePilot: user-facing UI strings must be plain ASCII.
+FusionPilot: user-facing UI strings must be plain ASCII.
 
 An em dash in a settings description made that item overlap the one below it. Nothing crashed and
 nothing logged -- the glyph is not in the UI font, so measure_text returned a width that did not

@@ -1,5 +1,5 @@
 """
-BluePilot: tests for the stationary turn-signal actuation test.
+FusionPilot: tests for the stationary turn-signal actuation test.
 
 This one operates a lamp that other drivers read, so the tests are about the gates, not the
 feature. Every one of them asserts that the signal does NOT come on, or that it stops.

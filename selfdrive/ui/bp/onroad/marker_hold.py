@@ -1,5 +1,5 @@
 """
-BluePilot: display-only steadying for the adjacent-lane marker.
+FusionPilot: display-only steadying for the adjacent-lane marker.
 
 Reported from the car, and worth quoting because it is also the diagnosis: "when a car is going in
 between the speed I want to pass at and the speed I don't. Same with it coming in and out of radar

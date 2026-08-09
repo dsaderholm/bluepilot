@@ -4,7 +4,7 @@ Copyright (c) 2021-, Haibin Wen, sunnypilot, and a number of other contributors.
 This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 
-BluePilot: how long an auto lane change waits after the blind spot goes clear.
+FusionPilot: how long an auto lane change waits after the blind spot goes clear.
 
 Reported from a real drive: the BSM-aware auto lane change moved over too close to a car it had
 just waited for. That is arithmetic, not tuning. While the blind spot is occupied the wait timer

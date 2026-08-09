@@ -1,5 +1,5 @@
 """
-BluePilot: passing-assist observation. PHASE 1 -- LOG ONLY.
+FusionPilot: passing-assist observation. PHASE 1 -- LOG ONLY.
 
 Nothing here alerts, steers, touches the set speed, or feeds any controller. The single output is
 a message on longitudinalPlanSP describing what the system WOULD have suggested and, more usefully,
@@ -2324,7 +2324,7 @@ class PassingAssistDetector:
     self._settle_s = 0.0
 
   def _keep_right(self) -> None:
-    """BluePilot: "keep right except to pass", the mirror of the passing question.
+    """FusionPilot: "keep right except to pass", the mirror of the passing question.
 
     Evaluated ONLY on the paths where no pass is warranted -- no lead, or a lead that is not
     holding us back. That ordering is the whole design: if a pass is on, we are out here for a

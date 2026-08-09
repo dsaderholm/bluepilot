@@ -1,5 +1,5 @@
 """
-BluePilot: what is in the lane I would move into -- and is it even going my way?
+FusionPilot: what is in the lane I would move into -- and is it even going my way?
 
 Two questions off one sensor. Whether the next lane is worth moving into, and whether it is a lane
 at all or the other half of a two-way road.

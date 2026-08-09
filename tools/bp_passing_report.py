@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""BluePilot: dump everything passing assist knows, from the device, in one paste.
+"""FusionPilot: dump everything passing assist knows, from the device, in one paste.
 
 RUN THIS ON THE CAR over SSH:
 

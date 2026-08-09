@@ -1,4 +1,4 @@
-"""BluePilot: the route reader, tested against a fake log rather than a real route.
+"""FusionPilot: the route reader, tested against a fake log rather than a real route.
 
 2026-08-06: *"I haven't been paying attention to anything on the screen. I hope logs will tell a
 lot."* This is what makes that true. The reader itself cannot be run against a device route offline,

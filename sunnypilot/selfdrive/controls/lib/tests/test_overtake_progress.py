@@ -1,5 +1,5 @@
 """
-BluePilot: measuring a pass that is taking too long.
+FusionPilot: measuring a pass that is taking too long.
 
 This feeds the one thing passing assist may ever do to the set speed, so the cases that matter are
 the ones where it would fire when it should not -- a nudge handed out for an ordinary car in the

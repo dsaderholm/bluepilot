@@ -1,5 +1,5 @@
 """
-BluePilot: run the detector for a long time on plausible-but-hostile road and see if it falls over.
+FusionPilot: run the detector for a long time on plausible-but-hostile road and see if it falls over.
 
 Every other test here asserts a specific behavior on a scene built to produce it. None asks the
 different question: given an hour of arbitrary driving, does anything raise, does any published

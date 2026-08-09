@@ -1,5 +1,5 @@
 """
-BluePilot: the passing-assist settings screen, read as a whole.
+FusionPilot: the passing-assist settings screen, read as a whole.
 
 Every control here was added in its own commit and described sensibly in isolation. The screen as a
 whole was never read end to end until it had about twenty of them, at which point the first section

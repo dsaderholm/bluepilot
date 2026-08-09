@@ -1,4 +1,4 @@
-"""BluePilot: every capnp field the onroad UI reads has to exist.
+"""FusionPilot: every capnp field the onroad UI reads has to exist.
 
 Written after a whole drive was lost to one that did not. On 2026-08-08 the panel latched off four
 minutes in and stayed off, and the reason was:

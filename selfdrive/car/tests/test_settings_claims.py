@@ -1,5 +1,5 @@
 """
-BluePilot: settings descriptions that state a fact about the code.
+FusionPilot: settings descriptions that state a fact about the code.
 
 A description saying "off by default" or "defaults to 1 s" is an assertion, and nothing keeps it
 true. The panel already shipped a label reading "Below 40 mph" months after that floor moved to 30

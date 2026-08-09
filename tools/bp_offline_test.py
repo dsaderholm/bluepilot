@@ -79,7 +79,7 @@ DEFAULT_TARGETS = [
   "sunnypilot/selfdrive/controls/lib/speed_limit/tests/test_speed_limit_resolver.py",
   "selfdrive/car/tests/test_structs_capnp_parity.py",
   "selfdrive/car/tests/test_pre_enable_standstill.py",
-  # BluePilot: passing assist -- the observer, the radar's adjacent-lane and oncoming detection,
+  # FusionPilot: passing assist -- the observer, the radar's adjacent-lane and oncoming detection,
   # and the static guards over the settings layouts (param types, orphaned and dangling items).
   "selfdrive/car/tests/test_param_write_types.py",
   "selfdrive/car/tests/test_settings_widget_params.py",

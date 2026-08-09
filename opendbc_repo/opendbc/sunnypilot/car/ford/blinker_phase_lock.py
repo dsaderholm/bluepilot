@@ -1,5 +1,5 @@
 """
-BluePilot: the phase lock. THIS IS THE THING THAT MADE THE BLINKER WORK.
+FusionPilot: the phase lock. THIS IS THE THING THAT MADE THE BLINKER WORK.
 
 Confirmed on the road 2026-08-06 after four earlier attempts failed. Extracted from
 blinker_test_ext so it is a component rather than test-only code, and so it can be tested at all --

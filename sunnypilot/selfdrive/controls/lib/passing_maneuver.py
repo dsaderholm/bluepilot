@@ -1,5 +1,5 @@
 """
-BluePilot: the maneuver passing assist WOULD perform, run as a dry run.
+FusionPilot: the maneuver passing assist WOULD perform, run as a dry run.
 
 Nothing here actuates. It consumes the detector's per-frame verdict and models the full sequence a
 fully-automatic pass would go through -- spot the slow car, confirm it, signal, wait, cross, drop

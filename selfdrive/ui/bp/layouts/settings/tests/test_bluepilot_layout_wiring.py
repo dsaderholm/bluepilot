@@ -1,5 +1,5 @@
 """
-BluePilot: structural checks on the settings layout, parsed from source.
+FusionPilot: structural checks on the settings layout, parsed from source.
 
 Both bugs these cover shipped to a car and crash-looped the UI, and neither was reachable by any
 existing test -- importing this module needs pyray, ui_state and compiled Params, so nothing was

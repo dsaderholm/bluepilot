@@ -1,5 +1,5 @@
 """
-BluePilot: rear-approach input for passing assist. NO SOURCE FITTED YET.
+FusionPilot: rear-approach input for passing assist. NO SOURCE FITTED YET.
 
 Answers one question per side: is something coming up behind me in that lane, and how fast.
 
@@ -48,7 +48,7 @@ MIN_CLOSING_MS = 1.5
 # time to reach the other car's speed is several seconds, and being wrong here puts us in front of
 # someone who cannot stop.
 UNSAFE_TTC_S = 8.0
-# BluePilot: the threshold that may stop a lane change ALREADY UNDERWAY, as opposed to refusing to
+# FusionPilot: the threshold that may stop a lane change ALREADY UNDERWAY, as opposed to refusing to
 # start one. Deliberately far tighter than UNSAFE_TTC_S: backing out of a crossing is itself a
 # maneuver, done half-way between two lanes, and it is only the right answer when continuing is
 # genuinely worse. At 8 s the correct response is to keep going and let them settle behind; at 3 s

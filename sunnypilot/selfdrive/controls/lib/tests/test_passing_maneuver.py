@@ -1,5 +1,5 @@
 """
-BluePilot: the dry run of a fully-automatic pass.
+FusionPilot: the dry run of a fully-automatic pass.
 
 The question this file exists to answer is the owner's: "would it theoretically function
 correctly?" Not "does each gate work" -- that is tested next door -- but does the SEQUENCE hold

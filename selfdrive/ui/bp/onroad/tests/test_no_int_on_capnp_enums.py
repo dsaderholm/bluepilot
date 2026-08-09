@@ -1,4 +1,4 @@
-"""BluePilot: never int() a capnp enum read off a live message.
+"""FusionPilot: never int() a capnp enum read off a live message.
 
 It is a `_DynamicEnum`, and int() raises TypeError on it. That crashed the passing-assist panel on
 the road on 2026-08-07 --

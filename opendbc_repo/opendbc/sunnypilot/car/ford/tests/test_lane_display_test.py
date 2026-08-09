@@ -1,4 +1,4 @@
-"""BluePilot: the standstill walk that reads the cluster's lane-display vocabulary off the car.
+"""FusionPilot: the standstill walk that reads the cluster's lane-display vocabulary off the car.
 
 Exactly ONE of `LaActvStats_D_Dsply`'s states has provably rendered on this cluster: Available, the
 always-green line. Upstream's Intervene branch sits inside `if enabled:` and ldw.py gates departure

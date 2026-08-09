@@ -1,5 +1,5 @@
 """
-BluePilot: which passing-assist state wins the panel when several are true at once.
+FusionPilot: which passing-assist state wins the panel when several are true at once.
 
 Seventeen states share three lines and exactly one can be shown. The precedence has never been
 looked at as a whole, and the last bug of this shape -- a green PASS LEFT displayed seconds after

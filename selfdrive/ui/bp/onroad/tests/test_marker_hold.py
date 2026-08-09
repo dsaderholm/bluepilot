@@ -1,5 +1,5 @@
 """
-BluePilot: the adjacent-lane marker's dropout hold and color debounce.
+FusionPilot: the adjacent-lane marker's dropout hold and color debounce.
 
 These are display timings, so the thing worth guarding is not that they smooth -- it is the two
 places smoothing would be a lie: a marker outliving an unavailable radar, and a hold that never

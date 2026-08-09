@@ -4,7 +4,7 @@ Copyright (c) 2021-, Haibin Wen, sunnypilot, and a number of other contributors.
 This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 
-BluePilot: tests for adjacent-lane detection from the front radar's off-path tracks.
+FusionPilot: tests for adjacent-lane detection from the front radar's off-path tracks.
 
 Four things here can be wrong in ways a drive would not reveal:
 

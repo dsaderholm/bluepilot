@@ -1,5 +1,5 @@
 """
-BluePilot: stationary bench test for turn-signal actuation on Ford.
+FusionPilot: stationary bench test for turn-signal actuation on Ford.
 
 STOP HERE. DO NOT ASK HIM TO TEST THIS AGAIN -- 2026-08-06.
 =========================================================

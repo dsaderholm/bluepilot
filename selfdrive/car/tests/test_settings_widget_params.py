@@ -1,5 +1,5 @@
 """
-BluePilot: a settings widget must match the type its param is registered as, and must be reachable.
+FusionPilot: a settings widget must match the type its param is registered as, and must be reachable.
 
 Two checks, both for mistakes made while moving the passing-assist controls into their own panel,
 and both of which produce a crash or a dead control on the device while every other test stays

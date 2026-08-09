@@ -1,5 +1,5 @@
 """
-BluePilot: on-road readout for the vehicle in the next lane over.
+FusionPilot: on-road readout for the vehicle in the next lane over.
 
 The lead already gets distance, speed and time on screen. This puts the same kind of answer over
 the car you would be pulling out in front of -- the one number that decides whether moving over is

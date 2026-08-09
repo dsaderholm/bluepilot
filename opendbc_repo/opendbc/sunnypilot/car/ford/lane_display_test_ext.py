@@ -1,5 +1,5 @@
 """
-BluePilot: read the cluster's lane-display vocabulary off the actual car.
+FusionPilot: read the cluster's lane-display vocabulary off the actual car.
 
 WHY THIS EXISTS
 ---------------

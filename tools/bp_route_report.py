@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-BluePilot: read a drive's route log and answer the questions the panel would have.
+FusionPilot: read a drive's route log and answer the questions the panel would have.
 
     python tools/bp_route_report.py latest        # the drive you just finished
     python tools/bp_route_report.py <route-name-or-segment-dir-or-rlog>

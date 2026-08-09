@@ -4,7 +4,7 @@ Copyright (c) 2021-, Haibin Wen, sunnypilot, and a number of other contributors.
 This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 
-BluePilot: behavioral tests for the phase-1 passing-assist observer.
+FusionPilot: behavioral tests for the phase-1 passing-assist observer.
 
 The detector cannot actuate anything, so these are not safety tests. They cover the two ways a
 log-only observer can still waste a drive's worth of data:

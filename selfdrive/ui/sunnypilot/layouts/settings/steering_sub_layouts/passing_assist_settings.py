@@ -4,7 +4,7 @@ Copyright (c) 2021-, Haibin Wen, sunnypilot, and a number of other contributors.
 This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 
-BluePilot: every passing-assist control, in one place.
+FusionPilot: every passing-assist control, in one place.
 
 WHY IT LIVES UNDER STEERING
 It was in the Cruise panel, and only because the observer is implemented inside
@@ -31,7 +31,7 @@ from openpilot.selfdrive.ui.bp.widgets.section_header import SectionHeader
 from openpilot.system.ui.widgets.network import NavButton
 from openpilot.system.ui.widgets.scroller_tici import Scroller
 from openpilot.system.ui.widgets import Widget
-# BluePilot: every control states the value it ships with, read from params_keys.h at draw time.
+# FusionPilot: every control states the value it ships with, read from params_keys.h at draw time.
 from openpilot.selfdrive.ui.bp.settings_defaults import recommended
 
 

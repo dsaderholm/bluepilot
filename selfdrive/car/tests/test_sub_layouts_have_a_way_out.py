@@ -1,4 +1,4 @@
-"""BluePilot: every settings sub-panel must actually DRAW its back button.
+"""FusionPilot: every settings sub-panel must actually DRAW its back button.
 
 Caught by hand, on the last check before a test drive, in a panel added the same day: Customize
 Blinker constructed a NavButton, wired its callback, and never rendered it. A room with no door --

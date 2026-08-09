@@ -1,5 +1,5 @@
 """
-BluePilot: the words shown when passing assist is not suggesting anything.
+FusionPilot: the words shown when passing assist is not suggesting anything.
 
 This is the text a driver actually reads at 70 mph, and it is the only explanation they get. The
 enum names are for the log; putting "nothingSlower" in front of someone at speed is a failure of

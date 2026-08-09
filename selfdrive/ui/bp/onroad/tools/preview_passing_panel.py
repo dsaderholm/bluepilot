@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Render the passing-assist panel to PNG, offline, at device scale.
 
-BluePilot: this panel is now the entire readout for passing assist -- every gate, the dry run of
+FusionPilot: this panel is now the entire readout for passing assist -- every gate, the dry run of
 the maneuver, the slow-pass warning and the drive summary all land in the same three lines. It had
 no preview, and the first thing rendering it found was three readouts that were being assembled and
 then silently dropped, because the methods that set `_pa_sub_detail` return before the code that

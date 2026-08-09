@@ -1,5 +1,5 @@
 """
-BluePilot: panel-state tests against REAL capnp messages.
+FusionPilot: panel-state tests against REAL capnp messages.
 
 Companion to test_acc_status_fields.py and written for the same reason. The passing-assist suite
 builds its messages from SimpleNamespace with plain Python values, so every enum it feeds the code

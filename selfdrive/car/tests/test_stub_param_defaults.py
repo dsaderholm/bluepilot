@@ -1,4 +1,4 @@
-"""BluePilot: the test stubs' param defaults must match what the device actually ships.
+"""FusionPilot: the test stubs' param defaults must match what the device actually ships.
 
 A stub that has drifted is worse than no stub. Every behavioral test in the passing-assist suite
 runs against `_STUB_PARAM_DEFAULTS`, so if that says 2 where params_keys.h says 1, the whole suite

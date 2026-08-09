@@ -1,5 +1,5 @@
 """
-BluePilot: params.put() must pass the type the key is registered as.
+FusionPilot: params.put() must pass the type the key is registered as.
 
 Params enforces this at write time. PYTHON_2_CPP maps (python type, key type) pairs and raises
 TypeError for anything else -- notably (str, INT) is NOT a valid pair, so writing "1" to an INT key

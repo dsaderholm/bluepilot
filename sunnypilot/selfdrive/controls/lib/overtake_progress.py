@@ -1,5 +1,5 @@
 """
-BluePilot: how long a pass is actually taking, measured.
+FusionPilot: how long a pass is actually taking, measured.
 
 The one circumstance in which passing assist is ever allowed to touch the set speed is this one:
 crawling alongside a car you are barely faster than. The owner, sharpening it: "the only time I
