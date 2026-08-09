@@ -143,7 +143,7 @@ screen says that.
 The last one exists only because nothing actuates -- see the note in `passing_maneuver.py`. When a
 control is wired up it should come down to `SETTLE_AFTER_CHANGE_S`.
 
-## One decision to make before it actuates
+## The two timers that govern the same moment -- DECIDED
 
 **Two settings will govern the same moment.** `Signal Before Moving` (here, 1 s) and
 sunnypilot's `Auto Lane Change by Blinker` (Steering > Customize Lane Change) both control how long
@@ -152,9 +152,29 @@ the label is what to read, never the number.** Passing assist deliberately does 
 own steering -- it drives the same lane change sunnypilot already performs -- so the moment it
 actuates, **both timers apply and the longer one silently wins.**
 
-Nothing is broken today, because nothing actuates. The choice, when it does:
+**ANSWERED 2026-08-09, and the answer removes the problem rather than choosing between the
+options.** In his words: *"for automatic lane changes, I want it to be the same. I want signaling
+for 1 and then make the change."*
+
+So both are one second, and both are set that way on the car today:
+
+| | value |
+|---|---|
+| `Auto Lane Change by Blinker` (sunnypilot) | option **3**, labelled "1 s" |
+| `Signal Before Moving` (passing assist) | **1 s** |
+
+With the two equal, "the longer one silently wins" has nothing to decide -- the answer is one
+second whichever timer gets there first, and a manual stalk change and an automatic one behave
+identically. That was the point: he signals for a second, then it moves, and it should not matter
+who started it.
+
+The two options below are therefore both moot unless he ever wants them to DIFFER. Left recorded
+in case that day comes:
 
 1. Passing assist sets sunnypilot's timer for the duration of its own maneuver, and
-   `Signal Before Moving` is the only control. **Recommended** -- one setting, one meaning.
+   `Signal Before Moving` is the only control -- one setting, one meaning.
 2. `Signal Before Moving` is deleted and sunnypilot's is used for both. Fewer settings, but then
-   your manual nudgeless changes and passing assist's cannot have different lead times.
+   manual nudgeless changes and passing assist's could not have different lead times.
+
+**The thing to watch is drift, not the choice.** These are two independently stored numbers that
+now agree by hand. Nothing enforces it, so if one moves the maneuver changes and nothing says so.
