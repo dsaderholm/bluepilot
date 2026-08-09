@@ -83,7 +83,7 @@ Worth checking, in this order:
 | Close In Before Passing | **Off (0)** | 0 -> -1 -> 0, where -1 is Auto |
 | Look Ahead / approach window | **60 s** | 9 -> 25 -> 60 s |
 | Avoid The Outermost Lane | **Off** | 1 -> 0 |
-| Auto Lane Change by Blinker (Customize **Lane Change**) | **0 s** | 0 -> 3 -> 0. A 3 there puts a three second wait on every stalk lane change -- you would have noticed, so yours is almost certainly 0. |
+| Auto Lane Change by Blinker (Customize **Lane Change**) | **1 s** -- the option numbered 3 | **This row was wrong twice, corrected 2026-08-09.** It read the option NUMBER as seconds: 3 is the "1 s" option, not a three second wait (that is 5). And it said yours should be 0, which is **Nudge** -- steering-nudge required, no auto lane change at all. His answer, in his words: *"I want nudgeless with a delay of 1 second. That's what I've always done."* That is option **3**. Found on the car holding **2** (0.5 s), which is why his lane changes had been going "so quickly lately". |
 
 None of these is what stops it suggesting -- your drive got past all of them sixty times and was
 refused by the lane geometry. But two of them, the deficit and the confirm time, would be wrong by a
@@ -147,7 +147,8 @@ control is wired up it should come down to `SETTLE_AFTER_CHANGE_S`.
 
 **Two settings will govern the same moment.** `Signal Before Moving` (here, 1 s) and
 sunnypilot's `Auto Lane Change by Blinker` (Steering > Customize Lane Change) both control how long
-the blinker is on before the car starts moving across. Passing assist deliberately does not have its
+the blinker is on before the car starts moving across. **His is the "1 s" option, numbered 3 --
+the label is what to read, never the number.** Passing assist deliberately does not have its
 own steering -- it drives the same lane change sunnypilot already performs -- so the moment it
 actuates, **both timers apply and the longer one silently wins.**
 
