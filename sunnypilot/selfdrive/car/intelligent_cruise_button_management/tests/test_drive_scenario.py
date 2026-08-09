@@ -260,3 +260,41 @@ def test_a_curve_is_not_metered_but_a_speed_limit_still_is():
   d3.cluster = d3.v_ego = 80
   d3.step(39, source=PlanSource.cruise)
   assert d3.icbm.v_target == 80 - DEFAULT_MAX_TARGET_DROP, "plain cruise should still coast"
+
+
+def test_the_set_speed_does_not_climb_while_a_curve_is_being_tracked():
+  """Measured on the 2026-08-08 off-ramp, and it is why the ramp was taken at 28 instead of 20.
+
+  SCC-Map lost the ramp at t+268.1. Vision's own target then bounced to 47-51 for a couple of
+  seconds before settling at 21, ICBM chased the peak, and the set speed went 42 -> 51 -- so the car
+  ACCELERATED from 41 to 44 mph mid-ramp and then had to walk all the way back down, reaching 20
+  about three seconds later than it could have.
+
+  A curve target that briefly rises is noise. The bend has ended when vision says so.
+  """
+  d = Drive()
+  d.cluster = d.v_ego = 42
+  peak = 0
+  # Vision noise of the logged SHAPE and the logged DURATION. Duration is the point: the harness
+  # moves the cluster one step per SEND_PERIOD against a CLUSTER_LAG delay, so a seven-frame burst
+  # cannot move it at all and the test passes with or without the fix. The real spike ran from
+  # t+268.1 to t+271.4 -- about 3.3 s, which is 330 frames, which is ample time to climb 9 mph.
+  for t in [47, 48, 49, 51, 45, 37, 30]:
+    for _ in range(48):
+      d.step(t, source=PlanSource.sccVision)
+      peak = max(peak, d.cluster)
+  d.cruise(400, target=21, source=PlanSource.sccVision)
+
+  # 45, not 43: the ceiling is 42 and the tolerance is 1, but presses already on the wire land after
+  # the cluster reaches it, so CLUSTER_LAG buys a couple of mph of overshoot that no ceiling can
+  # prevent. Without the block this reads 52, so the bound still discriminates.
+  assert peak <= 45, f"set speed climbed to {peak} chasing curve-target noise; it started at 42"
+  assert abs(d.cluster - 21) <= 1, f"never reached the curve speed, sat at {d.cluster}"
+
+
+def test_a_curve_ending_still_lets_the_speed_come_back():
+  """The block above must not strand the set speed low once the bend is actually over."""
+  d = Drive()
+  d.cluster = d.v_ego = 25
+  d.cruise(600, target=60, source=PlanSource.speedLimitAssist)
+  assert d.cluster >= 55, f"stuck at {d.cluster} after the curve ended"

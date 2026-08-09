@@ -82,6 +82,12 @@ RESUME_PRESS_MEMORY_FRAMES = 150  # 1.5 s at 100 Hz, generous next to the engage
 # jumps to the CURRENT VEHICLE SPEED. So once the number settles after re-engaging, whichever it
 # landed on says which button was pressed -- no button event required.
 RESUME_MATCH_TOLERANCE = 2  # display units; Ford resumes to the exact previous value
+# BluePilot: how far above the current set speed ICBM may still go while SCC-Vision is tracking a
+# bend. Not zero: ICBM commands in 1 mph steps against a lagged cluster, so it hunts by one, and
+# clamping hard to the cluster means a 1 mph undershoot can never be recovered for the length of the
+# curve. One display unit leaves the hunt working and still blocks the case this exists for -- a
+# 9 mph climb chased out of a noisy vision target, mid off-ramp, on 2026-08-08.
+CURVE_RISE_TOLERANCE = 1
 # The baseline applies to the speed-limit/cruise component only. A curve target is a physics limit,
 # not something to add an offset to -- SCC-Vision asking for 40 means 40, whatever the baseline is.
 BASELINE_SOURCES = (LongitudinalPlanSource.cruise, LongitudinalPlanSource.speedLimitAssist)
@@ -283,6 +289,8 @@ class IntelligentCruiseButtonManagement:
     self.plan_source = LongitudinalPlanSource.cruise
     self.scc_map_requesting = False   # a mapped corner is asking
     self.deadline_requesting = False  # map OR vision: a target with a fixed place in the road
+    self.curve_active = False        # SCC-Vision is tracking a bend right now
+    self.curve_ceiling = 0           # highest target allowed for the rest of this bend
     self.baseline_reset_delta = DEFAULT_BASELINE_RESET_DELTA
     self.v_cruise_cluster_prev = 0
     self.icbm_idle_frames = 0
@@ -416,6 +424,7 @@ class IntelligentCruiseButtonManagement:
       # So the fix for that has to be the vision TARGET, not the rate at which ICBM chases it. Until
       # then the cap stays, because it is the only thing standing between a bad target and the road.
       self.deadline_requesting = bool(scc.map.active)
+      self.curve_active = bool(scc.vision.active)
     except (AttributeError, KeyError):
       self.scc_map_requesting = False
       self.deadline_requesting = False
@@ -610,7 +619,30 @@ class IntelligentCruiseButtonManagement:
 
     Hold at (anchor + max_target_rise) and only take the next step once actual speed has caught
     up. Net acceleration ends up the same, but it arrives in stages instead of one pull.
+
+    NOTHING RISES WHILE A CURVE IS BEING TRACKED. Measured on the 2026-08-08 exit: SCC-Map lost the
+    ramp at t+268.1 and vision's own target bounced to 47-51 for a couple of seconds before settling
+    at 21. ICBM chased the peak, took the set speed from 42 up to 51, and the car ACCELERATED from
+    41 to 44 mph in the middle of an off-ramp -- then had to walk all the way back down, reaching 20
+    about three seconds later than it could have. He got to the tight part still doing 28.
+
+    A curve target that briefly rises is noise, not the bend ending. The bend has ended when vision
+    says so by going inactive, and until then the target is a LIMIT: follow it down, never up.
     """
+    if self.curve_active:
+      # Anchored to where the curve STARTED and ratcheted downward, never to the live cluster. A
+      # ceiling of (current cluster + tolerance) is not a ceiling at all: each step it allows raises
+      # the cluster, which raises the ceiling, which allows another step. That version metered the
+      # climb to 1 mph a step and still arrived at 52 -- the test caught it.
+      if self.curve_ceiling == 0:
+        self.curve_ceiling = self.v_cruise_cluster
+      self.curve_ceiling = min(self.curve_ceiling, self.v_target)
+      if self.v_target > self.curve_ceiling + CURVE_RISE_TOLERANCE:
+        self.rise_anchor = 0
+        return self.curve_ceiling + CURVE_RISE_TOLERANCE
+    else:
+      self.curve_ceiling = 0
+
     if self.max_target_rise <= 0:  # 0 disables the limiter
       self.rise_anchor = 0
       return self.v_target
