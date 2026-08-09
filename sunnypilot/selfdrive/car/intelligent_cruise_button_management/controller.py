@@ -467,12 +467,35 @@ class IntelligentCruiseButtonManagement:
     than braking into it. What is left under this limiter is therefore the no-deadline case only:
     speed limits and plain cruise.
 
-    THE ORIGINAL PREMISE IS ALSO DEAD, which is why removing it costs nothing. This existed because
-    a large set-speed drop supposedly makes Ford brake hard. Ford was measured at 1.31 m/s^2 on the
-    2026-08-08 exit -- the UN R13-H brake-lamp threshold, its ceiling -- and it decelerates at that
-    rate whatever the size of the drop. It cannot be violent. So metering never bought gentleness;
-    it only ever bought delay. What it still buys on a speed limit is COASTING instead of braking
-    at all, which is a real difference in feel and in whether the stop lamps light.
+    WHAT THIS WAS ACTUALLY FOR, from the owner who asked for it (2026-08-08): *"I originally planned
+    that feature so that the brake lights wouldn't be turning on all the time. But then I found out
+    that Ford ACC occasionally coasts and when it brakes, the lights don't come on for a bit."*
+
+    So the purpose was never gentleness -- it was the STOP LAMPS. Worth having written down,
+    because the comment here used to say the guard was against a violent application, and that
+    reading is what made the cap look load-bearing everywhere rather than in one case.
+
+    Two findings have since narrowed it, and they point the same way:
+
+      - Ford cannot be violent. Measured at 1.31 m/s^2 on the 2026-08-08 exit -- the UN R13-H lamp
+        threshold, its ceiling -- and it holds that rate whatever the size of the drop. Metering
+        never bought gentleness, only delay.
+      - Ford already does some of this itself: it coasts of its own accord, and light applications
+        do not light the lamps at all. That last part is a THRESHOLD, not a delay, which is the
+        useful correction -- carstate_ext.py reads BrkLamp_B_Rq (what traffic sees) separately from
+        AccBrkTot_A_Rq (what ACC asked for) precisely because ACC applies brake too light to trigger
+        the lamps. UN R13-H puts the mandatory point at 1.3 m/s^2. ACC ramps its request up from
+        zero, so the first part of every application sits under the line and reads from the driver's
+        seat as the lamps being late.
+
+    That threshold is why capping the step works at all, and it is a better reason than the one this
+    was built on: a small set-speed step produces a small deceleration request, which stays under
+    1.3 and leaves the lamps dark. Magnitude, which is exactly what a cap controls. The 1.31 m/s^2
+    measured on the exit is a hair OVER the mandatory point -- those lamps were lit the whole ramp.
+
+    What survives is narrow and real: on a target with no deadline, keeping each step small keeps
+    Ford in the coasting regime rather than the braking one, and the lamps stay dark. That is worth
+    having for a speed limit and worth nothing when the road has set a deadline.
 
     The exemption is keyed on a deadline-bearing source ASKING, not on it winning the frame -- see
     where deadline_requesting is set for why the frame's plan source is the wrong test.
