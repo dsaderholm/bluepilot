@@ -488,6 +488,11 @@ ACC_ENGINE_BRAKE_MS2 = -0.15
 DEFAULT_SETTLE_TIME_S = 20
 
 
+# How long behind a leftmost-lane straggler before it counts as one. Everybody slows for a moment;
+# a car genuinely camped in the passing lane is there for a while, and without this the count would
+# be dominated by ordinary bunching and say nothing.
+HOG_MIN_S = 8.0
+
 # --- keep right ---
 # "Keep right except to pass" is the mirror of the passing question: nothing is holding us back and
 # a lane exists to our right, so we should not be sitting out here. Deliberately slower to fire
@@ -560,6 +565,12 @@ class PassingAssistDetector:
     # Seconds per blocked reason, counted only while a pass was actually wanted. See wantedSeconds.
     self._block_seconds: dict[int, float] = {}
     self.wanted_seconds = 0.0
+    # LEFT LANE HOGS, asked for by name 2026-08-09 after a less printable list of alternatives.
+    # See _track_lane_hog for what counts as one and, more importantly, what does not.
+    self.hog_seconds = 0.0
+    self.hog_count = 0
+    self._hog_held_s = 0.0
+    self._hog_counted = False
     self.elapsed_s = 0.0
     self._timeline: list = []
     self._timeline_prev: tuple = ()
@@ -1250,6 +1261,46 @@ class PassingAssistDetector:
     except Exception:  # noqa: BLE001 - a param failure must never reach the planner
       pass
 
+  def _track_lane_hog(self) -> None:
+    """Time spent behind someone sitting in the leftmost lane below the set speed.
+
+    Asked for by name on 2026-08-09, at the end of a list whose other entries were the horn, the
+    high beams, a brake check and "a little love tap". This is the one of them that tells the next
+    drive something.
+
+    THREE TERMS, and the third is what makes it a hog rather than traffic:
+
+      a lead, slow enough to be worth passing   the same test the whole feature runs on, so this
+                                                cannot disagree with the panel about what "slow" is
+      no lane to our LEFT                       we are already as far over as the road goes. Behind
+                                                someone slow in the middle of a freeway is ordinary
+                                                traffic; behind them in the passing lane is not
+      a lane to our RIGHT                       somewhere for them to go. Without it they are not
+                                                hogging anything, they are just the front of the
+                                                queue, and counting that would make the number
+                                                meaningless on a two-lane road
+
+    Deliberately NOT gated on whether a pass was suggested or refused. The question is how much of
+    the drive was spent stuck behind one of these, and a gate that only counted the ones the system
+    reacted to would report the feature's coverage rather than the road's behavior.
+
+    HOG_MIN_S keeps a momentary queue out of the count: everyone slows for a moment, and a car that
+    is genuinely camped there is there for a while.
+    """
+    hogging = (self.lead_is_slow and not self.left_geometry_ok and self.right_geometry_ok)
+    if not hogging:
+      self._hog_held_s = 0.0
+      self._hog_counted = False
+      return
+
+    self._hog_held_s += DT_MDL
+    if self._hog_held_s < HOG_MIN_S:
+      return
+    self.hog_seconds += DT_MDL
+    if not self._hog_counted:
+      self._hog_counted = True
+      self.hog_count += 1
+
   def _record_timeline(self) -> None:
     """Append one entry whenever the visible state changes. See TIMELINE_MAX.
 
@@ -1296,6 +1347,8 @@ class PassingAssistDetector:
         "geoRefusedShare": round(self.geo_refusal[2], 3),
         "geoLoosenTo": self.geo_refusal_loosen_to,
         "wantedSeconds": round(self.wanted_seconds, 1),
+        "hogSeconds": round(self.hog_seconds, 1),
+        "hogCount": int(self.hog_count),
         "topBlockedBy": int(top_key),
         "topBlockedShare": round(top_share, 3),
         "clearShare": round(self.clear_share, 3),
@@ -1722,6 +1775,7 @@ class PassingAssistDetector:
       self.wanted_seconds += DT_MDL
       key = int(self.blocked_by)
       self._block_seconds[key] = self._block_seconds.get(key, 0.0) + DT_MDL
+    self._track_lane_hog()
 
     # Only once there is something worth keeping, so an idle commute cannot overwrite the drive
     # that actually produced numbers.
@@ -2299,6 +2353,8 @@ class PassingAssistDetector:
     passingAssist.accBrakingOnsetMax = float(pa.acc_onset_max)
     top_key, top_share = pa.top_blocked
     passingAssist.wantedSeconds = float(pa.wanted_seconds)
+    passingAssist.hogSeconds = float(pa.hog_seconds)
+    passingAssist.hogCount = min(pa.hog_count, 65535)
     passingAssist.topBlockedBy = top_key
     passingAssist.topBlockedShare = float(top_share)
     passingAssist.clearShare = float(pa.clear_share)

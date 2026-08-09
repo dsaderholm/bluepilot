@@ -3065,3 +3065,57 @@ class TestTrafficCanStandInForTheRoadEdge:
     det = run(PassingAssistDetector(), 1, **self.BAD_EDGE, **self.TRAFFIC)
     assert not det.adjacent.left.same_direction_recent
     assert not det.left_geometry_ok
+
+
+class TestLeftLaneHogs:
+  """Asked for by name on 2026-08-09, at the end of a list that also included the horn, the high
+  beams, a brake check and "a little love tap". This is the one that tells the next drive
+  something: it is the deficit threshold's own evidence, counted on the road.
+
+  Three terms, and the third is what makes it a hog rather than traffic -- a lane free to their
+  right. Without it they are not hogging anything, they are the front of the queue.
+  """
+
+  HOG_FRAMES = int(14.0 / DT_MDL)          # comfortably past HOG_MIN_S
+  # Leftmost lane with a real lane to the right: no far-left paint, road edge well out on the right.
+  PASSING_LANE = IN_LEFT_LANE
+  # Leftmost, but only a shoulder to the right -- an ordinary two-lane road.
+  NOWHERE_TO_GO = dict(probs=(0.1, 0.99, 0.99, 0.2), edges=(-2.2, 2.4))
+
+  def test_a_car_camped_in_the_passing_lane_is_counted(self):
+    det = run(PassingAssistDetector(), self.HOG_FRAMES, **self.PASSING_LANE)
+    assert det.hog_count == 1
+    assert det.hog_seconds > 3.0
+
+  def test_not_counted_when_there_is_still_a_lane_further_left(self):
+    """The default road puts us in the right-hand lane with a lane to our left. Being behind
+    something slow there is ordinary traffic, and counting it would drown the number."""
+    det = run(PassingAssistDetector(), self.HOG_FRAMES)
+    assert det.hog_count == 0
+
+  def test_not_counted_when_they_have_nowhere_to_go(self):
+    """The term that makes this mean something. On a two-lane road the car ahead is not hogging the
+    passing lane, it IS the road -- and a counter that fired here would say nothing about anyone's
+    behavior."""
+    det = run(PassingAssistDetector(), self.HOG_FRAMES, **self.NOWHERE_TO_GO)
+    assert det.hog_count == 0
+
+  def test_a_brief_slowdown_is_not_a_hog(self):
+    """Everybody slows for a moment. See HOG_MIN_S -- without it the count is dominated by ordinary
+    bunching and stops being about anyone camping."""
+    det = run(PassingAssistDetector(), int(5.0 / DT_MDL), **self.PASSING_LANE)
+    assert det.hog_count == 0
+    assert det.hog_seconds == 0.0
+
+  def test_one_hog_is_counted_once_however_long_he_sits_there(self):
+    """The seconds keep climbing; the count does not. A driver reads them as two different facts and
+    a count that ticked per frame would be meaningless."""
+    det = run(PassingAssistDetector(), int(60.0 / DT_MDL), **self.PASSING_LANE)
+    assert det.hog_count == 1
+    assert det.hog_seconds > 45.0
+
+  def test_a_second_one_later_counts_again(self):
+    det = run(PassingAssistDetector(), self.HOG_FRAMES, **self.PASSING_LANE)
+    run(det, int(6.0 / DT_MDL), status=False, **self.PASSING_LANE)   # road clears
+    run(det, self.HOG_FRAMES, **self.PASSING_LANE)
+    assert det.hog_count == 2

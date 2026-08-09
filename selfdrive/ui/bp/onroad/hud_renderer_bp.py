@@ -708,6 +708,12 @@ class HudRendererBP(HudRendererSP):
       if pa.accBrakingOnsetMax > 0:
         d = pa.accBrakingOnsetMax if ui_state.is_metric else pa.accBrakingOnsetMax * 3.28084
         lines.append(f"ACC braked by {d:.0f}{'m' if ui_state.is_metric else 'ft'}")
+      # LEFT LANE HOGS. He asked for this by name; the other items on that list were the horn,
+      # the high beams and a brake check. This is the one that tells the next drive something --
+      # it is the deficit threshold's own evidence, counted on the road rather than argued about.
+      if pa.hogCount:
+        lines.append(f"{pa.hogCount} left-lane hog{'' if pa.hogCount == 1 else 's'}, "
+                     f"{pa.hogSeconds:.0f}s")
       if pa.maneuverAborts:
         lines.append(f"{pa.maneuverAborts} backed out")
       if pa.crawlEvents:
@@ -797,6 +803,10 @@ class HudRendererBP(HudRendererSP):
       if passed_by:
         quiet = float(d.get("overtakenQuietest", 0))
         lines.append(f"passed by {passed_by}, quiet {quiet:.0f}s")
+      hogs = int(d.get("hogCount", 0))
+      if hogs:
+        lines.append(f"{hogs} left-lane hog{'' if hogs == 1 else 's'}, "
+                     f"{float(d.get('hogSeconds', 0)):.0f}s")
       if float(d.get("oncomingDRel", 0)) > 0:
         od = float(d["oncomingDRel"])
         ov = abs(float(d["oncomingVAbs"])) * (3.6 if ui_state.is_metric else 2.23694)

@@ -125,6 +125,9 @@ SCENES = [
    "THIS DRIVE", "left refused: paint 0.31 (86%)  -  suggested 0, taken 0", 0.0, False, INFO),
   ("stopped: a drive that wanted a pass and never got one",
    "THIS DRIVE", "suggested 0, taken 0  -  mostly: two-way road 78%", 0.0, False, INFO),
+  # The one he asked for by name. Sized as _fit_sub would emit it alongside its neighbours.
+  ("stopped: how much of the drive was spent behind a left-lane hog",
+   "THIS DRIVE", "4 left-lane hogs, 212s  -  mostly: no lane to move into 61%", 0.0, False, INFO),
   ("stopped: who overtook you, and the longest quiet stretch",
    "THIS DRIVE", "passed by 12, quiet 94s  -  your changes: 23, 3.8s each, 2 cancelled",
    0.0, False, INFO),

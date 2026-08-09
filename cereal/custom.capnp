@@ -691,7 +691,12 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     # "62% two-way road" point at completely different work, and neither is visible from watching
     # the panel, where every reason looks equally common because each one is only ever on screen
     # for a moment.
-    wantedSeconds @58 :Float32;      # total time a pass was warranted
+    wantedSeconds @58 :Float32;
+    # LEFT LANE HOGS. Seconds spent behind someone camped in the leftmost lane below
+    # the set speed with a lane free to their right, and how many distinct ones. See
+    # _track_lane_hog for why the lane-to-the-right term is what makes it a hog.
+    hogSeconds @94 :Float32;
+    hogCount @95 :UInt16;      # total time a pass was warranted
     topBlockedBy @59 :Blocked;       # the reason that consumed the most of it
     topBlockedShare @60 :Float32;    # its share, 0..1
     clearShare @61 :Float32;         # share where nothing was stopping it at all
