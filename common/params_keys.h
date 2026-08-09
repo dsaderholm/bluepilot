@@ -468,8 +468,19 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // So these are set from the objective alone -- minimize takeovers, slower is explicitly
     // acceptable -- and a flat modest bump is the honest expression of that. If the angle gains
     // move after the alignment, these do NOT need to move with them.
-    {"SmartCruiseControlVisionLowSpeedFactor", {PERSISTENT | BACKUP, INT, "110"}},
-    {"SmartCruiseControlVisionHighSpeedFactor", {PERSISTENT | BACKUP, INT, "100"}},
+    // BluePilot: 110 -> 100 on 2026-08-09. "It handled a lower speed curve pretty well though,
+    // maybe a bit too slow." 110 targeted 1.82 m/s^2; 100 targets 2.0, which is the same place the
+    // high-speed end now sits relative to its own complaint. "Pretty well" is why this moves less
+    // than the high-speed one in absolute terms.
+    {"SmartCruiseControlVisionLowSpeedFactor", {PERSISTENT | BACKUP, INT, "100"}},
+    // BluePilot: 100 -> 90 on 2026-08-09, from the road. "It also took a highway curve a little
+    // too slow again."
+    //
+    // a_lat_reg_max = _A_LAT_REG_MAX / sensitivity, and _A_LAT_REG_MAX is 2.0 m/s^2, so 100 targets
+    // exactly 2.0 and 90 targets 2.22 -- about 10% more speed through a bend. A 10% step because
+    // "a little too slow" is a small complaint and overshooting it means slowing too little, which
+    // is the worse direction to be wrong in.
+    {"SmartCruiseControlVisionHighSpeedFactor", {PERSISTENT | BACKUP, INT, "90"}},
     // BluePilot: SCC-Map deceleration target, tenths of m/s^2, magnitude. Unlike SCC-Vision this
     // single value sets BOTH how hard it slows and how early it starts, because the trigger is
     // "am I within the distance needed to reach the corner speed at this rate" -- gentler means a

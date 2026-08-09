@@ -6,7 +6,7 @@
 # Last Modified: $(date +%Y-%m-%d)
 #
 # This standalone script manages boot image updates/restoration
-# for CommaAI devices, specifically for BluePilot customizations.
+# for CommaAI devices, specifically for FusionPilot customizations.
 ###############################################################################
 
 readonly SCRIPT_VERSION="1.0.0"

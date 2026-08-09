@@ -1,4 +1,4 @@
-"""BluePilot: the message lists Ford's CarState hands to CANParser must not repeat an address.
+"""FusionPilot: the message lists Ford's CarState hands to CANParser must not repeat an address.
 
 CANParser raises RuntimeError("Duplicate Message Check: %d") when it does, at car init, which
 takes card down and leaves the device stuck on "waiting to start" with no way to drive.

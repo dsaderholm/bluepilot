@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Render the HOLD badge and Ford ACC pill to PNG, offline, at device scale.
 
-BluePilot: these two readouts sit under the MAX box, and until now the only way to judge their
+FusionPilot: these two readouts sit under the MAX box, and until now the only way to judge their
 size and placement was to flash the device and drive. That is a poor loop for a cosmetic change,
 and it is why they shipped as 34 px unbacked text that could not be read at a glance.
 

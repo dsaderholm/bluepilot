@@ -1,4 +1,4 @@
-"""BluePilot: the camera's veto over a map curve that is not there.
+"""FusionPilot: the camera's veto over a map curve that is not there.
 
 Both curve controllers feed a min() in the planner, so either can LOWER the target and neither can
 veto the other -- SCC-Vision seeing no curve is silence, and min() ignores silence. Bad OSM

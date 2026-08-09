@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""BluePilot: dump what was true around a "Controls Mismatch", on the device.
+"""FusionPilot: dump what was true around a "Controls Mismatch", on the device.
 
 Reported 2026-08-06: controlsMismatch appears when resuming cruise at a complete stop, never just
 from stopping. It is ET.IMMEDIATE_DISABLE, so it takes everything down with it.

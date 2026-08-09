@@ -4,7 +4,7 @@ Copyright (c) 2021-, Haibin Wen, sunnypilot, and a number of other contributors.
 This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 
-BluePilot: adding a car platform means registering it in several unrelated files, and missing one
+FusionPilot: adding a car platform means registering it in several unrelated files, and missing one
 does not fail at import -- it fails inside card at car init, on the vehicle.
 
 FORD_FUSION_MK5 shipped without an entry in torque_data/override.toml. Everything imported, the

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""BluePilot: every setting this branch adds or re-defaults, grouped by where it lives on screen.
+"""FusionPilot: every setting this branch adds or re-defaults, grouped by where it lives on screen.
 
     python tools/bp_list_defaults.py            # print it
     python tools/bp_list_defaults.py --md       # markdown, for BP-DEFAULTS.md
@@ -26,7 +26,7 @@ MENUS = {
   "selfdrive/ui/sunnypilot/layouts/settings/steering_sub_layouts/lane_change_settings.py": "Steering > Customize Lane Change",
   "selfdrive/ui/sunnypilot/layouts/settings/steering.py": "Steering",
   "selfdrive/ui/sunnypilot/layouts/settings/cruise.py": "Cruise",
-  "selfdrive/ui/bp/layouts/settings/bluepilot.py": "BluePilot",
+  "selfdrive/ui/bp/layouts/settings/bluepilot.py": "FusionPilot",
 }
 
 def strings(node):

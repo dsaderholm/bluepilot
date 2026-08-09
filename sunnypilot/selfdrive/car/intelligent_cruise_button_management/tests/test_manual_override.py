@@ -4,7 +4,7 @@ Copyright (c) 2021-, Haibin Wen, sunnypilot, and a number of other contributors.
 This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 
-BluePilot: behavioral tests for the ICBM driver baseline.
+FusionPilot: behavioral tests for the ICBM driver baseline.
 
 A set-speed press means "for this speed limit I want a different number", not "stop managing my
 cruise". Two real defects came from getting that wrong: ICBM dragging the set speed back down to
@@ -43,13 +43,13 @@ DECEL_PRESS = NS(type=NS(raw=ButtonType.decelCruise), pressed=True)
 DECEL_RELEASE = NS(type=NS(raw=ButtonType.decelCruise), pressed=False)
 
 CC = NS(enabled=True, cruiseControl=NS(resume=False, override=False, cancel=False))
-# BluePilot: controlsd sets cruiseControl.override whenever longitudinal is being overridden, and
+# FusionPilot: controlsd sets cruiseControl.override whenever longitudinal is being overridden, and
 # gasPressedOverride is the only event that does so -- see apply_gas_handoff.
 CC_override = NS(enabled=True, cruiseControl=NS(resume=False, override=True, cancel=False))
 
 
 def make_cs(cluster, v_ego=None, buttons=(), enabled=True, gas_pressed=False, brake_pressed=False):
-  """BluePilot: gasPressed and brakePressed are on every real CarState. They were missing here, so
+  """FusionPilot: gasPressed and brakePressed are on every real CarState. They were missing here, so
   the day the controller started reading one, 111 tests failed at once on an AttributeError that
   cannot happen on the device. A fixture thinner than the real message hides nothing useful."""
   return NS(vEgo=(cluster if v_ego is None else v_ego) * MPH,
@@ -1318,7 +1318,7 @@ class TestPressIsNotRelabelledByTheFallback:
 
 
 class TestGasPedalHandoff:
-  """BluePilot: the set speed follows the car while the driver is on the throttle.
+  """FusionPilot: the set speed follows the car while the driver is on the throttle.
 
   Without it, gasPressedOverride stands ICBM down for as long as the pedal is held, the set speed is
   left behind, and lifting off hands a much lower number back to Ford's ACC, which then brakes."""
@@ -1369,7 +1369,7 @@ class TestGasPedalHandoff:
 
 
 class TestOvertakeReturnsToTheDriversNumber:
-  """BluePilot: the question the gas handoff has to answer.
+  """FusionPilot: the question the gas handoff has to answer.
 
   Hold at 70, floor it to 85 to pass, lift. The handoff raised the set speed to 85 so lifting off
   did not brake -- but the driver wants their 70 back, not to cruise at the speed they overtook at.

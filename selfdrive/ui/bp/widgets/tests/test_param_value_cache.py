@@ -1,7 +1,7 @@
 """
-BluePilot: tests for the value behind a +/- settings control.
+FusionPilot: tests for the value behind a +/- settings control.
 
-Reported after a drive: "all my angle tuning got wiped in the BluePilot settings, and I also
+Reported after a drive: "all my angle tuning got wiped in the FusionPilot settings, and I also
 couldn't tweak it while driving."
 
 Those read as two complaints and were one bug in three parts, all of them in this value path. The

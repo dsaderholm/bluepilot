@@ -1,326 +1,137 @@
 ![](selfdrive/assets/img_bluepilot_boot.jpg)
 
-Table of Contents
-=======================
+# FusionPilot
 
-- [Table of Contents](#table-of-contents)
-  - [Updates on Branch Names and Links](#-updates-on-branch-names-and-links)
-  - [Join our Discord](#-join-our-discord)
-  - [What is bluepilot?](#-what-is-bluepilot)
-  - [Prohibited Safety Modifications](#-prohibited-safety-modifications)
-  - [Installation](#-installation)
-  - [BluePilot Specific Features - bp-7.0](#-bluepilot-specific-features---bp-70)
-  - [Special Thanks](#-special-thanks)
-  - [User Data](#-user-data)
-  - [Licensing](#licensing)
-  - [Support sunnypilot](#support-sunnypilot)
-  - [Technical Documentation](#-technical-documentation)
+A personal fork of [BluePilot](https://github.com/bluepilotdev/bluepilot), for one specific car:
+a **2020 Ford Fusion Titanium AWD running retrofitted Ford Edge ADAS hardware** — Edge PSCM, rack,
+IPMA camera and CCM radar, with the Fusion's own ABS, instrument cluster and steering column.
 
----
+That combination does not exist from the factory, which is the whole reason this fork exists rather
+than being a settings profile. Platform `FORD_FUSION_MK5`, flags `ALT_STEER_ANGLE | TSR`, not CAN FD.
 
-<details><summary><h3>💭 Updates on Branch Names and Links</h3></summary>
+The name is the car and the fork at once: a Fusion body with Edge brains, and four upstream projects
+fused into one tree.
 
----
-
-As of May 2025, we are updating the way branches are named and how links are generated. We had initially intended to use a branch naming system similar to openpilot and sunnypilot where there was a "stable" or "release" branch which included all fully vetted code, and then "staging" or "beta" branches with new code that would eventually move into the stable/release branches.  However as we evolved we found everyone liked being able to bounce between newer and older branches to compare features and control. Moving forwards all releases will simply be named bp-"feature release number" as an example "staging-1.1" which features the bluepilot 1.1 features (custom tuning) will become "bp-1.1".  We will not delete older branches so that anyone can go back and view older code for references.  Branches that no longer work properly will be denoted as -deprecated.
-
-To install any version of bluepilot, use the following URL formula (URL is case sensitive)
-
-installer.comma.ai/BluePilotDev/"branch name"
-
-For example
-
-installer.comma.ai/BluePilotDev/bp-7.0
-
-will install the **bp-7.0** branch (current release, synced with sunnypilot master as of June 10, 2026).  Branches known to no longer work due to changes in the comma codebase will be appended with -deprecated so it will be obvious they will not install or work correctly.
-
-</details>
-
-
----
-
-<details><summary><h3>💭 Join our Discord</h3></summary>
-
----
-
-Join the official #ford channel at the sunnypilot Discord server to stay up to date with all the latest features and be a part of shaping the future of bluepilot!
-* [sunnypilot Discord server](https://discord.sunnypilot.com)
-
-</details>
-
-<details><summary><h3>🌞 What is bluepilot?</h3></summary>
-
----
-
-[bluepilot](https://github.com/bluepilotdev/bluepilot) is a fork of the hugely popular SunnyPilot project for the comma 3X and comma 4.  The goal of BluePilot is to develop, test, and stage Ford specific enhancements, validating them before submission to the SunnyPilot team for inclusion in the parent project.  BluePilot is always based upon sunnypilot's master branch.
-
-**BluePilot bp-7.0** is synced with **sunnypilot master (June 10, 2026, openpilot 0.11.2 base)** and includes all upstream sunnypilot features plus Ford-specific enhancements. This release runs on AGNOS 18.4 and supports both the comma 3X and the comma 4.
-
-### Upstream SunnyPilot Features
-BluePilot includes **all** features from the upstream SunnyPilot project. For complete sunnypilot documentation:
-* **[sunnypilot documentation](https://docs.sunnypilot.ai/)** - Features, installation, and FAQ
-* **[README_SP.md](README_SP.md)** - The upstream sunnypilot README
-
-Key upstream features include: MADS (Modular Assistive Driving System), Neural Network Lateral Control (NNLC), Dynamic Experimental Control (DEC), Speed Limit Assist (SLA), Intelligent Cruise Button Management (ICBM, extended to Ford by BluePilot), Smart Cruise Control Map & Vision (SCC-M / SCC-V), Driving Model Manager, sunnylink integration, and much more.
-
-</details>
-
-<details><summary><h3>⛔ Prohibited Safety Modifications</h3></summary>
-
----
-
-All [official sunnypilot branches](https://github.com/sunnyhaibin/sunnypilot/branches) strictly adhere to [comma.ai's safety policy](https://github.com/commaai/openpilot/blob/master/docs/SAFETY.md). Any changes that go against this policy will result in your fork and your device being banned from both comma.ai and sunnypilot channels. This same stipulation applies to all bluepilot instances as well.
-
-The following changes are a **VIOLATION** of this policy and **ARE NOT** included in any sunnypilot branches:
-* Driver Monitoring:
-    * ❌ "Nerfing" or reducing monitoring parameters.
-* Panda safety:
-    * ❌ No preventing disengaging of <ins>**LONGITUDINAL CONTROL**</ins> (acceleration/brake) on brake pedal press.
-    * ❌ No auto re-engaging of <ins>**LONGITUDINAL CONTROL**</ins> (acceleration/brake) on brake pedal release.
-    * ❌ No disengaging on ACC MAIN in OFF state.
-
-</details>
-
-
-<details><summary><h3>⚒ Installation</h3></summary>
-
-* bluepilot not installed
-  1. [Factory reset/uninstall](https://github.com/commaai/openpilot/wiki/FAQ#how-can-i-reset-the-device) the previous software if you have another software/fork installed.
-  2. After factory reset/uninstall and upon reboot, select `Custom Software` when given the option.
-  3. Input the installation URL based on the desired branch. Example: ```installer.comma.ai/BluePilotDev/bp-7.0``` (note: `https://` is not required on the comma device)
-  4. Complete the rest of the installation following the onscreen instructions.
-
-* bluepilot already installed
-  1. On the device, go to `Settings` ▶️ `Software`.
-  2. At the `Download` option, press `CHECK`. This will fetch the list of latest branches.
-  3. At the `Target Branch` option, press `SELECT` to open the Target Branch selector.
-  4. Scroll to select the desired branch
-
-Requires further assistance with software installation? Join the [sunnypilot Discord server](https://discord.sunnypilot.com) and message us in the `#ford` channel.
-
-  </details>
-
-<details><summary><h3>🚗 BluePilot Specific Features - bp-7.0</h3></summary>
-
----
-
-## What's New in bp-7.0
-
-BluePilot 7.0 is a **major update** synced with sunnypilot master (June 10, 2026, openpilot 0.11.2 base) on AGNOS 18.4, headlined by a second, selectable Ford lateral control scheme with full panda safety enforcement.
-
-### Angle-Primary Lateral Control (New)
-A second Ford steering strategy, selectable at any time from the settings menu (no reinstall or reboot):
-
-* **Primary Control Variable selector** - Choose between Curvature (the proven 4-signal strategy from previous releases) and Angle (path_angle as the primary actuator)
-* **Per-platform tuning built in** - Separate gain defaults for CAN vehicles (Escape, Bronco Sport, Maverick, Edge), CAN-FD trucks (F-150, Lightning, Expedition, Ranger), and CAN-FD SUVs (Mustang Mach-E, Escape MK4.5)
-* **Variable lookahead** - Model lookahead time adapts to speed and curve depth for earlier, smoother curve entry without early unwind at the apex
-* **PSCM saturation handling** - Detects when the steering module is at its authority limit and manages the command to avoid snap corrections on release
-* **User feel adjustments** - Low Speed and High Speed Adjustment Factors plus an angle-specific Lane Change Factor
-
-### Panda Safety for Angle Mode
-Angle mode runs under full panda safety enforcement, not a bypass:
-
-* The safety firmware corroborates that angle mode is genuinely engaged through a redundant CAN channel before accepting angle-mode frames
-* A shadow curvature cross-check continuously validates the commanded steering intent against the measured vehicle motion
-* path_angle rate-of-change limits are enforced independently on the panda, tuned to the actual control cadence
-* Full regression test coverage in the safety test suite, validated against recorded real-world routes with a replay harness
-
-### Per-Scheme Tuning Parameters
-Curvature and angle control no longer share any tuning values:
-
-* Every lateral tuning parameter now belongs to exactly one scheme (curvature or angle)
-* Switching schemes never overwrites or reuses the other scheme's tuning; each keeps its own values
-* Existing settings migrate automatically on first boot after updating; no retuning required
-
-### Settings Menu Reorganization
-* **Nested lateral tuning sections** - Lateral Tuning now contains collapsible Angle Tuning and Curvature Tuning sub-sections; the disable toggle and scheme selector sit at the top
-* Controls for the unselected scheme stay visible but grey out, so both tuning sets are always discoverable (comma 3X)
-* Cleaned up and reorganized comma 4 menus, with an on-device vehicle selector and integer/float value pickers on both platforms
-
-### SunnyLink Remote Settings
-* **Ford BluePilot settings under the "vehicle" panel in sunnylink** - Configure BluePilot from the sunnylink interface, grouped by System, Vehicle, Visuals, Longitudinal Tuning, and Lateral Tuning
-* Scheme-aware: angle and curvature tuning entries appear only when their control scheme is selected, with the same dependency gating as the on-device menu
-
-### Connect Backend
-* **Connect Backend** - Choose Comma Connect (stock servers), Konik Stable (stable.konik.ai), or Offline Mode (unreachable hosts so uploads never succeed)
-* Dongle ID switches automatically between Comma and Konik and is cached per backend, so switching is reversible in both directions with a reboot
-* Pairing QR codes and instructions follow the selected backend
-
-### Visuals
-* **Rainbow Lane Lines** - Inner lane lines become rainbow colored when longitudinal control is active
-* **Minimal Driving View** - Hide the camera feed and show only lane lines and the model path
-* **Show Lateral Control Mode** - Steering wheel icon overlay showing the active lateral scheme
-* Steering arc fix for the comma 3X, with reduced false left-steer bias from road roll
-
-### Platform & Stability
-* Synced with sunnypilot master (June 10, 2026): Chrysler CUSW, Rivian, Tesla, Honda, and Hyundai updates, lateralManeuverPlan support, updated panda/msgq/rednose submodules
-* AGNOS 18.4 with the AGNOS thermal framework managing CPU frequency (replaces the static frequency cap)
-* Display initialization fixes for git-clone installs (EGL/GLES driver re-pointing on boot)
-* is_bluepilot() detection system; all stock file overrides are guarded and labeled for clean upstream merges
-* Ford opendbc code refactored into a sunnypilot extension layer, with the safety test harness synced to upstream
-
-### BluePilot Settings & Tuning
-
-The following settings are available in the BluePilot menu:
-
-**System:**
-* UI Debug Logging
-* Connect Backend (Comma Connect / Konik Stable / Offline Mode)
-* Preferred WiFi Network
-* Clear Crashed Model
-* Reset Menu Layout
-
-**Vehicle:**
-* Show BlueCruise UI on Cluster (supported digital dashes)
-* 12V Battery Limit
-
-**Visuals:**
-* Hide Onroad Border
-* Disable Lane Line Status Color
-* Minimal Driving View
-* Rainbow Lane Lines
-* Show Blindspot Overlay
-* Show Brake Status
-* Show Confidence Ball (comma 3X)
-* Animate Steering Wheel
-* Show Lateral Control Mode
-* Show Radar Lead Overlay (Ford ACC) with size selection
-* Hybrid/EV Battery Status, Power Flow, gauge size and style options
-* Lower Right Display selector (comma 4)
-
-**Longitudinal Tuning:**
-* Bypass BP Longitudinal Control
-* Disable Downhill Compensation
-* Disable Ford Radar (Vision-Only Leads)
-
-**Lateral Tuning:**
-* Disable BP Lateral Control
-* Primary Control Variable (Curvature / Angle)
-* Disable Lane Change Under Speed, with minimum speed selector
-* Angle Tuning: Low Speed Adjustment Factor, High Speed Adjustment Factor, Lane Change Factor High
-* Curvature Tuning: Human Turn Detection, Lane Change Factor High, Lane Positioning, In-Lane Offset, Lanefull Mode, Custom Tuning Profile, Predicted Curvature Blend Ratios (High/Low), Centering PID Gain
-
-### Previous Releases (6.x)
-
-BluePilot 6.0 through 6.1 introduced the React-based BluePilot Portal PWA (home dashboard, routes with video playback and GPS maps, settings, and diagnostics panels), comma 4 support with its own onroad UI and menus, separate BluePilot/SunnyPilot BSM toggles, ACC coasting improvements, the on-device vehicle selector, Ford Edge MK2 support, and Ford ICBM improvements. For the complete version-by-version history, see [BP_CHANGES.json](BP_CHANGES.json).
-
-</details>
-
-<details><summary><h3>🏆 Special Thanks</h3></summary>
-
----
-
-* [twilsonco](https://github.com/twilsonco/openpilot)
-
-</details>
-
-<details><summary><h3>📊 User Data</h3></summary>
-
----
-
-By default, sunnypilot/bluepilot uploads the driving data to comma servers. You can also access your data through [comma connect](https://connect.comma.ai/). The Connect Backend setting can instead send data to Konik (stable.konik.ai), or Offline Mode (unreachable hosts so uploads never succeed).
-
-sunnypilot/bluepilot is open source software. The user is free to disable data collection if they wish to do so.
-
-sunnypilot/bluepilot logs the road-facing camera, CAN, GPS, IMU, magnetometer, thermal sensors, crashes, and operating system logs.
-The driver-facing camera and microphone are only logged if you explicitly opt-in in settings.
-
-By using this software, you understand that use of this software or its related services will generate certain types of user data, which may be logged and stored at the sole discretion of comma. By accepting this agreement, you grant an irrevocable, perpetual, worldwide right to comma for the use of this data.
-
-</details>
-
-<details><summary><h3>Licensing</h3></summary>
-
-openpilot is released under the MIT license. Some parts of the software are released under other licenses as specified.
-
-Any user of this software shall indemnify and hold harmless comma.ai, Inc. and its directors, officers, employees, agents, stockholders, affiliates, subcontractors and customers from and against all allegations, claims, actions, suits, demands, damages, liabilities, obligations, losses, settlements, judgments, costs and expenses (including without limitation attorneys’ fees and costs) which arise out of, relate to or result from any use of this software by user.
-
-**THIS IS ALPHA QUALITY SOFTWARE FOR RESEARCH PURPOSES ONLY. THIS IS NOT A PRODUCT.
-YOU ARE RESPONSIBLE FOR COMPLYING WITH LOCAL LAWS AND REGULATIONS.
-NO WARRANTY EXPRESSED OR IMPLIED.**
-
-For full license terms, please see the [`LICENSE`](LICENSE) file.
-
-</details>
-
-<details><summary><h3>Support sunnypilot</h3></summary>
-<h3>💰 Support sunnypilot</h3>
-
----
-
-If you find any of the features useful, consider becoming a [sponsor on GitHub](https://github.com/sponsors/sunnyhaibin) to support future feature development and improvements.
-
-
-By becoming a sponsor, you will gain access to exclusive content, early access to new features, and the opportunity to directly influence the project's development.
-
-<h3>GitHub Sponsor</h3>
-
-<a href="https://github.com/sponsors/sunnyhaibin">
-  <img src="https://user-images.githubusercontent.com/47793918/244135584-9800acbd-69fd-4b2b-bec9-e5fa2d85c817.png" alt="Become a Sponsor" width="300" style="max-width: 100%; height: auto;">
-</a>
-<br>
-
-<h3>PayPal</h3>
-
-<a href="https://paypal.me/sunnyhaibin0850" target="_blank">
-<img src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" alt="PayPal this" title="PayPal - The safer, easier way to pay online!" border="0" />
-</a>
-<br></br>
-</details>
-
-<details><summary><h3>🔧 Technical Documentation</h3></summary>
-
----
-
-### BluePilot Portal
-
-The BluePilot Portal is a React-based Progressive Web App served directly from the device at `http://<device-ip>:8088` (WebSocket updates on port 8089):
-
-* **Home Dashboard** - System status, drive stats, and disk space visualization
-* **Routes** - Browse recorded routes with video playback, GPS maps, camera exports, and qlog/rlog downloads
-* **Settings** - Configure all parameters from the browser with live WebSocket updates
-* **Diagnostics** - Real-time TMUX streaming and parameter browser
-
-Modification endpoints are blocked (HTTP 403) while the vehicle is driving.
-
-### Backend Architecture
+## Lineage, and what still comes from where
 
 ```
-bluepilot/backend/
-├── bp_portal.py             # Main HTTP server (BluePilot Portal)
-├── config.py                # Configuration and constants
-├── handlers/                # HTTP endpoint handlers
-├── params/                  # Parameter management and watching
-├── routes/                  # Route discovery, GPS metrics, preprocessing
-├── video/                   # FFmpeg export and HEVC to MP4 remuxing
-├── realtime/                # WebSocket broadcasting
-├── logs/                    # Cereal log parsing
-├── cache/                   # Metrics/thumbnail/remux caching
-├── storage/                 # Route preservation
-├── network/                 # Network utilities
-├── system/                  # CPU/memory/disk metrics
-├── core/                    # Thread-safe state and lifecycle
-└── utils/                   # Helper functions
+openpilot (comma.ai)  →  sunnypilot  →  BluePilot  →  FusionPilot
 ```
 
-### Development
+**BluePilot is still upstream and updates are still taken from it regularly.** This fork is a layer
+on top, not a departure. Everything below is what this layer adds — the Ford lateral scheme, ICBM,
+Speed Limit Assist, MADS and Smart Cruise Control all come from BluePilot and sunnypilot, and are
+not reimplemented here.
 
-**Backend testing:**
+Keeping updates easy is an explicit design constraint. Every line this fork changes in an upstream
+file is a merge conflict paid forever, so new work goes into new files wherever it can, hooks into
+upstream files are kept to one-liners, and additions whose reason has expired get deleted rather
+than parked. See `CLAUDE.md` for the rules that enforce that.
+
+## What this fork adds
+
+### Intelligent Cruise Button Management — tuning and repair
+
+ICBM is sunnypilot's actuator adapter: stock Ford ACC will not accept a longitudinal command, so
+openpilot's desired speed is translated into cruise-button presses. The set speed is the only lever
+this car has, and most of the work here is making it behave.
+
+- **A button contract settled on the road.** `RES +` creates or raises a HOLD — the driver's own set
+  speed — and `SET −` lowers it or, with cruise off, hands the speed back to Speed Limit Assist.
+  Every other feature keeps working against a hold: curves still slow the car, hazards still fire,
+  and the speed returns to the driver's number rather than the posted limit.
+- **Holds pinned to a location.** Tap the HOLD badge and that hold returns every time you drive
+  through the same spot. For the places that need the same correction on every trip.
+- **A standstill resume gate.** openpilot asserts resume from its own plan, which on a stock-ACC car
+  is not the controller that then has to drive — Ford reads resume as "go" and brakes hard when its
+  radar finds the lead still there. Resume is held until the lead has actually gone.
+- **Radar-blind lead detection.** Ford's ACC follows only radar-confirmed leads and its manual says
+  plainly that it may not detect stationary vehicles below 6 mph. The driving model sees them. When
+  it does and the radar has not, the set speed is brought to Ford's 20 mph floor and the driver is
+  told, with the deceleration as reaction time rather than a warning after the fact.
+- **Stop signs and red lights.** The same channel, for the case the lead trigger structurally cannot
+  catch: an empty intersection, where there is no vehicle to measure. Gated so it acts only once the
+  stop actually requires braking rather than while coasting would still arrive in time.
+- **A drop limiter that only meters what has no deadline.** Ford coasts for small set-speed steps
+  and brakes for large ones, and coasting into a new speed limit is nicer than braking into it. But
+  a curve or a mapped corner is a fixed place in the road, so those go straight to target — metering
+  them spends road that was already budgeted.
+
+### Smart Cruise Control — curves and exits
+
+- **Freeway exits.** `SmartCruiseControlMapDecel` is a trigger distance, not a rate: the map
+  publishes the corner speed at exactly the moment braking must begin. Anything that re-paces it
+  downstream misses the corner, which is what the drop limiter used to do.
+- **`SmartCruiseControlMapFactor`**, new here — the magnitude control mapped corners never had.
+  Mapped targets follow the posted yellow advisory, which assumes factory steering; this car's
+  retrofit PSCM may want less.
+- **A curve ceiling.** While a bend is being tracked the set speed follows the target *down* and
+  never back up. A curve target that briefly rises is noise, and chasing it costs the road needed
+  for the rest of the bend.
+
+### Speed limits
+
+Banded offsets, a configurable policy and fallback, lookahead for higher limits, and a maximum set
+speed that Speed Limit Assist will never exceed regardless of what is posted.
+
+### Passing assist
+
+Suggests and manages lane changes on multi-lane roads: adjacent-lane occupancy from the front radar,
+an oncoming-traffic veto that tells a divided highway from an undivided one, keep-right prompting,
+lead-braking holds, two-way-road strictness, and a per-drive history so the behavior can be reviewed
+afterwards rather than argued about from memory.
+
+### Radar detector integration
+
+Reads a radar detector over USB and slows for alerts, with a per-speed-band threshold fitted against
+what the car can actually shed, a false-alarm mute, and a minimum bar count.
+
+### Diagnostics and guards
+
+- **`tools/bp_offline_test.py`** — the offline suite, which re-execs under the pinned Python and
+  stubs the device-only leaves. Bare `pytest` fails here in ways that look like environment noise.
+- **`tools/bp_merge_upstream.py`** — takes a newer BluePilot end to end: tags a rollback point,
+  regenerates `car_list.json` instead of merging it, prints what is ours in each conflict, and runs
+  the suite.
+- **Route diagnostics** for exits, stops and controls mismatches, which read the device's own logs.
+- **Static guards for what tests cannot reach**: duplicate CAN registrations that strand the car at
+  boot, capnp fields added without their dataclass mirror, params declared twice, `int()` on a capnp
+  enum, and settings that ship without a control.
+
+## Settings
+
+Settings behave **exactly as they do on stock BluePilot, sunnypilot and openpilot**: `manager.py`
+writes each param's default on the first boot that knows the key, and the stored value never changes
+again.
+
+So a changed default is a **recommendation**, not a change. Every tunable control prints its shipped
+default in its own description — read live, so it cannot go stale — and applying it is a deliberate
+act. There is no migration deciding what your settings should be.
+
+## Updating
+
 ```bash
-python3 bluepilot/backend/test_backend_import.py   # Test backend imports
-python3 bluepilot/backend/test_modules_only.py     # Test modular components
-python3 bluepilot/test_web_routes.py               # Run local server for testing
+python tools/bp_merge_upstream.py
 ```
 
-**Frontend development (React + Vite):**
+Then on the device:
+
 ```bash
-cd bluepilot/web
-npm install
-npm run dev      # Development server
-npm run build    # Production build
+cd /data/openpilot && git pull && sudo reboot
 ```
 
-</details>
+## License and attribution
 
+openpilot is released under the MIT license by comma.ai — see `LICENSE`.
 
-<span>-</span> BluePilotDev Team
+This project uses software from Haibin Wen and SUNNYPILOT LLC and is licensed under a custom license
+requiring permission for use. See `LICENSE.md`.
+
+BluePilot's Ford work — the angle-control lateral scheme in particular — is the foundation this fork
+is built on.
+
+## Safety
+
+This is alpha-quality software for research purposes. It is not a product. The driver is responsible
+at all times, and this remains an SAE Level 2 system: extra sensors and better tuning do not change
+that. Users are responsible for complying with local laws.

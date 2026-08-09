@@ -40,7 +40,7 @@ class SettingsLayoutSP(OP.SettingsLayout):
     # BluePilot: insert vehicle fingerprint selector and BP settings buttons
     if is_bluepilot():
       bp_panel = BluePilotLayoutMici(back_callback=gui_app.pop_widget)
-      bluepilot_btn = BigButton("bluepilot", "", gui_app.texture("icons_mici/settings/car_icon.png", ICON_SIZE, ICON_SIZE))
+      bluepilot_btn = BigButton("FusionPilot", "", gui_app.texture("icons_mici/settings/car_icon.png", ICON_SIZE, ICON_SIZE))
       bluepilot_btn.set_click_callback(lambda: gui_app.push_widget(bp_panel))
 
       items.insert(4, bluepilot_btn)

@@ -4,7 +4,7 @@ Copyright (c) 2021-, Haibin Wen, sunnypilot, and a number of other contributors.
 This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 
-BluePilot: one simulated drive, exercising the whole ICBM feature set together.
+FusionPilot: one simulated drive, exercising the whole ICBM feature set together.
 
 Every other ICBM test is a unit test. Both defects that reached the road were INTERACTIONS --
 the re-arm rule meeting a continuously varying target, and the baseline meeting the cluster's lag
@@ -56,7 +56,7 @@ class Drive:
 
   def step(self, target, source=PlanSource.speedLimitAssist, buttons=(),
            lead=UnconfirmedLeadState.inactive, lead_target=0.0, map_active=None):
-    # BluePilot: gasPressed/brakePressed exist on every real CarState. Omitting them here meant an
+    # FusionPilot: gasPressed/brakePressed exist on every real CarState. Omitting them here meant an
     # AttributeError the device could never raise, the moment the controller read one.
     cs = NS(vEgo=self.v_ego * MPH,
             gasPressed=False,

@@ -1,4 +1,4 @@
-"""BluePilot: put the shipped default in the settings description.
+"""FusionPilot: put the shipped default in the settings description.
 
 *"Why don't we just put in the description of the option what the recommended value is so I can
 easily know what to change it to?"* (2026-08-05)

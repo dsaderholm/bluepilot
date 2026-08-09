@@ -1,5 +1,5 @@
 """
-BluePilot: holds that stay pinned to a place.
+FusionPilot: holds that stay pinned to a place.
 
 A normal ICBM hold is temporary by design -- it survives curves and leads, but a big enough change
 in the posted limit discards it, and so does handing the speed back to Speed Limit Assist. That is
@@ -69,7 +69,7 @@ MAX_RADIUS_M = 250
 
 MAX_PINS = 200  # sanity bound on a JSON param, not an expected count
 
-# BluePilot: noticing that you keep correcting the same place, and offering to remember it.
+# FusionPilot: noticing that you keep correcting the same place, and offering to remember it.
 #
 # Every hold you set by hand is a small statement that something here is wrong -- a limit nobody
 # drives, a sign the camera misreads, a stretch you take differently. Set the same hold in the same
@@ -85,11 +85,11 @@ SUGGEST_AFTER = 3
 SUGGEST_SPEED_TOLERANCE = 3   # display units
 MAX_OBSERVATIONS = 400        # twice MAX_PINS; observations churn faster than pins
 
-# BluePilot: this is read from selfdrived, whose step() runs at 100 Hz. Reading three params --
+# FusionPilot: this is read from selfdrived, whose step() runs at 100 Hz. Reading three params --
 # one of them a JSON blob that grows with the pin count -- on every one of those is 300 reads a
 # second for settings that change when someone opens a menu. Every other param reader in this
 # fork gates on PARAMS_UPDATE_PERIOD and this one was the outlier; the device is already thermally
-# tight enough that BluePilot 7.0 shipped with UI concessions for it.
+# tight enough that FusionPilot 7.0 shipped with UI concessions for it.
 _SETTINGS_PERIOD_FRAMES = max(int(PARAMS_UPDATE_PERIOD / DT_CTRL), 1)
 # The pin request is a button press and cannot wait three seconds, but it does not need 100 Hz
 # either. 10 Hz is below the threshold where a tap feels delayed and is a tenth of the cost.

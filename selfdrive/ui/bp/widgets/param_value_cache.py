@@ -1,7 +1,7 @@
 """
-BluePilot: the stored value behind a +/- control, cached and written through.
+FusionPilot: the stored value behind a +/- control, cached and written through.
 
-WHY THIS EXISTS, in the owner's words: "all my angle tuning got wiped in the BluePilot settings,
+WHY THIS EXISTS, in the owner's words: "all my angle tuning got wiped in the FusionPilot settings,
 and I also couldn't tweak it while driving."
 
 One widget, three faults, and they compound into exactly that:

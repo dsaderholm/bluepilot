@@ -1,4 +1,4 @@
-"""BluePilot: adopting the NEXT speed limit early, so the car coasts into the zone.
+"""FusionPilot: adopting the NEXT speed limit early, so the car coasts into the zone.
 
 The mechanism was already in sunnypilot, carrying `# FIXME-SP: this is not working as expected`.
 It was a clock-epoch mix-up: time.monotonic() counts seconds since boot, unixTimestampMillis

@@ -1,4 +1,4 @@
-"""BluePilot: `int()` on a capnp enum field is a crash no fixture can reach.
+"""FusionPilot: `int()` on a capnp enum field is a crash no fixture can reach.
 
 A capnp enum arrives as `capnp.lib.capnp._DynamicEnum`, and `int()` on it raises
 
