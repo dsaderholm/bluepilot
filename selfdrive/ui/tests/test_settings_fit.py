@@ -1,4 +1,4 @@
-"""BluePilot: does every settings control actually fit on the screen?
+"""FusionPilot: does every settings control actually fit on the screen?
 
 Reported from the car on 2026-08-04: the "By Limit" speed-limit offset option was off the right
 edge and unreachable. Adding a fourth button to a row sized for three took it from 1350 px to 1800,
@@ -100,7 +100,7 @@ def test_button_row_fits_on_screen(row):
 
 
 def test_bp_tests_are_registered():
-  """BluePilot: a test file the runner never collects is worse than no test at all.
+  """FusionPilot: a test file the runner never collects is worse than no test at all.
 
   test_settings_recommend_defaults.py was written, passed when run by name, and was not in
   DEFAULT_TARGETS -- so the suite total did not move and nothing anywhere said why. The only reason
@@ -108,7 +108,7 @@ def test_bp_tests_are_registered():
 
   selfdrive/ui/tests/ cannot be globbed (raylib and device deps live beside these), so new files
   there must be added by name, and "add it by name" is exactly the step that gets forgotten. This
-  scans for test files carrying the BluePilot marker in their module docstring and checks each one
+  scans for test files carrying the FusionPilot marker in their module docstring and checks each one
   is covered by a DEFAULT_TARGETS entry -- a name or a parent directory.
   """
   runner = REPO / "tools" / "bp_offline_test.py"
@@ -133,7 +133,10 @@ def test_bp_tests_are_registered():
     except (SyntaxError, UnicodeDecodeError, OSError):
       continue
     doc = ast.get_docstring(mod)
-    if not doc or "BluePilot" not in doc:
+    # Both markers: files new to this fork say FusionPilot, and files that MODIFY an upstream file
+    # keep FusionPilot, because that marker sits alongside FusionPilot's own 316 identical ones and
+    # separating them would be churn in exactly the files merges land in.
+    if not doc or ("FusionPilot" not in doc and "FusionPilot" not in doc):
       continue
     # Must actually contain tests. bluepilot/test_web_routes.py is named like a test file and
     # carries the marker, but it is a hand-run script with no test functions -- pytest collects
@@ -147,6 +150,6 @@ def test_bp_tests_are_registered():
       missing.append(rel)
 
   assert not missing, (
-    f"BluePilot test files the runner never collects: {sorted(missing)}. Add each to "
+    f"FusionPilot test files the runner never collects: {sorted(missing)}. Add each to "
     "DEFAULT_TARGETS in tools/bp_offline_test.py -- by name if its directory holds tests that "
     "need the device.")

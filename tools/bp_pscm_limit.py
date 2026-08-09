@@ -9,10 +9,10 @@ It produced a clean-looking result -- saturation share doubling at 2.0 m/s^2 and
 -- and two settings defaults were changed on the strength of it. Both are reverted.
 
 WHY IT IS WRONG. angle_steers_des is openpilot's KINEMATICALLY IDEAL wheel angle, from
-VM.get_steer_from_curvature. Under BluePilot's angle scheme that is not what gets sent: the PSCM
+VM.get_steer_from_curvature. Under FusionPilot's angle scheme that is not what gets sent: the PSCM
 receives path_angle = 1/2 * kappa * d_ref as c1, scaled by FordLowSpeedFactor_ang /
 FordHighSpeedFactor_ang, at the PSCM's ~1.4 m lookahead. Different quantity, different signal, and
-the gains here are 0.92 / 0.87 -- deliberately BELOW 1.0, which BluePilot's own release notes
+the gains here are 0.92 / 0.87 -- deliberately BELOW 1.0, which FusionPilot's own release notes
 describe as making the wheel turn less.
 
 So the two sides were never meant to agree, and a fixed ~13% shortfall becomes an absolute error in
@@ -25,7 +25,7 @@ were right.
 
 WHAT A REAL VERSION WOULD COMPARE. The angle actually commanded through lateral_angle_ext -- after
 the gain, in the same units the PSCM receives -- against the delivered angle. Anything that reads
-actuators.steeringAngleDeg on a car running BluePilot angle control is reading a signal that is not
+actuators.steeringAngleDeg on a car running FusionPilot angle control is reading a signal that is not
 in the loop.
 
 Left in the tree deliberately. The trap is subtle, the output looked authoritative, and the next

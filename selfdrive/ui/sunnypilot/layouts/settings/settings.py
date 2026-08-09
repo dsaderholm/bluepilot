@@ -131,7 +131,7 @@ class SettingsLayoutSP(OP.SettingsLayout):
       OP.PanelType.FIREHOSE: PanelInfo(tr_noop("Firehose"), FirehoseLayout(), icon="../../sunnypilot/selfdrive/assets/offroad/icon_firehose.png"),
       OP.PanelType.DEVELOPER: PanelInfo(tr_noop("Developer"), DeveloperLayoutSP(), icon="icons/shell.png"),
       # BluePilot: settings and portal panels
-      **(({OP.PanelType.BLUEPILOT: PanelInfo(tr_noop("BluePilot"), BluePilotLayout(), icon="icons/chffr_wheel.png"),
+      **(({OP.PanelType.BLUEPILOT: PanelInfo(tr_noop("FusionPilot"), BluePilotLayout(), icon="icons/chffr_wheel.png"),
            OP.PanelType.BP_PORTAL: PanelInfo(tr_noop("BP Portal"), BPWebPanel(), icon="icons/network.png")}) if is_bluepilot() else {}),
     }
 

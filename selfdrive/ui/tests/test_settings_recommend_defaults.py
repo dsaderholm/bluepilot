@@ -1,4 +1,4 @@
-"""BluePilot: every tunable setting states its shipped default.
+"""FusionPilot: every tunable setting states its shipped default.
 
 *"Why don't we just put in the description of the option what the recommended value is so I can
 easily know what to change it to?"* (2026-08-05)

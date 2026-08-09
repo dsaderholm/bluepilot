@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""BluePilot: guard the hand-maintained dataclass mirrors in opendbc against custom.capnp.
+"""FusionPilot: guard the hand-maintained dataclass mirrors in opendbc against custom.capnp.
 
 Several structs in cereal/custom.capnp have a Python dataclass twin in
 opendbc/car/structs.py, and selfdrive/car/helpers.py converts capnp -> dataclass by splatting

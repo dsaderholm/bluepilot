@@ -1,4 +1,4 @@
-"""BluePilot: don't ask for the brake to be released on a car that resumes from a stop by itself.
+"""FusionPilot: don't ask for the brake to be released on a car that resumes from a stop by itself.
 
 preEnableStandstill holds openpilot in State.preEnabled showing "Release Brake to Engage". That is
 right for a car openpilot cannot engage from a standstill, and wrong for Ford, whose stock ACC

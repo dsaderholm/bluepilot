@@ -1,4 +1,4 @@
-"""BluePilot: holds pinned to a place.
+"""FusionPilot: holds pinned to a place.
 
 The risky part of this feature is not the geometry, it is that a corrupt or hostile param must never
 reach the control loop as anything but "no pins". It is read at control rate and its output edits
@@ -236,7 +236,7 @@ class TestItSurvivesTheDeviceStore:
 
 
 class TestSuggestions:
-  """BluePilot: noticing you keep correcting the same place.
+  """FusionPilot: noticing you keep correcting the same place.
 
   The safety property is that it only ever SUGGESTS -- nothing changes how the car drives until the
   driver taps. So the tests that matter most are the ones proving it does NOT suggest: too few

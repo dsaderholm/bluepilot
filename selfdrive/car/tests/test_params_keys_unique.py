@@ -1,4 +1,4 @@
-"""BluePilot: every param is declared exactly once in params_keys.h.
+"""FusionPilot: every param is declared exactly once in params_keys.h.
 
 `keys` is an initializer list for an unordered_map, so a duplicate entry is not a compile error and
 not a runtime error -- the later one is silently dropped and the first one wins. Two declarations
@@ -6,7 +6,7 @@ that disagree on type or default therefore produce a device that behaves as neit
 anywhere saying so.
 
 This is a MERGE hazard specifically. BPDefaultsGeneration was the live example -- declared near the
-top of the file on this branch and in the BluePilot block further down on passing-assist-phase1,
+top of the file on this branch and in the FusionPilot block further down on passing-assist-phase1,
 which git merges without a conflict because they are hundreds of lines apart. That key is gone now
 (the defaults migration it belonged to was removed on 2026-08-08), but every long-lived branch that
 adds a key to a different part of this file is the same trap.

@@ -1,4 +1,15 @@
-# BluePilot fork — working notes
+# FusionPilot — working notes
+
+Named 2026-08-09. This fork is **FusionPilot**; **BluePilot is still upstream** and updates are
+still taken from it, so "BluePilot" in these notes means the thing we merge FROM unless it plainly
+means this fork.
+
+The rename was deliberately confined to what he SEES -- the home screen, the settings tab, the two
+settings strings that named the fork, the README, and the `FusionPilot:` marker in files that are new
+here. Directories (`bluepilot/`, `selfdrive/ui/bp/`), file names, imports, param keys and the 316
+`BluePilot:` markers in upstream's own code all keep their names, because renaming them is a merge
+conflict forever and breaks the thing he cares about most: *"I want updating to newer BluePilot
+versions to still be easy."*
 
 ## START HERE if the owner asks to update
 

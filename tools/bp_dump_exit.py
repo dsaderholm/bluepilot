@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""BluePilot: why the car does not slow enough for a freeway exit.
+"""FusionPilot: why the car does not slow enough for a freeway exit.
 
 Standing report across several drives: "It still does not slow down anywhere close to enough on
 freeway exits."

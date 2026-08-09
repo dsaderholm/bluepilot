@@ -1,5 +1,5 @@
 """
-BluePilot fork: crash/log reporting must stay OPT-IN.
+FusionPilot fork: crash/log reporting must stay OPT-IN.
 
 This exists for merges, not for the code. Upstream edits system/sentry.py often -- DSN changes,
 noise filters, integrations -- so the opt-in guard at the top of init() is exactly the kind of

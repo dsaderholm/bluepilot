@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Merge a newer BluePilot into this fork, handling the parts that are known to be painful.
+"""Merge a newer FusionPilot into this fork, handling the parts that are known to be painful.
 
     python tools/bp_merge_upstream.py              # merge upstream/bp-7.0 (recommended)
     python tools/bp_merge_upstream.py --rebase     # replay our commits on top instead

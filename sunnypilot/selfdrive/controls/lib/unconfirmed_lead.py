@@ -1,5 +1,5 @@
 """
-BluePilot: radar-blind stopped-lead detection for Ford stock ACC.
+FusionPilot: radar-blind stopped-lead detection for Ford stock ACC.
 
 Ford's ACC follows only radar-confirmed leads. The driving model regularly sees a stopped vehicle
 that the radar never returns -- the classic case being a stopped car at the end of a queue. Stock
@@ -58,7 +58,7 @@ MIN_PERSISTENCE_S = 1.0
 # filter: bridges, gantries and guardrails tend to appear and vanish, while a real vehicle
 # survives a closing range sweep. Least-justified threshold here -- refit from logs.
 MIN_RANGE_SWEEP_M = 15.0
-# BluePilot: a lead that is genuinely STOPPED is stronger evidence than one merely closing, and it
+# FusionPilot: a lead that is genuinely STOPPED is stronger evidence than one merely closing, and it
 # is the entire reason this feature exists -- radar ACC ignores stationary returns, so a stopped car
 # at the end of a queue is the one thing Ford will drive into. It gets a shorter persistence.
 #
@@ -269,7 +269,7 @@ class UnconfirmedLeadDetector:
     commanding meaningful deceleration, and treating it as a takeover would release the warning
     before anything had actually slowed.
 
-    Defensive: carStateBP is BluePilot-conditional and absent on other platforms. Missing data
+    Defensive: carStateBP is FusionPilot-conditional and absent on other platforms. Missing data
     means "cannot tell", which must read as not-braking so the detector keeps working.
     """
     try:
@@ -677,7 +677,7 @@ class UnconfirmedLeadDetector:
     return max(min(v_ego - a_required * MODEL_STOP_HORIZON_S, v_ego), ACC_FLOOR_MS)
 
   def _lead_target(self, v_ego: float, d_rel: float) -> float:
-    """BluePilot: pace the lead request by geometry rather than dropping straight to the floor.
+    """FusionPilot: pace the lead request by geometry rather than dropping straight to the floor.
 
     His call, 2026-08-06, after driving both. This is NOT a return to the MPC-plan pacing that
     caused the hard brake -- that was openpilot's follow planner, a comfort curve that does not know

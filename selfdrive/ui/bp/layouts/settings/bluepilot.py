@@ -565,7 +565,7 @@ class BluePilotLayout(Widget):
     # Disable BP lateral control toggle
     self._disable_BP_lat = toggle_item(
       lambda: tr("Disable BP Lateral Control"),
-      lambda: tr("Disable BluePilot lateral control."),
+      lambda: tr("Disable FusionPilot lateral control."),
       initial_state=self._safe_get_bool(self._params, "disable_BP_lat_UI"),
       callback=lambda state: self._toggle_callback(state, "disable_BP_lat_UI"),
       icon="chffr_wheel.png"
@@ -574,7 +574,7 @@ class BluePilotLayout(Widget):
     # Bypass BP longitudinal control toggle (use stock long logic)
     self._disable_BP_long = toggle_item(
       lambda: tr("Bypass BP Longitudinal Control"),
-      lambda: tr("Use stock longitudinal logic instead of BluePilot TTC/coasting tuning."),
+      lambda: tr("Use stock longitudinal logic instead of FusionPilot TTC/coasting tuning."),
       initial_state=self._safe_get_bool(self._params, "disable_BP_long_UI"),
       callback=lambda state: self._toggle_callback(state, "disable_BP_long_UI"),
       icon="chffr_wheel.png"

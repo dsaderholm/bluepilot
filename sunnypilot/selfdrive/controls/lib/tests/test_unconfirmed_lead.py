@@ -4,7 +4,7 @@ Copyright (c) 2021-, Haibin Wen, sunnypilot, and a number of other contributors.
 This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 
-BluePilot: behavioral tests for the radar-blind lead / model-stop detector.
+FusionPilot: behavioral tests for the radar-blind lead / model-stop detector.
 
 These cover the two things that actually matter for safety here: that the detector never requests
 below Ford's ACC floor, and that its evidence gates cannot be short-circuited. Both of the bugs

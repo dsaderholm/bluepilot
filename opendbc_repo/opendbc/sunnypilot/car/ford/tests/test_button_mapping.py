@@ -1,4 +1,4 @@
-"""BluePilot: the cruise buttons must mean what the wheel says they mean.
+"""FusionPilot: the cruise buttons must mean what the wheel says they mean.
 
 This wheel is CNCL / RES+ / SET-, with a dedicated CNCL. RES+ and SET- each change meaning with
 cruise state, which is the whole reason the mapping is easy to get wrong -- and it was wrong:
