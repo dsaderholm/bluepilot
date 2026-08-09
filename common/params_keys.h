@@ -210,6 +210,20 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // It remains the weakest-evidence path here -- no lead means no dRel, vRel or TTC, so
     // persistence and the 20 mph ACC floor are its entire filter.
     {"IcbmModelStopEnabled", {PERSISTENT | BACKUP, BOOL, "1"}},
+    // BluePilot: how hard the stop would have to be braked for before this path acts at all, in
+    // tenths of m/s^2. THE EARLINESS CONTROL for stop signs and red lights.
+    //
+    // Measured 2026-08-08 on route 0000032c, activation #4: it fired at 34 mph with 193 m still to
+    // run, which needs 0.60 m/s^2 to stop -- gentler than coasting, and about 2.5x the distance a
+    // comfortable stop wants. "It's stopping for red lights a little too early", and the number
+    // agrees. DEC's slow-down flag is deliberately early (that is why it was chosen over
+    // shouldStop, which can never fire here) so the earliness has to be bounded downstream.
+    //
+    // 1.0 m/s^2 is where a stop stops being reachable by lifting off: below it, coasting arrives in
+    // time on its own and a set-speed request buys nothing. At 34 mph it moves that trigger from
+    // 193 m to about 116 m. Ford's own braking ceiling is ~1.3 (measured), so values much above
+    // that ask for a stop the car cannot deliver.
+    {"IcbmModelStopMinDecel", {PERSISTENT | BACKUP, INT, "10"}},
     // BluePilot: hold off openpilot's standstill resume request until the lead has actually gone.
     // controlsd asserts resume from ITS OWN MPC plan, which on a stock-ACC car is not the
     // controller that then has to drive -- Ford ACC reads resume as "go", accelerates toward the

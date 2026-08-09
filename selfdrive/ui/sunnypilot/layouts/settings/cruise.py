@@ -166,6 +166,20 @@ class CruiseLayout(Widget):
                      "the model insists, and a speed floor, are its only filters."), "IcbmModelStopEnabled"),
       param="IcbmModelStopEnabled")
 
+    # BluePilot: the earliness control for the stop path. Reported "stopping for red lights a little
+    # too early", and route 0000032c measured it firing at 34 mph with 193 m still to run -- 0.60
+    # m/s^2, gentler than coasting.
+    self.icbm_model_stop_min_decel = option_item_sp(
+      title=tr("Stop Sign Sensitivity"),
+      description=recommended(tr("How hard the stop would have to be braked for before slowing starts. "
+                     "Lower reacts further from the sign or light; higher waits until braking is "
+                     "genuinely needed. Below this the car arrives in time by coasting anyway."),
+                     "IcbmModelStopMinDecel", self._decel_label),
+      param="IcbmModelStopMinDecel",
+      min_value=4, max_value=20, value_change_step=1,
+      label_callback=self._decel_label,
+      inline=True)
+
     # BluePilot: hold openpilot's standstill resume until the lead has actually gone
     # BluePilot: holds pinned to a place -- see pinned_holds.py for why this survives TSR working.
     self.icbm_pinned_holds = toggle_item_sp(
@@ -305,6 +319,7 @@ class CruiseLayout(Widget):
       self.icbm_lead_max_ttc,
       self.icbm_lead_max_distance,
       self.icbm_model_stop,
+      self.icbm_model_stop_min_decel,
 
       SectionHeader(tr("Resuming From A Stop")),
       self.icbm_pinned_holds,
@@ -393,6 +408,12 @@ class CruiseLayout(Widget):
     return f"{value} m" if ui_state.is_metric else f"{round(value * 3.28084 / 5) * 5} ft"
 
   @staticmethod
+  def _decel_label(value):
+    # Stored in tenths of m/s^2. Deceleration is SI everywhere in openpilot and there is no useful
+    # US customary form of it, so the number is shown as-is with its unit rather than converted.
+    return f"{value / 10.:.1f} m/s²"
+
+  @staticmethod
   def _speed_step_label(value: int) -> str:
     """BluePilot: these params are stored in display units -- the same units the set speed is shown
     in -- so the label has to follow the driver's mph/km-h choice rather than assume one."""
@@ -409,6 +430,7 @@ class CruiseLayout(Widget):
       self.icbm_lead_max_ttc,
       self.icbm_lead_max_distance,
       self.icbm_model_stop,
+      self.icbm_model_stop_min_decel,
       self.icbm_resume_gate,
       self.icbm_resume_min_gap,
       self.icbm_resume_min_lead_speed,

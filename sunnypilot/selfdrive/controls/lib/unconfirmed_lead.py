@@ -226,12 +226,14 @@ class UnconfirmedLeadDetector:
     self.max_lead_distance = 180
     self.max_ttc = DEFAULT_MAX_TTC_S
     self.model_stop_enabled = False
+    self.model_stop_min_decel = 1.0
 
   def update_params(self) -> None:
     if self.frame % int(PARAMS_UPDATE_PERIOD / DT_MDL) == 0:
       self.max_lead_distance = self.params.get("IcbmLeadMaxDistance", return_default=True)
       self.max_ttc = self.params.get("IcbmLeadMaxTtc", return_default=True) / 10.
       self.model_stop_enabled = self.params.get_bool("IcbmModelStopEnabled")
+      self.model_stop_min_decel = self.params.get("IcbmModelStopMinDecel", return_default=True) / 10.
 
   @property
   def is_active(self) -> bool:
@@ -577,7 +579,19 @@ class UnconfirmedLeadDetector:
       # If there is a vehicle ahead then the vehicle is the thing to react to, and either Ford's own
       # ACC or the lead path above owns it. This path is for the empty intersection, where there is
       # nothing to measure and the model's trajectory is the only evidence there is.
+      # ...AND the stop has to actually need braking. DEC's slow-down flag is deliberately early --
+      # that is why it was chosen over shouldStop, which can never fire at these speeds -- so
+      # nothing downstream bounded how far out this acted. Measured 2026-08-08 on route 0000032c:
+      # it fired at 34 mph with 193 m to run, which needs 0.60 m/s^2. That is gentler than coasting.
+      #
+      # Below IcbmModelStopMinDecel the car arrives in time by lifting off and a set-speed request
+      # buys nothing, so this waits. inf endpoint (no trajectory reading) keeps the old behavior
+      # rather than silently disabling the path.
+      a_required = float('inf')
+      if math.isfinite(self.model_stop_distance) and self.model_stop_distance > MIN_STOP_DISTANCE_M:
+        a_required = v_ego * v_ego / (2. * self.model_stop_distance)
       model_candidate = (self.model_slow_down and not lead.status and
+                         a_required >= self.model_stop_min_decel and
                          v_ego >= MIN_V_EGO_MS and not CS.brakePressed)
       if model_candidate:
         self._model_stop_s += DT_MDL

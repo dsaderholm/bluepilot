@@ -609,3 +609,37 @@ class TestModelStopHandsOverWhenALeadAppears:
     det.update(make_sm(status=True, radar=True, d_rel=90., v_rel=-1.0, v_ego=26.8),
                TRAJ, CRUISE_MS, True, ev, True, 90.)
     assert det.trigger != Trigger.modelStop, "kept claiming a sign while Ford was following a car"
+
+
+class TestModelStopWaitsUntilBrakingIsActuallyNeeded:
+  """Reported 2026-08-08: "It's stopping for red lights a little too early."
+
+  Measured on route 0000032c, activation #4: it fired at 34 mph with 193 m still to run. Stopping in
+  193 m from 34 mph needs 0.60 m/s^2 -- gentler than coasting, and about 2.5x the distance a
+  comfortable stop wants. DEC's slow-down flag is deliberately early, which is why it was chosen
+  over shouldStop, so the earliness has to be bounded here rather than upstream.
+  """
+
+  def test_a_stop_reachable_by_coasting_does_not_trigger(self):
+    det, ev = model_stop_detector(), FakeEvents()
+    det.model_stop_min_decel = 1.0
+    # 34 mph, 193 m out -- the logged case. a = 15.2^2 / (2*193) = 0.60 m/s^2.
+    run(det, ev, 60, status=False, v_ego=15.2, slow_down=True, stop_dist=193.)
+    assert det.state != State.active, (
+      "fired 193 m out at 34 mph, which needs 0.60 m/s^2 -- the reported 'too early'")
+
+  def test_the_same_stop_triggers_once_it_is_close_enough_to_need_braking(self):
+    det, ev = model_stop_detector(), FakeEvents()
+    det.model_stop_min_decel = 1.0
+    # Same speed, 110 m out: a = 1.05 m/s^2, past the gate.
+    run(det, ev, 60, status=False, v_ego=15.2, slow_down=True, stop_dist=110.)
+    assert det.state == State.active and det.trigger == Trigger.modelStop, (
+      "did not act at 110 m, where coasting no longer arrives in time")
+
+  def test_an_unreadable_endpoint_keeps_the_old_behavior(self):
+    """inf endpoint means no trajectory reading, not 'a very distant stop'. Treating it as failing
+    the gate would silently disable the whole path on any frame the distance is missing."""
+    det, ev = model_stop_detector(), FakeEvents()
+    det.model_stop_min_decel = 1.0
+    run(det, ev, 60, status=False, v_ego=15.2, slow_down=True, stop_dist=float('inf'))
+    assert det.state == State.active, "an unreadable endpoint disabled the path"
