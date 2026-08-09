@@ -69,14 +69,22 @@ setting the driver can check against the windshield is worth more than a unit-le
 calibrate against anything. See strength_to_bars in esp_protocol.py -- the mapping is band-specific
 and comes from the vendor's Table 9.1.
 
-THE THRESHOLD SHIPS UNFITTED, ON PURPOSE
-----------------------------------------
-RadarDetectorMinBars has a defensible default and no evidence behind it. A V1 Gen2 sees Ka at ranges
-where the alert is real but the encounter is minutes away, and strength is not distance -- an
-instant-on hit arrives at full strength from a source that already has you. So the shipped
-configuration has detection and logging ON and the offset override OFF
-(RadarDetectorSlowdownEnabled), and the threshold is meant to be refitted from logged Ka encounters
-on roads the owner actually drives. Do not quietly promote the default to "tuned" without that data.
+THE THRESHOLD SHIPS UNFITTED, AND LOW
+------------------------------------
+RadarDetectorMinBars has no evidence behind it. A V1 Gen2 sees Ka at ranges where the alert is real
+but the encounter is minutes away, and strength is not distance -- an instant-on hit arrives at full
+strength from a source that already has you.
+
+It ships at 4 rather than 6 because defaults only reach a device that has never stored the key, so
+the first flash is the only one this number gets. That makes the two errors unequal: too low fires
+more than he likes and he notices on the first drive; too high never fires and looks like a broken
+feature. Ka is rare and this already requires a direction and 1.5 s of persistence, so the low bar
+does not chatter. bp_radar_fit.py replaces the guess once there are drives behind it -- and until
+then, do not describe this number as tuned.
+
+The whole feature ships ON, including the offset override, per "every feature this fork builds ships
+on". The cost of that is in bp_radar_fit.py: acting perturbs the measurement, so encounters where
+the car slowed are excluded from the fit.
 """
 
 from openpilot.common.constants import CV
@@ -112,7 +120,7 @@ RELEASE_BARS_MARGIN = 1
 # driver is already managing by pedal, and an offset override would only be noise in town.
 MIN_V_EGO_MS = 30 * CV.MPH_TO_MS
 
-DEFAULT_MIN_BARS = 6
+DEFAULT_MIN_BARS = 4   # see params_keys.h for why low rather than high
 DEFAULT_MARGIN = 1        # display units under the posted limit
 
 

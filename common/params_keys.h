@@ -260,7 +260,20 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"RadarDetectorSlowdownEnabled", {PERSISTENT | BACKUP, BOOL, "1"}},
     // Signal strength, in front-panel bar-graph LEDs (0-8) -- the same number shown on the
     // detector, so the setting can be checked against the windshield rather than taken on faith.
-    {"RadarDetectorMinBars", {PERSISTENT | BACKUP, INT, "6"}},
+    //
+    // FOUR, not six, and the reason is which way to be wrong. Defaults only reach a device that has
+    // never stored the key, so the first flash is the only one this number ever gets; from then on
+    // it is his to change from the settings screen. The two errors are therefore very unequal:
+    //
+    //   too LOW  -- it fires more often than he likes, he notices on the first drive, he raises it.
+    //   too HIGH -- it silently never fires and the feature looks broken. That is precisely how
+    //               IcbmModelStopEnabled went unexercised while he asked twice why stop-sign
+    //               slowing never happened.
+    //
+    // Ka is rare, and this already requires a direction and 1.5 s of persistence, so a low bar does
+    // not chatter. Being wrong in the visible direction is worth more than being wrong in the quiet
+    // one. bp_radar_fit.py replaces this with a fitted number once there are drives behind it.
+    {"RadarDetectorMinBars", {PERSISTENT | BACKUP, INT, "4"}},
     // How far under the posted limit to aim, in display units (mph here). Floored at Ford ACC's
     // 20 mph minimum regardless.
     {"RadarDetectorMargin", {PERSISTENT | BACKUP, INT, "1"}},

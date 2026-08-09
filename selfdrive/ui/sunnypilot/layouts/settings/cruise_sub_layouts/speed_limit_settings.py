@@ -201,7 +201,9 @@ class SpeedLimitSettingsLayout(Widget):
       title=tr("Alert Strength To Act On"),
       description=recommended(tr("How strong a Ka alert has to be before the set speed moves, counted in "
                      "the same signal bars the detector shows. Lower reacts sooner and further "
-                     "out; higher waits for the signal to be close and certain."), "RadarDetectorMinBars", lambda v: f"{v} of 8"),
+                     "out; higher waits for the signal to be close and certain. Ships low on "
+                     "purpose -- too high and it would never fire without you noticing. Run "
+                     "bp_radar_fit.py on your own drives to replace the guess."), "RadarDetectorMinBars", lambda v: f"{v} of 8"),
       param="RadarDetectorMinBars",
       min_value=1, max_value=8, value_change_step=1,
       label_callback=lambda v: f"{v} of 8",
