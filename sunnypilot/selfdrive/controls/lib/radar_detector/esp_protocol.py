@@ -49,7 +49,7 @@ Note the mapping is band-dependent -- the same raw byte is a different number of
 Ka -- so anything comparing strengths across bands must go through it.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 # Serial format, section 2. Not configurable and not guessed at.
 BAUD = 57600
@@ -62,24 +62,21 @@ EOF = 0xAB
 DEST_BASE = 0xD0
 ORIG_BASE = 0xE0
 
-# Device identifiers, Table 3.4. $03-$05 are the only ones Valentine makes available to third
-# parties; the rest are theirs. We never transmit, so we never claim one -- these are here to
-# recognize who a packet came from.
-DEV_CONCEALED_DISPLAY = 0x00
-DEV_REMOTE_AUDIO = 0x01
-DEV_SAVVY = 0x02
+# Device identifiers, Table 3.4. Used to recognize who a packet came from, and -- since the mute
+# path was added -- to say who we are when we send one.
+#
+# Table 3.4's other identifiers -- Concealed Display $00, Remote Audio $01, Savvy $02 -- are
+# deliberately NOT constants here. Nothing reads them, and a name nothing uses reads as load-bearing
+# to whoever comes next. The table is one line of prose; five unused assignments were not.
 DEV_GENERAL_BROADCAST = 0x08
 DEV_V1_NO_CHECKSUM = 0x09
 DEV_V1_CHECKSUM = 0x0A
 V1_ORIGINS = (DEV_V1_NO_CHECKSUM, DEV_V1_CHECKSUM)
 
-# Table 3.4 reserves exactly three identifiers for third-party accessories; everything else belongs
-# to Valentine Research products. We claim the first. The spec asks manufacturers to publish which
-# one they use so owners can tell what may share a bus -- BluePilot uses $03.
-DEV_THIRD_PARTY_1 = 0x03
-DEV_THIRD_PARTY_2 = 0x04
-DEV_THIRD_PARTY_3 = 0x05
-OUR_DEVICE_ID = DEV_THIRD_PARTY_1
+# Table 3.4 reserves $03, $04 and $05 for third-party accessories; everything else belongs to
+# Valentine Research products. We claim the first. The spec asks manufacturers to publish which one
+# they use so owners can tell what may share a bus -- BluePilot uses $03.
+OUR_DEVICE_ID = 0x03
 
 # Time slice for OUR_DEVICE_ID, Table 3.4, measured from the moment the End of Frame byte of the
 # V1's infDisplayData packet is received. Transmitting outside this window is what collides with
@@ -216,19 +213,6 @@ class AlertRecord:
     """Strongest of the two antennas, on the front panel's scale."""
     return max(strength_to_bars(self.band, self.front_strength),
                strength_to_bars(self.band, self.rear_strength))
-
-
-@dataclass
-class AlertTable:
-  """A complete Alert Table, assembled from the interleaved respAlertData stream."""
-  alerts: list[AlertRecord] = field(default_factory=list)
-
-  @property
-  def priority(self) -> AlertRecord | None:
-    for a in self.alerts:
-      if a.priority:
-        return a
-    return None
 
 
 def strength_to_bars(band: int, raw: int) -> int:

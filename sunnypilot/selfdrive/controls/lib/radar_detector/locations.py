@@ -24,8 +24,10 @@ trig calls a second" for a couple of hundred pins.
 
 So locations are bucketed into a dictionary keyed by rounded coordinates. A lookup touches the nine
 cells around you and nothing else, which makes it O(1) in the size of the store rather than O(n).
-The expensive distance maths then runs on the handful of candidates that survive, and only at
-MATCH_HZ rather than at the model rate.
+The expensive distance maths then runs on the handful of candidates that survive, and only at the
+cadence the CALLER chooses -- _RADAR_MATCH_FRAMES in speed_limit_resolver.py, currently 1 Hz. This
+module used to carry its own MATCH_HZ constant that nothing read, which is worse than nothing:
+changing it would have looked like changing the match rate and done exactly zero.
 
 At 80 mph the car covers 36 m in the time between matches at 1 Hz, so even the tightest useful
 radius cannot be stepped over.
@@ -47,11 +49,6 @@ CELL_DEG = 0.01
 # needs to name one spot on one carriageway, while a patrol car works a stretch and parks somewhere
 # slightly different each time.
 DEFAULT_RADIUS_M = 150
-
-# How often the position is matched against the store. Deliberately slow -- see the module
-# docstring. The warning lead time is measured in tens of seconds, so a second of latency in
-# noticing you are near a place costs nothing.
-MATCH_HZ = 1.0
 
 MAX_LOCATIONS = 2000   # the same order as the R4's own memory, and nothing here is bigger
 
