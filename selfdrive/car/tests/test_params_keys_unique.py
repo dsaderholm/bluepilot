@@ -5,10 +5,11 @@ not a runtime error -- the later one is silently dropped and the first one wins.
 that disagree on type or default therefore produce a device that behaves as neither, with nothing
 anywhere saying so.
 
-This is a MERGE hazard specifically, and one that is about to be real: BPDefaultsGeneration is
-declared near the top of the file on this branch and in the BluePilot block further down on
-passing-assist-phase1. Git merges both without a conflict, because they are hundreds of lines apart.
-Every long-lived branch that adds a key to a different part of this file is the same trap.
+This is a MERGE hazard specifically. BPDefaultsGeneration was the live example -- declared near the
+top of the file on this branch and in the BluePilot block further down on passing-assist-phase1,
+which git merges without a conflict because they are hundreds of lines apart. That key is gone now
+(the defaults migration it belonged to was removed on 2026-08-08), but every long-lived branch that
+adds a key to a different part of this file is the same trap.
 
 Static -- no compiled Params needed.
 """
@@ -43,4 +44,6 @@ def test_the_scan_actually_found_the_keys():
   """A regex that matches nothing would make the test above pass on anything at all."""
   found = _declarations()
   assert len(found) > 300, f"only {len(found)} declarations parsed -- the pattern has drifted"
-  assert "BPDefaultsGeneration" in found
+  # A key that is load-bearing rather than incidental, so it does not quietly vanish and take the
+  # canary with it the way BPDefaultsGeneration just did.
+  assert "IcbmModelStopEnabled" in found
