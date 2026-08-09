@@ -30,7 +30,7 @@ controls now sit with everything else that decides when to signal.
 
 | Control | Set to | Why |
 |---|---|---|
-| Blink Spacing If Unmeasurable | **760 ms** (applied) | Your own flasher, measured with Measure My Blinker. This one IS applied for you -- it is in `_BP_REDEFAULTED`, generation 2, so it lands whatever you had stored. |
+| Blink Spacing If Unmeasurable | **760 ms** | Your own flasher, measured with Measure My Blinker. This row used to say it was applied for you, via `_BP_REDEFAULTED`. That machinery is gone -- **set it by hand and confirm it reads 760**. |
 
 The buttons need the car **stopped, cruise off, and your own stalk idle**. They self-clear.
 
@@ -66,8 +66,9 @@ whether passing assist works.
 
 Found 2026-08-06 by a guard that walks every revision of `params_keys.h`. Your car keeps the first
 value it ever booted for a key, so for these ten the code says one thing and your device may hold
-another. **Nothing can apply them for you** -- the migration list is closed at your request -- so
-these are yours to check, in Steering > Customize Passing Assist unless noted.
+another. **Nothing can apply them for you** -- as of 2026-08-09 the migration does not exist at all,
+rather than merely being closed -- so these are yours to check, in Steering > Customize Passing
+Assist unless noted. This section is now the mechanism, not a footnote to one.
 
 Worth checking, in this order:
 
