@@ -571,8 +571,21 @@ published `RadarPoint` is correct; reading `self.points` directly silently gives
 lateral offset and double the relative speed. `adjacent_lane.py` must consume the published
 `liveTracks` points and never reach into the radar interface.
 
-This replaces the anti-weave settle timer with an actual measurement, and it is a lane-selection
-input for free.
+It is a lane-selection input for free.
+
+⚠️ **It does NOT replace the anti-weave settle timer, and an earlier draft of this line said it
+did.** Corrected 2026-08-09, because that sentence is exactly the kind that gets a live setting
+deleted under the "remove what we no longer use" rule.
+
+`PassingAssistSettleTime` stands in for *"have I actually cleared the car I just passed"*, and §14
+has the reason it cannot be answered here: **the front radar cannot see that car once it is
+behind.** A REAR radar measures the gap directly and would replace the timer with a measurement.
+Until one is fitted, twenty seconds of guesswork is the only answer available and the reason is
+live.
+
+What §6 genuinely replaces is nothing. It ADDS the target-lane occupancy check, which is a
+different question -- "is the lane I would move into worth moving into" rather than "am I done
+with the maneuver I already started".
 
 ---
 
