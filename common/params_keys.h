@@ -423,14 +423,19 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // high-speed end now sits relative to its own complaint. "Pretty well" is why this moves less
     // than the high-speed one in absolute terms.
     {"SmartCruiseControlVisionLowSpeedFactor", {PERSISTENT | BACKUP, INT, "100"}},
-    // BluePilot: 100 -> 90 on 2026-08-09, from the road. "It also took a highway curve a little
-    // too slow again."
+    // BluePilot: 100 -> 90 -> 80, each step from the road rather than a model.
     //
-    // a_lat_reg_max = _A_LAT_REG_MAX / sensitivity, and _A_LAT_REG_MAX is 2.0 m/s^2, so 100 targets
-    // exactly 2.0 and 90 targets 2.22 -- about 10% more speed through a bend. A 10% step because
-    // "a little too slow" is a small complaint and overshooting it means slowing too little, which
-    // is the worse direction to be wrong in.
-    {"SmartCruiseControlVisionHighSpeedFactor", {PERSISTENT | BACKUP, INT, "90"}},
+    // a_lat_reg_max = _A_LAT_REG_MAX / sensitivity, and _A_LAT_REG_MAX is 2.0 m/s^2, so this targets
+    // 2.5 m/s^2. He reported "a little too slow" at 100 and, after applying 90, "took a curve on the
+    // freeway too slow" again -- so the first 10-point step bought almost nothing and this one is
+    // larger on purpose.
+    //
+    // THIS IS THE LAST STEP TO TAKE BLIND. Past here the binding limit stops being comfort and
+    // becomes whether the retrofit PSCM can hold the angle, and there is no valid measurement of
+    // that -- the one attempted on 2026-08-09 recovered his angle-gain calibration instead and was
+    // retracted, see tools/bp_pscm_limit.py. Under-steering mid-curve is a worse failure than being
+    // slow, so if 80 is still not enough the next move is measuring the steering, not guessing again.
+    {"SmartCruiseControlVisionHighSpeedFactor", {PERSISTENT | BACKUP, INT, "80"}},
     // BluePilot: SCC-Map deceleration target, tenths of m/s^2, magnitude. Unlike SCC-Vision this
     // single value sets BOTH how hard it slows and how early it starts, because the trigger is
     // "am I within the distance needed to reach the corner speed at this rate" -- gentler means a
@@ -447,7 +452,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // too fast for this one to steer -- the retrofit PSCM has less authority than the advisory
     // assumes. 100 keeps the map's own number; lower takes every mapped corner proportionally
     // slower.
-    {"SmartCruiseControlMapFactor", {PERSISTENT | BACKUP, INT, "100"}},
+    {"SmartCruiseControlMapFactor", {PERSISTENT | BACKUP, INT, "90"}},
 
     // Torque lateral control custom params
     {"CustomTorqueParams", {PERSISTENT | BACKUP , BOOL}},
