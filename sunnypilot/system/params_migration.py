@@ -221,8 +221,28 @@ def _migrate_bp_new_defaults(_params):
   owned = set(_load_json_param(_params, BP_DEFAULTS_OWNED_KEY).get("keys", []))
 
   took: list[str] = []
+  released: list[str] = []
   for key in _bp_tracked_keys(_params):
     if key in owned:
+      # OWNED IS NOT PERMANENT. If he has put the key back to exactly the shipped value, that is the
+      # clearest statement available that he wants the default -- and keeping it owned means every
+      # future improvement to it silently never reaches him again.
+      #
+      # He announced the case that makes this matter, 2026-08-08: "On my next drive I will go
+      # through each setting, check the description for recommended value, and set my value to it."
+      # Without this, that drive would freeze every setting he has ever touched at today's number,
+      # forever, which is the exact opposite of what he is trying to do.
+      try:
+        shipped_now = _params.get_default_value(key)
+        stored_now = _params.get(key)
+        if shipped_now is not None and stored_now is not None:
+          stored_now = stored_now.decode() if isinstance(stored_now, bytes) else stored_now
+          if str(stored_now) == str(shipped_now):
+            owned.discard(key)
+            remembered[key] = str(shipped_now)
+            released.append(key)
+      except Exception as e:  # noqa: BLE001
+        cloudlog.exception(f"params_migration: could not re-check owned key {key}: {e}")
       continue
     # Per key. One unreadable key must not abandon the rest, and must not skip the write below --
     # a migration that fails to record its state runs again every boot, which is the one thing this
@@ -280,6 +300,9 @@ def _migrate_bp_new_defaults(_params):
   try:
     _params.put(BP_DEFAULTS_SNAPSHOT_KEY, json.dumps(remembered), block=True)
     _params.put(BP_DEFAULTS_OWNED_KEY, json.dumps({"keys": sorted(owned)}), block=True)
+    if released:
+      cloudlog.info(f"params_migration: released {len(released)} settings back to default "
+                    f"management: {', '.join(released)}")
     if took:
       cloudlog.info(f"params_migration: took new defaults for {len(took)} untouched settings: "
                     f"{', '.join(took)}")

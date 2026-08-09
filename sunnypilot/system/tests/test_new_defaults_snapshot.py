@@ -246,3 +246,35 @@ class TestAKeyThatHasNeverBeenWritten:
     boot(p)
     assert p.store[KEY] == "6", "his tuned value was lost"
     assert p.store[OTHER] == "70", "a newly declared key never received a moved default"
+
+
+class TestSettingItBackToTheRecommendationRestoresManagement:
+  """Announced 2026-08-08: "On my next drive I will go through each setting, check the description
+  for recommended value, and set my value to it."
+
+  Without this, that drive is a trap. `owned` only ever grew, and owned keys are skipped forever --
+  so every setting he had ever touched would freeze at today's number and never take another
+  improvement, which is the opposite of what he is doing it for.
+  """
+
+  def test_a_key_he_returns_to_the_default_is_managed_again(self):
+    p = FakeParams({KEY: "6"}, {KEY: "8"})
+    boot(p)
+    assert KEY in set(json.loads(p.store[BP_DEFAULTS_OWNED_KEY])["keys"]), "his 6 should be owned"
+
+    p.store[KEY] = "8"          # he reads "Recommended: 8" and sets it
+    boot(p)
+    assert KEY not in set(json.loads(p.store[BP_DEFAULTS_OWNED_KEY])["keys"]), (
+      "still owned after he matched the recommendation; it can never take a new default again")
+
+    p.defaults[KEY] = "12"      # a later build moves it
+    boot(p)
+    assert p.store[KEY] == "12", "released key did not take the moved default"
+
+  def test_a_key_he_actually_chose_stays_his(self):
+    """The release must key on matching the SHIPPED value, not on him having touched it."""
+    p = FakeParams({KEY: "6"}, {KEY: "8"})
+    boot(p)
+    p.defaults[KEY] = "12"
+    boot(p)
+    assert p.store[KEY] == "6", "his own value was taken away"
