@@ -1352,9 +1352,16 @@ unavoidable, the branch whose field has never been written to a log is the one t
 - **Shell commands are fine.** What he dislikes is running them *in the car*, in 100-degree heat.
   Diagnostics he can SSH into at home are welcome; "run this on your next drive" is not.
 - **Talk about the finished system.** Do not preface answers with what does not actuate yet; he is
-  always describing the finished behavior. **This is about answering HIM, and does not extend to
-  documentation** -- see the README section above, where the opposite applies, because a stranger
-  reading the README has no way to know what is scaffolding.
+  always describing the finished behavior. For passing assist that system **decides, signals and
+  makes the lane change with no stalk input** -- *"LANE CHANGES WILL NOT BE STARTED BY MY StALK"*,
+  and *"if I had to manually do anything, then I might as well just keep using the SunnyPilot
+  nudgeless lane changes"*. The decision is the whole feature; nudgeless already does a crossing
+  the driver chose. Describing it as advisory is not the cautious version of it, it is a different
+  product he already has. Note this does not change the SAE level: automating the decision leaves
+  it Level 2, because the level is set by who monitors and who carries liability, not by how much
+  the car does. **This is about answering HIM, and does not extend to documentation** -- see the
+  README section above, where the opposite applies, because a stranger reading the README has no
+  way to know what is scaffolding.
 - **23 controls on the settings screen is not a usability problem.** Do not consolidate unless asked.
 - **Report test results only when the result is news.** No sign-off with a suite total every message.
 - **Changes made on one branch reach the others because he rebases every time.** So CLAUDE.md is the
