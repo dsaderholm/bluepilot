@@ -191,13 +191,15 @@ def test_freeway_exit_is_not_metered_into_plateaus():
   assert d.icbm.v_target == 39, (
     f"SCC-Map's corner speed was metered down to {d.icbm.v_target}; it arrives with a deadline")
 
-  # SCC-Vision must STILL be metered -- it ramps its own target through the ENTERING state, and
-  # coasting through ordinary curves is exactly what the limiter is for.
+  # A SPEED LIMIT is what still gets metered. This half said sccVision until 2026-08-08, on the
+  # belief that vision ramps its own target smoothly -- the exit log showed it asking 72, 52, 46,
+  # 42 within two seconds, and the cap costing two and a half seconds of the approach. A curve has
+  # a fixed place in the road; a speed limit does not, and coasting into a zone beats braking.
   d2 = Drive()
   d2.cluster = d2.v_ego = 80
-  d2.step(39, source=PlanSource.sccVision)
+  d2.step(39, source=PlanSource.speedLimitAssist)
   assert d2.icbm.v_target == 80 - DEFAULT_MAX_TARGET_DROP, (
-    f"curve target came through at {d2.icbm.v_target}; the drop limiter should still meter it")
+    f"speed-limit target came through at {d2.icbm.v_target}; that one should still coast")
 
   # And end to end: the exit actually gets down to the corner speed.
   d.cruise(1200, target=39, source=PlanSource.sccMap)
@@ -228,3 +230,31 @@ def test_exit_exemption_survives_the_source_alternating():
       f"exemption is flickering with the plan source")
 
   assert abs(d.cluster - 39) <= 1, f"exit slowing stalled at {d.cluster} under an alternating source"
+
+
+def test_a_curve_is_not_metered_but_a_speed_limit_still_is():
+  """His call, 2026-08-08: "Only limit speed drops for speed limits lowering?"
+
+  A curve is a fixed place in the road, so its target carries a deadline exactly as a mapped corner
+  does. Measured on the exit that prompted this: vision asked 52 mph and the limiter held the set
+  speed at 58 for two and a half seconds of the approach.
+
+  A speed limit has no deadline, and coasting into a 35 zone beats braking into it -- so that one
+  keeps the cap. This pins both halves, because the whole change is the line between them.
+  """
+  d = Drive()
+  d.cluster = d.v_ego = 80
+  d.step(39, source=PlanSource.sccVision)
+  assert d.icbm.v_target == 39, (
+    f"curve target metered to {d.icbm.v_target}; a curve is a deadline, same as a mapped corner")
+
+  d2 = Drive()
+  d2.cluster = d2.v_ego = 80
+  d2.step(39, source=PlanSource.speedLimitAssist)
+  assert d2.icbm.v_target == 80 - DEFAULT_MAX_TARGET_DROP, (
+    f"speed-limit target came through at {d2.icbm.v_target}; that one should still coast")
+
+  d3 = Drive()
+  d3.cluster = d3.v_ego = 80
+  d3.step(39, source=PlanSource.cruise)
+  assert d3.icbm.v_target == 80 - DEFAULT_MAX_TARGET_DROP, "plain cruise should still coast"

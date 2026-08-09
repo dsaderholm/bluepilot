@@ -281,7 +281,8 @@ class IntelligentCruiseButtonManagement:
     self.v_baseline = 0            # the driver's chosen speed; 0 = no baseline, follow SLA
     self.v_target_raw = 0
     self.plan_source = LongitudinalPlanSource.cruise
-    self.scc_map_requesting = False  # a mapped corner is asking; exempts the drop limiter
+    self.scc_map_requesting = False   # a mapped corner is asking
+    self.deadline_requesting = False  # map OR vision: a target with a fixed place in the road
     self.baseline_reset_delta = DEFAULT_BASELINE_RESET_DELTA
     self.v_cruise_cluster_prev = 0
     self.icbm_idle_frames = 0
@@ -392,10 +393,24 @@ class IntelligentCruiseButtonManagement:
     #
     # `active` is the map controller's own statement that it is asking for something, and it stays
     # true across the whole approach.
+    #
+    # SCC-VISION COUNTS TOO, as of 2026-08-08. A curve is a fixed place in the road, so its target
+    # carries a deadline exactly like a mapped corner does, and metering it spends road that was
+    # needed. Measured on the exit that prompted this: vision asked for 52 mph at t+257.6 and the
+    # limiter held the set speed at 58 for two and a half seconds, breaking free only when SCC-Map
+    # fired and bypassed it. That is the approach, which is the one stretch where runway is the
+    # entire problem.
+    #
+    # Keeping vision limited was justified here last night by its docstring -- it "ramps its own
+    # target smoothly through the ENTERING state". The log says otherwise: 72, 52, 46, 42 in under
+    # two seconds. Reasoning from a docstring instead of data, again.
     try:
-      self.scc_map_requesting = bool(LP_SP.smartCruiseControl.map.active)
+      scc = LP_SP.smartCruiseControl
+      self.scc_map_requesting = bool(scc.map.active)
+      self.deadline_requesting = bool(scc.map.active or scc.vision.active)
     except (AttributeError, KeyError):
       self.scc_map_requesting = False
+      self.deadline_requesting = False
     self.v_target = self.apply_baseline(self.v_target)
 
     v_ego_conv = round(CS.vEgo * speed_conv)
@@ -446,13 +461,23 @@ class IntelligentCruiseButtonManagement:
     seconds to work 80 down to 30, by which point the ramp was gone. Every step was correct and the
     sum of them was far too slow.
 
-    SCC-Vision is NOT exempt and should not be. It ramps its own target through the ENTERING state
-    with a smooth deceleration, so its requests already arrive gradually -- coasting through those
-    is what this limiter is for, and it is the common case on ordinary roads. The exemption is keyed
-    on SCC-Map ASKING, not on it winning the frame -- see where scc_map_requesting is set for why
-    the frame's plan source is the wrong test.
+    SCC-VISION IS EXEMPT TOO. His call, 2026-08-08: *"Only limit speed drops for speed limits
+    lowering?"* -- and the split is the right one. A curve is a fixed place in the road, so its
+    target has a deadline; a speed limit does not, and coasting into a 35 zone is genuinely nicer
+    than braking into it. What is left under this limiter is therefore the no-deadline case only:
+    speed limits and plain cruise.
+
+    THE ORIGINAL PREMISE IS ALSO DEAD, which is why removing it costs nothing. This existed because
+    a large set-speed drop supposedly makes Ford brake hard. Ford was measured at 1.31 m/s^2 on the
+    2026-08-08 exit -- the UN R13-H brake-lamp threshold, its ceiling -- and it decelerates at that
+    rate whatever the size of the drop. It cannot be violent. So metering never bought gentleness;
+    it only ever bought delay. What it still buys on a speed limit is COASTING instead of braking
+    at all, which is a real difference in feel and in whether the stop lamps light.
+
+    The exemption is keyed on a deadline-bearing source ASKING, not on it winning the frame -- see
+    where deadline_requesting is set for why the frame's plan source is the wrong test.
     """
-    if self.scc_map_requesting:
+    if self.deadline_requesting:
       self.drop_anchor = 0
       return self.v_target
 
