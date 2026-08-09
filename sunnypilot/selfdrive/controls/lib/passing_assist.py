@@ -601,6 +601,12 @@ class PassingAssistDetector:
     # Seconds per blocked reason, counted only while a pass was actually wanted. See wantedSeconds.
     self._block_seconds: dict[int, float] = {}
     self.wanted_seconds = 0.0
+    # HOW BENT THE ROAD WAS WHEN IT SUGGESTED. Measurement only -- nothing gates on it. See
+    # _track_curve: the concern is his retrofit PSCM being asked to add a lane change on top of a
+    # curve it is already working to hold, and the number that would answer it does not exist yet.
+    self.lat_acc = 0.0
+    self.suggested_lat_acc_max = 0.0
+    self._lat_acc_hist = [0] * 5
     self._hold_s = 0.0        # see SUGGESTION_HOLD_S
     self._held_side = Side.none
     self._held_reason = Reason.none
@@ -1388,6 +1394,8 @@ class PassingAssistDetector:
         "geoLoosenTo": self.geo_refusal_loosen_to,
         "wantedSeconds": round(self.wanted_seconds, 1),
         "hogSeconds": round(self.hog_seconds, 1),
+        "suggestedLatAccMax": round(self.suggested_lat_acc_max, 2),
+        "suggestedLatAccHist": list(self._lat_acc_hist),
         "hogCount": int(self.hog_count),
         "topBlockedBy": int(top_key),
         "topBlockedShare": round(top_share, 3),
@@ -1783,7 +1791,45 @@ class PassingAssistDetector:
     """Decide, then advance the dry run of the maneuver that decision would produce."""
     self._decide(sm, v_cruise, long_enabled, speed_limit_target)
     self._hold_suggestion()
+    self._track_curve(sm, float(sm['carState'].vEgo))
     self._run_maneuver(sm['carState'])
+
+  def _track_curve(self, sm, v_ego: float) -> None:
+    """How hard the car is already cornering, and how bent it was when a pass was suggested.
+
+    MEASUREMENT ONLY. Nothing gates on this, deliberately, and the reason is a specific one rather
+    than caution: THE NUMBER THAT WOULD SET A THRESHOLD DOES NOT EXIST. From the road 2026-08-09,
+    the concern is the retrofitted Edge PSCM being asked to add a lane change on top of a curve it
+    is already working to hold -- and tools/bp_pscm_limit.py, which set out to find where that
+    module stops holding a commanded angle, is kept in the tree marked "BROKEN AS AN ANSWER, KEPT
+    AS A LESSON". It read latcontrol_angle's error, which under this fork's angle scheme is not the
+    signal in the loop, and two settings defaults were changed on it and reverted.
+
+    So this records what the road actually did at the moment of each suggestion. If it turns out
+    suggestions never land in a meaningful curve, no gate is needed and the worry is answered for
+    free. If they do, the distribution says where a threshold belongs -- which is the opposite of
+    picking one and finding out afterwards.
+
+    THE SAME QUANTITY SCC USES, on purpose: v_ego^2 * |curvature| off controlsState, which is what
+    vision_controller.py computes for current_lat_acc. Its own thresholds are 1.3 entering a turn
+    and 1.6 turning, and those are upstream's numbers with far more road under them than anything
+    invented here -- so when this does get a threshold, that is the scale it should be read against.
+    """
+    try:
+      self.lat_acc = v_ego * v_ego * abs(sm['controlsState'].curvature)
+    except (KeyError, AttributeError):
+      return
+    if self.suggestion == Side.none or self.reason != Reason.passing:
+      return
+    self.suggested_lat_acc_max = max(self.suggested_lat_acc_max, self.lat_acc)
+    # Coarse histogram against SCC's own scale, so the readout is comparable to the thresholds it
+    # would eventually be judged by rather than to an arbitrary axis.
+    for i, edge in enumerate((0.5, 1.0, 1.3, 1.6)):
+      if self.lat_acc < edge:
+        self._lat_acc_hist[i] += 1
+        break
+    else:
+      self._lat_acc_hist[4] += 1
 
   def _hold_suggestion(self) -> None:
     """Keep a standing suggestion alive through a brief dip in a non-safety gate.

@@ -113,7 +113,7 @@ def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., lead_y=0.0, status=Tr
             acc_braking=False, acc_precharge=False, acc_propulsion=0.0,
             acc_avail=True, set_speed=None,
             icbm_hold=0.0, icbm_manual=False, lka=False, tracks=(),
-            lead_accel=0.0, lead_radar=True):
+            lead_accel=0.0, lead_radar=True, curvature=0.0):
   # Being stuck behind a car means matching its speed, not still closing on it: vEgo tracks vLead
   # and the gap to the SET speed is what makes passing worth suggesting. Tests that need a genuine
   # approach pass v_ego explicitly.
@@ -139,6 +139,9 @@ def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., lead_y=0.0, status=Tr
                      blisLeft=NS(dataAvailable=blis_avail), blisRight=NS(dataAvailable=blis_avail),
                      trafficSignData=NS(dataAvailable=tsr_avail, overtakeMsg=ovtk_msg,
                                         overtakeStatus=ovtk_status)),
+    # What SCC computes current_lat_acc from. Passing assist records the same quantity at
+    # suggestion time -- see _track_curve, measurement only, nothing gates on it.
+    'controlsState': NS(curvature=curvature),
     'liveMapDataSP': NS(roadName=road_name),
     'selfdriveStateSP': NS(intelligentCruiseButtonManagement=NS(
         # The ENUMERANT NAME, which is what str() on a live capnp _DynamicEnum gives. It was 1/0
@@ -3178,3 +3181,54 @@ class TestASuggestionSurvivesAOneFrameDip:
     assert det.suggestion == Side.none
     run(det, 4)
     assert det.suggestion == Side.none or det._held_side == Side.none
+
+
+class TestHowBentTheRoadWasWhenItSuggested:
+  """Measurement only, and the tests say so -- if any of these ever gate a suggestion, that is the
+  regression.
+
+  From the road 2026-08-09: the worry is the retrofitted Edge PSCM being asked to add a lane change
+  on top of a curve it is already holding. The number that would set a threshold does not exist --
+  tools/bp_pscm_limit.py tried and is kept marked "BROKEN AS AN ANSWER, KEPT AS A LESSON", having
+  read a signal that is not in this fork's angle loop and moved two defaults that were reverted.
+
+  So: record what the road did, decide the threshold from the distribution, never the reverse.
+  """
+
+  # v_ego is SLOW_LEAD_MS (24 m/s). lat_acc = v^2 * |curvature|, so 0.0035 is about 2.0 m/s^2 --
+  # past both of SCC's thresholds and unambiguously a real corner.
+  HARD = 0.0035
+  GENTLE = 0.0006          # ~0.35 m/s^2, an interstate sweeper
+
+  def test_it_records_the_corner_it_suggested_in(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES, curvature=self.HARD)
+    assert det.suggestion == Side.left, "the fixture never suggested"
+    assert det.suggested_lat_acc_max > 1.6, det.suggested_lat_acc_max
+
+  def test_it_does_not_refuse_the_corner(self):
+    """THE POINT. A curve must not block a suggestion today -- picking that threshold by reasoning
+    is exactly what produced the reverted SCC defaults."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, curvature=self.HARD)
+    assert det.suggestion == Side.left
+    assert det.blocked_by == Blocked.none
+
+  def test_a_straight_road_records_nothing(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES, curvature=0.0)
+    assert det.suggestion == Side.left
+    assert det.suggested_lat_acc_max < 0.05
+
+  def test_only_frames_it_actually_suggested_in_are_counted(self):
+    """Otherwise this measures the road rather than the decision, and the whole question is whether
+    SUGGESTIONS land in curves."""
+    det = PassingAssistDetector()
+    run(det, int(3.0 / DT_MDL), status=False, curvature=self.HARD)   # hard corner, nothing to pass
+    assert det.suggested_lat_acc_max == 0.0
+    assert det.lat_acc > 1.6, "the corner was not actually present in the fixture"
+
+  def test_the_histogram_uses_sccs_own_scale(self):
+    """Bucketed at 0.5 / 1.0 / 1.3 / 1.6 so the readout is comparable to the thresholds it would
+    eventually be judged against, rather than an axis invented here."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, curvature=self.GENTLE)
+    assert sum(det._lat_acc_hist) > 0
+    assert det._lat_acc_hist[0] > 0, "a gentle sweeper belongs in the lowest bucket"
+    assert det._lat_acc_hist[4] == 0, "nothing should have landed past 1.6"
