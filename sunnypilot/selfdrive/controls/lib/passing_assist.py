@@ -493,6 +493,42 @@ DEFAULT_SETTLE_TIME_S = 20
 # be dominated by ordinary bunching and say nothing.
 HOG_MIN_S = 8.0
 
+# --- holding a suggestion through a one-frame dip ---
+#
+# MEASURED on the 2026-08-09 freeway drive, and the number that forced this: 59 suggestion episodes
+# against 62.7 s of wanting a pass, with a MEDIAN LENGTH OF 0.10 s -- two frames. 80 % lasted under
+# half a second and the whole drive contained 28 s of suggestion. It was not flickering on screen;
+# it never appeared long enough to be seen at all, which is why he took none of the 59.
+#
+# NO SINGLE TERM IS AT FAULT, which is the finding that decided the shape of this. Of the 59 deaths:
+# a non-geometry gate 42 %, paint 31 %, width 14 %, road edge 8 %. Four independent signals each
+# sitting near their threshold, and any one of them dipping for a single frame took the whole
+# suggestion away. Stabilising the worst of them would have left two thirds of it.
+#
+# So the hysteresis goes on the OUTPUT, where every one of those paths converges: once a suggestion
+# is up, a gate has to stay unhappy for this long before it is withdrawn. Appearing is unchanged --
+# the confirmation window already governs that, and this must not make it quicker to suggest.
+#
+# 0.6 s is four times the longest observed dip and still far shorter than the shortest episode
+# anyone could act on.
+SUGGESTION_HOLD_S = 0.6
+
+# AN ALLOW LIST, NOT AN EXEMPT LIST, and the first draft got this backwards. Exempting the safety
+# gates left everything else holdable, which included the DRIVER TAKING OVER and the feature being
+# switched off at the LKA button -- two tests caught it immediately, and both were right.
+#
+# The deeper problem with an exempt list is that it fails open: any gate added later is held through
+# by default, silently, and whoever adds it never sees this file. Naming what MAY be held through
+# fails closed instead, which is the same rule the rest of the module runs on -- evidence that keeps
+# a maneuver alive must never be cheaper than evidence that ends it.
+#
+# These three, and only these three, are exactly the ones measured oscillating on 2026-08-09:
+# noLaneAvailable 61 % of the deaths, adjacentSlow 24 %, nothingSlower 15 %. Every one of them says
+# the pass is POINTLESS -- there is nowhere to go, the lane is no faster, the car ahead is not
+# actually slow. None of them says it is DANGEROUS. A pointless suggestion held for another half
+# second costs nothing; anything else withdrawing late could cost a great deal.
+HOLD_THROUGH = (Blocked.noLaneAvailable, Blocked.adjacentSlow, Blocked.nothingSlower)
+
 # --- keep right ---
 # "Keep right except to pass" is the mirror of the passing question: nothing is holding us back and
 # a lane exists to our right, so we should not be sitting out here. Deliberately slower to fire
@@ -565,6 +601,10 @@ class PassingAssistDetector:
     # Seconds per blocked reason, counted only while a pass was actually wanted. See wantedSeconds.
     self._block_seconds: dict[int, float] = {}
     self.wanted_seconds = 0.0
+    self._hold_s = 0.0        # see SUGGESTION_HOLD_S
+    self._held_side = Side.none
+    self._held_reason = Reason.none
+    self._held_trigger = Trigger.none
     # LEFT LANE HOGS, asked for by name 2026-08-09 after a less printable list of alternatives.
     # See _track_lane_hog for what counts as one and, more importantly, what does not.
     self.hog_seconds = 0.0
@@ -1742,7 +1782,50 @@ class PassingAssistDetector:
   def update(self, sm, v_cruise: float, long_enabled: bool, speed_limit_target: float = 0.0) -> None:
     """Decide, then advance the dry run of the maneuver that decision would produce."""
     self._decide(sm, v_cruise, long_enabled, speed_limit_target)
+    self._hold_suggestion()
     self._run_maneuver(sm['carState'])
+
+  def _hold_suggestion(self) -> None:
+    """Keep a standing suggestion alive through a brief dip in a non-safety gate.
+
+    See SUGGESTION_HOLD_S for the measurement that forced this. In one sentence: the decision was
+    correct and unusable, because four independent gates each hovered at their threshold and any
+    one of them faltering for a single frame withdrew the whole thing. Median episode 0.10 s.
+
+    ONLY EVER EXTENDS AN EXISTING SUGGESTION. It cannot create one, cannot change the side, and
+    cannot make anything appear sooner -- the confirmation window still decides that, and a hold
+    that could suggest on its own would be a second, hidden trigger.
+
+    Only the three gates in HOLD_THROUGH may be held through. Everything else -- the driver
+    taking over, the feature being switched off, anything about danger -- ends it at once.
+    """
+    if self.suggestion != Side.none:
+      self._hold_s = 0.0
+      self._held_side, self._held_reason = self.suggestion, self.reason
+      self._held_trigger = self.trigger
+      return
+
+    if self._held_side == Side.none:
+      return
+
+    # Anything not on the allow list ends it now, and forgets the hold so it cannot resume.
+    if self.blocked_by not in HOLD_THROUGH:
+      self._held_side = Side.none
+      self._hold_s = 0.0
+      return
+
+    self._hold_s += DT_MDL
+    if self._hold_s >= SUGGESTION_HOLD_S:
+      self._held_side = Side.none
+      return
+
+    # Still within the hold: restore what was being shown, and say so rather than reporting the
+    # gate that momentarily objected -- blockedBy is what the drive summary counts, and recording a
+    # block during a frame the driver was still being shown a suggestion would corrupt it.
+    self.suggestion = self._held_side
+    self.reason = self._held_reason
+    self.trigger = self._held_trigger
+    self.blocked_by = Blocked.none
 
   def _run_maneuver(self, CS) -> None:
     """Feed the dry run. See passing_maneuver.py -- this actuates nothing.

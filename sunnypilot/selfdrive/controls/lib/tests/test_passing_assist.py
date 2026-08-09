@@ -28,6 +28,7 @@ from openpilot.common.realtime import DT_MDL
 from openpilot.sunnypilot.selfdrive.controls.lib.passing_maneuver import CHANGE_DURATION_S
 from openpilot.sunnypilot.selfdrive.controls.lib.passing_assist import (
   PassingAssistDetector, MIN_LANE_WIDTH_M, DEFAULT_MIN_SPEED_MPH, MAX_WIDENING_M,
+  SUGGESTION_HOLD_S,
   DEFAULT_PERSISTENCE_S, DRIVE_HISTORY_MAX, CHIME_MIN_INTERVAL_S,
   TIMELINE_MAX,
 )
@@ -3119,3 +3120,61 @@ class TestLeftLaneHogs:
     run(det, int(6.0 / DT_MDL), status=False, **self.PASSING_LANE)   # road clears
     run(det, self.HOG_FRAMES, **self.PASSING_LANE)
     assert det.hog_count == 2
+
+
+class TestASuggestionSurvivesAOneFrameDip:
+  """59 suggestions in 62.7 s of wanted time, median length 0.10 s -- two frames.
+
+  Measured on the 2026-08-09 drive. The decision was right and unusable: four gates each sat near
+  their threshold and any one dipping for a single frame withdrew the whole suggestion. It never
+  appeared long enough to see, which is why he took none of the 59.
+
+  No single term was at fault -- a non-geometry gate 42 %, paint 31 %, width 14 %, road edge 8 % --
+  so the hysteresis goes where all of them converge, on the output.
+  """
+
+  def test_a_momentary_geometry_dip_does_not_withdraw_it(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES)
+    assert det.suggestion == Side.left, "the fixture never suggested"
+    run(det, 2, probs=(0.2, 0.99, 0.99, 0.2))     # paint drops out for two frames
+    assert det.suggestion == Side.left
+    assert det.blocked_by == Blocked.none, "a held frame must not record a block"
+
+  def test_but_a_sustained_one_does(self):
+    """The hold is a bridge, not a latch. Past SUGGESTION_HOLD_S the gate is simply right."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES)
+    run(det, int((SUGGESTION_HOLD_S + 0.4) / DT_MDL), probs=(0.2, 0.99, 0.99, 0.2))
+    assert det.suggestion == Side.none
+    assert det.blocked_by == Blocked.noLaneAvailable
+
+  def test_the_driver_taking_over_ends_it_immediately(self):
+    """Not on the allow list, and the first draft of this held through it -- which would have kept
+    suggesting at a driver who had just grabbed the wheel."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES)
+    run(det, 1, blinker=True)
+    assert det.suggestion == Side.none
+    assert det.blocked_by == Blocked.driverActive
+
+  def test_oncoming_traffic_ends_it_immediately(self):
+    """The one the whole module is built around. Holding a suggestion through opposing traffic
+    would be inventing evidence, and half a second is a long way at a closing speed of 120 mph.
+
+    Asserted at the exact frame the veto lands rather than after a fixed wait, so this cannot pass
+    merely because the hold happened to expire first."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES)
+    assert det.suggestion == Side.left
+    oncoming = [track(90, 3.7, -27.0 - SLOW_LEAD_MS)]
+    for _ in range(12):
+      run(det, 1, tracks=oncoming)
+      if det.blocked_by == Blocked.oncomingLane:
+        break
+    assert det.blocked_by == Blocked.oncomingLane, "the veto never fired; the test proves nothing"
+    assert det.suggestion == Side.none, "a suggestion was held through opposing traffic"
+
+  def test_it_cannot_create_a_suggestion_of_its_own(self):
+    """It only ever extends one that already stood. If it could start one it would be a second
+    trigger, hidden behind the first, and the confirmation window would stop meaning anything."""
+    det = run(PassingAssistDetector(), 1)          # nowhere near the confirmation window
+    assert det.suggestion == Side.none
+    run(det, 4)
+    assert det.suggestion == Side.none or det._held_side == Side.none
