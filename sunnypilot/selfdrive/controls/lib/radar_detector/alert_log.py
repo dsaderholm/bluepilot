@@ -1,5 +1,5 @@
 """
-BluePilot: recording radar detector encounters so the strength threshold can be FITTED.
+FusionPilot: recording radar detector encounters so the strength threshold can be FITTED.
 
 RadarDetectorMinBars ships at a number with no evidence behind it, and no amount of reasoning will
 produce a better one -- signal strength is not distance, and how far ahead a given bar count sits

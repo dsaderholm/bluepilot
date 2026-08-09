@@ -4,7 +4,7 @@ Copyright (c) 2021-, Haibin Wen, sunnypilot, and a number of other contributors.
 This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 
-BluePilot: behavioral tests for the radar-detector speed limit offset override.
+FusionPilot: behavioral tests for the radar-detector speed limit offset override.
 
 The cases that earn their keep here are the ones asserting this stays OUT of the way: muted alerts,
 rear-only alerts, K and X band, and the shipped configuration where the override is switched off

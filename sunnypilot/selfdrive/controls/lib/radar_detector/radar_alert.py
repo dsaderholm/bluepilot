@@ -1,5 +1,5 @@
 """
-BluePilot: let a radar detector alert change what Speed Limit Assist aims for.
+FusionPilot: let a radar detector alert change what Speed Limit Assist aims for.
 
 The detector is a Valentine One Gen2 on its wired ESP bus (see esp_protocol.py for why the wire and
 not Bluetooth). This module decides whether an alert is worth acting on. It does NOT decide a set

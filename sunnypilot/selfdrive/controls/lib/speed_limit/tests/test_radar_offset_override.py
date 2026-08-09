@@ -4,7 +4,7 @@ Copyright (c) 2021-, Haibin Wen, sunnypilot, and a number of other contributors.
 This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 
-BluePilot: the radar detector's speed limit offset override, inside the resolver.
+FusionPilot: the radar detector's speed limit offset override, inside the resolver.
 
 These exist because the resolver's own 47 tests were green before this branch was added and would
 have stayed green if it had been wired backwards -- none of them reach the new code path. A test

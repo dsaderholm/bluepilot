@@ -1,5 +1,5 @@
 """
-BluePilot: reading the Valentine One's ESP bus off a USB serial adapter.
+FusionPilot: reading the Valentine One's ESP bus off a USB serial adapter.
 
 Split deliberately in two:
 

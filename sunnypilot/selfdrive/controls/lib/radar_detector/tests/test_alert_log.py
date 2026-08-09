@@ -4,7 +4,7 @@ Copyright (c) 2021-, Haibin Wen, sunnypilot, and a number of other contributors.
 This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 
-BluePilot: tests for the radar encounter log.
+FusionPilot: tests for the radar encounter log.
 
 The test that matters most here is test_the_warning_budget_is_computable. This log exists for
 exactly one purpose -- to answer "how many seconds pass between a Ka alert first reaching N bars

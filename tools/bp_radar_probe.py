@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""BluePilot: first-contact diagnostic for the Valentine One's wired ESP bus.
+"""FusionPilot: first-contact diagnostic for the Valentine One's wired ESP bus.
 
 Run this the day the detector arrives, before trusting anything else. Everything in the radar
 feature is built against Valentine's PUBLISHED specification and verified against their own example

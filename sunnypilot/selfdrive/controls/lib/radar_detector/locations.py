@@ -1,5 +1,5 @@
 """
-BluePilot: places worth remembering, learned from the radar detector.
+FusionPilot: places worth remembering, learned from the radar detector.
 
 Two jobs, one store, and that is the point rather than a compromise. A place you repeatedly alert
 at is either a false alarm or somewhere police actually work, and the same records answer both:

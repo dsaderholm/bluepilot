@@ -1,5 +1,5 @@
 """
-BluePilot: decoder for Valentine Research's Extended Serial Protocol (ESP).
+FusionPilot: decoder for Valentine Research's Extended Serial Protocol (ESP).
 
 This is the wire format spoken by a Valentine One on its wired accessory bus -- the ACC jack on
 the Lighter Adapter or the Accessory jack on the Direct-Wire Power Adapter. Everything here is
@@ -75,7 +75,7 @@ V1_ORIGINS = (DEV_V1_NO_CHECKSUM, DEV_V1_CHECKSUM)
 
 # Table 3.4 reserves $03, $04 and $05 for third-party accessories; everything else belongs to
 # Valentine Research products. We claim the first. The spec asks manufacturers to publish which one
-# they use so owners can tell what may share a bus -- BluePilot uses $03.
+# they use so owners can tell what may share a bus -- FusionPilot uses $03.
 OUR_DEVICE_ID = 0x03
 
 # Time slice for OUR_DEVICE_ID, Table 3.4, measured from the moment the End of Frame byte of the

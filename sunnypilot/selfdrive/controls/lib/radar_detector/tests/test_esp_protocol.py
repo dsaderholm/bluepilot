@@ -4,7 +4,7 @@ Copyright (c) 2021-, Haibin Wen, sunnypilot, and a number of other contributors.
 This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 
-BluePilot: tests for the Valentine One ESP decoder.
+FusionPilot: tests for the Valentine One ESP decoder.
 
 The valuable cases here are the ones taken verbatim from Valentine Research's published
 specification -- their two worked infDisplayData packets and their worked blink example. Those are

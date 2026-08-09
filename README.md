@@ -83,8 +83,18 @@ afterwards rather than argued about from memory.
 
 ### Radar detector integration
 
-Reads a radar detector over USB and slows for alerts, with a per-speed-band threshold fitted against
-what the car can actually shed, a false-alarm mute, and a minimum bar count.
+Reads a Valentine One Gen2 over its wired accessory bus, via a USB serial adapter, and aims just
+under the posted limit while a strong Ka alert is out there. It does that by overriding the speed
+limit offset, so it composes with whatever offset you normally run and needs no cruise buttons.
+
+It also learns places. Somewhere that alerts on nearly every pass is a supermarket door, and the
+detector gets told to stay quiet there; somewhere that alerts occasionally is where police actually
+work, and you get a warning before you reach it. Laser marks itself, because by the time it fires
+you have already been measured and the map is the only defence that helps next time.
+
+The strength threshold ships as a guess and is meant to be replaced: `tools/bp_radar_fit.py` reads
+the encounter log and reports, per speed band, whether a given threshold would have given enough
+warning to reach the limit at the rate this car actually sheds speed.
 
 ### Diagnostics and guards
 

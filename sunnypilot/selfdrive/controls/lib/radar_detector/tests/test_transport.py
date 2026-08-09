@@ -4,7 +4,7 @@ Copyright (c) 2021-, Haibin Wen, sunnypilot, and a number of other contributors.
 This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 
-BluePilot: tests for the ESP stream decoder.
+FusionPilot: tests for the ESP stream decoder.
 
 Only the pure half is tested here, which is the whole reason the transport is split the way it is.
 The serial shell opens a port and reads it; there is nothing in it to get subtly wrong that a mock

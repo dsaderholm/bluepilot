@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""BluePilot: pick RadarDetectorMinBars from your own driving instead of from a guess.
+"""FusionPilot: pick RadarDetectorMinBars from your own driving instead of from a guess.
 
     python tools/bp_radar_fit.py radar_alerts.jsonl
 
-RadarDetectorMinBars ships at 6 of 8 with NO EVIDENCE BEHIND IT. This is the thing that replaces the
+RadarDetectorMinBars ships at 4 of 8 with NO EVIDENCE BEHIND IT -- low on purpose, because
+defaults only reach a fresh flash and a threshold set too high fails silently. This is the thing that replaces the
 guess: it reads the encounter log written on the road and answers the only question that matters.
 
     Would this threshold have given me enough warning to actually reach the limit, and how often
