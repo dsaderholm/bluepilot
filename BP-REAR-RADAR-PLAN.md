@@ -783,6 +783,27 @@ on this part: CAN FD is a property of the *car's buses and openpilot's decode pa
 ⚠️ **Still avoid `-14D453` and `-14C689`** — those are the blind-spot (SODL/SODR) modules, the
 sensors the BLIS work already established cannot answer "is something closing".
 
+### The listings all say "blind spot". They are wrong. Buy it anyway.
+
+Confirmed by the owner 2026-08-09: **essentially every eBay listing for `JX7T-9G768-AC` is titled
+"Blind Spot Sensor Radar Module"**, and they are mislabeled. He knows because the listing he bought
+from last year said exactly that, and the part that arrived is the ACC radar now fitted to the front
+of this car, feeding `FORD_CADS` over bus 1 on every drive.
+
+*"These sellers are stupid."*
+
+**The part number is the fact; the title is keyword soup.** `9G768` is Ford's group for the cruise
+control distance sensor. `14D453`, `14C689` and `14D599` are the blind-spot groups. A title that
+says "blind spot" over a `9G768` number is a seller filling the box with search terms, not a
+description of the part.
+
+Recorded because this looks exactly like the trap the warning above describes, and raising it as an
+objection costs him a round trip every time. **It has already cost one.** If a future session is
+about to say "careful, that says blind spot" — the number decides, and this one is right.
+
+Sanity check that is nearly free anyway: ask for a photo of the label, or compare against the unit
+already in this car, since it is the same part number.
+
 ### Bill of materials
 
 **Phase 1 — bench test only.** Answers the one question that decides the project.
