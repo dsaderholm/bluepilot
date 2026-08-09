@@ -484,14 +484,23 @@ class IntelligentCruiseButtonManagement:
         do not light the lamps at all. That last part is a THRESHOLD, not a delay, which is the
         useful correction -- carstate_ext.py reads BrkLamp_B_Rq (what traffic sees) separately from
         AccBrkTot_A_Rq (what ACC asked for) precisely because ACC applies brake too light to trigger
-        the lamps. UN R13-H puts the mandatory point at 1.3 m/s^2. ACC ramps its request up from
-        zero, so the first part of every application sits under the line and reads from the driver's
-        seat as the lamps being late.
+        the lamps.
 
-    That threshold is why capping the step works at all, and it is a better reason than the one this
-    was built on: a small set-speed step produces a small deceleration request, which stays under
-    1.3 and leaves the lamps dark. Magnitude, which is exactly what a cap controls. The 1.31 m/s^2
-    measured on the exit is a hair OVER the mandatory point -- those lamps were lit the whole ramp.
+    AND THE RULE THAT GOVERNS THIS CAR IS NOT A RATE. The 1.3 m/s^2 figure quoted elsewhere in this
+    repo is UN R13-H, which is UNECE. This car is in the US, where FMVSS 108 S5.5.4 says the stop
+    lamps are activated UPON APPLICATION OF THE SERVICE BRAKES, and NHTSA has interpreted a bare
+    deceleration threshold as not a permissible trigger on its own -- a stop lamp signals that the
+    operator intends to diminish speed BY BRAKING, not that the vehicle is slowing.
+
+    So the line is whether the service brakes are applied at all, and speed reduction achieved by
+    coasting or powertrain drag correctly lights nothing. That is what the owner wanted from this
+    feature and it is the better-founded version of it: keeping each step small keeps Ford in the
+    coast regime, so no service brake, so no lamps -- rather than keeping a magnitude under a
+    threshold that does not apply here.
+
+    It also means AccBrkDecel_B_Rq, the boolean, tracks the legal trigger far better than
+    AccBrkTot_A_Rq does. The 1.31 m/s^2 measured on the exit says the brakes were firmly applied
+    there; it is evidence of braking, not the criterion for it.
 
     What survives is narrow and real: on a target with no deadline, keeping each step small keeps
     Ford in the coasting regime rather than the braking one, and the lamps stay dark. That is worth
