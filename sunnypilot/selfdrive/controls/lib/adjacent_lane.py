@@ -62,26 +62,27 @@ shifts both edges by about a tenth of a lane; the debounce, the road-edge test a
 path-relative measurement all matter more. But it is a real bias and it is silent, so: if the
 adjacent-lane band ever looks skewed to one side in the logs, this is the first thing to suspect.
 
-MEASURED 2026-08-09, AND THE RESULT CONTRADICTS ITSELF -- so nothing has been applied.
+MEASURED 2026-08-09, AND THE ANSWER IS THAT THE RADAR IS ALREADY CORRECTED. Nothing applied.
 
-Comparing radar-confirmed lead yRel against the model's own lead over a 7 minute drive (n=1208)
-gave a median disagreement of +0.40 m, which reads as the radar sitting 0.40 m toward the
-PASSENGER side. Two independent things say that is backwards:
+The sensor is physically about 0.35-0.40 m toward the DRIVER side, scaled off a factory photo of a
+stripped Fusion front end. That is not a bad retrofit -- Ford mounts these off-center by design,
+"the center area is not always available for installation, so that a position clearly outside the
+vehicle center must be used".
 
-  - the sensor is physically on the DRIVER side, behind the lower grille, in the factory pocket.
-    Confirmed from the car.
-  - the false positives were on the RIGHT -- "an elevated sidewalk after the right shoulder",
-    "curbs as other cars". A DRIVER-side offset is what pulls the right-hand band ~0.4 m closer to
-    the car and into the shoulder. A passenger-side offset would push that band further out and
-    make those reports less likely, not more.
+The test that settles it: if the radar reported raw angles from its own face, a lead sitting dead
+ahead would come back near -0.38 in this left-positive frame. Over a 7 minute drive (n=1326) the
+median lead came back at +0.25. Not -0.38, and not a sign flip away from it either. So the raw
+mounting offset is NOT present in what openpilot receives -- the module is reporting relative to
+the car, and the FORScan calibration applied during the retrofit is the likely reason.
 
-The obvious suspect was the frame flip, and it is not that: radard.py builds the vision lead as
-`yRel = -lead.y[0]` (lines 127 and 149), which is exactly the conversion the measurement used. So
-the error is somewhere else and is not yet found.
+What is still unexplained is a +0.40 m median disagreement between the radar's lead and the
+MODEL's lead over the same frames. Given the above, the suspect is now the vision side of that
+comparison rather than the radar: the model's own lead lateral estimate carrying a bias, which
+would make "camera as ground truth" the weak premise. Worth knowing before anyone reaches for
+modelV2 lead position as a reference for anything else.
 
-DO NOT APPLY A CORRECTION FROM THAT NUMBER. The sign is what matters here -- backwards turns a
-0.40 m bias into 0.80 m, which is worse than leaving it alone. A tape measure from the centerline
-to the sensor face settles magnitude and direction at once and depends on none of this.
+DO NOT APPLY A MOUNTING CORRECTION. The evidence says there is nothing to correct, and a 0.4 m
+"fix" applied to already-corrected data creates the exact error it was meant to remove.
 
 Measuring it is a tape measure from the car's centerline to the sensor face, and applying it is one
 constant subtracted from `lat` below. Not added speculatively -- the number has to be measured
