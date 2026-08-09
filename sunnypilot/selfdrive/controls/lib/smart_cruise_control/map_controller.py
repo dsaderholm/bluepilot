@@ -124,6 +124,7 @@ class SmartCruiseControlMap:
     self.model_lat_acc = 0.0
     self.model_vetoed = False   # logged so a missing slowdown can be explained rather than guessed
     self.target_distance = float('inf')
+    self.map_factor = 1.0
     self.long_enabled = False
     self.long_override = False
     self.is_enabled = False
@@ -153,6 +154,10 @@ class SmartCruiseControlMap:
       # the signed deceleration, and clipped so a bad param cannot make the trigger distance
       # infinite (which would read as "SCC-Map never fires") or slam the brakes.
       decel = self.params.get("SmartCruiseControlMapDecel", return_default=True) / 10.
+      # BluePilot: the magnitude knob, applied to the corner speed itself. Scaling here rather than
+      # at the output means the trigger distance is computed against the speed we will actually ask
+      # for, so a lower factor also starts earlier -- which is the physically consistent pairing.
+      self.map_factor = self.params.get("SmartCruiseControlMapFactor", return_default=True) / 100.
       self.target_accel = -min(max(decel, SCC_MAP_DECEL_MIN), SCC_MAP_DECEL_MAX)
 
   def update_calculations(self) -> None:
@@ -258,7 +263,7 @@ class SmartCruiseControlMap:
       self.target_lat = 0.0
       self.target_lon = 0.0
 
-    self.v_target = min_v
+    self.v_target = min_v * self.map_factor
     self.target_lat = target_lat
     self.target_lon = target_lon
 

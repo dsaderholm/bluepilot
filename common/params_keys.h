@@ -432,23 +432,23 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // move after the alignment, these do NOT need to move with them.
     {"SmartCruiseControlVisionLowSpeedFactor", {PERSISTENT | BACKUP, INT, "110"}},
     {"SmartCruiseControlVisionHighSpeedFactor", {PERSISTENT | BACKUP, INT, "100"}},
-    // BluePilot: how early the curve cycle starts, independent of how much it slows. 100 = stock.
-    //
-    // Went 100 -> 140 -> 170 while SCC-Map did not exist, because off-ramps triggered too late and
-    // vision was the only thing that could catch them. Reported from a drive on 2026-08-04 that the
-    // car now slows hard for gentle interstate sweepers: at 170 the entering threshold falls to
-    // 0.76 m/s^2, which at 70 mph is a 1281 m radius -- a bend you can barely feel. Stock is 754 m.
-    //
-    // Back to 110 (829 m). The ramps that justified 170 belong to SCC-Map now, which sees them from
-    // the map rather than waiting for the camera, so the earliness was buying nothing and costing
-    // every sweeper on I-15.
-    {"SmartCruiseControlVisionEarliness", {PERSISTENT | BACKUP, INT, "110"}},
     // BluePilot: SCC-Map deceleration target, tenths of m/s^2, magnitude. Unlike SCC-Vision this
     // single value sets BOTH how hard it slows and how early it starts, because the trigger is
     // "am I within the distance needed to reach the corner speed at this rate" -- gentler means a
     // longer distance means an earlier start. 12 = the stock -1.2 m/s^2, deliberately just under
     // the 1.3 that lights the stop lamps. Lower it to begin ramps sooner and more gently.
     {"SmartCruiseControlMapDecel", {PERSISTENT | BACKUP, INT, "8"}},
+    // BluePilot: scales the corner speed SCC-Map asks for, in percent. The magnitude control map
+    // has never had -- SmartCruiseControlMapDecel is a TRIGGER DISTANCE, so it moves when the
+    // slowing starts and not how slow it gets, and vision's factors do not apply to mapped corners.
+    //
+    // Asked for on 2026-08-08 after an off-ramp: "for the end of the exit, it honestly should've
+    // dropped down to 20 mph. My PSCM really wants to take curves like that at low speeds." The
+    // mapped target matched the ramp's yellow advisory sign, which is correct for a stock car and
+    // too fast for this one to steer -- the retrofit PSCM has less authority than the advisory
+    // assumes. 100 keeps the map's own number; lower takes every mapped corner proportionally
+    // slower.
+    {"SmartCruiseControlMapFactor", {PERSISTENT | BACKUP, INT, "100"}},
 
     // Torque lateral control custom params
     {"CustomTorqueParams", {PERSISTENT | BACKUP , BOOL}},

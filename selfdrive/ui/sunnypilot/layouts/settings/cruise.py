@@ -79,15 +79,6 @@ class CruiseLayout(Widget):
       label_callback=lambda v: f"{v}%",
       inline=True)
 
-    # BluePilot: how early the curve cycle starts, independent of how much it slows
-    self.scc_v_earliness = option_item_sp(
-      title=tr("Curve Detection Earliness"),
-      description=recommended(tr("How far ahead of a turn to begin slowing. This changes the timing only; "
-                     "how much speed comes off is set by the two sensitivity controls above."), "SmartCruiseControlVisionEarliness", lambda v: f"{v}%"),
-      param="SmartCruiseControlVisionEarliness",
-      min_value=50, max_value=200, value_change_step=10,
-      label_callback=lambda v: f"{v}%",
-      inline=True)
 
     # BluePilot: cap on how far ICBM drops the set speed in one step
     self.icbm_max_target_drop = option_item_sp(
@@ -234,6 +225,20 @@ class CruiseLayout(Widget):
       min_value=1, max_value=15, value_change_step=1,
       label_callback=self._speed_step_label,
       inline=True)
+    # BluePilot: the magnitude knob SCC-Map never had. MapDecel moves WHEN it starts; this moves
+    # how slow it gets. Asked for after an off-ramp whose mapped target matched the yellow advisory
+    # sign -- correct for a stock car, too fast for this one's retrofit PSCM to steer.
+    self.scc_map_factor = option_item_sp(
+      title=tr("Mapped Corner Speed"),
+      description=recommended(tr("Scales the speed mapped corners and exit ramps are taken at. "
+                     "100% uses the map's own number, which matches the posted advisory. Lower it "
+                     "if the steering struggles to hold those curves at the advisory speed."),
+                     "SmartCruiseControlMapFactor", self._percent_label),
+      param="SmartCruiseControlMapFactor",
+      min_value=50, max_value=100, value_change_step=5,
+      label_callback=self._percent_label,
+      inline=True)
+
 
     self.scc_m_toggle = toggle_item_sp(
       title=tr("Smart Cruise Control - Map"),
@@ -333,8 +338,8 @@ class CruiseLayout(Widget):
       self.scc_v_toggle,
       self.scc_v_low_speed_factor,
       self.scc_v_high_speed_factor,
-      self.scc_v_earliness,
       self.scc_m_toggle,
+      self.scc_map_factor,
       self.scc_m_decel,
 
       SectionHeader(tr("Other")),
@@ -406,6 +411,10 @@ class CruiseLayout(Widget):
     driver who measures in miles. Same rule as _speed_step_label below -- the unit follows the
     driver, and a settings label must never state one without asking which they use."""
     return f"{value} m" if ui_state.is_metric else f"{round(value * 3.28084 / 5) * 5} ft"
+
+  @staticmethod
+  def _percent_label(value):
+    return f"{value}%"
 
   @staticmethod
   def _decel_label(value):

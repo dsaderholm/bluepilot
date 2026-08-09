@@ -53,7 +53,7 @@ _LEAVING_ACC = 0.5  # Conformable acceleration to regain speed while leaving a t
 # sweeper feel like it's braking for nothing.
 #
 # The blended factor divides the lateral-acceleration budget only, which is what sets the target
-# speed through a curve. How EARLY the cycle starts is a separate knob (see _EARLINESS_* below).
+# speed through a curve. How early the cycle starts is upstream's, in the lat-acc thresholds below.
 #   > 100 -> smaller accel budget: slows further for a given curve
 #   < 100 -> larger budget: carries more speed through
 # Applied to _A_LAT_REG_MAX alone, NOT to the _TURNING_ACC / _ENTERING_SMOOTH_DECEL tables -- those
@@ -63,24 +63,16 @@ _SENSITIVITY_MIN = 0.5
 _SENSITIVITY_MAX = 1.5
 _SENSITIVITY_V_BP = [13.5, 26.82]  # m/s, ~30-60 mph. Matches lateral_angle_ext's gain blend band.
 
-# BluePilot: how early the turn cycle starts, decoupled from how much it slows.
+# BluePilot: there WAS an earliness control here, dividing every lat-acc threshold below. Removed
+# 2026-08-08. It was ours, not upstream's -- upstream uses these constants directly -- and it ended
+# up neutral: it existed because vision was once the only thing that could catch an off-ramp, and
+# SCC-Map does that now from the map instead of waiting for the camera. Raised to 170 on that
+# reasoning, it was walked back to 110 and then to no effect at all, having spent its whole life
+# making gentle interstate sweepers slow hard.
 #
-# These two were originally one multiplier, which made them impossible to separate: raising it
-# triggered earlier but also targeted a lower speed, and lowering it did the reverse. There was no
-# way to ask for "start sooner, slow the same amount" -- which is the one strictly-good direction
-# available, because more runway at an unchanged corner speed means a gentler deceleration, and a
-# gentler deceleration is less likely to reach the friction brake at all.
-#
-# Higher earliness -> lower lat-acc thresholds -> the entering phase starts further from the curve.
-# It is not free: every threshold that triggers sooner also triggers on curves that later abort
-# (see _ABORT_ENTERING_PRED_LAT_ACC_TH), so pushing this too far buys spurious slowdowns for
-# corners that would have been fine.
-#
-# The shipped default is 170, NOT 100 -- see params_keys.h. It was raised on drive reports of the
-# cycle starting too late, most visibly on freeway off-ramps. _EARLINESS_MAX below is the hard clip,
-# so 170 leaves only a little headroom.
-_EARLINESS_MIN = 0.5
-_EARLINESS_MAX = 2.0
+# Deleted rather than left at neutral, because a knob that changes nothing is still a modified
+# upstream line paid for on every future merge. Sensitivity stays: it governs how much speed comes
+# off, which is a different question and still useful.
 
 
 class SmartCruiseControlVision:
@@ -106,11 +98,10 @@ class SmartCruiseControlVision:
     self.max_pred_lat_acc = 0.
 
     # BluePilot: curve aggressiveness feel factors, blended by speed into self.sensitivity.
-    # sensitivity governs HOW MUCH it slows; earliness governs HOW EARLY it starts.
+    # sensitivity governs HOW MUCH it slows.
     self.low_speed_curve_factor = 1.0
     self.high_speed_curve_factor = 1.0
     self.sensitivity = 1.0
-    self.earliness = 1.0
 
   def _update_sensitivity(self) -> None:
     """BluePilot: blend the two feel factors by current speed."""
@@ -121,25 +112,10 @@ class SmartCruiseControlVision:
   def a_lat_reg_max(self) -> float:
     return _A_LAT_REG_MAX / self.sensitivity
 
-  @property
-  def entering_pred_lat_acc_th(self) -> float:
-    return _ENTERING_PRED_LAT_ACC_TH / self.earliness
 
-  @property
-  def abort_entering_pred_lat_acc_th(self) -> float:
-    return _ABORT_ENTERING_PRED_LAT_ACC_TH / self.earliness
 
-  @property
-  def turning_lat_acc_th(self) -> float:
-    return _TURNING_LAT_ACC_TH / self.earliness
 
-  @property
-  def leaving_lat_acc_th(self) -> float:
-    return _LEAVING_LAT_ACC_TH / self.earliness
 
-  @property
-  def finish_lat_acc_th(self) -> float:
-    return _FINISH_LAT_ACC_TH / self.earliness
 
   def get_a_target_from_control(self) -> float:
     return self.a_target
@@ -158,8 +134,6 @@ class SmartCruiseControlVision:
                         ("high_speed_curve_factor", "SmartCruiseControlVisionHighSpeedFactor")):
         factor = self.params.get(key, return_default=True) / 100.
         setattr(self, attr, float(np.clip(factor, _SENSITIVITY_MIN, _SENSITIVITY_MAX)))
-      earliness = self.params.get("SmartCruiseControlVisionEarliness", return_default=True) / 100.
-      self.earliness = float(np.clip(earliness, _EARLINESS_MIN, _EARLINESS_MAX))
 
   def _update_calculations(self, sm: messaging.SubMaster) -> None:
     if not self.long_enabled:
@@ -197,7 +171,7 @@ class SmartCruiseControlVision:
           if self.v_ego <= MIN_V:
             pass
           # If significant lateral acceleration is predicted ahead, then move to Entering turn state.
-          elif self.max_pred_lat_acc >= self.entering_pred_lat_acc_th:
+          elif self.max_pred_lat_acc >= _ENTERING_PRED_LAT_ACC_TH:
             self.state = VisionState.entering
 
         # OVERRIDING
@@ -208,25 +182,25 @@ class SmartCruiseControlVision:
         # ENTERING
         elif self.state == VisionState.entering:
           # Transition to Turning if current lateral acceleration is over the threshold.
-          if self.current_lat_acc >= self.turning_lat_acc_th:
+          if self.current_lat_acc >= _TURNING_LAT_ACC_TH:
             self.state = VisionState.turning
           # Abort if the predicted lateral acceleration drops
-          elif self.max_pred_lat_acc < self.abort_entering_pred_lat_acc_th:
+          elif self.max_pred_lat_acc < _ABORT_ENTERING_PRED_LAT_ACC_TH:
             self.state = VisionState.enabled
 
         # TURNING
         elif self.state == VisionState.turning:
           # Transition to Leaving if current lateral acceleration drops below a threshold.
-          if self.current_lat_acc <= self.leaving_lat_acc_th:
+          if self.current_lat_acc <= _LEAVING_LAT_ACC_TH:
             self.state = VisionState.leaving
 
         # LEAVING
         elif self.state == VisionState.leaving:
           # Transition back to Turning if current lateral acceleration goes back over the threshold.
-          if self.current_lat_acc >= self.turning_lat_acc_th:
+          if self.current_lat_acc >= _TURNING_LAT_ACC_TH:
             self.state = VisionState.turning
           # Finish if current lateral acceleration goes below a threshold.
-          elif self.current_lat_acc < self.finish_lat_acc_th:
+          elif self.current_lat_acc < _FINISH_LAT_ACC_TH:
             self.state = VisionState.enabled
 
     # DISABLED
