@@ -882,14 +882,39 @@ class PassingAssistDetector:
     # shoulder and calls it drivable width. It is still published, because it is the number that
     # shows the sum is not the same as its parts, but the two quantities that mean something on
     # their own are the lane's own width and the road left past it.
+    # A CAR DRIVING DOWN IT OUR WAY IS BETTER PROOF THAN A ROAD EDGE, so it may stand in for one.
+    #
+    # Measured on the 2026-08-09 freeway drive, and this is the fix that measurement asked for
+    # rather than another threshold move. leftEdgeStd had a MEDIAN of 2.12 and sat over the 1.2
+    # limit for 61 % of the drive -- the limit is at roughly the thirtieth percentile of this road,
+    # tight by a factor of two rather than marginally. On 2865 frames the edge was the ONLY
+    # objection, and on 94.1 % of those the radar had already seen same-direction traffic in that
+    # very lane.
+    #
+    # The two edge terms exist to separate a lane from a shoulder -- see MIN_EDGE_BEYOND_LINE_M and
+    # the "12 ft shoulder" case. Traffic travelling our way down it answers that question directly
+    # and better, without the model having to find a road edge at all. So both edge-derived terms
+    # are waived together: edge_beyond is measured FROM the edge, so an untrusted edge makes it
+    # meaningless rather than merely false, and keeping it would refuse on a number derived from
+    # the thing we just agreed not to trust.
+    #
+    # PAINT AND WIDTH STILL APPLY. This is not "traffic means yes" -- it is painted, correctly
+    # sized, AND someone is driving down it our way. Nothing here relaxes what a lane looks like.
+    #
+    # Corroborated by construction: same_direction_recent needs SAME_DIRECTION_FRAMES messages, so
+    # a single stray return cannot vouch. That ordering is deliberate and load-bearing -- evidence
+    # that OPENS a maneuver must never be cheaper than evidence that refuses one.
+    left_edge_ok = (left_std <= MAX_ROAD_EDGE_STD and
+                    self.left_edge_beyond >= MIN_EDGE_BEYOND_LINE_M) or self.adjacent.left.same_direction_recent
+    right_edge_ok = (right_std <= MAX_ROAD_EDGE_STD and
+                     self.right_edge_beyond >= MIN_EDGE_BEYOND_LINE_M) or self.adjacent.right.same_direction_recent
+
     self.left_geometry_ok = (self.left_line_prob >= MIN_ADJACENT_LINE_PROB and
                              MIN_LANE_WIDTH_M <= self.left_lane_width <= MAX_LANE_WIDTH_M and
-                             self.left_edge_beyond >= MIN_EDGE_BEYOND_LINE_M and
-                             left_std <= MAX_ROAD_EDGE_STD)
+                             left_edge_ok)
     self.right_geometry_ok = (self.right_line_prob >= MIN_ADJACENT_LINE_PROB and
                               MIN_LANE_WIDTH_M <= self.right_lane_width <= MAX_LANE_WIDTH_M and
-                              self.right_edge_beyond >= MIN_EDGE_BEYOND_LINE_M and
-                              right_std <= MAX_ROAD_EDGE_STD)
+                              right_edge_ok)
 
     # How long that lane has been there WITHOUT INTERRUPTION. See DEFAULT_MIN_LANE_AGE_S: a lane
     # that did not exist a moment ago and now does is an exit or an on-ramp, and this is the only
