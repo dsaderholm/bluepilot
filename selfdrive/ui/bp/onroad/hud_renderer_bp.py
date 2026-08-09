@@ -1,3 +1,6 @@
+import os
+import traceback
+
 import pyray as rl
 from openpilot.common.params import Params
 from cereal import custom
@@ -418,12 +421,35 @@ class HudRendererBP(HudRendererSP):
         # The latch itself stays: one bad frame must not be retried sixty times a second. What
         # changes is that it is now visible, and cloudlogged rather than debug-logged, so the
         # traceback reaches the route even with the debug param off.
+        # THE REASON GOES ON THE SCREEN AND INTO A PARAM, because neither log carried it.
+        #
+        # This latched on a drive on 2026-08-08 and the sub-line said "the route has the reason".
+        # The route did not have the reason. Nor did swaglog -- 2500 files searched, and the only
+        # UI entries were FPS warnings. So the one instruction on screen sent him, and then me,
+        # looking somewhere the answer had never been written, and it cost a test drive he had
+        # limited time for.
+        #
+        # Two channels now, neither of which depends on a log daemon:
+        #   - the panel names the exception and where it came from, readable at a stop, no SSH
+        #   - PassingAssistLastError persists it, so a REBOOT -- the only thing that clears this
+        #     latch -- no longer destroys the evidence along with the symptom
+        where = "?"
+        tb = traceback.extract_tb(e.__traceback__)
+        if tb:
+          where = f"{os.path.basename(tb[-1].filename)}:{tb[-1].lineno}"
         self._pa_main = "PASSING ASSIST ERROR"
-        self._pa_sub = "it stopped updating -- the route has the reason"
+        self._pa_sub = f"{type(e).__name__} at {where}"
         self._pa_progress, self._pa_alert = 0.0, True
         self._pa_color = rl.Color(235, 90, 80, 255)
         cloudlog.exception(f"passing assist panel failed, latched off: {e}")
         bp_ui_log.state("HudRendererBP", "passing_assist_error", repr(e))
+        # Never let the reporting path become the crash. This runs once per latch.
+        try:
+          self._bp_params.put("PassingAssistLastError",
+                              {"type": type(e).__name__, "msg": str(e)[:200], "where": where,
+                               "traceback": "".join(traceback.format_tb(e.__traceback__))[-1500:]})
+        except Exception:  # noqa: BLE001 - a params failure must not replace the real error
+          cloudlog.exception("could not record PassingAssistLastError")
 
     bp_ui_log.state("HudRendererBP", "brakes_on", self._brakes_on)
     bp_ui_log.state("HudRendererBP", "acc_braking", self._acc_braking)

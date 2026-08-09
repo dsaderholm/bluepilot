@@ -142,7 +142,7 @@ SCENES = [
    "THIS DRIVE", "cancel gesture: 0 reached the other side, 4 just went out (1 steering)", 0.0, False, INFO),
   # The state that existed and drew NOTHING. A crashed panel and an idle one were the same picture.
   ("the panel itself fell over",
-   "PASSING ASSIST ERROR", "it stopped updating  --  the route has the reason", 0.0, True, RED),
+   "PASSING ASSIST ERROR", "AttributeError at hud_renderer_bp.py:812", 0.0, True, RED),
   ("worst case for width: everything at once",
    "WOULD BE CHANGING RIGHT",
    "blinker on, steering across  -  camera only, speed not radar-measured", 0.6, True, PURPLE),

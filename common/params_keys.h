@@ -283,6 +283,13 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // periodically by the detector, read by the panel when the current drive has nothing yet.
     {"PassingAssistLastDrive", {PERSISTENT | BACKUP, JSON}},
     {"PassingAssistHistory", {PERSISTENT | BACKUP, JSON}},
+    // Why the panel latched off, written once per latch by the UI. Storage, not a setting, so no
+    // control -- same as LastDrive and History above.
+    // Exists because on 2026-08-08 the panel latched, told him "the route has the reason", and the
+    // reason was in neither the route nor any of 2500 swaglog files. A reboot is the only thing
+    // that clears the latch, so before this the one action that fixed the symptom also destroyed
+    // the evidence.
+    {"PassingAssistLastError", {PERSISTENT | BACKUP, JSON}},
     {"PassingAssistExitStandDown", {PERSISTENT | BACKUP, INT, "45"}},
     {"PassingAssistMinSpeed", {PERSISTENT | BACKUP, INT, "30"}},
     {"PassingAssistConfirmTime", {PERSISTENT | BACKUP, INT, "1"}},
