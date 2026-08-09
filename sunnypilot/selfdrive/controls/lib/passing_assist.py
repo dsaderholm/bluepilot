@@ -1404,10 +1404,35 @@ class PassingAssistDetector:
         # one, which is the case the stand-down exists for.
         if self._steer_held_s == 0.0:
           self._signalled_over_widening = False
+      # CANDIDATE, from the road 2026-08-09, NOT BUILT YET: a second kind of exit evidence.
+      #
+      #   "if I manually do a nudgeless sunnypilot lane change to the right from a faster lane to
+      #    a slower lane, then I am probably exiting soon."
+      #
+      # The test above is GEOMETRIC -- it needs the ramp to be visibly opening on the right at the
+      # moment he signals. His case has no geometry in it at all, and catches the one the widening
+      # test structurally cannot: moving over two lanes early, before the ramp exists to be seen.
+      #
+      # Newly buildable, and only since this week. The speed of the lane beside us arrived with the
+      # adjacent-lane work (adjacent.right.v_abs); when the widening test was written there was no
+      # way to know the right lane was slower.
+      #
+      # THE CONFOUND, and it is why this is a note rather than code: moving right into a slower
+      # lane is ALSO exactly what keep-right does on every ordinary road. The distinguishing part
+      # is that HE initiated it, not that the lane is slower -- so the rule wants to be
+      # driver-initiated AND rightward AND target-lane-slower, with the first term carrying the
+      # weight and the third only sharpening it.
+      #
+      # What would settle it: how often driver_change_was_exit comes out FALSE on a freeway drive
+      # with known exits. Every one of those is a case the geometric test missed and this would
+      # catch. Measure before building -- the same rule that stopped MAX_ROAD_EDGE_STD moving on
+      # one road's data.
+
       # Right-hand only: the road opening up on the left is not an exit, it is a lane being added.
       if side == 'right' and self.right_widening:
         self._signalled_over_widening = True
       return
+
 
     if self._driver_blinker is None:
       return
