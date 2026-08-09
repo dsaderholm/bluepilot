@@ -371,6 +371,32 @@ deciding whether to try it.
 dead -- enabled by default, storing nothing, for its entire life -- because both directions were
 broken and therefore agreed with each other.
 
+## Keep only the additions that still earn their place
+
+Stated 2026-08-08: *"I just want to keep additions we have made that actually make a difference."*
+This is the upstream-scope rule turned on OUR OWN work, and it has teeth, because a knob we invented
+costs the same merge conflict forever as one we borrowed.
+
+**The test is whether the REASON still holds, not whether the default is neutral.** Those come apart:
+
+- `SmartCruiseControlVisionEarliness` -- **deleted.** Ours, not upstream's; upstream uses
+  `_ENTERING_PRED_LAT_ACC_TH` 1.3 / `_ABORT` 1.1 / `_TURNING` 1.6 directly and we replaced all five
+  with properties dividing by a param. It existed because vision was once the only thing that could
+  catch an off-ramp. SCC-Map reads ramps from the map now, so the reason expired -- and its
+  remaining effect was making gentle interstate sweepers slow hard. Gone, call sites back on the
+  constants.
+- `SmartCruiseControlMapFactor` -- **kept**, and it defaults to 100, which changes nothing today.
+  Neutral, but the reason is live: it is the only way to ask for mapped corners slower than the
+  posted advisory, which this car's retrofit PSCM needs.
+- `SmartCruiseControlVisionHighSpeedFactor` -- **kept** at a neutral 100. It is one half of a
+  speed-blended pair whose other half is not neutral; removing it would break the blend, not
+  simplify it.
+
+**When a reason expires, delete rather than park at neutral.** A knob that changes nothing is still
+a modified upstream line, and it reads to the next person as load-bearing. And prefer upstream's
+constant to our multiplier where the two are equivalent -- their numbers have far more road under
+them than ours.
+
 ## Facts that have been got wrong before
 
 Each of these was asserted confidently from reasoning and turned out to be false. Check the source.
