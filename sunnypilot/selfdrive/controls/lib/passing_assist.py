@@ -5,12 +5,42 @@ Nothing here alerts, steers, touches the set speed, or feeds any controller. The
 a message on longitudinalPlanSP describing what the system WOULD have suggested and, more usefully,
 which gate stopped it. It exists to answer three questions that cannot be settled by reading code.
 
-Why this shape at all
----------------------
-openpilot cannot initiate a lane change on Ford: the turn signal is the driver's intent signal and
-desire_helper gates on carState.leftBlinker/rightBlinker, which come from the SCCM's own
-Steering_Data_FD1 on bus 0. So the reachable design is advisory -- tell the driver which side is
-clear, they flick the blinker, and the existing AutoLaneChangeController takes it from there.
+Where this is going, and why the driver never touches the stalk
+--------------------------------------------------------------
+THE FINISHED FEATURE DECIDES, SIGNALS AND MOVES BY ITSELF. Stated flatly on 2026-08-09:
+
+    "LANE CHANGES WILL NOT BE STARTED BY MY StALK"
+    "If I had to manually do anything, then I might as well just keep using the SunnyPilot
+     nudgeless lane changes!"
+
+Which is exactly right, and it is the whole point of the feature. Nudgeless already performs a
+crossing the driver has decided on. The thing being built here is the DECISION -- is there someone
+slower ahead, is the next lane clear and going the same way, is it legal and worth the move -- and a
+decision the driver has to ratify with a stalk flick is not one.
+
+This was once thought unreachable. The original note here read "openpilot cannot initiate a lane
+change on Ford", because desire_helper gates on carState.leftBlinker/rightBlinker and those come
+from the SCCM's Steering_Data_FD1 on bus 0. Phase-locking against the gateway's frame removed that
+on 2026-08-06 -- the car's blinker is now commandable and confirmed on the road.
+
+But NOT by making carState.leftBlinker read back true, and that distinction decides the wiring.
+carstate.py reads TurnLghtSwtch_D_Stat, which is the value WE transmit, and openpilot cannot see its
+own transmissions (panda returns TX at bus | 0x80 and the parser drops it). So the switch never
+reports our own command back, and a design that signals and waits for desire_helper to notice would
+wait forever. The two halves are therefore separate on purpose:
+
+  * the lane change desire is raised DIRECTLY, not round-tripped through the car;
+  * the lamps are commanded, and CS.turn_lamp_left / turn_lamp_right -- the body module's report of
+    what the lamps ACTUALLY did -- is the confirmation that the signal is lit before the car moves.
+
+That second half is the driver's own rule for the timing: the confirmation has to overlap the
+blinker rather than precede it. Lamps flash, so a consumer latches over a flash period rather than
+trusting one frame.
+
+None of this changes what the driver is responsible for. Automating the decision does not move this
+off SAE Level 2 -- the level is set by who monitors and who carries liability, not by how much the
+car does, which is why BlueCruise's hands-free automatic lane change is also Level 2. The driver
+supervises and takes over. That is why an unavailable sensor must never report as clear.
 
 The three unknowns
 ------------------
