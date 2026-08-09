@@ -377,6 +377,19 @@ Stated 2026-08-08: *"I just want to keep additions we have made that actually ma
 This is the upstream-scope rule turned on OUR OWN work, and it has teeth, because a knob we invented
 costs the same merge conflict forever as one we borrowed.
 
+**IF UPSTREAM HAS IT, KEEP IT -- even if nothing here uses it.** This rule is only ever about
+additions THIS FORK made. Deleting upstream's own code is the maximum merge cost there is: it
+conflicts with every future change they make to it, forever, which is the exact opposite of what
+this rule is for. An unused upstream param costs nothing, because it is on both sides of the diff
+and cancels out. Before deleting anything, check:
+
+```bash
+git show upstream/bp-7.0:<path> | grep -c "<the thing>"
+```
+
+Zero means it is ours and the rule applies. Anything else means leave it alone. That check is what
+established earliness was ours -- upstream has no earliness concept at all.
+
 **The test is whether the REASON still holds, not whether the default is neutral.** Those come apart:
 
 - `SmartCruiseControlVisionEarliness` -- **deleted.** Ours, not upstream's; upstream uses
