@@ -1440,8 +1440,39 @@ class PassingAssistDetector:
       return
 
     # Stalk just went off: the change is done, or they thought better of it. Either way, pause.
-    self._stand_down(self._driver_blinker == 'right' and self._signalled_over_widening)
+    self._stand_down(self._driver_blinker == 'right' and self._moved_toward_an_exit())
     self._driver_blinker = None
+
+  def _moved_toward_an_exit(self) -> bool:
+    """Rightward, and it looks like exit preparation rather than lane discipline.
+
+    THE CASE THIS EXISTS FOR HAS NO EXIT LANE AT ALL. From the road 2026-08-09, an I-80 exit he
+    takes daily: the ramp simply leaves from the rightmost through lane, so he moves over early to
+    prepare. Every exit test we had misses it, and each for its own structural reason:
+
+      road widening      nothing widens -- there is no ramp opening alongside to see.
+      lane age           the rightmost lane is an ordinary through lane, beside us for miles. It
+                         passes the age test comfortably.
+      lane speed         "sometimes they aren't slower", his own caveat, and correct.
+
+    What is left is where he ENDED UP: in the outermost lane, with no lane to the right. That is
+    already computed -- right_geometry_ok collapses to the shoulder there -- so this needs no new
+    measurement, only the observation that a DRIVER-CHOSEN move into the outermost lane is either
+    exit preparation or lane discipline, and suggesting a pass straight afterwards is wrong in both
+    cases.
+
+    Which is why the failure mode is benign and this ships without waiting for more road data: if
+    he was merely being courteous rather than exiting, the cost is that the system stays quiet for
+    a while on the side he just deliberately left. That is what keep-right wanted anyway.
+
+    The widening test stays as an OR rather than being replaced -- it still catches the ordinary
+    kind of exit, where a ramp lane really does open up and he moves into that instead.
+    """
+    if self._signalled_over_widening:
+      return True
+    # No lane to the right of where we now are. Read after the change, which is what makes it mean
+    # "outermost" rather than "there was no lane before I moved".
+    return not self.right_geometry_ok
 
   def _stand_down(self, was_exit: bool) -> None:
     """The driver just finished a maneuver of their own. Pause, and forget what was beside us.

@@ -2946,3 +2946,61 @@ class TestLkaButtonTurnsItOnAndOff:
     src = (pathlib.Path(__file__).resolve().parents[1] / "passing_assist.py").read_text(encoding="utf-8")
     assert 'put_bool("PassingAssistLogEnabled", self.enabled, block=True)' in src, (
       "the LKA toggle no longer writes blocking; the button will intermittently do nothing")
+
+
+class TestTheExitWithNoExitLane:
+  """From the road 2026-08-09, with a map of the junction: an I-80 exit he takes every day where
+  the ramp simply leaves the rightmost through lane. There is no exit lane at all.
+
+      "Notice how there is no exit lane at all, you just exit. Here I always get into the far right
+       lane early to prepare."
+
+  Every exit test that existed misses this, and each for a structural reason rather than a tuning
+  one:
+
+    road widening   nothing widens. There is no ramp lane opening alongside to be seen.
+    lane age        the rightmost lane is an ordinary through lane, beside him for miles. It passes
+                    the age gate comfortably.
+    lane speed      "sometimes they aren't slower" -- his own correction, and right.
+
+  So he moved over early, collected the four second pause, and the system was free to suggest
+  moving back left just as he was about to leave the freeway.
+
+  What is left is where he ENDS UP: the outermost lane, no lane to the right. Already computed.
+  """
+
+  @staticmethod
+  def _change(det, **road):
+    """Signal, hold it through the change, then let the stalk go."""
+    run(det, int(2.0 / DT_MDL), **road)
+    run(det, 2, **{k: v for k, v in road.items() if not k.startswith("blinker")})
+    return det
+
+  def test_moving_right_into_the_outermost_lane_reads_as_exit_preparation(self):
+    """The case. Default fixture geometry is one lane plus a shoulder -- the far right lane."""
+    det = self._change(keep_right_det(), blinker_right=True)
+    assert det.driver_change_was_exit
+    assert det.driver_change_standdown > 30.0
+
+  def test_moving_right_with_a_lane_still_out_there_is_ordinary_lane_discipline(self):
+    """The other half, and what stops this swallowing every rightward change. If there is still a
+    lane beyond the one he moved into, he has not run out of road and is not leaving."""
+    det = self._change(keep_right_det(), blinker_right=True, **IN_LEFT_LANE)
+    assert not det.driver_change_was_exit
+    assert 0.0 < det.driver_change_standdown <= 4.0
+
+  def test_a_left_change_is_never_an_exit_however_the_road_looks(self):
+    """Direction carries the claim. Moving LEFT out of the outermost lane is the opposite of
+    leaving, and the same geometry is present -- so a rule that only looked at the road would get
+    this backwards."""
+    det = self._change(keep_right_det(), blinker=True)
+    assert not det.driver_change_was_exit
+    assert det.driver_change_standdown <= 4.0
+
+  def test_the_widening_test_still_fires_where_it_always_did(self):
+    """Kept as an OR rather than replaced. The ordinary kind of exit -- a ramp lane that really
+    does open up, moved into while a lane remains to the right -- has to keep working, and it is
+    the case the outermost test cannot see."""
+    det = self._change(keep_right_det(), blinker_right=True, right_edge_widen=4.0, **IN_LEFT_LANE)
+    assert det.driver_change_was_exit
+    assert det.driver_change_standdown > 30.0
