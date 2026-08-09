@@ -971,30 +971,49 @@ class PassingAssistDetector:
     # their own are the lane's own width and the road left past it.
     # A CAR DRIVING DOWN IT OUR WAY IS BETTER PROOF THAN A ROAD EDGE, so it may stand in for one.
     #
-    # Measured on the 2026-08-09 freeway drive, and this is the fix that measurement asked for
-    # rather than another threshold move. leftEdgeStd had a MEDIAN of 2.12 and sat over the 1.2
-    # limit for 61 % of the drive -- the limit is at roughly the thirtieth percentile of this road,
-    # tight by a factor of two rather than marginally. On 2865 frames the edge was the ONLY
-    # objection, and on 94.1 % of those the radar had already seen same-direction traffic in that
-    # very lane.
+    # REVERTED 2026-08-09, the same evening it shipped. See TestTrafficMayNotStandInForTheRoadEdge.
     #
-    # The two edge terms exist to separate a lane from a shoulder -- see MIN_EDGE_BEYOND_LINE_M and
-    # the "12 ft shoulder" case. Traffic travelling our way down it answers that question directly
-    # and better, without the model having to find a road edge at all. So both edge-derived terms
-    # are waived together: edge_beyond is measured FROM the edge, so an untrusted edge makes it
-    # meaningless rather than merely false, and keeping it would refuse on a number derived from
-    # the thing we just agreed not to trust.
+    # It let same-direction traffic waive both edge-derived terms, on a freeway measurement: the
+    # edge was the ONLY objection on 2865 frames and the radar had already seen traffic going our
+    # way in that lane on 94.1 % of them. The reasoning still looks right and the road disproved it
+    # in two drives:
     #
-    # PAINT AND WIDTH STILL APPLY. This is not "traffic means yes" -- it is painted, correctly
-    # sized, AND someone is driving down it our way. Nothing here relaxes what a lane looks like.
+    #     "It tried to change lanes into the center turn lane median thing 3 times!"
     #
-    # Corroborated by construction: same_direction_recent needs SAME_DIRECTION_FRAMES messages, so
-    # a single stray return cannot vouch. That ordering is deliberate and load-bearing -- evidence
-    # that OPENS a maneuver must never be cheaper than evidence that refuses one.
+    # What the measurement could not see is that it was taken on a road with no turn lane. A center
+    # turn lane is painted like a travel lane, sized like one, and has cars moving down it our way
+    # -- so every term that survived the waiver passes, and the waived ones were the only terms
+    # that did not.
+    #
+    # THE STRUCTURAL FAULT, which matters more than the tuning: three protections cover this case
+    # and all three were down at once.
+    #
+    #   blocks_oncoming case 1  needs opposing traffic seen IN that lane. A turn lane has turning
+    #                           traffic, not opposing traffic. Never fires.
+    #   blocks_oncoming case 2  the turn-lane guard proper -- "road is two-way and nothing has
+    #                           driven down that lane our way, so assume turn lane". Needs the road
+    #                           KNOWN two-way, and it is unblocked by the very same
+    #                           same_direction_recent this waiver used.
+    #   these two edge terms    the last one standing, and this waived it.
+    #
+    # Case 2 never engaged because adjacent_lane.MAX_ROAD_EDGE_STD is 0.5 while the limit here is
+    # 1.2 -- a different constant of the same name. Both drives recorded oncomingEdgeTrusted false,
+    # so _on_our_carriageway was in its narrowed 5.5 m fallback throughout, and on a 1 + TWLTL + 1
+    # arterial the opposing traffic sits at 7.4 m. The detector could not see the traffic that
+    # would have classified the road, so the guard that depends on that classification never armed.
+    #
+    # So the untrusted edge DEGRADED the veto and, with this waiver, also excused the refusal. One
+    # missing measurement must not do both. Stated as the rule this module runs on: evidence that
+    # OPENS a maneuver must never be cheaper than evidence that refuses one -- and a waiver keyed
+    # to the same evidence that unblocks case 2 collapses two independent protections into one.
+    #
+    # The freeway problem it was solving is REAL and is now unsolved again: geoRefusedShare ran
+    # 0.98-1.0 before the waiver. Whatever replaces it has to tell a freeway passing lane from an
+    # arterial turn lane, which this did not, and must be validated on a road that HAS a turn lane.
     left_edge_ok = (left_std <= MAX_ROAD_EDGE_STD and
-                    self.left_edge_beyond >= MIN_EDGE_BEYOND_LINE_M) or self.adjacent.left.same_direction_recent
+                    self.left_edge_beyond >= MIN_EDGE_BEYOND_LINE_M)
     right_edge_ok = (right_std <= MAX_ROAD_EDGE_STD and
-                     self.right_edge_beyond >= MIN_EDGE_BEYOND_LINE_M) or self.adjacent.right.same_direction_recent
+                     self.right_edge_beyond >= MIN_EDGE_BEYOND_LINE_M)
 
     self.left_geometry_ok = (self.left_line_prob >= MIN_ADJACENT_LINE_PROB and
                              MIN_LANE_WIDTH_M <= self.left_lane_width <= MAX_LANE_WIDTH_M and

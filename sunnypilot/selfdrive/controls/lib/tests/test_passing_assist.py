@@ -3010,65 +3010,83 @@ class TestTheExitWithNoExitLane:
     assert det.driver_change_standdown > 30.0
 
 
-class TestTrafficCanStandInForTheRoadEdge:
-  """Measured on the 2026-08-09 freeway drive, and the fix that measurement asked for.
+class TestTrafficMayNotStandInForTheRoadEdge:
+  """The waiver that shipped and was reverted the same evening. Kept as tests because the reasoning
+  behind it was good and the road still disproved it, which is the part worth not repeating.
 
-  leftEdgeStd had a MEDIAN of 2.12 and sat over the 1.2 limit for 61 % of the drive -- the limit is
-  around the thirtieth percentile of that road, tight by a factor of two rather than marginally. On
-  2865 frames the edge was the ONLY objection, and on 94.1 % of those the radar had already seen
-  same-direction traffic in that very lane.
+  It let same-direction traffic waive both edge-derived terms. The measurement was real: on the
+  2026-08-09 freeway drive leftEdgeStd had a median of 2.12, the edge was the ONLY objection on
+  2865 frames, and on 94.1 % of those the radar had already seen traffic going our way in that
+  lane. Then:
 
-  The two edge-derived terms exist to tell a lane from a shoulder. A car driving down it our way
-  answers that question directly, and without the model having to find a road edge at all -- so it
-  may stand in for them. What it may NOT do is stand in for paint or width, and most of these tests
-  are about that boundary rather than about the case it enables.
+      "It tried to change lanes into the center turn lane median thing 3 times!"
+
+  A center turn lane is painted like a travel lane, sized like one, and has cars moving down it in
+  our direction. Every term that survived the waiver passes on it. The waived terms were the only
+  ones that did not -- so the waiver was, on that road, the whole gate.
+
+  What the freeway measurement could not contain: a freeway has no turn lane. Generalising from it
+  to every road is the actual mistake, and it is not visible in the number.
   """
 
   # Bad enough to fail MAX_ROAD_EDGE_STD on the left, fine on the right.
   BAD_EDGE = dict(edge_stds=(2.5, 0.1))
   # Same-direction, and FASTER, so it vouches for the lane without blocking the pass on speed.
+  # On an arterial this is a car using the center turn lane, which is exactly the trap.
   TRAFFIC = dict(tracks=[track(70, 3.7, 5.0)])
 
-  def test_the_edge_alone_still_refuses_with_nothing_in_the_lane(self):
-    """The behavior before this change, kept: an untrusted edge and no other evidence is a refusal.
-    If this ever passes, the substitution has become unconditional."""
+  def test_the_edge_alone_refuses_with_nothing_in_the_lane(self):
+    """Unchanged by the revert, and the baseline the case below has to match."""
     det = run(PassingAssistDetector(), STUCK_FRAMES, **self.BAD_EDGE)
     assert not det.left_geometry_ok
 
-  def test_a_car_travelling_our_way_down_it_makes_it_a_lane(self):
-    """The case. Same untrusted edge, one corroborated vehicle going our way."""
+  def test_a_car_travelling_our_way_down_it_does_NOT_make_it_a_lane(self):
+    """THE REGRESSION. This asserted the opposite this morning.
+
+    Identical geometry to a freeway passing lane and to a center turn lane -- painted, correctly
+    sized, someone driving down it our way. Nothing available here tells them apart, so the answer
+    has to be the safe one."""
     det = run(PassingAssistDetector(), STUCK_FRAMES, **self.BAD_EDGE, **self.TRAFFIC)
     assert det.adjacent.left.same_direction_recent, "the fixture never established the traffic"
-    assert det.left_geometry_ok
+    assert not det.left_geometry_ok
 
-  def test_it_does_not_override_paint(self):
-    """Traffic says the lane is DRIVEABLE. It says nothing about whether the model can see a lane
-    line there, and a lane the model cannot see is one it cannot steer into."""
+  def test_the_turn_lane_is_not_saved_by_the_oncoming_veto_either(self):
+    """Why the edge terms have to hold the line alone, rather than leaning on blocks_oncoming.
+
+    The turn-lane guard is blocks_oncoming case 2, and it needs the road KNOWN two-way. Establishing
+    that needs opposing traffic, which on a 1 + TWLTL + 1 arterial sits at 7.4 m -- outside the
+    5.5 m band _on_our_carriageway narrows to when the edge is untrusted. The edge being untrusted
+    is the same condition that invited the waiver, so the guard is always disarmed exactly when the
+    waiver would fire. Both drives recorded oncomingEdgeTrusted false throughout."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, **self.BAD_EDGE, **self.TRAFFIC)
+    assert not det.adjacent.left.blocks_oncoming, "no opposing traffic was ever visible to it"
+    assert not det.left_geometry_ok, "so nothing else may be relied on to refuse"
+
+  def test_it_still_does_not_override_paint(self):
+    """Kept from the original: traffic says the lane is DRIVEABLE, not that the model can see a
+    lane line there. Still true, and still not enough on its own."""
     det = run(PassingAssistDetector(), STUCK_FRAMES, probs=(0.2, 0.99, 0.99, 0.2),
               **self.BAD_EDGE, **self.TRAFFIC)
     assert not det.left_geometry_ok
 
-  def test_it_does_not_override_lane_width(self):
-    """Same reasoning. Something driving down a 2 m gap does not make it a lane to move into."""
+  def test_it_still_does_not_override_lane_width(self):
+    """Something driving down a 2 m gap does not make it a lane to move into."""
     det = run(PassingAssistDetector(), STUCK_FRAMES, ll=(-3.85, -1.85, 1.85, 5.5),
               **self.BAD_EDGE, **self.TRAFFIC)
     assert not det.left_geometry_ok
 
-  def test_the_room_past_the_line_is_waived_with_it_not_separately(self):
-    """Both edge-derived terms go together. edge_beyond is measured FROM the edge, so an untrusted
-    edge makes it meaningless rather than merely false -- refusing on it would be refusing on a
-    number derived from the thing we just agreed not to trust."""
+  def test_the_room_past_the_line_is_not_waived_either(self):
+    """The other half of the revert. edge_beyond is measured FROM the edge, and the argument for
+    waiving it was that an untrusted edge makes it meaningless. True -- but meaningless is a reason
+    to refuse, not a reason to proceed."""
     tight = dict(edges=(-5.8, 2.4))   # only 0.3 m past the far line, under MIN_EDGE_BEYOND_LINE_M
     assert not run(PassingAssistDetector(), STUCK_FRAMES, **tight).left_geometry_ok
-    assert run(PassingAssistDetector(), STUCK_FRAMES, **tight, **self.TRAFFIC).left_geometry_ok
+    assert not run(PassingAssistDetector(), STUCK_FRAMES, **tight, **self.TRAFFIC).left_geometry_ok
 
-  def test_a_single_stray_return_cannot_vouch(self):
-    """The ordering that matters: evidence which OPENS a maneuver must not be cheaper than evidence
-    that refuses one. same_direction_recent needs SAME_DIRECTION_FRAMES corroborating messages, so
-    one frame of traffic does not unlock an untrusted edge."""
-    det = run(PassingAssistDetector(), 1, **self.BAD_EDGE, **self.TRAFFIC)
-    assert not det.adjacent.left.same_direction_recent
-    assert not det.left_geometry_ok
+  def test_a_good_edge_still_opens_it_normally(self):
+    """The revert must not have made the gate unsatisfiable. A trusted edge with room past the
+    line is still a lane, with or without anybody driving down it."""
+    assert run(PassingAssistDetector(), STUCK_FRAMES).left_geometry_ok
 
 
 class TestLeftLaneHogs:
