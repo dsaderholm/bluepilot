@@ -1,45 +1,35 @@
-"""Read-only: at what lateral acceleration does this car's PSCM stop holding the commanded angle?
+"""BROKEN AS AN ANSWER, KEPT AS A LESSON. Do not use these numbers.
 
-Every corner speed in the stack is computed from a COMFORT lateral-accel limit. This car's binding
-limit is different and lower: the retrofit PSCM's authority. His words -- "the only reason I want to
-go slow into curves is because of my stupid Ford PSCM limits."
-
-latcontrol_angle.py measures exactly that, every frame:
+Written 2026-08-08 to find the lateral acceleration at which this car's PSCM stops holding the
+commanded angle, by binning the angle error latcontrol_angle computes:
 
     angle_control_saturated = abs(angle_steers_des - CS.steeringAngleDeg) > 2.5  # degrees
 
-So bucket the tracking error by lateral acceleration and find where it breaks down. Lateral accel is
-derived from the steering angle rather than a yaw sensor, because the question is about the angle
-loop and that keeps both sides of the comparison in the same frame of reference.
+It produced a clean-looking result -- saturation share doubling at 2.0 m/s^2 and reaching 43% by 4.0
+-- and two settings defaults were changed on the strength of it. Both are reverted.
 
-RESULT, route 0000032f, 53484 engaged frames, path-angle mode:
+WHY IT IS WRONG. angle_steers_des is openpilot's KINEMATICALLY IDEAL wheel angle, from
+VM.get_steer_from_curvature. Under BluePilot's angle scheme that is not what gets sent: the PSCM
+receives path_angle = 1/2 * kappa * d_ref as c1, scaled by FordLowSpeedFactor_ang /
+FordHighSpeedFactor_ang, at the PSCM's ~1.4 m lookahead. Different quantity, different signal, and
+the gains here are 0.92 / 0.87 -- deliberately BELOW 1.0, which BluePilot's own release notes
+describe as making the wheel turn less.
 
-    1.0-1.5 m/s^2   7.9% of frames saturated
-    1.5-2.0         8.5%
-    2.0-2.5        16.7%   <- doubles
-    2.5-3.0        18.7%
-    3.5-4.0        22.0%
-    4.0-4.5        43.2%
+So the two sides were never meant to agree, and a fixed ~13% shortfall becomes an absolute error in
+degrees that GROWS WITH ANGLE SIZE -- which is exactly the rising trend that looked like a capability
+limit. The measurement mostly recovered the gain calibration.
 
-~2.0 m/s^2 is where this PSCM starts losing the line, and _A_LAT_REG_MAX is 2.0 -- sunnypilot's
-comfort limit and this car's steering limit are the same number. HighSpeedFactor and MapFactor were
-set from this rather than by feel; see common/params_keys.h.
+It also overturned a correct earlier finding on bad evidence: that the take-over alerts are
+tracking-lag artifacts and the angle gains are a PSCM calibration rather than a detune. Both of those
+were right.
 
-NOBODY HAS PUBLISHED THIS. openpilot's Ford wiki only says path angle "might be able to achieve
-better control from the PSCM", and comma-steering-control maps lateral accel against steering TORQUE,
-which is a different question for a different kind of car. An Edge PSCM in a Fusion is a combination
-nobody else drives, so this measurement is the only characterization that will ever exist for it.
+WHAT A REAL VERSION WOULD COMPARE. The angle actually commanded through lateral_angle_ext -- after
+the gain, in the same units the PSCM receives -- against the delivered angle. Anything that reads
+actuators.steeringAngleDeg on a car running BluePilot angle control is reading a signal that is not
+in the loop.
 
-Re-run it after changing FordPrefLateralControl, the angle gains, or anything else lateral. The
-number is specific to path-angle mode; curvature control would give out sooner.
-
-USAGE, on the device:
-
-    cd /data/openpilot && python tools/bp_pscm_limit.py <route>
-
-The two low bands are worth ignoring: the worst errors sit at near-zero cornering, which is a
-transient when the commanded angle jumps rather than a capability limit, and those are the
-aggressive false positives behind "Take Control -- Turn Exceeds Steering Limit".
+Left in the tree deliberately. The trap is subtle, the output looked authoritative, and the next
+person to reach for latcontrol_angle's error on this car deserves to find this first.
 """
 import math
 import os
