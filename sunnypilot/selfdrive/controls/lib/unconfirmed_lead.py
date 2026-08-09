@@ -226,12 +226,14 @@ class UnconfirmedLeadDetector:
     self.max_lead_distance = 180
     self.max_ttc = DEFAULT_MAX_TTC_S
     self.model_stop_enabled = False
+    self.model_stop_min_decel = 1.0
 
   def update_params(self) -> None:
     if self.frame % int(PARAMS_UPDATE_PERIOD / DT_MDL) == 0:
       self.max_lead_distance = self.params.get("IcbmLeadMaxDistance", return_default=True)
       self.max_ttc = self.params.get("IcbmLeadMaxTtc", return_default=True) / 10.
       self.model_stop_enabled = self.params.get_bool("IcbmModelStopEnabled")
+      self.model_stop_min_decel = self.params.get("IcbmModelStopMinDecel", return_default=True) / 10.
 
   @property
   def is_active(self) -> bool:
@@ -428,6 +430,33 @@ class UnconfirmedLeadDetector:
 
     # ---- ACTIVE (model stop): resolve on the model letting go ----
     if self.state == State.active and self.trigger == Trigger.modelStop:
+      # A LEAD APPEARING ENDS THIS PATH, because the entry condition has to hold for as long as the
+      # path runs and nothing was maintaining it.
+      #
+      # Reported 2026-08-08: "it said stopping for a red light even though there was a car in front
+      # of me. Yeah sure it was a red light, but there was a car in front of me stopped there
+      # already." The trigger is correct and fired legitimately -- at the range where the model
+      # first sees the light, the queued car is often still outside radar acquisition, so there
+      # genuinely is no lead. Then it resolves as he closes, and the three release conditions below
+      # are the model letting go, dropping under the floor, and the brake. None of them is
+      # "something is in the way now", so it kept announcing an empty intersection at a car.
+      #
+      # Releasing outright would be wrong in the case that matters: _release() routes to RESTORING
+      # when a set speed is stored, which RAISES the set speed -- toward a stopped car. So this
+      # splits on who is going to do the braking.
+      if lead.status:
+        if self._ford_tracks(lead, v_ego):
+          self._release()      # moving fast enough for Ford's ACC to follow; it owns this now
+          return
+        # Ford will drive into it, which is the radar-blind lead case exactly. Same request, handed
+        # to the path that is about that, so the alert names a VEHICLE instead of a sign. No
+        # evidence sweep needed: model-stop persistence has already run, and a radar return the
+        # model also predicted is strictly more evidence than either alone.
+        self.trigger = Trigger.visionLead
+        self._lost_s = 0.0
+        self.v_target = self._lead_target(v_ego, lead.dRel)
+        events_sp.add(EventNameSP.unconfirmedLeadBraking)
+        return
       # Same signal as the trigger. DEC's filter carries its own hysteresis, so there is nothing to
       # add here. This used to read model_should_stop, which is false at every speed this path can
       # run at -- so the clear timer ran from the moment it triggered and would have released it
@@ -550,7 +579,19 @@ class UnconfirmedLeadDetector:
       # If there is a vehicle ahead then the vehicle is the thing to react to, and either Ford's own
       # ACC or the lead path above owns it. This path is for the empty intersection, where there is
       # nothing to measure and the model's trajectory is the only evidence there is.
+      # ...AND the stop has to actually need braking. DEC's slow-down flag is deliberately early --
+      # that is why it was chosen over shouldStop, which can never fire at these speeds -- so
+      # nothing downstream bounded how far out this acted. Measured 2026-08-08 on route 0000032c:
+      # it fired at 34 mph with 193 m to run, which needs 0.60 m/s^2. That is gentler than coasting.
+      #
+      # Below IcbmModelStopMinDecel the car arrives in time by lifting off and a set-speed request
+      # buys nothing, so this waits. inf endpoint (no trajectory reading) keeps the old behavior
+      # rather than silently disabling the path.
+      a_required = float('inf')
+      if math.isfinite(self.model_stop_distance) and self.model_stop_distance > MIN_STOP_DISTANCE_M:
+        a_required = v_ego * v_ego / (2. * self.model_stop_distance)
       model_candidate = (self.model_slow_down and not lead.status and
+                         a_required >= self.model_stop_min_decel and
                          v_ego >= MIN_V_EGO_MS and not CS.brakePressed)
       if model_candidate:
         self._model_stop_s += DT_MDL

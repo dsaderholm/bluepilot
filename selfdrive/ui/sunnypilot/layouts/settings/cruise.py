@@ -79,15 +79,6 @@ class CruiseLayout(Widget):
       label_callback=lambda v: f"{v}%",
       inline=True)
 
-    # BluePilot: how early the curve cycle starts, independent of how much it slows
-    self.scc_v_earliness = option_item_sp(
-      title=tr("Curve Detection Earliness"),
-      description=recommended(tr("How far ahead of a turn to begin slowing. This changes the timing only; "
-                     "how much speed comes off is set by the two sensitivity controls above."), "SmartCruiseControlVisionEarliness", lambda v: f"{v}%"),
-      param="SmartCruiseControlVisionEarliness",
-      min_value=50, max_value=200, value_change_step=10,
-      label_callback=lambda v: f"{v}%",
-      inline=True)
 
     # BluePilot: cap on how far ICBM drops the set speed in one step
     self.icbm_max_target_drop = option_item_sp(
@@ -166,6 +157,20 @@ class CruiseLayout(Widget):
                      "the model insists, and a speed floor, are its only filters."), "IcbmModelStopEnabled"),
       param="IcbmModelStopEnabled")
 
+    # BluePilot: the earliness control for the stop path. Reported "stopping for red lights a little
+    # too early", and route 0000032c measured it firing at 34 mph with 193 m still to run -- 0.60
+    # m/s^2, gentler than coasting.
+    self.icbm_model_stop_min_decel = option_item_sp(
+      title=tr("Stop Sign Sensitivity"),
+      description=recommended(tr("How hard the stop would have to be braked for before slowing starts. "
+                     "Lower reacts further from the sign or light; higher waits until braking is "
+                     "genuinely needed. Below this the car arrives in time by coasting anyway."),
+                     "IcbmModelStopMinDecel", self._decel_label),
+      param="IcbmModelStopMinDecel",
+      min_value=4, max_value=20, value_change_step=1,
+      label_callback=self._decel_label,
+      inline=True)
+
     # BluePilot: hold openpilot's standstill resume until the lead has actually gone
     # BluePilot: holds pinned to a place -- see pinned_holds.py for why this survives TSR working.
     self.icbm_pinned_holds = toggle_item_sp(
@@ -220,6 +225,20 @@ class CruiseLayout(Widget):
       min_value=1, max_value=15, value_change_step=1,
       label_callback=self._speed_step_label,
       inline=True)
+    # BluePilot: the magnitude knob SCC-Map never had. MapDecel moves WHEN it starts; this moves
+    # how slow it gets. Asked for after an off-ramp whose mapped target matched the yellow advisory
+    # sign -- correct for a stock car, too fast for this one's retrofit PSCM to steer.
+    self.scc_map_factor = option_item_sp(
+      title=tr("Mapped Corner Speed"),
+      description=recommended(tr("Scales the speed mapped corners and exit ramps are taken at. "
+                     "100% uses the map's own number, which matches the posted advisory. Lower it "
+                     "if the steering struggles to hold those curves at the advisory speed."),
+                     "SmartCruiseControlMapFactor", self._percent_label),
+      param="SmartCruiseControlMapFactor",
+      min_value=50, max_value=100, value_change_step=5,
+      label_callback=self._percent_label,
+      inline=True)
+
 
     self.scc_m_toggle = toggle_item_sp(
       title=tr("Smart Cruise Control - Map"),
@@ -305,6 +324,7 @@ class CruiseLayout(Widget):
       self.icbm_lead_max_ttc,
       self.icbm_lead_max_distance,
       self.icbm_model_stop,
+      self.icbm_model_stop_min_decel,
 
       SectionHeader(tr("Resuming From A Stop")),
       self.icbm_pinned_holds,
@@ -318,8 +338,8 @@ class CruiseLayout(Widget):
       self.scc_v_toggle,
       self.scc_v_low_speed_factor,
       self.scc_v_high_speed_factor,
-      self.scc_v_earliness,
       self.scc_m_toggle,
+      self.scc_map_factor,
       self.scc_m_decel,
 
       SectionHeader(tr("Other")),
@@ -393,6 +413,16 @@ class CruiseLayout(Widget):
     return f"{value} m" if ui_state.is_metric else f"{round(value * 3.28084 / 5) * 5} ft"
 
   @staticmethod
+  def _percent_label(value):
+    return f"{value}%"
+
+  @staticmethod
+  def _decel_label(value):
+    # Stored in tenths of m/s^2. Deceleration is SI everywhere in openpilot and there is no useful
+    # US customary form of it, so the number is shown as-is with its unit rather than converted.
+    return f"{value / 10.:.1f} m/s²"
+
+  @staticmethod
   def _speed_step_label(value: int) -> str:
     """BluePilot: these params are stored in display units -- the same units the set speed is shown
     in -- so the label has to follow the driver's mph/km-h choice rather than assume one."""
@@ -409,6 +439,7 @@ class CruiseLayout(Widget):
       self.icbm_lead_max_ttc,
       self.icbm_lead_max_distance,
       self.icbm_model_stop,
+      self.icbm_model_stop_min_decel,
       self.icbm_resume_gate,
       self.icbm_resume_min_gap,
       self.icbm_resume_min_lead_speed,

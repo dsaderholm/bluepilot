@@ -15,18 +15,6 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"AthenadPid", {PERSISTENT, INT}},
     {"AthenadUploadQueue", {PERSISTENT, JSON}},
     {"AthenadRecentlyViewedRoutes", {PERSISTENT, STRING}},
-    // BluePilot: which generation of changed shipped defaults this device has taken.
-    // See _BP_REDEFAULTED in sunnypilot/system/params_migration.py.
-    {"BPDefaultsGeneration", {PERSISTENT | BACKUP, STRING}},
-    // BluePilot: what shipped default the owner was last handed for each setting, and which
-    // settings he has since changed himself. Together these are the only way to tell "never
-    // touched" from "deliberately set to exactly that" -- manager.py writes every key to disk on
-    // first boot, so on a car that has been driven the two are identical on disk.
-    // See _migrate_bp_new_defaults in sunnypilot/system/params_migration.py.
-    // BACKUP on purpose: restoring onto a fresh device makes it treat settings as HIS, which is
-    // the conservative direction -- it declines to hand over a default rather than overwriting one.
-    {"BPDefaultsSnapshot", {PERSISTENT | BACKUP, STRING}},
-    {"BPDefaultsOwned", {PERSISTENT | BACKUP, STRING}},
     {"BootCount", {PERSISTENT, INT}},
     {"CalibrationParams", {PERSISTENT, BYTES}},
     {"CameraDebugExpGain", {CLEAR_ON_MANAGER_START, STRING}},
@@ -210,6 +198,20 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // It remains the weakest-evidence path here -- no lead means no dRel, vRel or TTC, so
     // persistence and the 20 mph ACC floor are its entire filter.
     {"IcbmModelStopEnabled", {PERSISTENT | BACKUP, BOOL, "1"}},
+    // BluePilot: how hard the stop would have to be braked for before this path acts at all, in
+    // tenths of m/s^2. THE EARLINESS CONTROL for stop signs and red lights.
+    //
+    // Measured 2026-08-08 on route 0000032c, activation #4: it fired at 34 mph with 193 m still to
+    // run, which needs 0.60 m/s^2 to stop -- gentler than coasting, and about 2.5x the distance a
+    // comfortable stop wants. "It's stopping for red lights a little too early", and the number
+    // agrees. DEC's slow-down flag is deliberately early (that is why it was chosen over
+    // shouldStop, which can never fire here) so the earliness has to be bounded downstream.
+    //
+    // 1.0 m/s^2 is where a stop stops being reachable by lifting off: below it, coasting arrives in
+    // time on its own and a set-speed request buys nothing. At 34 mph it moves that trigger from
+    // 193 m to about 116 m. Ford's own braking ceiling is ~1.3 (measured), so values much above
+    // that ask for a stop the car cannot deliver.
+    {"IcbmModelStopMinDecel", {PERSISTENT | BACKUP, INT, "10"}},
     // BluePilot: hold off openpilot's standstill resume request until the lead has actually gone.
     // controlsd asserts resume from ITS OWN MPC plan, which on a stock-ACC car is not the
     // controller that then has to drive -- Ford ACC reads resume as "go", accelerates toward the
@@ -455,23 +457,23 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // move after the alignment, these do NOT need to move with them.
     {"SmartCruiseControlVisionLowSpeedFactor", {PERSISTENT | BACKUP, INT, "110"}},
     {"SmartCruiseControlVisionHighSpeedFactor", {PERSISTENT | BACKUP, INT, "100"}},
-    // BluePilot: how early the curve cycle starts, independent of how much it slows. 100 = stock.
-    //
-    // Went 100 -> 140 -> 170 while SCC-Map did not exist, because off-ramps triggered too late and
-    // vision was the only thing that could catch them. Reported from a drive on 2026-08-04 that the
-    // car now slows hard for gentle interstate sweepers: at 170 the entering threshold falls to
-    // 0.76 m/s^2, which at 70 mph is a 1281 m radius -- a bend you can barely feel. Stock is 754 m.
-    //
-    // Back to 110 (829 m). The ramps that justified 170 belong to SCC-Map now, which sees them from
-    // the map rather than waiting for the camera, so the earliness was buying nothing and costing
-    // every sweeper on I-15.
-    {"SmartCruiseControlVisionEarliness", {PERSISTENT | BACKUP, INT, "110"}},
     // BluePilot: SCC-Map deceleration target, tenths of m/s^2, magnitude. Unlike SCC-Vision this
     // single value sets BOTH how hard it slows and how early it starts, because the trigger is
     // "am I within the distance needed to reach the corner speed at this rate" -- gentler means a
     // longer distance means an earlier start. 12 = the stock -1.2 m/s^2, deliberately just under
     // the 1.3 that lights the stop lamps. Lower it to begin ramps sooner and more gently.
     {"SmartCruiseControlMapDecel", {PERSISTENT | BACKUP, INT, "8"}},
+    // BluePilot: scales the corner speed SCC-Map asks for, in percent. The magnitude control map
+    // has never had -- SmartCruiseControlMapDecel is a TRIGGER DISTANCE, so it moves when the
+    // slowing starts and not how slow it gets, and vision's factors do not apply to mapped corners.
+    //
+    // Asked for on 2026-08-08 after an off-ramp: "for the end of the exit, it honestly should've
+    // dropped down to 20 mph. My PSCM really wants to take curves like that at low speeds." The
+    // mapped target matched the ramp's yellow advisory sign, which is correct for a stock car and
+    // too fast for this one to steer -- the retrofit PSCM has less authority than the advisory
+    // assumes. 100 keeps the map's own number; lower takes every mapped corner proportionally
+    // slower.
+    {"SmartCruiseControlMapFactor", {PERSISTENT | BACKUP, INT, "100"}},
 
     // Torque lateral control custom params
     {"CustomTorqueParams", {PERSISTENT | BACKUP , BOOL}},

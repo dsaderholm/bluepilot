@@ -276,10 +276,10 @@ stored value, so this waits until holds actually move into the planner, and is d
 `_BP_LATERAL_SCHEME_PARAM_RENAMES` machinery in `params_migration.py` that already exists for
 exactly this.
 
-**A new prefix has a second obligation.** `_BP_TRACKED_PREFIXES` in `sunnypilot/system/params_migration.py`
-lists the prefixes whose shipped defaults can reach the car. A key outside it never receives a
-changed default and nothing says so — that already happened to seven `PassingAssist*` keys. Add the
-prefix in the same commit that introduces it.
+**A new prefix used to carry a second obligation** -- registering it in `_BP_TRACKED_PREFIXES` so
+its shipped defaults could reach the car. That mechanism was removed on 2026-08-08 and settings now
+behave exactly as they do upstream, so there is nothing to register. See "Params, defaults, and his
+settings".
 
 ## Radar detector (Valentine One Gen2, wired ESP bus)
 
@@ -405,28 +405,32 @@ Two things that decided the design:
 
 ## Params, defaults, and his settings
 
-**His rule, in his words: "If I have never changed a value, great, I will get the new default. If I
-have, then it shouldn't change."** Fix code freely. Only settings he personally chose are off limits.
+**Settings behave EXACTLY as they do on stock BluePilot, sunnypilot and openpilot.** Decided
+2026-08-08: *"I know before that I wanted them to change or something, but that caused issues, so I
+want to go back to how upstream does it."* There is no defaults migration on this fork any more.
 
-**A changed default cannot reach a driven car by itself.** `system/manager/manager.py` writes every
-unset param to disk at boot, so with `PERSISTENT | BACKUP` the value shipping the day he first
-flashed a build containing a key is the value frozen on his car. Every later edit to that default
-goes to a file nobody reads. This is true of keys new to the branch too -- "it has never been
-written, so it takes its default" holds exactly once, and is false from his next flash onward.
+So the rule is upstream's, and it is simple: `system/manager/manager.py` writes every unset param to
+its default on the first boot that knows about the key, and after that **the stored value never
+changes**. Not on update, not ever.
 
-`_migrate_bp_new_defaults` in `sunnypilot/system/params_migration.py` is what makes his rule work.
-`BPDefaultsSnapshot` records the default he was last handed; `BPDefaultsOwned` records what he has
-since changed. Comparing the two is the only way to tell "untouched" from "his", because on disk
-they are identical. Seeding is pessimistic -- a key with no record is assumed to be his -- and his
-lateral tune is excluded by name.
+**The consequence that governs everything else here: CHANGING A SHIPPED DEFAULT DOES NOT REACH HIS
+CAR.** It reaches a fresh flash and nothing else. A changed default is therefore a RECOMMENDATION,
+not a change, and the only channel that actually carries it is the settings description --
+`selfdrive/ui/bp/settings_defaults.py`'s `recommended()`, which reads `get_default_value()` at
+display time and cannot go stale.
 
-- **New defaults just work now.** The old `_BP_REDEFAULT_GROUPS` generation lists are CLOSED; do not
-  add to them. Still name a changed default in the commit message so he knows what moved.
-- **A new prefix must join `_BP_TRACKED_PREFIXES`** in the same commit, or the key silently never
-  receives a moved default. Seven `PassingAssist*` keys went missing to exactly this.
-- **`run_migration` runs BEFORE manager.py materializes defaults**, so an unset key here means he has
-  never been handed the setting at all. It is not a value he chose. Getting this backwards claimed
-  every newly declared key as his, forever.
+So when a road report says a number should move:
+
+- Change the default, and **say so plainly in the message**, because that is how he learns to go
+  change it himself. He does this deliberately: *"I will go through each setting, check the
+  description for recommended value, and set my value to it."*
+- Never claim a default change fixed anything on his car. It did not, until he sets it.
+- Do not build machinery to push it. That machinery existed, produced two real bugs in one evening,
+  and was 272 lines in a sunnypilot file. It is gone and is not coming back.
+
+What remains in `params_migration.py` is upstream-shaped: a rename migration that carries a value
+across a key rename, which preserves settings rather than overriding them. Renames are fine.
+Anything that decides what value he *should* have is not.
 
 **Every feature this fork builds ships ON.** Stated 2026-08-08: *"the recommendation for all
 features should be on."* A feature defaulting off is a recommendation to not use it, and it is also
@@ -455,6 +459,45 @@ deciding whether to try it.
 `json.loads` on it fails too. Pass the list or dict directly. This shipped pinned holds completely
 dead -- enabled by default, storing nothing, for its entire life -- because both directions were
 broken and therefore agreed with each other.
+
+## Keep only the additions that still earn their place
+
+Stated 2026-08-08: *"I just want to keep additions we have made that actually make a difference."*
+This is the upstream-scope rule turned on OUR OWN work, and it has teeth, because a knob we invented
+costs the same merge conflict forever as one we borrowed.
+
+**IF UPSTREAM HAS IT, KEEP IT -- even if nothing here uses it.** This rule is only ever about
+additions THIS FORK made. Deleting upstream's own code is the maximum merge cost there is: it
+conflicts with every future change they make to it, forever, which is the exact opposite of what
+this rule is for. An unused upstream param costs nothing, because it is on both sides of the diff
+and cancels out. Before deleting anything, check:
+
+```bash
+git show upstream/bp-7.0:<path> | grep -c "<the thing>"
+```
+
+Zero means it is ours and the rule applies. Anything else means leave it alone. That check is what
+established earliness was ours -- upstream has no earliness concept at all.
+
+**The test is whether the REASON still holds, not whether the default is neutral.** Those come apart:
+
+- `SmartCruiseControlVisionEarliness` -- **deleted.** Ours, not upstream's; upstream uses
+  `_ENTERING_PRED_LAT_ACC_TH` 1.3 / `_ABORT` 1.1 / `_TURNING` 1.6 directly and we replaced all five
+  with properties dividing by a param. It existed because vision was once the only thing that could
+  catch an off-ramp. SCC-Map reads ramps from the map now, so the reason expired -- and its
+  remaining effect was making gentle interstate sweepers slow hard. Gone, call sites back on the
+  constants.
+- `SmartCruiseControlMapFactor` -- **kept**, and it defaults to 100, which changes nothing today.
+  Neutral, but the reason is live: it is the only way to ask for mapped corners slower than the
+  posted advisory, which this car's retrofit PSCM needs.
+- `SmartCruiseControlVisionHighSpeedFactor` -- **kept** at a neutral 100. It is one half of a
+  speed-blended pair whose other half is not neutral; removing it would break the blend, not
+  simplify it.
+
+**When a reason expires, delete rather than park at neutral.** A knob that changes nothing is still
+a modified upstream line, and it reads to the next person as load-bearing. And prefer upstream's
+constant to our multiplier where the two are equivalent -- their numbers have far more road under
+them than ours.
 
 ## Facts that have been got wrong before
 

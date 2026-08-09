@@ -79,11 +79,10 @@ DEFAULT_TARGETS = [
   "selfdrive/car/tests/test_pre_enable_standstill.py",
   "selfdrive/ui/bp/onroad/tests/",
   "system/tests/test_sentry_disabled_by_default.py",
-  "sunnypilot/system/tests/test_redefault_migration.py",
-  "sunnypilot/system/tests/test_new_defaults_snapshot.py",
   # A duplicate params_keys.h entry is silently dropped by the unordered_map rather than being
   # an error, and two long-lived branches adding the same key in different places is how it
-  # happens. BPDefaultsGeneration is about to be exactly that.
+  # happens. BPDefaultsGeneration was exactly that, before it was removed with the defaults
+  # migration on 2026-08-08.
   "selfdrive/car/tests/test_params_keys_unique.py",
   "selfdrive/car/tests/test_no_int_on_capnp_enums.py",
   # The value behind every +/- control. The widget needs pyray and cannot collect here, which

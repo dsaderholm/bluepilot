@@ -82,6 +82,12 @@ RESUME_PRESS_MEMORY_FRAMES = 150  # 1.5 s at 100 Hz, generous next to the engage
 # jumps to the CURRENT VEHICLE SPEED. So once the number settles after re-engaging, whichever it
 # landed on says which button was pressed -- no button event required.
 RESUME_MATCH_TOLERANCE = 2  # display units; Ford resumes to the exact previous value
+# BluePilot: how far above the current set speed ICBM may still go while SCC-Vision is tracking a
+# bend. Not zero: ICBM commands in 1 mph steps against a lagged cluster, so it hunts by one, and
+# clamping hard to the cluster means a 1 mph undershoot can never be recovered for the length of the
+# curve. One display unit leaves the hunt working and still blocks the case this exists for -- a
+# 9 mph climb chased out of a noisy vision target, mid off-ramp, on 2026-08-08.
+CURVE_RISE_TOLERANCE = 1
 # The baseline applies to the speed-limit/cruise component only. A curve target is a physics limit,
 # not something to add an offset to -- SCC-Vision asking for 40 means 40, whatever the baseline is.
 BASELINE_SOURCES = (LongitudinalPlanSource.cruise, LongitudinalPlanSource.speedLimitAssist)
@@ -281,7 +287,10 @@ class IntelligentCruiseButtonManagement:
     self.v_baseline = 0            # the driver's chosen speed; 0 = no baseline, follow SLA
     self.v_target_raw = 0
     self.plan_source = LongitudinalPlanSource.cruise
-    self.scc_map_requesting = False  # a mapped corner is asking; exempts the drop limiter
+    self.scc_map_requesting = False   # a mapped corner is asking
+    self.deadline_requesting = False  # map OR vision: a target with a fixed place in the road
+    self.curve_active = False        # SCC-Vision is tracking a bend right now
+    self.curve_ceiling = 0           # highest target allowed for the rest of this bend
     self.baseline_reset_delta = DEFAULT_BASELINE_RESET_DELTA
     self.v_cruise_cluster_prev = 0
     self.icbm_idle_frames = 0
@@ -392,10 +401,33 @@ class IntelligentCruiseButtonManagement:
     #
     # `active` is the map controller's own statement that it is asking for something, and it stays
     # true across the whole approach.
+    #
+    # SCC-VISION COUNTS TOO, as of 2026-08-08. A curve is a fixed place in the road, so its target
+    # carries a deadline exactly like a mapped corner does, and metering it spends road that was
+    # needed. Measured on the exit that prompted this: vision asked for 52 mph at t+257.6 and the
+    # limiter held the set speed at 58 for two and a half seconds, breaking free only when SCC-Map
+    # fired and bypassed it. That is the approach, which is the one stretch where runway is the
+    # entire problem.
+    #
+    # Keeping vision limited was justified here last night by its docstring -- it "ramps its own
+    # target smoothly through the ENTERING state". The log says otherwise: 72, 52, 46, 42 in under
+    # two seconds. Reasoning from a docstring instead of data, again.
     try:
-      self.scc_map_requesting = bool(LP_SP.smartCruiseControl.map.active)
+      scc = LP_SP.smartCruiseControl
+      self.scc_map_requesting = bool(scc.map.active)
+      # VISION IS METERED AGAIN as of 2026-08-08, reverting the same day's change. Removing the cap
+      # for curves produced 80 -> 50 mph on two slight freeway curves, with traffic behind reacting.
+      # The cap was doing load-bearing work nobody had identified: SCC-Vision's target on a gentle
+      # bend is far lower than the bend needs, and metering the DESCENT meant the curve was usually
+      # past before the set speed ever arrived. Take the cap away and the car actually goes there.
+      #
+      # So the fix for that has to be the vision TARGET, not the rate at which ICBM chases it. Until
+      # then the cap stays, because it is the only thing standing between a bad target and the road.
+      self.deadline_requesting = bool(scc.map.active)
+      self.curve_active = bool(scc.vision.active)
     except (AttributeError, KeyError):
       self.scc_map_requesting = False
+      self.deadline_requesting = False
     self.v_target = self.apply_baseline(self.v_target)
 
     v_ego_conv = round(CS.vEgo * speed_conv)
@@ -446,13 +478,62 @@ class IntelligentCruiseButtonManagement:
     seconds to work 80 down to 30, by which point the ramp was gone. Every step was correct and the
     sum of them was far too slow.
 
-    SCC-Vision is NOT exempt and should not be. It ramps its own target through the ENTERING state
-    with a smooth deceleration, so its requests already arrive gradually -- coasting through those
-    is what this limiter is for, and it is the common case on ordinary roads. The exemption is keyed
-    on SCC-Map ASKING, not on it winning the frame -- see where scc_map_requesting is set for why
-    the frame's plan source is the wrong test.
+    SCC-VISION IS NOT EXEMPT, having been exempt for a few hours on 2026-08-08. The deadline
+    argument for it is sound and the outcome was still bad: 80 -> 50 mph on two slight freeway
+    curves, traffic behind reacting. Reported the same day and reverted.
+
+    What that revealed is that the cap was covering for something else. SCC-Vision asks for a speed
+    a gentle bend does not need, and metering the descent meant the curve was normally past before
+    the set speed got there -- so the bad target never showed. Remove the cap and the car goes
+    where the target actually points. The cure is the TARGET, not the rate ICBM chases it at, and
+    until that is fixed the cap is the only thing between it and the road.
+
+    SCC-Map stays exempt: its targets come from mapped geometry, it was the case that prompted all
+    of this, and the exit it fixed drove well.
+
+    WHAT THIS WAS ACTUALLY FOR, from the owner who asked for it (2026-08-08): *"I originally planned
+    that feature so that the brake lights wouldn't be turning on all the time. But then I found out
+    that Ford ACC occasionally coasts and when it brakes, the lights don't come on for a bit."*
+
+    So the purpose was never gentleness -- it was the STOP LAMPS. Worth having written down,
+    because the comment here used to say the guard was against a violent application, and that
+    reading is what made the cap look load-bearing everywhere rather than in one case.
+
+    Two findings have since narrowed it, and they point the same way:
+
+      - Ford cannot be violent. Measured at 1.31 m/s^2 on the 2026-08-08 exit -- the UN R13-H lamp
+        threshold, its ceiling -- and it holds that rate whatever the size of the drop. Metering
+        never bought gentleness, only delay.
+      - Ford already does some of this itself: it coasts of its own accord, and light applications
+        do not light the lamps at all. That last part is a THRESHOLD, not a delay, which is the
+        useful correction -- carstate_ext.py reads BrkLamp_B_Rq (what traffic sees) separately from
+        AccBrkTot_A_Rq (what ACC asked for) precisely because ACC applies brake too light to trigger
+        the lamps.
+
+    AND THE RULE THAT GOVERNS THIS CAR IS NOT A RATE. The 1.3 m/s^2 figure quoted elsewhere in this
+    repo is UN R13-H, which is UNECE. This car is in the US, where FMVSS 108 S5.5.4 says the stop
+    lamps are activated UPON APPLICATION OF THE SERVICE BRAKES, and NHTSA has interpreted a bare
+    deceleration threshold as not a permissible trigger on its own -- a stop lamp signals that the
+    operator intends to diminish speed BY BRAKING, not that the vehicle is slowing.
+
+    So the line is whether the service brakes are applied at all, and speed reduction achieved by
+    coasting or powertrain drag correctly lights nothing. That is what the owner wanted from this
+    feature and it is the better-founded version of it: keeping each step small keeps Ford in the
+    coast regime, so no service brake, so no lamps -- rather than keeping a magnitude under a
+    threshold that does not apply here.
+
+    It also means AccBrkDecel_B_Rq, the boolean, tracks the legal trigger far better than
+    AccBrkTot_A_Rq does. The 1.31 m/s^2 measured on the exit says the brakes were firmly applied
+    there; it is evidence of braking, not the criterion for it.
+
+    What survives is narrow and real: on a target with no deadline, keeping each step small keeps
+    Ford in the coasting regime rather than the braking one, and the lamps stay dark. That is worth
+    having for a speed limit and worth nothing when the road has set a deadline.
+
+    The exemption is keyed on a deadline-bearing source ASKING, not on it winning the frame -- see
+    where deadline_requesting is set for why the frame's plan source is the wrong test.
     """
-    if self.scc_map_requesting:
+    if self.deadline_requesting:
       self.drop_anchor = 0
       return self.v_target
 
@@ -538,7 +619,30 @@ class IntelligentCruiseButtonManagement:
 
     Hold at (anchor + max_target_rise) and only take the next step once actual speed has caught
     up. Net acceleration ends up the same, but it arrives in stages instead of one pull.
+
+    NOTHING RISES WHILE A CURVE IS BEING TRACKED. Measured on the 2026-08-08 exit: SCC-Map lost the
+    ramp at t+268.1 and vision's own target bounced to 47-51 for a couple of seconds before settling
+    at 21. ICBM chased the peak, took the set speed from 42 up to 51, and the car ACCELERATED from
+    41 to 44 mph in the middle of an off-ramp -- then had to walk all the way back down, reaching 20
+    about three seconds later than it could have. He got to the tight part still doing 28.
+
+    A curve target that briefly rises is noise, not the bend ending. The bend has ended when vision
+    says so by going inactive, and until then the target is a LIMIT: follow it down, never up.
     """
+    if self.curve_active:
+      # Anchored to where the curve STARTED and ratcheted downward, never to the live cluster. A
+      # ceiling of (current cluster + tolerance) is not a ceiling at all: each step it allows raises
+      # the cluster, which raises the ceiling, which allows another step. That version metered the
+      # climb to 1 mph a step and still arrived at 52 -- the test caught it.
+      if self.curve_ceiling == 0:
+        self.curve_ceiling = self.v_cruise_cluster
+      self.curve_ceiling = min(self.curve_ceiling, self.v_target)
+      if self.v_target > self.curve_ceiling + CURVE_RISE_TOLERANCE:
+        self.rise_anchor = 0
+        return self.curve_ceiling + CURVE_RISE_TOLERANCE
+    else:
+      self.curve_ceiling = 0
+
     if self.max_target_rise <= 0:  # 0 disables the limiter
       self.rise_anchor = 0
       return self.v_target
