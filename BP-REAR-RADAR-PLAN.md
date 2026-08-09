@@ -811,7 +811,7 @@ already in this car, since it is the same part number.
 | Item | Price | Note |
 |---|---|---|
 | Delphi MRR, salvage | $50–150 | listings seen $33–469; used mostly $50–150 |
-| Connector pigtail | $0–30 | buy the harness stub with it; cutting one off a donor is far easier than sourcing the mate |
+| Connector pigtail | **~$10** | **"8-Way Front Radar/Sonar Sensor Connector Pigtail, 2020-2023 Ford Edge Ranger"** -- the exact one he bought for the front install last year. Ignore eBay's "doesn't fit": the Fusion never had this radar, which is the entire point of the retrofit. |
 | CANable 2.0 USB-CAN | ~$36 | 500 kbit/s classic CAN is all that is needed |
 | 12 V bench supply, 3 A | $25–40 | a spare battery and a fuse also works |
 | **Phase 1 total** | **$110–255** | money spent regardless of which way the answer goes |
