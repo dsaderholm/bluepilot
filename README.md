@@ -1,4 +1,4 @@
-![](selfdrive/assets/img_bluepilot_boot.jpg)
+![](selfdrive/assets/img_fusionpilot_boot.jpg)
 
 # FusionPilot
 
