@@ -813,7 +813,8 @@ already in this car, since it is the same part number.
 | Delphi MRR, salvage | $50–150 | listings seen $33–469; used mostly $50–150 |
 | Connector pigtail | **~$10** | **"8-Way Front Radar/Sonar Sensor Connector Pigtail, 2020-2023 Ford Edge Ranger"** -- the exact one he bought for the front install last year. Ignore eBay's "doesn't fit": the Fusion never had this radar, which is the entire point of the retrofit. |
 | CANable 2.0 USB-CAN, **isolated** | **$25** | 500 kbit/s classic CAN is all the radar needs -- the CAN FD these ship with is harmless. **Buy the ISOLATED version**, ~$5 over the plain one: the bench has a 12 V supply on one side and a LAPTOP on the other, sharing a CAN ground, and without galvanic isolation a ground difference returns through USB. Same protection again in phase 2, where the laptop taps bus 1 on a running car. Amazon rather than eBay -- the eBay units are all shipped from China and the cheapest item on this list should not be what the test waits a month for. |
-| 12 V bench supply, 3 A | $25–40 | a spare battery and a fuse also works |
+| 12 V bench supply, 3 A | **$10** | Facmogu 12 V 3 A wall adapter. 3 A is ~6x what the radar draws (~0.5 A / 6 W), and it has short-circuit protection, which is worth having on a bench where the connector is hand-wired. A spare battery and a fuse also works. |
+| Barrel-jack to screw-terminal adapter | **$5** | THE EASY-TO-MISS ONE. The supply ends in a 5.5x2.1 mm barrel and the radar pigtail is bare wire, so without this the bench session stops before it starts. Screw terminals rather than cutting the plug off, so the supply stays general-purpose. **Center/tip positive, sleeve negative** -- reversing it is one of the few ways to kill the radar before learning anything from it. |
 | **Phase 1 total** | **$110–255** | money spent regardless of which way the answer goes |
 
 **Phase 2 — only if phase 1 shows detections.**
