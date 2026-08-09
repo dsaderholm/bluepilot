@@ -643,3 +643,38 @@ class TestModelStopWaitsUntilBrakingIsActuallyNeeded:
     det.model_stop_min_decel = 1.0
     run(det, ev, 60, status=False, v_ego=15.2, slow_down=True, stop_dist=float('inf'))
     assert det.state == State.active, "an unreadable endpoint disabled the path"
+
+
+class TestTheStopRequestOnlyEverGoesDown:
+  """Reported 2026-08-08: "it only ever got down to 28 and almost started going up before I hit the
+  brakes... went down to 28 and kind of fluctuated there."
+
+  _model_stop_target is max(geometry, acceleration), and the acceleration term is
+  modelV2.action.desiredAcceleration -- noisy frame to frame. So the request wanders and ICBM chases
+  it back up. Same failure the curve ceiling fixed, except that keys on SCC-Vision being active and a
+  red light is not a curve.
+  """
+
+  def test_a_noisy_accel_estimate_cannot_raise_the_request(self):
+    det, ev = model_stop_detector(), FakeEvents()
+    run(det, ev, 40, status=False, v_ego=15.6, slow_down=True, stop_dist=90.)
+    assert det.state == State.active and det.trigger == Trigger.modelStop
+    low = det.v_target
+
+    # The model's accel estimate collapsing toward zero is what makes the target want to rise.
+    for _ in range(60):
+      det.update(make_sm(status=False, v_ego=15.6, accel=0.0), TRAJ, CRUISE_MS, True, ev, True, 400.)
+      assert det.v_target <= low + 1e-6, (
+        f"request rose from {low / 0.44704:.0f} to {det.v_target / 0.44704:.0f} mph mid-stop")
+
+  def test_a_new_stop_starts_from_scratch(self):
+    """The ratchet must not outlive the event, or the next light inherits the last one's floor."""
+    det, ev = model_stop_detector(), FakeEvents()
+    run(det, ev, 40, status=False, v_ego=15.6, slow_down=True, stop_dist=60.)
+    floored = det.v_target
+    for _ in range(60):        # light goes green; model stops asking
+      det.update(make_sm(status=False, v_ego=15.6), TRAJ, CRUISE_MS, True, ev, False, float('inf'))
+    assert det.state != State.active
+
+    run(det, ev, 40, status=False, v_ego=26.8, slow_down=True, stop_dist=250.)
+    assert det.v_target > floored, "the next stop inherited the previous floor"

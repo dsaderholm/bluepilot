@@ -219,6 +219,7 @@ class UnconfirmedLeadDetector:
     self._lost_s = 0.0
     self._sweep_start_d_rel = 0.0
     self._model_stop_s = 0.0
+    self._model_stop_floor = float('inf')
     self._model_clear_s = 0.0
 
     self.params = Params()
@@ -344,6 +345,7 @@ class UnconfirmedLeadDetector:
     self._lost_s = 0.0
     self._model_stop_s = 0.0
     self._model_clear_s = 0.0
+    self._model_stop_floor = float('inf')
     self.trigger = Trigger.none
     if self.restore_set_speed > 0:
       self.state = State.restoring
@@ -474,7 +476,20 @@ class UnconfirmedLeadDetector:
         self._release()
         return
 
-      self.v_target = self._model_stop_target(v_ego)
+      # RATCHET DOWN ONLY. Reported 2026-08-08: "it only ever got down to 28 and almost started
+      # going up before I hit the brakes... went down to 28 and kind of fluctuated there."
+      #
+      # _model_stop_target takes max(geometry, acceleration), and the acceleration term is
+      # modelV2.action.desiredAcceleration, which is noisy frame to frame. So the request wanders,
+      # and ICBM faithfully chases it back up -- the same failure the curve ceiling fixed, except
+      # that ceiling keys on SCC-Vision being active and a red light is not a curve.
+      #
+      # Nothing about a stop justifies asking for MORE speed while still committed to it. If the
+      # light goes green the model stops asking, model_slow_down clears, and the release above
+      # handles it in half a second. Until then the request only goes down.
+      target = self._model_stop_target(v_ego)
+      self._model_stop_floor = min(self._model_stop_floor, target)
+      self.v_target = self._model_stop_floor
       events_sp.add(EventNameSP.modelStopBraking)
       return
 
@@ -600,6 +615,7 @@ class UnconfirmedLeadDetector:
           self.trigger = Trigger.modelStop
           self.restore_set_speed = v_cruise_cluster
           self.v_target = self._model_stop_target(v_ego)
+          self._model_stop_floor = self.v_target
           self._model_clear_s = 0.0
           events_sp.add(EventNameSP.modelStopBraking)
           return
