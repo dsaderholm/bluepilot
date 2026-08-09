@@ -428,6 +428,33 @@ class UnconfirmedLeadDetector:
 
     # ---- ACTIVE (model stop): resolve on the model letting go ----
     if self.state == State.active and self.trigger == Trigger.modelStop:
+      # A LEAD APPEARING ENDS THIS PATH, because the entry condition has to hold for as long as the
+      # path runs and nothing was maintaining it.
+      #
+      # Reported 2026-08-08: "it said stopping for a red light even though there was a car in front
+      # of me. Yeah sure it was a red light, but there was a car in front of me stopped there
+      # already." The trigger is correct and fired legitimately -- at the range where the model
+      # first sees the light, the queued car is often still outside radar acquisition, so there
+      # genuinely is no lead. Then it resolves as he closes, and the three release conditions below
+      # are the model letting go, dropping under the floor, and the brake. None of them is
+      # "something is in the way now", so it kept announcing an empty intersection at a car.
+      #
+      # Releasing outright would be wrong in the case that matters: _release() routes to RESTORING
+      # when a set speed is stored, which RAISES the set speed -- toward a stopped car. So this
+      # splits on who is going to do the braking.
+      if lead.status:
+        if self._ford_tracks(lead, v_ego):
+          self._release()      # moving fast enough for Ford's ACC to follow; it owns this now
+          return
+        # Ford will drive into it, which is the radar-blind lead case exactly. Same request, handed
+        # to the path that is about that, so the alert names a VEHICLE instead of a sign. No
+        # evidence sweep needed: model-stop persistence has already run, and a radar return the
+        # model also predicted is strictly more evidence than either alone.
+        self.trigger = Trigger.visionLead
+        self._lost_s = 0.0
+        self.v_target = self._lead_target(v_ego, lead.dRel)
+        events_sp.add(EventNameSP.unconfirmedLeadBraking)
+        return
       # Same signal as the trigger. DEC's filter carries its own hysteresis, so there is nothing to
       # add here. This used to read model_should_stop, which is false at every speed this path can
       # run at -- so the clear timer ran from the moment it triggered and would have released it

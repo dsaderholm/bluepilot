@@ -73,10 +73,11 @@ def run(det, ev, frames, slow_down=False, stop_dist=float('inf'), **kw):
 
 
 class _ForceModelStop:
-  """The shipped default for IcbmModelStopEnabled is now 0 -- the trigger over-fires on the road, so
-  the feature ships off. These tests are about the path's LOGIC, not about whether it is switched on,
-  so they force it rather than inheriting whatever params_keys.h currently says. A test that silently
-  changes meaning when a default moves is not testing what it claims to."""
+  """Forces IcbmModelStopEnabled on, whatever params_keys.h currently ships.
+
+  It has now shipped 1, then 0, then 1 again, and these tests are about the path's LOGIC rather than
+  about whether it is switched on. A test that silently changes meaning when a default moves is not
+  testing what it claims to -- which is why this pins it rather than reading it."""
 
   def get_bool(self, key, *a, **k):
     return True if key == "IcbmModelStopEnabled" else False
@@ -576,3 +577,35 @@ class TestFordBrakingRelease:
   def test_invalid_socket_does_not_release(self):
     assert not self.UnconfirmedLeadDetector._ford_is_braking(
       self._sm(decel_flag=True, valid=False))
+
+
+class TestModelStopHandsOverWhenALeadAppears:
+  """Reported 2026-08-08: "it said stopping for a red light even though there was a car in front".
+
+  The trigger requires no lead and fires legitimately -- at the range where the model first sees the
+  light, a queued car is often still outside radar acquisition. Nothing then MAINTAINED that
+  condition, so the path kept describing an empty intersection at a car that had since resolved.
+  """
+
+  def test_a_stopped_lead_appearing_switches_the_alert_to_the_vehicle(self):
+    det, ev = model_stop_detector(), FakeEvents()
+    run(det, ev, 40, status=False, v_ego=26.8, slow_down=True, stop_dist=150.)
+    assert det.state == State.active and det.trigger == Trigger.modelStop, "need the stop path active"
+
+    # The queued car resolves. Stopped, so Ford's ACC will not follow it.
+    det.update(make_sm(status=True, radar=True, d_rel=110., v_rel=-26.8, v_ego=26.8),
+               TRAJ, CRUISE_MS, True, ev, True, 110.)
+    assert det.trigger == Trigger.visionLead, (
+      "still reporting a sign with a car in front -- the entry condition stopped holding")
+    assert det.state == State.active, "handing over must not stop the request"
+    assert det.v_target <= 26.8, "the request must not rise when a car appears ahead"
+
+  def test_a_moving_lead_appearing_releases_because_ford_follows_it(self):
+    det, ev = model_stop_detector(), FakeEvents()
+    run(det, ev, 40, status=False, v_ego=26.8, slow_down=True, stop_dist=150.)
+    assert det.state == State.active and det.trigger == Trigger.modelStop
+
+    # Moving with traffic, above Ford's 6 mph tracking floor, so its own ACC owns this.
+    det.update(make_sm(status=True, radar=True, d_rel=90., v_rel=-1.0, v_ego=26.8),
+               TRAJ, CRUISE_MS, True, ev, True, 90.)
+    assert det.trigger != Trigger.modelStop, "kept claiming a sign while Ford was following a car"
