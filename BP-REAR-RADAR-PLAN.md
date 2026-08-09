@@ -826,6 +826,26 @@ already in this car, since it is the same part number.
 | Bracket / radome | $0–40 | 3D print, or fabricate from the donor's own bracket |
 | **Phase 2 total** | **$70–110** | |
 
+### The bench adapter, settled 2026-08-09
+
+**Jhoinrch RH-02 PRO isolated USB-CAN FD, $25 on Amazon.** Two details from its listing that change
+what the bench session looks like:
+
+- **It ships with slcan firmware from the CANable project.** slcan enumerates as a virtual COM port,
+  so SavvyCAN or cangaroo on Windows talk to it with no flashing, no DFU and no driver hunt. That
+  was the one genuinely fiddly step expected in phase 1 and it does not exist.
+- **It carries a switchable 120 ohm**, silkscreened next to a jumper. The rule is the one already
+  written up in section 9, and it points opposite ways depending on which side you are on:
+
+  | | termination |
+  |---|---|
+  | Bench: adapter + radar alone on a new pair | **ON** -- but measure the radar's own CANH-CANL first; Delphi modules often carry an internal 120, in which case the jumper is the second and the pair reads ~60 |
+  | In the car: adapter tapping bus 1 | **OFF** -- bus 1 has its two terminators already, a third takes it to ~40 and can stop the bus the working front radar and ACC depend on |
+
+  Same jumper, opposite answer. The car side is the one that can break something already relied on.
+
+USB Type-C, cable not included -- and it has to be a data cable, not charge-only.
+
 **All-in: roughly $180–365**, with the go/no-go decision reached after the first $110–255.
 
 ### The alternative, and why it is second
