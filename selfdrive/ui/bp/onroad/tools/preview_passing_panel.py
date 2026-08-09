@@ -244,7 +244,9 @@ def main(outdir):
       "14 drives: 96 passed, 89 agreed",
       "suggested 12, taken 6, longest ignored 34s",
       "mostly: oncoming traffic that side 62%",
-      "oncoming: 62 at 410ft",
+      # The widest form this line can take: both halves of the memory split, a firing, and the
+      # longer of the two edge verdicts. See oncomingEdgeTrusted in custom.capnp.
+      "oncoming: 8s seen, 140s remembered, 62 at 410ft, 49ft out, trusted edge",
       "ACC braked by 449ft",
       "7 backed out",
       "4 slow passes, worst 21s",

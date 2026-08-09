@@ -1099,3 +1099,42 @@ class TestOvertakeCorroboration:
     for _ in range(int(1.5 / 0.05)):
       adj.update(FakeSM([track(18, 3.7, v_rel=8.0)]), V_EGO, MAX_D)
     assert adj.left.overtaken_count == 1
+
+
+class TestOncomingEdgeTrust:
+  """Which of the two I-15 bugs fired -- recorded, because the drive summary could not say.
+
+  "I was on I-15 for a while, and kept saying two-way road." Diagnosing that from a completed
+  drive failed on 2026-08-09 for a specific reason: the stored record held dRel and vAbs and
+  nothing else, and those two numbers are produced by both candidate causes. See
+  oncomingEdgeTrusted in custom.capnp.
+  """
+
+  def test_a_trusted_edge_is_recorded_as_trusted(self):
+    """The model placed our carriageway's edge beyond the opposing lane, so a real car over there
+    counted as being on our road. Default edge_stds are 0.1 -- well inside MAX_ROAD_EDGE_STD."""
+    adj = upd(AdjacentLane(), FakeSM([track(90, 3.7, v_rel=-27.0 - V_EGO)]), V_EGO, MAX_D)
+    assert adj.left.oncoming
+    assert adj.left.oncoming_edge_trusted is True
+
+  def test_an_untrusted_edge_is_recorded_as_untrusted(self):
+    """The fallback band was in force, so whatever fired was within ADJACENT_MAX_M of the car.
+    On a divided highway that is not opposing traffic at all -- it is close-range scenery."""
+    adj = upd(AdjacentLane(), FakeSM([track(90, 3.7, v_rel=-27.0 - V_EGO)],
+                                     edge_stds=(0.9, 0.1)), V_EGO, MAX_D)
+    assert adj.left.oncoming, "still inside the narrowed band, so it still fires"
+    assert adj.left.oncoming_edge_trusted is False
+
+  def test_it_defaults_to_untrusted(self):
+    """An absent measurement reports the CONSERVATIVE answer, never the permissive one. False
+    here means "the band was in force", which is the claim that does not require a good edge."""
+    assert AdjacentLane().left.oncoming_edge_trusted is False
+
+  def test_it_survives_the_radar_dropping_out(self):
+    """It is part of the oncoming record, and that record deliberately outlives the observation.
+    Losing it on a dropout would leave a live veto whose provenance silently read as untrusted."""
+    adj = upd(AdjacentLane(), FakeSM([track(90, 3.7, v_rel=-27.0 - V_EGO)]), V_EGO, MAX_D)
+    assert adj.left.oncoming_edge_trusted is True
+    adj.update(FakeSM(present=False), V_EGO, MAX_D)
+    assert adj.left.oncoming_seconds > 0.0, "the memory itself must still be there"
+    assert adj.left.oncoming_edge_trusted is True

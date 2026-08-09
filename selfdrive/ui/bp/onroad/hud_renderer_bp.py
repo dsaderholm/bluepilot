@@ -794,8 +794,31 @@ class HudRendererBP(HudRendererSP):
       # Which half of the oncoming veto did the work. Mostly-remembered on a divided highway is
       # the I-15 fault stated as a number rather than a complaint.
       seen, remembered = float(d.get("oncomingSeen", 0)), float(d.get("oncomingRemembered", 0))
-      if seen + remembered > 5.0:
-        lines.append(f"oncoming: {seen:.0f}s seen, {remembered:.0f}s remembered")
+      # ONE LINE, not two, and that is a fit decision rather than a style one. _fit_sub keeps
+      # lines in priority order until the width runs out, so a follow-on detail line is the first
+      # thing dropped -- the provenance would have been invisible on exactly the busy drives worth
+      # diagnosing. Joined to its parent it cannot be separated from it.
+      fired = float(d.get("oncomingDRel", 0)) > 0
+      # The 5 s floor stays for the memory-only case, where a second or two is noise. It must NOT
+      # apply when something actually fired: the 2026-08-09 drive recorded 1.2 s remembered and
+      # this line never appeared, which is how a real firing came to be invisible on the panel
+      # while its numbers sat in the param file the whole time.
+      if seen + remembered > 5.0 or fired:
+        line = f"oncoming: {seen:.0f}s seen, {remembered:.0f}s remembered"
+        if fired:
+          od = float(d["oncomingDRel"])
+          unit = 'm' if ui_state.is_metric else 'ft'
+          ov = abs(float(d["oncomingVAbs"])) * (3.6 if ui_state.is_metric else 2.23694)
+          du = od if ui_state.is_metric else od * 3.28084
+          # WHERE it was and WHETHER THE EDGE WAS TRUSTED -- the pair that says WHICH bug fired.
+          # See oncomingEdgeTrusted in custom.capnp. "band only" is the honest name for the
+          # fallback: no usable road edge, so the carriageway test narrowed to the adjacent lane
+          # and whatever fired was within ADJACENT_MAX_M of the car.
+          oy = abs(float(d.get("oncomingYRel", 0.0)))
+          yu = oy if ui_state.is_metric else oy * 3.28084
+          edge = "trusted edge" if d.get("oncomingEdgeTrusted") else "band only"
+          line += f", {ov:.0f} at {du:.0f}{unit}, {yu:.0f}{unit} out, {edge}"
+        lines.append(line)
       # How many cars went past us, and how long the lane has been quiet since. The whole question
       # this is meant to answer is whether a long quiet stretch is real, so the gap is the number
       # that matters -- not the count.
@@ -807,11 +830,6 @@ class HudRendererBP(HudRendererSP):
       if hogs:
         lines.append(f"{hogs} left-lane hog{'' if hogs == 1 else 's'}, "
                      f"{float(d.get('hogSeconds', 0)):.0f}s")
-      if float(d.get("oncomingDRel", 0)) > 0:
-        od = float(d["oncomingDRel"])
-        ov = abs(float(d["oncomingVAbs"])) * (3.6 if ui_state.is_metric else 2.23694)
-        du = od if ui_state.is_metric else od * 3.28084
-        lines.append(f"oncoming: {ov:.0f} at {du:.0f}{'m' if ui_state.is_metric else 'ft'}")
       # The driver's own lane changes, from a separate param. Two of passing assist's constants
       # are guesses this measures away: how long a crossing takes, and what a HUMAN abandon rate
       # looks like -- without which its own backed-out count has no scale.

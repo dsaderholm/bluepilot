@@ -651,7 +651,7 @@ class PassingAssistDetector:
     self._timeline: list = []
     self._timeline_prev: tuple = ()
     self._last_drive_write_s = 0.0
-    self._last_oncoming = (0.0, 0.0)
+    self._last_oncoming = (0.0, 0.0, 0.0, False)
     # See oncomingSeenSeconds -- how much of the oncoming veto is a live sighting and how much is
     # the tail of its memory.
     self.oncoming_seen_seconds = 0.0
@@ -1458,7 +1458,12 @@ class PassingAssistDetector:
         # shows it while the veto is up, and catching that means glancing at the screen at the right
         # moment on a road where it may only fire once.
         "oncomingDRel": round(self._last_oncoming[0], 1),
-        "oncomingVAbs": round(self._last_oncoming[1], 1),
+        # yRel is already published live and DRAWN, but the drawing is gone the moment the drive
+        # ends -- so the one record that survives to be read afterwards was missing both of the
+        # fields that say WHICH bug fired. See oncomingEdgeTrusted in custom.capnp.
+        "oncomingYRel": round(self._last_oncoming[1], 1),
+        "oncomingVAbs": round(self._last_oncoming[2], 1),
+        "oncomingEdgeTrusted": bool(self._last_oncoming[3]),
       })
     except Exception:  # noqa: BLE001 - a param write failure must never reach the planner
       pass
@@ -1979,7 +1984,8 @@ class PassingAssistDetector:
     """
     side = self.adjacent.left if on_the_left else self.adjacent.right
     if side.oncoming_d_rel > 0:
-      self._last_oncoming = (float(side.oncoming_d_rel), float(side.oncoming_v_abs))
+      self._last_oncoming = (float(side.oncoming_d_rel), float(side.oncoming_y_rel),
+                             float(side.oncoming_v_abs), bool(side.oncoming_edge_trusted))
     # `oncoming` is this frame's sighting; the memory outlives it by up to the full window.
     if side.oncoming:
       self.oncoming_seen_seconds += DT_MDL
@@ -2584,6 +2590,7 @@ class PassingAssistDetector:
       dest.oncomingDRel = float(side.oncoming_d_rel)
       dest.oncomingVAbs = float(side.oncoming_v_abs)
       dest.oncomingYRel = float(side.oncoming_y_rel)
+      dest.oncomingEdgeTrusted = bool(side.oncoming_edge_trusted)
       dest.oncomingAdjacent = side.oncoming_adjacent_seconds > 0.0
       dest.oncomingSeconds = float(side.oncoming_seconds)
       dest.sameDirectionRecent = side.same_direction_recent

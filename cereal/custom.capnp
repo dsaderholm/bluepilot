@@ -470,6 +470,20 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       # far carriageway and a marker over empty tarmac are the same log line and completely
       # different bugs.
       oncomingYRel @11 :Float32;
+      # WAS THE ROAD EDGE TRUSTED when this fired. The discriminator for "I was on I-15 for a
+      # while, and kept saying two-way road", and without it that report cannot be closed from a
+      # drive that has already happened. Two completely different bugs produce the same record:
+      #
+      #   trusted   -- the model placed our carriageway's edge BEYOND the opposing lanes, so real
+      #                traffic across a median read as being on our road. A geometry problem.
+      #   untrusted -- _on_our_carriageway fell back to the adjacent band, so whatever fired was
+      #                within 5.5 m of us. On a divided highway that is not opposing traffic at
+      #                all, it is close-range scenery reading as a closing vehicle.
+      #
+      # dRel and vAbs cannot separate those. The 2026-08-09 drive recorded 5.0 m and -9.2 m/s --
+      # far too slow for highway opposing traffic, which reads -25 to -31 -- and that was as far
+      # as the record could take it.
+      oncomingEdgeTrusted @16 :Bool;
       # The two facts that decide whether this side is refused, logged because they are what a
       # disputed decision comes down to and neither is visible from the road.
       #

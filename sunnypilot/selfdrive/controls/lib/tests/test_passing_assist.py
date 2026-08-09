@@ -28,7 +28,7 @@ from openpilot.common.realtime import DT_MDL
 from openpilot.sunnypilot.selfdrive.controls.lib.passing_maneuver import CHANGE_DURATION_S
 from openpilot.sunnypilot.selfdrive.controls.lib.passing_assist import (
   PassingAssistDetector, MIN_LANE_WIDTH_M, DEFAULT_MIN_SPEED_MPH, MAX_WIDENING_M,
-  SUGGESTION_HOLD_S,
+  SUGGESTION_HOLD_S, HOLD_THROUGH,
   DEFAULT_PERSISTENCE_S, DRIVE_HISTORY_MAX, CHIME_MIN_INTERVAL_S,
   TIMELINE_MAX,
 )
@@ -3232,3 +3232,79 @@ class TestHowBentTheRoadWasWhenItSuggested:
     assert sum(det._lat_acc_hist) > 0
     assert det._lat_acc_hist[0] > 0, "a gentle sweeper belongs in the lowest bucket"
     assert det._lat_acc_hist[4] == 0, "nothing should have landed past 1.6"
+
+
+class TestSuggestionHold:
+  """What TestASuggestionSurvivesAOneFrameDip does not reach.
+
+  That class covers the hold through a SCENE, which is the right shape for "does the feature
+  behave", and it already pins the geometry dip, the sustained dip, the driver taking over,
+  oncoming, and the fact that a hold cannot create a suggestion. Everything here is a case it
+  does not exercise: the other two allow-listed gates, the flapping pattern the road actually
+  produced rather than a single dip, four more gates that must NOT be held, whether ending a
+  hold also forgets it, and whether the side can change underneath it.
+
+  Driven at the method rather than through a scene, deliberately. These are properties of the
+  state machine between _decide and the maneuver, and feeding it the exact frame pattern measured
+  on 2026-08-09 is more direct than hoping a fixture reproduces it.
+
+  Not cosmetic. Once the maneuver actuates, a suggestion that dies and revives on alternate frames
+  strobes the turn signal -- which is what ABORT_STANDDOWN_S means when it says the collision-only
+  scope must not survive actuation.
+  """
+
+  FRAMES = int(round(SUGGESTION_HOLD_S / DT_MDL))
+
+  @staticmethod
+  def _armed(side=Side.left):
+    d = PassingAssistDetector()
+    d.suggestion, d.blocked_by = side, Blocked.none
+    d._hold_suggestion()
+    return d
+
+  @staticmethod
+  def _dip(d, blocked):
+    d.suggestion, d.blocked_by = Side.none, blocked
+    d._hold_suggestion()
+    return d.suggestion
+
+  def test_it_holds_through_a_dip_on_every_allow_listed_gate(self):
+    """All three of HOLD_THROUGH, not just the one that happened to be measured loudest."""
+    for gate in HOLD_THROUGH:
+      d = self._armed()
+      assert self._dip(d, gate) == Side.left, f"withdrawn immediately on {gate}"
+      assert d.blocked_by == Blocked.none, "a held frame must not be counted as a block"
+
+  def test_it_survives_the_ten_hertz_flapping_the_road_produced(self):
+    """The measured pattern: the gate alternates every frame for seconds at a time. Before the
+    hold this produced a suggestion that appeared and vanished faster than anyone could act on."""
+    d = self._armed()
+    for _ in range(40):
+      assert self._dip(d, Blocked.noLaneAvailable) == Side.left
+      d.suggestion, d.blocked_by = Side.left, Blocked.none
+      d._hold_suggestion()
+    assert d.suggestion == Side.left
+
+  def test_anything_not_on_the_allow_list_ends_it_at_once(self):
+    """The driver taking over, the feature switched off, anything about danger. Fails CLOSED:
+    a gate added later is withdrawn immediately unless someone puts it on the list deliberately."""
+    for gate in (Blocked.driverActive, Blocked.disabled, Blocked.rearApproaching,
+                 Blocked.oncomingLane, Blocked.blindspotOccupied, Blocked.suspended):
+      assert gate not in HOLD_THROUGH, "guard: this test is about the gates that are NOT held"
+      d = self._armed()
+      assert self._dip(d, gate) == Side.none, f"held through {gate}"
+
+  def test_it_cannot_resume_after_a_disallowed_gate(self):
+    """Ending it must also FORGET it. Otherwise the driver takes over, the gate goes quiet, and
+    the suggestion the takeover killed comes back on its own."""
+    d = self._armed()
+    self._dip(d, Blocked.driverActive)
+    assert self._dip(d, Blocked.noLaneAvailable) == Side.none
+
+  def test_it_cannot_change_the_side(self):
+    """Holding LEFT while the live decision has moved to RIGHT would point at the wrong lane."""
+    d = self._armed(Side.left)
+    d.suggestion, d.blocked_by = Side.right, Blocked.none
+    d._hold_suggestion()
+    assert d.suggestion == Side.right
+    assert self._dip(d, Blocked.noLaneAvailable) == Side.right

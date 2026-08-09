@@ -423,6 +423,10 @@ class AdjacentLaneSide:
     self.oncoming_d_rel = 0.0
     self.oncoming_y_rel = 0.0
     self.oncoming_v_abs = NO_SPEED
+    # See oncomingEdgeTrusted in custom.capnp. Defaults FALSE, meaning "the fallback band was in
+    # force" -- the conservative claim, and the same rule the rest of this file runs on: an absent
+    # measurement must never report as the more permissive answer.
+    self.oncoming_edge_trusted = False
     # Corroboration for the veto. See ONCOMING_FRAMES.
     self._oncoming_hits = 0
     self._oncoming_gap_s = 0.0
@@ -484,11 +488,15 @@ class AdjacentLaneSide:
             # a sensor dropout is not evidence that it changed. Losing it would silently reset the
             # clock to "nobody has ever overtaken", which reads as a quiet lane -- the one direction
             # this measurement must never fail in.
-            self.overtaken_seconds, self.overtaken_count, self.overtaken_v_abs)
+            self.overtaken_seconds, self.overtaken_count, self.overtaken_v_abs,
+            # Part of the oncoming record, so it outlives the observation for the same reason the
+            # memory does: a dropout is not evidence about what the edge looked like when it fired.
+            self.oncoming_edge_trusted)
     self.__init__()
     (self.oncoming_seconds, self.oncoming_adjacent_seconds, self.same_direction_seconds,
      self.oncoming, self.strict,
-     self.overtaken_seconds, self.overtaken_count, self.overtaken_v_abs) = held
+     self.overtaken_seconds, self.overtaken_count, self.overtaken_v_abs,
+     self.oncoming_edge_trusted) = held
 
   def observe(self, occupied: bool, d_rel: float, y_rel: float, v_rel: float, v_abs: float) -> None:
     """Feed one radar message's raw finding through the debounce."""
@@ -510,7 +518,7 @@ class AdjacentLaneSide:
       self.d_rel, self.y_rel, self.v_rel, self.v_abs = 0.0, 0.0, 0.0, NO_SPEED
 
   def observe_oncoming(self, d_rel: float, y_rel: float, v_abs: float, memory_s: float,
-                       adjacent: bool) -> None:
+                       adjacent: bool, edge_trusted: bool = False) -> None:
     """Record a vehicle travelling the other way on this side.
 
     Latches the memory only once ONCOMING_FRAMES MESSAGES have corroborated each other. The
@@ -535,6 +543,7 @@ class AdjacentLaneSide:
     self.oncoming_d_rel = float(d_rel)
     self.oncoming_y_rel = float(y_rel)
     self.oncoming_v_abs = float(v_abs)
+    self.oncoming_edge_trusted = bool(edge_trusted)
     self._oncoming_gap_s = 0.0
     if not self._counted_this_message:
       self._counted_this_message = True
@@ -846,7 +855,10 @@ class AdjacentLane:
         # -- on anything with a center turn lane the opposing traffic is two lanes out, and bounding
         # this to the adjacent band meant those roads produced no veto at all. That width is what
         # the carriageway test above allows; it is the same test, hoisted.
-        obj.observe_oncoming(p.dRel, p.yRel, v_abs, memory_s, adjacent)
+        # Recomputed rather than threaded out of _on_our_carriageway, which keeps that a plain
+        # predicate. Only runs on the oncoming branch, which is rare by construction.
+        obj.observe_oncoming(p.dRel, p.yRel, v_abs, memory_s, adjacent,
+                             road_edge_offset(model, side, p.dRel) is not None)
         self.oncoming_seen = True
         continue
 
