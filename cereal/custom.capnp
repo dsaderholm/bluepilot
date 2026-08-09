@@ -481,6 +481,11 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       # edge beyond both) and nothing in the sensors separates them.
       oncomingAdjacent @9 :Bool;
       sameDirectionRecent @10 :Bool;
+      # How much of the oncoming memory is left ON THIS SIDE. The veto is per-side and
+      # always was, so deciding which side to name needs a per-side number -- the UI read
+      # one here before it existed, and crashed the panel for a whole drive on 2026-08-08.
+      # oncomingSecondsLeft on the parent is NOT this: it is the max across both sides.
+      oncomingSeconds @15 :Float32;
 
       # BluePilot: WHO HAS OVERTAKEN US IN THIS LANE, AND HOW LONG AGO.
       #

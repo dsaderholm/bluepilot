@@ -2287,6 +2287,7 @@ class PassingAssistDetector:
       dest.oncomingVAbs = float(side.oncoming_v_abs)
       dest.oncomingYRel = float(side.oncoming_y_rel)
       dest.oncomingAdjacent = side.oncoming_adjacent_seconds > 0.0
+      dest.oncomingSeconds = float(side.oncoming_seconds)
       dest.sameDirectionRecent = side.same_direction_recent
       dest.overtakenSeconds = float(side.overtaken_seconds)
       dest.overtakenCount = min(side.overtaken_count, 65535)
