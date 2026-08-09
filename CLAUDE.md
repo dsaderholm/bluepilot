@@ -197,9 +197,23 @@ Staying current matters more than any individual change here — an update that 
 an update that gets deferred. So it is one command:
 
 ```bash
-python tools/bp_merge_upstream.py               # merge upstream/bp-7.0
+python tools/bp_merge_upstream.py               # merge the newest upstream RELEASE, auto-detected
 python tools/bp_merge_upstream.py --dry-run     # what would come in, changes nothing
 ```
+
+**Each BluePilot release is its own branch** -- bp-1.1, bp-2.0, ... bp-7.0, and bp-8.0 next -- so the
+script DISCOVERS the newest rather than pinning one. A pinned name is a time bomb: the day bp-8.0
+lands, a script still pointed at bp-7.0 merges a frozen branch, reports success, and leaves the tree
+a whole release behind with nothing saying so. It prints which branch it picked, and says so loudly
+when that is past bp-7.0.
+
+Detection is anchored to `bp-<major>.<minor>` exactly, and sorts numerically. The remote is full of
+near-misses that must never be picked up -- `bp-dev`, `bp-dev-ui`, `bp-dev-f150-mk14.5`,
+`bp-sync-06102026`, `bp-no-stall` -- and a string sort would put bp-10.0 below bp-9.0.
+
+**`bp-dev` is the BluePilot team's active development branch and is never a merge source.** He
+tracks releases only: *"I never want anything to do with bp-dev, that is the BluePilot team."*
+`--branch` can still force one, but nothing should.
 
 It tags a rollback point first, refuses to start on a dirty tree, regenerates `car_list.json`
 instead of merging it, prints what *ours* is in each remaining conflict, runs the test suite, and

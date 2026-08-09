@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Merge a newer FusionPilot into this fork, handling the parts that are known to be painful.
 
-    python tools/bp_merge_upstream.py              # merge upstream/bp-7.0 (recommended)
+    python tools/bp_merge_upstream.py              # merge the newest upstream release, detected
     python tools/bp_merge_upstream.py --rebase     # replay our commits on top instead
     python tools/bp_merge_upstream.py --branch bp-dev
     python tools/bp_merge_upstream.py --dry-run    # show what would come in, change nothing
@@ -32,13 +32,24 @@ button means is the worst outcome here, and no script should be trusted with tha
 from __future__ import annotations
 
 import argparse
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 DEFAULT_REMOTE = "upstream"
-DEFAULT_BRANCH = "bp-7.0"
+# Fallback only. The real branch is DISCOVERED -- see latest_release_branch below.
+FALLBACK_BRANCH = "bp-7.0"
+# BluePilot ships each release as its OWN BRANCH: bp-1.1, bp-2.0, ... bp-7.0, and bp-8.0 next.
+# A hardcoded branch name is therefore a time bomb -- the day bp-8.0 lands, a pinned bp-7.0 keeps
+# merging a frozen branch and reports success, so the tree looks current while sitting a whole
+# release behind and nothing anywhere says so.
+#
+# Anchored exactly, because the remote is full of near-misses that must never be picked up:
+# bp-dev, bp-dev-ui, bp-dev-f150-mk14.5, bp-sync-06102026, bp-no-stall, bp-livedelay-icon.
+# Only bp-<major>.<minor> is a release.
+RELEASE_RE = re.compile(r"^bp-(\d+)\.(\d+)$")
 
 # Generated files: never hand-merge, just re-run the generator. It rewrites the file wholesale, so
 # conflict markers in it do not matter and neither does which side "ours" means -- which is worth
@@ -92,17 +103,51 @@ def conflicted() -> list[str]:
   return [ln for ln in git("diff", "--name-only", "--diff-filter=U").splitlines() if ln]
 
 
+def latest_release_branch(remote: str) -> tuple[str, list[str]]:
+  """Highest bp-<major>.<minor> on the remote, and every release seen, newest first.
+
+  Sorted numerically on (major, minor), not as strings -- "bp-10.0" sorts BELOW "bp-9.0"
+  lexically, which is the classic way this kind of check quietly stops working at the tenth
+  release rather than the first.
+  """
+  try:
+    out = git("ls-remote", "--heads", remote)
+  except Exception:  # noqa: BLE001 - offline, or the remote is gone; fall back and say so
+    return FALLBACK_BRANCH, []
+  found = []
+  for line in out.splitlines():
+    name = line.rsplit("refs/heads/", 1)[-1].strip()
+    m = RELEASE_RE.match(name)
+    if m:
+      found.append(((int(m.group(1)), int(m.group(2))), name))
+  if not found:
+    return FALLBACK_BRANCH, []
+  found.sort(reverse=True)
+  return found[0][1], [n for _, n in found]
+
+
 def main() -> int:
   parser = argparse.ArgumentParser(description=__doc__,
                                    formatter_class=argparse.RawDescriptionHelpFormatter)
   parser.add_argument("--remote", default=DEFAULT_REMOTE)
-  parser.add_argument("--branch", default=DEFAULT_BRANCH)
+  parser.add_argument("--branch", default=None,
+                      help="override the auto-detected newest release branch")
   parser.add_argument("--rebase", action="store_true",
                       help="replay our commits on top of upstream instead of merging; see the "
                            "module docstring for why merge is the default")
   parser.add_argument("--dry-run", action="store_true", help="show what would come in, change nothing")
   args = parser.parse_args()
-  target = f"{args.remote}/{args.branch}"
+  branch = args.branch
+  if branch is None:
+    branch, releases = latest_release_branch(args.remote)
+    if releases:
+      print(f"  newest release on {args.remote}: {branch}"
+            + (f"   (also seen: {', '.join(releases[1:4])})" if len(releases) > 1 else ""))
+      if branch != FALLBACK_BRANCH:
+        print(f"  NOTE: this is past {FALLBACK_BRANCH}, which is what this script used to pin.")
+    else:
+      print(f"  could not list {args.remote} branches; falling back to {branch}")
+  target = f"{args.remote}/{branch}"
 
   if git("status", "--porcelain"):
     print("Working tree is dirty. Commit or stash first -- the rollback tag is worthless otherwise.",
