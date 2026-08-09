@@ -407,7 +407,15 @@ class IntelligentCruiseButtonManagement:
     try:
       scc = LP_SP.smartCruiseControl
       self.scc_map_requesting = bool(scc.map.active)
-      self.deadline_requesting = bool(scc.map.active or scc.vision.active)
+      # VISION IS METERED AGAIN as of 2026-08-08, reverting the same day's change. Removing the cap
+      # for curves produced 80 -> 50 mph on two slight freeway curves, with traffic behind reacting.
+      # The cap was doing load-bearing work nobody had identified: SCC-Vision's target on a gentle
+      # bend is far lower than the bend needs, and metering the DESCENT meant the curve was usually
+      # past before the set speed ever arrived. Take the cap away and the car actually goes there.
+      #
+      # So the fix for that has to be the vision TARGET, not the rate at which ICBM chases it. Until
+      # then the cap stays, because it is the only thing standing between a bad target and the road.
+      self.deadline_requesting = bool(scc.map.active)
     except (AttributeError, KeyError):
       self.scc_map_requesting = False
       self.deadline_requesting = False
@@ -461,11 +469,18 @@ class IntelligentCruiseButtonManagement:
     seconds to work 80 down to 30, by which point the ramp was gone. Every step was correct and the
     sum of them was far too slow.
 
-    SCC-VISION IS EXEMPT TOO. His call, 2026-08-08: *"Only limit speed drops for speed limits
-    lowering?"* -- and the split is the right one. A curve is a fixed place in the road, so its
-    target has a deadline; a speed limit does not, and coasting into a 35 zone is genuinely nicer
-    than braking into it. What is left under this limiter is therefore the no-deadline case only:
-    speed limits and plain cruise.
+    SCC-VISION IS NOT EXEMPT, having been exempt for a few hours on 2026-08-08. The deadline
+    argument for it is sound and the outcome was still bad: 80 -> 50 mph on two slight freeway
+    curves, traffic behind reacting. Reported the same day and reverted.
+
+    What that revealed is that the cap was covering for something else. SCC-Vision asks for a speed
+    a gentle bend does not need, and metering the descent meant the curve was normally past before
+    the set speed got there -- so the bad target never showed. Remove the cap and the car goes
+    where the target actually points. The cure is the TARGET, not the rate ICBM chases it at, and
+    until that is fixed the cap is the only thing between it and the road.
+
+    SCC-Map stays exempt: its targets come from mapped geometry, it was the case that prompted all
+    of this, and the exit it fixed drove well.
 
     WHAT THIS WAS ACTUALLY FOR, from the owner who asked for it (2026-08-08): *"I originally planned
     that feature so that the brake lights wouldn't be turning on all the time. But then I found out

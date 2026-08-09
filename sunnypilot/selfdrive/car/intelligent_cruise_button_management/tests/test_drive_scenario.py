@@ -245,8 +245,10 @@ def test_a_curve_is_not_metered_but_a_speed_limit_still_is():
   d = Drive()
   d.cluster = d.v_ego = 80
   d.step(39, source=PlanSource.sccVision)
-  assert d.icbm.v_target == 39, (
-    f"curve target metered to {d.icbm.v_target}; a curve is a deadline, same as a mapped corner")
+  assert d.icbm.v_target == 80 - DEFAULT_MAX_TARGET_DROP, (
+    f"curve target came through at {d.icbm.v_target}. Exempting vision was tried on 2026-08-08 and "
+    f"reverted the same day: it produced 80 -> 50 mph on slight freeway curves, because the cap was "
+    f"covering for a vision target the bend does not need.")
 
   d2 = Drive()
   d2.cluster = d2.v_ego = 80
