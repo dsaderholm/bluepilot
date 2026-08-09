@@ -431,7 +431,33 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // acceptable -- and a flat modest bump is the honest expression of that. If the angle gains
     // move after the alignment, these do NOT need to move with them.
     {"SmartCruiseControlVisionLowSpeedFactor", {PERSISTENT | BACKUP, INT, "110"}},
-    {"SmartCruiseControlVisionHighSpeedFactor", {PERSISTENT | BACKUP, INT, "100"}},
+    // BluePilot: 100 -> 120 on 2026-08-08, from a MEASUREMENT rather than a feel.
+    //
+    // a_lat_reg_max = _A_LAT_REG_MAX / sensitivity, and _A_LAT_REG_MAX is 2.0 m/s^2. At 100 this
+    // targets exactly 2.0 -- and 2.0 is where this car's retrofit PSCM starts failing to hold the
+    // commanded angle. Binned route 0000032f by the lateral acceleration being ASKED for, against
+    // the angle error latcontrol_angle already computes:
+    //
+    //   1.0-1.5 m/s^2   7.9% of frames over the 2.5 deg saturation threshold
+    //   1.5-2.0         8.5%
+    //   2.0-2.5        16.7%   <- doubles here
+    //   2.5-3.0        18.7%
+    //   3.5-4.0        22.0%
+    //   4.0-4.5        43.2%
+    //
+    // So high-speed corners were aimed at the exact point the steering gives out, with no margin.
+    // 120 targets 1.67 m/s^2, ~17% below it. LowSpeedFactor was already 110 (1.82), which is why
+    // this showed up at highway speed and not around town.
+    //
+    // "I don't care about comfort, but unfortunately my PSCM does." The comfort limit and this
+    // car's steering limit happen to be the same number, which is why nobody noticed.
+    //
+    // MEASURED IN PATH-ANGLE MODE, which is what he runs. Path angle tracks better than curvature,
+    // so 2.0 is the limit for that configuration and not a floor -- on curvature control the same
+    // PSCM would give out sooner. Re-measure before reusing this number if FordPrefLateralControl
+    // ever changes. What does not change is that the limit is the PSCM's: how openpilot asks does
+    // not alter what the factory unit will deliver.
+    {"SmartCruiseControlVisionHighSpeedFactor", {PERSISTENT | BACKUP, INT, "120"}},
     // BluePilot: SCC-Map deceleration target, tenths of m/s^2, magnitude. Unlike SCC-Vision this
     // single value sets BOTH how hard it slows and how early it starts, because the trigger is
     // "am I within the distance needed to reach the corner speed at this rate" -- gentler means a
@@ -448,7 +474,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // too fast for this one to steer -- the retrofit PSCM has less authority than the advisory
     // assumes. 100 keeps the map's own number; lower takes every mapped corner proportionally
     // slower.
-    {"SmartCruiseControlMapFactor", {PERSISTENT | BACKUP, INT, "100"}},
+    {"SmartCruiseControlMapFactor", {PERSISTENT | BACKUP, INT, "90"}},
 
     // Torque lateral control custom params
     {"CustomTorqueParams", {PERSISTENT | BACKUP , BOOL}},
