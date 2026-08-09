@@ -1,9 +1,19 @@
 # Settings to check before a test drive
 
-**Defaults I change land on your device on their own.** That is what `_migrate_bp_redefaulted` is
-for, and each one is listed here so a silent change is still a readable one. What does NOT get
-touched is anything you set yourself -- the migration that used to reach into the passing-assist
-display toggles is gone for good.
+**Nothing here is applied for you any more. All of it is yours to set.** Corrected 2026-08-09,
+when the defaults migration was removed in favor of how upstream does it: *"I know before that I
+wanted them to change or something, but that caused issues, so I want to go back to how upstream
+does it."*
+
+What that means in practice, and it is worth being blunt about because this file used to claim the
+opposite: `manager.py` writes each default ONCE, on the first boot that knows the key, and the
+stored value never changes again. **Every passing-assist key is already on your car.** So a default
+I change from here can never reach you -- not on an update, not ever. It reaches a fresh flash and
+nothing else.
+
+**A changed default is now a recommendation, and this file plus the settings description are the
+only two places it can travel.** The description shows the shipped default live, so
+Steering > Customize Passing Assist is always the current answer even when this file goes stale.
 
 So this file is the record, not a chore list. **A value marked "default" needs nothing from you** --
 it is listed so you can confirm rather than hunt. Anything marked **SET THIS** is one I cannot apply
