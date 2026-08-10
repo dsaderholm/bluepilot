@@ -14,6 +14,7 @@ mid-signal on the road.
 from cereal import custom
 from openpilot.common.realtime import DT_MDL
 from openpilot.sunnypilot.selfdrive.controls.lib.passing_maneuver import (
+  SIGNAL_WINDOW_S,
   PassingManeuver, CHANGE_DURATION_S, FINISH_HOLD_S, ABORT_DURATION_S, ABORT_STANDDOWN_S,
 )
 
@@ -22,8 +23,10 @@ Phase = custom.LongitudinalPlanSP.PassingAssist.Maneuver
 
 
 def run(m, seconds, *, clear=Side.none, suggested=Side.none, confirming=False, confirmed=False,
-        override=False, collision=False, actuating=False, settle_s=None):
+        override=False, collision=False, actuating=False, settle_s=None, wanted=None):
   kw = {} if settle_s is None else {"settle_after_change_s": settle_s}
+  if wanted is not None:
+    kw["wanted"] = wanted
   for _ in range(max(1, int(round(seconds / DT_MDL)))):
     m.update(clear=clear, suggested=suggested, confirming=confirming, confirmed=confirmed,
              driver_override=override, collision_abort=collision, actuating=actuating, **kw)
@@ -388,3 +391,88 @@ class TestWhatChangesWhenItActuates:
     run(m, self.SETTLE + 0.3, clear=Side.left, suggested=Side.left, confirmed=True,
         actuating=True, settle_s=30.0)
     assert m.phase != Phase.signaling, "a larger settle must actually hold it longer"
+
+
+class TestSignalFirstThenCheck:
+  """"Signaling should always start right when it notices a car is slow, and then during that one
+  second of signaling it should then check blind spots and radar and all of that before making the
+  change."
+
+  What production systems do, and both benchmarks bound it the same way: Super Cruise holds in lane
+  showing "looking for an opening" and gives up at five seconds, BlueCruise at about ten. The
+  difference here is that this one decides for itself, so the promise has no human behind it.
+  """
+
+  def test_the_signal_comes_up_before_the_gates_are_happy(self):
+    """THE CHANGE. `wanted` is a slow car and a lane; `clear` is every safety gate. The blinker
+    now follows the first, and used to wait for the second."""
+    m = PassingManeuver()
+    run(m, 0.2, wanted=Side.left, clear=Side.none, confirmed=True)
+    assert m.phase == Phase.signaling
+    assert m.side == Side.left
+
+  def test_but_it_does_not_cross_until_they_are(self):
+    """Signalling early is a promise; moving is the act. The gates guard the act."""
+    m = PassingManeuver()
+    run(m, 3.0, wanted=Side.left, clear=Side.none, suggested=Side.left, confirmed=True)
+    assert m.phase == Phase.signaling, "crossed with a gate still red"
+
+  def test_the_gates_must_hold_continuously_not_momentarily(self):
+    """The guarantee that moving the gates nearly lost. A blind-spot return dropping in and out
+    could otherwise be true on the single frame that is sampled, and the car commits into a gap
+    that was never there."""
+    m = PassingManeuver()
+    for i in range(int(4.0 / DT_MDL)):
+      flicker = Side.left if (i // int(0.2 / DT_MDL)) % 2 == 0 else Side.none
+      m.update(clear=flicker, wanted=Side.left, suggested=Side.left, confirming=False,
+               confirmed=True, driver_override=False)
+    assert m.phase != Phase.changing, "committed on a flickering gate"
+
+  def test_it_crosses_once_they_settle(self):
+    m = PassingManeuver()
+    run(m, 0.2, wanted=Side.left, clear=Side.none, suggested=Side.left, confirmed=True)
+    run(m, m.blinker_lead_s + 0.2, wanted=Side.left, clear=Side.left, suggested=Side.left,
+        confirmed=True)
+    assert m.phase == Phase.changing
+
+  def test_the_blinker_is_never_up_for_less_than_the_lead(self):
+    """His rule, and the change strengthens it rather than weakening it: the lead is measured from
+    when the gates went good, so the signal has been up at least that long and usually longer."""
+    m = PassingManeuver()
+    run(m, 2.0, wanted=Side.left, clear=Side.none, suggested=Side.left, confirmed=True)
+    before = m.phase_seconds
+    run(m, m.blinker_lead_s - 0.1, wanted=Side.left, clear=Side.left, suggested=Side.left,
+        confirmed=True)
+    assert m.phase == Phase.signaling, "crossed before the lead elapsed from the gates going good"
+    assert m.phase_seconds > before
+
+  def test_the_window_expires_rather_than_promising_forever(self):
+    """See SIGNAL_WINDOW_S. A signal held while nothing happens is the "never signal what you are
+    not doing" failure, and it is what bounds signalling before certainty.
+
+    Asserted on the COUNT rather than the phase: while only narrating there is no stand-down, so it
+    backs out and is free to re-signal on the next frame, and sampling the phase afterwards catches
+    the new sequence rather than the end of the old one."""
+    m = PassingManeuver()
+    run(m, SIGNAL_WINDOW_S - 0.5, wanted=Side.left, clear=Side.none, suggested=Side.left,
+        confirmed=True)
+    assert m.aborts == 0, "gave up before the window was out"
+    run(m, 0.8, wanted=Side.left, clear=Side.none, suggested=Side.left, confirmed=True)
+    assert m.aborts == 1, "still promising past the window"
+
+  def test_and_while_actuating_it_stands_down_instead_of_re_signalling(self):
+    """The same expiry, with a control wired. Backing out and lighting the lamp again on the next
+    frame is the strobe, so the stand-down applies here exactly as it does to a gate abort."""
+    m = PassingManeuver()
+    run(m, SIGNAL_WINDOW_S + 0.3, wanted=Side.left, clear=Side.none, suggested=Side.left,
+        confirmed=True, actuating=True)
+    assert m.aborts == 1
+    assert m.phase != Phase.signaling, "re-signalled immediately while driving the lamp"
+
+  def test_losing_the_reason_ends_it_immediately_rather_than_waiting_out_the_window(self):
+    """A gate saying "not yet" is worth waiting on. The slow car or the lane going away is not."""
+    m = PassingManeuver()
+    run(m, 0.2, wanted=Side.left, clear=Side.none, confirmed=True)
+    assert m.phase == Phase.signaling
+    run(m, 0.1, wanted=Side.none, clear=Side.none, confirmed=True)
+    assert m.phase != Phase.signaling

@@ -2489,9 +2489,14 @@ class TestTheBackedOutChime:
   number this whole dry run exists to produce, was the one thing he could not notice without
   staring at the screen and therefore could not report.
 
-  Every test here has to catch the machine DURING `signaling`, which is about a second wide. Once
-  the crossing starts a gate can no longer stop it -- a car cannot un-change lanes on a change of
-  mind -- so blocking a second too late provokes nothing at all.
+  Every test here has to catch the machine DURING `signaling`. Once the crossing starts a gate can
+  no longer stop it -- a car cannot un-change lanes on a change of mind -- so blocking a moment too
+  late provokes nothing at all.
+
+  UPDATED 2026-08-09 with the signal-first change. `signaling` is no longer about a second wide and
+  a gate going red no longer backs out on the frame it does: the signal now comes up on a slow car
+  and a lane, and the gates are given until SIGNAL_WINDOW_S to settle. So a reversal is the WINDOW
+  EXPIRING, and every test here has to block for longer than the window to provoke one.
   """
 
   @staticmethod
@@ -2506,7 +2511,11 @@ class TestTheBackedOutChime:
     det = keep_right_det()
     assert self._to_signaling(det), "never got as far as showing a blinker"
     heard = False
-    for _ in range(int(3.0 / DT_MDL)):        # the lane fills while the blinker is up
+    # PAST SIGNAL_WINDOW_S. A gate going red no longer backs out on the frame it does -- the signal
+    # holds while the gate is given a chance to change its mind, exactly as Super Cruise holds
+    # showing "looking for an opening". The reversal is the window EXPIRING, so a test that blocks
+    # for less than the window now provokes nothing at all.
+    for _ in range(int(7.0 / DT_MDL)):        # the lane fills while the blinker is up
       det.update(make_sm(v_lead=SLOW_LEAD_MS, left_bs=True), CRUISE_MS, True)
       heard = heard or det.abort_started
     assert det.maneuver.aborts >= 1, "did not actually back out"
@@ -2550,7 +2559,7 @@ class TestTheBackedOutChime:
     """
     det = keep_right_det()
     assert self._to_signaling(det)
-    for _ in range(int(3.0 / DT_MDL)):
+    for _ in range(int(7.0 / DT_MDL)):        # past SIGNAL_WINDOW_S; see the test above
       det.update(make_sm(v_lead=SLOW_LEAD_MS, left_bs=True), CRUISE_MS, True)
     assert det.maneuver.aborts >= 1
     n = 0

@@ -90,6 +90,32 @@ ABORT_DURATION_S = 2.5
 # doing it.
 ABORT_STANDDOWN_S = 10.0
 
+# How long the signal may stand while the safety gates are still deciding.
+#
+#     "Signaling should always start right when it notices a car is slow, and then during that one
+#      second of signaling it should then check blind spots and radar and all of that before making
+#      the change. I though that's what we agreed on."
+#
+# It is, and the recorded design says so: "signal early, keep confirming during the wait, abort and
+# drop the signal if confidence collapses before the car moves." The gates used to be ENTRY
+# conditions, so the blinker could not light until the lane was already clear -- which is not what
+# was agreed and is not what production systems do.
+#
+# What signalling before certainty needs to stay honest is a BOUND, and this is it. A signal is a
+# promise to the traffic behind, and one held while nothing happens is exactly the "never signal
+# what you are not doing" failure. Both benchmarks solve it the same way and only the number
+# differs: Super Cruise holds in lane showing "looking for an opening" and cancels if it cannot
+# complete in five seconds; BlueCruise gives up after about ten and displays "not possible".
+#
+# 5 s, the tighter of the two, and deliberately. Both of those are DRIVER-initiated -- the human
+# asked, so the signal has intent behind it for as long as it stands. This one decides for itself,
+# so an unfulfilled promise is the system's alone and should expire sooner.
+#
+# Generous against the numbers here regardless: the blinker lead is 1 s and the confirmation runs
+# concurrently, so a maneuver that is going to happen has usually committed inside two. Reaching
+# this means a gate stayed unhappy, and the honest answer is to go dark and stand down.
+SIGNAL_WINDOW_S = 5.0
+
 # ...and the same after a sequence RUNS ALL THE WAY THROUGH, which is a different problem with the
 # same shape.
 #
@@ -130,6 +156,8 @@ class PassingManeuver:
     # Which duration the current stand-down is measured against: a reversal and a completed run
     # both stop the next sequence, for different lengths of time and different reasons.
     self._standdown_target = ABORT_STANDDOWN_S
+    # How long every gate has been CONTINUOUSLY happy on our side. See the crossing condition.
+    self._clear_held_s = 0.0
 
   @property
   def blinker_on(self) -> bool:
@@ -170,10 +198,14 @@ class PassingManeuver:
   def update(self, *, clear: int, suggested: int, confirming: bool, confirmed: bool,
              driver_override: bool, collision_abort: bool = False,
              actuating: bool = False,
-             settle_after_change_s: float = COMPLETE_STANDDOWN_S) -> None:
+             settle_after_change_s: float = COMPLETE_STANDDOWN_S,
+             wanted: int | None = None) -> None:
     """One frame.
 
-    `clear`      -- a slow car is spotted and this side is clear RIGHT NOW. Lights the blinker.
+    `wanted`     -- a slow car is spotted and a lane exists that side. LIGHTS THE BLINKER, and says
+                    nothing about whether entering it is safe. See SIGNAL_WINDOW_S. Defaults to
+                    `clear`, which is the pre-2026-08-09 behaviour of gating the signal on safety.
+    `clear`      -- the same, AND every safety gate passes RIGHT NOW. Commits to crossing.
     `suggested`  -- the same, AND the confirmation has completed. Commits to moving.
     `confirming` -- a slower vehicle is being confirmed, timer still running.
     `confirmed`  -- that timer has completed, so anything still stopping us is a gate.
@@ -187,6 +219,8 @@ class PassingManeuver:
                     passing_assist imports THIS module, so reaching back for its constants would be
                     a circular import; and the settle policy belongs to the detector regardless.
     """
+    if wanted is None:
+      wanted = clear
     self.phase_seconds += DT_MDL
 
     # The driver taking their car back is not a gate and is not an abort worth counting against
@@ -244,7 +278,18 @@ class PassingManeuver:
     if self.phase == Phase.signaling:
       # A gate going red here is exactly the failure this module exists to count: the signal was
       # already shown to traffic behind before the sequence backed out.
-      if clear == Side.none or clear != self.side:
+      # THE WINDOW EXPIRING. A gate stayed unhappy, so the promise is withdrawn rather than held.
+      if self.phase_seconds >= SIGNAL_WINDOW_S:
+        self.aborts += 1
+        self.side = Side.none
+        if actuating:
+          self._standdown_s = 0.0
+          self._standdown_target = ABORT_STANDDOWN_S
+        self._to(Phase.waiting if confirmed else Phase.confirming if confirming else Phase.idle)
+        return
+
+      # The REASON went away, or the lane did -- which is different from a gate saying "not yet".
+      if wanted == Side.none or wanted != self.side:
         self.aborts += 1
         self.side = Side.none
         # THE STROBE GUARD, and conditional on purpose. See ABORT_STANDDOWN_S: while this only
@@ -260,15 +305,37 @@ class PassingManeuver:
         return
       # BOTH clocks, not one after the other: the signal has been up long enough AND the car is
       # confirmed slow. Whichever finishes last is what the driver waits for.
-      if self.phase_seconds >= self.blinker_lead_s and suggested == self.side:
+      # BOTH clocks and EVERY gate. `clear` moved here from the entry condition: this is the frame
+      # the car actually begins moving, which is where "is that lane safe to enter" has to be true.
+      # The blinker lead is unchanged -- 1 s minimum, longer if the gates are still deciding, never
+      # shorter. "The blinker should be on for 1 second before lane changes are made."
+      # CONTINUOUSLY happy, not happy on whichever frame we happen to look at.
+      #
+      # Moving the gates off the signal took an implicit guarantee with them. Before, `clear` was
+      # the entry condition AND any drop aborted at once, so reaching the crossing meant the gates
+      # had been good for the whole blinker lead. Gate them only at the crossing and a lane that
+      # FLICKERS -- a blind-spot return dropping in and out -- can be true on the single frame that
+      # is sampled, and the car commits into a gap that was never really there.
+      #
+      # So the lead is measured from when the gates went good rather than from when the signal came
+      # on. His rule holds either way, and more strongly: the blinker has been up at least that
+      # long and usually longer, never less. "The blinker should be on for 1 second before lane
+      # changes are made."
+      if clear == self.side:
+        self._clear_held_s += DT_MDL
+      else:
+        self._clear_held_s = 0.0
+
+      if self._clear_held_s >= self.blinker_lead_s and suggested == self.side:
         self._to(Phase.changing)
       return
 
     # ---- idle / confirming / waiting: not yet committed to anything ----
     # `clear`, not `suggested`. Signal the instant there is a slow car and somewhere to go --
     # unless we have just been forced out of one, see ABORT_STANDDOWN_S.
-    if clear != Side.none and self._standdown_s >= self._standdown_target:
-      self.side = clear
+    if wanted != Side.none and self._standdown_s >= self._standdown_target:
+      self.side = wanted
+      self._clear_held_s = 0.0
       self._to(Phase.signaling)
       return
 

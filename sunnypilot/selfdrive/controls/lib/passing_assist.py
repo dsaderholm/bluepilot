@@ -611,8 +611,11 @@ class PassingAssistDetector:
     self.lead_is_slow = False
     self._lead_gap_s = 0.0
     # The side that is clear RIGHT NOW, before the confirmation timer has anything to say about it.
-    # This is what lights the blinker; `suggestion` is what commits to moving.
+    # `suggestion` is what commits to moving.
     self.clear_side = Side.none
+    # WEAKER THAN clear_side, and it is what lights the blinker. A slow car worth passing and a lane
+    # that exists on that side -- nothing yet about whether entering it is safe. See SIGNAL_WINDOW_S.
+    self.wanted_side = Side.none
 
     self.has_lead = False
     self.lead_d_rel = 0.0
@@ -841,6 +844,12 @@ class PassingAssistDetector:
 
   def _reset_outputs(self, blocked: int) -> None:
     self.clear_side = Side.none
+    # AND wanted_side, or it keeps whatever a previous frame decided. Missing this let the passing
+    # machine light its blinker during a KEEP-RIGHT: wanted_side is geometry alone, so a stale value
+    # survived every early return that means "no pass is warranted here" -- no lead, nothing slower,
+    # too slow, driver active. Caught by the drive scenario asserting the passing machine stays out
+    # of a keep-right, which is exactly the signal-for-no-reason failure the whole design forbids.
+    self.wanted_side = Side.none
     self.suggestion = Side.none
     self.blocked_by = blocked
     self.reason = Reason.none
@@ -1993,6 +2002,7 @@ class PassingAssistDetector:
     confirmed = self.approach_seconds >= self.persistence_s
     self.maneuver.update(
       clear=self.clear_side,
+      wanted=self.wanted_side,
       suggested=self.suggestion if self.reason == Reason.passing else Side.none,
       confirming=self.approach_seconds > 0.0 and not confirmed,
       confirmed=confirmed,
@@ -2377,6 +2387,13 @@ class PassingAssistDetector:
     # decided the pass was worth wanting, so one knob governs both halves of the judgment.
     adj_left = self.adjacent.left.blocks_move(self.lead_v_lead, self.min_deficit_ms, CS.vEgo)
     adj_right = self.adjacent.right.blocks_move(self.lead_v_lead, self.min_deficit_ms, CS.vEgo)
+
+    # SIGNAL FIRST, THEN CHECK. His design, and what production systems do -- Super Cruise holds in
+    # lane showing "looking for an opening" with the signal already up, BlueCruise gives up after
+    # about ten seconds and says "not possible". Both are driver-initiated; this one decides for
+    # itself, which is the argument for the tighter window rather than for a different shape.
+    self.wanted_side = (Side.left if self.left_geometry_ok else
+                        Side.right if self.right_geometry_ok else Side.none)
 
     left_ok = (self.left_geometry_ok and not onc_left and not self.left_blindspot and
                not self.rear.left.blocks_lane_change and not adj_left)
