@@ -196,8 +196,11 @@ class PassingAssistSettingsLayout(Widget):
       title=tr("Never Pass Into Oncoming Traffic"),
       description=recommended(tr("Watch the front radar for vehicles coming the other way. If any are seen, "
                      "treat that side of the road as theirs and stop suggesting passes into it. "
-                     "The camera cannot tell an oncoming lane from a passing lane by itself, so "
-                     "leave this on unless you only ever drive divided highways."), "PassingAssistOncomingVeto"),
+                     "The camera cannot tell an oncoming lane from a passing lane by itself, and it "
+                     "cannot tell a painted median or a turn lane from one either - on 08-09 it "
+                     "offered all three. Until the blind spot and rear radar are fitted this is the "
+                     "only check standing between a suggestion and oncoming traffic, so turning it "
+                     "off leaves the camera deciding alone. Leave it on."), "PassingAssistOncomingVeto"),
       param="PassingAssistOncomingVeto")
 
     self._oncoming_memory = option_item_sp(
