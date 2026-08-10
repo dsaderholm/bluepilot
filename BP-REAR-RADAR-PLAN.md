@@ -1739,14 +1739,48 @@ sends.
 
 ### The shape of the full implementation
 
-1. Passing assist decides a side is clear — with the rear radar now answering "is something
-   closing", which is the gate that does not exist today.
+**SUPERSEDED 2026-08-09 by the conclusion in `blinker_test_ext.py`. Kept because the reasoning is
+still correct and only the injection point changed.** The version below was written before the
+blinker road tests; that file was written after them and reaches a better answer.
+
+The old shape:
+
+1. Passing assist decides a side is clear — with the rear radar answering "is something closing".
 2. Command the turn signal via `Steering_Data_FD1`. Proven.
-3. Feed `desire_helper` the request directly, rather than waiting for a stalk that will never move.
+3. **Feed `desire_helper` the request directly**, rather than waiting for a stalk that will never
+   move.
 4. `AutoLaneChangeController` runs the maneuver on its existing nudgeless timer.
 5. Cancel the signal when the state machine completes.
 
-Every piece except step 3 already exists and is tested.
+**Why step 3 is the wrong shape.** It is a fork change to sunnypilot's lane-change state machine --
+merge surface, forever -- and it leaves three things simulated that the car already does properly:
+
+| | commanded over CAN | stalk contacts paralleled |
+|---|---|---|
+| flash pattern | ours to generate, and the road said *"when it does eventually do all seven together, they are too fast -- there's not enough space in between"* | the BCM's own seven-flash, at the car's rate |
+| cancel | we stop commanding, and the BCM's native cancel never runs | the car's, including his nudge-back gesture |
+| `carState.leftBlinker` | still false; the SCCM never moved, so `desire_helper` needs patching | genuinely true, so `desire_helper` engages with NO fork change |
+
+**The replacement, from `blinker_test_ext.py`: parallel the SCCM's switch input.** The column sees a
+real deflection and every downstream consumer is correct at once. Passing assist's software job
+shrinks to emitting "signal this side" in the digest it already sends; the MCU closes a contact;
+sunnypilot's existing nudgeless lane change runs untouched because the car looks exactly as it does
+when the driver taps the stalk himself.
+
+**It shares the MCU with the rear-radar feeder**, so it adds a transistor and a measurement to a
+build already happening rather than a second project.
+
+**TWO THINGS MUST BE MEASURED BEFORE IT CAN BE BUILT**, and neither needs the radar hardware to
+arrive:
+
+1. **Is the stalk a plain contact-to-ground, or a resistor ladder?** That decides transistor versus
+   analog switch with a matched resistor. Multimeter across the switch pins, stalk off and then
+   held each way.
+2. **A hardware self-clear is mandatory.** A stuck output is a turn signal that never goes off,
+   which is worse than not having the feature. Design it so loss of the drive signal opens the
+   contact rather than holding it.
+
+Item 1 is on the critical path and can be done tonight.
 
 ### What changes about the design once it actuates
 
