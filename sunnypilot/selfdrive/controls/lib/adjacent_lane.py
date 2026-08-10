@@ -171,14 +171,17 @@ MIN_ONCOMING_MS = 5.0
 # worth passing on.
 ONCOMING_MAX_M = 15.0
 
-# How many lateral offsets of oncoming-speed returns to keep. See where they are recorded: this is
-# a measurement of where opposing traffic sits on a given road, kept so the untrusted-edge fallback
-# distance can be chosen from data instead of argued about.
+# WHERE OPPOSING TRAFFIC SITS, as a whole-drive histogram in one-meter buckets by lateral offset.
+# A measurement, so UNTRUSTED_EDGE_ONCOMING_M can stop being a guess.
 #
-# A plain ring of recent samples rather than a histogram, because the interesting statistic is not
-# known yet -- it may be the minimum, a low percentile, or a bimodal split between the near and far
-# opposing lanes. Keeping the samples leaves that open. 400 at ~8 Hz is the last minute or so.
-ONCOMING_LAT_SAMPLES_MAX = 400
+# A histogram rather than a ring of recent samples, and the first attempt got that wrong. A ring
+# holds the last minute and is then DISCARDED AT THE END OF THE DRIVE -- it never reached the drive
+# summary, so it measured nothing that anybody could read. The shape is what matters here anyway: a
+# bimodal split shows the near and far opposing lanes, and that is invisible in a minimum.
+#
+# Fixed length, so it cannot grow and needs no trimming. Index is the offset in meters, clamped;
+# nothing is recorded below ADJACENT_MIN_M or beyond ONCOMING_MAX_M, so 0 and 1 stay empty.
+ONCOMING_LAT_BUCKETS = 16
 
 # How far to look for OPPOSING traffic when the road edge cannot be trusted.
 #
@@ -201,7 +204,7 @@ ONCOMING_LAT_SAMPLES_MAX = 400
 # "I was on I-15 for a while, and kept saying two-way road", and some of that will come back. A
 # false two-way veto is a quiet stretch of road; the alternative is a pass into oncoming traffic.
 #
-# oncoming_lat_seen is recorded so this can stop being a guess: it samples where opposing traffic
+# oncoming_lat_hist is recorded so this can stop being a guess: it counts where opposing traffic
 # actually sits, and one drive on each road type replaces this with a measurement.
 #
 # Only the ONCOMING path widens. Same-direction and overtake are both gated on `adjacent` further
@@ -750,8 +753,8 @@ class AdjacentLane:
     self.left = AdjacentLaneSide()
     self.right = AdjacentLaneSide()
     self.oncoming_seen = False   # ever, this drive -- logged so the veto can be audited
-    # See ONCOMING_LAT_SAMPLES_MAX. Recording only; nothing reads this.
-    self.oncoming_lat_seen: list[float] = []
+    # See ONCOMING_LAT_BUCKETS. Recording only; nothing reads this.
+    self.oncoming_lat_hist: list[int] = [0] * ONCOMING_LAT_BUCKETS
 
   @property
   def available(self) -> bool:
@@ -904,8 +907,7 @@ class AdjacentLane:
       #
       # Recording only. Nothing reads these, and the classification below is untouched.
       if ground_speed(v_ego, p.dRel, p.yRel, p.vRel) < -MIN_ONCOMING_MS:
-        self.oncoming_lat_seen.append(round(abs_lat, 1))
-        del self.oncoming_lat_seen[:-ONCOMING_LAT_SAMPLES_MAX]
+        self.oncoming_lat_hist[min(int(abs_lat), ONCOMING_LAT_BUCKETS - 1)] += 1
 
       if not self._on_our_carriageway(model, side, lat, p.dRel):
         continue

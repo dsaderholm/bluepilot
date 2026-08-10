@@ -317,7 +317,11 @@ LAST_DRIVE_WRITE_S = 30
 # of weeks of ordinary use, small enough to paste in one go, and enough for the questions that need
 # several drives to answer -- whether the agreement ratio is settling, whether the oncoming veto is
 # rare or constant, what a genuinely quiet lane looks like.
-DRIVE_HISTORY_MAX = 20
+# Raised from 20 on 2026-08-09 for a road trip at the end of the month. Twenty drives is a week of
+# commuting and comfortably more than enough to answer a question about the usual roads; a trip is
+# many short legs across road types this car has never driven, and the interesting ones would be
+# pushed out by the ordinary ones before anybody looked. Each entry is well under a kilobyte.
+DRIVE_HISTORY_MAX = 60
 
 # --- a timeline, so a spoken report can be lined up with what actually happened ---
 #
@@ -1483,6 +1487,9 @@ class PassingAssistDetector:
         "oncomingYRel": round(self._last_oncoming[1], 1),
         "oncomingVAbs": round(self._last_oncoming[2], 1),
         "oncomingEdgeTrusted": bool(self._last_oncoming[3]),
+        # See ONCOMING_LAT_BUCKETS. The whole point of collecting it -- kept per drive so a trip
+        # across several road types gives one distribution each rather than one blurred average.
+        "oncomingLatHist": list(self.adjacent.oncoming_lat_hist),
       })
     except Exception:  # noqa: BLE001 - a param write failure must never reach the planner
       pass

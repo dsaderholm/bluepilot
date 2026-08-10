@@ -27,7 +27,6 @@ import random
 from cereal import custom
 from openpilot.common.realtime import DT_MDL
 from openpilot.sunnypilot.selfdrive.controls.lib.passing_assist import PassingAssistDetector
-from openpilot.sunnypilot.selfdrive.controls.lib.adjacent_lane import ONCOMING_LAT_SAMPLES_MAX
 from openpilot.sunnypilot.selfdrive.controls.lib.passing_assist import TIMELINE_MAX
 from openpilot.sunnypilot.selfdrive.controls.lib.tests.test_passing_assist import (
   CRUISE_MS, make_sm, track, keep_right_det,
@@ -179,11 +178,7 @@ def test_nothing_grows_without_bound_over_a_long_drive():
   # this test degenerates into "no ring buffer may be larger than 64". Everything else converges
   # because it is keyed by an enum; the timeline is a deliberate bounded ring and has to be allowed
   # to reach its own size -- and still caught if it ever stops being bounded.
-  # oncoming_lat_seen is the same shape: a deliberate ring, sized to about a minute of
-  # oncoming-speed returns so the untrusted-edge fallback distance can be chosen from a
-  # measurement. Checked against its own cap, so it still fails if the trim ever stops.
-  capped = {"_timeline": TIMELINE_MAX,
-            "adjacent.oncoming_lat_seen": ONCOMING_LAT_SAMPLES_MAX}
+  capped = {"_timeline": TIMELINE_MAX}
   for name, n in late.items():
     limit = capped.get(name, 64)
     assert n <= limit, f"{name} reached {n} entries against a cap of {limit}; something accumulates"

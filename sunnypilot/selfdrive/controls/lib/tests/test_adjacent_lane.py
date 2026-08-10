@@ -1189,9 +1189,27 @@ class TestTheFallbackReachesPastAMedian:
     assert not adj.left.occupied
 
   def test_where_opposing_traffic_sat_is_recorded(self):
-    """See ONCOMING_LAT_SAMPLES_MAX. Recorded before the carriageway test can discard it, so the
-    window above can be replaced by a measurement instead of the next guess."""
+    """See ONCOMING_LAT_BUCKETS. Counted before the carriageway test can discard it, so the window
+    above can be replaced by a measurement instead of the next guess."""
     adj = upd(AdjacentLane(), FakeSM([track(90, 7.4, v_rel=self.ONCOMING)], **self.NO_EDGE),
               V_EGO, MAX_D)
-    assert adj.oncoming_lat_seen, "nothing sampled"
-    assert max(adj.oncoming_lat_seen) >= 7.0
+    assert sum(adj.oncoming_lat_hist), "nothing counted"
+    assert adj.oncoming_lat_hist[7] > 0, "7.4 m belongs in the 7 m bucket"
+
+  def test_traffic_the_carriageway_test_discards_is_still_counted(self):
+    """THE REASON IT IS TAKEN EARLY. Something out at 13 m is refused above -- correctly, that is
+    the divided-highway protection -- but it must still be COUNTED, or the measurement can only
+    ever confirm the window it already has."""
+    adj = upd(AdjacentLane(), FakeSM([track(90, 13.0, v_rel=self.ONCOMING)], **self.NO_EDGE),
+              V_EGO, MAX_D)
+    assert not adj.oncoming_any_side, "still refused"
+    assert adj.oncoming_lat_hist[13] > 0, "and still measured"
+
+  def test_the_histogram_is_a_fixed_size(self):
+    """It reaches the drive summary, and a container that grows would bloat a param that keeps one
+    entry per drive. Fixed length means the soak test needs no exemption for it."""
+    adj = AdjacentLane()
+    before = len(adj.oncoming_lat_hist)
+    for _ in range(50):
+      adj.update(FakeSM([track(90, 7.4, v_rel=self.ONCOMING)], **self.NO_EDGE), V_EGO, MAX_D)
+    assert len(adj.oncoming_lat_hist) == before
