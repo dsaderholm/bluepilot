@@ -22,10 +22,11 @@ Phase = custom.LongitudinalPlanSP.PassingAssist.Maneuver
 
 
 def run(m, seconds, *, clear=Side.none, suggested=Side.none, confirming=False, confirmed=False,
-        override=False, collision=False):
+        override=False, collision=False, actuating=False, settle_s=None):
+  kw = {} if settle_s is None else {"settle_after_change_s": settle_s}
   for _ in range(max(1, int(round(seconds / DT_MDL)))):
     m.update(clear=clear, suggested=suggested, confirming=confirming, confirmed=confirmed,
-             driver_override=override, collision_abort=collision)
+             driver_override=override, collision_abort=collision, actuating=actuating, **kw)
   return m
 
 
@@ -311,3 +312,79 @@ class TestCollisionAbort:
   def test_and_is_zero_when_nothing_has_been_reversed(self):
     m = run(PassingManeuver(), 5.0, clear=Side.left, suggested=Side.left, confirmed=True)
     assert m.standdown_remaining == 0.0
+
+
+class TestWhatChangesWhenItActuates:
+  """The two timings this file's constants said were owed once a control exists.
+
+  Both are conditional rather than replaced, and that is the point. While this only narrates, the
+  abort COUNT is the product and suppressing flicker would hide it; the moment it drives the turn
+  signal the flicker IS the problem and the count has done its job. Same state machine, one flag.
+  """
+
+  SETTLE = 4.0
+
+  @staticmethod
+  def _step_until_idle(m, actuating, settle_s, cap_s=30.0):
+    """Run a committed crossing through to completion. Returns seconds taken, or None."""
+    for i in range(int(cap_s / DT_MDL)):
+      m.update(clear=Side.left, suggested=Side.left, confirming=False, confirmed=True,
+               driver_override=False, actuating=actuating, settle_after_change_s=settle_s)
+      if m.phase == Phase.idle:
+        return (i + 1) * DT_MDL
+    return None
+
+  def _gate_drops_during_signaling(self, actuating):
+    m = armed()
+    run(m, 0.1, clear=Side.none, confirmed=True, actuating=actuating)
+    return m
+
+  def test_observing_re_signals_at_once_so_the_count_stays_honest(self):
+    """Unchanged behaviour, pinned. A flickering gate must produce one abort per flicker, or the
+    number measuring gate instability under-reports it by the ratio of the stand-down."""
+    m = self._gate_drops_during_signaling(actuating=False)
+    assert m.aborts == 1
+    run(m, 0.05, clear=Side.left, suggested=Side.left, confirmed=True)
+    assert m.phase == Phase.signaling, "an observing run must be free to re-signal immediately"
+
+  def test_actuating_stands_down_instead_of_strobing_the_signal(self):
+    """THE REASON THIS EXISTS. Re-entering `signaling` on the next frame puts the lamp back on at
+    the gate's chatter rate, which traffic behind reads as noise rather than as intent."""
+    m = self._gate_drops_during_signaling(actuating=True)
+    assert m.aborts == 1
+    run(m, 0.05, clear=Side.left, suggested=Side.left, confirmed=True, actuating=True)
+    assert m.phase != Phase.signaling, "re-signalled immediately while driving the lamp"
+
+  def test_that_stand_down_expires_rather_than_latching(self):
+    m = self._gate_drops_during_signaling(actuating=True)
+    run(m, ABORT_STANDDOWN_S + 0.2, clear=Side.none, confirmed=True, actuating=True)
+    run(m, 0.05, clear=Side.left, suggested=Side.left, confirmed=True, actuating=True)
+    assert m.phase == Phase.signaling
+
+  def test_observing_holds_thirty_seconds_because_nothing_moved(self):
+    """The endless cycle from the road -- "it just kept saying that over and over again". Nothing
+    moved, so every input still reads the same and the sequence restarts without this."""
+    m = armed()
+    assert self._step_until_idle(m, actuating=False, settle_s=self.SETTLE) is not None
+    run(m, self.SETTLE + 1.0, clear=Side.left, suggested=Side.left, confirmed=True)
+    # `waiting`, not `idle`: still confirmed, and the stand-down is what holds it. Asserting idle
+    # here was wrong about the machine rather than about the timing.
+    assert m.phase != Phase.signaling, "restarted before COMPLETE_STANDDOWN_S"
+
+  def test_actuating_only_waits_out_the_anti_weave_settle(self):
+    """Once the car really moves the reason to pass is gone -- we are past the slow vehicle. What
+    remains is not a loop guard, it is the detector's own wait before changing lanes again."""
+    m = armed()
+    assert self._step_until_idle(m, actuating=True, settle_s=self.SETTLE) is not None
+    run(m, self.SETTLE + 0.3, clear=Side.left, suggested=Side.left, confirmed=True,
+        actuating=True, settle_s=self.SETTLE)
+    assert m.phase == Phase.signaling, "still held by the dry-run stand-down while actuating"
+
+  def test_the_settle_is_passed_in_rather_than_invented_here(self):
+    """passing_assist imports this module, so this module cannot import its constants back. The
+    number arriving as an argument is what keeps one owner for the anti-weave policy."""
+    m = armed()
+    assert self._step_until_idle(m, actuating=True, settle_s=30.0) is not None
+    run(m, self.SETTLE + 0.3, clear=Side.left, suggested=Side.left, confirmed=True,
+        actuating=True, settle_s=30.0)
+    assert m.phase != Phase.signaling, "a larger settle must actually hold it longer"

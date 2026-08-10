@@ -168,7 +168,9 @@ class PassingManeuver:
       self.phase_seconds = 0.0
 
   def update(self, *, clear: int, suggested: int, confirming: bool, confirmed: bool,
-             driver_override: bool, collision_abort: bool = False) -> None:
+             driver_override: bool, collision_abort: bool = False,
+             actuating: bool = False,
+             settle_after_change_s: float = COMPLETE_STANDDOWN_S) -> None:
     """One frame.
 
     `clear`      -- a slow car is spotted and this side is clear RIGHT NOW. Lights the blinker.
@@ -177,6 +179,13 @@ class PassingManeuver:
     `confirmed`  -- that timer has completed, so anything still stopping us is a gate.
     `driver_override` -- the driver is signaling, braking or steering. Always wins.
     `collision_abort` -- something is ARRIVING behind. The only input that can reverse a crossing.
+    `actuating`  -- is this driving the car, or narrating what it would do? Two timings below turn
+                    on it, both flagged in the constants as owed once a control exists. It is NOT a
+                    permission -- the caller decides whether actuation is allowed and passes the
+                    answer in, so this state machine keeps one shape either way.
+    `settle_after_change_s` -- the detector's own anti-weave wait, passed in rather than imported.
+                    passing_assist imports THIS module, so reaching back for its constants would be
+                    a circular import; and the settle policy belongs to the detector regardless.
     """
     self.phase_seconds += DT_MDL
 
@@ -223,7 +232,12 @@ class PassingManeuver:
         # See COMPLETE_STANDDOWN_S: nothing moved, so every reason to go is still true and the
         # next frame would start the same sequence over. This is what stops the loop.
         self._standdown_s = 0.0
-        self._standdown_target = COMPLETE_STANDDOWN_S
+        # See COMPLETE_STANDDOWN_S -- the one number in this file that exists because nothing is
+        # wired up. Thirty seconds stops a dry run that moved nothing from restarting on the very
+        # next frame, forever. Once the car really moves, the reason to pass is genuinely gone: we
+        # are in the other lane with the slow vehicle behind us, and what remains is only the
+        # anti-weave wait the detector already owns.
+        self._standdown_target = settle_after_change_s if actuating else COMPLETE_STANDDOWN_S
         self._to(Phase.idle)
       return
 
@@ -233,6 +247,15 @@ class PassingManeuver:
       if clear == Side.none or clear != self.side:
         self.aborts += 1
         self.side = Side.none
+        # THE STROBE GUARD, and conditional on purpose. See ABORT_STANDDOWN_S: while this only
+        # narrates, standing down here would suppress the very instability the abort count exists
+        # to measure -- a flickering gate would read as one event per ten seconds instead of forty.
+        # The moment it drives the lamp that trade inverts. The count has served its purpose and a
+        # signal flashing at the gate's chatter rate is the only thing that matters, to the traffic
+        # behind as much as to the driver.
+        if actuating:
+          self._standdown_s = 0.0
+          self._standdown_target = ABORT_STANDDOWN_S
         self._to(Phase.waiting if confirmed else Phase.confirming if confirming else Phase.idle)
         return
       # BOTH clocks, not one after the other: the signal has been up long enough AND the car is

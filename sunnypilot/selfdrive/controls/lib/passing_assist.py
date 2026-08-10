@@ -1996,6 +1996,9 @@ class PassingAssistDetector:
       # Exactly the inputs the detector already treats as the driver taking over. Reusing the same
       # test rather than restating it means the dry run cannot disagree with the gate above it.
       driver_override=override,
+      # See PassingManeuver.update. Both are inert until self.actuating is true.
+      actuating=self.actuating,
+      settle_after_change_s=float(SETTLE_AFTER_CHANGE_S),
       # The narrow tier: what may reverse a crossing already begun, as opposed to merely refusing
       # to start one.
       collision_abort=self._must_abort(self.maneuver.side),
