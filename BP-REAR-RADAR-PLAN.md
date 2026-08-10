@@ -1115,11 +1115,24 @@ Putting the controller at the front is correct, for reasons beyond convenience:
   So the install is INSIDE END TO END except the rear bumper penetration, which is unavoidable
   because that is where the sensor lives.
 
-  **Open, and do not guess at it:** whether the ford_q3 harness (this car is not CAN FD, so
-  `init_make` selects q3) exposes a bus 1 splice point that can be tapped without butchering it.
-  Electrically present is not the same as physically accessible, and §9a already flags harness
-  capability as the exact class of thing that produced four wrong claims on 2026-08-04. Look before
-  cutting.
+  **THE HARNESS IS CUSTOM-MADE -- 2026-08-09.** Stated by the owner, and it retires the open
+  question this bullet originally carried rather than answering it.
+
+  That question was whether the `ford_q3` harness exposes a bus 1 splice point. It was the wrong
+  question twice over. `init_make` selects q3 for a non-CAN-FD Ford, but that call decides what goes
+  in the VEHICLE DOCUMENTATION -- it is not a statement about what is plugged into this car. This is
+  an Edge-into-Fusion retrofit with a harness built for it, so nothing in the car port describes the
+  connector he actually has. Reasoning about his physical wiring from `init_make` is the same class
+  of error as the four capability claims on 2026-08-04: reading code that looks adjacent and
+  treating it as evidence about hardware.
+
+  What it means practically is better than the stock case. A custom harness was built by someone who
+  had to know the pinout, so the bus 1 conductors are identified rather than guessed at, and adding
+  a breakout is a known job rather than an exploratory one.
+
+  **Worth checking against §9a before buying anything:** he still has the spare CAN pair from the
+  old ESR install, and where that pair terminates at the comma end was already listed there as
+  unknown. If it lands somewhere useful it may serve as the bus 1 tap with no new conductor at all.
 
 **Corrected 2026-08-09.** Wire count is NOT the same either way, and the claim that it was had an
 unstated assumption -- that there is no usable supply in the back. The owner pointed out there is:
