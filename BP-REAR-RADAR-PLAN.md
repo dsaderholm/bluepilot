@@ -308,6 +308,50 @@ another reason the ESR must never go there.
 **Nothing needs to be added to `FORD_COMMON_TX_MSGS`.** openpilot transmits nothing to the ESR.
 Panda safety is untouched. This was the brief's preferred outcome and it is the correct one.
 
+### Where the MCU physically sits, and how the wire gets to the back
+
+Asked on 2026-08-09, and nothing above answered it: *"How in the world am I going to run CAN from
+the front of the vehicle to the back?"*
+
+**MOUNT THE MCU AT THE FRONT, WITH THE COMMA. Then exactly ONE twisted pair makes the trip.**
+
+Two of the three channels terminate at the front -- B taps bus 0 and C transmits on bus 1, both of
+which are at the comma harness. Only channel A, the private sensor bus, has to reach the bumper. Put
+the MCU in the trunk instead and B and C both become long runs: two pairs down the car rather than
+one, for no gain.
+
+The wording earlier in this section -- "short run (bumper to MCU)" -- implied the opposite and was
+written thinking about stub length rather than about the install. It does not matter here.
+**At 500 kbit/s the bus is good for a hundred meters**; a sedan is five. Length is not the reason to
+choose an end, and the number of holes to fish a wire through is.
+
+**The route** is the one every backup camera and amplifier install uses, and it needs no drilling:
+
+1. Pop the door sill scuff plates -- clip-in trim, plastic trim tool, no fasteners on most of them.
+2. Peel the carpet edge back off the rocker channel. The channel is already a wire path; the factory
+   body harness is in it.
+3. Run A-pillar to C-pillar down the rocker, then into the trunk through an EXISTING grommet.
+4. Radar power does NOT come from the front. Feed it from a switched source in the back and run only
+   the CAN pair the length of the car.
+
+**Cable.** It must be a twisted pair -- CAN's noise immunity is the twist, not the shielding. A
+single pair pulled out of CAT5/CAT6 works and is what most people use; nominal impedance is ~100 Ω
+against CAN's 120 Ω, which is well inside tolerance at this length. Do not use untwisted
+two-conductor wire.
+
+**Keep it away from power.** Not the CAN pair's own 12 V feed particularly, but anything switching
+hard: an amplifier feed, seat heaters, the rear defroster. Different side of the transmission tunnel
+if there is a choice; at minimum do not bundle them together.
+
+**Termination stays a property of the BUS, not of the car.** 120 Ω at the two physical ends of
+channel A -- one at the MCU, one at the radar -- exactly as above. Moving the MCU to the front does
+not change that, and it does not add a third terminator; measure the radar's own CANH-CANL first,
+because Delphi modules often carry an internal one and then the pair should read ~60 Ω.
+
+**Verify on the car rather than trusting this list:** grommet locations, which trunk circuit is
+switched rather than always-live, and where the battery actually is on this trim. All three are
+multimeter questions and he has one.
+
 ---
 
 ## 4. The feeder microcontroller's exact job
