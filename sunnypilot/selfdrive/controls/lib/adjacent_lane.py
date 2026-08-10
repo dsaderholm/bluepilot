@@ -171,6 +171,43 @@ MIN_ONCOMING_MS = 5.0
 # worth passing on.
 ONCOMING_MAX_M = 15.0
 
+# How many lateral offsets of oncoming-speed returns to keep. See where they are recorded: this is
+# a measurement of where opposing traffic sits on a given road, kept so the untrusted-edge fallback
+# distance can be chosen from data instead of argued about.
+#
+# A plain ring of recent samples rather than a histogram, because the interesting statistic is not
+# known yet -- it may be the minimum, a low percentile, or a bimodal split between the near and far
+# opposing lanes. Keeping the samples leaves that open. 400 at ~8 Hz is the last minute or so.
+ONCOMING_LAT_SAMPLES_MAX = 400
+
+# How far to look for OPPOSING traffic when the road edge cannot be trusted.
+#
+#     "But the median is always there, right? It doesn't just appear sometimes."
+#
+# It is, and that is what breaks the veto. With no usable edge this test used to narrow to
+# ADJACENT_MAX_M, 5.5 m -- the lane right beside us. On a road with a median the lane beside us IS
+# the median, and the opposing traffic sits behind it near 7.4 m, just outside. So the median does
+# not slip past the oncoming veto; it pushes the traffic that would have fired the veto OUT OF
+# RANGE, and the median then reads as an empty adjacent lane with nothing coming. Both 2026-08-09
+# drives ran with oncomingEdgeTrusted false throughout and the veto blocked 12 s out of 620.
+#
+# 9 m clears a median plus the near opposing lane with room for radar lateral error at range, and
+# stays well inside ONCOMING_MAX_M.
+#
+# THIS NUMBER IS A GUESS, AND THAT IS ACCEPTABLE HERE IN A WAY IT WAS NOT FOR THE ROAD-EDGE WAIVER.
+# Widening only ever finds MORE opposing traffic, so every way it is wrong makes the feature refuse
+# more often. The waiver was wrong in the other direction, which is why it put the car at a median.
+# The cost is real and lands on divided highways -- this is the narrowing that was introduced for
+# "I was on I-15 for a while, and kept saying two-way road", and some of that will come back. A
+# false two-way veto is a quiet stretch of road; the alternative is a pass into oncoming traffic.
+#
+# oncoming_lat_seen is recorded so this can stop being a guess: it samples where opposing traffic
+# actually sits, and one drive on each road type replaces this with a measurement.
+#
+# Only the ONCOMING path widens. Same-direction and overtake are both gated on `adjacent` further
+# down, so they still see nothing past ADJACENT_MAX_M.
+UNTRUSTED_EDGE_ONCOMING_M = 9.0
+
 # Fraction of our own speed a vehicle in the next lane must be doing before it counts as proof that
 # lane is a TRAVEL lane rather than a turn lane.
 #
@@ -713,6 +750,8 @@ class AdjacentLane:
     self.left = AdjacentLaneSide()
     self.right = AdjacentLaneSide()
     self.oncoming_seen = False   # ever, this drive -- logged so the veto can be audited
+    # See ONCOMING_LAT_SAMPLES_MAX. Recording only; nothing reads this.
+    self.oncoming_lat_seen: list[float] = []
 
   @property
   def available(self) -> bool:
@@ -762,7 +801,10 @@ class AdjacentLane:
     """
     edge_lat = road_edge_offset(model, side, d_rel)
     if edge_lat is None:
-      return abs(lat) <= ADJACENT_MAX_M
+      # See UNTRUSTED_EDGE_ONCOMING_M. Wide enough to reach past a median to the opposing lane,
+      # because a band that stops short of it reports "nothing coming" on exactly the roads where
+      # something is.
+      return abs(lat) <= UNTRUSTED_EDGE_ONCOMING_M
     # Camera frame: left is negative. "Inside the edge" is therefore a different comparison per
     # side, which is exactly the sort of thing that reads fine and is backwards.
     return lat > edge_lat if side == 'left' else lat < edge_lat
@@ -842,6 +884,29 @@ class AdjacentLane:
       # Fails open in the sense that matters: with no trusted edge, _on_our_carriageway narrows to
       # the adjacent band rather than opening up, so an unseen edge costs coverage rather than
       # letting the scenery back in.
+      # WHERE OPPOSING TRAFFIC ACTUALLY SITS, measured before anything below can discard it.
+      #
+      # The question this exists to settle, from 2026-08-09: "But the median is always there,
+      # right? It doesn't just appear sometimes." Correct, and it is why a lane-age test cannot
+      # help. A median does not sneak past the oncoming veto -- it pushes the opposing traffic
+      # OUT OF RANGE of it, which disables the veto entirely.
+      #
+      # With no trusted edge _on_our_carriageway narrows to ADJACENT_MAX_M, 5.5 m. On a road with
+      # a median the opposing lane sits near 7.4 m from the left lane, just outside it, so the
+      # median reads as an empty adjacent lane with no oncoming traffic anywhere near it. Both
+      # 2026-08-09 drives recorded oncomingEdgeTrusted false throughout and the veto blocked for
+      # 12 s out of 620.
+      #
+      # The fallback therefore has to reach PAST a median. Picking that distance by reasoning is
+      # exactly what produced the road-edge waiver, so this measures it instead: the lateral offset
+      # of every oncoming-speed return, whatever the carriageway test would go on to decide. One
+      # drive on an arterial and one on I-15 give both distributions, and the number falls out.
+      #
+      # Recording only. Nothing reads these, and the classification below is untouched.
+      if ground_speed(v_ego, p.dRel, p.yRel, p.vRel) < -MIN_ONCOMING_MS:
+        self.oncoming_lat_seen.append(round(abs_lat, 1))
+        del self.oncoming_lat_seen[:-ONCOMING_LAT_SAMPLES_MAX]
+
       if not self._on_our_carriageway(model, side, lat, p.dRel):
         continue
 

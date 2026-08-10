@@ -1138,3 +1138,60 @@ class TestOncomingEdgeTrust:
     adj.update(FakeSM(present=False), V_EGO, MAX_D)
     assert adj.left.oncoming_seconds > 0.0, "the memory itself must still be there"
     assert adj.left.oncoming_edge_trusted is True
+
+
+class TestTheFallbackReachesPastAMedian:
+  """The 2026-08-09 arterial drives, and the observation that explains them.
+
+      "It tried to change lanes into the center turn lane median thing 3 times!"
+      "But the median is always there, right? It doesn't just appear sometimes."
+
+  Exactly right, and it is why no lane-age or "has it just appeared" test can help. The median does
+  not sneak past the oncoming veto. It pushes the opposing traffic OUT OF RANGE of it: with no
+  trusted edge the search used to stop at ADJACENT_MAX_M (5.5 m), and from the left lane of a road
+  with a median the opposing lane sits near 7.4 m. So the veto looked at the median, saw nothing
+  coming, and reported the road clear.
+
+  None of it was pinned by a test -- the nearest one used a car at 5.0 m, inside both the old
+  window and the new one, so the boundary that mattered was never checked at all.
+  """
+
+  ONCOMING = -27.0 - V_EGO   # closing head-on, comfortably past MIN_ONCOMING_MS
+  NO_EDGE = dict(edge_stds=(9.9, 9.9))
+
+  def test_opposing_traffic_beyond_a_median_is_seen(self):
+    """THE CASE. 7.4 m is a median plus the near opposing lane -- outside the old 5.5 m window,
+    which is why three suggestions were made into it."""
+    adj = upd(AdjacentLane(), FakeSM([track(90, 7.4, v_rel=self.ONCOMING)], **self.NO_EDGE),
+              V_EGO, MAX_D)
+    assert adj.oncoming_any_side, "the median case: this is what failed on the road"
+
+  def test_the_lane_right_beside_us_is_still_seen(self):
+    """Unchanged, and the case a plain double yellow presents -- opposing traffic at one lane."""
+    adj = upd(AdjacentLane(), FakeSM([track(90, 3.7, v_rel=self.ONCOMING)], **self.NO_EDGE),
+              V_EGO, MAX_D)
+    assert adj.oncoming_any_side
+
+  def test_something_far_across_a_divided_highway_is_still_ignored(self):
+    """The narrowing exists for "I was on I-15 for a while, and kept saying two-way road", and
+    widening must not throw that away entirely. Past the window, an untrusted edge still refuses to
+    call it our road."""
+    adj = upd(AdjacentLane(), FakeSM([track(90, 13.0, v_rel=self.ONCOMING)], **self.NO_EDGE),
+              V_EGO, MAX_D)
+    assert not adj.oncoming_any_side
+
+  def test_only_the_oncoming_path_widened(self):
+    """Same-direction evidence stays bounded by ADJACENT_MAX_M. It is gated on `adjacent` further
+    down, and it must stay that way -- a car two lanes over says nothing about the lane beside us,
+    and letting it vouch is the shape of the bug that caused all this."""
+    adj = upd(AdjacentLane(), FakeSM([track(70, 7.0, 5.0)], **self.NO_EDGE), V_EGO, MAX_D)
+    assert not adj.left.same_direction_recent
+    assert not adj.left.occupied
+
+  def test_where_opposing_traffic_sat_is_recorded(self):
+    """See ONCOMING_LAT_SAMPLES_MAX. Recorded before the carriageway test can discard it, so the
+    window above can be replaced by a measurement instead of the next guess."""
+    adj = upd(AdjacentLane(), FakeSM([track(90, 7.4, v_rel=self.ONCOMING)], **self.NO_EDGE),
+              V_EGO, MAX_D)
+    assert adj.oncoming_lat_seen, "nothing sampled"
+    assert max(adj.oncoming_lat_seen) >= 7.0
