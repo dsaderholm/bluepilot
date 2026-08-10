@@ -13,7 +13,7 @@ weeks, so the `actuating` bit carries the whole weight and every path through it
 from types import SimpleNamespace
 
 from opendbc.sunnypilot.car.ford.passing_assist_blinker import PassingAssistBlinker
-from opendbc.sunnypilot.car.ford.blinker_test_ext import BLINK_COUNT, SIGNAL_NONE, SIGNAL_LEFT, SIGNAL_RIGHT
+from opendbc.sunnypilot.car.ford.blinker_test_ext import SIGNAL_NONE, SIGNAL_LEFT, SIGNAL_RIGHT
 
 PERIOD_S = 0.76
 
@@ -98,10 +98,12 @@ class TestWhenItIsAllowedToSignal:
     out = drive(PassingAssistBlinker(PERIOD_S), FakeSM(side=2))
     assert set(blinks(out)) == {SIGNAL_RIGHT}
 
-  def test_it_stops_after_the_same_count_the_buttons_send(self):
-    """BLINK_COUNT, shared with the Blink Left / Blink Right buttons rather than re-declared."""
-    out = drive(PassingAssistBlinker(PERIOD_S), FakeSM(side=1), frames=400)
-    assert blink_groups(out) == BLINK_COUNT
+  def test_it_keeps_signalling_for_as_long_as_the_request_stands(self):
+    """NOT a fixed count. BLINK_COUNT is 7 because that is his one-touch, which is the right
+    emulation of a stalk TAP and the wrong bound for a crossing -- 5.3 s against a sequence that is
+    the signal lead plus CHANGE_DURATION_S. A fixed seven runs out part-way with the car moving."""
+    out = drive(PassingAssistBlinker(PERIOD_S), FakeSM(side=1), frames=1500)
+    assert blink_groups(out) > 7, "stopped at a fixed count instead of tracking the request"
 
 
 class TestCancelling:
@@ -125,17 +127,24 @@ class TestCancelling:
     sm = FakeSM(side=1)
     out = drive(b, sm, frames=40)
     sent = blink_groups(out)
-    assert 0 < sent < BLINK_COUNT, "need a partial pattern for this to mean anything"
+    assert sent > 0, "need it signalling for this to mean anything"
     sm.data['longitudinalPlanSP'].passingAssist.actuating = False
     assert blinks(drive(b, sm, frames=200, ts_start=100)) == []
 
-  def test_a_new_maneuver_gets_its_own_full_pattern(self):
-    """Re-arming resets blinks_sent, or a second pass would inherit a spent counter and signal
-    fewer times -- or not at all."""
+  def test_a_new_maneuver_on_the_other_side_signals_the_other_side(self):
+    """Re-arming on a side change resets the phase, so the second maneuver gets a clean pattern
+    rather than inheriting whatever the first left behind."""
     b = PassingAssistBlinker(PERIOD_S)
     sm = FakeSM(side=1)
     drive(b, sm, frames=400)
     sm.data['longitudinalPlanSP'].passingAssist.maneuverSide = 2
     out = drive(b, sm, frames=400, ts_start=1000)
-    assert blink_groups(out) == BLINK_COUNT
+    assert blink_groups(out) > 0
     assert set(blinks(out)) == {SIGNAL_RIGHT}
+
+  def test_a_wedged_request_cannot_signal_forever(self):
+    """See MAX_SIGNAL_S. A backstop, not the normal bound -- a turn signal that never goes off is
+    the one failure here worth spending a constant on."""
+    out = drive(PassingAssistBlinker(PERIOD_S), FakeSM(side=1), frames=6000)
+    tail = out[-500:]
+    assert blinks(tail) == [], "still signalling well past the runaway backstop"
