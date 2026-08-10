@@ -1347,8 +1347,10 @@ class PassingAssistDetector:
       # costs eight characters in a param that already holds twenty-three numbers per drive.
       # THE TIMELINE DOES NOT GO IN THE HISTORY. It rides in LastDrive, where it is the record of
       # the drive just finished and gets read once. Archiving it too would put three hundred entries
-      # into each of twenty drives -- 129 KB in a single PERSISTENT | BACKUP param, rewritten in
-      # full every time a drive ends, to hold a sequence nobody is going to read a fortnight later.
+      # into each of DRIVE_HISTORY_MAX drives -- at 60 that is around 390 KB in a single
+      # PERSISTENT | BACKUP param, rewritten in full every time a drive ends, to hold a sequence
+      # nobody is going to read a fortnight later. Stated against the constant rather than a number,
+      # because the number moved from 20 to 60 the same day and this comment did not.
       # History is for aggregates; the timeline is for the drive he is describing.
       last = {k: v for k, v in last.items() if k != "timeline"}
       try:

@@ -181,6 +181,11 @@ ONCOMING_MAX_M = 15.0
 #
 # Fixed length, so it cannot grow and needs no trimming. Index is the offset in meters, clamped;
 # nothing is recorded below ADJACENT_MIN_M or beyond ONCOMING_MAX_M, so 0 and 1 stay empty.
+#
+# COUNTS RETURNS, NOT VEHICLES, and that matters when reading it. This radar publishes one vehicle
+# as several tracks at slightly different ranges, so a bucket's height is not a car count and two
+# roads are only comparable by SHAPE -- where the mass sits, and whether it is bimodal. That is the
+# question being asked anyway: is there a peak out past the median, or only the near lane.
 ONCOMING_LAT_BUCKETS = 16
 
 # How far to look for OPPOSING traffic when the road edge cannot be trusted.
