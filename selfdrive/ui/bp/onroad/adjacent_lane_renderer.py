@@ -39,7 +39,7 @@ import pyray as rl
 
 from openpilot.common.constants import CV
 from openpilot.common.filter_simple import FirstOrderFilter
-from openpilot.selfdrive.ui.bp.onroad.marker_hold import MarkerHold
+from openpilot.selfdrive.ui.bp.onroad.marker_hold import MarkerHold, ONCOMING_HOLD_S
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.text_measure import measure_text_cached
@@ -62,6 +62,7 @@ BORDER = 3
 MAX_DRAW_D_REL = 160.0
 
 
+
 class AdjacentLaneRenderer:
   """Draws a compact speed readout over the nearest vehicle in each adjacent lane."""
 
@@ -74,6 +75,11 @@ class AdjacentLaneRenderer:
     self._y_filters = [FirstOrderFilter(0, 0.5, dt, initialized=False) for _ in range(2)]
     # Dropout hold and color debounce, one per side. See marker_hold.py.
     self._holds = [MarkerHold(), MarkerHold()]
+    # See ONCOMING_HOLD_S. Separate holds with a much shorter dropout, and no blocking debounce --
+    # oncoming markers have one color and never change it.
+    self._onc_holds = [MarkerHold(dropout_hold_s=ONCOMING_HOLD_S),
+                       MarkerHold(dropout_hold_s=ONCOMING_HOLD_S)]
+    self._onc_last: list = [None, None]
     # Last drawn values, so a held marker keeps showing the vehicle it belonged to rather than
     # freezing on whatever the filters happened to contain.
     self._last = [None, None]
@@ -94,7 +100,7 @@ class AdjacentLaneRenderer:
     blocking = str(pa.blockedBy) == 'adjacentSlow'
     dt = 1 / gui_app.target_fps
 
-    self._draw_oncoming(pa, model_renderer, rect)
+    self._draw_oncoming(pa, model_renderer, rect, dt)
 
     for i, side in enumerate(sides):
       # Out of drawing range counts as not occupied, not as unavailable: the vehicle is real, we
@@ -132,29 +138,48 @@ class AdjacentLaneRenderer:
     for h in self._holds:
       h.reset()
     self._last = [None, None]
+    # The oncoming holds go with them. A stale message or a dead service must not leave a marker
+    # riding out its dropout hold over traffic nobody is still measuring.
+    for h in self._onc_holds:
+      h.reset()
+    self._onc_last = [None, None]
 
-  def _draw_oncoming(self, pa, model_renderer, rect: rl.Rectangle) -> None:
+  def _draw_oncoming(self, pa, model_renderer, rect: rl.Rectangle, dt: float) -> None:
     """Mark vehicles coming the other way, if the driver asked for them.
 
     Drawn from the LIVE sighting, never from the veto's memory. The veto deliberately outlives the
     car that caused it -- meeting someone tells you about the road, not just that moment -- but a
     marker floating over empty tarmac for the next ninety seconds would be a lie about where a
     vehicle is, and this exists precisely to be believed about position.
+
+    The one exception is a quarter-second dropout hold, which is about the RADAR missing a message
+    rather than about the veto's memory. See ONCOMING_HOLD_S for why it is a third of the
+    same-direction one.
     """
     if not ui_state.params.get_bool("ShowOncomingSpeeds"):
+      self._onc_last = [None, None]
       return
-    for side in (pa.adjacentLeft, pa.adjacentRight):
-      if not (side.available and side.oncoming) or side.oncomingDRel <= 0:
+    for i, side in enumerate((pa.adjacentLeft, pa.adjacentRight)):
+      live = bool(side.oncoming) and 0 < side.oncomingDRel <= MAX_DRAW_D_REL
+      # See ONCOMING_HOLD_S. `available` is passed through untouched, so a radar that has actually
+      # gone away still clears the marker at once rather than holding a ghost -- a dropout and an
+      # unavailable sensor must never look the same.
+      draw, alpha, _ = self._onc_holds[i].update(dt, bool(side.available), live, False)
+      if not draw:
+        self._onc_last[i] = None
         continue
-      if side.oncomingDRel > MAX_DRAW_D_REL:
+      if live:
+        self._onc_last[i] = (side.oncomingDRel, side.oncomingYRel, abs(side.oncomingVAbs))
+      if self._onc_last[i] is None:
         continue
-      point = model_renderer.project_ground_point(side.oncomingDRel, side.oncomingYRel)
+      onc_d, onc_y, onc_v = self._onc_last[i]
+      point = model_renderer.project_ground_point(onc_d, onc_y)
       if point is None:
         continue
       # Unfiltered, unlike the same-direction markers. A closing speed near 130 mph crosses the
       # whole range in a couple of seconds, so a smoothing filter tuned for a car being overtaken
       # would lag it badly enough to draw it somewhere it is not.
-      self._draw_marker(point, abs(side.oncomingVAbs), side.oncomingDRel, False, 1.0, rect,
+      self._draw_marker(point, onc_v, onc_d, False, alpha, rect,
                         color=ONCOMING, prefix="<< ")
 
   def _draw_marker(self, point, v_abs: float, d_rel: float, blocking: bool, alpha: float,

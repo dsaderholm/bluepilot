@@ -31,6 +31,22 @@ driving the car, which is how the 100 Hz turn-signal frame reached the road.
 # still flicker; much longer and a car that genuinely left would linger.
 DROPOUT_HOLD_S = 0.8
 
+# Dropout hold for the ONCOMING markers only, and much shorter than the same-direction one.
+#
+# Reported from the road on 2026-08-09: "I've noticed the oncoming ones update less frequently."
+# Three things caused that and only one was a defect. An oncoming car crosses the whole draw range
+# in under three seconds, so there are simply fewer of them and each is brief -- that is physics.
+# The position is unfiltered on purpose, so it steps at the radar's 8 Hz instead of gliding -- see
+# _draw_oncoming. But it also had NO dropout hold at all, so a single radar message that missed the
+# track blanked the marker completely, while the same-direction markers ride through the same gap.
+#
+# 0.25 s bridges two missed messages at the radar's ~8 Hz and no more. DROPOUT_HOLD_S is 0.8, which
+# is right for a car sitting alongside and badly wrong here: held at a closing speed near 130 mph it
+# would leave the marker 46 m from the vehicle. At 0.25 s the worst case is about 14 m, and the
+# marker's claim is "something is coming there", which survives that. Anything longer starts lying
+# about position, which is the one thing this overlay exists to be believed about.
+ONCOMING_HOLD_S = 0.25
+
 # How long a changed blocking state must persist before the color follows it.
 #
 # This is a debounce, not a minimum dwell: the new value has to HOLD for this long, so a vehicle

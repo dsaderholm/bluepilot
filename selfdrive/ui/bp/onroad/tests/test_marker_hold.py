@@ -6,7 +6,8 @@ places smoothing would be a lie: a marker outliving an unavailable radar, and a 
 expires. Both are asserted directly.
 """
 
-from openpilot.selfdrive.ui.bp.onroad.marker_hold import MarkerHold, DROPOUT_HOLD_S, BLOCKING_DEBOUNCE_S
+from openpilot.selfdrive.ui.bp.onroad.marker_hold import (
+  MarkerHold, DROPOUT_HOLD_S, BLOCKING_DEBOUNCE_S, ONCOMING_HOLD_S)
 
 DT = 1 / 20.0     # the UI's frame rate
 
@@ -106,3 +107,42 @@ class TestBlockingDebounce:
     run(h, DROPOUT_HOLD_S / 2, occupied=False, blocking=True)
     run(h, BLOCKING_DEBOUNCE_S / 2 + DT, blocking=True)
     assert h.blocking is True
+
+
+class TestTheOncomingHoldIsShort:
+  """From the road on 2026-08-09: "I've noticed the oncoming ones update less frequently."
+
+  Part of that was physics -- an oncoming car crosses the whole draw range in under three seconds --
+  and part was that the oncoming markers had no dropout hold at all, so one radar message that
+  missed the track blanked them while the same-direction markers rode through the same gap.
+
+  It cannot simply borrow DROPOUT_HOLD_S. That is tuned for a car sitting alongside, and a marker
+  held that long against a closing speed near 130 mph would sit tens of meters from the vehicle.
+  These pin the property that makes the short value correct rather than the number itself.
+  """
+
+  RADAR_GAP_S = 0.12    # one message at the MRR's ~8 Hz publish rate
+
+  def test_it_is_much_shorter_than_the_same_direction_hold(self):
+    assert ONCOMING_HOLD_S < DROPOUT_HOLD_S / 2
+
+  def test_it_bridges_a_missed_radar_message(self):
+    """The defect it exists to fix: a single dropped message must not blank the marker."""
+    h = MarkerHold(dropout_hold_s=ONCOMING_HOLD_S)
+    run(h, 1.0)
+    held = run(h, self.RADAR_GAP_S, occupied=False)
+    assert all(draw for draw, _, _ in held), "blanked on a single missed message"
+
+  def test_it_does_not_outlive_a_vehicle_that_really_left(self):
+    """The other direction, and the one that would make the overlay lie. Half a second of holding
+    at closing speed is already tens of meters of error."""
+    h = MarkerHold(dropout_hold_s=ONCOMING_HOLD_S)
+    run(h, 1.0)
+    run(h, 0.5, occupied=False)
+    assert not h.update(DT, True, False, False)[0]
+
+  def test_an_unavailable_radar_still_clears_it_at_once(self):
+    """A dropout and a dead sensor must never look the same, however short the hold."""
+    h = MarkerHold(dropout_hold_s=ONCOMING_HOLD_S)
+    run(h, 1.0)
+    assert not h.update(DT, False, False, False)[0]
