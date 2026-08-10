@@ -1,0 +1,156 @@
+#!/usr/bin/env python3
+"""FusionPilot: which source slowed the car, for any slowdown, not just exit-sized ones.
+
+Three drives running, three reports of "went too slow on a highway curve", and three settings
+changes made on the ASSUMPTION that SCC-Vision was the source. That was never checked. It could
+equally be SCC-Map carrying mapped curve geometry on the highway, Speed Limit Assist, a lead, or the
+model-stop path. Changing the vision sensitivity does nothing if vision is not the one asking.
+
+bp_dump_exit.py cannot answer it: it triggers on 55 -> 45 mph, so a 75 -> 60 highway curve never
+appears. This one triggers on any sustained drop, at any speed, and attributes it.
+
+For each slowdown it prints who was the plan source at the start, what each SCC controller was
+asking for, and the lateral acceleration being demanded -- which is the number the curve settings
+actually move, so an unreasonable target is visible as a number rather than a feeling.
+
+USAGE, on the device:
+
+    cd /data/openpilot && python tools/bp_why_slow.py
+    python tools/bp_why_slow.py --route 00000042--aa11bb22cc --drop 6
+"""
+from __future__ import annotations
+
+import argparse
+import math
+import os
+import sys
+from collections import deque
+
+REALDATA = "/data/media/0/realdata"
+MS_TO_MPH = 2.23694
+STEER_RATIO = 17.07     # FORD_FUSION_MK5
+WHEELBASE = 2.85
+NO_TARGET_MPH = 500.0   # SCC publishes 255 m/s as "no target"
+
+
+def find_segments(route: str | None) -> list[str]:
+  if not os.path.isdir(REALDATA):
+    sys.exit(f"no {REALDATA} -- run this on the device")
+  entries = sorted(d for d in os.listdir(REALDATA) if "--" in d)
+  if not entries:
+    sys.exit("no route segments")
+  if route is None:
+    route = entries[-1].rsplit("--", 1)[0]
+    print(f"# newest route: {route}")
+  segs = [os.path.join(REALDATA, d) for d in entries if d.startswith(route + "--")]
+  if not segs:
+    sys.exit(f"no segments for {route}")
+  return segs
+
+
+def rlog(seg: str) -> str | None:
+  for name in ("rlog", "rlog.zst", "rlog.bz2"):
+    p = os.path.join(seg, name)
+    if os.path.exists(p):
+      return p
+  return None
+
+
+def main() -> int:
+  ap = argparse.ArgumentParser()
+  ap.add_argument("--route", default=None)
+  ap.add_argument("--drop", type=float, default=8.0, help="mph lost to count as a slowdown")
+  ap.add_argument("--window", type=float, default=12.0, help="seconds to lose it in")
+  args = ap.parse_args()
+
+  try:
+    from openpilot.tools.lib.logreader import LogReader
+  except ImportError as e:
+    sys.exit(f"no LogReader ({e}); run from /data/openpilot")
+
+  st = {"v": 0.0, "dash": 0.0, "src": "?", "mapV": 0.0, "mapAct": False,
+        "visV": 0.0, "visAct": False, "brake": False, "gas": False, "lead": 0.0, "angle": 0.0}
+  hist: deque = deque(maxlen=4000)     # ~40 s of carState
+  events = 0
+  t0 = None
+
+  for seg in find_segments(args.route):
+    path = rlog(seg)
+    if path is None:
+      continue
+    for msg in LogReader(path):
+      w = msg.which()
+      t = msg.logMonoTime / 1e9
+      if t0 is None:
+        t0 = t
+      try:
+        if w == "carState":
+          cs = msg.carState
+          st["v"] = cs.vEgo * MS_TO_MPH
+          st["dash"] = cs.cruiseState.speedCluster * MS_TO_MPH
+          st["brake"] = cs.brakePressed
+          st["gas"] = cs.gasPressed
+          st["angle"] = float(cs.steeringAngleDeg)
+          hist.append((t - t0, dict(st)))
+        elif w == "radarState":
+          ld = msg.radarState.leadOne
+          st["lead"] = ld.dRel if ld.status else 0.0
+        elif w == "longitudinalPlanSP":
+          lp = msg.longitudinalPlanSP
+          st["src"] = str(lp.longitudinalPlanSource)
+          st["mapV"] = lp.smartCruiseControl.map.vTarget * MS_TO_MPH
+          st["mapAct"] = bool(lp.smartCruiseControl.map.active)
+          st["visV"] = lp.smartCruiseControl.vision.vTarget * MS_TO_MPH
+          st["visAct"] = bool(lp.smartCruiseControl.vision.active)
+        else:
+          continue
+      except Exception:  # noqa: BLE001
+        continue
+
+      # A slowdown is `drop` mph lost inside `window` seconds. Compared against the OLDEST sample
+      # still inside the window rather than a peak, so a slow steady decay counts the same as an
+      # abrupt one -- "too slow through a curve" is usually the gradual kind.
+      if len(hist) < 50:
+        continue
+      now_t, now = hist[-1]
+      old = None
+      for ts, s in hist:
+        if now_t - ts <= args.window:
+          old = (ts, s)
+          break
+      if old is None:
+        continue
+      if old[1]["v"] - now["v"] < args.drop:
+        continue
+
+      events += 1
+      print(f"\n===== slowdown #{events}: {old[1]['v']:.0f} -> {now['v']:.0f} mph "
+            f"over {now_t - old[0]:.1f}s, at t+{now_t:.0f}s =====")
+      print("   time    mph  dash  source        sccMap  sccVis   latAcc  lead  G B")
+      shown = 0
+      for ts, s in hist:
+        if ts < old[0]:
+          continue
+        shown += 1
+        if shown % 25:
+          continue
+        # Lateral acceleration being DELIVERED, from the steering angle. This is the quantity the
+        # curve sensitivity settings move, so it says whether a target was unreasonable.
+        curv = math.tan(math.radians(s["angle"] / STEER_RATIO)) / WHEELBASE
+        lat = abs((s["v"] / MS_TO_MPH) ** 2 * curv)
+        m = "  --  " if not s["mapAct"] or s["mapV"] > NO_TARGET_MPH else f"{s['mapV']:5.0f}*"
+        v = "  --  " if not s["visAct"] or s["visV"] > NO_TARGET_MPH else f"{s['visV']:5.0f}*"
+        print(f"  t+{ts:6.0f} {s['v']:6.1f} {s['dash']:5.0f}  {s['src']:<12} {m}  {v}  "
+              f"{lat:6.2f}  {s['lead']:4.0f}  {'G' if s['gas'] else '.'} "
+              f"{'B' if s['brake'] else '.'}")
+      hist.clear()
+
+  print(f"\n=== {events} slowdowns of >={args.drop:.0f} mph found ===")
+  print("  Read the `source` column at the START of each block -- that is who asked. If it is not")
+  print("  sccVision, the curve sensitivity settings are the wrong knob and always were.")
+  print("  latAcc is what the car actually pulled; the vision factors target 2.0 / sensitivity.")
+  return 0
+
+
+if __name__ == "__main__":
+  raise SystemExit(main())
