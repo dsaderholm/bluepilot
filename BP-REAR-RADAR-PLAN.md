@@ -1098,7 +1098,28 @@ Putting the controller at the front is correct, for reasons beyond convenience:
 - **It is dry and reachable.** Reflashing a microcontroller buried in a wet rear bumper is a bad
   afternoon.
 - **Bus 1 is physically there.** `fordcan.py` fixes the numbering — `main` = 0, `radar` = **1**,
-  `camera` = 2 — so the front radar's own CAN pins *are* bus 1. No hunting.
+  `camera` = 2 — so the front radar's own CAN pins *are* bus 1.
+
+  **TAP IT AT THE COMMA HARNESS, NOT AT THE RADAR -- corrected 2026-08-09.** The owner caught what
+  this bullet had glossed over:
+
+  > *"So you want me to run the wires inside? I guess we should just run it straight up into the
+  > comma harness? Why go back outside the vehicle?"*
+
+  Exactly right. The front radar's pins are in the FRONT BUMPER. Routing the tap there sends the
+  wire back outside, past the weather and the fascia, immediately after the whole point of the
+  rocker route was to stay inside. Bus 1 is equally present at the windshield -- the panda reads it,
+  so it is electrically there or `liveTracks` would be empty -- and the comma end is dry, reachable
+  and already the place a connector is being handled.
+
+  So the install is INSIDE END TO END except the rear bumper penetration, which is unavoidable
+  because that is where the sensor lives.
+
+  **Open, and do not guess at it:** whether the ford_q3 harness (this car is not CAN FD, so
+  `init_make` selects q3) exposes a bus 1 splice point that can be tapped without butchering it.
+  Electrically present is not the same as physically accessible, and §9a already flags harness
+  capability as the exact class of thing that produced four wrong claims on 2026-08-04. Look before
+  cutting.
 
 **Corrected 2026-08-09.** Wire count is NOT the same either way, and the claim that it was had an
 unstated assumption -- that there is no usable supply in the back. The owner pointed out there is:
