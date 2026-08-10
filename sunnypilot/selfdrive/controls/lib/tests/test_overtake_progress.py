@@ -29,9 +29,9 @@ EMPTY = lane(occupied=False)
 
 
 def run(op, seconds, left=EMPTY, right=EMPTY, v_ego=CRUISE_MS, settle_s=0.0,
-        since_lane_change_s=0.0):
+        since_lane_change_s=0.0, in_leftmost=True):
   for _ in range(max(1, int(round(seconds / DT_MDL)))):
-    op.update(v_ego, left, right, settle_s, since_lane_change_s)
+    op.update(v_ego, left, right, settle_s, since_lane_change_s, in_leftmost)
   return op
 
 
@@ -177,3 +177,39 @@ class TestWhatIsActuallyASlowPass:
     op = run(OvertakeProgress(), 25.0, right=lane(d_rel=20.0, v_rel=-0.4))
     assert op.crawling
     assert op.crawl_side == Side.right
+
+
+class TestOnlyFromTheFarLeftLane:
+  """"The slow pass thing should only apply if I'm in the far left lane."
+
+  The harm in a slow pass is WHERE it happens, not that it is slow. Grinding past someone from the
+  middle lane of a four-lane road blocks nobody -- the passing lane is still free and anyone in a
+  hurry goes around it. Doing it from the far left is the thing he does not want to be: "no one
+  should ever have to be stuck behind me."
+
+  This is the second correction on the same idea. The first was "a slow pass would only matter if
+  I'm passing on the left", which made it watch the right side only.
+  """
+
+  GRIND = dict(right=lane(d_rel=20.0, v_rel=-0.4))
+
+  def test_a_grind_from_the_leftmost_lane_counts(self):
+    assert run(OvertakeProgress(), 10.0, in_leftmost=True, **self.GRIND).crawling
+
+  def test_the_same_grind_from_a_middle_lane_does_not(self):
+    """Identical arithmetic, different lane. Nothing is being held up."""
+    assert not run(OvertakeProgress(), 10.0, in_leftmost=False, **self.GRIND).crawling
+
+  def test_moving_out_of_the_left_lane_ends_a_crawl_in_progress(self):
+    """If he pulls right mid-grind the complaint is over, and the event should stop rather than
+    keep accruing against a lane he is no longer blocking."""
+    op = run(OvertakeProgress(), 10.0, in_leftmost=True, **self.GRIND)
+    assert op.crawling
+    run(op, 1.0, in_leftmost=False, **self.GRIND)
+    assert not op.crawling
+
+  def test_it_does_not_count_events_from_a_middle_lane(self):
+    """The drive summary number, not just the live flag -- crawlEvents is what he reads."""
+    op = run(OvertakeProgress(), 30.0, in_leftmost=False, **self.GRIND)
+    assert op.crawl_events == 0
+    assert op.crawl_longest == 0.0

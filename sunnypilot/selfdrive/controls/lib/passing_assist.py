@@ -1989,8 +1989,10 @@ class PassingAssistDetector:
     # grinding is happening in the other lane, where the lead-based gates have nothing to say -- so
     # hanging this off the decision path would have measured only the crawls that began while a
     # fresh suggestion was still live, which is the subset least in need of measuring.
+    # in_leftmost: no lane to our LEFT, the same term _track_lane_hog uses. See the note in
+    # OvertakeProgress.update for why a slow pass only matters from the far left lane.
     self.overtake.update(CS.vEgo, self.adjacent.left, self.adjacent.right, self._settle_s,
-                         self.since_driver_change_s)
+                         self.since_driver_change_s, not self.left_geometry_ok)
 
     # Counted AFTER every gate has run, so blocked_by is final for this frame. Only while a
     # slower car is actually spotted -- an empty road is not evidence about anything -- and only

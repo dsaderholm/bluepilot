@@ -108,7 +108,7 @@ class OvertakeProgress:
     return -SLOW_LOSS_MPH * CV.MPH_TO_MS < gain < min_gain_ms
 
   def update(self, v_ego: float, left, right, settle_s: float,
-             since_lane_change_s: float = 1e3) -> None:
+             since_lane_change_s: float = 1e3, in_leftmost: bool = True) -> None:
     # A CAR BESIDE YOU IS NOT A PASS. Reported from the road: "it's been saying slow pass even
     # though I'm in the far right lane."
     #
@@ -142,10 +142,25 @@ class OvertakeProgress:
     # nothing but going past, continuously, on every highway.
     #
     # Undertaking on the right is deliberately silent. There is no lane to hurry back to.
+    # AND ONLY FROM THE LEFTMOST LANE, which is his second correction on the same idea:
+    #
+    #   "The slow pass thing should only apply if I'm in the far left lane."
+    #
+    # The harm in a slow pass is not the slowness, it is WHERE it happens. Grinding past someone
+    # from the middle lane of a four-lane road blocks nobody -- the passing lane is still free and
+    # anyone in a hurry goes around. Doing it from the far left is the thing he does not want to be:
+    # "no one should ever have to be stuck behind me". Same principle as the lane hog counter, which
+    # is why it uses the same term rather than a second definition of leftmost.
+    #
+    # THE WEAKNESS, stated because it is real: "no lane to our left" is read from the camera, and
+    # this drive it could not see the left lane line at all -- the paint term refused 73 % of the
+    # time at a probability of 0.011. So a middle lane whose left neighbour is invisible reads as
+    # leftmost, and a crawl there would still be counted. It errs toward counting, which for a
+    # measurement is the right direction, but it is not a clean test and no clean one exists today.
     min_gain = SLOW_GAIN_MPH * CV.MPH_TO_MS
     right_grinding = self._grinding(right, min_gain)
 
-    if not right_grinding:
+    if not (right_grinding and in_leftmost):
       self._reset()
       return
 
