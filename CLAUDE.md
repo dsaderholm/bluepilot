@@ -1345,6 +1345,16 @@ unavoidable, the branch whose field has never been written to a log is the one t
 
 ## Working with the owner
 
+- **READ THE MODULE BEFORE EXTENDING IT.** These files carry long design docstrings recording what
+  was tried, what failed on the road, and what was settled -- `blinker_test_ext.py` opens with a
+  summary that answers most of what a new feature needs to know about commanding the signal. On
+  2026-08-09 I asked him a series of questions and proposed a design that were all already answered
+  in the tree, and he escalated three times before: *"I'm really mad you don't remember any of what
+  we did before, even though all the code is right in front of your fucking face."* The failure was
+  searching for CONFIRMATION of what I was about to build rather than reading what was already
+  built. grep for the concept before adding a field, param or constant, and check whether a later
+  section of a long plan document supersedes the one you are editing. When he says "we already did
+  this", stop and go read.
 - **He reports, I tune.** On-road reports are tuning input, not complaints to work around. His
   observation of his own device beats my inference about it every time.
 - **Don't check in.** He has given open-ended permission; pick the work and report it done rather
