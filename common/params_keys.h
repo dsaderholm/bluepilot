@@ -311,7 +311,22 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // because the observer still records what it WOULD have said, which measures how often that
     // actually bites; it is not a feature to lean on until map data can distinguish the two.
     {"PassingAssistKeepRight", {PERSISTENT | BACKUP, BOOL, "1"}},
-    {"PassingAssistKeepRightDelay", {PERSISTENT | BACKUP, INT, "10"}},  // seconds
+    // FusionPilot: 10 -> 5 on 2026-08-09, asked for by name. How long the lane to the right must
+    // stay clear and fast enough before moving back over.
+    //
+    //     "I want the left lane to be like the floor is lava, and be there enough to pass cars,
+    //      and that's it. No one should ever have to be stuck behind me."
+    //
+    // This is the number that governs that, and it is the closest thing here to the BlueCruise
+    // behaviour he objects to -- "I also don't like the biased to stay put thing". Lowering it is
+    // the anti-bias, and it compounds: the system can only see the lane immediately beside it, so
+    // reaching the rightmost usable lane on a four-lane road is repeated single steps, each paying
+    // this wait. At 10 s that is twenty-odd seconds from lane one to lane three; at 5 s it is ten.
+    //
+    // Not lower than 5, because the wait is also what stops a keep-right firing into a gap that
+    // closes -- and the 15 s lane-age test runs CONCURRENTLY with it, so below about 5 s this stops
+    // being the binding constraint anyway and only the age test remains.
+    {"PassingAssistKeepRightDelay", {PERSISTENT | BACKUP, INT, "5"}},  // seconds
     // BluePilot: seconds the lane to the right must have existed CONTINUOUSLY before moving into
     // it is suggested. An exit lane did not exist a moment ago and now does; a through lane has
     // been beside us the whole time. Every other exit test asks what the lane looks like, and an

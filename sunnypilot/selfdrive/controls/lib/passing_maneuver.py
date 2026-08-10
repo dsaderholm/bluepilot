@@ -116,6 +116,17 @@ ABORT_STANDDOWN_S = 10.0
 # this means a gate stayed unhappy, and the honest answer is to go dark and stand down.
 SIGNAL_WINDOW_S = 5.0
 
+# And how long to stay quiet after the window runs out, which is NOT the same as after a gate
+# flicker. ABORT_STANDDOWN_S is 10 s and answers "something wobbled"; this answers "that lane was
+# not available for a full five seconds", which is a fact about the traffic rather than about a
+# sensor. Retrying on the same cadence would give 5 s of signal, 10 s of quiet, 5 s of signal --
+# a slow strobe promising a pass that heavy traffic is not going to allow.
+#
+# 20 s, four times the window. Long enough that persistently blocked traffic produces an occasional
+# ask rather than a rhythm, short enough that a lane which genuinely opens is used. It only ever
+# delays a maneuver, never permits one.
+WINDOW_STANDDOWN_S = 20.0
+
 # ...and the same after a sequence RUNS ALL THE WAY THROUGH, which is a different problem with the
 # same shape.
 #
@@ -283,8 +294,10 @@ class PassingManeuver:
         self.aborts += 1
         self.side = Side.none
         if actuating:
+          # See WINDOW_STANDDOWN_S -- longer than a gate flicker's, because this says the lane was
+          # unavailable rather than that a reading wobbled.
           self._standdown_s = 0.0
-          self._standdown_target = ABORT_STANDDOWN_S
+          self._standdown_target = WINDOW_STANDDOWN_S
         self._to(Phase.waiting if confirmed else Phase.confirming if confirming else Phase.idle)
         return
 

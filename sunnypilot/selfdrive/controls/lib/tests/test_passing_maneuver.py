@@ -14,7 +14,7 @@ mid-signal on the road.
 from cereal import custom
 from openpilot.common.realtime import DT_MDL
 from openpilot.sunnypilot.selfdrive.controls.lib.passing_maneuver import (
-  SIGNAL_WINDOW_S,
+  SIGNAL_WINDOW_S, WINDOW_STANDDOWN_S,
   PassingManeuver, CHANGE_DURATION_S, FINISH_HOLD_S, ABORT_DURATION_S, ABORT_STANDDOWN_S,
 )
 
@@ -476,3 +476,39 @@ class TestSignalFirstThenCheck:
     assert m.phase == Phase.signaling
     run(m, 0.1, wanted=Side.none, clear=Side.none, confirmed=True)
     assert m.phase != Phase.signaling
+
+
+class TestBlockedTrafficDoesNotProduceARhythm:
+  """A lane that is persistently unavailable must not be asked about on a metronome.
+
+  The window expiring says something different from a gate flickering: not "a reading wobbled" but
+  "that lane was not available for five whole seconds". Retrying on the flicker cadence would give
+  5 s of signal, 10 s of quiet, 5 s of signal -- a slow strobe promising a pass heavy traffic is
+  never going to allow.
+  """
+
+  def test_the_stand_down_after_a_window_is_longer_than_after_a_flicker(self):
+    assert WINDOW_STANDDOWN_S > ABORT_STANDDOWN_S
+
+  def test_it_asks_occasionally_rather_than_rhythmically(self):
+    """Sixty seconds against a lane that never opens. On the flicker cadence that is four asks."""
+    m = PassingManeuver()
+    signalling = 0
+    for _ in range(int(60.0 / DT_MDL)):
+      m.update(clear=Side.none, wanted=Side.left, suggested=Side.left, confirming=False,
+               confirmed=True, driver_override=False, actuating=True)
+      signalling += m.phase == Phase.signaling
+    assert m.aborts <= 3, f"asked {m.aborts} times in a minute of blocked traffic"
+    assert signalling * DT_MDL < 20.0, "signalling for a third of the time into a blocked lane"
+
+  def test_a_lane_that_opens_is_still_used(self):
+    """The stand-down only ever delays a maneuver. It must not turn into a refusal."""
+    m = PassingManeuver()
+    run(m, SIGNAL_WINDOW_S + 0.2, wanted=Side.left, clear=Side.none, suggested=Side.left,
+        confirmed=True, actuating=True)
+    assert m.aborts == 1
+    run(m, WINDOW_STANDDOWN_S + 0.2, wanted=Side.none, clear=Side.none, confirmed=False,
+        actuating=True)
+    run(m, m.blinker_lead_s + 0.4, wanted=Side.left, clear=Side.left, suggested=Side.left,
+        confirmed=True, actuating=True)
+    assert m.phase == Phase.changing, "a lane that opened was never used"

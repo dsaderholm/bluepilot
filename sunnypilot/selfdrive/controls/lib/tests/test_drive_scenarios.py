@@ -73,12 +73,15 @@ class TestAnOrdinaryInterstatePass:
     assert det.driver_change_standdown == 0.0
     assert det.suggestion == Side.none
 
-    # 7. Sitting in the left lane with nothing to pass: it wants us back right -- but not for
-    #    THIRTY SECONDS, and that is deliberate rather than slow. The 20 s settle after suggesting
-    #    a pass is what stops a three-lane road turning into a weave, and only once it expires does
-    #    the 10 s clear-lane delay start. Worth stating here because 30 s feels wrong until you
-    #    remember what it is buying.
-    drive(det, 20.0, status=False, **IN_LEFT_LANE)
+    # 7. Sitting in the left lane with nothing to pass: it wants us back right -- but not
+    #    immediately. The 20 s settle after suggesting a pass is what stops a three-lane road
+    #    turning into a weave, and only once it expires does the clear-lane delay start.
+    #
+    #    25 s TOTAL as of 2026-08-09, down from 30: PassingAssistKeepRightDelay went 10 -> 5,
+    #    because "I want the left lane to be like the floor is lava". This block therefore has to
+    #    stop SHORT of the total rather than land on it -- it used to drive to exactly 25 s and
+    #    assert nothing had happened, which was true only while the delay was 10.
+    drive(det, 15.0, status=False, **IN_LEFT_LANE)
     assert det.suggestion == Side.none, "still settling from the pass"
     # Stepped one frame at a time to the MOMENT it asks, rather than driving a fixed block and
     # looking afterwards. A fixed block used to work and no longer does, for a good reason: the

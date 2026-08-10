@@ -459,7 +459,7 @@ DELAY_FRAMES = int(11.0 / DT_MDL)   # clears the delay alone, NOT the age
 # new param. Defaults live in params_keys.h; these mirror them.
 _STUB_PARAM_DEFAULTS = {
   "PassingAssistMinDeficit": 4, "PassingAssistConfirmTime": 1,
-  "PassingAssistKeepRightDelay": 10, "PassingAssistSettleTime": 20,
+  "PassingAssistKeepRightDelay": 5, "PassingAssistSettleTime": 20,
   "PassingAssistMaxDistance": 220,
   "PassingAssistOncomingMemory": 90, "PassingAssistBlinkerLead": 1, "PassingAssistMinApproach": 0, "PassingAssistMinSpeed": 30, "PassingAssistExitStandDown": 45, "PassingAssistCrawlTime": 8, "PassingAssistMinLaneAge": 15,
 }
