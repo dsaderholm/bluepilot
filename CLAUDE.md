@@ -1359,6 +1359,14 @@ unavoidable, the branch whose field has never been written to a log is the one t
   observation of his own device beats my inference about it every time.
 - **Don't check in.** He has given open-ended permission; pick the work and report it done rather
   than closing with "want me to...".
+- **AND DON'T LEAVE WORK PARKED**, which is the same failure from the other side. Stated on
+  2026-08-10: *"After I ask something like 'Is there anything else you want to do before my next
+  drive?', you should say no, because you should have done everything. You shouldn't wait for me to
+  follow up. Why aren't you just doing everything?"* That question should always be answerable with
+  a plain no. Before reporting, sweep: is every finding acted on, is every number that was added
+  actually rendered somewhere, is the device updated, is anything still sitting in a note as "worth
+  doing later" that could be done now. Finding a real problem and describing it instead of fixing
+  it is not a report, it is a handoff he did not ask for.
 - **Shell commands are fine.** What he dislikes is running them *in the car*, in 100-degree heat.
   Diagnostics he can SSH into at home are welcome; "run this on your next drive" is not.
 - **Talk about the finished system.** Do not preface answers with what does not actuate yet; he is
