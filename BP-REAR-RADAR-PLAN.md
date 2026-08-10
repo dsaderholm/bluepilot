@@ -1100,8 +1100,39 @@ Putting the controller at the front is correct, for reasons beyond convenience:
 - **Bus 1 is physically there.** `fordcan.py` fixes the numbering — `main` = 0, `radar` = **1**,
   `camera` = 2 — so the front radar's own CAN pins *are* bus 1. No hunting.
 
-Wire count is the same either way: four conductors run the length of the car regardless of which
-end the controller sits at. So take the end with power, shelter and access.
+**Corrected 2026-08-09.** Wire count is NOT the same either way, and the claim that it was had an
+unstated assumption -- that there is no usable supply in the back. The owner pointed out there is:
+
+> *"My thought was to have the radar go to the teensy in the trunk and them both be powered by the
+> same power that drives the amp, then run CAN along the bottom of my car to the front radar."*
+
+An amplifier feed is a switched, fused, high-current source already in the trunk. Power the rear
+radar from it and NOTHING carries 12 V forward -- the run drops from four conductors to two.
+
+**But the controller still belongs at the front, and now for an electrical reason rather than a
+convenience one.** Whichever end it sits at, ONE pair goes the length of the car; the question is
+WHICH bus that pair belongs to:
+
+| Controller at | The long pair is | Why it matters |
+|---|---|---|
+| **Front** | the private rear-radar bus | Two nodes, terminated at both ends, dedicated. Long is fine -- see the hundred-meter figure below. |
+| **Trunk** | the **bus 1 tap** | A ~5 m UNTERMINATED SPUR off a live bus. It cannot be terminated without breaking bus 1's own termination, and bus 1 is what the working front radar and ACC run on. |
+
+That is the whole argument. "Keep the bus 1 stub short" below is not a style note. The private bus
+is ours to build correctly; bus 1 is a working bus this project must not disturb.
+
+**So: controller at the front, radar in the back on amp-derived power, one twisted pair between
+them.** Two conductors, and the long run is on the bus that tolerates it.
+
+Two cautions on the amp tap, neither optional:
+
+- **Take a separately fused feed** rather than sharing the amplifier's circuit.
+- **Check whether that lug is CONSTANT 12 V.** Most amp installs run constant power with only a
+  remote turn-on wire switched. Constant power means the radar never sleeps and sits draining the
+  battery. Switch it off the remote wire through a relay, or find a switched source.
+
+**Not along the underside.** Road spray, salt, stones, exhaust heat and chafing, for no gain -- the
+rocker channel inside is the same path and protected. See the route below.
 
 ### How those four conductors physically get to the back -- 2026-08-09
 
