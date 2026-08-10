@@ -503,6 +503,30 @@ Units have a split that matters, and it is **not** a style choice:
 Dates in comments: **ISO `YYYY-MM-DD`**. Not because it is US style — it is not — but because
 `08-04` is genuinely ambiguous across readers and this file already records dated decisions.
 
+## TSR, and the region change that is not worth repeating
+
+**Setting the region in FORScan produced a lot of DTCs.** His words, 2026-08-09: *"when I set
+region and stuff, I got hella DTCs."* That path has been tried and it cost more than it returned.
+Do not propose it again as a way to make TSR work, and do not treat the region as an unexplored
+lever -- it is explored, and the answer was no.
+
+What the camera actually does, measured from route 00000333 on 2026-08-09 rather than assumed:
+
+- `Traffic_RecognitnData` (0x3CD) IS on the bus -- 366 frames on bus 2, forwarded to bus 0. The
+  IPMA transmits it.
+- `vLimit1` is NOT constant: 255 (the no-data sentinel) for most of the drive, and a real value for
+  roughly 10% of it, with `vLimit1Permanent` flipping in lockstep. So the camera does read signs.
+- Everything else in the message is pinned across 36,000 frames -- `tsrStatus`, `vLimit1Status`,
+  `vLimit2`, `vLimitUnit`, the overtake and warning fields. One field doing real work, the rest idle.
+
+**The IPC is a separate question and an irrelevant one.** He asked and was told "the US IPC does not
+support TSR, you have to replace it." That is about the CLUSTER drawing a sign, which he does not
+want: *"I don't care about TSR being on my IPC."* The camera reading signs and the cluster
+displaying them are different modules, and the first is the only one Speed Limit Assist needs.
+
+There is also an on-screen TSR status readout already built. Check what it shows before writing new
+diagnostics for the same question.
+
 ## Car
 
 2020 Ford Fusion Titanium AWD with retrofitted Edge ADAS parts (Edge PSCM, rack, IPMA camera, CCM
