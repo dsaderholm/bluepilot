@@ -236,6 +236,20 @@ DEFAULT_MIN_SPEED_MPH = 30
 # passing assist doesn't pass, but I still want it to take over." So a left-hand change to pass
 # something is back to normal within seconds.
 SETTLE_AFTER_CHANGE_S = 4
+
+# Blocked reasons that mean THE FEATURE WAS NOT RUNNING, as opposed to it running and declining.
+#
+# The distinction matters because the agreement score is the number that decides whether this is
+# ever worth letting steer, and on 2026-08-09 it read 2 of 106 lifetime -- which sounds like a
+# system that disagrees with its driver. The most common miss reason on that drive was `tooSlow`:
+# the car was under PassingAssistMinSpeed, where passing assist is deliberately switched off. A
+# lane change made on a surface street counted against a feature that was not consulted.
+#
+# nothingSlower is deliberately NOT here. That one is a live calibration question -- it means the
+# feature WAS running and judged the lead fast enough -- and _record_driver_pass exists partly to
+# surface exactly those.
+OFF_BY_DESIGN = frozenset({int(Blocked.disabled), int(Blocked.notEngaged), int(Blocked.tooSlow),
+                           int(Blocked.suspended)})
 DEFAULT_EXIT_STANDDOWN_S = 45
 
 # ...and the same again for a maneuver made with NO BLINKER AT ALL. "I usually use sunnypilot
@@ -749,6 +763,11 @@ class PassingAssistDetector:
     self.driver_pass_lead_s = 0.0
     self._suggest_held_s = 0.0
     self._miss_reasons: dict[int, int] = {}
+    # Passes made while the feature was actually ELIGIBLE to have an opinion. See
+    # OFF_BY_DESIGN: the agreement score is meaningless measured against passes it was
+    # switched off for, and 2 of 106 was being read as "it disagrees with him" when a large part of
+    # it is "it was not running".
+    self.driver_passes_eligible = 0
     # See missedDeficitMph -- what the deficit actually was on the passes the threshold rejected.
     self.missed_deficit_mph = 0.0
     self._missed_deficit_n = 0
@@ -1474,7 +1493,13 @@ class PassingAssistDetector:
         "driverPasses": int(self.driver_passes),
         "driverPassesAgreed": int(self.driver_passes_agreed),
         "driverPassLead": round(self.driver_pass_lead_s, 1),
+        # A REASON CODE, not a count, and the key name has misled a reader of this record more
+        # than once. Kept for continuity with the archived history; the unambiguous name is
+        # alongside it.
         "driverPassMiss": int(self.driver_pass_miss_reason),
+        "driverPassMissReason": int(self.driver_pass_miss_reason),
+        # See OFF_BY_DESIGN -- the denominator that makes driverPassesAgreed mean something.
+        "driverPassesEligible": int(self.driver_passes_eligible),
         "missedDeficit": round(self.missed_deficit_mph, 1),
         "lifetimeDrives": int(self.lifetime[0]),
         "lifetimePasses": int(self.lifetime[1]),
@@ -1717,6 +1742,11 @@ class PassingAssistDetector:
     flatters itself by discarding its own misses is worth nothing.
     """
     self.driver_passes += 1
+    # See OFF_BY_DESIGN. The total still counts everything -- "a metric that flatters itself by
+    # discarding its own misses is worth nothing" -- but the DENOMINATOR for agreement has to be
+    # passes it could have had an opinion about, or the score measures the minimum speed setting.
+    if int(self.blocked_by) not in OFF_BY_DESIGN:
+      self.driver_passes_eligible += 1
     if self.suggestion == Side.left and self.reason == Reason.passing:
       self.driver_passes_agreed += 1
       # Closes the open episode so it is not also counted as ignored -- the driver-active gate
@@ -2657,6 +2687,7 @@ class PassingAssistDetector:
     passingAssist.driverPassesAgreed = min(pa.driver_passes_agreed, 65535)
     passingAssist.driverPassLeadSeconds = float(pa.driver_pass_lead_s)
     passingAssist.driverPassMissReason = pa.driver_pass_miss_reason
+    passingAssist.driverPassesEligible = min(pa.driver_passes_eligible, 65535)
     passingAssist.missedDeficitMph = float(pa.missed_deficit_mph)
     passingAssist.oncomingSeenSeconds = float(pa.oncoming_seen_seconds)
     passingAssist.oncomingRememberedSeconds = float(pa.oncoming_remembered_seconds)

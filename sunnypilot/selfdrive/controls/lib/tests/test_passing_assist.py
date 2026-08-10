@@ -3418,3 +3418,42 @@ class TestWhatTheSignalWaitsFor:
     det = run(PassingAssistDetector(), STUCK_FRAMES, probs=(0.1, 0.99, 0.99, 0.1),
               edges=(-2.2, 2.4))
     assert det.wanted_side == Side.none
+
+
+class TestTheAgreementScoreHasTheRightDenominator:
+  """2 of 106 lifetime reads as "it disagrees with its driver". A large part of it was "it was not
+  running": the most common miss reason on the 2026-08-09 drive was `tooSlow`, meaning the car was
+  under PassingAssistMinSpeed, where the feature is deliberately off. A lane change on a surface
+  street counted against a feature that was never consulted.
+
+  The total still counts everything, because "a metric that flatters itself by discarding its own
+  misses is worth nothing". What changes is that there is now a denominator to read the agreement
+  against.
+  """
+
+  @staticmethod
+  def _pass_at(blocked):
+    det = PassingAssistDetector()
+    det.blocked_by = blocked
+    det._record_driver_pass()
+    return det
+
+  def test_a_pass_below_the_minimum_speed_is_not_held_against_it(self):
+    det = self._pass_at(Blocked.tooSlow)
+    assert det.driver_passes == 1, "still counted in the total"
+    assert det.driver_passes_eligible == 0, "counted against a feature that was switched off"
+
+  def test_nor_one_made_with_the_feature_disabled_or_disengaged(self):
+    for reason in (Blocked.disabled, Blocked.notEngaged, Blocked.suspended):
+      assert self._pass_at(reason).driver_passes_eligible == 0, f"counted while {reason}"
+
+  def test_but_nothingSlower_IS_held_against_it(self):
+    """The live calibration question, and the whole reason misses are recorded. It means the
+    feature was running and judged the lead fast enough -- exactly what needs surfacing."""
+    det = self._pass_at(Blocked.nothingSlower)
+    assert det.driver_passes_eligible == 1, "discarded the miss that matters most"
+
+  def test_and_so_is_a_gate_refusing(self):
+    """It was running, it had an opinion, and the opinion was no. That is a real disagreement."""
+    for reason in (Blocked.noLaneAvailable, Blocked.adjacentSlow, Blocked.oncomingLane):
+      assert self._pass_at(reason).driver_passes_eligible == 1, f"discarded a real refusal: {reason}"

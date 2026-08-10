@@ -770,6 +770,12 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     # a right-hand signal which could be an exit, a keep-right or a pass.
     driverPasses @69 :UInt16;
     driverPassesAgreed @70 :UInt16;      # ...where it had already suggested that same side
+    # Of those, the ones the feature was ELIGIBLE to have an opinion about. See OFF_BY_DESIGN in
+    # passing_assist.py: a pass made below the minimum speed, or with the feature off, counted
+    # against it in the agreement score -- which is the number deciding whether this is ever worth
+    # letting steer, and it read 2 of 106 while a large share of the denominator was drives it was
+    # switched off for.
+    driverPassesEligible @97 :UInt16;
     driverPassLeadSeconds @71 :Float32;  # how long it had been suggesting before the driver acted
     driverPassMissReason @72 :Blocked;   # the gate that most often stopped it when it disagreed
 

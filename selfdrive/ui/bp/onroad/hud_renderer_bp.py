@@ -616,7 +616,13 @@ class HudRendererBP(HudRendererSP):
       # item now, so it competes on merit instead of riding along.
       if pa.driverPasses:
         agreed = pa.driverPassesAgreed
-        line = f"{pa.driverPasses} passes, {agreed} agreed"
+        # AGAINST THE ELIGIBLE COUNT, not the total. A pass made below the minimum speed or with
+        # the feature off is not a disagreement, and counting it as one made the readiness score
+        # read far worse than the feature deserved. The total is still shown when they differ, so
+        # nothing is hidden -- see driverPassesEligible in custom.capnp.
+        eligible = pa.driverPassesEligible
+        line = (f"{eligible} passes, {agreed} agreed" if eligible == pa.driverPasses else
+                f"{eligible} of {pa.driverPasses} passes, {agreed} agreed")
         if agreed:
           line += f" ({pa.driverPassLeadSeconds:.0f}s early)"
         lines.append(line)
@@ -741,7 +747,13 @@ class HudRendererBP(HudRendererSP):
         return False
       lines = []
       if int(d.get("driverPasses", 0)):
-        line = f"you passed {int(d['driverPasses'])}, agreed {int(d['driverPassesAgreed'])}"
+        # See driverPassesEligible. Older archived drives predate the field; fall back to the
+        # total rather than reading a missing key as zero, which would report every drive before
+        # today as having had no eligible passes at all.
+        elig = int(d.get("driverPassesEligible", d.get("driverPasses", 0)))
+        tot = int(d['driverPasses'])
+        line = (f"you passed {elig}, agreed {int(d['driverPassesAgreed'])}" if elig == tot else
+                f"you passed {elig} of {tot}, agreed {int(d['driverPassesAgreed'])}")
         if int(d.get("driverPassesAgreed", 0)):
           line += f" ({float(d['driverPassLead']):.0f}s early)"
         lines.append(line)
