@@ -1130,9 +1130,13 @@ Putting the controller at the front is correct, for reasons beyond convenience:
   had to know the pinout, so the bus 1 conductors are identified rather than guessed at, and adding
   a breakout is a known job rather than an exploratory one.
 
-  **Worth checking against §9a before buying anything:** he still has the spare CAN pair from the
-  old ESR install, and where that pair terminates at the comma end was already listed there as
-  unknown. If it lands somewhere useful it may serve as the bus 1 tap with no new conductor at all.
+  **The spare ESR pair is NOT the answer -- settled 2026-08-09.** *"That spare CAN from the ESR
+  doesn't reach the comma as far as I know, and it's probably full."* So §9a's open question is
+  closed in the negative: it is not a free bus 1 tap, and nothing should be planned around it.
+  A new conductor is needed for the tap, short, from the harness to the controller.
+
+  He also knows his own harness: *"I know exactly what cables are what on my harness, don't
+  worry."* Identifying the bus 1 pair is therefore not a task in this plan.
 
 **Corrected 2026-08-09.** Wire count is NOT the same either way, and the claim that it was had an
 unstated assumption -- that there is no usable supply in the back. The owner pointed out there is:
