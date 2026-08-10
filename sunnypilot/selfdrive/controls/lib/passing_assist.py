@@ -2606,6 +2606,9 @@ class PassingAssistDetector:
     passingAssist.maneuver = live.phase
     passingAssist.maneuverSeconds = float(live.phase_seconds)
     passingAssist.maneuverSide = live.side
+    # See `actuating` in custom.capnp. The car side reads blinkerWouldBeOn and maneuverSide, which
+    # the dry run publishes on every drive; this is what separates a command from a description.
+    passingAssist.actuating = bool(pa.actuating)
     passingAssist.maneuverReason = live_reason
     passingAssist.blinkerWouldBeOn = live.blinker_on
     passingAssist.steeringWouldBeActive = live.steering_active

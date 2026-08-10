@@ -632,6 +632,14 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     maneuverSeconds @42 :Float32;   # time in the current phase
     maneuverSide @43 :Side;         # the side the sequence committed to
     blinkerWouldBeOn @44 :Bool;      # on through the crossing, out when it completes
+    # IS THIS DRIVING THE CAR, or narrating what it would do? The one bit the car side cannot work
+    # out for itself, and the only thing that was missing to make the signal real.
+    #
+    # blinkerWouldBeOn and maneuverSide are published in BOTH modes -- they are the dry run's whole
+    # output -- so a consumer that acted on them alone would command the signal on every drive since
+    # the feature was written. This says which it is. See PassingAssistDetector.may_actuate: false
+    # whenever the rear sensor on the side being moved into is unavailable, which today is always.
+    actuating @96 :Bool;
     steeringWouldBeActive @45 :Bool;
 
     # Sequences that reached `signaling` and then backed out -- a blinker shown to traffic behind

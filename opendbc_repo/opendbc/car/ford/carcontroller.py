@@ -12,6 +12,7 @@ from openpilot.common.params import Params
 from opendbc.sunnypilot.car.ford.lateral_curv_ext import LateralCurvExt, PrimaryLateralControl
 from opendbc.sunnypilot.car.ford.lateral_angle_ext import LateralAngleExt
 from opendbc.sunnypilot.car.ford.blinker_test_ext import BlinkerTestExt
+from opendbc.sunnypilot.car.ford.passing_assist_blinker import PassingAssistBlinker
 from opendbc.sunnypilot.car.ford.lane_display_test_ext import LaneDisplayTestExt
 from opendbc.sunnypilot.car.ford.longitudinal_ext import LongitudinalExt
 from opendbc.sunnypilot.car.ford.hud_ext import HudExt
@@ -83,6 +84,8 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
     LongitudinalExt.__init__(self, CP, CP_SP)
     HudExt.__init__(self, CP, CP_SP)
     BlinkerTestExt.__init__(self)
+    # FusionPilot: the same blink engine, driven by the planner instead of a button.
+    self.pa_blinker = PassingAssistBlinker()
     LaneDisplayTestExt.__init__(self)
     # ICBM: base class sets state used at runtime, init for robustness
     # IntelligentCruiseButtonManagementInterface.__init__(self, CP, CP_SP)
@@ -139,6 +142,13 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
     # explicitly requested, standstill-gated pulse returns anything else -- so nothing openpilot
     # does on the road, a lane change or a revert included, moves his blinker.
     turn_signal = BlinkerTestExt.update_blinker_test(self, CS)
+    # FusionPilot: and the passing-assist lane change, which is the OTHER thing that commands it.
+    # Only when the bench test wants nothing, so the two can never contend for the switch -- the
+    # test is standstill-only and a lane change is not, so in practice they never overlap anyway.
+    # Returns SIGNAL_NONE unless the planner published actuating AND blinkerWouldBeOn; see
+    # passing_assist_blinker.py, and `actuating` in custom.capnp for why that bit has to exist.
+    if not turn_signal:
+      turn_signal = self.pa_blinker.update(self.sm, getattr(CS, 'steering_data_ts', 0))
     # update_blinker_test rate-limits itself to BUTTONS_STEP -- see its docstring. The rate lives
     # there rather than here because this file cannot be tested offline, and sending this frame too
     # fast is precisely the bug that reached the car.
