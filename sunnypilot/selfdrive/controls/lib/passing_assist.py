@@ -664,6 +664,8 @@ class PassingAssistDetector:
     # behave exactly as the plain test it replaced, because in phase 1 every blinker on the car
     # IS the driver's. One flag, flipped when the lamp is actually wired, and the fix is already
     # in place and tested rather than remembered.
+    # See PassingAssistActuate. The SWITCH; may_actuate() is the gate that actually decides.
+    self.actuate_enabled = True
     self.actuating = False
     # See overtakenSeconds in custom.capnp -- the longest either lane has gone without anyone
     # passing us. Tracked at drive level because the per-side clock resets on every overtake, so the
@@ -790,6 +792,7 @@ class PassingAssistDetector:
       self.keep_right_enabled = self.params.get_bool("PassingAssistKeepRight")
       self.keep_right_delay_s = float(self.params.get("PassingAssistKeepRightDelay", return_default=True))
       self.min_lane_age_s = float(self.params.get("PassingAssistMinLaneAge", return_default=True))
+      self.actuate_enabled = bool(self.params.get_bool("PassingAssistActuate"))
       self.adjacent_enabled = self.params.get_bool("PassingAssistAdjacentLane")
       self.oncoming_veto = self.params.get_bool("PassingAssistOncomingVeto")
       self.strict_two_way = self.params.get_bool("PassingAssistStrictTwoWay")
@@ -2023,6 +2026,29 @@ class PassingAssistDetector:
     else:
       self.oncoming_remembered_seconds += DT_MDL
 
+  def may_actuate(self, side: int) -> bool:
+    """May a maneuver into THIS side command anything? Consult before every commanded output.
+
+    PassingAssistActuate is the switch. This is the gate, and the distinction matters: the switch is
+    the driver's stated intent, the gate is whether the car can currently back that intent with a
+    sensor. A switch that were also the gate would mean turning it on before the hardware exists
+    silently enables a lane change with no way to see what is arriving behind.
+
+    REAR COVERAGE ON THE SIDE BEING MOVED INTO. Not RearApproach.available, which is left OR right
+    -- the permissive combiner. With one sensor working that answers yes for both sides and would
+    allow a move into the side with no coverage at all. Suggesting into it is acceptable, because
+    the driver still looks; MOVING into it is the exact failure this module exists to prevent.
+
+    Side.none answers False, so "no side chosen" can never be read as permission.
+    """
+    if not self.actuate_enabled:
+      return False
+    if side == Side.left:
+      return self.rear.left.available
+    if side == Side.right:
+      return self.rear.right.available
+    return False
+
   def _own_blinker(self) -> int:
     """The side WE are lighting the blinker for, or none.
 
@@ -2142,6 +2168,13 @@ class PassingAssistDetector:
     except KeyError:
       car_state_bp = None
     self.rear.update(sm)
+    # Both sides, because the maneuver timings in passing_maneuver.py are properties of the whole
+    # sequence rather than of a side. may_actuate() is what decides whether a PARTICULAR move is
+    # allowed, and it is the one that must be consulted before anything is commanded.
+    # BOTH sides. The stand-down timings this feeds are properties of the sequence, not of a side,
+    # and a flag that flipped with whichever side happened to be chosen would make them ambiguous.
+    # Requiring full coverage is also not a practical restriction: one rear radar covers both.
+    self.actuating = self.may_actuate(Side.left) and self.may_actuate(Side.right)
     # Runs every cycle, before any gate. What the next lane over is doing is worth logging on the
     # frames where nothing is suggested too -- that is how the band and the debounce get fitted.
     if self.adjacent_enabled:

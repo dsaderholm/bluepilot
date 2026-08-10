@@ -3326,3 +3326,51 @@ class TestSuggestionHold:
     d._hold_suggestion()
     assert d.suggestion == Side.right
     assert self._dip(d, Blocked.noLaneAvailable) == Side.right
+
+
+class TestNothingActuatesWithoutRearCoverage:
+  """The gate between "the driver asked for this" and "the car can back it with a sensor".
+
+  PassingAssistActuate ships ON, which is only safe because the switch is not the gate. With no
+  rear radar fitted every side answers unavailable, so the feature reads enabled and commands
+  nothing. When one is fitted it starts working -- which is the point, and is a thing the owner
+  does deliberately with a wire in his hand rather than something that arrives in an update.
+  """
+
+  @staticmethod
+  def _det(enabled=True, left=False, right=False):
+    d = PassingAssistDetector()
+    d.actuate_enabled = enabled
+    d.rear.left.available = left
+    d.rear.right.available = right
+    return d
+
+  def test_no_rear_sensor_means_no_actuation_on_either_side(self):
+    d = self._det()
+    assert not d.may_actuate(Side.left)
+    assert not d.may_actuate(Side.right)
+
+  def test_coverage_is_required_on_the_SIDE_BEING_MOVED_INTO(self):
+    """THE ONE THAT MATTERS. RearApproach.available is left OR right, so a single working sensor
+    would answer yes for both sides. Moving into the uncovered one is the failure this prevents."""
+    d = self._det(left=True, right=False)
+    assert d.may_actuate(Side.left)
+    assert not d.may_actuate(Side.right), "permitted a move into a side with no rear coverage"
+
+  def test_the_switch_still_wins_when_it_is_off(self):
+    d = self._det(enabled=False, left=True, right=True)
+    assert not d.may_actuate(Side.left)
+    assert not d.may_actuate(Side.right)
+
+  def test_no_side_is_never_permission(self):
+    """Side.none must not read as "nothing objects"."""
+    d = self._det(left=True, right=True)
+    assert not d.may_actuate(Side.none)
+
+  def test_the_sequence_flag_needs_both_sides(self):
+    """`actuating` drives stand-down TIMINGS, which belong to the sequence rather than to a side.
+    One sensor working must not flip the timings into their actuating meaning."""
+    d = self._det(left=True, right=False)
+    assert not (d.may_actuate(Side.left) and d.may_actuate(Side.right))
+    d = self._det(left=True, right=True)
+    assert d.may_actuate(Side.left) and d.may_actuate(Side.right)

@@ -341,6 +341,18 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // than a merely wasted one -- the camera cannot tell an oncoming lane from a passing lane, so
     // without this every two-lane road clears a pass into head-on traffic.
     {"PassingAssistOncomingVeto", {PERSISTENT | BACKUP, BOOL, "1"}},
+    // FusionPilot: let passing assist SIGNAL AND MAKE the lane change itself, rather than
+    // describing one. Ships ON, and the reason that is safe is that the switch is not what gates
+    // it -- REAR SENSING IS. Nothing actuates on a side whose rear sensor is unavailable, and with
+    // no rear radar fitted that is both sides, so this reads on and does nothing until the hardware
+    // exists. See PassingAssistDetector.may_actuate.
+    //
+    // Per-side rather than "is a rear sensor fitted", deliberately. RearApproach.available is
+    // left OR right, which is the permissive combiner: with one sensor working it would answer yes
+    // and allow a move into the side that has no coverage at all. For a suggestion that is
+    // acceptable, since the driver still checks. For a maneuver it is the exact failure this whole
+    // module is built to avoid -- unavailable must never read as clear.
+    {"PassingAssistActuate", {PERSISTENT | BACKUP, BOOL, "1"}},
     // How long one sighting keeps the road classified as two-way, in seconds. Long on purpose:
     // meeting a car is evidence about the ROAD, not an event, and on a quiet two-lane road the
     // gaps between meetings are exactly when a wrong suggestion would look most plausible.

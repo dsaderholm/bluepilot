@@ -191,6 +191,15 @@ class PassingAssistSettingsLayout(Widget):
                      "reporting, the onroad panel says so rather than assuming the lane is clear."), "PassingAssistAdjacentLane"),
       param="PassingAssistAdjacentLane")
 
+    self._actuate = toggle_item_sp(
+      title=tr("Make The Lane Change Itself"),
+      description=recommended(tr("Signal and perform the pass, instead of only saying it would. "
+                     "REAR SENSING IS WHAT GATES THIS, not this switch: nothing moves into a side "
+                     "whose rear sensor is unavailable, so with no rear radar fitted this reads on "
+                     "and does nothing. You still supervise and can take over at any point - the "
+                     "stalk, the brake or the wheel ends it immediately."), "PassingAssistActuate"),
+      param="PassingAssistActuate")
+
     # --- oncoming traffic ---
     self._oncoming_veto = toggle_item_sp(
       title=tr("Never Pass Into Oncoming Traffic"),
@@ -354,6 +363,7 @@ class PassingAssistSettingsLayout(Widget):
       self._adjacent_lane,
 
       SectionHeader(tr("Oncoming Traffic")),
+      self._actuate,
       self._oncoming_veto,
       self._oncoming_memory,
       self._strict_two_way,
