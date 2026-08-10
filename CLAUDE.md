@@ -505,10 +505,15 @@ Dates in comments: **ISO `YYYY-MM-DD`**. Not because it is US style — it is no
 
 ## TSR, and the region change that is not worth repeating
 
-**Setting the region in FORScan produced a lot of DTCs.** His words, 2026-08-09: *"when I set
-region and stuff, I got hella DTCs."* That path has been tried and it cost more than it returned.
+**Setting the region in FORScan produced a lot of DTCs, and it is now back to UNSPECIFIED.** His
+words, 2026-08-09: *"when I set region and stuff, I got hella DTCs"* and *"the region is set to
+unspecified or something like that."* That path has been tried and it cost more than it returned.
 Do not propose it again as a way to make TSR work, and do not treat the region as an unexplored
 lever -- it is explored, and the answer was no.
+
+**And it does not need to be set**, which is the part worth noticing. Everything below was measured
+with the region UNSPECIFIED. The camera reads signs anyway; what the region appears to gate is the
+STATUS enumerants, not the detection.
 
 What the camera actually does, measured from route 00000333 on 2026-08-09 rather than assumed:
 
