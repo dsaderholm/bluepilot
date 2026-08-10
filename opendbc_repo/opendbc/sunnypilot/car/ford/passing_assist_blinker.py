@@ -103,7 +103,9 @@ class PassingAssistBlinker:
       pa = sm['longitudinalPlanSP'].passingAssist
       if not (bool(pa.actuating) and bool(pa.blinkerWouldBeOn)):
         return 0
-      return int(pa.maneuverSide)
+      # .raw, NOT int() -- see below. int() on a live capnp enum is a TypeError on the device,
+      # and the broad except here would have swallowed it into a silently dead blinker.
+      return getattr(pa.maneuverSide, 'raw', pa.maneuverSide)
     except Exception:  # noqa: BLE001 - no planner is not a reason to break the car controller
       return 0
 

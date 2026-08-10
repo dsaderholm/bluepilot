@@ -214,10 +214,15 @@ class HudExt:
         # A pass is on the table: the machine is past idle, or a suggestion is standing. `waiting`
         # counts and matters most -- that is the state where a gate is what is stopping us, and
         # oncoming is one of the gates.
-        in_play = phase != "idle" or int(pa.suggestion) != 0
+        # .raw, NOT int(). A capnp enum off a live message is a _DynamicEnum and int() raises
+        # TypeError on the device -- which the broad except below turned into a cluster
+        # display that silently never worked. Found 2026-08-10 when the same mistake was
+        # caught in new code by test_no_int_on_capnp_enums, whose COVERED list did not
+        # reach opendbc. It does now.
+        in_play = phase != "idle" or getattr(pa.suggestion, 'raw', pa.suggestion) != 0
         passing = fordcan_ext.ClusterPassing(
-          suggestion=int(pa.suggestion),
-          maneuver_side=int(pa.maneuverSide),
+          suggestion=getattr(pa.suggestion, 'raw', pa.suggestion),
+          maneuver_side=getattr(pa.maneuverSide, 'raw', pa.maneuverSide),
           maneuver_moving=moving,
           pass_in_play=in_play,
           oncoming_left=bool(pa.adjacentLeft.oncoming),

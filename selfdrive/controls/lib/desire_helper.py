@@ -2,6 +2,8 @@ from cereal import log, custom
 from openpilot.common.constants import CV
 from openpilot.common.realtime import DT_MDL
 from openpilot.sunnypilot.selfdrive.controls.lib.auto_lane_change import AutoLaneChangeController, AutoLaneChangeMode
+from openpilot.sunnypilot.selfdrive.controls.lib.passing_assist_desire import (
+  request_side as pa_request_side, NONE as PA_NONE, LEFT as PA_LEFT)
 from openpilot.sunnypilot.selfdrive.controls.lib.lane_turn_desire import LaneTurnController
 # BluePilot: blinker-based lane change pause during turn signals
 from openpilot.common.bluepilot import is_bluepilot
@@ -60,10 +62,17 @@ class DesireHelper:
       self._bp_blinker_pause = BPBlinkerPause()
 
   @staticmethod
-  def get_lane_change_direction(CS):
+  def get_lane_change_direction(CS, pa_side=PA_NONE):
+    # BluePilot: THE REQUEST DECIDES THE SIDE WHEN THERE IS ONE. Stock reads "left if the left
+    # blinker is on, else RIGHT" -- right by default, because a stalk press is the only way to get
+    # here and one of the two is always set. A commanded signal is invisible to carState (panda
+    # drops our own TX), so a left request would arm the machine and then be steered RIGHT, into
+    # whatever is there. On the outside lane that is the shoulder. See passing_assist_desire.
+    if pa_side != PA_NONE:
+      return LaneChangeDirection.left if pa_side == PA_LEFT else LaneChangeDirection.right
     return LaneChangeDirection.left if CS.leftBlinker else LaneChangeDirection.right
 
-  def update(self, carstate, lateral_active, lane_change_prob):
+  def update(self, carstate, lateral_active, lane_change_prob, longitudinal_plan_sp=None):
     self.alc.update_params()
     self.lane_turn_controller.update_params()
     v_ego = carstate.vEgo
@@ -87,7 +96,12 @@ class DesireHelper:
     # DRIVER's blinker everywhere in this function, with our own commanded signal subtracted --
     # exactly what PassingAssistDetector._driver_override already does for its own gates, and for
     # exactly the same reason. Do that once, here, rather than patching the branches that bite.
-    one_blinker = carstate.leftBlinker != carstate.rightBlinker
+    # BluePilot: passing assist's own request counts as a blinker, because it IS one -- the lamp is
+    # lit and only carState cannot see it. Everything downstream then treats it exactly like a stalk
+    # press: the nudgeless timer, the blind-spot check and the torque override all apply unchanged.
+    # See passing_assist_desire for why it cannot outlive the maneuver and re-arm itself.
+    pa_side = pa_request_side(longitudinal_plan_sp) if longitudinal_plan_sp is not None else PA_NONE
+    one_blinker = (carstate.leftBlinker != carstate.rightBlinker) or pa_side != PA_NONE
     # BluePilot: see AutoLaneChangeController.should_cancel -- the blinker on this car turns itself
     # off after its one-touch flashes, and how long it was on is what separates that from a cancel.
     self.alc.update_blinker_timer(one_blinker, carstate.steeringPressed)
@@ -108,12 +122,12 @@ class DesireHelper:
         self.lane_change_state = LaneChangeState.preLaneChange
         self.lane_change_ll_prob = 1.0
         # Initialize lane change direction to prevent UI alert flicker
-        self.lane_change_direction = self.get_lane_change_direction(carstate)
+        self.lane_change_direction = self.get_lane_change_direction(carstate, pa_side)
 
       # LaneChangeState.preLaneChange
       elif self.lane_change_state == LaneChangeState.preLaneChange:
         # Update lane change direction
-        self.lane_change_direction = self.get_lane_change_direction(carstate)
+        self.lane_change_direction = self.get_lane_change_direction(carstate, pa_side)
 
         torque_applied = carstate.steeringPressed and \
                          ((carstate.steeringTorque > 0 and self.lane_change_direction == LaneChangeDirection.left) or
