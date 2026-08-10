@@ -23,7 +23,7 @@ Four things here can be wrong in ways a drive would not reveal:
 from types import SimpleNamespace as NS
 
 from openpilot.sunnypilot.selfdrive.controls.lib.adjacent_lane import (
-  ONCOMING_FRAMES, MIN_ONCOMING_MS, OVERTAKE_FRAMES, SAME_DIRECTION_FRAMES,
+  ONCOMING_FRAMES, ONCOMING_WINDOW_S, MIN_ONCOMING_MS, OVERTAKE_FRAMES, SAME_DIRECTION_FRAMES,
   SAME_DIRECTION_WINDOW_S,
   AdjacentLane, AdjacentLaneSide, ADJACENT_MIN_M, ADJACENT_MAX_M, DEBOUNCE_FRAMES, MIN_MOVING_MS,
   ONCOMING_MAX_M, SAME_DIRECTION_MIN_FRACTION, path_offset, ground_speed,
@@ -1213,3 +1213,65 @@ class TestTheFallbackReachesPastAMedian:
     for _ in range(50):
       adj.update(FakeSM([track(90, 7.4, v_rel=self.ONCOMING)], **self.NO_EDGE), V_EGO, MAX_D)
     assert len(adj.oncoming_lat_hist) == before
+
+
+class TestTheOverlayWaitsForCorroboration:
+  """"I also saw way more false ones."
+
+  Measured the same drive: 372 oncoming-speed returns across the whole band on a DIVIDED highway,
+  where none of them can be real, against 0.1 s of the veto actually firing. The corroboration was
+  working; the DISPLAY was not asking it, so the driver saw every unbelieved return as a marker
+  while the decision layer correctly ignored them.
+  """
+
+  ONCOMING = -27.0 - V_EGO
+
+  def test_one_return_is_not_drawn(self):
+    """The whole point. A single sighting sets `oncoming` -- it must not set the drawn flag."""
+    adj = AdjacentLane()
+    adj.update(FakeSM([track(90, 3.7, v_rel=self.ONCOMING)]), V_EGO, MAX_D)
+    assert adj.left.oncoming, "the sighting itself is still recorded"
+    assert not adj.left.oncoming_corroborated, "drew a marker on one unbelieved return"
+
+  def test_it_is_drawn_once_the_messages_agree(self):
+    """A real oncoming vehicle closes at 120+ mph and is tracked across dozens of messages, so
+    this costs a genuine sighting nothing."""
+    adj = upd(AdjacentLane(), FakeSM([track(90, 3.7, v_rel=self.ONCOMING)]), V_EGO, MAX_D)
+    assert adj.left.oncoming_corroborated
+
+  def test_it_clears_with_the_sighting_rather_than_latching(self):
+    """It marks a LIVE believed sighting. The 90 s memory is a separate thing and must not be
+    drawn -- a marker over empty tarmac for a minute and a half is a lie about position."""
+    adj = upd(AdjacentLane(), FakeSM([track(90, 3.7, v_rel=self.ONCOMING)]), V_EGO, MAX_D)
+    assert adj.left.oncoming_corroborated
+    adj.update(FakeSM([]), V_EGO, MAX_D)
+    assert not adj.left.oncoming_corroborated
+    assert adj.left.oncoming_seconds > 0.0, "the veto memory is unaffected"
+
+  def test_sparse_noise_never_corroborates(self):
+    """What the 2026-08-09 drive actually recorded: 372 returns over 790 s, about one every two
+    seconds against a radar publishing at 8 Hz. Returns that far apart never agree, which is why
+    the veto fired for 0.1 s while the overlay drew all of them."""
+    adj = AdjacentLane()
+    drawn = False
+    for i in range(40):
+      adj.update(FakeSM([track(90, 2.5 + (i % 12), v_rel=self.ONCOMING)]), V_EGO, MAX_D)
+      drawn = drawn or adj.left.oncoming_corroborated
+      adj.left.decay(ONCOMING_WINDOW_S + 0.2)   # the gap the real returns had between them
+    assert not drawn, "sparse noise produced a marker"
+
+  def test_a_DENSE_burst_does_corroborate_and_that_is_a_known_limit(self):
+    """Stated rather than hidden. ONCOMING_FRAMES counts MESSAGES, not agreement about WHERE --
+    three consecutive messages carrying returns at three different offsets corroborate each other.
+    Real opposing traffic holds a roughly constant lateral offset while its range closes, so
+    checking that would be a sound tightening.
+
+    NOT DONE HERE, deliberately: it would make the veto harder to fire, and evidence that opens a
+    maneuver must never be cheaper than evidence that refuses one. If the road shows bursts dense
+    enough to matter, the place for it is the DRAWN flag alone, where it cannot weaken a refusal."""
+    adj = AdjacentLane()
+    # Inside the road edge, or the carriageway test excludes them and the burst never forms --
+    # which it did on the first draft of this test, correctly.
+    for i in range(ONCOMING_FRAMES):
+      adj.update(FakeSM([track(90, 2.5 + i * 1.5, v_rel=self.ONCOMING)]), V_EGO, MAX_D)
+    assert adj.left.oncoming_corroborated

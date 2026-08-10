@@ -465,6 +465,16 @@ class AdjacentLaneSide:
     self.v_rel = 0.0
     self.v_abs = NO_SPEED        # absolute speed of the nearest vehicle in that lane
     self.oncoming = False        # something on this side is travelling the other way, right now
+    # THE SAME SIGHTING, ONCE IT HAS BEEN BELIEVED. `oncoming` is true on the first return; this
+    # waits for ONCOMING_FRAMES messages to agree, which is the standard the veto already holds
+    # itself to. It exists because the OVERLAY was drawing the first one:
+    #
+    #     "I also saw way more false ones."
+    #
+    # Measured on the 2026-08-09 I-15 drive: 372 oncoming-speed returns across the whole band on a
+    # DIVIDED highway, where none of them can be real -- and the veto fired for 0.1 s of the drive.
+    # The corroboration was doing its job; the display simply was not asking it.
+    self.oncoming_corroborated = False
     self.oncoming_d_rel = 0.0
     self.oncoming_y_rel = 0.0
     self.oncoming_v_abs = NO_SPEED
@@ -528,7 +538,7 @@ class AdjacentLaneSide:
     already reporting no data.
     """
     held = (self.oncoming_seconds, self.oncoming_adjacent_seconds, self.same_direction_seconds,
-            self.oncoming, self.strict,
+            self.oncoming, self.oncoming_corroborated, self.strict,
             # Same reasoning: how long since somebody last passed us is a fact about the road, and
             # a sensor dropout is not evidence that it changed. Losing it would silently reset the
             # clock to "nobody has ever overtaken", which reads as a quiet lane -- the one direction
@@ -539,7 +549,7 @@ class AdjacentLaneSide:
             self.oncoming_edge_trusted)
     self.__init__()
     (self.oncoming_seconds, self.oncoming_adjacent_seconds, self.same_direction_seconds,
-     self.oncoming, self.strict,
+     self.oncoming, self.oncoming_corroborated, self.strict,
      self.overtaken_seconds, self.overtaken_count, self.overtaken_v_abs,
      self.oncoming_edge_trusted) = held
 
@@ -595,6 +605,7 @@ class AdjacentLaneSide:
       self._oncoming_hits += 1
     if self._oncoming_hits < ONCOMING_FRAMES:
       return
+    self.oncoming_corroborated = True
     self.oncoming_seconds = float(memory_s)
     if adjacent:
       self.oncoming_adjacent_seconds = float(memory_s)
@@ -658,6 +669,7 @@ class AdjacentLaneSide:
     is actually wired up.
     """
     self.oncoming = False
+    self.oncoming_corroborated = False
     self._counted_this_message = False
     self._same_dir_counted_this_message = False
     # Overtakes must be seen on CONSECUTIVE messages, so a message that showed nothing breaks the

@@ -2392,8 +2392,22 @@ class PassingAssistDetector:
     # lane showing "looking for an opening" with the signal already up, BlueCruise gives up after
     # about ten seconds and says "not possible". Both are driver-initiated; this one decides for
     # itself, which is the argument for the tighter window rather than for a different shape.
-    self.wanted_side = (Side.left if self.left_geometry_ok else
-                        Side.right if self.right_geometry_ok else Side.none)
+    # NOT geometry alone. Measured on the 2026-08-09 I-15 drive: entering `signaling` on geometry
+    # produced 47 aborts in 13 minutes, against 29 the drive before. Every one of those is a
+    # five-second blinker episode once a control is wired, on a road where nothing was wrong.
+    #
+    # The split that fixes it is his own wording -- "check blind spots and radar and all of that
+    # before making the change". Those are the gates that can plausibly change their mind inside the
+    # window: a car moving out of the blind spot, something behind finishing its pass. Waiting on
+    # those with the signal up is the whole point.
+    #
+    # The others describe a SITUATION rather than a moment, and no amount of waiting resolves them:
+    # a lane full of traffic no faster than our lead is still full five seconds later, and the
+    # oncoming veto is a ninety second memory by construction. Signalling into either is a promise
+    # made against something that was never going to move.
+    want_left = self.left_geometry_ok and not onc_left and not adj_left
+    want_right = self.right_geometry_ok and not onc_right and not adj_right
+    self.wanted_side = Side.left if want_left else Side.right if want_right else Side.none
 
     left_ok = (self.left_geometry_ok and not onc_left and not self.left_blindspot and
                not self.rear.left.blocks_lane_change and not adj_left)
@@ -2417,6 +2431,13 @@ class PassingAssistDetector:
       else:
         blocked = Blocked.blindspotOccupied
       self._reset_outputs(blocked)
+      # AND PUT IT BACK, because this is the one path it has to survive. _reset_outputs clears
+      # wanted_side, which is right for every early return above -- those mean no pass is warranted
+      # at all, and a stale value there lit the blinker during a keep-right. THIS branch means the
+      # opposite: a pass IS warranted and a gate is what is stopping it, which is precisely when the
+      # signal should be up waiting. Clearing it here made the whole signal-first change a no-op on
+      # the only path that matters.
+      self.wanted_side = Side.left if want_left else Side.right if want_right else Side.none
       return
 
     # Left is preferred where both are available: passing on the right is the wrong default, and
@@ -2671,6 +2692,7 @@ class PassingAssistDetector:
       dest.vRel = float(side.v_rel)
       dest.vAbs = float(side.v_abs)
       dest.oncoming = side.oncoming
+      dest.oncomingCorroborated = side.oncoming_corroborated
       dest.oncomingDRel = float(side.oncoming_d_rel)
       dest.oncomingVAbs = float(side.oncoming_v_abs)
       dest.oncomingYRel = float(side.oncoming_y_rel)

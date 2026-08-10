@@ -484,6 +484,11 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       # far too slow for highway opposing traffic, which reads -25 to -31 -- and that was as far
       # as the record could take it.
       oncomingEdgeTrusted @16 :Bool;
+    # The same sighting once ONCOMING_FRAMES messages have agreed. `oncoming` is the first return;
+    # this is the one the veto would act on. Drawn from this rather than from `oncoming`, because a
+    # marker that appears on a single unbelieved return shows the driver noise the decision layer is
+    # correctly ignoring -- 372 of them on one divided-highway drive against 0.1 s of actual veto.
+    oncomingCorroborated @17 :Bool;
       # The two facts that decide whether this side is refused, logged because they are what a
       # disputed decision comes down to and neither is visible from the road.
       #

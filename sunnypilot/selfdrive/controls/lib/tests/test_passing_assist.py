@@ -3383,3 +3383,38 @@ class TestNothingActuatesWithoutRearCoverage:
     assert not (d.may_actuate(Side.left) and d.may_actuate(Side.right))
     d = self._det(left=True, right=True)
     assert d.may_actuate(Side.left) and d.may_actuate(Side.right)
+
+
+class TestWhatTheSignalWaitsFor:
+  """47 aborts in 13 minutes on the 2026-08-09 I-15 drive, against 29 the drive before. Entering
+  `signaling` on geometry alone meant any gate at all could hold it there for the full window, and
+  every one of those is a five-second blinker episode once a control is wired.
+
+  The split is his: "check blind spots and radar and all of that before making the change." Those
+  can change their mind inside a second. A lane full of slow traffic and a ninety-second oncoming
+  memory cannot, and signalling into either promises something that was never going to move.
+  """
+
+  def test_it_waits_with_the_signal_up_for_a_blind_spot(self):
+    """The case the whole design is for -- somebody alongside who is about to be past."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, left_bs=True)
+    assert det.wanted_side == Side.left, "refused to even signal for a transient gate"
+
+  def test_it_does_not_signal_into_a_lane_full_of_traffic_no_faster(self):
+    """adjacentSlow is a situation, not a moment. Five seconds of blinker changes nothing."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES,
+              tracks=[track(40, 3.7, -6.0)])
+    if det.blocked_by == Blocked.adjacentSlow:
+      assert det.wanted_side != Side.left, "signalled into a lane it knew was no faster"
+
+  def test_it_does_not_signal_into_oncoming(self):
+    """A ninety second memory by construction. Nothing about a window applies to it."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES,
+              tracks=[track(90, 3.7, -27.0 - CRUISE_MS)])
+    assert det.wanted_side != Side.left, "signalled toward oncoming traffic"
+
+  def test_geometry_alone_is_still_required(self):
+    """The weaker condition is still a condition. No lane, no signal."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, probs=(0.1, 0.99, 0.99, 0.1),
+              edges=(-2.2, 2.4))
+    assert det.wanted_side == Side.none

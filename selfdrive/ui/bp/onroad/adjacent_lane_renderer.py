@@ -160,7 +160,9 @@ class AdjacentLaneRenderer:
       self._onc_last = [None, None]
       return
     for i, side in enumerate((pa.adjacentLeft, pa.adjacentRight)):
-      live = bool(side.oncoming) and 0 < side.oncomingDRel <= MAX_DRAW_D_REL
+      # CORROBORATED, not the first return. See oncomingCorroborated in custom.capnp -- drawing
+      # every sighting put 372 markers on a divided-highway drive where none could be real.
+      live = bool(side.oncomingCorroborated) and 0 < side.oncomingDRel <= MAX_DRAW_D_REL
       # See ONCOMING_HOLD_S. `available` is passed through untouched, so a radar that has actually
       # gone away still clears the marker at once rather than holding a ghost -- a dropout and an
       # unavailable sensor must never look the same.
