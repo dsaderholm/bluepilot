@@ -73,6 +73,12 @@ def main() -> int:
   hist: deque = deque(maxlen=4000)     # ~40 s of carState
   events = 0
   t0 = None
+  # WHOLE-DRIVE occupancy, which is the number that matters most. If SCC-Vision is the plan source
+  # for most of a highway drive then it is not slowing for curves, it is simply governing -- and the
+  # HOLD badge greys for exactly as long, since hold_suppressed is true whenever the source is not
+  # cruise or speedLimitAssist. One state, two complaints.
+  src_frames: dict = {}
+  plan_frames = 0
 
   for seg in find_segments(args.route):
     path = rlog(seg)
@@ -102,6 +108,8 @@ def main() -> int:
           st["mapAct"] = bool(lp.smartCruiseControl.map.active)
           st["visV"] = lp.smartCruiseControl.vision.vTarget * MS_TO_MPH
           st["visAct"] = bool(lp.smartCruiseControl.vision.active)
+          src_frames[st["src"]] = src_frames.get(st["src"], 0) + 1
+          plan_frames += 1
         else:
           continue
       except Exception:  # noqa: BLE001
