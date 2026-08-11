@@ -66,6 +66,20 @@ def history() -> int:
     if fails:
       print("    each term, independently: " +
             ", ".join(f"{n} {v * 100:.0f}%" for n, v in zip(GEO_TERMS, fails, strict=False)))
+
+    # WHERE OPPOSING TRAFFIC ACTUALLY SAT, which is the whole reason the histogram exists and was
+    # being written to the param and read by nobody -- a bare sixteen-element array in a JSON dump
+    # is not a readout. Printed as a profile because the SHAPE is the answer: a peak past a median
+    # means the search has to reach it, and mass spread evenly across the band means the returns are
+    # noise rather than traffic and no distance setting will separate them.
+    hist = d.get("oncomingLatHist")
+    if hist and sum(hist):
+      total = sum(hist)
+      peak = max(hist)
+      bars = "".join("#" if n > peak * 0.66 else "+" if n > peak * 0.33 else
+                     "." if n else " " for n in hist)
+      top = max(range(len(hist)), key=lambda i: hist[i])
+      print(f"    oncoming by meters 0-15: [{bars}]  {total} returns, peak at {top} m")
     print(json.dumps({k: v for k, v in d.items() if k != "build"}, sort_keys=True))
   return 0
 
