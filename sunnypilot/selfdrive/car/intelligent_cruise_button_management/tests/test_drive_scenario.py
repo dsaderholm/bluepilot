@@ -298,3 +298,45 @@ def test_a_curve_ending_still_lets_the_speed_come_back():
   d.cluster = d.v_ego = 25
   d.cruise(600, target=60, source=PlanSource.speedLimitAssist)
   assert d.cluster >= 55, f"stuck at {d.cluster} after the curve ended"
+
+
+def test_the_ceiling_does_not_ratchet_across_a_whole_drive_of_active_vision():
+  """His report, 2026-08-10: after a slow curve the speed "stayed the speed that I overrode with my
+  gas pedal" and the HOLD badge "stayed gray", and separately that he overrides with the pedal
+  FREQUENTLY because curves go too slow.
+
+  Both are one defect. The ceiling was scoped by `smartCruiseControl.vision.active`, and that is not
+  a per-bend pulse -- on a highway it can stay true continuously. So the ceiling reset only when
+  vision went quiet, which on a long drive is never, and it ratcheted downward monotonically: every
+  dip anywhere permanently lowered the cap for everything after it. The badge stays grey the whole
+  time for the same reason (hold_suppressed is true whenever the source is not cruise or
+  speedLimitAssist), and apply_gas_handoff runs after this and bypasses it -- so the pedal was
+  literally the only thing left that could raise the speed.
+
+  Vision stays ACTIVE for the entire drive here. That is the condition the other curve tests do not
+  create: theirs end the bend, which hides a ratchet that only shows up when it cannot reset.
+  """
+  d = Drive()
+  d.cluster = d.v_ego = 70
+  d.cruise(600, target=55, source=PlanSource.sccVision)
+  assert d.cluster <= 58, f"the bend never brought the speed down, sat at {d.cluster}"
+
+  # The road straightens. Vision is still active and still the source, but now asks for more than the
+  # car is doing, which is vision saying there is no bend to cap.
+  d.cruise(2000, target=75, source=PlanSource.sccVision)
+  assert d.cluster >= 70, (
+    f"stranded at {d.cluster} with vision active and asking 75 -- the ceiling ratcheted and never "
+    f"released, which is why the gas pedal was the only way back up")
+
+
+def test_a_sustained_recovery_is_required_before_the_ceiling_releases():
+  """The release must not fire on the noise burst, which is itself a rise above the cluster.
+
+  Same 3.3 s spike as the noise test, but held just under the release threshold and then taken back
+  down, so a release here would prove the threshold is doing nothing.
+  """
+  d = Drive()
+  d.cluster = d.v_ego = 42
+  for _ in range(400):        # 4 s of vision asking for more, under the 5 s release
+    d.step(60, source=PlanSource.sccVision)
+  assert d.cluster <= 45, f"released early at {d.cluster}; the burst is noise, not a finished bend"

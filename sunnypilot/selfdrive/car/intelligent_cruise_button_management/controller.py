@@ -88,6 +88,9 @@ RESUME_MATCH_TOLERANCE = 2  # display units; Ford resumes to the exact previous 
 # curve. One display unit leaves the hunt working and still blocks the case this exists for -- a
 # 9 mph climb chased out of a noisy vision target, mid off-ramp, on 2026-08-08.
 CURVE_RISE_TOLERANCE = 1
+# 5 s at 100 Hz. Longer than the 3.3 s off-ramp spike this ceiling exists to reject, and short enough
+# that a genuinely finished bend costs only a couple of seconds before the speed is allowed back.
+CURVE_RELEASE_FRAMES = 500
 # The baseline applies to the speed-limit/cruise component only. A curve target is a physics limit,
 # not something to add an offset to -- SCC-Vision asking for 40 means 40, whatever the baseline is.
 BASELINE_SOURCES = (LongitudinalPlanSource.cruise, LongitudinalPlanSource.speedLimitAssist)
@@ -291,6 +294,8 @@ class IntelligentCruiseButtonManagement:
     self.deadline_requesting = False  # map OR vision: a target with a fixed place in the road
     self.curve_active = False        # SCC-Vision is tracking a bend right now
     self.curve_ceiling = 0           # highest target allowed for the rest of this bend
+    self.v_curve_target = 0          # SCC-Vision's own ask, display units; releases the ceiling
+    self.curve_release_frames = 0     # consecutive frames vision has asked for more than the ceiling
     self.baseline_reset_delta = DEFAULT_BASELINE_RESET_DELTA
     self.v_cruise_cluster_prev = 0
     self.icbm_idle_frames = 0
@@ -425,9 +430,19 @@ class IntelligentCruiseButtonManagement:
       # then the cap stays, because it is the only thing standing between a bad target and the road.
       self.deadline_requesting = bool(scc.map.active)
       self.curve_active = bool(scc.vision.active)
+      # Vision's OWN ask, in display units. The curve ceiling needs this rather than the post-limiter
+      # target: metering walks v_target through every value between the old speed and the curve's,
+      # so ratcheting on it drags the ceiling below what the bend ever actually demanded.
+      self.v_curve_target = round(scc.vision.vTarget * speed_conv) if self.curve_active else 0
     except (AttributeError, KeyError):
       self.scc_map_requesting = False
       self.deadline_requesting = False
+      # curve_active and its ceiling latched here before: neither was cleared, so one bad frame left
+      # the ceiling pinned at whatever it held with nothing able to reset it.
+      self.curve_active = False
+      self.curve_ceiling = 0
+      self.v_curve_target = 0
+      self.curve_release_frames = 0
     self.v_target = self.apply_baseline(self.v_target)
 
     v_ego_conv = round(CS.vEgo * speed_conv)
@@ -634,14 +649,58 @@ class IntelligentCruiseButtonManagement:
       # ceiling of (current cluster + tolerance) is not a ceiling at all: each step it allows raises
       # the cluster, which raises the ceiling, which allows another step. That version metered the
       # climb to 1 mph a step and still arrived at 52 -- the test caught it.
-      if self.curve_ceiling == 0:
-        self.curve_ceiling = self.v_cruise_cluster
-      self.curve_ceiling = min(self.curve_ceiling, self.v_target)
-      if self.v_target > self.curve_ceiling + CURVE_RISE_TOLERANCE:
-        self.rise_anchor = 0
-        return self.curve_ceiling + CURVE_RISE_TOLERANCE
+      #
+      # SCOPED TO ONE BEND, and that scoping is the whole correctness argument. `curve_active` is
+      # SCC-Vision's `active`, which on a highway can stay true continuously -- it is not a per-bend
+      # pulse. Resetting the ceiling only when it falls made this a one-way ratchet for the entire
+      # drive: every dip anywhere permanently lowered the cap for everything after it, the HOLD badge
+      # stayed grey the whole time because the source never returned to a baseline one, and the only
+      # thing left that could raise the speed was the gas pedal, since apply_gas_handoff runs after
+      # this and bypasses it. The owner reported exactly that, and reported reaching for the pedal
+      # frequently, which is the same fact from the driver's seat.
+      #
+      # So the release condition is VISION'S OWN TARGET recovering above the ceiling. That is the
+      # bend letting go, or a wider one replacing it. Safe to key on where the live cluster is not:
+      # vision's target is upstream of every button ICBM sends, so there is no feedback path. Keying
+      # on the cluster self-raises -- each allowed step lifts the cluster, which lifts the ceiling,
+      # which allows another step, and it walked to 52 one mile per hour at a time.
+      # The release has to be SUSTAINED, and the test for noise-chasing is what proves it. Vision's
+      # target rising is not by itself the bend ending -- the logged off-ramp spike went 47, 48, 49,
+      # 51 before settling at 21, so an instant release would re-anchor the ceiling on exactly the
+      # noise it exists to reject. A bend genuinely letting go holds its higher ask indefinitely; the
+      # spike held for 3.3 s. So require longer than that, and let the counter reset on any frame
+      # that falls back.
+      # A bend caps nothing while vision is asking for MORE than the car is already doing -- there is
+      # no bend to cap. That is the arming condition, and it has to be sustained, because vision's
+      # target rising is not by itself the bend ending: the logged off-ramp spike read 47, 48, 49, 51
+      # before settling at 21, so an instant release re-anchors on exactly the noise this rejects. A
+      # bend genuinely letting go holds its higher ask indefinitely; the spike held 3.3 s.
+      if self.v_curve_target > self.v_cruise_cluster:
+        self.curve_release_frames += 1
+      else:
+        self.curve_release_frames = 0
+      released = self.curve_release_frames >= CURVE_RELEASE_FRAMES
+      if released:
+        # Stays released, with no ceiling at all, until vision asks for less than the cluster again --
+        # which resets the counter and re-arms below. Re-anchoring to the live cluster while still
+        # released instead rebuilds the ceiling at the speed the bend left behind, and the set speed
+        # then climbs 1 mph per release interval rather than recovering.
+        self.curve_ceiling = 0
+      else:
+        # The cluster ALONE. Seeding from vision's ask -- max(cluster, v_curve_target) -- takes the
+        # anchor straight from the noise burst, which read 47 on the frame the bend began.
+        if self.curve_ceiling == 0:
+          self.curve_ceiling = self.v_cruise_cluster
+        # Ratchets on the METERED target, deliberately. Using the planner's raw ask collapses the
+        # ceiling to the corner speed on frame one, and it then fights the drop limiter -- the limiter
+        # says coast 80 -> 68 and the ceiling answers 40. Tried it; two tests said no.
+        self.curve_ceiling = min(self.curve_ceiling, self.v_target)
+        if self.v_target > self.curve_ceiling + CURVE_RISE_TOLERANCE:
+          self.rise_anchor = 0
+          return self.curve_ceiling + CURVE_RISE_TOLERANCE
     else:
       self.curve_ceiling = 0
+      self.curve_release_frames = 0
 
     if self.max_target_rise <= 0:  # 0 disables the limiter
       self.rise_anchor = 0
