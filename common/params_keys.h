@@ -422,7 +422,13 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // maybe a bit too slow." 110 targeted 1.82 m/s^2; 100 targets 2.0, which is the same place the
     // high-speed end now sits relative to its own complaint. "Pretty well" is why this moves less
     // than the high-speed one in absolute terms.
-    {"SmartCruiseControlVisionLowSpeedFactor", {PERSISTENT | BACKUP, INT, "100"}},
+    // MEASURED COMFORT, two drives: he holds 2.7-3.0 m/s^2 through bends deliberately and reports no
+    // difficulty. Route 00000338 t+815, 2.98 at 50 mph on the accelerator; route 0000033c t+210, 2.70
+    // at 69 mph, again on the accelerator, on a bend SCC-Vision had already let him take at 74 mph
+    // pulling 2.17 before it asked for 66. The budget is _A_LAT_REG_MAX / (factor/100), so 80 gives
+    // 2.5 -- just under what he actually drives, which is why every bend reads as slightly too slow
+    // and why he overrides so often. 70 gives 2.86, inside his demonstrated range.
+    {"SmartCruiseControlVisionLowSpeedFactor", {PERSISTENT | BACKUP, INT, "70"}},
     // BluePilot: 100 -> 90 -> 80, each step from the road rather than a model.
     //
     // a_lat_reg_max = _A_LAT_REG_MAX / sensitivity, and _A_LAT_REG_MAX is 2.0 m/s^2, so this targets
@@ -435,7 +441,13 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // that -- the one attempted on 2026-08-09 recovered his angle-gain calibration instead and was
     // retracted, see tools/bp_pscm_limit.py. Under-steering mid-curve is a worse failure than being
     // slow, so if 80 is still not enough the next move is measuring the steering, not guessing again.
-    {"SmartCruiseControlVisionHighSpeedFactor", {PERSISTENT | BACKUP, INT, "80"}},
+    // MEASURED COMFORT, two drives: he holds 2.7-3.0 m/s^2 through bends deliberately and reports no
+    // difficulty. Route 00000338 t+815, 2.98 at 50 mph on the accelerator; route 0000033c t+210, 2.70
+    // at 69 mph, again on the accelerator, on a bend SCC-Vision had already let him take at 74 mph
+    // pulling 2.17 before it asked for 66. The budget is _A_LAT_REG_MAX / (factor/100), so 80 gives
+    // 2.5 -- just under what he actually drives, which is why every bend reads as slightly too slow
+    // and why he overrides so often. 70 gives 2.86, inside his demonstrated range.
+    {"SmartCruiseControlVisionHighSpeedFactor", {PERSISTENT | BACKUP, INT, "70"}},
     // BluePilot: SCC-Map deceleration target, tenths of m/s^2, magnitude. Unlike SCC-Vision this
     // single value sets BOTH how hard it slows and how early it starts, because the trigger is
     // "am I within the distance needed to reach the corner speed at this rate" -- gentler means a
