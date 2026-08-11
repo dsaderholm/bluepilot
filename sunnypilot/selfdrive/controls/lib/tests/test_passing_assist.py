@@ -3502,3 +3502,35 @@ class TestEachGeometryTermIsCountedIndependently:
     det = run(PassingAssistDetector(), STUCK_FRAMES, v_lead=CRUISE_MS,
               probs=(0.05, 0.99, 0.99, 0.05), edge_stds=(2.5, 0.1))
     assert det._geo_frames == 0, "counted geometry on a road with nothing worth passing"
+
+
+class TestTheRoadEdgeBySpeed:
+  """The last discriminator that needs no new hardware.
+
+  Threshold tuning is finished: the edge std measured 3.9, 4.9, 15.1 and 16.3 across four drives
+  against a limit of 1.2, and no single value admits any two of them. But what the edge term
+  protects against -- a painted median, a left-turn pocket -- is an ARTERIAL feature that does not
+  exist at 75 mph. So "is it bad everywhere, or only where the median risk lives" is the question,
+  and it decides whether the California run needs anything changed at all.
+  """
+
+  def test_a_freeway_speed_refusal_lands_in_the_top_band(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES, v_ego=75 * CV.MPH_TO_MS,
+              v_lead=60 * CV.MPH_TO_MS, edge_stds=(9.9, 0.1))
+    assert det._edge_by_speed[3][1] > 0, "freeway refusal not recorded in the 70+ band"
+    assert det._edge_by_speed[0][1] == 0, "leaked into the town band"
+
+  def test_an_arterial_refusal_lands_in_a_lower_band(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES, v_ego=45 * CV.MPH_TO_MS,
+              v_lead=35 * CV.MPH_TO_MS, edge_stds=(9.9, 0.1))
+    assert det._edge_by_speed[1][1] > 0, "arterial refusal not recorded in the 40-55 band"
+    assert det._edge_by_speed[3][1] == 0, "leaked into the freeway band"
+
+  def test_a_trusted_edge_counts_frames_but_not_failures(self):
+    """A rate needs both halves. Counting only failures cannot tell "never tried" from "always
+    fine", which is exactly the distinction that decides the trip."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, v_ego=75 * CV.MPH_TO_MS,
+              v_lead=60 * CV.MPH_TO_MS)
+    band = det._edge_by_speed[3]
+    if band[0]:
+      assert band[1] == 0, "counted a failure on a trusted edge"

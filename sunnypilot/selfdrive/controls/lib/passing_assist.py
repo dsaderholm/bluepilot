@@ -725,6 +725,22 @@ class PassingAssistDetector:
     # road dominates it.
     self._geo_term_fails = [0, 0, 0, 0]
     self._geo_frames = 0
+    # THE ROAD EDGE, BY SPEED BAND -- the one discriminator left that needs no new hardware.
+    #
+    # Threshold tuning is finished as an avenue: the edge std measured 3.9, 4.9, 15.1 and 16.3
+    # across four drives against a limit of 1.2, and no single value admits any two of them. But the
+    # thing the edge term protects against -- a painted median, a left-turn pocket -- IS AN ARTERIAL
+    # FEATURE. Those do not exist at 75 mph. At freeway speed the failure mode is an oncoming lane,
+    # which the radar veto answers.
+    #
+    # So the question worth one drive: is the edge untrustworthy EVERYWHERE, or only where the
+    # median risk lives? If it is fine above 65 mph then the California run works untouched. If it
+    # is equally bad at every speed, relaxing it at speed becomes a real choice with a real risk,
+    # and this is the number that says which.
+    #
+    # [<40, 40-55, 55-70, 70+] mph. Pairs of (frames where a pass was wanted, frames the edge
+    # refused), so the answer is a rate rather than a count that road time can distort.
+    self._edge_by_speed = [[0, 0], [0, 0], [0, 0], [0, 0]]
     self._geo_sums = [0.0, 0.0, 0.0, 0.0]
     # ...and the SPREAD, not just the mean. See geo_refusal_loosen_to.
     self._geo_hist = [[0] * 10 for _ in range(4)]
@@ -1141,6 +1157,13 @@ class PassingAssistDetector:
     self._geo_sums[idx] += val
 
     # ...and independently, which is the part the chain above cannot answer. See _geo_term_fails.
+    # See _edge_by_speed. Banded on the frame's own speed, not the drive's average.
+    mph = float(self.last_v_ego) * CV.MS_TO_MPH
+    band = 0 if mph < 40 else 1 if mph < 55 else 2 if mph < 70 else 3
+    self._edge_by_speed[band][0] += 1
+    if self.left_edge_std > MAX_ROAD_EDGE_STD:
+      self._edge_by_speed[band][1] += 1
+
     self._geo_frames += 1
     for i, failed in enumerate((
         self.left_edge_std > MAX_ROAD_EDGE_STD,
@@ -1510,6 +1533,10 @@ class PassingAssistDetector:
         # them. Order: edge-std, paint, width, room-past-the-line.
         "geoTermFails": [round(n / self._geo_frames, 3) if self._geo_frames else 0.0
                          for n in self._geo_term_fails],
+        # See _edge_by_speed. Refusal RATE per band, so the arterial and the interstate can be told
+        # apart -- the whole question being whether the edge is unusable everywhere or only where
+        # painted medians live.
+        "edgeFailBySpeed": [round(bad / n, 3) if n else -1.0 for n, bad in self._edge_by_speed],
         "geoRefusedBy": int(self.geo_refusal[0]),
         "geoRefusedValue": round(self.geo_refusal[1], 3),
         "geoRefusedShare": round(self.geo_refusal[2], 3),

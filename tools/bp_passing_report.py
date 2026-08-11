@@ -72,6 +72,14 @@ def history() -> int:
     # is not a readout. Printed as a profile because the SHAPE is the answer: a peak past a median
     # means the search has to reach it, and mass spread evenly across the band means the returns are
     # noise rather than traffic and no distance setting will separate them.
+    # THE ONE THAT DECIDES THE CALIFORNIA RUN. -1 means no frames in that band on this drive.
+    bands = d.get("edgeFailBySpeed")
+    if bands:
+      names = ("<40", "40-55", "55-70", "70+")
+      shown = ", ".join(f"{nm} {v * 100:.0f}%" if v >= 0 else f"{nm} -"
+                        for nm, v in zip(names, bands, strict=False))
+      print(f"    road edge refused, by mph: {shown}")
+
     hist = d.get("oncomingLatHist")
     if hist and sum(hist):
       total = sum(hist)
