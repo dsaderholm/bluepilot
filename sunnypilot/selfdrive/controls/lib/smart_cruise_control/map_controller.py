@@ -77,6 +77,27 @@ TARGET_ACCEL = -1.2  # m/s^2 should match up with the long planner limit
 # enough that the camera genuinely has the curve in frame, and a phantom curve right in front of you
 # is still caught.
 MODEL_HORIZON_S = 4.0
+# ...but only for corners slow enough to be a RAMP. A highway-speed mapped corner gets the model's
+# real reach, and the difference decides whether the veto can fire at all.
+#
+# max_pred_lat_acc is a 97th percentile over the WHOLE modelV2 plan, which runs to 10 s -- about
+# 330 m at 74 mph. The 4 s bound was therefore never a statement about what the camera can see; it
+# was a bound on a number already summarizing far more road. At highway speed it makes the veto
+# unreachable: SCC-Map's trigger distance for 74 -> 52 mph at -1.2 m/s^2 is ~232 m, always outside a
+# 132 m gate, so the map commits before the veto is ever allowed to look.
+#
+# Measured on route 0000033c, 2026-08-11, the drive that prompted this. At t+142, the frame the map
+# committed to 52 mph, predicted lateral acceleration was 0.24 -- under MODEL_DISAGREE_LAT_ACC, so
+# the camera was already saying there is no curve here. The set speed then fell 75 -> 52 in four
+# seconds on a road measuring 0.00-0.24 m/s^2, and the owner overrode with the accelerator. The real
+# bend arrived much later and peaked at 2.0, which at his measured comfort needs no slowing at all.
+#
+# THE SPLIT IS THE SAFETY ARGUMENT. On a real exit the model predicts the path it expects to drive,
+# which is straight down the highway, so a ramp's curvature may never enter the plan until the car is
+# on it -- vetoing there would disable the one thing SCC-Map is for. That risk belongs to RAMPS, and
+# a ramp is a slow corner. A mapped corner of 45 mph or more is a highway bend, on the road the model
+# is already predicting, so its silence is evidence rather than blindness.
+MODEL_HORIZON_HIGH_SPEED_S = 10.0  # matches modelV2's T_IDXS span
 # Predicted lateral acceleration below this means the camera is looking at a straight road. Well
 # under _ENTERING_PRED_LAT_ACC_TH (1.3) in vision_controller: this is not "is there a curve worth
 # slowing for", it is "is there a curve at all".
@@ -342,7 +363,10 @@ class SmartCruiseControlMap:
     Only meaningful inside the model's own horizon. Outside it the model has nothing to say and
     silence must not be read as disagreement.
     """
-    horizon = self.v_ego * MODEL_HORIZON_S
+    # _MAP_FACTOR_V_BP[1] is the same 45 mph line that separates ramps from highway bends for the
+    # corner-speed factors. One definition, used by both, so they cannot drift apart.
+    ramp_like = self.v_target < _MAP_FACTOR_V_BP[1]
+    horizon = self.v_ego * (MODEL_HORIZON_S if ramp_like else MODEL_HORIZON_HIGH_SPEED_S)
     if target_distance_m > horizon or horizon <= 0:
       return False
     return self.model_lat_acc < MODEL_DISAGREE_LAT_ACC
