@@ -56,7 +56,10 @@ def request_side(longitudinal_plan_sp) -> int:
   """
   try:
     pa = longitudinal_plan_sp.passingAssist
-    if not (bool(pa.actuating) and bool(pa.blinkerWouldBeOn)):
+    # desireOk, NOT blinkerWouldBeOn. The lamp may be lit while the gates are still deciding --
+    # that is what signal-first means -- but the DESIRE may not, because desire_helper advances on
+    # its own timer without consulting them. See PassingManeuver.desire_ok.
+    if not (bool(pa.actuating) and bool(pa.desireOk)):
       return NONE
     # .raw, NOT int(): a capnp enum read off a live message is a _DynamicEnum and int() raises
     # TypeError on the device. getattr keeps the plain ints test fixtures build working.

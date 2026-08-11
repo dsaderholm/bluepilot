@@ -11,8 +11,10 @@ from openpilot.sunnypilot.selfdrive.controls.lib.passing_assist_desire import (
   request_side, NONE, LEFT, RIGHT)
 
 
-def plan(actuating=True, blinker=True, side=LEFT):
-  pa = SimpleNamespace(actuating=actuating, blinkerWouldBeOn=blinker, maneuverSide=side)
+def plan(actuating=True, desire_ok=True, side=LEFT):
+  # desireOk, not blinkerWouldBeOn -- the lamp may be on while the gates are still deciding, and
+  # the desire may not. See PassingManeuver.desire_ok.
+  pa = SimpleNamespace(actuating=actuating, desireOk=desire_ok, maneuverSide=side)
   return SimpleNamespace(passingAssist=pa)
 
 
@@ -35,7 +37,16 @@ class TestItCannotMoveWhenItShouldNotBeMoving:
 
   def test_no_request_between_maneuvers(self):
     """`actuating` is a permission, not a request -- true whenever the hardware allows it."""
-    assert request_side(plan(blinker=False)) == NONE
+    assert request_side(plan(desire_ok=False)) == NONE
+
+  def test_a_lit_blinker_is_not_enough_on_its_own(self):
+    """THE INTERACTION BUG. Since signal-first, the lamp comes on at `signaling` BEFORE the gates
+    pass. desire_helper does not consult those gates -- it advances on its own nudgeless timer and
+    a blind-spot check -- so a desire raised then would start the crossing with oncoming,
+    adjacent-slow, rear-approach and geometry all still refusing."""
+    lamp_on_gates_bad = SimpleNamespace(passingAssist=SimpleNamespace(
+      actuating=True, desireOk=False, blinkerWouldBeOn=True, maneuverSide=LEFT))
+    assert request_side(lamp_on_gates_bad) == NONE
 
   def test_a_missing_planner_asks_for_nothing(self):
     """This runs in modeld's hot loop. An absent or malformed planner must not reach it."""

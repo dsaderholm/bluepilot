@@ -637,6 +637,13 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     maneuverSeconds @42 :Float32;   # time in the current phase
     maneuverSide @43 :Side;         # the side the sequence committed to
     blinkerWouldBeOn @44 :Bool;      # on through the crossing, out when it completes
+    # NARROWER THAN blinkerWouldBeOn, and the difference is a safety property rather than a detail.
+    # The lamp comes on at `signaling`, which since the signal-first change begins BEFORE the gates
+    # pass. A DESIRE must not, because desire_helper does not consult our gates -- it advances on its
+    # own nudgeless timer and a blind-spot check alone. Raising the desire at `signaling` would start
+    # the crossing on a 1 s timer with oncoming, adjacent-slow, rear-approach and geometry all still
+    # refusing. See PassingManeuver.desire_ok.
+    desireOk @98 :Bool;
     # IS THIS DRIVING THE CAR, or narrating what it would do? The one bit the car side cannot work
     # out for itself, and the only thing that was missing to make the signal real.
     #

@@ -169,12 +169,38 @@ class PassingManeuver:
     self._standdown_target = ABORT_STANDDOWN_S
     # How long every gate has been CONTINUOUSLY happy on our side. See the crossing condition.
     self._clear_held_s = 0.0
+    # Are they happy THIS frame. See `desire_ok`, which is what may raise a lane-change desire.
+    self._clear_now = False
 
   @property
   def blinker_on(self) -> bool:
     """The blinker stays on THROUGH the crossing and goes out when it completes, which is how a
     person signals. Dropping it at the start of the movement would be the common mistake."""
     return self.phase in (Phase.signaling, Phase.changing)
+
+  @property
+  def desire_ok(self) -> bool:
+    """May a lane-change DESIRE be raised right now? Narrower than blinker_on, deliberately.
+
+    THE BUG THIS EXISTS TO PREVENT, found reviewing the interaction rather than any one piece.
+    blinker_on covers `signaling`, which since the signal-first change begins BEFORE the safety
+    gates pass -- that is the whole point of it, and it is correct for a lamp. It is catastrophic
+    for a desire, because desire_helper does not consult our gates at all: preLaneChange advances to
+    laneChangeStarting on its own nudgeless timer and a blind-spot check, nothing else. Raise the
+    desire at `signaling` and the car starts crossing on a 1 s timer while oncoming, adjacent-slow,
+    rear-approach and geometry are all still saying no.
+
+    So: during `signaling` the gates must be satisfied THIS FRAME. Once `changing`, they no longer
+    can call it off -- a car cannot un-change lanes on a change of mind -- so the desire stands.
+
+    The two 1 s clocks then start together rather than stacking: desire_helper's nudgeless timer
+    begins when the gates go good, which is the same moment _clear_held_s starts counting toward the
+    blinker lead. Both finish at once, which is what "for automatic lane changes, I want it to be
+    the same" requires.
+    """
+    if self.phase == Phase.changing:
+      return True
+    return self.phase == Phase.signaling and self._clear_now
 
   @property
   def steering_active(self) -> bool:
@@ -232,6 +258,7 @@ class PassingManeuver:
     """
     if wanted is None:
       wanted = clear
+    self._clear_now = clear != Side.none and clear == self.side
     self.phase_seconds += DT_MDL
 
     # The driver taking their car back is not a gate and is not an abort worth counting against

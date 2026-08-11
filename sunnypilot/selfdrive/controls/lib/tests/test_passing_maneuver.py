@@ -512,3 +512,51 @@ class TestBlockedTrafficDoesNotProduceARhythm:
     run(m, m.blinker_lead_s + 0.4, wanted=Side.left, clear=Side.left, suggested=Side.left,
         confirmed=True, actuating=True)
     assert m.phase == Phase.changing, "a lane that opened was never used"
+
+
+class TestTheDesireIsNarrowerThanTheLamp:
+  """Found reviewing the interaction between signal-first, the blinker path and the desire
+  injection -- each correct alone, and wrong together.
+
+  desire_helper does NOT consult passing assist's gates. preLaneChange advances to
+  laneChangeStarting on its own nudgeless timer plus a blind-spot check, nothing else. So anything
+  that raises a desire is committing the car, and it must not happen while the gates are deciding.
+  """
+
+  def test_the_lamp_is_on_before_the_desire_is_allowed(self):
+    """Signal-first in one assertion: signalling with the gates still red is the intended
+    behaviour, and raising a desire there is not."""
+    m = PassingManeuver()
+    run(m, 0.2, wanted=Side.left, clear=Side.none, suggested=Side.left, confirmed=True)
+    assert m.phase == Phase.signaling
+    assert m.blinker_on, "should be signalling while the gates decide"
+    assert not m.desire_ok, "would have started the crossing with every gate refusing"
+
+  def test_the_desire_follows_the_gates_going_good(self):
+    m = PassingManeuver()
+    run(m, 0.2, wanted=Side.left, clear=Side.none, suggested=Side.left, confirmed=True)
+    run(m, 0.1, wanted=Side.left, clear=Side.left, suggested=Side.left, confirmed=True)
+    assert m.desire_ok
+
+  def test_it_drops_again_if_a_gate_goes_red_before_the_crossing(self):
+    """The gates may still call it off right up to `changing`, so the desire has to track them
+    rather than latch on the first good frame."""
+    m = PassingManeuver()
+    run(m, 0.2, wanted=Side.left, clear=Side.left, suggested=Side.left, confirmed=True)
+    assert m.desire_ok
+    run(m, 0.1, wanted=Side.left, clear=Side.none, suggested=Side.left, confirmed=True)
+    assert not m.desire_ok
+
+  def test_but_once_crossing_it_stands_regardless(self):
+    """Committed. A car cannot un-change lanes on a change of mind, and dropping the desire
+    mid-crossing would abandon the maneuver halfway across a lane line."""
+    m = PassingManeuver()
+    run(m, m.blinker_lead_s + 0.4, wanted=Side.left, clear=Side.left, suggested=Side.left,
+        confirmed=True)
+    assert m.phase == Phase.changing
+    run(m, 0.1, wanted=Side.left, clear=Side.none, suggested=Side.left, confirmed=True)
+    assert m.phase == Phase.changing
+    assert m.desire_ok, "abandoned the crossing partway across"
+
+  def test_nothing_is_desired_while_idle(self):
+    assert not PassingManeuver().desire_ok
