@@ -62,6 +62,51 @@ whether passing assist works.
 
 ---
 
+## Two contexts, and how few settings actually differ -- 2026-08-10
+
+    "I want to save these defaults for when I go to California, right? We do almost need modes, I
+     don't know how that would work."
+
+The Utah-to-California I-15 run and the daily commute want different things:
+
+| | road trip | commute |
+|---|---|---|
+| road | sparse, fast, divided | dense, slower, arterial |
+| goal | hold the set speed for four hours | do not weave for no reason |
+| a 4 mph slower car | worth passing -- 15 minutes over the drive | not worth two lane changes |
+
+**BUT ALMOST NOTHING DIFFERS BETWEEN THEM, which is the actual finding.** Everything verified on
+the car on 2026-08-10 is either identical in both contexts or not yet known:
+
+| setting | trip | commute | why |
+|---|---|---|---|
+| `PassingAssistMinDeficit` | **the one real difference** | 4 mph | the "go fast" lever. Lower passes more. UNMEASURED -- needs an I-15 drive |
+| `PassingAssistMaxDistance` | possibly further | 220 m | 220 gives ~90 m over ACC's measured 129.6 m braking onset. Probably enough for both |
+| `PassingAssistKeepRightDelay` | 5 | 5 | "the floor is lava" is not a road-trip preference, it is how he drives |
+| blinker lead / confirm | 1 s / 1 s | same | settled, and they agree so stalk and automatic behave identically |
+| `PassingAssistMinApproach` | 0 | 0 | decide early rather than once held up. Right in both |
+| curve factors 80 / 90 | same | same | applied already |
+
+**So this is one number, maybe two.** A mode system to switch one setting is machinery that costs a
+merge conflict forever and a screen nobody needs. Write the trip value down here when a drive
+produces it, change it before leaving, change it back.
+
+### If it DOES grow past two or three, here is the shape -- and the shape that is wrong
+
+**Wrong: a profile read as an OVERLAY at param-read time.** The settings screen would show a stored
+value while the code used a different one, which is precisely the class of confusion that produced
+"the settings doc read an option NUMBER as seconds". A setting must mean what the screen says.
+
+**Right: profiles that WRITE, on an explicit switch he makes.** Save-current-as-profile, load-a-
+profile, both driver-initiated. That respects the rule the hard way round -- *"I ALWAYS want you to
+write defaults, but not tweaks I've made"* -- because loading a profile IS him choosing the values,
+not a migration overruling him. It is the one form of settings-writing that is his decision rather
+than ours.
+
+**And not before the values are known.** Building storage for numbers nobody has measured is how
+the parked-neutral knobs in this fork happened. One I-15 drive settles whether there is anything to
+store.
+
 ## Settings whose shipped default MOVED while this was being built
 
 Found 2026-08-06 by a guard that walks every revision of `params_keys.h`. Your car keeps the first
