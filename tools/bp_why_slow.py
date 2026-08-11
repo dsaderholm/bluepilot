@@ -61,6 +61,9 @@ def main() -> int:
   ap.add_argument("--route", default=None)
   ap.add_argument("--drop", type=float, default=8.0, help="mph lost to count as a slowdown")
   ap.add_argument("--window", type=float, default=12.0, help="seconds to lose it in")
+  # Parsing rlogs on the device is slow and a long route has dozens of segments. Capped so a run
+  # finishes in a couple of minutes; the occupancy percentages are stable well before the whole drive.
+  ap.add_argument("--max-segments", type=int, default=8)
   args = ap.parse_args()
 
   try:
@@ -80,7 +83,11 @@ def main() -> int:
   src_frames: dict = {}
   plan_frames = 0
 
-  for seg in find_segments(args.route):
+  segs = find_segments(args.route)
+  if len(segs) > args.max_segments:
+    print(f"# {len(segs)} segments; reading the first {args.max_segments} (--max-segments to change)")
+    segs = segs[:args.max_segments]
+  for seg in segs:
     path = rlog(seg)
     if path is None:
       continue
