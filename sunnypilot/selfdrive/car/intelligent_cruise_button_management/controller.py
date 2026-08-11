@@ -82,6 +82,10 @@ RESUME_PRESS_MEMORY_FRAMES = 150  # 1.5 s at 100 Hz, generous next to the engage
 # jumps to the CURRENT VEHICLE SPEED. So once the number settles after re-engaging, whichever it
 # landed on says which button was pressed -- no button event required.
 RESUME_MATCH_TOLERANCE = 2  # display units; Ford resumes to the exact previous value
+# Wider than the resume tolerance on purpose. A resume restores an exact stored number, so 2 covers
+# it; a SET lands on the vehicle speed, which is still moving as the press is processed and is read
+# through a cluster that lags, so the landing scatters by several mph.
+SET_MATCH_TOLERANCE = 4  # display units
 # BluePilot: how far above the current set speed ICBM may still go while SCC-Vision is tracking a
 # bend. Not zero: ICBM commands in 1 mph steps against a lagged cluster, so it hunts by one, and
 # clamping hard to the cluster means a 1 mph undershoot can never be recovered for the length of the
@@ -907,9 +911,25 @@ class IntelligentCruiseButtonManagement:
                 and self.cluster_stable_frames >= CRUISE_CYCLE_STABLE_FRAMES)
       if landed or self.cruise_cycle_frames == 0:
         resumed = abs(self.v_cruise_cluster - self.v_cluster_before_disengage) <= RESUME_MATCH_TOLERANCE
+        # Ford's SET jumps to the CURRENT VEHICLE SPEED, floored at the 20 mph minimum. That is the
+        # POSITIVE signature of a SET, and it was never checked -- the old test read "did not land on
+        # the previous set speed" as proof of a SET, which is not the same claim.
+        #
+        # It cost him a hold. Route 0000033c, t+480: cruise re-engaged at 2 mph after a stop, the set
+        # speed landed at 69 against 62 before the disengage, 7 apart with a tolerance of 2, so the
+        # cycle was read as a SET and his 75 was discarded. But a SET at 2 mph lands at 20, nowhere
+        # near 69 -- so there was positive evidence AGAINST a set and it went unused. A standstill
+        # re-engage is not the driver handing the speed back to Speed Limit Assist.
+        #
+        # Landing on neither number is not evidence of anything, and discarding a hold is
+        # destructive and silent while keeping one the driver can always change. So ambiguity keeps
+        # it: only a landing that actually looks like a SET clears.
+        v_ego_set = max(round(CS.vEgo * (CV.MS_TO_KPH if self.is_metric else CV.MS_TO_MPH)),
+                        self.v_cruise_min)
+        looks_like_set = abs(self.v_cruise_cluster - v_ego_set) <= SET_MATCH_TOLERANCE
         if resumed:
           self.reanchor_overridden = True
-        else:
+        elif looks_like_set:
           self.clear_baseline()
         self.cycle_decision_pending = False
 
@@ -1147,6 +1167,22 @@ class IntelligentCruiseButtonManagement:
     fired = self.pinned_hold > 0 and self.pinned_hold != self.pinned_hold_prev
     self.pinned_hold_prev = self.pinned_hold
     if not fired:
+      return False
+
+    # A LIVE HOLD OUTRANKS A REMEMBERED ONE. Measured on route 0000033c at t+333, 2026-08-11: he set
+    # 75 by hand at t+134, drove into a zone with 70 pinned from an earlier drive, and the pin
+    # silently replaced his number. He reported it as "my hold dropped by 5 mph, which was strange",
+    # and strange is exactly right -- nothing he did caused it and nothing on screen said why.
+    #
+    # A pin is a record of what he wanted on some previous drive. A hold he set minutes ago is what
+    # he wants now, and when the two disagree the live one wins. The pin still applies when there is
+    # no hold, which is the case it exists for, and a pin still replaces a hold that came from
+    # another pin -- that is one remembered number superseding another, not a preference being
+    # overwritten.
+    #
+    # The edge is consumed above whether or not it applies, so a blocked pin does not retry every
+    # frame inside the radius. Leaving and re-entering still re-arms it.
+    if self.v_baseline > 0 and self.baseline_source != BaselineSource.pinned:
       return False
 
     if self.override_state != OverrideState.manual:

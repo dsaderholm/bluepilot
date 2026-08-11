@@ -1513,3 +1513,125 @@ class TestAPinnedHoldSurvivesCruiseBeingOff:
     in_zone(icbm, 50, 100, enabled=False)
     in_zone(icbm, 50, 300, enabled=True)
     assert icbm.v_baseline == 50, f"applied the wrong zone's number: {icbm.v_baseline}"
+
+
+class TestALiveHoldOutranksAPinnedOne:
+  """Measured, route 0000033c t+333 on 2026-08-11, and confirmed by the owner the same day.
+
+  He set 75 by hand at t+134, then drove into a zone with 70 pinned from an earlier drive, and the
+  pin silently replaced his number. His words: "at some point, my hold dropped by 5 miles per hour,
+  which was strange." Nothing he did caused it and nothing on screen said why.
+
+  A pin records what he wanted on a previous drive; a hold he set minutes ago is what he wants now.
+  """
+
+  def test_a_pin_does_not_overwrite_a_hold_he_set_by_hand(self):
+    icbm = fresh()
+    # A real press creates the hold, exactly as it did on the road.
+    icbm.run(make_cs(LIMIT, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT), False)
+    for cluster in range(LIMIT, DRIVER + 1):
+      icbm.run(make_cs(cluster, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT), False)
+    icbm.run(make_cs(DRIVER, buttons=(ACCEL_RELEASE,)), CC, make_lp(LIMIT), False)
+    assert icbm.v_baseline == DRIVER, "no hold to defend"
+    assert icbm.baseline_source == BaselineSource.press
+
+    in_zone(icbm, DRIVER - 5, 300, enabled=True, road_speed=DRIVER)
+    assert icbm.v_baseline == DRIVER, (
+      f"the pin replaced his live hold with {icbm.v_baseline} -- THE REPORTED BUG")
+    assert icbm.baseline_source == BaselineSource.press, "the pin took ownership of his number"
+
+  def test_a_pin_still_applies_when_there_is_no_hold(self):
+    """The case the pin exists for. The guard must not cost it."""
+    icbm = fresh()
+    in_zone(icbm, 45, 300, enabled=True)
+    assert icbm.v_baseline == 45, "the guard blocked a pin that had nothing to overwrite"
+    assert icbm.baseline_source == BaselineSource.pinned
+
+  def test_one_pin_can_still_supersede_another(self):
+    """Two remembered numbers is not a preference being overwritten -- the later place wins."""
+    icbm = fresh()
+    in_zone(icbm, 45, 300, enabled=True)
+    assert icbm.v_baseline == 45
+    in_zone(icbm, 0, 50, enabled=True)      # leave the first zone, which re-arms
+    # 65, not LIMIT: a hold that lands exactly on SLA's target is cleared by the divergence rule,
+    # which would fail this test for a reason that has nothing to do with pins.
+    in_zone(icbm, 65, 300, enabled=True)    # enter a different one
+    assert icbm.v_baseline == 65, "a pinned hold blocked the next pin"
+    assert icbm.baseline_source == BaselineSource.pinned
+
+
+class TestAStandstillReEngageIsNotASet:
+  """Measured, route 0000033c t+471-482 on 2026-08-11: "when I resumed, my hold went away."
+
+    t+471  CRUISE OFF      set speed 62, 67 mph
+    t+480  CRUISE ENGAGED  set speed 62,  2 mph
+    t+482  HOLD CLEARED (was 75)
+
+  The re-engage was decided by comparing the landed set speed against the one before the disengage:
+  69 against 62, 7 apart with a tolerance of 2, so it was read as a SET and his hold was discarded.
+
+  But Ford's SET jumps to the CURRENT VEHICLE SPEED, floored at the 20 mph minimum -- the comment on
+  RESUME_MATCH_TOLERANCE says exactly this. At 2 mph a SET lands at 20, nowhere near 69. So there was
+  positive evidence AGAINST a set, sitting unused, while "did not land on the previous set speed" was
+  being treated as proof of one. Those are different claims.
+
+  Landing on neither number is evidence of nothing. Discarding a hold is destructive and silent;
+  keeping one he can always change is not. So ambiguity keeps it.
+  """
+
+  def _held_at(self, icbm, to):
+    icbm.run(make_cs(LIMIT, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT), False)
+    for cluster in range(LIMIT, to + 1):
+      icbm.run(make_cs(cluster, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT), False)
+    icbm.run(make_cs(to, buttons=(ACCEL_RELEASE,)), CC, make_lp(LIMIT), False)
+    for _ in range(200):
+      icbm.run(make_cs(to), CC, make_lp(LIMIT), False)
+    return icbm
+
+  def test_re_engaging_from_a_stop_keeps_the_hold(self):
+    icbm = self._held_at(fresh(), DRIVER)
+    assert icbm.v_baseline == DRIVER
+
+    # A curve walks the set speed down to 62 -- BY ICBM'S OWN BUTTONS. Moving the cluster directly
+    # instead re-baselines the hold on the first frame, because an unexplained set-speed move is
+    # exactly what fallbackIdle exists to catch. The bug needs a set speed lowered by ICBM and a hold
+    # that survived it, which is the state he was actually in.
+    cluster = DRIVER
+    for i in range(3000):
+      if cluster <= 62:
+        break
+      icbm.run(make_cs(cluster, v_ego=cluster), CC, make_lp(45, source=PlanSource.sccVision), False)
+      if i % 20 == 0 and icbm.cruise_button == SendButtonState.decrease:
+        cluster -= 1
+    assert cluster <= 62, f"ICBM never brought the set speed down, stalled at {cluster}"
+    assert icbm.v_baseline == DRIVER, (
+      f"the hold was re-baselined to {icbm.v_baseline} during the curve, before the resume was "
+      f"reached -- the fixture is testing the wrong thing")
+    for _ in range(50):
+      icbm.run(make_cs(62, v_ego=62), CC, make_lp(45, source=PlanSource.sccVision), False)
+    for _ in range(100):
+      icbm.run(make_cs(62, v_ego=2, enabled=False), CC, make_lp(LIMIT), False)
+    # Re-engages at a standstill and the set speed lands at 69 -- neither the pre-disengage 62 nor
+    # anything a SET at 2 mph could produce.
+    for _ in range(400):
+      icbm.run(make_cs(69, v_ego=2), CC, make_lp(LIMIT), False)
+
+    assert icbm.v_baseline == DRIVER, (
+      f"hold went to {icbm.v_baseline} -- a standstill re-engage was read as the driver pressing "
+      f"SET and handing the speed back to SLA. THE REPORTED BUG.")
+
+  def test_a_real_set_still_clears_the_hold(self):
+    """The counterweight. A SET lands on the vehicle speed, and that must still hand the speed back."""
+    icbm = self._held_at(fresh(), DRIVER)
+    assert icbm.v_baseline == DRIVER
+
+    for _ in range(50):
+      icbm.run(make_cs(DRIVER, v_ego=DRIVER), CC, make_lp(LIMIT), False)
+    for _ in range(100):
+      icbm.run(make_cs(DRIVER, v_ego=58, enabled=False), CC, make_lp(LIMIT), False)
+    # Ford's SET jumps to the current vehicle speed: rolling at 58, the set speed lands on 58.
+    for _ in range(400):
+      icbm.run(make_cs(58, v_ego=58), CC, make_lp(LIMIT), False)
+
+    assert icbm.v_baseline == 0, (
+      f"hold survived at {icbm.v_baseline}; a SET must still hand the speed back to SLA")
