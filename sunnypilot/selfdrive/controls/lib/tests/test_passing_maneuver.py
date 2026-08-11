@@ -23,8 +23,11 @@ Phase = custom.LongitudinalPlanSP.PassingAssist.Maneuver
 
 
 def run(m, seconds, *, clear=Side.none, suggested=Side.none, confirming=False, confirmed=False,
-        override=False, collision=False, actuating=False, settle_s=None, wanted=None):
-  kw = {} if settle_s is None else {"settle_after_change_s": settle_s}
+        override=False, collision=False, actuating=False, settle_s=None, wanted=None,
+        too_slow=False):
+  kw = {"too_slow": too_slow} if too_slow else {}
+  if settle_s is not None:
+    kw["settle_after_change_s"] = settle_s
   if wanted is not None:
     kw["wanted"] = wanted
   for _ in range(max(1, int(round(seconds / DT_MDL)))):
@@ -560,3 +563,54 @@ class TestTheDesireIsNarrowerThanTheLamp:
 
   def test_nothing_is_desired_while_idle(self):
     assert not PassingManeuver().desire_ok
+
+
+class TestComingToAStopEndsIt:
+  """From the road on 2026-08-11:
+
+      "I was in the middle of stopping and then it said would be changing right. Shouldn't it
+       cancel lane changes when it goes below the speed? I was coming to a stop behind a vehicle,
+       so of course I was going slower than the speed limit."
+
+  Both gates that should have caught it DID fire at the decision layer -- `tooSlow` is the first
+  thing the detector checks, and the lead-braking hold zeroes the keep-right clock. Neither could
+  reach a COMMITTED sequence, because once this machine is `changing` it stops reading gates on
+  purpose: a car cannot un-change lanes on a change of mind.
+
+  Coming to a stop is not a gate changing its mind. It is the situation ceasing to exist.
+  """
+
+  def test_it_ends_a_committed_crossing(self):
+    """THE REPORT. Committed at speed, then a stop -- it rode all the way through."""
+    m = PassingManeuver()
+    run(m, m.blinker_lead_s + 0.4, wanted=Side.left, clear=Side.left, suggested=Side.left,
+        confirmed=True)
+    assert m.phase == Phase.changing, "fixture never committed"
+    run(m, 0.1, too_slow=True)
+    assert m.phase == Phase.idle, "narrated a lane change while coming to a stop"
+    assert m.side == Side.none
+
+  def test_it_ends_a_standing_signal_too(self):
+    m = PassingManeuver()
+    run(m, 0.2, wanted=Side.left, clear=Side.none, confirmed=True)
+    assert m.phase == Phase.signaling
+    run(m, 0.1, too_slow=True)
+    assert m.phase == Phase.idle
+
+  def test_it_is_not_counted_as_an_abort(self):
+    """Same reasoning as driver_override: the sequence did not fail, it stopped being applicable.
+    Counting it would bury real gate instability under every red light."""
+    m = PassingManeuver()
+    run(m, m.blinker_lead_s + 0.4, wanted=Side.left, clear=Side.left, suggested=Side.left,
+        confirmed=True)
+    before = m.aborts
+    run(m, 0.1, too_slow=True)
+    assert m.aborts == before, "counted a stop as a backed-out maneuver"
+
+  def test_a_collision_abort_still_outranks_nothing_here(self):
+    """Ordering check: too_slow sits with driver_override, above everything a gate can say, and
+    below nothing -- it must not be reachable only after some other branch returns."""
+    m = PassingManeuver()
+    run(m, 0.2, wanted=Side.left, clear=Side.left, suggested=Side.left, confirmed=True)
+    run(m, 0.1, too_slow=True, collision=True)
+    assert m.phase == Phase.idle

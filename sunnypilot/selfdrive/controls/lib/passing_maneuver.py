@@ -236,9 +236,10 @@ class PassingManeuver:
              driver_override: bool, collision_abort: bool = False,
              actuating: bool = False,
              settle_after_change_s: float = COMPLETE_STANDDOWN_S,
-             wanted: int | None = None) -> None:
+             wanted: int | None = None, too_slow: bool = False) -> None:
     """One frame.
 
+    `too_slow`   -- below the minimum speed. Ends the sequence AT ANY PHASE, like driver_override.
     `wanted`     -- a slow car is spotted and a lane exists that side. LIGHTS THE BLINKER, and says
                     nothing about whether entering it is safe. See SIGNAL_WINDOW_S. Defaults to
                     `clear`, which is the pre-2026-08-09 behaviour of gating the signal on safety.
@@ -264,6 +265,30 @@ class PassingManeuver:
     # The driver taking their car back is not a gate and is not an abort worth counting against
     # the system -- it is the correct outcome, at any phase, including mid-crossing.
     if driver_override:
+      self._to(Phase.idle)
+      self.side = Side.none
+      return
+
+    # BELOW THE MINIMUM SPEED, and it has to end the sequence at any phase for the same reason the
+    # override does. From the road on 2026-08-11:
+    #
+    #   "I was in the middle of stopping and then it said would be changing right. Shouldn't it
+    #    cancel lane changes when it goes below the speed? I was coming to a stop behind a vehicle,
+    #    so of course I was going slower than the speed limit."
+    #
+    # Exactly right, and the hole is specific. The DETECTOR refuses below PassingAssistMinSpeed --
+    # `tooSlow` is the first gate it checks -- but a refusal only clears `clear` and `wanted`, and
+    # once this machine reaches `changing` it stops reading those on purpose: a car cannot un-change
+    # lanes on a change of mind. So a sequence committed at speed rode all the way through a stop.
+    #
+    # The distinction that makes this different from a gate: a gate changing its mind is the
+    # decision being revisited, and committing past that is correct. Coming to a stop is the
+    # SITUATION ceasing to exist -- there is no pass, there is no lane change, and continuing to
+    # narrate one is at best noise and at worst a maneuver nobody wants at 15 mph.
+    #
+    # Not counted as an abort, for the same reason the override is not: the sequence did not fail,
+    # it stopped being applicable.
+    if too_slow:
       self._to(Phase.idle)
       self.side = Side.none
       return

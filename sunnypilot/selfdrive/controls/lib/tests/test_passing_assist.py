@@ -3534,3 +3534,27 @@ class TestTheRoadEdgeBySpeed:
     band = det._edge_by_speed[3]
     if band[0]:
       assert band[1] == 0, "counted a failure on a trusted edge"
+
+
+class TestKeepRightEndsWhenComingToAStop:
+  """The half of the 2026-08-11 report the maneuver-level tests did not reach.
+
+      "I was in the middle of stopping and then it said would be changing RIGHT."
+
+  It was the KEEP-RIGHT machine, and wiring too_slow to the passing maneuver alone left this exactly
+  as it was. Caught by mutation rather than by writing the test first: unwiring keep-right broke no
+  test at all, which is the only reason it got covered.
+  """
+
+  def test_a_committed_keep_right_ends_below_the_minimum_speed(self):
+    det = run(keep_right_det(), KEEP_RIGHT_FRAMES, status=False, **IN_LEFT_LANE)
+    assert det.keep_right_maneuver.phase != Phase.idle, "fixture never started a keep-right"
+    run(det, 10, status=False, v_ego=10 * CV.MPH_TO_MS, v_lead=8 * CV.MPH_TO_MS, **IN_LEFT_LANE)
+    assert det.keep_right_maneuver.phase == Phase.idle, "kept narrating a move while stopping"
+
+  def test_and_it_says_nothing_on_the_panel_either(self):
+    """blinkerWouldBeOn is what the car side reads, so a maneuver left running is not merely a
+    cosmetic line -- once actuating it is a commanded signal at 10 mph."""
+    det = run(keep_right_det(), KEEP_RIGHT_FRAMES, status=False, **IN_LEFT_LANE)
+    run(det, 10, status=False, v_ego=10 * CV.MPH_TO_MS, v_lead=8 * CV.MPH_TO_MS, **IN_LEFT_LANE)
+    assert not det.keep_right_maneuver.blinker_on

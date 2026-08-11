@@ -2090,14 +2090,21 @@ class PassingAssistDetector:
     # may not happen.
     kr_side = self.suggestion if self.reason == Reason.keepRight else Side.none
     kr_rear = self._must_abort(self.keep_right_maneuver.side)
+    # too_slow HERE TOO, and this is the machine that produced the report -- "it said would be
+    # changing RIGHT" while coming to a stop. Wiring it to the passing maneuver alone would have
+    # fixed the half he did not hit.
     self.keep_right_maneuver.update(clear=kr_side, suggested=kr_side, confirming=False,
                                      confirmed=kr_side != Side.none, driver_override=override,
-                                     collision_abort=kr_rear)
+                                     collision_abort=kr_rear,
+                                     too_slow=bool(CS.vEgo < self.min_speed_ms))
 
     confirmed = self.approach_seconds >= self.persistence_s
     self.maneuver.update(
       clear=self.clear_side,
       wanted=self.wanted_side,
+      # See PassingManeuver.update. The detector refuses below this speed, but a refusal cannot
+      # reach a committed crossing -- this can.
+      too_slow=bool(CS.vEgo < self.min_speed_ms),
       suggested=self.suggestion if self.reason == Reason.passing else Side.none,
       confirming=self.approach_seconds > 0.0 and not confirmed,
       confirmed=confirmed,
