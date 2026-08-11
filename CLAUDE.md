@@ -456,6 +456,18 @@ Each of these was asserted confidently from reasoning and turned out to be false
   it. Route anything needing body actuation to FORScan instead of designing around it.
 - **The Fusion IPC is LKA-only.** TJA, LCA, BlueCruise and Driver Alert draw nothing on his cluster;
   the LKA states are the entire vocabulary available.
+- **"Too slow in curves" was SCC-MAP, not SCC-Vision.** Measured on route 00000338, 2026-08-10:
+  sccMap was the plan source and had driven the dash to 43 mph before vision said anything. Three
+  separate changes to the vision factors were aimed at a controller that was not asking. Attribute
+  the source before touching a sensitivity -- `tools/bp_why_slow.py` does it, and vision was only
+  7.9% of that whole drive.
+- **The vision factors barely apply between 30 and 60 mph.** `_SENSITIVITY_V_BP` blends
+  `SmartCruiseControlVisionLowSpeedFactor` into `...HighSpeedFactor` across 30-60 mph. With low at
+  100 and high at 80, a bend taken at 45 mph gets ~0.90, not 0.80. Changing only the high factor does
+  almost nothing to a 40-55 mph corner, which is the range most complaints have been about.
+- **A single vision target frame can be a large outlier.** On that bend vision asked 59, then 36, then
+  55 on consecutive samples. ICBM chases the minimum, so one frame set the number. Do not read a
+  single logged target as the controller's estimate.
 - **Ford's angle gains are a PSCM calibration, not a detune**, and the take-over alert that looks
   like they cause is a tracking-lag false positive.
 
