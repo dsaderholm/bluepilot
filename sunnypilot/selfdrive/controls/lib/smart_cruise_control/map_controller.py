@@ -2,6 +2,8 @@ import json
 import math
 import platform
 
+import numpy as np
+
 from cereal import custom
 from openpilot.common.params import Params
 from openpilot.common.realtime import DT_MDL
@@ -9,6 +11,22 @@ from openpilot.selfdrive.car.cruise import V_CRUISE_UNSET
 from openpilot.sunnypilot import PARAMS_UPDATE_PERIOD
 from openpilot.sunnypilot.navd.helpers import coordinate_from_param, Coordinate
 from openpilot.sunnypilot.selfdrive.controls.lib.smart_cruise_control import MIN_V
+
+# FusionPilot: the mapped-corner factor is blended across the CORNER's own speed, not the car's.
+# That distinction is the whole point. A loop ramp is a 25 mph corner entered at 75, and a highway
+# sweeper is a 50 mph corner entered at 75 -- identical ego speed, opposite requirements, so keying
+# the blend on vEgo cannot tell them apart. Vision's pair keys on vEgo because it is regulating
+# lateral acceleration continuously; this one is picking a number for a specific corner.
+#
+# Measured on route 00000338 at t+796 on 2026-08-10, which is why this exists: the map's own number
+# for a highway bend was 48 mph, a single global factor of 90 asked for 43, and the owner overrode
+# with the accelerator and took the bend at 51 mph pulling 2.9 m/s^2 without difficulty. The same 90
+# was set on 2026-08-08 for the opposite reason -- a ramp his retrofit PSCM wanted taken at 20 rather
+# than the advisory speed. Both reports are correct and one knob could not serve them.
+# Band top is 45 mph, deliberately BELOW the 48 mph bend that prompted this. Inside the band a
+# 48 mph corner still gets 99% of the tight factor, which is the old behaviour with extra steps;
+# above it the map's own number stands, which is what the measurement says it should.
+_MAP_FACTOR_V_BP = [11.18, 20.12]  # m/s, 25-45 mph on the CORNER speed
 
 MapState = VisionState = custom.LongitudinalPlanSP.SmartCruiseControl.MapState
 
@@ -125,6 +143,7 @@ class SmartCruiseControlMap:
     self.model_vetoed = False   # logged so a missing slowdown can be explained rather than guessed
     self.target_distance = float('inf')
     self.map_factor = 1.0
+    self.map_high_speed_factor = 1.0
     self.long_enabled = False
     self.long_override = False
     self.is_enabled = False
@@ -158,6 +177,11 @@ class SmartCruiseControlMap:
       # at the output means the trigger distance is computed against the speed we will actually ask
       # for, so a lower factor also starts earlier -- which is the physically consistent pairing.
       self.map_factor = self.params.get("SmartCruiseControlMapFactor", return_default=True) / 100.
+      # Deliberately NOT a rename of the key above. His stored 90 already means what he chose it to
+      # mean -- tight ramps slower than the advisory -- so leaving it as the low-speed end preserves
+      # that with no migration, and the new key fixes only the case that was measured wrong.
+      self.map_high_speed_factor = self.params.get("SmartCruiseControlMapHighSpeedFactor",
+                                                   return_default=True) / 100.
       self.target_accel = -min(max(decel, SCC_MAP_DECEL_MIN), SCC_MAP_DECEL_MAX)
 
   def update_calculations(self) -> None:
@@ -263,9 +287,14 @@ class SmartCruiseControlMap:
       self.target_lat = 0.0
       self.target_lon = 0.0
 
-    self.v_target = min_v * self.map_factor
+    self.v_target = min_v * self._factor_for_corner(min_v)
     self.target_lat = target_lat
     self.target_lon = target_lon
+
+  def _factor_for_corner(self, corner_v: float) -> float:
+    """FusionPilot: blend the tight-corner and highway-corner factors across the corner's own speed."""
+    return float(np.interp(corner_v, _MAP_FACTOR_V_BP,
+                           [self.map_factor, self.map_high_speed_factor]))
 
   def _update_state_machine(self) -> tuple[bool, bool]:
     # ENABLED, TURNING

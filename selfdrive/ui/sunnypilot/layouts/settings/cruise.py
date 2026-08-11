@@ -229,12 +229,28 @@ class CruiseLayout(Widget):
     # how slow it gets. Asked for after an off-ramp whose mapped target matched the yellow advisory
     # sign -- correct for a stock car, too fast for this one's retrofit PSCM to steer.
     self.scc_map_factor = option_item_sp(
-      title=tr("Mapped Corner Speed"),
-      description=recommended(tr("Scales the speed mapped corners and exit ramps are taken at. "
+      title=tr("Mapped Corner Speed - Tight"),
+      description=recommended(tr("Scales the speed tight mapped corners and exit ramps are taken at. "
                      "100% uses the map's own number, which matches the posted advisory. Lower it "
-                     "if the steering struggles to hold those curves at the advisory speed."),
+                     "if the steering struggles to hold those curves at the advisory speed. This one "
+                     "governs corners of 25 mph and below, blending out to the highway setting by "
+                     "45 mph."),
                      "SmartCruiseControlMapFactor", self._percent_label),
       param="SmartCruiseControlMapFactor",
+      min_value=50, max_value=100, value_change_step=5,
+      label_callback=self._percent_label,
+      inline=True)
+
+    # FusionPilot: split from the control above on 2026-08-10. A ramp is a 25 mph corner entered at 75
+    # and a sweeper is a 50 mph corner entered at 75, so one factor could not serve both -- the value
+    # that made ramps steerable was cutting 5 mph off highway bends the map had already got right.
+    self.scc_map_high_factor = option_item_sp(
+      title=tr("Mapped Corner Speed - Highway"),
+      description=recommended(tr("Scales the speed faster mapped corners are taken at, from 45 mph "
+                     "upward. 100% uses the map's own number. Separate from the setting above "
+                     "because a tight ramp and a highway sweeper need opposite adjustments."),
+                     "SmartCruiseControlMapHighSpeedFactor", self._percent_label),
+      param="SmartCruiseControlMapHighSpeedFactor",
       min_value=50, max_value=100, value_change_step=5,
       label_callback=self._percent_label,
       inline=True)
@@ -340,6 +356,7 @@ class CruiseLayout(Widget):
       self.scc_v_high_speed_factor,
       self.scc_m_toggle,
       self.scc_map_factor,
+      self.scc_map_high_factor,
       self.scc_m_decel,
 
       SectionHeader(tr("Other")),

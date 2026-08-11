@@ -58,6 +58,7 @@ DEFAULT_TARGETS = [
   # (that directory glob already covers test_button_mapping.py)
   "sunnypilot/selfdrive/controls/lib/tests/test_unconfirmed_lead.py",
   "sunnypilot/selfdrive/controls/lib/smart_cruise_control/tests/test_map_model_veto.py",
+  "sunnypilot/selfdrive/controls/lib/smart_cruise_control/tests/test_map_factor_split.py",
   # Named files, not selfdrive/ui/tests/ -- test_raylib_ui.py, test_soundd.py, test_feedbackd.py
   # and test_translations.py all need raylib or the device and break collection for the folder.
   # That is also how test_settings_recommend_defaults.py sat here unrun on the day it was written:

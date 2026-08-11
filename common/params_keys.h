@@ -452,7 +452,19 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // too fast for this one to steer -- the retrofit PSCM has less authority than the advisory
     // assumes. 100 keeps the map's own number; lower takes every mapped corner proportionally
     // slower.
+    // Now the TIGHT-CORNER end of a speed-blended pair; see _MAP_FACTOR_V_BP in map_controller.py.
+    // Kept under its original name rather than renamed so the stored value keeps meaning exactly what
+    // it was chosen to mean on 2026-08-08 -- ramps slower than the yellow advisory -- with no
+    // migration. It governs corners at or below 25 mph and blends out to the key below by 45 mph.
     {"SmartCruiseControlMapFactor", {PERSISTENT | BACKUP, INT, "90"}},
+    // FusionPilot: the HIGHWAY-CORNER end of that pair, in percent. 100 keeps the map's own number.
+    //
+    // Measured, route 00000338 t+796 on 2026-08-10: the map's number for a highway bend was 48 mph,
+    // the single global factor of 90 asked for 43, and he overrode with the accelerator and took the
+    // bend at 51 pulling 2.9 m/s^2 comfortably. So the map was already close and the factor was the
+    // error. Defaults to 100 because there is no evidence a mapped highway corner needs cutting --
+    // and a global cut is what produced the report.
+    {"SmartCruiseControlMapHighSpeedFactor", {PERSISTENT | BACKUP, INT, "100"}},
 
     // Torque lateral control custom params
     {"CustomTorqueParams", {PERSISTENT | BACKUP , BOOL}},
