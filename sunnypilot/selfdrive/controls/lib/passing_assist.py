@@ -116,6 +116,12 @@ MAX_WIDENING_M = 2.5
 # uses for "lane visible"; raised slightly because acting on it is a stronger claim than warning.
 # 0.3, DOWN FROM 0.6, and the old value was stricter than openpilot is about its own best data.
 #
+# STALE AS WRITTEN -- the constant below is 0.5, not 0.3, and this line has said otherwise since
+# whenever it moved back. Left in place rather than deleted because the REASONING is still the
+# argument for lowering it; only the number is wrong. And 2026-08-09 settled that lowering is not
+# the fix anyway: the measured value was 0.011, so neither 0.5 nor 0.3 nor 0.1 would have passed.
+# The model has no opinion about that line, which is a different problem from a strict threshold.
+#
 # ldw.py calls a lane "visible" at laneLineProbs > 0.5 -- but it tests indices 1 and 2, the EGO
 # lane's own lines, which are the two the model predicts most confidently. This tests 0 and 3, the
 # lines beyond them, which are inherently less certain: further away, more often occluded, and not
@@ -704,6 +710,21 @@ class PassingAssistDetector:
     self.left_geometry_ok = False
     # Which geometry term refuses the LEFT side, counted over the whole drive. See _record_refusal.
     self._geo_refusals = [0, 0, 0, 0]
+    # HOW OFTEN EACH TERM FAILS ON ITS OWN, independent of which one got the blame.
+    #
+    # _geo_refusals is an if/elif chain, so it records the FIRST failing term and says nothing about
+    # the others -- its own comment admits it "names A binding term, not THE one". That is the exact
+    # question blocking any fix: when paint refuses at 0.011, would the road edge have said yes?
+    #
+    #   fail TOGETHER  -> nothing in the current sensor set fixes this, and no amount of gate
+    #                     restructuring helps. Stop looking here.
+    #   fail ALTERNATELY -> requiring BOTH is what costs three quarters of the drive, and the gate
+    #                     is the problem rather than the camera.
+    #
+    # Counted only on frames where a pass was actually wanted, same as the tally above, or an empty
+    # road dominates it.
+    self._geo_term_fails = [0, 0, 0, 0]
+    self._geo_frames = 0
     self._geo_sums = [0.0, 0.0, 0.0, 0.0]
     # ...and the SPREAD, not just the mean. See geo_refusal_loosen_to.
     self._geo_hist = [[0] * 10 for _ in range(4)]
@@ -1118,6 +1139,16 @@ class PassingAssistDetector:
       idx, val = self.GEO_BEYOND, self.left_edge_beyond
     self._geo_refusals[idx] += 1
     self._geo_sums[idx] += val
+
+    # ...and independently, which is the part the chain above cannot answer. See _geo_term_fails.
+    self._geo_frames += 1
+    for i, failed in enumerate((
+        self.left_edge_std > MAX_ROAD_EDGE_STD,
+        self.left_line_prob < MIN_ADJACENT_LINE_PROB,
+        not (MIN_LANE_WIDTH_M <= self.left_lane_width <= MAX_LANE_WIDTH_M),
+        self.left_edge_beyond < MIN_EDGE_BEYOND_LINE_M)):
+      if failed:
+        self._geo_term_fails[i] += 1
     # Ten buckets across the term's plausible range. A mean says "paint averaged 0.31" and cannot
     # answer the only question worth asking -- what would I have to set it to. Half the refusals
     # could be at 0.45 and half at 0.17, and 0.30 would fix neither cleanly.
@@ -1474,6 +1505,11 @@ class PassingAssistDetector:
         # written and never stored, so the one number that explains a drive with sixty refusals and
         # zero suggestions could only be read off a running car -- "I guess I need to go back to my
         # car?" is the cost of that, and the answer was no, it was my omission.
+        # See _geo_term_fails. Shares of the refused frames each term failed on, INDEPENDENTLY --
+        # they sum to more than 1 when terms fail together, which is the whole point of recording
+        # them. Order: edge-std, paint, width, room-past-the-line.
+        "geoTermFails": [round(n / self._geo_frames, 3) if self._geo_frames else 0.0
+                         for n in self._geo_term_fails],
         "geoRefusedBy": int(self.geo_refusal[0]),
         "geoRefusedValue": round(self.geo_refusal[1], 3),
         "geoRefusedShare": round(self.geo_refusal[2], 3),

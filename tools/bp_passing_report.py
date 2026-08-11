@@ -58,6 +58,14 @@ def history() -> int:
       why = (f"  [left refused by {GEO_TERMS[int(d.get('geoRefusedBy', 0))]} = "
              f"{d.get('geoRefusedValue')}, {share * 100:.0f}%]")
     print(f"--- drive {i}  build {build}{why}")
+    # EACH TERM INDEPENDENTLY, which the line above cannot say. geoRefusedBy is the first failing
+    # term in an if/elif chain, so it names A binding term rather than THE one -- and the question
+    # that decides whether the geometry gate is fixable is whether paint and the road edge fail
+    # TOGETHER or ALTERNATELY. Shares sum past 100% exactly when they overlap, which is the answer.
+    fails = d.get("geoTermFails")
+    if fails:
+      print("    each term, independently: " +
+            ", ".join(f"{n} {v * 100:.0f}%" for n, v in zip(GEO_TERMS, fails, strict=False)))
     print(json.dumps({k: v for k, v in d.items() if k != "build"}, sort_keys=True))
   return 0
 

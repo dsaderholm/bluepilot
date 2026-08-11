@@ -3457,3 +3457,48 @@ class TestTheAgreementScoreHasTheRightDenominator:
     """It was running, it had an opinion, and the opinion was no. That is a real disagreement."""
     for reason in (Blocked.noLaneAvailable, Blocked.adjacentSlow, Blocked.oncomingLane):
       assert self._pass_at(reason).driver_passes_eligible == 1, f"discarded a real refusal: {reason}"
+
+
+class TestEachGeometryTermIsCountedIndependently:
+  """geoRefusedBy is an if/elif chain, so it records the FIRST failing term and its own comment
+  admits it "names A binding term, not THE one". That ambiguity is what blocks any fix to the
+  geometry gate, which refused 73-77 % of the last two drives:
+
+    fail TOGETHER    -> nothing in the current sensor set fixes it, and restructuring the gate is
+                        wasted effort
+    fail ALTERNATELY -> requiring BOTH is what costs three quarters of the drive
+
+  The independent tally answers that and the chain cannot.
+  """
+
+  IDX_EDGE_STD, IDX_PAINT, IDX_WIDTH, IDX_BEYOND = 0, 1, 2, 3
+
+  def test_two_terms_failing_at_once_are_both_counted(self):
+    """THE CASE THAT MATTERS. The chain blames one; both have to appear here or the overlap is
+    invisible and the question stays open."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES,
+              probs=(0.05, 0.99, 0.99, 0.05), edge_stds=(2.5, 0.1))
+    fails = det._geo_term_fails
+    assert fails[self.IDX_PAINT] > 0, "paint failure not counted"
+    assert fails[self.IDX_EDGE_STD] > 0, "edge-std failure not counted while paint took the blame"
+
+  def test_a_term_that_passes_is_not_counted(self):
+    """Or every share reads 100% and the measurement says nothing."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, probs=(0.05, 0.99, 0.99, 0.05))
+    assert det._geo_term_fails[self.IDX_PAINT] > 0
+    assert det._geo_term_fails[self.IDX_EDGE_STD] == 0, "counted an edge failure that did not happen"
+
+  def test_the_shares_can_exceed_one_together(self):
+    """Deliberately. Summing past 100% IS the finding -- it is what "they fail together" looks
+    like in the number, and a normalised share would hide exactly that."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES,
+              probs=(0.05, 0.99, 0.99, 0.05), edge_stds=(2.5, 0.1))
+    assert det._geo_frames > 0
+    total = sum(n / det._geo_frames for n in det._geo_term_fails)
+    assert total > 1.0
+
+  def test_nothing_is_counted_on_a_road_where_no_pass_was_wanted(self):
+    """Same gate as the tally it sits beside. An empty road would otherwise dominate it."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, v_lead=CRUISE_MS,
+              probs=(0.05, 0.99, 0.99, 0.05), edge_stds=(2.5, 0.1))
+    assert det._geo_frames == 0, "counted geometry on a road with nothing worth passing"
