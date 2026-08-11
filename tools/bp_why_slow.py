@@ -153,6 +153,16 @@ def main() -> int:
               f"{'B' if s['brake'] else '.'}")
       hist.clear()
 
+  print("\n=== who GOVERNED the drive, whole route ===")
+  if plan_frames:
+    for src, n in sorted(src_frames.items(), key=lambda x: -x[1]):
+      print(f"  {src:<18} {100.0 * n / plan_frames:5.1f}%  {'#' * int(40.0 * n / plan_frames)}")
+    grey = sum(n for k, n in src_frames.items() if k not in ("cruise", "speedLimitAssist"))
+    print(f"\n  HOLD badge reads grey for {100.0 * grey / plan_frames:.1f}% of the drive.")
+    print("  hold_suppressed is true whenever the source is not cruise or speedLimitAssist, so a")
+    print("  high number here explains a permanently grey badge AND permanent curve limiting with")
+    print("  ONE cause instead of two.")
+
   print(f"\n=== {events} slowdowns of >={args.drop:.0f} mph found ===")
   print("  Read the `source` column at the START of each block -- that is who asked. If it is not")
   print("  sccVision, the curve sensitivity settings are the wrong knob and always were.")
