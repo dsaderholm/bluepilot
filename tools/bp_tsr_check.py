@@ -4,23 +4,35 @@
 Run this before and after any FORScan change to the camera, so "did that help" is a measurement
 instead of an impression.
 
-2026-08-11: THE FIX WAS "CAMERA + APIM", AND EVERY THEORY BELOW HAD IT BACKWARDS.
+2026-08-11: TSR DATA SOURCE IS NOT THE LEVER. BOTH VALUES GIVE THE SAME RESULT.
 
-His IPMA was ALREADY set to "TSR data source: Camera Only" -- the state this file spent two days
-arguing he should move TO. Changing it to Camera + APIM cleared NoNavDataAvailable immediately.
+Tested properly, in one sitting, and the result is more useful than a fix would have been:
 
-So the reasoning below, that camera-only stops the module waiting on navigation, is wrong on this
-hardware. Most likely explanation: FORScan decodes as-built with a 2020 Fusion profile and the module
-is an Edge MK2 IPMA, so the label and the byte do not necessarily mean the same thing. Do not trust a
-FORScan label on this car without testing what it actually does.
+  - "Camera Only"  -> tsrMsg pinned at 3, NoNavDataAvailable. He had been in this state all along --
+                      it is the state this file spent two days arguing he should move TO.
+  - "Camera + APIM" -> the message cleared, then CAME BACK after an ignition cycle.
 
-The lesson worth more than the fix: ASK WHAT THE SETTINGS ALREADY ARE BEFORE PLANNING A CHANGE TO
-THEM. A whole plan was built on getting a donor car's as-built to find a byte that was already set
-the way the plan wanted it.
+That clearing was the module re-initializing after the as-built write, not the setting working. A
+config change that only holds until the next start has not changed behavior; it has reset something.
+Always re-check after an ignition cycle before believing a FORScan change.
 
-STILL UNCONFIRMED as of this writing: whether the camera now READS signs. The status field going
-healthy means it stopped refusing to participate; vLimit1 going non-255 at a posted sign is the thing
-that matters, and needs a drive.
+So the data source byte does not control this on this hardware, whichever way it is set. Most likely
+FORScan decodes as-built with a 2020 Fusion profile while the module is an Edge MK2 IPMA, so the
+label and the byte do not mean the same thing -- which would also explain why the region change threw
+DTCs rather than doing anything useful.
+
+WHAT THIS RULES OUT, which is the value here: the camera is NOT reporting CountryNotSupported (5) or
+RegionNotSupported (6). It reports NoNavDataAvailable (3) -- it believes its region setup is fine and
+is waiting for navigation data. And the nav exchange happens on a bus openpilot cannot see, so no
+measurement here can take it further.
+
+WHICH PUTS THE DONOR CAR BACK AT THE TOP. A Ford Fusion Sport owner with the same camera strategy
+(KT4T-14F397-AE) has sign recognition working. Since the LABELS are proven unreliable on this module,
+a byte-level diff of his 706-01-01 against this car's is the only approach left that does not involve
+guessing. Ask for the raw as-built block, not a description of his settings.
+
+AND ASK WHAT A SETTING ALREADY IS BEFORE PLANNING A CHANGE TO IT. A plan was built around obtaining a
+donor's as-built to locate a byte already set the way the plan wanted it. One screenshot ended it.
 
 STATE AS OF 2026-08-09, region UNSPECIFIED, no FORScan TSR change made:
 

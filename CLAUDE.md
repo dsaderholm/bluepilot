@@ -697,14 +697,21 @@ unspecified or something like that."* That path has been tried and it cost more 
 Do not propose it again as a way to make TSR work, and do not treat the region as an unexplored
 lever -- it is explored, and the answer was no.
 
-**2026-08-11: TSR data source was already "Camera Only", and "Camera + APIM" is what fixed it.**
-The pinned `NoNavDataAvailable` cleared the moment he switched it. Every note here had theorized the
-opposite -- that camera-only would stop the module waiting for navigation -- and he had been in
-camera-only the entire time. FORScan decodes as-built with a 2020 Fusion profile while the module is
-an Edge MK2 IPMA, so a label there is not evidence of what the byte does.
+**2026-08-11: TSR data source is NOT the lever -- both values give the same result.** He was already
+on "Camera Only", the state every note here argued he should move to. Switching to "Camera + APIM"
+cleared the pinned `NoNavDataAvailable`, and it CAME BACK after an ignition cycle -- so that was the
+module re-initializing after the write, not the setting working.
 
-**Ask what a setting IS before planning a change to it.** An entire plan was built around obtaining a
-donor car's as-built block to locate a byte that was already set the way the plan wanted it.
+**Re-check a FORScan change after an ignition cycle before believing it.** A change that only holds
+until the next start has reset something, not altered behavior.
+
+The camera reports `NoNavDataAvailable` (3), not `CountryNotSupported` (5) or `RegionNotSupported`
+(6), so it believes its region setup is fine and is waiting on navigation. That exchange is on a bus
+openpilot cannot see. Since the FORScan LABELS are now proven unreliable on this module -- a 2020
+Fusion profile decoding an Edge MK2 IPMA -- a byte-level diff against the Fusion Sport owner who has
+TSR working is the only approach left that is not guessing. Ask for the raw block, not his settings.
+
+**And ask what a setting already IS before planning a change to it.**
 
 **And it does not need to be set**, which is the part worth noticing. Everything below was measured
 with the region UNSPECIFIED. The camera reads signs anyway; what the region appears to gate is the
