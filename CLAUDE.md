@@ -718,18 +718,21 @@ unspecified or something like that."* That path has been tried and it cost more 
 Do not propose it again as a way to make TSR work, and do not treat the region as an unexplored
 lever -- it is explored, and the answer was no.
 
-**ROOT CAUSE, 2026-08-11: the IPMA cannot talk to the APIM.** `U0253 - Lost Communication With
-Accessory Protocol Interface Module`, logged by the IPMA, constantly. The APIM is the SYNC module and
-the source of navigation data, so `NoNavDataAvailable` is literal: the camera cannot reach the module
-that would supply it.
+**U0253 WAS the blocker, and it is FIXED.** `U0253 - Lost Communication With Accessory Protocol
+Interface Module`, logged by the IPMA constantly. The APIM is the SYNC module and the source of
+navigation data, so `NoNavDataAvailable` was literal.
 
-**This is a network fault and no as-built value can fix it.** Do not edit the IPMA configuration
-chasing it -- two DTCs were matured on that module in one evening doing exactly that. Dead theories,
-all tested: Ford nav instead of Waze (no change), TSR data source Camera Only (it was already set
-that way), Camera + APIM (rejected, reverted), region (U2101 Configuration Incompatible, twice).
+**Enabling TSR in the APIM at `7D0-09-02` cleared it** -- the DTC is now "Previously Set - Not
+Present". That write succeeded where every IPMA and IPC write was refused, which is the one thing
+FORScan's Fusion profile allowed.
 
-It is an Edge IPMA in a Fusion, so the likely cause is gateway routing or which network the retrofit
-put each module on. That is vehicle wiring work, not anything measurable from the comma device.
+What remains is that TSR is switched OFF in the IPMA at `706-01-01` (third character of the first
+group: `1` = Off, `5` = SLIF) and SLIF is disabled in the cluster at `720-09-01`. FORScan refuses both
+writes. **See `bluepilot/TSR-INVESTIGATION.md`** -- restore points, field maps and next steps.
+
+Dead theories, all tested: Ford nav instead of Waze (no change), TSR data source Camera Only (already
+set that way), Camera + APIM (write reverted), region (`U2101 Configuration Incompatible`, twice), and
+the Maverick community byte positions (wrong field for this module; caused `U2101` and a radar fault).
 
 **And it does not need to be set**, which is the part worth noticing. Everything below was measured
 with the region UNSPECIFIED. The camera reads signs anyway; what the region appears to gate is the
