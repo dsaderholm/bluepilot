@@ -386,7 +386,19 @@ class IntelligentCruiseButtonManagement:
     v_target_unset = round(V_CRUISE_MAX * CV.KPH_TO_MS * speed_conv)
     self.v_target_valid = 0 < self.v_target < v_target_unset
     if not self.v_target_valid:
-      self.v_target = self.v_cruise_cluster
+      # THE DRIVER'S HOLD FIRST, the cluster only when there is no hold. Holding the cluster
+      # unconditionally freezes the set speed wherever it stands, and if nothing starts asking again
+      # it stays there: on route 00000348 (2026-08-11) every planner candidate was unset at once and
+      # the set speed sat at 38 through a full stop and the restart, with a hold of 50 that could
+      # never pull it back, because the hold is applied to a target that has already been replaced by
+      # the cluster. Only cancelling and re-engaging cleared it.
+      #
+      # The root cause is fixed in longitudinal_planner -- Speed Limit Assist no longer displaces the
+      # cruise baseline while it has no limit to follow, so the all-unset frame should not recur. This
+      # is the second line of defense, and it is the RIGHT default independently: when nothing at all
+      # is asking, the driver's own number is the correct thing to aim at. A hold is only ever set by
+      # a deliberate gesture, so aiming at it can never invent a speed nobody chose.
+      self.v_target = self.v_baseline if self.v_baseline > 0 else self.v_cruise_cluster
 
     # BluePilot: keep the planner's own target before the limiters touch it. Every override
     # decision compares against this, never against self.v_target -- the limiters clamp toward the

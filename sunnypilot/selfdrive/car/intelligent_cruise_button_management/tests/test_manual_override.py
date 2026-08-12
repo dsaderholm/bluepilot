@@ -20,6 +20,8 @@ import pytest
 from types import SimpleNamespace as NS
 
 from cereal import car, custom
+from openpilot.common.constants import CV
+from openpilot.sunnypilot.selfdrive.car.cruise_ext import V_CRUISE_MAX
 from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management.controller import (
   IntelligentCruiseButtonManagement, DEFAULT_BASELINE_RESET_DELTA,
 )
@@ -1635,3 +1637,62 @@ class TestAStandstillReEngageIsNotASet:
 
     assert icbm.v_baseline == 0, (
       f"hold survived at {icbm.v_baseline}; a SET must still hand the speed back to SLA")
+
+
+class TestNobodyAskingDoesNotStrandTheHold:
+  """Route 00000348 t+838-876, 2026-08-11: "it got stuck at 38, even though my hold was set to 50.
+  The hold never resumed until I canceled and resumed."
+
+  Measured: SCC-Vision inactive at 570 mph (V_CRUISE_UNSET), SCC-Map the same, Speed Limit Assist the
+  same because the road had no limit data, and the published plan target 570. Every candidate unset at
+  once. ICBM rejects that as unreal -- correctly -- and then held the CURRENT set speed, so 38 froze
+  for 40 seconds through a full stop and the restart.
+
+  The plan source read sccVision the whole time, which is a trap worth keeping in the test: min() over
+  equally-unset candidates still names one, so the label pointed at a controller asking for nothing.
+
+  Root cause is fixed in longitudinal_planner. This pins the second line of defense, which is also the
+  right default on its own: when nothing is asking, aim at the driver's number.
+  """
+
+  def test_an_unset_target_falls_back_to_the_hold(self):
+    icbm = fresh()
+    icbm.run(make_cs(LIMIT, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT), False)
+    for cluster in range(LIMIT, DRIVER + 1):
+      icbm.run(make_cs(cluster, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT), False)
+    icbm.run(make_cs(DRIVER, buttons=(ACCEL_RELEASE,)), CC, make_lp(LIMIT), False)
+    for _ in range(200):
+      icbm.run(make_cs(DRIVER), CC, make_lp(LIMIT), False)
+    assert icbm.v_baseline == DRIVER
+
+    # A curve walks the set speed down to 38 BY ICBM'S OWN BUTTONS. Moving the cluster there directly
+    # re-baselines the hold to 38 on the first frame -- an unexplained set-speed move is what
+    # fallbackIdle exists to catch -- and the test would then pass for the wrong reason.
+    cluster = DRIVER
+    for i in range(4000):
+      if cluster <= 38:
+        break
+      icbm.run(make_cs(cluster, v_ego=cluster), CC, make_lp(35, source=PlanSource.sccVision), False)
+      if i % 20 == 0 and icbm.cruise_button == SendButtonState.decrease:
+        cluster -= 1
+    assert cluster <= 38, f"ICBM never lowered the set speed, stalled at {cluster}"
+    assert icbm.v_baseline == DRIVER, f"hold was re-baselined to {icbm.v_baseline} before the test"
+
+    # Now everything goes quiet at once, exactly as logged: every candidate unset.
+    unset = V_CRUISE_MAX * CV.KPH_TO_MS
+    for _ in range(300):
+      icbm.run(make_cs(cluster, v_ego=cluster),
+               CC, make_lp(unset * CV.MS_TO_MPH, source=PlanSource.sccVision), False)
+
+    assert icbm.v_target == DRIVER, (
+      f"target fell back to {icbm.v_target} instead of the hold -- the set speed is stranded at the "
+      f"cluster with no way back. THE REPORTED BUG.")
+
+  def test_with_no_hold_it_still_holds_the_cluster(self):
+    """The original behavior, which is right when there is no driver number to aim at."""
+    icbm = fresh()
+    unset = V_CRUISE_MAX * CV.KPH_TO_MS
+    for _ in range(50):
+      icbm.run(make_cs(38, v_ego=38), CC, make_lp(unset * CV.MS_TO_MPH), False)
+    assert icbm.v_baseline == 0
+    assert icbm.v_target == 38, f"invented a target of {icbm.v_target} with no hold to aim at"
