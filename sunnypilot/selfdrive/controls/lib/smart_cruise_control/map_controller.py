@@ -102,6 +102,22 @@ MODEL_HORIZON_HIGH_SPEED_S = 10.0  # matches modelV2's T_IDXS span
 # under _ENTERING_PRED_LAT_ACC_TH (1.3) in vision_controller: this is not "is there a curve worth
 # slowing for", it is "is there a curve at all".
 MODEL_DISAGREE_LAT_ACC = 0.4
+# The camera seeing SOMETHING is not the camera agreeing. Measured on route 00000348 t+1510,
+# 2026-08-11: the map demanded 50 mph on an 80 mph freeway, predicted lateral acceleration was 1.22 --
+# comfortably over the "no curve at all" threshold above, so the absolute test says nothing -- and the
+# owner overrode and held 65-70 through the bend without difficulty. Vision's own target across that
+# stretch was 84-98 mph. Two controllers disagreeing by a factor of two, with the map winning
+# unopposed.
+#
+# So the second test asks what the MODEL'S OWN VIEW implies. Its predicted peak lateral acceleration
+# at the current speed gives a curvature, and that curvature gives the speed at which the bend would
+# reach a normal lateral-acceleration budget. If the map is demanding far less than that, the map is
+# not describing the road the camera is looking at.
+#
+# _A_LAT_REG_MAX_REF is upstream's 2.0 deliberately, NOT the owner's tuned curve factors. This is a
+# question about the road, not about his taste, and it must not move when he retunes comfort.
+_A_LAT_REG_MAX_REF = 2.0
+MODEL_IMPLIED_SPEED_FRACTION = 0.75
 
 SCC_MAP_DECEL_MIN = 0.4   # m/s^2, magnitude. Gentler than this and the trigger distance is absurd.
 SCC_MAP_DECEL_MAX = 2.5
@@ -369,7 +385,22 @@ class SmartCruiseControlMap:
     horizon = self.v_ego * (MODEL_HORIZON_S if ramp_like else MODEL_HORIZON_HIGH_SPEED_S)
     if target_distance_m > horizon or horizon <= 0:
       return False
-    return self.model_lat_acc < MODEL_DISAGREE_LAT_ACC
+
+    # 1. The camera sees no curve at all.
+    if self.model_lat_acc < MODEL_DISAGREE_LAT_ACC:
+      return True
+
+    # 2. The camera sees a curve, but a far gentler one than the map is describing. Highway corners
+    #    only -- a ramp keeps the conservative bound, because there the model may legitimately not
+    #    have the corner in its plan at all and its silence is blindness rather than evidence.
+    #
+    #    Vetoing here is not "ignore the corner": it removes only the MAP's contribution, and
+    #    SCC-Vision goes on running as the near-field expert. So a highway bend the map overstated
+    #    degrades to camera-based curve control, which is the thing that handles bends you can see.
+    if ramp_like or self.v_ego <= 0:
+      return False
+    implied_ok_v = self.v_ego * math.sqrt(_A_LAT_REG_MAX_REF / max(self.model_lat_acc, 1e-3))
+    return self.v_target < implied_ok_v * MODEL_IMPLIED_SPEED_FRACTION
 
   def update(self, long_enabled: bool, long_override: bool, v_ego, a_ego, v_cruise,
              model_lat_acc: float = 0.0) -> None:

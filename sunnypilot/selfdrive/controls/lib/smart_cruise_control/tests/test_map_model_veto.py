@@ -97,7 +97,32 @@ class TestAHighwayBendGetsTheModelsRealReach:
       "THE REPORTED BUG")
 
   def test_a_highway_corner_the_camera_confirms_is_left_alone(self):
-    assert not self._at(52, CURVING), "vetoed a bend the camera agrees is there"
+    """CORROBORATION IS A NUMBER, not "the camera sees something".
+
+    For a 52 mph corner to be real it must have curvature 2.0 / 23.2^2 = 0.0037, which at 74 mph
+    predicts about 4.1 m/s^2. That is what agreement looks like. The old fixture here used 1.2 -- three
+    times the "is there a curve at all" threshold, but nowhere near enough to justify 52 mph -- and it
+    passed only because nothing was checking the magnitude against what the map claimed.
+    """
+    assert not self._at(52, 4.1), "vetoed a bend the camera agrees is there"
+
+  def test_a_gentler_bend_than_the_map_claims_is_vetoed(self):
+    """Route 00000348 t+1510, 2026-08-11: "it still went down to 50 from 80 for a curve on the
+    freeway, which was a little ridiculous."
+
+    The map demanded 50 mph at 79 mph with predicted lateral acceleration 1.22 -- over the "no curve
+    at all" threshold, so the absolute test says nothing -- while SCC-Vision's own target across the
+    same stretch was 84-98 mph. He overrode and held 65-70 comfortably.
+
+    1.22 at 79 mph implies the bend is fine at about 100 mph, so 50 is not describing this road.
+    """
+    assert self._at(50, 1.22, v_ego=35.4), (
+      "the map asked for 50 mph on a bend the camera says is fine at ~100 -- THE REPORTED BUG")
+
+  def test_a_ramp_is_never_vetoed_by_the_relative_test(self):
+    """The relative test must not reach ramps. At range the model may not have the ramp in its plan,
+    so a low prediction there is blindness, and a 25 mph ramp would be vetoed on every approach."""
+    assert not self._at(25, 1.22, v_ego=35.4, dist=60.0)
 
   def test_a_ramp_keeps_the_conservative_bound(self):
     """The case SCC-Map exists for. A 25 mph ramp at the same distance must NOT be vetoed, because
