@@ -197,9 +197,23 @@ Staying current matters more than any individual change here — an update that 
 an update that gets deferred. So it is one command:
 
 ```bash
-python tools/bp_merge_upstream.py               # merge upstream/bp-7.0
+python tools/bp_merge_upstream.py               # merge the newest upstream RELEASE, auto-detected
 python tools/bp_merge_upstream.py --dry-run     # what would come in, changes nothing
 ```
+
+**Each BluePilot release is its own branch** -- bp-1.1, bp-2.0, ... bp-7.0, and bp-8.0 next -- so the
+script DISCOVERS the newest rather than pinning one. A pinned name is a time bomb: the day bp-8.0
+lands, a script still pointed at bp-7.0 merges a frozen branch, reports success, and leaves the tree
+a whole release behind with nothing saying so. It prints which branch it picked, and says so loudly
+when that is past bp-7.0.
+
+Detection is anchored to `bp-<major>.<minor>` exactly, and sorts numerically. The remote is full of
+near-misses that must never be picked up -- `bp-dev`, `bp-dev-ui`, `bp-dev-f150-mk14.5`,
+`bp-sync-06102026`, `bp-no-stall` -- and a string sort would put bp-10.0 below bp-9.0.
+
+**`bp-dev` is the BluePilot team's active development branch and is never a merge source.** He
+tracks releases only: *"I never want anything to do with bp-dev, that is the BluePilot team."*
+`--branch` can still force one, but nothing should.
 
 It tags a rollback point first, refuses to start on a dirty tree, regenerates `car_list.json`
 instead of merging it, prints what *ours* is in each remaining conflict, runs the test suite, and
@@ -510,6 +524,80 @@ a modified upstream line, and it reads to the next person as load-bearing. And p
 constant to our multiplier where the two are equivalent -- their numbers have far more road under
 them than ours.
 
+## THE EXIT THAT NEVER SLOWS ENOUGH IS NOT A TUNING PROBLEM
+
+He has reported this repeatedly. Measured on route 00000348, 2026-08-11, and the answer is arithmetic:
+
+  t+24439  63 mph  dash 80  nothing asking
+  t+24441  66 mph  dash 78  sccVision fires, asking 71
+  t+24443  69 mph  dash 71  sccMap fires, asking 38
+  t+24447  66 mph  dash 58  latAcc 6.03   <- already in the corner
+  t+24453  46 mph  dash 38  the set speed finally arrives
+
+Two hard numbers bound it:
+
+- **The set speed falls at about 3.3 mph/s and cannot go faster.** 71 -> 38 took ten seconds. ICBM
+  already HOLDS the button rather than tapping (the state machine asserts `decrease` continuously),
+  so that is the car's own repeat rate for a held button, roughly 5 mph every 1.5 s. It is not a
+  parameter and nothing in this fork can raise it.
+- **The map asked four seconds before peak cornering.** A 65 -> 38 exit needs about eight seconds of
+  set-speed travel. It got four.
+
+So the deficit is DETECTION TIME, and the levers people reach for do not touch it:
+
+- `SmartCruiseControlMapDecel` is a trigger distance, and at 8 it already triggers earlier than
+  stock. The map still only fired 4 s out, so the corner was not in `MapTargetVelocities` until then.
+- Commanding Ford's 20 mph floor instead of 38 does NOT help. The dash descends at the same rate
+  either way; a lower final number just overshoots later. Worth stating because the hazard path does
+  exactly that for a different reason, and the analogy is tempting and wrong.
+- The camera cannot cover it either: SCC-Vision fired two seconds before the map, because a ramp bends
+  away from where the camera is looking.
+
+The remaining lever is how far ahead `MapTargetVelocities` is populated, which is mapd's, upstream of
+this fork. Do not re-derive this from scratch; measure with `tools/bp_missed_curves.py` and compare
+the map's fire time against the 3.3 mph/s budget before proposing anything.
+
+## Diagnosing a road report: the tools, and the order to use them
+
+Written 2026-08-11 after an evening where three separate wrong controllers were blamed in turn. All
+live in `tools/` and all are READ-ONLY; scp them to the device and run from `/data/openpilot`.
+
+| Tool | Answers |
+|---|---|
+| `bp_why_slow.py` | who GOVERNED the drive (per-source occupancy) and what caused every slowdown |
+| `bp_hold_history.py` | every change to the HOLD, with `baselineSource` naming the mechanism |
+| `bp_dump_exit.py` | the older exit-specific dump; superseded for anything above 55 mph |
+
+The order that works: occupancy first, then the specific event, then the raw fields. Skipping to the
+raw fields is how an evening goes to the wrong controller.
+
+**And do not trust the source label.** See "Facts that have been got wrong before" -- it names a
+winner even when every candidate is `V_CRUISE_UNSET`.
+
+## SCC-Map has three defenses now, and they are deliberately different questions
+
+Built up across 2026-08-10 and 2026-08-11 from measured events. They stack, and the split between
+them is what keeps exits working:
+
+1. **The corner-speed factor pair.** `SmartCruiseControlMapFactor` (tight, <= 25 mph) and
+   `SmartCruiseControlMapHighSpeedFactor` (highway, >= 45 mph), blended on the CORNER's speed, not
+   the car's. A ramp is a 25 mph corner entered at 75 and a sweeper is a 50 mph corner entered at 75;
+   keying on vEgo cannot separate them.
+2. **The camera veto, absolute.** The model sees no curve at all (`< MODEL_DISAGREE_LAT_ACC`). Ramps
+   keep a conservative 4 s horizon; highway corners get the model's real 10 s reach, because
+   `max_pred_lat_acc` is a percentile over the whole modelV2 plan and 4 s made the veto unreachable
+   at highway speed.
+3. **The camera veto, relative.** The model sees a curve, but a far gentler one than the map claims.
+   Highway corners only.
+
+`_MAP_FACTOR_V_BP[1]` (45 mph) is the single definition of "highway corner" for all three --
+referenced, never duplicated.
+
+**Why ramps are excluded from 2 and 3.** On an exit the model predicts the path it expects to drive,
+straight down the highway, so a ramp's curvature may never enter the plan until the car is on it.
+Camera silence there is blindness, not evidence. That is also why vetoing is safe where it does
+apply: it removes only the MAP's contribution, and SCC-Vision keeps running as the near-field expert.
+
 ## Facts that have been got wrong before
 
 Each of these was asserted confidently from reasoning and turned out to be false. Check the source.
@@ -527,6 +615,29 @@ Each of these was asserted confidently from reasoning and turned out to be false
   it. Route anything needing body actuation to FORScan instead of designing around it.
 - **The Fusion IPC is LKA-only.** TJA, LCA, BlueCruise and Driver Alert draw nothing on his cluster;
   the LKA states are the entire vocabulary available.
+- **"Too slow in curves" was SCC-MAP, not SCC-Vision.** Measured on route 00000338, 2026-08-10:
+  sccMap was the plan source and had driven the dash to 43 mph before vision said anything. Three
+  separate changes to the vision factors were aimed at a controller that was not asking. Attribute
+  the source before touching a sensitivity -- `tools/bp_why_slow.py` does it, and vision was only
+  7.9% of that whole drive.
+- **The vision factors barely apply between 30 and 60 mph.** `_SENSITIVITY_V_BP` blends
+  `SmartCruiseControlVisionLowSpeedFactor` into `...HighSpeedFactor` across 30-60 mph. With low at
+  100 and high at 80, a bend taken at 45 mph gets ~0.90, not 0.80. Changing only the high factor does
+  almost nothing to a 40-55 mph corner, which is the range most complaints have been about.
+- **A single vision target frame can be a large outlier.** On that bend vision asked 59, then 36, then
+  55 on consecutive samples. ICBM chases the minimum, so one frame set the number. Do not read a
+  single logged target as the controller's estimate.
+- **`longitudinalPlanSource` NAMES A WINNER EVEN WHEN NOBODY ASKED.** It is
+  `min(targets, key=...)` over every candidate, so when they are all `V_CRUISE_UNSET` it still
+  reports one -- on route 00000348 it read `sccVision` for 40 s while vision was inactive and asking
+  for nothing. Check `smartCruiseControl.<x>.active` AND the published `vTarget` before believing the
+  source label. 570 mph in a diagnostic is 255 m/s, which means "not asking".
+- **A diagnostic that prints `--` for both "inactive" and "active with no target" hides the only
+  distinction that matters.** Two tools were written that way and both pointed at the wrong
+  controller. Print the raw fields.
+- **Speed Limit Assist stays `is_active` on a road with NO speed limit data.** It is not a proxy for
+  "SLA has a number". Anything gating on it must also check that its target is real, or a stretch
+  with no map coverage silently removes the cruise baseline from the planner.
 - **Ford's angle gains are a PSCM calibration, not a detune**, and the take-over alert that looks
   like they cause is a tracking-lag false positive.
 
@@ -573,6 +684,35 @@ Units have a split that matters, and it is **not** a style choice:
 
 Dates in comments: **ISO `YYYY-MM-DD`**. Not because it is US style — it is not — but because
 `08-04` is genuinely ambiguous across readers and this file already records dated decisions.
+
+## TSR, and the region change that is not worth repeating
+
+**Setting the region in FORScan produced a lot of DTCs, and it is now back to UNSPECIFIED.** His
+words, 2026-08-09: *"when I set region and stuff, I got hella DTCs"* and *"the region is set to
+unspecified or something like that."* That path has been tried and it cost more than it returned.
+Do not propose it again as a way to make TSR work, and do not treat the region as an unexplored
+lever -- it is explored, and the answer was no.
+
+**And it does not need to be set**, which is the part worth noticing. Everything below was measured
+with the region UNSPECIFIED. The camera reads signs anyway; what the region appears to gate is the
+STATUS enumerants, not the detection.
+
+What the camera actually does, measured from route 00000333 on 2026-08-09 rather than assumed:
+
+- `Traffic_RecognitnData` (0x3CD) IS on the bus -- 366 frames on bus 2, forwarded to bus 0. The
+  IPMA transmits it.
+- `vLimit1` is NOT constant: 255 (the no-data sentinel) for most of the drive, and a real value for
+  roughly 10% of it, with `vLimit1Permanent` flipping in lockstep. So the camera does read signs.
+- Everything else in the message is pinned across 36,000 frames -- `tsrStatus`, `vLimit1Status`,
+  `vLimit2`, `vLimitUnit`, the overtake and warning fields. One field doing real work, the rest idle.
+
+**The IPC is a separate question and an irrelevant one.** He asked and was told "the US IPC does not
+support TSR, you have to replace it." That is about the CLUSTER drawing a sign, which he does not
+want: *"I don't care about TSR being on my IPC."* The camera reading signs and the cluster
+displaying them are different modules, and the first is the only one Speed Limit Assist needs.
+
+There is also an on-screen TSR status readout already built. Check what it shows before writing new
+diagnostics for the same question.
 
 ## Car
 

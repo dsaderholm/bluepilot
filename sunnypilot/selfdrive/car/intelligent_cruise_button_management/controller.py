@@ -82,12 +82,22 @@ RESUME_PRESS_MEMORY_FRAMES = 150  # 1.5 s at 100 Hz, generous next to the engage
 # jumps to the CURRENT VEHICLE SPEED. So once the number settles after re-engaging, whichever it
 # landed on says which button was pressed -- no button event required.
 RESUME_MATCH_TOLERANCE = 2  # display units; Ford resumes to the exact previous value
+# Wider than the resume tolerance on purpose. A resume restores an exact stored number, so 2 covers
+# it; a SET lands on the vehicle speed, which is still moving as the press is processed and is read
+# through a cluster that lags, so the landing scatters by several mph.
+SET_MATCH_TOLERANCE = 4  # display units
 # BluePilot: how far above the current set speed ICBM may still go while SCC-Vision is tracking a
 # bend. Not zero: ICBM commands in 1 mph steps against a lagged cluster, so it hunts by one, and
 # clamping hard to the cluster means a 1 mph undershoot can never be recovered for the length of the
 # curve. One display unit leaves the hunt working and still blocks the case this exists for -- a
 # 9 mph climb chased out of a noisy vision target, mid off-ramp, on 2026-08-08.
 CURVE_RISE_TOLERANCE = 1
+# 5 s at 100 Hz. Longer than the 3.3 s off-ramp spike this ceiling exists to reject, and short enough
+# that a genuinely finished bend costs only a couple of seconds before the speed is allowed back.
+CURVE_RELEASE_FRAMES = 500
+# 5 s at 100 Hz. Covers the stretch where SCC-Vision has let go but the car is still coming out of the
+# bend -- the logged jump ran four seconds from vision releasing.
+CURVE_EXIT_LINGER_FRAMES = 500
 # The baseline applies to the speed-limit/cruise component only. A curve target is a physics limit,
 # not something to add an offset to -- SCC-Vision asking for 40 means 40, whatever the baseline is.
 BASELINE_SOURCES = (LongitudinalPlanSource.cruise, LongitudinalPlanSource.speedLimitAssist)
@@ -291,6 +301,9 @@ class IntelligentCruiseButtonManagement:
     self.deadline_requesting = False  # map OR vision: a target with a fixed place in the road
     self.curve_active = False        # SCC-Vision is tracking a bend right now
     self.curve_ceiling = 0           # highest target allowed for the rest of this bend
+    self.v_curve_target = 0          # SCC-Vision's own ask, display units; releases the ceiling
+    self.curve_release_frames = 0     # consecutive frames vision has asked for more than the ceiling
+    self.curve_exit_frames = 0        # counts down after a bend; the lead bypass waits this out
     self.baseline_reset_delta = DEFAULT_BASELINE_RESET_DELTA
     self.v_cruise_cluster_prev = 0
     self.icbm_idle_frames = 0
@@ -377,7 +390,19 @@ class IntelligentCruiseButtonManagement:
     v_target_unset = round(V_CRUISE_MAX * CV.KPH_TO_MS * speed_conv)
     self.v_target_valid = 0 < self.v_target < v_target_unset
     if not self.v_target_valid:
-      self.v_target = self.v_cruise_cluster
+      # THE DRIVER'S HOLD FIRST, the cluster only when there is no hold. Holding the cluster
+      # unconditionally freezes the set speed wherever it stands, and if nothing starts asking again
+      # it stays there: on route 00000348 (2026-08-11) every planner candidate was unset at once and
+      # the set speed sat at 38 through a full stop and the restart, with a hold of 50 that could
+      # never pull it back, because the hold is applied to a target that has already been replaced by
+      # the cluster. Only cancelling and re-engaging cleared it.
+      #
+      # The root cause is fixed in longitudinal_planner -- Speed Limit Assist no longer displaces the
+      # cruise baseline while it has no limit to follow, so the all-unset frame should not recur. This
+      # is the second line of defense, and it is the RIGHT default independently: when nothing at all
+      # is asking, the driver's own number is the correct thing to aim at. A hold is only ever set by
+      # a deliberate gesture, so aiming at it can never invent a speed nobody chose.
+      self.v_target = self.v_baseline if self.v_baseline > 0 else self.v_cruise_cluster
 
     # BluePilot: keep the planner's own target before the limiters touch it. Every override
     # decision compares against this, never against self.v_target -- the limiters clamp toward the
@@ -425,9 +450,24 @@ class IntelligentCruiseButtonManagement:
       # then the cap stays, because it is the only thing standing between a bad target and the road.
       self.deadline_requesting = bool(scc.map.active)
       self.curve_active = bool(scc.vision.active)
+      # Vision's OWN ask, in display units. The curve ceiling needs this rather than the post-limiter
+      # target: metering walks v_target through every value between the old speed and the curve's,
+      # so ratcheting on it drags the ceiling below what the bend ever actually demanded.
+      self.v_curve_target = round(scc.vision.vTarget * speed_conv) if self.curve_active else 0
+      # Re-armed while a bend is tracked, counted down after. See the lead bypass in
+      # apply_target_rise_limit for why the exit needs covering separately from the bend itself.
+      self.curve_exit_frames = (CURVE_EXIT_LINGER_FRAMES if self.curve_active
+                                else max(0, self.curve_exit_frames - 1))
     except (AttributeError, KeyError):
       self.scc_map_requesting = False
       self.deadline_requesting = False
+      # curve_active and its ceiling latched here before: neither was cleared, so one bad frame left
+      # the ceiling pinned at whatever it held with nothing able to reset it.
+      self.curve_active = False
+      self.curve_ceiling = 0
+      self.v_curve_target = 0
+      self.curve_release_frames = 0
+      self.curve_exit_frames = 0
     self.v_target = self.apply_baseline(self.v_target)
 
     v_ego_conv = round(CS.vEgo * speed_conv)
@@ -634,14 +674,52 @@ class IntelligentCruiseButtonManagement:
       # ceiling of (current cluster + tolerance) is not a ceiling at all: each step it allows raises
       # the cluster, which raises the ceiling, which allows another step. That version metered the
       # climb to 1 mph a step and still arrived at 52 -- the test caught it.
-      if self.curve_ceiling == 0:
-        self.curve_ceiling = self.v_cruise_cluster
-      self.curve_ceiling = min(self.curve_ceiling, self.v_target)
-      if self.v_target > self.curve_ceiling + CURVE_RISE_TOLERANCE:
-        self.rise_anchor = 0
-        return self.curve_ceiling + CURVE_RISE_TOLERANCE
+      #
+      # SCOPED TO ONE BEND, and that scoping is the whole correctness argument. `curve_active` is
+      # SCC-Vision's `active`, which on a highway can stay true continuously -- it is not a per-bend
+      # pulse. Resetting the ceiling only when it falls made this a one-way ratchet for the entire
+      # drive: every dip anywhere permanently lowered the cap for everything after it, the HOLD badge
+      # stayed grey the whole time because the source never returned to a baseline one, and the only
+      # thing left that could raise the speed was the gas pedal, since apply_gas_handoff runs after
+      # this and bypasses it. The owner reported exactly that, and reported reaching for the pedal
+      # frequently, which is the same fact from the driver's seat.
+      #
+      # So the release condition is VISION'S OWN TARGET recovering above the ceiling. That is the
+      # bend letting go, or a wider one replacing it. Safe to key on where the live cluster is not:
+      # vision's target is upstream of every button ICBM sends, so there is no feedback path. Keying
+      # on the cluster self-raises -- each allowed step lifts the cluster, which lifts the ceiling,
+      # which allows another step, and it walked to 52 one mile per hour at a time.
+      # A bend caps nothing while vision is asking for MORE than the car is already doing -- there is
+      # no bend to cap. That is the arming condition, and it has to be sustained, because vision's
+      # target rising is not by itself the bend ending: the logged off-ramp spike read 47, 48, 49, 51
+      # before settling at 21, so an instant release re-anchors on exactly the noise this rejects. A
+      # bend genuinely letting go holds its higher ask indefinitely; the spike held 3.3 s.
+      if self.v_curve_target > self.v_cruise_cluster:
+        self.curve_release_frames += 1
+      else:
+        self.curve_release_frames = 0
+      released = self.curve_release_frames >= CURVE_RELEASE_FRAMES
+      if released:
+        # Stays released, with no ceiling at all, until vision asks for less than the cluster again --
+        # which resets the counter and re-arms below. Re-anchoring to the live cluster while still
+        # released instead rebuilds the ceiling at the speed the bend left behind, and the set speed
+        # then climbs 1 mph per release interval rather than recovering.
+        self.curve_ceiling = 0
+      else:
+        # The cluster ALONE. Seeding from vision's ask -- max(cluster, v_curve_target) -- takes the
+        # anchor straight from the noise burst, which read 47 on the frame the bend began.
+        if self.curve_ceiling == 0:
+          self.curve_ceiling = self.v_cruise_cluster
+        # Ratchets on the METERED target, deliberately. Using the planner's raw ask collapses the
+        # ceiling to the corner speed on frame one, and it then fights the drop limiter -- the limiter
+        # says coast 80 -> 68 and the ceiling answers 40. Tried it; two tests said no.
+        self.curve_ceiling = min(self.curve_ceiling, self.v_target)
+        if self.v_target > self.curve_ceiling + CURVE_RISE_TOLERANCE:
+          self.rise_anchor = 0
+          return self.curve_ceiling + CURVE_RISE_TOLERANCE
     else:
       self.curve_ceiling = 0
+      self.curve_release_frames = 0
 
     if self.max_target_rise <= 0:  # 0 disables the limiter
       self.rise_anchor = 0
@@ -658,7 +736,28 @@ class IntelligentCruiseButtonManagement:
     #
     # The owner's framing, which is the right one: behind a car, set the speed to anything, because
     # that car is probably driving correctly. It is only with no one ahead that the number matters.
-    if self.lead_present:
+    # A LEAD SKIPS THIS -- EXCEPT JUST AFTER A BEND. The owner's rule stands and is a better
+    # discriminator than any timer: behind a car, set the speed to anything, because that car is
+    # probably driving correctly. ACC is gap-limited there and the set speed is a ceiling it never
+    # reaches.
+    #
+    # It has one hole, and it is the moment the bend ends. The curve ceiling above is scoped to
+    # SCC-Vision being ACTIVE, so it lets go the instant vision does -- and vision lets go while the
+    # car is still physically in the corner. With a lead present nothing else meters the recovery, so
+    # the set speed jumps the whole way at once. Route 00000348 t+1060, 2026-08-11, lead at 31-38 m:
+    #
+    #   t+1058  36 mph  dash 34  sccVision   latAcc 1.91   (the bend peaked at 2.32 a second later)
+    #   t+1060  34 mph  dash 33  cruise      latAcc 0.99   <- vision releases, still cornering
+    #   t+1064  40 mph  dash 50
+    #
+    # 17 mph in four seconds, and the car pulled about 1.4 m/s^2 coming out of the bend. His report:
+    # "it slowed down to 30 but then hit the gas way too fast while I was still in the curve."
+    #
+    # So the bypass waits out the exit. During the linger the ordinary limiter applies, which walks
+    # the same recovery up in 5 mph steps instead of one jump, and RISE_STEP_STALL_FRAMES still
+    # guarantees it completes even though actual speed cannot catch up behind a lead. Everywhere else
+    # -- ordinary following, traffic, a limit change with a car ahead -- the rule is unchanged.
+    if self.lead_present and self.curve_exit_frames == 0:
       self.rise_anchor = 0
       self.rise_stall_frames = 0
       return self.v_target
@@ -848,9 +947,25 @@ class IntelligentCruiseButtonManagement:
                 and self.cluster_stable_frames >= CRUISE_CYCLE_STABLE_FRAMES)
       if landed or self.cruise_cycle_frames == 0:
         resumed = abs(self.v_cruise_cluster - self.v_cluster_before_disengage) <= RESUME_MATCH_TOLERANCE
+        # Ford's SET jumps to the CURRENT VEHICLE SPEED, floored at the 20 mph minimum. That is the
+        # POSITIVE signature of a SET, and it was never checked -- the old test read "did not land on
+        # the previous set speed" as proof of a SET, which is not the same claim.
+        #
+        # It cost him a hold. Route 0000033c, t+480: cruise re-engaged at 2 mph after a stop, the set
+        # speed landed at 69 against 62 before the disengage, 7 apart with a tolerance of 2, so the
+        # cycle was read as a SET and his 75 was discarded. But a SET at 2 mph lands at 20, nowhere
+        # near 69 -- so there was positive evidence AGAINST a set and it went unused. A standstill
+        # re-engage is not the driver handing the speed back to Speed Limit Assist.
+        #
+        # Landing on neither number is not evidence of anything, and discarding a hold is
+        # destructive and silent while keeping one the driver can always change. So ambiguity keeps
+        # it: only a landing that actually looks like a SET clears.
+        v_ego_set = max(round(CS.vEgo * (CV.MS_TO_KPH if self.is_metric else CV.MS_TO_MPH)),
+                        self.v_cruise_min)
+        looks_like_set = abs(self.v_cruise_cluster - v_ego_set) <= SET_MATCH_TOLERANCE
         if resumed:
           self.reanchor_overridden = True
-        else:
+        elif looks_like_set:
           self.clear_baseline()
         self.cycle_decision_pending = False
 
@@ -1088,6 +1203,22 @@ class IntelligentCruiseButtonManagement:
     fired = self.pinned_hold > 0 and self.pinned_hold != self.pinned_hold_prev
     self.pinned_hold_prev = self.pinned_hold
     if not fired:
+      return False
+
+    # A LIVE HOLD OUTRANKS A REMEMBERED ONE. Measured on route 0000033c at t+333, 2026-08-11: he set
+    # 75 by hand at t+134, drove into a zone with 70 pinned from an earlier drive, and the pin
+    # silently replaced his number. He reported it as "my hold dropped by 5 mph, which was strange",
+    # and strange is exactly right -- nothing he did caused it and nothing on screen said why.
+    #
+    # A pin is a record of what he wanted on some previous drive. A hold he set minutes ago is what
+    # he wants now, and when the two disagree the live one wins. The pin still applies when there is
+    # no hold, which is the case it exists for, and a pin still replaces a hold that came from
+    # another pin -- that is one remembered number superseding another, not a preference being
+    # overwritten.
+    #
+    # The edge is consumed above whether or not it applies, so a blocked pin does not retry every
+    # frame inside the radius. Leaving and re-entering still re-arms it.
+    if self.v_baseline > 0 and self.baseline_source != BaselineSource.pinned:
       return False
 
     if self.override_state != OverrideState.manual:

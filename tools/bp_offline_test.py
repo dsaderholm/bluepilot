@@ -61,6 +61,7 @@ DEFAULT_TARGETS = [
   # to be, because the alternative is discovering a misread byte layout on the road.
   "sunnypilot/selfdrive/controls/lib/radar_detector/tests/",
   "sunnypilot/selfdrive/controls/lib/smart_cruise_control/tests/test_map_model_veto.py",
+  "sunnypilot/selfdrive/controls/lib/smart_cruise_control/tests/test_map_factor_split.py",
   # Named files, not selfdrive/ui/tests/ -- test_raylib_ui.py, test_soundd.py, test_feedbackd.py
   # and test_translations.py all need raylib or the device and break collection for the folder.
   # That is also how test_settings_recommend_defaults.py sat here unrun on the day it was written:
@@ -71,6 +72,7 @@ DEFAULT_TARGETS = [
   # sunnylink/API stack (jwt and friends) and cannot collect without the device environment.
   # Listing the folder pulled it in and broke collection for everything.
   "sunnypilot/selfdrive/controls/lib/speed_limit/tests/test_upcoming_limit.py",
+  "sunnypilot/selfdrive/controls/lib/speed_limit/tests/test_sla_unset_invariant.py",
   "sunnypilot/selfdrive/controls/lib/speed_limit/tests/test_speed_limit_resolver.py",
   # The radar detector's offset override lives in the resolver, and the resolver's own tests do not
   # reach it -- they were green before it existed and would stay green if it were wired backwards.

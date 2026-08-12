@@ -20,6 +20,8 @@ import pytest
 from types import SimpleNamespace as NS
 
 from cereal import car, custom
+from openpilot.common.constants import CV
+from openpilot.sunnypilot.selfdrive.car.cruise_ext import V_CRUISE_MAX
 from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management.controller import (
   IntelligentCruiseButtonManagement, DEFAULT_BASELINE_RESET_DELTA,
 )
@@ -61,17 +63,24 @@ def make_cs(cluster, v_ego=None, buttons=(), enabled=True, gas_pressed=False, br
 
 
 def make_lp(target, lead_state=UnconfirmedLeadState.inactive, lead_target=0.0,
-            source=PlanSource.speedLimitAssist, limit_known=True):
+            source=PlanSource.speedLimitAssist, limit_known=True,
+            curve_active=False, curve_target=0.0, map_active=False):
   """limit_known defaults TRUE because that is the ordinary road: OSM has a limit for most places.
 
   It was absent entirely at first, which made LP_SP.speedLimit raise and every test run as though no
   limit were ever known -- the rarer case, silently, everywhere. Holding a fixture constant at the
   wrong value is how the model-stop path passed its tests for weeks while doing nothing on the car.
   """
+  # smartCruiseControl was ABSENT here entirely, so the controller's try/except fired on every frame
+  # of every test in this file and the whole curve-ceiling path was unreachable -- a fixture thinner
+  # than the real message, hiding exactly the code it should have been exercising. Defaults match
+  # what the except produced, so nothing that passed before changes meaning.
   return NS(vTarget=target * MPH,
             longitudinalPlanSource=source,
             speedLimit=NS(resolver=NS(speedLimitValid=limit_known,
                                       speedLimitLastValid=limit_known)),
+            smartCruiseControl=NS(map=NS(active=map_active, vTarget=target * MPH),
+                                  vision=NS(active=curve_active, vTarget=curve_target * MPH)),
             unconfirmedLead=NS(state=lead_state, vTarget=lead_target * MPH))
 
 
@@ -1513,3 +1522,235 @@ class TestAPinnedHoldSurvivesCruiseBeingOff:
     in_zone(icbm, 50, 100, enabled=False)
     in_zone(icbm, 50, 300, enabled=True)
     assert icbm.v_baseline == 50, f"applied the wrong zone's number: {icbm.v_baseline}"
+
+
+class TestALiveHoldOutranksAPinnedOne:
+  """Measured, route 0000033c t+333 on 2026-08-11, and confirmed by the owner the same day.
+
+  He set 75 by hand at t+134, then drove into a zone with 70 pinned from an earlier drive, and the
+  pin silently replaced his number. His words: "at some point, my hold dropped by 5 miles per hour,
+  which was strange." Nothing he did caused it and nothing on screen said why.
+
+  A pin records what he wanted on a previous drive; a hold he set minutes ago is what he wants now.
+  """
+
+  def test_a_pin_does_not_overwrite_a_hold_he_set_by_hand(self):
+    icbm = fresh()
+    # A real press creates the hold, exactly as it did on the road.
+    icbm.run(make_cs(LIMIT, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT), False)
+    for cluster in range(LIMIT, DRIVER + 1):
+      icbm.run(make_cs(cluster, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT), False)
+    icbm.run(make_cs(DRIVER, buttons=(ACCEL_RELEASE,)), CC, make_lp(LIMIT), False)
+    assert icbm.v_baseline == DRIVER, "no hold to defend"
+    assert icbm.baseline_source == BaselineSource.press
+
+    in_zone(icbm, DRIVER - 5, 300, enabled=True, road_speed=DRIVER)
+    assert icbm.v_baseline == DRIVER, (
+      f"the pin replaced his live hold with {icbm.v_baseline} -- THE REPORTED BUG")
+    assert icbm.baseline_source == BaselineSource.press, "the pin took ownership of his number"
+
+  def test_a_pin_still_applies_when_there_is_no_hold(self):
+    """The case the pin exists for. The guard must not cost it."""
+    icbm = fresh()
+    in_zone(icbm, 45, 300, enabled=True)
+    assert icbm.v_baseline == 45, "the guard blocked a pin that had nothing to overwrite"
+    assert icbm.baseline_source == BaselineSource.pinned
+
+  def test_one_pin_can_still_supersede_another(self):
+    """Two remembered numbers is not a preference being overwritten -- the later place wins."""
+    icbm = fresh()
+    in_zone(icbm, 45, 300, enabled=True)
+    assert icbm.v_baseline == 45
+    in_zone(icbm, 0, 50, enabled=True)      # leave the first zone, which re-arms
+    # 65, not LIMIT: a hold that lands exactly on SLA's target is cleared by the divergence rule,
+    # which would fail this test for a reason that has nothing to do with pins.
+    in_zone(icbm, 65, 300, enabled=True)    # enter a different one
+    assert icbm.v_baseline == 65, "a pinned hold blocked the next pin"
+    assert icbm.baseline_source == BaselineSource.pinned
+
+
+class TestAStandstillReEngageIsNotASet:
+  """Measured, route 0000033c t+471-482 on 2026-08-11: "when I resumed, my hold went away."
+
+    t+471  CRUISE OFF      set speed 62, 67 mph
+    t+480  CRUISE ENGAGED  set speed 62,  2 mph
+    t+482  HOLD CLEARED (was 75)
+
+  The re-engage was decided by comparing the landed set speed against the one before the disengage:
+  69 against 62, 7 apart with a tolerance of 2, so it was read as a SET and his hold was discarded.
+
+  But Ford's SET jumps to the CURRENT VEHICLE SPEED, floored at the 20 mph minimum -- the comment on
+  RESUME_MATCH_TOLERANCE says exactly this. At 2 mph a SET lands at 20, nowhere near 69. So there was
+  positive evidence AGAINST a set, sitting unused, while "did not land on the previous set speed" was
+  being treated as proof of one. Those are different claims.
+
+  Landing on neither number is evidence of nothing. Discarding a hold is destructive and silent;
+  keeping one he can always change is not. So ambiguity keeps it.
+  """
+
+  def _held_at(self, icbm, to):
+    icbm.run(make_cs(LIMIT, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT), False)
+    for cluster in range(LIMIT, to + 1):
+      icbm.run(make_cs(cluster, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT), False)
+    icbm.run(make_cs(to, buttons=(ACCEL_RELEASE,)), CC, make_lp(LIMIT), False)
+    for _ in range(200):
+      icbm.run(make_cs(to), CC, make_lp(LIMIT), False)
+    return icbm
+
+  def test_re_engaging_from_a_stop_keeps_the_hold(self):
+    icbm = self._held_at(fresh(), DRIVER)
+    assert icbm.v_baseline == DRIVER
+
+    # A curve walks the set speed down to 62 -- BY ICBM'S OWN BUTTONS. Moving the cluster directly
+    # instead re-baselines the hold on the first frame, because an unexplained set-speed move is
+    # exactly what fallbackIdle exists to catch. The bug needs a set speed lowered by ICBM and a hold
+    # that survived it, which is the state he was actually in.
+    cluster = DRIVER
+    for i in range(3000):
+      if cluster <= 62:
+        break
+      icbm.run(make_cs(cluster, v_ego=cluster), CC, make_lp(45, source=PlanSource.sccVision), False)
+      if i % 20 == 0 and icbm.cruise_button == SendButtonState.decrease:
+        cluster -= 1
+    assert cluster <= 62, f"ICBM never brought the set speed down, stalled at {cluster}"
+    assert icbm.v_baseline == DRIVER, (
+      f"the hold was re-baselined to {icbm.v_baseline} during the curve, before the resume was "
+      f"reached -- the fixture is testing the wrong thing")
+    for _ in range(50):
+      icbm.run(make_cs(62, v_ego=62), CC, make_lp(45, source=PlanSource.sccVision), False)
+    for _ in range(100):
+      icbm.run(make_cs(62, v_ego=2, enabled=False), CC, make_lp(LIMIT), False)
+    # Re-engages at a standstill and the set speed lands at 69 -- neither the pre-disengage 62 nor
+    # anything a SET at 2 mph could produce.
+    for _ in range(400):
+      icbm.run(make_cs(69, v_ego=2), CC, make_lp(LIMIT), False)
+
+    assert icbm.v_baseline == DRIVER, (
+      f"hold went to {icbm.v_baseline} -- a standstill re-engage was read as the driver pressing "
+      f"SET and handing the speed back to SLA. THE REPORTED BUG.")
+
+  def test_a_real_set_still_clears_the_hold(self):
+    """The counterweight. A SET lands on the vehicle speed, and that must still hand the speed back."""
+    icbm = self._held_at(fresh(), DRIVER)
+    assert icbm.v_baseline == DRIVER
+
+    for _ in range(50):
+      icbm.run(make_cs(DRIVER, v_ego=DRIVER), CC, make_lp(LIMIT), False)
+    for _ in range(100):
+      icbm.run(make_cs(DRIVER, v_ego=58, enabled=False), CC, make_lp(LIMIT), False)
+    # Ford's SET jumps to the current vehicle speed: rolling at 58, the set speed lands on 58.
+    for _ in range(400):
+      icbm.run(make_cs(58, v_ego=58), CC, make_lp(LIMIT), False)
+
+    assert icbm.v_baseline == 0, (
+      f"hold survived at {icbm.v_baseline}; a SET must still hand the speed back to SLA")
+
+
+class TestNobodyAskingDoesNotStrandTheHold:
+  """Route 00000348 t+838-876, 2026-08-11: "it got stuck at 38, even though my hold was set to 50.
+  The hold never resumed until I canceled and resumed."
+
+  Measured: SCC-Vision inactive at 570 mph (V_CRUISE_UNSET), SCC-Map the same, Speed Limit Assist the
+  same because the road had no limit data, and the published plan target 570. Every candidate unset at
+  once. ICBM rejects that as unreal -- correctly -- and then held the CURRENT set speed, so 38 froze
+  for 40 seconds through a full stop and the restart.
+
+  The plan source read sccVision the whole time, which is a trap worth keeping in the test: min() over
+  equally-unset candidates still names one, so the label pointed at a controller asking for nothing.
+
+  Root cause is fixed in longitudinal_planner. This pins the second line of defense, which is also the
+  right default on its own: when nothing is asking, aim at the driver's number.
+  """
+
+  def test_an_unset_target_falls_back_to_the_hold(self):
+    icbm = fresh()
+    icbm.run(make_cs(LIMIT, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT), False)
+    for cluster in range(LIMIT, DRIVER + 1):
+      icbm.run(make_cs(cluster, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT), False)
+    icbm.run(make_cs(DRIVER, buttons=(ACCEL_RELEASE,)), CC, make_lp(LIMIT), False)
+    for _ in range(200):
+      icbm.run(make_cs(DRIVER), CC, make_lp(LIMIT), False)
+    assert icbm.v_baseline == DRIVER
+
+    # A curve walks the set speed down to 38 BY ICBM'S OWN BUTTONS. Moving the cluster there directly
+    # re-baselines the hold to 38 on the first frame -- an unexplained set-speed move is what
+    # fallbackIdle exists to catch -- and the test would then pass for the wrong reason.
+    cluster = DRIVER
+    for i in range(4000):
+      if cluster <= 38:
+        break
+      icbm.run(make_cs(cluster, v_ego=cluster), CC, make_lp(35, source=PlanSource.sccVision), False)
+      if i % 20 == 0 and icbm.cruise_button == SendButtonState.decrease:
+        cluster -= 1
+    assert cluster <= 38, f"ICBM never lowered the set speed, stalled at {cluster}"
+    assert icbm.v_baseline == DRIVER, f"hold was re-baselined to {icbm.v_baseline} before the test"
+
+    # Now everything goes quiet at once, exactly as logged: every candidate unset.
+    unset = V_CRUISE_MAX * CV.KPH_TO_MS
+    for _ in range(300):
+      icbm.run(make_cs(cluster, v_ego=cluster),
+               CC, make_lp(unset * CV.MS_TO_MPH, source=PlanSource.sccVision), False)
+
+    assert icbm.v_target == DRIVER, (
+      f"target fell back to {icbm.v_target} instead of the hold -- the set speed is stranded at the "
+      f"cluster with no way back. THE REPORTED BUG.")
+
+  def test_with_no_hold_it_still_holds_the_cluster(self):
+    """The original behavior, which is right when there is no driver number to aim at."""
+    icbm = fresh()
+    unset = V_CRUISE_MAX * CV.KPH_TO_MS
+    for _ in range(50):
+      icbm.run(make_cs(38, v_ego=38), CC, make_lp(unset * CV.MS_TO_MPH), False)
+    assert icbm.v_baseline == 0
+    assert icbm.v_target == 38, f"invented a target of {icbm.v_target} with no hold to aim at"
+
+
+class TestComingOutOfACurveBehindALeadIsStillMetered:
+  """Route 00000348 t+1060, 2026-08-11, with a lead at 31-38 m:
+
+    t+1058  36 mph  dash 34  sccVision   latAcc 1.91   (the bend peaked at 2.32 a second later)
+    t+1060  34 mph  dash 33  cruise      latAcc 0.99   <- vision releases, still cornering
+    t+1064  40 mph  dash 50
+
+  17 mph of set speed in four seconds, and the car pulled about 1.4 m/s^2 coming out of the bend.
+  "It slowed down to 30 but then hit the gas way too fast while I was still in the curve."
+
+  The lead bypass is the owner's rule and stays. Its one hole is this moment: the curve ceiling is
+  scoped to SCC-Vision being ACTIVE, so it lets go the instant vision does, and vision lets go while
+  the car is still in the corner. With a lead present nothing else was metering the recovery.
+  """
+
+  def test_the_jump_out_of_a_bend_is_metered(self):
+    icbm = fresh(max_rise=5)
+    for _ in range(300):
+      icbm.run(make_cs(33, v_ego=33), CC,
+               make_lp(30, source=PlanSource.sccVision, curve_active=True, curve_target=30),
+               False, True)
+    # Vision lets go. The planner asks for the full number again and the lead is still there.
+    icbm.run(make_cs(33, v_ego=33), CC, make_lp(DRIVER, source=PlanSource.cruise), False, True)
+    assert icbm.v_target <= 33 + 5, (
+      f"set speed jumped straight to {icbm.v_target} coming out of a bend behind a lead -- "
+      f"THE REPORTED BUG")
+
+  def test_it_still_completes_rather_than_sticking_low(self):
+    """Metering must not reintroduce the stuck-behind-traffic problem the bypass was added for.
+    RISE_STEP_STALL_FRAMES advances a step that actual speed cannot consume."""
+    icbm = fresh(max_rise=5)
+    for _ in range(300):
+      icbm.run(make_cs(33, v_ego=33), CC,
+               make_lp(30, source=PlanSource.sccVision, curve_active=True, curve_target=30),
+               False, True)
+    cluster = 33
+    for i in range(4000):
+      icbm.run(make_cs(cluster, v_ego=33), CC, make_lp(DRIVER, source=PlanSource.cruise), False, True)
+      if i % 20 == 0 and icbm.cruise_button == SendButtonState.increase:
+        cluster += 1
+      if cluster >= DRIVER:
+        break
+    assert cluster >= DRIVER, f"stuck at {cluster} behind a lead -- metering must still complete"
+
+  def test_an_ordinary_rise_behind_a_lead_is_untouched(self):
+    """Nowhere near a bend, the owner's rule applies exactly as before."""
+    icbm = fresh(max_rise=5)
+    icbm.run(make_cs(50, v_ego=45), CC, make_lp(DRIVER), False, True)
+    assert icbm.v_target == DRIVER, "metered a rise that had nothing to do with a curve"

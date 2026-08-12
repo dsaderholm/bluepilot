@@ -2,6 +2,8 @@ import json
 import math
 import platform
 
+import numpy as np
+
 from cereal import custom
 from openpilot.common.params import Params
 from openpilot.common.realtime import DT_MDL
@@ -9,6 +11,22 @@ from openpilot.selfdrive.car.cruise import V_CRUISE_UNSET
 from openpilot.sunnypilot import PARAMS_UPDATE_PERIOD
 from openpilot.sunnypilot.navd.helpers import coordinate_from_param, Coordinate
 from openpilot.sunnypilot.selfdrive.controls.lib.smart_cruise_control import MIN_V
+
+# FusionPilot: the mapped-corner factor is blended across the CORNER's own speed, not the car's.
+# That distinction is the whole point. A loop ramp is a 25 mph corner entered at 75, and a highway
+# sweeper is a 50 mph corner entered at 75 -- identical ego speed, opposite requirements, so keying
+# the blend on vEgo cannot tell them apart. Vision's pair keys on vEgo because it is regulating
+# lateral acceleration continuously; this one is picking a number for a specific corner.
+#
+# Measured on route 00000338 at t+796 on 2026-08-10, which is why this exists: the map's own number
+# for a highway bend was 48 mph, a single global factor of 90 asked for 43, and the owner overrode
+# with the accelerator and took the bend at 51 mph pulling 2.9 m/s^2 without difficulty. The same 90
+# was set on 2026-08-08 for the opposite reason -- a ramp his retrofit PSCM wanted taken at 20 rather
+# than the advisory speed. Both reports are correct and one knob could not serve them.
+# Band top is 45 mph, deliberately BELOW the 48 mph bend that prompted this. Inside the band a
+# 48 mph corner still gets 99% of the tight factor, which is the old behaviour with extra steps;
+# above it the map's own number stands, which is what the measurement says it should.
+_MAP_FACTOR_V_BP = [11.18, 20.12]  # m/s, 25-45 mph on the CORNER speed
 
 MapState = VisionState = custom.LongitudinalPlanSP.SmartCruiseControl.MapState
 
@@ -59,10 +77,47 @@ TARGET_ACCEL = -1.2  # m/s^2 should match up with the long planner limit
 # enough that the camera genuinely has the curve in frame, and a phantom curve right in front of you
 # is still caught.
 MODEL_HORIZON_S = 4.0
+# ...but only for corners slow enough to be a RAMP. A highway-speed mapped corner gets the model's
+# real reach, and the difference decides whether the veto can fire at all.
+#
+# max_pred_lat_acc is a 97th percentile over the WHOLE modelV2 plan, which runs to 10 s -- about
+# 330 m at 74 mph. The 4 s bound was therefore never a statement about what the camera can see; it
+# was a bound on a number already summarizing far more road. At highway speed it makes the veto
+# unreachable: SCC-Map's trigger distance for 74 -> 52 mph at -1.2 m/s^2 is ~232 m, always outside a
+# 132 m gate, so the map commits before the veto is ever allowed to look.
+#
+# Measured on route 0000033c, 2026-08-11, the drive that prompted this. At t+142, the frame the map
+# committed to 52 mph, predicted lateral acceleration was 0.24 -- under MODEL_DISAGREE_LAT_ACC, so
+# the camera was already saying there is no curve here. The set speed then fell 75 -> 52 in four
+# seconds on a road measuring 0.00-0.24 m/s^2, and the owner overrode with the accelerator. The real
+# bend arrived much later and peaked at 2.0, which at his measured comfort needs no slowing at all.
+#
+# THE SPLIT IS THE SAFETY ARGUMENT. On a real exit the model predicts the path it expects to drive,
+# which is straight down the highway, so a ramp's curvature may never enter the plan until the car is
+# on it -- vetoing there would disable the one thing SCC-Map is for. That risk belongs to RAMPS, and
+# a ramp is a slow corner. A mapped corner of 45 mph or more is a highway bend, on the road the model
+# is already predicting, so its silence is evidence rather than blindness.
+MODEL_HORIZON_HIGH_SPEED_S = 10.0  # matches modelV2's T_IDXS span
 # Predicted lateral acceleration below this means the camera is looking at a straight road. Well
 # under _ENTERING_PRED_LAT_ACC_TH (1.3) in vision_controller: this is not "is there a curve worth
 # slowing for", it is "is there a curve at all".
 MODEL_DISAGREE_LAT_ACC = 0.4
+# The camera seeing SOMETHING is not the camera agreeing. Measured on route 00000348 t+1510,
+# 2026-08-11: the map demanded 50 mph on an 80 mph freeway, predicted lateral acceleration was 1.22 --
+# comfortably over the "no curve at all" threshold above, so the absolute test says nothing -- and the
+# owner overrode and held 65-70 through the bend without difficulty. Vision's own target across that
+# stretch was 84-98 mph. Two controllers disagreeing by a factor of two, with the map winning
+# unopposed.
+#
+# So the second test asks what the MODEL'S OWN VIEW implies. Its predicted peak lateral acceleration
+# at the current speed gives a curvature, and that curvature gives the speed at which the bend would
+# reach a normal lateral-acceleration budget. If the map is demanding far less than that, the map is
+# not describing the road the camera is looking at.
+#
+# _A_LAT_REG_MAX_REF is upstream's 2.0 deliberately, NOT the owner's tuned curve factors. This is a
+# question about the road, not about his taste, and it must not move when he retunes comfort.
+_A_LAT_REG_MAX_REF = 2.0
+MODEL_IMPLIED_SPEED_FRACTION = 0.75
 
 SCC_MAP_DECEL_MIN = 0.4   # m/s^2, magnitude. Gentler than this and the trigger distance is absurd.
 SCC_MAP_DECEL_MAX = 2.5
@@ -125,6 +180,7 @@ class SmartCruiseControlMap:
     self.model_vetoed = False   # logged so a missing slowdown can be explained rather than guessed
     self.target_distance = float('inf')
     self.map_factor = 1.0
+    self.map_high_speed_factor = 1.0
     self.long_enabled = False
     self.long_override = False
     self.is_enabled = False
@@ -158,6 +214,11 @@ class SmartCruiseControlMap:
       # at the output means the trigger distance is computed against the speed we will actually ask
       # for, so a lower factor also starts earlier -- which is the physically consistent pairing.
       self.map_factor = self.params.get("SmartCruiseControlMapFactor", return_default=True) / 100.
+      # Deliberately NOT a rename of the key above. His stored 90 already means what he chose it to
+      # mean -- tight ramps slower than the advisory -- so leaving it as the low-speed end preserves
+      # that with no migration, and the new key fixes only the case that was measured wrong.
+      self.map_high_speed_factor = self.params.get("SmartCruiseControlMapHighSpeedFactor",
+                                                   return_default=True) / 100.
       self.target_accel = -min(max(decel, SCC_MAP_DECEL_MIN), SCC_MAP_DECEL_MAX)
 
   def update_calculations(self) -> None:
@@ -263,9 +324,14 @@ class SmartCruiseControlMap:
       self.target_lat = 0.0
       self.target_lon = 0.0
 
-    self.v_target = min_v * self.map_factor
+    self.v_target = min_v * self._factor_for_corner(min_v)
     self.target_lat = target_lat
     self.target_lon = target_lon
+
+  def _factor_for_corner(self, corner_v: float) -> float:
+    """FusionPilot: blend the tight-corner and highway-corner factors across the corner's own speed."""
+    return float(np.interp(corner_v, _MAP_FACTOR_V_BP,
+                           [self.map_factor, self.map_high_speed_factor]))
 
   def _update_state_machine(self) -> tuple[bool, bool]:
     # ENABLED, TURNING
@@ -313,10 +379,28 @@ class SmartCruiseControlMap:
     Only meaningful inside the model's own horizon. Outside it the model has nothing to say and
     silence must not be read as disagreement.
     """
-    horizon = self.v_ego * MODEL_HORIZON_S
+    # _MAP_FACTOR_V_BP[1] is the same 45 mph line that separates ramps from highway bends for the
+    # corner-speed factors. One definition, used by both, so they cannot drift apart.
+    ramp_like = self.v_target < _MAP_FACTOR_V_BP[1]
+    horizon = self.v_ego * (MODEL_HORIZON_S if ramp_like else MODEL_HORIZON_HIGH_SPEED_S)
     if target_distance_m > horizon or horizon <= 0:
       return False
-    return self.model_lat_acc < MODEL_DISAGREE_LAT_ACC
+
+    # 1. The camera sees no curve at all.
+    if self.model_lat_acc < MODEL_DISAGREE_LAT_ACC:
+      return True
+
+    # 2. The camera sees a curve, but a far gentler one than the map is describing. Highway corners
+    #    only -- a ramp keeps the conservative bound, because there the model may legitimately not
+    #    have the corner in its plan at all and its silence is blindness rather than evidence.
+    #
+    #    Vetoing here is not "ignore the corner": it removes only the MAP's contribution, and
+    #    SCC-Vision goes on running as the near-field expert. So a highway bend the map overstated
+    #    degrades to camera-based curve control, which is the thing that handles bends you can see.
+    if ramp_like or self.v_ego <= 0:
+      return False
+    implied_ok_v = self.v_ego * math.sqrt(_A_LAT_REG_MAX_REF / max(self.model_lat_acc, 1e-3))
+    return self.v_target < implied_ok_v * MODEL_IMPLIED_SPEED_FRACTION
 
   def update(self, long_enabled: bool, long_override: bool, v_ego, a_ego, v_cruise,
              model_lat_acc: float = 0.0) -> None:

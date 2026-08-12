@@ -8,7 +8,7 @@ See the LICENSE.md file in the root directory for more details.
 from cereal import messaging, custom
 from opendbc.car import structs
 from openpilot.common.constants import CV
-from openpilot.selfdrive.car.cruise import V_CRUISE_MAX
+from openpilot.selfdrive.car.cruise import V_CRUISE_MAX, V_CRUISE_UNSET
 from openpilot.sunnypilot.selfdrive.controls.lib.dec.dec import DynamicExperimentalController
 from openpilot.sunnypilot.selfdrive.controls.lib.e2e_alerts_helper import E2EAlertsHelper
 from openpilot.sunnypilot.selfdrive.controls.lib.smart_cruise_control.smart_cruise_control import SmartCruiseControl
@@ -96,7 +96,26 @@ class LongitudinalPlannerSP:
     # ICBM's manual override latch lets one real button press take it back.
     #
     # The curve controllers stay inside the min() either way: they may only ever lower.
-    if not (self.sla.auto_follow and self.sla.is_active):
+    #
+    # ...but ONLY WHILE SLA IS ACTUALLY ASKING FOR SOMETHING. is_active alone is not that: SLA stays
+    # active across a stretch with no speed limit data, and its target there is V_CRUISE_UNSET. Drop
+    # cruise on is_active alone and every candidate can be unset at once, which publishes a vTarget
+    # nobody requested. ICBM then rejects it as unreal and falls back to holding the CURRENT set
+    # speed -- so the number freezes wherever it happened to be, and a hold cannot pull it back
+    # because the hold is applied to a target that has already been replaced by the cluster.
+    #
+    # Measured on route 00000348, 2026-08-11, t+838 to t+876: vision and map both inactive at 570 mph
+    # (V_CRUISE_UNSET), SLA the same, planner vTarget 570, and the set speed sat at 38 through a full
+    # stop and the restart while the driver's hold was 50. It only recovered when he cancelled and
+    # re-engaged. His report: "it got stuck at 38, even though my hold was set to 50. The hold never
+    # resumed until I canceled and resumed."
+    #
+    # The plan source said sccVision throughout, which is a red herring worth remembering: min() over
+    # equally-unset candidates still has to name one, so the label pointed at a controller that was
+    # inactive and asking for nothing.
+    sla_owns_baseline = (self.sla.auto_follow and self.sla.is_active
+                         and self.sla.output_v_target < V_CRUISE_UNSET)
+    if not sla_owns_baseline:
       targets[LongitudinalPlanSource.cruise] = (v_cruise, a_ego)
 
     self.source = min(targets, key=lambda k: targets[k][0])
