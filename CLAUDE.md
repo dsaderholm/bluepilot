@@ -261,32 +261,39 @@ upstream merge broke them before:
 
 If it goes wrong: `git reset --hard pre-upstream-<sha>`.
 
-## README.md on a rebase: BASE WINS, then re-add your own section
+## README.md is GENERATED. Add a file, do not edit it.
 
-The README is shared and every feature branch adds to it, which makes it a recurring conflict with a
-resolution that is not obvious and that git guesses wrong.
+The README describes the whole fork, but the fork is three branches -- this one, passing assist, and
+the radar detector -- each rebasing onto this one and each needing to describe its own features. As a
+single hand-edited file that was a conflict on every rebase, and git resolved it wrong in a specific
+way: it replays the feature branch's OLDER copy over the base's newer one, silently reverting the
+whole document. That happened on 2026-08-11 to a same-day rewrite and was caught only by reading the
+result.
 
-**`icbm-manual-override-and-tuning` owns the document.** It carries the framing, the status section,
-the "Will this work on my car?" section, ICBM, Smart Cruise Control, speed limits, diagnostics,
-settings, licence and safety. Feature branches add ONE section under `## What this branch adds`, plus
-a bullet in Diagnostics and a bullet in "Will this work on my car?" if they need one.
+So each branch owns files nobody else touches:
 
-On rebase, git replays the feature branch's older copy over the base's newer one, which silently
-reverts the whole document to whatever that branch last had. It happened on 2026-08-11: passing
-assist replayed the pre-rewrite README over a same-day rewrite and only caught it by reading the
-result. So:
-
-```bash
-git checkout <base-branch> -- README.md    # take the base outright
-# then re-add just your own section
+```
+readme/sections/*.md            the shared document, owned by THIS branch
+readme/fragments/features/      one file per feature area
+readme/fragments/diagnostics/   one bullet per branch that adds a diagnostic
+readme/fragments/portability/   one bullet per branch with its own hardware caveats
+python tools/bp_build_readme.py     # rewrites README.md
 ```
 
-Never hand-merge it hunk by hunk -- that is how half a rewrite survives and reads as deliberate.
+**To add your branch's section: create ONE new file in the right fragment directory and rebuild.**
+Two branches adding a section now add two different files, which git merges without an opinion.
 
-**Say plainly what does not actuate.** The README is now shared with people outside this project, and
-a reader assumes everything described is live. Passing assist leads its section with the fact that it
-actuates nothing on any car today, which is the right shape: the limitation goes in the same sentence
-as the description, not in a footnote.
+- Number with room to insert (10, 20, 30) and name it after your feature -- `40-passing-assist.md`,
+  never `40-section.md`, or two branches collide again on the same path.
+- Never hand-edit `README.md`. `test_readme_is_built.py` fails if it does not match its parts.
+- If `README.md` conflicts anyway, do NOT merge it hunk by hunk. Take either side and re-run the
+  build; the parts are the source of truth and the file is disposable.
+- An anchor with no fragments behind it renders nothing, deliberately -- a branch without passing
+  assist should not advertise a gap where it would go.
+
+**Sections are this branch's to edit; fragments are each branch's own.** If a change belongs in the
+shared prose -- the status section, portability, licence, safety -- it goes in `readme/sections/`
+here and reaches the others by rebase, which is the direction that works.
 
 ## Name a feature for what it DOES, never for ICBM
 

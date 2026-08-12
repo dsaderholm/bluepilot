@@ -65,6 +65,7 @@ DEFAULT_TARGETS = [
   # the suite total did not move and nothing said why. test_bp_tests_are_registered guards it now.
   "selfdrive/ui/tests/test_settings_fit.py",
   "selfdrive/ui/tests/test_settings_recommend_defaults.py",
+  "selfdrive/ui/tests/test_readme_is_built.py",
   # Named files, not the directory: test_speed_limit_assist.py in the same folder imports the
   # sunnylink/API stack (jwt and friends) and cannot collect without the device environment.
   # Listing the folder pulled it in and broke collection for everything.

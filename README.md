@@ -1,3 +1,7 @@
+<!-- GENERATED FILE. Edit readme/sections/ or readme/fragments/, then run
+     python tools/bp_build_readme.py
+     Editing this file directly will be overwritten. -->
+
 ![](selfdrive/assets/img_fusionpilot_boot.jpg)
 
 # FusionPilot
