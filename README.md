@@ -33,10 +33,15 @@ component you also have rather than against a Fusion badge.
 
 Two practical notes before you try it:
 
-- **The car is selected by hand, not fingerprinted.** `FORD_FUSION_MK5` carries no fingerprint
-  entries, because the retrofit combination does not exist from the factory and there is nothing
-  stock to match. Pick "Ford Fusion (ADAS retrofit) 2020" in the vehicle picker. That is also why an
-  MKZ is not rejected for being an MKZ: nothing is checking.
+- **The fingerprint is three-quarters retrofit parts, and one part that is not.**
+  `FORD_FUSION_MK5` is fingerprinted in `opendbc/sunnypilot/car/ford/fingerprints_ext.py` on four
+  ECUs: the Edge PSCM (`K2GC-14D003-AH`), the CCM radar (`JX7T-14D049-AC`) and the IPMA camera
+  (`KT4T-14F397-AE`) are all retrofit hardware you would also have installed, so those match. The
+  fourth is the **Fusion's own ABS** (`KG9C-2D053-MD`), and yours will be a different part number.
+
+  So expect fingerprinting not to complete on a different donor car. Either add your ABS firmware
+  string to that same entry — a one-line addition, and the right fix if you want it recognized
+  automatically — or select "Ford Fusion (ADAS retrofit) 2020" by hand.
 - **Check the platform specs against your car.** `CarSpecs(mass=1731, wheelbase=2.85,
   steerRatio=17.07)` in `opendbc/car/ford/values.py`. Wheelbase and steer ratio should carry across
   the platform and the shared rack; mass is the one that moves, particularly on a hybrid, and it
