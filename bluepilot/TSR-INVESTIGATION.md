@@ -180,7 +180,7 @@ international sales.
 
 ---
 
-## 6b. THE GWM IS THE MOST PROMISING LEAD, AND IT IS UNTOUCHED
+## 6b. THE GWM EXPLAINS IT — AND IS OFF LIMITS. DO NOT PROPOSE TOUCHING IT.
 
 Reported 2026-08-12, and it reframes everything above:
 
@@ -204,9 +204,17 @@ incompatible pair, and the module is the one telling the truth.
 **It also undermines "the US IPC does not support TSR."** His cluster gained a new indicator from a
 gateway update. That claim was about hardware; what he observed is configuration.
 
-**Next:** check whether the GWM has a newer calibration available in FORScan, the same way the IPMA
-update was found. Reading costs nothing. If AHB needed a GWM update to work after the retrofit, TSR
-plausibly needs one too -- and that would explain why two modules refuse the same feature.
+**HE HAS RULED IT OUT, 2026-08-12: "I don't think I should touch the GWM. It took me forever to get
+where it is."** That is his decision and it is the right one -- the gateway routes every module on the
+car, so a bad write there is not a reverted as-built, it is a car that does not start. He has already
+spent a long time getting the retrofit stable. Do not propose GWM changes, do not suggest "just
+reading" it as a way in, and do not treat this as an open question. It is closed.
+
+**What that means honestly.** If the gateway is the gate, then TSR via as-built may not be reachable
+at all on this car, because the camera validates against what the vehicle declares at runtime and a
+different tool does not change what the gateway broadcasts. The remaining paths are narrower than
+they looked an hour ago, and one of them may be "not achievable without touching the thing he will
+not touch". Say that plainly rather than letting a search continue that cannot terminate.
 
 ## 7. Next steps, in order
 
