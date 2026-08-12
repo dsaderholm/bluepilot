@@ -583,6 +583,39 @@ The remaining lever is how far ahead `MapTargetVelocities` is populated, which i
 this fork. Do not re-derive this from scratch; measure with `tools/bp_missed_curves.py` and compare
 the map's fire time against the 3.3 mph/s budget before proposing anything.
 
+## THE SET SPEED HUNTS AROUND A STATIONARY TARGET — DIAGNOSED, NOT FIXED
+
+Reported 2026-08-12: *"it raised and lowered my cruise over and over... it was when the speed limit
+changed to 25."* Found with `tools/bp_setspeed_hunting.py` on route 00000361 at t+2704:
+
+```
+18 reversals in 20 s.  SLA 25.  icbmTgt a CONSTANT 27.  dash 26 <-> 29 <-> 26.
+state flipping increasing/decreasing about once a second.  hold 0, no lead.
+```
+
+**The cause is certain.** `v_cruise_equal` is `self.v_target == self.v_cruise_cluster` -- EXACT
+equality. The set speed cannot land on an arbitrary number, because presses already on the wire keep
+arriving after the cluster reaches the target, so it overshoots by one or two. Equality is therefore
+unsatisfiable, `holding` exits on the next frame, and the direction flips forever.
+
+**THREE FIXES WERE TRIED AND ALL THREE BROKE SOMETHING REAL. It is reverted; the tree is clean.**
+
+| attempt | what broke |
+|---|---|
+| deadband in `v_cruise_equal` + early exit from increasing/decreasing | stalled a curve descent at 63 instead of 40 -- the DROP LIMITER steps its target down 1 mph at a time and needs ICBM to actually arrive before releasing the next step |
+| re-entry keyed on whether the target MOVED since last settling | ICBM overshot a driver press by 6 mph |
+| gating the BUTTON instead of the state machine, latch cleared on a driver press | still broke `TestPressWinsWhileIcbmIsBusy` -- 5 failures, did not converge |
+
+**What that says about the code.** The transitions carry more meaning than they look like they do:
+the drop limiter depends on exact arrival, and the press path depends on the state machine reacting
+immediately. Any anti-hunt rule has to leave both untouched, which none of the three did.
+
+**Judgement call, and worth restating if it comes up again:** the symptom is a 3 mph hunt around a
+25 mph limit -- annoying, not dangerous -- and every attempted fix damaged either curve slowing or
+the driver's own button presses. Those are worse. Do not ship a fix here without a design that
+survives the whole `intelligent_cruise_button_management` suite, and treat green tests as the bar
+rather than an obstacle: each one caught a genuine regression.
+
 ## Diagnosing a road report: the tools, and the order to use them
 
 Written 2026-08-11 after an evening where three separate wrong controllers were blamed in turn. All
