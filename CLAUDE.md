@@ -231,35 +231,6 @@ owner to judge a layout you have not rendered. It calls the real drawing methods
 hud_renderer_bp.py rather than reimplementing them, which is why it stays accurate -- keep it that
 way, and add a scene to SCENES whenever a new state is introduced.
 
-## Write changed DEFAULTS. Never write his tweaks.
-
-This took two goes to get right, and the second correction is the one to keep:
-
-> "All my settings in the blue pilot section got wiped out. Let's not have it overwrite settings
-> anymore. Just tell me what settings to change each time."
-
-...so both settings-writing migrations were deleted, which was too far:
-
-> "I ALWAYS want you to write defaults, but not tweaks I've made to other settings."
-
-**A default you changed is yours to apply.** Every settings key is PERSISTENT, so once a value is
-stored the default in `params_keys.h` stops meaning anything on that device -- change a default and
-his car keeps driving on the old number while the code, the comments and the settings screen all
-describe behaviour it does not have. `_migrate_bp_redefaulted` in `params_migration.py` exists for
-exactly this: add the key to `_BP_REDEFAULTED` with a comment saying what moved and why, and bump
-`BP_DEFAULTS_GENERATION`. It CLEARS rather than writes, so the default stays stated in one place.
-
-**A value he chose is his.** The migration that stays deleted set the display toggles and keep-right
-to what a measurement drive wanted -- values that were already the shipped defaults, so the only
-device it could change was one where he had deliberately turned something off. That is not applying
-a default, that is overruling him.
-
-Renames and value-carrying migrations are fine either way: they preserve intent rather than override
-it.
-
-Also add the row to `BP-SETTINGS.md`, the on-device checklist. A default that lands silently is
-still a behaviour change he should be able to read about.
-
 ## Before saying a branch is safe to flash
 
 1. `python tools/bp_offline_test.py` — expect 0 failed.
