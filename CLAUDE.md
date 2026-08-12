@@ -697,18 +697,18 @@ unspecified or something like that."* That path has been tried and it cost more 
 Do not propose it again as a way to make TSR work, and do not treat the region as an unexplored
 lever -- it is explored, and the answer was no.
 
-**2026-08-11: "Camera + APIM" cleared `NoNavDataAvailable`, and the write did not persist.** He was
-already on "Camera Only" -- the state every note here argued he should move to. Setting Camera + APIM
-cleared the message immediately; after an ignition cycle the message returned AND the setting had
-reverted. So the value was never really tested, and while it WAS applied it did something.
+**ROOT CAUSE, 2026-08-11: the IPMA cannot talk to the APIM.** `U0253 - Lost Communication With
+Accessory Protocol Interface Module`, logged by the IPMA, constantly. The APIM is the SYNC module and
+the source of navigation data, so `NoNavDataAvailable` is literal: the camera cannot reach the module
+that would supply it.
 
-**The problem is the write not committing, not the value chosen.** An as-built change that reverts
-across an ignition cycle was not written to the module -- FORScan procedure, outside anything
-measurable from here.
+**This is a network fault and no as-built value can fix it.** Do not edit the IPMA configuration
+chasing it -- two DTCs were matured on that module in one evening doing exactly that. Dead theories,
+all tested: Ford nav instead of Waze (no change), TSR data source Camera Only (it was already set
+that way), Camera + APIM (rejected, reverted), region (U2101 Configuration Incompatible, twice).
 
-**Do not record a FORScan result until after an ignition cycle, and check the SETTING as well as the
-symptom.** Two conclusions were committed from partial observations of this single change, and both
-were wrong for the same reason: reported before the state had settled.
+It is an Edge IPMA in a Fusion, so the likely cause is gateway routing or which network the retrofit
+put each module on. That is vehicle wiring work, not anything measurable from the comma device.
 
 **And it does not need to be set**, which is the part worth noticing. Everything below was measured
 with the region UNSPECIFIED. The camera reads signs anyway; what the region appears to gate is the

@@ -4,31 +4,40 @@
 Run this before and after any FORScan change to the camera, so "did that help" is a measurement
 instead of an impression.
 
-2026-08-11: "CAMERA + APIM" CLEARED IT, AND THE WRITE DID NOT PERSIST.
+ROOT CAUSE, FOUND 2026-08-11: THE IPMA CANNOT TALK TO THE APIM.
 
-The sequence, and the order matters because two wrong conclusions were recorded before it was
-complete:
+    U0253 - Lost Communication With Accessory Protocol Interface Module
+    Module: Image Processing Module A     DTC Maturing - Intermittent
+    (he reports getting this constantly)
 
-  1. His IPMA was ALREADY "TSR data source: Camera Only" -- the state this file spent two days
-     arguing he should move TO -- and it reported NoNavDataAvailable.
-  2. He set it to "Camera + APIM". NoNavDataAvailable cleared immediately.
-  3. After an ignition cycle the message came back AND THE SETTING HAD REVERTED to Camera Only.
+The APIM is the SYNC module, and the APIM is where navigation data comes from. The camera reports
+NoNavDataAvailable because it cannot reach the module that would supply it. This is a NETWORK fault,
+not a configuration one, and no as-built value can fix it.
 
-So Camera + APIM was never really under test. While it was actually applied the message cleared,
-which is evidence the setting DOES do something; it reverted because the write did not stick.
+Everything that failed before this was found now makes sense:
 
-THE PROBLEM IS THEREFORE THE WRITE, NOT THE VALUE. An as-built change that reverts across an ignition
-cycle was not committed to the module. That is FORScan procedure, outside anything measurable from
-here, and the usual causes are writing without the full block, a rejected checksum, or insufficient
-voltage during the write.
+  - Running a route in SYNC 3's own navigation changed nothing. The camera cannot reach the APIM
+    whether route guidance is running or not.
+  - Every as-built write was rejected or pointless. You cannot configure a module into reaching one
+    that is not there.
+  - The only navigation messages in the Ford DBC (APIMGPS_Data_Nav_1/2/3_FD1) carry GPS telemetry
+    only, with no speed limit -- consistent with the real nav exchange never happening at all.
 
-DO NOT record a FORScan result until after an ignition cycle, and check the SETTING as well as the
-symptom. Two conclusions were committed here from partial observations of this one change -- "the fix
-was Camera + APIM", then "neither value matters" -- and both were wrong for the same reason: reported
-before the state had settled.
+It is an Edge IPMA in a Fusion. The Edge module expects the APIM on some bus or under some address
+that this car's topology does not provide, or the gateway does not route between them.
 
-What is still ruled out: the camera reports NoNavDataAvailable (3), never CountryNotSupported (5) or
-RegionNotSupported (6), so it believes its region setup is fine.
+DO NOT KEEP EDITING THE AS-BUILT. Two faults were matured on this module in one evening chasing a
+configuration cause for a communication failure.
+
+WHAT WOULD ACTUALLY MOVE THIS: establish why IPMA and APIM cannot see each other -- gateway routing
+configuration, or the physical network the retrofit put each module on. That is FORScan/wiring work
+on the vehicle, not anything measurable from the comma device, and not anything in this repo.
+
+AND THE PRIOR THEORIES ARE ALL DEAD, recorded so they are not tried again:
+  - "Use Ford nav instead of Waze" -- tested, no change.
+  - "Set TSR data source to Camera Only" -- it was ALREADY set to that.
+  - "Set it to Camera + APIM" -- cleared the message until the write reverted; the module rejected it.
+  - "Change the region" -- U2101 Configuration Incompatible, twice, months apart.
 
 STATE AS OF 2026-08-09, region UNSPECIFIED, no FORScan TSR change made:
 
