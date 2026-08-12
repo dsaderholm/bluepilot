@@ -175,6 +175,37 @@ worked. Find out why it does not persist.
 **Ask the friend what HIS TSR data source is set to.** If his reads Camera + APIM and it persists,
 that is the exact target state and the question narrows to why this module will not hold it.
 
+## 4c. THE FAILURE IS TSR-SPECIFIC. THE MODULE COMMITS OTHER CHANGES FINE.
+
+Stated by him 2026-08-12, and it eliminates three theories at once: **other IPMA as-built changes
+have persisted, with the same UCDS adapter, under the same power conditions.**
+
+So all of these are OUT:
+
+- **The adapter.** IPMA writes land with it.
+- **Power-saving / auto-engine-off interrupting the commit.** Other changes commit under the same
+  conditions in the same sessions.
+- **FORScan being generally unable to write this module.** It can; it does.
+
+What is left is narrow and specific: **the camera accepts reconfiguration, but not reconfiguration
+that enables TSR.**
+
+  - As Built view, TSR fields -> refused outright, nothing reaches the car
+  - Friendly view, TSR data source -> lands, works, reverts at the next boot
+  - Anything else -> sticks
+
+That is a FEATURE AUTHORIZATION, not a mechanical write failure. Some other authority on the car
+declares whether this vehicle has TSR, and the camera defers to it -- which is exactly what `U2101
+Control Module Configuration Incompatible / Signal Plausibility Failure` means.
+
+**Do not spend more time on adapters, cables, voltage, power-saving, checksums or which FORScan view
+to use.** They are all ruled out by one sentence: other changes to the same module work.
+
+The authority is most likely the gateway, which is OFF LIMITS by his decision (section 6b). If that
+is right, TSR is not reachable on this car by configuration alone. The remaining evidence that could
+overturn it is his friend's car -- same question, sharper: does a Fusion exist where the IPMA HOLDS a
+TSR-enabling configuration across a restart?
+
 ## 5. Dead ends — tested, do not repeat
 
 | tried | result |
