@@ -689,6 +689,27 @@ Units have a split that matters, and it is **not** a style choice:
 Dates in comments: **ISO `YYYY-MM-DD`**. Not because it is US style — it is not — but because
 `08-04` is genuinely ambiguous across readers and this file already records dated decisions.
 
+## TSR: read bluepilot/TSR-INVESTIGATION.md before touching anything
+
+Several hours of in-car work on 2026-08-11 is written up there: the exact as-built field positions,
+a full restore point for both modules, what was tried and refused, and the next steps in order. It is
+the difference between continuing and starting over.
+
+**He wants this working.** It is not a curiosity -- Speed Limit Assist has no camera speed limit
+source, and on the drive that same evening the set speed froze on a road with no map coverage. TSR is
+the second source for exactly those roads. Treat it as live work, not a closed file.
+
+Three things from that session that will otherwise be re-learned the hard way:
+
+- **FORScan decodes an Edge IPMA through a 2020 Fusion profile, and its friendly names are wrong.**
+  It reports "wheel arch height 1338 mm / 1856 mm" for a block that actually holds
+  `FeatureCfg_DAS_GSR`, and "TSR: Enabled" for a byte that is not the TSR field. Use raw as-built.
+- **Writing IPMA as-built invalidates the RADAR's calibration** (`B1433`, MIL on). Reverting the IPMA
+  clears it with no alignment drive. The two modules are calibrated as a pair.
+- **Do not run the IPMA firmware update to `CF`.** It moves Strategy `KT4T-14F397-AE` -> `-AF`, which
+  is the `FORD_EDGE_MK2` fingerprint in this repo rather than `FORD_FUSION_MK5`, and away from the
+  software a known-working car runs.
+
 ## TSR, and the region change that is not worth repeating
 
 **Setting the region in FORScan produced a lot of DTCs, and it is now back to UNSPECIFIED.** His
