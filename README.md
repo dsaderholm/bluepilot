@@ -35,7 +35,7 @@ rack in a CD4-platform Ford, and a Lincoln MKZ with the same swap is the same pr
 platform, same retrofitted steering hardware, so the numbers that matter were fitted against the
 component you also have rather than against a Fusion badge.
 
-Three practical notes before you try it:
+Two practical notes before you try it:
 
 - **The fingerprint is three-quarters retrofit parts, and one part that is not.**
   `FORD_FUSION_MK5` is fingerprinted in `opendbc/sunnypilot/car/ford/fingerprints_ext.py` on four
@@ -50,13 +50,6 @@ Three practical notes before you try it:
   steerRatio=17.07)` in `opendbc/car/ford/values.py`. Wheelbase and steer ratio should carry across
   the platform and the shared rack; mass is the one that moves, particularly on a hybrid, and it
   feeds the lateral tuning.
-- **The radar detector integration is car-agnostic and hardware-gated.** Nothing in it touches the
-  PSCM, the retrofit or the platform, so it behaves identically on your car — but it will do nothing
-  at all unless you have specific hardware: a Valentine One Gen2, an FTDI USB-serial adapter (no
-  other chip works on AGNOS), a USB-C to USB-A OTG adapter, and a tap into the detector's accessory
-  cord. With none of that plugged in it is simply inert, which is the state to expect. Each of those
-  is a hard requirement rather than a preference, and each fails in a way that looks like a wiring
-  fault, so read that section before buying anything.
 
 **On a stock Fusion, Edge or MKZ, expect it to be wrong rather than merely unnecessary.** Several
 constants exist specifically to compensate for the retrofit PSCM having different steering authority
@@ -68,6 +61,24 @@ What does not transfer at all:
 - **Anything fitted to one driver's comfort.** The curve-speed factors were set from measured
   cornering that this driver repeatedly chose and was happy with, around 0.28-0.31 g. That is a
   preference, not a limit, and yours may differ.
+
+**The radar detector integration is car-agnostic, and hardware-gated.** It is deliberately not in the
+list above: nothing in it touches the PSCM, the retrofit or the platform, so it behaves identically
+on your car whatever you are driving. What it needs is hardware, and all of it is required rather
+than recommended:
+
+- a **Valentine One Gen2** — the only current detector with a second, independent data path, because
+  the comma 3X has no Bluetooth at all and everything else talks only to a phone
+- an **FTDI** USB-serial adapter — AGNOS registers `ftdi_sio` and no other usb-serial driver, and
+  cannot load one later, so a CP2102 or CH340 will not enumerate
+- a **USB-C to USB-A OTG adapter**, which is what asserts host role rather than merely changing the
+  plug
+- a tap into the detector's accessory cord
+
+With none of that plugged in it does nothing at all — no reader thread starts and the onroad readout
+does not draw. That is the expected state, not a fault, and it is almost certainly your state. Each
+of those requirements fails in a way that looks like a wiring fault, so read the section on it before
+buying anything.
 
 ## Lineage, and what still comes from where
 
@@ -205,6 +216,15 @@ tuning the wrong controller. These read the device's own logs:
 - **`tools/bp_missed_curves.py`** — the opposite question: curves taken *too fast*, and whether that
   was the camera not seeing the bend, a target that was too generous, or the driver on the pedal
 - **`tools/bp_hold_history.py`** — every change to the driver's hold, and what caused each one
+
+- **`tools/bp_radar_probe.py`** — first contact with the detector. Run it the day the hardware
+  arrives, before trusting anything: it says whether bytes are arriving, whether they frame as ESP,
+  whether the decode looks sane, and whether the mute bit ever moves. When it sees nothing it names
+  the pinout before the software, because the accessory jack is pin-reversed from the main one
+- **`tools/bp_radar_fit.py`** — replaces the guessed strength threshold with a fitted one. Reports,
+  per speed band, whether a given threshold would have given enough warning to actually reach the
+  limit at the rate this car sheds speed — measured from the log rather than assumed, and excluding
+  the encounters where the car acted, since those would fit the threshold to its own output
 
 ### Guards for what tests cannot reach
 
