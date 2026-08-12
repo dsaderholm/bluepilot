@@ -144,13 +144,43 @@ Checksum behavior observed on `706-01-01`: **additive on the low byte.** `0410`â
 
 ---
 
+## 4b. THE ONLY THING THAT DEMONSTRABLY WORKED: "TSR data source = Camera + APIM"
+
+Filed as a dead end at first. It is the opposite -- it is the single piece of positive evidence from
+two days, and he had to point that out twice before it was written down properly.
+
+**What happened:** his IPMA was on "TSR data source: Camera Only". He set it to **Camera + APIM** and
+`NoNavDataAvailable` CLEARED on the comma screen immediately. After an ignition cycle the message came
+back AND the setting had reverted to Camera Only.
+
+**Why that matters more than anything else here.** THERE ARE TWO DIFFERENT FAILURE MODES and they had
+been lumped together:
+
+| mode | what happens | example |
+|---|---|---|
+| **FORScan refuses** | error dialog, nothing reaches the car, no DTC | `0450`, the IPC SLIF change |
+| **Module accepts, then reverts** | the write lands, behavior CHANGES, a power cycle undoes it | Camera + APIM |
+
+The second one got through. The camera acted on it. So the camera **can** be made to stop asking for
+navigation data -- which is the entire goal -- and the remaining problem is not "what value" but
+**"why will the module not commit it."**
+
+A write that applies and then reverts at the next boot is the module accepting into working memory and
+then failing its own configuration validation at startup, restoring what it had. That is `U2101`
+again, and probably the same cross-module check that refuses everything else.
+
+**So the target has changed.** Do not go looking for a different value. The value is known and it
+worked. Find out why it does not persist.
+
+**Ask the friend what HIS TSR data source is set to.** If his reads Camera + APIM and it persists,
+that is the exact target state and the question narrows to why this module will not hold it.
+
 ## 5. Dead ends â€” tested, do not repeat
 
 | tried | result |
 |---|---|
 | Use Ford nav (SYNC 3 route) instead of Waze | No change. `NoNavDataAvailable` persisted. |
 | Set "TSR data source" to Camera Only | **It was already set that way.** |
-| Set it to Camera + APIM | Cleared the message, then the write reverted on ignition cycle. |
 | Change Region | `U2101 Configuration Incompatible`, twice, months apart. |
 | Maverick community values (`xxD2`/`xxD3` in the **second** group of `706-01-01`) | **Wrong field for this module.** Caused `U2101` and a radar fault. |
 | IPMA firmware update to `CF` | Would move to Strategy `AF`, away from the known-working `AE`. Not run. |
