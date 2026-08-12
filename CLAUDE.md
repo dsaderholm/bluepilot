@@ -439,6 +439,47 @@ a modified upstream line, and it reads to the next person as load-bearing. And p
 constant to our multiplier where the two are equivalent -- their numbers have far more road under
 them than ours.
 
+## Diagnosing a road report: the tools, and the order to use them
+
+Written 2026-08-11 after an evening where three separate wrong controllers were blamed in turn. All
+live in `tools/` and all are READ-ONLY; scp them to the device and run from `/data/openpilot`.
+
+| Tool | Answers |
+|---|---|
+| `bp_why_slow.py` | who GOVERNED the drive (per-source occupancy) and what caused every slowdown |
+| `bp_hold_history.py` | every change to the HOLD, with `baselineSource` naming the mechanism |
+| `bp_dump_exit.py` | the older exit-specific dump; superseded for anything above 55 mph |
+
+The order that works: occupancy first, then the specific event, then the raw fields. Skipping to the
+raw fields is how an evening goes to the wrong controller.
+
+**And do not trust the source label.** See "Facts that have been got wrong before" -- it names a
+winner even when every candidate is `V_CRUISE_UNSET`.
+
+## SCC-Map has three defenses now, and they are deliberately different questions
+
+Built up across 2026-08-10 and 2026-08-11 from measured events. They stack, and the split between
+them is what keeps exits working:
+
+1. **The corner-speed factor pair.** `SmartCruiseControlMapFactor` (tight, <= 25 mph) and
+   `SmartCruiseControlMapHighSpeedFactor` (highway, >= 45 mph), blended on the CORNER's speed, not
+   the car's. A ramp is a 25 mph corner entered at 75 and a sweeper is a 50 mph corner entered at 75;
+   keying on vEgo cannot separate them.
+2. **The camera veto, absolute.** The model sees no curve at all (`< MODEL_DISAGREE_LAT_ACC`). Ramps
+   keep a conservative 4 s horizon; highway corners get the model's real 10 s reach, because
+   `max_pred_lat_acc` is a percentile over the whole modelV2 plan and 4 s made the veto unreachable
+   at highway speed.
+3. **The camera veto, relative.** The model sees a curve, but a far gentler one than the map claims.
+   Highway corners only.
+
+`_MAP_FACTOR_V_BP[1]` (45 mph) is the single definition of "highway corner" for all three --
+referenced, never duplicated.
+
+**Why ramps are excluded from 2 and 3.** On an exit the model predicts the path it expects to drive,
+straight down the highway, so a ramp's curvature may never enter the plan until the car is on it.
+Camera silence there is blindness, not evidence. That is also why vetoing is safe where it does
+apply: it removes only the MAP's contribution, and SCC-Vision keeps running as the near-field expert.
+
 ## Facts that have been got wrong before
 
 Each of these was asserted confidently from reasoning and turned out to be false. Check the source.
