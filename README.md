@@ -2,15 +2,48 @@
 
 # FusionPilot
 
-A personal fork of [BluePilot](https://github.com/bluepilotdev/bluepilot), for one specific car:
-a **2020 Ford Fusion Titanium AWD running retrofitted Ford Edge ADAS hardware** — Edge PSCM, rack,
-IPMA camera and CCM radar, with the Fusion's own ABS, instrument cluster and steering column.
+A personal fork of [BluePilot](https://github.com/bluepilotdev/bluepilot), built for one specific
+car: a **2020 Ford Fusion Titanium AWD running retrofitted Ford Edge ADAS hardware** — Edge PSCM,
+steering rack, IPMA camera and CCM radar, with the Fusion's own ABS, instrument cluster and steering
+column.
 
-That combination does not exist from the factory, which is the whole reason this fork exists rather
-than being a settings profile. Platform `FORD_FUSION_MK5`, flags `ALT_STEER_ANGLE | TSR`, not CAN FD.
+That combination does not exist from the factory, which is why this is a fork rather than a settings
+profile. Platform `FORD_FUSION_MK5`, flags `ALT_STEER_ANGLE | TSR`, not CAN FD.
 
 The name is the car and the fork at once: a Fusion body with Edge brains, and four upstream projects
 fused into one tree.
+
+## Status: constantly changing
+
+**This is under active, near-daily development and is not a release.** Behavior is tuned from road
+reports and log analysis, sometimes several times a week, and things that worked last month may work
+differently now. Branches are rebased often, so commit hashes are not stable — check what a build
+contains by looking at the code, not the hash.
+
+There is no support, no release cadence, and no promise that any given commit is good. If you run it,
+read the commit messages: they carry the measured evidence behind each change, including the ones
+that were tried and reverted.
+
+## Will this work on my car?
+
+Honestly: **probably not without work.**
+
+The tuning here is fitted to one retrofit drivetrain. The PSCM is an Edge unit in a Fusion, so its
+steering authority and calibration differ from either car in stock form, and several numbers in this
+fork exist specifically to compensate for that. On a stock Fusion or a stock Edge they would be
+wrong rather than merely unnecessary.
+
+What travels reasonably well:
+
+- The ICBM work, on any Ford where openpilot cannot drive longitudinal control directly
+- The diagnostic tools, which read any openpilot route
+- The Smart Cruise Control layering, which is car-agnostic in shape if not in numbers
+
+What does not travel:
+
+- Every tuned constant
+- Anything assuming the retrofit's steering authority
+- The pinned-hold locations, which are literally coordinates on one person's commute
 
 ## Lineage, and what still comes from where
 
@@ -18,85 +51,98 @@ fused into one tree.
 openpilot (comma.ai)  →  sunnypilot  →  BluePilot  →  FusionPilot
 ```
 
-**BluePilot is still upstream and updates are still taken from it regularly.** This fork is a layer
-on top, not a departure. Everything below is what this layer adds — the Ford lateral scheme, ICBM,
-Speed Limit Assist, MADS and Smart Cruise Control all come from BluePilot and sunnypilot, and are
-not reimplemented here.
+**BluePilot is still upstream and updates are taken from it regularly.** This fork is a layer on top,
+not a departure. The Ford lateral scheme, ICBM, Speed Limit Assist, MADS and Smart Cruise Control all
+come from BluePilot and sunnypilot and are not reimplemented here.
 
-Keeping updates easy is an explicit design constraint. Every line this fork changes in an upstream
-file is a merge conflict paid forever, so new work goes into new files wherever it can, hooks into
-upstream files are kept to one-liners, and additions whose reason has expired get deleted rather
-than parked. See `CLAUDE.md` for the rules that enforce that.
+Keeping updates easy is an explicit design constraint. Every line changed in an upstream file is a
+merge conflict paid forever, so new work goes into new files where it can, hooks into upstream files
+are kept to one-liners, and additions whose reason has expired are deleted rather than parked at a
+neutral value. `CLAUDE.md` documents the rules that enforce this.
 
-## What this fork adds
+## What this branch adds
 
-### Intelligent Cruise Button Management — tuning and repair
+### Intelligent Cruise Button Management
 
-ICBM is sunnypilot's actuator adapter: stock Ford ACC will not accept a longitudinal command, so
-openpilot's desired speed is translated into cruise-button presses. The set speed is the only lever
-this car has, and most of the work here is making it behave.
+Stock Ford ACC will not accept a longitudinal command, so ICBM — sunnypilot's actuator adapter —
+translates openpilot's desired speed into cruise-button presses. **The set speed is the only lever
+this car has**, and most of the work here is making that lever behave.
+
+That constraint is worth understanding before reading anything else: the set speed falls at roughly
+**3.3 mph per second**, which is the car's own repeat rate for a held cruise button. It is not a
+parameter. Every feature that slows the car has to fit inside that budget, and a few requests that
+sound reasonable are simply impossible because of it.
 
 - **A button contract settled on the road.** `RES +` creates or raises a HOLD — the driver's own set
   speed — and `SET −` lowers it or, with cruise off, hands the speed back to Speed Limit Assist.
   Every other feature keeps working against a hold: curves still slow the car, hazards still fire,
-  and the speed returns to the driver's number rather than the posted limit.
-- **Holds pinned to a location.** Tap the HOLD badge and that hold returns every time you drive
-  through the same spot. For the places that need the same correction on every trip.
+  and the speed returns to the driver's number afterwards rather than to the posted limit.
+- **Holds pinned to a location.** Tap the HOLD badge and that hold returns whenever you drive through
+  the same place. A hold you set by hand always outranks a pinned one.
 - **A standstill resume gate.** openpilot asserts resume from its own plan, which on a stock-ACC car
   is not the controller that then has to drive — Ford reads resume as "go" and brakes hard when its
   radar finds the lead still there. Resume is held until the lead has actually gone.
-- **Radar-blind lead detection.** Ford's ACC follows only radar-confirmed leads and its manual says
-  plainly that it may not detect stationary vehicles below 6 mph. The driving model sees them. When
-  it does and the radar has not, the set speed is brought to Ford's 20 mph floor and the driver is
-  told, with the deceleration as reaction time rather than a warning after the fact.
-- **Stop signs and red lights.** The same channel, for the case the lead trigger structurally cannot
-  catch: an empty intersection, where there is no vehicle to measure. Gated so it acts only once the
-  stop actually requires braking rather than while coasting would still arrive in time.
-- **A drop limiter that only meters what has no deadline.** Ford coasts for small set-speed steps
-  and brakes for large ones, and coasting into a new speed limit is nicer than braking into it. But
-  a curve or a mapped corner is a fixed place in the road, so those go straight to target — metering
+- **Radar-blind lead detection.** Ford's ACC follows only radar-confirmed leads, and its manual says
+  plainly that it may not detect stationary vehicles below 6 mph. The driving model does see them.
+  When it does and the radar has not, the set speed is taken to Ford's 20 mph floor and the driver is
+  told — the deceleration itself is the reaction time, rather than a warning after the fact.
+- **Stop signs and red lights**, on the same channel, for the case the lead trigger structurally
+  cannot catch: an empty intersection with no vehicle to measure. Gated so it acts only once the stop
+  actually requires braking, rather than while coasting would still arrive in time.
+- **Rate limiters that only meter what has no deadline.** Ford coasts for small set-speed steps and
+  brakes for large ones, and coasting into a lower speed limit is nicer than braking into it. But a
+  curve or a mapped corner is a fixed place in the road, so those go straight to target — metering
   them spends road that was already budgeted.
 
-### Smart Cruise Control — curves and exits
+### Smart Cruise Control — curves and corners
 
-- **Freeway exits.** `SmartCruiseControlMapDecel` is a trigger distance, not a rate: the map
-  publishes the corner speed at exactly the moment braking must begin. Anything that re-paces it
-  downstream misses the corner, which is what the drop limiter used to do.
-- **`SmartCruiseControlMapFactor`**, new here — the magnitude control mapped corners never had.
-  Mapped targets follow the posted yellow advisory, which assumes factory steering; this car's
-  retrofit PSCM may want less.
-- **A curve ceiling.** While a bend is being tracked the set speed follows the target *down* and
-  never back up. A curve target that briefly rises is noise, and chasing it costs the road needed
-  for the rest of the bend.
+Two controllers can slow the car for a bend: SCC-Vision, from the driving model's predicted path, and
+SCC-Map, from mapped corner geometry. They feed a `min()`, so either can lower the speed and neither
+could historically overrule the other. Most of the work here is about that asymmetry.
+
+- **Corner-speed factors split by the corner, not the car.** A loop ramp is a 25 mph corner entered
+  at 75, and a highway sweeper is a 50 mph corner entered at 75 — identical vehicle speed, opposite
+  requirements. A single factor cannot serve both, and one keyed on vehicle speed cannot tell them
+  apart, so the blend is keyed on the corner's own speed.
+- **A camera veto over mapped corners that are not there.** Bad map geometry used to slow the car
+  with nothing able to say no. When the model looks at the road the map is describing and sees no
+  bend at all, the map's request is dropped.
+- **A second veto for when the camera sees a *gentler* bend than the map claims.** "The camera sees
+  something" is not "the camera agrees" — the model's own predicted lateral acceleration implies a
+  speed, and a map demanding far less than that is not describing the same road.
+- **Both vetoes are deliberately excluded from exit ramps.** On an exit the model predicts the path it
+  expects to drive, straight down the highway, so a ramp's curvature may never enter its plan until
+  the car is on it. Camera silence there is blindness, not evidence — and seeing around a bend the
+  camera cannot is the entire reason SCC-Map exists.
+- **A curve ceiling.** While a bend is tracked the set speed follows the target down and not back up,
+  because a curve target that briefly rises is noise, and chasing it costs the road needed for the
+  rest of the bend. It releases once the model's own ask has recovered for long enough to be real.
 
 ### Speed limits
 
 Banded offsets, a configurable policy and fallback, lookahead for higher limits, and a maximum set
 speed that Speed Limit Assist will never exceed regardless of what is posted.
 
-### Passing assist
+### Diagnostics
 
-Suggests and manages lane changes on multi-lane roads: adjacent-lane occupancy from the front radar,
-an oncoming-traffic veto that tells a divided highway from an undivided one, keep-right prompting,
-lead-braking holds, two-way-road strictness, and a per-drive history so the behavior can be reviewed
-afterwards rather than argued about from memory.
+Road reports are only as good as what can be measured afterwards, and several days were lost here to
+tuning the wrong controller. These read the device's own logs:
 
-### Radar detector integration
+- **`tools/bp_why_slow.py`** — which source governed a drive, and what caused every slowdown
+- **`tools/bp_missed_curves.py`** — the opposite question: curves taken *too fast*, and whether that
+  was the camera not seeing the bend, a target that was too generous, or the driver on the pedal
+- **`tools/bp_hold_history.py`** — every change to the driver's hold, and what caused each one
 
-Reads a radar detector over USB and slows for alerts, with a per-speed-band threshold fitted against
-what the car can actually shed, a false-alarm mute, and a minimum bar count.
+### Guards for what tests cannot reach
 
-### Diagnostics and guards
-
-- **`tools/bp_offline_test.py`** — the offline suite, which re-execs under the pinned Python and
-  stubs the device-only leaves. Bare `pytest` fails here in ways that look like environment noise.
+- **`tools/bp_offline_test.py`** — the offline suite, which re-execs under the pinned Python and stubs
+  the device-only modules. Bare `pytest` fails here in ways that look like environment noise.
 - **`tools/bp_merge_upstream.py`** — takes a newer BluePilot end to end: tags a rollback point,
-  regenerates `car_list.json` instead of merging it, prints what is ours in each conflict, and runs
+  regenerates `car_list.json` rather than merging it, prints what is ours in each conflict, and runs
   the suite.
-- **Route diagnostics** for exits, stops and controls mismatches, which read the device's own logs.
-- **Static guards for what tests cannot reach**: duplicate CAN registrations that strand the car at
-  boot, capnp fields added without their dataclass mirror, params declared twice, `int()` on a capnp
-  enum, and settings that ship without a control.
+- **Static checks** for duplicate CAN registrations that strand the car at boot, capnp fields added
+  without their dataclass mirror, params declared twice, `int()` on a capnp enum, and settings that
+  ship without a control to reach them.
 
 ## Settings
 
@@ -104,14 +150,16 @@ Settings behave **exactly as they do on stock BluePilot, sunnypilot and openpilo
 writes each param's default on the first boot that knows the key, and the stored value never changes
 again.
 
-So a changed default is a **recommendation**, not a change. Every tunable control prints its shipped
+So a changed default is a **recommendation, not a change**. Every tunable control prints its shipped
 default in its own description — read live, so it cannot go stale — and applying it is a deliberate
-act. There is no migration deciding what your settings should be.
+act. Nothing here decides what your settings should be.
 
-## Updating
+## Installing and updating
+
+This is installed the same way as any openpilot fork, by URL at device setup. Updating:
 
 ```bash
-python tools/bp_merge_upstream.py
+python tools/bp_merge_upstream.py     # pull in a newer BluePilot release
 ```
 
 Then on the device:
@@ -132,6 +180,11 @@ is built on.
 
 ## Safety
 
-This is alpha-quality software for research purposes. It is not a product. The driver is responsible
-at all times, and this remains an SAE Level 2 system: extra sensors and better tuning do not change
-that. Users are responsible for complying with local laws.
+This is alpha-quality software for research purposes. **It is not a product.**
+
+The driver is responsible at all times, and this remains an **SAE Level 2** system. Extra sensors and
+better tuning do not change that: everything here assumes a driver watching the road and ready to
+take over immediately. Several features exist precisely because the car cannot be trusted to see
+everything, which is the point rather than a caveat.
+
+Users are responsible for complying with local laws.
