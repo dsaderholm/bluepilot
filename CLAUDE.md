@@ -697,6 +697,15 @@ unspecified or something like that."* That path has been tried and it cost more 
 Do not propose it again as a way to make TSR work, and do not treat the region as an unexplored
 lever -- it is explored, and the answer was no.
 
+**2026-08-11: TSR data source was already "Camera Only", and "Camera + APIM" is what fixed it.**
+The pinned `NoNavDataAvailable` cleared the moment he switched it. Every note here had theorized the
+opposite -- that camera-only would stop the module waiting for navigation -- and he had been in
+camera-only the entire time. FORScan decodes as-built with a 2020 Fusion profile while the module is
+an Edge MK2 IPMA, so a label there is not evidence of what the byte does.
+
+**Ask what a setting IS before planning a change to it.** An entire plan was built around obtaining a
+donor car's as-built block to locate a byte that was already set the way the plan wanted it.
+
 **And it does not need to be set**, which is the part worth noticing. Everything below was measured
 with the region UNSPECIFIED. The camera reads signs anyway; what the region appears to gate is the
 STATUS enumerants, not the detection.

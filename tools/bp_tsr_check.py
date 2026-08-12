@@ -4,6 +4,24 @@
 Run this before and after any FORScan change to the camera, so "did that help" is a measurement
 instead of an impression.
 
+2026-08-11: THE FIX WAS "CAMERA + APIM", AND EVERY THEORY BELOW HAD IT BACKWARDS.
+
+His IPMA was ALREADY set to "TSR data source: Camera Only" -- the state this file spent two days
+arguing he should move TO. Changing it to Camera + APIM cleared NoNavDataAvailable immediately.
+
+So the reasoning below, that camera-only stops the module waiting on navigation, is wrong on this
+hardware. Most likely explanation: FORScan decodes as-built with a 2020 Fusion profile and the module
+is an Edge MK2 IPMA, so the label and the byte do not necessarily mean the same thing. Do not trust a
+FORScan label on this car without testing what it actually does.
+
+The lesson worth more than the fix: ASK WHAT THE SETTINGS ALREADY ARE BEFORE PLANNING A CHANGE TO
+THEM. A whole plan was built on getting a donor car's as-built to find a byte that was already set
+the way the plan wanted it.
+
+STILL UNCONFIRMED as of this writing: whether the camera now READS signs. The status field going
+healthy means it stopped refusing to participate; vLimit1 going non-255 at a posted sign is the thing
+that matters, and needs a drive.
+
 STATE AS OF 2026-08-09, region UNSPECIFIED, no FORScan TSR change made:
 
   - Traffic_RecognitnData (0x3CD) IS on the bus: 366 frames on bus 2, forwarded to bus 0. The
