@@ -468,6 +468,17 @@ Each of these was asserted confidently from reasoning and turned out to be false
 - **A single vision target frame can be a large outlier.** On that bend vision asked 59, then 36, then
   55 on consecutive samples. ICBM chases the minimum, so one frame set the number. Do not read a
   single logged target as the controller's estimate.
+- **`longitudinalPlanSource` NAMES A WINNER EVEN WHEN NOBODY ASKED.** It is
+  `min(targets, key=...)` over every candidate, so when they are all `V_CRUISE_UNSET` it still
+  reports one -- on route 00000348 it read `sccVision` for 40 s while vision was inactive and asking
+  for nothing. Check `smartCruiseControl.<x>.active` AND the published `vTarget` before believing the
+  source label. 570 mph in a diagnostic is 255 m/s, which means "not asking".
+- **A diagnostic that prints `--` for both "inactive" and "active with no target" hides the only
+  distinction that matters.** Two tools were written that way and both pointed at the wrong
+  controller. Print the raw fields.
+- **Speed Limit Assist stays `is_active` on a road with NO speed limit data.** It is not a proxy for
+  "SLA has a number". Anything gating on it must also check that its target is real, or a stretch
+  with no map coverage silently removes the cruise baseline from the planner.
 - **Ford's angle gains are a PSCM calibration, not a detune**, and the take-over alert that looks
   like they cause is a tracking-lag false positive.
 
