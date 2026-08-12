@@ -82,6 +82,10 @@ DEFAULT_TARGETS = [
   "selfdrive/car/tests/test_pre_enable_standstill.py",
   "selfdrive/ui/bp/onroad/tests/",
   "system/tests/test_sentry_disabled_by_default.py",
+  # Guards the policy stated in CLAUDE.md's "Params, defaults, and his settings": nothing may write
+  # a settings key. It lived only on the passing assist branch, where the policy is not stated, so
+  # the other branches were unguarded against the exact failure it was written for.
+  "sunnypilot/system/tests/test_no_migration_writes_settings.py",
   # A duplicate params_keys.h entry is silently dropped by the unordered_map rather than being
   # an error, and two long-lived branches adding the same key in different places is how it
   # happens. BPDefaultsGeneration was exactly that, before it was removed with the defaults

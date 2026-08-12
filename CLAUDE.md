@@ -47,6 +47,42 @@ cd /data/openpilot && git pull && sudo reboot
 
 Everything below is background for when that is not enough.
 
+## You can SSH into the car yourself
+
+Set up 2026-08-08. **No key file, no IP, no config** -- it already works:
+
+```bash
+ssh comma@comma-34b959b "bash -lc 'cd /data/openpilot && python tools/bp_route_report.py latest'"
+```
+
+Three things make that work, each of which cost a wrong guess first:
+
+- **Hostname, not IP.** `comma-34b959b` resolves over mDNS. His IP changes constantly -- "I go a lot
+  of places" -- and none of that matters. Do not ask him for an IP.
+- **Bitwarden Desktop is the SSH agent.** The private key never leaves the vault; `ssh` asks
+  Bitwarden to sign. `ssh-add -l` shows it as "My SSH Key (ED25519)". **Do not ask him to export a
+  key to disk** -- that was suggested first and correctly refused, and it was never necessary.
+- **`bash -lc` or python is not on PATH.** A non-interactive SSH session skips the profile, so plain
+  `python` gives "command not found". The interpreter is `/usr/local/venv/bin/python`.
+
+Use PowerShell for this, not the Bash tool: the Windows OpenSSH agent is a named pipe and Git Bash's
+ssh does not speak it.
+
+**What to do with it.** Read freely -- reports, logs, params, `git log`. Anything that WRITES to the
+device, changes a setting, or restarts a process: say what the command is and why before running it.
+Never touch it while he is driving. He was surprised to find a session already connected -- "I didn't
+even know you were connected!" -- so say when you connect and what you ran.
+
+**The device's own logs are not the route.** `/data/log/swaglog.*` holds every daemon's cloudlog,
+including the UI's, and a route's `logMessage` stream does NOT carry all of it. A crash that is
+missing from `bp_route_report` may still be sitting in swaglog:
+
+```bash
+ssh comma@comma-34b959b "bash -lc 'grep -h \"<the error you cannot find>\" /data/log/* | head -1'"
+```
+
+That is how a UI crash was finally found, after two rounds of hunting for it in the route.
+
 ## Run tests with `tools/bp_offline_test.py`, never bare `pytest`
 
 ```bash
@@ -291,9 +327,26 @@ Two branches adding a section now add two different files, which git merges with
 - An anchor with no fragments behind it renders nothing, deliberately -- a branch without passing
   assist should not advertise a gap where it would go.
 
+**SAY PLAINLY WHAT DOES NOT ACTUATE.** This carve-out was dropped when this section was rewritten on
+2026-08-11 and had to be put back the same day. It is the one place "Talk about the finished system"
+below does NOT apply: that rule is about answering the owner, who is always describing the finished
+behavior and does not need the caveat. A README is read by strangers who have no way to know, and one
+written under that rule describes scaffolding as shipped behavior.
+
+Put the limitation in the same sentence as the description, not a footnote. Passing assist opens with
+"This moves nothing today, on any car", which is the right shape.
+
+**And put it in the right section.** A limitation true for everyone is a FEATURE limitation and
+belongs in the feature fragment; only something about the reader's car belongs in portability. Filing
+"it actuates nowhere" under portability tells a reader their car is the reason, when it is not.
+
 **Sections are this branch's to edit; fragments are each branch's own.** If a change belongs in the
 shared prose -- the status section, portability, licence, safety -- it goes in `readme/sections/`
 here and reaches the others by rebase, which is the direction that works.
+
+**Rebase onto the BRANCH, not onto a hash somebody quoted you.** A hash in a handoff message is stale
+the moment the base is pushed to again, and resolving conflicts against a version that no longer
+exists is wasted work. Use `origin/icbm-manual-override-and-tuning` and check the tip when you start.
 
 ## Name a feature for what it DOES, never for ICBM
 
@@ -690,7 +743,9 @@ it was built to catch.
 - **Shell commands are fine.** What he dislikes is running them *in the car*, in 100-degree heat.
   Diagnostics he can SSH into at home are welcome; "run this on your next drive" is not.
 - **Talk about the finished system.** Do not preface answers with what does not actuate yet; he is
-  always describing the finished behavior.
+  always describing the finished behavior. **This is about answering HIM, and does not extend to
+  documentation** -- see the README section above, where the opposite applies, because a stranger
+  reading the README has no way to know what is scaffolding.
 - **23 controls on the settings screen is not a usability problem.** Do not consolidate unless asked.
 - **Report test results only when the result is news.** No sign-off with a suite total every message.
 - **Changes made on one branch reach the others because he rebases every time.** So CLAUDE.md is the
