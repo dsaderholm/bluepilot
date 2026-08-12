@@ -11,6 +11,30 @@ here. Directories (`bluepilot/`, `selfdrive/ui/bp/`), file names, imports, param
 conflict forever and breaks the thing he cares about most: *"I want updating to newer BluePilot
 versions to still be easy."*
 
+## THE DEVICE AUTO-UPDATES. A PUSH IS A DEPLOY.
+
+Found by the passing assist session on 2026-08-12, from the device's own reflog: it pulls
+`Reset to FETCH_HEAD` unattended, roughly hourly.
+
+```
+330369129  2026-08-12 05:18 +0000
+330369129  2026-08-12 02:19 +0000
+9d5bc1b9d  2026-08-12 00:49 +0000
+7f82ca85c  2026-08-11 18:55 +0000
+```
+
+**So pushing to the branch his car tracks puts code on his car, with nobody deciding to send it.**
+That branch is currently `passing-assist-phase1`, not this one -- check
+`git rev-parse --abbrev-ref HEAD` on the device rather than assuming.
+
+This was believed and TOLD TO HIM the other way round: that a push is inert until he runs `git pull`.
+It is not. The consequence is that an untested push reaches a car being driven, so:
+
+- **Hold a push on the tracked branch until he asks for it**, unless it is a fix he is waiting on.
+- The suite passing is not optional before pushing there. There is no manual gate behind it.
+- The command below is how he takes an update DELIBERATELY and immediately. It is not the only way
+  code arrives.
+
 ## START HERE if the owner asks to update
 
 They will open a fresh session and say something like *"update BluePilot"*, *"get the latest
