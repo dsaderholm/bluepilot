@@ -4,40 +4,52 @@
 Run this before and after any FORScan change to the camera, so "did that help" is a measurement
 instead of an impression.
 
-ROOT CAUSE, FOUND 2026-08-11: THE IPMA CANNOT TALK TO THE APIM.
+2026-08-11, A LONG SESSION IN THE CAR. WHAT WAS ESTABLISHED:
 
-    U0253 - Lost Communication With Accessory Protocol Interface Module
-    Module: Image Processing Module A     DTC Maturing - Intermittent
-    (he reports getting this constantly)
+1. U0253 WAS THE REAL BLOCKER, AND IT IS FIXED. The IPMA was logging "Lost Communication With
+   Accessory Protocol Interface Module" constantly -- the APIM is SYNC, which is where navigation
+   data comes from, so NoNavDataAvailable was literal. Enabling TSR in the APIM at 7D0-09-02 cleared
+   it; the DTC is now "Previously Set - Not Present".
 
-The APIM is the SYNC module, and the APIM is where navigation data comes from. The camera reports
-NoNavDataAvailable because it cannot reach the module that would supply it. This is a NETWORK fault,
-not a configuration one, and no as-built value can fix it.
+2. TSR IS SWITCHED OFF IN THE IPMA, and we know exactly where. From a Ford as-built field reference
+   he supplied:
 
-Everything that failed before this was found now makes sense:
+       706-01-01   xx*x xxxx xx--     ModuleFeatureCfg_TSR / ModuleFeatureCfg_IACC
+         1 = MFCTSR Off   ! IACC Enabled      <- his value (3rd character of the FIRST group)
+         5 = MFCTSR SLIF  ! IACC Enabled      <- what it needs
 
-  - Running a route in SYNC 3's own navigation changed nothing. The camera cannot reach the APIM
-    whether route guidance is running or not.
-  - Every as-built write was rejected or pointless. You cannot configure a module into reaching one
-    that is not there.
-  - The only navigation messages in the Ford DBC (APIMGPS_Data_Nav_1/2/3_FD1) carry GPS telemetry
-    only, with no speed limit -- consistent with the real nav exchange never happening at all.
+   His 706-01-01 reads 0410 A9DB B960, so the field is 1: TSR off at the module. FORScan's friendly
+   view claims "Traffic Sign Recognition (TSR): Enabled" -- that is a DIFFERENT byte, decoded through
+   a Fusion profile. Do not trust the friendly view on this car.
 
-It is an Edge IPMA in a Fusion. The Edge module expects the APIM on some bus or under some address
-that this car's topology does not provide, or the gateway does not route between them.
+3. FORSCAN WILL NOT WRITE IT. Setting 0450 fails with "Writing blocks failed - incompatible
+   configuration", with two different checksums, so it is FORScan refusing the VALUE, not the module
+   rejecting a block -- nothing reaches the car. Its vehicle profile is a 2020 Fusion, a Fusion never
+   had TSR, so the combination is disallowed at the tool. This is the same wall an Edge owner with the
+   identical part number (KT4T-19H406-CE) hit on the FORScan forum: "for IPMA it is somehow blocked".
 
-DO NOT KEEP EDITING THE AS-BUILT. Two faults were matured on this module in one evening chasing a
-configuration cause for a communication failure.
+   The remaining path is a tool that does not decode through a Fusion profile -- UCDS. That is what
+   his expired licence would actually buy, which is worth knowing before spending anything.
 
-WHAT WOULD ACTUALLY MOVE THIS: establish why IPMA and APIM cannot see each other -- gateway routing
-configuration, or the physical network the retrofit put each module on. That is FORScan/wiring work
-on the vehicle, not anything measurable from the comma device, and not anything in this repo.
+4. CHANGING IPMA AS-BUILT INVALIDATES THE RADAR'S CALIBRATION. Writing 706-01-01 produced
+   B1433 "Forward Looking Sensor Alignment - Missing Calibration" on the CCM, with the MIL on, and
+   REVERTING THE IPMA CLEARED IT with no alignment drive needed. Not DTC clearing -- he has cleared
+   DTCs thousands of times without this -- and not a pre-existing fault, since ACC has always worked.
+   The two modules are aligned as a pair. Expect any future IPMA as-built work to require a radar
+   alignment, and expect a revert to undo it.
 
-AND THE PRIOR THEORIES ARE ALL DEAD, recorded so they are not tried again:
-  - "Use Ford nav instead of Waze" -- tested, no change.
-  - "Set TSR data source to Camera Only" -- it was ALREADY set to that.
-  - "Set it to Camera + APIM" -- cleared the message until the write reverted; the module rejected it.
-  - "Change the region" -- U2101 Configuration Incompatible, twice, months apart.
+5. THE FUSION-PROFILE DECODE IS DEMONSTRABLY WRONG. 706-05-01 holds FeatureCfg_DAS_GSR per the real
+   Ford reference; FORScan's Fusion profile renders it as "wheel arch height, left/right front" of
+   1338 mm and 1856 mm. Those values were never real, and neither was the "Region: incorrect value or
+   not configured" that sent this down a two-day detour.
+
+DEAD ENDS, tested, do not repeat:
+  - "Use Ford nav instead of Waze" -- he ran a SYNC 3 route; no change.
+  - "Set TSR data source to Camera Only" -- it was already set that way.
+  - "Camera + APIM" -- cleared the message until the write reverted.
+  - Region -- U2101 Configuration Incompatible, twice, months apart.
+  - The Maverick community values (706-01-01 xxD2/xxD3 in the SECOND group) -- wrong field for this
+    module, and writing them caused U2101 and the B1433 above.
 
 STATE AS OF 2026-08-09, region UNSPECIFIED, no FORScan TSR change made:
 
