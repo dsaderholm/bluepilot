@@ -35,6 +35,19 @@ MS_TO_MPH = 2.23694
 NO_TARGET_MPH = 500.0
 
 
+
+def seg_index(name: str) -> int:
+  """Segment ORDER IS NUMERIC, not lexicographic.
+
+  sorted() puts `--10` before `--2`, so any route with ten or more segments was read out of order.
+  Found on 2026-08-11 on a 32-segment route: the timeline jumped around, timestamps ran to eight
+  hours on a half-hour drive, and the reboot re-basing kept adding shifts to chase it. Per-frame data
+  was still real -- a run of frames inside one segment is contiguous either way -- but every t+ label
+  spanning segments was wrong, and windows pulled from them pointed at the wrong part of the drive.
+  """
+  tail = name.rsplit("--", 1)[-1]
+  return int(tail) if tail.isdigit() else -1
+
 def main() -> int:
   ap = argparse.ArgumentParser()
   ap.add_argument("--route", default=None)
@@ -51,7 +64,7 @@ def main() -> int:
 
   if not os.path.isdir(REALDATA):
     sys.exit(f"no {REALDATA} -- run this on the device")
-  entries = sorted(d for d in os.listdir(REALDATA) if "--" in d)
+  entries = sorted((d for d in os.listdir(REALDATA) if "--" in d), key=seg_index)
   route = args.route or entries[-1].rsplit("--", 1)[0]
   segs = [d for d in entries if d.startswith(route + "--")][:args.max_segments]
   print(f"# route {route}, {len(segs)} segments, threshold {args.lat:.1f} m/s^2\n")
