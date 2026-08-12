@@ -439,6 +439,39 @@ a modified upstream line, and it reads to the next person as load-bearing. And p
 constant to our multiplier where the two are equivalent -- their numbers have far more road under
 them than ours.
 
+## THE EXIT THAT NEVER SLOWS ENOUGH IS NOT A TUNING PROBLEM
+
+He has reported this repeatedly. Measured on route 00000348, 2026-08-11, and the answer is arithmetic:
+
+  t+24439  63 mph  dash 80  nothing asking
+  t+24441  66 mph  dash 78  sccVision fires, asking 71
+  t+24443  69 mph  dash 71  sccMap fires, asking 38
+  t+24447  66 mph  dash 58  latAcc 6.03   <- already in the corner
+  t+24453  46 mph  dash 38  the set speed finally arrives
+
+Two hard numbers bound it:
+
+- **The set speed falls at about 3.3 mph/s and cannot go faster.** 71 -> 38 took ten seconds. ICBM
+  already HOLDS the button rather than tapping (the state machine asserts `decrease` continuously),
+  so that is the car's own repeat rate for a held button, roughly 5 mph every 1.5 s. It is not a
+  parameter and nothing in this fork can raise it.
+- **The map asked four seconds before peak cornering.** A 65 -> 38 exit needs about eight seconds of
+  set-speed travel. It got four.
+
+So the deficit is DETECTION TIME, and the levers people reach for do not touch it:
+
+- `SmartCruiseControlMapDecel` is a trigger distance, and at 8 it already triggers earlier than
+  stock. The map still only fired 4 s out, so the corner was not in `MapTargetVelocities` until then.
+- Commanding Ford's 20 mph floor instead of 38 does NOT help. The dash descends at the same rate
+  either way; a lower final number just overshoots later. Worth stating because the hazard path does
+  exactly that for a different reason, and the analogy is tempting and wrong.
+- The camera cannot cover it either: SCC-Vision fired two seconds before the map, because a ramp bends
+  away from where the camera is looking.
+
+The remaining lever is how far ahead `MapTargetVelocities` is populated, which is mapd's, upstream of
+this fork. Do not re-derive this from scratch; measure with `tools/bp_missed_curves.py` and compare
+the map's fire time against the 3.3 mph/s budget before proposing anything.
+
 ## Diagnosing a road report: the tools, and the order to use them
 
 Written 2026-08-11 after an evening where three separate wrong controllers were blamed in turn. All
