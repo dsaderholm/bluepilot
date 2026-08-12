@@ -63,17 +63,24 @@ def make_cs(cluster, v_ego=None, buttons=(), enabled=True, gas_pressed=False, br
 
 
 def make_lp(target, lead_state=UnconfirmedLeadState.inactive, lead_target=0.0,
-            source=PlanSource.speedLimitAssist, limit_known=True):
+            source=PlanSource.speedLimitAssist, limit_known=True,
+            curve_active=False, curve_target=0.0, map_active=False):
   """limit_known defaults TRUE because that is the ordinary road: OSM has a limit for most places.
 
   It was absent entirely at first, which made LP_SP.speedLimit raise and every test run as though no
   limit were ever known -- the rarer case, silently, everywhere. Holding a fixture constant at the
   wrong value is how the model-stop path passed its tests for weeks while doing nothing on the car.
   """
+  # smartCruiseControl was ABSENT here entirely, so the controller's try/except fired on every frame
+  # of every test in this file and the whole curve-ceiling path was unreachable -- a fixture thinner
+  # than the real message, hiding exactly the code it should have been exercising. Defaults match
+  # what the except produced, so nothing that passed before changes meaning.
   return NS(vTarget=target * MPH,
             longitudinalPlanSource=source,
             speedLimit=NS(resolver=NS(speedLimitValid=limit_known,
                                       speedLimitLastValid=limit_known)),
+            smartCruiseControl=NS(map=NS(active=map_active, vTarget=target * MPH),
+                                  vision=NS(active=curve_active, vTarget=curve_target * MPH)),
             unconfirmedLead=NS(state=lead_state, vTarget=lead_target * MPH))
 
 
@@ -1696,3 +1703,54 @@ class TestNobodyAskingDoesNotStrandTheHold:
       icbm.run(make_cs(38, v_ego=38), CC, make_lp(unset * CV.MS_TO_MPH), False)
     assert icbm.v_baseline == 0
     assert icbm.v_target == 38, f"invented a target of {icbm.v_target} with no hold to aim at"
+
+
+class TestComingOutOfACurveBehindALeadIsStillMetered:
+  """Route 00000348 t+1060, 2026-08-11, with a lead at 31-38 m:
+
+    t+1058  36 mph  dash 34  sccVision   latAcc 1.91   (the bend peaked at 2.32 a second later)
+    t+1060  34 mph  dash 33  cruise      latAcc 0.99   <- vision releases, still cornering
+    t+1064  40 mph  dash 50
+
+  17 mph of set speed in four seconds, and the car pulled about 1.4 m/s^2 coming out of the bend.
+  "It slowed down to 30 but then hit the gas way too fast while I was still in the curve."
+
+  The lead bypass is the owner's rule and stays. Its one hole is this moment: the curve ceiling is
+  scoped to SCC-Vision being ACTIVE, so it lets go the instant vision does, and vision lets go while
+  the car is still in the corner. With a lead present nothing else was metering the recovery.
+  """
+
+  def test_the_jump_out_of_a_bend_is_metered(self):
+    icbm = fresh(max_rise=5)
+    for _ in range(300):
+      icbm.run(make_cs(33, v_ego=33), CC,
+               make_lp(30, source=PlanSource.sccVision, curve_active=True, curve_target=30),
+               False, True)
+    # Vision lets go. The planner asks for the full number again and the lead is still there.
+    icbm.run(make_cs(33, v_ego=33), CC, make_lp(DRIVER, source=PlanSource.cruise), False, True)
+    assert icbm.v_target <= 33 + 5, (
+      f"set speed jumped straight to {icbm.v_target} coming out of a bend behind a lead -- "
+      f"THE REPORTED BUG")
+
+  def test_it_still_completes_rather_than_sticking_low(self):
+    """Metering must not reintroduce the stuck-behind-traffic problem the bypass was added for.
+    RISE_STEP_STALL_FRAMES advances a step that actual speed cannot consume."""
+    icbm = fresh(max_rise=5)
+    for _ in range(300):
+      icbm.run(make_cs(33, v_ego=33), CC,
+               make_lp(30, source=PlanSource.sccVision, curve_active=True, curve_target=30),
+               False, True)
+    cluster = 33
+    for i in range(4000):
+      icbm.run(make_cs(cluster, v_ego=33), CC, make_lp(DRIVER, source=PlanSource.cruise), False, True)
+      if i % 20 == 0 and icbm.cruise_button == SendButtonState.increase:
+        cluster += 1
+      if cluster >= DRIVER:
+        break
+    assert cluster >= DRIVER, f"stuck at {cluster} behind a lead -- metering must still complete"
+
+  def test_an_ordinary_rise_behind_a_lead_is_untouched(self):
+    """Nowhere near a bend, the owner's rule applies exactly as before."""
+    icbm = fresh(max_rise=5)
+    icbm.run(make_cs(50, v_ego=45), CC, make_lp(DRIVER), False, True)
+    assert icbm.v_target == DRIVER, "metered a rise that had nothing to do with a curve"

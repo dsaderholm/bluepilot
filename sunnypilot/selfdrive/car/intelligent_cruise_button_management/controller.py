@@ -95,6 +95,9 @@ CURVE_RISE_TOLERANCE = 1
 # 5 s at 100 Hz. Longer than the 3.3 s off-ramp spike this ceiling exists to reject, and short enough
 # that a genuinely finished bend costs only a couple of seconds before the speed is allowed back.
 CURVE_RELEASE_FRAMES = 500
+# 5 s at 100 Hz. Covers the stretch where SCC-Vision has let go but the car is still coming out of the
+# bend -- the logged jump ran four seconds from vision releasing.
+CURVE_EXIT_LINGER_FRAMES = 500
 # The baseline applies to the speed-limit/cruise component only. A curve target is a physics limit,
 # not something to add an offset to -- SCC-Vision asking for 40 means 40, whatever the baseline is.
 BASELINE_SOURCES = (LongitudinalPlanSource.cruise, LongitudinalPlanSource.speedLimitAssist)
@@ -300,6 +303,7 @@ class IntelligentCruiseButtonManagement:
     self.curve_ceiling = 0           # highest target allowed for the rest of this bend
     self.v_curve_target = 0          # SCC-Vision's own ask, display units; releases the ceiling
     self.curve_release_frames = 0     # consecutive frames vision has asked for more than the ceiling
+    self.curve_exit_frames = 0        # counts down after a bend; the lead bypass waits this out
     self.baseline_reset_delta = DEFAULT_BASELINE_RESET_DELTA
     self.v_cruise_cluster_prev = 0
     self.icbm_idle_frames = 0
@@ -450,6 +454,10 @@ class IntelligentCruiseButtonManagement:
       # target: metering walks v_target through every value between the old speed and the curve's,
       # so ratcheting on it drags the ceiling below what the bend ever actually demanded.
       self.v_curve_target = round(scc.vision.vTarget * speed_conv) if self.curve_active else 0
+      # Re-armed while a bend is tracked, counted down after. See the lead bypass in
+      # apply_target_rise_limit for why the exit needs covering separately from the bend itself.
+      self.curve_exit_frames = (CURVE_EXIT_LINGER_FRAMES if self.curve_active
+                                else max(0, self.curve_exit_frames - 1))
     except (AttributeError, KeyError):
       self.scc_map_requesting = False
       self.deadline_requesting = False
@@ -459,6 +467,7 @@ class IntelligentCruiseButtonManagement:
       self.curve_ceiling = 0
       self.v_curve_target = 0
       self.curve_release_frames = 0
+      self.curve_exit_frames = 0
     self.v_target = self.apply_baseline(self.v_target)
 
     v_ego_conv = round(CS.vEgo * speed_conv)
@@ -680,12 +689,6 @@ class IntelligentCruiseButtonManagement:
       # vision's target is upstream of every button ICBM sends, so there is no feedback path. Keying
       # on the cluster self-raises -- each allowed step lifts the cluster, which lifts the ceiling,
       # which allows another step, and it walked to 52 one mile per hour at a time.
-      # The release has to be SUSTAINED, and the test for noise-chasing is what proves it. Vision's
-      # target rising is not by itself the bend ending -- the logged off-ramp spike went 47, 48, 49,
-      # 51 before settling at 21, so an instant release would re-anchor the ceiling on exactly the
-      # noise it exists to reject. A bend genuinely letting go holds its higher ask indefinitely; the
-      # spike held for 3.3 s. So require longer than that, and let the counter reset on any frame
-      # that falls back.
       # A bend caps nothing while vision is asking for MORE than the car is already doing -- there is
       # no bend to cap. That is the arming condition, and it has to be sustained, because vision's
       # target rising is not by itself the bend ending: the logged off-ramp spike read 47, 48, 49, 51
@@ -733,7 +736,28 @@ class IntelligentCruiseButtonManagement:
     #
     # The owner's framing, which is the right one: behind a car, set the speed to anything, because
     # that car is probably driving correctly. It is only with no one ahead that the number matters.
-    if self.lead_present:
+    # A LEAD SKIPS THIS -- EXCEPT JUST AFTER A BEND. The owner's rule stands and is a better
+    # discriminator than any timer: behind a car, set the speed to anything, because that car is
+    # probably driving correctly. ACC is gap-limited there and the set speed is a ceiling it never
+    # reaches.
+    #
+    # It has one hole, and it is the moment the bend ends. The curve ceiling above is scoped to
+    # SCC-Vision being ACTIVE, so it lets go the instant vision does -- and vision lets go while the
+    # car is still physically in the corner. With a lead present nothing else meters the recovery, so
+    # the set speed jumps the whole way at once. Route 00000348 t+1060, 2026-08-11, lead at 31-38 m:
+    #
+    #   t+1058  36 mph  dash 34  sccVision   latAcc 1.91   (the bend peaked at 2.32 a second later)
+    #   t+1060  34 mph  dash 33  cruise      latAcc 0.99   <- vision releases, still cornering
+    #   t+1064  40 mph  dash 50
+    #
+    # 17 mph in four seconds, and the car pulled about 1.4 m/s^2 coming out of the bend. His report:
+    # "it slowed down to 30 but then hit the gas way too fast while I was still in the curve."
+    #
+    # So the bypass waits out the exit. During the linger the ordinary limiter applies, which walks
+    # the same recovery up in 5 mph steps instead of one jump, and RISE_STEP_STALL_FRAMES still
+    # guarantees it completes even though actual speed cannot catch up behind a lead. Everywhere else
+    # -- ordinary following, traffic, a limit change with a car ahead -- the rule is unchanged.
+    if self.lead_present and self.curve_exit_frames == 0:
       self.rise_anchor = 0
       self.rise_stall_frames = 0
       return self.v_target
