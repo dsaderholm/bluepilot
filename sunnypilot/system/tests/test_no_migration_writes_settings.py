@@ -37,6 +37,13 @@ FORBIDDEN = {
   "PassingAssistChime", "PassingAssistMinDeficit", "PassingAssistMinSpeed",
   "FordLowSpeedFactor_ang", "FordHighSpeedFactor_ang", "FordHighSpeedDampening_ang",
   "FordPrefLateralControl", "SpeedLimitMode", "SpeedLimitOffsetType",
+  # The radar detector's five. Added when this guard reached the radar-detector branch: merging the
+  # test alone did NOT protect them, because this set is hardcoded and passing on an unlisted key is
+  # indistinguishable from passing on a guarded one. A guard with a hole in it reads exactly like a
+  # guard -- the same failure test_settings_recommend_defaults had when its SCREENS tuple covered
+  # one file.
+  "RadarDetectorEnabled", "RadarDetectorSlowdownEnabled", "RadarDetectorMinBars",
+  "RadarDetectorMargin", "RadarDetectorMuteFalseAlarms",
 }
 
 
