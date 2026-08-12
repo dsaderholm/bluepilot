@@ -180,6 +180,34 @@ international sales.
 
 ---
 
+## 6b. THE GWM IS THE MOST PROMISING LEAD, AND IT IS UNTOUCHED
+
+Reported 2026-08-12, and it reframes everything above:
+
+> "Auto high beams stopped working with the new IPMA, but that got fixed by a GWM update, and now the
+> IPC has a new indicator for them that it didn't have when they were working on my old IPMA."
+
+That is a retrofit ADAS feature restored by updating the GATEWAY, plus the cluster gaining an
+indicator it never had. Both are exactly what TSR needs, and neither came from the IPMA.
+
+**Why this fits the evidence better than anything tried so far.** The GWM broadcasts
+`GGCC_Config_Mgmt_ID_1_FD1` (0x40A), carrying `VehicleGGCCData` -- a 64-bit vehicle-configuration
+identity whose receiver list in the Ford DBC includes **`IPMA_ADAS`**. That is what the camera
+compares its own as-built against, and `U2101 - Control Module Configuration Incompatible` with
+symptom **Signal Plausibility Failure** is precisely the shape of a module finding its configuration
+inconsistent with what the vehicle declares.
+
+So every refused write may have been the camera correctly refusing to enable a feature the GATEWAY
+says this car does not have. Enabling TSR in the IPMA and IPC while the GWM declares no TSR is an
+incompatible pair, and the module is the one telling the truth.
+
+**It also undermines "the US IPC does not support TSR."** His cluster gained a new indicator from a
+gateway update. That claim was about hardware; what he observed is configuration.
+
+**Next:** check whether the GWM has a newer calibration available in FORScan, the same way the IPMA
+update was found. Reading costs nothing. If AHB needed a GWM update to work after the retrofit, TSR
+plausibly needs one too -- and that would explain why two modules refuse the same feature.
+
 ## 7. Next steps, in order
 
 1. **Ask the friend for two lines** — free, and decides whether anything else is worth doing:
