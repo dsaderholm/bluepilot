@@ -26,24 +26,32 @@ that were tried and reverted.
 
 ## Will this work on my car?
 
-Honestly: **probably not without work.**
+**If you did the same retrofit, most of it should.** The tuning here is fitted to an Edge PSCM and
+rack in a CD4-platform Ford, and a Lincoln MKZ with the same swap is the same problem — same
+platform, same retrofitted steering hardware, so the numbers that matter were fitted against the
+component you also have rather than against a Fusion badge.
 
-The tuning here is fitted to one retrofit drivetrain. The PSCM is an Edge unit in a Fusion, so its
-steering authority and calibration differ from either car in stock form, and several numbers in this
-fork exist specifically to compensate for that. On a stock Fusion or a stock Edge they would be
-wrong rather than merely unnecessary.
+Two practical notes before you try it:
 
-What travels reasonably well:
+- **The car is selected by hand, not fingerprinted.** `FORD_FUSION_MK5` carries no fingerprint
+  entries, because the retrofit combination does not exist from the factory and there is nothing
+  stock to match. Pick "Ford Fusion (ADAS retrofit) 2020" in the vehicle picker. That is also why an
+  MKZ is not rejected for being an MKZ: nothing is checking.
+- **Check the platform specs against your car.** `CarSpecs(mass=1731, wheelbase=2.85,
+  steerRatio=17.07)` in `opendbc/car/ford/values.py`. Wheelbase and steer ratio should carry across
+  the platform and the shared rack; mass is the one that moves, particularly on a hybrid, and it
+  feeds the lateral tuning.
 
-- The ICBM work, on any Ford where openpilot cannot drive longitudinal control directly
-- The diagnostic tools, which read any openpilot route
-- The Smart Cruise Control layering, which is car-agnostic in shape if not in numbers
+**On a stock Fusion, Edge or MKZ, expect it to be wrong rather than merely unnecessary.** Several
+constants exist specifically to compensate for the retrofit PSCM having different steering authority
+from either donor car in stock form.
 
-What does not travel:
+What does not transfer at all:
 
-- Every tuned constant
-- Anything assuming the retrofit's steering authority
-- The pinned-hold locations, which are literally coordinates on one person's commute
+- **Pinned holds**, which are literally GPS coordinates on one person's commute
+- **Anything fitted to one driver's comfort.** The curve-speed factors were set from measured
+  cornering that this driver repeatedly chose and was happy with, around 0.28-0.31 g. That is a
+  preference, not a limit, and yours may differ.
 
 ## Lineage, and what still comes from where
 
