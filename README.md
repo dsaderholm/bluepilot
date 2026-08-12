@@ -31,7 +31,7 @@ rack in a CD4-platform Ford, and a Lincoln MKZ with the same swap is the same pr
 platform, same retrofitted steering hardware, so the numbers that matter were fitted against the
 component you also have rather than against a Fusion badge.
 
-Two practical notes before you try it:
+Three practical notes before you try it:
 
 - **The fingerprint is three-quarters retrofit parts, and one part that is not.**
   `FORD_FUSION_MK5` is fingerprinted in `opendbc/sunnypilot/car/ford/fingerprints_ext.py` on four
@@ -46,6 +46,13 @@ Two practical notes before you try it:
   steerRatio=17.07)` in `opendbc/car/ford/values.py`. Wheelbase and steer ratio should carry across
   the platform and the shared rack; mass is the one that moves, particularly on a hybrid, and it
   feeds the lateral tuning.
+- **The radar detector integration is car-agnostic and hardware-gated.** Nothing in it touches the
+  PSCM, the retrofit or the platform, so it behaves identically on your car — but it will do nothing
+  at all unless you have specific hardware: a Valentine One Gen2, an FTDI USB-serial adapter (no
+  other chip works on AGNOS), a USB-C to USB-A OTG adapter, and a tap into the detector's accessory
+  cord. With none of that plugged in it is simply inert, which is the state to expect. Each of those
+  is a hard requirement rather than a preference, and each fails in a way that looks like a wiring
+  fault, so read that section before buying anything.
 
 **On a stock Fusion, Edge or MKZ, expect it to be wrong rather than merely unnecessary.** Several
 constants exist specifically to compensate for the retrofit PSCM having different steering authority
@@ -57,10 +64,6 @@ What does not transfer at all:
 - **Anything fitted to one driver's comfort.** The curve-speed factors were set from measured
   cornering that this driver repeatedly chose and was happy with, around 0.28-0.31 g. That is a
   preference, not a limit, and yours may differ.
-- **The radar detector integration**, which needs a Valentine One Gen2 specifically, an FTDI
-  USB-serial adapter specifically, and a tap into the detector's accessory cord. Every part of that
-  list is a hard requirement rather than a recommendation, and each fails in a way that looks like a
-  wiring fault.
 
 ## Lineage, and what still comes from where
 
