@@ -291,9 +291,26 @@ Two branches adding a section now add two different files, which git merges with
 - An anchor with no fragments behind it renders nothing, deliberately -- a branch without passing
   assist should not advertise a gap where it would go.
 
+**SAY PLAINLY WHAT DOES NOT ACTUATE.** This carve-out was dropped when this section was rewritten on
+2026-08-11 and had to be put back the same day. It is the one place "Talk about the finished system"
+below does NOT apply: that rule is about answering the owner, who is always describing the finished
+behavior and does not need the caveat. A README is read by strangers who have no way to know, and one
+written under that rule describes scaffolding as shipped behavior.
+
+Put the limitation in the same sentence as the description, not a footnote. Passing assist opens with
+"This moves nothing today, on any car", which is the right shape.
+
+**And put it in the right section.** A limitation true for everyone is a FEATURE limitation and
+belongs in the feature fragment; only something about the reader's car belongs in portability. Filing
+"it actuates nowhere" under portability tells a reader their car is the reason, when it is not.
+
 **Sections are this branch's to edit; fragments are each branch's own.** If a change belongs in the
 shared prose -- the status section, portability, licence, safety -- it goes in `readme/sections/`
 here and reaches the others by rebase, which is the direction that works.
+
+**Rebase onto the BRANCH, not onto a hash somebody quoted you.** A hash in a handoff message is stale
+the moment the base is pushed to again, and resolving conflicts against a version that no longer
+exists is wasted work. Use `origin/icbm-manual-override-and-tuning` and check the tip when you start.
 
 ## Name a feature for what it DOES, never for ICBM
 
@@ -605,7 +622,9 @@ it was built to catch.
 - **Shell commands are fine.** What he dislikes is running them *in the car*, in 100-degree heat.
   Diagnostics he can SSH into at home are welcome; "run this on your next drive" is not.
 - **Talk about the finished system.** Do not preface answers with what does not actuate yet; he is
-  always describing the finished behavior.
+  always describing the finished behavior. **This is about answering HIM, and does not extend to
+  documentation** -- see the README section above, where the opposite applies, because a stranger
+  reading the README has no way to know what is scaffolding.
 - **23 controls on the settings screen is not a usability problem.** Do not consolidate unless asked.
 - **Report test results only when the result is news.** No sign-off with a suite total every message.
 - **Changes made on one branch reach the others because he rebases every time.** So CLAUDE.md is the
