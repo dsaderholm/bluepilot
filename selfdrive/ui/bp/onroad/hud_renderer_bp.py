@@ -411,14 +411,23 @@ class HudRendererBP(HudRendererSP):
     Only a request is raised here. selfdrived does the work, because that is where the GPS fix and
     the live baseline both are; the UI has neither and should not grow a second copy of either.
     """
-    super()._handle_mouse_release(mouse_pos)
-    if self._hold_rect is None or not self._icbm_baseline:
-      return
-    if rl.check_collision_point_rec(mouse_pos, self._hold_rect):
+    # THE BADGE TAP IS CONSUMED BEFORE THE PARENT SEES IT. This used to call super() first, so every
+    # tap reached upstream's handler and opened the sidebar -- including taps on the badge. Reported
+    # 2026-08-12: "tapping a hold does nothing, if you tap the screen it just opens the menu on the
+    # left." The pin request was still being raised underneath, but the sidebar sliding out is what
+    # the driver sees, so the gesture read as dead and the feedback was hidden behind the menu.
+    #
+    # Checking our own target first and returning is what makes it a real button rather than a
+    # side effect of a tap that also does something else.
+    if (self._hold_rect is not None and self._icbm_baseline
+        and rl.check_collision_point_rec(mouse_pos, self._hold_rect)):
       try:
         self._bp_params.put_bool("IcbmPinHoldRequest", True)
       except Exception:
         pass
+      return
+
+    super()._handle_mouse_release(mouse_pos)
 
   def _ahead_box_visible(self) -> bool:
     """Is sunnypilot's AHEAD box on screen, so our stack has to start below it?
