@@ -697,21 +697,18 @@ unspecified or something like that."* That path has been tried and it cost more 
 Do not propose it again as a way to make TSR work, and do not treat the region as an unexplored
 lever -- it is explored, and the answer was no.
 
-**2026-08-11: TSR data source is NOT the lever -- both values give the same result.** He was already
-on "Camera Only", the state every note here argued he should move to. Switching to "Camera + APIM"
-cleared the pinned `NoNavDataAvailable`, and it CAME BACK after an ignition cycle -- so that was the
-module re-initializing after the write, not the setting working.
+**2026-08-11: "Camera + APIM" cleared `NoNavDataAvailable`, and the write did not persist.** He was
+already on "Camera Only" -- the state every note here argued he should move to. Setting Camera + APIM
+cleared the message immediately; after an ignition cycle the message returned AND the setting had
+reverted. So the value was never really tested, and while it WAS applied it did something.
 
-**Re-check a FORScan change after an ignition cycle before believing it.** A change that only holds
-until the next start has reset something, not altered behavior.
+**The problem is the write not committing, not the value chosen.** An as-built change that reverts
+across an ignition cycle was not written to the module -- FORScan procedure, outside anything
+measurable from here.
 
-The camera reports `NoNavDataAvailable` (3), not `CountryNotSupported` (5) or `RegionNotSupported`
-(6), so it believes its region setup is fine and is waiting on navigation. That exchange is on a bus
-openpilot cannot see. Since the FORScan LABELS are now proven unreliable on this module -- a 2020
-Fusion profile decoding an Edge MK2 IPMA -- a byte-level diff against the Fusion Sport owner who has
-TSR working is the only approach left that is not guessing. Ask for the raw block, not his settings.
-
-**And ask what a setting already IS before planning a change to it.**
+**Do not record a FORScan result until after an ignition cycle, and check the SETTING as well as the
+symptom.** Two conclusions were committed from partial observations of this single change, and both
+were wrong for the same reason: reported before the state had settled.
 
 **And it does not need to be set**, which is the part worth noticing. Everything below was measured
 with the region UNSPECIFIED. The camera reads signs anyway; what the region appears to gate is the
