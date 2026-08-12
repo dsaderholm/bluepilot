@@ -4,7 +4,13 @@ Session of **2026-08-11**, in the car, several hours. Written so this can be pic
 
 **The car is currently REVERTED and healthy.** Every IPMA change was undone, the radar fault cleared
 without needing an alignment drive, and ACC works. The one change left in place is on the APIM, and
-it is the one that helped.
+**it did not help** -- see below.
+
+**THE BLOCKER IS `U0253`, AND IT IS UNRESOLVED.** The IPMA cannot reach the APIM. It was recorded as
+fixed on 2026-08-11 because a read came back "Previously Set - Not Present at Time of Request"; that
+means not present at that instant, not resolved, and the same read said "Test not complete". He said
+repeatedly that it keeps coming back and was ignored. Every as-built theory below is downstream of a
+communication fault that is still there.
 
 ---
 
@@ -12,7 +18,7 @@ it is the one that helped.
 
 | | state |
 |---|---|
-| **APIM** | TSR **enabled** (`7D0-09-02`). Write succeeded. **`U0253` cleared.** Left in place. |
+| **APIM** | TSR **enabled** (`7D0-09-02`). Write succeeded. **`U0253` STILL RECURS -- this fixed nothing.** |
 | **IPC** | SLIF **disabled**. Write refused by FORScan. Reverted. |
 | **IPMA** | TSR **off** at `706-01-01`. Write refused by FORScan. Reverted. |
 | **comma** | still reports `NoNavDataAvailable`; SLA has no camera speed limit source |
@@ -87,10 +93,10 @@ not trustworthy. These positions come from the real reference.
 was being asked to run `MFCTSR = SLIF` while the cluster declares SLIF unavailable. That IS an
 incompatible configuration.
 
-### APIM — the one that worked
+### APIM — the write that landed but changed nothing
 
-`7D0-09-02` TSR enable. Written successfully, and `U0253` went from constantly present to
-*"Previously Set - Not Present"*.
+`7D0-09-02` TSR enable. The write succeeded, which is notable only because FORScan refused every
+other module. **`U0253` still recurs**, so it did not restore IPMA-to-APIM communication.
 
 ---
 

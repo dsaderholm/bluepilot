@@ -718,21 +718,22 @@ unspecified or something like that."* That path has been tried and it cost more 
 Do not propose it again as a way to make TSR work, and do not treat the region as an unexplored
 lever -- it is explored, and the answer was no.
 
-**U0253 WAS the blocker, and it is FIXED.** `U0253 - Lost Communication With Accessory Protocol
-Interface Module`, logged by the IPMA constantly. The APIM is the SYNC module and the source of
-navigation data, so `NoNavDataAvailable` was literal.
+**U0253 IS STILL HAPPENING. IT WAS NEVER FIXED.** `U0253 - Lost Communication With Accessory
+Protocol Interface Module`, logged by the IPMA, recurring. The APIM is the SYNC module and the source
+of navigation data, so `NoNavDataAvailable` is literal: the camera cannot reach the module that would
+supply it.
 
-**Enabling TSR in the APIM at `7D0-09-02` cleared it** -- the DTC is now "Previously Set - Not
-Present". That write succeeded where every IPMA and IPC write was refused, which is the one thing
-FORScan's Fusion profile allowed.
+**Enabling TSR in the APIM at `7D0-09-02` did NOT fix it.** That was recorded here as a fix on
+2026-08-11 and it was wrong -- a DTC read back as "Previously Set - Not Present at Time of Request"
+was taken as resolved, when it means only "not present at this instant" and the same read said "Test
+not complete". He said repeatedly that it keeps coming back. Believe the owner over a status byte.
 
-What remains is that TSR is switched OFF in the IPMA at `706-01-01` (third character of the first
-group: `1` = Off, `5` = SLIF) and SLIF is disabled in the cluster at `720-09-01`. FORScan refuses both
-writes. **See `bluepilot/TSR-INVESTIGATION.md`** -- restore points, field maps and next steps.
+So the blocker is a COMMUNICATION fault between two modules, not a feature flag. TSR is also switched
+off in the IPMA at `706-01-01` (third character of the first group: `1` = Off, `5` = SLIF) and SLIF is
+disabled in the cluster at `720-09-01`, but neither matters while the camera cannot reach the APIM.
 
-Dead theories, all tested: Ford nav instead of Waze (no change), TSR data source Camera Only (already
-set that way), Camera + APIM (write reverted), region (`U2101 Configuration Incompatible`, twice), and
-the Maverick community byte positions (wrong field for this module; caused `U2101` and a radar fault).
+**See `bluepilot/TSR-INVESTIGATION.md`.** Note that the gateway -- the most likely place a retrofit
+routing fault would live -- is OFF LIMITS by his decision, and that is not to be reopened.
 
 **And it does not need to be set**, which is the part worth noticing. Everything below was measured
 with the region UNSPECIFIED. The camera reads signs anyway; what the region appears to gate is the
