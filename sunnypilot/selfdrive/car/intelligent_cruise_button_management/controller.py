@@ -59,6 +59,14 @@ RE_ARM_ON_CRUISE_CYCLE = True  # cancel (or any disengage) followed by re-engage
 # resumeCruise in that state -- and cruise_enabled only flips a few frames later, so the press has
 # to be remembered across the transition rather than read on the cycle frame.
 RESUME_BUTTONS = (ButtonType.resumeCruise,)
+# Tapping. Within TAP_BAND mph of the target the button is pulsed rather than held, because a held
+# button moves this car 5 mph and a tap moves it 1 -- see the duty-cycle block in update_state_machine.
+# ON long enough for opendbc's ford/icbm.py to put one frame on the wire (it emits at most one per
+# 0.05 s), then a gap long enough that the car reads a release rather than a repeat.
+TAP_BAND = 2
+TAP_ON_FRAMES = 8
+TAP_CYCLE_FRAMES = 60
+
 RESUME_PRESS_MEMORY_FRAMES = 150  # 1.5 s at 100 Hz, generous next to the engage delay
 # ...but the button event must not be DEPENDED on, so RESUME is also recognized from BEHAVIOR.
 #
@@ -306,6 +314,7 @@ class IntelligentCruiseButtonManagement:
     self.curve_exit_frames = 0        # counts down after a bend; the lead bypass waits this out
     self.baseline_reset_delta = DEFAULT_BASELINE_RESET_DELTA
     self.v_cruise_cluster_prev = 0
+    self.tap_phase = 0               # duty-cycle counter for small corrections
     self.icbm_idle_frames = 0
     self.counter_move_accum = 0      # set-speed movement against ICBM's own command, display units
     self.cruise_button_prev = SendButtonState.none
@@ -868,6 +877,30 @@ class IntelligentCruiseButtonManagement:
         self.state = State.preActive
 
     send_button = SEND_BUTTONS.get(self.state, SendButtonState.none)
+
+    # TAP FOR SMALL CORRECTIONS, HOLD FOR LARGE ONES.
+    #
+    # This car moves the set speed 1 mph for a TAP and 5 mph for a HELD button. ICBM asserts the
+    # button continuously until the cluster crosses the target, which is a hold -- so when it needs a
+    # 1 mph correction it asks for 5, overshoots, and then asks for 5 the other way.
+    #
+    # That is the oscillation measured on route 00000361 at t+2704, when the limit changed to 25: the
+    # target sat at a constant 27 while the dash bounced 26 -> 29 -> 26, eighteen reversals in twenty
+    # seconds. "It raised and lowered my cruise over and over." The controller was not failing to
+    # settle on a reachable number; it had no way to ASK for a small change.
+    #
+    # So the shape of the request changes, and nothing else does. Three earlier attempts tried to
+    # make the state machine tolerate being a mile per hour off, and each broke something the tests
+    # defend: a deadband stalled a curve descent at 63 instead of 40, because the drop limiter needs
+    # exact arrival before releasing its next step; keying re-entry on target movement made ICBM
+    # overshoot a driver press by 6. The transitions are left completely alone here -- only the duty
+    # cycle of the output changes, so `increasing` still means increasing and arrives exactly.
+    if send_button != SendButtonState.none and abs(self.v_target - self.v_cruise_cluster) <= TAP_BAND:
+      self.tap_phase += 1
+      if self.tap_phase % TAP_CYCLE_FRAMES >= TAP_ON_FRAMES:
+        send_button = SendButtonState.none
+    else:
+      self.tap_phase = 0
 
     return send_button
 
