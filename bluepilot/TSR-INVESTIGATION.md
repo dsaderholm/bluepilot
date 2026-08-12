@@ -287,6 +287,36 @@ different tool does not change what the gateway broadcasts. The remaining paths 
 they looked an hour ago, and one of them may be "not achievable without touching the thing he will
 not touch". Say that plainly rather than letting a search continue that cannot terminate.
 
+## 6c. THE AUTHORITY IS THE BdyCM's CENTRAL CONFIGURATION (CCC) — NOT THE GATEWAY
+
+Researched 2026-08-12, and it identifies the thing that has been refusing every TSR write:
+
+- **`U2101` sets when a module's configuration does not match the CENTRAL CAR CONFIGURATION**, or when
+  it receives invalid vehicle configuration data. That is the definition of the code, not a theory.
+- **Ford's Central Car Configuration (CCC) is stored in the BdyCM**, not the gateway. "Configuration
+  for all modules is stored at some main module and the main module provides necessary information to
+  all modules that need it. CC changes are made in BdyCM."
+- UCDS's own tool is labelled **"AsBuilt Editor (CCC)"**, which is exactly this block.
+- FORScan has a documented Central Configuration programming procedure.
+
+**This matters because it is NOT the module he ruled out.** Section 6b closes the GWM, correctly and
+permanently. The CCC lives somewhere else. Whether he wants to touch the BdyCM is a separate decision
+that is his to make -- but it should be presented as a different question, not smuggled in as the
+gateway by another name.
+
+**It also explains every observation at once**, which nothing else has:
+
+- TSR writes rejected INSTANTLY, while unrelated writes to the same module commit fine -- the camera
+  checks the new config against CCC on the spot.
+- Both As Built and friendly-view TSR changes fail, in different ways -- one refused, one accepted and
+  reverted at boot when the camera re-validates against CCC.
+- His friend's car works on the SAME camera software -- his CCC presumably declares TSR.
+- Auto high beams were fixed by a module update after the retrofit -- the same class of problem,
+  solved by making the car's declared configuration match the installed equipment.
+
+**A documented remedy exists for exactly this:** load an as-built from a car that has the options you
+want. That is the donor request, aimed at the right module this time.
+
 ## 7. Next steps, in order
 
 1. **Ask the friend for two lines** — free, and decides whether anything else is worth doing:
