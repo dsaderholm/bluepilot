@@ -194,6 +194,10 @@ that enables TSR.**
   - Friendly view, TSR data source -> lands, works, reverts at the next boot
   - Anything else -> sticks
 
+**And the DTCs are INSTANT.** He reports getting them the moment he makes a TSR change -- not after a
+drive, not intermittently. The camera evaluates the new configuration immediately and rejects it.
+Unrelated changes in the same session produce nothing.
+
 That is a FEATURE AUTHORIZATION, not a mechanical write failure. Some other authority on the car
 declares whether this vehicle has TSR, and the camera defers to it -- which is exactly what `U2101
 Control Module Configuration Incompatible / Signal Plausibility Failure` means.
