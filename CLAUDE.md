@@ -261,6 +261,33 @@ upstream merge broke them before:
 
 If it goes wrong: `git reset --hard pre-upstream-<sha>`.
 
+## README.md on a rebase: BASE WINS, then re-add your own section
+
+The README is shared and every feature branch adds to it, which makes it a recurring conflict with a
+resolution that is not obvious and that git guesses wrong.
+
+**`icbm-manual-override-and-tuning` owns the document.** It carries the framing, the status section,
+the "Will this work on my car?" section, ICBM, Smart Cruise Control, speed limits, diagnostics,
+settings, licence and safety. Feature branches add ONE section under `## What this branch adds`, plus
+a bullet in Diagnostics and a bullet in "Will this work on my car?" if they need one.
+
+On rebase, git replays the feature branch's older copy over the base's newer one, which silently
+reverts the whole document to whatever that branch last had. It happened on 2026-08-11: passing
+assist replayed the pre-rewrite README over a same-day rewrite and only caught it by reading the
+result. So:
+
+```bash
+git checkout <base-branch> -- README.md    # take the base outright
+# then re-add just your own section
+```
+
+Never hand-merge it hunk by hunk -- that is how half a rewrite survives and reads as deliberate.
+
+**Say plainly what does not actuate.** The README is now shared with people outside this project, and
+a reader assumes everything described is live. Passing assist leads its section with the fact that it
+actuates nothing on any car today, which is the right shape: the limitation goes in the same sentence
+as the description, not in a footnote.
+
 ## Name a feature for what it DOES, never for ICBM
 
 ICBM is an **actuator adapter**, not a feature. It exists because stock Ford ACC will not take a
