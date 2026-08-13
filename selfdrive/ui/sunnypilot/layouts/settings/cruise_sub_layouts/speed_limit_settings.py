@@ -193,8 +193,8 @@ class SpeedLimitSettingsLayout(Widget):
       description=recommended(tr("Aim below the posted limit while a strong Ka alert is ahead of you, "
                      "replacing your usual offset until it clears. Muted alerts are ignored, so "
                      "anywhere the detector has already learned to stay quiet stays quiet here "
-                     "too. Off until you have driven with the readout and picked a strength that "
-                     "matches your roads."), "RadarDetectorSlowdownEnabled"),
+                     "too. The strength below is a starting guess -- drive with it, then run "
+                     "bp_radar_fit.py to pick the number from your own roads."), "RadarDetectorSlowdownEnabled"),
       param="RadarDetectorSlowdownEnabled")
 
     self._radar_detector_min_bars = option_item_sp(

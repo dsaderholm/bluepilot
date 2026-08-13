@@ -1212,6 +1212,146 @@
                       "equals": true
                     }
                   ]
+                },
+                {
+                  "key": "RadarDetectorEnabled",
+                  "widget": "toggle",
+                  "title": "Radar Detector",
+                  "description": "Read alerts from a Valentine One Gen2 connected to the accessory jack and show them on screen. On its own this only displays and records -- it never changes how the car drives."
+                },
+                {
+                  "key": "RadarDetectorMuteFalseAlarms",
+                  "widget": "toggle",
+                  "title": "Learn And Mute False Alarms",
+                  "description": "Remember the places your detector cries wolf -- the store doors and the signs -- and tell it to stay quiet there, the way your old detector's mute memory did. A place has to alert on nearly every pass before it counts, so somewhere police actually sit is never silenced. This is the only part of the feature that sends anything to the detector.",
+                  "enablement": [
+                    {
+                      "type": "param",
+                      "key": "RadarDetectorEnabled",
+                      "equals": true
+                    }
+                  ]
+                },
+                {
+                  "key": "RadarDetectorSlowdownEnabled",
+                  "widget": "toggle",
+                  "title": "Slow Down For Strong Ka Alerts",
+                  "description": "Aim below the posted limit while a strong Ka alert is ahead of you, replacing your usual offset until it clears. Muted alerts are ignored, so anywhere the detector has already learned to stay quiet stays quiet here too. The strength below is a starting guess -- drive with it, then run bp_radar_fit.py to pick the number from your own roads.",
+                  "visibility": [
+                    {
+                      "type": "capability",
+                      "field": "has_longitudinal_control",
+                      "equals": true
+                    },
+                    {
+                      "type": "capability",
+                      "field": "has_icbm",
+                      "equals": true
+                    }
+                  ],
+                  "enablement": [
+                    {
+                      "type": "capability",
+                      "field": "has_longitudinal_control",
+                      "equals": true
+                    },
+                    {
+                      "type": "capability",
+                      "field": "has_icbm",
+                      "equals": true
+                    },
+                    {
+                      "type": "param",
+                      "key": "RadarDetectorEnabled",
+                      "equals": true
+                    }
+                  ]
+                },
+                {
+                  "key": "RadarDetectorMinBars",
+                  "widget": "option",
+                  "title": "Alert Strength To Act On",
+                  "description": "How strong a Ka alert has to be before the set speed moves, counted in the same signal bars the detector shows. Lower reacts sooner and further out; higher waits for the signal to be close and certain. Ships low on purpose -- too high and it would never fire without you noticing. Run bp_radar_fit.py on your own drives to replace the guess.",
+                  "min": 1,
+                  "max": 8,
+                  "step": 1,
+                  "visibility": [
+                    {
+                      "type": "capability",
+                      "field": "has_longitudinal_control",
+                      "equals": true
+                    },
+                    {
+                      "type": "capability",
+                      "field": "has_icbm",
+                      "equals": true
+                    }
+                  ],
+                  "enablement": [
+                    {
+                      "type": "capability",
+                      "field": "has_longitudinal_control",
+                      "equals": true
+                    },
+                    {
+                      "type": "capability",
+                      "field": "has_icbm",
+                      "equals": true
+                    },
+                    {
+                      "type": "param",
+                      "key": "RadarDetectorEnabled",
+                      "equals": true
+                    },
+                    {
+                      "type": "param",
+                      "key": "RadarDetectorSlowdownEnabled",
+                      "equals": true
+                    }
+                  ]
+                },
+                {
+                  "key": "RadarDetectorMargin",
+                  "widget": "option",
+                  "title": "Speed During An Alert",
+                  "description": "How far below the posted limit to aim while an alert is active. This replaces your normal offset for as long as it lasts.",
+                  "min": 0,
+                  "max": 15,
+                  "step": 1,
+                  "visibility": [
+                    {
+                      "type": "capability",
+                      "field": "has_longitudinal_control",
+                      "equals": true
+                    },
+                    {
+                      "type": "capability",
+                      "field": "has_icbm",
+                      "equals": true
+                    }
+                  ],
+                  "enablement": [
+                    {
+                      "type": "capability",
+                      "field": "has_longitudinal_control",
+                      "equals": true
+                    },
+                    {
+                      "type": "capability",
+                      "field": "has_icbm",
+                      "equals": true
+                    },
+                    {
+                      "type": "param",
+                      "key": "RadarDetectorEnabled",
+                      "equals": true
+                    },
+                    {
+                      "type": "param",
+                      "key": "RadarDetectorSlowdownEnabled",
+                      "equals": true
+                    }
+                  ]
                 }
               ]
             }
