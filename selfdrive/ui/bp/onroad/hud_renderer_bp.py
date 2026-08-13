@@ -685,6 +685,16 @@ class HudRendererBP(HudRendererSP):
     The acting edge is the same green as the MAX label, and that is not decoration: green in this
     corner already means "openpilot is managing this number", so an alert that is moving the set
     speed borrows the meaning rather than inventing a new one.
+
+    THIS DOES NOT DRAW ON A COMMA 4X, and that is correct rather than a gap. MiciHudRendererBP
+    extends upstream's HudRenderer, not this class, so nothing here reaches the small screen -- and a
+    tap target sized for a 2160x1080 display would not be usable there anyway. The feature degrades
+    sensibly: no readout, but the approaching-place ALERT still fires, because that goes through the
+    standard event path which every device renders, and all five settings are reachable from
+    SunnyLink.
+
+    The way that stops being true is somebody moving this method into a shared base class, at which
+    point it lands on the 4X. Check what MiciHudRendererBP inherits before doing that.
     """
     if not self._radar_enabled:
       return 0
