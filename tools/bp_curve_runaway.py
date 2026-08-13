@@ -21,20 +21,24 @@ nothing in `_update_state_machine` bounds it. SCC-Map got three defenses built f
 Vision has none.
 
 So the signature this looks for is not "slowed a lot" -- it is a descent during which the implied
-RADIUS SHRANK. A genuine approach to a corner resolves to a roughly stable radius; a runaway keeps
-finding a tighter corner the slower it goes. On route 00000365 the implied radius went 382 m -> 147 m
-while the car came down from 61 to 44 mph, and 147 m is not a radius that exists on I-215.
+RADIUS SHRANK: a runaway keeps finding a tighter corner the slower it goes.
 
-IT ALSO SETTLES A MEASUREMENT DISPUTE, which is why the steering columns are here. Two tools
-disagreed 30x about the lateral acceleration at one instant: `currentLateralAccel` (which is
-`v_ego^2 * controlsState.curvature`) read 4.53 where a steering-angle derivation read 0.13. 4.53 m/s2
-at 34 mph is a 51 m radius, and the owner's map says that road is I-215. Every flagged event prints
-the RAW steering angle beside both derivations, because the angle cannot be argued with: a freeway
-curve at 34 mph needs a few degrees, a 51 m radius needs about 55.
+**A SHRINKING RADIUS IS NOT PROOF OF A RUNAWAY, AND THE FIRST RUN PROVED IT.** On route 00000365 the
+one flagged event, 68 -> 37 mph, was CORRECT. Its implied radius collapsed 1653 m -> 180 m, which
+looks damning until you read the steering column beside it: 16 degrees at 37 mph is a 174 m radius,
+so the model's 180 m estimate was RIGHT and the road really was a ramp. Approaching a ramp from a
+straight highway collapses the implied radius every time, because the ramp only enters the model's
+plan on approach -- which is the same reason SCC-Map already excludes ramps from its two camera
+vetoes. Treat a flag as a question, and answer it with the steering column and a map.
 
-The steering derivation here is the simple bicycle model and ignores tire slip, so it reads slightly
-LOW at highway speed. That is worth a few percent, not 30x -- do not explain away an order of
-magnitude with it.
+THE STEERING COLUMNS ARE THE POINT, then, not a footnote. `currentLateralAccel` (which is
+`v_ego^2 * controlsState.curvature`) was accused of being untrustworthy on the strength of a 30x
+disagreement with a steering-angle figure. It is fine: run this and the two columns track each other
+everywhere. The 30x came from comparing values sampled at DIFFERENT INSTANTS in two tools -- a
+peak against a nearby trough -- which is a mistake about the comparison, not a fault in the field.
+
+The steering derivation is the simple bicycle model and ignores the understeer term, so it reads
+HIGH by roughly half at highway speed. Expect that gap; it is not a disagreement.
 
 READ-ONLY. Nothing here writes, sets a param, or restarts anything.
 
@@ -56,6 +60,9 @@ NO_TARGET_MPH = 500.0
 # Fallbacks only. Both are read from carParams when the route carries it.
 DEFAULT_STEER_RATIO = 17.07
 DEFAULT_WHEELBASE = 2.85
+
+# Speed recovery from a descent's trough that ends the descent. ~2 mph.
+RECOVERY_MS = 1.0
 
 
 def seg_index(name: str) -> int:
@@ -111,7 +118,7 @@ def main() -> int:
   t0 = t_prev = None
   t_shift = 0.0
   run: list = []          # frames of the current descent
-  peak_v = None
+  peak_v = trough_v = None
   found = flagged = 0
 
   def close_run() -> None:
@@ -204,16 +211,19 @@ def main() -> int:
       if w != "longitudinalPlanSP":
         continue                       # sample the descent on the planner's cadence, once per frame
 
-      if peak_v is None:
-        peak_v = st["v"]
-        continue
-      if st["v"] > peak_v - 0.3:       # still at or above the high-water mark: no descent underway
+      # A descent runs from a local speed maximum until the car recovers from its trough. peak_v is
+      # a HIGH-WATER MARK and must not be dragged down with the car -- doing that made every frame
+      # look like a fresh peak, and the tool reported no descents at all on a route with nineteen.
+      if peak_v is None or st["v"] >= peak_v:
         close_run()
-        peak_v = st["v"]
+        peak_v = trough_v = st["v"]
         continue
-      peak_v = max(peak_v, st["v"])
+      trough_v = min(trough_v, st["v"])
       if not run or ts - run[-1][0] >= 1.0:
         run.append((ts, dict(st)))
+      if st["v"] > trough_v + RECOVERY_MS:    # climbing again: the descent is over
+        close_run()
+        peak_v = trough_v = st["v"]
 
   close_run()
 

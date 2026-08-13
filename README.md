@@ -154,6 +154,8 @@ tuning the wrong controller. These read the device's own logs:
   claims keeps getting *tighter* as the car slows into it
 - **`tools/bp_setspeed_hunting.py`** — bursts where the set speed was raised and lowered repeatedly,
   with each source's target, since the causes look identical from the driver's seat
+- **`tools/bp_sunnylink_settings_audit.py`** — settings that exist on the car's screen but cannot be
+  reached from SunnyLink, which is how you configure a comma 4X in practice
 
 ### Guards for what tests cannot reach
 

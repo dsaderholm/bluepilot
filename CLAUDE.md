@@ -511,6 +511,60 @@ deciding whether to try it.
 dead -- enabled by default, storing nothing, for its entire life -- because both directions were
 broken and therefore agreed with each other.
 
+## COMMA 4X: EVERY SETTING MUST BE REACHABLE FROM SUNNYLINK
+
+Asked for 2026-08-12: *"We need Comma 4 compatibility. We need the menus and all settings available
+in SunnyLink for changing."* And the reason, in his words: *"SunnyLink is useful for Comma 4X users
+since they have a tiny screen to deal with."*
+
+The comma 4 is `mici` in the hardware layer (`HARDWARE.get_device_type()`), alongside `tici` (comma
+three) and `tizi` (3X). Upstream already carries `mici_only` and `hide_on_mici` macros, so the
+concept exists -- what was missing was this fork's own settings.
+
+**The state when this started: 6 of 32 fork settings were reachable from SunnyLink.** The other 26 --
+every ICBM control, both curve-factor pairs, nine speed-limit controls -- could only be changed by
+standing at the car. That is the on-device rule ("every param ships with a control") failing in a new
+way: the control exists, but not on a surface a 4X owner can practically use.
+
+**settings_ui.json is GENERATED. Never hand-edit it.** Same shape as README.md:
+
+```
+sunnypilot/sunnylink/settings_ui_src/pages/*.yaml     author here
+sunnypilot/sunnylink/settings_ui_src/_macros.yaml     shared rule fragments, $ref them
+python sunnypilot/sunnylink/tools/compile_settings_ui.py     rewrites settings_ui.json
+```
+
+**The workflow for any new setting, and the one the other branches must follow:**
+
+```bash
+python tools/bp_sunnylink_settings_audit.py     # what is missing, with YAML to paste
+# place each item in the right page section, then:
+python sunnypilot/sunnylink/tools/compile_settings_ui.py
+python tools/bp_offline_test.py
+```
+
+`test_sunnylink_settings_complete.py` fails when a fork setting has no SunnyLink entry, and names it.
+It was verified to fail with an item removed -- do not trust it on green alone, that mistake has been
+made here before.
+
+**Things learned doing this that will otherwise be re-learned:**
+
+- **`option` IS the numeric widget.** It takes `min`/`max`/`step`. The widget enum reads
+  `toggle | option | multiple_button | button | info` with nothing obviously numeric, which invites
+  the wrong conclusion that ranges cannot be expressed.
+- **`multiple_button` options are `{value, label}` objects, not bare strings**, and the button's
+  index is its stored value.
+- **An omitted `value_change_step` means 1**, from `option_item_sp`'s own signature. Emitting `None`
+  produces a control that validates as a string and cannot be moved.
+- **Upstream deliberately shows some params on more than one page.** A duplicate check that does not
+  scope itself to this fork's own keys fails on Mads and a dozen others, and policing upstream's
+  layout is not this fork's business.
+- **The compiled JSON validates against `settings_ui.schema.json`** with `jsonschema`. That catches
+  the two mistakes above; the on-device `validate_settings_ui.py` needs `msgq` and cannot run here.
+
+**This is per-branch work.** Passing assist and the radar detector each add their own params, so each
+must rebase and run the same loop. The audit only sees what is defined in the branch it runs in.
+
 ## Keep only the additions that still earn their place
 
 Stated 2026-08-08: *"I just want to keep additions we have made that actually make a difference."*
@@ -664,31 +718,34 @@ That is what happened; back-calculated from the logged targets and speeds:
 ```
 
 The model's curve got 3x tighter as the car approached it, and 147 m is not a radius that exists on
-I-215. **Note this derivation uses only `v_target` and `v_ego`** -- deliberately, because the obvious
-field to reach for is not trustworthy (below).
+I-215 mainline. **Note this derivation uses only `v_target` and `v_ego`.**
+
+**Then the device was reachable and the one flagged event turned out to be a RAMP, correctly taken.**
+See the section below. So this mechanism is real in the code and no measured example of it has been
+found yet -- a shrinking implied radius is the signature of approaching a ramp too, which is exactly
+why SCC-Map excludes ramps from its own vetoes. Do not build a bound on vision until an event is
+found where the steering column disagrees with the model's radius.
 
 **And nothing stops it.** Read `_update_state_machine`: the only exits are the model's own prediction
 falling. There is no cross-check against the map, no plausibility bound on `max_pred_lat_acc`, no
 speed-class floor. SCC-Map got three defenses built from measured events; **vision got none, and
 vision is the controller that owns the near field**, so it is the one answering for curve complaints.
 
-## `currentLateralAccel` IS NOT ESTABLISHED AS GROUND TRUTH. DO NOT QUOTE IT AS ONE.
+## `currentLateralAccel` IS FINE. THE 30x DISAGREEMENT WAS A SAMPLING MISTAKE.
 
-`smartCruiseControl.vision.currentLateralAccel` is `v_ego**2 * abs(controlsState.curvature)`, and
-`controlsState.curvature` is `-VM.calc_curvature(steer_angle_without_offset, vEgo, roll)` -- so it
-should agree with a steering-angle derivation and **it does not**. On route 00000365 at t+3323 it read
-**4.53** where `bp_why_slow`'s steering-angle figure read **0.00-0.13**, a 30x disagreement about the
-same instant. 4.53 m/s2 at 34 mph is a 51 m radius; the owner's map says that road is I-215, which has
-nothing of the sort, and he was right to reject it.
+Recorded 2026-08-12 as untrustworthy, then measured on the device the same evening and cleared.
+`tools/bp_curve_runaway.py` prints it beside a steering-angle derivation on the same frame, and the
+two track each other across every descent on route 00000365. The steering figure reads HIGH by
+roughly half at highway speed because the simple bicycle model omits the understeer term.
 
-This was quoted to him as proof that "the corner was real" and it proved nothing. **Attribute
-slowdowns from `v_target` and `v_ego`, which are unambiguous, until this is reconciled.**
+The original 30x came from comparing two tools' numbers at DIFFERENT INSTANTS -- a peak against a
+nearby trough. **Before calling a logged field wrong, print it beside its rival ON THE SAME FRAME.**
 
-Unreconciled because the device was off the network that evening. The check is written and ready --
-it prints raw `steeringAngleDeg` beside both derivations, which settles it, since a freeway curve at
-34 mph needs a few degrees and a 51 m radius needs about 55. Suspects, in order: `liveParameters.roll`
-(it contributes `roll * g` to lateral acceleration regardless of speed, so ~0.46 rad of bank would be
-needed -- implausible, but check it is not garbage), and a stale `v_ego`/`curvature` pairing.
+**And the conclusion it was used to overturn was right after all.** The 68 -> 37 mph slowdown at the
+I-80/I-215 interchange was CORRECT: 16 degrees of steering at 37 mph is a 174 m radius, and the
+model's implied radius there was 180 m. Real ramp, appropriate slowing -- if anything ~8 mph more
+conservative than his measured comfort. Three positions were taken on this event in one day; the one
+that held is the one with two independent measurements agreeing on the same frame.
 
 ## SCC-Map has three defenses now, and they are deliberately different questions
 
