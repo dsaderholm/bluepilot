@@ -498,6 +498,18 @@ which is why the part is an FTDI TTL-232R-5V and not a 3.3 V one. Also note **Fe
 which governs Legacy Concealed Display output versus ESP -- the first thing to check if the wire is
 powered and no ESP data appears.
 
+**Comma 4: done, do not redo it.** All five `RadarDetector*` keys are in
+`settings_ui_src/pages/cruise.yaml` under `speed_limit_settings`, and the audit reads 37/37 on this
+branch. Gating is by what each control actually needs rather than copied from its neighbors:
+`RadarDetectorEnabled` is UNGATED, because reading the detector and writing the log work on any car
+and need neither longitudinal nor ICBM; only the three that move the car take
+`longitudinal_and_icbm`.
+
+And **the onroad pill is absent on a comma 4 by inheritance, which is correct** -- `_draw_radar_pill`
+lives in `HudRendererBP` and `MiciHudRendererBP` extends upstream's `HudRenderer`. The feature still
+degrades sensibly there: the approaching-place ALERT fires, because that is the standard event path
+every device renders.
+
 **Open, needs hardware:** the ACC jack data pin (6p4c RJ11, ACC is pin-reversed from MAIN -- meter
 it), whether the V1 emits ESP data with nothing asserting ESP mode, whether the time-slice timing
 holds from Python, and whether anything external ever sets the mute bit.
