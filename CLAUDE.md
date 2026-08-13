@@ -565,6 +565,27 @@ made here before.
 **This is per-branch work.** Passing assist and the radar detector each add their own params, so each
 must rebase and run the same loop. The audit only sees what is defined in the branch it runs in.
 
+## DO NOT PORT THIS FORK'S UI TO THE COMMA 4
+
+Decided 2026-08-12, when the mici settings-screen port was offered: *"remember what UI can actually be
+rendered on the Comma 4. I don't think we even want to try to display stuff."*
+
+**SunnyLink is the entire settings story on a 4X.** There is no mici screen for any of this fork's
+33 settings and none is wanted. Do not build one, and do not treat its absence as a gap to close.
+
+The good news, checked rather than assumed: **nothing of ours renders on a 4X, so nothing of ours can
+break there.**
+
+- `selfdrive/ui/bp/mici/layouts/settings/` never imports our cruise layout, so our settings items are
+  simply absent rather than mis-laid-out.
+- `MiciHudRendererBP` extends upstream's `HudRenderer`, **not** our `HudRendererBP`. The HOLD badge,
+  the ACC status readout and the brake-lamp indicator are not drawn there at all.
+
+That separation is what makes "compatible" true by absence. **If a future change moves one of our
+readouts into a shared base class, it lands on the 4X screen** -- so when touching
+`hud_renderer_bp.py`, check which class the mici renderer inherits before assuming the small screen
+is unaffected.
+
 ## Keep only the additions that still earn their place
 
 Stated 2026-08-08: *"I just want to keep additions we have made that actually make a difference."*
