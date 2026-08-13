@@ -744,6 +744,9 @@ class PassingAssistDetector:
     self._geo_sums = [0.0, 0.0, 0.0, 0.0]
     # ...and the SPREAD, not just the mean. See geo_refusal_loosen_to.
     self._geo_hist = [[0] * 10 for _ in range(4)]
+    # DOES A LEFT LANE EVEN EXIST? Pairs of (refused frames where the radar could answer, frames
+    # where it saw a vehicle over there). See the note at the end of _record_refusal.
+    self._geo_left_proof = [0, 0]
     self.right_geometry_ok = False
     self.right_widening_m = 0.0
     self.right_widening = False
@@ -1178,6 +1181,27 @@ class PassingAssistDetector:
     span = self.GEO_SPAN[idx]
     self._geo_hist[idx][min(9, max(0, int(val / span * 10)))] += 1
 
+    # THE QUESTION EVERY TERM ABOVE IS STRUCTURALLY UNABLE TO ANSWER: is there a lane there at all?
+    #
+    # All four read the camera, so "no lane line" and "a lane line the camera could not see" produce
+    # an identical refusal. On 2026-08-12 that cost two confident wrong diagnoses of the same drives
+    # -- darkness, then a code regression -- when he had simply been in the left lane already, and
+    # the tell was buried in who had overtaken him on which side.
+    #
+    # `in_leftmost` cannot settle it either: it is defined as `not left_geometry_ok`, so asking it
+    # here asks the same camera the same question twice and agrees with itself.
+    #
+    # The RADAR is independent of all of it. A vehicle tracked in the left lane proves a left lane
+    # exists whatever the paint says -- so refusals with traffic over there are the camera failing,
+    # and a drive of refusals with none is consistent with there being nothing to fail at.
+    #
+    # Gated on `available`, NOT just `occupied`. An unavailable side reports False, which would read
+    # as "no lane" and manufacture exactly the false conclusion this exists to prevent.
+    if self.adjacent.left.available:
+      self._geo_left_proof[0] += 1
+      if self.adjacent.left.occupied:
+        self._geo_left_proof[1] += 1
+
   @property
   def geo_refusal_loosen_to(self) -> float:
     """Where the dominant term would have to sit to admit FOUR FIFTHS of the refusals.
@@ -1541,6 +1565,11 @@ class PassingAssistDetector:
         "geoRefusedValue": round(self.geo_refusal[1], 3),
         "geoRefusedShare": round(self.geo_refusal[2], 3),
         "geoLoosenTo": self.geo_refusal_loosen_to,
+        # See the radar note in _record_refusal. -1 when the radar could not answer on any refused
+        # frame, which is NOT zero -- zero is a claim ("a lane was never seen"), -1 is a silence
+        # ("nobody could look"), and collapsing them is the mistake this field exists to stop.
+        "geoLeftProven": (round(self._geo_left_proof[1] / self._geo_left_proof[0], 3)
+                          if self._geo_left_proof[0] else -1.0),
         "wantedSeconds": round(self.wanted_seconds, 1),
         "hogSeconds": round(self.hog_seconds, 1),
         "suggestedLatAccMax": round(self.suggested_lat_acc_max, 2),

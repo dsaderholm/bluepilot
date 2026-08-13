@@ -3497,6 +3497,67 @@ class TestEachGeometryTermIsCountedIndependently:
     total = sum(n / det._geo_frames for n in det._geo_term_fails)
     assert total > 1.0
 
+  def test_the_radar_proves_a_left_lane_exists_when_the_camera_denies_it(self):
+    """THE ONE NO CAMERA TERM CAN ANSWER. Paint at 0.05 refuses identically whether there is no
+    lane line or a lane line the model missed, and on 2026-08-12 that produced two confident wrong
+    diagnoses of the same drives -- darkness, then a code regression -- when he had simply been in
+    the left lane already.
+
+    A tracked vehicle to our left is proof a left lane exists whatever the paint says. Faster
+    traffic deliberately, so the pass is not also refused for being slow: the point is that the
+    GEOMETRY refused while the radar could see a lane there.
+    """
+    det = run(PassingAssistDetector(), STUCK_FRAMES,
+              probs=(0.05, 0.99, 0.99, 0.05), tracks=[track(70, 3.7, 5.0)])
+    assert det._geo_frames > 0, "the fixture never refused on geometry"
+    assert det.adjacent.left.occupied, "the fixture never established traffic to the left"
+    seen, occupied = det._geo_left_proof
+    assert seen > 0 and occupied > 0, "a lane the radar could see was not recorded as proof"
+
+  def test_an_empty_left_is_not_proof_of_anything(self):
+    """The other half, and the one that must not overclaim. No traffic over there is consistent
+    with being in the left lane AND with an empty passing lane; it is the absence of evidence, so
+    it records zero rather than a verdict."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, probs=(0.05, 0.99, 0.99, 0.05))
+    seen, occupied = det._geo_left_proof
+    assert seen > 0, "the radar was available and should have been asked"
+    assert occupied == 0
+
+  def test_an_unavailable_radar_is_silence_not_an_empty_lane(self):
+    """THE FAILURE THAT WOULD MANUFACTURE THE WRONG ANSWER. `occupied` is False when the side is
+    unavailable, so counting those frames would report 'no traffic ever seen left' on a drive where
+    nothing could be seen at all -- which reads as 'he was in the left lane' and is the exact
+    conclusion this field exists to stop being guessed."""
+    det = PassingAssistDetector()
+    run(det, STUCK_FRAMES, probs=(0.05, 0.99, 0.99, 0.05))
+    det._geo_left_proof = [0, 0]
+    det.adjacent.left.available = False
+    det.left_geometry_ok = False
+    det._record_refusal()
+    assert det._geo_left_proof == [0, 0], "counted a frame the radar could not answer"
+
+  def test_the_record_reports_silence_as_minus_one_rather_than_zero(self):
+    """Zero is a claim -- 'a lane was never seen' -- and -1 is 'nobody could look'. Collapsing them
+    is how a share becomes a wrong verdict in the report."""
+    class P:
+      def __init__(s): s.store = {}
+      def get(s, k, *a, **kw): return s.store.get(k)
+      def get_bool(s, k, *a, **kw): return bool(s.store.get(k))
+      def put(s, k, v, block=False): s.store[k] = v
+
+    def written(proof):
+      det = PassingAssistDetector()
+      det.params = P()
+      det._geo_left_proof = proof
+      # Force the write; the summary is otherwise rate limited. See LAST_DRIVE_WRITE_S.
+      det._last_drive_write_s = 1e9
+      det._save_drive_summary()
+      return det.params.store["PassingAssistLastDrive"]["geoLeftProven"]
+
+    assert written([0, 0]) == -1.0, "silence was reported as a measurement"
+    assert written([10, 0]) == 0.0
+    assert written([10, 5]) == 0.5
+
   def test_nothing_is_counted_on_a_road_where_no_pass_was_wanted(self):
     """Same gate as the tally it sits beside. An empty road would otherwise dominate it."""
     det = run(PassingAssistDetector(), STUCK_FRAMES, v_lead=CRUISE_MS,

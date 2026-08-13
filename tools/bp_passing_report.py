@@ -80,6 +80,23 @@ def history() -> int:
                         for nm, v in zip(names, bands, strict=False))
       print(f"    road edge refused, by mph: {shown}")
 
+    # IS THERE A LANE THERE AT ALL -- the one question no camera term can answer, because "no lane
+    # line" and "a line the camera missed" refuse identically. The radar is the independent witness:
+    # a vehicle tracked to our left proves a left lane exists no matter what the paint says.
+    #
+    # Printed with an explicit verdict rather than a bare share, because the whole failure this
+    # prevents was reading a number and inferring the wrong cause from it twice in one day.
+    proven = d.get("geoLeftProven")
+    if proven is not None and proven >= 0:
+      if proven > 0:
+        verdict = "a left lane EXISTS -- these refusals are the camera, not the road"
+      else:
+        verdict = "no traffic ever seen left; consistent with already being in the left lane"
+      print(f"    radar saw a vehicle left on {proven * 100:.0f}% of refused frames: {verdict}")
+    elif proven is not None:
+      # -1, and it must not read as 0%. See geoLeftProven.
+      print("    radar could not answer whether a left lane exists on any refused frame")
+
     hist = d.get("oncomingLatHist")
     if hist and sum(hist):
       total = sum(hist)
