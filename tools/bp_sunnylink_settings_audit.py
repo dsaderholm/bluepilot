@@ -44,6 +44,17 @@ SETTINGS_UI_JSON = ROOT / "sunnypilot/sunnylink/settings_ui.json"
 # here. See "Do not fix UNRELATED upstream bugs in this fork".
 OUR_PREFIXES = ("Icbm", "SmartCruiseControl", "SpeedLimit", "PassingAssist", "RadarDetector")
 
+# NOT a gap in the list above, and not to be "fixed" by adding it. `BPSentryEnabled` is the fork's
+# crash-reporting KILL SWITCH -- upstream inits Sentry unconditionally and this fork returns early
+# from init() unless it is set, so the param exists to keep telemetry off, not to offer a feature.
+# It ships off, has no on-device toggle, and `system/tests/test_sentry_disabled_by_default.py`
+# fails if a merge drops the guard.
+#
+# Giving it a SunnyLink entry would put a REMOTE control on device telemetry the owner wants
+# permanently off, which is the opposite of what the guard is for. Anything else that turns out to
+# be a kill switch rather than a setting belongs here too.
+DELIBERATELY_NOT_REMOTE = ("BPSentryEnabled",)
+
 # option_item_sp(...) declares `value_change_step: int = 1`; an omitted step means 1.
 DEFAULT_OPTION_STEP = 1
 
@@ -103,7 +114,9 @@ def collect_ui_settings() -> dict[str, dict]:
           continue
         kw = {k.arg: k.value for k in node.keywords if k.arg}
         param = _literal(kw.get("param"))
-        if not isinstance(param, str) or not param.startswith(OUR_PREFIXES):
+        if not isinstance(param, str) or param in DELIBERATELY_NOT_REMOTE:
+          continue
+        if not param.startswith(OUR_PREFIXES):
           continue
         entry = {
           "param": param,
