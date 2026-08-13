@@ -630,6 +630,8 @@ live in `tools/` and all are READ-ONLY; scp them to the device and run from `/da
 |---|---|
 | `bp_why_slow.py` | who GOVERNED the drive (per-source occupancy) and what caused every slowdown |
 | `bp_hold_history.py` | every change to the HOLD, with `baselineSource` naming the mechanism |
+| `bp_curve_runaway.py` | slowdowns where VISION chased its own output down, plus the raw steering angle beside both lateral-acceleration derivations |
+| `bp_setspeed_hunting.py` | bursts of set-speed reversals, with every source's target |
 | `bp_dump_exit.py` | the older exit-specific dump; superseded for anything above 55 mph |
 
 The order that works: occupancy first, then the specific event, then the raw fields. Skipping to the
@@ -637,6 +639,56 @@ raw fields is how an evening goes to the wrong controller.
 
 **And do not trust the source label.** See "Facts that have been got wrong before" -- it names a
 winner even when every candidate is `V_CRUISE_UNSET`.
+
+## SCC-VISION HAS NO DEFENSES AT ALL, AND ITS TARGET CHASES THE CAR DOWN
+
+Found 2026-08-12 on route 00000365, from the owner's own map of where the events happened. He marked
+three spots on I-215/I-80 at the Parley's interchange: two where it slowed far too much, one where it
+did not slow enough. All three are freeway curves, and the same controller owned all three.
+
+**The target is proportional to current speed**, from `vision_controller.py`:
+
+```
+v_target = v_ego * sqrt(a_lat_reg_max / max_pred_lat_acc)
+```
+
+If the model's implied curvature is CONSTANT this converges to a fixed corner speed and is correct --
+`max_pred` falls as v² so the ratio cancels. It only runs away when the model's implied curvature
+RISES while the car slows, because then every frame re-derives a lower target from the lower speed.
+That is what happened; back-calculated from the logged targets and speeds:
+
+```
+61.5 mph  target 74  ->  implied radius 382 m
+54.2 mph  target 57  ->  implied radius ~230 m
+44.1 mph  target 46  ->  implied radius 147 m
+```
+
+The model's curve got 3x tighter as the car approached it, and 147 m is not a radius that exists on
+I-215. **Note this derivation uses only `v_target` and `v_ego`** -- deliberately, because the obvious
+field to reach for is not trustworthy (below).
+
+**And nothing stops it.** Read `_update_state_machine`: the only exits are the model's own prediction
+falling. There is no cross-check against the map, no plausibility bound on `max_pred_lat_acc`, no
+speed-class floor. SCC-Map got three defenses built from measured events; **vision got none, and
+vision is the controller that owns the near field**, so it is the one answering for curve complaints.
+
+## `currentLateralAccel` IS NOT ESTABLISHED AS GROUND TRUTH. DO NOT QUOTE IT AS ONE.
+
+`smartCruiseControl.vision.currentLateralAccel` is `v_ego**2 * abs(controlsState.curvature)`, and
+`controlsState.curvature` is `-VM.calc_curvature(steer_angle_without_offset, vEgo, roll)` -- so it
+should agree with a steering-angle derivation and **it does not**. On route 00000365 at t+3323 it read
+**4.53** where `bp_why_slow`'s steering-angle figure read **0.00-0.13**, a 30x disagreement about the
+same instant. 4.53 m/s2 at 34 mph is a 51 m radius; the owner's map says that road is I-215, which has
+nothing of the sort, and he was right to reject it.
+
+This was quoted to him as proof that "the corner was real" and it proved nothing. **Attribute
+slowdowns from `v_target` and `v_ego`, which are unambiguous, until this is reconciled.**
+
+Unreconciled because the device was off the network that evening. The check is written and ready --
+it prints raw `steeringAngleDeg` beside both derivations, which settles it, since a freeway curve at
+34 mph needs a few degrees and a 51 m radius needs about 55. Suspects, in order: `liveParameters.roll`
+(it contributes `roll * g` to lateral acceleration regardless of speed, so ~0.46 rad of bank would be
+needed -- implausible, but check it is not garbage), and a stale `v_ego`/`curvature` pairing.
 
 ## SCC-Map has three defenses now, and they are deliberately different questions
 

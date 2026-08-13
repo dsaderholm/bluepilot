@@ -7,6 +7,11 @@ tuning the wrong controller. These read the device's own logs:
 - **`tools/bp_missed_curves.py`** — the opposite question: curves taken *too fast*, and whether that
   was the camera not seeing the bend, a target that was too generous, or the driver on the pedal
 - **`tools/bp_hold_history.py`** — every change to the driver's hold, and what caused each one
+- **`tools/bp_curve_runaway.py`** — curve slowdowns where the camera controller chased its own output
+  down instead of settling, told apart from a legitimate slowdown by whether the corner the model
+  claims keeps getting *tighter* as the car slows into it
+- **`tools/bp_setspeed_hunting.py`** — bursts where the set speed was raised and lowered repeatedly,
+  with each source's target, since the causes look identical from the driver's seat
 
 <!-- fragments: diagnostics -->
 
