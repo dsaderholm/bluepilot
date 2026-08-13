@@ -374,6 +374,8 @@ sections:
       description: 'Signal and perform the pass, instead of only saying it would. REAR SENSING IS WHAT GATES THIS, not this
         switch: nothing moves into a side whose rear sensor is unavailable, so with no rear radar fitted this reads on and
         does nothing. You still supervise and can take over at any point - the stalk, the brake or the wheel ends it immediately.'
+      enablement:
+      - $ref: '#/macros/offroad'
     - key: PassingAssistOncomingVeto
       widget: toggle
       title: Never Pass Into Oncoming Traffic
