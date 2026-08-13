@@ -62,23 +62,12 @@ What does not transfer at all:
   cornering that this driver repeatedly chose and was happy with, around 0.28-0.31 g. That is a
   preference, not a limit, and yours may differ.
 
-**The radar detector integration is car-agnostic, and hardware-gated.** It is deliberately not in the
+**The radar detector integration is not about your car at all.** It is deliberately absent from the
 list above: nothing in it touches the PSCM, the retrofit or the platform, so it behaves identically
-on your car whatever you are driving. What it needs is hardware, and all of it is required rather
-than recommended:
-
-- a **Valentine One Gen2** — the only current detector with a second, independent data path, because
-  the comma 3X has no Bluetooth at all and everything else talks only to a phone
-- an **FTDI** USB-serial adapter — AGNOS registers `ftdi_sio` and no other usb-serial driver, and
-  cannot load one later, so a CP2102 or CH340 will not enumerate
-- a **USB-C to USB-A OTG adapter**, which is what asserts host role rather than merely changing the
-  plug
-- a tap into the detector's accessory cord
-
-With none of that plugged in it does nothing at all — no reader thread starts and the onroad readout
-does not draw. That is the expected state, not a fault, and it is almost certainly your state. Each
-of those requirements fails in a way that looks like a wiring fault, so read the section on it before
-buying anything.
+whatever you drive. What gates it is hardware — a Valentine One Gen2, an FTDI USB-serial adapter, a
+USB-C OTG adapter and a tap into the detector's accessory cord — and with none of that plugged in it
+does nothing at all, which is almost certainly your situation and costs you nothing. The requirements
+and why each one is not negotiable are in the feature section rather than repeated here.
 
 ## Lineage, and what still comes from where
 
@@ -160,10 +149,11 @@ speed that Speed Limit Assist will never exceed regardless of what is posted.
 
 ### Radar detector
 
-Reads a Valentine One Gen2 over its wired accessory bus and aims just under the posted limit while a
-strong Ka alert is out there. **Nothing here has met hardware yet** — the protocol decoder is written
-against Valentine's published specification and checked against their own worked example packets,
-which is the best evidence obtainable without a detector on the bench and is not the same thing.
+**None of this has met hardware yet**, and it reads a Valentine One Gen2 over its wired accessory
+bus to aim just under the posted limit while a strong Ka alert is out there. The protocol decoder is
+written against Valentine's published specification and checked against their own worked example
+packets, which is the best evidence obtainable without a detector on the bench and is not the same
+thing as having one.
 
 - **It needs one specific detector, and that is not a preference.** The V1 Gen2 is the only current
   detector with a second, independent data path: a wired ESP bus on the ACC jack of the power

@@ -1,9 +1,10 @@
 ### Radar detector
 
-Reads a Valentine One Gen2 over its wired accessory bus and aims just under the posted limit while a
-strong Ka alert is out there. **Nothing here has met hardware yet** — the protocol decoder is written
-against Valentine's published specification and checked against their own worked example packets,
-which is the best evidence obtainable without a detector on the bench and is not the same thing.
+**None of this has met hardware yet**, and it reads a Valentine One Gen2 over its wired accessory
+bus to aim just under the posted limit while a strong Ka alert is out there. The protocol decoder is
+written against Valentine's published specification and checked against their own worked example
+packets, which is the best evidence obtainable without a detector on the bench and is not the same
+thing as having one.
 
 - **It needs one specific detector, and that is not a preference.** The V1 Gen2 is the only current
   detector with a second, independent data path: a wired ESP bus on the ACC jack of the power
