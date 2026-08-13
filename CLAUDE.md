@@ -92,6 +92,27 @@ Three things make that work, each of which cost a wrong guess first:
 Use PowerShell for this, not the Bash tool: the Windows OpenSSH agent is a named pipe and Git Bash's
 ssh does not speak it.
 
+**WRAP EVERY REMOTE COMMAND IN A SINGLE-QUOTED HERE-STRING.** PowerShell expands `$(...)` inside
+double quotes *before* ssh ever sees it, so this:
+
+```powershell
+ssh comma@comma-34b959b "bash -lc 'echo HEAD=$(git rev-parse --short HEAD)'"
+```
+
+runs `git rev-parse` on THIS MACHINE and reports the local repo as though it were the car. Escaping
+the dollar as `\$(` does not save it either. On 2026-08-12 that produced a confident, entirely wrong
+report that the device had switched branches and pulled a commit -- from a laptop's own git. The
+device was on a different branch at a different commit the whole time.
+
+```powershell
+$cmd = @'
+cd /data/openpilot && echo "HEAD: $(git rev-parse --short HEAD)"
+'@; ssh comma@comma-34b959b "bash -lc '$cmd'"
+```
+
+`@'...'@` is literal; only the outer `$cmd` interpolates. **If a remote reading agrees suspiciously
+well with what is on the laptop, suspect this before believing it.**
+
 **What to do with it.** Read freely -- reports, logs, params, `git log`. Anything that WRITES to the
 device, changes a setting, or restarts a process: say what the command is and why before running it.
 Never touch it while he is driving. He was surprised to find a session already connected -- "I didn't
