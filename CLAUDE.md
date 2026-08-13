@@ -717,6 +717,36 @@ pulsed within the band, held outside it -- and both were confirmed to fail with 
 Whether the gap is long enough is a road question. If the hunt persists, lengthen the gap before
 touching anything else.
 
+## EVERY `t+NNNN` PRINTED BEFORE 2026-08-12 IS INFLATED. THE EVENTS ARE REAL, THE CLOCK WAS NOT.
+
+All four log tools carried this, and it is wrong in both premises:
+
+    if t_prev is not None and t_raw < t_prev - 1.0:
+      t_shift += t_prev - t_raw          # "segments restart the clock"
+
+`logMonoTime` is boot-relative and **already monotonic across the segments of one route**, so there is
+normally no clock to restart. And messages from DIFFERENT SERVICES interleave out of order by more
+than a second constantly, because each is buffered on its own -- so the guard fired on ordinary
+logging, and the shift is never removed. The reported time inflates all drive.
+
+Route 00000365 is **753 seconds long**. It was being quoted at t+3300 and beyond. A synthetic replay
+of the old logic over a 600 s drive returns 3298 s -- a 5.5x inflation that lands almost exactly on
+the numbers that had been in use. It surfaced only because a check that read `carState` ALONE -- one
+ordered stream, no interleaving -- reported the honest 753 s and disagreed with everything else.
+
+**What this does and does not invalidate.** Speeds, targets, radii, plan sources and the ORDER of rows
+in a printed table are all fine; consecutive rows carry nearly the same shift. What is wrong is every
+absolute `t+NNNN`, and any duration measured across a stretch long enough to accumulate more shift.
+**Treat a quoted timestamp in these notes or in git history as an event label, not a time.**
+
+Fixed in `tools/bp_logtime.py`: compare against the running MAXIMUM rather than the previous message,
+and only treat a reboot-sized fall (60 s) as a reset. `test_drive_clock.py` asserts both directions --
+interleaving must not move the clock, a reboot must -- and the interleaving case was confirmed to fail
+against the old logic rather than trusted on green.
+
+**The lesson worth keeping: a number that only one tool can produce has never been checked.** This
+survived because every tool shared the helper, so they all agreed with each other.
+
 ## Diagnosing a road report: the tools, and the order to use them
 
 Written 2026-08-11 after an evening where three separate wrong controllers were blamed in turn. All

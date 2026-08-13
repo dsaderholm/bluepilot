@@ -26,6 +26,8 @@ import os
 import sys
 from collections import deque
 
+from openpilot.tools.bp_logtime import DriveClock
+
 REALDATA = "/data/media/0/realdata"
 MS_TO_MPH = 2.23694
 STEER_RATIO = 17.07     # FORD_FUSION_MK5
@@ -100,26 +102,19 @@ def main() -> int:
   if len(segs) > args.max_segments:
     print(f"# {len(segs)} segments; reading the first {args.max_segments} (--max-segments to change)")
     segs = segs[:args.max_segments]
-  # Segments recorded across a reboot carry a DIFFERENT monotime base, so a single t0 makes the clock
-  # jump backwards mid-route. On route 00000348 that printed a slowdown lasting -1040 s, which is the
-  # harmless symptom; the damaging one is every timestamp after the discontinuity being wrong, so a
-  # window pulled from this output looks at the wrong part of the drive. Re-based on any backward
-  # step, keeping the timeline monotonic and roughly continuous.
-  t_prev = None
-  t_shift = 0.0
+  # Timestamps come from DriveClock, not from a raw t0. A route CAN cross a reboot -- on 00000348
+  # that printed a slowdown lasting -1040 s -- but re-basing on ANY backward step, which is what this
+  # used to do, mistakes ordinary out-of-order service logging for a reset and inflates the whole
+  # timeline. It turned a 753 s drive into timestamps past t+3300. See tools/bp_logtime.py.
+  clock = DriveClock()
   for seg in segs:
     path = rlog(seg)
     if path is None:
       continue
     for msg in LogReader(path):
       w = msg.which()
-      t_raw = msg.logMonoTime / 1e9
-      if t_prev is not None and t_raw < t_prev - 1.0:
-        t_shift += t_prev - t_raw
-      t_prev = t_raw
-      t = t_raw + t_shift
-      if t0 is None:
-        t0 = t
+      ts = clock.seconds(msg.logMonoTime)
+      t = ts
       try:
         if w == "carState":
           cs = msg.carState

@@ -28,6 +28,8 @@ import os
 import sys
 from collections import deque
 
+from openpilot.tools.bp_logtime import DriveClock
+
 REALDATA = "/data/media/0/realdata"
 MS_TO_MPH = 2.23694
 NO_TARGET_MPH = 500.0
@@ -60,8 +62,7 @@ def main() -> int:
   st = {"dash": 0.0, "v": 0.0, "src": "?", "hold": 0.0, "tgt": 0.0, "state": "?",
         "slaV": 0.0, "visV": 0.0, "mapV": 0.0, "lead": 0.0}
   hist: deque = deque()          # (ts, dash, snapshot)
-  t0 = t_prev = None
-  t_shift = 0.0
+  clock = DriveClock()
   last_dash = None
   last_dir = 0
   reported_until = -1e9
@@ -78,14 +79,7 @@ def main() -> int:
       continue
     for msg in LogReader(path):
       w = msg.which()
-      t_raw = msg.logMonoTime / 1e9
-      if t_prev is not None and t_raw < t_prev - 1.0:
-        t_shift += t_prev - t_raw
-      t_prev = t_raw
-      t = t_raw + t_shift
-      if t0 is None:
-        t0 = t
-      ts = t - t0
+      ts = clock.seconds(msg.logMonoTime)
       try:
         if w == "carState":
           cs = msg.carState

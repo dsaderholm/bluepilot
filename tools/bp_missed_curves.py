@@ -30,6 +30,8 @@ import argparse
 import os
 import sys
 
+from openpilot.tools.bp_logtime import DriveClock
+
 REALDATA = "/data/media/0/realdata"
 MS_TO_MPH = 2.23694
 NO_TARGET_MPH = 500.0
@@ -71,8 +73,7 @@ def main() -> int:
 
   st = {"v": 0.0, "dash": 0.0, "src": "?", "lat": 0.0, "pred": 0.0,
         "mapV": 0.0, "mapAct": False, "visV": 0.0, "visAct": False, "gas": False}
-  t0 = t_prev = None
-  t_shift = 0.0
+  clock = DriveClock()
   run_start = None
   peak = 0.0
   worst: dict = {}
@@ -90,14 +91,7 @@ def main() -> int:
       continue
     for msg in LogReader(path):
       w = msg.which()
-      t_raw = msg.logMonoTime / 1e9
-      if t_prev is not None and t_raw < t_prev - 1.0:
-        t_shift += t_prev - t_raw   # a route can cross a reboot; keep the clock monotonic
-      t_prev = t_raw
-      t = t_raw + t_shift
-      if t0 is None:
-        t0 = t
-      ts = t - t0
+      ts = clock.seconds(msg.logMonoTime)
       try:
         if w == "carState":
           st["v"] = msg.carState.vEgo * MS_TO_MPH

@@ -53,6 +53,8 @@ import math
 import os
 import sys
 
+from openpilot.tools.bp_logtime import DriveClock
+
 REALDATA = "/data/media/0/realdata"
 MS_TO_MPH = 2.23694
 NO_TARGET_MPH = 500.0
@@ -115,8 +117,7 @@ def main() -> int:
 
   st = {"v": 0.0, "dash": 0.0, "angle": 0.0, "cs_curv": 0.0, "state": "?", "src": "?",
         "vis_t": 0.0, "vis_lat": 0.0, "vis_pred": 0.0, "vis_active": False, "map_t": 0.0}
-  t0 = t_prev = None
-  t_shift = 0.0
+  clock = DriveClock()
   run: list = []          # frames of the current descent
   peak_v = trough_v = None
   found = flagged = 0
@@ -169,14 +170,7 @@ def main() -> int:
       continue
     for msg in LogReader(path):
       w = msg.which()
-      t_raw = msg.logMonoTime / 1e9
-      if t_prev is not None and t_raw < t_prev - 1.0:
-        t_shift += t_prev - t_raw          # segments restart the clock; keep one timeline
-      t_prev = t_raw
-      t = t_raw + t_shift
-      if t0 is None:
-        t0 = t
-      ts = t - t0
+      ts = clock.seconds(msg.logMonoTime)
       try:
         if w == "carParams" and not geometry_from_log:
           cp = msg.carParams
