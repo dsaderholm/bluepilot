@@ -511,10 +511,10 @@ deciding whether to try it.
 dead -- enabled by default, storing nothing, for its entire life -- because both directions were
 broken and therefore agreed with each other.
 
-## COMMA 4X: EVERY SETTING MUST BE REACHABLE FROM SUNNYLINK
+## COMMA 4: EVERY SETTING MUST BE REACHABLE FROM SUNNYLINK
 
 Asked for 2026-08-12: *"We need Comma 4 compatibility. We need the menus and all settings available
-in SunnyLink for changing."* And the reason, in his words: *"SunnyLink is useful for Comma 4X users
+in SunnyLink for changing."* And the reason, in his words: *"SunnyLink is useful for Comma 4 users
 since they have a tiny screen to deal with."*
 
 The comma 4 is `mici` in the hardware layer (`HARDWARE.get_device_type()`), alongside `tici` (comma
@@ -524,7 +524,7 @@ concept exists -- what was missing was this fork's own settings.
 **The state when this started: 6 of 32 fork settings were reachable from SunnyLink.** The other 26 --
 every ICBM control, both curve-factor pairs, nine speed-limit controls -- could only be changed by
 standing at the car. That is the on-device rule ("every param ships with a control") failing in a new
-way: the control exists, but not on a surface a 4X owner can practically use.
+way: the control exists, but not on a surface a comma 4 owner can practically use.
 
 **settings_ui.json is GENERATED. Never hand-edit it.** Same shape as README.md:
 
@@ -570,10 +570,10 @@ must rebase and run the same loop. The audit only sees what is defined in the br
 Decided 2026-08-12, when the mici settings-screen port was offered: *"remember what UI can actually be
 rendered on the Comma 4. I don't think we even want to try to display stuff."*
 
-**SunnyLink is the entire settings story on a 4X.** There is no mici screen for any of this fork's
+**SunnyLink is the entire settings story on a comma 4.** There is no mici screen for any of this fork's
 33 settings and none is wanted. Do not build one, and do not treat its absence as a gap to close.
 
-The good news, checked rather than assumed: **nothing of ours renders on a 4X, so nothing of ours can
+The good news, checked rather than assumed: **nothing of ours renders on a comma 4, so nothing of ours can
 break there.**
 
 - `selfdrive/ui/bp/mici/layouts/settings/` never imports our cruise layout, so our settings items are
@@ -582,7 +582,7 @@ break there.**
   the ACC status readout and the brake-lamp indicator are not drawn there at all.
 
 That separation is what makes "compatible" true by absence. **If a future change moves one of our
-readouts into a shared base class, it lands on the 4X screen** -- so when touching
+readouts into a shared base class, it lands on the comma 4 screen** -- so when touching
 `hud_renderer_bp.py`, check which class the mici renderer inherits before assuming the small screen
 is unaffected.
 
