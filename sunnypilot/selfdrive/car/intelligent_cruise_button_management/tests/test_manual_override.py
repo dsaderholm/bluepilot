@@ -1754,3 +1754,54 @@ class TestComingOutOfACurveBehindALeadIsStillMetered:
     icbm = fresh(max_rise=5)
     icbm.run(make_cs(50, v_ego=45), CC, make_lp(DRIVER), False, True)
     assert icbm.v_target == DRIVER, "metered a rise that had nothing to do with a curve"
+
+
+class TestSmallCorrectionsAreTappedNotHeld:
+  """This car moves the set speed 1 mph for a TAP and 5 mph for a HELD button.
+
+  ICBM asserts the button continuously until the cluster crosses the target, which is a hold. So a
+  1 mph correction requests 5, overshoots, and requests 5 back the other way -- measured on route
+  00000361 at t+2704 as eighteen reversals in twenty seconds around a target that never moved.
+
+  NOTE ON WHAT THIS CAN AND CANNOT PROVE. The Drive harness moves the cluster 1 mph per emitted
+  button frame, so it models tapping and cannot reproduce a held-button overshoot at all -- which is
+  exactly why no existing test caught the oscillation. So this asserts the DUTY CYCLE rather than the
+  resulting speed: within the band the button must not be asserted on every frame. Whether the gap is
+  long enough for the car to read a release rather than a repeat can only be confirmed on the road.
+  """
+
+  # The first frames are preActive and command nothing, so they are skipped. Counting them made the
+  # pulse test pass with tapping DISABLED -- the startup ramp alone put it under the total, which is
+  # passing for the wrong reason. Only the steady state says whether the button is held or pulsed.
+  SETTLE = 60
+
+  @staticmethod
+  def _frames_asserted(icbm, cluster, target, n=240, skip=60):
+    asserted = 0
+    for i in range(n):
+      icbm.run(make_cs(cluster, v_ego=cluster), CC, make_lp(target), False)
+      if i >= skip and icbm.cruise_button != SendButtonState.none:
+        asserted += 1
+    return asserted
+
+  def test_a_small_correction_pulses(self):
+    icbm = fresh()
+    asserted = self._frames_asserted(icbm, cluster=26, target=27)
+    steady = 240 - self.SETTLE
+    assert 0 < asserted < steady, (
+      f"button asserted on {asserted}/{steady} steady-state frames for a 1 mph correction -- a "
+      f"continuous assert is a HOLD, which moves this car 5 mph and overshoots. THE REPORTED BUG.")
+
+  def test_a_large_correction_still_holds(self):
+    """Holding is right when there is real distance to cover -- 3.3 mph/s is already the constraint
+    on every exit, and pulsing a big descent would make that worse.
+
+    Not asserted on EVERY frame, because the state machine spends its first frames in preActive
+    before it commands anything. Compared against the small-correction case instead, which is the
+    distinction that matters and cannot pass by accident.
+    """
+    small = self._frames_asserted(fresh(), cluster=26, target=27)
+    large = self._frames_asserted(fresh(), cluster=70, target=40)
+    assert large > small * 2, (
+      f"a 30 mph correction asserted the button on {large}/240 frames and a 1 mph one on {small} -- "
+      f"large moves must stay held or exits get slower still")

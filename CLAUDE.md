@@ -11,6 +11,30 @@ here. Directories (`bluepilot/`, `selfdrive/ui/bp/`), file names, imports, param
 conflict forever and breaks the thing he cares about most: *"I want updating to newer BluePilot
 versions to still be easy."*
 
+## THE DEVICE AUTO-UPDATES. A PUSH IS A DEPLOY.
+
+Found by the passing assist session on 2026-08-12, from the device's own reflog: it pulls
+`Reset to FETCH_HEAD` unattended, roughly hourly.
+
+```
+330369129  2026-08-12 05:18 +0000
+330369129  2026-08-12 02:19 +0000
+9d5bc1b9d  2026-08-12 00:49 +0000
+7f82ca85c  2026-08-11 18:55 +0000
+```
+
+**So pushing to the branch his car tracks puts code on his car, with nobody deciding to send it.**
+That branch is currently `passing-assist-phase1`, not this one -- check
+`git rev-parse --abbrev-ref HEAD` on the device rather than assuming.
+
+This was believed and TOLD TO HIM the other way round: that a push is inert until he runs `git pull`.
+It is not. The consequence is that an untested push reaches a car being driven, so:
+
+- **Hold a push on the tracked branch until he asks for it**, unless it is a fix he is waiting on.
+- The suite passing is not optional before pushing there. There is no manual gate behind it.
+- The command below is how he takes an update DELIBERATELY and immediately. It is not the only way
+  code arrives.
+
 ## START HERE if the owner asks to update
 
 They will open a fresh session and say something like *"update BluePilot"*, *"get the latest
@@ -572,6 +596,60 @@ deciding whether to try it.
 dead -- enabled by default, storing nothing, for its entire life -- because both directions were
 broken and therefore agreed with each other.
 
+## COMMA 4X: EVERY SETTING MUST BE REACHABLE FROM SUNNYLINK
+
+Asked for 2026-08-12: *"We need Comma 4 compatibility. We need the menus and all settings available
+in SunnyLink for changing."* And the reason, in his words: *"SunnyLink is useful for Comma 4X users
+since they have a tiny screen to deal with."*
+
+The comma 4 is `mici` in the hardware layer (`HARDWARE.get_device_type()`), alongside `tici` (comma
+three) and `tizi` (3X). Upstream already carries `mici_only` and `hide_on_mici` macros, so the
+concept exists -- what was missing was this fork's own settings.
+
+**The state when this started: 6 of 32 fork settings were reachable from SunnyLink.** The other 26 --
+every ICBM control, both curve-factor pairs, nine speed-limit controls -- could only be changed by
+standing at the car. That is the on-device rule ("every param ships with a control") failing in a new
+way: the control exists, but not on a surface a 4X owner can practically use.
+
+**settings_ui.json is GENERATED. Never hand-edit it.** Same shape as README.md:
+
+```
+sunnypilot/sunnylink/settings_ui_src/pages/*.yaml     author here
+sunnypilot/sunnylink/settings_ui_src/_macros.yaml     shared rule fragments, $ref them
+python sunnypilot/sunnylink/tools/compile_settings_ui.py     rewrites settings_ui.json
+```
+
+**The workflow for any new setting, and the one the other branches must follow:**
+
+```bash
+python tools/bp_sunnylink_settings_audit.py     # what is missing, with YAML to paste
+# place each item in the right page section, then:
+python sunnypilot/sunnylink/tools/compile_settings_ui.py
+python tools/bp_offline_test.py
+```
+
+`test_sunnylink_settings_complete.py` fails when a fork setting has no SunnyLink entry, and names it.
+It was verified to fail with an item removed -- do not trust it on green alone, that mistake has been
+made here before.
+
+**Things learned doing this that will otherwise be re-learned:**
+
+- **`option` IS the numeric widget.** It takes `min`/`max`/`step`. The widget enum reads
+  `toggle | option | multiple_button | button | info` with nothing obviously numeric, which invites
+  the wrong conclusion that ranges cannot be expressed.
+- **`multiple_button` options are `{value, label}` objects, not bare strings**, and the button's
+  index is its stored value.
+- **An omitted `value_change_step` means 1**, from `option_item_sp`'s own signature. Emitting `None`
+  produces a control that validates as a string and cannot be moved.
+- **Upstream deliberately shows some params on more than one page.** A duplicate check that does not
+  scope itself to this fork's own keys fails on Mads and a dozen others, and policing upstream's
+  layout is not this fork's business.
+- **The compiled JSON validates against `settings_ui.schema.json`** with `jsonschema`. That catches
+  the two mistakes above; the on-device `validate_settings_ui.py` needs `msgq` and cannot run here.
+
+**This is per-branch work.** Passing assist and the radar detector each add their own params, so each
+must rebase and run the same loop. The audit only sees what is defined in the branch it runs in.
+
 ## Keep only the additions that still earn their place
 
 Stated 2026-08-08: *"I just want to keep additions we have made that actually make a difference."*
@@ -644,6 +722,44 @@ The remaining lever is how far ahead `MapTargetVelocities` is populated, which i
 this fork. Do not re-derive this from scratch; measure with `tools/bp_missed_curves.py` and compare
 the map's fire time against the 3.3 mph/s budget before proposing anything.
 
+## THE SET SPEED HUNT: TAP FOR SMALL CORRECTIONS, HOLD FOR LARGE ONES
+
+Reported 2026-08-12: *"it raised and lowered my cruise over and over... when the speed limit changed
+to 25."* Found with `tools/bp_setspeed_hunting.py` on route 00000361 at t+2704:
+
+```
+18 reversals in 20 s.  SLA 25.  icbmTgt a CONSTANT 27.  dash 26 <-> 29 <-> 26.
+```
+
+**The cause.** This car moves the set speed **1 mph for a tap and 5 mph for a held button**. ICBM
+asserts the button continuously until the cluster crosses the target -- a hold. So a 1 mph correction
+requests 5, overshoots, and requests 5 back the other way, forever. The controller was not failing to
+settle on a reachable number; **it had no way to ask for a small change.**
+
+**The fix is the SHAPE of the request, not the state machine.** Within `TAP_BAND` the button is
+pulsed; outside it, held exactly as before. No transition changed.
+
+**THREE EARLIER ATTEMPTS ALL BROKE SOMETHING. Do not retry them:**
+
+| attempt | what broke |
+|---|---|
+| deadband in `v_cruise_equal` + early exit from increasing/decreasing | stalled a curve descent at 63 instead of 40 -- the DROP LIMITER steps its target down 1 mph at a time and needs exact arrival before releasing the next step |
+| re-entry keyed on whether the target MOVED since last settling | ICBM overshot a driver press by 6 mph |
+| gating the button on a reversal count | broke `TestPressWinsWhileIcbmIsBusy`, did not converge |
+
+All three tried to make the state machine TOLERATE being a mile per hour off. None asked why it was
+off. The transitions carry more meaning than they look like they do -- the drop limiter depends on
+exact arrival, the press path on immediate reaction -- so leave them alone.
+
+**WHAT IS NOT VERIFIED.** `TAP_ON_FRAMES` / `TAP_CYCLE_FRAMES` are a guess at what this car reads as
+a release rather than a repeat, and it cannot be checked offline: **the Drive harness moves the
+cluster 1 mph per emitted button frame, so it models tapping and cannot reproduce a held-button
+overshoot at all.** That modelling gap is why no test ever caught this, and it contradicts the
+button contract below, which says to model 5 mph jumps. The tests therefore assert the DUTY CYCLE --
+pulsed within the band, held outside it -- and both were confirmed to fail with tapping disabled.
+Whether the gap is long enough is a road question. If the hunt persists, lengthen the gap before
+touching anything else.
+
 ## Diagnosing a road report: the tools, and the order to use them
 
 Written 2026-08-11 after an evening where three separate wrong controllers were blamed in turn. All
@@ -653,6 +769,8 @@ live in `tools/` and all are READ-ONLY; scp them to the device and run from `/da
 |---|---|
 | `bp_why_slow.py` | who GOVERNED the drive (per-source occupancy) and what caused every slowdown |
 | `bp_hold_history.py` | every change to the HOLD, with `baselineSource` naming the mechanism |
+| `bp_curve_runaway.py` | slowdowns where VISION chased its own output down, plus the raw steering angle beside both lateral-acceleration derivations |
+| `bp_setspeed_hunting.py` | bursts of set-speed reversals, with every source's target |
 | `bp_dump_exit.py` | the older exit-specific dump; superseded for anything above 55 mph |
 
 The order that works: occupancy first, then the specific event, then the raw fields. Skipping to the
@@ -660,6 +778,59 @@ raw fields is how an evening goes to the wrong controller.
 
 **And do not trust the source label.** See "Facts that have been got wrong before" -- it names a
 winner even when every candidate is `V_CRUISE_UNSET`.
+
+## SCC-VISION HAS NO DEFENSES AT ALL, AND ITS TARGET CHASES THE CAR DOWN
+
+Found 2026-08-12 on route 00000365, from the owner's own map of where the events happened. He marked
+three spots on I-215/I-80 at the Parley's interchange: two where it slowed far too much, one where it
+did not slow enough. All three are freeway curves, and the same controller owned all three.
+
+**The target is proportional to current speed**, from `vision_controller.py`:
+
+```
+v_target = v_ego * sqrt(a_lat_reg_max / max_pred_lat_acc)
+```
+
+If the model's implied curvature is CONSTANT this converges to a fixed corner speed and is correct --
+`max_pred` falls as v² so the ratio cancels. It only runs away when the model's implied curvature
+RISES while the car slows, because then every frame re-derives a lower target from the lower speed.
+That is what happened; back-calculated from the logged targets and speeds:
+
+```
+61.5 mph  target 74  ->  implied radius 382 m
+54.2 mph  target 57  ->  implied radius ~230 m
+44.1 mph  target 46  ->  implied radius 147 m
+```
+
+The model's curve got 3x tighter as the car approached it, and 147 m is not a radius that exists on
+I-215 mainline. **Note this derivation uses only `v_target` and `v_ego`.**
+
+**Then the device was reachable and the one flagged event turned out to be a RAMP, correctly taken.**
+See the section below. So this mechanism is real in the code and no measured example of it has been
+found yet -- a shrinking implied radius is the signature of approaching a ramp too, which is exactly
+why SCC-Map excludes ramps from its own vetoes. Do not build a bound on vision until an event is
+found where the steering column disagrees with the model's radius.
+
+**And nothing stops it.** Read `_update_state_machine`: the only exits are the model's own prediction
+falling. There is no cross-check against the map, no plausibility bound on `max_pred_lat_acc`, no
+speed-class floor. SCC-Map got three defenses built from measured events; **vision got none, and
+vision is the controller that owns the near field**, so it is the one answering for curve complaints.
+
+## `currentLateralAccel` IS FINE. THE 30x DISAGREEMENT WAS A SAMPLING MISTAKE.
+
+Recorded 2026-08-12 as untrustworthy, then measured on the device the same evening and cleared.
+`tools/bp_curve_runaway.py` prints it beside a steering-angle derivation on the same frame, and the
+two track each other across every descent on route 00000365. The steering figure reads HIGH by
+roughly half at highway speed because the simple bicycle model omits the understeer term.
+
+The original 30x came from comparing two tools' numbers at DIFFERENT INSTANTS -- a peak against a
+nearby trough. **Before calling a logged field wrong, print it beside its rival ON THE SAME FRAME.**
+
+**And the conclusion it was used to overturn was right after all.** The 68 -> 37 mph slowdown at the
+I-80/I-215 interchange was CORRECT: 16 degrees of steering at 37 mph is a 174 m radius, and the
+model's implied radius there was 180 m. Real ramp, appropriate slowing -- if anything ~8 mph more
+conservative than his measured comfort. Three positions were taken on this event in one day; the one
+that held is the one with two independent measurements agreeing on the same frame.
 
 ## SCC-Map has three defenses now, and they are deliberately different questions
 
@@ -774,6 +945,27 @@ Units have a split that matters, and it is **not** a style choice:
 Dates in comments: **ISO `YYYY-MM-DD`**. Not because it is US style — it is not — but because
 `08-04` is genuinely ambiguous across readers and this file already records dated decisions.
 
+## TSR: read bluepilot/TSR-INVESTIGATION.md before touching anything
+
+Several hours of in-car work on 2026-08-11 is written up there: the exact as-built field positions,
+a full restore point for both modules, what was tried and refused, and the next steps in order. It is
+the difference between continuing and starting over.
+
+**He wants this working.** It is not a curiosity -- Speed Limit Assist has no camera speed limit
+source, and on the drive that same evening the set speed froze on a road with no map coverage. TSR is
+the second source for exactly those roads. Treat it as live work, not a closed file.
+
+Three things from that session that will otherwise be re-learned the hard way:
+
+- **FORScan decodes an Edge IPMA through a 2020 Fusion profile, and its friendly names are wrong.**
+  It reports "wheel arch height 1338 mm / 1856 mm" for a block that actually holds
+  `FeatureCfg_DAS_GSR`, and "TSR: Enabled" for a byte that is not the TSR field. Use raw as-built.
+- **Writing IPMA as-built invalidates the RADAR's calibration** (`B1433`, MIL on). Reverting the IPMA
+  clears it with no alignment drive. The two modules are calibrated as a pair.
+- **Do not run the IPMA firmware update to `CF`.** It moves Strategy `KT4T-14F397-AE` -> `-AF`, which
+  is the `FORD_EDGE_MK2` fingerprint in this repo rather than `FORD_FUSION_MK5`, and away from the
+  software a known-working car runs.
+
 ## TSR, and the region change that is not worth repeating
 
 **Setting the region in FORScan produced a lot of DTCs, and it is now back to UNSPECIFIED.** His
@@ -781,6 +973,23 @@ words, 2026-08-09: *"when I set region and stuff, I got hella DTCs"* and *"the r
 unspecified or something like that."* That path has been tried and it cost more than it returned.
 Do not propose it again as a way to make TSR work, and do not treat the region as an unexplored
 lever -- it is explored, and the answer was no.
+
+**U0253 IS STILL HAPPENING. IT WAS NEVER FIXED.** `U0253 - Lost Communication With Accessory
+Protocol Interface Module`, logged by the IPMA, recurring. The APIM is the SYNC module and the source
+of navigation data, so `NoNavDataAvailable` is literal: the camera cannot reach the module that would
+supply it.
+
+**Enabling TSR in the APIM at `7D0-09-02` did NOT fix it.** That was recorded here as a fix on
+2026-08-11 and it was wrong -- a DTC read back as "Previously Set - Not Present at Time of Request"
+was taken as resolved, when it means only "not present at this instant" and the same read said "Test
+not complete". He said repeatedly that it keeps coming back. Believe the owner over a status byte.
+
+So the blocker is a COMMUNICATION fault between two modules, not a feature flag. TSR is also switched
+off in the IPMA at `706-01-01` (third character of the first group: `1` = Off, `5` = SLIF) and SLIF is
+disabled in the cluster at `720-09-01`, but neither matters while the camera cannot reach the APIM.
+
+**See `bluepilot/TSR-INVESTIGATION.md`.** Note that the gateway -- the most likely place a retrofit
+routing fault would live -- is OFF LIMITS by his decision, and that is not to be reopened.
 
 **And it does not need to be set**, which is the part worth noticing. Everything below was measured
 with the region UNSPECIFIED. The camera reads signs anyway; what the region appears to gate is the

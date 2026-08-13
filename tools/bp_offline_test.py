@@ -62,6 +62,7 @@ DEFAULT_TARGETS = [
   "sunnypilot/selfdrive/controls/lib/radar_detector/tests/",
   "sunnypilot/selfdrive/controls/lib/smart_cruise_control/tests/test_map_model_veto.py",
   "sunnypilot/selfdrive/controls/lib/smart_cruise_control/tests/test_map_factor_split.py",
+  "sunnypilot/selfdrive/controls/lib/smart_cruise_control/tests/test_scc_leaves_disabled.py",
   # Named files, not selfdrive/ui/tests/ -- test_raylib_ui.py, test_soundd.py, test_feedbackd.py
   # and test_translations.py all need raylib or the device and break collection for the folder.
   # That is also how test_settings_recommend_defaults.py sat here unrun on the day it was written:
@@ -69,6 +70,7 @@ DEFAULT_TARGETS = [
   "selfdrive/ui/tests/test_settings_fit.py",
   "selfdrive/ui/tests/test_settings_recommend_defaults.py",
   "selfdrive/ui/tests/test_readme_is_built.py",
+  "selfdrive/ui/tests/test_sunnylink_settings_complete.py",
   # Named files, not the directory: test_speed_limit_assist.py in the same folder imports the
   # sunnylink/API stack (jwt and friends) and cannot collect without the device environment.
   # Listing the folder pulled it in and broke collection for everything.
