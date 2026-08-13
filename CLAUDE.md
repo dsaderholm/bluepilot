@@ -717,35 +717,44 @@ pulsed within the band, held outside it -- and both were confirmed to fail with 
 Whether the gap is long enough is a road question. If the hunt persists, lengthen the gap before
 touching anything else.
 
-## EVERY `t+NNNN` PRINTED BEFORE 2026-08-12 IS INFLATED. THE EVENTS ARE REAL, THE CLOCK WAS NOT.
+## EVERY `t+NNNN` PRINTED BEFORE 2026-08-12 IS INFLATED, BY ABOUT 4x
 
-All four log tools carried this, and it is wrong in both premises:
+**The cause, measured rather than reasoned about.** Every segment file replays the boot-time header
+messages -- initData, carParams and friends -- before its own data, so all thirteen segments of route
+00000365 START at monotime 70.0:
 
-    if t_prev is not None and t_raw < t_prev - 1.0:
-      t_shift += t_prev - t_raw          # "segments restart the clock"
+    seg 0    70.0 -> 131.3
+    seg 1    70.0 -> 191.3          <- steps BACK 61 s at the boundary
+    ...
+    seg 12   70.0 -> 824.4          <- steps BACK 721 s
 
-`logMonoTime` is boot-relative and **already monotonic across the segments of one route**, so there is
-normally no clock to restart. And messages from DIFFERENT SERVICES interleave out of order by more
-than a second constantly, because each is buffered on its own -- so the guard fired on ordinary
-logging, and the shift is never removed. The reported time inflates all drive.
+Walking the segments in order therefore steps backward at every boundary, by an amount that GROWS
+with the drive. Two successive versions of the helper saw those steps and "corrected" them --
+first on any backward step over 1 s, then on any over 60 s -- and both accumulated a shift at every
+boundary. The drive is **754 seconds** and was being reported past t+3300.
 
-Route 00000365 is **753 seconds long**. It was being quoted at t+3300 and beyond. A synthetic replay
-of the old logic over a 600 s drive returns 3298 s -- a 5.5x inflation that lands almost exactly on
-the numbers that had been in use. It surfaced only because a check that read `carState` ALONE -- one
-ordered stream, no interleaving -- reported the honest 753 s and disagreed with everything else.
+**THE FIX IS TO DO NOTHING.** openpilot starts a new route per ignition cycle, so `logMonoTime` is
+already monotonic within a route. There is no reset to compensate for. Subtract the smallest monotime
+seen and stop -- `tools/bp_logtime.py`, `DriveClock`.
+
+Two traps that cost a wrong fix each:
+
+- **The first monotime is not the smallest.** Header replay means the minimum may arrive at any point,
+  so anchor on the running minimum, not on the first message.
+- **A reset cannot be told from header replay by the SIZE of the backward step.** That step equals
+  elapsed drive time, so it grows without bound and any threshold on it fails on a long enough drive
+  -- a 10-minute drive already clears 60 s and would clear 600 s. Discriminate on the VALUE: header
+  replay lands exactly ON the earliest monotime, a real reset lands BELOW it.
 
 **What this does and does not invalidate.** Speeds, targets, radii, plan sources and the ORDER of rows
-in a printed table are all fine; consecutive rows carry nearly the same shift. What is wrong is every
-absolute `t+NNNN`, and any duration measured across a stretch long enough to accumulate more shift.
-**Treat a quoted timestamp in these notes or in git history as an event label, not a time.**
+in a printed table were never affected -- consecutive rows carried nearly the same shift. What was
+wrong is every absolute `t+NNNN`, and any duration measured across a long stretch. **Treat a
+timestamp quoted anywhere before 2026-08-12 as an event label, not a time.**
 
-Fixed in `tools/bp_logtime.py`: compare against the running MAXIMUM rather than the previous message,
-and only treat a reboot-sized fall (60 s) as a reset. `test_drive_clock.py` asserts both directions --
-interleaving must not move the clock, a reboot must -- and the interleaving case was confirmed to fail
-against the old logic rather than trusted on green.
-
-**The lesson worth keeping: a number that only one tool can produce has never been checked.** This
-survived because every tool shared the helper, so they all agreed with each other.
+**And the lesson that actually matters: a number only one tool can produce has never been checked.**
+All four tools shared the helper, so they always agreed with each other, and nothing disagreed until a
+one-off script happened to read `carState` alone -- the one stream with no header replay in it -- and
+returned 754 s. When a tool's output has no independent cross-check, go and build one.
 
 ## Diagnosing a road report: the tools, and the order to use them
 

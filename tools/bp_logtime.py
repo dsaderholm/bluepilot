@@ -1,64 +1,88 @@
 """FusionPilot: turn a route's `logMonoTime` into a drive-relative timestamp, correctly.
 
 Every diagnostic here reads several services out of one LogReader and needs "seconds into the drive"
-to label events with. The obvious way to get it is wrong in a way that is invisible until you check a
-number against something else.
+to label events with. Two different attempts at that were wrong in the same direction, and both
+inflated every timestamp this fork has ever printed by roughly a factor of four.
 
-WHAT WENT WRONG, found 2026-08-12. All four tools carried this:
+WHAT IS ACTUALLY GOING ON, measured on route 00000365 (13 segments) rather than reasoned about:
 
-    if t_prev is not None and t_raw < t_prev - 1.0:
-      t_shift += t_prev - t_raw          # "segments restart the clock"
+    seg        first mono      last mono
+    0                70.0          131.3
+    1                70.0          191.3
+    2                70.0          251.3
+    ...
+    12               70.0          824.4
 
-Two false premises. `logMonoTime` is boot-relative and **already monotonic across the segments of one
-route**, so there is normally no clock to restart. And messages from DIFFERENT SERVICES interleave out
-of order by more than a second routinely, because each service is buffered on its own -- so the guard
-fires constantly on ordinary logging and adds to `t_shift` every time. The shift is never removed, so
-the reported time inflates all drive.
+**Every segment file begins at the same early monotime**, because each rlog replays the boot-time
+header messages -- initData, carParams and friends -- before its own data. So walking the segments in
+order steps BACKWARD at every boundary: -61 s, -121 s, -181 s, ... -721 s, growing as the drive goes
+on.
 
-On route 00000365 that turned a 753-second drive into timestamps past t+3300 -- a factor of four.
-Reading only `carState`, a single ordered stream, the same code gave the honest 753 s, which is how
-the discrepancy finally surfaced.
+Both previous versions saw those steps and "corrected" them:
 
-**The event data was never wrong** -- speeds, targets, radii and their order within a printed table
-are all fine, because consecutive rows carry nearly the same shift. What was wrong is every absolute
-`t+NNNN` label, and any duration measured across a stretch long enough to accumulate more shift.
+    if t_prev is not None and t_raw < t_prev - 1.0:      # v1: any backward step
+      t_shift += t_prev - t_raw
+                                                        # v2: only reboot-sized steps (60 s)
+Each boundary jump is far larger than either threshold, so both accumulated a shift at every one of
+them. Route 00000365 is **754 seconds** long and was being reported past t+3300.
 
-THE FIX. A route crossing a reboot is real but rare, and it looks nothing like interleaving: monotime
-drops by the whole uptime, not by a couple of seconds. So compare against the running MAXIMUM rather
-than the previous message, and only treat a reboot-sized fall as a reset.
+THE FIX IS TO DO NOTHING. **openpilot starts a new route per ignition cycle**, so `logMonoTime` is
+already monotonic across a route's segments -- there is no reset to compensate for, and the header
+messages are not out-of-order data, they are just early. Subtracting the smallest monotime seen gives
+the true drive time, and 754 s agrees with reading `carState` alone, which is the one stream with no
+header replay to confuse it.
+
+A genuine mid-route reboot would show up as time running backwards. That is reported rather than
+smoothed over, because silently papering over it is what produced this bug twice.
+
+THE LESSON: a number only one tool can produce has never been checked. Four tools shared this helper,
+so they always agreed with each other, and the disagreement that finally exposed it came from a
+one-off script that happened to read a single service.
 """
 from __future__ import annotations
 
-# A backward step of at least this much is a reboot. Ordinary inter-service interleaving is well
-# under a second; a few seconds happens. An hour of uptime disappearing does not.
-REBOOT_GAP_S = 60.0
+# A monotime this far BELOW the earliest one already seen is a new minimum, not header replay
+# (which lands on the earliest value exactly).
+NEW_MINIMUM_EPS_S = 5.0
+
+# ...and only once the route has clearly started, so ordinary ordering among the first few header
+# messages cannot look like a reset.
+SETTLED_SPAN_S = 60.0
 
 
 class DriveClock:
-  """Drive-relative seconds from `logMonoTime`, tolerant of out-of-order services.
+  """Drive-relative seconds from `logMonoTime`.
 
       clock = DriveClock()
       for msg in LogReader(path):
         ts = clock.seconds(msg.logMonoTime)
+      ...
+      if clock.went_backwards:
+        print("warning: monotime ran backwards; this route may span a reboot")
   """
 
-  def __init__(self, reboot_gap_s: float = REBOOT_GAP_S) -> None:
-    self.reboot_gap_s = reboot_gap_s
+  def __init__(self) -> None:
     self._t0: float | None = None
-    self._max_raw: float | None = None
-    self._shift = 0.0
-    self.reboots = 0
+    self._max: float | None = None
+    self.went_backwards = False
+    self.max_fall_below_start = 0.0
 
   def seconds(self, log_mono_time: int | float) -> float:
     raw = log_mono_time / 1e9
-    if self._max_raw is not None and raw < self._max_raw - self.reboot_gap_s:
-      # The clock genuinely restarted. Continue the timeline from where it left off.
-      self._shift += self._max_raw - raw
-      self._max_raw = raw
-      self.reboots += 1
-    elif self._max_raw is None or raw > self._max_raw:
-      self._max_raw = raw
-    t = raw + self._shift
-    if self._t0 is None:
-      self._t0 = t
-    return t - self._t0
+
+    # A reset is told apart from header replay by the VALUE it lands on, never by the size of the
+    # step. The step backward at a segment boundary equals the elapsed drive time, so it grows
+    # without bound and no threshold on it is safe -- a 10-minute drive already clears 600 s.
+    # Header replay returns to exactly the earliest monotime; a reset goes BELOW it.
+    if self._t0 is not None and raw < self._t0 - NEW_MINIMUM_EPS_S and self._max is not None \
+       and self._max - self._t0 > SETTLED_SPAN_S:
+      self.went_backwards = True
+      self.max_fall_below_start = max(self.max_fall_below_start, self._t0 - raw)
+
+    # The FIRST monotime is not the smallest: segment 0's header messages are, and every later
+    # segment repeats them. Track the minimum so the drive starts at zero wherever it is seen.
+    if self._t0 is None or raw < self._t0:
+      self._t0 = raw
+    if self._max is None or raw > self._max:
+      self._max = raw
+    return raw - self._t0

@@ -1,10 +1,18 @@
-"""The drive clock must survive out-of-order services and still catch a real reboot.
+"""The drive clock must report real drive time from a route's segment files.
 
-The bug this replaces inflated a 753-second drive into timestamps past t+3300 -- a factor of four --
-because it treated ordinary inter-service interleaving as a clock reset and accumulated the
-correction forever. Nothing said so; the numbers just looked like a longer drive.
+Two earlier versions inflated a 754-second drive past t+3300, both by "correcting" a backward step
+that needed no correction. The shape that fooled them is the one asserted here: every segment file
+replays the boot-time header messages, so walking segments in order steps backward at every boundary
+by an amount that GROWS as the drive goes on.
 
-So both directions are asserted here: interleaving must NOT move the clock, and a reboot must.
+Measured on route 00000365 -- each segment starts at monotime 70.0 and ends 60 s later than the last:
+
+    seg 0    70.0 -> 131.3
+    seg 1    70.0 -> 191.3
+    ...
+    seg 12   70.0 -> 824.4      real drive length 754 s
+
+So the fixture below is that pattern, and the assertion is the number a human can check: 754.
 """
 from __future__ import annotations
 
@@ -18,44 +26,59 @@ SPEC.loader.exec_module(bp_logtime)
 DriveClock = bp_logtime.DriveClock
 
 NS = 1_000_000_000
+HEADER_MONO = 70.0          # where every segment's replayed header messages sit
+SEG_S = 60.0
 
 
-def test_interleaved_services_do_not_inflate_the_clock():
-  """carState, radarState and modelV2 arrive out of order by seconds. That is not a reboot."""
+def _route(segments: int, last_seg_s: float = SEG_S):
+  """(monotime seconds) for a route, in the order LogReader yields them segment by segment.
+
+  The final segment is PARTIAL, as a real one is -- 00000365 ends 34 s into its thirteenth.
+  """
+  for seg in range(segments):
+    yield HEADER_MONO                                  # header replay, same value every segment
+    start = HEADER_MONO + seg * SEG_S
+    span = last_seg_s if seg == segments - 1 else SEG_S
+    for i in range(int(span)):
+      yield start + i + 1.0                            # that segment's own data
+
+
+def test_a_754_second_drive_reports_as_754_seconds():
   clock = DriveClock()
-  # 600 s of drive, sampled every second, with each sample jittered backwards by up to 3 s the way
-  # a slow service's messages land after a fast one's.
-  jitter = [0.0, -2.5, -1.0, -3.0, -0.5]
   last = 0.0
-  for i in range(600):
-    for j in jitter:
-      last = clock.seconds(int((i + j) * NS))
-  assert clock.reboots == 0, "ordinary interleaving was mistaken for a reboot"
-  # 600 samples, last one jittered -0.5 s, so just under 600.
-  assert 595 <= last <= 600, f"a 600 s drive reported as {last:.0f} s"
+  for mono in _route(13, last_seg_s=34.0):
+    ts = clock.seconds(int(mono * NS))
+    last = max(last, ts)
+  assert 750 <= last <= 760, f"a 754 s drive reported as {last:.0f} s"
 
 
-def test_a_real_reboot_keeps_the_timeline_moving_forward():
+def test_segment_header_replay_is_not_treated_as_a_reboot():
   clock = DriveClock()
-  for i in range(100):
-    clock.seconds(int(i * NS))
-  # Reboot: monotime falls back to near zero after 100 s of uptime.
-  after = clock.seconds(int(0.5 * NS))
-  assert clock.reboots == 1, "a monotime reset was not recognised"
-  assert after >= 99, f"the timeline went backwards across a reboot: {after:.1f}"
+  for mono in _route(13, last_seg_s=34.0):
+    clock.seconds(int(mono * NS))
+  assert not clock.went_backwards, "the per-segment header replay was mistaken for a clock reset"
 
 
 def test_the_clock_starts_at_zero_whatever_the_uptime():
   clock = DriveClock()
-  first = clock.seconds(int(86_400 * NS))       # a device up for a day
-  assert first == 0.0
+  assert clock.seconds(int(86_400 * NS)) == 0.0        # a device up for a day
   assert clock.seconds(int(86_410 * NS)) == 10.0
 
 
-def test_a_short_backward_step_is_never_a_reboot():
-  """The old code's threshold was 1 s, which ordinary logging crosses constantly."""
+def test_a_header_message_arriving_late_still_anchors_the_start():
+  """Segment 0's header is the smallest monotime, but it is not always the first message seen."""
   clock = DriveClock()
-  clock.seconds(int(50 * NS))
-  clock.seconds(int(45 * NS))     # 5 s late -- a slow service, not a reboot
-  assert clock.reboots == 0
-  assert clock.seconds(int(51 * NS)) == 1.0, "a late message shifted the whole timeline"
+  assert clock.seconds(int(200 * NS)) == 0.0           # data first
+  assert clock.seconds(int(70 * NS)) == 0.0            # header, older -- becomes the new anchor
+  assert clock.seconds(int(210 * NS)) == 140.0         # measured from the header, not the data
+
+
+def test_a_real_clock_reset_is_reported_not_smoothed():
+  clock = DriveClock()
+  for i in range(2000):
+    clock.seconds(int((100 + i) * NS))
+  clock.seconds(int(5 * NS))
+  assert clock.went_backwards, "a genuine monotime reset was hidden"
+  # How far below the route's START it fell -- 100 s in, back to 5 s. Not the drop from the peak,
+  # which is just elapsed drive time and says nothing about the reset.
+  assert clock.max_fall_below_start == 95.0
