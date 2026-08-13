@@ -402,6 +402,41 @@ class SmartCruiseControlMap:
     implied_ok_v = self.v_ego * math.sqrt(_A_LAT_REG_MAX_REF / max(self.model_lat_acc, 1e-3))
     return self.v_target < implied_ok_v * MODEL_IMPLIED_SPEED_FRACTION
 
+  def _camera_has_not_seen_it(self, target_distance_m: float) -> bool:
+    """A HIGHWAY corner the camera cannot see yet must not be acted on unchallenged.
+
+    Measured on route 00000365, 2026-08-12. The map commanded 50 mph on an I-215 sweeper and walked
+    the set speed 79 -> 64 before anything questioned it. Both camera vetoes were unreachable, and
+    not by a narrow margin -- `_model_disagrees` returns False at its distance gate before either
+    test runs, because SCC-Map publishes the corner speed exactly when braking must BEGIN:
+
+        braking 79 -> 50 mph at 0.8 m/s^2   = 467 m
+        model horizon at 79 mph             = 353 m
+
+    So the corner is 114 m beyond the camera's reach at the moment it is acted on. That gate is
+    right -- silence from a camera that cannot see the corner is not evidence -- but returning False
+    let the map act anyway, which made the veto structurally unreachable rather than merely quiet.
+
+    The dead band is wide. The veto can only be reached when the braking distance fits inside the
+    horizon, `(v1^2 - v2^2) / 2a <= 10 * v1`, which at 79 mph means corners of 58 mph or faster; and
+    it is disabled below 45 mph as ramp-like. **So at 79 mph it could only ever protect corners
+    between 58 and 79 mph**, and 45-58 mph -- the band that produces the largest slowdowns -- had no
+    protection at all.
+
+    So a highway corner waits until the camera can see it. The cost is bounded and small: braking
+    from 79 to 50 within 353 m needs 1.06 m/s^2 rather than 0.8, which ICBM can deliver (its set
+    speed falls at 3.3 mph/s, about 1.5 m/s^2). What it buys is that the camera gets asked at all.
+
+    **RAMPS ARE DELIBERATELY EXEMPT AND MUST STAY THAT WAY.** On an exit the model predicts the path
+    it expects to drive -- straight down the highway -- so a ramp's curvature may never enter its
+    plan until the car is on it. Waiting there would delay the one case that already has too little
+    room; see "THE EXIT THAT NEVER SLOWS ENOUGH" in CLAUDE.md. Same 45 mph line as everything else.
+    """
+    if self.v_target >= _MAP_FACTOR_V_BP[1]:
+      horizon = self.v_ego * MODEL_HORIZON_HIGH_SPEED_S
+      return horizon > 0 and target_distance_m > horizon
+    return False
+
   def update(self, long_enabled: bool, long_override: bool, v_ego, a_ego, v_cruise,
              model_lat_acc: float = 0.0) -> None:
     self.long_enabled = long_enabled
@@ -420,7 +455,11 @@ class SmartCruiseControlMap:
     # instead of having to re-enter from disabled. is_active is cleared too, so the SCC-M badge does
     # not claim to be acting while it is being overruled.
     self.model_lat_acc = model_lat_acc
-    self.model_vetoed = bool(self.is_active and self._model_disagrees(self.target_distance))
+    # Two separate claims, deliberately not merged: the camera looked and saw something gentler, or
+    # the camera has not been able to look yet. Both suppress the map here; only the first is the
+    # model disagreeing, and folding them into one predicate makes the log unreadable.
+    self.model_vetoed = bool(self.is_active and (self._model_disagrees(self.target_distance)
+                                                 or self._camera_has_not_seen_it(self.target_distance)))
     if self.model_vetoed:
       self.is_active = False
 

@@ -8,7 +8,7 @@ The failure mode to guard against is the OPPOSITE one: vetoing beyond camera ran
 the only thing SCC-Map is for, which is seeing around a bend the camera cannot.
 """
 from openpilot.sunnypilot.selfdrive.controls.lib.smart_cruise_control.map_controller import (
-  SmartCruiseControlMap, MODEL_HORIZON_S, MODEL_DISAGREE_LAT_ACC,
+  SmartCruiseControlMap, MODEL_HORIZON_S, MODEL_HORIZON_HIGH_SPEED_S, MODEL_DISAGREE_LAT_ACC,
 )
 
 V_EGO = 31.3          # ~70 mph
@@ -133,3 +133,61 @@ class TestAHighwayBendGetsTheModelsRealReach:
   def test_a_highway_corner_beyond_even_the_wider_reach_is_left_alone(self):
     """Silence outside the model's actual plan is still not evidence."""
     assert not self._at(52, 0.24, dist=self.V_HIGHWAY * 12.0)
+
+
+class TestAHighwayCornerTheCameraCannotSeeYet:
+  """Measured on route 00000365, 2026-08-12.
+
+  The map commanded 50 mph on an I-215 sweeper and walked the set speed 79 -> 64 with nothing
+  questioning it. Both vetoes were unreachable: SCC-Map publishes the corner speed exactly when
+  braking must BEGIN, and at 0.8 m/s^2 that is 467 m out, against a 353 m model horizon.
+
+  The dead band was wide, not marginal. The veto can only be reached when the braking distance fits
+  inside the horizon, so at 79 mph it protected corners of 58 mph and faster, while being disabled
+  below 45 mph as ramp-like -- leaving 45-58 mph, the band that produces the biggest slowdowns,
+  with no protection at all.
+  """
+
+  V_EGO_79 = 35.3           # m/s, 79 mph -- the measured speed
+  CORNER_50 = 22.35         # m/s, 50 mph -- what the map asked for
+  RAMP_30 = 13.4            # m/s, 30 mph -- below the 45 mph line
+
+  def _scc(self, v_target: float, v_ego: float = V_EGO_79) -> SmartCruiseControlMap:
+    scc = SmartCruiseControlMap()
+    scc.v_ego = v_ego
+    scc.v_target = v_target
+    return scc
+
+  def test_the_measured_event_is_now_suppressed(self):
+    """467 m of braking distance against a 353 m horizon: the camera was never asked."""
+    scc = self._scc(self.CORNER_50)
+    assert scc._camera_has_not_seen_it(467.0)
+
+  def test_the_same_corner_is_allowed_once_it_comes_into_view(self):
+    """Suppression is 'not yet', not 'never'. Inside the horizon the normal vetoes decide."""
+    scc = self._scc(self.CORNER_50)
+    assert not scc._camera_has_not_seen_it(300.0)
+
+  def test_a_corner_exactly_at_the_horizon_is_allowed(self):
+    """Strictly beyond, matching every other boundary in this file."""
+    scc = self._scc(self.CORNER_50)
+    assert not scc._camera_has_not_seen_it(self.V_EGO_79 * MODEL_HORIZON_HIGH_SPEED_S)
+
+  def test_a_ramp_beyond_the_horizon_is_NOT_suppressed(self):
+    """The exit case. On a ramp the model plans straight down the highway, so its silence is
+    blindness rather than evidence -- and the exit already has too little room to brake in."""
+    scc = self._scc(self.RAMP_30)
+    assert not scc._camera_has_not_seen_it(1000.0)
+
+  def test_a_stopped_car_is_not_suppressed(self):
+    """horizon <= 0 must not read as 'everything is out of range'."""
+    scc = self._scc(self.CORNER_50, v_ego=0.0)
+    assert not scc._camera_has_not_seen_it(467.0)
+
+  def test_the_58_mph_boundary_that_defined_the_dead_band(self):
+    """Corners fast enough to brake for inside the horizon were always protected; the fix is for
+    the ones below that line, which were not."""
+    inside = self._scc(26.5)          # ~59 mph: (v1^2-v2^2)/1.6 = 340 m, fits in 353 m
+    assert not inside._camera_has_not_seen_it(340.0)
+    outside = self._scc(self.CORNER_50)
+    assert outside._camera_has_not_seen_it(467.0)

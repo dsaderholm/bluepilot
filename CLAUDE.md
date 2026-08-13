@@ -828,7 +828,7 @@ model's implied radius there was 180 m. Real ramp, appropriate slowing -- if any
 conservative than his measured comfort. Three positions were taken on this event in one day; the one
 that held is the one with two independent measurements agreeing on the same frame.
 
-## SCC-Map has three defenses now, and they are deliberately different questions
+## SCC-Map has four defenses now, and they are deliberately different questions
 
 Built up across 2026-08-10 and 2026-08-11 from measured events. They stack, and the split between
 them is what keeps exits working:
@@ -844,7 +844,20 @@ them is what keeps exits working:
 3. **The camera veto, relative.** The model sees a curve, but a far gentler one than the map claims.
    Highway corners only.
 
-`_MAP_FACTOR_V_BP[1]` (45 mph) is the single definition of "highway corner" for all three --
+4. **The camera has not been able to look yet.** A HIGHWAY corner still beyond the model horizon is
+   suppressed until it comes into view. Added 2026-08-12 because defenses 2 and 3 were
+   STRUCTURALLY UNREACHABLE, not merely quiet: SCC-Map publishes the corner speed exactly when
+   braking must BEGIN, so on route 00000365 a 50 mph corner was acted on at 467 m against a 353 m
+   horizon, and `_model_disagrees` returned False at its distance gate before either test ran. It
+   walked the set speed 79 -> 64 with nothing able to question it.
+
+   The dead band was wide. A veto is only reachable when the braking distance fits inside the
+   horizon -- `(v1^2 - v2^2) / 2a <= 10 * v1` -- so at 79 mph it protected corners of 58 mph and
+   faster, while being off below 45 mph as ramp-like. **45-58 mph, the band that produces the
+   biggest slowdowns, had no protection at all.** The cost of waiting is bounded: 79 -> 50 within
+   353 m needs 1.06 m/s^2 instead of 0.8, which ICBM delivers.
+
+`_MAP_FACTOR_V_BP[1]` (45 mph) is the single definition of "highway corner" for all four --
 referenced, never duplicated.
 
 **Why ramps are excluded from 2 and 3.** On an exit the model predicts the path it expects to drive,
