@@ -212,7 +212,7 @@ tuning the wrong controller. These read the device's own logs:
 - **`tools/bp_setspeed_hunting.py`** — bursts where the set speed was raised and lowered repeatedly,
   with each source's target, since the causes look identical from the driver's seat
 - **`tools/bp_sunnylink_settings_audit.py`** — settings that exist on the car's screen but cannot be
-  reached from SunnyLink, which is how you configure a comma 4X in practice
+  reached from SunnyLink, which is how you configure a comma 4 in practice
 
 - **`tools/bp_radar_probe.py`** — first contact with the detector. Run it the day the hardware
   arrives, before trusting anything: it says whether bytes are arriving, whether they frame as ESP,

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """FusionPilot: find settings that exist on the big screen but cannot be reached from SunnyLink.
 
-Asked for 2026-08-12: comma 4X compatibility, with every setting configurable through SunnyLink.
-The 4X has a small screen, so SunnyLink is not a convenience there -- for a fork with 33 of its own
+Asked for 2026-08-12: comma 4 compatibility, with every setting configurable through SunnyLink.
+The comma 4 has a small screen, so SunnyLink is not a convenience there -- for a fork with 33 of its own
 settings it is the practical way to configure the car at all.
 
 WHAT THIS CHECKS. `selfdrive/ui/sunnypilot/layouts/settings/` is where the fork defines its controls,
@@ -183,7 +183,7 @@ def main() -> int:
     print("  Nothing to do: every setting this fork defines can be changed remotely.")
     return 0
 
-  print("\n  These can only be changed by standing at the car, which is the problem on a 4X:\n")
+  print("\n  These can only be changed by standing at the car, which is the problem on a comma 4:\n")
   for e in missing:
     print(f"    {e['param']:42s} {e['widget']:16s} {e['source']}")
   print("\n  YAML for sunnypilot/sunnylink/settings_ui_src/pages/*.yaml -- place each item in the")

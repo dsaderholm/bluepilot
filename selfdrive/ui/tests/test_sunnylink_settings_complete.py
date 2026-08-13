@@ -1,12 +1,12 @@
 """Every setting this fork defines must be reachable from SunnyLink, not just from the car's screen.
 
-Asked for 2026-08-12, for comma 4X compatibility. The 4X screen is small enough that configuring 32
+Asked for 2026-08-12, for comma 4 compatibility. The comma 4 screen is small enough that configuring 32
 fork settings on it is impractical, so SunnyLink is the real settings surface on that hardware --
 which makes "big-screen only" a shipping defect rather than a nicety.
 
 This is the same rule the fork already applies on-device: a param with no control has not shipped,
 because a feature nobody can turn on gets reported as broken. `IcbmModelStopEnabled` was exactly that
-for weeks. On a 4X, a param with no SunnyLink entry is the same failure with a different cause.
+for weeks. On a comma 4, a param with no SunnyLink entry is the same failure with a different cause.
 
 It fails LOUDLY and names the missing keys, because the fix is mechanical and the tool prints it:
 
@@ -41,7 +41,7 @@ def test_every_fork_setting_is_reachable_from_sunnylink():
 
   missing = audit.missing_settings()
   assert not missing, (
-    "these settings can only be changed by standing at the car, which does not work on a comma 4X:\n"
+    "these settings can only be changed by standing at the car, which does not work on a comma 4:\n"
     + "\n".join(f"  {e['param']}  ({e['widget']}, from {e['source']})" for e in missing)
     + "\n\nRun: python tools/bp_sunnylink_settings_audit.py  -- it prints the YAML to paste."
   )
