@@ -19,6 +19,29 @@ a ready-to-paste YAML block carrying the title, range and step across faithfully
 `test_sunnylink_settings_complete.py` runs the same comparison and fails when something is missing,
 which is what keeps a newly added setting from silently being big-screen-only.
 
+WHAT THIS DOES NOT CHECK, established 2026-08-12 by probing it rather than reading the count. Both
+sides of the comparison are "settings the on-device UI defines", so anything outside that net cannot
+be reported missing and a green 37/37 says nothing about it:
+
+- **A param with NO control at all is invisible.** It is absent from both sides, so it cancels out.
+  `BPSentryEnabled` is the live example -- fork-added, read only by system/sentry.py, reachable from
+  neither screen nor SunnyLink. That is a real gap but a DIFFERENT one (SSH-only, not big-screen
+  only), and for that key it is arguably deliberate: it is a privacy opt-in nobody wants flipped.
+- **`param=` must be a literal.** visuals.py builds its toggles in a loop over `_toggle_defs`, so
+  every one is skipped. All eleven are upstream display prefs, which CLAUDE.md leaves alone anyway.
+- **Only `ITEM_CALLS` widgets count.** `button_item_sp` and `dual_button_item_sp` are in use and not
+  in that map; no fork param uses either today, so nothing is hidden by it right now.
+- **Only the two `UI_DIRS` are scanned** -- deliberately, since mici gets no screens for our stuff.
+
+Checked and clean as of 2026-08-12: the three fork-prefixed params with no control
+(`IcbmHoldObservations`, `IcbmPinnedHolds`, `IcbmPinHoldRequest`) are learned data and a transient
+onroad-tap request, not settings, so their absence is correct.
+
+There is deliberately no test for the first bullet. It needs "fork-added" rather than "matches a
+prefix" -- 6 of the 40 prefix-matching keys are upstream's own -- and the only offline way to get
+that is diffing params_keys.h against upstream/bp-7.0. A suite that turns red because UPSTREAM added
+a `SpeedLimit*` key teaches people to ignore a red suite, which costs more than this catches.
+
 USAGE:
 
     python tools/bp_sunnylink_settings_audit.py            # what is missing, with YAML to paste
