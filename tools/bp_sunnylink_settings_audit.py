@@ -24,9 +24,10 @@ sides of the comparison are "settings the on-device UI defines", so anything out
 be reported missing and a green 37/37 says nothing about it:
 
 - **A param with NO control at all is invisible.** It is absent from both sides, so it cancels out.
-  `BPSentryEnabled` is the live example -- fork-added, read only by system/sentry.py, reachable from
-  neither screen nor SunnyLink. That is a real gap but a DIFFERENT one (SSH-only, not big-screen
-  only), and for that key it is arguably deliberate: it is a privacy opt-in nobody wants flipped.
+  Such a param is not automatically a gap: `BPSentryEnabled` is one, and it is a KILL SWITCH that
+  must never be remote -- see `DELIBERATELY_NOT_REMOTE` below, which is the authoritative answer for
+  it. The blind spot is still worth knowing, because the next such param might be a real setting and
+  this tool will not say so.
 - **`param=` must be a literal.** visuals.py builds its toggles in a loop over `_toggle_defs`, so
   every one is skipped. All eleven are upstream display prefs, which CLAUDE.md leaves alone anyway.
 - **Only `ITEM_CALLS` widgets count.** `button_item_sp` and `dual_button_item_sp` are in use and not

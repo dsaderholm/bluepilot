@@ -531,6 +531,17 @@ lives in `HudRendererBP` and `MiciHudRendererBP` extends upstream's `HudRenderer
 degrades sensibly there: the approaching-place ALERT fires, because that is the standard event path
 every device renders.
 
+**All five are safe to expose remotely, because this feature has NO data-egress path.** Checked
+2026-08-12 against the rule that a kill switch on data leaving the device stays local
+(`DELIBERATELY_NOT_REMOTE` in the audit tool): there is no upload, no shared feed and no remote
+endpoint anywhere in `radar_detector/`. `radar_alerts.jsonl` and the GeoJSON export are written to
+`/data` and read at home over SSH, which `alert_log.py`'s docstring already commits to.
+
+`RadarDetectorEnabled` does start a position log, and it IS remotely flippable -- deliberately, since
+it gates LOCAL recording rather than egress, and a comma 4 owner has to be able to turn the feature
+off from somewhere. **If this feature ever grows an upload, the switch for it goes in
+`DELIBERATELY_NOT_REMOTE` and gets no SunnyLink entry**, which is a different decision from this one.
+
 **Open, needs hardware:** the ACC jack data pin (6p4c RJ11, ACC is pin-reversed from MAIN -- meter
 it), whether the V1 emits ESP data with nothing asserting ESP mode, whether the time-slice timing
 holds from Python, and whether anything external ever sets the mute bit.
