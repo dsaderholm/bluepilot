@@ -210,6 +210,49 @@ is right, TSR is not reachable on this car by configuration alone. The remaining
 overturn it is his friend's car -- same question, sharper: does a Fusion exist where the IPMA HOLDS a
 TSR-enabling configuration across a restart?
 
+## 4d. THE FRIEND'S AS-BUILT, DIFFED — AND IT KILLS TWO THEORIES
+
+Obtained 2026-08-12. Same strategy and calibration as his, TSR WORKING. Twelve blocks differ in data
+(checksum-only differences ignored):
+
+```
+block       yours            friend           differing nibbles (1-based, checksum excluded)
+706-01-01   0410 A9DB B960   0810 A9DA A953   2, 8, 9      <-- the block of interest
+706-01-02   301A 6535 6458   101A A535 6478   1, 5
+706-02-01   FD56 16DB 7FD3   FD56 16DB 5FB3   9
+706-02-02   FFC1 55AA E1B1   FFC3 55AA E1B3   4
+706-02-03   0842 1000 006C   F840 0800 0052   1, 4, 5, 6
+706-02-04   0000 0000 0013   0008 0000 001B   4
+706-02-05   0000 0000 0014   0800 0000 0824   2, 10
+706-02-07   0000 0004 001A   0000 0084 009A   7
+706-03-01   C000 5200 80A3   8000 0000 8011   1, 5, 6
+706-03-04   0080 0000 0094   0089 0000 009D   4
+706-04-01   FFFC 26C3 847A   1EFC 26C3 485D   1, 2, 9, 10
+706-05-01   53AA 7400 0084   566A B800 008B   2, 3, 5, 6
+```
+
+**TWO THEORIES DIE HERE.**
+
+1. **`706-01-01` nibble 3 -- the reference's `ModuleFeatureCfg_TSR` -- is `1` on BOTH cars.** `1`
+   means "TSR Off" per that map, and TSR works on the friend's car. So either the position is wrong
+   for these modules or that field is not the enable. **`0450` was never the answer**, and FORScan
+   refusing it prevented a change that would have done nothing.
+2. **`706-02-01` nibbles 1-2 (`FeatureCfg_TSRMode`) are `FD` on both.** So `4D` / "CameraOnlyOn" was
+   never needed either. Both of those consumed hours.
+
+**What is actually different in the block of interest:** `706-01-01` nibble **2** (`4` -> `8`), and
+nibbles **8** and **9** (`B` -> `A`, `B` -> `A`).
+
+**Caution before copying anything.** Twelve blocks differ and most of that is legitimately different
+car content, not TSR -- these are different vehicles with different options. Copying the whole dump
+would import his options onto this car. The targeted experiment is `706-01-01` alone, to
+`0810 A9DA A953`, with section 4's restore point in hand and the expectation that the radar
+calibration will need redoing (section 5).
+
+**And the reference map is now suspect generally.** It was derived from a Ford as-built document for
+a different vehicle line, and its one testable claim -- that nibble 3 is the TSR enable -- is
+contradicted by a working car. Do not trust its other positions without the same kind of check.
+
 ## 5. Dead ends — tested, do not repeat
 
 | tried | result |
