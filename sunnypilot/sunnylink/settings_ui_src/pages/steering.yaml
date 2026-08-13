@@ -255,3 +255,181 @@ sections:
       key: AutoLaneChangeTimer
       op: '>'
       value: 0
+- id: passing_assist
+  title: Passing Assist
+  description: Deciding when a pass is worth making, and which side is clear
+  items:
+  - key: PassingAssistLogEnabled
+    widget: toggle
+    title: Passing Assist (Log Only)
+    description: 'Watch for a slower vehicle ahead and work out whether a pass is worth making and which side is clear. Nothing
+      acts on the answer: no alert, no steering, no set speed change. It records what it would have said so the idea can be
+      judged from real drives before anything is wired to it.'
+  sub_panels:
+  - id: passing_assist_settings
+    label: Passing Assist Settings
+    trigger_key: PassingAssistLogEnabled
+    trigger_condition:
+      type: param
+      key: PassingAssistLogEnabled
+      equals: true
+    items:
+    - key: PassingAssistChime
+      widget: toggle
+      title: Chime When It Decides Or Backs Out
+      description: 'Two short tones, so you can tell what it did without looking. A higher one the moment a pass is worked
+        out. A LOWER one when it lights the blinker and then withdraws it, which is the case worth telling me about and the
+        one you could not hear before. Neither covers the screen. Ford sounds one before a BlueCruise lane change for the
+        same reason: at the moment a car moves, nobody is reading a display.'
+    - key: PassingAssistMinDeficit
+      widget: option
+      title: Slower By At Least
+      description: How far below your set speed a vehicle has to be before passing it is worth suggesting. Below about 3 you
+        are inside ordinary traffic variation, so it starts firing on cars that are not really slower.
+      min: 1
+      max: 25
+      step: 1
+    - key: PassingAssistExitStandDown
+      widget: option
+      title: Stay Quiet After You Take An Exit
+      description: If you change lanes yourself into a lane that was opening up like an exit, stay out of the way for this
+        long. Being told to move out of your own exit lane at the gore point is worse than useless. Any other lane change
+        you make only gets a few seconds, so pulling out to pass something manually hands control straight back.
+      min: 0
+      max: 120
+      step: 15
+    - key: PassingAssistMinSpeed
+      widget: option
+      title: Only Above
+      description: 'Below this speed a pass is not the maneuver being considered. Kept low on purpose: stuck behind a tractor
+        on a 55 road your cruise drags you down to 30, and that is exactly when a pass is most obviously wanted. Town driving
+        is already excluded by needing cruise engaged. Much below 30 the lane detection starts calling turn pockets and driveways
+        passing lanes.'
+      min: 20
+      max: 60
+      step: 5
+    - key: PassingAssistConfirmTime
+      widget: option
+      title: Confirm For
+      description: How long that vehicle must be seen before a pass is suggested. Short by design -- this rejects a bad frame
+        of radar tracking, it is not a waiting period. Waiting is the behavior this feature exists to remove.
+      min: 1
+      max: 20
+      step: 1
+    - key: PassingAssistLeadBrakingHold
+      widget: toggle
+      title: Wait If The Car Ahead Slams On
+      description: Do not start a pass while the vehicle in front is braking hard -- they are usually turning off, or braking
+        for something ahead you cannot see yet. Only a deliberate stop counts. A car merely slowing is the best reason there
+        is to go round it, and this stays out of the way for that.
+    - key: PassingAssistCrawlTime
+      widget: option
+      title: Call It A Slow Pass After
+      description: How long grinding past a car you are barely faster than counts as a pass that is taking too long. Measured
+        only for now -- this is the one situation where passing assist would ever be allowed to nudge your set speed, and
+        the size of that nudge should come from what your own drives show rather than from a guess.
+      min: 3
+      max: 30
+      step: 1
+    - key: PassingAssistBlinkerLead
+      widget: option
+      title: Signal Before Moving
+      description: How long the turn signal would be on before the lane change starts. Nothing is actuated yet -- this drives
+        the dry run on screen, which shows the whole sequence a fully automatic pass would go through so it can be judged
+        from a real drive before anything is wired to a control. Defaults to 1 s, which is how the owner drives; Utah asks
+        for 2 before a lane change.
+      min: 0
+      max: 5
+      step: 1
+    - key: PassingAssistMinApproach
+      widget: option
+      title: Close In Before Passing
+      description: 'Hold off until the car ahead is this close, instead of pulling out as soon as it is spotted -- which is
+        how people actually drive. Abandoned instantly if Ford''s cruise starts slowing for that car, at any distance, so
+        setting it too aggressive costs a late pass rather than braking.
+
+        Auto uses the distance your own cruise has actually been measured starting to brake at, plus a margin, and re-learns
+        it every drive.'
+      min: -1
+      max: 200
+      step: 10
+    - key: PassingAssistMaxDistance
+      widget: option
+      title: Look Ahead
+      description: 'How far ahead to notice a slower vehicle. Higher decides earlier, which is the whole point: it is what
+        avoids stock ACC braking for a car you were always going to pass. Beyond about 200 m there is rarely anything tracked
+        to decide on.'
+      min: 40
+      max: 250
+      step: 10
+    - key: PassingAssistAdjacentLane
+      widget: toggle
+      title: Check The Lane Before Suggesting It
+      description: Use the front radar to see traffic in the next lane over, and stay quiet when that lane is already full
+        of vehicles no faster than the car ahead of you. Uses the radar already fitted to the car. If the radar is not reporting,
+        the onroad panel says so rather than assuming the lane is clear.
+    - key: PassingAssistActuate
+      widget: toggle
+      title: Make The Lane Change Itself
+      description: 'Signal and perform the pass, instead of only saying it would. REAR SENSING IS WHAT GATES THIS, not this
+        switch: nothing moves into a side whose rear sensor is unavailable, so with no rear radar fitted this reads on and
+        does nothing. You still supervise and can take over at any point - the stalk, the brake or the wheel ends it immediately.'
+    - key: PassingAssistOncomingVeto
+      widget: toggle
+      title: Never Pass Into Oncoming Traffic
+      description: Watch the front radar for vehicles coming the other way. If any are seen, treat that side of the road as
+        theirs and stop suggesting passes into it. The camera cannot tell an oncoming lane from a passing lane by itself,
+        and it cannot tell a painted median or a turn lane from one either - on 08-09 it offered all three. Until the blind
+        spot and rear radar are fitted this is the only check standing between a suggestion and oncoming traffic, so turning
+        it off leaves the camera deciding alone. Leave it on.
+    - key: PassingAssistOncomingMemory
+      widget: option
+      title: Remember Oncoming Traffic For
+      description: 'How long after meeting a vehicle that side of the road stays treated as theirs. Per side, not per road:
+        meeting someone on your left says nothing about the lane on your right, and that one stays available. Long is safer
+        -- meeting a car tells you about the road, not just that moment, and on a quiet road the gaps between meeting cars
+        are exactly when a wrong suggestion would look most convincing.'
+      min: 15
+      max: 600
+      step: 15
+    - key: PassingAssistStrictTwoWay
+      widget: toggle
+      title: Assume An Unknown Middle Lane Is A Turn Lane
+      description: On a road with oncoming traffic, a center turn lane and an ordinary passing lane look identical to the
+        sensors -- same width, same position, and the paint differs only by color, which the camera does not report. On, it
+        assumes the worst until a vehicle is seen driving down that lane in your direction, which is safer but quiets passing
+        on two-lane highways with alternating passing lanes such as US-6 and US-89. Off trades that back. Oncoming traffic
+        seen in the next lane blocks a pass either way.
+    - key: PassingAssistKeepRight
+      widget: toggle
+      title: Keep Right Except To Pass
+      description: 'Also work out when you could return to a lane on your right because nothing is holding you back. The hard
+        part is that a camera cannot tell a through lane from an exit-only one, so a suggestion here can mean take the exit.
+        Two things guard it: the road opening up ahead, and the lane having been continuously there for a while. Both are
+        unproven on real roads, which is why this is on -- nothing acts on it, so a wrong suggestion costs a wrong line on
+        screen and buys a measurement.'
+    - key: PassingAssistKeepRightDelay
+      widget: option
+      title: Wait Before Moving Right
+      description: How long the lane to your right must stay clear before returning would be suggested. Longer avoids nagging
+        during brief gaps while you overtake a line of vehicles.
+      min: 3
+      max: 60
+      step: 1
+    - key: PassingAssistMinLaneAge
+      widget: option
+      title: Lane Must Have Been There
+      description: How long the lane on your right must have been continuously present before returning would be suggested.
+        An exit lane appears out of nowhere; a through lane has been beside you for miles. If the camera loses the lane briefly
+        the clock restarts, which just costs a few quiet seconds.
+      min: 0
+      max: 60
+      step: 5
+    - key: PassingAssistSettleTime
+      widget: option
+      title: Settle After A Pass
+      description: 'How long after suggesting a pass before suggesting a return. Without it, a three-lane road with a slow
+        left lane turns into a weave: move left, find it no faster, get told to move back.'
+      min: 5
+      max: 90
+      step: 5
