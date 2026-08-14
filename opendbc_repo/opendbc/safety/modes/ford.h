@@ -515,6 +515,7 @@ static void ford_rx_hook(const CANPacket_t *msg) {
     // Update brake pedal and cruise state
     if (msg->addr == FORD_EngBrakeData) {
       // Signal: BpedDrvAppl_D_Actl
+      bool ford_bp_brake_was_pressed = brake_pressed;
       brake_pressed = ((msg->data[0] >> 4) & 0x3U) == 2U;
 
       // Signal: CcStat_D_Actl
@@ -522,6 +523,43 @@ static void ford_rx_hook(const CANPacket_t *msg) {
       bool cruise_engaged = (cruise_state == 4U) || (cruise_state == 5U);
       pcm_cruise_check(cruise_engaged);
       acc_main_on = (cruise_state == 3U) || cruise_engaged;
+
+      // BluePilot: RE-ARM AFTER THE STANDSTILL RACE.
+      //
+      // Resuming at a near-stop force-disengaged with controlsMismatch, intermittently. Measured on
+      // route 0000036b, 2026-08-13, by rebuilding controls_allowed from raw CAN
+      // (tools/bp_panda_controls_allowed.py):
+      //
+      //   t+542.03   6-sample speed max 0.175 m/s  -> vehicle_moving TRUE
+      //   t+542.24   6-sample speed max 0.097 m/s  -> vehicle_moving FALSE
+      //   t+542.243  cruise rising edge            <- lands ON that boundary
+      //
+      // generic_rx_checks runs after EVERY message and uses the vehicle_moving LATCHED at the last
+      // FORD_DesiredTorqBrk, not the speed samples as they stand now. With a stale TRUE it clears
+      // controls_allowed on the same frame pcm_cruise_check set it -- and panda only allows on an
+      // EDGE, so nothing restores it. Two seconds of enabled-without-allowed is IMMEDIATE_DISABLE.
+      //
+      // IT IS A RACE, so moving the 0.1 m/s threshold does not fix it; that only changes the speed
+      // at which the crossing happens. The owner's three data points fit exactly: the resume that
+      // worked was at 0.0 mph with the window long clear, the two that failed were at 0.2 mph.
+      //
+      // WHY THIS SHAPE, and not "allow on level". A bare level check would re-allow the instant the
+      // driver brakes mid-drive with stock ACC still on, which is the one thing the brake clear
+      // exists to prevent. Every condition below is load-bearing:
+      //
+      //   brake RELEASED this frame  the driver has taken their foot off; a held brake still blocks
+      //   not vehicle_moving         standstill only, so this cannot fire at road speed
+      //   cruise_engaged             the car itself says ACC is active, not us deciding it is
+      //   !controls_allowed          only recovers a lost grant; never creates one from nothing
+      //
+      // The recovered state is one panda ALREADY GRANTED microseconds earlier on the genuine rising
+      // edge, and then dropped to a stale variable. This restores that grant rather than inventing
+      // a new one. Stock Ford ACC accepts SET at a crawl with the brake held; openpilot refusing to
+      // is the deviation being corrected here.
+      if (cruise_engaged && !controls_allowed && ford_bp_brake_was_pressed && !brake_pressed &&
+          !vehicle_moving) {
+        controls_allowed = true;
+      }
     }
 
     if (msg->addr == FORD_Steering_Data_FD1) {
