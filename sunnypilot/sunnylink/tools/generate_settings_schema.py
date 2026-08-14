@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import datetime
 import gzip
+import copy
 import json
 import os
 from collections.abc import Callable
@@ -59,11 +60,42 @@ def _inject_dynamic_options(schema: dict) -> None:
   _walk_all_items(schema, visitor)
 
 
+_definition_cache: tuple[tuple, dict] | None = None
+
+
 def _load_definition() -> dict:
-  """Load settings_ui.json and inject dynamic options sourced from runtime data files."""
+  """Load settings_ui.json and inject dynamic options sourced from runtime data files.
+
+  CACHED on the file's identity, because every caller re-read, re-parsed and re-injected the whole
+  definition. That was tolerable when it was 96 KB and stopped being tolerable at 133 KB: the
+  capabilities the frontend asks for include `has_icbm` and `has_longitudinal_control`, and BOTH
+  change when cruise engages -- so the heaviest work on this path lands exactly when the car is
+  being driven. A comma 4 owner reported processes falling behind within about ten seconds of
+  enabling cruise, which is that window.
+
+  Keyed on (mtime, size) rather than a plain lru_cache so an update that rewrites the file is
+  picked up without a restart, which is how this device takes new code.
+
+  A deep copy is returned on every call. Callers MUTATE what they get -- generate_schema() stamps
+  generated_at into it, sunnylinkd adds capabilities -- and handing out the cached dict would let
+  one caller's additions leak into the next one's payload.
+  """
+  global _definition_cache
+  try:
+    st = os.stat(DEFINITION_PATH)
+    key = (st.st_mtime_ns, st.st_size)
+  except OSError:
+    key = None
+
+  if key is not None and _definition_cache is not None and _definition_cache[0] == key:
+    return copy.deepcopy(_definition_cache[1])
+
   with open(DEFINITION_PATH) as f:
     schema = json.load(f)
   _inject_dynamic_options(schema)
+  if key is not None:
+    _definition_cache = (key, schema)
+    return copy.deepcopy(schema)
   return schema
 
 
