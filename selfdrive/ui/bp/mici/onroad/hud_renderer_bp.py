@@ -100,8 +100,9 @@ class MiciHudRendererBP(HudRenderer):
     self._overlay_center_x = 0
     self._overlay_center_y = 0
     self._overlay_size = 0
-    # Latched on any drawing error; keeps a display bug off the screen. See _render.
-    self._hold_badge_failed = False
+    # Latched PER READOUT on a drawing error; keeps a display bug off the screen without taking
+    # the other readouts with it. See _render.
+    self._readout_failed: dict[str, bool] = {}
     # Last drawn HOLD badge rect; the tap target for pinning. None = nothing to hit.
     self._hold_rect = None
 
@@ -142,20 +143,35 @@ class MiciHudRendererBP(HudRenderer):
       self._draw_set_speed(rect)
 
     self._draw_steering_wheel(rect)
-    # Latched off on any error, exactly like the big screen's ACC status block. That guard exists
-    # because `int()` on a capnp _DynamicEnum once raised inside _update_state and CRASH-LOOPED THE
-    # UI -- and because the readout only runs when cruise is available, it only happened with the
-    # car on, which is the hardest kind of failure to attribute. This badge has the same shape: it
-    # reads capnp enums and only draws once the driver has a hold, i.e. seconds after engaging
-    # cruise and moving the set speed. A display bug here must cost the badge, not the screen.
-    if not self._hold_badge_failed:
-      try:
-        below = self._draw_hold_badge(rect)
-        below = self._draw_acc_pill(rect, below)
-        self._draw_brake_lamp_pill(rect, below)
-      except Exception as e:  # noqa: BLE001 -- see above; the screen outranks the readout
-        self._hold_badge_failed = True
-        bp_ui_log.state("MiciHudRenderer", "hold_badge_error", repr(e))
+    # Each readout is latched OFF SEPARATELY. A shared latch meant one bad pill silently took the
+    # other two with it, and the HOLD badge is the one worth keeping longest -- it shows a number
+    # that exists nowhere else on screen.
+    #
+    # Guarded at all because the big screen's equivalent block had to be: `int()` on a capnp
+    # _DynamicEnum once raised inside _update_state and CRASH-LOOPED THE UI, and because those
+    # readouts only run when cruise is available, it only happened with the car on -- the hardest
+    # kind of failure to attribute. These have the same shape: they read capnp enums and only draw
+    # once cruise is engaged. A display bug must cost the readout, not the screen.
+    below = self._safe_draw("hold", self._draw_hold_badge, rect,
+                            fallback=rect.y + HOLD_MARGIN)
+    below = self._safe_draw("acc", self._draw_acc_pill, rect, below, fallback=below)
+    self._safe_draw("lamp", self._draw_brake_lamp_pill, rect, below, fallback=below)
+
+  def _safe_draw(self, name: str, draw, *args, fallback):
+    """Draw one readout, latching it off for the session if it ever raises.
+
+    Returns `fallback` when the readout is latched off or throws, so the stack below it closes up
+    rather than leaving a gap where a failed pill would have been.
+    """
+    if self._readout_failed.get(name):
+      return fallback
+    try:
+      result = draw(*args)
+    except Exception as e:  # noqa: BLE001 -- the screen outranks any one readout
+      self._readout_failed[name] = True
+      bp_ui_log.state("MiciHudRenderer", f"{name}_readout_error", repr(e))
+      return fallback
+    return fallback if result is None else result
 
   def _draw_hold_badge(self, rect: rl.Rectangle) -> float:
     """The driver's own set speed, on a 536x240 screen.
