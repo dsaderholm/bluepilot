@@ -4,6 +4,7 @@ from opendbc.car.structs import ControllerStateBP
 from openpilot.bluepilot.ui.lib.bp_shaders import draw_shader_circle_gradient
 from openpilot.selfdrive.ui.onroad.hud_renderer import UI_CONFIG, FONT_SIZES, COLORS
 from openpilot.selfdrive.ui.sunnypilot.onroad.hud_renderer import HudRendererSP
+from openpilot.selfdrive.ui.bp.onroad.icbm_hud_state import read_icbm_hud_state
 from openpilot.selfdrive.ui.bp.onroad.exp_button_bp import ExpButtonBP
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.text_measure import measure_text_cached
@@ -285,16 +286,15 @@ class HudRendererBP(HudRendererSP):
     # readout -- and hiding it behind an unrelated toggle meant the driver spent days unable to
     # see whether an override had taken at all. The ACC accel/coast/brake line below stays behind
     # the toggle; that one really is diagnostic.
-    try:
-      icbm = sm['selfdriveStateSP'].intelligentCruiseButtonManagement
-      self._icbm_arrow = {1: "+", 2: "-"}.get(icbm.sendButton.raw, "")
-      if icbm.overrideState.raw == 1 and icbm.vBaseline > 0:
-        self._icbm_baseline = round(icbm.vBaseline)
-        self._icbm_hold_locked = bool(icbm.holdSuppressed)
-        self._icbm_pinned = icbm.baselineSource.raw == 4  # BaselineSource.pinned
-        self._icbm_pin_suggested = icbm.pinSuggestion > 0
-    except Exception:
-      pass
+    # Read through the shared reader, not inline: the comma 4 screen draws the same hold from its own
+    # renderer tree, and two copies of this would drift apart on the next enum change.
+    icbm_state = read_icbm_hud_state(sm)
+    self._icbm_arrow = icbm_state.arrow
+    if icbm_state.has_hold:
+      self._icbm_baseline = icbm_state.baseline
+      self._icbm_hold_locked = icbm_state.hold_locked
+      self._icbm_pinned = icbm_state.pinned
+      self._icbm_pin_suggested = icbm_state.pin_suggested
 
     # BluePilot: TSR fault reason. Read before the brake-status gate below -- it has nothing to do
     # with brakes and must not disappear when that toggle is off.
