@@ -99,6 +99,10 @@ DEFAULT_TARGETS = [
   # happens. BPDefaultsGeneration was exactly that, before it was removed with the defaults
   # migration on 2026-08-08.
   "selfdrive/car/tests/test_params_keys_unique.py",
+  # Rear radar detections reaching the lead path would slow the car for a vehicle BEHIND it, via
+  # unconfirmed_lead -> ICBM. Static, because the guarantee is structural and structural guarantees
+  # are the kind a later change erases with every test still green.
+  "selfdrive/car/tests/test_rear_radar_isolation.py",
   "selfdrive/car/tests/test_no_int_on_capnp_enums.py",
   # Both written for passing assist and neither ever collected -- caught by
   # test_bp_tests_are_registered, which is the only reason anyone noticed. A test that does not
