@@ -189,13 +189,21 @@ sections:
     - key: SpeedLimitOffsetType
       widget: multiple_button
       title: Speed Limit Offset Type
+      # FOUR options, matching SPEED_LIMIT_OFFSET_TYPE_BUTTONS in
+      # cruise_sub_layouts/speed_limit_settings.py. "By Limit" is this fork's own fourth mode and
+      # was missing here, so a car set to it matched NO option and the control rendered with
+      # nothing highlighted at all -- not wrong-looking, just blank, which is why it took a
+      # screenshot to notice. Labels follow the DEVICE's, not upstream's: a remote control that
+      # names things differently from the screen in the car is its own bug.
       options:
       - value: 0
-        label: 'Off'
+        label: None
       - value: 1
         label: Fixed
       - value: 2
-        label: Percentage
+        label: '%'
+      - value: 3
+        label: By Limit
     - key: SpeedLimitValueOffset
       widget: option
       title: Speed Limit Offset Value

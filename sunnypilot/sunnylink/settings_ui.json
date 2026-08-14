@@ -880,7 +880,7 @@
                   "options": [
                     {
                       "value": 0,
-                      "label": "Off"
+                      "label": "None"
                     },
                     {
                       "value": 1,
@@ -888,7 +888,11 @@
                     },
                     {
                       "value": 2,
-                      "label": "Percentage"
+                      "label": "%"
+                    },
+                    {
+                      "value": 3,
+                      "label": "By Limit"
                     }
                   ]
                 },

@@ -66,8 +66,15 @@ ITEM_CALLS = {
 }
 
 
-def _literal(node) -> object | None:
-  """Best-effort literal from an AST node, seeing through tr(...) and string concatenation."""
+def _literal(node, consts: dict | None = None) -> object | None:
+  """Best-effort literal from an AST node, seeing through tr(...) and string concatenation.
+
+  `consts` resolves bare NAMES against the file's module-level assignments. Without it the
+  button lists are invisible: the device writes `buttons=SPEED_LIMIT_OFFSET_TYPE_BUTTONS`, a name,
+  and returning None there is what let SunnyLink ship three choices against the device's four.
+  """
+  if isinstance(node, ast.Name) and consts and node.id in consts:
+    return _literal(consts[node.id], consts)
   if isinstance(node, ast.Constant):
     return node.value
   if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
@@ -75,9 +82,9 @@ def _literal(node) -> object | None:
     # wrap the real string in their first argument, and both must be seen through or every
     # description here comes back empty.
     if node.func.id in ("tr", "recommended") and node.args:
-      return _literal(node.args[0])
+      return _literal(node.args[0], consts)
   if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-    left, right = _literal(node.left), _literal(node.right)
+    left, right = _literal(node.left, consts), _literal(node.right, consts)
     if isinstance(left, str) and isinstance(right, str):
       return left + right
   if isinstance(node, ast.JoinedStr):
@@ -85,10 +92,10 @@ def _literal(node) -> object | None:
   if isinstance(node, ast.Lambda):
     return None
   if isinstance(node, ast.List):
-    vals = [_literal(e) for e in node.elts]
+    vals = [_literal(e, consts) for e in node.elts]
     return vals if all(v is not None for v in vals) else None
   if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
-    inner = _literal(node.operand)
+    inner = _literal(node.operand, consts)
     return -inner if isinstance(inner, int | float) else None
   return None
 
@@ -106,6 +113,8 @@ def collect_ui_settings() -> dict[str, dict]:
         tree = ast.parse(path.read_text(encoding="utf-8"))
       except SyntaxError:
         continue
+      consts = {t.id: n.value for n in tree.body if isinstance(n, ast.Assign)
+                for t in n.targets if isinstance(t, ast.Name)}
       for node in ast.walk(tree):
         if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
           continue
@@ -113,7 +122,7 @@ def collect_ui_settings() -> dict[str, dict]:
         if widget is None:
           continue
         kw = {k.arg: k.value for k in node.keywords if k.arg}
-        param = _literal(kw.get("param"))
+        param = _literal(kw.get("param"), consts)
         if not isinstance(param, str) or param in DELIBERATELY_NOT_REMOTE:
           continue
         if not param.startswith(OUR_PREFIXES):
@@ -121,12 +130,12 @@ def collect_ui_settings() -> dict[str, dict]:
         entry = {
           "param": param,
           "widget": widget,
-          "title": _literal(kw.get("title")),
-          "description": _literal(kw.get("description")),
-          "min": _literal(kw.get("min_value")),
-          "max": _literal(kw.get("max_value")),
-          "step": _literal(kw.get("value_change_step")) or DEFAULT_OPTION_STEP,
-          "buttons": _literal(kw.get("buttons")),
+          "title": _literal(kw.get("title"), consts),
+          "description": _literal(kw.get("description"), consts),
+          "min": _literal(kw.get("min_value"), consts),
+          "max": _literal(kw.get("max_value"), consts),
+          "step": _literal(kw.get("value_change_step"), consts) or DEFAULT_OPTION_STEP,
+          "buttons": _literal(kw.get("buttons"), consts),
           "source": str(path.relative_to(ROOT)).replace("\\", "/"),
         }
         found.setdefault(param, entry)
@@ -151,6 +160,43 @@ def collect_sunnylink_keys() -> set[str]:
 
   walk(json.loads(SETTINGS_UI_JSON.read_text(encoding="utf-8")))
   return keys
+
+
+def option_mismatches() -> list[str]:
+  """Controls whose CHOICES differ between the device and SunnyLink.
+
+  A param can be present and still unusable. `SpeedLimitOffsetType` shipped with four buttons on
+  the device -- None / Fixed / % / By Limit -- and only three in SunnyLink, because "By Limit" is
+  this fork's own addition and nobody updated the remote copy. A car set to it matched no option,
+  so the control rendered with nothing selected: not wrong-looking, just blank. It took a
+  screenshot to find, because presence-only checking said everything was fine.
+  """
+  ui, sl_json = collect_ui_settings(), json.loads(SETTINGS_UI_JSON.read_text(encoding="utf-8"))
+  remote: dict[str, list] = {}
+
+  def walk(o) -> None:
+    if isinstance(o, dict):
+      if isinstance(o.get("key"), str) and "widget" in o and o.get("options"):
+        remote[o["key"]] = o["options"]
+      for v in o.values():
+        walk(v)
+    elif isinstance(o, list):
+      for v in o:
+        walk(v)
+
+  walk(sl_json)
+  out = []
+  for param, entry in sorted(ui.items()):
+    device = entry.get("buttons")
+    if not device:
+      continue
+    got = remote.get(param)
+    if got is None:
+      out.append(f"{param}: device offers {len(device)} choices, SunnyLink offers none")
+    elif len(got) != len(device):
+      out.append(f"{param}: device offers {len(device)} ({', '.join(device)}), "
+                 f"SunnyLink offers {len(got)}")
+  return out
 
 
 def missing_settings() -> list[dict]:
@@ -188,6 +234,16 @@ def main() -> int:
     print(f"# {len(ui)} fork settings defined by the on-device UI\n")
     for p in sorted(ui):
       print(f"  {'ok     ' if p in sl else 'MISSING'}  {p:42s} {ui[p]['widget']:16s} {ui[p]['source']}")
+    print()
+
+  mismatched = option_mismatches()
+  if mismatched:
+    print("=== CONTROLS WHOSE CHOICES DISAGREE WITH THE DEVICE ===")
+    print("  Present is not the same as usable: a value the remote list does not contain renders")
+    print("  as nothing selected at all.")
+    print()
+    for line in mismatched:
+      print(f"    {line}")
     print()
 
   print(f"=== {len(ui) - len(missing)}/{len(ui)} fork settings reachable from SunnyLink, "

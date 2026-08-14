@@ -118,3 +118,20 @@ def test_compiled_settings_validate_against_their_schema():
 
 def _has_jsonschema() -> bool:
   return importlib.util.find_spec("jsonschema") is not None
+
+
+def test_every_control_offers_the_same_choices_as_the_device():
+  """Present is not the same as usable.
+
+  SpeedLimitOffsetType shipped four buttons on the device -- None / Fixed / % / By Limit -- and
+  three in SunnyLink, because "By Limit" is this fork's own addition and the remote copy was never
+  updated. A car set to it matched no option, so the control rendered with NOTHING selected. Not
+  wrong-looking, just blank, which is why presence-only checking passed it and a screenshot caught
+  it instead.
+  """
+  audit = _audit()
+  bad = audit.option_mismatches()
+  assert not bad, (
+    "these controls offer different choices remotely than they do in the car:\n"
+    + "\n".join(f"  {b}" for b in bad)
+  )
