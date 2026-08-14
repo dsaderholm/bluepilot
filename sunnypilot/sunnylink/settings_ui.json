@@ -916,41 +916,7 @@
                   "key": "SpeedLimitAutoFollow",
                   "widget": "toggle",
                   "title": "Automatic Speed Limit Following",
-                  "description": "Follow detected speed limits in both directions without confirmation. Stock behavior only ever lowers the set speed and requires you to confirm increases. Every automatic change is announced on screen, and any cruise button press takes back control.",
-                  "visibility": [
-                    {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
-                    }
-                  ],
-                  "enablement": [
-                    {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
-                    }
-                  ]
+                  "description": "Follow detected speed limits in both directions without confirmation. Stock behavior only ever lowers the set speed and requires you to confirm increases. Every automatic change is announced on screen, and any cruise button press takes back control."
                 },
                 {
                   "key": "SpeedLimitFallback",
@@ -966,40 +932,6 @@
                       "value": 1,
                       "label": "Last Known"
                     }
-                  ],
-                  "visibility": [
-                    {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
-                    }
-                  ],
-                  "enablement": [
-                    {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
-                    }
                   ]
                 },
                 {
@@ -1009,41 +941,7 @@
                   "description": "How far ahead of a higher speed limit to start raising the set speed, so the car is already up to speed where the faster road begins instead of crawling up after the sign. Never applies before the sign is reached. 0 turns it off.",
                   "min": 0,
                   "max": 15,
-                  "step": 1,
-                  "visibility": [
-                    {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
-                    }
-                  ],
-                  "enablement": [
-                    {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
-                    }
-                  ]
+                  "step": 1
                 },
                 {
                   "key": "SpeedLimitMaxSetSpeed",
@@ -1052,41 +950,7 @@
                   "description": "Automatic speed limit following will never request above this speed, regardless of the detected limit.",
                   "min": 25,
                   "max": 100,
-                  "step": 5,
-                  "visibility": [
-                    {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
-                    }
-                  ],
-                  "enablement": [
-                    {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
-                    }
-                  ]
+                  "step": 5
                 },
                 {
                   "key": "SpeedLimitOffsetHigh",
@@ -1095,41 +959,7 @@
                   "description": "Added to limits at or above the second breakpoint.",
                   "min": -15,
                   "max": 25,
-                  "step": 1,
-                  "visibility": [
-                    {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
-                    }
-                  ],
-                  "enablement": [
-                    {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
-                    }
-                  ]
+                  "step": 1
                 },
                 {
                   "key": "SpeedLimitOffsetHighThreshold",
@@ -1138,41 +968,7 @@
                   "description": "Posted limits at or above this use the fast-road offset.",
                   "min": 35,
                   "max": 85,
-                  "step": 5,
-                  "visibility": [
-                    {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
-                    }
-                  ],
-                  "enablement": [
-                    {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
-                    }
-                  ]
+                  "step": 5
                 },
                 {
                   "key": "SpeedLimitOffsetLow",
@@ -1181,41 +977,7 @@
                   "description": "Added to limits below the first breakpoint.",
                   "min": -15,
                   "max": 25,
-                  "step": 1,
-                  "visibility": [
-                    {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
-                    }
-                  ],
-                  "enablement": [
-                    {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
-                    }
-                  ]
+                  "step": 1
                 },
                 {
                   "key": "SpeedLimitOffsetMid",
@@ -1224,41 +986,7 @@
                   "description": "Added to limits between the two breakpoints.",
                   "min": -15,
                   "max": 25,
-                  "step": 1,
-                  "visibility": [
-                    {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
-                    }
-                  ],
-                  "enablement": [
-                    {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
-                    }
-                  ]
+                  "step": 1
                 },
                 {
                   "key": "SpeedLimitOffsetMidThreshold",
@@ -1267,41 +995,7 @@
                   "description": "Posted limits below this use the slow-road offset.",
                   "min": 15,
                   "max": 60,
-                  "step": 5,
-                  "visibility": [
-                    {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
-                    }
-                  ],
-                  "enablement": [
-                    {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
-                    }
-                  ]
+                  "step": 5
                 }
               ]
             }
@@ -1423,41 +1117,7 @@
                   "description": "How hard to slow for a turn the map knows about. This also sets how early it starts: a gentler rate needs more distance, so the set speed begins falling sooner. Lower this if exit ramps come up too fast. Above 1.3 m/s2 the stop lamps light, so values past that trade the BRAKE LAMPS readout for a later, harder slowdown.",
                   "min": 4,
                   "max": 25,
-                  "step": 1,
-                  "visibility": [
-                    {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
-                    }
-                  ],
-                  "enablement": [
-                    {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
-                    }
-                  ]
+                  "step": 1
                 },
                 {
                   "key": "SmartCruiseControlMapFactor",
@@ -1466,41 +1126,7 @@
                   "description": "Scales the speed tight mapped corners and exit ramps are taken at. 100% uses the map's own number, which matches the posted advisory. Lower it if the steering struggles to hold those curves at the advisory speed. This one governs corners of 25 mph and below, blending out to the highway setting by 45 mph.",
                   "min": 50,
                   "max": 100,
-                  "step": 5,
-                  "visibility": [
-                    {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
-                    }
-                  ],
-                  "enablement": [
-                    {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
-                    }
-                  ]
+                  "step": 5
                 },
                 {
                   "key": "SmartCruiseControlMapHighSpeedFactor",
@@ -1509,41 +1135,7 @@
                   "description": "Scales the speed faster mapped corners are taken at, from 45 mph upward. 100% uses the map's own number. Separate from the setting above because a tight ramp and a highway sweeper need opposite adjustments.",
                   "min": 50,
                   "max": 100,
-                  "step": 5,
-                  "visibility": [
-                    {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
-                    }
-                  ],
-                  "enablement": [
-                    {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
-                    }
-                  ]
+                  "step": 5
                 },
                 {
                   "key": "SmartCruiseControlVisionHighSpeedFactor",
@@ -1552,41 +1144,7 @@
                   "description": "The same scale for turns taken at highway speed, where the same corner needs a very different amount of slowing.",
                   "min": 50,
                   "max": 150,
-                  "step": 5,
-                  "visibility": [
-                    {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
-                    }
-                  ],
-                  "enablement": [
-                    {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
-                    }
-                  ]
+                  "step": 5
                 },
                 {
                   "key": "SmartCruiseControlVisionLowSpeedFactor",
@@ -1595,41 +1153,7 @@
                   "description": "How much to slow for turns taken at low speed. Above 100% slows more than the model asks for, below 100% slows less.",
                   "min": 50,
                   "max": 150,
-                  "step": 5,
-                  "visibility": [
-                    {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
-                    }
-                  ],
-                  "enablement": [
-                    {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
-                    }
-                  ]
+                  "step": 5
                 }
               ]
             }
@@ -1639,23 +1163,6 @@
           "id": "intelligent_cruise_button_management",
           "title": "Intelligent Cruise Button Management",
           "description": "How the set speed is moved on cars whose stock cruise control cannot be commanded directly",
-          "enablement": [
-            {
-              "type": "any",
-              "conditions": [
-                {
-                  "type": "capability",
-                  "field": "has_longitudinal_control",
-                  "equals": true
-                },
-                {
-                  "type": "capability",
-                  "field": "has_icbm",
-                  "equals": true
-                }
-              ]
-            }
-          ],
           "items": [],
           "sub_panels": [
             {
@@ -1673,36 +1180,16 @@
                   "step": 1,
                   "visibility": [
                     {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
+                      "type": "capability",
+                      "field": "has_icbm",
+                      "equals": true
                     }
                   ],
                   "enablement": [
                     {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
+                      "type": "capability",
+                      "field": "has_icbm",
+                      "equals": true
                     }
                   ]
                 },
@@ -1716,36 +1203,16 @@
                   "step": 10,
                   "visibility": [
                     {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
+                      "type": "capability",
+                      "field": "has_icbm",
+                      "equals": true
                     }
                   ],
                   "enablement": [
                     {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
+                      "type": "capability",
+                      "field": "has_icbm",
+                      "equals": true
                     }
                   ]
                 },
@@ -1759,36 +1226,16 @@
                   "step": 5,
                   "visibility": [
                     {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
+                      "type": "capability",
+                      "field": "has_icbm",
+                      "equals": true
                     }
                   ],
                   "enablement": [
                     {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
+                      "type": "capability",
+                      "field": "has_icbm",
+                      "equals": true
                     }
                   ]
                 },
@@ -1802,36 +1249,16 @@
                   "step": 1,
                   "visibility": [
                     {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
+                      "type": "capability",
+                      "field": "has_icbm",
+                      "equals": true
                     }
                   ],
                   "enablement": [
                     {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
+                      "type": "capability",
+                      "field": "has_icbm",
+                      "equals": true
                     }
                   ]
                 },
@@ -1845,36 +1272,16 @@
                   "step": 1,
                   "visibility": [
                     {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
+                      "type": "capability",
+                      "field": "has_icbm",
+                      "equals": true
                     }
                   ],
                   "enablement": [
                     {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
+                      "type": "capability",
+                      "field": "has_icbm",
+                      "equals": true
                     }
                   ]
                 },
@@ -1885,36 +1292,16 @@
                   "description": "Use the driving model's own stop intent to bring the set speed down for stop signs and red lights with no vehicle at them. This is the one case the setting above cannot catch, since an empty intersection produces no vehicle to measure. Weaker evidence than the vehicle case -- how long the model insists, and a speed floor, are its only filters.",
                   "visibility": [
                     {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
+                      "type": "capability",
+                      "field": "has_icbm",
+                      "equals": true
                     }
                   ],
                   "enablement": [
                     {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
+                      "type": "capability",
+                      "field": "has_icbm",
+                      "equals": true
                     }
                   ]
                 },
@@ -1928,36 +1315,16 @@
                   "step": 1,
                   "visibility": [
                     {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
+                      "type": "capability",
+                      "field": "has_icbm",
+                      "equals": true
                     }
                   ],
                   "enablement": [
                     {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
+                      "type": "capability",
+                      "field": "has_icbm",
+                      "equals": true
                     }
                   ]
                 },
@@ -1971,36 +1338,16 @@
                   "step": 5,
                   "visibility": [
                     {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
+                      "type": "capability",
+                      "field": "has_icbm",
+                      "equals": true
                     }
                   ],
                   "enablement": [
                     {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
+                      "type": "capability",
+                      "field": "has_icbm",
+                      "equals": true
                     }
                   ]
                 },
@@ -2011,36 +1358,16 @@
                   "description": "Tap the HOLD badge while driving to pin that hold to the spot you are in. It comes back on its own every time you drive through there. For the few places that need the same correction every trip: a sign the camera reads wrong, a limit nobody drives, a school zone outside school hours. Tap a pinned hold again to remove it.",
                   "visibility": [
                     {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
+                      "type": "capability",
+                      "field": "has_icbm",
+                      "equals": true
                     }
                   ],
                   "enablement": [
                     {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
+                      "type": "capability",
+                      "field": "has_icbm",
+                      "equals": true
                     }
                   ]
                 },
@@ -2051,36 +1378,16 @@
                   "description": "Wait for the vehicle ahead to actually move before resuming from a stop. Without this, openpilot requests resume from its own plan and stock ACC accelerates toward the set speed, then brakes hard when its radar finds the lead still close.",
                   "visibility": [
                     {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
+                      "type": "capability",
+                      "field": "has_icbm",
+                      "equals": true
                     }
                   ],
                   "enablement": [
                     {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
+                      "type": "capability",
+                      "field": "has_icbm",
+                      "equals": true
                     }
                   ]
                 },
@@ -2094,36 +1401,16 @@
                   "step": 1,
                   "visibility": [
                     {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
+                      "type": "capability",
+                      "field": "has_icbm",
+                      "equals": true
                     }
                   ],
                   "enablement": [
                     {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
+                      "type": "capability",
+                      "field": "has_icbm",
+                      "equals": true
                     }
                   ]
                 },
@@ -2137,36 +1424,16 @@
                   "step": 1,
                   "visibility": [
                     {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
+                      "type": "capability",
+                      "field": "has_icbm",
+                      "equals": true
                     }
                   ],
                   "enablement": [
                     {
-                      "type": "any",
-                      "conditions": [
-                        {
-                          "type": "capability",
-                          "field": "has_longitudinal_control",
-                          "equals": true
-                        },
-                        {
-                          "type": "capability",
-                          "field": "has_icbm",
-                          "equals": true
-                        }
-                      ]
+                      "type": "capability",
+                      "field": "has_icbm",
+                      "equals": true
                     }
                   ]
                 }

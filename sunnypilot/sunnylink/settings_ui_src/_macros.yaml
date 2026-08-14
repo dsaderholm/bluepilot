@@ -27,6 +27,13 @@ macros:
         - {type: capability, field: has_longitudinal_control, equals: true}
         - {type: capability, field: has_icbm, equals: true}
 
+  # ICBM on. MATCHES THE DEVICE: cruise.py gates its ICBM tunables with
+  # `set_enabled(ui_state.has_icbm)` -- ICBM alone, not longitudinal as well. SunnyLink must not be
+  # stricter than the screen in the car, or a setting the owner can change on the bench reads as
+  # UNAVAILABLE remotely, which is exactly what happened.
+  icbm_enabled:
+    - {type: capability, field: has_icbm, equals: true}
+
   # Longitudinal + ICBM BOTH available. Rarely what you want -- see longitudinal_or_icbm above.
   longitudinal_and_icbm:
     - {type: capability, field: has_longitudinal_control, equals: true}
