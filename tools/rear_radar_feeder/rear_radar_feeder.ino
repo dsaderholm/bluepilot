@@ -10,20 +10,30 @@
 // IT NEVER TRANSMITS TO THE RADAR. The MRR free-runs -- proven on the bench, all 64 detection
 // addresses plus the 0x174 header with nothing sent to it. The ESR this project originally planned
 // around needed Vehicle_Data and SensorInput just to stay alive; this one needs no transmit path at
-// all, which is why CAN1 below is receive-only.
+// all, which is why the radar channel below is receive-only.
 //
 // THIS MIRRORS tools/bp_rear_digest_sim.py. That file is the reference and is unit tested in
 // selfdrive/car/tests/test_rear_digest_reduction.py. When the two disagree, Python is right --
 // a sign error here inverts closing and receding, which looks entirely reasonable in a log.
 //
-// WIRING
-//   CAN1  private bus to the radar, 500 kbps, 120 ohm at each end (the radar carries one)
-//   CAN2  the car's bus 1, 500 kbps, NO added terminator -- that bus already has its two
+// WIRING, by the board's wire colours
+//   red / black        12 V switched and ground
+//   CAN1 white/lt blue THE CAR, bus 1, 500 kbps. CUT ITS 120 OHM RESISTOR -- that bus already has
+//                      its two terminators and a third takes it to ~40 ohm, which can stop the
+//                      front radar and ACC this car actually drives on.
+//   CAN2 yellow/green  the radar's private bus, 500 kbps. KEEP its 120 ohm: the radar carries the
+//                      other one, giving the ~60 ohm a healthy pair should read.
+//   purple             spare switched output, unused
 //
 #include <FlexCAN_T4.h>
 
-FlexCAN_T4<CAN1, RX_SIZE_256, TX_SIZE_16> radarBus;
-FlexCAN_T4<CAN2, RX_SIZE_16, TX_SIZE_64> carBus;
+// CHANNEL ASSIGNMENT FOLLOWS THE BOARD'S OWN LABELS, not what reads naturally in code. The
+// Electroneering hat silkscreens CAN1 as the VEHICLE side (white/light blue) and CAN2 as the DEVICE
+// side (yellow/green), confirmed by the seller 2026-08-14. Writing it the other way round would
+// mean wiring against the labels, which is the kind of thing that is correct in a commit message
+// and wrong in a car.
+FlexCAN_T4<CAN1, RX_SIZE_16, TX_SIZE_64> carBus;     // vehicle side: bus 1, digest OUT
+FlexCAN_T4<CAN2, RX_SIZE_256, TX_SIZE_16> radarBus;  // device side: private radar bus, listen only
 
 // ---- the radar's own protocol -------------------------------------------------------------
 static const uint32_t MRR_START = 0x120;
