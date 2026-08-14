@@ -43,6 +43,22 @@ HOLD_LOCKED_EDGE = rl.Color(140, 148, 156, 235)
 HOLD_LOCKED_LABEL = rl.Color(178, 186, 194, 255)
 HOLD_DOT_COLOR = rl.Color(255, 214, 90, 255)
 
+# BluePilot: the stop lamps, under the HOLD badge. Same colors as the big screen's pill.
+#
+# Ported second, ahead of the ACC pill, because it is the only readout in that column that is a
+# MEASURED FACT rather than a request -- StopLghtOn_B_Stat is the body module reporting actual lamp
+# state, whatever lit them. The owner verified it against the ground behind the car at night before
+# trusting it. Everything else on that stack is something the system WANTS.
+LAMP_LABEL_ON = "BRAKE LAMPS ON"
+LAMP_LABEL_OFF = "LAMPS OFF"
+LAMP_HEIGHT = 32
+LAMP_LABEL_SIZE = 18
+LAMP_GAP = 8              # below the HOLD badge
+LAMP_ON_FILL = rl.Color(228, 40, 40, 240)
+LAMP_OFF_FILL = rl.Color(0, 0, 0, 150)
+LAMP_OFF_EDGE = rl.Color(120, 126, 132, 190)
+LAMP_OFF_INK = rl.Color(150, 156, 162, 255)
+
 
 class MiciHudRendererBP(HudRenderer):
   """BluePilot MICI HudRenderer with brake status coloring and powerflow gauge."""
@@ -53,6 +69,7 @@ class MiciHudRendererBP(HudRenderer):
     self._torque_bar = TorqueBar()
     self._bp_params = Params()
     self._brakes_on = False
+    self._lamp_data_available = False
     self._power_flow = MiciPowerflowGauge()
     self._txt_wheel_comma_3x = gui_app.texture("icons/chffr_wheel.png", self._txt_wheel.width, self._txt_wheel.height)
     self._animate_steering_wheel = self._bp_params.get_bool("BPAnimateSteeringWheel")
@@ -83,11 +100,12 @@ class MiciHudRendererBP(HudRenderer):
       try:
         car_state_bp = sm['carStateBP']
         brake_light_status = car_state_bp.brakeLightStatus
+        self._lamp_data_available = bool(brake_light_status.dataAvailable)
         self._brakes_on = brake_light_status.dataAvailable and brake_light_status.brakeLightsOn
       except (KeyError, AttributeError):
-        self._brakes_on = False
+        self._brakes_on = self._lamp_data_available = False
     else:
-      self._brakes_on = False
+      self._brakes_on = self._lamp_data_available = False
 
     self.show_lateral_control = self._bp_params.get_bool("BpShowLateralControl")
     if self.show_lateral_control:
@@ -112,12 +130,13 @@ class MiciHudRendererBP(HudRenderer):
     # cruise and moving the set speed. A display bug here must cost the badge, not the screen.
     if not self._hold_badge_failed:
       try:
-        self._draw_hold_badge(rect)
+        below = self._draw_hold_badge(rect)
+        self._draw_brake_lamp_pill(rect, below)
       except Exception as e:  # noqa: BLE001 -- see above; the screen outranks the readout
         self._hold_badge_failed = True
         bp_ui_log.state("MiciHudRenderer", "hold_badge_error", repr(e))
 
-  def _draw_hold_badge(self, rect: rl.Rectangle) -> None:
+  def _draw_hold_badge(self, rect: rl.Rectangle) -> float:
     """The driver's own set speed, on a 536x240 screen.
 
     REDESIGNED, not scaled. The big screen's badge is 172x124 sized against a 204 px MAX box and
@@ -139,7 +158,7 @@ class MiciHudRendererBP(HudRenderer):
     """
     hold = read_icbm_hud_state(ui_state.sm)
     if not hold.has_hold:
-      return
+      return rect.y + HOLD_MARGIN      # nothing drawn; the lamp pill takes the badge's place
 
     value = str(hold.baseline)
     label_w = measure_text_cached(self._font_semi_bold, HOLD_LABEL, HOLD_LABEL_SIZE).x
@@ -171,6 +190,35 @@ class MiciHudRendererBP(HudRenderer):
     elif hold.pin_suggested:
       rl.draw_ring(rl.Vector2(x + HOLD_DOT_INSET, y + HOLD_HEIGHT / 2),
                    HOLD_DOT_RADIUS - 2, HOLD_DOT_RADIUS, 0, 360, 20, HOLD_DOT_COLOR)
+    return y + HOLD_HEIGHT + LAMP_GAP
+
+  def _draw_brake_lamp_pill(self, rect: rl.Rectangle, y: float) -> None:
+    """Are the stop lamps lit right now -- the one readout here that is measured, not requested.
+
+    Drawn in BOTH states, deliberately, and that is not padding: an indicator that only appears when
+    lit cannot be told apart from one that is broken, and "are my lamps on" is a question about both
+    answers. It draws only when the car is actually reporting lamp state, so a silent bus shows
+    nothing rather than a confident OFF.
+
+    Right-aligned under the HOLD badge, and it slides up into the badge's place when there is no
+    hold -- on a 240 px screen a reserved empty slot is a luxury.
+    """
+    if not self._lamp_data_available:
+      return
+
+    lit = self._brakes_on
+    label = LAMP_LABEL_ON if lit else LAMP_LABEL_OFF
+    text_w = measure_text_cached(self._font_semi_bold, label, LAMP_LABEL_SIZE).x
+    width = text_w + HOLD_PAD_X * 2
+    x = rect.x + rect.width - HOLD_MARGIN - width
+
+    box = rl.Rectangle(x, y, width, LAMP_HEIGHT)
+    rl.draw_rectangle_rounded(box, 0.45, 10, LAMP_ON_FILL if lit else LAMP_OFF_FILL)
+    if not lit:
+      rl.draw_rectangle_rounded_lines_ex(box, 0.45, 10, 2, LAMP_OFF_EDGE)
+    rl.draw_text_ex(self._font_semi_bold, label,
+                    rl.Vector2(x + HOLD_PAD_X, y + (LAMP_HEIGHT - LAMP_LABEL_SIZE) / 2 - 1),
+                    LAMP_LABEL_SIZE, 0, rl.WHITE if lit else LAMP_OFF_INK)
 
   def _draw_steering_wheel(self, rect: rl.Rectangle) -> None:
     """Override to add brake status coloring to wheel icon, powerflow gauge, and lateral control overlay."""

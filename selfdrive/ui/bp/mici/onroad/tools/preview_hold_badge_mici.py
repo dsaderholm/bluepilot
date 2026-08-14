@@ -31,14 +31,16 @@ W, H = 536, 240        # the comma 4 display, exactly
 SET_SPEED_CIRCLE = 162      # _draw_set_speed's drop shadow diameter, top-left at the rect origin
 WHEEL_D = 86                # the steering wheel, bottom-left
 
-# (caption, baseline, locked, pinned, pin_suggested)
+# (caption, baseline, locked, pinned, pin_suggested, lamp_available, lamps_lit)
 SCENES = [
-  ("holding 70", 70, False, False, False),
-  ("holding 105 -- widest realistic value", 105, False, False, False),
-  ("hold suppressed: a curve owns the target", 70, True, False, False),
-  ("pinned to this place", 45, False, True, False),
-  ("pin suggested here", 45, False, False, True),
-  ("no hold -- badge must not draw", 0, False, False, False),
+  ("holding 70, lamps dark", 70, False, False, False, True, False),
+  ("holding 70, stop lamps lit", 70, False, False, False, True, True),
+  ("holding 105 -- widest realistic value", 105, False, False, False, True, False),
+  ("hold suppressed: a curve owns the target", 70, True, False, False, True, True),
+  ("pinned to this place", 45, False, True, False, True, False),
+  ("no hold -- lamp pill slides up into its place", 0, False, False, False, True, True),
+  ("no lamp data on the bus -- nothing rather than a confident OFF", 70, False, False, False,
+   False, False),
 ]
 
 
@@ -46,7 +48,9 @@ def load_shipped_drawing_code():
   """Lift `_draw_hold_badge` and the module constants out of the source file."""
   tree = ast.parse(open(HUD, encoding="utf-8").read())
   cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "MiciHudRendererBP")
-  method = next(n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name == "_draw_hold_badge")
+  wanted = ("_draw_hold_badge", "_draw_brake_lamp_pill")
+  methods = [n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name in wanted]
+  assert len(methods) == len(wanted), f"expected {wanted}, found {[m.name for m in methods]}"
 
   ns = {
     "rl": rl,
@@ -57,9 +61,10 @@ def load_shipped_drawing_code():
       exec(compile(ast.Module(body=[node], type_ignores=[]), "<const>", "exec"), ns)
     except NameError:
       pass   # constants referencing car structs are irrelevant here
-  exec(compile(ast.Module(body=[method], type_ignores=[]), "<method>", "exec"), ns)
+  exec(compile(ast.Module(body=methods, type_ignores=[]), "<methods>", "exec"), ns)
 
-  for required in ("HOLD_HEIGHT", "HOLD_FILL", "HOLD_LOCKED_FILL", "HOLD_MARGIN", "HOLD_DOT_COLOR"):
+  for required in ("HOLD_HEIGHT", "HOLD_FILL", "HOLD_LOCKED_FILL", "HOLD_MARGIN", "HOLD_DOT_COLOR",
+                   "LAMP_HEIGHT", "LAMP_ON_FILL", "LAMP_OFF_FILL", "LAMP_LABEL_ON"):
     assert required in ns, f"{required} did not survive extraction -- the preview would be a lie"
   return ns
 
@@ -76,7 +81,7 @@ def main(outdir: str) -> int:
     rl.set_texture_filter(f.texture, rl.TextureFilter.TEXTURE_FILTER_BILINEAR)
 
   rect = rl.Rectangle(0, 0, W, H)
-  for i, (caption, baseline, locked, pinned, suggested) in enumerate(SCENES):
+  for i, (caption, baseline, locked, pinned, suggested, lamp_avail, lit) in enumerate(SCENES):
     tex = rl.load_render_texture(W, H)
     rl.begin_texture_mode(tex)
     # A mid-grey stand-in for the camera feed: the badge has to survive a road, not a black screen.
@@ -86,12 +91,14 @@ def main(outdir: str) -> int:
                    rl.Color(0, 0, 0, 90))
     rl.draw_circle(21 + WHEEL_D // 2, H - 14 - WHEEL_D // 2, WHEEL_D / 2, rl.Color(0, 0, 0, 90))
 
-    self = types.SimpleNamespace(_font_semi_bold=f_semi, _font_bold=f_bold)
+    self = types.SimpleNamespace(_font_semi_bold=f_semi, _font_bold=f_bold,
+                                 _lamp_data_available=lamp_avail, _brakes_on=lit)
     ns["read_icbm_hud_state"] = lambda _sm, b=baseline, lo=locked, p=pinned, s=suggested: \
       types.SimpleNamespace(has_hold=b > 0, baseline=b, hold_locked=lo, pinned=p, pin_suggested=s,
                             arrow="")
     ns["ui_state"] = types.SimpleNamespace(sm={})
-    ns["_draw_hold_badge"](self, rect)
+    below = ns["_draw_hold_badge"](self, rect)
+    ns["_draw_brake_lamp_pill"](self, rect, below)
     rl.end_texture_mode()
 
     path = os.path.join(outdir, f"mici_hold_{i}.png")
