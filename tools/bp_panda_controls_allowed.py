@@ -22,6 +22,34 @@ have set controls_allowed TRUE on the rising edge at t+542.24 -- and the log say
 for the full two seconds. **The documented logic does not explain the observed behaviour.** That is
 the finding, and it is what an upstream report needs.
 
+MECHANISM FOUND 2026-08-13, and this tool's own first answer was wrong in an instructive way.
+
+It recomputed `vehicle_moving` inline in the 0x165 handler. The real panda does NOT: vehicle_moving
+is LATCHED when 0x213 arrives, and generic_rx_checks runs after EVERY message using that latched
+value. So the brake clear fires with whatever vehicle_moving was at the last 0x213, not with the
+speed samples as they stand when the cruise edge lands.
+
+The numbers, from route 0000036b:
+
+    t+542.03   6-sample speed max 0.175 m/s   -> vehicle_moving TRUE
+    t+542.24   6-sample speed max 0.097 m/s   -> vehicle_moving FALSE
+    t+542.243  cruise rising edge on bus 0    <- lands ON that boundary
+
+If the last 0x213 preceded the samples clearing, vehicle_moving is stale-TRUE when the edge fires,
+generic_rx_checks clears controls_allowed on the same frame that pcm_cruise_check set it, and
+nothing restores it because panda only allows on an EDGE. Two seconds later selfdrived raises
+controlsMismatch, which is ET.IMMEDIATE_DISABLE.
+
+**IT IS A RACE, WHICH IS WHY IT IS INTERMITTENT.** The owner's resume that worked was at 0.0 mph,
+with the sample window long since clear; the two that failed were at 0.2 mph, right at the crossing.
+Any fix has to close the race rather than move a threshold -- moving one only shifts the speed at
+which the crossing happens.
+
+Note also that 0x165 arrives at 50 Hz while panda's rx check declares it at 10 Hz. That is not the
+fault (the check is a minimum, and rx_checks_invalid was false throughout) but it does mean the
+cruise edge is sampled five times more often than the declared rate, which narrows the window in
+which a stale vehicle_moving can catch it.
+
 WHAT IS LEFT for whoever picks this up: `cruise_engaged_prev` is panda-internal and persists across
 the whole drive, so an edge this reconstruction sees is only real if panda's view of the bus matches
 ours. The next step is whether ford_rx_hook processes 0x165 at that moment at all -- bus routing
