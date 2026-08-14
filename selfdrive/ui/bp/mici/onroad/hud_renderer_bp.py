@@ -102,6 +102,8 @@ class MiciHudRendererBP(HudRenderer):
     self._overlay_size = 0
     # Latched on any drawing error; keeps a display bug off the screen. See _render.
     self._hold_badge_failed = False
+    # Last drawn HOLD badge rect; the tap target for pinning. None = nothing to hit.
+    self._hold_rect = None
 
   def _update_state(self) -> None:
     super()._update_state()
@@ -177,7 +179,8 @@ class MiciHudRendererBP(HudRenderer):
     """
     hold = read_icbm_hud_state(ui_state.sm)
     if not hold.has_hold:
-      return rect.y + HOLD_MARGIN      # nothing drawn; the lamp pill takes the badge's place
+      self._hold_rect = None           # no badge on screen, no tap target
+      return rect.y + HOLD_MARGIN      # nothing drawn; the stack closes up
 
     value = str(hold.baseline)
     label_w = measure_text_cached(self._font_semi_bold, HOLD_LABEL, HOLD_LABEL_SIZE).x
@@ -372,7 +375,29 @@ class MiciHudRendererBP(HudRenderer):
     rl.draw_text_ex(self._font_bold, letter, rl.Vector2(text_x, text_y), text_size, 0, color)
 
   def _handle_mouse_press(self, mouse_pos):
-    """Toggle FordPrefLateralControl between PrimaryLateralControl.curvature and .angle on overlay click."""
+    """Tap the HOLD badge to pin this hold to this place, or unpin it. Then the lateral overlay.
+
+    CHECKED FIRST, and it consumes the event. The big screen learned this the hard way: it called
+    super() before its own hit test, so every badge tap also reached upstream's handler and slid the
+    sidebar out. The pin request was still raised underneath, but the menu is what the driver sees,
+    so the gesture read as dead. Checking our own target first is what makes it a button rather
+    than a side effect of a tap that also does something else.
+
+    Only a REQUEST is raised. selfdrived does the work, because that is where the GPS fix and the
+    live baseline are; the UI has neither and must not grow a second copy of either.
+
+    The badge is the target because it is already the thing on screen that means "hold", and
+    because the cruise buttons are full -- every one carries a settled meaning, and adding a gesture
+    would mean relearning one to gain a rare action.
+    """
+    if self._hold_rect is not None and rl.check_collision_point_rec(mouse_pos, self._hold_rect):
+      gui_app._mouse_events.clear()
+      try:
+        self._bp_params.put_bool("IcbmPinHoldRequest", True)
+      except Exception:  # noqa: BLE001 -- a failed pin must not take the on-road screen down
+        bp_ui_log.state("MiciHudRenderer", "pin_request_failed", True)
+      return
+
     if self._overlay_size <= 0 or self.lateral_mode not in (LateralMode.curvature, LateralMode.angle):
       return
 
