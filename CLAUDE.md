@@ -622,6 +622,64 @@ because the small screen is where a layout mistake is most likely and least visi
 Geometry cannot be carried over: the big-screen badge is sized against the MAX box and stacks four
 elements under it, which will not fit.
 
+## SUNNYLINK: REACHABLE IS NOT THE SAME AS USABLE
+
+Four bugs in one feature on 2026-08-13, every one found from a screenshot the owner sent, and every
+one passing the audit, the schema validation and the full suite the whole time. The checks verify
+that the JSON is well-formed and complete. **None of them verifies that a human can reach the
+setting**, which is the only thing that matters.
+
+1. **A bare list of rules is an AND.** `{$ref: longitudinal_and_icbm}` requires BOTH capabilities --
+   the macro name says so. Upstream wraps the same two in `type: any` to get OR. Using the raw macro
+   greyed out all 26 added settings on a car with ICBM and stock ACC, which is his car.
+2. **Section-level `option` items do not render.** Every option slider upstream ships lives in a
+   `sub_panel`; section-level items are all toggles. Speed limits appeared and SCC/ICBM did not, and
+   that was the only difference between them.
+3. **SunnyLink must never gate more tightly than the device.** `cruise.py` gates ICBM tunables on
+   `has_icbm` ALONE and does not capability-gate SCC or speed limits at all. Anything stricter means
+   a setting he can change on the bench reads as UNAVAILABLE remotely. **The device is the spec.**
+4. **Fork additions include new CHOICES, not just new params.** `SpeedLimitOffsetType` has four
+   buttons on the device -- None / Fixed / % / By Limit -- and SunnyLink had three. A car set to the
+   fourth matched nothing and the control rendered BLANK. The audit could not see it twice over: it
+   compared presence only, and the device passes `buttons=SPEED_LIMIT_OFFSET_TYPE_BUTTONS`, a NAME,
+   which the AST extractor returned None for.
+
+Both audit gaps are fixed -- `_literal` resolves names against module-level assignments, and
+`option_mismatches()` compares choices -- and `test_sunnylink_settings_complete.py` covers it. The
+compiler also dereferences `trigger_key` unconditionally, so a sub-panel needs one even where the
+schema says only `id` and `label` are required; it fails with a bare KeyError.
+
+## REVIEW THE FAILURE PATHS INSIDE THE FAILURE HANDLING
+
+A review on 2026-08-13 of code written HOURS earlier found two real bugs, and both had the same
+shape -- an error path inside an error handler, which no test exercises because every test drives
+the happy path:
+
+- soundd's retry loop constructed `SounddBP()` OUTSIDE its own `try`. `__init__` loads sound files
+  and opens a socket, so a missing audio device raises there and escaped `main()` -- the fix for a
+  crash loop contained a path that caused one.
+- The mici HOLD badge left `_hold_rect` populated when it latched off, so a badge that threw once
+  stopped drawing while its rectangle kept accepting taps. An invisible button.
+
+**When you add a guard, review the guard.** 589 green tests said nothing about either, and the same
+blindness produced all four SunnyLink bugs above: structure checked, behaviour unchecked.
+
+## SOUNDD CRASH-LOOPS ON THE COMMA 4, AND THAT LOOKS LIKE A COMMS FAULT
+
+upstream's `soundd_thread` ends its loop on a bare `assert stream.active`. When the output stream
+stops -- device suspend, underrun, the comma 4's amplifier changing state -- the process exits,
+manager restarts it, and it dies again. **The restart churn is what the driver sees: "low
+communication rate between processes", then devicestate and managerstate complaints.** It recovers
+after a couple of minutes and correlates with cruise use, because that is when alerts fire.
+
+Not reproducible on the 3X. `selfdrive/ui/bp/soundd_bp.py` now reopens the stream instead of dying,
+in the wrapper rather than in upstream's loop, since a wrapper costs nothing on the next merge.
+
+**Why this fork carries an upstream bug**, against the rule above: this fork ships `soundd_bp` AS
+the soundd process, and ICBM drives far more engage/disengage cycles than stock, so it exercises the
+stream much harder. A latent upstream bug we make LIKELY is ours to survive, even while it stays
+theirs to fix.
+
 ## Keep only the additions that still earn their place
 
 ## Keep only the additions that still earn their place
