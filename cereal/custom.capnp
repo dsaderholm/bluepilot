@@ -1495,7 +1495,34 @@ struct CarStateBP @0xb057204d7deadf3f {
   }
 }
 
-struct CustomReserved15 @0xbd443b539493bc68 {
+# FusionPilot: the rear radar digest, as the feeder microcontroller sends it.
+#
+# NOT raw detections. The MRR emits 64 detection messages at 33 Hz -- ~2100 frames/s, measured on
+# the bench 2026-08-14 -- and bus 1 is already 60-73% loaded, so the feeder reduces them to the
+# nearest CLOSING target per side before anything reaches this message. See bp_rear_radar.dbc.
+#
+# Deliberately its own message rather than a field on carStateBP: that one is declared at 100 Hz
+# and already over-published, and hanging 20 Hz sensor data off it would republish it five times
+# over on every BluePilot Ford, most of which have no rear radar at all.
+struct RearRadarBP @0xbd443b539493bc68 {
+  # The feeder is talking AND the radar behind it is alive. Both, because a feeder that keeps
+  # sending after its radar dies would otherwise report an empty road forever.
+  dataAvailable @0 :Bool;
+  radarAlive @1 :Bool;
+  # Rate of MRR_Detection frames the feeder sees. A silent digest cannot otherwise be told from an
+  # empty road, and those must never read the same to a feature whose job is refusing when blind.
+  detectionHz @2 :UInt8;
+  validDetections @3 :UInt8;
+  left @4 :Target;
+  right @5 :Target;
+
+  struct Target {
+    detected @0 :Bool;
+    dRel @1 :Float32;      # m behind us, positive rearward
+    yRel @2 :Float32;      # m lateral, left positive
+    vRel @3 :Float32;      # m/s, POSITIVE = closing on us -- matches RearApproachSide.from_radar
+    targetCount @4 :UInt8; # closing targets this side had before reduction
+  }
 }
 
 struct CustomReserved16 @0xfc6241ed8877b611 {

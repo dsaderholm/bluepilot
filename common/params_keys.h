@@ -342,6 +342,11 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // hardware that is not already fitted, and an unavailable radar reports unavailable rather
     // than clear. Off is for isolating it when the band or the debounce is being fitted from logs.
     {"PassingAssistAdjacentLane", {PERSISTENT | BACKUP, BOOL, "1"}},
+    // FusionPilot: read the rear radar digest off bus 1. Ships ON, and that is not a claim that a
+    // radar is fitted -- card builds a parser that simply never sees a frame, RearApproach reports
+    // unavailable, and unavailable already refuses rather than clears. Off is for isolating the
+    // parser if the feeder is ever suspected of putting traffic on a bus that is 60-73% loaded.
+    {"PassingAssistRearRadar", {PERSISTENT | BACKUP, BOOL, "1"}},
     // BluePilot: draw the speed and distance of the next-lane vehicle over it on the road view.
     // Separate from PassingAssistAdjacentLane above, which is the detection itself: turning the
     // display off must not stop the gate working, and turning the gate off must not leave a

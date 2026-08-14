@@ -103,6 +103,9 @@ DEFAULT_TARGETS = [
   # unconfirmed_lead -> ICBM. Static, because the guarantee is structural and structural guarantees
   # are the kind a later change erases with every test still green.
   "selfdrive/car/tests/test_rear_radar_isolation.py",
+  # Built at car init, where a bad parser strands the car on "waiting to start". Stubs CANParser
+  # and asserts on the arguments -- the behavioural suite cannot reach this code at all.
+  "selfdrive/car/tests/test_rear_radar_parser.py",
   "selfdrive/car/tests/test_no_int_on_capnp_enums.py",
   # Both written for passing assist and neither ever collected -- caught by
   # test_bp_tests_are_registered, which is the only reason anyone noticed. A test that does not

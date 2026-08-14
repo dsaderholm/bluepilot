@@ -41,7 +41,10 @@ def main():
                             # the observer sees the lane it would move into. Note the rate: card
                             # emits it at ~8.3 Hz on a Delphi MRR, not the 20 Hz declared in
                             # services.py, so anything counting frames must gate on sm.updated.
-                            'liveMapDataSP', 'carStateSP', 'carStateBP', 'liveTracks',
+                            # rearRadarBP is the rear digest, published only when a feeder is
+                            # fitted -- absent on every other car, where sm.valid stays False and
+                            # RearApproach correctly reports unavailable rather than clear.
+                            'liveMapDataSP', 'carStateSP', 'carStateBP', 'liveTracks', 'rearRadarBP',
                             'selfdriveStateSP', gps_location_service],
                            poll='carState')
 

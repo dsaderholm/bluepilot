@@ -191,6 +191,15 @@ class PassingAssistSettingsLayout(Widget):
                      "reporting, the onroad panel says so rather than assuming the lane is clear."), "PassingAssistAdjacentLane"),
       param="PassingAssistAdjacentLane")
 
+    self._rear_radar = toggle_item_sp(
+      title=tr("Use The Rear Radar"),
+      description=recommended(tr("Read the rear radar, so the car can tell whether something is "
+                     "closing from behind before it moves. This is what actually permits a lane "
+                     "change - without it every side reads unavailable, and unavailable refuses "
+                     "rather than clears. Harmless with no radar fitted: it listens to a bus that "
+                     "never carries the message."), "PassingAssistRearRadar"),
+      param="PassingAssistRearRadar")
+
     self._actuate = toggle_item_sp(
       title=tr("Make The Lane Change Itself"),
       description=recommended(tr("Signal and perform the pass, instead of only saying it would. "
@@ -361,6 +370,7 @@ class PassingAssistSettingsLayout(Widget):
 
       SectionHeader(tr("The Lane You Would Move Into")),
       self._adjacent_lane,
+      self._rear_radar,
 
       SectionHeader(tr("Oncoming Traffic")),
       self._actuate,

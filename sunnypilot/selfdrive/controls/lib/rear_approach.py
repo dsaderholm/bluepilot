@@ -147,9 +147,33 @@ class RearApproach:
   def update(self, sm) -> None:
     """Populate from whatever rear sensing exists.
 
-    Today: nothing does, so both sides reset to unavailable every cycle. When a source is fitted
-    this is the only function that changes -- it calls from_radar() or from_blis() per side and
-    everything downstream, including the gate ordering and the display, already works.
+    RESET FIRST, ALWAYS. Every path below either fills a side or leaves it unavailable, and
+    unavailable is not clear -- see the note at the top of this file. A missing message, a dead
+    feeder, a radar that stopped: all of them must land here as "we cannot see", never as
+    "nothing is there".
     """
     self.left.reset()
     self.right.reset()
+
+    # The digest, when a feeder is fitted. Absent on every car that has not had one built, which is
+    # why this is a quiet return rather than anything that logs or alerts.
+    try:
+      if not sm.valid.get("rearRadarBP", False) or not sm.updated.get("rearRadarBP", False):
+        return
+      rr = sm["rearRadarBP"]
+    except (KeyError, AttributeError, TypeError):
+      return
+
+    # dataAvailable is the feeder's own verdict: it is talking AND its radar is alive AND detection
+    # frames are still arriving. A feeder that outlived its sensor would otherwise report an empty
+    # road indefinitely, which is the one failure this module was written to refuse.
+    if not bool(rr.dataAvailable):
+      return
+
+    for side, msg in ((self.left, rr.left), (self.right, rr.right)):
+      if not bool(msg.detected):
+        # SEEN AND EMPTY is a real answer, and a different one from not looking. The side is
+        # available with no target, so blocks_lane_change can clear it rather than veto by silence.
+        side.available = True
+        continue
+      side.from_radar(float(msg.dRel), float(msg.vRel))

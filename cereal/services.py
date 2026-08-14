@@ -98,6 +98,9 @@ _services: dict[str, tuple] = {
   # BluePilot: controllerStateBP (lateral uncertainty) + carStateBP (hybrid drive)
   "controllerStateBP": (True, 100., 10),
   "carStateBP": (True, 100., 10),
+  # FusionPilot: the rear radar digest, at the rate the sensor actually runs. 20 Hz rather than
+  # carStateBP's 100 -- treat that one as a mistake not to repeat, not a precedent.
+  "rearRadarBP": (True, 20., 5),
 
   # debug
   "uiDebug": (True, 0., 1),

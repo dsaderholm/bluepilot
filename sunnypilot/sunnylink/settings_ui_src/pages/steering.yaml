@@ -368,6 +368,12 @@ sections:
       description: Use the front radar to see traffic in the next lane over, and stay quiet when that lane is already full
         of vehicles no faster than the car ahead of you. Uses the radar already fitted to the car. If the radar is not reporting,
         the onroad panel says so rather than assuming the lane is clear.
+    - key: PassingAssistRearRadar
+      widget: toggle
+      title: Use The Rear Radar
+      description: 'Read the rear radar, so the car can tell whether something is closing from behind before it moves.
+        This is what actually permits a lane change - without it every side reads unavailable, and unavailable refuses
+        rather than clears. Harmless with no radar fitted: it listens to a bus that never carries the message.'
     - key: PassingAssistActuate
       widget: toggle
       title: Make The Lane Change Itself
