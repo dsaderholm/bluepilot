@@ -251,8 +251,13 @@ def main() -> None:
   merge, an edit to upstream's loop is a conflict forever.
   """
   while True:
-    soundd = SounddBP()
+    soundd = None
     try:
+      # CONSTRUCTION IS INSIDE THE TRY on purpose. __init__ loads the sound files and opens the
+      # test socket, and if the audio device is transiently gone it can raise here just as easily
+      # as in the loop -- with the constructor outside, that exception escapes main() and
+      # reinstates the very crash loop this function exists to remove.
+      soundd = SounddBP()
       soundd.soundd_thread()
       return                      # a clean return means shutdown, not failure
     except AssertionError:
@@ -260,7 +265,8 @@ def main() -> None:
     except Exception:
       cloudlog.exception("soundd_bp: unexpected failure, reopening")
     finally:
-      soundd.close()
+      if soundd is not None:
+        soundd.close()
     time.sleep(STREAM_RETRY_DELAY_S)
 
 

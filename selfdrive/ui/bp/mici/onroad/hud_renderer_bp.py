@@ -169,6 +169,11 @@ class MiciHudRendererBP(HudRenderer):
       result = draw(*args)
     except Exception as e:  # noqa: BLE001 -- the screen outranks any one readout
       self._readout_failed[name] = True
+      # A latched-off badge leaves no tap target behind. _hold_rect is only cleared by the badge's
+      # own no-hold path, so without this a badge that threw once would stop drawing while its last
+      # rectangle kept firing pin requests -- an invisible button, which is worse than none.
+      if name == "hold":
+        self._hold_rect = None
       bp_ui_log.state("MiciHudRenderer", f"{name}_readout_error", repr(e))
       return fallback
     return fallback if result is None else result
