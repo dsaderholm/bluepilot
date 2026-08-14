@@ -4,6 +4,7 @@ import hashlib
 import os
 import socket
 import tempfile
+import time
 import wave
 
 import numpy as np
@@ -36,6 +37,9 @@ SOUND_PACK_FILES = {
     AudibleAlert.refuse: os.path.join(CUSTOM_SOUND_DIR, "tesla_warning.wav"),
   },
 }
+# Pause before reopening a dead audio stream. Long enough that a permanently dead output device
+# cannot spin the CPU, short enough that the driver gets their chimes back without noticing.
+STREAM_RETRY_DELAY_S = 2.0
 SOUND_OUTPUT_DEVICE_ENV = "BP_SOUNDD_OUTPUT_DEVICE"
 SOUND_TEST_CONTROL_ENV = "BP_SOUNDD_TEST_CONTROL"
 TEST_ALERTS = {
@@ -217,11 +221,47 @@ class SounddBP(Soundd):
 
 
 def main() -> None:
-  soundd = SounddBP()
-  try:
-    soundd.soundd_thread()
-  finally:
-    soundd.close()
+  """Run soundd, REOPENING the audio stream instead of dying with it.
+
+  upstream's soundd_thread ends its loop with a bare `assert stream.active`, so the moment the
+  output stream stops -- a device suspend, an underrun, the comma 4's amplifier changing state --
+  it raises AssertionError and the process exits. manager restarts it, it dies again, and the
+  restart storm is what the driver actually experiences:
+
+      File "selfdrive/ui/soundd.py", line 195, in soundd_thread
+        assert stream.active
+      AssertionError
+
+  Reported 2026-08-13 by a comma 4 owner: "low communication rate between processes", then
+  devicestate and managerstate complaints, seconds after using cruise control, recovering after two
+  or three minutes. Process churn starves the daemons that report health; soundd is merely the one
+  dying. He guessed the trigger was stoplights, which fits -- that is when alerts fire.
+
+  WHY THIS FORK OWNS IT even though the assert is openpilot's and this file is BluePilot's. The
+  owner's comma 3X has never shown it, so it is hardware-specific to the comma 4 -- but this fork
+  ships soundd_bp as the soundd process, and ICBM drives far more engage/disengage cycles than
+  stock, so the stream is exercised much harder here. A latent upstream bug we make likely is ours
+  to survive, whatever it is upstream's to fix. Report it there too.
+
+  A dead audio stream is worth RECOVERING, not worth killing a process over: the car drives fine
+  without a chime, and nothing soundd does is safety-critical. Retrying in-process is both faster
+  and quieter than letting manager do it.
+
+  Deliberately in this file, not in selfdrive/ui/soundd.py -- a wrapper costs nothing on the next
+  merge, an edit to upstream's loop is a conflict forever.
+  """
+  while True:
+    soundd = SounddBP()
+    try:
+      soundd.soundd_thread()
+      return                      # a clean return means shutdown, not failure
+    except AssertionError:
+      cloudlog.exception("soundd_bp: audio stream died, reopening")
+    except Exception:
+      cloudlog.exception("soundd_bp: unexpected failure, reopening")
+    finally:
+      soundd.close()
+    time.sleep(STREAM_RETRY_DELAY_S)
 
 
 if __name__ == "__main__":
