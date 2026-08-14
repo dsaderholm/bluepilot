@@ -17,7 +17,17 @@ macros:
   longitudinal:
     - {type: capability, field: has_longitudinal_control, equals: true}
 
-  # Longitudinal + ICBM both available.
+  # EITHER longitudinal control OR ICBM -- the correct gate for anything that works through the
+  # cruise buttons as well as through direct longitudinal control. A bare list of rules is an AND,
+  # so this needs the explicit `any`; using longitudinal_and_icbm below greyed out all 26 of this
+  # fork's settings on a car that has ICBM but not alpha long, which is the owner's own car.
+  longitudinal_or_icbm:
+    - type: any
+      conditions:
+        - {type: capability, field: has_longitudinal_control, equals: true}
+        - {type: capability, field: has_icbm, equals: true}
+
+  # Longitudinal + ICBM BOTH available. Rarely what you want -- see longitudinal_or_icbm above.
   longitudinal_and_icbm:
     - {type: capability, field: has_longitudinal_control, equals: true}
     - {type: capability, field: has_icbm, equals: true}

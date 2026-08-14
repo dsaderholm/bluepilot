@@ -215,9 +215,9 @@ sections:
       title: "Automatic Speed Limit Following"
       description: "Follow detected speed limits in both directions without confirmation. Stock behavior only ever lowers the set speed and requires you to confirm increases. Every automatic change is announced on screen, and any cruise button press takes back control."
       visibility:
-      - {$ref: "#/macros/longitudinal_and_icbm"}
+      - {$ref: "#/macros/longitudinal_or_icbm"}
       enablement:
-      - {$ref: "#/macros/longitudinal_and_icbm"}
+      - {$ref: "#/macros/longitudinal_or_icbm"}
     - key: SpeedLimitFallback
       widget: multiple_button
       title: "SpeedLimitFallback"
@@ -228,9 +228,9 @@ sections:
       - value: 1
         label: "Last Known"
       visibility:
-      - {$ref: "#/macros/longitudinal_and_icbm"}
+      - {$ref: "#/macros/longitudinal_or_icbm"}
       enablement:
-      - {$ref: "#/macros/longitudinal_and_icbm"}
+      - {$ref: "#/macros/longitudinal_or_icbm"}
     - key: SpeedLimitLookaheadHigher
       widget: option
       title: "Speed Up Early For Faster Roads"
@@ -239,9 +239,9 @@ sections:
       max: 15
       step: 1
       visibility:
-      - {$ref: "#/macros/longitudinal_and_icbm"}
+      - {$ref: "#/macros/longitudinal_or_icbm"}
       enablement:
-      - {$ref: "#/macros/longitudinal_and_icbm"}
+      - {$ref: "#/macros/longitudinal_or_icbm"}
     - key: SpeedLimitMaxSetSpeed
       widget: option
       title: "Maximum Set Speed"
@@ -250,9 +250,9 @@ sections:
       max: 100
       step: 5
       visibility:
-      - {$ref: "#/macros/longitudinal_and_icbm"}
+      - {$ref: "#/macros/longitudinal_or_icbm"}
       enablement:
-      - {$ref: "#/macros/longitudinal_and_icbm"}
+      - {$ref: "#/macros/longitudinal_or_icbm"}
     - key: SpeedLimitOffsetHigh
       widget: option
       title: "Offset on Fast Roads"
@@ -261,9 +261,9 @@ sections:
       max: 25
       step: 1
       visibility:
-      - {$ref: "#/macros/longitudinal_and_icbm"}
+      - {$ref: "#/macros/longitudinal_or_icbm"}
       enablement:
-      - {$ref: "#/macros/longitudinal_and_icbm"}
+      - {$ref: "#/macros/longitudinal_or_icbm"}
     - key: SpeedLimitOffsetHighThreshold
       widget: option
       title: "Medium / Fast Breakpoint"
@@ -272,9 +272,9 @@ sections:
       max: 85
       step: 5
       visibility:
-      - {$ref: "#/macros/longitudinal_and_icbm"}
+      - {$ref: "#/macros/longitudinal_or_icbm"}
       enablement:
-      - {$ref: "#/macros/longitudinal_and_icbm"}
+      - {$ref: "#/macros/longitudinal_or_icbm"}
     - key: SpeedLimitOffsetLow
       widget: option
       title: "Offset on Slow Roads"
@@ -283,9 +283,9 @@ sections:
       max: 25
       step: 1
       visibility:
-      - {$ref: "#/macros/longitudinal_and_icbm"}
+      - {$ref: "#/macros/longitudinal_or_icbm"}
       enablement:
-      - {$ref: "#/macros/longitudinal_and_icbm"}
+      - {$ref: "#/macros/longitudinal_or_icbm"}
     - key: SpeedLimitOffsetMid
       widget: option
       title: "Offset on Medium Roads"
@@ -294,9 +294,9 @@ sections:
       max: 25
       step: 1
       visibility:
-      - {$ref: "#/macros/longitudinal_and_icbm"}
+      - {$ref: "#/macros/longitudinal_or_icbm"}
       enablement:
-      - {$ref: "#/macros/longitudinal_and_icbm"}
+      - {$ref: "#/macros/longitudinal_or_icbm"}
     - key: SpeedLimitOffsetMidThreshold
       widget: option
       title: "Slow / Medium Breakpoint"
@@ -305,9 +305,9 @@ sections:
       max: 60
       step: 5
       visibility:
-      - {$ref: "#/macros/longitudinal_and_icbm"}
+      - {$ref: "#/macros/longitudinal_or_icbm"}
       enablement:
-      - {$ref: "#/macros/longitudinal_and_icbm"}
+      - {$ref: "#/macros/longitudinal_or_icbm"}
 - id: smart_cruise
   title: Smart Cruise Control
   description: ''
@@ -365,187 +365,202 @@ sections:
       - type: capability
         field: has_icbm
         equals: true
-  - key: SmartCruiseControlMapDecel
-    widget: option
-    title: "Map Curve Braking Rate"
-    description: "How hard to slow for a turn the map knows about. This also sets how early it starts: a gentler rate needs more distance, so the set speed begins falling sooner. Lower this if exit ramps come up too fast. Above 1.3 m/s2 the stop lamps light, so values past that trade the BRAKE LAMPS readout for a later, harder slowdown."
-    min: 4
-    max: 25
-    step: 1
-    visibility:
-    - {$ref: "#/macros/longitudinal_and_icbm"}
-    enablement:
-    - {$ref: "#/macros/longitudinal_and_icbm"}
-  - key: SmartCruiseControlMapFactor
-    widget: option
-    title: "Mapped Corner Speed - Tight"
-    description: "Scales the speed tight mapped corners and exit ramps are taken at. 100% uses the map's own number, which matches the posted advisory. Lower it if the steering struggles to hold those curves at the advisory speed. This one governs corners of 25 mph and below, blending out to the highway setting by 45 mph."
-    min: 50
-    max: 100
-    step: 5
-    visibility:
-    - {$ref: "#/macros/longitudinal_and_icbm"}
-    enablement:
-    - {$ref: "#/macros/longitudinal_and_icbm"}
-  - key: SmartCruiseControlMapHighSpeedFactor
-    widget: option
-    title: "Mapped Corner Speed - Highway"
-    description: "Scales the speed faster mapped corners are taken at, from 45 mph upward. 100% uses the map's own number. Separate from the setting above because a tight ramp and a highway sweeper need opposite adjustments."
-    min: 50
-    max: 100
-    step: 5
-    visibility:
-    - {$ref: "#/macros/longitudinal_and_icbm"}
-    enablement:
-    - {$ref: "#/macros/longitudinal_and_icbm"}
-  - key: SmartCruiseControlVisionHighSpeedFactor
-    widget: option
-    title: "Curve Sensitivity (High Speed)"
-    description: "The same scale for turns taken at highway speed, where the same corner needs a very different amount of slowing."
-    min: 50
-    max: 150
-    step: 5
-    visibility:
-    - {$ref: "#/macros/longitudinal_and_icbm"}
-    enablement:
-    - {$ref: "#/macros/longitudinal_and_icbm"}
-  - key: SmartCruiseControlVisionLowSpeedFactor
-    widget: option
-    title: "Curve Sensitivity (Low Speed)"
-    description: "How much to slow for turns taken at low speed. Above 100% slows more than the model asks for, below 100% slows less."
-    min: 50
-    max: 150
-    step: 5
-    visibility:
-    - {$ref: "#/macros/longitudinal_and_icbm"}
-    enablement:
-    - {$ref: "#/macros/longitudinal_and_icbm"}
+  sub_panels:
+  - id: scc_tuning
+    label: Smart Cruise Control Tuning
+    # The compiler dereferences trigger_key unconditionally, so a sub-panel needs one even when
+    # nothing should gate it. Vision is the closer of the two toggles to this tuning and the one
+    # the owner leaves on; the map factors live here too because a second sub-panel for two
+    # sliders is worse than one panel named for what it tunes.
+    trigger_key: SmartCruiseControlVision
+    items:
+    - key: SmartCruiseControlMapDecel
+      widget: option
+      title: "Map Curve Braking Rate"
+      description: "How hard to slow for a turn the map knows about. This also sets how early it starts: a gentler rate needs more distance, so the set speed begins falling sooner. Lower this if exit ramps come up too fast. Above 1.3 m/s2 the stop lamps light, so values past that trade the BRAKE LAMPS readout for a later, harder slowdown."
+      min: 4
+      max: 25
+      step: 1
+      visibility:
+      - {$ref: "#/macros/longitudinal_or_icbm"}
+      enablement:
+      - {$ref: "#/macros/longitudinal_or_icbm"}
+    - key: SmartCruiseControlMapFactor
+      widget: option
+      title: "Mapped Corner Speed - Tight"
+      description: "Scales the speed tight mapped corners and exit ramps are taken at. 100% uses the map's own number, which matches the posted advisory. Lower it if the steering struggles to hold those curves at the advisory speed. This one governs corners of 25 mph and below, blending out to the highway setting by 45 mph."
+      min: 50
+      max: 100
+      step: 5
+      visibility:
+      - {$ref: "#/macros/longitudinal_or_icbm"}
+      enablement:
+      - {$ref: "#/macros/longitudinal_or_icbm"}
+    - key: SmartCruiseControlMapHighSpeedFactor
+      widget: option
+      title: "Mapped Corner Speed - Highway"
+      description: "Scales the speed faster mapped corners are taken at, from 45 mph upward. 100% uses the map's own number. Separate from the setting above because a tight ramp and a highway sweeper need opposite adjustments."
+      min: 50
+      max: 100
+      step: 5
+      visibility:
+      - {$ref: "#/macros/longitudinal_or_icbm"}
+      enablement:
+      - {$ref: "#/macros/longitudinal_or_icbm"}
+    - key: SmartCruiseControlVisionHighSpeedFactor
+      widget: option
+      title: "Curve Sensitivity (High Speed)"
+      description: "The same scale for turns taken at highway speed, where the same corner needs a very different amount of slowing."
+      min: 50
+      max: 150
+      step: 5
+      visibility:
+      - {$ref: "#/macros/longitudinal_or_icbm"}
+      enablement:
+      - {$ref: "#/macros/longitudinal_or_icbm"}
+    - key: SmartCruiseControlVisionLowSpeedFactor
+      widget: option
+      title: "Curve Sensitivity (Low Speed)"
+      description: "How much to slow for turns taken at low speed. Above 100% slows more than the model asks for, below 100% slows less."
+      min: 50
+      max: 150
+      step: 5
+      visibility:
+      - {$ref: "#/macros/longitudinal_or_icbm"}
+      enablement:
+      - {$ref: "#/macros/longitudinal_or_icbm"}
+
 - id: intelligent_cruise_button_management
   title: Intelligent Cruise Button Management
   description: How the set speed is moved on cars whose stock cruise control cannot be commanded directly
   enablement:
-  - {$ref: "#/macros/longitudinal_and_icbm"}
-  items:
-  - key: IcbmBaselineResetDelta
-    widget: option
-    title: "Forget My Set Speed On Limit Change"
-    description: "When you adjust the set speed yourself, ICBM keeps every other feature working but aims at your number instead of the speed limit target. This is how far the posted limit has to move before your number is discarded and Speed Limit Assist takes over again. Curves and lead vehicles never discard it. You can also hand it back at any time by setting the speed to exactly the limit, or by canceling and re-engaging."
-    min: 0
-    max: 30
-    step: 1
-    visibility:
-    - {$ref: "#/macros/longitudinal_and_icbm"}
-    enablement:
-    - {$ref: "#/macros/longitudinal_and_icbm"}
-  - key: IcbmLeadMaxDistance
-    widget: option
-    title: "Unconfirmed Vehicle Max Distance"
-    description: "A sanity limit on the setting above: never react to an unconfirmed vehicle further away than this, however early the timing says."
-    min: 40
-    max: 200
-    step: 10
-    visibility:
-    - {$ref: "#/macros/longitudinal_and_icbm"}
-    enablement:
-    - {$ref: "#/macros/longitudinal_and_icbm"}
-  - key: IcbmLeadMaxTtc
-    widget: option
-    title: "Slow For Unconfirmed Vehicles"
-    description: "How early to slow for a vehicle the camera sees but the radar has not confirmed -- most importantly a stopped car ahead. Measured as how many seconds away it is. Higher reacts sooner. This is the control that changes behavior; the distance limit below rarely comes into play."
-    min: 10
-    max: 80
-    step: 5
-    visibility:
-    - {$ref: "#/macros/longitudinal_and_icbm"}
-    enablement:
-    - {$ref: "#/macros/longitudinal_and_icbm"}
-  - key: IcbmMaxTargetDrop
-    widget: option
-    title: "Max Set Speed Drop Per Step"
-    description: "How far the set speed may fall in one step for a curve or a speed limit. This does not change how fast the car slows down -- it changes how. Stock ACC brakes for one large drop and coasts through a series of small ones, so smaller steps trade braking for coasting at the same net deceleration. Watch the BRAKE LAMPS readout: regulations light the stop lamps above 1.3 m/s2 of automatic braking, so lower this if the lamps come on during routine slowing. 0 disables the cap. Never applies to a stop sign or an unconfirmed vehicle -- those bypass it."
-    min: 0
-    max: 15
-    step: 1
-    visibility:
-    - {$ref: "#/macros/longitudinal_and_icbm"}
-    enablement:
-    - {$ref: "#/macros/longitudinal_and_icbm"}
-  - key: IcbmMaxTargetRise
-    widget: option
-    title: "Max Set Speed Rise Per Step"
-    description: "How much the set speed may climb in one step when returning to cruise speed after a curve or a low speed limit. ICBM holds the button rather than tapping it, so without a cap the car accelerates back up as hard as it can. Lower is gentler. 0 disables the cap."
-    min: 0
-    max: 15
-    step: 1
-    visibility:
-    - {$ref: "#/macros/longitudinal_and_icbm"}
-    enablement:
-    - {$ref: "#/macros/longitudinal_and_icbm"}
-  - key: IcbmModelStopEnabled
-    widget: toggle
-    title: "Slow For Stop Signs And Lights"
-    description: "Use the driving model's own stop intent to bring the set speed down for stop signs and red lights with no vehicle at them. This is the one case the setting above cannot catch, since an empty intersection produces no vehicle to measure. Weaker evidence than the vehicle case -- how long the model insists, and a speed floor, are its only filters."
-    visibility:
-    - {$ref: "#/macros/longitudinal_and_icbm"}
-    enablement:
-    - {$ref: "#/macros/longitudinal_and_icbm"}
-  - key: IcbmModelStopMinDecel
-    widget: option
-    title: "Stop Sign Sensitivity"
-    description: "How hard the stop would have to be braked for before slowing starts. Lower reacts further from the sign or light; higher waits until braking is genuinely needed. Below this the car arrives in time by coasting anyway."
-    min: 4
-    max: 20
-    step: 1
-    visibility:
-    - {$ref: "#/macros/longitudinal_and_icbm"}
-    enablement:
-    - {$ref: "#/macros/longitudinal_and_icbm"}
-  - key: IcbmPinnedHoldRadius
-    widget: option
-    title: "Pinned Hold Range"
-    description: "How close you have to get before a pinned hold takes effect. A pin only has to catch once, then it behaves like any other hold, so this covers GPS wander rather than the length of the road. Raise it if a pin gets missed; lower it if one fires on a road running alongside."
-    min: 15
-    max: 250
-    step: 5
-    visibility:
-    - {$ref: "#/macros/longitudinal_and_icbm"}
-    enablement:
-    - {$ref: "#/macros/longitudinal_and_icbm"}
-  - key: IcbmPinnedHoldsEnabled
-    widget: toggle
-    title: "Remember Holds By Location"
-    description: "Tap the HOLD badge while driving to pin that hold to the spot you are in. It comes back on its own every time you drive through there. For the few places that need the same correction every trip: a sign the camera reads wrong, a limit nobody drives, a school zone outside school hours. Tap a pinned hold again to remove it."
-    visibility:
-    - {$ref: "#/macros/longitudinal_and_icbm"}
-    enablement:
-    - {$ref: "#/macros/longitudinal_and_icbm"}
-  - key: IcbmResumeGateEnabled
-    widget: toggle
-    title: "Wait For The Car Ahead Before Resuming"
-    description: "Wait for the vehicle ahead to actually move before resuming from a stop. Without this, openpilot requests resume from its own plan and stock ACC accelerates toward the set speed, then brakes hard when its radar finds the lead still close."
-    visibility:
-    - {$ref: "#/macros/longitudinal_and_icbm"}
-    enablement:
-    - {$ref: "#/macros/longitudinal_and_icbm"}
-  - key: IcbmResumeMinGap
-    widget: option
-    title: "Resume Minimum Gap"
-    description: "How far the car ahead must have pulled away before resuming counts as safe."
-    min: 2
-    max: 20
-    step: 1
-    visibility:
-    - {$ref: "#/macros/longitudinal_and_icbm"}
-    enablement:
-    - {$ref: "#/macros/longitudinal_and_icbm"}
-  - key: IcbmResumeMinLeadSpeed
-    widget: option
-    title: "Resume Minimum Lead Speed"
-    description: "How fast the car ahead must be moving before resuming. Together with the gap above, this is what separates it rolling away from it merely creeping."
-    min: 1
-    max: 15
-    step: 1
-    visibility:
-    - {$ref: "#/macros/longitudinal_and_icbm"}
-    enablement:
-    - {$ref: "#/macros/longitudinal_and_icbm"}
+  - {$ref: "#/macros/longitudinal_or_icbm"}
+  items: []
+  sub_panels:
+  - id: icbm_tuning
+    label: ICBM Settings
+    trigger_key: IntelligentCruiseButtonManagement
+    items:
+    - key: IcbmBaselineResetDelta
+      widget: option
+      title: "Forget My Set Speed On Limit Change"
+      description: "When you adjust the set speed yourself, ICBM keeps every other feature working but aims at your number instead of the speed limit target. This is how far the posted limit has to move before your number is discarded and Speed Limit Assist takes over again. Curves and lead vehicles never discard it. You can also hand it back at any time by setting the speed to exactly the limit, or by canceling and re-engaging."
+      min: 0
+      max: 30
+      step: 1
+      visibility:
+      - {$ref: "#/macros/longitudinal_or_icbm"}
+      enablement:
+      - {$ref: "#/macros/longitudinal_or_icbm"}
+    - key: IcbmLeadMaxDistance
+      widget: option
+      title: "Unconfirmed Vehicle Max Distance"
+      description: "A sanity limit on the setting above: never react to an unconfirmed vehicle further away than this, however early the timing says."
+      min: 40
+      max: 200
+      step: 10
+      visibility:
+      - {$ref: "#/macros/longitudinal_or_icbm"}
+      enablement:
+      - {$ref: "#/macros/longitudinal_or_icbm"}
+    - key: IcbmLeadMaxTtc
+      widget: option
+      title: "Slow For Unconfirmed Vehicles"
+      description: "How early to slow for a vehicle the camera sees but the radar has not confirmed -- most importantly a stopped car ahead. Measured as how many seconds away it is. Higher reacts sooner. This is the control that changes behavior; the distance limit below rarely comes into play."
+      min: 10
+      max: 80
+      step: 5
+      visibility:
+      - {$ref: "#/macros/longitudinal_or_icbm"}
+      enablement:
+      - {$ref: "#/macros/longitudinal_or_icbm"}
+    - key: IcbmMaxTargetDrop
+      widget: option
+      title: "Max Set Speed Drop Per Step"
+      description: "How far the set speed may fall in one step for a curve or a speed limit. This does not change how fast the car slows down -- it changes how. Stock ACC brakes for one large drop and coasts through a series of small ones, so smaller steps trade braking for coasting at the same net deceleration. Watch the BRAKE LAMPS readout: regulations light the stop lamps above 1.3 m/s2 of automatic braking, so lower this if the lamps come on during routine slowing. 0 disables the cap. Never applies to a stop sign or an unconfirmed vehicle -- those bypass it."
+      min: 0
+      max: 15
+      step: 1
+      visibility:
+      - {$ref: "#/macros/longitudinal_or_icbm"}
+      enablement:
+      - {$ref: "#/macros/longitudinal_or_icbm"}
+    - key: IcbmMaxTargetRise
+      widget: option
+      title: "Max Set Speed Rise Per Step"
+      description: "How much the set speed may climb in one step when returning to cruise speed after a curve or a low speed limit. ICBM holds the button rather than tapping it, so without a cap the car accelerates back up as hard as it can. Lower is gentler. 0 disables the cap."
+      min: 0
+      max: 15
+      step: 1
+      visibility:
+      - {$ref: "#/macros/longitudinal_or_icbm"}
+      enablement:
+      - {$ref: "#/macros/longitudinal_or_icbm"}
+    - key: IcbmModelStopEnabled
+      widget: toggle
+      title: "Slow For Stop Signs And Lights"
+      description: "Use the driving model's own stop intent to bring the set speed down for stop signs and red lights with no vehicle at them. This is the one case the setting above cannot catch, since an empty intersection produces no vehicle to measure. Weaker evidence than the vehicle case -- how long the model insists, and a speed floor, are its only filters."
+      visibility:
+      - {$ref: "#/macros/longitudinal_or_icbm"}
+      enablement:
+      - {$ref: "#/macros/longitudinal_or_icbm"}
+    - key: IcbmModelStopMinDecel
+      widget: option
+      title: "Stop Sign Sensitivity"
+      description: "How hard the stop would have to be braked for before slowing starts. Lower reacts further from the sign or light; higher waits until braking is genuinely needed. Below this the car arrives in time by coasting anyway."
+      min: 4
+      max: 20
+      step: 1
+      visibility:
+      - {$ref: "#/macros/longitudinal_or_icbm"}
+      enablement:
+      - {$ref: "#/macros/longitudinal_or_icbm"}
+    - key: IcbmPinnedHoldRadius
+      widget: option
+      title: "Pinned Hold Range"
+      description: "How close you have to get before a pinned hold takes effect. A pin only has to catch once, then it behaves like any other hold, so this covers GPS wander rather than the length of the road. Raise it if a pin gets missed; lower it if one fires on a road running alongside."
+      min: 15
+      max: 250
+      step: 5
+      visibility:
+      - {$ref: "#/macros/longitudinal_or_icbm"}
+      enablement:
+      - {$ref: "#/macros/longitudinal_or_icbm"}
+    - key: IcbmPinnedHoldsEnabled
+      widget: toggle
+      title: "Remember Holds By Location"
+      description: "Tap the HOLD badge while driving to pin that hold to the spot you are in. It comes back on its own every time you drive through there. For the few places that need the same correction every trip: a sign the camera reads wrong, a limit nobody drives, a school zone outside school hours. Tap a pinned hold again to remove it."
+      visibility:
+      - {$ref: "#/macros/longitudinal_or_icbm"}
+      enablement:
+      - {$ref: "#/macros/longitudinal_or_icbm"}
+    - key: IcbmResumeGateEnabled
+      widget: toggle
+      title: "Wait For The Car Ahead Before Resuming"
+      description: "Wait for the vehicle ahead to actually move before resuming from a stop. Without this, openpilot requests resume from its own plan and stock ACC accelerates toward the set speed, then brakes hard when its radar finds the lead still close."
+      visibility:
+      - {$ref: "#/macros/longitudinal_or_icbm"}
+      enablement:
+      - {$ref: "#/macros/longitudinal_or_icbm"}
+    - key: IcbmResumeMinGap
+      widget: option
+      title: "Resume Minimum Gap"
+      description: "How far the car ahead must have pulled away before resuming counts as safe."
+      min: 2
+      max: 20
+      step: 1
+      visibility:
+      - {$ref: "#/macros/longitudinal_or_icbm"}
+      enablement:
+      - {$ref: "#/macros/longitudinal_or_icbm"}
+    - key: IcbmResumeMinLeadSpeed
+      widget: option
+      title: "Resume Minimum Lead Speed"
+      description: "How fast the car ahead must be moving before resuming. Together with the gap above, this is what separates it rolling away from it merely creeping."
+      min: 1
+      max: 15
+      step: 1
+      visibility:
+      - {$ref: "#/macros/longitudinal_or_icbm"}
+      enablement:
+      - {$ref: "#/macros/longitudinal_or_icbm"}
