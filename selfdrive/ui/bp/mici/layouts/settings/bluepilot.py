@@ -1,8 +1,11 @@
 """BluePilot MICI settings — master layout with category sub-panels."""
 
+import datetime
+import os
 from collections.abc import Callable
 
 from openpilot.common.params import Params
+from openpilot.system.hardware.hw import Paths
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.ui.bp.mici.widgets.button_bp import (
   BigButtonBP, BigParamControlBP, BigMultiParamToggleBP,
@@ -15,13 +18,17 @@ from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.lib.multilang import tr
 from openpilot.system.ui.lib.wifi_manager import WifiManager, Network
-from openpilot.selfdrive.ui.mici.widgets.dialog import BigConfirmationDialog
+from openpilot.selfdrive.ui.mici.widgets.dialog import BigConfirmationDialog, BigDialog
 from openpilot.system.ui.widgets.scroller import NavScroller
 from openpilot.selfdrive.ui.bp.mici.layouts.settings.vehicle_mici import VehicleLayoutMici
 from openpilot.selfdrive.ui.bp.mici.layouts.settings.audio_mici import AudioLayoutMici
 from openpilot.selfdrive.ui.bp.mici.layouts.settings.visuals_mici import VisualsLayoutMici
 from openpilot.selfdrive.ui.bp.mici.layouts.settings.longitudinal_mici import LongitudinalLayoutMici
 from openpilot.selfdrive.ui.bp.mici.layouts.settings.lateral_mici import LateralLayoutMici
+
+
+# The END of a traceback names the failure; the start is imports. Keep the end.
+ERROR_LOG_TAIL_CHARS = 1400
 
 
 class BluePilotBigButton(BigButtonBP):
@@ -106,7 +113,14 @@ class BluePilotLayoutMici(NavScroller):
     )
     lat_btn.set_click_callback(lambda: gui_app.push_widget(lat_panel))
 
+    self._error_log_path = os.path.join(Paths.crash_log_root(), "error.log")
+    error_log_btn = BluePilotBigButton(
+      tr("error log"), "", "icons_mici/settings/developer_icon.png", icon_size=80,
+    )
+    error_log_btn.set_click_callback(self._show_error_log)
+
     self._scroller.add_widgets([
+      error_log_btn,
       self.enable_web_routes,
       self.show_web_routes_qr,
       self.preferred_network_btn,
@@ -142,6 +156,34 @@ class BluePilotLayoutMici(NavScroller):
   def hide_event(self):
     super().hide_event()
     self._wifi_manager.set_active(False)
+
+  def _show_error_log(self):
+    """Show the crash log on the comma 4, where there is otherwise no way to see one.
+
+    The big screen has this under Developer -> Error Log. mici's developer panel does not, so a
+    comma 4 owner who hits a crash has nothing to look at and no way to report it except describing
+    the symptom in prose. That cost two people a day of chasing three wrong mechanisms.
+
+    Deliberately in THIS panel rather than upstream's mici developer page: that file is theirs, and
+    editing it is a merge conflict on every update forever. This one is ours and purely additive.
+
+    Reads the same file the big screen reads, so both screens show the same thing. Only the TAIL is
+    shown -- BigDialog is a card on a 536x240 screen, and the end of a traceback is the part that
+    names the failure while the start is imports.
+    """
+    text = tr("No errors logged.")
+    try:
+      if os.path.exists(self._error_log_path):
+        when = datetime.datetime.fromtimestamp(
+          os.path.getmtime(self._error_log_path)).strftime("%d %b %H:%M")
+        with open(self._error_log_path, encoding="utf-8", errors="replace") as f:
+          body = f.read().strip()
+        if body:
+          text = when + os.linesep + os.linesep + body[-ERROR_LOG_TAIL_CHARS:]
+    except Exception as e:  # noqa: BLE001 -- a settings screen must not die reading a log file
+      cloudlog.exception("bp_mici.error_log_read_failed")
+      text = tr("Could not read the error log: ") + repr(e)
+    gui_app.push_widget(BigDialog(tr("error log"), text))
 
   def _render(self, rect):
     self._wifi_manager.process_callbacks()
