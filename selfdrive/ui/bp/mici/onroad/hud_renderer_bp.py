@@ -11,6 +11,7 @@ from openpilot.selfdrive.ui.bp.lib.steering_wheel_style import (
   SteeringWheelIconStyle,
 )
 from openpilot.selfdrive.ui.bp.onroad.icbm_hud_state import read_icbm_hud_state
+from openpilot.selfdrive.ui.bp.onroad.acc_hud_state import read_acc_hud_state
 from openpilot.selfdrive.ui.bp.lib.ui_debug_logger import bp_ui_log
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.lib.application import gui_app
@@ -58,6 +59,23 @@ LAMP_ON_FILL = rl.Color(228, 40, 40, 240)
 LAMP_OFF_FILL = rl.Color(0, 0, 0, 150)
 LAMP_OFF_EDGE = rl.Color(120, 126, 132, 190)
 LAMP_OFF_INK = rl.Color(150, 156, 162, 255)
+
+# BluePilot: what stock ACC is asking for. Same one green-to-red scale as the big screen, so the
+# colour means the same thing on either display -- position on the scale IS the reading.
+# ENG BRAKE sits deliberately OFF that scale in teal: it is the one state both slowing the car and
+# costing nothing, no pads and no stop lamps, which does not fit a "how hard is it slowing" axis.
+ACC_HEIGHT = 34
+ACC_LABEL_SIZE = 19
+ACC_VALUE_SIZE = 19
+ACC_INK = rl.Color(10, 14, 20, 255)
+ACC_QUIET_STATES = ("COAST", "PRE-BRAKE")     # no magnitude to report; the colour is the reading
+ACC_STATUS_COLORS = {
+  "ACCEL": rl.Color(70, 200, 115, 235),
+  "COAST": rl.Color(196, 176, 70, 205),
+  "ENG BRAKE": rl.Color(55, 185, 195, 235),
+  "PRE-BRAKE": rl.Color(245, 145, 35, 235),
+  "BRAKE": rl.Color(232, 58, 48, 240),
+}
 
 
 class MiciHudRendererBP(HudRenderer):
@@ -131,6 +149,7 @@ class MiciHudRendererBP(HudRenderer):
     if not self._hold_badge_failed:
       try:
         below = self._draw_hold_badge(rect)
+        below = self._draw_acc_pill(rect, below)
         self._draw_brake_lamp_pill(rect, below)
       except Exception as e:  # noqa: BLE001 -- see above; the screen outranks the readout
         self._hold_badge_failed = True
@@ -191,6 +210,46 @@ class MiciHudRendererBP(HudRenderer):
       rl.draw_ring(rl.Vector2(x + HOLD_DOT_INSET, y + HOLD_HEIGHT / 2),
                    HOLD_DOT_RADIUS - 2, HOLD_DOT_RADIUS, 0, 360, 20, HOLD_DOT_COLOR)
     return y + HOLD_HEIGHT + LAMP_GAP
+
+  def _draw_acc_pill(self, rect: rl.Rectangle, y: float) -> float:
+    """What stock Ford ACC is asking for, between the hold and the lamps.
+
+    Ordered this way for a reason, and it is the big screen's order: HOLD is the number that exists
+    nowhere else, ACC is what the system WANTS, lamps are what is measurably true. Request above
+    fact, because the request is the thing you cannot otherwise see.
+
+    Filled rather than outlined, because the colour is the reading -- one green-to-red scale for how
+    much the car is slowing, with ENG BRAKE off that scale in teal since it slows the car for free.
+    COAST is muted on purpose: it is on screen most of the time, and a bright resting state trains
+    you to stop looking.
+
+    Returns the y the next readout should use, so the stack closes up when this is absent.
+    """
+    acc = read_acc_hud_state(ui_state.sm)
+    if not acc.has_state:
+      return y
+
+    label = acc.state
+    show_value = label not in ACC_QUIET_STATES and abs(acc.accel) >= 0.05
+    value = f"{abs(acc.accel):.1f}" if show_value else ""
+
+    label_w = measure_text_cached(self._font_semi_bold, label, ACC_LABEL_SIZE).x
+    value_w = measure_text_cached(self._font_bold, value, ACC_VALUE_SIZE).x if show_value else 0.0
+    gap = HOLD_LABEL_GAP if show_value else 0.0
+    width = HOLD_PAD_X * 2 + label_w + gap + value_w
+    x = rect.x + rect.width - HOLD_MARGIN - width
+
+    rl.draw_rectangle_rounded(rl.Rectangle(x, y, width, ACC_HEIGHT), 0.45, 10,
+                              ACC_STATUS_COLORS.get(label, LAMP_OFF_FILL))
+    rl.draw_text_ex(self._font_semi_bold, label,
+                    rl.Vector2(x + HOLD_PAD_X, y + (ACC_HEIGHT - ACC_LABEL_SIZE) / 2 - 1),
+                    ACC_LABEL_SIZE, 0, ACC_INK)
+    if show_value:
+      rl.draw_text_ex(self._font_bold, value,
+                      rl.Vector2(x + HOLD_PAD_X + label_w + gap,
+                                 y + (ACC_HEIGHT - ACC_VALUE_SIZE) / 2 - 1),
+                      ACC_VALUE_SIZE, 0, ACC_INK)
+    return y + ACC_HEIGHT + LAMP_GAP
 
   def _draw_brake_lamp_pill(self, rect: rl.Rectangle, y: float) -> None:
     """Are the stop lamps lit right now -- the one readout here that is measured, not requested.

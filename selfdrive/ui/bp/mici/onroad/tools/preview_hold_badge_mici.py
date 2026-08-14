@@ -31,16 +31,20 @@ W, H = 536, 240        # the comma 4 display, exactly
 SET_SPEED_CIRCLE = 162      # _draw_set_speed's drop shadow diameter, top-left at the rect origin
 WHEEL_D = 86                # the steering wheel, bottom-left
 
-# (caption, baseline, locked, pinned, pin_suggested, lamp_available, lamps_lit)
+# (caption, baseline, locked, pinned, pin_suggested, lamp_available, lamps_lit, acc, accel)
 SCENES = [
-  ("holding 70, lamps dark", 70, False, False, False, True, False),
-  ("holding 70, stop lamps lit", 70, False, False, False, True, True),
-  ("holding 105 -- widest realistic value", 105, False, False, False, True, False),
-  ("hold suppressed: a curve owns the target", 70, True, False, False, True, True),
-  ("pinned to this place", 45, False, True, False, True, False),
-  ("no hold -- lamp pill slides up into its place", 0, False, False, False, True, True),
-  ("no lamp data on the bus -- nothing rather than a confident OFF", 70, False, False, False,
-   False, False),
+  ("holding 70, coasting, lamps dark", 70, False, False, False, True, False, "COAST", 0.0),
+  ("braking hard enough to light the lamps", 70, False, False, False, True, True, "BRAKE", 1.4),
+  ("braking too lightly to light them", 70, False, False, False, True, False, "BRAKE", 0.4),
+  ("engine braking: slowing, no pads, no lamps", 70, False, False, False, True, False,
+   "ENG BRAKE", 0.9),
+  ("precharging: pressurised, not yet slowing", 70, False, False, False, True, False,
+   "PRE-BRAKE", 0.0),
+  ("accelerating back to the hold", 70, False, False, False, True, False, "ACCEL", 0.6),
+  ("hold suppressed by a curve, ACC braking", 70, True, False, False, True, True, "BRAKE", 1.4),
+  ("pinned here", 45, False, True, False, True, False, "COAST", 0.0),
+  ("no hold -- the stack closes up", 0, False, False, False, True, True, "BRAKE", 1.4),
+  ("cruise off: no ACC state, no lamp data", 0, False, False, False, False, False, "", 0.0),
 ]
 
 
@@ -48,7 +52,7 @@ def load_shipped_drawing_code():
   """Lift `_draw_hold_badge` and the module constants out of the source file."""
   tree = ast.parse(open(HUD, encoding="utf-8").read())
   cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "MiciHudRendererBP")
-  wanted = ("_draw_hold_badge", "_draw_brake_lamp_pill")
+  wanted = ("_draw_hold_badge", "_draw_acc_pill", "_draw_brake_lamp_pill")
   methods = [n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name in wanted]
   assert len(methods) == len(wanted), f"expected {wanted}, found {[m.name for m in methods]}"
 
@@ -64,7 +68,8 @@ def load_shipped_drawing_code():
   exec(compile(ast.Module(body=methods, type_ignores=[]), "<methods>", "exec"), ns)
 
   for required in ("HOLD_HEIGHT", "HOLD_FILL", "HOLD_LOCKED_FILL", "HOLD_MARGIN", "HOLD_DOT_COLOR",
-                   "LAMP_HEIGHT", "LAMP_ON_FILL", "LAMP_OFF_FILL", "LAMP_LABEL_ON"):
+                   "LAMP_HEIGHT", "LAMP_ON_FILL", "LAMP_OFF_FILL", "LAMP_LABEL_ON",
+                   "ACC_HEIGHT", "ACC_STATUS_COLORS", "ACC_QUIET_STATES"):
     assert required in ns, f"{required} did not survive extraction -- the preview would be a lie"
   return ns
 
@@ -81,7 +86,7 @@ def main(outdir: str) -> int:
     rl.set_texture_filter(f.texture, rl.TextureFilter.TEXTURE_FILTER_BILINEAR)
 
   rect = rl.Rectangle(0, 0, W, H)
-  for i, (caption, baseline, locked, pinned, suggested, lamp_avail, lit) in enumerate(SCENES):
+  for i, (caption, baseline, locked, pinned, suggested, lamp_avail, lit, acc, accel) in enumerate(SCENES):
     tex = rl.load_render_texture(W, H)
     rl.begin_texture_mode(tex)
     # A mid-grey stand-in for the camera feed: the badge has to survive a road, not a black screen.
@@ -97,7 +102,10 @@ def main(outdir: str) -> int:
       types.SimpleNamespace(has_hold=b > 0, baseline=b, hold_locked=lo, pinned=p, pin_suggested=s,
                             arrow="")
     ns["ui_state"] = types.SimpleNamespace(sm={})
+    ns["read_acc_hud_state"] = lambda _sm, a=acc, mag=accel: types.SimpleNamespace(
+      has_state=bool(a), state=a, accel=mag)
     below = ns["_draw_hold_badge"](self, rect)
+    below = ns["_draw_acc_pill"](self, rect, below)
     ns["_draw_brake_lamp_pill"](self, rect, below)
     rl.end_texture_mode()
 
