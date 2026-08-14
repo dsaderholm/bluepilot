@@ -586,26 +586,43 @@ made here before.
 **This is per-branch work.** Passing assist and the radar detector each add their own params, so each
 must rebase and run the same loop. The audit only sees what is defined in the branch it runs in.
 
-## DO NOT PORT THIS FORK'S UI TO THE COMMA 4
+## COMMA 4 ON-ROAD UI: PORT IT, IMPORTANT THINGS FIRST
 
-Decided 2026-08-12, when the mici settings-screen port was offered: *"remember what UI can actually be
-rendered on the Comma 4. I don't think we even want to try to display stuff."*
+**Reversed 2026-08-13.** The earlier instruction here was not to port any UI to the comma 4 -- *"I
+don't think we even want to try to display stuff"* -- and that is no longer what he wants: *"Let's
+also see how much of the on-road UI we can port to the Comma 4. Try to see what you can include.
+Start with the important stuff."* Settings still live in SunnyLink; this is about the ONROAD screen.
 
-**SunnyLink is the entire settings story on a comma 4.** There is no mici screen for any of this fork's
-33 settings and none is wanted. Do not build one, and do not treat its absence as a gap to close.
+**What is there today.** `MiciHudRendererBP` extends mici's own `HudRenderer` -- NOT our
+`HudRendererBP` -- and its `_render` draws three things: the torque bar, the set speed, and the
+steering wheel (with brake colouring, powerflow gauge and the lateral-control overlay). None of the
+ACC status stack is on it.
 
-The good news, checked rather than assumed: **nothing of ours renders on a comma 4, so nothing of ours can
-break there.**
+**What the big screen has that mici does not**, in `_draw_acc_status`'s stacking order, which is
+already a priority order:
 
-- `selfdrive/ui/bp/mici/layouts/settings/` never imports our cruise layout, so our settings items are
-  simply absent rather than mis-laid-out.
-- `MiciHudRendererBP` extends upstream's `HudRenderer`, **not** our `HudRendererBP`. The HOLD badge,
-  the ACC status readout and the brake-lamp indicator are not drawn there at all.
+  1. **HOLD badge** -- the driver's own set speed, and the tap target for pinning. The most important
+     one: it is the number ICBM returns to, and nothing else on screen shows it.
+  2. **ACC pill** -- what stock ACC is asking for.
+  3. **Brake lamp pill** -- drawn in BOTH states deliberately; an indicator that only appears when lit
+     cannot be told from one that is broken.
+  4. **TSR pill** -- the camera's reason for having no speed limit.
 
-That separation is what makes "compatible" true by absence. **If a future change moves one of our
-readouts into a shared base class, it lands on the comma 4 screen** -- so when touching
-`hud_renderer_bp.py`, check which class the mici renderer inherits before assuming the small screen
-is unaffected.
+**The plumbing is already portable, which is the part that makes this cheap.** All the ICBM state
+(`_icbm_baseline`, `_icbm_arrow`, `_icbm_pinned`, `_icbm_hold_locked`) is gathered in
+`selfdrive/ui/bp/onroad/hud_renderer_bp.py` by reading `selfdriveStateSP` directly -- it is our code
+reading a message, not something inherited from the big-screen base class. Extract it into a shared
+module and both renderers can consume it. Do that BEFORE writing any mici drawing code; duplicating
+the reader is how the two screens start disagreeing about the same hold.
+
+**Do not guess at layout.** `selfdrive/ui/bp/onroad/tools/preview_acc_status.py` renders the shipped
+drawing methods to PNG at device scale, and he confirmed after driving that the car looks exactly
+like the preview. It is big-screen only today -- **give it a mici scene set as part of this work**,
+because the small screen is where a layout mistake is most likely and least visible offline.
+Geometry cannot be carried over: the big-screen badge is sized against the MAX box and stacks four
+elements under it, which will not fit.
+
+## Keep only the additions that still earn their place
 
 ## Keep only the additions that still earn their place
 
