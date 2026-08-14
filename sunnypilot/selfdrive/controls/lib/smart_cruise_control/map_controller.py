@@ -432,6 +432,15 @@ class SmartCruiseControlMap:
     plan until the car is on it. Waiting there would delay the one case that already has too little
     room; see "THE EXIT THAT NEVER SLOWS ENOUGH" in CLAUDE.md. Same 45 mph line as everything else.
     """
+    # NO CORNER, NO QUESTION. `target_distance` initialises to inf and `v_target` is unset when the
+    # map has nothing to say, and both comparisons below are TRUE against inf -- so without this
+    # guard the answer is "not seen yet" on every frame the map is idle, which is most of a drive.
+    # That is not merely wrong, it is a state that flips continuously the whole time longitudinal is
+    # engaged, and it is exactly the window a comma 4 owner reported trouble in. `_model_disagrees`
+    # never had this problem because its distance gate returns False for an unreachable corner;
+    # this check inverts that gate, so it has to establish there IS a corner first.
+    if not math.isfinite(target_distance_m) or not math.isfinite(self.v_target):
+      return False
     if self.v_target >= _MAP_FACTOR_V_BP[1]:
       horizon = self.v_ego * MODEL_HORIZON_HIGH_SPEED_S
       return horizon > 0 and target_distance_m > horizon
