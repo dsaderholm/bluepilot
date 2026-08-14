@@ -106,6 +106,9 @@ DEFAULT_TARGETS = [
   # Built at car init, where a bad parser strands the car on "waiting to start". Stubs CANParser
   # and asserts on the arguments -- the behavioural suite cannot reach this code at all.
   "selfdrive/car/tests/test_rear_radar_parser.py",
+  # The reduction the feeder performs, proven in Python because it becomes C++ on a part behind a
+  # bumper. A sign error here inverts closing and receding, which looks entirely reasonable in a log.
+  "selfdrive/car/tests/test_rear_digest_reduction.py",
   "selfdrive/car/tests/test_no_int_on_capnp_enums.py",
   # Both written for passing assist and neither ever collected -- caught by
   # test_bp_tests_are_registered, which is the only reason anyone noticed. A test that does not
