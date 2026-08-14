@@ -12,7 +12,7 @@ See the LICENSE.md file in the root directory for more details.
 
 import unittest
 
-from opendbc.sunnypilot.car.ford.lane_center_trim import LaneCenterTrim
+from opendbc.sunnypilot.car.ford.lane_center_trim import LaneCenterTrim, _CORRECTION_ROC_PER_TICK
 
 
 class _XY:
@@ -201,6 +201,76 @@ class TestLaneCenterTrim(unittest.TestCase):
                      probs=[0.9, 0.9, 0.9, 0.9], pos_x=[], pos_y=[])
     self._run(broken, offset=5.0, gain=1.0, iterations=50)
     self.assertEqual(self.trim.correction, 0.0)
+
+  # --- Hardening: guards restored from the reference implementation ---
+
+  def test_narrow_lane_not_centered(self):
+    # Two confident stripes 1.5 m apart (double-stripe repaint, gore-point paint) must NOT be
+    # treated as a lane to center in: the width-tolerance low edge zeroes the laneline scale,
+    # so with no user bias there is no correction at all.
+    narrow = _good_model(lane_center_y=1.0, model_y=0.0, width=1.5)
+    self._run(narrow, offset=0.0, gain=1.0, iterations=500)
+    self.assertAlmostEqual(self.trim.correction, 0.0, places=6)
+
+  def test_high_std_ignores_laneline_center(self):
+    # High positional uncertainty (rain/glare: the model is sure lines exist but not where)
+    # must drag centering authority to zero even when probabilities are high.
+    blurry = _good_model(lane_center_y=2.0, model_y=0.0, stds=(0.1, 0.6, 0.1, 0.1))
+    self._run(blurry, offset=0.0, gain=1.0, iterations=500)
+    self.assertAlmostEqual(self.trim.correction, 0.0, places=6)
+
+  def test_nan_offset_is_inert(self):
+    # A corrupt float param must never reach the wire: NaN offset -> no correction, kappa_cmd
+    # passes through untouched.
+    result = self._run(_good_model(), kappa_cmd=0.01, offset=float("nan"), iterations=10)
+    self.assertEqual(self.trim.correction, 0.0)
+    self.assertEqual(result, 0.01)
+
+  def test_nan_gain_is_inert(self):
+    result = self._run(_good_model(), kappa_cmd=0.01, offset=0.3, gain=float("nan"), iterations=10)
+    self.assertEqual(self.trim.correction, 0.0)
+    self.assertEqual(result, 0.01)
+
+  # --- Rate-of-change limit: smooths confidence transitions (merge lanes, lines dropping out) ---
+
+  def test_correction_rate_limited_on_confidence_jump(self):
+    # Converge to a strong positive correction under confident, off-center lane lines.
+    centered_confident = _good_model(lane_center_y=2.0, model_y=0.0)
+    self._run(centered_confident, offset=0.0, gain=1.0, iterations=500)
+    before = self.trim.correction
+    self.assertAlmostEqual(before, 0.004, places=3)
+
+    # Lane lines vanish entirely in the very next frame (e.g. crossing into a too-wide merge
+    # lane) while a negative user offset now drives the fallback target the opposite way -- a
+    # large, instantaneous target swing (+0.004 -> -0.004 worth of target).
+    no_lines = _no_lanelines_model(model_y=0.0)
+    after = self.trim.update(0.0, no_lines, self.V_EGO, True, -5.0, 1.0, True, False)
+
+    # The correction must not have snapped toward the new target -- bounded to roughly one
+    # tick's worth of rate-of-change, regardless of how far the target actually moved.
+    self.assertLessEqual(abs(after - before), _CORRECTION_ROC_PER_TICK + 1e-9)
+
+  def test_correction_eventually_converges_despite_rate_limit(self):
+    # The rate limit paces the transition but must not prevent it from completing.
+    centered_confident = _good_model(lane_center_y=2.0, model_y=0.0)
+    self._run(centered_confident, offset=0.0, gain=1.0, iterations=500)
+    self.assertAlmostEqual(self.trim.correction, 0.004, places=3)
+
+    no_lines = _no_lanelines_model(model_y=0.0)
+    self._run(no_lines, offset=-5.0, gain=1.0, iterations=1000)
+    self.assertAlmostEqual(self.trim.correction, -0.004, places=3)
+
+  def test_fallback_bias_is_position_independent_by_design(self):
+    # Pins the fallback semantics deliberately: with no lanelines, error == offset regardless of
+    # where the model path is (target moves with the baseline), i.e. the bias is a constant push,
+    # not a position controller. If this ever changes, it should change on purpose.
+    a = _no_lanelines_model(model_y=0.0)
+    b = _no_lanelines_model(model_y=-3.0)
+    self._run(a, offset=0.3, gain=1.0, iterations=500)
+    correction_a = self.trim.correction
+    self.trim.reset()
+    self._run(b, offset=0.3, gain=1.0, iterations=500)
+    self.assertAlmostEqual(self.trim.correction, correction_a, places=9)
 
 
 if __name__ == "__main__":
