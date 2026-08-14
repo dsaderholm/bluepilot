@@ -10,6 +10,7 @@ from openpilot.selfdrive.ui.bp.lib.steering_wheel_style import (
   get_steering_wheel_icon_style,
   SteeringWheelIconStyle,
 )
+from openpilot.selfdrive.ui.bp.onroad.icbm_hud_state import read_icbm_hud_state
 from openpilot.selfdrive.ui.bp.lib.ui_debug_logger import bp_ui_log
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.lib.application import gui_app
@@ -18,6 +19,30 @@ from openpilot.bluepilot.ui.lib.bp_shaders import draw_shader_circle_gradient
 from openpilot.selfdrive.ui.bp.mici.onroad.torque_bar_bp import TorqueBarBP as TorqueBar
 
 LateralMode = ControllerStateBP.LateralMode
+
+# BluePilot: the HOLD badge on a 536x240 screen. Deliberately NOT the big screen's numbers -- see
+# _draw_hold_badge. Colors ARE shared with it, so the same state reads the same on either display.
+HOLD_LABEL = "HOLD"
+HOLD_HEIGHT = 44
+HOLD_MARGIN = 14          # from the top and right edges of the screen
+# Wide enough to clear the pin dot, which is drawn inside this padding. Reserved in EVERY
+# state, not only when pinned: sizing the pill to its contents would make it change width
+# the moment a hold is pinned, and it is right-aligned, so the whole badge would jump.
+HOLD_PAD_X = 24
+HOLD_PAD_BOTTOM = 9       # text baseline inset, tuned against the render rather than guessed
+HOLD_LABEL_GAP = 9
+HOLD_LABEL_SIZE = 20
+HOLD_VALUE_SIZE = 30
+HOLD_DOT_INSET = 12
+HOLD_DOT_RADIUS = 4
+HOLD_FILL = rl.Color(30, 78, 176, 235)
+HOLD_EDGE = rl.Color(130, 185, 255, 255)
+HOLD_LABEL_COLOR = rl.Color(175, 210, 255, 255)
+HOLD_LOCKED_FILL = rl.Color(84, 90, 98, 225)
+HOLD_LOCKED_EDGE = rl.Color(140, 148, 156, 235)
+HOLD_LOCKED_LABEL = rl.Color(178, 186, 194, 255)
+HOLD_DOT_COLOR = rl.Color(255, 214, 90, 255)
+
 
 class MiciHudRendererBP(HudRenderer):
   """BluePilot MICI HudRenderer with brake status coloring and powerflow gauge."""
@@ -77,6 +102,62 @@ class MiciHudRendererBP(HudRenderer):
       self._draw_set_speed(rect)
 
     self._draw_steering_wheel(rect)
+    self._draw_hold_badge(rect)
+
+  def _draw_hold_badge(self, rect: rl.Rectangle) -> None:
+    """The driver's own set speed, on a 536x240 screen.
+
+    REDESIGNED, not scaled. The big screen's badge is 172x124 sized against a 204 px MAX box and
+    stacks three more readouts under it -- on a 240 px tall screen that box alone is most of the
+    display. So this is a single horizontal pill in the top-right, the one corner mici leaves free:
+    the set-speed box owns the top-left (a 162 px circle) and the steering wheel the bottom-left.
+
+    Horizontal rather than the big screen's label-over-number, because at this size stacking two
+    lines inside 44 px leaves neither legible. Reading "HOLD 70" across is worth more here than
+    matching the other screen's shape.
+
+    WHY THIS ONE FIRST, of the four readouts the big screen has. It is the only one showing a number
+    that exists nowhere else: the speed ICBM returns to once a curve or limit has passed. The ACC and
+    lamp pills describe things the driver can also feel through the car; a hold is invisible without
+    it, and the owner has twice reported being unable to tell whether an override had taken.
+
+    No tap target here. On the big screen this badge is the pin/unpin control, but mici's touch
+    handling lives in a different tree and a control that silently does nothing is worse than none.
+    """
+    hold = read_icbm_hud_state(ui_state.sm)
+    if not hold.has_hold:
+      return
+
+    value = str(hold.baseline)
+    label_w = measure_text_cached(self._font_semi_bold, HOLD_LABEL, HOLD_LABEL_SIZE).x
+    value_w = measure_text_cached(self._font_bold, value, HOLD_VALUE_SIZE).x
+    width = HOLD_PAD_X * 2 + label_w + HOLD_LABEL_GAP + value_w
+    x = rect.x + rect.width - HOLD_MARGIN - width
+    y = rect.y + HOLD_MARGIN
+
+    locked = hold.hold_locked
+    box = rl.Rectangle(x, y, width, HOLD_HEIGHT)
+    rl.draw_rectangle_rounded(box, 0.4, 10, HOLD_LOCKED_FILL if locked else HOLD_FILL)
+    rl.draw_rectangle_rounded_lines_ex(box, 0.4, 10, 3, HOLD_LOCKED_EDGE if locked else HOLD_EDGE)
+
+    # Baseline-align the two texts rather than centring each in the pill: the label is 20 px and the
+    # value 30, and centring them independently makes the word visibly float above the number.
+    baseline = y + HOLD_HEIGHT - HOLD_PAD_BOTTOM
+    rl.draw_text_ex(self._font_semi_bold, HOLD_LABEL,
+                    rl.Vector2(x + HOLD_PAD_X, baseline - HOLD_LABEL_SIZE),
+                    HOLD_LABEL_SIZE, 0, HOLD_LOCKED_LABEL if locked else HOLD_LABEL_COLOR)
+    rl.draw_text_ex(self._font_bold, value,
+                    rl.Vector2(x + HOLD_PAD_X + label_w + HOLD_LABEL_GAP,
+                               baseline - HOLD_VALUE_SIZE),
+                    HOLD_VALUE_SIZE, 0, rl.WHITE)
+
+    # A pinned hold gets a dot on the LEFT edge, clear of the arrow that hangs off the right. The
+    # big screen learned that the hard way -- arrow and dot landed within a pixel of each other.
+    if hold.pinned:
+      rl.draw_circle(int(x + HOLD_DOT_INSET), int(y + HOLD_HEIGHT / 2), HOLD_DOT_RADIUS, HOLD_DOT_COLOR)
+    elif hold.pin_suggested:
+      rl.draw_ring(rl.Vector2(x + HOLD_DOT_INSET, y + HOLD_HEIGHT / 2),
+                   HOLD_DOT_RADIUS - 2, HOLD_DOT_RADIUS, 0, 360, 20, HOLD_DOT_COLOR)
 
   def _draw_steering_wheel(self, rect: rl.Rectangle) -> None:
     """Override to add brake status coloring to wheel icon, powerflow gauge, and lateral control overlay."""
