@@ -90,7 +90,6 @@ def main() -> int:
         "visV": 0.0, "visAct": False, "brake": False, "gas": False, "lead": 0.0, "angle": 0.0}
   hist: deque = deque(maxlen=4000)     # ~40 s of carState
   events = 0
-  t0 = None
   # WHOLE-DRIVE occupancy, which is the number that matters most. If SCC-Vision is the plan source
   # for most of a highway drive then it is not slowing for curves, it is simply governing -- and the
   # HOLD badge greys for exactly as long, since hold_suppressed is true whenever the source is not
@@ -114,7 +113,6 @@ def main() -> int:
     for msg in LogReader(path):
       w = msg.which()
       ts = clock.seconds(msg.logMonoTime)
-      t = ts
       try:
         if w == "carState":
           cs = msg.carState
@@ -123,7 +121,7 @@ def main() -> int:
           st["brake"] = cs.brakePressed
           st["gas"] = cs.gasPressed
           st["angle"] = float(cs.steeringAngleDeg)
-          hist.append((t - t0, dict(st)))
+          hist.append((ts, dict(st)))
         elif w == "radarState":
           ld = msg.radarState.leadOne
           st["lead"] = ld.dRel if ld.status else 0.0
