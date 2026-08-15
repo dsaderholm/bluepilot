@@ -199,7 +199,9 @@ class MiciHudRendererBP(HudRenderer):
     handling lives in a different tree and a control that silently does nothing is worse than none.
     """
     hold = read_icbm_hud_state(ui_state.sm)
-    if not hold.has_hold:
+    # worth_showing, not has_hold: without Speed Limit Assist the hold IS the MAX speed, so a
+    # second readout of the same number is a concept the driver has to learn for nothing.
+    if not hold.worth_showing:
       self._hold_rect = None           # no badge on screen, no tap target
       return rect.y + HOLD_MARGIN      # nothing drawn; the stack closes up
 

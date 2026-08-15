@@ -290,7 +290,9 @@ class HudRendererBP(HudRendererSP):
     # renderer tree, and two copies of this would drift apart on the next enum change.
     icbm_state = read_icbm_hud_state(sm)
     self._icbm_arrow = icbm_state.arrow
-    if icbm_state.has_hold:
+    # worth_showing, not has_hold -- see IcbmHudState. The hold still governs the car either way;
+    # this only decides whether a badge showing the same number as MAX is drawn.
+    if icbm_state.worth_showing:
       self._icbm_baseline = icbm_state.baseline
       self._icbm_hold_locked = icbm_state.hold_locked
       self._icbm_pinned = icbm_state.pinned

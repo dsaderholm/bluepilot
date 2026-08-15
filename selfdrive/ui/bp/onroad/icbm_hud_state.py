@@ -38,10 +38,33 @@ class IcbmHudState:
   pinned: bool = False          # created by a pin, so tapping the badge removes it
   pin_suggested: bool = False   # this place is a candidate for pinning
 
+  # Is Speed Limit Assist actually producing a limit right now? NOT whether it is switched on --
+  # SLA stays "active" on a road with no limit data, which is a documented trap in this fork.
+  sla_has_limit: bool = False
+
   @property
   def has_hold(self) -> bool:
-    """Whether there is a hold to draw at all. The badge's own visibility test."""
+    """Whether a hold exists at all, regardless of whether it is worth drawing."""
     return self.baseline > 0
+
+  @property
+  def worth_showing(self) -> bool:
+    """Whether the HOLD badge tells the driver anything MAX does not.
+
+    WITHOUT SPEED LIMIT ASSIST, THE HOLD IS ALREADY THE MAX SPEED. The controller sets
+    `v_baseline = v_cruise_cluster` when a press creates one, and falls back to `v_cruise_cluster`
+    when there is none -- so ICBM aims at the driver's own number either way. Curves and leads dip
+    the dash below it and it returns there. Drawing a second readout of the same value invents a
+    concept the driver then has to learn, and an owner running without SLA reported exactly that
+    confusion: two numbers on screen, no idea which one was his.
+
+    So the badge appears only when SLA has a real limit -- which is precisely when "which number
+    wins" is a live question and the two can genuinely differ.
+
+    This is a DISPLAY rule. The hold itself is unchanged and still governs the car; hiding a
+    readout must never change what the car does.
+    """
+    return self.has_hold and self.sla_has_limit
 
 
 def read_icbm_hud_state(sm) -> IcbmHudState:
@@ -56,6 +79,12 @@ def read_icbm_hud_state(sm) -> IcbmHudState:
   """
   state = IcbmHudState()
   try:
+    try:
+      sl = sm['longitudinalPlanSP'].speedLimit
+      state.sla_has_limit = bool(sl.resolver.speedLimitValid and sl.resolver.speedLimit > 0)
+    except Exception:  # noqa: BLE001 -- no SLA data reads as "no limit", which hides the badge
+      state.sla_has_limit = False
+
     icbm = sm['selfdriveStateSP'].intelligentCruiseButtonManagement
     state.arrow = _SEND_BUTTON_ARROW.get(icbm.sendButton.raw, "")
     if icbm.overrideState.raw == _OVERRIDE_STATE_HOLDING and icbm.vBaseline > 0:

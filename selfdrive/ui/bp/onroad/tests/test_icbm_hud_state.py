@@ -76,3 +76,53 @@ def test_a_malformed_message_is_also_the_default():
   class Junk:
     def __getitem__(self, k): return type("S", (), {})()
   assert read_icbm_hud_state(Junk()) == IcbmHudState()
+
+
+class _SL:
+  """Minimal speedLimit stand-in: resolver.speedLimitValid + resolver.speedLimit."""
+  def __init__(self, valid, limit):
+    self.resolver = type("R", (), {"speedLimitValid": valid, "speedLimit": limit})()
+
+
+class _SM2:
+  def __init__(self, icbm, sl=None):
+    self._icbm, self._sl = icbm, sl
+  def __getitem__(self, k):
+    if k == 'selfdriveStateSP':
+      return type("S", (), {"intelligentCruiseButtonManagement": self._icbm})()
+    if k == 'longitudinalPlanSP':
+      if self._sl is None:
+        raise KeyError(k)
+      return type("L", (), {"speedLimit": self._sl})()
+    raise KeyError(k)
+
+
+def test_the_badge_is_hidden_when_speed_limit_assist_has_no_limit():
+  """Without SLA the hold IS the MAX speed -- drawing it twice invents a second concept.
+
+  The controller sets v_baseline = v_cruise_cluster on a press and falls back to v_cruise_cluster
+  with no hold, so ICBM aims at the driver's own number either way. An owner running without SLA
+  reported exactly this confusion: two numbers on screen and no idea which was his.
+  """
+  s = read_icbm_hud_state(_SM2(_Icbm(baseline=72.0), _SL(False, 0.0)))
+  assert s.has_hold, "the hold still exists and still governs the car"
+  assert not s.worth_showing, "but there is nothing to show that MAX does not already say"
+
+
+def test_the_badge_appears_once_a_real_limit_exists():
+  s = read_icbm_hud_state(_SM2(_Icbm(baseline=72.0), _SL(True, 24.6)))
+  assert s.worth_showing
+
+
+def test_a_valid_flag_with_no_limit_is_not_a_limit():
+  """SLA stays active on a road with no data -- a documented trap in this fork."""
+  assert not read_icbm_hud_state(_SM2(_Icbm(baseline=72.0), _SL(True, 0.0))).worth_showing
+
+
+def test_no_hold_is_never_worth_showing_however_valid_the_limit():
+  assert not read_icbm_hud_state(_SM2(_Icbm(baseline=0.0), _SL(True, 24.6))).worth_showing
+
+
+def test_missing_speed_limit_data_hides_the_badge_rather_than_raising():
+  s = read_icbm_hud_state(_SM2(_Icbm(baseline=72.0), None))
+  assert s.has_hold and not s.worth_showing
