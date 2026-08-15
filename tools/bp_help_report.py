@@ -17,12 +17,16 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from collections import Counter
 
 REALDATA = "/data/media/0/realdata"
 CRASH_DIRS = ("/data/community/crashes", "/data/crashes")
 LOG_DIR = "/data/log"
 MPH = 2.23694
+
+# Frames closer together than this belong to the same episode.
+EPISODE_GAP_S = 1.0
+# Mismatch episodes closer than this are one stall, not separate faults.
+CLUSTER_GAP_S = 10.0
 
 
 def sh(cmd: str) -> str:
@@ -90,9 +94,18 @@ def main() -> int:
     print(f"cannot read the route here ({e}) -- run this from /data/openpilot")
     return 0
 
-  events: Counter = Counter()
+  # EPISODES, NOT FRAMES. onroadEvents republishes an event on EVERY frame it stays true, so a raw
+  # count says nothing about how often something happened -- 277 frames of wrongGear is a few
+  # seconds sitting in Park, not 277 gear faults. That number was misread exactly that way once and
+  # a whole platform theory was built on it. So group contiguous frames into episodes and report
+  # how many, how long, and when.
+  from openpilot.tools.bp_logtime import DriveClock
+
+  clock = DriveClock()
+  episodes: dict = {}
   hits = []
   st = {"v": 0.0, "cruise": False, "standstill": False, "allowed": None, "brake": False}
+  drive_end = 0.0
   for seg in segs:
     path = next((os.path.join(REALDATA, seg, n) for n in ("rlog", "rlog.zst", "rlog.bz2")
                  if os.path.exists(os.path.join(REALDATA, seg, n))), None)
@@ -100,6 +113,8 @@ def main() -> int:
       continue
     for m in LogReader(path):
       w = m.which()
+      ts = clock.seconds(m.logMonoTime)
+      drive_end = max(drive_end, ts)
       try:
         if w == "carState":
           cs = m.carState
@@ -112,22 +127,42 @@ def main() -> int:
         elif w == "onroadEvents":
           for e in m.onroadEvents:
             name = str(e.name)
-            events[name] += 1
-            if "ismatch" in name and len(hits) < 12:
-              hits.append((name, dict(st)))
+            runs = episodes.setdefault(name, [])
+            if runs and ts - runs[-1][1] <= EPISODE_GAP_S:
+              runs[-1][1] = ts
+            else:
+              runs.append([ts, ts])
+              if "ismatch" in name and len(hits) < 15:
+                hits.append((name, ts, dict(st)))
       except Exception:  # noqa: BLE001
         continue
 
-  print("\nmost common events:")
-  for name, n in events.most_common(12):
-    print(f"  {n:6d}  {name}")
+  print()
+  print("drive length: %.0f s" % drive_end)
+  print()
+  print("EVENTS AS EPISODES -- times it happened, not frames it was true for:")
+  print("  %-26s %7s %9s %9s %8s %8s" % ("event", "times", "total s", "longest", "first", "last"))
+  for name, runs in sorted(episodes.items(), key=lambda kv: -sum(b2 - a2 for a2, b2 in kv[1]))[:14]:
+    total = sum(b2 - a2 for a2, b2 in runs)
+    longest = max((b2 - a2 for a2, b2 in runs), default=0.0)
+    print("  %-26s %7d %9.1f %9.1f %8.0f %8.0f"
+          % (name, len(runs), total, longest, runs[0][0], runs[-1][1]))
 
-  print("\nEVERY MISMATCH, with the state when it fired:")
+  print()
+  print("EVERY MISMATCH, when it fired and the state at that moment:")
   if not hits:
     print("  none on this drive")
-  for name, s in hits:
-    print(f"  {name:22s} {s['v']:5.1f} mph  cruise={s['cruise']!s:5s} "
-          f"standstill={s['standstill']!s:5s} brake={s['brake']!s:5s} pandaAllowed={s['allowed']}")
+  for name, ts, s2 in hits:
+    print("  t+%7.1f  %-20s %5.1f mph  cruise=%-5s standstill=%-5s brake=%-5s pandaAllowed=%s"
+          % (ts, name, s2["v"], s2["cruise"], s2["standstill"], s2["brake"], s2["allowed"]))
+
+  if len(hits) > 1:
+    gaps = [hits[i + 1][1] - hits[i][1] for i in range(len(hits) - 1)]
+    close = sum(1 for g in gaps if g <= CLUSTER_GAP_S)
+    print()
+    print("  %d mismatch episodes; %d of the %d gaps between them are under %.0fs"
+          % (len(hits), close, len(gaps), CLUSTER_GAP_S))
+    print("  Clustered means ONE stall producing several, not several independent faults.")
 
   print("\n--- paste everything above ---")
   return 0
