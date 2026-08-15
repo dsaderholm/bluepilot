@@ -243,10 +243,16 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
   # BluePilot: ACC follow-gap requested by a longitudinal feature (Time_Gap_1..5), 0 for none.
   #
   # Defined on the ICBM branch rather than the passing-assist branch on purpose: ICBM is the base
-  # the others rebase onto, and a capnp field number can only have one meaning. Passing assist is
-  # the first requester; if it has already numbered its own fields from @9 they renumber above this
-  # one on rebase.
-  accGapRequest @9 :UInt8;
+  # the others rebase onto, and a capnp field number can only have one meaning.
+  #
+  # MOVED TO @10 ON REBASE, and deliberately the other way round from how it was proposed. The
+  # tiebreaker is not which branch is the base -- it is which field has WIRE HISTORY.
+  # `passingAssist @9` has been published on every drive since it was written and is in every route
+  # log on the device; `accGapRequest` had never run. Renumbering passingAssist would make @9 in
+  # those logs decode as a UInt8, so every recorded drive would read as garbage for the one feature
+  # whose whole output is recorded drives. Renumbering this one cost nothing, because there was
+  # nothing to be compatible with yet.
+  accGapRequest @10 :UInt8;
 
   # BluePilot: vision-detected lead with no radar corroboration. Carried on its own channel rather
   # than folded into vTarget so it bypasses ICBM's target-drop rate limiter -- that limiter exists
@@ -1422,7 +1428,13 @@ struct CarStateBP @0xb057204d7deadf3f {
   # only way to find out is to drive with different settings and measure the gap the radar reports
   # against speed. That measurement needs the setting recorded beside the lead distance in the same
   # route, which is all this field is for.
-  accGap @4 :UInt8;
+  #
+  # MOVED TO @9 ON REBASE. It landed on @4, which `blisLeft` has held since carStateBP existed --
+  # git merged the two additions cleanly because they are in different parts of the file, and capnp
+  # then ABORTS THE PROCESS rather than raising, so the whole suite died at import with a stack that
+  # named pytest rather than the schema. Same tiebreaker as accGapRequest: the field with wire
+  # history keeps its number, and blisLeft is in every route log on the device.
+  accGap @9 :UInt8;
 
   # BluePilot: every signal in Traffic_RecognitnData (0x3CD), raw, for investigation.
   # Only vLimit1 and vLimitUnit feed the speed limit resolver; the rest are logged so what the

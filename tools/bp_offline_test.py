@@ -99,6 +99,10 @@ DEFAULT_TARGETS = [
   # happens. BPDefaultsGeneration was exactly that, before it was removed with the defaults
   # migration on 2026-08-08.
   "selfdrive/car/tests/test_params_keys_unique.py",
+  # A duplicate capnp ordinal makes capnp ABORT the process at import, so the whole suite vanishes
+  # with a traceback that names pytest and never mentions a schema. Two branches adding a field in
+  # different parts of one file is not a conflict git can see.
+  "selfdrive/car/tests/test_capnp_ordinals_unique.py",
   # Rear radar detections reaching the lead path would slow the car for a vehicle BEHIND it, via
   # unconfirmed_lead -> ICBM. Static, because the guarantee is structural and structural guarantees
   # are the kind a later change erases with every test still green.

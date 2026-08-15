@@ -30,8 +30,7 @@ from openpilot.sunnypilot.selfdrive.controls.lib.passing_assist import (
   PassingAssistDetector, MIN_LANE_WIDTH_M, DEFAULT_MIN_SPEED_MPH, MAX_WIDENING_M,
   SUGGESTION_HOLD_S, HOLD_THROUGH,
   DEFAULT_PERSISTENCE_S, DRIVE_HISTORY_MAX, CHIME_MIN_INTERVAL_S,
-  TIMELINE_MAX,
-)
+  TIMELINE_MAX, GAP_WHILE_PASSING, GAP_GIVE_UP_S)
 
 Side = custom.LongitudinalPlanSP.PassingAssist.Side
 Blocked = custom.LongitudinalPlanSP.PassingAssist.Blocked
@@ -3619,3 +3618,62 @@ class TestKeepRightEndsWhenComingToAStop:
     det = run(keep_right_det(), KEEP_RIGHT_FRAMES, status=False, **IN_LEFT_LANE)
     run(det, 10, status=False, v_ego=10 * CV.MPH_TO_MS, v_lead=8 * CV.MPH_TO_MS, **IN_LEFT_LANE)
     assert not det.keep_right_maneuver.blinker_on
+
+
+class TestTheGapRequestIsALease:
+  """ICBM restores his follow gap on SILENCE, not on a stored deadline -- "assert the gap every
+  frame you still want it". That inverts what these tests are about: the interesting property is
+  not that it asks, it is that it STOPS asking. A request that latches leaves the car following at
+  gap 1 after passing assist has stopped wanting anything, and the driver never chose that.
+
+  Every early return in _decide routes through _reset_outputs, which is where the request is
+  dropped, so these walk the paths that reach it rather than asserting on one flag.
+  """
+
+  def test_it_asks_while_a_slower_car_is_confirmed_ahead(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES)
+    assert det.gap_request == GAP_WHILE_PASSING
+
+  def test_it_asks_before_the_lane_is_known_to_be_clear(self):
+    """EARLY IS THE REQUIREMENT. Reaching a gap costs up to ~4.5 s of confirmed toggle steps, so
+    waiting for the geometry gates would put the request after the moment it exists for. A blocked
+    lane must not stop it asking -- only a blocked lane that STAYS blocked."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, left_bs=True, right_bs=True)
+    assert det.clear_side == Side.none, "the fixture left a lane clear"
+    assert det.gap_request == GAP_WHILE_PASSING
+
+  def test_it_gives_up_on_a_road_that_never_clears(self):
+    """A slow car where passing is never possible would otherwise be trailed at gap 1 for miles."""
+    det = run(PassingAssistDetector(), int((GAP_GIVE_UP_S + 1.0) / DT_MDL),
+              left_bs=True, right_bs=True)
+    assert det.gap_request == 0
+
+  def test_no_lead_asks_for_nothing(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES, status=False)
+    assert det.gap_request == 0
+
+  def test_a_lead_that_is_not_slow_asks_for_nothing(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES, v_lead=CRUISE_MS)
+    assert det.gap_request == 0
+
+  def test_the_driver_taking_over_ends_it(self):
+    """Not merely 'stops suggesting'. The driver signalling means they are driving, and their own
+    follow distance comes back with everything else."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES)
+    assert det.gap_request == GAP_WHILE_PASSING
+    run(det, 2, blinker=True)
+    assert det.gap_request == 0
+
+  def test_dropping_below_the_speed_floor_ends_it(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES)
+    assert det.gap_request == GAP_WHILE_PASSING
+    run(det, 5, v_ego=2.0, v_lead=1.0)
+    assert det.gap_request == 0
+
+  def test_it_recovers_after_a_block_clears(self):
+    """Giving up must not be permanent -- the same road opening up later should get the gap back."""
+    det = run(PassingAssistDetector(), int((GAP_GIVE_UP_S + 1.0) / DT_MDL),
+              left_bs=True, right_bs=True)
+    assert det.gap_request == 0
+    run(det, int(1.0 / DT_MDL))
+    assert det.gap_request == GAP_WHILE_PASSING

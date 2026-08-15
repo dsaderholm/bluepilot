@@ -496,6 +496,19 @@ DEFAULT_MIN_APPROACH_M = -1     # Auto
 # the measured max grows and the hold relaxes to match, so the error can only shrink.
 AUTO_APPROACH_MARGIN_M = 20.0
 
+# The follow gap to ask ICBM for while pursuing a pass. Time_Gap_1..5; 1 is the closest.
+#
+# NOT a driving style. The point is headroom: at his own 3 of 5 the car begins braking so far back
+# that the decision is forced ridiculously early, and closing that gap moves ACC's onset in so the
+# pass can be made where a person would make it. ICBM restores his setting the moment we stop
+# asking -- see the lease note in longitudinal_planner.
+GAP_WHILE_PASSING = 1
+
+# ...and stop asking if the pass is not happening. A slow car on a road where passing is never
+# possible would otherwise be trailed at gap 1 indefinitely, which is closer than he chose to drive
+# for no benefit at all. Long enough not to trip on the gate flicker the abort counter measures.
+GAP_GIVE_UP_S = 10.0
+
 # --- do not go round a car that is braking hard ---
 #
 # People do not pass a braking car, and the instinct is a good one: hard deceleration usually means
@@ -833,6 +846,10 @@ class PassingAssistDetector:
     self._life_passes = 0
     self._life_agreed = 0
     self.closing_in = False
+    # See gap_request. 0 asks for nothing; ICBM releases the lease on silence.
+    self.gap_request = 0
+    self._gap_blocked_s = 0.0
+    self._gap_pursuing = False
     self.lead_accel = 0.0
     self.lead_braking_enabled = True
     self.lead_braking_hold = False
@@ -1986,7 +2003,13 @@ class PassingAssistDetector:
 
   def update(self, sm, v_cruise: float, long_enabled: bool, speed_limit_target: float = 0.0) -> None:
     """Decide, then advance the dry run of the maneuver that decision would produce."""
+    # THE FLAG IS CLEARED BEFORE _decide, NOT IN _reset_outputs. Gate refusals -- blind spot,
+    # oncoming, geometry -- go through _reset_outputs too, and those are exactly the frames the
+    # request must survive: asking only once a lane is clear would arrive after the ~4.5 s the gap
+    # takes to reach. So only a return BEFORE the `spotted` check leaves this False.
+    self._gap_pursuing = False
     self._decide(sm, v_cruise, long_enabled, speed_limit_target)
+    self._update_gap_request()
     self._hold_suggestion()
     self._track_curve(sm, float(sm['carState'].vEgo))
     self._run_maneuver(sm['carState'])
@@ -2027,6 +2050,29 @@ class PassingAssistDetector:
         break
     else:
       self._lat_acc_hist[4] += 1
+
+  def _update_gap_request(self) -> None:
+    """Ask ICBM for a closer follow gap, or stop asking. Once per frame, after the decision.
+
+    ICBM releases on SILENCE, so this is a lease reasserted every frame it is still wanted -- and
+    the property that matters is that it stops, not that it starts. A latched request leaves the car
+    following at gap 1 after passing assist has stopped wanting anything, which the driver never
+    chose and would have no way to attribute.
+
+    Blocked is not the same as not pursuing. A lane that is occupied right now is the normal case
+    during an approach and the request stands through it; a lane that stays unavailable for
+    GAP_GIVE_UP_S is a road where the pass is not going to happen, and trailing a slow car at gap 1
+    there is cost with no benefit.
+    """
+    if not self._gap_pursuing:
+      self.gap_request = 0
+      self._gap_blocked_s = 0.0
+      return
+    if self.clear_side != Side.none:
+      self._gap_blocked_s = 0.0
+    else:
+      self._gap_blocked_s += DT_MDL
+    self.gap_request = GAP_WHILE_PASSING if self._gap_blocked_s < GAP_GIVE_UP_S else 0
 
   def _hold_suggestion(self) -> None:
     """Keep a standing suggestion alive through a brief dip in a non-safety gate.
@@ -2453,6 +2499,17 @@ class PassingAssistDetector:
       self._reset_outputs(Blocked.nothingSlower)
       self._keep_right()
       return
+
+    # ASK FOR THE GAP HERE, past the approach hold and every reason to want nothing. `spotted` means
+    # a slower vehicle is confirmed ahead, which is the earliest honest moment to want a closer gap
+    # -- and early is the requirement: reaching a gap costs up to ~4.5 s of confirmed toggle steps.
+    #
+    # Independent of whether a LANE is available, deliberately. Closing the gap is about the car
+    # ahead, not about where we would go, and waiting for the geometry gates would put the request
+    # after the moment it exists for. What it is not independent of is time: if nothing clears for
+    # GAP_GIVE_UP_S the request drops, because trailing a slow car at gap 1 on a road that will
+    # never allow a pass is closer than he chose to drive for no benefit.
+    self._gap_pursuing = True
 
     # trigger now reports the OUTCOME rather than the mechanism: did the suggestion land before
     # Ford's ACC started braking for a lead we were always going to pass, or after. That is the

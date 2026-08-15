@@ -154,6 +154,17 @@ class LongitudinalPlannerSP:
     longitudinalPlanSP.aTarget = float(self.output_a_target)
     longitudinalPlanSP.events = self.events_sp.to_msg()
 
+    # FusionPilot: ask ICBM for a closer follow gap while a pass is being pursued.
+    #
+    # ASSERTED, NOT TIMED -- ICBM releases on silence, which is deliberate on their side and right:
+    # a stored deadline cannot survive this planner dying, and continuous assertion can. So this is
+    # republished every frame it is still wanted and simply stops otherwise.
+    #
+    # EARLY, because reaching a gap takes up to ~4.5 s of confirmed toggle steps and set-speed
+    # presses win the wire. Requesting at the start of the maneuver would arrive after the moment it
+    # was for. See PassingAssistDetector.gap_request for what "pursuing" means.
+    longitudinalPlanSP.accGapRequest = int(self.passing_assist.gap_request)
+
     # Dynamic Experimental Control
     dec = longitudinalPlanSP.dec
     dec.state = DecState.blended if self.dec.mode() == 'blended' else DecState.acc

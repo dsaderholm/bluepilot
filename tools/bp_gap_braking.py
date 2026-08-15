@@ -9,10 +9,13 @@ the time gap for the duration of an approach.
 
 Which needs a number nobody has: how much later does gap 1 brake than gap 3?
 
-WHY THE GAP COMES FROM RAW CAN. `AccTGap_D_Dsply` lives in ACCDATA_3, which openpilot parses into
-`acc_tja_status_stock_values` and publishes nowhere. Rather than wait for it to be exposed, this
-decodes address 394 directly -- bits 34|3 big-endian, which is byte 4 masked to 0x07. Verified on
-2026-08-14 against six segments: 3,431 frames, every one reading 3, matching his setting.
+NOT A SECOND GAP EXTRACTOR. `tools/bp_gap_seconds.py` answers what each setting IS in seconds; this
+answers how often ACC brakes at each setting, bucketed by closing rate. Different questions, and the
+second one is what decides whether a closer gap buys enough room to pass.
+
+The setting comes from `carStateBP.accGap`, which ICBM added for exactly this. Raw CAN is kept only
+as a FALLBACK for routes recorded before that field existed -- without it every drive up to
+2026-08-15 is unreadable here, and those are the entire gap-3 baseline to compare against.
 
   python tools/bp_gap_braking.py                 # every route on the device
   python tools/bp_gap_braking.py 00000370        # one route
@@ -78,7 +81,20 @@ def main() -> int:
     try:
       for msg in LogReader(path):
         w = msg.which()
-        if w == "can":
+        if w == "carStateBP":
+          try:
+            if msg.carStateBP.accGap:
+              gap = int(msg.carStateBP.accGap)
+              gap_seen[gap] += 1
+          except Exception:
+            pass
+          try:
+            braking = bool(msg.carStateBP.brakeLightStatus.accDecelRequest)
+          except Exception:
+            braking = None
+        elif w == "can" and gap is None:
+          # Only until carStateBP carries it. See the note above -- bits 34|3 big-endian is byte 4
+          # masked to 0x07, verified against six segments reading 3 on 2026-08-14.
           for c in msg.can:
             if c.address == ACCDATA_3:
               gap = c.dat[4] & 0x07
@@ -87,11 +103,6 @@ def main() -> int:
           v_ego = msg.carState.vEgo * MS_TO_MPH
         elif w == "selfdriveState":
           engaged = bool(msg.selfdriveState.enabled)
-        elif w == "carStateBP":
-          try:
-            braking = bool(msg.carStateBP.brakeLightStatus.accDecelRequest)
-          except Exception:
-            braking = None
         elif w == "radarState":
           lead = msg.radarState.leadOne
           lead_d = float(lead.dRel) if lead.status else None
