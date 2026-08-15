@@ -654,6 +654,7 @@ class SelfdriveD(CruiseHelper):
     icbm.holdSuppressed = self.icbm.hold_suppressed
     icbm.baselineSource = self.icbm.baseline_source
     icbm.pinSuggestion = float(self.icbm_pin_suggestion)
+    icbm.gapTarget = int(self.icbm.gap_target)
 
     self.pm.send('selfdriveStateSP', ss_sp_msg)
 

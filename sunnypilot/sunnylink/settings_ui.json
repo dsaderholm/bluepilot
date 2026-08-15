@@ -1419,6 +1419,26 @@
                   ]
                 },
                 {
+                  "key": "IcbmGapControl",
+                  "widget": "toggle",
+                  "title": "Let openpilot Change The Follow Gap",
+                  "description": "Allow features like passing assist to briefly ask stock ACC for a closer follow distance, then put your own setting back. openpilot presses the same gap button you do and reads the result back from the car, so a press that does not land is simply retried. Your own press always wins and ends the request.",
+                  "visibility": [
+                    {
+                      "type": "capability",
+                      "field": "has_icbm",
+                      "equals": true
+                    }
+                  ],
+                  "enablement": [
+                    {
+                      "type": "capability",
+                      "field": "has_icbm",
+                      "equals": true
+                    }
+                  ]
+                },
+                {
                   "key": "IcbmResumeMinLeadSpeed",
                   "widget": "option",
                   "title": "Resume Minimum Lead Speed",

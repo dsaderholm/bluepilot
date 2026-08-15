@@ -365,6 +365,7 @@ class CarStateExt:
     hybrid_battery.socActual = 0.0
 
     traffic_sign_data.dataAvailable = False
+    dat.carStateBP.accGap = 0
 
     brake_light_status.dataAvailable = False
     brake_light_status.brakeLightsOn = False
@@ -426,6 +427,15 @@ class CarStateExt:
     if brake_lights_detected and self.CP.openpilotLongitudinalControl:
       acc_brake_active = brake_light_status.accPrechargeRequest or brake_light_status.accDecelRequest
       brake_light_status.brakeLightsOn = brake_light_status.brakeLightsOn or acc_brake_active
+
+    # BluePilot: the ACC follow gap, straight off the camera. Read unconditionally and separately
+    # from the block above, because this is the signal an earlier note wrongly recorded as coming
+    # from the GWM and therefore unreadable -- it is in ACCDATA_3, which IPMA_ADAS sends and this
+    # parser has always registered.
+    try:
+      dat.carStateBP.accGap = int(cp_cam.vl["ACCDATA_3"]["AccTGap_D_Dsply"])
+    except (KeyError, TypeError, ValueError):
+      pass
 
     # HEV cluster data (Cluster_HEV_Data2)
     try:

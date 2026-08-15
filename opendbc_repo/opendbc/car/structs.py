@@ -115,6 +115,7 @@ class IntelligentCruiseButtonManagement:
     default_factory=lambda: IntelligentCruiseButtonManagement.BaselineSource.none
   )
   pinSuggestion: float = auto_field()
+  gapTarget: int = auto_field()  # BluePilot: requested ACC follow gap, 0 = none
 
   class IntelligentCruiseButtonManagementState(StrEnum):
     inactive = auto()

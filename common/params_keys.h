@@ -235,6 +235,16 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // Set by tapping the on-screen HOLD badge; consumed by selfdrived, which is where the GPS fix
     // and the live baseline both are. Keeps the UI from needing either.
     {"IcbmPinHoldRequest", {CLEAR_ON_MANAGER_START, BOOL}},
+    // BluePilot: let a longitudinal feature ask the car for a different ACC follow gap, by pressing
+    // the gap button the way ICBM presses the set-speed buttons. Closed loop against
+    // AccTGap_D_Dsply in ACCDATA_3, which the camera already broadcasts and carstate already
+    // parses -- see opendbc/sunnypilot/car/ford/gap_control.py.
+    //
+    // OFF by default, and this default matters: whether the camera honours an INJECTED gap press
+    // at all is unproven. Only the driver's own cycling button is known to work. The controller
+    // finds out for itself and declines if nothing moves, but until that has happened on the road
+    // once, nothing should be pressing this button unasked.
+    {"IcbmGapControl", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"DeviceBootMode", {PERSISTENT | BACKUP, INT, "0"}},
     {"DevUIInfo", {PERSISTENT | BACKUP, INT, "0"}},
     {"EnableCopyparty", {PERSISTENT | BACKUP, BOOL}},

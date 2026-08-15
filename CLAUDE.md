@@ -1053,12 +1053,55 @@ laterally clear the lead drops and ACC accelerates regardless. The exposure is t
 and the failure is a slow overtake. But "better passes than I can make" is the goal, and a pass that
 decelerates through its first half is worse than his own.
 
-**The route out is hardware and it is already described in `blinker_test_ext.py`:** parallel the
-stalk contacts at the SCCM's switch input. That does not trick ACC into seeing a stalk -- it makes
-the stalk signal genuinely real, from its only legitimate originator, so nothing downstream can tell
-the difference. It also retires the desire injection, since `carState.leftBlinker` becomes true on
-its own. The Electroneering board bought for the rear radar has a spare switched output, so the
-hardware may already be arriving for another reason.
+**AND THERE IS NO ROUTE OUT. THE OWNER HAS CLOSED THE ONLY ONE.** An earlier version of this
+section, written hours before this one, called the SCCM stalk-contact tap from `blinker_test_ext.py`
+"the route out" and noted the rear-radar board has a spare switched output, so the hardware might
+arrive anyway. He has since ruled steering-column wiring too invasive. That is a decision, not an
+obstacle to route around: **do not propose it again**, and do not treat the suppression finding as
+temporary. The injected blinker is what this feature has, permanently.
+
+So the honest state of it: passing assist actuates a blinker the camera does not see as a stalk, ACC
+therefore keeps its full following distance through the crossing, and the first half of a commanded
+pass is slower than the same pass made by hand. That is the cost, it is fixed, and the only lever
+left is the follow gap itself.
+
+**Which is why the gap button matters more than it looked.** It is the one remaining way to buy room
+before a pass on this car, and it is closed loop -- see below.
+
+### The follow-gap button (built 2026-08-14)
+
+`opendbc/sunnypilot/car/ford/gap_control.py`, pressed from `ford/icbm.py`, requested via
+`longitudinalPlanSP.accGapRequest` -> `selfdriveStateSP...gapTarget` -> `CC_SP`. Off by default
+(`IcbmGapControl`).
+
+Three things about it are worth remembering because each replaced a guess:
+
+- **`Steering_Data_FD1` carries THREE gap signals**, not one: `AccButtnGapIncPress`,
+  `AccButtnGapDecPress` and `AccButtnGapTogglePress`, all received by IPMA_ADAS. His wheel only has
+  the cycling button -- but the wheel is not what authors this message, we are. Whether the camera
+  honours inc/dec from an injected frame is UNPROVEN, so the controller probes it on its first press
+  of a drive and falls back to toggle if nothing moves. Same for which direction the numbers run.
+- **Panda does not gate these bits.** `ford.h`'s Steering_Data_FD1 tx_hook checks only cancel and
+  resume, so gap presses go out regardless of `controls_allowed`.
+- **The lease is ASSERTED, never timed.** The requester asks every frame it still wants the gap;
+  silence restores. A dead planner or a dead selfdrived therefore restores by itself, which no
+  stored deadline could guarantee. `MAX_LEASE_FRAMES` exists only for a request wedged ON, and after
+  it fires the request must drop to zero before another is honoured.
+
+The driver outranks all of it: their own press, or any gap movement we did not command, ends the
+lease on the spot and is NOT pressed back over.
+
+**What is still unknown is the only thing that matters:** whether the camera accepts an injected gap
+press at all. It cannot be settled offline and there is no requester yet, so the first real passing
+assist request is the experiment. The controller diagnoses itself and gives up safely, and every
+transition is `cloudlog.warning`ed as `ICBM gap: mode=... result=...` so the answer is readable off
+a route rather than inferred.
+
+**And nobody knows what gaps 1-5 ARE.** He set his by feel and thinks 3/5 is about two seconds.
+`tools/bp_gap_seconds.py` measures it from any route -- headway during steady following only, since
+frames where the set speed binds contain no information about the setting and averaging them in
+produces a plausible-looking number that means nothing. `carStateBP.accGap` now logs the setting;
+the tool falls back to decoding address 394 byte 4 low-3-bits for routes recorded before that.
 
 ## Working with the owner
 

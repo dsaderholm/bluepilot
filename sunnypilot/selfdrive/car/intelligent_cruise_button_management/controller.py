@@ -365,11 +365,18 @@ class IntelligentCruiseButtonManagement:
     self.unconfirmed_lead_commanding = False
     self.unconfirmed_lead_state = UnconfirmedLeadState.inactive
 
+    # BluePilot: the ACC follow gap being asked for, republished for the car layer. This controller
+    # only gates the request -- the closed loop that actually presses the button, and the readback
+    # it closes on, live in opendbc's ford/gap_control.py where the camera's ACCDATA_3 already is.
+    self.gap_control_enabled = False
+    self.gap_target = 0
+
   def update_params(self) -> None:
     if self.frame % int(PARAMS_UPDATE_PERIOD / DT_CTRL) == 0:
       self.max_target_drop = self.params.get("IcbmMaxTargetDrop", return_default=True)
       self.max_target_rise = self.params.get("IcbmMaxTargetRise", return_default=True)
       self.baseline_reset_delta = self.params.get("IcbmBaselineResetDelta", return_default=True)
+      self.gap_control_enabled = self.params.get_bool("IcbmGapControl")
 
   @property
   def v_cruise_equal(self) -> bool:
@@ -1271,6 +1278,31 @@ class IntelligentCruiseButtonManagement:
     self.reanchor_overridden = False
     self.counter_move_accum = 0
 
+  def update_gap_request(self, CS: car.CarState, LP_SP: custom.LongitudinalPlanSP) -> None:
+    """BluePilot: decide whether a longitudinal feature's follow-gap request is allowed through.
+
+    Deliberately thin. Everything that needs the camera's readback -- refusing to start when the
+    gap cannot be read, restoring the driver's setting, standing down when the driver presses their
+    own button -- happens one layer down in ford/gap_control.py, because that is where the readback
+    is. Duplicating any of it here would create a second opinion about the same state, and the two
+    would drift.
+
+    What DOES belong here is the gating that has nothing to do with the button:
+
+      - the owner's toggle, so the feature can be switched off outright;
+      - cruise actually being engaged. Pressing the gap button with ACC off changes a setting the
+        driver will meet later with no idea why it moved. The requester has no business asking in
+        that state and this is the cheapest place to be certain of it.
+
+    The request is passed through per-frame with no memory. Silence restores, so anything that
+    stops asking -- including this method deciding not to pass it on -- ends the lease.
+    """
+    if not self.gap_control_enabled or not CS.cruiseState.enabled:
+      self.gap_target = 0
+      return
+
+    self.gap_target = int(getattr(LP_SP, "accGapRequest", 0) or 0)
+
   def run(self, CS: car.CarState, CC: car.CarControl, LP_SP: custom.LongitudinalPlanSP, is_metric: bool,
           lead_present: bool = False, pinned_hold: int = 0) -> None:
     if self.CP_SP.pcmCruiseSpeed:
@@ -1284,6 +1316,7 @@ class IntelligentCruiseButtonManagement:
     self.update_params()
     self.update_calculations(CS, LP_SP)
     self.update_readiness(CS, CC)
+    self.update_gap_request(CS, LP_SP)
 
     # BluePilot: how long ICBM has gone without commanding anything, counted unconditionally --
     # not only while a baseline is held, or it would read 0 at the exact moment a fresh press

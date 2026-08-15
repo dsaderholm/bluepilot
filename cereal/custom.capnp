@@ -50,6 +50,14 @@ struct IntelligentCruiseButtonManagement {
   # hold here before. 0 = nothing to offer. Only ever a suggestion; a tap on the badge accepts it.
   pinSuggestion @7 :Float32;
 
+  # BluePilot: the ACC follow-gap this fork is asking the car for (Time_Gap_1..5), or 0 for "no
+  # request, restore the driver's own". Asserted CONTINUOUSLY for as long as it is wanted -- there
+  # is no duration, because silence is what restores. A requester that dies stops asserting and the
+  # gap comes back by itself, which no stored deadline could guarantee.
+  #
+  # Honoured in opendbc's ford/gap_control.py, closed loop against AccTGap_D_Dsply in ACCDATA_3.
+  gapTarget @8 :UInt8;
+
   enum IntelligentCruiseButtonManagementState {
     inactive @0;      # No button press or default state
     preActive @1;     # Pre-active state before transitioning to increasing or decreasing
@@ -230,6 +238,14 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
   events @6 :List(OnroadEventSP.Event);
   e2eAlerts @7 :E2eAlerts;
   unconfirmedLead @8 :UnconfirmedLead;
+
+  # BluePilot: ACC follow-gap requested by a longitudinal feature (Time_Gap_1..5), 0 for none.
+  #
+  # Defined on the ICBM branch rather than the passing-assist branch on purpose: ICBM is the base
+  # the others rebase onto, and a capnp field number can only have one meaning. Passing assist is
+  # the first requester; if it has already numbered its own fields from @9 they renumber above this
+  # one on rebase.
+  accGapRequest @9 :UInt8;
 
   # BluePilot: vision-detected lead with no radar corroboration. Carried on its own channel rather
   # than folded into vTarget so it bypasses ICBM's target-drop rate limiter -- that limiter exists
@@ -646,6 +662,16 @@ struct CarStateBP @0xb057204d7deadf3f {
   hybridBattery @1 :HybridBattery;
   brakeLightStatus @2 :BrakeLightStatus;
   trafficSignData @3 :TrafficSignData;
+
+  # BluePilot: the ACC follow gap the camera is reporting, AccTGap_D_Dsply from ACCDATA_3
+  # (Time_Gap_1..5; 0 means the camera is not reporting a usable value).
+  #
+  # Logged for its own sake, not for a feature. What Time_Gap_1..5 actually ARE in seconds is
+  # unknown -- the owner set it by feel and believes 3 of 5 gives him about two seconds -- and the
+  # only way to find out is to drive with different settings and measure the gap the radar reports
+  # against speed. That measurement needs the setting recorded beside the lead distance in the same
+  # route, which is all this field is for.
+  accGap @4 :UInt8;
 
   # BluePilot: every signal in Traffic_RecognitnData (0x3CD), raw, for investigation.
   # Only vLimit1 and vLimitUnit feed the speed limit resolver; the rest are logged so what the

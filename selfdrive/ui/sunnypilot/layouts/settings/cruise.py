@@ -209,6 +209,15 @@ class CruiseLayout(Widget):
                      "lead still close."), "IcbmResumeGateEnabled"),
       param="IcbmResumeGateEnabled")
 
+    self.icbm_gap_control = toggle_item_sp(
+      title=tr("Let openpilot Change The Follow Gap"),
+      description=recommended(tr("Allow features like passing assist to briefly ask stock ACC for a closer "
+                     "follow distance, then put your own setting back. openpilot presses the same gap "
+                     "button you do and reads the result back from the car, so a press that does not "
+                     "land is simply retried. Your own press always wins and ends the request."),
+                     "IcbmGapControl"),
+      param="IcbmGapControl")
+
     self.icbm_resume_min_gap = option_item_sp(
       title=tr("Resume Minimum Gap"),
       description=recommended(tr("How far the car ahead must have pulled away before resuming counts as safe."), "IcbmResumeMinGap", lambda v: f"{v} m"),
@@ -349,6 +358,7 @@ class CruiseLayout(Widget):
       self.icbm_resume_gate,
       self.icbm_resume_min_gap,
       self.icbm_resume_min_lead_speed,
+      self.icbm_gap_control,
 
       SectionHeader(tr("Curves")),
       self.scc_v_toggle,
@@ -460,6 +470,7 @@ class CruiseLayout(Widget):
       self.icbm_resume_gate,
       self.icbm_resume_min_gap,
       self.icbm_resume_min_lead_speed,
+      self.icbm_gap_control,
     )
 
   def _update_state(self):
