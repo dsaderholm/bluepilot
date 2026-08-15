@@ -236,9 +236,13 @@ class PassingManeuver:
              driver_override: bool, collision_abort: bool = False,
              actuating: bool = False,
              settle_after_change_s: float = COMPLETE_STANDDOWN_S,
-             wanted: int | None = None, too_slow: bool = False) -> None:
+             wanted: int | None = None, too_slow: bool = False,
+             acc_braking: bool = False) -> None:
     """One frame.
 
+    `acc_braking` -- Ford's ACC is slowing the car for this lead RIGHT NOW. Holds the crossing in
+                    `signaling` rather than cancelling it: braking mid-lane-change is the thing he
+                    most wants to avoid, and it costs a second or two on a lead already matched.
     `too_slow`   -- below the minimum speed. Ends the sequence AT ANY PHASE, like driver_override.
     `wanted`     -- a slow car is spotted and a lane exists that side. LIGHTS THE BLINKER, and says
                     nothing about whether entering it is safe. See SIGNAL_WINDOW_S. Defaults to
@@ -391,7 +395,20 @@ class PassingManeuver:
       else:
         self._clear_held_s = 0.0
 
-      if self._clear_held_s >= self.blinker_lead_s and suggested == self.side:
+      # ...AND THE CAR IS NOT BRAKING. Asked for directly on 2026-08-14: "I don't want to involve
+      # braking when doing the lane change itself."
+      #
+      # This does NOT delay the decision. ACC deceleration still releases the approach hold -- see
+      # closingIn in passing_assist -- so a braking car has already committed to passing and the
+      # blinker is already up. What waits is the CROSSING, and only until the deceleration ends,
+      # which on a lead we have matched speed with is a second or two.
+      #
+      # Bounded by SIGNAL_WINDOW_S above, which counts phase_seconds and does not care WHY the
+      # crossing has not started -- so a lead that keeps braking withdraws rather than signalling
+      # forever. Note the asymmetry that check exposed: the stand-down after the window applies only
+      # when `actuating`, so the DRY RUN re-signals immediately and logs repeated episodes where the
+      # actuating path logs one. Abort counts read off a dry-run drive are therefore an upper bound.
+      if self._clear_held_s >= self.blinker_lead_s and suggested == self.side and not acc_braking:
         self._to(Phase.changing)
       return
 

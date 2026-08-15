@@ -24,8 +24,10 @@ Phase = custom.LongitudinalPlanSP.PassingAssist.Maneuver
 
 def run(m, seconds, *, clear=Side.none, suggested=Side.none, confirming=False, confirmed=False,
         override=False, collision=False, actuating=False, settle_s=None, wanted=None,
-        too_slow=False):
+        too_slow=False, acc_braking=False):
   kw = {"too_slow": too_slow} if too_slow else {}
+  if acc_braking:
+    kw["acc_braking"] = True
   if settle_s is not None:
     kw["settle_after_change_s"] = settle_s
   if wanted is not None:
@@ -614,3 +616,65 @@ class TestComingToAStopEndsIt:
     run(m, 0.2, wanted=Side.left, clear=Side.left, suggested=Side.left, confirmed=True)
     run(m, 0.1, too_slow=True, collision=True)
     assert m.phase == Phase.idle
+
+
+class TestItDoesNotCrossWhileAccIsBraking:
+  """Asked for directly on 2026-08-14: "I don't want to involve braking when doing the lane change
+  itself."
+
+  The distinction that makes this correct rather than merely cautious: ACC deceleration is what
+  RELEASES the approach hold in passing_assist -- a braking car has already decided to pass, and the
+  blinker is already up. What waits is the crossing, and only until the deceleration ends. On a lead
+  we have matched speed with that is a second or two.
+
+  Getting it backwards -- cancelling the maneuver on braking rather than holding it -- would refuse
+  a pass in exactly the situation the whole feature exists for.
+  """
+
+  def test_braking_holds_the_crossing_in_signaling(self):
+    m = run(armed(), 3.0, clear=Side.left, suggested=Side.left, confirmed=True, acc_braking=True)
+    assert m.phase == Phase.signaling, "crossed while ACC was slowing the car"
+
+  def test_the_blinker_stays_on_while_it_waits(self):
+    """Holding, not withdrawing. A lamp that went out here would tell the driver it changed its
+    mind when it has not."""
+    m = run(armed(), 2.0, clear=Side.left, suggested=Side.left, confirmed=True, acc_braking=True)
+    assert m.blinker_on
+
+  def test_it_crosses_as_soon_as_the_braking_stops(self):
+    """The wait must be exactly as long as the deceleration and not a frame longer -- no fresh
+    blinker lead, no re-confirmation. The lead has already been served while holding."""
+    m = run(armed(), 2.0, clear=Side.left, suggested=Side.left, confirmed=True, acc_braking=True)
+    assert m.phase == Phase.signaling
+    run(m, 0.1, clear=Side.left, suggested=Side.left, confirmed=True)
+    assert m.phase == Phase.changing, "did not go the moment ACC stopped braking"
+
+  def test_braking_cannot_hold_a_lit_blinker_indefinitely(self):
+    """THE BOUND THAT MAKES THIS SAFE. Behind a car that keeps slowing, the signal window expires
+    and the maneuver withdraws rather than signalling forever.
+
+    actuating=True deliberately: the stand-down after the window only applies when this is driving
+    the car, so the dry run re-signals immediately and the lamp would appear to stay lit. That is
+    the pre-existing design and it is the ACTUATING path that has a real lamp to worry about.
+    """
+    m = run(armed(), SIGNAL_WINDOW_S + 1.0, clear=Side.left, suggested=Side.left,
+            confirmed=True, acc_braking=True, actuating=True)
+    assert m.phase != Phase.changing
+    assert not m.blinker_on, "still signalling past the window"
+
+  def test_the_dry_run_re_signals_instead_of_standing_down(self):
+    """Recording the asymmetry rather than asserting it is fine. The dry run has no stand-down, so
+    a lead that keeps braking produces repeated signalling episodes where the actuating path
+    produces one and then waits. Anyone reading abort counts off a dry-run drive should know that
+    the same road actuating would show fewer."""
+    m = run(armed(), SIGNAL_WINDOW_S + 1.0, clear=Side.left, suggested=Side.left,
+            confirmed=True, acc_braking=True)
+    assert m.aborts >= 1, "the window never expired at all"
+
+  def test_braking_does_not_reverse_a_crossing_already_underway(self):
+    """A car cannot un-change lanes. Once committed, ACC braking is not a reason to steer back --
+    only collision_abort reverses a crossing, and that is deliberate."""
+    m = run(armed(), 1.2, clear=Side.left, suggested=Side.left, confirmed=True)
+    assert m.phase == Phase.changing
+    run(m, 1.0, clear=Side.left, suggested=Side.left, confirmed=True, acc_braking=True)
+    assert m.phase == Phase.changing

@@ -2134,6 +2134,10 @@ class PassingAssistDetector:
       # See PassingManeuver.update. The detector refuses below this speed, but a refusal cannot
       # reach a committed crossing -- this can.
       too_slow=bool(CS.vEgo < self.min_speed_ms),
+      # See PassingManeuver.update. Despite its name this is the LIVE per-frame value -- _acc_braking
+      # recomputes it every update from accDecelRequest plus engine braking. Holds the crossing, not
+      # the decision: ACC deceleration is what RELEASES the approach hold above.
+      acc_braking=bool(self.acc_braking_at_decision),
       suggested=self.suggestion if self.reason == Reason.passing else Side.none,
       confirming=self.approach_seconds > 0.0 and not confirmed,
       confirmed=confirmed,
