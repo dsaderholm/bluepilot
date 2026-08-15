@@ -447,7 +447,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // pulling 2.17 before it asked for 66. The budget is _A_LAT_REG_MAX / (factor/100), so 80 gives
     // 2.5 -- just under what he actually drives, which is why every bend reads as slightly too slow
     // and why he overrides so often. 70 gives 2.86, inside his demonstrated range.
-    {"SmartCruiseControlVisionHighSpeedFactor", {PERSISTENT | BACKUP, INT, "70"}},
+    {"SmartCruiseControlVisionHighSpeedFactor", {PERSISTENT | BACKUP, INT, "80"}},
     // BluePilot: SCC-Map deceleration target, tenths of m/s^2, magnitude. Unlike SCC-Vision this
     // single value sets BOTH how hard it slows and how early it starts, because the trigger is
     // "am I within the distance needed to reach the corner speed at this rate" -- gentler means a
