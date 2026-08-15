@@ -29,9 +29,9 @@ EPISODE_GAP_S = 1.0
 CLUSTER_GAP_S = 10.0
 
 
-def sh(cmd: str) -> str:
+def sh(cmd: str, timeout: int = 20) -> str:
   try:
-    return subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30).stdout.strip()
+    return subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout).stdout.strip()
   except Exception as e:  # noqa: BLE001
     return f"(failed: {e})"
 
@@ -71,8 +71,15 @@ def main() -> int:
   print(sh("grep -hc \"audio stream died\" /data/log/* 2>/dev/null | paste -sd+ | bc") or "0")
 
   head("RECENT ERRORS IN THE DAEMON LOG")
-  print(sh("grep -ho \"\\\"msg[^,]*\\\"\" /data/log/* 2>/dev/null | grep -i \"error\\|exception\\|invalid\\|not valid\\|mismatch\" "
-           "| sort | uniq -c | sort -rn | head -12") or "(none)")
+  # BOUNDED. This scanned every file in /data/log and timed out twice on a real device, taking the
+  # drive section below with it -- the one part actually worth reading. Newest three files only,
+  # capped output, short timeout, and a failure here must never cost the rest of the report.
+  newest = sh("ls -t /data/log/* 2>/dev/null | head -3 | tr '\n' ' '")
+  if newest:
+    print(sh(f"grep -hoiE 'error|exception|not valid|mismatch|lagging' {newest} 2>/dev/null "
+             "| sort | uniq -c | sort -rn | head -8", timeout=10) or "(none)")
+  else:
+    print("(no daemon logs)")
 
   head("LATEST DRIVE")
   if not os.path.isdir(REALDATA):
