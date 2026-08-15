@@ -15,6 +15,7 @@ from opendbc.sunnypilot.car.ford.longitudinal_ext import LongitudinalExt
 from opendbc.sunnypilot.car.ford.hud_ext import HudExt
 from opendbc.sunnypilot.car.ford import fordcan_ext
 from opendbc.sunnypilot.car.ford.icbm import IntelligentCruiseButtonManagementInterface
+from opendbc.sunnypilot.car.ford.gap_control import FordGapController
 
 LongCtrlState = structs.CarControl.Actuators.LongControlState
 VisualAlert = structs.CarControl.HUDControl.VisualAlert
@@ -92,6 +93,14 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
     self.accel = 0.0
     self.gas = 0.0
     self.last_button_frame = 0  # BluePilot: ICBM button press tracking
+    # BluePilot: ICBM gap controller state. It lives HERE, on the CarController, because
+    # IntelligentCruiseButtonManagementInterface.update is called class-style two lines below with
+    # `self` = this CarController -- its own __init__ is commented out above and never runs. An
+    # __init__ added to that class is dead code; attributes it sets do not exist at runtime.
+    # Getting this wrong took the car off the road on 2026-08-15 with an AttributeError inside
+    # card's control loop.
+    self.icbm_gap = FordGapController()
+    self.icbm_gap_failed = False
     # Note: main_on_last, lkas_enabled_last, steer_alert_last, lead_distance_bars_last,
     # distance_bar_frame are initialized by HudExt.__init__() above
 

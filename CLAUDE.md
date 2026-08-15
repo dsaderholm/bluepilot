@@ -166,6 +166,9 @@ uv pip install --python ../.venv-bp312/Scripts/python.exe pytest pytest-mock pyc
 
 Anything needing compiled extensions, a real CAN bus, or a display. Two specific gaps have bitten:
 
+**`CarController.update` IS covered now** -- see the carcontroller section above. It was not until
+2026-08-15, and the day it was not is the day the car would not drive.
+
 - **`get_can_parsers`.** `CANParser` rejects a duplicate message address with
   `RuntimeError("Duplicate Message Check: N")` at car init, which kills `card` and leaves the
   device on "waiting to start". This happened for real when an upstream merge added a second
@@ -196,6 +199,61 @@ way, and add a scene to SCENES whenever a new state is introduced.
    car init without a test, and that every CAN signal read exists in the DBC.
 4. For new `Params` keys: confirm each is declared in `common/params_keys.h`. The stubbed `Params`
    raises on unknown keys the way the device does.
+
+## AN EXCEPTION IN carcontroller MAKES THE CAR UNDRIVABLE. TEST IT BY RUNNING IT.
+
+2026-08-15. The car would not drive. One line, on the first control frame:
+
+    File "opendbc/sunnypilot/car/ford/icbm.py", line 111, in _update_gap
+      was_mode, was_result = self.gap.mode, self.gap.last_result
+    AttributeError: 'CarController' object has no attribute 'gap'. Did you mean: 'gas'?
+
+**Why it happened.** `ford/carcontroller.py` calls the ICBM interface CLASS-STYLE --
+`IntelligentCruiseButtonManagementInterface.update(self, ...)` -- with `self` being the
+CarController, and the line that would construct a real instance is COMMENTED OUT right above it.
+So that class is never instantiated, its `__init__` never runs, and any attribute it sets does not
+exist at runtime.
+
+**It is a trap because four sibling classes do the opposite.** `LateralCurvExt`, `LateralAngleExt`,
+`LongitudinalExt` and `HudExt` all have their `__init__` called explicitly at lines 79-82. One class
+in five breaks the pattern, and it is the one with a commented-out call rather than a missing one --
+so the file reads as though all five are initialized.
+
+**Per-drive state for the ICBM path goes on the Ford CarController's own `__init__`.** `self.icbm_gap`
+is created there for exactly this reason. Never add an `__init__` to
+`IntelligentCruiseButtonManagementInterface`; `test_carcontroller_smoke.py` asserts it has none.
+
+**Why nothing caught it.** 607 tests were green, ruff was clean, and the code reads as obviously
+correct. Every test in this fork exercised either PURE LOGIC (`gap_control.py`, `controller.py`) or
+arguments at a stubbed boundary. **Nothing offline had ever called `CarController.update`.** Pure
+logic cannot catch a wiring mistake between two objects, and that is precisely the category that
+takes the car off the road rather than merely making a feature wrong.
+
+**`opendbc/sunnypilot/car/ford/tests/test_carcontroller_smoke.py` closes it.** It builds the REAL
+CarController with the real DBC and his real CarParams, and drives `update()` for 400 frames across
+engaged/not x sendButton none/increase/decrease x gapTarget 0/1/3/5. Verified by reintroducing the
+bug: it reproduces the AttributeError above character for character.
+
+Two things make it worth trusting, and both must be preserved:
+
+- **It matches card's call convention exactly** -- `CC` is a capnp READER, `CC_SP` is the opendbc
+  dataclass, mirroring `self.CI.apply(CC, convert_carControlSP(CC_SP), now_nanos)` in card.py. The
+  first draft passed a builder and failed on `actuators.as_builder()`, which is the tell.
+- **`CS` is a STRICT object, not a Mock**, with its stock-value dicts derived from the real DBC. A
+  Mock returns a Mock for `self.gap` and the test passes while the car does not start. This is the
+  same "a stub laxer than the real thing hides the bug it was built to catch" failure recorded
+  elsewhere in this file, and it would have applied here perfectly.
+
+**THE RULE: anything that adds state or a call to the carcontroller path gets a case in that smoke
+test, in the same commit.** Not "is the logic right" -- does a real CarController survive being
+driven.
+
+**And write the feature so it CANNOT do this again.** An exception in `_update_gap` does not disable
+a feature; it propagates out of `CarController.update`, through card's control loop, and stops the
+car. So the whole gap path is wrapped and LATCHED OFF on any failure, with `icbm_gap_failed`
+defaulting to True when absent so a missing attribute disables the feature instead of the car. A
+follow-distance convenience must degrade to doing nothing. Apply that shape to any future addition
+in this layer.
 
 ## Do not fix UNRELATED upstream bugs in this fork
 

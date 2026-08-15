@@ -10,7 +10,7 @@ Ford ICBM (Intelligent Cruise Button Management) implementation.
 from opendbc.car import structs, DT_CTRL
 from opendbc.car.can_definitions import CanData
 from opendbc.sunnypilot.car.ford import fordcan_ext
-from opendbc.sunnypilot.car.ford.gap_control import FordGapController, SIGNAL_DECREASE, SIGNAL_INCREASE, SIGNAL_TOGGLE
+from opendbc.sunnypilot.car.ford.gap_control import SIGNAL_DECREASE, SIGNAL_INCREASE, SIGNAL_TOGGLE
 from opendbc.sunnypilot.car.intelligent_cruise_button_management_interface_base import IntelligentCruiseButtonManagementInterfaceBase
 from openpilot.common.swaglog import cloudlog
 
@@ -29,12 +29,18 @@ _DRIVER_GAP_SIGNALS = (SIGNAL_INCREASE, SIGNAL_DECREASE, SIGNAL_TOGGLE)
 
 
 class IntelligentCruiseButtonManagementInterface(IntelligentCruiseButtonManagementInterfaceBase):
-  def __init__(self, CP, CP_SP):
-    super().__init__(CP, CP_SP)
-    # BluePilot: ACC follow-gap actuation. See gap_control.py -- the whole loop lives here rather
-    # than in selfdrived because this is the only layer holding BOTH the camera's readback
-    # (ACCDATA_3, already parsed) and the packer, so no new plumbing carries either one.
-    self.gap = FordGapController()
+  """WARNING: `self` IS THE CARCONTROLLER, NOT AN INSTANCE OF THIS CLASS.
+
+  ford/carcontroller.py calls `IntelligentCruiseButtonManagementInterface.update(self, ...)`
+  class-style, and the line that would have constructed a real instance is commented out right
+  above it. So this class is never instantiated, `__init__` never runs, and ANY attribute an
+  __init__ here sets does not exist at runtime.
+
+  Every attribute used below is therefore either assigned inside `update` itself or created by the
+  CarController's own __init__ (`self.icbm_gap`). Adding `self.foo = ...` in an __init__ here reads
+  as correct, passes review, and raises AttributeError on the first control frame -- which is what
+  happened on 2026-08-15 and left the car undrivable.
+  """
 
   def update(self, CC_SP, CS, packer, CAN, frame, last_button_frame) -> tuple[list[CanData], int]:
     """
@@ -98,26 +104,38 @@ class IntelligentCruiseButtonManagementInterface(IntelligentCruiseButtonManageme
     start a lease on -- the requester asked explicitly that it not start blind, and a controller
     that presses without being able to see the result is the open-loop design this replaced.
     """
-    try:
-      gap_now = int(CS.acc_tja_status_stock_values["AccTGap_D_Dsply"])
-    except (KeyError, TypeError, ValueError, AttributeError):
-      gap_now = 0
+    # An exception raised from here does not disable a feature -- it propagates out of
+    # CarController.update, through card's control loop, and stops the car being drivable. That
+    # happened. So this whole path is caught and LATCHED OFF on any failure: a follow-distance
+    # convenience must degrade to doing nothing, never to taking steering and cruise with it.
+    if getattr(self, "icbm_gap_failed", True):
+      return None
 
     try:
-      driver_pressing = any(CS.buttons_stock_values[s] for s in _DRIVER_GAP_SIGNALS)
-    except (KeyError, TypeError, AttributeError):
-      driver_pressing = False
+      try:
+        gap_now = int(CS.acc_tja_status_stock_values["AccTGap_D_Dsply"])
+      except (KeyError, TypeError, ValueError, AttributeError):
+        gap_now = 0
 
-    was_mode, was_result = self.gap.mode, self.gap.last_result
-    signal = self.gap.update(gap_now, int(getattr(self.ICBM, "gapTarget", 0)), driver_pressing)
+      try:
+        driver_pressing = any(CS.buttons_stock_values[s] for s in _DRIVER_GAP_SIGNALS)
+      except (KeyError, TypeError, AttributeError):
+        driver_pressing = False
 
-    # Log every transition, once. Whether the camera honours an injected gap press at all is the
-    # one thing about this feature that cannot be settled offline, and the first real request is
-    # the experiment -- so its outcome has to end up somewhere readable rather than only in the
-    # controller's own state.
-    if (self.gap.mode, self.gap.last_result) != (was_mode, was_result):
-      cloudlog.warning("ICBM gap: mode=%s inverted=%s result=%s gap=%d target=%d",
-                       self.gap.mode, self.gap.inverted, self.gap.last_result, gap_now,
-                       int(getattr(self.ICBM, "gapTarget", 0)))
+      target = int(getattr(self.ICBM, "gapTarget", 0))
+      was = (self.icbm_gap.mode, self.icbm_gap.last_result)
+      signal = self.icbm_gap.update(gap_now, target, driver_pressing)
 
-    return signal
+      # Log every transition, once. Whether the camera honours an injected gap press at all is the
+      # one thing about this feature that cannot be settled offline, and the first real request is
+      # the experiment -- so its outcome has to end up somewhere readable rather than only in the
+      # controller's own state.
+      if (self.icbm_gap.mode, self.icbm_gap.last_result) != was:
+        cloudlog.warning("ICBM gap: mode=%s inverted=%s result=%s gap=%d target=%d",
+                         self.icbm_gap.mode, self.icbm_gap.inverted, self.icbm_gap.last_result,
+                         gap_now, target)
+      return signal
+    except Exception:  # noqa: BLE001 -- see above; this must never reach card
+      self.icbm_gap_failed = True
+      cloudlog.exception("ICBM gap control disabled for this drive")
+      return None
