@@ -40,11 +40,28 @@ def _params():
   return Params()
 
 
+def _already_archived(hist, last) -> bool:
+  """Is PassingAssistLastDrive the same drive as the newest history entry?
+
+  It is, for most of a drive's life. _archive_drive copies the record into history and stamps a
+  build onto the copy, but LastDrive keeps being written until the NEXT drive starts -- so between
+  those two moments the same drive exists in both places, and appending it unconditionally listed
+  it twice. Seen 2026-08-14: drives 44 and 45 were byte-identical, same 591.6 s, same histogram,
+  same lifetime counters, and read as two drives that never happened.
+
+  Compared on the whole record minus `build`, because build is exactly what the archive adds.
+  """
+  if not hist:
+    return False
+  newest = {k: v for k, v in hist[-1].items() if k != "build"}
+  return newest == {k: v for k, v in last.items() if k != "build"}
+
+
 def history() -> int:
   p = _params()
   hist = p.get("PassingAssistHistory") or []
   last = p.get("PassingAssistLastDrive")
-  if last:
+  if last and not _already_archived(hist, last):
     hist = list(hist) + [dict(last, build="(in progress)")]
   if not hist:
     print("no drives recorded yet")
