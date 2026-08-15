@@ -27,6 +27,8 @@ MPH = 2.23694
 EPISODE_GAP_S = 1.0
 # Mismatch episodes closer than this are one stall, not separate faults.
 CLUSTER_GAP_S = 10.0
+# Detail lines printed. The COUNT is never capped -- see the comment where hits is built.
+MAX_MISMATCH_LINES = 15
 
 
 def sh(cmd: str, timeout: int = 20) -> str:
@@ -139,7 +141,10 @@ def main() -> int:
               runs[-1][1] = ts
             else:
               runs.append([ts, ts])
-              if "ismatch" in name and len(hits) < 15:
+              # Every mismatch episode is RECORDED; only the printed detail is capped. Counting
+              # from this list once it was truncated would have reported "15 episodes" for a car
+              # with fifty, and the episode count is the number the whole diagnosis turns on.
+              if "ismatch" in name:
                 hits.append((name, ts, dict(st)))
       except Exception:  # noqa: BLE001
         continue
@@ -159,9 +164,11 @@ def main() -> int:
   print("EVERY MISMATCH, when it fired and the state at that moment:")
   if not hits:
     print("  none on this drive")
-  for name, ts, s2 in hits:
+  for name, ts, s2 in hits[:MAX_MISMATCH_LINES]:
     print("  t+%7.1f  %-20s %5.1f mph  cruise=%-5s standstill=%-5s brake=%-5s pandaAllowed=%s"
           % (ts, name, s2["v"], s2["cruise"], s2["standstill"], s2["brake"], s2["allowed"]))
+  if len(hits) > MAX_MISMATCH_LINES:
+    print("  ... and %d more (all of them counted below)" % (len(hits) - MAX_MISMATCH_LINES))
 
   if len(hits) > 1:
     gaps = [hits[i + 1][1] - hits[i][1] for i in range(len(hits) - 1)]
