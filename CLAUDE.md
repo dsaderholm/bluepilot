@@ -1018,16 +1018,47 @@ button may be unnecessary. If they do not, that is the strongest argument for it
 enough." So the likely answer is BOTH -- signal for the lane change, and reduce the gap for the
 duration of the maneuver -- with the caveat below.
 
-**The gap button is harder than it looks on this car.** See the notes on it: five settings
-(Time_Gap_1..5), his current wheel has a single CYCLING button rather than the old up/down rocker,
-and `AccTGap_D_Dsply` -- the signal reporting the current setting -- is sent by the GWM, which is
-permanently off limits. Ford's carstate reads the button PRESS (`AccButtnGapTogglePress`) but never
-the resulting STATE. So commanding a specific gap means counting presses from an assumed position,
-and one missed or unobserved press leaves the car following closer than the driver chose with
-nothing to correct it. Unlike the set-speed buttons, that error does not self-heal.
+**THE GAP BUTTON IS CLOSED-LOOP, and an earlier version of this section said otherwise.** It claimed
+`AccTGap_D_Dsply` came from the GWM and was therefore unreadable, so commanding a gap meant counting
+presses open-loop against a state nobody could see. **That was wrong twice over**, and the passing
+assist session caught it:
 
-If passing assist takes this on, it must track its own presses AND the driver's, and refuse to act
-at all the moment it loses confidence in where the gap is.
+- `BO_ 394 ACCDATA_3: 8 IPMA_ADAS` -- the CAMERA sends it, not the gateway. GWM is a receiver on that
+  signal line, which is what the DBC line was misread as.
+- `opendbc/car/ford/carstate.py` **already registers ACCDATA_3 at 5 Hz** and reads other signals out
+  of it. Nothing new has to be subscribed.
+- And the owner's GWM ruling was about FLASHING FIRMWARE AND AS-BUILT, never about reading a
+  broadcast frame. Stretching it to cover a message we already parse was my error, not his rule.
+
+So: press, read the resulting setting, repeat. The "one missed press leaves the car following closer
+than the driver chose" objection dissolves entirely -- the loop closes on the next ACCDATA_3 frame.
+Five settings (`Time_Gap_1..5`) and a single cycling button on his current wheel are still true, and
+still mean a specific gap takes up to four presses, but that is bounded work rather than an
+unverifiable assumption.
+
+**Before scoping the gap button at all, though, try his own idea:** *"we may not have to pass cars as
+far away. We can get a little closer and wait for ACC braking and then pass."* The 63% figure above
+makes ACC's own deceleration a reliable trigger, and once the car is laterally clear the radar drops
+the lead and ACC accelerates on its own. No gap command, no press counting, no new signal.
+
+**AND THE SUPPRESSION QUESTION IS NOT MOOT DURING THE MOVE -- I argued it might be and was wrong.**
+The reasoning was that the driver's stalk would be involved by then. It will not be, ever: *"LANE
+CHANGES WILL NOT BE STARTED BY MY STALK"* and *"if I had to manually do anything, then I might as
+well just keep using the SunnyPilot nudgeless lane changes."* The finished maneuver decides, signals
+and crosses with no stalk input, so the crossing is precisely where the ONLY blinker is the injected
+one.
+
+What that costs, stated as passing assist put it: **a worse pass, not a dangerous one.** Once
+laterally clear the lead drops and ACC accelerates regardless. The exposure is the crossing itself,
+and the failure is a slow overtake. But "better passes than I can make" is the goal, and a pass that
+decelerates through its first half is worse than his own.
+
+**The route out is hardware and it is already described in `blinker_test_ext.py`:** parallel the
+stalk contacts at the SCCM's switch input. That does not trick ACC into seeing a stalk -- it makes
+the stalk signal genuinely real, from its only legitimate originator, so nothing downstream can tell
+the difference. It also retires the desire injection, since `carState.leftBlinker` becomes true on
+its own. The Electroneering board bought for the rear radar has a spare switched output, so the
+hardware may already be arriving for another reason.
 
 ## Working with the owner
 
