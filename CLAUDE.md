@@ -989,6 +989,46 @@ accepted any type, so the suite was more permissive than the device and a `TypeE
 every real write was invisible. A stub laxer than the thing it stands in for hides exactly the bugs
 it was built to catch.
 
+## SIGNALLING ALREADY SUPPRESSES FORD'S ACC BRAKING -- MEASURED, AND IT MATTERS TO PASSING ASSIST
+
+Measured 2026-08-14 across routes 00000365, 0000036b and 0000036f -- 92,000 frames with a lead
+inside 80 m, engaged, above 18 mph:
+
+                    frames    ACC braking %    mean gap (s)
+    blinker ON       9,277           4.3%            2.00
+    blinker off     82,550          18.9%            2.14
+
+**Stock Ford ACC brakes about four times less often while the blinker is on.** The owner suspected
+this from the seat and was right. It is correlational -- he signals when he intends to pass, and
+passes are situations he is accelerating through anyway -- but a 4.4x difference is far too large to
+be selection alone, and Ford documents overtake-aware ACC behaviour on some models.
+
+**WHY PASSING ASSIST CANNOT JUST ASSUME IT GETS THIS FOR FREE**, which is the owner's own point and
+the sharp part: passing assist ACTUATES the blinker itself, over CAN. The measurement above is of
+the DRIVER moving the stalk. If Ford's ACC keys off the stalk position or a body-module signal rather
+than the lamp state, a CAN-injected blinker may produce the lamps without the ACC behaviour -- the
+suppression would silently not happen, and the pass would be made into a car that still brakes for
+the vehicle being overtaken.
+
+**That is a measurement, not a guess to make.** Compare braking rate during passing-assist-commanded
+blinker against driver-stalk blinker, using the same query shape as above. If they match, the gap
+button may be unnecessary. If they do not, that is the strongest argument for it.
+
+**And the owner's judgement is that it is not enough on its own:** "I don't think it closes the gap
+enough." So the likely answer is BOTH -- signal for the lane change, and reduce the gap for the
+duration of the maneuver -- with the caveat below.
+
+**The gap button is harder than it looks on this car.** See the notes on it: five settings
+(Time_Gap_1..5), his current wheel has a single CYCLING button rather than the old up/down rocker,
+and `AccTGap_D_Dsply` -- the signal reporting the current setting -- is sent by the GWM, which is
+permanently off limits. Ford's carstate reads the button PRESS (`AccButtnGapTogglePress`) but never
+the resulting STATE. So commanding a specific gap means counting presses from an assumed position,
+and one missed or unobserved press leaves the car following closer than the driver chose with
+nothing to correct it. Unlike the set-speed buttons, that error does not self-heal.
+
+If passing assist takes this on, it must track its own presses AND the driver's, and refuse to act
+at all the moment it loses confidence in where the gap is.
+
 ## Working with the owner
 
 - **He reports, I tune.** On-road reports are tuning input, not complaints to work around. His
