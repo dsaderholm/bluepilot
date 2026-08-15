@@ -1103,6 +1103,34 @@ frames where the set speed binds contain no information about the setting and av
 produces a plausible-looking number that means nothing. `carStateBP.accGap` now logs the setting;
 the tool falls back to decoding address 394 byte 4 low-3-bits for routes recorded before that.
 
+## Capnp field numbers across branches -- the tiebreaker is WIRE HISTORY, not base branch
+
+Two branches added fields to the same structs on 2026-08-14 and both collided. I had written that
+ICBM owns the numbering because it is the base the others rebase onto. **That is wrong, and passing
+assist renumbered mine instead. They were right:**
+
+  - `accGapRequest @9` collided with `passingAssist @9`  -> mine moved to @10
+  - `accGap @4` collided with `blisLeft @4`              -> mine moved to @9
+
+**capnp reads by POSITION.** `passingAssist` and `blisLeft` are already in every route log on the
+device, so renumbering THEM makes every recorded drive decode as garbage. My fields had never run
+anywhere. A field with wire history outranks a field on the base branch, every time.
+
+**Git will not catch this.** Neither branch touched the other's lines, so the merge is clean and
+silent. And capnp does not raise on a bad numbering space -- it calls `abort()`, so the whole suite
+dies at import behind a traceback that names pytest and never mentions a schema. Verified here: a
+struct with an ordinal GAP kills the interpreter with no Python-level exception at all, exit 127,
+`except` never runs. `test_capnp_ordinals_unique.py` on the passing-assist branch guards it.
+
+**The numbers CANNOT be mirrored back onto this branch, and that is not stubbornness.** capnp
+ordinals must be contiguous from 0. `CarStateBP` here ends at @3, so a new field can only be @4;
+@9 is reachable only once blisLeft and its neighbours exist, which happens at rebase. So the
+renumber is inherently a rebase-time operation.
+
+**Therefore: declare new shared capnp fields on the branch that will OWN them, and let the consumer
+rebase onto it -- but never renumber a field that has already been recorded.** When a collision is
+unavoidable, the branch whose field has never been written to a log is the one that moves.
+
 ## Working with the owner
 
 - **He reports, I tune.** On-road reports are tuning input, not complaints to work around. His
