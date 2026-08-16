@@ -549,11 +549,22 @@ The small text above it normally reads "MAX", and sunnypilot REPLACES it with th
 he means, and it is ICBM's to move, never his. The HOLD badge is a third thing again.
 
 **What the drives showed.** Route 00000378: SLA had a limit in 98.4% of plan frames, holds ran
-70-80, `baselineSource` read `press`. Working as designed. Route 00000379: SLA had a limit in
-**1.7%** of frames, yet a hold was held for **36.5%** of the drive, `overrideState` read manual and
-`baselineSource` read `fallbackIdle` -- the path that INFERS a press from set-speed movement. He
-pressed SET five times and pressed nothing else all drive. Nearly every hold on that drive was
-inferred rather than chosen.
+70-80, `baselineSource` read `press`. Working as designed. Route 00000379: a hold was held for
+**36.5%** of the drive with `overrideState` reading manual and `baselineSource` reading
+`fallbackIdle` -- the path that INFERS a press from set-speed movement. He pressed SET five times and
+pressed nothing else all drive. Nearly every hold on that drive was inferred rather than chosen.
+
+**THE "1.7% OF FRAMES HAD A LIMIT" FIGURE THAT USED TO SIT IN THAT SENTENCE IS WITHDRAWN, 2026-08-16.
+It was measured over the front segments of a 53-segment route, where the car was PARKED.** Whole
+route, above 5 mph, it is **50.9%** of 62,940 plan frames -- re-measured twice by two sessions that
+had independently fallen into the same trap, and cross-checked against 00000378. He said "the speed
+limit works" at the time and he was right. See `bluepilot/MAPD-V2-PLAN.md` for the corrected numbers
+and for the sampling bug behind them, which affects any whole-drive percentage produced with a
+`--max-segments` cap.
+
+**This does not disturb the rule below.** He asked for it in his own words, twice, and the inferred
+holds on 00000379 are logged fact independent of how much of that drive had a limit. What changes is
+only how OFTEN the no-limit case arises: about 14% of the road he covers, not nearly all of it.
 
 **The rule: `enforce_no_limit_no_hold()`, called straight after `update_manual_override`.** A hold
 only ever meant "for THIS posted limit I want a different number". With no limit there is nothing to
