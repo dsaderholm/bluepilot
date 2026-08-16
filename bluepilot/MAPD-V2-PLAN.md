@@ -147,10 +147,25 @@ comma was with it.
   Navigate on openpilot shipped in 0.9.4 (the Taco Bell drive), gained navigation INSTRUCTIONS in
   0.9.5 as a ternary left/straight/right vector, and was REMOVED in 0.9.7 "to focus on improving the
   driving model", with a stated plan to bring it back better. There is no `nav` or `map` directory in
-  openpilot's `selfdrive` today. A `ui: navigation stack` merged 2026-02-21 and one for tici the day
-  before, so navigation DISPLAY is being rebuilt; navigation DRIVING is not back, and there is no
-  date. (Same shape as sunnypilot's mapd v2 promise, which is worth noticing having now seen it
-  twice.)
+  openpilot's `selfdrive` today, and no date for its return. (Same shape as sunnypilot's mapd v2
+  promise, which is worth noticing having now seen it twice.)
+
+  CORRECTED 2026-08-16, same day: an earlier version of this paragraph said navigation DISPLAY was
+  being rebuilt, citing `ui: navigation stack` (#37094, merged 2026-02-21) and its tici twin. **Those
+  are about navigating the USER INTERFACE** -- screens, keyboards, dialogs, back buttons; the PR body
+  reads "Makes navigating the ui more intuitive" and a sibling PR is titled "Nav stack: pop_widget
+  takes widget". Matched on the word and inferred maps. There is no map work in flight at comma that
+  is visible from the outside.
+
+  **AND OPENPILOT ITSELF HAS NEVER USED MAPD.** mapd is a FORK component -- pfeiferj built it for
+  forks, and sunnypilot, FrogPilot and the rest are its users. comma ships no OSM tiles and no
+  offline map at all. When comma did navigation they used **Mapbox**, verified rather than recalled:
+  `from_mapbox_tuple` in `selfdrive/navd/helpers.py` at tag v0.9.4. So their nav was online and
+  commercial, which is the same dependency that makes Mapbox a poor primary source for us -- the
+  roads with the worst OSM coverage are disproportionately the roads with the worst LTE.
+
+  The consequence for THIS branch: there is no upstream, at either comma or sunnypilot, whose arrival
+  would make this work redundant. Nothing to wait for in either direction.
 
 **NOO NEVER PUT MAP DATA IN THE PLANNER.** It rendered the map to an IMAGE, compressed it, and fed
 that to the driving model, which predicted where a human would drive to follow the route. So there is
