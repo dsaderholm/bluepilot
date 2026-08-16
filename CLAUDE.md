@@ -1060,6 +1060,14 @@ The curve gate is worth noting as both 2 and 3, which is why it is the strongest
 "I don't want to pass on curves" is a preference, and the PSCM authority limit underneath it is a car
 fact. When those two agree, the number is not a guess.
 
+**Checked against the industry in `bluepilot/MODEL-VS-CODE.md`**, and it mostly holds. Mobileye's
+RSS is this rule formalized -- five verifiable mathematical rules sitting OVER the learned perception,
+operating on assumed bounds on perception error. Waymo BUILT the end-to-end version (EMMA), kept it
+as research, and ships modular, their co-CEO calling monolithic "wildly inadequate to go to full
+autonomy safely and at scale". Tesla bets the other way and replaced 300k lines of C++ with one
+network. And his own car already runs the standard shape -- a learned path inside a written envelope,
+since panda enforces torque and accel limits regardless of what the model asks for.
+
 **What this costs, stated because it is real:** written code only refuses what somebody thought of.
 The center turn lane was not thought of -- the road taught us, twice, and it is still not fully
 solved. A model that had seen ten thousand turn lanes would simply not do it. Enumeration is the
