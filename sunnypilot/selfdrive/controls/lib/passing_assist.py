@@ -850,7 +850,8 @@ class PassingAssistDetector:
     self._geo_hist = [[0] * 10 for _ in range(4)]
     # DOES A LEFT LANE EVEN EXIST? Pairs of (refused frames where the radar could answer, frames
     # where it saw a vehicle over there). See the note at the end of _record_refusal.
-    self._geo_left_proof = [0, 0]
+    # See _record_refusal: [radar could answer, something was there, something was TRAVELLING].
+    self._geo_left_proof = [0, 0, 0]
     self.right_geometry_ok = False
     self.right_widening_m = 0.0
     self.right_widening = False
@@ -1248,6 +1249,31 @@ class PassingAssistDetector:
     # The freeway problem it was solving is REAL and is now unsolved again: geoRefusedShare ran
     # 0.98-1.0 before the waiver. Whatever replaces it has to tell a freeway passing lane from an
     # arterial turn lane, which this did not, and must be validated on a road that HAS a turn lane.
+    #
+    # WHAT HAS CHANGED SINCE, checked 2026-08-16, because two thirds of the paragraph above is now
+    # stale and reading it cost most of a session -- it describes protections as down that have
+    # since been repaired, which makes the revert look more permanent than the evidence supports:
+    #
+    #   the 5.5 m band   FIXED. UNTRUSTED_EDGE_ONCOMING_M is 9.0 now, introduced specifically to
+    #                    reach past a median to opposing traffic near 7.4 m -- the exact distance
+    #                    quoted above as out of reach. Case 2 can arm on that arterial today.
+    #   the discriminator ADDED. SAME_DIRECTION_MIN_FRACTION (0.6) means a car decelerating into a
+    #                    turn lane no longer vouches for the lane it is about to stop in. That is
+    #                    the "tell a freeway passing lane from an arterial turn lane" requirement,
+    #                    and it is met -- in adjacent_lane, not here.
+    #
+    # SO ONE CRITERION IS LEFT, AND IT IS THE STRUCTURAL ONE, UNMOVED: a waiver keyed to
+    # same-direction traffic still keys on the same evidence that unblocks case 2, so a single
+    # sighting would remove two protections at once. Repairing case 2 does not fix that; it only
+    # means the second protection is now capable of arming when the first is spent.
+    #
+    # AND THE MEASUREMENT THAT WOULD SETTLE IT DID NOT EXIST UNTIL NOW. geoLeftProven counted
+    # `occupied`, which has no speed test in it, so the 25-37% quoted across four drives INCLUDES
+    # cars slowing into turn lanes and cannot distinguish the good case from the one that caused
+    # the revert. geoLeftTravelProven is the same share with the speed test applied; the gap
+    # between them is the turn-lane exposure. Read both, on a road with a turn lane, before
+    # proposing this again -- and note that neither number needs map data, which is the point:
+    # this has to work where tileLoaded is false.
     left_edge_ok = (left_std <= MAX_ROAD_EDGE_STD and
                     self.left_edge_beyond >= MIN_EDGE_BEYOND_LINE_M)
     right_edge_ok = (right_std <= MAX_ROAD_EDGE_STD and
@@ -1360,10 +1386,23 @@ class PassingAssistDetector:
     #
     # Gated on `available`, NOT just `occupied`. An unavailable side reports False, which would read
     # as "no lane" and manufacture exactly the false conclusion this exists to prevent.
+    # ...AND `occupied` IS THE WEAKER OF THE TWO CLAIMS AVAILABLE, which is the whole reason the
+    # second counter exists. It means "something is in the band". It does NOT apply
+    # SAME_DIRECTION_MIN_FRACTION, so a car decelerating into a center turn lane -- still moving,
+    # comfortably over MIN_MOVING_MS -- counts here exactly as a car cruising down a passing lane
+    # does. That is precisely the confusion that reverted the road-edge waiver on 2026-08-09, and a
+    # number carrying it cannot be the evidence for bringing the waiver back.
+    #
+    # `same_direction_recent` is the same sighting with the speed test applied: at 45 mph it asks
+    # for 27, which a through lane clears and a turning car does not. THE GAP BETWEEN THE TWO IS
+    # THE TURN-LANE EXPOSURE, measured rather than argued about, and it is the number a future
+    # waiver has to answer for.
     if self.adjacent.left.available:
       self._geo_left_proof[0] += 1
       if self.adjacent.left.occupied:
         self._geo_left_proof[1] += 1
+      if self.adjacent.left.same_direction_recent:
+        self._geo_left_proof[2] += 1
 
   @property
   def geo_refusal_loosen_to(self) -> float:
@@ -1739,6 +1778,11 @@ class PassingAssistDetector:
         # ("nobody could look"), and collapsing them is the mistake this field exists to stop.
         "geoLeftProven": (round(self._geo_left_proof[1] / self._geo_left_proof[0], 3)
                           if self._geo_left_proof[0] else -1.0),
+        # The same share with the travel-speed test applied. Lower than geoLeftProven by exactly
+        # the traffic that was slowing down over there -- which on an arterial is a car entering a
+        # turn lane, and on a freeway is nothing. Same -1 convention, same reason.
+        "geoLeftTravelProven": (round(self._geo_left_proof[2] / self._geo_left_proof[0], 3)
+                                if self._geo_left_proof[0] else -1.0),
         "wantedSeconds": round(self.wanted_seconds, 1),
         "hogSeconds": round(self.hog_seconds, 1),
         "suggestedLatAccMax": round(self.suggested_lat_acc_max, 2),

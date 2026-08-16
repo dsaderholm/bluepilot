@@ -3749,17 +3749,21 @@ class TestEachGeometryTermIsCountedIndependently:
               probs=(0.05, 0.99, 0.99, 0.05), tracks=[track(70, 3.7, 5.0)])
     assert det._geo_frames > 0, "the fixture never refused on geometry"
     assert det.adjacent.left.occupied, "the fixture never established traffic to the left"
-    seen, occupied = det._geo_left_proof
+    seen, occupied, travelling = det._geo_left_proof
     assert seen > 0 and occupied > 0, "a lane the radar could see was not recorded as proof"
+    # ...and at 5 m/s FASTER than us, so it clears SAME_DIRECTION_MIN_FRACTION comfortably. The
+    # freeway case: the two counters should agree, and only diverge where traffic is slowing.
+    assert travelling > 0, "traffic at road speed did not register as a TRAVEL lane"
 
   def test_an_empty_left_is_not_proof_of_anything(self):
     """The other half, and the one that must not overclaim. No traffic over there is consistent
     with being in the left lane AND with an empty passing lane; it is the absence of evidence, so
     it records zero rather than a verdict."""
     det = run(PassingAssistDetector(), STUCK_FRAMES, probs=(0.05, 0.99, 0.99, 0.05))
-    seen, occupied = det._geo_left_proof
+    seen, occupied, travelling = det._geo_left_proof
     assert seen > 0, "the radar was available and should have been asked"
     assert occupied == 0
+    assert travelling == 0
 
   def test_an_unavailable_radar_is_silence_not_an_empty_lane(self):
     """THE FAILURE THAT WOULD MANUFACTURE THE WRONG ANSWER. `occupied` is False when the side is
@@ -3768,11 +3772,11 @@ class TestEachGeometryTermIsCountedIndependently:
     conclusion this field exists to stop being guessed."""
     det = PassingAssistDetector()
     run(det, STUCK_FRAMES, probs=(0.05, 0.99, 0.99, 0.05))
-    det._geo_left_proof = [0, 0]
+    det._geo_left_proof = [0, 0, 0]
     det.adjacent.left.available = False
     det.left_geometry_ok = False
     det._record_refusal()
-    assert det._geo_left_proof == [0, 0], "counted a frame the radar could not answer"
+    assert det._geo_left_proof == [0, 0, 0], "counted a frame the radar could not answer"
 
   def test_the_record_reports_silence_as_minus_one_rather_than_zero(self):
     """Zero is a claim -- 'a lane was never seen' -- and -1 is 'nobody could look'. Collapsing them
@@ -3790,11 +3794,16 @@ class TestEachGeometryTermIsCountedIndependently:
       # Force the write; the summary is otherwise rate limited. See LAST_DRIVE_WRITE_S.
       det._last_drive_write_s = 1e9
       det._save_drive_summary()
-      return det.params.store["PassingAssistLastDrive"]["geoLeftProven"]
+      rec = det.params.store["PassingAssistLastDrive"]
+      return rec["geoLeftProven"], rec["geoLeftTravelProven"]
 
-    assert written([0, 0]) == -1.0, "silence was reported as a measurement"
-    assert written([10, 0]) == 0.0
-    assert written([10, 5]) == 0.5
+    assert written([0, 0, 0]) == (-1.0, -1.0), "silence was reported as a measurement"
+    assert written([10, 0, 0]) == (0.0, 0.0)
+    assert written([10, 5, 5]) == (0.5, 0.5)
+    # THE ARTERIAL: everything the radar saw over there was slowing down. The top line reads as
+    # a lane and the bottom one says it was a car entering a turn lane -- which is the whole
+    # reason the second number exists, and both must survive to the record to show it.
+    assert written([10, 5, 0]) == (0.5, 0.0)
 
   def test_nothing_is_counted_on_a_road_where_no_pass_was_wanted(self):
     """Same gate as the tally it sits beside. An empty road would otherwise dominate it."""

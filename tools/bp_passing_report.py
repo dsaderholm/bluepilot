@@ -110,6 +110,16 @@ def history() -> int:
       else:
         verdict = "no traffic ever seen left; consistent with already being in the left lane"
       print(f"    radar saw a vehicle left on {proven * 100:.0f}% of refused frames: {verdict}")
+      # AND THE SAME SHARE WITH THE SPEED TEST APPLIED. The gap between the two lines is traffic
+      # that was over there but SLOWING -- a car entering a center turn lane, which is the exact
+      # thing that reverted the road-edge waiver on 2026-08-09. On a freeway the two should be
+      # nearly equal; a wide gap says the road had a turn lane in it and the top line is not the
+      # evidence it appears to be.
+      travel = d.get("geoLeftTravelProven")
+      if travel is not None and travel >= 0:
+        gap = proven - travel
+        print(f"    ...of which {travel * 100:.0f}% were TRAVELLING, not slowing"
+              f"{'  <- turn-lane risk, do not read the line above as a lane' if gap > 0.15 else ''}")
     elif proven is not None:
       # -1, and it must not read as 0%. See geoLeftProven.
       print("    radar could not answer whether a left lane exists on any refused frame")
