@@ -89,6 +89,10 @@ DEFAULT_TARGETS = [
   # migration on 2026-08-08.
   "selfdrive/car/tests/test_params_keys_unique.py",
   "selfdrive/car/tests/test_no_int_on_capnp_enums.py",
+  # Named file, not the directory: test_mapd_version.py beside it hashes the installed mapd binary
+  # and cannot run without the device. The schema guard pins mapd v2's ordinals, which are theirs
+  # rather than ours -- capnp reads by position, so drift decodes as different fields with no error.
+  "sunnypilot/mapd/tests/test_mapd_schema.py",
   # The value behind every +/- control. The widget needs pyray and cannot collect here, which
   # is why its logic lives in param_value_cache.py -- there was nothing to test before, and
   # nothing caught the read that wiped his angle tuning.

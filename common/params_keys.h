@@ -337,6 +337,12 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // mapd
     {"MapAdvisorySpeedLimit", {CLEAR_ON_ONROAD_TRANSITION, FLOAT}},
     {"MapdVersion", {PERSISTENT, STRING}},
+    // FusionPilot: mapd v2's own settings blob. mapd reads and writes this file itself, in Go,
+    // straight to /data/params/d with the same lock protocol -- it is the ONE param it touches, and
+    // it never opens /dev/shm/params, which is what lets v1 and v2 run side by side without
+    // interfering. Declared here so our Params does not reject the key.
+    // JSON encodes itself: pass the dict, never json.dumps() -- see CLAUDE.md.
+    {"MapdSettings", {PERSISTENT, JSON}},
     {"MapSpeedLimit", {CLEAR_ON_ONROAD_TRANSITION, FLOAT, "0.0"}},
     {"NextMapSpeedLimit", {CLEAR_ON_ONROAD_TRANSITION, JSON}},
     {"Offroad_OSMUpdateRequired", {CLEAR_ON_MANAGER_START, JSON}},
