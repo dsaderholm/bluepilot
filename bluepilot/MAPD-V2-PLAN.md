@@ -310,6 +310,34 @@ From mapd's own `docs/integration.md`, the **Minimal** path — note it is ADDIT
 - sunnypilot's `live_map_data` layer reads `mem_params` throughout and would need a v2 reader.
 - `mapd_installer.py` pins the version and hash; v2 ships differently.
 
+## WHY SUNNYPILOT WILL NOT DO THIS FOR US, AND WHY WE NEED IT FIRST
+
+His question, 2026-08-16: *"SunnyPilot right now has no need for a newer mapd, right? Will they
+ever?"* Correct, and it explains the stall better than "abandoned" does.
+
+**Their map-consuming features are Speed Limit Assist and map turn speed control, and both work on
+v1.** So the v2 move is a refactor with no user-visible feature behind it, and refactors with no
+feature attached lose to comma 4 support every time. PR #1647 is not neglect, it is a correct
+priority call for a fork that does not need the data.
+
+**WE NEED IT FIRST, AND FOR A REASON THEY DO NOT HAVE.** Passing assist wants `lanes`,
+`distanceFromWayCenter`, `highwayClass` and `oneWay`. **None of sunnypilot's features want any of
+those**, and the remembered-hold feature he specified needs `wayId`, which is measured at 100%
+populated on tiles already on his device. "Wait for upstream" was never waiting for a peer with the
+same problem; it was waiting for someone with no reason to move.
+
+**One urgency argument was raised and is DISPROVED by the measurements below** -- recorded because it
+is the obvious worry and someone will have it again. The fear was that v1's tiles come from one
+person's hosting, that v2.1.0 changed the map file format, and that v1-format regeneration would
+therefore stop and strand every fork on v1 with silently stale speed limits. **There is only one
+dataset.** Same URL, same store, same files; the format change was additive under the same capnp file
+id, and the box pulled from the SHIPPED v1 downloader was dated two days before the check. v1 has been
+reading post-v2 tiles in production all along. There is no countdown.
+
+**So the cost of doing it here is the only thing left to weigh**, and finding 1 below is what makes
+it acceptable: divergence from sunnypilot inside their own files is the price CLAUDE.md says outranks
+being right elsewhere -- but a pure observer touches none of their map layer at all.
+
 ## THE OPEN QUESTION — ANSWERED 2026-08-16: YES
 
 **Can the Minimal path run ALONGSIDE v1 without the SLA/SCC teardown that PR #1647 performs?**
