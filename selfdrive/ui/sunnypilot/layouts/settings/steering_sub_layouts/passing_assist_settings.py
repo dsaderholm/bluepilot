@@ -192,6 +192,16 @@ class PassingAssistSettingsLayout(Widget):
                      "any curve."), "PassingAssistMaxCurve"),
       param="PassingAssistMaxCurve", min_value=0, max_value=40, value_change_step=1)
 
+    self._patience = option_item_sp(
+      title=tr("Be Fussier When Not In A Hurry"),
+      description=recommended(tr("Multiply the minimum speed gain, in tenths, when you are driving at the "
+                     "posted speed limit -- so a pass has to be worth more before it is offered. "
+                     "Fades out as you go over the limit and is gone entirely at 8 mph over, so "
+                     "your setting is unchanged whenever you are actually making time. Uses your "
+                     "held cruise speed if you have one. Set to 10 to treat every road the same."),
+                     "PassingAssistPatience"),
+      param="PassingAssistPatience", min_value=10, max_value=30, value_change_step=1)
+
     self._adjacent_lane = toggle_item_sp(
       title=tr("Check The Lane Before Suggesting It"),
       description=recommended(tr("Use the front radar to see traffic in the next lane over, and stay quiet "
@@ -368,6 +378,9 @@ class PassingAssistSettingsLayout(Widget):
 
       SectionHeader(tr("Deciding To Pass")),
       self._min_deficit,
+      # Directly under the number it multiplies, because on its own "be fussier" says nothing about
+      # what gets fussier.
+      self._patience,
       self._min_speed,
       self._max_distance,
       self._confirm_time,

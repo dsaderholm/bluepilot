@@ -81,7 +81,13 @@ class LongitudinalPlannerSP:
     # for. See PassingAssistDetector._reference_speed.
     sl_target = (self.resolver.speed_limit_final
                  if self.sla.enabled and self.resolver.speed_limit_valid else 0.0)
-    self.passing_assist.update(sm, v_cruise_cluster, long_enabled, sl_target)
+    # ...and the RAW posted limit alongside it, which is a different question and needs a different
+    # answer. sl_target is what SLA would drive and is zeroed when SLA is off; this is what the sign
+    # says, wanted whether or not he has handed the speed over. See _apply_patience: it measures how
+    # far over the limit he has ASKED to go, and gating that on SLA being enabled would switch the
+    # measurement off precisely when the driver is the one choosing the speed.
+    posted = float(self.resolver.speed_limit) if self.resolver.speed_limit_valid else 0.0
+    self.passing_assist.update(sm, v_cruise_cluster, long_enabled, sl_target, posted)
     # ...with one exception to "log only": a chime when it decides. See passingAssistSuggested --
     # the panel is the whole readout for this feature and nobody is reading it at the moment that
     # matters. Still no target and no return value; the only thing that leaves here is a sound.

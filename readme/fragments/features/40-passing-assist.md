@@ -31,6 +31,20 @@ map data:
   every gate has held clear for the whole lead. This is deliberate and is the opposite of the usual
   ordering: it buys the decision a second of road without the driver waiting on a car that appears to
   have decided nothing.
+- **No pass while the road is bending.** Above a configurable lateral acceleration — 1.3 m/s², the
+  same threshold the curve controller uses to decide the car is entering a turn — a suggestion is
+  refused. This is a physical limit rather than a preference on this car: the retrofit power steering
+  needs the car slowed before it will accept a hard steering command, so in a bend it is already near
+  its authority and a lane change asks for steering on top of what the curve is taking. A crossing
+  already underway is never called off by it.
+- **Two ways to recognize an exit the driver is taking**, because the geometry alone cannot: ending
+  up in the outermost lane, and slowing down after moving right with nothing ahead to slow for. Both
+  buy a long silence, so the system does not suggest moving back left at the gore point. Every
+  right-hand change is counted by which test recognized it, including the ones none did.
+- **Fussier when there is nothing to be made up.** How far over the posted limit the driver has asked
+  to go — from the set speed or a held cruise speed — scales how much slower a car must be before
+  passing it is worth suggesting. It only ever adds patience: at 8 mph over the limit the configured
+  thresholds apply unchanged, and with no posted limit known nothing changes at all.
 - **Keep right**, after five seconds clear of a reason to be left.
 - **Holds for a pass that is about to become wrong** — the lead braking, the gap closing, traffic
   arriving from behind, the driver taking the lane themselves, and dropping below the speed floor.

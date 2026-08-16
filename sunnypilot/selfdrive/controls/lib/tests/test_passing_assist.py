@@ -461,7 +461,7 @@ _STUB_PARAM_DEFAULTS = {
   "PassingAssistMinDeficit": 4, "PassingAssistConfirmTime": 1,
   "PassingAssistKeepRightDelay": 5, "PassingAssistSettleTime": 20,
   "PassingAssistMaxDistance": 220,
-  "PassingAssistOncomingMemory": 90, "PassingAssistBlinkerLead": 1, "PassingAssistMinApproach": 0, "PassingAssistMinSpeed": 30, "PassingAssistExitStandDown": 45, "PassingAssistCrawlTime": 8, "PassingAssistMinLaneAge": 15, "PassingAssistMaxCurve": 13,
+  "PassingAssistOncomingMemory": 90, "PassingAssistBlinkerLead": 1, "PassingAssistMinApproach": 0, "PassingAssistMinSpeed": 30, "PassingAssistExitStandDown": 45, "PassingAssistCrawlTime": 8, "PassingAssistMinLaneAge": 15, "PassingAssistMaxCurve": 13, "PassingAssistPatience": 18,
 }
 
 
@@ -3017,6 +3017,104 @@ class TestTheExitWithNoExitLane:
     det = self._change(keep_right_det(), blinker_right=True, right_edge_widen=4.0, **IN_LEFT_LANE)
     assert det.driver_change_was_exit
     assert det.driver_change_standdown > 30.0
+
+
+class TestFussierWhenNotInAHurry:
+  """Aggression derived from how hard he is trying to get somewhere, which he asked for directly:
+
+      "could we derive aggression from how far over the speed limit I am manually going or have a
+       hold set on my cruise (from ICBM branch)?"
+
+  Both halves arrive together, because _reference_speed already resolves the hold before the dash
+  before SLA. The only new input is the posted limit to measure it against.
+
+  THE DIRECTION IS THE DESIGN. It only ever adds patience: at 8 mph over, behavior is exactly his
+  settings, and it climbs from there down to the limit. "It does want to pass more often than I
+  want" is the report, and the only safe way to answer it is by making some cases rarer rather than
+  making others more eager.
+  """
+
+  # 5 mph slower: comfortably over his 4 mph setting, comfortably under the 7.2 that 1.8x makes it.
+  MARGINAL_LEAD = CRUISE_MS - 5.0 * CV.MPH_TO_MS
+
+  @staticmethod
+  def _at(det, frames, posted, **kw):
+    for _ in range(frames):
+      det.update(make_sm(**kw), CRUISE_MS, True, 0.0, posted)
+    return det
+
+  def test_a_marginal_lead_is_not_worth_passing_at_the_posted_limit(self):
+    """The case. He is doing exactly the limit, so there is nothing to be made up, and giving up
+    five miles an hour is not a reason to change lanes twice."""
+    det = self._at(PassingAssistDetector(), STUCK_FRAMES, CRUISE_MS, v_lead=self.MARGINAL_LEAD)
+    assert abs(det.patience_scale - 1.8) < 1e-6
+    assert not det.lead_is_slow
+    assert det.suggestion == Side.none
+    assert det.patience_refused_s > 0.0, "the cost has to be counted, or it cannot be judged later"
+
+  def test_the_same_lead_is_worth_passing_when_he_is_making_time(self):
+    """Eight over. His settings, unmodified -- this is the half that must not change, or the
+    feature is a speed limiter wearing a passing assist's clothes."""
+    posted = CRUISE_MS - 8.0 * CV.MPH_TO_MS
+    det = self._at(PassingAssistDetector(), STUCK_FRAMES, posted, v_lead=self.MARGINAL_LEAD)
+    assert det.patience_scale == 1.0
+    assert det.lead_is_slow
+    assert det.suggestion == Side.left
+
+  def test_partway_over_is_partway_fussy(self):
+    """Linear between, so there is no cliff where one mile an hour changes the answer."""
+    posted = CRUISE_MS - 4.0 * CV.MPH_TO_MS
+    det = self._at(PassingAssistDetector(), 5, posted, v_lead=self.MARGINAL_LEAD)
+    assert abs(det.patience_scale - 1.4) < 1e-6
+
+  def test_no_posted_limit_changes_nothing(self):
+    """The common case on his roads -- one drive had a limit on 1.7% of frames. An unknown limit is
+    not evidence of anything, and must not quietly make the system either fussier or keener."""
+    det = self._at(PassingAssistDetector(), STUCK_FRAMES, 0.0, v_lead=self.MARGINAL_LEAD)
+    assert det.patience_scale == 1.0
+    assert det.suggestion == Side.left
+
+  def test_driving_under_the_limit_is_no_fussier_than_driving_at_it(self):
+    """Clamped. Being below the limit is often traffic rather than a statement of intent, and there
+    is no reading of his request where slower than the sign means fussier than at the sign."""
+    det = self._at(keep_right_det(), 5, CRUISE_MS + 5.0, v_lead=self.MARGINAL_LEAD)
+    assert abs(det.patience_scale - 1.8) < 1e-6
+
+  def test_a_held_cruise_speed_is_what_it_measures(self):
+    """"...or have a hold set on my cruise." The dash is AT the limit and the hold is nine over, so
+    a rule reading the dash would call this unhurried. The hold is the driver saying what they
+    want, and it is the whole reason _reference_speed resolves it first."""
+    det = self._at(PassingAssistDetector(), STUCK_FRAMES, CRUISE_MS, v_lead=self.MARGINAL_LEAD,
+                   set_speed=CRUISE_MS, icbm_hold=CRUISE_MS + 9.0 * CV.MPH_TO_MS, icbm_manual=True)
+    assert det.patience_scale == 1.0
+    assert det.lead_is_slow
+
+  def test_ten_switches_it_off(self):
+    det = self._at(keep_right_det(PassingAssistPatience=10), STUCK_FRAMES, CRUISE_MS,
+                   v_lead=self.MARGINAL_LEAD)
+    assert det.patience_scale == 1.0
+    assert det.suggestion == Side.left
+
+  def test_a_pass_it_refused_is_not_blamed_on_the_deficit_setting(self):
+    """THE TRAP THIS FEATURE SETS FOR THE PANEL. missedDeficitMph becomes "try N mph" on screen, a
+    recommendation about the DEFICIT setting, and he acts on those deliberately. A lead his own
+    number would have taken, refused by patience, must not be filed as evidence that his number is
+    too high -- that is advice to change the wrong setting."""
+    det = self._at(PassingAssistDetector(), STUCK_FRAMES, CRUISE_MS, v_lead=self.MARGINAL_LEAD)
+    assert det.blocked_by == Blocked.nothingSlower
+    self._at(det, 3, CRUISE_MS, v_lead=self.MARGINAL_LEAD, blinker=True)
+    assert det.driver_passes == 1
+    assert det.patience_missed == 1
+    assert det.missed_deficit_mph == 0.0, "attributed to patience, so the deficit average is clean"
+
+  def test_a_pass_his_own_setting_refused_still_counts_against_the_setting(self):
+    """The other side of that attribution, and what stops it swallowing the measurement whole. A
+    lead too close in speed even by HIS number is exactly what missedDeficitMph is for."""
+    det = self._at(PassingAssistDetector(), STUCK_FRAMES, CRUISE_MS,
+                   v_lead=CRUISE_MS - 2.0 * CV.MPH_TO_MS)
+    self._at(det, 3, CRUISE_MS, v_lead=CRUISE_MS - 2.0 * CV.MPH_TO_MS, blinker=True)
+    assert det.patience_missed == 0
+    assert abs(det.missed_deficit_mph - 2.0) < 0.3
 
 
 class TestTheExitWithADecelerationLane:

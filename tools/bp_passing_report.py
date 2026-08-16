@@ -114,6 +114,14 @@ def history() -> int:
       # -1, and it must not read as 0%. See geoLeftProven.
       print("    radar could not answer whether a left lane exists on any refused frame")
 
+    # WHAT THE EXTRA FUSSINESS COST. Printed even at zero, because zero is the answer to "is this
+    # doing anything" and a line that only appears when it fired cannot be told from one that is
+    # broken -- the same reason the brake lamp pill is drawn in both states.
+    missed, refused = d.get("patienceMissed"), d.get("patienceRefused")
+    if missed is not None:
+      print(f"    fussier-at-the-limit refused {refused:.0f} s of slow-enough leads, and "
+            f"{missed} pass{'' if missed == 1 else 'es'} you made yourself")
+
     # WHICH EXIT TEST DID THE WORK, and how many exits none of them caught. Printed as a verdict
     # for the same reason as the line above: the useful reading is the last bucket, and a bare
     # four-element list invites reading the first.

@@ -86,10 +86,14 @@ SCENES = [
    "PASSING ASSIST OFF", "LKA button turns it back on", 0.0, False, GREY),
   ("keep right",
    "MOVE RIGHT  >>>", "no rear data", 0.0, True, BLUE),
+  # The bar has moved off his setting and the line has to say so, or it reads as the old "nothing
+  # slower ahead with a visibly slower car in front" bug wearing a new cause.
+  ("held: at the posted limit, so a pass has to be worth more",
+   "Nothing slower ahead", "want 65  lead 60  [cluster]  need 7", 0.0, False, GREY),
   ("held: you just took an exit yourself",
    "You just changed lanes", "no rear data", 0.0, False, GREY),
   ("stopped: what this drive measured",
-   "THIS DRIVE", "7 passes, 6 agreed (11s early)  -  missed cars 2.4 mph slower",
+   "THIS DRIVE", "7 passes, 6 agreed (11s early)  -  at-limit fussiness cost 2 passes",
    0.0, False, INFO),
   ("stopped: the previous drive, kept across parking",
    "LAST DRIVE", "14 drives: 96 passed, 89 agreed  -  oncoming: 62 at 410ft",

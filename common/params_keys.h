@@ -337,6 +337,12 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // than a number invented here. Asked for after driving Parley's: "I don't want to pass on
     // curves". 0 disables the gate. Gates the suggestion only, never a crossing already underway.
     {"PassingAssistMaxCurve", {PERSISTENT | BACKUP, INT, "13"}},
+    // Tenths of a multiplier on the minimum speed gain, applied when driving AT the posted
+    // limit and fading to nothing by 8 mph over it. His own idea: "could we derive aggression
+    // from how far over the speed limit I am manually going or have a hold set on my cruise".
+    // Only ever adds patience -- 8+ over is the unmodified behavior, so this cannot make the
+    // system pass more than the deficit setting says. 10 disables it.
+    {"PassingAssistPatience", {PERSISTENT | BACKUP, INT, "18"}},
     // BluePilot: extra-conservative exit avoidance -- require a further lane BEYOND the one being
     // moved into. Superseded as the primary defence by the road-widening check, which spots an exit
     // from the road opening up ahead and works on two-lane roads. Default off: this one costs

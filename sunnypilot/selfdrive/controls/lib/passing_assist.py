@@ -433,6 +433,33 @@ DEFAULT_PERSISTENCE_S = 1
 # much, so this is the width of the noise, not a second judgment.
 DEFICIT_HYSTERESIS_MPH = 1
 
+# HOW HARD HE IS TRYING TO GET SOMEWHERE, asked for directly:
+#
+#   "could we derive aggression from how far over the speed limit I am manually going or have a
+#    hold set on my cruise (from ICBM branch)?"
+#
+# Both halves of that arrive already combined. _reference_speed resolves the driver's intent from
+# the ICBM hold first, the dash second, SLA's target last -- so "have a hold set" is not a separate
+# input, it is the case where reference_speed comes back labeled icbmHold. The only thing missing
+# was the posted limit to measure it against, which the planner now passes.
+#
+# THE SCALE ONLY EVER ADDS PATIENCE, NEVER REMOVES IT, and that direction is the whole design:
+#
+#   - 8+ mph over the limit is the UNCHANGED behavior, not the aggressive one. His settings mean
+#     what they say and this cannot make the system pass more than he configured.
+#   - at or under the limit the required speed gain is multiplied up, so only a clearly slower car
+#     is worth the maneuver. "It does want to pass more often than I want" is the report this
+#     answers, and answering it by making some other case rarer is the only safe direction.
+#   - no posted limit means scale 1.0. Unknown is not evidence, and on his roads it is common --
+#     one drive had a limit on 1.7% of frames.
+#
+# It scales the DEFICIT and nothing else. Not the curve gate, which is a steering-authority limit
+# rather than a preference -- the PSCM does not care how late he is. Not the blind spot, the
+# oncoming veto, the approach distance or the confirmation: "evidence that opens a maneuver must
+# never be cheaper than evidence that refuses one" is the rule this could most easily break.
+DEFAULT_PATIENCE = 18            # tenths of a multiplier. 10 disables it.
+PATIENCE_FULL_EXCESS_MPH = 8.0   # at or above this far over the limit, no extra patience at all
+
 # A GRACE WINDOW then decay fixes the dropout, and the grace window is the part that matters.
 #
 # Decay alone was not enough, which is worth spelling out because it looked like it was. Decaying
@@ -845,6 +872,16 @@ class PassingAssistDetector:
     self.frame = 0
     self.enabled = True
     self.min_deficit_ms = DEFAULT_MIN_DEFICIT_MPH * CV.MPH_TO_MS
+    # See DEFAULT_PATIENCE. The configured multiplier, the posted limit it is measured against,
+    # what it currently works out to, and the threshold every gate actually reads.
+    self.patience = DEFAULT_PATIENCE / 10.0
+    self.posted_limit = 0.0
+    self.patience_scale = 1.0
+    self.min_deficit_active_ms = DEFAULT_MIN_DEFICIT_MPH * CV.MPH_TO_MS
+    self.patience_refused_s = 0.0
+    # ...and passes HE made that patience refused, which is the stronger version of the same
+    # question: seconds are exposure, this is a maneuver he actually wanted.
+    self.patience_missed = 0
     self.persistence_s = float(DEFAULT_PERSISTENCE_S)
     self.keep_right_enabled = True
     self.keep_right_delay_s = float(DEFAULT_KEEP_RIGHT_DELAY_S)
@@ -941,6 +978,8 @@ class PassingAssistDetector:
     if self.frame % int(PARAMS_UPDATE_PERIOD / DT_MDL) == 0:
       self.enabled = self.params.get_bool("PassingAssistLogEnabled")
       self.min_deficit_ms = self.params.get("PassingAssistMinDeficit", return_default=True) * CV.MPH_TO_MS
+      # Tenths, like the curve gate above it. 18 -> 1.8x.
+      self.patience = float(self.params.get("PassingAssistPatience", return_default=True)) / 10.0
       self.persistence_s = float(self.params.get("PassingAssistConfirmTime", return_default=True))
       self.keep_right_enabled = self.params.get_bool("PassingAssistKeepRight")
       self.keep_right_delay_s = float(self.params.get("PassingAssistKeepRightDelay", return_default=True))
@@ -1520,9 +1559,15 @@ class PassingAssistDetector:
       return False
 
     # See DEFICIT_HYSTERESIS_MPH. Harder to become slow than to stay slow.
-    threshold = self.min_deficit_ms - (DEFICIT_HYSTERESIS_MPH * CV.MPH_TO_MS if self.lead_is_slow else 0.0)
+    hysteresis = DEFICIT_HYSTERESIS_MPH * CV.MPH_TO_MS if self.lead_is_slow else 0.0
+    threshold = self.min_deficit_active_ms - hysteresis
     self.lead_is_slow = self.speed_deficit >= threshold
     if not self.lead_is_slow:
+      # WHAT PATIENCE COST, measured where it is spent rather than inferred later. This lead was
+      # slow enough by the number he set and was refused only because he is not going anywhere in
+      # a hurry -- which is the whole question of whether the feature earns its place.
+      if self.speed_deficit >= self.min_deficit_ms - hysteresis:
+        self.patience_refused_s += DT_MDL
       self._clear_confirmation()
       return False
 
@@ -1711,6 +1756,10 @@ class PassingAssistDetector:
         # bucket is the one to read -- it is the count of exits all three tests missed, which is
         # the number the note in that method has been asking for since it was written.
         "exitsBy": list(self._exits_by),
+        # See DEFAULT_PATIENCE. What the extra fussiness cost -- seconds where a lead was slow
+        # enough by his own setting, and passes he then made himself.
+        "patienceRefused": round(self.patience_refused_s, 1),
+        "patienceMissed": int(self.patience_missed),
         "driverPasses": int(self.driver_passes),
         "driverPassesAgreed": int(self.driver_passes_agreed),
         "driverPassLead": round(self.driver_pass_lead_s, 1),
@@ -2052,9 +2101,17 @@ class PassingAssistDetector:
       # Only for the threshold's own refusals. A pass refused for a blind spot says nothing about
       # whether 4 mph is the right number, and averaging it in would bury the cases that do.
       if key == int(Blocked.nothingSlower) and self.has_lead:
-        self._missed_deficit_n += 1
-        mph = float(self.speed_deficit) * CV.MS_TO_MPH
-        self.missed_deficit_mph += (mph - self.missed_deficit_mph) / self._missed_deficit_n
+        # ATTRIBUTED BEFORE IT IS AVERAGED, because the panel turns missedDeficitMph into "try N"
+        # -- a recommendation about the DEFICIT SETTING. A lead his own setting would have taken,
+        # refused because patience raised the bar, says nothing about that setting: telling him to
+        # lower it would be advice to fix the wrong number, and he follows this advice deliberately
+        # ("I will go through each setting, check the description for recommended value").
+        if self.patience_scale > 1.0 and self.speed_deficit >= self.min_deficit_ms:
+          self.patience_missed += 1
+        else:
+          self._missed_deficit_n += 1
+          mph = float(self.speed_deficit) * CV.MS_TO_MPH
+          self.missed_deficit_mph += (mph - self.missed_deficit_mph) / self._missed_deficit_n
 
   @property
   def lifetime(self) -> tuple[int, int, int]:
@@ -2166,6 +2223,7 @@ class PassingAssistDetector:
         held = max(baseline, cluster)
         self.reference_speed = held
         self.reference_source = RefSource.icbmHold if baseline >= cluster else RefSource.cluster
+        self._apply_patience()
         return held
     except (KeyError, AttributeError, TypeError, ValueError):
       pass
@@ -2179,16 +2237,48 @@ class PassingAssistDetector:
 
     self.reference_speed = best
     self.reference_source = source
+    self._apply_patience()
     return best
 
-  def update(self, sm, v_cruise: float, long_enabled: bool, speed_limit_target: float = 0.0) -> None:
+  def _apply_patience(self) -> None:
+    """Turn "how far over the limit did he ask to go" into the speed gain a pass has to be worth.
+
+    See DEFAULT_PATIENCE. Called from BOTH exits of _reference_speed rather than after it, because
+    the driver's own held speed returns early -- and a hold is the strongest statement of intent
+    there is, so it is the last case that should fall through to a stale scale.
+
+    The excess is measured against the RAW POSTED LIMIT, not SLA's limit-plus-offset. His offset is
+    a standing preference that applies everywhere; going beyond it is the thing being detected.
+    Measuring against the offset target would read his ordinary cruising as unhurried on every road
+    and as hurried on none, which is the same as switching the feature off.
+    """
+    if self.patience <= 1.0 or self.posted_limit <= 0.0 or self.reference_speed <= 0.0:
+      self.patience_scale = 1.0
+    else:
+      excess_mph = (self.reference_speed - self.posted_limit) * CV.MS_TO_MPH
+      # Clamped at both ends: below the limit is not MORE patient than at it -- he may simply be
+      # in traffic -- and there is nothing above unmodified.
+      frac = min(1.0, max(0.0, excess_mph) / PATIENCE_FULL_EXCESS_MPH)
+      # SNAPPED TO EXACTLY 1.0 AT THE TOP, and snapped on the RESULT rather than on frac, because
+      # the epsilon does not come from the clamp -- 8 mph converted to m/s and back is 7.999999999,
+      # so frac arrives just under 1 and 1.8 + (-0.8) * frac lands on 1.0000000000000002.
+      #
+      # That passes `patience_scale > 1.0`, which is the comparison deciding whether a pass he made
+      # gets blamed on patience or on his deficit setting. A float epsilon at the knee would have
+      # quietly corrupted the panel's recommendation at exactly the speeds he drives.
+      scale = self.patience + (1.0 - self.patience) * frac
+      self.patience_scale = 1.0 if scale <= 1.0 + 1e-6 else scale
+    self.min_deficit_active_ms = self.min_deficit_ms * self.patience_scale
+
+  def update(self, sm, v_cruise: float, long_enabled: bool, speed_limit_target: float = 0.0,
+             posted_limit: float = 0.0) -> None:
     """Decide, then advance the dry run of the maneuver that decision would produce."""
     # THE FLAG IS CLEARED BEFORE _decide, NOT IN _reset_outputs. Gate refusals -- blind spot,
     # oncoming, geometry -- go through _reset_outputs too, and those are exactly the frames the
     # request must survive: asking only once a lane is clear would arrive after the ~4.5 s the gap
     # takes to reach. So only a return BEFORE the `spotted` check leaves this False.
     self._gap_pursuing = False
-    self._decide(sm, v_cruise, long_enabled, speed_limit_target)
+    self._decide(sm, v_cruise, long_enabled, speed_limit_target, posted_limit)
     self._update_gap_request()
     self._hold_suggestion()
     self._track_curve(sm, float(sm['carState'].vEgo))
@@ -2494,7 +2584,8 @@ class PassingAssistDetector:
       return self.keep_right_maneuver, Reason.keepRight
     return self.maneuver, Reason.none
 
-  def _decide(self, sm, v_cruise: float, long_enabled: bool, speed_limit_target: float = 0.0) -> None:
+  def _decide(self, sm, v_cruise: float, long_enabled: bool, speed_limit_target: float = 0.0,
+              posted_limit: float = 0.0) -> None:
     """
     Args:
       sm: SubMaster with carState, radarState, modelV2 and (BluePilot, Ford) carStateBP
@@ -2512,6 +2603,7 @@ class PassingAssistDetector:
     self.last_v_ego = float(CS.vEgo)
     lead = sm['radarState'].leadOne
 
+    self.posted_limit = float(posted_limit)
     v_cruise = self._reference_speed(CS, sm, v_cruise, speed_limit_target)
 
     # BLIS is read every cycle regardless of the gates below -- its behavior approaching a pass
@@ -2771,8 +2863,8 @@ class PassingAssistDetector:
     # asking whether it is faster than what we are stuck behind -- a queue crawling at 45 is still
     # worth moving into if the lead is doing 40 and we want 70. The margin is the same deficit that
     # decided the pass was worth wanting, so one knob governs both halves of the judgment.
-    adj_left = self.adjacent.left.blocks_move(self.lead_v_lead, self.min_deficit_ms, CS.vEgo)
-    adj_right = self.adjacent.right.blocks_move(self.lead_v_lead, self.min_deficit_ms, CS.vEgo)
+    adj_left = self.adjacent.left.blocks_move(self.lead_v_lead, self.min_deficit_active_ms, CS.vEgo)
+    adj_right = self.adjacent.right.blocks_move(self.lead_v_lead, self.min_deficit_active_ms, CS.vEgo)
 
     # SIGNAL FIRST, THEN CHECK. His design, and what production systems do -- Super Cruise holds in
     # lane showing "looking for an opening" with the signal already up, BlueCruise gives up after
@@ -2916,7 +3008,7 @@ class PassingAssistDetector:
     #
     # Expressed as the passing threshold read backwards -- slower than the set speed by the deficit
     # margin -- so the two behaviors cannot disagree about what "slow" means.
-    if self.adjacent.right.blocks_move(self.reference_speed - self.min_deficit_ms, 0.0,
+    if self.adjacent.right.blocks_move(self.reference_speed - self.min_deficit_active_ms, 0.0,
                                        self.last_v_ego):
       self.keep_right_seconds = 0.0
       return
@@ -3043,6 +3135,8 @@ class PassingAssistDetector:
     passingAssist.keepRightAborts = min(pa.keep_right_maneuver.aborts, 65535)
     passingAssist.minApproachActive = float(pa.min_approach_m)
     passingAssist.minDeficitActive = float(pa.min_deficit_ms * CV.MS_TO_MPH)
+    passingAssist.patienceScale = float(pa.patience_scale)
+    passingAssist.patienceMissed = int(pa.patience_missed)
     passingAssist.driverPasses = min(pa.driver_passes, 65535)
     passingAssist.driverPassesAgreed = min(pa.driver_passes_agreed, 65535)
     passingAssist.driverPassLeadSeconds = float(pa.driver_pass_lead_s)

@@ -668,6 +668,15 @@ class HudRendererBP(HudRendererSP):
           elif name:
             lines.append(f"missed on {_BLOCKED_TEXT.get(name, name).lower()}")
 
+        # WHAT THE EXTRA FUSSINESS COST OVER THE DRIVE. The live line above says the bar moved;
+        # this says whether that mattered. Counted in passes he went and made himself, which is the
+        # only unarguable evidence that a refusal was wrong -- seconds are exposure, a pass is a
+        # verdict. Below the threshold it stays off the panel rather than reporting a zero: the
+        # drive summary is priority-ordered and a line that says nothing happened outranks nothing.
+        if pa.patienceMissed > 0:
+          lines.append(f"at-limit fussiness cost {pa.patienceMissed} "
+                       f"pass{'' if pa.patienceMissed == 1 else 'es'}")
+
       # The total is what actually decides anything -- one drive's seven passes swing by a third on
       # a single odd stretch of road. Shown only once there is more of it than the drive in front
       # of it, or it is the same number printed twice.
@@ -1107,6 +1116,13 @@ class HudRendererBP(HudRendererSP):
           self._pa_sub_detail = (f"want {pa.referenceSpeed * conv:.0f}"
                                  f"  lead {pa.leadVLead * conv:.0f}"
                                  f"  [{pa.referenceSource}]")
+          # ...and the bar it is being held to, when that is NOT the number on the settings screen.
+          # Without this the line shows a lead visibly slower than the wanted speed and says
+          # "nothing slower ahead" anyway -- which is the exact report that cost two drives to
+          # diagnose, reintroduced by a feature that quietly moves the threshold. Shown only while
+          # patience is doing something, because at 8 over it is his setting and needs no gloss.
+          if pa.patienceScale > 1.0:
+            self._pa_sub_detail += f"  need {pa.minDeficitActive * pa.patienceScale:.0f}"
         # ONE WORD, for the LEFT side, and nothing else. It used to print "L paint 0.31     R
         # shoulder 0.3ft" -- four numbers to parse at 70 mph -- which earned "and you expect me to
         # read all of that while driving?" and was removed outright.

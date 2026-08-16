@@ -878,6 +878,22 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     oncomingSeenSeconds @80 :Float32;        # refused while actually watching a vehicle
     oncomingRememberedSeconds @81 :Float32;  # refused on memory alone, nothing in view
 
+    # How much the minimum speed gain is being multiplied by right now, from how far over the
+    # posted limit the driver has asked to go. 1.0 is "his setting, unmodified".
+    #
+    # SEPARATE FROM minDeficitActive ON PURPOSE. That field feeds the summary's "try N mph"
+    # recommendation, which names the SETTING to change -- scaling it would make the panel
+    # recommend a number derived from a momentary road condition, which is the exact fault its own
+    # comment warns about one field up.
+    patienceScale @99 :Float32;
+    # ...and what it cost: passes HE went and made himself, out of leads that were slow enough by
+    # his own setting and were refused only because of this. The number to look at before deciding
+    # whether to keep the feature -- a pass he made is a verdict, where seconds are only exposure.
+    #
+    # The seconds are kept too, in the drive record rather than here, because nothing on screen
+    # would draw them and a published field nobody renders reads as a real measurement forever.
+    patienceMissed @100 :UInt16;
+
     enum Maneuver {
       idle @0;         # nothing warranted
       confirming @1;   # a slower vehicle is being confirmed, timer running

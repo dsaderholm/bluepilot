@@ -579,6 +579,15 @@
                   "step": 1
                 },
                 {
+                  "key": "PassingAssistPatience",
+                  "widget": "option",
+                  "title": "Be Fussier When Not In A Hurry",
+                  "description": "Multiply the minimum speed gain, in tenths, when you are driving at the posted speed limit -- so a pass has to be worth more before it is offered. Fades out as you go over the limit and is gone entirely at 8 mph over, so your setting is unchanged whenever you are actually making time. Uses your held cruise speed if you have one. Set to 10 to treat every road the same.",
+                  "min": 10,
+                  "max": 30,
+                  "step": 1
+                },
+                {
                   "key": "PassingAssistExitStandDown",
                   "widget": "option",
                   "title": "Stay Quiet After You Take An Exit",
