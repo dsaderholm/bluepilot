@@ -1275,3 +1275,79 @@ class TestTheOverlayWaitsForCorroboration:
     for i in range(ONCOMING_FRAMES):
       adj.update(FakeSM([track(90, 2.5 + i * 1.5, v_rel=self.ONCOMING)]), V_EGO, MAX_D)
     assert adj.left.oncoming_corroborated
+
+
+class TestOncomingMustBeMovingLikeTraffic:
+  """The floor on oncoming speed scales with road speed, and the reason is a measured drive.
+
+  The night highway run on 2026-08-15 logged oncomingVAbs of -8.4 m/s -- 19 mph -- and the day run
+  in the other direction -15.6. Neither is a vehicle travelling the other way at road speed. Both
+  cleared the flat -5 m/s floor, three frames latched the veto, and 7.8 s of sightings became 73 s
+  of remembered oncoming on a divided highway where the true count is zero.
+
+  ground_speed already corrects the cosine error exactly, and its own docstring shows what is left:
+  a barrier 4 m out at 67 mph reads 6.6 m/s at 5 m. The correction cannot remove that, because the
+  residue is real measurement error, not geometry. A floor that scales with our speed can.
+
+  WHAT MUST NOT BREAK is the slow arterial. The 5 m/s floor exists so a 25 mph oncoming car on a
+  two-lane road is still seen, and that is the case the whole two-way-road detection was built for.
+  """
+
+  # v_abs = v_ego + v_rel / cos(theta); near boresight cos ~ 1, so v_rel = v_abs - v_ego.
+  @staticmethod
+  def at(v_abs, v_ego, d=90, y=3.7):
+    import math
+    cos_t = d / math.hypot(d, y)
+    return track(d, y, v_rel=(v_abs - v_ego) * cos_t)
+
+  def test_the_measured_false_positive_is_rejected(self):
+    """-8.4 m/s at 30 m/s ego: the exact reading from the night drive."""
+    adj = AdjacentLane()
+    upd(adj, FakeSM([self.at(-8.4, 30.0)]), 30.0, MAX_D)
+    assert not adj.left.oncoming
+    assert not adj.oncoming_any_side
+
+  def test_the_day_drive_reading_is_NOT_rejected_and_that_is_deliberate(self):
+    """-15.6 at 30 m/s ego clears the floor by a hair -- half of 30 is exactly 15.0.
+
+    Recorded rather than tuned away. Raising the fraction to catch this one measurement would be
+    fitting a constant to two points, and the asymmetry forbids it: a missed oncoming car means
+    suggesting a pass into head-on traffic, while a false veto costs a pass and nothing else. So
+    the floor stays generous and this reading still vetoes.
+
+    If day-drive oncoming keeps showing up at half road speed on divided highways, THAT is the
+    evidence to raise the fraction on -- several drives, not one number.
+    """
+    adj = AdjacentLane()
+    upd(adj, FakeSM([self.at(-15.6, 30.0)]), 30.0, MAX_D)
+    assert adj.left.oncoming
+
+  def test_real_oncoming_at_highway_speed_still_classifies_the_road(self):
+    """THE CASE THE FEATURE EXISTS FOR must survive the fix. A car doing 60 the other way reads
+    about -27, which is well past half of our own 30."""
+    adj = AdjacentLane()
+    upd(adj, FakeSM([self.at(-27.0, 30.0)]), 30.0, MAX_D)
+    assert adj.left.oncoming
+    assert adj.oncoming_any_side
+
+  def test_a_slow_oncoming_car_on_an_arterial_is_still_seen(self):
+    """The 5 m/s floor's whole purpose. At 30 mph a 25 mph oncoming car reads about -11, which the
+    scaled floor must still admit -- half of 13 m/s is 6.5."""
+    adj = AdjacentLane()
+    upd(adj, FakeSM([self.at(-11.0, 13.0)]), 13.0, MAX_D)
+    assert adj.left.oncoming
+
+  def test_the_floor_never_drops_below_the_noise_band(self):
+    """Crawling in traffic must not make every barrier oncoming. Half of 4 m/s is 2, and a track
+    reading -3 is noise around zero, not a car."""
+    adj = AdjacentLane()
+    upd(adj, FakeSM([self.at(-3.0, 4.0)]), 4.0, MAX_D)
+    assert not adj.left.oncoming
+
+  def test_the_threshold_itself(self):
+    from openpilot.sunnypilot.selfdrive.controls.lib.adjacent_lane import (
+      min_oncoming_ms, MIN_ONCOMING_MS)
+    assert min_oncoming_ms(0.0) == MIN_ONCOMING_MS
+    assert min_oncoming_ms(4.0) == MIN_ONCOMING_MS, "the noise floor is the lower bound"
+    assert min_oncoming_ms(30.0) == 15.0
+    assert min_oncoming_ms(-5.0) == MIN_ONCOMING_MS, "reverse must not invert the floor"

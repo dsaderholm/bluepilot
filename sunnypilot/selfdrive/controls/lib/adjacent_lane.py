@@ -156,6 +156,28 @@ MIN_MOVING_MS = 5.0
 # it is already fitted.
 MIN_ONCOMING_MS = 5.0
 
+# ...AND THAT REASONING WAS NEVER IMPLEMENTED. The paragraph above says an oncoming car reads
+# "around -27 m/s for someone doing 60", then the constant admits anything past -5 m/s -- 11 mph.
+# A noise floor around zero is the right shape for a 25 mph arterial and far too loose on a
+# freeway, where the sensor's own angle error on a stationary object produces exactly that.
+#
+# Measured on the night highway drive, 2026-08-15: oncomingVAbs -8.4 m/s, and -15.6 m/s on the day
+# drive in the other direction. Neither is traffic travelling the other way at road speed; both
+# cleared -5 easily. Three such frames buy a 90 s veto, and 7.8 s of sightings became 73 s of
+# remembered oncoming on a divided highway where the true count is zero.
+#
+# So the floor scales with how fast the ROAD is, using our own speed as the proxy for it. Oncoming
+# traffic travels at roughly road speed whatever we happen to be doing; clutter misread through an
+# angle error scales with ours. Half is deliberately generous -- it still admits a 25 mph oncoming
+# car while we do 30, which is the arterial case the 5 m/s floor exists for, and rejects -8.4 at
+# freeway speed where a real oncoming vehicle would read past -25.
+ONCOMING_SPEED_FRACTION = 0.5
+
+
+def min_oncoming_ms(v_ego: float) -> float:
+  """The absolute ground speed a track must be making TOWARDS us to count as oncoming."""
+  return max(MIN_ONCOMING_MS, ONCOMING_SPEED_FRACTION * max(0.0, float(v_ego)))
+
 # How far out to LOOK for oncoming traffic. Deliberately much wider than the adjacent-lane band,
 # and the reason is the center turn lane.
 #
@@ -934,8 +956,9 @@ class AdjacentLane:
       # NOT v_ego + p.vRel -- see ground_speed(). That form reads a close barrier as a moving car.
       v_abs = ground_speed(v_ego, p.dRel, p.yRel, p.vRel)
 
-      if v_abs < -MIN_ONCOMING_MS:
-        # Travelling the other way. Seen across the FULL width of our road, not just the next lane
+      if v_abs < -min_oncoming_ms(v_ego):
+        # Travelling the other way, FAST ENOUGH to be traffic rather than an angle error on
+        # something stationary -- see min_oncoming_ms. Seen across the FULL width of our road, not just the next lane
         # -- on anything with a center turn lane the opposing traffic is two lanes out, and bounding
         # this to the adjacent band meant those roads produced no veto at all. That width is what
         # the carriageway test above allows; it is the same test, hoisted.
