@@ -99,6 +99,40 @@ never make the car more willing to pass than his own settings. Keep that clamp.
 **Owned by ICBM** -- holds are theirs, `bp_hold_history.py` already walks every change to one with
 `baselineSource` naming the mechanism, and that is where a correction layer would be built from.
 
+#### HE HAS SPECIFIED IT: three sightings and the hold is remembered
+
+*"A hold will get remembered if it's set 3 times."* 2026-08-16. So this is a feature request with a
+threshold already chosen, not an idea to evaluate.
+
+**THE KEY IS THE WHOLE DESIGN, and it is the strongest concrete argument for mapd v2 in this
+document** -- stronger than any field on the list above, because it decides whether the feature
+works at all rather than making it nicer:
+
+  v1 today   `RoadName` + `MapSpeedLimit` are the only identifiers available. The key becomes
+             something like ("I 15", 65) -> 72. But "I 15" is FOUR HUNDRED MILES. A correction made
+             in Utah County applies through St George, and a road whose posted limit is wrong in
+             different ways along its length cannot be represented at all.
+  v2         `wayId`, added in mapd v2.1.0, identifies the actual OSM way -- typically a few hundred
+             meters to a few miles. "The map is wrong HERE" instead of "somewhere on this highway."
+
+So the feature is crude on what ships today and precise after the upgrade.
+
+Constraints it has to respect, both already recorded elsewhere in this repo:
+
+- **It must show what it is doing.** "The one thing it must never become is a system that retunes
+  itself and mentions it nowhere." The HOLD badge already draws and is already a tap target, so the
+  surface exists -- but a REMEMBERED hold has to be distinguishable from one he just set, or he
+  cannot tell a decision he made from one made for him.
+- **The counter is a JSON param and those encode themselves.** `put(key, json.dumps(x))` is a
+  TypeError and `get` returns the decoded object. That mistake shipped pinned holds completely dead
+  for their entire life, because both directions were broken and therefore agreed with each other.
+- **A hold BELOW the limit is the direction to trust first**, per the paragraph above.
+
+Open questions for whoever builds it: what counts as "the same" hold (exact mph, or a band); whether
+the count decays when he drives the same road WITHOUT setting one; and how a remembered hold
+interacts with `enforce_no_limit_no_hold` -- it should be consistent, since the key includes a posted
+limit and therefore cannot exist where no limit is known.
+
 ## The three facts that frame it
 
 1. **`v1.12.0` is the last v1 release that will ever exist.** pfeiferj shipped it and everything
