@@ -989,11 +989,21 @@ section above says is "mapd's, upstream of this fork", and `MapdExtendedOut.path
 whole curvature-and-target-velocity profile ahead rather than SCC-Map's single step.
 
 **Do not start this before the California trip.** It is large and it touches the layers this fork has
-customized most. But drop "upstream will handle it" as a reason -- it is measurably false, and the
-question actually worth settling is whether mapd's own documented "Minimal" integration path (which is
-ADDITIVE -- add capnp defs, a service, a process, a subscription) can run alongside v1 without the
-SLA/SCC teardown that draft performs. That teardown is sunnypilot's consolidation choice, not a
-technical requirement of mapd v2. **That question is unanswered and is the one to answer first.**
+customized most. But drop "upstream will handle it" as a reason -- it is measurably false.
+
+**THE BLOCKING QUESTION IS ANSWERED, 2026-08-16: v2 CAN RUN ALONGSIDE v1 AS A PURE OBSERVER.** The
+SLA/SCC teardown in that draft is sunnypilot's consolidation choice, confirmed rather than assumed --
+**mapd v2's `params.go` has no `/dev/shm` concept in it at all**, so every key SLA and SCC read is
+written by v1 and cannot be perturbed by a process that never opens that store. v2 takes its own
+position from `gpsLocationExternal` over msgq. Two further things that were assumed wrong: there are
+not two tile stores (v2's base path IS `Paths.mapd_root()`, same URL, same layout), and the tiles
+already on the device already carry `wayId` and `highwayClass` at 100% -- the shipped v1.12.0 binary
+reads those very files and has no way to publish either field. Only integration step 7 (clamping
+`v_cruise` in the planner) is non-additive, and it is the one the map-is-evidence rule forbids anyway.
+
+Full evidence, the four mechanical collisions, and what still needs the device (CPU and memory with
+both running) are in `bluepilot/MAPD-V2-PLAN.md`. `tools/bp_offline_map.py` reads the tile store
+directly -- the first tool here that can see what the map says, since v1 puts none of it in the route.
 
 ### THE MAP IS EVIDENCE, NEVER PERMISSION -- and that is the design, not a caveat
 
