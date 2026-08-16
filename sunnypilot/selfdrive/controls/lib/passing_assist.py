@@ -270,6 +270,23 @@ DEFAULT_EXIT_STANDDOWN_S = 45
 # a correction.
 MIN_STEER_TAKEOVER_S = 0.7
 
+# HIS OWN EXIT RULE, the half the geometry tests cannot reach: "if I nudgeless go into the most far
+# right lane and go SLOWER there, then I am probably exiting."
+#
+# The other half of that sentence -- the far right lane -- is already what _moved_toward_an_exit
+# tests, and it is the stronger evidence where it applies. What it cannot see is an exit with a
+# real DECELERATION LANE: the ramp is a lane, so right_geometry_ok stays true and we are not
+# outermost, and nothing widens because the lane was already there. Both existing branches go
+# quiet on exactly the exit that is easiest to see out of the windshield.
+#
+# So the speed is watched AFTER the change rather than during it, because "slower there" happens
+# there -- on the ramp, seconds after the stalk goes off. EXIT_WATCH_S has to outlive
+# SETTLE_AFTER_CHANGE_S for this to be worth anything.
+EXIT_WATCH_S = 12.0
+# ~9 mph. Large on purpose. Small drops are ordinary traffic and this competes against a real cost
+# (see _arm_exit_watch): every false positive is a pass he wanted and did not get offered.
+EXIT_DECEL_MS = 4.0
+
 # How often the drive's measurements are written to a param so they survive being parked.
 #
 # They are the whole output of phase 1 and they used to live only in RAM: park, screen off, gone.
@@ -857,6 +874,16 @@ class PassingAssistDetector:
     self._driver_blinker = None       # side currently being signaled, or None
     self._signalled_over_widening = False
     self._steer_held_s = 0.0
+    # See EXIT_WATCH_S. Speed just before the driver's current maneuver began, and the watch it
+    # arms afterwards.
+    self._change_entry_v = 0.0
+    self._exit_watch_s = 0.0
+    self._exit_watch_v = 0.0
+    # Which test caught each rightward driver change: widening, outermost, slowed after, none.
+    # This is the measurement _moved_toward_an_exit's own note asks for -- "how often
+    # driver_change_was_exit comes out false on a freeway drive with known exits" -- and it now
+    # rides along with the drive instead of needing a separate tool and a separate drive.
+    self._exits_by = [0, 0, 0, 0]
     # See driverPasses in custom.capnp -- agreement with the driver, the readiness measure.
     self.driver_passes = 0
     self.driver_passes_agreed = 0
@@ -1679,6 +1706,11 @@ class PassingAssistDetector:
         "crawlLongest": round(self.overtake.crawl_longest, 1),
         "aborts": self.maneuver.aborts,
         "accOnsetMax": round(self.acc_onset_max, 1),
+        # See _moved_toward_an_exit. Every RIGHTWARD driver change on the drive, split by which
+        # test recognized it: widening, outermost lane, slowed afterwards, nothing. The last
+        # bucket is the one to read -- it is the count of exits all three tests missed, which is
+        # the number the note in that method has been asking for since it was written.
+        "exitsBy": list(self._exits_by),
         "driverPasses": int(self.driver_passes),
         "driverPassesAgreed": int(self.driver_passes_agreed),
         "driverPassLead": round(self.driver_pass_lead_s, 1),
@@ -1749,6 +1781,13 @@ class PassingAssistDetector:
     the only moment the evidence exists is while the maneuver is still happening.
     """
     self.driver_change_standdown = max(0.0, self.driver_change_standdown - DT_MDL)
+
+    # Read from LAST frame's state, deliberately: on the frame the stalk first appears this still
+    # sees "no maneuver in progress" and captures the speed he was holding before it began. A
+    # change that starts with a lift then measures its own drop from the right number.
+    if self._driver_blinker is None and self._steer_held_s == 0.0:
+      self._change_entry_v = float(CS.vEgo)
+    self._tick_exit_watch(float(CS.vEgo))
 
     # How long the current suggestion has been up. Reset on any change, so at the moment the driver
     # acts this is the warning it actually gave -- which is the whole benefit being claimed: enough
@@ -1855,7 +1894,8 @@ class PassingAssistDetector:
       return
 
     # Stalk just went off: the change is done, or they thought better of it. Either way, pause.
-    self._stand_down(self._driver_blinker == 'right' and self._moved_toward_an_exit())
+    rightward = self._driver_blinker == 'right'
+    self._stand_down(rightward and self._moved_toward_an_exit(), rightward=rightward)
     self._driver_blinker = None
 
   def _moved_toward_an_exit(self) -> bool:
@@ -1884,12 +1924,67 @@ class PassingAssistDetector:
     kind of exit, where a ramp lane really does open up and he moves into that instead.
     """
     if self._signalled_over_widening:
+      self._exits_by[0] += 1
       return True
     # No lane to the right of where we now are. Read after the change, which is what makes it mean
     # "outermost" rather than "there was no lane before I moved".
-    return not self.right_geometry_ok
+    if not self.right_geometry_ok:
+      self._exits_by[1] += 1
+      return True
+    # Neither test could see it. Counted here rather than at the call site so the totals cannot
+    # drift apart, and provisionally: the speed watch may still claim this one, which moves it out
+    # of this bucket and into the third.
+    self._exits_by[3] += 1
+    return False
 
-  def _stand_down(self, was_exit: bool) -> None:
+  def _arm_exit_watch(self) -> None:
+    """A rightward change that neither geometry test claimed. Keep watching the speed.
+
+    See EXIT_WATCH_S. NOT ARMED WITH A LEAD IN FRONT, which is the discriminator that makes this
+    safe to ship, and the reason it is not simply "he slowed down":
+
+      following   he moves right and gets behind a truck. He slows to the truck's speed. That is
+                  the single most common rightward change on a two-lane interstate, and it is also
+                  the exact moment he most wants to be offered the pass back. A stand-down there
+                  would fight the feature.
+      exiting     he moves right with clear road ahead and slows anyway. Nothing in front explains
+                  it, cruise would not do it, so it is him coming off for a reason.
+
+    The lead is read at the moment of the change rather than during the watch because the gate at
+    driver_change_standdown returns before has_lead is updated -- it would be frozen for the whole
+    watch regardless, and a value frozen at a meaningful instant beats one frozen by accident.
+
+    The climb is a deliberate no-op rather than an exception: he moves right and slows on a grade
+    with nothing ahead, and this reads it as an exit. He does not want to be offered a pass there
+    either -- "I don't want to pass going uphill when my engine is already stressed enough" -- so
+    the wrong reason reaches the right silence.
+    """
+    if self.has_lead:
+      return
+    self._exit_watch_s = EXIT_WATCH_S
+    self._exit_watch_v = self._change_entry_v
+
+  def _tick_exit_watch(self, v_ego: float) -> None:
+    """Did he slow down after moving over? Then that was an exit after all.
+
+    Upgrades a stand-down already in progress. It does NOT restart since_driver_change_s or the
+    right lane age: the change itself happened seconds ago and re-zeroing them here would age the
+    lane from the moment we changed our mind about it rather than from the moment the road did.
+    """
+    if self._exit_watch_s <= 0.0:
+      return
+    self._exit_watch_s = max(0.0, self._exit_watch_s - DT_MDL)
+    if v_ego > self._exit_watch_v - EXIT_DECEL_MS:
+      return
+    self._exit_watch_s = 0.0
+    self.driver_change_was_exit = True
+    self._exits_by[3] -= 1
+    self._exits_by[2] += 1
+    # max, not assignment: an ordinary settle is shorter than the exit pause, but a watch that
+    # fires one frame before the exit stand-down would have expired must never shorten it.
+    self.driver_change_standdown = max(self.driver_change_standdown, self.exit_standdown_s)
+
+  def _stand_down(self, was_exit: bool, rightward: bool = False) -> None:
     """The driver just finished a maneuver of their own. Pause, and forget what was beside us.
 
     Called from both routes into a stand-down -- the stalk and a silent steering takeover -- for the
@@ -1913,6 +2008,11 @@ class PassingAssistDetector:
     self.since_driver_change_s = 0.0
     self._signalled_over_widening = False
     self.right_lane_age_s = 0.0
+    # Cleared unconditionally first, so a second change during a watch replaces it rather than
+    # leaving the old one to fire against a speed reference that belongs to a maneuver ago.
+    self._exit_watch_s = 0.0
+    if rightward and not was_exit:
+      self._arm_exit_watch()
 
   def _record_driver_pass(self) -> None:
     """The driver just started a pass. Did we agree, and how long had we been saying so?

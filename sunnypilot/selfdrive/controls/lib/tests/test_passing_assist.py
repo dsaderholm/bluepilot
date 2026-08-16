@@ -31,7 +31,7 @@ from openpilot.sunnypilot.selfdrive.controls.lib.passing_assist import (
   SUGGESTION_HOLD_S, HOLD_THROUGH,
   DEFAULT_PERSISTENCE_S, DRIVE_HISTORY_MAX, CHIME_MIN_INTERVAL_S,
   TIMELINE_MAX, GAP_WHILE_PASSING, GAP_GIVE_UP_S, WANTED_RISE_S, WANTED_FALL_S,
-  LEAD_GAP_GRACE_S)
+  LEAD_GAP_GRACE_S, EXIT_WATCH_S, EXIT_DECEL_MS)
 
 Side = custom.LongitudinalPlanSP.PassingAssist.Side
 Blocked = custom.LongitudinalPlanSP.PassingAssist.Blocked
@@ -3017,6 +3017,121 @@ class TestTheExitWithNoExitLane:
     det = self._change(keep_right_det(), blinker_right=True, right_edge_widen=4.0, **IN_LEFT_LANE)
     assert det.driver_change_was_exit
     assert det.driver_change_standdown > 30.0
+
+
+class TestTheExitWithADecelerationLane:
+  """His own rule, and the exit both geometry tests are blind to.
+
+      "If I nudgeless go into the most far right lane and go SLOWER there, then I am probably
+       exiting. If I nudgeless go into the most far right lane and go FASTER there, it could be an
+       exit or it could be me passing on the right."
+
+  The far-right half is TestTheExitWithNoExitLane above. This is the other half, and it is needed
+  because a proper exit -- one with a deceleration lane -- defeats both of the tests there at once:
+  the ramp IS a lane, so we are not outermost, and it was already there, so nothing widens. The
+  easiest exit to see out of the windshield is the one the geometry cannot name.
+
+  The ambiguous half of his sentence is deliberately not implemented. Faster could be either, so it
+  stays ordinary lane discipline and collects the four second settle.
+  """
+
+  @staticmethod
+  def _change_then(det, drop, after_s=6.0, v0=31.0, left=False, **road):
+    """Signal, complete the change, and then travel at v0 - drop for a while."""
+    side = dict(blinker=True) if left else dict(blinker_right=True)
+    # A lane still out there to the right, so the outermost test cannot claim it. This IS the
+    # deceleration lane in the scenario being modeled.
+    road = dict(IN_LEFT_LANE, **road)
+    # Driving normally first. Not decoration: the driver-override gate returns before the lead is
+    # read, so has_lead holds whatever the last un-overridden frame saw -- which is the whole
+    # point, but it means a fixture that opens mid-change has never seen anything.
+    run(det, int(2.0 / DT_MDL), v_ego=v0, **road)
+    run(det, int(2.0 / DT_MDL), v_ego=v0, **side, **road)
+    run(det, 2, v_ego=v0, **road)
+    run(det, int(after_s / DT_MDL), v_ego=v0 - drop, **road)
+    return det
+
+  def test_slowing_down_after_moving_right_reads_as_an_exit(self):
+    """The case. No lead ahead, so nothing in front explains giving up nine miles an hour."""
+    det = self._change_then(keep_right_det(), drop=EXIT_DECEL_MS + 1.0, status=False)
+    assert det.driver_change_was_exit
+    assert det.driver_change_standdown > 30.0
+
+  def test_slowing_behind_a_lead_is_following_not_exiting(self):
+    """THE DISCRIMINATOR, and the reason this is safe to ship. Moving right and settling in behind
+    a truck is the most common rightward change there is on a two-lane interstate, and it is also
+    the moment he most wants the pass offered back. Reading it as an exit would fight the feature
+    at exactly the wrong time."""
+    det = self._change_then(keep_right_det(), drop=EXIT_DECEL_MS + 1.0, status=True)
+    assert not det.driver_change_was_exit
+    assert det.driver_change_standdown == 0.0
+
+  def test_holding_speed_after_moving_right_is_ordinary_lane_discipline(self):
+    """Keeping right without slowing is just keeping right. The four second settle, nothing more."""
+    det = self._change_then(keep_right_det(), drop=0.0, after_s=2.0, status=False)
+    assert not det.driver_change_was_exit
+    assert det.driver_change_standdown <= 4.0
+
+  def test_a_small_speed_drop_is_traffic_not_an_exit(self):
+    """Under the threshold on purpose. Everyday speed varies by a couple of mph and a rule that
+    fired on that would stand down for most of a drive."""
+    det = self._change_then(keep_right_det(), drop=EXIT_DECEL_MS - 1.5, status=False)
+    assert not det.driver_change_was_exit
+
+  def test_slowing_long_after_the_change_is_not_attributed_to_it(self):
+    """The watch is bounded. Slowing two minutes later is a different event, and tying it to a lane
+    change that has been over since then is how a stand-down becomes permanent."""
+    det = self._change_then(keep_right_det(), drop=0.0, after_s=EXIT_WATCH_S + 2.0, status=False)
+    run(det, int(3.0 / DT_MDL), v_ego=31.0 - (EXIT_DECEL_MS + 1.0), status=False, **IN_LEFT_LANE)
+    assert not det.driver_change_was_exit
+
+  def test_a_left_change_followed_by_slowing_is_never_an_exit(self):
+    """Direction still carries the claim, exactly as for the outermost test. Slowing down after
+    moving LEFT is being stuck, which is the opposite situation and the one worth suggesting on."""
+    det = self._change_then(keep_right_det(), drop=EXIT_DECEL_MS + 1.0, left=True, status=False)
+    assert not det.driver_change_was_exit
+
+  def test_the_drop_is_measured_from_before_the_change_not_from_its_end(self):
+    """He lifts as he moves over, so most of the deceleration has already happened by the time the
+    stalk goes off. Measured from the end of the change, half the evidence is gone -- and this is
+    the ordinary way an exit is taken, not an edge case."""
+    det = keep_right_det()
+    v0 = 31.0
+    # Already 3 m/s down by the time the stalk goes off; only 2 more afterwards.
+    run(det, int(1.0 / DT_MDL), v_ego=v0, blinker_right=True, status=False, **IN_LEFT_LANE)
+    run(det, int(1.0 / DT_MDL), v_ego=v0 - 3.0, blinker_right=True, status=False, **IN_LEFT_LANE)
+    run(det, 2, v_ego=v0 - 3.0, status=False, **IN_LEFT_LANE)
+    run(det, int(3.0 / DT_MDL), v_ego=v0 - 5.0, status=False, **IN_LEFT_LANE)
+    assert det.driver_change_was_exit
+
+  def test_which_test_caught_it_is_counted_for_every_rightward_change(self):
+    """The measurement _moved_toward_an_exit has been asking for in a comment. The last bucket is
+    the interesting one -- exits nothing recognized -- and it can only mean that if the buckets
+    always sum to the number of rightward changes."""
+    det = keep_right_det()
+    # outermost: default fixture geometry is one lane plus a shoulder
+    run(det, int(2.0 / DT_MDL), blinker_right=True, status=False)
+    run(det, 2, status=False)
+    assert det._exits_by == [0, 1, 0, 0]
+
+    self._change_then(det, drop=EXIT_DECEL_MS + 1.0, status=False)
+    assert det._exits_by == [0, 1, 1, 0], "the slowing branch must move it out of the last bucket"
+
+    self._change_then(det, drop=0.0, after_s=2.0, status=False)
+    assert det._exits_by == [0, 1, 1, 1]
+    assert sum(det._exits_by) == 3
+
+  def test_a_second_change_replaces_the_watch_rather_than_stacking(self):
+    """Two changes in quick succession. The first watch must not survive to fire against a speed
+    reference belonging to a maneuver that is over -- it would attribute the second change's speed
+    to the first one's road."""
+    det = self._change_then(keep_right_det(), drop=0.0, after_s=1.0, status=False)
+    v0 = 31.0
+    run(det, int(2.0 / DT_MDL), v_ego=v0, blinker=True, status=False, **IN_LEFT_LANE)
+    run(det, 2, v_ego=v0, status=False, **IN_LEFT_LANE)
+    assert det._exit_watch_s == 0.0
+    run(det, int(3.0 / DT_MDL), v_ego=v0 - (EXIT_DECEL_MS + 1.0), status=False, **IN_LEFT_LANE)
+    assert not det.driver_change_was_exit
 
 
 class TestTrafficMayNotStandInForTheRoadEdge:

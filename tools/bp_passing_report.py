@@ -114,6 +114,16 @@ def history() -> int:
       # -1, and it must not read as 0%. See geoLeftProven.
       print("    radar could not answer whether a left lane exists on any refused frame")
 
+    # WHICH EXIT TEST DID THE WORK, and how many exits none of them caught. Printed as a verdict
+    # for the same reason as the line above: the useful reading is the last bucket, and a bare
+    # four-element list invites reading the first.
+    exits = d.get("exitsBy")
+    if exits and sum(exits):
+      caught = ", ".join(f"{nm} {n}" for nm, n in
+                         zip(("widening", "outermost", "slowed after"), exits[:3], strict=False) if n)
+      print(f"    right-hand driver changes: {sum(exits)}, treated as exits by {caught or 'nothing'}"
+            f" -- {exits[3]} not recognized")
+
     hist = d.get("oncomingLatHist")
     if hist and sum(hist):
       total = sum(hist)
