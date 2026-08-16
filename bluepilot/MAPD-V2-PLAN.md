@@ -40,6 +40,12 @@ listed `advisorySpeed` as a win for SCC-Vision -- "the yellow curve sign, an ind
 a corner." It is not available in Utah in any useful quantity. That was a field list read as though
 it were data.
 
+**HIS CORRECTION, and it is right:** *"I'd still use advisory if it exists, though. I want to use
+all data."* Struck was the wrong verdict -- what is wrong is DEPENDING on it, not consuming it. A
+mapped yellow sign is a real number for that corner. So it is opportunistic input, exactly like every
+other map field: may refuse, may corroborate, may never be the sole thing that opens a maneuver. What
+it cannot be is the cross-check SCC-Vision is missing, because at 1% it will not be there when needed.
+
 It is not a new or proposed tag either, which was the next reasonable guess -- it is an old one
 almost nobody fills in. Worldwide, from taginfo: `maxspeed` 22.3M uses, `lanes` 19.9M,
 **`maxspeed:advisory` 113K** -- half a percent of maxspeed. No import provides it (every value is
@@ -218,7 +224,7 @@ Other outputs that land on ICBM/SLA directly:
 
 | Field / setting | Why it matters here |
 |---|---|
-| ~~`advisorySpeed`~~ | **STRUCK. Measured at 0-2% coverage in Utah** — see the section at the top. It would have been an independent number for a corner, which SCC-Vision has never had; there is no data behind it here. |
+| `advisorySpeed`, `nextAdvisorySpeed` | **Use it where it exists; never depend on it.** 0-2% coverage in Utah, 113K uses worldwide — so it cannot be a defense SCC leans on, but where a yellow sign IS mapped it is a real independent number for that corner and there is no reason to discard it. *"I want to use all data."* Same rule as everything else here: may refuse, may corroborate, may never be the sole thing that opens. |
 | `speedLimit` with forward/backward direction handling | correct limit on divided roads where each direction is tagged separately |
 | `nextSpeedLimit` + `nextSpeedLimitDistance` | already used, but logged and at 20 Hz |
 | `conditionalSpeedLimit` (raw `maxspeed:conditional`) | school zones and time-of-day limits, with the raw tag exposed so we can evaluate conditions mapd does not |
