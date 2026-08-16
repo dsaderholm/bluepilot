@@ -1,0 +1,4 @@
+# Kept so this directory survives a checkout. Git does not track empty directories, so without
+# this file `readme/sections/`'s portability anchor points at a directory that exists only on the
+# machine where someone happened to create it -- and test_readme_is_built.py fails on every fresh
+# clone. bp_build_readme.py globs *.md, so this file is never rendered.
