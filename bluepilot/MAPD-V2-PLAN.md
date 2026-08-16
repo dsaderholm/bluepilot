@@ -104,8 +104,9 @@ below is the backlog v1's transport made impossible, not a pile of new features.
 **The honest limits, so this is not oversold:**
 
 - None of it authorizes anything on its own — see fact 3. `lanes = 3` may not open a lane change.
-- `lanes` is frequently absent in OSM outside major roads. `tileLoaded` and `waySelectionType` are
-  what keep that from reading as "one lane".
+- `lanes` coverage is NOT the worry it looks like -- measured at 99-100% on his corridors and 79%
+  even on tertiary streets. `tileLoaded` and `waySelectionType` still have to gate it, because an
+  absent tag must read as "unknown" and never as "one lane"; but the tag is there.
 - **It does not solve the center turn lane.** OSM does tag `turn:lanes`, but mapd does not publish
   it, so the arterial TWLTL case that reverted the road-edge waiver on 2026-08-09 stays exactly
   where it is: `geoLeftTravelProven` vs `geoLeftProven` is still the measurement that settles it.
