@@ -30,7 +30,8 @@ from openpilot.sunnypilot.selfdrive.controls.lib.passing_assist import (
   PassingAssistDetector, MIN_LANE_WIDTH_M, DEFAULT_MIN_SPEED_MPH, MAX_WIDENING_M,
   SUGGESTION_HOLD_S, HOLD_THROUGH,
   DEFAULT_PERSISTENCE_S, DRIVE_HISTORY_MAX, CHIME_MIN_INTERVAL_S,
-  TIMELINE_MAX, GAP_WHILE_PASSING, GAP_GIVE_UP_S)
+  TIMELINE_MAX, GAP_WHILE_PASSING, GAP_GIVE_UP_S, WANTED_RISE_S, WANTED_FALL_S,
+  LEAD_GAP_GRACE_S)
 
 Side = custom.LongitudinalPlanSP.PassingAssist.Side
 Blocked = custom.LongitudinalPlanSP.PassingAssist.Blocked
@@ -3677,3 +3678,74 @@ class TestTheGapRequestIsALease:
     assert det.gap_request == 0
     run(det, int(1.0 / DT_MDL))
     assert det.gap_request == GAP_WHILE_PASSING
+
+
+class TestTheSignalDoesNotFlicker:
+  """126 aborts in 37 minutes, measured on the day highway drive 2026-08-15.
+
+  An abort is a signal shown to the traffic behind and then withdrawn. That many is disqualifying
+  on its own, whatever the sensors are doing -- and the cause was not a gate being WRONG but a gate
+  being UNSTEADY. The road-edge term failed 85% of that drive, so it passed the other 15% in
+  flickers, and wanted_side was recomputed from it every frame with nothing holding it still.
+
+  These drive the geometry directly rather than through a whole scene, because the property is
+  about the shape of the signal in time, not about which gate produced it.
+  """
+
+  ON = {"probs": (0.99, 0.99, 0.99, 0.99), "edge_stds": (0.1, 0.1)}
+  OFF = {"probs": (0.05, 0.99, 0.99, 0.05), "edge_stds": (2.5, 0.1)}
+
+  def test_a_single_bad_frame_does_not_retract_the_signal(self):
+    """THE ABORT, in its simplest form. One dropped frame of geometry used to withdraw a promise
+    already made to the driver behind."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, **self.ON)
+    assert det.wanted_side == Side.left, "the fixture never wanted a pass"
+    run(det, 1, **self.OFF)
+    assert det.wanted_side == Side.left, "one bad frame retracted the signal"
+
+  def test_a_single_good_frame_does_not_raise_one(self):
+    """The other half. Geometry that passes for one frame in a drive where it mostly fails is a
+    sensor artefact, and signalling on it is the same promise broken from the other end."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, **self.OFF)
+    assert det.wanted_side == Side.none
+    run(det, 1, **self.ON)
+    assert det.wanted_side == Side.none, "one good frame lit the signal"
+
+  def test_geometry_that_really_goes_away_still_withdraws(self):
+    """Hysteresis must not become a latch. A lane that is genuinely gone has to drop the signal,
+    or the feature promises a pass it cannot make."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, **self.ON)
+    assert det.wanted_side == Side.left
+    run(det, int((WANTED_FALL_S + 0.2) / DT_MDL), **self.OFF)
+    assert det.wanted_side == Side.none
+
+  def test_geometry_that_really_arrives_still_signals(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES, **self.OFF)
+    assert det.wanted_side == Side.none
+    run(det, int((WANTED_RISE_S + 0.2) / DT_MDL), **self.ON)
+    assert det.wanted_side == Side.left
+
+  def test_entering_is_harder_than_staying(self):
+    """The asymmetry is the design. If they were equal, a 50% duty-cycle flicker would still pass
+    through both thresholds and produce exactly the aborts this exists to stop."""
+    assert WANTED_FALL_S > WANTED_RISE_S
+
+  def test_an_alternating_gate_produces_no_signal_at_all(self):
+    """THE MEASURED CASE. Geometry alternating every frame is what 85% failure with 15% passing
+    looks like up close. Before the debounce this lit and dropped the blinker repeatedly."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, **self.OFF)
+    for _ in range(60):
+      run(det, 1, **self.ON)
+      run(det, 1, **self.OFF)
+    assert det.wanted_side == Side.none, "an alternating gate still raised the signal"
+
+  def test_no_pass_warranted_clears_it_immediately(self):
+    """Hysteresis applies to the GEOMETRY wobbling, not to the driver taking over or the lead
+    disappearing. Those mean no pass is warranted at all and must not wait out WANTED_FALL_S."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, **self.ON)
+    assert det.wanted_side == Side.left
+    # Past LEAD_GAP_GRACE_S: a single dropped radar return is deliberately absorbed as the same
+    # car, so one frame of status=False proves nothing. The point is that this clears WITHOUT
+    # waiting out WANTED_FALL_S, which is longer.
+    run(det, int((LEAD_GAP_GRACE_S + 0.1) / DT_MDL), status=False)
+    assert det.wanted_side == Side.none

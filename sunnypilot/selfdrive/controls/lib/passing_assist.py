@@ -496,6 +496,29 @@ DEFAULT_MIN_APPROACH_M = -1     # Auto
 # the measured max grows and the hold relaxes to match, so the error can only shrink.
 AUTO_APPROACH_MARGIN_M = 20.0
 
+# Hysteresis on wanted_side, which is what lights the blinker.
+#
+# 126 ABORTS IN 37 MINUTES, measured on the day highway drive 2026-08-15. An abort is a signal shown
+# to the traffic behind and then withdrawn, and that many is disqualifying on its own -- it would be
+# 126 blinker flashes that went nowhere, whatever the sensors were doing.
+#
+# The cause is not a gate being wrong, it is a gate being UNSTEADY. wanted_side is recomputed every
+# frame from the camera geometry with nothing holding it still, and the road-edge term failed 85% of
+# that drive -- meaning it passed the other 15%, in flickers. Each flicker lit the signal and
+# dropped it.
+#
+# THE RISE DELAY IS THE UNCOMFORTABLE HALF, because it argues with a stated preference: "It should
+# come on instantly telling drivers I want to change lanes." 0.3 s is six frames, below what anyone
+# perceives against a 1 s blinker lead, and it is the difference between signalling a decision and
+# signalling a sensor artefact. A promise made 126 times and broken 126 times is not instant, it is
+# noise.
+WANTED_RISE_S = 0.3
+
+# The fall side matters more and costs nothing. A single dropped frame of geometry should not
+# retract a signal already shown -- that is the abort. Longer than the rise deliberately: entering
+# the state should be harder than staying in it, or the hysteresis has no direction.
+WANTED_FALL_S = 0.75
+
 # The follow gap to ask ICBM for while pursuing a pass. Time_Gap_1..5; 1 is the closest.
 #
 # NOT a driving style. The point is headroom: at his own 3 of 5 the car begins braking so far back
@@ -649,6 +672,9 @@ class PassingAssistDetector:
     # WEAKER THAN clear_side, and it is what lights the blinker. A slow car worth passing and a lane
     # that exists on that side -- nothing yet about whether entering it is safe. See SIGNAL_WINDOW_S.
     self.wanted_side = Side.none
+    # See WANTED_RISE_S. The raw per-frame answer, and how long it has held.
+    self._wanted_raw = Side.none
+    self._wanted_held_s = 0.0
 
     self.has_lead = False
     self.lead_d_rel = 0.0
@@ -918,14 +944,44 @@ class PassingAssistDetector:
       self.max_distance_m = float(self.params.get("PassingAssistMaxDistance", return_default=True))
       self.chime_enabled = self.params.get_bool("PassingAssistChime")
 
-  def _reset_outputs(self, blocked: int) -> None:
+  def _debounce_wanted(self, raw: int) -> int:
+    """Hold wanted_side still. See WANTED_RISE_S -- this is what 126 aborts in 37 minutes bought.
+
+    Asymmetric on purpose. Entering costs WANTED_RISE_S of agreement so a one-frame flicker in the
+    camera geometry cannot light the signal; leaving costs WANTED_FALL_S so a one-frame dropout
+    cannot retract one already shown. The second is the abort, and it is the longer of the two.
+
+    A side CHANGE resets rather than crossing over, because left and right are different promises
+    and sliding between them without passing through none would signal the wrong way for a frame.
+    """
+    if raw != self._wanted_raw:
+      self._wanted_raw = raw
+      self._wanted_held_s = 0.0
+    else:
+      self._wanted_held_s += DT_MDL
+
+    if raw == self.wanted_side:
+      return self.wanted_side
+    if raw == Side.none:
+      return Side.none if self._wanted_held_s >= WANTED_FALL_S else self.wanted_side
+    return raw if self._wanted_held_s >= WANTED_RISE_S else self.wanted_side
+
+  def _reset_outputs(self, blocked: int, keep_wanted: bool = False) -> None:
     self.clear_side = Side.none
     # AND wanted_side, or it keeps whatever a previous frame decided. Missing this let the passing
     # machine light its blinker during a KEEP-RIGHT: wanted_side is geometry alone, so a stale value
     # survived every early return that means "no pass is warranted here" -- no lead, nothing slower,
     # too slow, driver active. Caught by the drive scenario asserting the passing machine stays out
     # of a keep-right, which is exactly the signal-for-no-reason failure the whole design forbids.
-    self.wanted_side = Side.none
+    # keep_wanted: a GATE refusing is not the same as no pass being warranted. Geometry wobbling
+    # is exactly what the debounce exists to ride out, and hard-clearing here would defeat it --
+    # which it did, until a test caught it. Every OTHER caller means "no pass here at all" (no
+    # lead, nothing slower, too slow, driver active) and those must clear at once, without waiting
+    # out WANTED_FALL_S.
+    if not keep_wanted:
+      self.wanted_side = Side.none
+      self._wanted_raw = Side.none
+      self._wanted_held_s = 0.0
     self.suggestion = Side.none
     self.blocked_by = blocked
     self.reason = Reason.none
@@ -2526,7 +2582,11 @@ class PassingAssistDetector:
       # whichever term refuses a residential street. This branch is reached only when a pass IS
       # warranted and geometry is the thing standing in the way, which is exactly the question.
       self._record_refusal()
-      self._reset_outputs(Blocked.noLaneAvailable)
+      # THE FLICKER'S OWN PATH, and the one that made the first debounce useless: geometry failing
+      # on both sides returns here, before wanted_side is computed below. So the debounce has to be
+      # applied here too, with the raw answer this frame actually gives -- none.
+      self.wanted_side = self._debounce_wanted(Side.none)
+      self._reset_outputs(Blocked.noLaneAvailable, keep_wanted=True)
       return
 
     # Two-way road. Evaluated before the sign veto, and it is the one this whole design was waiting
@@ -2599,7 +2659,8 @@ class PassingAssistDetector:
     # made against something that was never going to move.
     want_left = self.left_geometry_ok and not onc_left and not adj_left
     want_right = self.right_geometry_ok and not onc_right and not adj_right
-    self.wanted_side = Side.left if want_left else Side.right if want_right else Side.none
+    raw_wanted = Side.left if want_left else Side.right if want_right else Side.none
+    self.wanted_side = self._debounce_wanted(raw_wanted)
 
     left_ok = (self.left_geometry_ok and not onc_left and not self.left_blindspot and
                not self.rear.left.blocks_lane_change and not adj_left)
@@ -2622,7 +2683,9 @@ class PassingAssistDetector:
         blocked = Blocked.adjacentSlow
       else:
         blocked = Blocked.blindspotOccupied
-      self._reset_outputs(blocked)
+      # keep_wanted: see _debounce_wanted. wanted_side was already set from this frame's geometry
+      # just above, and this branch is the gate saying no -- which is the flicker case.
+      self._reset_outputs(blocked, keep_wanted=True)
       # AND PUT IT BACK, because this is the one path it has to survive. _reset_outputs clears
       # wanted_side, which is right for every early return above -- those mean no pass is warranted
       # at all, and a stale value there lit the blinker during a keep-right. THIS branch means the
