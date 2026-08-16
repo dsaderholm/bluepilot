@@ -310,22 +310,122 @@ From mapd's own `docs/integration.md`, the **Minimal** path — note it is ADDIT
 - sunnypilot's `live_map_data` layer reads `mem_params` throughout and would need a v2 reader.
 - `mapd_installer.py` pins the version and hash; v2 ships differently.
 
-## THE OPEN QUESTION, and it is the one to answer first
+## THE OPEN QUESTION — ANSWERED 2026-08-16: YES
 
 **Can the Minimal path run ALONGSIDE v1 without the SLA/SCC teardown that PR #1647 performs?**
 
-That teardown is sunnypilot's consolidation choice, not a technical requirement of mapd v2. If v2
-can run as a pure observer — publishing `mapdOut` for us to read, while v1 keeps feeding SLA and SCC
-exactly as today — then this becomes an additive change we can take incrementally and back out of,
-instead of a rewrite of three subsystems.
+**Yes.** v2 can run as a pure observer. Every mechanism the two would have had to share turns out
+either to be untouched by v2 or to be *already shared and already compatible*. The teardown in
+PR #1647 is sunnypilot's consolidation choice, confirmed rather than assumed.
 
-Unverified. Things to check before anything else:
+Four findings, in descending order of how much they decide it.
 
-- do v1 and v2 fight over map storage (`Paths.mapd_root()`), or use separate trees?
-- do both want the same GPS/params, and does v1's blocking param write interfere?
-- two tile sets on disk — how much space, and is it acceptable on the 3X?
-- CPU and memory with both running. v2 claims sub-10% memory and a few percent of a core; v1 is
-  what we already pay.
+### 1. THE TWO TRANSPORTS DO NOT TOUCH AT ALL
 
-If the answer is yes, the sequencing question changes completely: we would take the DATA first and
-migrate the CONSUMERS later, one at a time, each behind its own toggle.
+This is the whole answer, and it is a one-line fact: **v2's `params/params.go` has no `/dev/shm`
+concept in it.** v1 declares both `ParamsPath = "/data/params/d"` and
+`MemParamsPath = "/dev/shm/params/d"`; v2 declares only the first, and the only key it writes is
+`MapdSettings` (it declares a `LastGPSPosition` path and never uses it). Everything else v2 emits is
+cereal over msgq.
+
+So the sixteen `/dev/shm/params` keys v1 publishes — `RoadName`, `MapSpeedLimit`,
+`MapTargetVelocities`, `MapCurvatures`, `MapTargetLatA`, `NextMapSpeedLimit`, the `OSMDownload*`
+trio and the rest — are written by v1 and read by SLA/SCC exactly as today, with **nothing v2 does
+able to perturb them.** SLA, SCC-Map and `map_controller.py` do not change, are not read from, and
+cannot be affected.
+
+**And v2 gets its own position rather than wanting ours.** `cereal/gps.go` subscribes to
+`gpsLocationExternal` and falls back to `gpsLocation` — both already in our `cereal/services.py`
+(10 Hz / 1 Hz). We do not have to copy GPS back out to it the way v1 requires, and we do not have to
+publish `mapdIn`: the CLI publishes `mapdCli` itself.
+
+**The msgq ABI matches.** `gomsgq` is a pure-Go reimplementation, not a binding — it mmaps
+`/dev/shm/<openpilot_prefix>/<endpoint>` and overlays a header of `num_readers`, `write_pointer`,
+`write_uid` and three `NUM_READERS`-long arrays, with `NUM_READERS = 15`. That is field-for-field
+`msgq/msgq.h` at our pinned `9beb84af`.
+
+### 2. THE MAP STORE IS ALREADY SHARED, AND THAT IS GOOD NEWS RATHER THAN A COLLISION
+
+The question assumed two tile sets. There are not two. v2's `GetBaseOpPath()` returns
+**`/data/media/0/osm`** — literally `Paths.mapd_root()`. Same base path, same source URL
+`https://map-data.pfeifer.dev/offline/{lat}/{lon}.tar.gz`, same `tmp/offline` staging, same
+extraction layout. v1.12.0 and v2.3.0 are the same client against the same store.
+
+**And the tile format is additive, with the same capnp file id `0xda3a0d9284ca402f`.** v2's `Way`
+appends `id @14`, `highwayClass @15` and the three `maxSpeedConditional` fields @16-18 to v1's
+fourteen. A v1 reader ignores ordinals it does not know; that is what capnp evolution guarantees.
+
+**Measured, not reasoned about.** The 1-degree box covering Salt Lake City was pulled from the URL
+the SHIPPED v1.12.0 downloader uses, and parsed against the v2 schema:
+
+    box 40.75,-112.0 -> 41.0,-111.75     file dated 2026-08-14      9,165 ways
+
+    id (wayId)      100.0%
+    highwayClass    100.0%
+    lanes            73.5%
+    advisorySpeed     0.5%      (as the coverage section above predicted)
+    maxspeed:cond     0.0%
+
+    motorway 294   motorwayLink 403   trunk 17   primary 591   secondary 1153
+    tertiary 1632  residential 4178   unclassified 831   *Link 66
+
+Three consequences:
+
+- **The tiles already on his device carry the v2 fields.** The regeneration is live (that file was
+  built two days ago), it is one hosted dataset, and v1 has been reading post-v2 tiles in
+  production all along. So the shared store costs **zero extra disk and zero extra download** — the
+  two binaries read the same files.
+- **`highwayClass` separates freeway from ramp in his own city today** — 294 motorway against 403
+  motorwayLink in one box. The exit problem's missing fact is sitting on the eMMC unread.
+- **`wayId` is 100% populated**, so the remembered-hold key is available the moment there is a
+  transport for it. What is missing has never been the data; it is that v1 cannot say it.
+
+**This also sharpens the 50x discrepancy above.** The tiles hold `maxspeed` for these roads and are
+already on disk, so the loss is between the tile and SLA — v1's way-matching or SLA's own validation
+— and not coverage. Chase it there.
+
+### 3. FOUR SMALL COLLISIONS, ALL MECHANICAL
+
+- **The process name `mapd` is taken.** `process_config.py` already has
+  `NativeProcess("mapd", Paths.mapd_root(), ...)` for v1. The second entry needs its own name, and
+  its own binary path — v1 lives at `third_party/mapd_pfeiferj/mapd`, v2's integration doc wants
+  `selfdrive/mapd`. `mapd_installer.py` pins v1's version and hash, so v2 needs a separate install
+  path; the v2.3.0 release asset is a single 20.8 MB binary.
+- **Downloads are commanded, not automatic** — by CLI or a `mapdIn` message, against
+  `download_menu.json`. So keep v1 as the downloader and never command v2's, or the two race in the
+  shared `tmp/offline` staging directory.
+- **The OSM settings screen's DELETE button `rmtree`s `/data/media/0/osm/offline`** — shared store
+  means shared fate. Correct behavior, worth saying out loud rather than discovering.
+- **Capnp slots 17-19 are free on every branch** and land at `@143/@144/@145`, exactly what mapd
+  hardcodes. Passing assist took 15 (`rearRadarBP @141`); nobody has claimed 16-19. The
+  wire-history tiebreaker still governs *when* they are declared — claim them on the branch that
+  will own them, and never renumber a field already recorded on the device.
+
+### 4. SKIP STEPS 6 AND 7. THEY ARE THE ONLY NON-ADDITIVE ONES.
+
+Step 7 clamps `v_cruise` to `mapdOut.suggestedSpeed` inside `longitudinal_planner.py`. That single
+edit is what turns v2 from an observer into a controller, and it would hand the map an unmediated
+veto over the set speed — the exact shape "the map is EVIDENCE, never PERMISSION" forbids. Steps
+1-5 and 8 are pure additions: capnp definitions in reserved slots, a service entry, a param key, a
+binary, a process entry, and a SubMaster subscription.
+
+Which means the back-out is deleting one process entry.
+
+### WHAT IS STILL UNMEASURED, AND IT NEEDS THE DEVICE
+
+Everything above is settled from the two codebases and one downloaded tile. What cannot be settled
+that way, in the order to check it:
+
+- **CPU and memory with both running.** v1 is what we already pay; v2 claims sub-10% memory and a
+  few percent of a core, and the 2.3.0 notes cite a further memory reduction. Two Go processes
+  mmapping tiles for the same area is the specific thing to watch.
+- **Free space on `/data/media/0`.** The shared store means no extra tiles, but the 20.8 MB binary
+  and the tmp staging still land there.
+- **Route size with `mapdOut` logged at 20 Hz** — the diagnostics win has a cost and it should be a
+  number.
+
+### SO THE SEQUENCING CHANGES, AS EXPECTED
+
+Take the DATA first and migrate the CONSUMERS later, one at a time, each behind its own toggle. The
+first consumer is not SLA or SCC: it is a diagnostic, because for the first time the map's own
+account of a drive lands in the route.
