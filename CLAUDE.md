@@ -989,6 +989,40 @@ ADDITIVE -- add capnp defs, a service, a process, a subscription) can run alongs
 SLA/SCC teardown that draft performs. That teardown is sunnypilot's consolidation choice, not a
 technical requirement of mapd v2. **That question is unanswered and is the one to answer first.**
 
+### THE MAP IS EVIDENCE, NEVER PERMISSION -- and that is the design, not a caveat
+
+His, 2026-08-16, and it is the sentence to check any map integration against:
+
+  *"Mine works better with the map data we will add, but also works without it. BlueCruise always
+   requires map data."*
+
+  *"I almost think it's good that we aren't getting good map data yet, so we can make this work for
+   the best and not rely on it."*
+
+**BlueCruise uses the map as PERMISSION.** A Blue Zone is an operational design domain drawn in
+advance -- prequalified divided highway, HD-surveyed. No map, no feature. That is why it covers
+130,000 miles and why his 2+1 sections on US-6 and US-89 will never be in it.
+
+**Here the map is one more input into a decision the sensors already reach.** The existing rule is
+what makes that rigorous rather than a good intention -- *evidence that OPENS a maneuver must never
+be cheaper than evidence that refuses one*. Applied to map data:
+
+  MAY REFUSE, freely. `highwayClass` says motorwayLink, do not offer a pass. `oneWay` false with
+  radar oncoming, do not offer a pass. A refusal from a stale tile costs a missed pass.
+  MUST NEVER BE THE SOLE THING THAT OPENS. `lanes = 3` alone cannot authorize a lane change. A
+  wrong tile then puts the car somewhere real, and losing map coverage takes the feature with it.
+
+Hold that and the property he wants is automatic: **no map costs COVERAGE, never SAFETY.**
+
+**THE MOMENT THIS GETS LOST IS ONE LINE LONG**, and it will look like a cleanup: "the map says
+three lanes, so skip the camera check." That converts the map from evidence to permission silently,
+and every gate downstream inherits it. Whenever mapd v2 lands, check each new map input against the
+two bullets above before it touches a gate.
+
+The trade, stated so it is chosen rather than discovered: in the MAPPED case BlueCruise wins. It
+knows the lane count and where the gore point is; we re-derive both from a radar and a camera every
+frame. We give up that ceiling to work on roads nobody surveyed, which is where he drives.
+
 ## THE SET SPEED HUNT: TAP FOR SMALL CORRECTIONS, HOLD FOR LARGE ONES
 
 Reported 2026-08-12: *"it raised and lowered my cruise over and over... when the speed limit changed
