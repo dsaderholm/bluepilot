@@ -937,6 +937,58 @@ The remaining lever is how far ahead `MapTargetVelocities` is populated, which i
 this fork. Do not re-derive this from scratch; measure with `tools/bp_missed_curves.py` and compare
 the map's fire time against the 3.3 mph/s budget before proposing anything.
 
+## WE ARE PINNED TO THE LAST RELEASE OF A DEAD MAPD, AND UPSTREAM IS NOT COMING
+
+Established 2026-08-16 from the repos, because "mapd is upstream of this fork" was being used as a
+reason to stop thinking, and it turns out to be a reason to start.
+
+**mapd is [pfeiferj/openpilot-mapd](https://github.com/pfeiferj/openpilot-mapd)** -- a standalone Go
+binary using OpenStreetMap, downloaded from GitHub releases at boot by
+`sunnypilot/mapd/mapd_installer.py`, where the version is one constant. Not a library.
+
+**`VERSION = "v1.12.0"` IS THE FINAL v1 RELEASE THAT WILL EVER EXIST.** pfeiferj shipped v1.12.0 and
+every release after it is v2.x. Upstream is on v2.3.0 as of 2026-08-12.
+
+**And sunnypilot's move to v2 is abandoned, not in progress.** All of it dates to one day:
+
+  - PR [#1647](https://github.com/sunnypilot/sunnypilot/pull/1647) "prerequisite mapd v2: remove old
+    mapd, sla, scc" -- still a DRAFT, `+3/-2567` across 35 files, pure demolition
+  - branches `mapd-v2`, `mapd-v2-prebuilt`, `mapd-v2-prerequ` -- last commit 2026-01-14, all three
+  - `mapd-v2` is 2 commits ahead of master and **1439 commits behind**
+  - zero human comments on the PR in seven months, only a CI bot
+  - the author is STILL ACTIVE in the repo (PR #1767, 2026-08-14) -- they did not leave, they moved
+    to UI work and never came back to this
+
+So "wait for upstream" is not a plan. There is nothing to wait for, and nothing to collide with
+either -- which inverts the usual rule. The demolition draft is 1439 commits behind and would have to
+be rewritten by whoever finishes it.
+
+**WHY IT MATTERS TO EVERY FEATURE HERE, not just passing assist.** v1 talks through `/dev/shm/params`,
+which pfeifer's own docs call the design's biggest flaw: a BLOCKING operation in the controls loop,
+where every new field is a breaking change for every fork, and **none of the data reaches the route
+logs**. That last one is why no drive analysis in this fork has ever been able to see what the map was
+saying. v2 rewrites comma's msgq in Go, so mapd speaks native cereal -- non-blocking, logged, and able
+to read openpilot's state directly instead of us copying GPS back out to it.
+
+The v1 field list is short because its transport made adding fields expensive, not because the data
+does not exist. What v2 publishes on `mapdOut` (20 Hz) that we have no access to today:
+
+| Field | Answers |
+|---|---|
+| `highwayClass` | the raw OSM tag, and it separates `motorway` from `motorwayLink` -- **freeway from on/off-ramp**, which is the exit problem above stated exactly |
+| `advisorySpeed` | the yellow curve-advisory sign, an independent number for the corner SCC-Vision currently derives with no cross-check at all |
+| `lanes` + `distanceFromWayCenter` + `estimatedRoadWidth` | how many lanes, and which one we are in -- the question the camera structurally cannot answer when paint refuses |
+| `oneWay` | divided-highway corroboration for the radar oncoming veto |
+| `waySelectionType` (incl. `fail`) | when the map is LOST rather than confident and wrong |
+| `tileLoaded` | "no limit here" vs "no map here" -- the distinction behind a hold inferred for 36% of route 00000379 |
+
+**Do not start this before the California trip.** It is large and it touches the layers this fork has
+customized most. But drop "upstream will handle it" as a reason -- it is measurably false, and the
+question actually worth settling is whether mapd's own documented "Minimal" integration path (which is
+ADDITIVE -- add capnp defs, a service, a process, a subscription) can run alongside v1 without the
+SLA/SCC teardown that draft performs. That teardown is sunnypilot's consolidation choice, not a
+technical requirement of mapd v2. **That question is unanswered and is the one to answer first.**
+
 ## THE SET SPEED HUNT: TAP FOR SMALL CORRECTIONS, HOLD FOR LARGE ONES
 
 Reported 2026-08-12: *"it raised and lowered my cruise over and over... when the speed limit changed
