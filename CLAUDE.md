@@ -982,6 +982,12 @@ does not exist. What v2 publishes on `mapdOut` (20 Hz) that we have no access to
 | `waySelectionType` (incl. `fail`) | when the map is LOST rather than confident and wrong |
 | `tileLoaded` | "no limit here" vs "no map here" -- the distinction behind a hold inferred for 36% of route 00000379 |
 
+**The full inventory is in `bluepilot/MAPD-V2-PLAN.md`** -- every field and setting, sorted by
+which feature it serves, with the integration cost and the known collisions. The underrated half
+is the SETTINGS: `Curve Target Speed Time Offset` is literally the earliness lever the exit
+section above says is "mapd's, upstream of this fork", and `MapdExtendedOut.path` carries the
+whole curvature-and-target-velocity profile ahead rather than SCC-Map's single step.
+
 **Do not start this before the California trip.** It is large and it touches the layers this fork has
 customized most. But drop "upstream will handle it" as a reason -- it is measurably false, and the
 question actually worth settling is whether mapd's own documented "Minimal" integration path (which is
