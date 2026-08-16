@@ -139,6 +139,34 @@ the count decays when he drives the same road WITHOUT setting one; and how a rem
 interacts with `enforce_no_limit_no_hold` -- it should be consistent, since the key includes a posted
 limit and therefore cannot exist where no limit is known.
 
+### DOES OPENPILOT'S OWN NAVIGATION SUPERSEDE THIS? No -- different mechanism entirely
+
+Checked 2026-08-16, because it is the obvious risk to this whole branch and neither of us knew where
+comma was with it.
+
+  Navigate on openpilot shipped in 0.9.4 (the Taco Bell drive), gained navigation INSTRUCTIONS in
+  0.9.5 as a ternary left/straight/right vector, and was REMOVED in 0.9.7 "to focus on improving the
+  driving model", with a stated plan to bring it back better. There is no `nav` or `map` directory in
+  openpilot's `selfdrive` today. A `ui: navigation stack` merged 2026-02-21 and one for tici the day
+  before, so navigation DISPLAY is being rebuilt; navigation DRIVING is not back, and there is no
+  date. (Same shape as sunnypilot's mapd v2 promise, which is worth noticing having now seen it
+  twice.)
+
+**NOO NEVER PUT MAP DATA IN THE PLANNER.** It rendered the map to an IMAGE, compressed it, and fed
+that to the driving model, which predicted where a human would drive to follow the route. So there is
+no `lanes`, no `oneWay`, no `highwayClass` published anywhere a gate could read -- it is pixels into a
+neural net. **Nothing in this document is made redundant by navigation returning.**
+
+**And it explains his observation about the Taco Bell drive**, which is a forced consequence of that
+design rather than a gap comma did not get to: *"it only changed lanes for navigational purposes."*
+Navigation was the only thing the model was told. There is no representation of "that car ahead is
+slow" anywhere in the input, so a passing decision was not merely absent -- it was unrepresentable.
+
+The real interaction, if it returns, is two systems wanting the same actuator: the model wanting the
+exit lane, passing assist wanting the overtake. Nothing structurally conflicts -- the passing hook is
+a pre-maneuver gate -- and the constraint to hold is that **nav must never displace radar oncoming
+detection**. Re-check against whatever actually ships.
+
 ## The three facts that frame it
 
 1. **`v1.12.0` is the last v1 release that will ever exist.** pfeiferj shipped it and everything
