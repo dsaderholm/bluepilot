@@ -8,6 +8,56 @@ be made against a list instead of a vibe.
 this fork has customized most. This document exists so the next person does not have to re-derive
 the value, and so the ICBM and radar-detector sessions can see what is in it for them.
 
+## FIRST: what is actually IN the map, measured
+
+His question, 2026-08-16, and the right one: *"right now speed limits are missing for so many roads
+I drive, so how much other information is missing, too?"*
+
+Measured against Overpass rather than assumed. Salt Lake County, 16,469 way segments,
+motorway..tertiary:
+
+    class          ways  maxspeed  lanes  oneway  advisory  turn:lanes
+    motorway        941       97%   100%    100%        1%         22%
+    trunk           308       93%    98%    100%        0%         21%
+    primary        4046       93%    99%     72%        0%         28%
+    secondary      4136       85%    93%     39%        1%         11%
+    tertiary       5325       66%    79%     32%        0%          6%
+
+His actual corridors, 3,100 segments:
+
+    route          ways  maxspeed  lanes  oneway  advisory
+    I 15            970       90%   100%     88%        0%
+    US 6            536       86%   100%     22%        2%
+    US 89          1594       86%    99%     56%        0%
+
+**`lanes` IS ESSENTIALLY COMPLETE on every road he drives** -- 99-100% on all three corridors, better
+covered than speed limits. The tag passing assist most needs is the one OSM has. `oneway`'s low
+numbers are not gaps: absence means two-way, which is the OSM default, so US 6 at 22% is CORRECT and
+is what makes it a passing-assist road.
+
+**`maxspeed:advisory` IS 0-2% AND MUST BE TREATED AS ABSENT.** An earlier version of this document
+listed `advisorySpeed` as a win for SCC-Vision -- "the yellow curve sign, an independent number for
+a corner." It is not available in Utah in any useful quantity. That was a field list read as though
+it were data.
+
+**`turn:lanes` at 6-28% confirms the center-turn-lane case is not solved by the map either**, which
+is what the passing assist section below already says for a different reason.
+
+### AND THE 50x DISCREPANCY, which matters more than the upgrade
+
+OSM has a speed limit on **86-97%** of his roads. Route 00000379 measured SLA holding a limit on
+**1.7%** of plan frames.
+
+So the missing speed limits are **NOT a map data problem**. The data is in OSM for the roads he was
+on. Something between the tile and SLA is dropping it: tiles not downloaded or stale, v1's
+way-matching losing the road, or SLA's own validation rejecting it. Note sunnypilot's abandoned
+`mapd-sp` branch commit reads *"Prevents freeway jumping to parallel service roads"* -- v1 matching
+is known-weak.
+
+**This is chaseable NOW, without any migration, and it gates a shipped feature**: PassingAssistPatience
+needs a posted limit and is inert without one. Needs the device -- tile state, `MapdVersion`, and a
+route report over the roads actually driven.
+
 ## The three facts that frame it
 
 1. **`v1.12.0` is the last v1 release that will ever exist.** pfeiferj shipped it and everything
@@ -92,7 +142,7 @@ Other outputs that land on ICBM/SLA directly:
 
 | Field / setting | Why it matters here |
 |---|---|
-| `advisorySpeed`, `nextAdvisorySpeed`, `nextAdvisorySpeedDistance` | the yellow curve-advisory sign — an independent number for a corner, which **SCC-Vision has never had**. CLAUDE.md: "vision got none, and vision is the controller that owns the near field" |
+| ~~`advisorySpeed`~~ | **STRUCK. Measured at 0-2% coverage in Utah** — see the section at the top. It would have been an independent number for a corner, which SCC-Vision has never had; there is no data behind it here. |
 | `speedLimit` with forward/backward direction handling | correct limit on divided roads where each direction is tagged separately |
 | `nextSpeedLimit` + `nextSpeedLimitDistance` | already used, but logged and at 20 Hz |
 | `conditionalSpeedLimit` (raw `maxspeed:conditional`) | school zones and time-of-day limits, with the raw tag exposed so we can evaluate conditions mapd does not |
