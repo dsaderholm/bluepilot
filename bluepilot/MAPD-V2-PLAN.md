@@ -40,6 +40,17 @@ listed `advisorySpeed` as a win for SCC-Vision -- "the yellow curve sign, an ind
 a corner." It is not available in Utah in any useful quantity. That was a field list read as though
 it were data.
 
+It is not a new or proposed tag either, which was the next reasonable guess -- it is an old one
+almost nobody fills in. Worldwide, from taginfo: `maxspeed` 22.3M uses, `lanes` 19.9M,
+**`maxspeed:advisory` 113K** -- half a percent of maxspeed. No import provides it (every value is
+somebody standing at a yellow sign), and no router consumes it, so nothing has ever pulled it into
+existence. Treat it as permanently absent rather than as coverage that will improve.
+
+**This does NOT mean the map cannot help with curves**, and the two must not be confused: mapd
+derives corner speeds from road GEOMETRY, and `MapdExtendedOut.path` carries per-point `curvature`
+and `targetVelocity` regardless. What is lost is only the INDEPENDENT cross-check on a computed
+curvature -- which SCC-Vision has never had and now will not get from the map.
+
 **`turn:lanes` at 6-28% confirms the center-turn-lane case is not solved by the map either**, which
 is what the passing assist section below already says for a different reason.
 
