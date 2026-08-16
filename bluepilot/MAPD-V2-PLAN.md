@@ -60,20 +60,54 @@ curvature -- which SCC-Vision has never had and now will not get from the map.
 **`turn:lanes` at 6-28% confirms the center-turn-lane case is not solved by the map either**, which
 is what the passing assist section below already says for a different reason.
 
-### AND THE 50x DISCREPANCY, which matters more than the upgrade
+### THE 50x DISCREPANCY WAS NOT REAL. MEASURED AND WITHDRAWN 2026-08-16.
 
-OSM has a speed limit on **86-97%** of his roads. Route 00000379 measured SLA holding a limit on
-**1.7%** of plan frames.
+**It was an artifact of a PARKED CAR.** This section used to read: OSM has a limit on 86-97% of his
+roads, route 00000379 measured SLA holding one on 1.7% of plan frames, so something between the tile
+and SLA is eating 50 out of every 51 limits. The second number came from the FRONT of a 53-segment
+route, where the GPS bbox is one point to four decimal places -- the car was sitting in the driveway.
+He said so plainly at the time: *"the speed limit works."* He was right and the measurement was wrong.
 
-So the missing speed limits are **NOT a map data problem**. The data is in OSM for the roads he was
-on. Something between the tile and SLA is dropping it: tiles not downloaded or stale, v1's
-way-matching losing the road, or SLA's own validation rejecting it. Note sunnypilot's abandoned
-`mapd-sp` branch commit reads *"Prevents freeway jumping to parallel service roads"* -- v1 matching
-is known-weak.
+**Two sessions hit the identical trap independently on the same day**, one sampling the first 6-8
+segments and one the first 10, which is worth more than either finding: every tool in `tools/` caps
+at `--max-segments` from the FRONT, and that cap is correct for "did this event happen" and silently
+wrong for "what did the whole drive look like". `bp_map_vs_sla.py` samples EVENLY SPACED segments
+instead. Check any other whole-drive percentage in this repo that was produced with a segment cap.
 
-**This is chaseable NOW, without any migration, and it gates a shipped feature**: PassingAssistPatience
-needs a posted limit and is inert without one. Needs the device -- tile state, `MapdVersion`, and a
-route report over the roads actually driven.
+Re-measured over whole routes, with positions bucketed on a ~55 m grid so a red light cannot outvote
+a mile of freeway, and only above 5 mph:
+
+    route 00000379   62,940 plan frames   SLA had a valid limit in 50.9%   1200 positions, 170 blind
+    route 00000378   44,900 plan frames   SLA had a valid limit in 76.4%   1197 positions, 169 blind
+
+And for every blind position, what the device's OWN tiles hold there:
+
+                                              00000379        00000378
+      a way with a maxspeed was right there    20  11.8%      17  10.1%   <- genuinely lost
+      nearest way carries no maxspeed         149  87.6%     152  89.9%   <- OSM has nothing
+      no way within 40 m                        1   0.6%       0   0.0%
+      no tile covering the point                0   0.0%       0   0.0%   <- coverage is complete
+
+**So the honest number is about 1.7% of positions, not 98% of them** -- and note that the figure
+withdrawn from this section and the residual real defect happen to share a number, which is a good
+way to quote the wrong one. Two independent drives agree to within two points on every row, which is
+what makes this trustworthy where the original was not.
+
+Three conclusions, all different from what this section used to say:
+
+- **The map data is NOT being eaten.** The dominant reason SLA has no limit is that OSM has no
+  `maxspeed` on that way -- 88-90% of blind positions, and they are residential streets, which is
+  exactly where the county-wide 86-97% figure does not apply. That figure counts WAYS across
+  motorway..tertiary; a drive spends its minutes elsewhere. Comparing them was comparing populations.
+- **Not one blind position lacked a tile.** Downloading more maps would fix nothing.
+- **There IS a residual defect and it is on the freeway**, which is why it still matters at 1.7%: six
+  consecutive positions on US 40/189 where the tile says 65 mph, and one on I-80 where it says 70,
+  with SLA holding nothing. That is v1 way-matching or SLA validation, it needs no migration to
+  investigate -- and it is precisely what mapd v2 would make legible, since `waySelectionType`
+  including `fail` says whether the map was LOST rather than confident and wrong.
+
+`PassingAssistPatience` still needs a posted limit and is still inert without one, but it is inert
+across roughly 14% of the road he covers rather than 98% of it.
 
 ### A HOLD IS A LABELED DATA POINT ABOUT THE MAP
 
