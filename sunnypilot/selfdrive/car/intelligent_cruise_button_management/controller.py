@@ -1270,6 +1270,39 @@ class IntelligentCruiseButtonManagement:
     self.v_cluster_at_press = self.v_cruise_cluster
     return True
 
+  def enforce_no_limit_no_hold(self) -> None:
+    """BluePilot: WITHOUT A POSTED LIMIT THERE IS NO HOLD. The max speed is the whole interface.
+
+    Asked for directly on 2026-08-15: *"I want the +/- to just affect the max speed like normal,
+    like when ICBM is off entirely, not affect the little number above the max speed"*, and
+    *"there's no point in having the max speed be stuck where I hit set when there is no SLA"*.
+
+    A hold only ever meant one thing: "for this posted limit, I want a different number". With no
+    limit there is nothing to want a different number THAN. The baseline then equals the max speed
+    by construction -- `v_baseline = v_cruise_cluster` at every capture site -- so it is a second
+    name for a value the driver can already see and already controls, and inventing it costs him a
+    concept to learn for no behaviour he did not already have.
+
+    Measured on route 00000379 (SLA had a limit in 1.7% of plan frames): a hold was held for 36.5%
+    of the drive, `overrideState` read manual, and `baselineSource` read fallbackIdle -- the path
+    that infers a press from set-speed movement. He pressed SET five times and nothing else. Almost
+    every one of those holds was inferred, not chosen.
+
+    With no baseline, `apply_baseline` is the identity, ICBM aims at the planner's cruise target,
+    and the max speed behaves exactly as it does with ICBM switched off -- while curves, leads and
+    the hazard path all keep working, because none of them ever depended on a baseline existing.
+
+    PINNED HOLDS SURVIVE. A pin is an explicit gesture at an explicit place, so it is the one hold
+    that means something without a limit -- and it is the reason this is not simply a guard at the
+    three capture sites: `apply_pinned_hold` runs inside `update_manual_override` too, and a blanket
+    rule there would silently delete the feature.
+    """
+    if self.speed_limit_known or self.v_baseline <= 0:
+      return
+    if self.baseline_source == BaselineSource.pinned:
+      return
+    self.clear_baseline()
+
   def clear_baseline(self) -> None:
     self.override_state = OverrideState.auto
     self.v_baseline = 0
@@ -1367,6 +1400,7 @@ class IntelligentCruiseButtonManagement:
       self.cruise_cycle_frames = 0
 
     self.update_manual_override(CS)
+    self.enforce_no_limit_no_hold()
 
     # BluePilot: the state machine runs unconditionally. A baseline changes WHAT ICBM aims for,
     # not WHETHER it aims -- see apply_baseline. The previous design forced State.inactive here,

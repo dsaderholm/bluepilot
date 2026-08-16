@@ -61,10 +61,15 @@ class IcbmHudState:
     So the badge appears only when SLA has a real limit -- which is precisely when "which number
     wins" is a live question and the two can genuinely differ.
 
+    A PINNED hold is the exception, because as of 2026-08-15 it is the only hold that can exist
+    without a limit at all (see `enforce_no_limit_no_hold`). Hiding it would leave a speed he
+    deliberately pinned to a place governing the car with nothing on screen saying so, and the tap
+    target that removes it unreachable.
+
     This is a DISPLAY rule. The hold itself is unchanged and still governs the car; hiding a
     readout must never change what the car does.
     """
-    return self.has_hold and self.sla_has_limit
+    return self.has_hold and (self.sla_has_limit or self.pinned)
 
 
 def read_icbm_hud_state(sm) -> IcbmHudState:

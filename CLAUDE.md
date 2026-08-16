@@ -533,6 +533,61 @@ Two things that decided the design:
 - **Tap moves the set speed 1 mph, press-and-hold moves it 5 mph** — the car's behavior, not
   openpilot's. Model set-speed movement as 5 mph jumps with stationary gaps, never a 1 mph ramp.
 
+## NO POSTED LIMIT MEANS NO HOLD. THE MAX SPEED IS THE WHOLE INTERFACE THERE.
+
+Asked for on 2026-08-15, twice, after two long highway drives:
+
+  *"I want the +/- to just affect the max speed like normal, like when ICBM is off entirely, not
+  affect the little number above the max speed."*
+  *"I never want to affect the number on the top. That's ICBM's job, not mine."*
+  *"There's no point in having the max speed be stuck where I hit set when there is no SLA."*
+
+**Read the screen the way he does, because there are two "little numbers" and only one is meant.**
+In the set-speed box the BIG number is `vCruiseCluster` (openpilot's own v_cruise -- the MAX, his).
+The small text above it normally reads "MAX", and sunnypilot REPLACES it with the DASH set speed
+`speedCluster` whenever ICBM is actively moving it (`show_icbm_status`). That top number is the one
+he means, and it is ICBM's to move, never his. The HOLD badge is a third thing again.
+
+**What the drives showed.** Route 00000378: SLA had a limit in 98.4% of plan frames, holds ran
+70-80, `baselineSource` read `press`. Working as designed. Route 00000379: SLA had a limit in
+**1.7%** of frames, yet a hold was held for **36.5%** of the drive, `overrideState` read manual and
+`baselineSource` read `fallbackIdle` -- the path that INFERS a press from set-speed movement. He
+pressed SET five times and pressed nothing else all drive. Nearly every hold on that drive was
+inferred rather than chosen.
+
+**The rule: `enforce_no_limit_no_hold()`, called straight after `update_manual_override`.** A hold
+only ever meant "for THIS posted limit I want a different number". With no limit there is nothing to
+want a different number than, and `v_baseline = v_cruise_cluster` at every capture site -- so the
+hold is a second name for a value he can already see and already controls. With no baseline
+`apply_baseline` is the identity, ICBM aims at the planner's cruise target, and the max speed
+behaves exactly as it does with ICBM off, while curves, leads and the hazard path keep working
+because none of them ever depended on a baseline existing.
+
+**PINNED holds are the exception**, and that is why this is a single call at the end rather than a
+guard at the three capture sites: `apply_pinned_hold` runs INSIDE `update_manual_override`, so a
+blanket rule there deletes the whole pinned-holds feature silently. A pin is an explicit gesture at
+an explicit place and is the one hold that still means something with no limit -- so it survives,
+and `worth_showing` now draws the badge for a pinned hold even with no SLA, or he would have a speed
+governing the car with nothing on screen and no tap target to remove it.
+
+**What this gives up, stated because he should hear it rather than discover it:** a number he sets
+on a road with no coverage is no longer carried in as a hold when coverage returns. SLA takes the
+speed at that point, and he presses + to override -- which now creates a hold, because a limit is
+known. `TestAHoldMadeWhereNoLimitIsKnown` used to protect the opposite behaviour from a 2026-08-06
+report; it is REPLACED, not weakened, because its premise no longer exists.
+
+**And it exposed a fixture defect worth remembering.** `test_drive_scenario.py`'s `step()` built its
+plan message with NO `speedLimit` field at all, so `LP_SP.speedLimit` raised on every frame and every
+scenario in that file had silently been running as "no limit known" -- the rare road, everywhere.
+`make_lp` in `test_manual_override.py` carries a docstring about being fixed for exactly this reason;
+the second harness was never fixed with it. Two scenarios failed for a reason unrelated to the change
+and that is how it surfaced. **When one fixture is documented as having had a hole, go and check the
+others for the same hole.**
+
+**Both halves were mutation-tested, and one test was vacuous until that was done:** disabling the
+rule initially failed only ONE of the two tests, because the existing baseline-equals-target rule was
+clearing the hold in the other. Green was not evidence; breaking the code on purpose was.
+
 ## Params, defaults, and his settings
 
 **Settings behave EXACTLY as they do on stock BluePilot, sunnypilot and openpilot.** Decided

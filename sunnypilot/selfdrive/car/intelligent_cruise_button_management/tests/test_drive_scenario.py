@@ -55,7 +55,8 @@ class Drive:
     self._frame = 0
 
   def step(self, target, source=PlanSource.speedLimitAssist, buttons=(),
-           lead=UnconfirmedLeadState.inactive, lead_target=0.0, map_active=None):
+           lead=UnconfirmedLeadState.inactive, lead_target=0.0, map_active=None,
+           limit_known=True):
     # FusionPilot: gasPressed/brakePressed exist on every real CarState. Omitting them here meant an
     # AttributeError the device could never raise, the moment the controller read one.
     cs = NS(vEgo=self.v_ego * MPH,
@@ -70,7 +71,18 @@ class Drive:
     # map.active was true on the vision frames too. So it is a separate knob here, defaulting to
     # the common case and overridable for the alternation that exposed the difference.
     map_on = (source == PlanSource.sccMap) if map_active is None else map_active
+    # FusionPilot: speedLimit was ABSENT here entirely, so LP_SP.speedLimit raised on every frame
+    # and `speed_limit_known` read False for every scenario in this file -- the RARE road, silently,
+    # everywhere. test_manual_override's make_lp carries a docstring about being fixed for exactly
+    # this reason; this second harness was never fixed with it. It surfaced on 2026-08-15 when
+    # "no posted limit means no hold" landed and two scenarios began failing for a reason that had
+    # nothing to do with the change.
+    #
+    # Defaults TRUE because that is the ordinary road, and because these scenarios are all about
+    # holds -- which now only exist where a limit is known.
     lp = NS(vTarget=target * MPH, longitudinalPlanSource=source,
+            speedLimit=NS(resolver=NS(speedLimitValid=limit_known,
+                                      speedLimitLastValid=limit_known)),
             smartCruiseControl=NS(map=NS(active=map_on, vTarget=target * MPH),
                                   vision=NS(active=source == PlanSource.sccVision,
                                             vTarget=target * MPH)),
