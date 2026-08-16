@@ -44,6 +44,28 @@ version"*, or *"there's a new BluePilot"*. That is the whole request. Handle it 
 python tools/bp_merge_upstream.py
 ```
 
+**This fork has several worktrees, one per line of work, and a fresh session lands in whichever
+one it lands in.** Upstream is merged into `icbm-manual-override-and-tuning` only; the others pick
+the update up by being rebased onto it afterwards. The script checks this and, if it is in the
+wrong place, prints the `cd` to run instead -- so just follow what it says rather than reasoning
+about branches.
+
+After the merge lands, rebase the other worktrees onto it and run their tests too. `git worktree
+list` shows them.
+
+**A fix belongs to the branch that owns the code, not to the branch you happened to find it from.**
+Stated as a rule on 2026-08-05: *"don't fix any ICBM related stuff on this branch, it should only
+be fixed on the ICBM branch."*
+
+So when work on a feature branch turns up a bug in ICBM, the BluePilot settings page, or anything
+else `icbm-manual-override-and-tuning` owns: `cd` to that worktree, fix it there, commit, push,
+then rebase this branch onto it. Do NOT fix it in place. Fixing it in place strands the fix on a
+branch that has not merged -- so a device flashed from ICBM still has the bug -- and guarantees a
+conflict on the next rebase against the eventual real fix.
+
+This does not narrow what may be fixed. Anything related to what is being built is in scope
+whatever layer owns it; the rule is only about WHERE the commit lands.
+
 Then:
 
 1. **No conflicts, tests green** → show them the summary, commit, push, and give them the
@@ -55,8 +77,21 @@ Then:
 Then give them exactly this, and nothing more complicated:
 
 ```bash
-cd /data/openpilot && git pull && sudo reboot
+cd /data/openpilot && git fetch && git reset --hard origin/<branch> && sudo reboot
 ```
+
+**NOT `git pull`.** It fails on the car every time a branch is rebased, which is most updates here:
+rebasing gives every commit a new id, so pull tries to MERGE the rewritten branch into the device's
+older copy of itself and conflicts against its own history. It happened on 2026-08-06 and left him
+standing at the car with four conflicts and a half-finished merge:
+
+    "This is why I always just use the updater on SunnyPilot"
+
+Fair. The reset form is no harder to paste, works whether or not the branch was rewritten, and
+cannot half-apply. The device is a deployment with no local edits, so discarding them is free --
+and if that ever stops being true, the answer is still not `pull`.
+
+If he is already stuck mid-merge, `git merge --abort;` in front of it clears the state first.
 
 **Rules for this task, learned the hard way:**
 
@@ -182,6 +217,13 @@ Onroad HUD drawing *is* checkable, and the check is **trustworthy**:
 `selfdrive/ui/bp/onroad/tools/preview_acc_status.py` renders the shipped drawing methods to PNG at
 device scale. The owner confirmed on 2026-08-03, after driving it, that the car looks *exactly*
 like the preview renders -- colors, sizes, spacing, all of it.
+
+`selfdrive/ui/bp/onroad/tools/preview_passing_panel.py` does the same for the passing-assist
+panel, which is now that whole feature's readout -- every gate, the dry run of the maneuver, the
+slow-pass warning and the drive summary all land in the same three lines. It prints each panel's
+pixel size and asserts none exceeds the screen. **Add a scene to its SCENES whenever a new panel
+state is introduced**; the first render found three readouts that were being assembled and then
+silently dropped, which the full suite had passed over.
 
 So treat a preview render as the answer, not an approximation. Iterate on it until it looks right
 and ship that; do not caveat UI work with "we won't know until you drive it", and do not ask the
@@ -895,6 +937,135 @@ The remaining lever is how far ahead `MapTargetVelocities` is populated, which i
 this fork. Do not re-derive this from scratch; measure with `tools/bp_missed_curves.py` and compare
 the map's fire time against the 3.3 mph/s budget before proposing anything.
 
+## WE ARE PINNED TO THE LAST RELEASE OF A DEAD MAPD, AND UPSTREAM IS NOT COMING
+
+Established 2026-08-16 from the repos, because "mapd is upstream of this fork" was being used as a
+reason to stop thinking, and it turns out to be a reason to start.
+
+**mapd is [pfeiferj/openpilot-mapd](https://github.com/pfeiferj/openpilot-mapd)** -- a standalone Go
+binary using OpenStreetMap, downloaded from GitHub releases at boot by
+`sunnypilot/mapd/mapd_installer.py`, where the version is one constant. Not a library.
+
+**`VERSION = "v1.12.0"` IS THE FINAL v1 RELEASE THAT WILL EVER EXIST.** pfeiferj shipped v1.12.0 and
+every release after it is v2.x. Upstream is on v2.3.0 as of 2026-08-12.
+
+**And sunnypilot's move to v2 is abandoned, not in progress.** All of it dates to one day:
+
+  - PR [#1647](https://github.com/sunnypilot/sunnypilot/pull/1647) "prerequisite mapd v2: remove old
+    mapd, sla, scc" -- still a DRAFT, `+3/-2567` across 35 files, pure demolition
+  - branches `mapd-v2`, `mapd-v2-prebuilt`, `mapd-v2-prerequ` -- last commit 2026-01-14, all three
+  - `mapd-v2` is 2 commits ahead of master and **1439 commits behind**
+  - zero human comments on the PR in seven months, only a CI bot
+  - the author is STILL ACTIVE in the repo (PR #1767, 2026-08-14) -- they did not leave, they moved
+    to UI work and never came back to this
+
+So "wait for upstream" is not a plan. There is nothing to wait for, and nothing to collide with
+either -- which inverts the usual rule. The demolition draft is 1439 commits behind and would have to
+be rewritten by whoever finishes it.
+
+**WHY IT MATTERS TO EVERY FEATURE HERE, not just passing assist.** v1 talks through `/dev/shm/params`,
+which pfeifer's own docs call the design's biggest flaw: a BLOCKING operation in the controls loop,
+where every new field is a breaking change for every fork, and **none of the data reaches the route
+logs**. That last one is why no drive analysis in this fork has ever been able to see what the map was
+saying. v2 rewrites comma's msgq in Go, so mapd speaks native cereal -- non-blocking, logged, and able
+to read openpilot's state directly instead of us copying GPS back out to it.
+
+The v1 field list is short because its transport made adding fields expensive, not because the data
+does not exist. What v2 publishes on `mapdOut` (20 Hz) that we have no access to today:
+
+| Field | Answers |
+|---|---|
+| `highwayClass` | the raw OSM tag, and it separates `motorway` from `motorwayLink` -- **freeway from on/off-ramp**, which is the exit problem above stated exactly |
+| `advisorySpeed` | the yellow curve-advisory sign, an independent number for the corner SCC-Vision currently derives with no cross-check at all |
+| `lanes` + `distanceFromWayCenter` + `estimatedRoadWidth` | how many lanes, and which one we are in -- the question the camera structurally cannot answer when paint refuses |
+| `oneWay` | divided-highway corroboration for the radar oncoming veto |
+| `waySelectionType` (incl. `fail`) | when the map is LOST rather than confident and wrong |
+| `tileLoaded` | "no limit here" vs "no map here" -- the distinction behind a hold inferred for 36% of route 00000379 |
+
+**The full inventory is in `bluepilot/MAPD-V2-PLAN.md`** -- every field and setting, sorted by
+which feature it serves, with the integration cost and the known collisions. The underrated half
+is the SETTINGS: `Curve Target Speed Time Offset` is literally the earliness lever the exit
+section above says is "mapd's, upstream of this fork", and `MapdExtendedOut.path` carries the
+whole curvature-and-target-velocity profile ahead rather than SCC-Map's single step.
+
+**Do not start this before the California trip.** It is large and it touches the layers this fork has
+customized most. But drop "upstream will handle it" as a reason -- it is measurably false, and the
+question actually worth settling is whether mapd's own documented "Minimal" integration path (which is
+ADDITIVE -- add capnp defs, a service, a process, a subscription) can run alongside v1 without the
+SLA/SCC teardown that draft performs. That teardown is sunnypilot's consolidation choice, not a
+technical requirement of mapd v2. **That question is unanswered and is the one to answer first.**
+
+### THE MAP IS EVIDENCE, NEVER PERMISSION -- and that is the design, not a caveat
+
+His, 2026-08-16, and it is the sentence to check any map integration against:
+
+  *"Mine works better with the map data we will add, but also works without it. BlueCruise always
+   requires map data."*
+
+  *"I almost think it's good that we aren't getting good map data yet, so we can make this work for
+   the best and not rely on it."*
+
+**BlueCruise uses the map as PERMISSION.** A Blue Zone is an operational design domain drawn in
+advance -- prequalified divided highway, HD-surveyed. No map, no feature. That is why it covers
+130,000 miles and why his 2+1 sections on US-6 and US-89 will never be in it.
+
+**Here the map is one more input into a decision the sensors already reach.** The existing rule is
+what makes that rigorous rather than a good intention -- *evidence that OPENS a maneuver must never
+be cheaper than evidence that refuses one*. Applied to map data:
+
+  MAY REFUSE, freely. `highwayClass` says motorwayLink, do not offer a pass. `oneWay` false with
+  radar oncoming, do not offer a pass. A refusal from a stale tile costs a missed pass.
+  MUST NEVER BE THE SOLE THING THAT OPENS. `lanes = 3` alone cannot authorize a lane change. A
+  wrong tile then puts the car somewhere real, and losing map coverage takes the feature with it.
+
+Hold that and the property he wants is automatic: **no map costs COVERAGE, never SAFETY.**
+
+**THE MOMENT THIS GETS LOST IS ONE LINE LONG**, and it will look like a cleanup: "the map says
+three lanes, so skip the camera check." That converts the map from evidence to permission silently,
+and every gate downstream inherits it. Whenever mapd v2 lands, check each new map input against the
+two bullets above before it touches a gate.
+
+The trade, stated so it is chosen rather than discovered: in the MAPPED case BlueCruise wins. It
+knows the lane count and where the gore point is; we re-derive both from a radar and a camera every
+frame. We give up that ceiling to work on roads nobody surveyed, which is where he drives.
+
+### THE MODEL GETS WHAT HE HAS NO PREFERENCE ABOUT. WRITTEN CODE GETS THE REST.
+
+His, 2026-08-16, and it is the test to apply to any "should this be learned or hand-written" question
+rather than arguing it fresh each time:
+
+  *"Models here are good for things of which I have no preference, like staying in my lane."*
+
+It sorts into three, and the third is the one people miss:
+
+**1. PERCEPTION -- no preference, and the model is genuinely better.** Where the lane lines are, how
+wide the lane is, where the road edge sits, is there a lead. Nobody would hand-write these and this
+fork does not: `_geometry` consumes modelV2 wholesale. Comma's end-to-end direction is right here and
+we free-ride on it.
+
+**2. POLICY -- he has a preference, so it is written code with a param.** Whether to pass at all, how
+much slower a car has to be, keep-right, how fussy to be when not making time, follow gap. These are
+HIS, and the reason a fleet-trained model cannot serve them is not capability -- **a model trained on
+the fleet learns the median driver and averages his preferences away by construction.** That is the
+same objection he has to BlueCruise refusing to move into a faster lane: someone else's policy, baked
+in where he cannot reach it.
+
+**3. CAR FACTS -- nobody has a preference, but the model cannot know them.** The set speed moving 1
+mph on a tap and 5 on a hold. The retrofit PSCM needing the car slowed before it accepts hard
+steering. ICBM existing at all. These are not preferences and not perception; they are properties of
+ONE car, and there is no fleet to learn them from. Written code, and deliberately with NO param --
+they are facts, not choices.
+
+The curve gate is worth noting as both 2 and 3, which is why it is the strongest of the recent gates:
+"I don't want to pass on curves" is a preference, and the PSCM authority limit underneath it is a car
+fact. When those two agree, the number is not a guess.
+
+**What this costs, stated because it is real:** written code only refuses what somebody thought of.
+The center turn lane was not thought of -- the road taught us, twice, and it is still not fully
+solved. A model that had seen ten thousand turn lanes would simply not do it. Enumeration is the
+weakness of category 2, and the answer is to keep MEASURING (geoLeftTravelProven, exitsBy,
+patienceMissed) so the road can keep teaching, rather than to pretend the enumeration is complete.
+
 ## THE SET SPEED HUNT: TAP FOR SMALL CORRECTIONS, HOLD FOR LARGE ONES
 
 Reported 2026-08-12: *"it raised and lowered my cruise over and over... when the speed limit changed
@@ -1274,16 +1445,41 @@ unavoidable, the branch whose field has never been written to a log is the one t
 
 ## Working with the owner
 
+- **READ THE MODULE BEFORE EXTENDING IT.** These files carry long design docstrings recording what
+  was tried, what failed on the road, and what was settled -- `blinker_test_ext.py` opens with a
+  summary that answers most of what a new feature needs to know about commanding the signal. On
+  2026-08-09 I asked him a series of questions and proposed a design that were all already answered
+  in the tree, and he escalated three times before: *"I'm really mad you don't remember any of what
+  we did before, even though all the code is right in front of your fucking face."* The failure was
+  searching for CONFIRMATION of what I was about to build rather than reading what was already
+  built. grep for the concept before adding a field, param or constant, and check whether a later
+  section of a long plan document supersedes the one you are editing. When he says "we already did
+  this", stop and go read.
 - **He reports, I tune.** On-road reports are tuning input, not complaints to work around. His
   observation of his own device beats my inference about it every time.
 - **Don't check in.** He has given open-ended permission; pick the work and report it done rather
   than closing with "want me to...".
+- **AND DON'T LEAVE WORK PARKED**, which is the same failure from the other side. Stated on
+  2026-08-10: *"After I ask something like 'Is there anything else you want to do before my next
+  drive?', you should say no, because you should have done everything. You shouldn't wait for me to
+  follow up. Why aren't you just doing everything?"* That question should always be answerable with
+  a plain no. Before reporting, sweep: is every finding acted on, is every number that was added
+  actually rendered somewhere, is the device updated, is anything still sitting in a note as "worth
+  doing later" that could be done now. Finding a real problem and describing it instead of fixing
+  it is not a report, it is a handoff he did not ask for.
 - **Shell commands are fine.** What he dislikes is running them *in the car*, in 100-degree heat.
   Diagnostics he can SSH into at home are welcome; "run this on your next drive" is not.
 - **Talk about the finished system.** Do not preface answers with what does not actuate yet; he is
-  always describing the finished behavior. **This is about answering HIM, and does not extend to
-  documentation** -- see the README section above, where the opposite applies, because a stranger
-  reading the README has no way to know what is scaffolding.
+  always describing the finished behavior. For passing assist that system **decides, signals and
+  makes the lane change with no stalk input** -- *"LANE CHANGES WILL NOT BE STARTED BY MY StALK"*,
+  and *"if I had to manually do anything, then I might as well just keep using the SunnyPilot
+  nudgeless lane changes"*. The decision is the whole feature; nudgeless already does a crossing
+  the driver chose. Describing it as advisory is not the cautious version of it, it is a different
+  product he already has. Note this does not change the SAE level: automating the decision leaves
+  it Level 2, because the level is set by who monitors and who carries liability, not by how much
+  the car does. **This is about answering HIM, and does not extend to documentation** -- see the
+  README section above, where the opposite applies, because a stranger reading the README has no
+  way to know what is scaffolding.
 - **23 controls on the settings screen is not a usability problem.** Do not consolidate unless asked.
 - **Report test results only when the result is news.** No sign-off with a suite total every message.
 - **Changes made on one branch reach the others because he rebases every time.** So CLAUDE.md is the
