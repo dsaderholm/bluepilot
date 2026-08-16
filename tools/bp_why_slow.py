@@ -98,6 +98,7 @@ def main() -> int:
   plan_frames = 0
 
   segs = find_segments(args.route)
+  total_segs = len(segs)
   if len(segs) > args.max_segments:
     print(f"# {len(segs)} segments; reading the first {args.max_segments} (--max-segments to change)")
     segs = segs[:args.max_segments]
@@ -177,7 +178,18 @@ def main() -> int:
               f"{'B' if s['brake'] else '.'}")
       hist.clear()
 
-  print("\n=== who GOVERNED the drive, whole route ===")
+  # NOT "whole route" unless it really was. The cap reads from the FRONT, and the front of a route is
+  # the driveway -- on 2026-08-16 two sessions independently read the first 6-10 segments of a
+  # 53-segment route, measured a PARKED car, and each concluded Speed Limit Assist was broken. The
+  # owner said "the speed limit works" and was right. A percentage over 15% of a drive, printed under
+  # a header claiming the whole one, is how that happens. Say what was covered.
+  covered = len(segs)
+  scope = (f"whole route, {covered} segments" if covered == total_segs else
+           f"THE FIRST {covered} OF {total_segs} SEGMENTS -- not the whole drive; "
+           f"pass --max-segments {total_segs}")
+  print(f"\n=== who GOVERNED the drive, {scope} ===")
+  if covered != total_segs:
+    print("  The front of a route is often stationary, which skews every percentage below.")
   if plan_frames:
     for src, n in sorted(src_frames.items(), key=lambda x: -x[1]):
       print(f"  {src:<18} {100.0 * n / plan_frames:5.1f}%  {'#' * int(40.0 * n / plan_frames)}")
