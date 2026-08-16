@@ -439,16 +439,35 @@ binary, a process entry, and a SubMaster subscription.
 
 Which means the back-out is deleting one process entry.
 
-### WHAT IS STILL UNMEASURED, AND IT NEEDS THE DEVICE
+### MEASURED ON THE DEVICE, 2026-08-16 — AND v1 IS NOT CHEAP
 
-Everything above is settled from the two codebases and one downloaded tile. What cannot be settled
-that way, in the order to check it:
+    /data              89G total, 75G used, 9.0G free (90%)   -- 65G of it is realdata
+    /data/media/0/osm  524M, 3072 tiles, all downloaded 2026-08-02
+    mapd (v1.12.0)     ~22% of a core, 204 MB RSS (5.5%)      -- OFFROAD, engine off
+    mapd_manager       0.3% CPU, 89 MB
+    memory             3607 MB total, 2184 MB available
 
-- **CPU and memory with both running.** v1 is what we already pay; v2 claims sub-10% memory and a
-  few percent of a core, and the 2.3.0 notes cite a further memory reduction. Two Go processes
-  mmapping tiles for the same area is the specific thing to watch.
-- **Free space on `/data/media/0`.** The shared store means no extra tiles, but the 20.8 MB binary
-  and the tmp staging still land there.
+**The device's OWN tile was copied off and parsed, not just the hosted one.** Same box, downloaded
+2026-08-02: 9,159 ways, `wayId` 100%, `highwayClass` 100%, 292 motorway against 403 motorwayLink. So
+this is not a claim about what the server would send if we re-downloaded — **the freeway/ramp tag and
+the way ids are on his eMMC now**, and have been since before every drive analyzed in this document.
+
+**The honest reading of the CPU number: coexistence is affordable but it is not free.** v1 alone
+burns about a fifth of a core and 200 MB while the car is parked, which makes it one of the more
+expensive processes on the device, and v2's claim of "sub-10% memory and a few percent of a core" is
+against the same baseline rather than on top of a small one. With 2.1 GB available and 76% idle
+offroad there is room, and the shared tile store means no second copy of 524 MB. But **run both for
+the migration window, not permanently** -- the point of the observer period is to prove the data,
+then move the consumers over and delete v1, not to keep two map daemons resident forever.
+
+**Disk is not a constraint here and the pressure is elsewhere:** 9 GB free, of which v2 needs 20.8 MB
+for its binary and zero for tiles. What has /data at 90% is 65 GB of realdata, which is `deleter`'s
+business and nothing to do with this.
+
+Still unmeasured, and it needs v2 actually running:
+
+- **CPU and memory with both up at once.** Two Go processes mmapping tiles for the same area is the
+  specific thing to watch, against the ~22%/204 MB baseline above.
 - **Route size with `mapdOut` logged at 20 Hz** — the diagnostics win has a cost and it should be a
   number.
 
