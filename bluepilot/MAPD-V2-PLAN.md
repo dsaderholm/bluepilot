@@ -290,7 +290,25 @@ Other outputs that land on ICBM/SLA directly:
 
 ---
 
-## What it costs
+## NOTHING HERE COSTS HIM MONEY. Stated because it read the other way once.
+
+**OpenStreetMap is free** -- volunteer-made, openly licensed, no account, no API key, no billing.
+**The map tiles are free too.** pfeiferj takes the free OSM planet file, converts it to the compact
+format mapd reads, and hosts it at `map-data.pfeifer.dev`; the device downloads from there at no
+charge. His introduction doc mentions the hosting costing about $5/month -- **that is HIS bill, and
+he raises it as a point about efficiency**, not a price to anyone. Quoting it without saying whose it
+was is what caused the confusion, on 2026-08-16.
+
+The only map option with a real bill attached is **Mapbox**: commercial, API key, per-request
+pricing. It is what FrogPilot uses as a speed-limit fallback and what comma used for navigation, and
+it is the one we are NOT doing -- now for two reasons, since it also needs live LTE exactly where LTE
+is worst.
+
+The single genuine consideration is that tile hosting rests on one person continuing to pay his own
+$5. That is a single-point dependency, not a charge, and regeneration was measured live above with a
+file dated two days before the check.
+
+## What it costs to INTEGRATE
 
 From mapd's own `docs/integration.md`, the **Minimal** path — note it is ADDITIVE:
 
