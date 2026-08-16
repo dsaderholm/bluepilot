@@ -58,6 +58,36 @@ is known-weak.
 needs a posted limit and is inert without one. Needs the device -- tile state, `MapdVersion`, and a
 route report over the roads actually driven.
 
+### A HOLD IS A LABELED DATA POINT ABOUT THE MAP
+
+His, immediately after the coverage numbers above, and it reframes what a hold is:
+
+  *"If I am setting a hold, though, it means the speed limit is wrong or I want to go slower/faster
+   than my offset."*
+
+Correct, and those two cases separate over TIME even though no single drive can tell them apart:
+
+  same offset, same place, every trip   systematic -- the map is WRONG on that stretch
+  a one-off                             intent -- traffic, weather, running late
+
+So the hold history is a personal speed-limit correction layer built from data he already generates,
+needing no mapd upgrade and no TSR -- which matters, because TSR is still blocked on U0253 and cannot
+supply the true sign.
+
+**A hold BELOW the limit is the unambiguous half.** Nobody corrects a posted limit downward by
+accident, so that is a statement about the ROAD rather than about the map, and it is the direction to
+trust first.
+
+**It also bounds a live feature.** `PassingAssistPatience` (shipped 2026-08-16) computes
+`reference_speed - posted_limit`, and `reference_speed` IS the ICBM hold when one is set -- so a
+wrong map limit makes it misread hurry in exactly the way he describes. What contains that is the
+one-directional design: the scale is clamped at 1.0 and can only ADD patience, never remove it below
+his configured deficit. A wrong limit therefore costs the extra fussiness and nothing else; it can
+never make the car more willing to pass than his own settings. Keep that clamp.
+
+**Owned by ICBM** -- holds are theirs, `bp_hold_history.py` already walks every change to one with
+`baselineSource` naming the mechanism, and that is where a correction layer would be built from.
+
 ## The three facts that frame it
 
 1. **`v1.12.0` is the last v1 release that will ever exist.** pfeiferj shipped it and everything
