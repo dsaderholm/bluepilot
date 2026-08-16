@@ -183,6 +183,10 @@ _BLOCKED_TEXT = {
   'closingIn': "Waiting to get closer",
   'leadBraking': "Car ahead is braking",
   'driverChangedLanes': "You just changed lanes",
+  # Not "curve ahead" -- the point is not that a bend exists, it is that this is a bad place to be
+  # changing lanes. On this car it is also a steering-authority fact: the retrofit PSCM needs the
+  # car slowed to accept a hard steering command, so a bend is already asking near its limit.
+  'inCurve': "Road is bending too much",
 }
 
 # BluePilot: sunnypilot's "AHEAD" box hangs off the bottom of the speed-limit sign, in the same

@@ -183,6 +183,15 @@ class PassingAssistSettingsLayout(Widget):
       inline=True)
 
     # --- the lane you would move into ---
+    self._max_curve = option_item_sp(
+      title=tr("Do Not Pass In A Bend Tighter Than"),
+      description=recommended(tr("How hard the road may be bending and still be a place to pass, in "
+                     "tenths of g-force sideways. 13 is where the curve controller decides you are "
+                     "entering a turn, so the two agree about what a bend is. Measured on a Parley's "
+                     "run: a fifth of all suggestions were above this. Set to 0 to allow passing in "
+                     "any curve."), "PassingAssistMaxCurve"),
+      param="PassingAssistMaxCurve", min_value=0, max_value=40, value_change_step=1)
+
     self._adjacent_lane = toggle_item_sp(
       title=tr("Check The Lane Before Suggesting It"),
       description=recommended(tr("Use the front radar to see traffic in the next lane over, and stay quiet "
@@ -367,6 +376,8 @@ class PassingAssistSettingsLayout(Widget):
       SectionHeader(tr("Moving Over")),
       self._min_approach,
       self._blinker_lead,
+
+      self._max_curve,
 
       SectionHeader(tr("The Lane You Would Move Into")),
       self._adjacent_lane,

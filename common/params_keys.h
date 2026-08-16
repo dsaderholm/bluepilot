@@ -332,6 +332,11 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // been beside us the whole time. Every other exit test asks what the lane looks like, and an
     // exit looks exactly like a through lane. This asks how long it has been there.
     {"PassingAssistMinLaneAge", {PERSISTENT | BACKUP, INT, "15"}},
+    // FusionPilot: how hard the road may be bending and still be a place to pass, in TENTHS of
+    // m/s^2 lateral. 13 -> 1.3, which is vision_controller's own entering-a-turn threshold rather
+    // than a number invented here. Asked for after driving Parley's: "I don't want to pass on
+    // curves". 0 disables the gate. Gates the suggestion only, never a crossing already underway.
+    {"PassingAssistMaxCurve", {PERSISTENT | BACKUP, INT, "13"}},
     // BluePilot: extra-conservative exit avoidance -- require a further lane BEYOND the one being
     // moved into. Superseded as the primary defence by the road-widening check, which spots an exit
     // from the road opening up ahead and works on two-lane roads. Default off: this one costs

@@ -632,6 +632,7 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       closingIn @14;         # deliberately holding off: still closing, ACC has not had to brake
       leadBraking @15;       # they are braking hard: wait and see before committing to go round
       driverChangedLanes @16; # standing down after the driver's own lane change -- see below
+      inCurve @17;           # the road is bending hard enough that a pass is the wrong place for it
     }
 
     # BluePilot: the maneuver this WOULD perform, run as a dry run. Nothing actuates; see

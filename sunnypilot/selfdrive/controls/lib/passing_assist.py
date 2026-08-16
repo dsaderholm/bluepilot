@@ -496,6 +496,26 @@ DEFAULT_MIN_APPROACH_M = -1     # Auto
 # the measured max grows and the hold relaxes to match, so the error can only shrink.
 AUTO_APPROACH_MARGIN_M = 20.0
 
+# Lateral acceleration above which the road is bending too hard to be passing on it, m/s^2.
+#
+# THE MEASURE-FIRST PHASE IS OVER. _track_curve has recorded this on every drive without gating
+# anything, deliberately -- "the distribution says where a threshold belongs, which is the opposite
+# of picking one and finding out afterwards". The distribution now exists, and so does the report
+# that prompted it: driving Parley's to Deer Valley, "I don't want to pass on curves".
+#
+# Suggestion frames by bucket on the 2026-08-15 pair, against edges 0.5 / 1.0 / 1.3 / 1.6:
+#
+#   night  [2156, 238, 197, 218, 395]   19% above 1.3, 12% above 1.6
+#   day    [1150,  99,  59,  35,  36]    5% above 1.3
+#
+# 1.3 is not invented here: it is vision_controller's own ENTERING-A-TURN threshold, and upstream
+# has far more road behind that number than this fork could gather. "Entering a turn" is precisely
+# the moment he objects to being offered a pass, so the two agree about what the number means.
+#
+# Gates the SUGGESTION, not a crossing already underway -- a car cannot un-change lanes because the
+# road started bending, and pulling out of a committed pass mid-corner would be worse than either.
+DEFAULT_MAX_PASS_LAT_ACC = 1.3
+
 # Hysteresis on wanted_side, which is what lights the blinker.
 #
 # 126 ABORTS IN 37 MINUTES, measured on the day highway drive 2026-08-15. An abort is a signal shown
@@ -701,6 +721,7 @@ class PassingAssistDetector:
     # _track_curve: the concern is his retrofit PSCM being asked to add a lane change on top of a
     # curve it is already working to hold, and the number that would answer it does not exist yet.
     self.lat_acc = 0.0
+    self.max_pass_lat_acc = DEFAULT_MAX_PASS_LAT_ACC
     self.suggested_lat_acc_max = 0.0
     self._lat_acc_hist = [0] * 5
     self._hold_s = 0.0        # see SUGGESTION_HOLD_S
@@ -897,6 +918,9 @@ class PassingAssistDetector:
       self.keep_right_enabled = self.params.get_bool("PassingAssistKeepRight")
       self.keep_right_delay_s = float(self.params.get("PassingAssistKeepRightDelay", return_default=True))
       self.min_lane_age_s = float(self.params.get("PassingAssistMinLaneAge", return_default=True))
+      # Tenths of m/s^2, because Params carries ints. 13 -> 1.3.
+      self.max_pass_lat_acc = float(
+        self.params.get("PassingAssistMaxCurve", return_default=True)) / 10.0
       self.actuate_enabled = bool(self.params.get_bool("PassingAssistActuate"))
       self.adjacent_enabled = self.params.get_bool("PassingAssistAdjacentLane")
       self.oncoming_veto = self.params.get_bool("PassingAssistOncomingVeto")
@@ -2587,6 +2611,16 @@ class PassingAssistDetector:
       # applied here too, with the raw answer this frame actually gives -- none.
       self.wanted_side = self._debounce_wanted(Side.none)
       self._reset_outputs(Blocked.noLaneAvailable, keep_wanted=True)
+      return
+
+    # THE ROAD IS BENDING. See DEFAULT_MAX_PASS_LAT_ACC. Checked here -- past "a pass is warranted"
+    # and past geometry, before the lane-choosing gates -- because it is a fact about the ROAD and
+    # not about either lane, so naming a side for it would be arbitrary.
+    #
+    # Suggestion only. A crossing already underway is left alone: a car cannot un-change lanes
+    # because the road started bending, and abandoning one mid-corner is worse than finishing it.
+    if self.max_pass_lat_acc > 0.0 and self.lat_acc > self.max_pass_lat_acc:
+      self._reset_outputs(Blocked.inCurve)
       return
 
     # Two-way road. Evaluated before the sign veto, and it is the one this whole design was waiting

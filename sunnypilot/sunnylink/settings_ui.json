@@ -648,6 +648,15 @@
                   "step": 10
                 },
                 {
+                  "key": "PassingAssistMaxCurve",
+                  "widget": "option",
+                  "title": "Do Not Pass In A Bend Tighter Than",
+                  "description": "How hard the road may be bending and still be a place to pass, in tenths of g-force sideways. 13 is where the curve controller decides you are entering a turn, so the two agree about what a bend is. Measured on a Parley's run: a fifth of all suggestions were above this. Set to 0 to allow passing in any curve.",
+                  "min": 0,
+                  "max": 40,
+                  "step": 1
+                },
+                {
                   "key": "PassingAssistAdjacentLane",
                   "widget": "toggle",
                   "title": "Check The Lane Before Suggesting It",

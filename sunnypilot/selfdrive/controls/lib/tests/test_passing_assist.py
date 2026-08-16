@@ -461,7 +461,7 @@ _STUB_PARAM_DEFAULTS = {
   "PassingAssistMinDeficit": 4, "PassingAssistConfirmTime": 1,
   "PassingAssistKeepRightDelay": 5, "PassingAssistSettleTime": 20,
   "PassingAssistMaxDistance": 220,
-  "PassingAssistOncomingMemory": 90, "PassingAssistBlinkerLead": 1, "PassingAssistMinApproach": 0, "PassingAssistMinSpeed": 30, "PassingAssistExitStandDown": 45, "PassingAssistCrawlTime": 8, "PassingAssistMinLaneAge": 15,
+  "PassingAssistOncomingMemory": 90, "PassingAssistBlinkerLead": 1, "PassingAssistMinApproach": 0, "PassingAssistMinSpeed": 30, "PassingAssistExitStandDown": 45, "PassingAssistCrawlTime": 8, "PassingAssistMinLaneAge": 15, "PassingAssistMaxCurve": 13,
 }
 
 
@@ -3211,15 +3211,21 @@ class TestASuggestionSurvivesAOneFrameDip:
 
 
 class TestHowBentTheRoadWasWhenItSuggested:
-  """Measurement only, and the tests say so -- if any of these ever gate a suggestion, that is the
-  regression.
+  """Measurement, and now the threshold the measurement earned.
 
-  From the road 2026-08-09: the worry is the retrofitted Edge PSCM being asked to add a lane change
-  on top of a curve it is already holding. The number that would set a threshold does not exist --
-  tools/bp_pscm_limit.py tried and is kept marked "BROKEN AS AN ANSWER, KEPT AS A LESSON", having
-  read a signal that is not in this fork's angle loop and moved two defaults that were reverted.
+  This class used to assert that a curve must NEVER refuse a suggestion, and that was right at the
+  time: the number did not exist, and tools/bp_pscm_limit.py had already tried to invent one and is
+  kept marked "BROKEN AS AN ANSWER, KEPT AS A LESSON" for moving two defaults that were reverted.
 
-  So: record what the road did, decide the threshold from the distribution, never the reverse.
+  The distribution arrived on 2026-08-15. Suggestion frames above 1.3 m/s^2 were 19% of the night
+  Parley's run and 5% of the day one, and the report from the seat was "I don't want to pass on
+  curves". So the threshold is now set FROM the distribution, which is the order that class comment
+  demanded, and it is upstream's own entering-a-turn number rather than one chosen here.
+
+  The original worry was right and is now the stated rationale: the retrofitted Edge PSCM is asked
+  to add a lane change on top of a curve it is already holding -- and he has tuned SCC to slow the
+  car specifically so that PSCM will accept a hard steering command, so in a bend it is already
+  near its authority. That is a physical limit, not a preference.
   """
 
   # v_ego is SLOW_LEAD_MS (24 m/s). lat_acc = v^2 * |curvature|, so 0.0035 is about 2.0 m/s^2 --
@@ -3227,17 +3233,36 @@ class TestHowBentTheRoadWasWhenItSuggested:
   HARD = 0.0035
   GENTLE = 0.0006          # ~0.35 m/s^2, an interstate sweeper
 
-  def test_it_records_the_corner_it_suggested_in(self):
-    det = run(PassingAssistDetector(), STUCK_FRAMES, curvature=self.HARD)
+  @staticmethod
+  def _no_gate():
+    """A detector with the curve gate switched off, so the measurement path can still be tested."""
+    det = PassingAssistDetector()
+    det.params = _KeepRightOnParams(PassingAssistMaxCurve=0)
+    return det
+
+  def test_it_records_the_corner_it_measured(self):
+    """The histogram still records, with the gate switched off, because the distribution is what
+    any future move of the threshold has to be argued from."""
+    det = run(self._no_gate(), STUCK_FRAMES, curvature=self.HARD)
     assert det.suggestion == Side.left, "the fixture never suggested"
     assert det.suggested_lat_acc_max > 1.6, det.suggested_lat_acc_max
 
-  def test_it_does_not_refuse_the_corner(self):
-    """THE POINT. A curve must not block a suggestion today -- picking that threshold by reasoning
-    is exactly what produced the reverted SCC defaults."""
+  def test_a_hard_corner_now_refuses(self):
+    """THE INVERSION. This asserted the opposite until the distribution existed to justify it."""
     det = run(PassingAssistDetector(), STUCK_FRAMES, curvature=self.HARD)
+    assert det.suggestion == Side.none
+    assert det.blocked_by == Blocked.inCurve
+
+  def test_an_interstate_sweeper_still_passes(self):
+    """The gate must not cost the road it was built for. I-15 to California is long gentle bends,
+    and refusing those would disable the feature on the drive it is being tuned for."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, curvature=self.GENTLE)
     assert det.suggestion == Side.left
     assert det.blocked_by == Blocked.none
+
+  def test_zero_disables_the_gate(self):
+    det = run(self._no_gate(), STUCK_FRAMES, curvature=self.HARD)
+    assert det.suggestion == Side.left
 
   def test_a_straight_road_records_nothing(self):
     det = run(PassingAssistDetector(), STUCK_FRAMES, curvature=0.0)
