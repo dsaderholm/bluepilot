@@ -1517,6 +1517,48 @@ class TestNoPostedLimitMeansNoHold:
     assert icbm.v_baseline == 45, "a pinned hold was discarded because no limit was known"
     assert icbm.baseline_source == BaselineSource.pinned
 
+  def test_a_pin_is_not_relabeled_into_deletion_by_the_idle_fallback(self):
+    """The label is now load-bearing, not diagnostic.
+
+    `enforce_no_limit_no_hold` spares a hold only while it is still labeled `pinned`. The idle
+    fallback used to overwrite that label freely -- harmless when the label was only for reading
+    routes, a DELETION now, on exactly the roads the owner says he pins on. And the pin is
+    edge-triggered and already spent, so it would never re-apply for the rest of the drive.
+    """
+    icbm = fresh()
+    for _ in range(200):
+      icbm.run(make_cs(48, v_ego=48), CC, make_lp(LIMIT, limit_known=False), False, pinned_hold=45)
+    assert icbm.baseline_source == BaselineSource.pinned
+
+    # The set speed now moves while ICBM is idle -- the exact trigger for the inferred fallback.
+    for cluster in (46, 47, 48, 49, 50):
+      for _ in range(40):
+        icbm.run(make_cs(cluster, v_ego=48), CC, make_lp(LIMIT, limit_known=False), False)
+
+    assert icbm.baseline_source == BaselineSource.pinned, "the pin was relabeled as an inferred hold"
+    assert icbm.v_baseline == 45, "the pin was deleted after being relabeled"
+
+  def test_a_real_press_still_takes_the_baseline_over_from_a_pin(self):
+    """The other half of the pin guards, and the half that would make them a trap if it were wrong.
+
+    Protecting a pin from the INFERRED path must not make it unoverridable by hand. Overriding a pin
+    with the buttons is deliberate; drifting off one because the cluster moved is not. With no
+    posted limit the deliberate override then correctly leaves NO hold at all -- the max speed is
+    the interface there.
+    """
+    icbm = fresh()
+    for _ in range(200):
+      icbm.run(make_cs(48, v_ego=48), CC, make_lp(LIMIT, limit_known=False), False, pinned_hold=45)
+    assert icbm.baseline_source == BaselineSource.pinned
+
+    icbm.run(make_cs(48, v_ego=48, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT, limit_known=False), False)
+    for cluster in range(48, 54):
+      icbm.run(make_cs(cluster, v_ego=48, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT, limit_known=False), False)
+    icbm.run(make_cs(53, v_ego=48, buttons=(ACCEL_RELEASE,)), CC, make_lp(LIMIT, limit_known=False), False)
+
+    assert icbm.baseline_source != BaselineSource.pinned, "a real press could not override the pin"
+    assert icbm.v_baseline == 0, "no posted limit, so the hand override must leave no hold"
+
 
 def in_zone(icbm, speed, frames, enabled=True, road_speed=48):
   """Drive with a pinned hold of `speed` in range (0 means no pin here), cruise on or off."""

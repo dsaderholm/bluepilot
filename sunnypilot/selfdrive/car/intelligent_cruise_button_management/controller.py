@@ -1100,7 +1100,16 @@ class IntelligentCruiseButtonManagement:
       # the target, so movement there must not redefine the hold. Without this the press path's
       # protection is worthless -- the fallback re-baselines a frame later, which is what a probe
       # caught: the hold still fell 70 -> 50 with the press path already fixed.
-      if not self.hold_suppressed:
+      # A PIN OWNS ITS VALUE, not just its label. This branch is the INFERRED path -- it fires on
+      # set-speed movement with no button event behind it, and route 00000379 showed it firing all
+      # drive on a road with no posted limit. Letting it rewrite v_baseline replaces the number the
+      # owner deliberately pinned to this place with whatever the cluster happens to read, and the
+      # pin is edge-triggered and already spent, so nothing restores it.
+      #
+      # A real button press is a different matter and still wins: that site sets both the value and
+      # `press` unconditionally, a few lines up. Overriding a pin by hand is deliberate; drifting
+      # off one because the cluster moved is not.
+      if not self.hold_suppressed and self.baseline_source != BaselineSource.pinned:
         self.v_baseline = self.v_cruise_cluster
         # NEVER downgrade a press. The question this field exists to answer is "does the press
         # path fire at all on this car", and a last-writer-wins field answers a different one.
@@ -1112,6 +1121,11 @@ class IntelligentCruiseButtonManagement:
         # press after the first 5 mph jump at idle 67, overwritten to fallback at idle 128.
         #
         # I nearly deleted a working code path on that reading.
+        #
+        # No `pinned` clause is needed here, and adding one was reverted: this whole block is nested
+        # inside the value guard above, which already returns early for a pin. Mutation-testing it
+        # proved it unreachable -- removing the clause broke no test. A guard that cannot fire, with
+        # a comment claiming it is load-bearing, is worse than no guard at all.
         if self.baseline_source != BaselineSource.press:
           self.baseline_source = (BaselineSource.fallbackIdle if fallback_idle
                                   else BaselineSource.fallbackCounter)
@@ -1145,7 +1159,15 @@ class IntelligentCruiseButtonManagement:
     # speed on any car whose cluster reports slower than the timer.
     if self.press_settle_frames > 0:
       # Honour what was true when the press happened, not what is true now -- see press_suppressed.
-      if not self.press_suppressed:
+      #
+      # A pin is exempt here for the same reason as the fallback capture above, and this is the site
+      # that actually bit: the INFERRED fallback arms this stand-down too, so guarding only the
+      # capture left the pin's value rewritten here a few lines later. Found by tracing every write
+      # to v_baseline rather than by reading, after the first guard did not fix the test.
+      #
+      # A genuine button press is unaffected: the press path sets `press` (and the value)
+      # unconditionally before this runs, so `pinned` is only still set when nobody pressed anything.
+      if not self.press_suppressed and self.baseline_source != BaselineSource.pinned:
         self.v_baseline = self.v_cruise_cluster
       # The set speed must have actually MOVED before "stable" means anything. Without this the
       # counter reaches its threshold while the cluster is merely slow to report, the stand-down

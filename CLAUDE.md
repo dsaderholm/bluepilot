@@ -563,7 +563,24 @@ hold is a second name for a value he can already see and already controls. With 
 behaves exactly as it does with ICBM off, while curves, leads and the hazard path keep working
 because none of them ever depended on a baseline existing.
 
-**PINNED holds are the exception**, and that is why this is a single call at the end rather than a
+**PINNED holds are the exception, and he confirmed they are the COMMON case where it matters:**
+*"we do still want pinned holds since those are frequently done when SLA doesn't have a number."*
+So the carve-out is the main path on no-limit roads, not an edge case -- which meant it had to be
+protected properly, and it was not at first:
+
+- The inferred fallback rewrote `v_baseline` from the cluster on any set-speed movement, and the
+  press-settle path rewrote it again a few lines later. A pin is EDGE-TRIGGERED and already spent by
+  then, so nothing restored it and nothing on screen said why. **Both write sites now exempt a
+  pinned baseline.** The second one is the one that actually bit, and it was found by tracing every
+  write to `v_baseline` after guarding only the first failed to fix the test.
+- A real BUTTON press still takes the baseline over from a pin -- that path sets the value and the
+  `press` label unconditionally. Overriding a pin by hand is deliberate; drifting off one because
+  the cluster moved is not. With no limit the hand override then correctly leaves no hold at all.
+- A third guard was added to the LABEL write and then REVERTED: it sits nested inside the value
+  guard, so it can never fire. Mutation testing is what showed it -- removing it broke no test. A
+  guard that cannot fire, carrying a comment that calls it load-bearing, is worse than no guard.
+
+That is also why this is a single call at the end rather than a
 guard at the three capture sites: `apply_pinned_hold` runs INSIDE `update_manual_override`, so a
 blanket rule there deletes the whole pinned-holds feature silently. A pin is an explicit gesture at
 an explicit place and is the one hold that still means something with no limit -- so it survives,
