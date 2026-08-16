@@ -1029,6 +1029,43 @@ The trade, stated so it is chosen rather than discovered: in the MAPPED case Blu
 knows the lane count and where the gore point is; we re-derive both from a radar and a camera every
 frame. We give up that ceiling to work on roads nobody surveyed, which is where he drives.
 
+### THE MODEL GETS WHAT HE HAS NO PREFERENCE ABOUT. WRITTEN CODE GETS THE REST.
+
+His, 2026-08-16, and it is the test to apply to any "should this be learned or hand-written" question
+rather than arguing it fresh each time:
+
+  *"Models here are good for things of which I have no preference, like staying in my lane."*
+
+It sorts into three, and the third is the one people miss:
+
+**1. PERCEPTION -- no preference, and the model is genuinely better.** Where the lane lines are, how
+wide the lane is, where the road edge sits, is there a lead. Nobody would hand-write these and this
+fork does not: `_geometry` consumes modelV2 wholesale. Comma's end-to-end direction is right here and
+we free-ride on it.
+
+**2. POLICY -- he has a preference, so it is written code with a param.** Whether to pass at all, how
+much slower a car has to be, keep-right, how fussy to be when not making time, follow gap. These are
+HIS, and the reason a fleet-trained model cannot serve them is not capability -- **a model trained on
+the fleet learns the median driver and averages his preferences away by construction.** That is the
+same objection he has to BlueCruise refusing to move into a faster lane: someone else's policy, baked
+in where he cannot reach it.
+
+**3. CAR FACTS -- nobody has a preference, but the model cannot know them.** The set speed moving 1
+mph on a tap and 5 on a hold. The retrofit PSCM needing the car slowed before it accepts hard
+steering. ICBM existing at all. These are not preferences and not perception; they are properties of
+ONE car, and there is no fleet to learn them from. Written code, and deliberately with NO param --
+they are facts, not choices.
+
+The curve gate is worth noting as both 2 and 3, which is why it is the strongest of the recent gates:
+"I don't want to pass on curves" is a preference, and the PSCM authority limit underneath it is a car
+fact. When those two agree, the number is not a guess.
+
+**What this costs, stated because it is real:** written code only refuses what somebody thought of.
+The center turn lane was not thought of -- the road taught us, twice, and it is still not fully
+solved. A model that had seen ten thousand turn lanes would simply not do it. Enumeration is the
+weakness of category 2, and the answer is to keep MEASURING (geoLeftTravelProven, exitsBy,
+patienceMissed) so the road can keep teaching, rather than to pretend the enumeration is complete.
+
 ## THE SET SPEED HUNT: TAP FOR SMALL CORRECTIONS, HOLD FOR LARGE ONES
 
 Reported 2026-08-12: *"it raised and lowered my cruise over and over... when the speed limit changed
