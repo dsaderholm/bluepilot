@@ -191,6 +191,17 @@ def create_acc_msg_passthrough(packer, CAN: CanBus, stock_values: dict):
   looking clever.
   """
   values = {s: stock_values[s] for s in _ACCDATA_SIGNALS}
+  # ONE FIELD IS OVERRIDDEN, and only because panda will not carry Ford's version of it.
+  #
+  # `AccPrpl_A_Pred` is the PREDICTED acceleration -- a feed-forward hint to the powertrain, not a
+  # command. Panda holds it to [-0.5, 2.0] with a single legal escape at exactly -5.0, and drive A
+  # showed Ford sweeping it through -1.79 -> -1.29 while coasting: 25.2% of engaged frames, and the
+  # second-largest reason a frame could not be forwarded.
+  #
+  # -5.0 is not an invented value. It is what UPSTREAM openpilot hardcodes here, so it is exactly
+  # what this car's PCM sees on every normal op-long frame. Pinning it costs Ford a hint the PCM
+  # already lives without, and buys back nearly ten points of forwarding.
+  values["AccPrpl_A_Pred"] = _PANDA_GAS_INACTIVE
   return packer.make_can_msg("ACCDATA", CAN.main, values)
 
 
@@ -277,7 +288,9 @@ def passthrough_admissible(stock_values: dict, long_active: bool) -> str:
   if not (_PANDA_ACCEL_MIN + _PANDA_MARGIN) <= accel <= (_PANDA_ACCEL_MAX - _PANDA_MARGIN):
     return "AccBrkTot_A_Rq %.3f outside panda's band" % accel
 
-  for name in ("AccPrpl_A_Rq", "AccPrpl_A_Pred"):
+  # AccPrpl_A_Pred is NOT checked here: create_acc_msg_passthrough pins it to the inactive value,
+  # so Ford's number never reaches the wire and cannot make panda drop the frame.
+  for name in ("AccPrpl_A_Rq",):
     gas = float(stock_values.get(name, 0.0))
     if abs(gas - _PANDA_GAS_INACTIVE) < 0.005:
       continue

@@ -77,7 +77,11 @@ def test_every_dbc_signal_is_carried_and_none_is_invented():
   assert set(_ACCDATA_SIGNALS) == _dbc_accdata_signals(), (
     "the forwarded signal list has drifted from the DBC -- a missing one ships as zero")
   assert set(sent) == _dbc_accdata_signals()
-  assert sent == stock, "values must pass through untouched -- the whole point is Ford's own numbers"
+  # Everything except the one advisory field panda will not carry. See create_acc_msg_passthrough.
+  assert sent["AccPrpl_A_Pred"] == -5.0, "the predicted-accel field must be pinned to panda's escape"
+  rest = {k: v for k, v in sent.items() if k != "AccPrpl_A_Pred"}
+  assert rest == {k: v for k, v in stock.items() if k != "AccPrpl_A_Pred"}, (
+    "values must pass through untouched -- the whole point is Ford's own numbers")
 
 
 def test_a_missing_signal_raises_rather_than_shipping_a_zero():
@@ -120,8 +124,10 @@ def test_the_gas_band_is_enforced_and_not_only_the_brake_cap():
   assert not passthrough_admissible(_stock(AccPrpl_A_Rq=-5.0), True), "the inactive value is legal"
 
   assert passthrough_admissible(_stock(AccPrpl_A_Rq=-1.2), True), "a coasting request must be refused"
-  assert passthrough_admissible(_stock(AccPrpl_A_Pred=-1.2), True), "the PREDICTED request is checked too"
   assert passthrough_admissible(_stock(AccPrpl_A_Rq=2.5), True)
+  # AccPrpl_A_Pred is NOT refused -- it is pinned on the way out, so Ford's value never reaches
+  # panda. Drive A: refusing on it cost 9.6% of engaged frames for an advisory field.
+  assert not passthrough_admissible(_stock(AccPrpl_A_Pred=-1.2), True)
 
 
 def test_the_brake_cap_is_enforced_at_pandas_number_not_the_signals():
@@ -161,11 +167,19 @@ def test_the_unpoliced_actuation_bits_are_refused():
     assert passthrough_admissible(_stock(**{name: 1}), True), f"{name} was forwarded unchecked"
 
 
-def test_the_predicted_gas_band_is_what_actually_binds():
-  """The review said the gas band was never measured and was four times narrower than the brake cap.
-  Drive A: `AccPrpl_A_Pred outside panda's band` is the dominant refusal reason in the log, sweeping
-  -1.79 -> -1.29 while coasting. Every one of those frames would have been transmitted and then
-  DROPPED by panda without this check."""
-  for pred in (-1.79, -1.74, -1.69, -1.29):
-    assert passthrough_admissible(_stock(AccPrpl_A_Pred=pred), True), \
-      f"AccPrpl_A_Pred {pred} was admitted; panda would have dropped the whole frame"
+def test_the_predicted_accel_is_pinned_rather_than_costing_the_frame():
+  """The review was right that the gas band was never measured, and drive A showed Ford sweeping
+  `AccPrpl_A_Pred` through -1.79 -> -1.29 while coasting: 25.2% of engaged frames.
+
+  But REFUSING the whole frame over it was the wrong response, and cost 9.6% of engaged frames on
+  its own. It is the PREDICTED accel -- a feed-forward hint, not a command -- and upstream openpilot
+  hardcodes it to exactly -5.0, which is what this car's PCM sees on every normal op-long frame
+  anyway. Pinning it keeps the frame and costs the PCM a hint it already lives without."""
+  packer = _Packer()
+  for pred in (-1.79, -1.74, -1.29):
+    assert not passthrough_admissible(_stock(AccPrpl_A_Pred=pred), True), \
+      f"AccPrpl_A_Pred {pred} cost the whole frame instead of being pinned"
+  create_acc_msg_passthrough(packer, _CAN, _stock(AccPrpl_A_Pred=-1.79, AccBrkTot_A_Rq=-2.1))
+  sent = packer.calls[0][2]
+  assert sent["AccPrpl_A_Pred"] == -5.0
+  assert sent["AccBrkTot_A_Rq"] == -2.1, "pinning one field must not disturb the real command"

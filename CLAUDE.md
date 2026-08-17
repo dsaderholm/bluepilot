@@ -803,7 +803,7 @@ frame that DENIES stock AEB, and forwarding Ford's own deny bit would trip it.
 **Also learned: NO route on the device has ever had op long enabled**, so the camera question below
 cannot be answered from existing data. It needs a drive.
 
-## DRIVE A ANSWERED IT: THE PREMISE IS FALSE. The camera does not keep working with the relay open.
+## DRIVE A: THE CAMERA DOES KEEP WORKING. The first read of the numbers said the opposite and was wrong.
 
 Route 00000383, 2026-08-18, `openpilotLongitudinalControl = True`, `StockAccPassthrough = 1`.
 29,890 camera ACCDATA frames, 29,525 transmitted by us.
@@ -813,10 +813,25 @@ Route 00000383, 2026-08-18, `openpilotLongitudinalControl = True`, `StockAccPass
     we forwarded the camera's frame   4,940         16.7%
     we fell back to our own          24,571         83.3%
 
-**The camera spent most of the drive asking the car to CANCEL.** It was not quietly computing ACC
-in the background. Its loop is open -- it commands and never sees the car respond -- and its state
-machine settles into cancel. "It still has all its inputs" was true about the INPUTS and wrong about
-the CONTROLLER. That is the whole idea, and it does not survive.
+**THAT 70.6% IS THE WRONG DENOMINATOR AND IT PRODUCED THE WRONG CONCLUSION.** It was read as "the
+camera spends the drive asking to cancel, so its loop is open and it knows" -- and the owner pushed
+back rather than accepting it, which was correct. Restricted to frames where openpilot was actually
+ENGAGED:
+
+    ADMISSIBLE -- Ford's own frame passes everything    5,126   71.7%
+    blocked by AccCancl_B_Rq                            1,333   18.6%
+    blocked by AccPrpl_A_Pred band                        685    9.6%
+    blocked by AccPrpl_A_Rq band                           10    0.1%
+    blocked by AccBrkTot cap                                0    0.0%
+
+The 70.6% was dominated by 15,075 frames where NOTHING WAS ENGAGED, and cancel is exactly what the
+camera should say there. `CmbbDeny_B_Actl` was 0.0% across the entire drive -- the camera never
+faulted. With cancel clear its mean `AccBrkTot_A_Rq` was +0.100 and its minimum -2.80: real ACC
+commands. **The camera tracks openpilot's engagement state and keeps computing. The premise holds.**
+
+**The lesson is the denominator.** "70.6% of all frames" and "17.7% of engaged frames" are the same
+data and opposite conclusions, and the first was published as a finding. Restrict to the frames
+where the feature is live BEFORE reading anything into a rate.
 
 Everything the owner reported follows from it:
 
@@ -838,10 +853,22 @@ refusal reason in the log, sweeping -1.79 -> -1.29 while coasting. That is the b
 and panda would have dropped it -- 83% of a 50 Hz message vanishing and reappearing. The drive would
 have been far worse than it was.
 
-**What is left of the idea.** Forwarding is dead. What is not dead is the observation underneath it:
-the camera still computes something, and `ACCDATA_2` (stock AEB) reaches the car untouched either
-way. Any future version has to start from "the camera's loop is open and it knows", not from
-"the camera does not notice".
+**AND THE FIX FOR THE SECOND-LARGEST BLOCKER IS ONE FIELD.** `AccPrpl_A_Pred` is the PREDICTED
+accel -- a feed-forward hint to the powertrain, not a command -- and **upstream openpilot hardcodes
+it to exactly -5.0**, panda's legal escape value, which is therefore what this PCM sees on every
+normal op-long frame. `create_acc_msg_passthrough` now pins it and `passthrough_admissible` no
+longer refuses on it: **71.7% -> 81.3% forwarded, for a hint the car already lives without.**
+
+**What is left to understand: the 18.6% cancel while engaged.** Falling back there is correct --
+forwarding a cancel is actuation, not a degraded command -- but 19% of a drive on openpilot
+longitudinal is not the feature working. Whether that is engagement transients or the camera
+genuinely refusing is the next question, and drive A's log can answer it.
+
+**Do NOT enable this again until that is understood**, because the park-brake path is real: four
+transmitted frames carried `AccBrkPrkEl_B_Rq`. That is now refused along with cancel, deny, stop
+status, brake pulse and auto-resume -- the bits panda does not police at all. **"Panda would allow
+it" was never the same question as "we understand it", and the first version only asked the first
+one.**
 
 **THE UNKNOWN THAT DECIDES IT, and it cannot be settled offline:** while we forward faithfully the
 camera's loop stays closed -- it commands, the car responds, its model stays consistent. During an
