@@ -1405,6 +1405,26 @@ State 1 exists because v1 records NOTHING about what it saw, so the only way to 
 run both and log the new one. `tools/bp_mapd_compare.py` scores one drive; the gate for moving to
 state 2 is its "only v1 had a limit" row being near zero.
 
+**THE GATE IS MET. Route 00000383, 2026-08-18, 494 frames where both had spoken:**
+
+    both agree on a limit    318   64.4%
+    both say no limit        126   25.5%
+    ONLY v1 had a limit        8    1.6%   <- the gate
+    only v2 had a limit       33    6.7%   <- v1 was blind here
+    differ by >1 mph           9    1.8%
+
+And all eight "only v1" frames are ones where v2's `waySelectionType` was **fail** -- v2 was not
+wrong, it said it did not know, and `MapdV2MapData` refuses a limit from a failed match anyway. v2
+published 8,740 frames against v1's 598.
+
+Checked before recommending it, because the way this could hurt is v2 INVENTING a low limit rather
+than missing one. Every "only v2" limit is class-appropriate: 20 residential, 30 tertiary, 45 on a
+motorwayLink, 70 and 65 on motorway, 30/35/40 secondary. And in the disagreements v2 reads HIGHER in
+108 of 121 frames -- v1 was serving 20 mph on a secondary road v2 calls 30. Flipping to state 2 is
+not a slower car.
+
+**So `MapdV2` 1 -> 2 is his to set, and it is now backed by his own drive rather than by the plan.**
+
 **Default 0 is deliberate and it is about somebody else's car.** Others track this branch for ICBM
 alone -- a second map daemon on their device, a fifth of a core and 200 MB, for a migration that is
 ours, is not a cost to hand to them. The binary ships either way; what it costs is opt-in.
