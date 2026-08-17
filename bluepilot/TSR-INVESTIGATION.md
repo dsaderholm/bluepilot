@@ -388,9 +388,32 @@ bus, from `ford_lincoln_base_pt.dbc`:
     APIMGPS_Data_Nav_3_FD1  (0x464)  speed, heading, altitude, HDOP/VDOP, satellites in view
     APIM_Data_FD1           (0x32B)  exterior light menus, distance to stopover, GoT edit times
 
-**No speed limit. No road class. No route geometry.** The navigation database stays inside SYNC; what
-leaves it is a GPS receiver feed plus route trivia. So there is no third speed-limit source here, and
-that question is closed rather than open.
+**No speed limit. No road class. No route geometry** -- ON THIS BUS.
+
+**THAT QUALIFIER WAS MISSING AND THE CONCLUSION DRAWN FROM IT WAS WRONG. Corrected 2026-08-17**, when
+he asked the question that breaks it: *"then how has my IPC shown speed limit before I even got my
+new IPMA?"* It did, so a working path existed, and "there is no third speed-limit source" cannot be
+true as stated.
+
+What the search actually covered was `ford_lincoln_base_pt.dbc`, the POWERTRAIN bus. **His car's
+MS-CAN is not modeled by any DBC in this repo** -- the only body-CAN file here is
+`ford_cgea1_2_bodycan_2011`, a different platform generation, and its single APIM message
+(`Personality_APIM_Data3_MS`) carries no limit either. Absence from the one bus we model is not
+absence from the car, and section 4b is direct evidence against it: the IPMA has a **"TSR data
+source"** setting whose options include **Camera + APIM**, and selecting it changed the camera's
+behavior immediately. A module cannot take TSR data from a source that sends none.
+
+So the honest state: the APIM CAN feed the camera speed limits, over a bus openpilot cannot see.
+
+**AND THAT MAKES FIXING 4b WORTH MORE THAN THIS DOCUMENT HAS BEEN TREATING IT.** The camera FUSES its
+sources and republishes the result in `Traffic_RecognitnData` (0x3CD), which is on bus 2 and which
+this fork already parses. So if "Camera + APIM" can be made to persist, SYNC's map limits reach
+Speed Limit Assist through the camera -- WITHOUT openpilot ever needing to see MS-CAN. That is a
+second speed-limit source for exactly the roads mapd has nothing for, which is the original problem.
+
+It also explains his report cleanly. His car had a working configuration; the Edge camera arrived set
+to Camera Only and will not hold the change. Which of those two is why the display stopped is not
+settled here -- the old camera doing TSR by itself would look the same from the driver's seat.
 
 **But the receiver list is the interesting part: `IPMA_ADAS` is listed on all three GPS messages.**
 The camera is *supposed* to be getting its position from the APIM, and `U0253` is precisely "lost
