@@ -30,10 +30,10 @@ class FakeParams:
     self.vals = dict(vals)
     self.puts: list[tuple[str, object]] = []
 
-  def get(self, k, return_default=False):
+  def get(self, k, return_default=False, block=False):
     return self.vals.get(k)
 
-  def put(self, k, v):
+  def put(self, k, v, block=False):
     self.puts.append((k, v))
 
 
