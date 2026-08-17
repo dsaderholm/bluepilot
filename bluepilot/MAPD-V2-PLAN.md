@@ -300,6 +300,45 @@ US 6.
                             already ahead of it, not because it is weak.
     4. highway=stop      ICBM's, drafted.
 
+#### AND THEN THE WORLDWIDE COUNTS CAME IN AND DEMOTED ITEM 3 BY OUR OWN HAND
+
+Asked by pfeiferj on issue 129 (*"if there is a more common thing that gets more or less the same
+information I'd prefer that"*), measured with `tools/bp_osm_tag_census.py` on 2026-08-17. taginfo,
+planet-wide object counts:
+
+    overtaking             151,095      13.6x bare `change`
+    change:lanes            80,151       7.2x bare `change`
+    change:lanes:forward    52,650
+    change:lanes:backward   51,022
+    change                  11,105
+    median                   9,617
+    divider                  8,862
+    separation:left          7,528
+
+**This needed a different instrument and that is the transferable part.** Every other coverage
+number in this document is Overpass over a corridor he drives, which answers *can my car use this*.
+A maintainer choosing between two tags is asking *is this tag common*, over a planet file, and
+Overpass on US 6 cannot answer it. taginfo can, and the two questions have different answers.
+
+Three findings, in decreasing order of how much they cost us:
+
+- **`overtaking` is the more common key and we told him so, knowing it demotes our own ask.** It is a
+  different question -- crossing into ONCOMING on a two-lane road, versus moving between
+  same-direction lanes -- so it does not substitute for `change`. But if only one is ever built,
+  it is the better value for his users, and the reply says we would drop 129 for it. That is a real
+  concession and it is the right one: `change` is 27/4/0% across three Utah highways, so the ask was
+  marginal for this car anyway, and credibility spends better on `hov:lanes`, which is 100% on I-15
+  and closes a gate that is open today.
+- **`overtaking` is worth nothing to US.** 0% on all three Utah roads, and the maneuver never crosses
+  into oncoming traffic, so the restriction it encodes describes something passing assist does not
+  do. Conceding it costs this car nothing real.
+- **We asked for the wrong spelling.** `change:lanes` is 7.2x bare `change`. The per-lane form is
+  where the data is, and the original issue named the rare one.
+
+**The rule this leaves:** a coverage number and a commonality number are different measurements with
+different tools, and quoting one when asked for the other is how the US 6 figure went out. Before
+arguing that a maintainer should expose a tag, measure it BOTH ways.
+
 ### HE SAID YES, AND TOLD US HIS PATTERN. Both drafts below are shaped to it.
 
 pfeiferj on mapd issue 127, 2026-08-17: *"Yeah, I can work on adding this. I honestly didn't even
