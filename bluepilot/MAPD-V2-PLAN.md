@@ -178,14 +178,36 @@ him no explanation. No em dashes, at the owner's request, so it does not read as
 *"Yes, the HOV lane is something we should never try to lane change into."* 2026-08-17. A decision,
 not a preference to be weighed later.
 
-**Measured at 100% on I-15 in Salt Lake** -- all 400 motorway ways carry both `hov:lanes` and
-`hov:minimum`, alongside `hgv` and `toll:hov`. That is the road he is driving to California, and the
-leftmost lane there is the tolled express lane.
+**THE 100% FIGURE THAT USED TO BE HERE IS WITHDRAWN, 2026-08-17.** It read "all 400 motorway ways on
+I-15 in Salt Lake carry both `hov:lanes` and `hov:minimum`", and the same paragraph went on to
+describe 279 tagged ways, which should have been the tell. Re-measured by `ref="I 15"` along the
+whole corridor rather than one metro box:
 
-**Why it outranks stop signs as a request.** Stop signs cross-check a detector we do not trust;
-`hov:lanes` closes a gate that is currently WIDE OPEN. Passing assist will happily suggest moving
-into the express lane today, because nothing in the system knows it exists. Coverage is 100% where he
-drives, versus a measurement that still needs a road test.
+    I-15 Utah              1269 ways    45%
+    I-15 Arizona/Nevada     500 ways    22%
+    I-15 California         544 ways     0%
+
+**THIRD TIME. Same error, three different tags** -- `change` on US 6, this, and the ACCDATA cancel
+rate before them. A number measured over one narrow window, quoted as a general property. The
+denominator was never stated, so nothing contradicted it.
+
+**AND THE CALIFORNIA ZERO IS THE FINDING, not a gap in the survey.** There the HOV lane is mapped as
+its own separate carriageway: 419 of 501 bare-`hov` ways in the LA basin carry only 1-2 lanes. So on
+the California end of the trip, `hov:lanes` on our matched way says nothing, WHILE A PHYSICALLY
+ADJACENT HOV LANE STILL EXISTS to our left, buffer-separated. Radar and camera see a normal adjacent
+lane. **The gate this ask was supposed to close stays open for exactly the drive it was justified
+by**, and no tag on our own way can close it, because the restriction belongs to a different way.
+
+That is a real design problem for passing assist, not just a coverage note, and it is unsolved. The
+in-carriageway case (Utah 45%, Nevada 22%) is what `hov:lanes` actually buys.
+
+**Why it still outranks stop signs as a request.** Stop signs cross-check a detector we do not trust;
+`hov:lanes` closes a gate that is currently WIDE OPEN wherever it applies. Passing assist will
+happily suggest moving into the express lane today, because nothing in the system knows it exists.
+
+**Worldwide, for the commonality half of the question** (`tools/bp_osm_tag_census.py`, 2026-08-17):
+`hov:lanes` 19,306 objects, `hov:minimum` 11,419, `lanes:hov` 212 and not worth reading. A US and
+Canada tag rather than a common one. FILED as mapd issue 130, with all of the above stated in it.
 
 **FORMAT MEASURED 2026-08-17**, 279 I-15 motorway ways carrying the tag:
 
