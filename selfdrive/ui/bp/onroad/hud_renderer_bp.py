@@ -187,6 +187,9 @@ _BLOCKED_TEXT = {
   # changing lanes. On this car it is also a steering-authority fact: the retrofit PSCM needs the
   # car slowed to accept a hard steering command, so a bend is already asking near its limit.
   'inCurve': "Road is bending too much",
+  # The map's own word for it, not a guess -- OSM calls a ramp a motorwayLink, and nothing on the
+  # car can tell one from a road on its own.
+  'onRamp': "On a ramp",
 }
 
 # BluePilot: sunnypilot's "AHEAD" box hangs off the bottom of the speed-limit sign, in the same

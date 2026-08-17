@@ -113,14 +113,18 @@ def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., lead_y=0.0, status=Tr
             acc_braking=False, acc_precharge=False, acc_propulsion=0.0,
             acc_avail=True, set_speed=None,
             icbm_hold=0.0, icbm_manual=False, lka=False, tracks=(),
-            lead_accel=0.0, lead_radar=True, curvature=0.0):
+            lead_accel=0.0, lead_radar=True, curvature=0.0,
+            # mapd v2. ABSENT BY DEFAULT, because that is the state of every car that has not
+            # opted in and of this one before MapdV2 was set -- so every existing test keeps
+            # asserting the no-map behaviour without being touched.
+            mapd_present=False, mapd_hwy="motorway", mapd_oneway=False, mapd_tile=True):
   # Being stuck behind a car means matching its speed, not still closing on it: vEgo tracks vLead
   # and the gap to the SET speed is what makes passing worth suggesting. Tests that need a genuine
   # approach pass v_ego explicitly.
   if v_ego is None:
     v_ego = v_lead
   v_rel = v_lead - v_ego
-  return FakeSubMaster({
+  sm = FakeSubMaster({
     'carState': NS(vEgo=v_ego, brakePressed=brake, steeringPressed=steering,
                    leftBlinker=blinker, rightBlinker=blinker_right,
                    leftBlindspot=left_bs, rightBlindspot=right_bs,
@@ -153,6 +157,12 @@ def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., lead_y=0.0, status=Tr
     # service entirely to produce.
     'liveTracks': NS(points=list(tracks)),
   })
+  if mapd_present:
+    sm.data['mapdOut'] = NS(highwayClass=mapd_hwy, oneWay=mapd_oneway, tileLoaded=mapd_tile)
+    sm.alive['mapdOut'] = True
+    sm.valid['mapdOut'] = True
+    sm.updated['mapdOut'] = True
+  return sm
 
 
 def track(d_rel, y_rel, v_rel):
@@ -1000,6 +1010,29 @@ class TestLaneAge:
     assert det.suggestion == Side.none, "suggested moving into an unproven lane"
     run(det, int(12.0 / DT_MDL), status=False, **IN_LEFT_LANE)
     assert det.suggestion == Side.right                       # and it comes back once proven
+
+  def test_a_ramp_refuses_the_pass(self):
+    """mapd v2's highwayClass is OSM's own classification: motorwayLink IS a ramp. Nothing on the car
+    can tell one from a road -- the camera sees lane lines and drivable surface either way -- which is
+    why every exit test in this module is reactive and fires only after he has already moved."""
+    det = keep_right_det()
+    run(det, int(4.0 / DT_MDL), v_lead=SLOW_LEAD_MS, mapd_present=True, mapd_hwy="motorwayLink")
+    assert det.blocked_by == Blocked.onRamp
+    assert det.suggestion == Side.none
+
+  def test_no_map_means_no_ramp_gate(self):
+    """Absent map, absent tile, MapdV2 off -- all reach this as not-a-ramp and the feature behaves
+    exactly as it did before mapd v2 existed. No map costs coverage, never safety."""
+    det = keep_right_det()
+    run(det, int(4.0 / DT_MDL), v_lead=SLOW_LEAD_MS, mapd_present=False)
+    assert det.blocked_by != Blocked.onRamp
+    assert det.suggestion == Side.left
+
+  def test_a_motorway_is_not_a_ramp(self):
+    det = keep_right_det()
+    run(det, int(4.0 / DT_MDL), v_lead=SLOW_LEAD_MS, mapd_present=True, mapd_hwy="motorway")
+    assert det.blocked_by != Blocked.onRamp
+    assert det.suggestion == Side.left
 
   def test_a_bend_at_the_threshold_does_not_wobble_the_signal(self):
     """FOUND BY REVIEW 2026-08-17, reproduced before it was fixed.

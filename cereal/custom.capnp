@@ -632,7 +632,12 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       closingIn @14;         # deliberately holding off: still closing, ACC has not had to brake
       leadBraking @15;       # they are braking hard: wait and see before committing to go round
       driverChangedLanes @16; # standing down after the driver's own lane change -- see below
-      inCurve @17;           # the road is bending hard enough that a pass is the wrong place for it
+      inCurve @17;
+      # ON A RAMP. mapd v2's highwayClass says motorwayLink, which is OSM's own word for an on- or
+      # off-ramp rather than anything inferred. Nothing on the car can tell a ramp from a road: the
+      # camera sees lane lines and a drivable surface either way, which is why every exit test in
+      # passing_assist is REACTIVE and fires only after he has already moved.
+      onRamp @18;           # the road is bending hard enough that a pass is the wrong place for it
     }
 
     # BluePilot: the maneuver this WOULD perform, run as a dry run. Nothing actuates; see

@@ -2293,6 +2293,21 @@ class PassingAssistDetector:
     self.lead_ttc = (lead.dRel / closing) if closing > MIN_APPROACH_CLOSING_MS else NO_TTC_S
 
   @staticmethod
+  def _on_a_ramp(sm) -> bool:
+    """Is the way we are matched to an on- or off-ramp? See Blocked.onRamp.
+
+    Same absent-is-False discipline as _divided_carriageway, and the same reason: with no map this
+    has to leave the feature exactly as it was.
+    """
+    try:
+      if not (sm.alive['mapdOut'] and sm.valid['mapdOut']):
+        return False
+      o = sm['mapdOut']
+      return bool(o.tileLoaded) and str(o.highwayClass) == "motorwayLink"
+    except (KeyError, AttributeError, TypeError):
+      return False
+
+  @staticmethod
   def _divided_carriageway(sm) -> bool:
     """Does the map say this carriageway is one-way? See _on_our_carriageway.
 
@@ -2969,6 +2984,22 @@ class PassingAssistDetector:
     #
     # Suggestion only. A crossing already underway is left alone: a car cannot un-change lanes
     # because the road started bending, and abandoning one mid-corner is worse than finishing it.
+    # ON A RAMP, WHICH NOTHING ON THIS CAR CAN OTHERWISE KNOW. mapd v2's highwayClass is OSM's own
+    # classification, not an inference: motorwayLink IS an on- or off-ramp. The camera sees lane
+    # lines and drivable surface on a ramp exactly as it does on a road, which is why every exit
+    # test above is reactive and fires only after he has already moved right.
+    #
+    # A refusal, and the direction the map is allowed to push. Absent map, absent tile, or MapdV2
+    # off all read as not-a-ramp and this gate never fires -- no map costs coverage, never safety.
+    #
+    # Placed with the curve gate because it is the same kind of claim: a fact about the ROAD rather
+    # than about either lane, so naming a side for it would be arbitrary. keep_wanted for the same
+    # reason too -- reached past "a pass is warranted", so it is the flicker case, and a ramp's
+    # highwayClass flickers at every way transition.
+    if self._on_a_ramp(sm):
+      self._reset_outputs(Blocked.onRamp, keep_wanted=True)
+      return
+
     if self.max_pass_lat_acc > 0.0 and self.lat_acc > self.max_pass_lat_acc:
       # keep_wanted, for the same reason the blindspot branch below carries it. This gate is reached
       # PAST "a pass is warranted", so it is the flicker case, not the no-pass-warranted case --
