@@ -77,6 +77,93 @@ def spread(segs, cap):
   return [segs[int(i * step)] for i in range(cap)], len(segs)
 
 
+class Score:
+  """The episode walk, kept out of main() so it can be exercised without a route.
+
+  This tool runs ONCE, on data that does not exist until he drives, and its verdict decides whether
+  route prediction gets built at all. A miscount here is not a wrong number on a screen -- it is a
+  wasted drive and a decision made on it. So the logic lives here and `feed_segment` is fed synthetic
+  frames by the tests.
+  """
+
+  def __init__(self):
+    self.hits = self.misses = self.unresolved = self.spanning = 0
+    self.ramp_hits = self.ramp_misses = 0
+    self.lead_times = []
+    self.ramp_leads = []
+    self.sel_counts = Counter()
+    self.blinker_at_resolve = Counter()
+    self.mapd_frames = 0
+
+  def feed_segment(self, messages):
+    """One segment's messages, in order.
+
+    PER SEGMENT, DELIBERATELY. Sampled segments are not contiguous and every segment replays the
+    boot-time header messages, so absolute time across them is meaningless -- see the "every t+NNNN
+    is inflated" section of CLAUDE.md. Within one segment logMonoTime is monotonic, so an episode
+    that starts and resolves inside it can be timed exactly. Episodes crossing a boundary are
+    COUNTED AND DROPPED rather than guessed at.
+    """
+    open_pred = None          # (wayId, monotime) of the guess currently outstanding
+    blinker = None
+    speed = 0.0
+
+    for m in messages:
+      w = m.which()
+      if w == "carState":
+        speed = float(m.carState.vEgo)
+        blinker = ("left" if m.carState.leftBlinker else
+                   "right" if m.carState.rightBlinker else None)
+        continue
+      if w != "mapdOut":
+        continue
+
+      self.mapd_frames += 1
+      o = m.mapdOut
+      sel = str(o.waySelectionType)
+      self.sel_counts[sel] += 1
+      if speed < MIN_SPEED_MS:
+        open_pred = None
+        continue
+
+      if sel == "predicted":
+        # Only the FIRST frame of a run opens an episode; a guess held for two seconds is one guess.
+        # A CHANGED wayId is a NEW guess -- mapd changed its mind, and timing the second one from
+        # the first would credit it with lead time it never had.
+        if open_pred is None or open_pred[0] != int(o.wayId):
+          open_pred = (int(o.wayId), int(m.logMonoTime))
+        continue
+
+      if open_pred is None:
+        continue
+
+      if sel == "current":
+        pred_way, t0 = open_pred
+        lead = (int(m.logMonoTime) - t0) / 1e9
+        correct = int(o.wayId) == pred_way
+        # Resolution onto a RAMP is the population a passing gate would run on.
+        on_ramp = str(o.highwayClass) == "motorwayLink"
+        if correct:
+          self.hits += 1
+          if on_ramp:
+            self.ramp_hits += 1
+            self.ramp_leads.append(lead)
+        else:
+          self.misses += 1
+          if on_ramp:
+            self.ramp_misses += 1
+        self.lead_times.append(lead)
+        if on_ramp:
+          self.blinker_at_resolve[blinker or "none"] += 1
+        open_pred = None
+      elif sel == "fail":
+        self.unresolved += 1
+        open_pred = None
+
+    if open_pred is not None:
+      self.spanning += 1
+
+
 def main():
   ap = argparse.ArgumentParser()
   ap.add_argument("--route", default=None, help="route id; default is the newest on the device")
@@ -92,80 +179,16 @@ def main():
   if len(segs) < total:
     print(f"# sampling {len(segs)} of {total} segments, spread evenly across the route")
 
-  hits = misses = unresolved = spanning = 0
-  lead_times = []
-  ramp_hits = ramp_misses = 0
-  ramp_leads = []
-  sel_counts = Counter()
-  blinker_at_resolve = Counter()
-  mapd_frames = 0
-
+  sc = Score()
   for seg in segs:
     f = os.path.join(seg, "rlog.zst")
-    if not os.path.exists(f):
-      continue
+    if os.path.exists(f):
+      sc.feed_segment(LogReader(f))
 
-    # PER SEGMENT, DELIBERATELY. Sampled segments are not contiguous and every segment replays the
-    # boot-time header messages, so absolute time across them is meaningless -- see the "every t+NNNN
-    # is inflated" section of CLAUDE.md. Within one segment logMonoTime is monotonic, so an episode
-    # that starts and resolves inside it can be timed exactly. Episodes crossing a boundary are
-    # COUNTED AND DROPPED rather than guessed at.
-    open_pred = None          # (wayId, monotime) of the guess currently outstanding
-    blinker = None
-    speed = 0.0
-
-    for m in LogReader(f):
-      w = m.which()
-      if w == "carState":
-        speed = float(m.carState.vEgo)
-        blinker = ("left" if m.carState.leftBlinker else
-                   "right" if m.carState.rightBlinker else None)
-        continue
-      if w != "mapdOut":
-        continue
-
-      mapd_frames += 1
-      o = m.mapdOut
-      sel = str(o.waySelectionType)
-      sel_counts[sel] += 1
-      if speed < MIN_SPEED_MS:
-        open_pred = None
-        continue
-
-      if sel == "predicted":
-        # Only the FIRST frame of a run opens an episode; a guess held for two seconds is one guess.
-        if open_pred is None or open_pred[0] != int(o.wayId):
-          open_pred = (int(o.wayId), int(m.logMonoTime), str(o.highwayClass))
-        continue
-
-      if open_pred is None:
-        continue
-
-      if sel == "current":
-        pred_way, t0, _ = open_pred
-        lead = (int(m.logMonoTime) - t0) / 1e9
-        correct = int(o.wayId) == pred_way
-        # Resolution onto a RAMP is the population a passing gate would run on.
-        on_ramp = str(o.highwayClass) == "motorwayLink"
-        if correct:
-          hits += 1
-          if on_ramp:
-            ramp_hits += 1
-            ramp_leads.append(lead)
-        else:
-          misses += 1
-          if on_ramp:
-            ramp_misses += 1
-        lead_times.append(lead)
-        if on_ramp:
-          blinker_at_resolve[blinker or "none"] += 1
-        open_pred = None
-      elif sel == "fail":
-        unresolved += 1
-        open_pred = None
-
-    if open_pred is not None:
-      spanning += 1
+  hits, misses, unresolved, spanning = sc.hits, sc.misses, sc.unresolved, sc.spanning
+  lead_times, ramp_leads = sc.lead_times, sc.ramp_leads
+  ramp_hits, ramp_misses = sc.ramp_hits, sc.ramp_misses
+  sel_counts, blinker_at_resolve, mapd_frames = sc.sel_counts, sc.blinker_at_resolve, sc.mapd_frames
 
   if not mapd_frames:
     print("NO mapdOut IN THIS ROUTE AT ALL.")
