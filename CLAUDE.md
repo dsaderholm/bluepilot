@@ -1753,6 +1753,25 @@ therefore keeps its full following distance through the crossing, and the first 
 pass is slower than the same pass made by hand. That is the cost, it is fixed, and the only lever
 left is the follow gap itself.
 
+**EXCEPT THAT "THE CAMERA DOES NOT SEE IT AS A STALK" WAS NEVER MEASURED** -- caught 2026-08-17. The
+measurement is named twenty lines above, as a thing to do, and no result was ever recorded. The
+paragraph that reads like the closing argument rules out the stalk-contact TAP, which is a hardware
+decision, not evidence about the camera. A conservative assumption hardened into a stated fact, and
+it is the premise for "the only lever left is the follow gap".
+
+The mechanism makes it genuinely open: we send the same field the stalk sends, and the lamps prove
+the BCM accepts our frames -- but the DBC lists `IPMA_ADAS,PSCM` as the other receivers of
+`TurnLghtSwtch_D_Stat`, and they see the SAME alternation with the gateway. Whether that reads as
+"signalling" is a debounce question, not a signal-authenticity one.
+
+And it is answerable from logs, not a drive: `ford/carstate.py:232` reads the blinker back off bus 0
+through a parser that updates on every frame, ours and the gateway's. **Compare the duty cycle of
+`carState.leftBlinker` during a COMMANDED blink against a stalk blink.** Near 100% kills most of the
+hypothesis; near 50% quantifies exactly what a fix would have to beat.
+
+Full write-up, including the two gap-controller contract changes: `bluepilot/BLINKER-ACC-SUPPRESSION.md`.
+Either way it stays a supplement -- 2.14 -> 2.00 s is 4 m, and he has already said that is not enough.
+
 **Which is why the gap button matters more than it looked.** It is the one remaining way to buy room
 before a pass on this car, and it is closed loop -- see below.
 
