@@ -106,5 +106,5 @@ tools/jotpluggler/layouts/Path_Angle_Analysis.json
 # selfdrive/ui/bp/onroad/tools/, written into the repo root when they run. They were committed
 # once by a `git add -A` and blocked the push, because *.png is an LFS-tracked pattern here.
 acc_status_*.png
-hold_badge_*.png
+mici_hold_*.png
 passing_panel_*.png
