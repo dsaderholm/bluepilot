@@ -375,7 +375,45 @@ gateway by another name.
 **A documented remedy exists for exactly this:** load an as-built from a car that has the options you
 want. That is the donor request, aimed at the right module this time.
 
+## 6d. THE APIM'S OWN TRAFFIC, FROM THE DBC — AND A U0253 TEST NOBODY HAS RUN
+
+Raised 2026-08-16, from his question about whether SYNC's maps could be a second speed-limit source:
+*"If we could somehow use the SYNC maps for speed limits or something else if it's worth it."*
+
+**They cannot, and the DBC settles it without touching the car.** Everything the APIM puts on the
+bus, from `ford_lincoln_base_pt.dbc`:
+
+    APIMGPS_Data_Nav_1_FD1  (0x462)  latitude, longitude, hemispheres
+    APIMGPS_Data_Nav_2_FD1  (0x463)  UTC date/time, PDOP, compass direction, GPS fault bit
+    APIMGPS_Data_Nav_3_FD1  (0x464)  speed, heading, altitude, HDOP/VDOP, satellites in view
+    APIM_Data_FD1           (0x32B)  exterior light menus, distance to stopover, GoT edit times
+
+**No speed limit. No road class. No route geometry.** The navigation database stays inside SYNC; what
+leaves it is a GPS receiver feed plus route trivia. So there is no third speed-limit source here, and
+that question is closed rather than open.
+
+**But the receiver list is the interesting part: `IPMA_ADAS` is listed on all three GPS messages.**
+The camera is *supposed* to be getting its position from the APIM, and `U0253` is precisely "lost
+communication with the APIM". So:
+
+**UNTESTED, AND IT IS A DIRECT U0253 MEASUREMENT:** are addresses 1122/1123/1124 actually present on
+a bus openpilot can see? If they are ABSENT, the camera is not hearing the APIM because nothing is
+transmitting — a wiring or routing fault, and the DTC is literal. If they are PRESENT on bus 0 or 2,
+the frames exist and the camera is rejecting or not receiving them for some other reason, which
+points somewhere entirely different. Either answer narrows the search, and it costs one route read.
+
+The probe was written on 2026-08-16 and not run -- the device went to sleep first. It counts frames
+by address and bus over one segment, including `Traffic_RecognitnData` (973) for scale, since that
+one is known to be present and forwarded. Rebuild it or write it again; it is a dozen lines against
+`LogReader`, reading `can` and bucketing `(address, src)`.
+
+Note this needs no as-built write, no GWM change and no FORScan -- it is reading frames off a bus we
+already parse.
+
 ## 7. Next steps, in order
+
+0. **Run the APIM bus probe above.** Free, read-only, one route, and it is the only outstanding test
+   that could move `U0253` from "recurring, cause unknown" to a specific fault.
 
 1. **Ask the friend for two lines** — free, and decides whether anything else is worth doing:
    - his `706-01-01` (is his 3rd character a `5`?)
