@@ -686,6 +686,40 @@ others for the same hole.**
 rule initially failed only ONE of the two tests, because the existing baseline-equals-target rule was
 clearing the hold in the other. Green was not evidence; breaking the code on purpose was.
 
+## ICBM CANNOT STOP THE CAR, AND FAKING A LEAD IS NOT THE WAY ROUND IT
+
+Asked 2026-08-17: *"Can we not fake a lead vehicle to have Ford ACC come to a complete stop?"* The
+motivation is correct -- **`get_minimum_set_speed()` returns 20 mph** (30 kph), which is FORD's floor,
+not ours. Every ICBM feature commands through the set speed, so the model-stop path can walk the car
+down toward 20 and no further. Stock ACC comes to a full stop only when its OWN radar sees a lead.
+
+**But the answer is no, four times over, and any one of them is fatal:**
+
+1. **Panda's TX allowlist has no radar message at all.** `FORD_COMMON_TX_MSGS` is
+   `Steering_Data_FD1` (buses 0 and 2), `ACCDATA_3`, `Lane_Assist_Data1`, `IPMA_Data`; the LONG
+   variants add `ACCDATA` and `LateralMotionControl`. Nothing on bus 1, nothing radar.
+2. **We are not in line with the radar.** The relay is on the CAMERA. Bus 1 can be read but its real
+   frames cannot be removed, so injecting means two transmitters for the same IDs -- a conflict, not
+   an override. Bus 1 is also already 60-73% loaded.
+3. **A convincing stopped target is the exact input to AEB.** The camera fuses radar for FCW and
+   emergency braking (`Cmbb_B_Enbl`, `FcwVisblWarn_B_Rq`, `FcwAudioWarn_B_Rq`, all in `ACCDATA_3`
+   which the camera authors). Aiming for a smooth stop with no control over the transfer function
+   from target to brake force, the plausible failure is a panic stop.
+4. **The direct path already exists and is better.** `FORD_ACCDATA` IS the brake command --
+   `AccBrkTot_A_Rq`, `AccBrkDecel_B_Rq`, `AccStopStat_B_Rq` -- and it is already in the TX list.
+   Faking a target to persuade the camera to compute the braking we want is a worse version of
+   sending the braking command ourselves.
+
+**And 4 is the real conclusion: `ACCDATA` is LONG-only and carries `check_relay = true`**, so panda
+verifies the camera's ACCDATA is relayed OUT before ours is let in. Openpilot longitudinal control is
+therefore ALL-OR-NOTHING by construction. There is no arrangement where the camera keeps computing
+ACC and we send ACCDATA for just the last few mph of a stop; the two cannot coexist on the bus.
+
+**So: a commanded full stop requires op long, which he has tried and rejected. There is no side
+door.** Do not propose a fake lead, a fake target, or a partial ACCDATA takeover -- and note the
+naming rule reads the same way, since a stop that only exists under ICBM is scaffolding for a
+problem op long does not have.
+
 ## Params, defaults, and his settings
 
 **Settings behave EXACTLY as they do on stock BluePilot, sunnypilot and openpilot.** Decided
