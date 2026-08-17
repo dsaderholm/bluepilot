@@ -201,6 +201,48 @@ comma was with it.
   The consequence for THIS branch: there is no upstream, at either comma or sunnypilot, whose arrival
   would make this work redundant. Nothing to wait for in either direction.
 
+### ROUTE INTENT -- "AM I TAKING THIS EXIT" -- AND WHY WAZE CANNOT SUPPLY IT
+
+Raised 2026-08-17. He misses Waze putting turn-by-turn on his IPC, and the reason he wants it back
+is the right one: *"so OpenPilot could know more about where I'm going, like if I am going to take an
+exit or not."*
+
+**IT WOULD NOT HELP, AND THE REASON IS PLUMBING RATHER THAN POLICY.** Android Auto navigation
+metadata travels phone -> AA -> SYNC -> cluster. On Ford that last hop is MS-CAN, which the panda is
+not wired to on this car. openpilot sees bus 0 and bus 2 and would never see a byte of it, however
+well Waze implemented it. Restoring it gets his cluster back, which is worth wanting on its own --
+it just buys this fork nothing, so do not weigh it as a feature dependency.
+
+And what it carries is thinner than it sounds: `NavigationManager.updateTrip` publishes a MANEUVER, a
+distance and a destination name. A turn arrow, not road geometry. mapd's path already gives the
+curvature ahead, which is strictly more than "right turn in 500 m".
+
+**BUT THE UNDERLYING QUESTION IS REAL AND IT IS THE EXIT PROBLEM'S MISSING HALF.** That section
+measures the deficit as DETECTION TIME -- the map asked 4 s before peak cornering against a ~8 s
+budget at 3.3 mph/s. Part of that is availability, which `mapdExtendedOut.path` may already fix by
+carrying the profile ahead instead of a single step. The other part is AMBIGUITY: at a fork, the map
+does not know whether the ramp or the mainline is his road, and committing to the ramp's corner speed
+early is only safe if he is actually taking it.
+
+**Three sources of intent, ranked by what they cost:**
+
+1. **`waySelectionType` already guesses** -- `predicted` is mapd doing exactly this, and it is on the
+   wire and logged at 20 Hz today. **Nobody has looked at how good it is.** That is measurable from
+   the observe drives he is already collecting, and it comes before building anything: if mapd's
+   prediction is right most of the time at the forks he actually drives, the problem is much smaller
+   than it looks.
+2. **His own history.** He drives the same roads daily, and this fork already has the machinery --
+   `IcbmHoldObservations` learns "he sets 45 here" from repeated sightings and offers a pin. The same
+   shape learns "at this fork he takes the ramp." No phone, no Waze, no MS-CAN, no destination to
+   enter, and it degrades to nothing on a road he has not driven.
+3. **The turn signal** is genuine intent and openpilot already sees it -- but it arrives at the gore
+   point, seconds after the decision needed to be made. Useful for CONFIRMING a prediction, useless
+   for making one.
+
+**Order: measure 1 before building 2.** Under the map-is-evidence rule a route prediction MAY REFUSE
+freely and must never be the sole thing that opens -- and slowing earlier for a ramp he is not taking
+is a comfort cost, not a safety one, which is the mild direction to be wrong in.
+
 **NOO NEVER PUT MAP DATA IN THE PLANNER.** It rendered the map to an IMAGE, compressed it, and fed
 that to the driving model, which predicted where a human would drive to follow the route. So there is
 no `lanes`, no `oneWay`, no `highwayClass` published anywhere a gate could read -- it is pixels into a
