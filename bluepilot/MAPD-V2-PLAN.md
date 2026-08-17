@@ -528,3 +528,22 @@ Still unmeasured, and it needs v2 actually running:
 Take the DATA first and migrate the CONSUMERS later, one at a time, each behind its own toggle. The
 first consumer is not SLA or SCC: it is a diagnostic, because for the first time the map's own
 account of a drive lands in the route.
+
+### WHAT TO ASK THE FIRST OBSERVE DRIVE, IN ORDER
+
+Observe mode went live 2026-08-16. Once a drive with `mapdOut` in it exists, run
+`tools/bp_mapd_compare.py` and answer these three, in order:
+
+1. **Is "only v1 had a limit" near zero?** That is the gate for state 2. Note the tool scores only
+   frames above 5 mph, because v1 serves the PREVIOUS drive's limit out of `/dev/shm/params` while
+   stationary and it reads exactly like a live one.
+2. **DOES mapd PUBLISH A NON-ZERO `speedLimit` ON FRAMES WHERE `waySelectionType` IS `fail`?** This is
+   the one review finding left deliberately open: it cannot be settled offline, and guessing at a
+   gate would be inventing behavior. `MapdV2MapData` passes `speedLimit` straight through today
+   without consulting the confidence field. If mapd zeroes the limit when its matcher fails, nothing
+   needs doing. **If it does not, the reader needs a gate before state 2** -- otherwise a guessed
+   limit reaches Speed Limit Assist labelled exactly like a matched one, which is the opposite of
+   what this migration is for.
+3. **What do the `only v2` rows look like?** Those are places v1 was blind. The measured US 40/189
+   case -- tile holds 65 mph, SLA showed nothing -- should appear among them; if it does not, the
+   residual defect is somewhere other than v1's way-matching and the 1.7% figure needs re-deriving.
