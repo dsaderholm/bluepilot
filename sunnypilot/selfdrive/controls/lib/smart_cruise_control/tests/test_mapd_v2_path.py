@@ -82,8 +82,21 @@ def test_points_with_no_target_velocity_are_dropped():
   assert targets[0]["velocity"] == pytest.approx(17.9)
 
 
-def test_none_when_every_point_lacks_a_velocity():
-  assert path_from_mapd(FakeSM(points=[(40.76, -111.90, 0.0)])) is None
+def test_a_straight_road_with_no_velocities_is_an_ANSWER_not_a_fallback():
+  """Measured on route 00000383: of 46 frames where no point carried a velocity, all 46 had no
+  curvature either. That is "no corners ahead", and returning None sent SCC-Map to v1 for a question
+  v2 had already answered -- 8 of the 9 percentage points of fallback on that drive."""
+  position, targets = path_from_mapd(FakeSM(points=[(40.76, -111.90, 0.0), (40.77, -111.91, 0.0)]))
+  assert targets == []
+  assert position.latitude == pytest.approx(40.75)
+
+
+def test_but_curvature_with_no_velocity_DOES_fall_back():
+  """mapd derives velocity from curvature alone, so a bend with no velocity means it could not
+  compute rather than that there was nothing to compute. That is worth v1. It happened zero times
+  on the measured drive, and this stays because zero is a measurement, not a guarantee."""
+  sm = FakeSM(points=[(40.76, -111.90, 0.0, 0.01)])   # 100 m radius, no velocity
+  assert path_from_mapd(sm) is None
 
 
 def test_the_controller_actually_walks_the_v2_path():

@@ -1544,6 +1544,40 @@ SCC-Map also FALLS BACK to v1 when v2 is selected but silent, which is the oppos
 reader does. Deliberate: there a quiet fallback hides a broken install behind plausible speed limits,
 here v1 is still the shipped curve source and the failure being avoided is not slowing for a corner.
 
+### REMOVING v1: THE ONLY THING HOLDING IT IN IS SCC-MAP'S FALLBACK, AND THAT IS A NUMBER
+
+Checked 2026-08-18, because "then we should probably remove v1 to save RAM and CPU" needs a list
+rather than a guess. The list is one item long:
+
+- **Speed Limit Assist and the road-name HUD are ALREADY on v2 at state 2.** `RoadNameRenderer`
+  reads `liveMapDataSP.roadName`, which `base_map_data` fills from `get_current_road_name()`, which
+  `MapdV2MapData` overrides to `mapdOut.roadName`. The `/dev/shm` `RoadName` reader is
+  `osm_map_data.py` -- v1's own, correctly.
+- **`LastGPSPosition` is written by `MapdV2MapData` itself**, deliberately, so it is not a v1
+  dependency either.
+- **`SmartCruiseControlMap` re-reads `MapTargetVelocities` whenever the v2 path is None.** That is
+  the whole of it.
+
+**And `mapd_ready()` never looks at `MapdV2` at all** -- it returns True whenever the map root
+exists -- so v1 runs in every state including 2. Its measured cost is ~22% of a core and 204 MB.
+
+**How often the fallback actually fires, from drive A: 9.0% of moving frames, 5 runs, longest 38 s.**
+Which was too high, and 8 of those 9 points were a bug in our own reader rather than a gap in v2:
+
+    frames where NO path point carried a targetVelocity   46
+       ...and the path had curvature (mapd could not compute)    0
+       ...and the path was straight (nothing to compute)        46
+
+`path_from_mapd` returned None for all 46, against its own docstring saying an empty list is "a real
+answer meaning no corners ahead". So SCC-Map consulted a second, older map for a question v2 had
+already answered. Fixed: a straight path with no velocities returns an EMPTY target list, and only
+curvature-present-with-no-velocity still falls back -- which happened zero times, and stays because
+zero is a measurement rather than a guarantee.
+
+**So the remaining fallback is the "empty path" case alone, and the next state-2 drive measures
+whether v1 can go.** Do not remove it before that drive: the fallback is silent, and a v2 that goes
+quiet without it costs curve slowing outright.
+
 **What is left, in order:** the curvature profile itself -- plan a descent against the ~3.3 mph/s the
 buttons actually deliver instead of reacting to a step, which is the exit-ramp problem, together with
 whatever the defenses become. Then passing assist consuming lanes / highwayClass / oneWay /
