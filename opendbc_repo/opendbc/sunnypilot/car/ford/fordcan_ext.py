@@ -156,6 +156,101 @@ def create_acc_msg(packer, CAN: CanBus, long_active: bool, gas: float, accel: fl
   return packer.make_can_msg("ACCDATA", CAN.main, values)
 
 
+# FusionPilot: every signal the DBC defines for ACCDATA (0x186). Listed rather than derived so a
+# missing one is a NameError here instead of a silently zeroed field on the wire.
+_ACCDATA_SIGNALS = (
+  "AccBrkPulse_B_Rq", "AccAutoResum_D_Rq", "AccBrkTot_A_Rq", "AccPrpl_A_Pred", "AccVeh_V_Trg",
+  "AccBrkPrkEl_B_Rq", "Cmbb_B_Enbl", "CmbbOvrrd_B_RqDrv", "CmbbDeny_B_Actl", "CmbbEngTqMn_B_Rq",
+  "AccPrpl_A_Rq", "AccDeny_B_Rq", "AccResumEnbl_B_Rq", "AccCancl_B_Rq", "AccBrkPrchg_B_Rq",
+  "AccBrkDecel_B_Rq", "AccStopStat_B_Rq",
+)
+
+
+def create_acc_msg_passthrough(packer, CAN: CanBus, stock_values: dict):
+  """FusionPilot: re-send the CAMERA's own ACC command, unchanged.
+
+  Under openpilot longitudinal control the relay is open, so the camera's ACCDATA never reaches the
+  car -- panda blocks it, by design, because openpilot is meant to author it instead. But the camera
+  is still fed everything it needs (bus 0 is forwarded to bus 2) and is still computing and
+  publishing ACC on the camera bus. So we can put Ford's OWN numbers back on the wire.
+
+  **That is the whole point: this does not try to match Ford ACC, it forwards Ford ACC.** The owner's
+  position, and the reason this exists at all: *"I trust how Ford ACC works."* Everything openpilot
+  would have to get right about longitudinal tuning is skipped, because the tuning is Ford's.
+
+  WHY A REPACK IS FAITHFUL HERE, measured rather than hoped:
+
+    - ACCDATA carries NO COUNTER AND NO CHECKSUM. Nothing has to stay in sync, and handing control
+      back after an override needs no resynchronization. That is normally what makes this class of
+      idea impossible.
+    - The DBC leaves EIGHT BITS unmapped (5, 18-23, 35), which a repack would zero. Checked across
+      108,388 real ACCDATA frames on this car: all eight are zero in every one. So the repacked
+      frame is byte-identical in practice.
+
+  The second one is a MEASUREMENT, not a guarantee. If Ford ever sets one of those bits this drops
+  it silently. They are undocumented reserved bits on a message with no integrity fields, so the
+  risk is accepted -- but it is the reason this function lists signals explicitly rather than
+  looking clever.
+  """
+  values = {s: stock_values[s] for s in _ACCDATA_SIGNALS}
+  return packer.make_can_msg("ACCDATA", CAN.main, values)
+
+
+# FusionPilot: panda's ACCDATA bands, from opendbc/safety/modes/ford.h's FORD_LONG_LIMITS, in the
+# engineering units the DBC scales to. THE BRAKE CAP IS NOT THE TIGHT ONE -- that was the review's
+# correction. The gas band is [-0.5, 2.0] with a single legal escape value of exactly -5.0, and it
+# is checked against BOTH AccPrpl_A_Rq and AccPrpl_A_Pred.
+_PANDA_ACCEL_MIN = -3.4991
+_PANDA_ACCEL_MAX = 1.9999
+_PANDA_GAS_MIN = -0.5
+_PANDA_GAS_MAX = 2.0
+_PANDA_GAS_INACTIVE = -5.0
+# Scaled-signal quantization: AccBrkTot_A_Rq is 0.0039 m/s^2 per bit, AccPrpl_* is 0.01. Stay a bit
+# inside the band so a value that is legal on the wire is not rejected here by a rounding step.
+_PANDA_MARGIN = 0.02
+
+
+def passthrough_admissible(stock_values: dict, long_active: bool) -> str:
+  """FusionPilot: would panda actually let this camera frame through? "" if yes, else the reason.
+
+  THIS IS THE FIX FOR THE THING THAT MAKES THIS FEATURE FAIL WORST. `ford_tx_hook` does not clamp a
+  bad value -- it drops the WHOLE MESSAGE. So a forwarded frame panda dislikes does not produce a
+  slightly-wrong command, it produces a 50 Hz message that simply stops for as long as Ford holds
+  that value, and then resumes. Intermittent absence is a far worse failure than either extreme.
+
+  Three ways the camera's own frame is inadmissible, all read straight out of ford.h:
+
+    - `CmbbDeny_B_Actl` set. `violation |= cmbb_deny` is unconditional there. This is not
+      hypothetical on this car: ford/carstate.py already maps that same bit to `ret.accFaulted`.
+    - Any of the three scaled requests outside its band. The brake cap (-3.4991) was measured across
+      189,418 frames and never bound; the GAS band was never measured at all, and it is four times
+      narrower and sits exactly where a coasting or engine-braking Ford lives.
+    - openpilot longitudinal not active. `get_longitudinal_allowed()` is false, and then the only
+      frame panda passes is the inactive one -- so every real Ford command is dropped.
+
+  Returning a REASON rather than a bool is deliberate: whether these ever fire on his roads is the
+  open question this feature turns on, and the answer has to end up in the log rather than only in
+  a branch taken.
+  """
+  if not long_active:
+    return "openpilot longitudinal inactive"
+  if stock_values.get("CmbbDeny_B_Actl"):
+    return "camera set CmbbDeny_B_Actl"
+
+  accel = float(stock_values.get("AccBrkTot_A_Rq", 0.0))
+  if not (_PANDA_ACCEL_MIN + _PANDA_MARGIN) <= accel <= (_PANDA_ACCEL_MAX - _PANDA_MARGIN):
+    return "AccBrkTot_A_Rq %.3f outside panda's band" % accel
+
+  for name in ("AccPrpl_A_Rq", "AccPrpl_A_Pred"):
+    gas = float(stock_values.get(name, 0.0))
+    if abs(gas - _PANDA_GAS_INACTIVE) < 0.005:
+      continue
+    if not (_PANDA_GAS_MIN + _PANDA_MARGIN) <= gas <= (_PANDA_GAS_MAX - _PANDA_MARGIN):
+      return "%s %.3f outside panda's band" % (name, gas)
+
+  return ""
+
+
 def create_acc_ui_msg(packer, CAN: CanBus, CP, main_on: bool, enabled: bool, fcw_alert: bool,
                       standstill: bool, hud_control, stock_values: dict, send_hands_free_msg: bool,
                       send_ui: bool, send_bars: bool, tja_warn: int, tja_msg: int):

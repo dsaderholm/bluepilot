@@ -63,7 +63,8 @@ class IntelligentCruiseButtonManagementInterface(IntelligentCruiseButtonManageme
     self.frame = frame
     self.last_button_frame = last_button_frame
 
-    if self.ICBM.sendButton != SendButtonState.none:
+    preempted = self.ICBM.sendButton != SendButtonState.none
+    if preempted:
       button_signal = BUTTON_SIGNALS[self.ICBM.sendButton]
 
       # Ford sends button messages at 10Hz (every 0.1s), but we send at 20Hz (every 0.05s) per CarControllerParams.BUTTONS_STEP
@@ -78,16 +79,17 @@ class IntelligentCruiseButtonManagementInterface(IntelligentCruiseButtonManageme
 
     # BluePilot: ACC follow-gap, second in line behind the set speed.
     #
-    # The state machine is not advanced at all on a frame where a set-speed press is outstanding,
-    # rather than advanced-and-suppressed. A gap press is a shaped pulse -- 0.1 s on, 0.4 s off,
-    # then a confirm window -- and dropping frames out of the middle of it would put a truncated
-    # press on the wire that the camera may or may not read. Pausing keeps the shape intact; the
-    # only cost is that a gap change waits out ICBM's speed hunting.
-    #
     # The ordering is not arbitrary. The set speed is how ICBM slows the car for curves and leads,
     # and nothing about a follow distance may ever delay that.
-    else:
-      gap_signal = self._update_gap(CS)
+    #
+    # But the machine is TOLD it has been preempted rather than simply not being called. An earlier
+    # version skipped the call entirely, on the theory that pausing kept the press shape intact. It
+    # does the opposite: nothing holds the bit asserted while we stand down, the SCCM's own frames
+    # keep arriving at the camera with the gap bits clear, and the resumed remainder lands as a
+    # SECOND press -- two toggle steps for one intended, or a delta of 2 that the probe reads as
+    # "incDec works" and latches for the drive. So a preempted press is abandoned and retried whole.
+    gap_signal = self._update_gap(CS, preempted)
+    if not preempted:
       if gap_signal is not None and (self.frame - self.last_button_frame) * DT_CTRL > 0.05:
         can_sends.append(fordcan_ext.create_button_msg(packer, CAN.camera, CS.buttons_stock_values,
                                                        icbm_button=gap_signal))
@@ -97,7 +99,7 @@ class IntelligentCruiseButtonManagementInterface(IntelligentCruiseButtonManageme
 
     return can_sends, self.last_button_frame
 
-  def _update_gap(self, CS) -> str | None:
+  def _update_gap(self, CS, preempted: bool = False) -> str | None:
     """Read the camera's reported gap, feed the lease, and return the signal to press.
 
     Every failure to read returns 0, which the controller treats as "not readable" and refuses to
@@ -124,7 +126,7 @@ class IntelligentCruiseButtonManagementInterface(IntelligentCruiseButtonManageme
 
       target = int(getattr(self.ICBM, "gapTarget", 0))
       was = (self.icbm_gap.mode, self.icbm_gap.last_result)
-      signal = self.icbm_gap.update(gap_now, target, driver_pressing)
+      signal = self.icbm_gap.update(gap_now, target, driver_pressing, preempted)
 
       # Log every transition, once. Whether the camera honours an injected gap press at all is the
       # one thing about this feature that cannot be settled offline, and the first real request is

@@ -133,6 +133,10 @@ class FordGapController:
     self._settle_frames = 0
     self._gap_prev = 0
     self._expected_gap = 0       # what the readback should read while no press is outstanding
+    # A request that is already satisfied opens no lease, but the driver can still move the gap out
+    # from under it. Watching means "no lease, but this request is live and the value is ours to
+    # notice changing".
+    self._watching = False
 
     # Reported for logging, never used to decide anything.
     self.last_result = ""
@@ -197,13 +201,15 @@ class FordGapController:
       else:
         self.last_result = "incDec works"
 
-  def update(self, gap_now: int, requested: int, driver_pressing: bool = False) -> str | None:
+  def update(self, gap_now: int, requested: int, driver_pressing: bool = False,
+             preempted: bool = False) -> str | None:
     """Advance one frame.
 
     Args:
       gap_now: AccTGap_D_Dsply as reported by the camera, or 0 if unavailable.
       requested: the gap the requester wants (GAP_MIN..GAP_MAX), or 0 for "no request".
       driver_pressing: any physical gap button is down right now.
+      preempted: ICBM wants the button for the set speed this frame, so nothing may be pressed.
 
     Returns:
       The Steering_Data_FD1 signal to assert this frame, or None.
@@ -224,18 +230,42 @@ class FordGapController:
     # request or a driver override, and it requires the requester to explicitly stop asking.
     if requested <= 0:
       self.abandoned = False
+      self._watching = False
 
-    # The driver's own button always wins, immediately and without a restore.
-    if driver_pressing and self.active:
+    # The driver's own button always wins, immediately and without a restore. NOT gated on a lease
+    # being active: when the requester asks for the gap the car is ALREADY at, no lease is opened
+    # (see below), and that is exactly the window in which their press would otherwise go unnoticed
+    # and be pressed straight back a frame later.
+    if driver_pressing:
       self.abandoned = True
-      self._end_lease("driver pressed the gap button")
+      if self.active:
+        self._end_lease("driver pressed the gap button")
+      else:
+        self.last_result = "driver pressed the gap button"
       return None
 
     # Unexpected movement between our own presses is the driver too -- their press may land on a
-    # frame we do not see the button down for, but the RESULT is unmistakable.
-    if self.active and self._phase == _PHASE_IDLE and valid and self._expected_gap and gap_now != self._expected_gap:
-      self.abandoned = True
-      self._end_lease("gap changed by the driver")
+    # frame we do not see the button down for, but the RESULT is unmistakable. `_expected_gap` is
+    # maintained while merely WATCHING a satisfied request as well as while leasing, for the same
+    # reason as above.
+    if self._phase == _PHASE_IDLE and valid and self._expected_gap and gap_now != self._expected_gap:
+      if self.active or self._watching:
+        self.abandoned = True
+        self._end_lease("gap changed by the driver")
+        self._watching = False
+        self._expected_gap = 0
+        return None
+
+    # ICBM owns the button this frame. A press already on the wire must be ABANDONED rather than
+    # paused: nothing keeps the bit asserted while we stand down, so the camera reads a release and
+    # a resumed press arrives as a SECOND press -- two toggle steps for one intended, and a delta of
+    # 2 that the probe would read as "incDec works". Aborting costs one retry out of the budget and
+    # is the only version of this that cannot lie to the camera.
+    if preempted:
+      if self._phase != _PHASE_IDLE:
+        self._reset_press()
+        self._expected_gap = 0  # the aborted press may or may not have landed; re-sync when idle
+        self.last_result = "press abandoned to the set speed"
       return None
 
     # ---- lease bookkeeping -------------------------------------------------------------------
@@ -254,7 +284,12 @@ class FordGapController:
       if not GAP_MIN <= requested <= GAP_MAX:
         return None
       if requested == gap_now:
-        return None  # nothing to do; no lease, so nothing to restore later either
+        # Nothing to do; no lease, so nothing to restore later either. But WATCH it: this is the
+        # state a maneuver spends most of its time in, and a driver press here used to be invisible
+        # -- their new value simply made `requested != gap_now` a frame later and got pressed back.
+        self._watching = True
+        self._expected_gap = gap_now
+        return None
       self.active = True
       self.restore_gap = gap_now
       self._expected_gap = gap_now
@@ -277,6 +312,10 @@ class FordGapController:
 
     # ---- press state machine -----------------------------------------------------------------
     if self._phase == _PHASE_IDLE:
+      # Re-sync after an abandoned press. We do not know whether it landed, so the first settled
+      # readback becomes the new truth rather than being read as driver interference.
+      if not self._expected_gap and valid:
+        self._expected_gap = gap_now
       if self.mode == MODE_UNAVAILABLE:
         # The camera is not honouring injected presses at all. End the lease here rather than
         # letting the press budget drain one useless press at a time -- and note that there is no

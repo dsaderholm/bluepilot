@@ -756,6 +756,30 @@ exactly the wrong moment. Measured across six routes, 2026-08-17, using
 0.8 m/s^2 of headroom and nothing in the bulk of the distribution past -2.5. Stock AEB rides a
 separate path and panda refuses `cmbb_deny` outright, so it is unaffected either way.
 
+**AND THAT WAS THE WRONG SIGNAL TO HAVE CHECKED ALONE** -- caught in review, 2026-08-17, before any
+drive. `FORD_LONG_LIMITS` has THREE bands and the brake cap is the loosest of them:
+
+    AccBrkTot_A_Rq   [-3.4991, 1.9999]              <- the one measured above
+    AccPrpl_A_Rq     [-0.5, 2.0]  or exactly -5.0   <- never looked at
+    AccPrpl_A_Pred   [-0.5, 2.0]  or exactly -5.0   <- never looked at
+
+The gas band is four times narrower and sits exactly where a coasting or engine-braking Ford lives,
+and `longitudinal_gas_checks` runs against BOTH fields. `violation |= cmbb_deny` is a fourth exit,
+and `ford/carstate.py` already reads that same bit as `accFaulted`, so the camera does set it.
+
+Two consequences, both now in the code. `fordcan_ext.passthrough_admissible()` asks whether panda
+would accept the frame BEFORE forwarding it and falls back to openpilot's own ACCDATA when it would
+not -- because `ford_tx_hook` does not clamp, it drops the whole message, so an inadmissible frame
+makes a 50 Hz message vanish and reappear, which is worse than either controller driving. And the
+passthrough is gated on `CC.longActive`: with longitudinal inactive `get_longitudinal_allowed()` is
+false and panda passes only the inactive frame, AND `create_acc_msg` clearing `Cmbb_B_Enbl` is how
+openpilot's own disengagement reaches the car in the first place.
+
+`tools/bp_accdata_bands.py` measures the refusal rate on drives already recorded. It is no longer a
+safety question -- the fallback handles it -- but a high rate would mean the passthrough hands the
+car back at exactly the interesting moments, which makes it a worse idea rather than a broken one.
+**Run it before the first passthrough drive.**
+
 **Also learned: NO route on the device has ever had op long enabled**, so the camera question below
 cannot be answered from existing data. It needs a drive.
 
@@ -781,6 +805,77 @@ whole drive. Acceptable for a 20-minute experiment; not a state to leave the car
 coexist means changing sunnypilot's own gating in two places -- a permanent merge cost -- and it is
 NOT needed for the first test, only for the feature. Do not pay it before the camera question is
 answered.
+
+**WHAT HAPPENS TO OPENPILOT'S LONGITUDINAL STACK: it runs, and every bit of it is DISCARDED.** He
+asked whether Dynamic Experimental Control is involved. It is not, and checking why is the clearest
+description of the mechanism. DEC lives entirely in `longitudinal_planner.py`, choosing MPC modes for
+openpilot's own plan; nothing in the Ford carcontroller path reads it. Under the passthrough DEC
+still picks a mode, the MPC still solves, `LongitudinalExt` still computes `lng.accel`/`lng.gas` --
+and then Ford's frame goes out instead.
+
+**That is the whole point rather than a side effect.** Op long is used purely as PERMISSION -- it is
+what opens the relay and puts `ACCDATA` in panda's TX list -- while the numbers stay Ford's. Expect
+experimental-mode and DEC indicators to keep showing state that is driving nothing.
+
+**AND THAT DECIDES THE SHAPE OF THE OVERRIDE, WHICH IS THE NEXT THING ANYONE WILL BUILD.**
+
+  THE TRAP: `min(ford_accel, openpilot_accel)` -- "use whichever brakes harder". One line, handles
+  stops and ramps and everything else automatically, and it is WRONG. openpilot's planner is more
+  conservative than Ford's most of the time, so it would win constantly and the passthrough becomes
+  op long again, arriving through a comparison operator. Every reason this idea exists is undone.
+
+  THE RULE: the override is a NAMED, BOUNDED CONDITION, never a comparison. "A stop line ahead and
+  within N seconds of needing to brake" fires explicitly, for a few seconds, and falls back to
+  Ford's number the moment it is done. Same discipline as the gap lease -- assert while needed,
+  silence restores.
+
+**THE DIVISION OF LABOUR, settled 2026-08-17 across several of his corrections. Do not re-litigate
+it; DO settle the boundary with drive data.**
+
+  FORD DECIDES **HOW** TO SLOW. WE DECIDE **WHETHER** AND **BY HOW MUCH**.
+
+Three independent arguments converge on it, and the third is his and is the one that would be
+easiest to forget:
+
+1. **PERCEPTION.** Ford's radar sees leads and it has years of calibration on following and
+   stop-and-go. It has no idea about a mapped corner, a stop sign, a red light, or a car its radar
+   has not acquired. Those are ours.
+2. **RATE.** The set speed falls at 3.3 mph/s and stops at 20 mph. Anything needing more than that
+   cannot be expressed through buttons at all.
+3. **ACTUATION VOCABULARY -- his point, and the sharpest.** *"Coasting is a thing Ford ACC can
+   do."* Ford chooses between coasting, engine braking, precharge and friction brakes, and the DROP
+   LIMITER exists precisely to exploit that -- "stock ACC brakes for one large drop and coasts
+   through a series of small ones, so smaller steps trade braking for coasting at the same net
+   deceleration." **The set speed is a request for an OUTCOME and Ford picks the means. ACCDATA is a
+   command of the MEANS.** Overriding directly means choosing brake-versus-coast ourselves, every
+   frame.
+
+**And point 3 has a cost he already measures.** A direct override reaches for friction brakes and
+lights the stop lamps where a staged set-speed drop would have coasted there silently. The brake-lamp
+readout exists for that, `IcbmMaxTargetDrop` is tuned against it ("lower this if the lamps come on
+during routine slowing"), and the preview scenes name the states an override would flatten: COAST,
+ENG BRAKE, PRE-BRAKE, BRAKE.
+
+**So the override takes over ONLY where coasting could never have reached anyway:** below 20 mph,
+where the set speed cannot ask; and on ramps steep enough to need real braking regardless. Everywhere
+else the set speed is STRICTLY BETTER, because Ford's answer to "be doing 45 shortly" is a blend we
+do not have to write and could not easily match.
+
+**AND ICBM KEEPS WORKING UNDER THE PASSTHROUGH -- the earlier claim that it does not was wrong.**
+Both gates in `sunnypilot/selfdrive/car/interfaces.py` key on `CP.openpilotLongitudinalControl` and
+encode one assumption: op long is on, therefore openpilot drives, therefore the buttons are
+meaningless. **Under the passthrough that is false** -- Ford is still computing, the set speed still
+governs, and panda permits button injection in long mode (`Steering_Data_FD1` is in
+`FORD_COMMON_TX_MSGS`, which `FORD_LONG_TX_MSGS` inherits; verified). So holds, SLA, both curve
+controllers, pinned holds and the gap button all survive. They die today only because of two `if`
+statements written for a different mode, and teaching those gates about a third state is the work.
+
+**His other correction, and it is what makes any of this safe:** *"holds shouldn't even be a part of
+ICBM, they are a part of SLA."* Correct, and already recorded above as a known misnaming. It matters
+more here than as naming hygiene: **a hold is a statement about what speed he wants against a posted
+limit, and has nothing to do with how that speed is achieved** -- so it is actuator-independent by
+construction and survives any migration. Same for SLA and the curve controllers. These were never
+ICBM features; ICBM was merely the only actuator available.
 
 **The cheap first step is a pure passthrough that overrides NOTHING.** If the car drives identically
 to stock, the hard half is proven and the stop is a small addition. If the camera faults merely from

@@ -49,7 +49,8 @@ SETTINGS_UI_JSON = ROOT / "sunnypilot/sunnylink/settings_ui.json"
 # here is not a fork setting as far as this tool is concerned, so it is not counted OR checked. The
 # comma 4 rule is "every setting must be reachable"; a guard that cannot see a whole settings family
 # reads as compliance. If you introduce a name family, put it here in the same commit.
-OUR_PREFIXES = ("Icbm", "SmartCruiseControl", "SpeedLimit", "PassingAssist", "RadarDetector", "Mapd")
+OUR_PREFIXES = ("Icbm", "SmartCruiseControl", "SpeedLimit", "PassingAssist", "RadarDetector",
+                "Mapd", "StockAcc")
 
 # NOT a gap in the list above, and not to be "fixed" by adding it. `BPSentryEnabled` is the fork's
 # crash-reporting KILL SWITCH -- upstream inits Sentry unconditionally and this fork returns early

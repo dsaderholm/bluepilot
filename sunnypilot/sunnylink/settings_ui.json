@@ -1646,6 +1646,26 @@
                   ]
                 },
                 {
+                  "key": "StockAccPassthrough",
+                  "widget": "toggle",
+                  "title": "Use Ford's Own ACC Commands",
+                  "description": "With openpilot longitudinal control on, send the camera's own acceleration and braking instead of openpilot's. The car then drives exactly like stock adaptive cruise, because the commands are Ford's -- openpilot only carries them. Has no effect unless openpilot longitudinal control is enabled. Leave this off until a drive has confirmed the camera keeps working this way.",
+                  "visibility": [
+                    {
+                      "type": "capability",
+                      "field": "has_icbm",
+                      "equals": true
+                    }
+                  ],
+                  "enablement": [
+                    {
+                      "type": "capability",
+                      "field": "has_icbm",
+                      "equals": true
+                    }
+                  ]
+                },
+                {
                   "key": "IcbmGapControl",
                   "widget": "toggle",
                   "title": "Let openpilot Change The Follow Gap",

@@ -222,6 +222,16 @@ class CruiseLayout(Widget):
                      "IcbmGapControl"),
       param="IcbmGapControl")
 
+    self.stock_acc_passthrough = toggle_item_sp(
+      title=tr("Use Ford's Own ACC Commands"),
+      description=recommended(tr("With openpilot longitudinal control on, send the camera's own "
+                     "acceleration and braking instead of openpilot's. The car then drives exactly "
+                     "like stock adaptive cruise, because the commands are Ford's -- openpilot only "
+                     "carries them. Has no effect unless openpilot longitudinal control is enabled. "
+                     "Leave this off until a drive has confirmed the camera keeps working this way."),
+                     "StockAccPassthrough"),
+      param="StockAccPassthrough")
+
     self.icbm_resume_min_gap = option_item_sp(
       title=tr("Resume Minimum Gap"),
       description=recommended(tr("How far the car ahead must have pulled away before resuming counts as safe."), "IcbmResumeMinGap", lambda v: f"{v} m"),
@@ -363,6 +373,7 @@ class CruiseLayout(Widget):
       self.icbm_resume_min_gap,
       self.icbm_resume_min_lead_speed,
       self.icbm_gap_control,
+      self.stock_acc_passthrough,
 
       SectionHeader(tr("Curves")),
       self.scc_v_toggle,
@@ -475,6 +486,7 @@ class CruiseLayout(Widget):
       self.icbm_resume_min_gap,
       self.icbm_resume_min_lead_speed,
       self.icbm_gap_control,
+      self.stock_acc_passthrough,
     )
 
   def _update_state(self):
