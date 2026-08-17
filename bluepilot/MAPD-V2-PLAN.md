@@ -203,6 +203,8 @@ comma was with it.
 
 ### ROUTE INTENT -- "AM I TAKING THIS EXIT" -- AND WHY WAZE CANNOT SUPPLY IT
 
+**Full write-up, with sources and what is measured vs unverified: `bluepilot/ROUTE-INTENT.md`.**
+
 Raised 2026-08-17. He misses Waze putting turn-by-turn on his IPC, and the reason he wants it back
 is the right one: *"so OpenPilot could know more about where I'm going, like if I am going to take an
 exit or not."*
