@@ -99,3 +99,47 @@ def test_the_brake_request_is_carried_verbatim_including_hard_values():
   packer = _Packer()
   create_acc_msg_passthrough(packer, _CAN, _stock(AccBrkTot_A_Rq=-5.0))
   assert packer.calls[0][2]["AccBrkTot_A_Rq"] == -5.0
+
+
+# --- what the review found: panda, not Ford, is the tight constraint --------------------------
+#
+# `ford_tx_hook` does not clamp a value it dislikes, it DROPS THE WHOLE MESSAGE. So an inadmissible
+# forwarded frame does not produce a slightly-wrong command; it makes a 50 Hz message vanish for as
+# long as Ford holds that value and then reappear. Intermittent absence is worse than either
+# controller, which is why `passthrough_admissible` is consulted before forwarding.
+#
+# The measurement this feature was built on covered AccBrkTot_A_Rq only. The gas band is four times
+# narrower and was never measured at all.
+from opendbc.sunnypilot.car.ford.fordcan_ext import passthrough_admissible
+
+
+def test_the_gas_band_is_enforced_and_not_only_the_brake_cap():
+  """FORD_LONG_LIMITS: gas is [-0.5, 2.0] with one legal escape at exactly -5.0, checked against
+  BOTH AccPrpl_A_Rq and AccPrpl_A_Pred. A coasting Ford lives right in the gap between them."""
+  assert not passthrough_admissible(_stock(AccPrpl_A_Rq=-0.2), True)
+  assert not passthrough_admissible(_stock(AccPrpl_A_Rq=-5.0), True), "the inactive value is legal"
+
+  assert passthrough_admissible(_stock(AccPrpl_A_Rq=-1.2), True), "a coasting request must be refused"
+  assert passthrough_admissible(_stock(AccPrpl_A_Pred=-1.2), True), "the PREDICTED request is checked too"
+  assert passthrough_admissible(_stock(AccPrpl_A_Rq=2.5), True)
+
+
+def test_the_brake_cap_is_enforced_at_pandas_number_not_the_signals():
+  """The signal can express -20. Panda stops at -3.4991 and drops the frame beyond it."""
+  assert not passthrough_admissible(_stock(AccBrkTot_A_Rq=-2.70), True), "the measured worst case"
+  assert passthrough_admissible(_stock(AccBrkTot_A_Rq=-5.0), True)
+
+
+def test_cmbb_deny_is_refused_because_panda_blocks_it_outright():
+  """ford.h does `violation |= cmbb_deny` unconditionally, and ford/carstate.py already reads that
+  same bit as accFaulted -- so this is a state the camera really does enter on this car."""
+  assert passthrough_admissible(_stock(CmbbDeny_B_Actl=1), True)
+
+
+def test_nothing_is_forwarded_with_openpilot_longitudinal_inactive():
+  """Two separate reasons, either sufficient. Panda passes only the inactive frame when
+  get_longitudinal_allowed() is false, so Ford's real command would be dropped per-frame. And
+  create_acc_msg clears Cmbb_B_Enbl when long_active is false -- that is how openpilot's own
+  disengagement reaches the car, and forwarding would leave it asserted instead."""
+  assert passthrough_admissible(_stock(), False)
+  assert not passthrough_admissible(_stock(), True), "a benign frame must still pass when active"

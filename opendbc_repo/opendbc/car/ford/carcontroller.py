@@ -7,6 +7,7 @@ from opendbc.car.ford import fordcan
 from opendbc.car.ford.values import CarControllerParams, FordFlags, CAR
 from opendbc.car.interfaces import CarControllerBase, V_CRUISE_MAX
 from openpilot.common.params import Params
+from openpilot.common.swaglog import cloudlog
 
 # BluePilot: extension imports for lateral, longitudinal, and HUD control
 from opendbc.sunnypilot.car.ford.lateral_curv_ext import LateralCurvExt, PrimaryLateralControl
@@ -106,6 +107,9 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
     # swapping it mid-drive would hand over between two different longitudinal behaviors with no
     # transition. Same reasoning as mapd_manager reading MapdV2 once.
     self.stock_acc_passthrough = self.params.get_bool("StockAccPassthrough")
+    # Last reason the forwarded frame was refused, so the log carries transitions and not 50 Hz of
+    # the same line. Lives here for the same reason everything else does -- see the note above.
+    self.passthrough_reason_last = "?"
     # Note: main_on_last, lkas_enabled_last, steer_alert_last, lead_distance_bars_last,
     # distance_bar_frame are initialized by HudExt.__init__() above
 
@@ -294,19 +298,37 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
       #
       # Note this path is only reachable under op long, so it is NOT an Icbm* feature: it is
       # meaningless when ICBM is the actuator, which is the naming test in CLAUDE.md.
-      use_passthrough = (self.stock_acc_passthrough and getattr(CS, "acc_stock_values", None)
-                         and getattr(CS, "acc_cam_valid", False))
+      # AND THE SECOND FAIL-SAFE IS PANDA. `ford_tx_hook` does not clamp a value it dislikes, it
+      # drops the entire message -- so a frame Ford is entitled to send but panda refuses would make
+      # ACCDATA vanish intermittently, which is worse than either controller. `passthrough_admissible`
+      # asks that question first and falls back to our own authored command when the answer is no.
+      # It also covers `CC.longActive`: with openpilot longitudinal inactive panda passes only the
+      # inactive frame, and forwarding Ford's would both be blocked AND leave Cmbb_B_Enbl asserted
+      # after openpilot had disengaged.
+      use_passthrough = False
+      if self.stock_acc_passthrough and getattr(CS, "acc_cam_valid", False) and getattr(CS, "acc_stock_values", None):
+        reason = fordcan_ext.passthrough_admissible(CS.acc_stock_values, CC.longActive)
+        use_passthrough = not reason
+        if reason != self.passthrough_reason_last:
+          self.passthrough_reason_last = reason
+          cloudlog.warning("stock ACC passthrough: %s", reason or "forwarding Ford's command")
+
       if use_passthrough:
         can_sends.append(fordcan_ext.create_acc_msg_passthrough(self.packer, self.CAN,
                                                                CS.acc_stock_values))
+        # Record what actually went on the wire, not what we computed and discarded. Every offline
+        # tool reads actuatorsOutput, and the whole point of the first passthrough drive is to
+        # compare Ford's numbers against openpilot's -- logging ours would falsify that comparison.
+        self.accel = float(CS.acc_stock_values["AccBrkTot_A_Rq"])
+        self.gas = float(CS.acc_stock_values["AccPrpl_A_Rq"])
       else:
         can_sends.append(fordcan_ext.create_acc_msg(
           self.packer, self.CAN, CC.longActive, lng.gas, lng.accel, lng.accel_pred_send,
           lng.stopping, lng.brake_actuate, lng.precharge_actuate, v_ego_kph=lng.target_speed
         ))
 
-      self.accel = lng.accel
-      self.gas = lng.gas
+        self.accel = lng.accel
+        self.gas = lng.gas
 
     ### ui ###
     # BluePilot: HUD message generation via HudExt

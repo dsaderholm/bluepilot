@@ -1477,6 +1477,24 @@ class TestNoPostedLimitMeansNoHold:
     assert icbm.no_limit_hold_speed == DRIVER, (
       "the hold was dropped without a trace, so nothing can observe or pin it")
 
+  def test_the_remembered_hold_is_dropped_when_a_posted_limit_returns(self):
+    """It must not follow the car onto the next road.
+
+    `_pinnable_speed()` in selfdrived is `v_baseline or no_limit_hold_speed`. Leaving the remembered
+    value set once a limit exists means that function can never return 0 again for the rest of the
+    drive -- which wedges `_last_observed_hold` at a number captured somewhere else, and a GENUINE
+    hold equal to it is then silently never observed. That is the exact failure this feature was
+    built to fix, reintroduced one road later. Found in review, 2026-08-17.
+    """
+    icbm = self._press_with_no_limit()
+    assert icbm.no_limit_hold_speed == DRIVER
+
+    for _ in range(5):
+      icbm.run(make_cs(DRIVER), CC, make_lp(LIMIT), False)
+
+    assert icbm.no_limit_hold_speed == 0, (
+      "a hold remembered from a road with no limit survived onto one with a posted limit")
+
   def test_a_press_where_no_limit_is_known_creates_no_hold(self):
     icbm = self._press_with_no_limit()
     assert icbm.v_baseline == 0, "a hold was created with no posted limit to hold against"

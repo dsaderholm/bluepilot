@@ -756,6 +756,30 @@ exactly the wrong moment. Measured across six routes, 2026-08-17, using
 0.8 m/s^2 of headroom and nothing in the bulk of the distribution past -2.5. Stock AEB rides a
 separate path and panda refuses `cmbb_deny` outright, so it is unaffected either way.
 
+**AND THAT WAS THE WRONG SIGNAL TO HAVE CHECKED ALONE** -- caught in review, 2026-08-17, before any
+drive. `FORD_LONG_LIMITS` has THREE bands and the brake cap is the loosest of them:
+
+    AccBrkTot_A_Rq   [-3.4991, 1.9999]              <- the one measured above
+    AccPrpl_A_Rq     [-0.5, 2.0]  or exactly -5.0   <- never looked at
+    AccPrpl_A_Pred   [-0.5, 2.0]  or exactly -5.0   <- never looked at
+
+The gas band is four times narrower and sits exactly where a coasting or engine-braking Ford lives,
+and `longitudinal_gas_checks` runs against BOTH fields. `violation |= cmbb_deny` is a fourth exit,
+and `ford/carstate.py` already reads that same bit as `accFaulted`, so the camera does set it.
+
+Two consequences, both now in the code. `fordcan_ext.passthrough_admissible()` asks whether panda
+would accept the frame BEFORE forwarding it and falls back to openpilot's own ACCDATA when it would
+not -- because `ford_tx_hook` does not clamp, it drops the whole message, so an inadmissible frame
+makes a 50 Hz message vanish and reappear, which is worse than either controller driving. And the
+passthrough is gated on `CC.longActive`: with longitudinal inactive `get_longitudinal_allowed()` is
+false and panda passes only the inactive frame, AND `create_acc_msg` clearing `Cmbb_B_Enbl` is how
+openpilot's own disengagement reaches the car in the first place.
+
+`tools/bp_accdata_bands.py` measures the refusal rate on drives already recorded. It is no longer a
+safety question -- the fallback handles it -- but a high rate would mean the passthrough hands the
+car back at exactly the interesting moments, which makes it a worse idea rather than a broken one.
+**Run it before the first passthrough drive.**
+
 **Also learned: NO route on the device has ever had op long enabled**, so the camera question below
 cannot be answered from existing data. It needs a drive.
 

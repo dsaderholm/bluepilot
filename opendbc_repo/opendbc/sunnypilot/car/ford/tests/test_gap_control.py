@@ -269,3 +269,70 @@ def test_press_is_a_pulse_not_a_hold():
     runs.append(run)
   assert runs, "never pressed"
   assert all(r == PRESS_ON_FRAMES for r in runs), runs
+
+
+# --- what the review found ---------------------------------------------------------------------
+
+def test_a_preempted_press_is_abandoned_whole_and_never_resumed():
+  """ICBM taking the button mid-press must not leave half a press on the wire.
+
+  The first version simply did not call `update` while the set speed was being pressed, on the
+  theory that pausing preserved the pulse. It does the opposite: nothing holds the bit asserted
+  during the stand-down, the SCCM's own frames keep reaching the camera with the gap bits clear,
+  and the resumed remainder arrives as a SECOND press. On the toggle path that is two gap steps for
+  one intended; in probe mode `_judge_press` sees a delta of 2 and latches the wrong mode for the
+  ignition cycle.
+  """
+  ctl, cam = settled(gap=3, honors=("toggle",))
+  ctl.mode = MODE_TOGGLE
+
+  # Start a press, then preempt it partway through the ON window.
+  drive(ctl, cam, 5, PRESS_ON_FRAMES // 2)
+  assert cam.presses, "no press started, so the preemption is not being exercised"
+  before = len(cam.presses)
+
+  for _ in range(50):
+    assert ctl.update(cam.reported, 5, False, True) is None, "nothing may be pressed while preempted"
+    cam.step(None)
+
+  assert ctl._phase == "idle", "the press must be abandoned, not left mid-flight to resume later"
+  assert len(cam.presses) == before, "a new press was started during the preemption"
+
+  # And the retry that follows is a WHOLE press, which still gets there.
+  drive(ctl, cam, 5, 1500)
+  assert cam.gap == 5, "the abandoned press was never retried to completion"
+
+
+def test_the_driver_wins_even_when_the_request_is_already_satisfied():
+  """The window the old code could not see.
+
+  Passing assist asks for the gap the car is ALREADY at, so no lease opens -- and both override
+  paths were gated on a lease being active. The driver's press then simply made requested != gap a
+  frame later, which opened a fresh lease that pressed their choice straight back out.
+  """
+  ctl, cam = settled(gap=2, honors=("toggle",))
+  ctl.mode = MODE_TOGGLE
+
+  drive(ctl, cam, 2, 20)          # satisfied: nothing to do, no lease
+  assert not ctl.active
+
+  cam.force(3)                    # the driver reaches over
+  drive(ctl, cam, 2, 600)
+
+  assert cam.gap == 3, "the driver's own gap was pressed back out from under them"
+  assert not ctl.active
+  assert ctl.abandoned, "their press must latch until the requester stops asking"
+
+
+def test_a_driver_press_with_no_lease_still_stands_the_controller_down():
+  ctl, cam = settled(gap=2, honors=("toggle",))
+  ctl.mode = MODE_TOGGLE
+
+  drive(ctl, cam, 2, 20, driver_pressing=True)
+  assert ctl.abandoned
+
+  # Only the request dropping to zero clears it.
+  drive(ctl, cam, 4, 400)
+  assert cam.gap == 2, "a latched abandon must refuse to start a new lease"
+  drive(ctl, cam, 0, 5)
+  assert not ctl.abandoned

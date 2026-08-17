@@ -159,3 +159,24 @@ class TestAPinCanStillBeCreatedWhereThereIsNoLimit:
   def test_no_hold_and_no_suggestion_still_shows_nothing(self):
     s = read_icbm_hud_state(_SM2(_Icbm(baseline=0.0, suggestion=0.0), _SL(True, 24.6)))
     assert not s.worth_showing
+
+
+def test_a_pin_suggestion_does_not_re_expose_a_hold_the_no_limit_rule_hides():
+  """The two badge exceptions answer different questions, and OR-ing them flat conflated them.
+
+  `sla_has_limit` exists to stop a badge drawing the same number as MAX on a road with no posted
+  limit. The suggestion exception is for the case where there is NO hold and the badge is the only
+  tap target for creating a pin. Without `and not has_hold`, a hold on a no-limit road became
+  visible purely because the car happened to be somewhere pinnable.
+  """
+  hidden = IcbmHudState(baseline=70, sla_has_limit=False, pinned=False, pin_suggested=False)
+  assert not hidden.worth_showing
+
+  still_hidden = IcbmHudState(baseline=70, sla_has_limit=False, pinned=False,
+                              pin_suggested=True, pin_suggestion=65)
+  assert not still_hidden.worth_showing, "a suggestion re-exposed a hold the rule deliberately hides"
+
+  # The case the exception is actually for: a suggestion with no hold behind it.
+  offered = IcbmHudState(baseline=0, sla_has_limit=False, pin_suggested=True, pin_suggestion=65)
+  assert offered.worth_showing
+  assert offered.display_value == 65

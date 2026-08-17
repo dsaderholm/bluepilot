@@ -80,7 +80,12 @@ class IcbmHudState:
     This is a DISPLAY rule. The hold itself is unchanged and still governs the car; hiding a
     readout must never change what the car does.
     """
-    return (self.has_hold and (self.sla_has_limit or self.pinned)) or self.pin_suggested
+    # `and not self.has_hold` on the suggestion term, because the two exceptions answer different
+    # questions. Without it a standing suggestion re-exposed a hold that the sla_has_limit rule
+    # deliberately hides -- the badge would appear on a no-limit road purely because the car
+    # happened to be somewhere pinnable, which is the readout that rule exists to suppress.
+    return ((self.has_hold and (self.sla_has_limit or self.pinned))
+            or (self.pin_suggested and not self.has_hold))
 
 
   @property

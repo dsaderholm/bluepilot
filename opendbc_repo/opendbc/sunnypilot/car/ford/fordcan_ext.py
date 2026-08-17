@@ -194,6 +194,61 @@ def create_acc_msg_passthrough(packer, CAN: CanBus, stock_values: dict):
   return packer.make_can_msg("ACCDATA", CAN.main, values)
 
 
+# FusionPilot: panda's ACCDATA bands, from opendbc/safety/modes/ford.h's FORD_LONG_LIMITS, in the
+# engineering units the DBC scales to. THE BRAKE CAP IS NOT THE TIGHT ONE -- that was the review's
+# correction. The gas band is [-0.5, 2.0] with a single legal escape value of exactly -5.0, and it
+# is checked against BOTH AccPrpl_A_Rq and AccPrpl_A_Pred.
+_PANDA_ACCEL_MIN = -3.4991
+_PANDA_ACCEL_MAX = 1.9999
+_PANDA_GAS_MIN = -0.5
+_PANDA_GAS_MAX = 2.0
+_PANDA_GAS_INACTIVE = -5.0
+# Scaled-signal quantization: AccBrkTot_A_Rq is 0.0039 m/s^2 per bit, AccPrpl_* is 0.01. Stay a bit
+# inside the band so a value that is legal on the wire is not rejected here by a rounding step.
+_PANDA_MARGIN = 0.02
+
+
+def passthrough_admissible(stock_values: dict, long_active: bool) -> str:
+  """FusionPilot: would panda actually let this camera frame through? "" if yes, else the reason.
+
+  THIS IS THE FIX FOR THE THING THAT MAKES THIS FEATURE FAIL WORST. `ford_tx_hook` does not clamp a
+  bad value -- it drops the WHOLE MESSAGE. So a forwarded frame panda dislikes does not produce a
+  slightly-wrong command, it produces a 50 Hz message that simply stops for as long as Ford holds
+  that value, and then resumes. Intermittent absence is a far worse failure than either extreme.
+
+  Three ways the camera's own frame is inadmissible, all read straight out of ford.h:
+
+    - `CmbbDeny_B_Actl` set. `violation |= cmbb_deny` is unconditional there. This is not
+      hypothetical on this car: ford/carstate.py already maps that same bit to `ret.accFaulted`.
+    - Any of the three scaled requests outside its band. The brake cap (-3.4991) was measured across
+      189,418 frames and never bound; the GAS band was never measured at all, and it is four times
+      narrower and sits exactly where a coasting or engine-braking Ford lives.
+    - openpilot longitudinal not active. `get_longitudinal_allowed()` is false, and then the only
+      frame panda passes is the inactive one -- so every real Ford command is dropped.
+
+  Returning a REASON rather than a bool is deliberate: whether these ever fire on his roads is the
+  open question this feature turns on, and the answer has to end up in the log rather than only in
+  a branch taken.
+  """
+  if not long_active:
+    return "openpilot longitudinal inactive"
+  if stock_values.get("CmbbDeny_B_Actl"):
+    return "camera set CmbbDeny_B_Actl"
+
+  accel = float(stock_values.get("AccBrkTot_A_Rq", 0.0))
+  if not (_PANDA_ACCEL_MIN + _PANDA_MARGIN) <= accel <= (_PANDA_ACCEL_MAX - _PANDA_MARGIN):
+    return "AccBrkTot_A_Rq %.3f outside panda's band" % accel
+
+  for name in ("AccPrpl_A_Rq", "AccPrpl_A_Pred"):
+    gas = float(stock_values.get(name, 0.0))
+    if abs(gas - _PANDA_GAS_INACTIVE) < 0.005:
+      continue
+    if not (_PANDA_GAS_MIN + _PANDA_MARGIN) <= gas <= (_PANDA_GAS_MAX - _PANDA_MARGIN):
+      return "%s %.3f outside panda's band" % (name, gas)
+
+  return ""
+
+
 def create_acc_ui_msg(packer, CAN: CanBus, CP, main_on: bool, enabled: bool, fcw_alert: bool,
                       standstill: bool, hud_control, stock_values: dict, send_hands_free_msg: bool,
                       send_ui: bool, send_bars: bool, tja_warn: int, tja_msg: int):

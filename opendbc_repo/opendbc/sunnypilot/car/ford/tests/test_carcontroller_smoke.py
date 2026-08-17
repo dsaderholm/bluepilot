@@ -122,7 +122,7 @@ def carcontroller_parts():
   return CarController, {Bus.pt: "ford_lincoln_base_pt"}, CP, CP_SP, structs
 
 
-def _car_control(structs, *, enabled, send_button, gap_target):
+def _car_control(structs, *, enabled, send_button, gap_target, long_active=False):
   """Match card's call convention EXACTLY: CC is a capnp READER, CC_SP is the opendbc dataclass.
 
   `selfdrive/car/card.py` does `self.CI.apply(CC, convert_carControlSP(CC_SP), now_nanos)` with CC
@@ -135,7 +135,7 @@ def _car_control(structs, *, enabled, send_button, gap_target):
   msg = capnp_car.CarControl.new_message()
   msg.enabled = enabled
   msg.latActive = enabled
-  msg.longActive = False
+  msg.longActive = long_active
   msg.hudControl.leadVisible = True
   msg.hudControl.leftLaneVisible = True
   msg.hudControl.rightLaneVisible = True
@@ -272,7 +272,7 @@ def test_the_acc_passthrough_never_raises_and_falls_back_when_the_camera_is_stal
 
   CC, CC_SP = _car_control(structs, enabled=True,
                            send_button=structs.IntelligentCruiseButtonManagement.SendButtonState.none,
-                           gap_target=0)
+                           gap_target=0, long_active=True)
   sent = []
   for frame in range(200):
     _, can_sends = cc.update(CC, CC_SP, CS, frame * 10_000_000)

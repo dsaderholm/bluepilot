@@ -1327,7 +1327,15 @@ class IntelligentCruiseButtonManagement:
     """
     if not self.cruise_enabled:
       self.no_limit_hold_speed = 0
-    if self.speed_limit_known or self.v_baseline <= 0:
+    if self.speed_limit_known:
+      # CLEAR IT, do not just decline to update it. A limit means v_baseline survives on its own, so
+      # a remembered no-limit hold has no job here -- and leaving it set makes `_pinnable_speed()`
+      # unable to return 0 for the rest of the drive, which wedges `_last_observed_hold` at a value
+      # from a different road. A genuine hold equal to that stale number is then never observed,
+      # which is the exact failure this whole change existed to fix.
+      self.no_limit_hold_speed = 0
+      return
+    if self.v_baseline <= 0:
       return
     if self.baseline_source == BaselineSource.pinned:
       return
