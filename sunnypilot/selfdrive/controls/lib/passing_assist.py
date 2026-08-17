@@ -61,6 +61,13 @@ The three unknowns
    (oncomingAnySide and oncomingSeen are logged with every decision), and whether 90 s of memory is
    the right number for the roads actually driven.
 
+   THE FIRST HALF NOW HAS A TOOL: `tools/bp_oncoming_falsepos.py`. It became answerable when mapd v2
+   observe put `oneWay` on the wire -- each carriageway of a divided highway is a one-way way, so
+   oncoming traffic in an ADJACENT lane is impossible there by construction, and veto-up on a
+   one-way motorway frame is a false positive needing no human labelling. That is the I-15 report
+   ("I was on I-15 for a while, and kept saying two-way road") made countable, and it is the
+   verification of the speed-scaled floor, which shipped and has never been checked on road.
+
 2. TSR OVERTAKING. Traffic_RecognitnData carries a latched no-overtaking zone state with its own
    confidence channel. If this market's camera populates it, it is a sound VETO. It is not a
    permit: absence of a no-passing sign says nothing about whether the left lane is same-direction,
