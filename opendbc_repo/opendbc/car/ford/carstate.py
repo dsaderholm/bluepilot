@@ -253,6 +253,15 @@ class CarState(CarStateBase, MadsCarState, CarStateExt):
     self.buttons_stock_values = cp.vl["Steering_Data_FD1"]
     # Stock values from IPMA so that we can retain some stock functionality
     self.acc_tja_status_stock_values = cp_cam.vl["ACCDATA_3"]
+    # FusionPilot: the camera's own ACC command, kept so it can be forwarded verbatim. See
+    # fordcan_ext.create_acc_msg_passthrough -- this is the input to the stock-ACC passthrough.
+    #
+    # `acc_cam_valid` is stored BESIDE it because a CANParser's `vl` dict holds the LAST value
+    # forever. Staleness is invisible from the values themselves, so the carcontroller has no way to
+    # tell a live command from one frozen at the moment the camera bus dropped -- and forwarding a
+    # frozen brake request is the worst failure this feature has.
+    self.acc_stock_values = cp_cam.vl["ACCDATA"]
+    self.acc_cam_valid = bool(cp_cam.can_valid)
     self.lkas_status_stock_values = cp_cam.vl["IPMA_Data"]
 
     MadsCarState.update_mads(self, ret, can_parsers)

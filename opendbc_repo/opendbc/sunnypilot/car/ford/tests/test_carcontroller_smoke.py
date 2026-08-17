@@ -101,6 +101,11 @@ class FakeCarState:
     self.lkas_status_stock_values = dict.fromkeys(_dbc_signals("IPMA_Data"), 0)
     # The ACC gap the camera reports. 3 is what the owner drives.
     self.acc_tja_status_stock_values["AccTGap_D_Dsply"] = 3
+    # The camera's own ACC command, plus its freshness. Both are what the stock-ACC passthrough
+    # reads, and a CarController that cannot survive their ABSENCE is the failure this file exists
+    # for -- see the 2026-08-15 crash in the module docstring.
+    self.acc_stock_values = dict.fromkeys(_dbc_signals("ACCDATA"), 0)
+    self.acc_cam_valid = True
 
 
 @pytest.fixture(scope="module")
@@ -229,3 +234,85 @@ def test_a_broken_gap_controller_does_not_take_the_car_with_it(carcontroller_par
 
 if __name__ == "__main__":
   sys.exit(pytest.main([__file__, "-q"]))
+
+
+@pytest.mark.parametrize("passthrough", [False, True])
+@pytest.mark.parametrize("cam_valid", [True, False])
+def test_the_acc_passthrough_never_raises_and_falls_back_when_the_camera_is_stale(
+    carcontroller_parts, passthrough, cam_valid):
+  """The stock-ACC passthrough, driven through a real CarController.
+
+  `cam_valid=False` is the case that matters. A CANParser's `vl` dict keeps its last value forever,
+  so a dead camera bus looks identical to a live one from the values alone -- and forwarding a
+  FROZEN brake or throttle request is the worst thing this feature could do. The carcontroller must
+  fall back to its own computed ACCDATA, which it can only do if it is told about the staleness.
+  """
+  CarController, dbc_names, CP, CP_SP, structs = carcontroller_parts
+  # The ACCDATA block only runs under op long, and the shared fixture's CarParams does not have it.
+  # Without this the passthrough branch is unreachable and the test asserts against a path that
+  # never executes -- which is exactly how it passed while proving nothing.
+  from opendbc.car.ford.interface import CarInterface
+  from opendbc.car.ford.values import CAR
+  CP_long = CarInterface.get_non_essential_params(CAR.FORD_FUSION_MK5)
+  CP_long.openpilotLongitudinalControl = True
+
+  cc = CarController(dbc_names, CP_long, CP_SP)
+  cc.stock_acc_passthrough = passthrough
+
+  out = structs.CarState()
+  out.vEgo = 20.0
+  out.vEgoRaw = 20.0
+  out.cruiseState.enabled = True
+  out.cruiseState.available = True
+  CS = FakeCarState(out)
+  CS.acc_cam_valid = cam_valid
+
+  # A distinctive brake request, so the frame on the wire says which path produced it.
+  CS.acc_stock_values["AccBrkTot_A_Rq"] = -1.75
+
+  CC, CC_SP = _car_control(structs, enabled=True,
+                           send_button=structs.IntelligentCruiseButtonManagement.SendButtonState.none,
+                           gap_target=0)
+  sent = []
+  for frame in range(200):
+    _, can_sends = cc.update(CC, CC_SP, CS, frame * 10_000_000)
+    sent.extend(m for m in can_sends if m[0] == 390)
+
+  assert sent, "no ACCDATA was sent at all"
+  from opendbc.sunnypilot.car.ford.fordcan_ext import create_acc_msg_passthrough
+
+  class _P:
+    def __init__(self, real): self.real = real
+    def make_can_msg(self, *a): return self.real.make_can_msg(*a)
+  expected = create_acc_msg_passthrough(_P(cc.packer), cc.CAN, CS.acc_stock_values)[1]
+  forwarded = any(m[1] == expected for m in sent)
+
+  if passthrough and cam_valid:
+    assert forwarded, "passthrough was on with a live camera and Ford's own frame never went out"
+  else:
+    assert not forwarded, (
+      "the camera's command was forwarded when it should not have been -- with a STALE camera that "
+      "is a frozen brake request held indefinitely")
+
+
+def test_a_carcontroller_with_no_camera_acc_at_all_still_drives(carcontroller_parts):
+  """Old CarState, a merge that drops the field, a platform that never sets it -- the passthrough
+  must degrade to the normal path rather than taking the control loop down with it."""
+  CarController, dbc_names, CP, CP_SP, structs = carcontroller_parts
+  cc = CarController(dbc_names, CP, CP_SP)
+  cc.stock_acc_passthrough = True
+
+  out = structs.CarState()
+  out.vEgo = 20.0
+  out.vEgoRaw = 20.0
+  out.cruiseState.enabled = True
+  out.cruiseState.available = True
+  CS = FakeCarState(out)
+  del CS.acc_stock_values
+  del CS.acc_cam_valid
+
+  CC, CC_SP = _car_control(structs, enabled=True,
+                           send_button=structs.IntelligentCruiseButtonManagement.SendButtonState.none,
+                           gap_target=0)
+  for frame in range(200):
+    cc.update(CC, CC_SP, CS, frame * 10_000_000)

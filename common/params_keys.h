@@ -245,6 +245,18 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // finds out for itself and declines if nothing moves, but until that has happened on the road
     // once, nothing should be pressing this button unasked.
     {"IcbmGapControl", {PERSISTENT | BACKUP, BOOL, "0"}},
+    // FusionPilot: under openpilot longitudinal control, forward the CAMERA's own ACCDATA instead
+    // of authoring our own. The car then behaves exactly as stock Ford ACC, because the commands
+    // ARE Ford's -- his position is "I trust how Ford ACC works", and this borrows that tuning
+    // rather than trying to reproduce it.
+    //
+    // NOT Icbm*: it is meaningless when ICBM is the actuator, since ICBM exists precisely because
+    // op long is off. It only has an effect with op long ON.
+    //
+    // OFF by default and it must stay that way until one drive has proven the camera keeps
+    // computing ACC with the relay open. That cannot be checked offline and no route on the device
+    // has ever had op long enabled.
+    {"StockAccPassthrough", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"DeviceBootMode", {PERSISTENT | BACKUP, INT, "0"}},
     {"DevUIInfo", {PERSISTENT | BACKUP, INT, "0"}},
     {"EnableCopyparty", {PERSISTENT | BACKUP, BOOL}},
