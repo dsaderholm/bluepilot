@@ -693,6 +693,12 @@ motivation is correct -- **`get_minimum_set_speed()` returns 20 mph** (30 kph), 
 not ours. Every ICBM feature commands through the set speed, so the model-stop path can walk the car
 down toward 20 and no further. Stock ACC comes to a full stop only when its OWN radar sees a lead.
 
+**AND THE 20 IS FORD'S, CONFIRMED BY HIM 2026-08-17: *"No, I can't set it lower than 20."*** Worth
+recording because `get_minimum_set_speed()` is UPSTREAM sunnypilot's and returns the same 20 mph /
+30 kph for Hyundai, Honda, Chrysler, Mazda and Ford alike -- a generic constant that nobody here had
+checked against this car. It happens to be exactly right. **The question is closed; do not re-open it
+hoping the floor is ours.**
+
 **But the answer is no, four times over, and any one of them is fatal:**
 
 1. **Panda's TX allowlist has no radar message at all.** `FORD_COMMON_TX_MSGS` is
