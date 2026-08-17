@@ -2145,6 +2145,29 @@ unavoidable, the branch whose field has never been written to a log is the one t
 - **Changes made on one branch reach the others because he rebases every time.** So CLAUDE.md is the
   channel that actually travels between sessions; per-directory memory is not.
 
+## NEVER WRITE `owner/repo#N` IN A COMMIT MESSAGE
+
+Done once, 2026-08-17, in `de53b9ca2`. GitHub turns a fully-qualified issue reference in a commit
+message into a CROSS-REPOSITORY EVENT, so that commit now appears in a stranger's issue thread on
+`pfeiferj/mapd` -- titled "measure stop sign coverage: good, unlike every other tag we hoped for".
+
+The clutter is not the problem. **It advertised a SECOND feature request inside the first one's
+thread**, which is precisely the thing that request list says never to do: one ask per thread, or a
+volunteer maintainer deprioritises both. An internal commit title leaked our next ask into the issue
+we were waiting on.
+
+It cannot be cleanly withdrawn from this side, and a comment explaining it would be louder than the
+reference. So it stands, and the rule is to not do it again.
+
+- **In commit messages**, write it unlinkable: `mapd issue 127`, or `pfeiferj/mapd issue 127`. No `#`
+  immediately after the repo name.
+- **A bare `#127` is harmless** -- it resolves against this repo, not theirs.
+- **In markdown files it is fine.** GitHub scans commit messages and issue comments, not file
+  contents, so `bluepilot/MAPD-V2-PLAN.md` may reference it freely and does.
+
+Same reasoning applies to any upstream tracker -- commaai, sunnypilot, opendbc. A commit here should
+never be able to speak in someone else's thread.
+
 ## Language and units — US
 
 The owner is in the United States (Utah). Everything written here is **US English**: comments,
