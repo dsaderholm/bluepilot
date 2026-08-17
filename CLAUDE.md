@@ -726,6 +726,24 @@ door.** Do not propose a fake lead, a fake target, or a partial ACCDATA takeover
 naming rule reads the same way, since a stop that only exists under ICBM is scaffolding for a
 problem op long does not have.
 
+### A HEREDOC EATS `
+`, AND IT HAS NOW SHIPPED A BROKEN PUSH
+
+Three times on 2026-08-16/17, and the third one went out with a RED SUITE because the push was
+chained after the test command with `&&` and the failure scrolled past. Writing Python through a
+`<<'PY'` heredoc in this environment, an escape inside a triple-quoted string arrives as a LITERAL
+NEWLINE, producing an unterminated string literal. It hit `test_mapd_schema.py`, `bp_mapd_compare.py`
+and `cruise.py`.
+
+**Avoid the escape entirely** -- `print()` for a blank line, `", ".join(...)` instead of a joined
+newline, or a single spaced sentence. If a newline is genuinely required, use the Edit tool rather
+than a heredoc.
+
+**AND READ THE SUITE RESULT BEFORE THE PUSH LANDS, NOT AFTER.** `test && commit && push` prints the
+failure and then pushes anyway if the chain is written so the push does not depend on it. On a branch
+every other branch rebases onto, that is the worst possible place to be sloppy. The rule was already
+written down and it was still broken.
+
 ## Params, defaults, and his settings
 
 **Settings behave EXACTLY as they do on stock BluePilot, sunnypilot and openpilot.** Decided

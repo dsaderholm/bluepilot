@@ -154,9 +154,7 @@ class CruiseLayout(Widget):
                      "stop signs and red lights with no vehicle at them. This is the one case "
                      "the setting above cannot catch, since an empty intersection produces "
                      "no vehicle to measure. Weaker evidence than the vehicle case -- how long "
-                     "the model insists, and a speed floor, are its only filters.
-
-"
+                     "the model insists, and a speed floor, are its only filters. "
                      "IT SLOWS, IT DOES NOT STOP. Ford's cruise will not accept a set speed under "
                      "20 mph, so the car arrives at the sign doing 20 and the stop itself is yours. "
                      "You are alerted when the slowing starts, not when it runs out, so the whole "
