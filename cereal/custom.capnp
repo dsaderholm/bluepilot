@@ -642,7 +642,10 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       # a two-way road with one lane each way, where the lane to the left IS the oncoming lane. A
       # claim about the ROAD, needing no idea which lane we are in, which is the only map claim of
       # that shape that survived measurement.
-      noRoomInMap @19;           # the road is bending hard enough that a pass is the wrong place for it
+      noRoomInMap @19;
+      # A speed limit DROP is close enough that a pass started now would be finished while braking
+      # for it. The map is the only thing that can see a limit change before the sign does.
+      limitDropAhead @20;           # the road is bending hard enough that a pass is the wrong place for it
     }
 
     # BluePilot: the maneuver this WOULD perform, run as a dry run. Nothing actuates; see

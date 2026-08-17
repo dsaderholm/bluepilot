@@ -118,7 +118,8 @@ def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., lead_y=0.0, status=Tr
             # opted in and of this one before MapdV2 was set -- so every existing test keeps
             # asserting the no-map behaviour without being touched.
             mapd_present=False, mapd_hwy="motorway", mapd_oneway=False, mapd_tile=True,
-            mapd_lanes=3, mapd_sel="current"):
+            mapd_lanes=3, mapd_sel="current", mapd_next_sl=0.0, mapd_next_d=0.0,
+            mapd_sl=0.0, mapd_adv=0.0):
   # Being stuck behind a car means matching its speed, not still closing on it: vEgo tracks vLead
   # and the gap to the SET speed is what makes passing worth suggesting. Tests that need a genuine
   # approach pass v_ego explicitly.
@@ -160,7 +161,9 @@ def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., lead_y=0.0, status=Tr
   })
   if mapd_present:
     sm.data['mapdOut'] = NS(highwayClass=mapd_hwy, oneWay=mapd_oneway, tileLoaded=mapd_tile,
-                            lanes=mapd_lanes, waySelectionType=mapd_sel)
+                            lanes=mapd_lanes, waySelectionType=mapd_sel,
+                            nextSpeedLimit=mapd_next_sl, nextSpeedLimitDistance=mapd_next_d,
+                            speedLimit=mapd_sl, advisorySpeed=mapd_adv)
     sm.alive['mapdOut'] = True
     sm.valid['mapdOut'] = True
     sm.updated['mapdOut'] = True
@@ -1012,6 +1015,55 @@ class TestLaneAge:
     assert det.suggestion == Side.none, "suggested moving into an unproven lane"
     run(det, int(12.0 / DT_MDL), status=False, **IN_LEFT_LANE)
     assert det.suggestion == Side.right                       # and it comes back once proven
+
+  MPH_ = 0.44704
+
+  def test_a_slower_zone_close_ahead_refuses_the_pass(self):
+    """65 dropping to 45 in 150 m. A pass started now finishes while braking for the zone, which is a
+    worse pass than the one he would have made himself -- and the map is the only thing that can see
+    a limit change before the sign is readable."""
+    det = keep_right_det()
+    run(det, int(4.0 / DT_MDL), v_lead=SLOW_LEAD_MS, mapd_present=True,
+        mapd_sl=65 * self.MPH_, mapd_next_sl=45 * self.MPH_, mapd_next_d=150.0)
+    assert det.blocked_by == Blocked.limitDropAhead
+    assert det.suggestion == Side.none
+
+  def test_the_same_drop_far_enough_away_does_not(self):
+    det = keep_right_det()
+    run(det, int(4.0 / DT_MDL), v_lead=SLOW_LEAD_MS, mapd_present=True,
+        mapd_sl=65 * self.MPH_, mapd_next_sl=45 * self.MPH_, mapd_next_d=900.0)
+    assert det.blocked_by != Blocked.limitDropAhead
+    assert det.suggestion == Side.left
+
+  def test_a_rounding_sized_drop_is_not_a_reason(self):
+    """70 to 65 changes nothing about whether a pass is sensible."""
+    det = keep_right_det()
+    run(det, int(4.0 / DT_MDL), v_lead=SLOW_LEAD_MS, mapd_present=True,
+        mapd_sl=70 * self.MPH_, mapd_next_sl=65 * self.MPH_, mapd_next_d=100.0)
+    assert det.blocked_by != Blocked.limitDropAhead
+
+  def test_a_limit_RISE_is_never_a_reason(self):
+    """45 becoming 65 ahead is the opposite situation and must not read as a drop."""
+    det = keep_right_det()
+    run(det, int(4.0 / DT_MDL), v_lead=SLOW_LEAD_MS, mapd_present=True,
+        mapd_sl=45 * self.MPH_, mapd_next_sl=65 * self.MPH_, mapd_next_d=100.0)
+    assert det.blocked_by != Blocked.limitDropAhead
+    assert det.suggestion == Side.left
+
+  def test_a_posted_advisory_well_below_the_reference_is_a_corner(self):
+    """maxspeed:advisory is 2.6% of US 6 and 0% of I-15, so this almost never fires. It catches the
+    one case lateral acceleration structurally cannot: a corner the camera has not reached, since
+    lat_acc is what the road is doing NOW."""
+    det = keep_right_det()
+    run(det, int(4.0 / DT_MDL), v_lead=SLOW_LEAD_MS, mapd_present=True, mapd_adv=35 * self.MPH_)
+    assert det.blocked_by == Blocked.inCurve
+    assert det.suggestion == Side.none
+
+  def test_an_advisory_near_the_reference_is_a_sweeper_not_a_corner(self):
+    det = keep_right_det()
+    run(det, int(4.0 / DT_MDL), v_lead=SLOW_LEAD_MS, mapd_present=True, mapd_adv=60 * self.MPH_)
+    assert det.blocked_by != Blocked.inCurve
+    assert det.suggestion == Side.left
 
   def test_a_lost_map_is_believed_by_nothing(self):
     """waySelectionType == fail means mapd could not find an acceptable way to call ours -- and its

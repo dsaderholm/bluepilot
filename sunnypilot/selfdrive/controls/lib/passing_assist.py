@@ -567,6 +567,24 @@ AUTO_APPROACH_MARGIN_M = 20.0
 # road started bending, and pulling out of a committed pass mid-corner would be worse than either.
 DEFAULT_MAX_PASS_LAT_ACC = 1.3
 
+# A SPEED LIMIT DROP CLOSE ENOUGH TO SPOIL A PASS. Not a preference, so not a param -- the same
+# reasoning as the ramp gate. A commanded pass runs roughly ten to fifteen seconds from suggestion to
+# back-in-lane, which at 65 mph is about 300 m, and one finished while braking for a lower limit is a
+# worse pass than the one he would have made himself.
+#
+# 250 m rather than 300: the suggestion is the thing being gated, and the crossing that follows it is
+# already protected by the maneuver's own aborts. Refusing at the full pass length would go quiet
+# every time a limit change appeared on the horizon, which on an arterial is most of the time.
+LIMIT_DROP_LOOKAHEAD_M = 250.0
+# Ignore the rounding-sized ones. A 70 -> 65 transition changes nothing about whether a pass is
+# sensible; a 65 -> 45 does.
+LIMIT_DROP_MIN_MPH = 10.0
+
+# How far below the driver's own reference an advisory sign has to sit before it means a corner
+# rather than caution. Two thirds: a 40 advisory against a 65 reference is a corner; a 55 is a sign
+# on a sweeper he takes at 65 without thinking about it.
+ADVISORY_CORNER_FRACTION = 0.67
+
 # Hysteresis on wanted_side, which is what lights the blinker.
 #
 # 126 ABORTS IN 37 MINUTES, measured on the day highway drive 2026-08-15. An abort is a signal shown
@@ -2321,6 +2339,47 @@ class PassingAssistDetector:
     except (KeyError, AttributeError, TypeError):
       return None
 
+  def _advisory_says_corner(self, sm) -> bool:
+    """Is the posted advisory speed far enough below the reference to mean a real corner?
+
+    Scaled off the same reference speed the deficit uses, so it means the same thing on every road:
+    an advisory a third below what he is trying to drive is a corner, and one a few mph below is a
+    ramp sign on a gentle sweeper.
+    """
+    o = PassingAssistDetector._map_usable(sm)
+    if o is None or self.reference_speed <= 0.0:
+      return False
+    try:
+      adv = float(o.advisorySpeed)
+    except (AttributeError, TypeError, ValueError):
+      return False
+    return 0.0 < adv < ADVISORY_CORNER_FRACTION * self.reference_speed
+
+  @staticmethod
+  def _limit_drop_ahead(sm) -> bool:
+    """Is a materially lower speed limit close enough to spoil a pass? See LIMIT_DROP_LOOKAHEAD_M.
+
+    Compared against the CURRENT map limit rather than the set speed or the dash, because the
+    question is whether the ROAD is about to ask for less -- not whether he happens to be under it
+    already. A driver doing 50 in a 65 approaching a 45 zone is still approaching a restriction.
+
+    Both halves must be present and positive. mapd publishes 0 for "no next limit known", and a
+    distance of 0 with a real limit means the change is upon us rather than infinitely far, so the
+    distance test is a bound rather than a truthiness check.
+    """
+    o = PassingAssistDetector._map_usable(sm)
+    if o is None:
+      return False
+    try:
+      nxt = float(o.nextSpeedLimit)
+      cur = float(o.speedLimit)
+      dist = float(o.nextSpeedLimitDistance)
+    except (AttributeError, TypeError, ValueError):
+      return False
+    if nxt <= 0.0 or cur <= 0.0 or dist > LIMIT_DROP_LOOKAHEAD_M or dist < 0.0:
+      return False
+    return (cur - nxt) * CV.MS_TO_MPH >= LIMIT_DROP_MIN_MPH
+
   @staticmethod
   def _map_says_no_room(sm) -> bool:
     """Does the map rule out a same-direction lane to our left? See Blocked.noRoomInMap.
@@ -3050,12 +3109,30 @@ class PassingAssistDetector:
     #
     # Refusal only, and absent-is-permissive: lanes was 91.5% populated on route 00000383, so an
     # unknown count must never refuse. A missing map leaves every gate exactly as it was.
+    # A LOWER LIMIT IS CLOSE. The map sees a limit change before the sign is readable, which is the
+    # one thing it can do here that no sensor can. Refusal only, and absent map or absent next-limit
+    # both mean no claim.
+    if self._limit_drop_ahead(sm):
+      self._reset_outputs(Blocked.limitDropAhead, keep_wanted=True)
+      return
+
     if self._map_says_no_room(sm):
       self._reset_outputs(Blocked.noRoomInMap, keep_wanted=True)
       return
 
     if self._on_a_ramp(sm):
       self._reset_outputs(Blocked.onRamp, keep_wanted=True)
+      return
+
+    # ...AND THE MAP'S OWN CORNER SPEED, where a survey put one on a sign. maxspeed:advisory is 2.6%
+    # on US 6 and 0% on I-15, so this almost never fires -- but "I want to use all data" and it costs
+    # a comparison. It catches the corner the camera has not reached yet, which is the one case
+    # lat_acc structurally cannot: lateral acceleration is what the road is doing NOW.
+    #
+    # Reuses inCurve and the same param, because it is the same refusal for the same reason and a
+    # second blocked code would say "the road is bending" twice in different words.
+    if self.max_pass_lat_acc > 0.0 and self._advisory_says_corner(sm):
+      self._reset_outputs(Blocked.inCurve, keep_wanted=True)
       return
 
     if self.max_pass_lat_acc > 0.0 and self.lat_acc > self.max_pass_lat_acc:
