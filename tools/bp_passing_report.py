@@ -53,8 +53,18 @@ def _already_archived(hist, last) -> bool:
   """
   if not hist:
     return False
-  newest = {k: v for k, v in hist[-1].items() if k != "build"}
-  return newest == {k: v for k, v in last.items() if k != "build"}
+  # EXCLUDE THE TIMELINE TOO, and the omission double-listed the current drive on 2026-08-16.
+  # The archived copy carries a `build` and drops `timeline`; LastDrive carries a `timeline` and no
+  # `build`. Comparing on build alone therefore never matches and the newest drive is always
+  # appended a second time -- which is the exact fault this function was written to fix, returning
+  # through the half of it that was missed.
+  #
+  # The detector's own _archive_drive already excludes both, and says in its comment that the
+  # exclusion list is "named once and used on both sides rather than written out at each call".
+  # It is named once THERE. This is a third site, in a different file, and it drifted.
+  drop = ("build", "timeline")
+  comparable = lambda d: {k: v for k, v in d.items() if k not in drop}
+  return comparable(hist[-1]) == comparable(last)
 
 
 def history() -> int:
