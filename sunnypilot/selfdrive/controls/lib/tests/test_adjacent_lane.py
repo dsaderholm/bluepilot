@@ -74,6 +74,47 @@ class FakeSM:
     return self.data[s]
 
 
+class TestADividedCarriagewayHasNoOncomingLane:
+  """Route 00000383: the oncoming veto was up on 58% of one-way motorway frames -- 1337 of 2305 --
+  where opposing traffic in an ADJACENT lane is impossible by construction.
+
+  Not a classifier fault. With the model refusing to vouch for the left edge (0.0% of motorway
+  frames at the shipped threshold, still only 13.9% at 1.5), the band falls back to 9 m to reach
+  opposing traffic at 7.4 m on a centre-turn-lane arterial -- and on a divided highway that same
+  9 m reaches the far carriageway, where the radar correctly finds real oncoming cars that are not
+  our problem. Nineteen such returns, each latching 90 s, blanketed the drive.
+
+  There is no sensor-only separation: the two road types are geometrically identical from the car,
+  and the edge-threshold fix was replayed against that drive and kept all 19 at every value. OSM
+  stores a divided highway as two one-way ways, so `oneWay` is the only discriminator there is.
+  """
+
+  def _far_carriageway(self, divided):
+    """A vehicle closing head-on at 7.4 m -- the far carriageway of a divided highway, and outside
+    the adjacent lane. Edge untrusted, which is the only path that ever runs on motorway."""
+    adj = AdjacentLane()
+    sm = FakeSM([track(80.0, 7.4, -2 * V_EGO)], edge_stds=(5.0, 5.0))
+    upd(adj, sm, divided=divided)
+    return adj
+
+  def test_the_far_carriageway_is_not_our_road_when_the_map_says_one_way(self):
+    assert not self._far_carriageway(divided=True).left.blocks_oncoming
+
+  def test_and_it_still_counts_when_the_map_says_nothing(self):
+    """The pre-map behaviour, unchanged. Absent map, absent tile, feature off -- all reach here as
+    divided=False and the veto behaves exactly as it did."""
+    assert self._far_carriageway(divided=False).left.blocks_oncoming
+
+  def test_the_adjacent_lane_still_vetoes_on_a_one_way_way(self):
+    """The narrowing must not become a blanket excuse. A one-way way with something genuinely in the
+    next lane over is still a refusal -- a mis-tagged road, a frontage road, an oncoming vehicle on
+    the wrong side. Only the FAR carriageway moves outside the band."""
+    adj = AdjacentLane()
+    sm = FakeSM([track(80.0, 3.7, -2 * V_EGO)], edge_stds=(5.0, 5.0))
+    upd(adj, sm, divided=True)
+    assert adj.left.blocks_oncoming
+
+
 def upd(adj, sm, v_ego=V_EGO, max_d=MAX_D, **kw):
   """Apply one scene ONCOMING_FRAMES times.
 

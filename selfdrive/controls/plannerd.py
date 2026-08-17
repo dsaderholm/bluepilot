@@ -49,7 +49,14 @@ def main():
                             # rearRadarBP is the rear digest, published only when a feeder is
                             # fitted -- absent on every other car, where sm.valid stays False and
                             # RearApproach correctly reports unavailable rather than clear.
-                            'liveMapDataSP', 'carStateSP', 'carStateBP', 'liveTracks', 'rearRadarBP',
+                            # mapdOut is mapd v2's own message, and passing assist needs exactly one
+                            # field from it: oneWay. A divided carriageway is a one-way way, which is
+                            # the ONLY thing that separates it from an undivided road with a centre
+                            # turn lane -- the two are geometrically identical from the car, and the
+                            # sensor-only fix was replayed against a real drive and measured dead.
+                            # Absent unless MapdV2 is 1 or 2, where sm.valid stays False and the
+                            # oncoming veto keeps its pre-map behaviour exactly.
+                            'liveMapDataSP', 'carStateSP', 'carStateBP', 'liveTracks', 'rearRadarBP', 'mapdOut',
                             'selfdriveStateSP', 'mapdExtendedOut', gps_location_service],
                            poll='carState')
 

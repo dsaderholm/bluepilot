@@ -2292,6 +2292,29 @@ class PassingAssistDetector:
     closing = -float(lead.vRel)
     self.lead_ttc = (lead.dRel / closing) if closing > MIN_APPROACH_CLOSING_MS else NO_TTC_S
 
+  @staticmethod
+  def _divided_carriageway(sm) -> bool:
+    """Does the map say this carriageway is one-way? See _on_our_carriageway.
+
+    ABSENT IS FALSE, and that is the whole safety story. mapdOut is only published with MapdV2 at 1
+    or 2; with the feature off, mapd dead, or the tile missing, sm.valid is False and this returns
+    False, which leaves the oncoming veto behaving exactly as it did before the map existed. No map
+    costs coverage, never safety.
+
+    tileLoaded is required for the same reason the false-positive tool requires it: the map being
+    unable to answer is not an answer of "two-way", and it is certainly not an answer of "one-way".
+
+    Read every frame rather than latched. A way changes as he drives, and a stale "one-way" carried
+    onto an undivided road is the one failure mode that matters here.
+    """
+    try:
+      if not (sm.alive['mapdOut'] and sm.valid['mapdOut']):
+        return False
+      o = sm['mapdOut']
+      return bool(o.tileLoaded) and bool(o.oneWay)
+    except (KeyError, AttributeError, TypeError):
+      return False
+
   def _reference_speed(self, CS, sm, v_cruise: float, speed_limit_target: float) -> float:
     """The speed the driver asked for -- the operand the deficit is measured against.
 
@@ -2778,7 +2801,7 @@ class PassingAssistDetector:
     if self.adjacent_enabled:
       self.adjacent.update(sm, float(CS.vEgo), self.max_distance_m,
                            dt=DT_MDL, memory_s=self.oncoming_memory_s,
-                           strict=self.strict_two_way)
+                           strict=self.strict_two_way, divided=self._divided_carriageway(sm))
     else:
       self.adjacent.reset()
     self._blindspot(car_state_bp)

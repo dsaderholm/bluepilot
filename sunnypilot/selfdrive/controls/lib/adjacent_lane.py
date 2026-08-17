@@ -860,7 +860,8 @@ class AdjacentLane:
     self.right.reset()
 
   @staticmethod
-  def _on_our_carriageway(model, side: str, lat: float, d_rel: float) -> bool:
+  def _on_our_carriageway(model, side: str, lat: float, d_rel: float,
+                          divided: bool = False) -> bool:
     """Is that oncoming vehicle on our road, or across a median on the other carriageway?
 
     The one case the lateral band cannot settle on its own. A divided highway with a jersey barrier
@@ -888,16 +889,27 @@ class AdjacentLane:
     """
     edge_lat = road_edge_offset(model, side, d_rel)
     if edge_lat is None:
-      # See UNTRUSTED_EDGE_ONCOMING_M. Wide enough to reach past a median to the opposing lane,
-      # because a band that stops short of it reports "nothing coming" on exactly the roads where
-      # something is.
-      return abs(lat) <= UNTRUSTED_EDGE_ONCOMING_M
+      # THE MAP ANSWERS THE QUESTION THE EDGE COULD NOT. `divided` is mapd's oneWay: a divided
+      # carriageway is stored in OSM as two separate one-way ways, so on a one-way way there is no
+      # opposing lane to reach for and the 9 m reach has nothing to find. Narrowing to the adjacent
+      # band puts the far carriageway (about 7.4 m) outside, where it belongs.
+      #
+      # THIS IS THE GEOMETRY QUESTION, NOT A PERMIT. It does not cancel a veto or excuse a refusal --
+      # it decides whether a radar return is on OUR ROAD, which is the same job road_edge_offset
+      # does and the same job it fails at when the model will not vouch for the edge. Anything
+      # genuinely in the adjacent lane still counts, and every other gate is untouched.
+      #
+      # Measured before building: the sensor-only alternative was replayed against route 00000383 at
+      # five edge-trust thresholds and kept all 19 oncoming returns at every one of them. The two
+      # road types are identical from the car; oneWay is the only thing that separates them.
+      return abs(lat) <= (ADJACENT_MAX_M if divided else UNTRUSTED_EDGE_ONCOMING_M)
     # Camera frame: left is negative. "Inside the edge" is therefore a different comparison per
     # side, which is exactly the sort of thing that reads fine and is backwards.
     return lat > edge_lat if side == 'left' else lat < edge_lat
 
   def update(self, sm, v_ego: float, max_distance_m: float, dt: float = 0.05,
-             memory_s: float = DEFAULT_ONCOMING_MEMORY_S, strict: bool = True) -> None:
+             memory_s: float = DEFAULT_ONCOMING_MEMORY_S, strict: bool = True,
+             divided: bool = False) -> None:
     """Scan liveTracks for the nearest vehicle in each adjacent lane.
 
     Nearest by dRel, because that is the one we would meet first. Anything beyond the passing
@@ -993,7 +1005,7 @@ class AdjacentLane:
       if ground_speed(v_ego, p.dRel, p.yRel, p.vRel) < -MIN_ONCOMING_MS:
         self.oncoming_lat_hist[min(int(abs_lat), ONCOMING_LAT_BUCKETS - 1)] += 1
 
-      if not self._on_our_carriageway(model, side, lat, p.dRel):
+      if not self._on_our_carriageway(model, side, lat, p.dRel, divided):
         continue
 
       # The sign of absolute ground speed sorts the rest out. Oncoming is checked FIRST, because it
