@@ -1684,7 +1684,12 @@ class PassingAssistDetector:
         # drive -- so a drive that ran on build A and was archived after an update was labelled B.
         # Seen 2026-08-16: drives 5 and 6 were stamped 91e43d4f while plainly lacking the fields
         # that build added. A stamp that records who ARCHIVED a drive answers nothing anyone asked.
-        last.setdefault("build", str(self.params.get("GitCommit") or "")[:8])
+        # `not last.get(...)` rather than setdefault: _save_drive_summary now always WRITES a build
+        # key, and writes "" when the params read failed. setdefault sees a present key and declines,
+        # so a failed read would leave the drive permanently unattributable -- the one thing the
+        # stamp exists to prevent.
+        if not last.get("build"):
+          last["build"] = str(self.params.get("GitCommit") or "")[:8]
       except Exception:  # noqa: BLE001 - an unstamped drive is still worth keeping
         pass
       hist.append(last)
@@ -2942,7 +2947,14 @@ class PassingAssistDetector:
     # Suggestion only. A crossing already underway is left alone: a car cannot un-change lanes
     # because the road started bending, and abandoning one mid-corner is worse than finishing it.
     if self.max_pass_lat_acc > 0.0 and self.lat_acc > self.max_pass_lat_acc:
-      self._reset_outputs(Blocked.inCurve)
+      # keep_wanted, for the same reason the blindspot branch below carries it. This gate is reached
+      # PAST "a pass is warranted", so it is the flicker case, not the no-pass-warranted case --
+      # and lateral acceleration sitting near the threshold on a sweeper is about as flickery as a
+      # signal gets. Without it a bend hovering at 1.3 hard-cleared wanted_side the instant the gate
+      # fired and made the debounce pay WANTED_RISE_S to get it back, over and over: exactly the
+      # wobble that 126 aborts in 37 minutes bought _debounce_wanted for, reintroduced on a path the
+      # fix did not cover. Found by review 2026-08-17, reproduced before fixing.
+      self._reset_outputs(Blocked.inCurve, keep_wanted=True)
       return
 
     # Two-way road. Evaluated before the sign veto, and it is the one this whole design was waiting

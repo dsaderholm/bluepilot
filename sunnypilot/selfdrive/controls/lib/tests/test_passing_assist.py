@@ -1001,6 +1001,38 @@ class TestLaneAge:
     run(det, int(12.0 / DT_MDL), status=False, **IN_LEFT_LANE)
     assert det.suggestion == Side.right                       # and it comes back once proven
 
+  def test_a_bend_at_the_threshold_does_not_wobble_the_signal(self):
+    """FOUND BY REVIEW 2026-08-17, reproduced before it was fixed.
+
+    The gate is reached PAST "a pass is warranted", so it is the flicker case -- the same category as
+    the blindspot and no-lane branches, both of which pass keep_wanted. It did not, so a sweeper
+    hovering at the threshold hard-cleared wanted_side the instant it fired and made the debounce pay
+    WANTED_RISE_S to get it back, cycling for as long as the bend lasted. That is the wobble
+    _debounce_wanted was written for after 126 aborts in 37 minutes, arriving on a path the fix did
+    not cover.
+
+    Alternating either side of the threshold, wanted_side must hold what it had."""
+    det = keep_right_det()
+    run(det, int(4.0 / DT_MDL), v_lead=SLOW_LEAD_MS)
+    assert det.wanted_side == Side.left, "fixture did not establish a wanted pass"
+
+    seen = set()
+    for _ in range(6):
+      run(det, 10, v_lead=SLOW_LEAD_MS, curvature=0.0085)   # well over the gate
+      seen.add(int(det.wanted_side))
+      run(det, 10, v_lead=SLOW_LEAD_MS, curvature=0.0005)   # well under it
+      seen.add(int(det.wanted_side))
+    assert seen == {int(Side.left)}, f"wanted_side wobbled with the bend: {seen}"
+
+  def test_the_bend_still_refuses_the_suggestion_while_holding_the_signal(self):
+    """And the gate must still DO its job -- holding wanted_side is not the same as allowing a pass.
+    blocked_by has to read inCurve and no suggestion may stand."""
+    det = keep_right_det()
+    run(det, int(4.0 / DT_MDL), v_lead=SLOW_LEAD_MS)
+    run(det, 10, v_lead=SLOW_LEAD_MS, curvature=0.0085)
+    assert det.blocked_by == Blocked.inCurve
+    assert det.suggestion == Side.none
+
   def test_zero_disables_the_gate(self):
     """The control goes down to 0 s, and there the widening test is on its own."""
     det = keep_right_det(PassingAssistMinLaneAge=0)
