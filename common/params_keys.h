@@ -343,15 +343,27 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // interfering. Declared here so our Params does not reject the key.
     // JSON encodes itself: pass the dict, never json.dumps() -- see CLAUDE.md.
     {"MapdSettings", {PERSISTENT, JSON}},
-    // FusionPilot: fill liveMapDataSP from mapd v2's mapdOut instead of v1's /dev/shm/params.
+    // FusionPilot: the mapd v2 cutover control, and it has THREE states because the migration has
+    // three, not two:
     //
-    // DEFAULTS OFF, and the reason is about the car rather than caution about the code: the v2
-    // binary is not on the device yet, and with this on and nothing publishing mapdOut, Speed Limit
-    // Assist correctly reports no limit -- which would look exactly like the map being broken. It
-    // flips on once the binary is installed and one drive has confirmed the numbers match.
+    //   0  off      the v2 process does not run at all. Nothing changes, nothing is spent.
+    //   1  observe  v2 runs and its view is logged into the route at 20 Hz, but Speed Limit Assist
+    //               still reads v1. This is the state a verification drive happens in, and the only
+    //               way to compare the two on identical input -- v1 logs nothing about what it saw.
+    //   2  on       SLA reads v2. Same reversibility: put it back to 1 or 0 with no reflash.
+    //
+    // A BOOL could not express this. It was one until 2026-08-16, and the process ran whenever the
+    // binary was present, which meant anyone tracking this branch for ICBM alone got a second map
+    // daemon -- about a fifth of a core and 200 MB -- for a feature they had not asked for. Running
+    // a background process on someone's car by default because OUR migration needs it is not a cost
+    // to hand to somebody else.
+    //
+    // DEFAULTS OFF, and the reason is about the car rather than caution about the code: nothing has
+    // yet confirmed on this car that v2 finds the limits v1 does. It becomes 1 for the verification
+    // drive, then 2 once bp_mapd_compare shows "only v1" near zero.
     //
     // Transitional by design. It exists to make the cutover reversible and is deleted with v1.
-    {"MapdV2", {PERSISTENT, BOOL, "0"}},
+    {"MapdV2", {PERSISTENT | BACKUP, INT, "0"}},
     {"MapSpeedLimit", {CLEAR_ON_ONROAD_TRANSITION, FLOAT, "0.0"}},
     {"NextMapSpeedLimit", {CLEAR_ON_ONROAD_TRANSITION, JSON}},
     {"Offroad_OSMUpdateRequired", {CLEAR_ON_MANAGER_START, JSON}},

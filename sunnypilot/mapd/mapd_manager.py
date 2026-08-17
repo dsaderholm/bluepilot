@@ -19,7 +19,7 @@ from openpilot.selfdrive.selfdrived.alertmanager import set_offroad_alert
 from openpilot.sunnypilot.mapd.live_map_data.mapd_v2_map_data import MapdV2MapData
 from openpilot.sunnypilot.mapd.live_map_data.osm_map_data import OsmMapData
 from openpilot.system.hardware.hw import Paths
-from openpilot.sunnypilot.mapd import MAPD_PATH
+from openpilot.sunnypilot.mapd import MAPD_PATH, MAPD_V2_ON
 from openpilot.sunnypilot.mapd.mapd_installer import VERSION, update_installed_version
 
 # PFEIFER - MAPD {{
@@ -121,9 +121,13 @@ def main_thread():
   # FusionPilot: which map source fills liveMapDataSP. Read ONCE at start rather than per tick --
   # swapping the source mid-drive would hand Speed Limit Assist a different set of numbers with no
   # transition, and the setting is one a reboot follows anyway.
-  use_v2 = params.get_bool("MapdV2")
+  # Only state 2 switches the SOURCE. State 1 runs v2 and logs it while Speed Limit Assist stays on
+  # v1 -- that asymmetry is the entire verification step, so read the value, not its truthiness.
+  mapd_v2_state = params.get("MapdV2", return_default=True)
+  use_v2 = mapd_v2_state == MAPD_V2_ON
   live_map_sp = MapdV2MapData() if use_v2 else OsmMapData()
-  cloudlog.warning(f"mapd: live map source = {'mapd v2 (mapdOut)' if use_v2 else 'v1 (/dev/shm/params)'}")
+  cloudlog.warning(f"mapd: MapdV2={mapd_v2_state}, live map source = "
+                   f"{'mapd v2 (mapdOut)' if use_v2 else 'v1 (/dev/shm/params)'}")
 
   # Create folder needed for OSM
   try:

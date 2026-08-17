@@ -12,3 +12,9 @@ MAPD_PATH = os.path.join(MAPD_BIN_DIR, 'mapd')
 # device gets it with the update, so no boot-time download and no network needed for a test drive.
 MAPD_V2_PATH = os.path.join(MAPD_BIN_DIR, 'mapd_v2')
 MAPD_V2_VERSION = "v2.3.0"
+
+# The three states of the MapdV2 param. Named because `== 2` at a call site says nothing about why,
+# and because the middle one is the state nobody expects: v2 running and logged, SLA still on v1.
+MAPD_V2_OFF = 0
+MAPD_V2_OBSERVE = 1
+MAPD_V2_ON = 2

@@ -776,9 +776,23 @@
           "items": [
             {
               "key": "MapdV2",
-              "widget": "toggle",
-              "title": "Use mapd v2",
-              "description": "Read speed limits and curves from mapd v2 over cereal instead of v1's shared memory. v2 also reports lane count, freeway-vs-ramp, one-way, and whether the map is lost -- and unlike v1 it records what the map saw into the drive logs. Requires the v2 binary; with this on and the binary missing there will be no speed limits at all."
+              "widget": "multiple_button",
+              "title": "mapd v2",
+              "description": "Off: only the current map program runs and nothing changes. Observe: mapd v2 runs alongside it and records what it sees into your drive logs, while speed limits still come from the old one -- drive in this state first, so the two can be compared on the same drive. On: speed limits and curves come from mapd v2, which also knows lane count, freeway-versus-ramp, one-way, and when the map has lost the road.",
+              "options": [
+                {
+                  "value": 0,
+                  "label": "Off"
+                },
+                {
+                  "value": 1,
+                  "label": "Observe"
+                },
+                {
+                  "value": 2,
+                  "label": "On"
+                }
+              ]
             }
           ],
           "sub_panels": [
