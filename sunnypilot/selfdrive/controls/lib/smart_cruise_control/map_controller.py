@@ -193,6 +193,11 @@ class SmartCruiseControlMap:
 
     self.last_position = coordinate_from_param("LastGPSPosition", self.mem_params) or Coordinate(0.0, 0.0)
     self.target_velocities = velocities_from_param("MapTargetVelocities", self.mem_params) or []
+    # Declared HERE, not just in update(). An attribute that only exists once some other method has
+    # run is the exact shape of the bug that made the car undrivable on 2026-08-15 -- `self.gap` on
+    # the Ford CarController, set in a method that was never called. update_calculations() is
+    # reachable without update() and the suite proved it within a minute of this being missing.
+    self.mapd_v2_path: tuple | None = None
 
   def get_v_target_from_control(self) -> float:
     if self.is_active:
@@ -222,11 +227,19 @@ class SmartCruiseControlMap:
       self.target_accel = -min(max(decel, SCC_MAP_DECEL_MIN), SCC_MAP_DECEL_MAX)
 
   def update_calculations(self) -> None:
-    self.last_position = coordinate_from_param("LastGPSPosition", self.mem_params) or Coordinate(0.0, 0.0)
+    # FusionPilot: same two inputs, either source. Everything below this point -- the walk, the
+    # trigger arithmetic, the corner-speed factor pair and all four defenses -- is untouched by the
+    # migration and MUST stay that way for now. Each defense was bought with a measured event on
+    # these roads, and re-deriving them against a full profile is a separate job to do WITH drive
+    # data, not the same afternoon as the source swap. Change one thing at a time on a car.
+    if self.mapd_v2_path is not None:
+      self.last_position, self.target_velocities = self.mapd_v2_path
+    else:
+      self.last_position = coordinate_from_param("LastGPSPosition", self.mem_params) or Coordinate(0.0, 0.0)
+      self.target_velocities = velocities_from_param("MapTargetVelocities", self.mem_params) or []
+
     lat = self.last_position.latitude
     lon = self.last_position.longitude
-
-    self.target_velocities = velocities_from_param("MapTargetVelocities", self.mem_params) or []
 
     if self.last_position is None or self.target_velocities is None:
       return
@@ -447,12 +460,15 @@ class SmartCruiseControlMap:
     return False
 
   def update(self, long_enabled: bool, long_override: bool, v_ego, a_ego, v_cruise,
-             model_lat_acc: float = 0.0) -> None:
+             model_lat_acc: float = 0.0, mapd_v2_path=None) -> None:
     self.long_enabled = long_enabled
     self.long_override = long_override
     self.v_ego = v_ego
     self.a_ego = a_ego
     self.v_cruise = v_cruise
+    # None means "use v1". Passed in rather than read here so this class keeps taking its inputs
+    # from its caller instead of growing a second opinion about which map source is live.
+    self.mapd_v2_path = mapd_v2_path
 
     self.update_params()
     self.update_calculations()

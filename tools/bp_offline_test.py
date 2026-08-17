@@ -58,6 +58,7 @@ DEFAULT_TARGETS = [
   # (that directory glob already covers test_button_mapping.py)
   "sunnypilot/selfdrive/controls/lib/tests/test_unconfirmed_lead.py",
   "sunnypilot/selfdrive/controls/lib/smart_cruise_control/tests/test_map_model_veto.py",
+  "sunnypilot/selfdrive/controls/lib/smart_cruise_control/tests/test_mapd_v2_path.py",
   "sunnypilot/selfdrive/controls/lib/smart_cruise_control/tests/test_map_factor_split.py",
   "sunnypilot/selfdrive/controls/lib/smart_cruise_control/tests/test_scc_leaves_disabled.py",
   # Named files, not selfdrive/ui/tests/ -- test_raylib_ui.py, test_soundd.py, test_feedbackd.py
