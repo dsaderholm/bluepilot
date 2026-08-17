@@ -186,10 +186,56 @@ leftmost lane there is the tolled express lane.
 into the express lane today, because nothing in the system knows it exists. Coverage is 100% where he
 drives, versus a measurement that still needs a road test.
 
-**What it needs from mapd.** `hov:lanes` is a per-lane list (`designated|yes|yes|yes`), so exposing
-it usefully means a lane-indexed field rather than a scalar -- a bigger shape than `lanes:forward`,
-smaller than node tags. Worth confirming the tag's value format across his corridor before asking, so
-the request names what it wants rather than the tag.
+**FORMAT MEASURED 2026-08-17**, 279 I-15 motorway ways carrying the tag:
+
+    hov:lanes = "designated||||"    108      hov:minimum = 2   on all 279
+                "designated|||"      62      lanes       = 4..8, pipe count always matches
+                "designated|||||"    59
+
+Pipe-separated per lane, and **`designated` is always FIRST** -- the leftmost lane, on every way, with
+a 2-occupant minimum. That is precisely the lane a pass would move into.
+
+**Ask for it as raw Text, following their own `conditionalSpeedLimit` precedent.** That field is
+documented as "always output when the tag is present so forks can evaluate conditions mapd does not
+handle itself", which is exactly this situation: mapd should not have to reason about occupancy,
+tolling or which lane we are in. Hand over the string. That also makes the ask small -- one Text
+field, no parsing, no lane indexing in their code -- rather than the lane-indexed structure this
+section previously assumed it needed.
+
+#### THE DRAFT
+
+Title: `Expose hov:lanes as raw text`
+
+```
+Hi. A small one, and shaped like conditionalSpeedLimit rather than like a new
+feature.
+
+Would you consider outputting OSM's `hov:lanes` (and `hov:minimum`) as raw Text on
+MapdOut, the way conditionalSpeedLimit passes the tag through untouched?
+
+The reason for raw rather than parsed: whether an HOV lane is usable depends on
+occupancy, tolling and local rules, none of which mapd should have to reason
+about. Your conditionalSpeedLimit note says it best -- output the tag so forks can
+evaluate what mapd does not handle itself. Same thing here.
+
+Coverage on the road I care about, measured before asking. I-15 through Salt Lake,
+279 motorway ways carrying the tag:
+
+    hov:lanes = "designated||||"    108      hov:minimum = 2 on all 279
+                "designated|||"      62      lanes = 4..8, pipe count matches
+                "designated|||||"    59
+
+100% of I-15 motorway ways in that box have both tags, and `designated` is always
+the first entry, so the leftmost lane is the HOV lane throughout.
+
+What it is for: my fork suggests lane changes to pass slower traffic, and it will
+currently suggest moving into the express lane because nothing in the system knows
+it exists. A refusal is all I need, and one string is enough to build it.
+
+Happy to test on hardware -- I have v2 running with Utah tiles downloaded.
+```
+
+**Ordering unchanged**: after `pfeiferj/mapd#127` gets a response.
 
 **Ordering unchanged**: after `pfeiferj/mapd#127` gets a response. Two open asks from one person is
 how both slide, and that applies to this one as much as to the stop signs.
