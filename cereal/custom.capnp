@@ -290,6 +290,17 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     state @0 :DynamicExperimentalControlState;
     enabled @1 :Bool;
     active @2 :Bool;
+    # FusionPilot: the model's "I am planning to stop for something ahead", and where it expects to
+    # be stopped. Computed from modelV2 alone, so it is meaningful whatever mode DEC is in and even
+    # when DEC is off -- and `unconfirmed_lead.py` already drives the stop-sign path from it.
+    #
+    # It has NEVER been on the wire. He reported stop-sign slowing as inaccurate while traffic
+    # lights are fine, and that complaint was unattributable: nothing in any route says whether the
+    # model failed to see the sign or saw it and the response was wrong. Same shape as the three
+    # readouts computed correctly and never rendered.
+    hasSlowDown @3 :Bool;
+    slowDownUrgency @4 :Float32;
+    slowDownEndpoint @5 :Float32;  # metres to the model's furthest point; inf when not a full plan
 
     enum DynamicExperimentalControlState {
       acc @0;

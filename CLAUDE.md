@@ -1677,6 +1677,28 @@ solved. A model that had seen ten thousand turn lanes would simply not do it. En
 weakness of category 2, and the answer is to keep MEASURING (geoLeftTravelProven, exitsBy,
 patienceMissed) so the road can keep teaching, rather than to pretend the enumeration is complete.
 
+## THE STOP-SIGN SIGNAL IS ON THE WIRE NOW. IT NEVER WAS.
+
+2026-08-18. He reported stop-sign slowing as inaccurate while traffic lights are fine, and that
+complaint was **unattributable**: `dec.has_slow_down()` -- the thing the whole stop-sign path keys
+on, and what `unconfirmed_lead.py` drives `IcbmModelStopEnabled` from -- had never been published.
+`DynamicExperimentalControl` logged `state`, `enabled` and `active` and nothing else, so no route
+has ever said whether the model failed to SEE a sign or saw it and the RESPONSE was wrong.
+
+Now `hasSlowDown`, `slowDownUrgency` and `slowDownEndpoint` are on the struct and set in
+`longitudinal_planner.py` from the accessors. `endpoint_x()` is inf when the model's plan is not
+full length, and inf is clamped to 0 on the wire -- **0 means "no endpoint", never "stopping right
+here"**, which is the one reading that would invert the meaning.
+
+**This is the third time a value in this fork was computed correctly and never rendered.** The test
+asserts the WIRING and follows one level of indirection to do it: a field fed from `active()`
+instead of `has_slow_down()` would read plausibly and correlate, and the test fails on it.
+
+**It costs a drive to use.** `has_slow_down` is computed from modelV2 alone, so it is live whatever
+DEC is doing -- but it is not retroactive, and no existing route carries it. The measurement it
+enables is scoring fire locations against OSM stop and give_way nodes from the tile store
+(`tools/bp_offline_map.py` reads that store), which finally separates detection from response.
+
 ## THE SET SPEED HUNT: TAP FOR SMALL CORRECTIONS, HOLD FOR LARGE ONES
 
 Reported 2026-08-12: *"it raised and lowered my cruise over and over... when the speed limit changed

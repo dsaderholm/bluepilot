@@ -92,6 +92,7 @@ DEFAULT_TARGETS = [
   # migration on 2026-08-08.
   "selfdrive/car/tests/test_params_keys_unique.py",
   "selfdrive/car/tests/test_no_int_on_capnp_enums.py",
+  "selfdrive/car/tests/test_dec_slow_down_published.py",
   # Named file, not the directory: test_mapd_version.py beside it hashes the installed mapd binary
   # and cannot run without the device. The schema guard pins mapd v2's ordinals, which are theirs
   # rather than ours -- capnp reads by position, so drift decodes as different fields with no error.

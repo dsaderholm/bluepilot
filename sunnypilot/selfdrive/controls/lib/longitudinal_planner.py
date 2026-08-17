@@ -5,6 +5,7 @@ This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 """
 
+import math
 from cereal import messaging, custom
 from opendbc.car import structs
 from openpilot.common.constants import CV
@@ -135,6 +136,18 @@ class LongitudinalPlannerSP:
     dec.state = DecState.blended if self.dec.mode() == 'blended' else DecState.acc
     dec.enabled = self.dec.enabled()
     dec.active = self.dec.active()
+    # FusionPilot: publish the stop-sign signal itself, not only DEC's mode. `has_slow_down()` is
+    # what drives the stop-sign path in unconfirmed_lead.py, it is computed from modelV2 alone so it
+    # is live even with DEC off, and it had never reached a log -- which is why "stop signs are not
+    # accurate, traffic lights are" could not be attributed to detection or to response.
+    #
+    # endpoint_x() is inf when the model's plan is not full length. capnp Float32 takes inf, but a
+    # tool reading it has to handle that, so it is clamped to 0 here and 0 means "no endpoint"
+    # rather than "stopping right now" -- the one reading that would invert the meaning.
+    dec.hasSlowDown = self.dec.has_slow_down()
+    dec.slowDownUrgency = float(self.dec.urgency())
+    endpoint = float(self.dec.endpoint_x())
+    dec.slowDownEndpoint = 0.0 if not math.isfinite(endpoint) else endpoint
 
     # Smart Cruise Control
     smartCruiseControl = longitudinalPlanSP.smartCruiseControl
