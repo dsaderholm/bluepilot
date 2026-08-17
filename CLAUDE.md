@@ -1073,6 +1073,14 @@ ours, is not a cost to hand to them. The binary ships either way; what it costs 
   fields in our own structs.
 - **For passing assist: map data MAY REFUSE, MUST NEVER OPEN.** `lanes = 3` cannot authorize a lane
   change on its own. That is what keeps "no map costs coverage, never safety" true.
+- **A LIMIT FROM A FAILED WAY MATCH IS REFUSED.** `waySelectionType == fail` means mapd's matcher
+  could not decide which way the car is on, and `MapdV2MapData` zeroes both the current and the next
+  limit there -- the next one is matched against the same way, so it is exactly as suspect. Added
+  2026-08-17. It is OUR confidence policy, not an assumption about mapd: a limit is an instruction to
+  change speed, so refusing one costs coverage while honoring a wrong one costs safety, which is the
+  map-is-evidence rule applied. Whether mapd zeroes it anyway is answered by
+  `bp_mapd_compare.py`, which now cross-tabs fail frames against non-zero `speedLimit` -- so that
+  question needed a DRIVE, never a device, and it no longer blocks state 2 either way.
 - **A new setting family needs its prefix in `bp_sunnylink_settings_audit.py`.** `Mapd` was missing
   and the audit reported 33/33 reachable while the new control could not be changed remotely at all.
 

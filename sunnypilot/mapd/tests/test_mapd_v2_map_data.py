@@ -113,3 +113,36 @@ def test_transitions_are_logged_once_not_per_frame(monkeypatch):
   m.sm._data["mapdOut"].waySelectionType = "fail"
   m._log_transitions()
   assert any("waySelectionType=fail" in w for w in warnings)
+
+
+class TestALostRoadPublishesNoLimit:
+  """A limit from a FAILED way match is a guess about which road we are on.
+
+  `waySelectionType == fail` means mapd's matcher could not decide. Whether it also zeroes its
+  `speedLimit` on those frames is unknown and cannot be settled without a drive -- so this gate is
+  OUR confidence policy, not an assumption about mapd's behavior. If mapd zeroes it anyway the gate
+  never fires and costs nothing; if it does not, this is the only thing standing between Speed Limit
+  Assist and a limit for a road the car may not be on.
+
+  Which way it actually is gets answered by the first observe route:
+  `tools/bp_mapd_compare.py` now cross-tabs fail frames against non-zero speedLimit and says so.
+
+  This matters ONLY at MapdV2 = 2, which has not happened yet -- which is exactly why the gate goes
+  in now rather than after. The rule it comes from is in CLAUDE.md: the map may refuse freely, but
+  must never be the sole thing that opens. A limit is an instruction to slow down or speed up.
+  """
+
+  def test_a_failed_match_yields_no_current_limit(self):
+    m = make(True, speedLimit=29.058, waySelectionType="fail")
+    assert m.get_current_speed_limit() == 0.0
+
+  def test_a_failed_match_yields_no_next_limit_either(self):
+    """The next limit is matched against the same way, so it is exactly as suspect."""
+    m = make(True, nextSpeedLimit=24.587, nextSpeedLimitDistance=412.0, waySelectionType="fail")
+    assert m.get_next_speed_limit_and_distance() == (0.0, 0.0)
+
+  def test_every_confident_selection_still_passes_through(self):
+    """The gate must catch `fail` and nothing else -- `extended` and `possible` are still matches."""
+    for kind in ("current", "predicted", "possible", "extended"):
+      m = make(True, speedLimit=29.058, waySelectionType=kind)
+      assert m.get_current_speed_limit() == 29.058, f"{kind} was gated as though it had failed"

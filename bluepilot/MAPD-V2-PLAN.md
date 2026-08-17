@@ -537,13 +537,23 @@ Observe mode went live 2026-08-16. Once a drive with `mapdOut` in it exists, run
 1. **Is "only v1 had a limit" near zero?** That is the gate for state 2. Note the tool scores only
    frames above 5 mph, because v1 serves the PREVIOUS drive's limit out of `/dev/shm/params` while
    stationary and it reads exactly like a live one.
-2. **DOES mapd PUBLISH A NON-ZERO `speedLimit` ON FRAMES WHERE `waySelectionType` IS `fail`?** This is
-   the one review finding left deliberately open: it cannot be settled offline, and guessing at a
-   gate would be inventing behavior. `MapdV2MapData` passes `speedLimit` straight through today
-   without consulting the confidence field. If mapd zeroes the limit when its matcher fails, nothing
-   needs doing. **If it does not, the reader needs a gate before state 2** -- otherwise a guessed
-   limit reaches Speed Limit Assist labelled exactly like a matched one, which is the opposite of
-   what this migration is for.
+2. **DOES mapd PUBLISH A NON-ZERO `speedLimit` ON FRAMES WHERE `waySelectionType` IS `fail`?**
+   **ANSWERED BY THE TOOL NOW, 2026-08-17** -- `bp_mapd_compare.py` cross-tabs fail frames against
+   non-zero `speedLimit` and prints the verdict in words. Both fields are in `mapdOut` at 20 Hz, so
+   any observe route settles it; it needed a DRIVE, not a device.
+
+   **AND THE GATE IS ALREADY IN**, so the answer no longer blocks state 2 -- it only says whether the
+   gate is load-bearing or belt-and-braces. `MapdV2MapData.way_match_failed` zeroes both the current
+   and the next limit when the matcher failed, for the current limit AND the next one, since both are
+   matched against the same way.
+
+   That is not a guess about mapd's behavior, which is what the earlier note rightly refused to make.
+   It is OUR confidence policy: a limit published on a failed match is a limit for a road mapd is not
+   confident we are on, and it would arrive at Speed Limit Assist labelled exactly like a matched
+   one. The map-is-evidence rule settles which way to err -- a limit is an instruction to change
+   speed, so refusing one costs coverage and honoring a wrong one costs safety. If mapd zeroes it
+   anyway the gate never fires and costs nothing.
+
 3. **What do the `only v2` rows look like?** Those are places v1 was blind. The measured US 40/189
    case -- tile holds 65 mph, SLA showed nothing -- should appear among them; if it does not, the
    residual defect is somewhere other than v1's way-matching and the 1.7% figure needs re-deriving.
