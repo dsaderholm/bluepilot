@@ -1250,6 +1250,36 @@ class TestReferenceSpeedIsTheDriversIntent:
                       set_speed=70 * self.MPH, icbm_hold=95 * self.MPH, icbm_manual=False)
     assert det.reference_source == RefSource.cluster
 
+  def test_the_max_is_the_intent_once_icbm_clears_the_baseline(self):
+    """THE REGRESSION ICBM WARNED ABOUT, 2026-08-17. `enforce_no_limit_no_hold` clears vBaseline
+    wherever SLA has no number -- about 14% of his road -- so the hold branch stops firing and the
+    reference used to fall to the DASH, which ICBM lowers for curves and leads.
+
+    Driver's MAX is 80, no SLA limit anywhere, ICBM has dropped the dash to 68 for a curve, lead is
+    doing 65. Against the dash that lead is 3 mph slow and refused; against the number he actually
+    set it is 15 mph slow and worth passing. vCruiseCluster tracks driver presses only, so it is
+    the operand that survives ICBM lowering anything."""
+    v_max = 80 * self.MPH
+    det = PassingAssistDetector()
+    for _ in range(int(3.0 / DT_MDL)):
+      det.update(make_sm(v_ego=68 * self.MPH, v_lead=65 * self.MPH, d_rel=60.,
+                         set_speed=68 * self.MPH, icbm_hold=0.0, icbm_manual=True),
+                 v_max, True, 0.0)
+    assert det.reference_speed >= 79 * self.MPH, "fell back to the dash ICBM had lowered"
+    assert det.suggestion == Side.left
+
+  def test_the_max_does_not_override_a_limit_sla_is_actually_driving(self):
+    """The other half, and what keeps the fix narrow. With SLA managing to 50 while the MAX sits at
+    80, taking the max would suggest passes to reach a speed the system is deliberately not driving
+    -- "a valid limit is not consent to drive it", the fault the planner's own comment records."""
+    v_max = 80 * self.MPH
+    det = PassingAssistDetector()
+    for _ in range(int(3.0 / DT_MDL)):
+      det.update(make_sm(v_ego=48 * self.MPH, v_lead=46 * self.MPH, d_rel=60.,
+                         set_speed=48 * self.MPH), v_max, True, 50 * self.MPH)
+    assert det.reference_source == RefSource.speedLimit
+    assert det.reference_speed < 55 * self.MPH, "the MAX overrode a limit SLA was driving"
+
   def test_reference_never_below_the_dash(self):
     det = self._drive(v_ego=80 * self.MPH, v_lead=78 * self.MPH, d_rel=60.,
                       set_speed=80 * self.MPH, icbm_hold=50 * self.MPH, icbm_manual=True)

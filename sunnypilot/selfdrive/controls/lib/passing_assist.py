@@ -2306,6 +2306,30 @@ class PassingAssistDetector:
 
     best, source = (cluster if cluster > 0 else v_cruise), RefSource.cluster
 
+    # WITH NO SLA NUMBER, THE DRIVER'S MAX IS THE INTENT AND THE DASH IS NOT.
+    #
+    # Added 2026-08-17, when ICBM's `enforce_no_limit_no_hold` began clearing the baseline wherever
+    # SLA has no limit -- about 14% of the road he covers. Their session flagged it: "if any gate of
+    # yours reads the hold as the driver's chosen speed, it now reads zero there."
+    #
+    # It does, and the consequence lands exactly on the fault the top of this docstring exists to
+    # prevent. With the baseline gone the branch above no longer fires, so the reference falls to
+    # `cluster` -- the DASH -- which ICBM lowers for curves, leads and the hazard path. Differencing
+    # against a number that drops every time the car slows means every lead stops looking slow at
+    # the moment a pass is most wanted, which is the whole reason this method does not simply read
+    # the dash.
+    #
+    # `v_cruise` is `vCruiseCluster` in m/s, and under ICBM it tracks DRIVER BUTTON PRESSES ONLY --
+    # nothing lowers it for a curve. So a max recovers the driver's number with no new capnp field
+    # and without ICBM's `no_limit_hold_speed`, which is not on the wire and cannot be read here.
+    #
+    # ONLY WHERE SLA HAS NOTHING, which is the narrow case and keeps the managed case untouched. If
+    # SLA is driving to a limit, taking the MAX over its target would suggest passes to reach a
+    # speed the system is deliberately not driving -- "a valid limit is not consent to drive it",
+    # the same fault the planner's own comment records for feeding the limit in.
+    if speed_limit_target <= 0.0 and v_cruise > best:
+      best, source = v_cruise, RefSource.cluster
+
     # SLA following the limit plus offset. Only reaches here when the driver has not overridden,
     # and the planner only supplies it when Speed Limit Assist is actually switched on.
     if speed_limit_target > best:
