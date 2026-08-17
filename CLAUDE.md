@@ -1498,6 +1498,37 @@ printf "1" > /data/params/d/MapdV2      # 0 off, 1 observe, 2 on
 
 Otherwise it is reboot, set, reboot. True of any new param on its first flash, not just this one.
 
+### WHAT THE v2 PATH ACTUALLY CARRIES: CURVATURE. THE VELOCITIES ARE A TRANSFORM OF IT.
+
+Measured 2026-08-18, route 00000383, and it reframes the migration. Across **6,725 path points,
+every single one**:
+
+    targetVelocity^2 * |curvature| = 2.200
+
+which is `/personalities/standard/map_curve_target_lat_a` exactly. mapd computes the path's corner
+speeds as `v = sqrt(a_lat / curvature)` and nothing else, on the STANDARD personality --
+`subscriber/shadow_selfdrive_state` is False, so it never sees openpilot's.
+
+**So `targetVelocity` carries no information `curvature` does not.** SCC-Map at state 2 is fed the
+same KIND of number v1 gave it, at 27 points instead of one. The plan document sold the path on its
+velocities; **the value is the curvature profile**, and that is what the exit-ramp work should be
+built on rather than on a denser supply of corner speeds.
+
+Two dials that look like new levers and are not:
+
+- **`map_curve_target_lat_a` IS `SmartCruiseControlMapFactor`**, in different units:
+  `v = sqrt(a_lat / k) * factor`. Two controls for one behaviour. If they are ever consolidated
+  mapd's is the better one -- a lateral acceleration rather than a multiplier on somebody else's
+  constant -- but that is a SWAP, not an add.
+- **`curve_target_speed_time_offset` does not reach SCC-Map at all.** SCC-Map walks the path and
+  does its own trigger arithmetic, so mapd's offset only moves mapd's own controller output, which
+  this fork does not consume. It was written up in `MAPD-V2-PLAN.md` as the answer to "the exit that
+  never slows enough" and **it is not**. That lever is still ours, in the walk.
+
+`sunnypilot/mapd/mapd_settings.py` is the bridge that establishes all of this: it caches mapd's own
+settings into `MapdSettings` (declared since v2 landed, never read or written by anything, and no
+process had ever published `mapdIn`), and its write path is built, tested and **deliberately empty**.
+
 **SCC-Map ALREADY READS THE v2 PATH at state 2** (`mapd_v2_path.py`, wired in
 `smart_cruise_control.py`, `mapdExtendedOut` subscribed in plannerd). It is a pure SOURCE SWAP: the
 walk, the trigger arithmetic, the corner-speed factor pair and all four camera defenses are
