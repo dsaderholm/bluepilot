@@ -309,12 +309,44 @@ to mapdOut. Instead, I check if they exist for the direction of travel and if so
 correct one in the lanes output. That's how maxSpeed:forward and maxSpeed:backward are handled as the
 user probably doesn't care about the direction that isn't active."*
 
-**THE PATTERN, and every future ask should assume it:** directional tags are resolved to the
-direction of travel and folded into the EXISTING output. No new field. So do not ask for
-`change:lanes:forward` -- ask for `change`, resolved.
+**THE PATTERN, as first stated:** directional tags are resolved to the direction of travel and
+folded into the EXISTING output. No new field. So do not ask for `change:lanes:forward` -- ask for
+`change`, resolved.
 
 **And it silently inverts our lane-count gate**; see the comment at `_map_says_no_room`. Flagged in
 the reply below because every other fork consuming `lanes` has the same problem and cannot detect it.
+
+#### HE CHANGED IT AFTER THAT REPLY. THE PATTERN ABOVE IS NOT A GENERAL RULE.
+
+pfeiferj, 2026-08-17, responding to the release-note request: *"Gotcha, what I might do then is have
+a new field that is something like currentDirectionLanes that only gets filled when there is a
+directional lane tag and then keep lanes as a total. The current lanes tag does get used for road
+size calculations when attaching to a road so it might make sense to split them for this as opposed
+to maxSpeed where there's really not a functional reason to know the other directions maxSpeed."*
+
+**So the fold-into-the-existing-output pattern holds only where the total has NO consumer of its
+own.** `maxSpeed` folds because nobody needs the other direction's limit. `lanes` does not, because
+mapd itself uses the way total for road-size calculations when attaching a position to a road. That
+distinction is the thing to carry into the next ask, not "he never adds fields":
+
+  ASK FOR A RESOLVED VALUE IN THE EXISTING FIELD when the unresolved total is meaningless.
+  EXPECT A NEW FIELD when something already depends on the total.
+
+Two consequences, both good for us:
+
+- **The version hazard is gone.** `lanes` keeps its meaning, `_map_says_no_room` stays correct across
+  the bump, and the capitalized instruction that used to sit in that comment -- invert the threshold
+  to `lanes <= 1` -- would now BREAK the gate on the exact 2+1 sections it exists for. The comment
+  has been rewritten to say so; do not resurrect it from this document's history.
+- **`currentDirectionLanes` is strictly better than the `oneWay` term** it would replace, because it
+  answers the question directly rather than inferring it from divided-vs-undivided. Prefer it where
+  present. A count of 0 must keep meaning UNKNOWN: he confirmed on issue 86 that absent numeric
+  fields read as 0 in tiles predating a field, so 0 can never mean "no lanes this way".
+
+**This also validates raising the ambiguity at all.** The ask itself was answered "yes" immediately;
+the FOLLOW-UP -- that the change was invisible to consumers and needed a release note -- is what
+produced a better design. Worth repeating: when a maintainer agrees to a change, the useful next
+message is what the change breaks silently, not thanks.
 
 #### REPLY TO ISSUE 127
 

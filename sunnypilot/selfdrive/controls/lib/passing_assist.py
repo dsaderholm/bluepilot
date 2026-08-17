@@ -2398,28 +2398,31 @@ class PassingAssistDetector:
       return False
     if lanes <= 0:
       return False
-    # *** THIS THRESHOLD INVERTS WHEN MAPD LEARNS lanes:forward. READ BEFORE BUMPING MAPD_V2_VERSION. ***
+    # THE VERSION HAZARD THAT USED TO BE WRITTEN HERE IS RESOLVED. DO NOT ACT ON IT.
     #
-    # pfeiferj replied to mapd issue 127 on 2026-08-17 agreeing to add the forward/backward lane
-    # tags, and said how he would do it: NOT as new MapdOut fields, but by checking whether the
-    # directional tag exists for the direction of travel and using it in the EXISTING `lanes`
-    # output. That is how he already handles maxSpeed:forward/backward, and it is the right call for
-    # a consumer that only cares about the active direction.
+    # This block previously said, in capitals, that `lanes` would silently become direction-resolved
+    # on a future mapd release and that this threshold must be inverted to `lanes <= 1` when
+    # MAPD_V2_VERSION was bumped past it. That was a correct reading of the design pfeiferj first
+    # described on mapd issue 127, and it is no longer the design he is building. Following the old
+    # instruction would refuse passes on exactly the 2+1 sections this gate exists to allow.
     #
-    # It also silently changes what this line means, and the field looks identical at runtime:
+    # What he settled on instead, on 2026-08-17, after the ambiguity was raised: `lanes` KEEPS its
+    # meaning as the way total, and a separate field -- `currentDirectionLanes` or similar -- is
+    # populated only where a directional lane tag exists. His reason is worth keeping, because it
+    # predicts how he will treat the next field like this: `lanes` feeds road-size calculations when
+    # attaching a position to a road, so the total has a consumer of its own, unlike maxSpeed where
+    # only the active direction ever mattered.
     #
-    #   today            `lanes` is the way's TOTAL, both directions. A US 6 2+1 section reads 3,
-    #                    3 <= 2 is false, and a real passing lane is correctly allowed.
-    #   after his change `lanes` is OUR DIRECTION. The same section reads 2, 2 <= 2 is TRUE, and the
-    #                    gate refuses a pass on the exact road it was built for.
+    # So this line stays correct across that release, and there is nothing to do on a version bump.
+    # test_a_one_way_carriageway_with_two_lanes_still_passes pins the CURRENT meaning and stays the
+    # canary: if `lanes` ever does change meaning, it fails loudly rather than the gate inverting in
+    # silence.
     #
-    # When MAPD_V2_VERSION is bumped past the release carrying that change, this becomes simply
-    # `lanes <= 1` with no oneWay term at all -- one lane in our direction is no passing lane, on a
-    # divided carriageway and an undivided road alike, which is a simpler rule than this one.
-    #
-    # There is no runtime way to tell the two apart, which is why this is a comment and a test rather
-    # than a detection. test_a_one_way_carriageway_with_two_lanes_still_passes is the canary: it
-    # asserts the CURRENT meaning and will fail on the bump, which is the point.
+    # WHEN THE NEW FIELD SHIPS it is a strict improvement over the oneWay term below and should be
+    # preferred where present, because it answers the question directly instead of inferring it:
+    # `oneWay` distinguishes a divided carriageway from an undivided road, which is only a proxy for
+    # "how many lanes run my way". A count of 0 must keep meaning UNKNOWN -- he confirmed on issue 86
+    # that absent numeric fields default to 0 in old tiles, so 0 can never be read as "no lanes".
     return lanes <= (1 if bool(o.oneWay) else 2)
 
   @staticmethod
