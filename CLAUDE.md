@@ -1033,7 +1033,12 @@ ours, is not a cost to hand to them. The binary ships either way; what it costs 
   ~3.3 mph/s, that a HOLD exists, or that SCC-Map carries four defenses built from measured events --
   and as a clamp it moves the MAX number, which is his. Take the INGREDIENTS instead:
   `speedLimitSuggestedSpeed`, `mapCurveSpeed`, `visionCurveSpeed`, as inputs beside the camera.
-  `test_mapd_schema.py` fails if the planner ever reads it.
+  `test_mapd_schema.py` fails if ANY decision-making file reads it -- widened 2026-08-16, because
+  the first version checked `longitudinal_planner.py` alone and a read added to
+  `speed_limit_assist.py` passed it. The guide names the planner because that is where the GUIDE
+  puts it; the bypass is just as total from SLA, SCC-Map, ICBM or a passing-assist gate. It parses
+  with `ast` rather than grepping, so prose explaining why we refuse the field stays free while code
+  using it is caught by file and line -- necessary, since every such explanation contains the word.
 - **The `Mapd*` structs in `cereal/custom.capnp` are THEIRS.** The binary is compiled against its own
   copy and capnp reads by POSITION, so an inserted field does not rename anything -- it makes
   `speedLimit` decode out of other bytes, with no error anywhere. Take mapd's verbatim; put our own
