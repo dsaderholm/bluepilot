@@ -2398,6 +2398,28 @@ class PassingAssistDetector:
       return False
     if lanes <= 0:
       return False
+    # *** THIS THRESHOLD INVERTS WHEN MAPD LEARNS lanes:forward. READ BEFORE BUMPING MAPD_V2_VERSION. ***
+    #
+    # pfeiferj replied to mapd issue 127 on 2026-08-17 agreeing to add the forward/backward lane
+    # tags, and said how he would do it: NOT as new MapdOut fields, but by checking whether the
+    # directional tag exists for the direction of travel and using it in the EXISTING `lanes`
+    # output. That is how he already handles maxSpeed:forward/backward, and it is the right call for
+    # a consumer that only cares about the active direction.
+    #
+    # It also silently changes what this line means, and the field looks identical at runtime:
+    #
+    #   today            `lanes` is the way's TOTAL, both directions. A US 6 2+1 section reads 3,
+    #                    3 <= 2 is false, and a real passing lane is correctly allowed.
+    #   after his change `lanes` is OUR DIRECTION. The same section reads 2, 2 <= 2 is TRUE, and the
+    #                    gate refuses a pass on the exact road it was built for.
+    #
+    # When MAPD_V2_VERSION is bumped past the release carrying that change, this becomes simply
+    # `lanes <= 1` with no oneWay term at all -- one lane in our direction is no passing lane, on a
+    # divided carriageway and an undivided road alike, which is a simpler rule than this one.
+    #
+    # There is no runtime way to tell the two apart, which is why this is a comment and a test rather
+    # than a detection. test_a_one_way_carriageway_with_two_lanes_still_passes is the canary: it
+    # asserts the CURRENT meaning and will fail on the bump, which is the point.
     return lanes <= (1 if bool(o.oneWay) else 2)
 
   @staticmethod
