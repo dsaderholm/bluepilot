@@ -33,6 +33,7 @@ import argparse
 import math
 import os
 import sys
+from collections import Counter
 
 REALDATA = "/data/media/0/realdata"
 TILE_ROOT = "/data/media/0/osm/offline"
@@ -204,11 +205,12 @@ def main() -> int:
           if pos is None or speed < args.min_speed:
             continue
           key = (int(pos[0] / GRID), int(pos[1] / GRID))
-          cell = cells.setdefault(key, [False, 0, pos, str(r.source)])
+          # [had a limit here at least once, position, SLA's own source label]. The count of
+          # no-limit samples used to live here too and was never read -- dropped rather than left
+          # sitting in the tuple looking load-bearing.
+          cell = cells.setdefault(key, [False, pos, str(r.source)])
           if has:
             cell[0] = True
-          else:
-            cell[1] += 1
       except Exception:  # noqa: BLE001
         continue
 
@@ -234,12 +236,14 @@ def main() -> int:
   tiles = Tiles(args.tiles)
   print(f"# {len(tiles.index)} tiles indexed; matching {len(blind)} positions...", file=sys.stderr)
 
+  sla_sources: Counter = Counter()
   no_tile = 0
   no_way = 0
   had_limit = 0
   no_limit = 0
   examples: list[str] = []
-  for _, _, (lat, lon), src in blind:
+  for _, (lat, lon), src in blind:
+    sla_sources[src] += 1
     ways = tiles.ways_at(lat, lon)
     if ways is None:
       no_tile += 1
@@ -266,6 +270,9 @@ def main() -> int:
   print(f"  nearest way carries no maxspeed         {no_limit:5d}  {pct(no_limit)}   genuinely unmapped")
   print(f"  no way within {args.radius:.0f} m                    {no_way:5d}  {pct(no_way)}   off-road, or way-geometry gap")
   print(f"  no tile covering the point              {no_tile:5d}  {pct(no_tile)}   maps not downloaded here")
+  # SLA names a resolver source even where it produced nothing; printed because a blind
+  # stretch attributed to the car/TSR path is a different problem from one attributed to map.
+  print(f"\n  SLA resolver source at those positions: {dict(sla_sources.most_common())}")
 
   if examples:
     print("\nexamples (position, distance to the way, what OSM holds there):")
