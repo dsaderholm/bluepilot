@@ -1104,6 +1104,14 @@ ours, is not a cost to hand to them. The binary ships either way; what it costs 
   switching, by v1 being wrong rather than v2 being deficient. `bp_mapd_compare.py` scores only
   frames above 5 mph for exactly this reason.
 
+- **A ROUTE OLDER THAN THE CURRENT BOOT SAYS NOTHING ABOUT A PROCESS YOU JUST ENABLED.** On
+  2026-08-17 `mapdOut` was absent from all four newest routes and that nearly went out as "observe
+  mode is broken". The newest was 00:25, the device had booted at 03:54, and it had been parked
+  since -- so every route predated the build being asked about. Check `uptime` and the segment
+  mtimes against each other BEFORE reading anything into a missing message. Combined with the
+  offroad-publishes-nothing fact above, a parked device can neither confirm nor deny observe mode,
+  and it will happily let you conclude either.
+
 **Setting `MapdV2` right after a flash needs the FILE, not `Params().put()`.** `common/params_pyx` is
 compiled from `params_keys.h`, so until scons rebuilds on the first boot the key does not exist and
 you get `UnknownKeyName: b'MapdV2'`. Writing the file directly lets ONE reboot do both, since manager
