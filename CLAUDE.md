@@ -745,6 +745,20 @@ facts from the same read: `AccVeh_V_Trg` ranges from 0 kph, so the control messa
 confirms the 20 mph limit is set-speed only; and `AccBrkPrkEl_B_Rq` is in the message, so the
 stop-and-hold vocabulary is already there.
 
+**THE OTHER LIKELY KILLER WAS CHECKED AND IS NOT THERE.** Panda caps `AccBrkTot_A_Rq` at
+**-3.4991 m/s^2** (`FORD_LONG_LIMITS.min_accel`), while the signal itself can express -20 -- so if
+Ford ever brakes harder than panda allows, the forwarded frame is BLOCKED and the braking is lost at
+exactly the wrong moment. Measured across six routes, 2026-08-17, using
+`carStateBP.brakeLightStatus.accAccelRequest` which is that signal straight off the camera:
+
+    189,418 braking frames.  ZERO above the limit.  Hardest Ford ever commanded: -2.70 m/s^2.
+
+0.8 m/s^2 of headroom and nothing in the bulk of the distribution past -2.5. Stock AEB rides a
+separate path and panda refuses `cmbb_deny` outright, so it is unaffected either way.
+
+**Also learned: NO route on the device has ever had op long enabled**, so the camera question below
+cannot be answered from existing data. It needs a drive.
+
 **THE UNKNOWN THAT DECIDES IT, and it cannot be settled offline:** while we forward faithfully the
 camera's loop stays closed -- it commands, the car responds, its model stays consistent. During an
 override it commands "hold 20" and watches the car stop anyway. Does it re-plan, fault, or drop ACC?
