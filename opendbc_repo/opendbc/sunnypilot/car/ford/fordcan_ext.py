@@ -193,6 +193,17 @@ def create_acc_msg_passthrough(packer, CAN: CanBus, stock_values: dict):
   looking clever.
   """
   values = {s: stock_values[s] for s in _ACCDATA_SIGNALS}
+  # ONE FIELD IS OVERRIDDEN, and only because panda will not carry Ford's version of it.
+  #
+  # `AccPrpl_A_Pred` is the PREDICTED acceleration -- a feed-forward hint to the powertrain, not a
+  # command. Panda holds it to [-0.5, 2.0] with a single legal escape at exactly -5.0, and drive A
+  # showed Ford sweeping it through -1.79 -> -1.29 while coasting: 25.2% of engaged frames, and the
+  # second-largest reason a frame could not be forwarded.
+  #
+  # -5.0 is not an invented value. It is what UPSTREAM openpilot hardcodes here, so it is exactly
+  # what this car's PCM sees on every normal op-long frame. Pinning it costs Ford a hint the PCM
+  # already lives without, and buys back nearly ten points of forwarding.
+  values["AccPrpl_A_Pred"] = _PANDA_GAS_INACTIVE
   return packer.make_can_msg("ACCDATA", CAN.main, values)
 
 
@@ -205,9 +216,11 @@ _PANDA_ACCEL_MAX = 1.9999
 _PANDA_GAS_MIN = -0.5
 _PANDA_GAS_MAX = 2.0
 _PANDA_GAS_INACTIVE = -5.0
-# Scaled-signal quantization: AccBrkTot_A_Rq is 0.0039 m/s^2 per bit, AccPrpl_* is 0.01. Stay a bit
-# inside the band so a value that is legal on the wire is not rejected here by a rounding step.
-_PANDA_MARGIN = 0.02
+# Half a quantum of the coarsest field (AccPrpl_* at 0.01 m/s^2 per bit), which is all the guard a
+# DBC round-trip can need. It was 0.02 and that refused ten frames sitting exactly on the -0.5
+# boundary that panda would have accepted. Ten frames is nothing; the PRINCIPLE is not, because
+# refusing a frame panda would have carried is the whole mechanism behind the drive-A cascade.
+_PANDA_MARGIN = 0.005
 
 
 def passthrough_admissible(stock_values: dict, long_active: bool) -> str:
@@ -237,11 +250,51 @@ def passthrough_admissible(stock_values: dict, long_active: bool) -> str:
   if stock_values.get("CmbbDeny_B_Actl"):
     return "camera set CmbbDeny_B_Actl"
 
+  # THE PARKING BRAKE. Drive A, 2026-08-18: pressing resume behind a stopped car applied the
+  # ELECTRIC PARK BRAKE. `AccBrkPrkEl_B_Rq` is bit 38 of this message, its receivers are GWM and
+  # ABS_ESC, `create_acc_msg` never sets it, and the relay blocks the camera's own copy -- so the
+  # only path to the ABS was this function forwarding it.
+  #
+  # WHAT IS NOT KNOWN, and was stated too confidently the first time: whether Ford ACC normally
+  # does this at all. The owner has never heard it on this car, and **no indicator light came on**,
+  # which does not fit a genuine EPB application -- the lamp is driven off actual EPB state. So
+  # there are two live explanations and the logs decide between them:
+  #
+  #   - the ABS applied HYDRAULIC brake hold rather than the park brake, which is lampless, and the
+  #     signal name is describing a request the ABS services its own way; or
+  #   - the park brake really was applied and the lamp path was broken by the open relay, since the
+  #     cluster is told about ACC state over messages the camera no longer delivers.
+  #
+  # Either way the fault is ours, not Ford's: we relayed a stop-and-hold request out of a controller
+  # whose model of the car had diverged from the car, into an actuator panda does not police.
+  # `carState.parkingBrake` plus the raw ACCDATA bits in drive A's log settle which one it was.
+  #
+  # THAT IS THE GENERAL LESSON AND IT IS BIGGER THAN THIS BIT. Panda checks five things in ACCDATA.
+  # It does NOT check AccBrkPrkEl_B_Rq, AccStopStat_B_Rq, AccCancl_B_Rq, AccDeny_B_Rq,
+  # AccResumEnbl_B_Rq, AccAutoResum_D_Rq, AccBrkPulse_B_Rq, Cmbb_B_Enbl, CmbbOvrrd_B_RqDrv or
+  # CmbbEngTqMn_B_Rq. "Panda would allow it" was never the same question as "we understand it", and
+  # the first version of this function only asked the first one.
+  #
+  # Refusing rather than zeroing, deliberately: zeroing would hand the car a frame Ford never sent,
+  # mid-stop, which is its own new behaviour. Falling back to the authored command is a controller
+  # we already ship.
+  # AND THE ONE THAT ACTUALLY MATTERS, measured on drive A: the camera asserted `AccCancl_B_Rq` in
+  # **70.6% of its frames** (21,090 of 29,890). It was not quietly computing ACC with the relay
+  # open -- it spent most of the drive asking the car to CANCEL, and we relayed that request 219
+  # times. Forwarding a cancel is not a degraded version of forwarding a command; it is actuation
+  # in its own right, and the PCM's cruise status faulted 82 times over the drive.
+  for name in ("AccCancl_B_Rq", "AccDeny_B_Rq", "AccBrkPrkEl_B_Rq", "AccStopStat_B_Rq",
+               "AccBrkPulse_B_Rq", "AccAutoResum_D_Rq"):
+    if stock_values.get(name):
+      return "camera asserted %s -- unpoliced actuation, see drive A" % name
+
   accel = float(stock_values.get("AccBrkTot_A_Rq", 0.0))
   if not (_PANDA_ACCEL_MIN + _PANDA_MARGIN) <= accel <= (_PANDA_ACCEL_MAX - _PANDA_MARGIN):
     return "AccBrkTot_A_Rq %.3f outside panda's band" % accel
 
-  for name in ("AccPrpl_A_Rq", "AccPrpl_A_Pred"):
+  # AccPrpl_A_Pred is NOT checked here: create_acc_msg_passthrough pins it to the inactive value,
+  # so Ford's number never reaches the wire and cannot make panda drop the frame.
+  for name in ("AccPrpl_A_Rq",):
     gas = float(stock_values.get(name, 0.0))
     if abs(gas - _PANDA_GAS_INACTIVE) < 0.005:
       continue

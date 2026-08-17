@@ -117,6 +117,7 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
     # Last reason the forwarded frame was refused, so the log carries transitions and not 50 Hz of
     # the same line. Lives here for the same reason everything else does -- see the note above.
     self.passthrough_reason_last = "?"
+    self.passthrough_cancel_frames = 0
     # Note: main_on_last, lkas_enabled_last, steer_alert_last, lead_distance_bars_last,
     # distance_bar_frame are initialized by HudExt.__init__() above
 
@@ -342,6 +343,19 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
         if reason != self.passthrough_reason_last:
           self.passthrough_reason_last = reason
           cloudlog.warning("stock ACC passthrough: %s", reason or "forwarding Ford's command")
+
+        # A LATCHED CANCEL MUST NOT BE SILENT. On drive A the camera asserted cancel at t+229.43 and
+        # never released it -- it was still asserting 262 s later at the end of the drive. From that
+        # moment the passthrough is inert and openpilot longitudinal is driving, which is precisely
+        # the controller this feature exists to avoid, and nothing on the screen or in the log said
+        # so. Count it and say it once.
+        if reason.startswith("camera asserted AccCancl"):
+          self.passthrough_cancel_frames += 1
+          if self.passthrough_cancel_frames == 250:  # 5 s at ACC_CONTROL_STEP
+            cloudlog.error("stock ACC passthrough INERT: camera has asked to cancel for 5 s "
+                           "straight. openpilot longitudinal is driving from here.")
+        else:
+          self.passthrough_cancel_frames = 0
 
       if use_passthrough:
         can_sends.append(fordcan_ext.create_acc_msg_passthrough(self.packer, self.CAN,

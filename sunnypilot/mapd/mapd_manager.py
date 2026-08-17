@@ -19,7 +19,8 @@ from openpilot.selfdrive.selfdrived.alertmanager import set_offroad_alert
 from openpilot.sunnypilot.mapd.live_map_data.mapd_v2_map_data import MapdV2MapData
 from openpilot.sunnypilot.mapd.live_map_data.osm_map_data import OsmMapData
 from openpilot.system.hardware.hw import Paths
-from openpilot.sunnypilot.mapd import MAPD_PATH, MAPD_V2_ON
+from openpilot.sunnypilot.mapd import MAPD_PATH, MAPD_V2_OFF, MAPD_V2_ON
+from openpilot.sunnypilot.mapd.mapd_settings import MapdSettingsSync
 from openpilot.sunnypilot.mapd.mapd_installer import VERSION, update_installed_version
 
 # PFEIFER - MAPD {{
@@ -126,6 +127,11 @@ def main_thread():
   mapd_v2_state = params.get("MapdV2", return_default=True)
   use_v2 = mapd_v2_state == MAPD_V2_ON
   live_map_sp = MapdV2MapData() if use_v2 else OsmMapData()
+  # FusionPilot: mapd's own settings, cached into MapdSettings so a drive's configuration is
+  # answerable afterwards. Only when v2 is actually running -- in state 0 there is nobody to talk
+  # to and a SubMaster on a silent socket would just be a dict entry. See mapd_settings.py for why
+  # it writes nothing today.
+  settings_sync = MapdSettingsSync(params) if mapd_v2_state != MAPD_V2_OFF else None
   cloudlog.warning(f"mapd: MapdV2={mapd_v2_state}, live map source = "
                    f"{'mapd v2 (mapdOut)' if use_v2 else 'v1 (/dev/shm/params)'}")
 
@@ -143,6 +149,8 @@ def main_thread():
 
     update_osm_db()
     live_map_sp.tick()
+    if settings_sync is not None:
+      settings_sync.tick()
     rk.keep_time()
 
 

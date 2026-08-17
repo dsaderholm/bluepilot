@@ -53,6 +53,8 @@ WANT = (3, 12)
 # The suites that genuinely run without the compiled extensions. Keep this list honest: a suite
 # that cannot run offline belongs out of it, not skipped inside it.
 DEFAULT_TARGETS = [
+  # Named rather than by directory: sunnypilot/selfdrive/car/tests/ also holds device-only tests.
+  "sunnypilot/selfdrive/car/tests/test_icbm_survives_passthrough.py",
   "sunnypilot/selfdrive/car/intelligent_cruise_button_management/tests/",
   "opendbc_repo/opendbc/sunnypilot/car/ford/tests/",
   # (that directory glob already covers test_button_mapping.py)
@@ -125,12 +127,14 @@ DEFAULT_TARGETS = [
   # A sub-panel that builds a back button and never draws it opens and cannot be left. Found by
   # hand on the last check before a drive, in a panel added the same day.
   "selfdrive/car/tests/test_sub_layouts_have_a_way_out.py",
+  "selfdrive/car/tests/test_dec_slow_down_published.py",
   # Named file, not the directory: test_mapd_version.py beside it hashes the installed mapd binary
   # and cannot run without the device. The schema guard pins mapd v2's ordinals, which are theirs
   # rather than ours -- capnp reads by position, so drift decodes as different fields with no error.
   "sunnypilot/mapd/tests/test_mapd_schema.py",
   "sunnypilot/mapd/tests/test_mapd_v2_map_data.py",
   "sunnypilot/mapd/tests/test_mapd_v2_binary.py",
+  "sunnypilot/mapd/tests/test_mapd_settings.py",
   # The value behind every +/- control. The widget needs pyray and cannot collect here, which
   # is why its logic lives in param_value_cache.py -- there was nothing to test before, and
   # nothing caught the read that wiped his angle tuning.
@@ -246,6 +250,33 @@ def install_stubs() -> None:
   sl = types.ModuleType("openpilot.common.swaglog")
   sl.cloudlog = type("_Log", (), {"__getattr__": lambda self, _: (lambda *a, **k: None)})()
   sys.modules["openpilot.common.swaglog"] = sl
+
+  # FusionPilot: `sunnypilot/selfdrive/car/interfaces.py` imports system.sentry at module level,
+  # which reaches athena/registration and then PyJWT -- a device dependency. That one import chain
+  # made the whole file untestable offline, and the file holds the two gates that decide whether
+  # ICBM exists at all. Stubbing the leaf is enough; nothing under test calls into it.
+  # Stub sentry itself rather than the chain under it -- it reaches athena, the comma API and
+  # PyJWT, none of which exist here and none of which anything under test calls.
+  #
+  # `import openpilot.system.sentry as sentry` binds through the PARENT package, so a sys.modules
+  # entry for the leaf alone is not enough -- `openpilot.system` has to exist and carry `sentry` as
+  # an attribute. That is why the first attempt still failed with "cannot import name 'system'".
+  sentry = types.ModuleType("openpilot.system.sentry")
+  for _name in ("capture_exception", "capture_warning", "set_tag", "init", "bind_user"):
+    setattr(sentry, _name, lambda *a, **k: None)
+  if "openpilot.system" not in sys.modules:
+    osys = types.ModuleType("openpilot.system")
+    osys.__path__ = []  # a package, so submodule imports resolve against it
+    sys.modules["openpilot.system"] = osys
+  sys.modules["openpilot.system"].sentry = sentry
+  sys.modules.setdefault("openpilot.system.sentry", sentry)
+
+  # sunnylink's statsd is the other module-level import in that file, and chasing ITS imports is
+  # the wrong cut -- it wants pyzmq, then hardware.hw.Paths, then system.version, and each stub
+  # only reveals the next. `interfaces.py` uses one name from it. Stub the module.
+  statsd = types.ModuleType("openpilot.sunnypilot.sunnylink.statsd")
+  statsd.STATSLOGSP = type("_Stats", (), {"__getattr__": lambda self, _: (lambda *a, **k: None)})()
+  sys.modules.setdefault("openpilot.sunnypilot.sunnylink.statsd", statsd)
 
 
 def main() -> int:

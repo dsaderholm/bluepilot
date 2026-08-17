@@ -780,8 +780,136 @@ safety question -- the fallback handles it -- but a high rate would mean the pas
 car back at exactly the interesting moments, which makes it a worse idea rather than a broken one.
 **Run it before the first passthrough drive.**
 
+**STOCK AEB IS NOT LOST UNDER OP LONG. Answered 2026-08-17 from the safety code, not assumed.**
+The worry was that "trust Ford" is a weaker proposition if Ford's emergency braking cannot come
+along. It can:
+
+- `safety_fwd_hook` (opendbc/safety/safety.h:261) forwards camera -> car by default and blocks ONLY
+  addresses in the TX list carrying `check_relay = true` for the destination bus. Its own comment
+  names the reason: "Safety modes can opt out of this in the case of selective AEB forwarding."
+- Ford's blocked set is `ACCDATA`, `ACCDATA_3`, `Lane_Assist_Data1`, `IPMA_Data` and the
+  LateralMotionControl pair. **`ACCDATA_2` appears ZERO times in `modes/ford.h`**, so it is not in
+  the TX list and is never blocked.
+- `ford_hooks` sets no `.fwd`, so there is no Ford-specific blocking either.
+
+`ACCDATA_2` is the message carrying `CmbbBrkDecel_B_Rq` -- `ford/carstate.py:229` reads it as
+`ret.stockAeb`. It passes straight through to the ABS untouched, relay open or not. Stock AEB is
+Ford's the whole time and openpilot never touches it.
+
+This is also why `passthrough_admissible` refuses a frame with `CmbbDeny_B_Actl` set rather than
+forwarding it: panda's `violation |= cmbb_deny` exists precisely so openpilot can never transmit a
+frame that DENIES stock AEB, and forwarding Ford's own deny bit would trip it.
+
 **Also learned: NO route on the device has ever had op long enabled**, so the camera question below
 cannot be answered from existing data. It needs a drive.
+
+## DRIVE A: THE CAMERA DOES KEEP WORKING. The first read of the numbers said the opposite and was wrong.
+
+Route 00000383, 2026-08-18, `openpilotLongitudinalControl = True`, `StockAccPassthrough = 1`.
+29,890 camera ACCDATA frames, 29,525 transmitted by us.
+
+    camera asserted AccCancl_B_Rq   21,090 frames   70.6%
+    camera asserted CmbbDeny_B_Actl      0 frames    0.0%
+    we forwarded the camera's frame   4,940         16.7%
+    we fell back to our own          24,571         83.3%
+
+**THAT 70.6% IS THE WRONG DENOMINATOR AND IT PRODUCED THE WRONG CONCLUSION.** It was read as "the
+camera spends the drive asking to cancel, so its loop is open and it knows" -- and the owner pushed
+back rather than accepting it, which was correct. Restricted to frames where openpilot was actually
+ENGAGED:
+
+    ADMISSIBLE -- Ford's own frame passes everything    5,126   71.7%
+    blocked by AccCancl_B_Rq                            1,333   18.6%
+    blocked by AccPrpl_A_Pred band                        685    9.6%
+    blocked by AccPrpl_A_Rq band                           10    0.1%
+    blocked by AccBrkTot cap                                0    0.0%
+
+The 70.6% was dominated by 15,075 frames where NOTHING WAS ENGAGED, and cancel is exactly what the
+camera should say there. `CmbbDeny_B_Actl` was 0.0% across the entire drive -- the camera never
+faulted. With cancel clear its mean `AccBrkTot_A_Rq` was +0.100 and its minimum -2.80: real ACC
+commands. **The camera tracks openpilot's engagement state and keeps computing. The premise holds.**
+
+**The lesson is the denominator.** "70.6% of all frames" and "17.7% of engaged frames" are the same
+data and opposite conclusions, and the first was published as a finding. Restrict to the frames
+where the feature is live BEFORE reading anything into a rate.
+
+Everything the owner reported follows from it:
+
+- **The park brake applied behind a stopped car.** Four of our transmitted frames carried
+  `AccBrkPrkEl_B_Rq`. `create_acc_msg` never sets it and the relay blocks the camera's own copy, so
+  the passthrough was the only path to the ABS. `carState.parkingBrake` was true for 2,231 frames
+  with 20 `parkBrake` events. He had never seen the car do this and there was no indicator light.
+- **It would not stay engaged.** `accFaulted` x82, and NOT from the camera --
+  `carstate.py:202` reads `EngBrakeData.CcStat_D_Actl in (1, 2)`, the PCM's own cruise status. The
+  PCM was being handed our authored command 83% of the time, Ford's 17%, and relayed cancels on top.
+- **The gap button changed openpilot's aggressiveness.** `personalityChanged` x3. Under op long the
+  stock handler takes the button first; it never reaches the camera.
+- **ICBM had to be re-enabled and did not stick.** `interfaces.py:83` deletes the param under op
+  long and it has no default, so it returns as off. Confirmed on the device: `unset`.
+
+**AND THE REVIEW FINDING WAS THE MAIN EVENT.** `AccPrpl_A_Pred outside panda's band` is the dominant
+refusal reason in the log, sweeping -1.79 -> -1.29 while coasting. That is the band recorded above as
+"never looked at". Without `passthrough_admissible`, every one of those frames would have gone out
+and panda would have dropped it -- 83% of a 50 Hz message vanishing and reappearing. The drive would
+have been far worse than it was.
+
+**AND THE FIX FOR THE SECOND-LARGEST BLOCKER IS ONE FIELD.** `AccPrpl_A_Pred` is the PREDICTED
+accel -- a feed-forward hint to the powertrain, not a command -- and **upstream openpilot hardcodes
+it to exactly -5.0**, panda's legal escape value, which is therefore what this PCM sees on every
+normal op-long frame. `create_acc_msg_passthrough` now pins it and `passthrough_admissible` no
+longer refuses on it: **71.7% -> 81.3% forwarded, for a hint the car already lives without.**
+
+**AND THE 18.6% CANCEL WAS MOSTLY SELF-INFLICTED. Traced 2026-08-18, and this is the finding.**
+
+    camera first asserts cancel            t+0.02    (whenever ACC is not running -- correct)
+    five clean engagements                 t+22.1 .. t+234.45, 11.6/46.4/27.6/15.4/20.9 s
+    camera asserts cancel WHILE ENGAGED    t+229.43
+    WE FORWARD THAT CANCEL                 t+234.44
+    the fifth engagement ends              t+234.45   <- ten milliseconds later
+    everything after                       70 windows, mean 1.91 s
+
+**Relaying the camera's cancel request knocked openpilot out, and every re-engagement relayed the
+still-asserted cancel and knocked it out again -- seventy times.** That is the chime cycling he
+reported, and the park brake at the stop is downstream of the same loop. It was ours, not Ford's.
+
+**The honest refusal rate is 4.1%**: before the first forwarded cancel, the camera refused for 5.0 s
+out of 121.8 s engaged. With cancel and deny now refused rather than relayed, the loop cannot form,
+and the expected forwarding rate is the admissible share plus the pinned-pred share plus most of
+what the loop was destroying.
+
+**AND THE LATCH ITSELF IS EXPLAINED. IT IS THE SAME FIELD, and it is the whole story.** Traced to
+the frame, 2026-08-18. In the seconds before t+229.43:
+
+    camera  1353011100c5c400   AccBrkTot_A_Rq -0.71   AccPrpl_A_Pred -2.27   <- braking for a lead
+    we sent 13f80000032205f4   accel          -0.06   gas             0.00   <- braking for nothing
+    radar   lead at 22.1 m, closing at 1.9 m/s;  the car ACCELERATING, aEgo +0.1 -> +0.27
+
+`AccPrpl_A_Pred` was out of panda's band, so the frame was refused and openpilot's own command went
+out instead -- and openpilot was not braking. Over the run-up:
+
+    window before the latch    OLD refused    NEW refuses    camera braking
+    last  5 s                    31.6%           0.0%           24.8%
+    last 20 s                    44.6%           1.0%           25.5%
+    last 40 s                    51.7%           0.5%           16.5%
+
+**The camera spent forty seconds watching the car ignore its braking requests, and then gave up.**
+Half its commands were being thrown away over an advisory field the PCM does not need. Then we
+forwarded the cancel it raised, and that produced the seventy re-engagement cycles.
+
+So every symptom he reported -- the cycling, the chime, the park brake at the stop, "Ford ACC worked
+for a little bit" -- traces to `AccPrpl_A_Pred` not being pinned. Pinning it takes that same window
+from 51.7% refused to 0.5%.
+
+**What is NOT proven:** that the camera releases cancel once its commands are honoured. The latch
+was never seen to clear -- it was still asserting 262 s later at the end of the drive. So a latched
+cancel is now logged at ERROR after 5 s straight (`passthrough_cancel_frames`), because from that
+moment the passthrough is inert and openpilot longitudinal is driving with nothing saying so.
+
+**Do NOT enable this again until that is understood**, because the park-brake path is real: four
+transmitted frames carried `AccBrkPrkEl_B_Rq`. That is now refused along with cancel, deny, stop
+status, brake pulse and auto-resume -- the bits panda does not police at all. **"Panda would allow
+it" was never the same question as "we understand it", and the first version only asked the first
+one.**
 
 **THE UNKNOWN THAT DECIDES IT, and it cannot be settled offline:** while we forward faithfully the
 camera's loop stays closed -- it commands, the car responds, its model stays consistent. During an
@@ -860,6 +988,20 @@ ENG BRAKE, PRE-BRAKE, BRAKE.
 where the set speed cannot ask; and on ramps steep enough to need real braking regardless. Everywhere
 else the set speed is STRICTLY BETTER, because Ford's answer to "be doing 45 shortly" is a blend we
 do not have to write and could not easily match.
+
+**DONE, 2026-08-18: `_op_long_drives()` in `sunnypilot/selfdrive/car/interfaces.py`.** Both gates now
+ask whether op long DRIVES the car rather than whether it is merely on -- with `StockAccPassthrough`
+set, Ford is still authoring the command, so ICBM stays. It also fixes something that bit on drive A
+independently of the passthrough: the second gate does not ignore the param, it REMOVES it, and the
+key has no default, so it returns as OFF. He re-enabled ICBM mid-drive, the gate deleted it again,
+and the device still read `unset` afterwards.
+
+**And `interfaces.py` is now testable offline for the first time**, which is why this could be
+checked at all. Its module-level `sunnylink.statsd` import wants pyzmq, then `hardware.hw.Paths`,
+then `system.version` -- each stub revealing the next. **Stub the MODULE, not its chain**: the file
+uses one name from it. Same for `system.sentry`, and note that `import a.b.c as x` binds through the
+parent, so a `sys.modules` entry for the leaf alone is not enough -- `openpilot.system` has to exist
+and carry the attribute.
 
 **AND ICBM KEEPS WORKING UNDER THE PASSTHROUGH -- the earlier claim that it does not was wrong.**
 Both gates in `sunnypilot/selfdrive/car/interfaces.py` key on `CP.openpilotLongitudinalControl` and
@@ -1263,6 +1405,26 @@ State 1 exists because v1 records NOTHING about what it saw, so the only way to 
 run both and log the new one. `tools/bp_mapd_compare.py` scores one drive; the gate for moving to
 state 2 is its "only v1 had a limit" row being near zero.
 
+**THE GATE IS MET. Route 00000383, 2026-08-18, 494 frames where both had spoken:**
+
+    both agree on a limit    318   64.4%
+    both say no limit        126   25.5%
+    ONLY v1 had a limit        8    1.6%   <- the gate
+    only v2 had a limit       33    6.7%   <- v1 was blind here
+    differ by >1 mph           9    1.8%
+
+And all eight "only v1" frames are ones where v2's `waySelectionType` was **fail** -- v2 was not
+wrong, it said it did not know, and `MapdV2MapData` refuses a limit from a failed match anyway. v2
+published 8,740 frames against v1's 598.
+
+Checked before recommending it, because the way this could hurt is v2 INVENTING a low limit rather
+than missing one. Every "only v2" limit is class-appropriate: 20 residential, 30 tertiary, 45 on a
+motorwayLink, 70 and 65 on motorway, 30/35/40 secondary. And in the disagreements v2 reads HIGHER in
+108 of 121 frames -- v1 was serving 20 mph on a secondary road v2 calls 30. Flipping to state 2 is
+not a slower car.
+
+**So `MapdV2` 1 -> 2 is his to set, and it is now backed by his own drive rather than by the plan.**
+
 **Default 0 is deliberate and it is about somebody else's car.** Others track this branch for ICBM
 alone -- a second map daemon on their device, a fifth of a core and 200 MB, for a migration that is
 ours, is not a cost to hand to them. The binary ships either way; what it costs is opt-in.
@@ -1336,6 +1498,37 @@ printf "1" > /data/params/d/MapdV2      # 0 off, 1 observe, 2 on
 
 Otherwise it is reboot, set, reboot. True of any new param on its first flash, not just this one.
 
+### WHAT THE v2 PATH ACTUALLY CARRIES: CURVATURE. THE VELOCITIES ARE A TRANSFORM OF IT.
+
+Measured 2026-08-18, route 00000383, and it reframes the migration. Across **6,725 path points,
+every single one**:
+
+    targetVelocity^2 * |curvature| = 2.200
+
+which is `/personalities/standard/map_curve_target_lat_a` exactly. mapd computes the path's corner
+speeds as `v = sqrt(a_lat / curvature)` and nothing else, on the STANDARD personality --
+`subscriber/shadow_selfdrive_state` is False, so it never sees openpilot's.
+
+**So `targetVelocity` carries no information `curvature` does not.** SCC-Map at state 2 is fed the
+same KIND of number v1 gave it, at 27 points instead of one. The plan document sold the path on its
+velocities; **the value is the curvature profile**, and that is what the exit-ramp work should be
+built on rather than on a denser supply of corner speeds.
+
+Two dials that look like new levers and are not:
+
+- **`map_curve_target_lat_a` IS `SmartCruiseControlMapFactor`**, in different units:
+  `v = sqrt(a_lat / k) * factor`. Two controls for one behaviour. If they are ever consolidated
+  mapd's is the better one -- a lateral acceleration rather than a multiplier on somebody else's
+  constant -- but that is a SWAP, not an add.
+- **`curve_target_speed_time_offset` does not reach SCC-Map at all.** SCC-Map walks the path and
+  does its own trigger arithmetic, so mapd's offset only moves mapd's own controller output, which
+  this fork does not consume. It was written up in `MAPD-V2-PLAN.md` as the answer to "the exit that
+  never slows enough" and **it is not**. That lever is still ours, in the walk.
+
+`sunnypilot/mapd/mapd_settings.py` is the bridge that establishes all of this: it caches mapd's own
+settings into `MapdSettings` (declared since v2 landed, never read or written by anything, and no
+process had ever published `mapdIn`), and its write path is built, tested and **deliberately empty**.
+
 **SCC-Map ALREADY READS THE v2 PATH at state 2** (`mapd_v2_path.py`, wired in
 `smart_cruise_control.py`, `mapdExtendedOut` subscribed in plannerd). It is a pure SOURCE SWAP: the
 walk, the trigger arithmetic, the corner-speed factor pair and all four camera defenses are
@@ -1350,6 +1543,48 @@ step would produce a drive that cannot say which half moved.
 SCC-Map also FALLS BACK to v1 when v2 is selected but silent, which is the opposite of what the SLA
 reader does. Deliberate: there a quiet fallback hides a broken install behind plausible speed limits,
 here v1 is still the shipped curve source and the failure being avoided is not slowing for a corner.
+
+### REMOVING v1: THE ONLY THING HOLDING IT IN IS SCC-MAP'S FALLBACK, AND THAT IS A NUMBER
+
+Checked 2026-08-18, because "then we should probably remove v1 to save RAM and CPU" needs a list
+rather than a guess. The list is one item long:
+
+- **Speed Limit Assist and the road-name HUD are ALREADY on v2 at state 2.** `RoadNameRenderer`
+  reads `liveMapDataSP.roadName`, which `base_map_data` fills from `get_current_road_name()`, which
+  `MapdV2MapData` overrides to `mapdOut.roadName`. The `/dev/shm` `RoadName` reader is
+  `osm_map_data.py` -- v1's own, correctly.
+- **`LastGPSPosition` is written by `MapdV2MapData` itself**, deliberately, so it is not a v1
+  dependency either.
+- **`SmartCruiseControlMap` re-reads `MapTargetVelocities` whenever the v2 path is None.** That is
+  the whole of it.
+
+**And `mapd_ready()` never looks at `MapdV2` at all** -- it returns True whenever the map root
+exists -- so v1 runs in every state including 2. Its measured cost is ~22% of a core and 204 MB.
+
+**How often the fallback actually fires, from drive A: 9.0% of moving frames, 5 runs, longest 38 s.**
+Which was too high, and 8 of those 9 points were a bug in our own reader rather than a gap in v2:
+
+    frames where NO path point carried a targetVelocity   46
+       ...and the path had curvature (mapd could not compute)    0
+       ...and the path was straight (nothing to compute)        46
+
+`path_from_mapd` returned None for all 46, against its own docstring saying an empty list is "a real
+answer meaning no corners ahead". So SCC-Map consulted a second, older map for a question v2 had
+already answered. Fixed: a straight path with no velocities returns an EMPTY target list, and only
+curvature-present-with-no-velocity still falls back -- which happened zero times, and stays because
+zero is a measurement rather than a guarantee.
+
+**So the remaining fallback is the "empty path" case alone, and the next state-2 drive measures
+whether v1 can go.** Do not remove it before that drive: the fallback is silent, and a v2 that goes
+quiet without it costs curve slowing outright.
+
+**FOR PASSING ASSIST: `bluepilot/MAPD-V2-FOR-PASSING-ASSIST.md`.** Field-by-field availability
+measured on route 00000383 -- `oneWay` 100% and trustworthy (motorway and motorwayLink both 100%
+True across 41 distinct ways, residential and tertiary 0%), `highwayClass` 98.6%, `lanes` 91.5% and
+plausible by class, and `distanceFromWayCenter` with a p90 of 11.58 m that **does not fit any real
+road** and must not carry a lane-position gate until it is checked against the camera. Written so
+that session consumes rather than re-derives, and so the v1 removal stays here where its one
+remaining dependency lives.
 
 **What is left, in order:** the curvature profile itself -- plan a descent against the ~3.3 mph/s the
 buttons actually deliver instead of reacting to a step, which is the exit-ramp problem, together with
@@ -1449,6 +1684,28 @@ The center turn lane was not thought of -- the road taught us, twice, and it is 
 solved. A model that had seen ten thousand turn lanes would simply not do it. Enumeration is the
 weakness of category 2, and the answer is to keep MEASURING (geoLeftTravelProven, exitsBy,
 patienceMissed) so the road can keep teaching, rather than to pretend the enumeration is complete.
+
+## THE STOP-SIGN SIGNAL IS ON THE WIRE NOW. IT NEVER WAS.
+
+2026-08-18. He reported stop-sign slowing as inaccurate while traffic lights are fine, and that
+complaint was **unattributable**: `dec.has_slow_down()` -- the thing the whole stop-sign path keys
+on, and what `unconfirmed_lead.py` drives `IcbmModelStopEnabled` from -- had never been published.
+`DynamicExperimentalControl` logged `state`, `enabled` and `active` and nothing else, so no route
+has ever said whether the model failed to SEE a sign or saw it and the RESPONSE was wrong.
+
+Now `hasSlowDown`, `slowDownUrgency` and `slowDownEndpoint` are on the struct and set in
+`longitudinal_planner.py` from the accessors. `endpoint_x()` is inf when the model's plan is not
+full length, and inf is clamped to 0 on the wire -- **0 means "no endpoint", never "stopping right
+here"**, which is the one reading that would invert the meaning.
+
+**This is the third time a value in this fork was computed correctly and never rendered.** The test
+asserts the WIRING and follows one level of indirection to do it: a field fed from `active()`
+instead of `has_slow_down()` would read plausibly and correlate, and the test fails on it.
+
+**It costs a drive to use.** `has_slow_down` is computed from modelV2 alone, so it is live whatever
+DEC is doing -- but it is not retroactive, and no existing route carries it. The measurement it
+enables is scoring fire locations against OSM stop and give_way nodes from the tile store
+(`tools/bp_offline_map.py` reads that store), which finally separates detection from response.
 
 ## THE SET SPEED HUNT: TAP FOR SMALL CORRECTIONS, HOLD FOR LARGE ONES
 
