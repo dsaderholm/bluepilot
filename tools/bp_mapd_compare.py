@@ -73,6 +73,8 @@ def main() -> int:
   ap.add_argument("--route", default=None)
   ap.add_argument("--max-segments", type=int, default=20)
   ap.add_argument("--tolerance", type=float, default=1.0, help="mph the two may differ by")
+  ap.add_argument("--min-speed", type=float, default=5.0,
+                  help="mph below which frames are not scored (see the staleness note below)")
   args = ap.parse_args()
 
   try:
@@ -94,6 +96,8 @@ def main() -> int:
   v2_frames = 0
   v1_frames = 0
   v1_stale = 0
+  v1_stopped = 0
+  vego_mph = 0.0
   v1_consumed = True   # nothing to compare until the first v1 sample arrives
   agree = both_none = only_v1 = only_v2 = differ = 0
   differences: list[str] = []
@@ -109,7 +113,22 @@ def main() -> int:
     for msg in LogReader(path):
       w = msg.which()
       try:
-        if w == "liveMapDataSP":
+        # V1 SERVES STALE VALUES AND THEY LOOK EXACTLY LIKE LIVE ONES. /dev/shm/params keeps
+        # MapSpeedLimit and RoadName from the PREVIOUS drive -- tmpfs survives ignition cycles within
+        # a boot -- and mapd_manager republishes liveMapDataSP from them every tick regardless. So at
+        # the start of a drive v1 confidently reports last trip's speed limit while v2, correctly,
+        # publishes nothing until it has a position.
+        #
+        # Scored naively that is a run of "only v1 had a limit" rows, which is THE number the cutover
+        # decision rests on, poisoned in the direction of never switching -- by v1 being wrong rather
+        # than v2 being deficient. Found by the passing-assist session parked in a driveway, where
+        # v1 looked alive and v2 looked broken and it was the other way round.
+        #
+        # Requiring the car to be moving is enough: by then GPS is live and v1 is updating from a
+        # real position. Same reasoning as bp_map_vs_sla.py's own min-speed gate.
+        if w == "carState":
+          vego_mph = msg.carState.vEgo * MS_TO_MPH
+        elif w == "liveMapDataSP":
           m = msg.liveMapDataSP
           v1 = (bool(m.speedLimitValid), float(m.speedLimit), msg.logMonoTime)
           v1_frames += 1
@@ -123,6 +142,9 @@ def main() -> int:
           if m.roadName:
             road_names[str(m.roadName)] += 1
 
+          if vego_mph < args.min_speed:
+            v1_stopped += 1
+            continue
           if v1 is None:
             continue
           v1_has, v1_limit, v1_time = v1
@@ -192,6 +214,10 @@ def main() -> int:
   print(f"  ONLY v1 had a limit        {only_v1:7d}  {pct(only_v1)}   <-- must be near zero to flip")
   print(f"  only v2 had a limit        {only_v2:7d}  {pct(only_v2)}   <-- a win: v1 was blind here")
   print(f"  differ by >{args.tolerance:.0f} mph          {differ:7d}  {pct(differ)}")
+  if v1_stopped:
+    print(f"\n  {v1_stopped} frames below {args.min_speed:.0f} mph were NOT scored -- v1 serves the")
+    print("  previous drive's speed limit out of /dev/shm/params while stationary, and it is")
+    print("  indistinguishable from a live one. Scoring those counts v1 right and v2 blind.")
   if v1_stale:
     print(f"\n  {v1_stale} v2 frames had no fresh v1 sample within 3 s and were NOT scored.")
     print("  A large number here means v1 stopped publishing mid-drive -- check mapd_manager.")

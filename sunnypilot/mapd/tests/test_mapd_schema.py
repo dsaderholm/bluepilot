@@ -113,6 +113,47 @@ def test_highway_class_matches_the_tile_schema():
   assert [e for e in tile.HighwayClass.schema.enumerants] == list(msg_enum)
 
 
+# Where a decision about the car gets made. Scanned whole, because the ban below is not about one
+# file -- it is about one IDEA, and the idea is equally wrong wherever it lands. Passing assist and
+# the radar detector rebase onto this branch, so their code is under these roots too and is covered
+# here without either branch having to remember to add a guard of its own.
+_DECISION_ROOTS = (
+  "selfdrive/controls",
+  "selfdrive/car",
+  "selfdrive/selfdrived",
+  "sunnypilot/selfdrive",
+  "sunnypilot/mapd",
+  "opendbc_repo/opendbc/sunnypilot",
+)
+# This file names it constantly, on purpose.
+_BAN_EXEMPT = ("sunnypilot/mapd/tests/test_mapd_schema.py",)
+
+
+def _reads_suggested_speed(path: str) -> list[int]:
+  """Lines where `suggestedSpeed` is USED as a name -- not merely written about.
+
+  Parsed rather than grepped, and that distinction is the whole reason this can be a hard ban:
+  every explanation of why we refuse this field contains the word, so a text search forces whoever
+  writes the next comment to either omit the name or add an exemption. `ast` sees code only.
+
+  Catches attribute access (`sm['mapdOut'].suggestedSpeed`) and the getattr spelling
+  (`getattr(x, "suggestedSpeed")`). A docstring MENTIONING it is a longer string and is not equal
+  to the name, so prose stays free.
+  """
+  import ast
+  try:
+    tree = ast.parse(open(path, encoding="utf-8").read())
+  except (SyntaxError, UnicodeDecodeError):
+    return []
+  hits = []
+  for node in ast.walk(tree):
+    if isinstance(node, ast.Attribute) and node.attr == "suggestedSpeed":
+      hits.append(node.lineno)
+    elif isinstance(node, ast.Constant) and node.value == "suggestedSpeed":
+      hits.append(node.lineno)
+  return hits
+
+
 def test_nothing_clamps_v_cruise_from_the_map():
   """mapd's integration guide, step 7, says to put this in longitudinal_planner.py:
 
@@ -128,10 +169,31 @@ def test_nothing_clamps_v_cruise_from_the_map():
 
   The INGREDIENTS are welcome and are the point of the migration: speedLimitSuggestedSpeed,
   mapCurveSpeed and visionCurveSpeed go in as inputs beside the camera, and our controllers decide.
+
+  THIS SCANS EVERY DECISION-MAKING FILE, not just the planner. The first version checked
+  longitudinal_planner.py alone, and a read added to speed_limit_assist.py passed it -- verified by
+  doing exactly that on 2026-08-16. The guide names the planner because that is where the guide
+  puts it; the bypass is just as complete from SLA, from SCC-Map, from the ICBM controller, or from
+  a passing-assist gate. A guard against one spelling of a mistake is not a guard against the
+  mistake.
   """
-  planner = os.path.join(REPO, "selfdrive", "controls", "lib", "longitudinal_planner.py")
-  text = open(planner, encoding="utf-8").read()
-  assert "suggestedSpeed" not in text, (
-    "longitudinal_planner.py reads mapd's suggestedSpeed. That is the one non-additive step in "
-    "mapd's integration guide and it bypasses ICBM, holds and the SCC-Map defenses. Consume "
+  offenders = []
+  for root in _DECISION_ROOTS:
+    base = os.path.join(REPO, *root.split("/"))
+    for dirpath, dirnames, filenames in os.walk(base):
+      dirnames[:] = [d for d in dirnames if d not in ("__pycache__", ".git")]
+      for name in filenames:
+        if not name.endswith(".py"):
+          continue
+        full = os.path.join(dirpath, name)
+        rel = os.path.relpath(full, REPO).replace(os.sep, "/")
+        if rel in _BAN_EXEMPT:
+          continue
+        for line in _reads_suggested_speed(full):
+          offenders.append(f"{rel}:{line}")
+
+  assert not offenders, (
+    "these read mapd's suggestedSpeed: " + ", ".join(offenders) + " -- "
+    "that is the one non-additive step in mapd's integration guide and it bypasses ICBM, holds and "
+    "the SCC-Map defenses; as a clamp it also moves the MAX number, which is his. Consume "
     "speedLimitSuggestedSpeed / mapCurveSpeed / visionCurveSpeed through the controllers instead.")
