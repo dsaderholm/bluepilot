@@ -164,6 +164,22 @@ def main():
       gaps.append((a, b - a))
   print(f"  {len(mapd_times)} frames over {span:.0f} s "
         f"({len(mapd_times) / max(span, 1e-9):.1f} Hz average)")
+
+  # An average rate below nominal says nothing about WHERE the frames went, and the two
+  # possibilities have different causes: a steady slower cadence is mapd publishing on something
+  # other than its timer, while a nominal cadence pocked with short dropouts is contention. The
+  # gap list above only shows outages over a second, which is exactly the wrong resolution to
+  # tell those apart.
+  intervals = sorted(b - a for a, b in zip(mapd_times, mapd_times[1:]))
+  if intervals:
+    def pct(q):
+      return intervals[min(len(intervals) - 1, int(q * len(intervals)))]
+    print(f"  interval p50 {pct(0.50) * 1e3:.0f} ms   p90 {pct(0.90) * 1e3:.0f} ms   "
+          f"p99 {pct(0.99) * 1e3:.0f} ms   max {intervals[-1] * 1e3:.0f} ms")
+    nominal = pct(0.50)
+    skipped = sum(1 for i in intervals if i > 1.5 * nominal)
+    print(f"  intervals over 1.5x the median: {skipped} "
+          f"({100.0 * skipped / len(intervals):.1f}% of frames)")
   print(f"  gaps longer than {GAP_S:.0f} s: {len(gaps)}, "
         f"total {sum(g for _, g in gaps):.1f} s")
   attributed = attribute_gaps(gaps, pid_timeline)
