@@ -877,8 +877,33 @@ out of 121.8 s engaged. With cancel and deny now refused rather than relayed, th
 and the expected forwarding rate is the admissible share plus the pinned-pred share plus most of
 what the loop was destroying.
 
-What is still unexplained is narrow and no longer catastrophic: why the camera began asserting
-cancel at t+229.43 at all, 15.8 s into a window when the previous one had run 46 s without it.
+**AND THE LATCH ITSELF IS EXPLAINED. IT IS THE SAME FIELD, and it is the whole story.** Traced to
+the frame, 2026-08-18. In the seconds before t+229.43:
+
+    camera  1353011100c5c400   AccBrkTot_A_Rq -0.71   AccPrpl_A_Pred -2.27   <- braking for a lead
+    we sent 13f80000032205f4   accel          -0.06   gas             0.00   <- braking for nothing
+    radar   lead at 22.1 m, closing at 1.9 m/s;  the car ACCELERATING, aEgo +0.1 -> +0.27
+
+`AccPrpl_A_Pred` was out of panda's band, so the frame was refused and openpilot's own command went
+out instead -- and openpilot was not braking. Over the run-up:
+
+    window before the latch    OLD refused    NEW refuses    camera braking
+    last  5 s                    31.6%           0.0%           24.8%
+    last 20 s                    44.6%           1.0%           25.5%
+    last 40 s                    51.7%           0.5%           16.5%
+
+**The camera spent forty seconds watching the car ignore its braking requests, and then gave up.**
+Half its commands were being thrown away over an advisory field the PCM does not need. Then we
+forwarded the cancel it raised, and that produced the seventy re-engagement cycles.
+
+So every symptom he reported -- the cycling, the chime, the park brake at the stop, "Ford ACC worked
+for a little bit" -- traces to `AccPrpl_A_Pred` not being pinned. Pinning it takes that same window
+from 51.7% refused to 0.5%.
+
+**What is NOT proven:** that the camera releases cancel once its commands are honoured. The latch
+was never seen to clear -- it was still asserting 262 s later at the end of the drive. So a latched
+cancel is now logged at ERROR after 5 s straight (`passthrough_cancel_frames`), because from that
+moment the passthrough is inert and openpilot longitudinal is driving with nothing saying so.
 
 **Do NOT enable this again until that is understood**, because the park-brake path is real: four
 transmitted frames carried `AccBrkPrkEl_B_Rq`. That is now refused along with cancel, deny, stop
