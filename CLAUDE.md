@@ -989,6 +989,20 @@ where the set speed cannot ask; and on ramps steep enough to need real braking r
 else the set speed is STRICTLY BETTER, because Ford's answer to "be doing 45 shortly" is a blend we
 do not have to write and could not easily match.
 
+**DONE, 2026-08-18: `_op_long_drives()` in `sunnypilot/selfdrive/car/interfaces.py`.** Both gates now
+ask whether op long DRIVES the car rather than whether it is merely on -- with `StockAccPassthrough`
+set, Ford is still authoring the command, so ICBM stays. It also fixes something that bit on drive A
+independently of the passthrough: the second gate does not ignore the param, it REMOVES it, and the
+key has no default, so it returns as OFF. He re-enabled ICBM mid-drive, the gate deleted it again,
+and the device still read `unset` afterwards.
+
+**And `interfaces.py` is now testable offline for the first time**, which is why this could be
+checked at all. Its module-level `sunnylink.statsd` import wants pyzmq, then `hardware.hw.Paths`,
+then `system.version` -- each stub revealing the next. **Stub the MODULE, not its chain**: the file
+uses one name from it. Same for `system.sentry`, and note that `import a.b.c as x` binds through the
+parent, so a `sys.modules` entry for the leaf alone is not enough -- `openpilot.system` has to exist
+and carry the attribute.
+
 **AND ICBM KEEPS WORKING UNDER THE PASSTHROUGH -- the earlier claim that it does not was wrong.**
 Both gates in `sunnypilot/selfdrive/car/interfaces.py` key on `CP.openpilotLongitudinalControl` and
 encode one assumption: op long is on, therefore openpilot drives, therefore the buttons are

@@ -214,9 +214,11 @@ _PANDA_ACCEL_MAX = 1.9999
 _PANDA_GAS_MIN = -0.5
 _PANDA_GAS_MAX = 2.0
 _PANDA_GAS_INACTIVE = -5.0
-# Scaled-signal quantization: AccBrkTot_A_Rq is 0.0039 m/s^2 per bit, AccPrpl_* is 0.01. Stay a bit
-# inside the band so a value that is legal on the wire is not rejected here by a rounding step.
-_PANDA_MARGIN = 0.02
+# Half a quantum of the coarsest field (AccPrpl_* at 0.01 m/s^2 per bit), which is all the guard a
+# DBC round-trip can need. It was 0.02 and that refused ten frames sitting exactly on the -0.5
+# boundary that panda would have accepted. Ten frames is nothing; the PRINCIPLE is not, because
+# refusing a frame panda would have carried is the whole mechanism behind the drive-A cascade.
+_PANDA_MARGIN = 0.005
 
 
 def passthrough_admissible(stock_values: dict, long_active: bool) -> str:
