@@ -1005,6 +1005,50 @@ Full evidence, the four mechanical collisions, and what still needs the device (
 both running) are in `bluepilot/MAPD-V2-PLAN.md`. `tools/bp_offline_map.py` reads the tile store
 directly -- the first tool here that can see what the map says, since v1 puts none of it in the route.
 
+### MAPD V2 IS SHIPPED AND LIVES IN THIS BRANCH. WHAT EVERY SESSION NEEDS TO KNOW.
+
+Built 2026-08-16. It is in `icbm-manual-override-and-tuning` **on purpose**, not on a feature branch:
+it touches `cereal/`, `params_keys.h`, `process_config.py` and `sunnypilot/mapd/`, which the base
+owns, and every other branch rebases onto this one -- so this is the only place it survives. Passing
+assist and the radar detector pick it up by rebasing, which they already do.
+
+**`MapdV2` HAS THREE STATES, and the middle one is the one nobody expects:**
+
+    0  off       the v2 process does not run. Nothing changes, nothing is spent. THE DEFAULT.
+    1  observe   v2 runs and its whole view is logged at 20 Hz; Speed Limit Assist still reads v1.
+    2  on        SLA reads v2.
+
+State 1 exists because v1 records NOTHING about what it saw, so the only way to compare the two is to
+run both and log the new one. `tools/bp_mapd_compare.py` scores one drive; the gate for moving to
+state 2 is its "only v1 had a limit" row being near zero.
+
+**Default 0 is deliberate and it is about somebody else's car.** Others track this branch for ICBM
+alone -- a second map daemon on their device, a fifth of a core and 200 MB, for a migration that is
+ours, is not a cost to hand to them. The binary ships either way; what it costs is opt-in.
+
+**Rules for anything touching this, all already paid for:**
+
+- **`mapdOut.suggestedSpeed` IS NOT TO BE CONSUMED.** It is mapd's own arbitration and its integration
+  guide has you clamp `v_cruise` to it. It cannot know this car is driven by BUTTON PRESSES at
+  ~3.3 mph/s, that a HOLD exists, or that SCC-Map carries four defenses built from measured events --
+  and as a clamp it moves the MAX number, which is his. Take the INGREDIENTS instead:
+  `speedLimitSuggestedSpeed`, `mapCurveSpeed`, `visionCurveSpeed`, as inputs beside the camera.
+  `test_mapd_schema.py` fails if the planner ever reads it.
+- **The `Mapd*` structs in `cereal/custom.capnp` are THEIRS.** The binary is compiled against its own
+  copy and capnp reads by POSITION, so an inserted field does not rename anything -- it makes
+  `speedLimit` decode out of other bytes, with no error anywhere. Take mapd's verbatim; put our own
+  fields in our own structs.
+- **For passing assist: map data MAY REFUSE, MUST NEVER OPEN.** `lanes = 3` cannot authorize a lane
+  change on its own. That is what keeps "no map costs coverage, never safety" true.
+- **A new setting family needs its prefix in `bp_sunnylink_settings_audit.py`.** `Mapd` was missing
+  and the audit reported 33/33 reachable while the new control could not be changed remotely at all.
+
+**What is left, in order:** SCC-Map from v1's single corner speed onto `mapdExtendedOut.path` -- this
+is where the exit-ramp earliness setting lives, and the four SCC-Map defenses need RE-DERIVING
+against a profile rather than porting blindly, since they were built to interrogate a single number
+arriving with no context. Then passing assist consuming lanes / highwayClass / oneWay /
+distanceFromWayCenter. Then v1 comes out and gives back what the overlap costs.
+
 ### THE MAP IS EVIDENCE, NEVER PERMISSION -- and that is the design, not a caveat
 
 His, 2026-08-16, and it is the sentence to check any map integration against:

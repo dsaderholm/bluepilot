@@ -26,7 +26,7 @@ from openpilot.system.ui.widgets.scroller_tici import Scroller
 
 from openpilot.selfdrive.ui.bp.settings_defaults import recommended
 from openpilot.system.ui.sunnypilot.lib.utils import NoElideButtonAction
-from openpilot.system.ui.sunnypilot.widgets.list_view import ListItemSP, toggle_item_sp
+from openpilot.system.ui.sunnypilot.widgets.list_view import ListItemSP, multiple_button_item_sp
 from openpilot.system.ui.sunnypilot.widgets.tree_dialog import TreeFolder, TreeNode, TreeOptionDialog
 from openpilot.system.ui.sunnypilot.widgets.progress_bar import progress_item
 
@@ -52,14 +52,17 @@ class OSMLayout(Widget):
     # under the version, because that is where someone looks when the map is misbehaving -- and the
     # symptom of having this on without the v2 binary installed is "no speed limits anywhere",
     # which is indistinguishable from the map being broken unless the switch is visible.
-    self._mapd_v2 = toggle_item_sp(
-      title=tr("Use mapd v2"),
+    self._mapd_v2 = multiple_button_item_sp(
+      title=tr("mapd v2"),
       description=recommended(
-        tr("Read speed limits and curves from mapd v2 over cereal instead of v1's shared memory. "
-           "v2 also reports lane count, freeway-vs-ramp, one-way, and whether the map is lost -- "
-           "and unlike v1 it records what the map saw into the drive logs. Requires the v2 binary; "
-           "with this on and the binary missing there will be no speed limits at all."),
+        tr("Off: only the current map program runs and nothing changes.  "
+           "Observe: mapd v2 runs alongside it and records what it sees into your drive logs, while "
+           "speed limits still come from the old one -- drive in this state first, so the two can "
+           "be compared on the same drive.  "
+           "On: speed limits and curves come from mapd v2, which also knows lane count, "
+           "freeway-versus-ramp, one-way, and when the map has lost the road."),
         "MapdV2"),
+      buttons=[tr("Off"), tr("Observe"), tr("On")],
       param="MapdV2")
     self._delete_maps_btn = ListItemSP(tr("Downloaded Maps"), action_item=NoElideButtonAction(tr("DELETE"), enabled=True), callback=self._delete_maps)
     self._progress = progress_item(tr("Downloading Map"))

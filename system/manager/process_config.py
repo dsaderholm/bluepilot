@@ -97,18 +97,20 @@ def mapd_ready(started: bool, params: Params, CP: car.CarParams) -> bool:
   return bool(os.path.exists(Paths.mapd_root()))
 
 def mapd_v2_ready(started: bool, params: Params, CP: car.CarParams) -> bool:
-  """FusionPilot: run mapd v2 whenever its binary is present, regardless of the MapdV2 param.
+  """FusionPilot: run mapd v2 in states 1 (observe) and 2 (on), never in 0.
 
-  That is deliberate and it is the cutover plan. The param decides which source Speed Limit Assist
-  READS; this decides whether v2 is running at all. Running it as an observer first is what makes
-  the migration checkable: mapdOut lands in the route beside v1's behavior, so the two can be
-  compared over a real drive before anything depends on the new one.
+  Both non-zero states run the process, because observing IS the point of state 1: mapdOut lands in
+  the route at 20 Hz beside v1's behavior, which is the only way to compare the two on identical
+  input -- v1 records nothing about what it saw. State 2 additionally switches what Speed Limit
+  Assist reads; that decision lives in mapd_manager, not here.
 
-  The two together cost about a fifth of a core and 200 MB more than v1 alone, measured on this
-  device. That overlap is temporary -- v1 comes out once SCC-Map has moved to mapdExtendedOut and a
-  drive has confirmed the numbers.
+  STATE 0 MUST RUN NOTHING, and that is why the param is checked here at all. An earlier version
+  keyed only on the binary being present, so anyone tracking this branch for ICBM alone paid a fifth
+  of a core and 200 MB for a migration that is ours, not theirs. The binary ships either way; what
+  it costs is opt-in.
   """
-  return bool(os.path.exists(MAPD_V2_PATH) and os.path.exists(Paths.mapd_root()))
+  return bool(params.get("MapdV2", return_default=True) > 0 and
+              os.path.exists(MAPD_V2_PATH) and os.path.exists(Paths.mapd_root()))
 
 def uploader_ready(started: bool, params: Params, CP: car.CarParams) -> bool:
   if not params.get_bool("OnroadUploads"):
