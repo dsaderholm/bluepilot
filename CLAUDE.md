@@ -859,10 +859,26 @@ it to exactly -5.0**, panda's legal escape value, which is therefore what this P
 normal op-long frame. `create_acc_msg_passthrough` now pins it and `passthrough_admissible` no
 longer refuses on it: **71.7% -> 81.3% forwarded, for a hint the car already lives without.**
 
-**What is left to understand: the 18.6% cancel while engaged.** Falling back there is correct --
-forwarding a cancel is actuation, not a degraded command -- but 19% of a drive on openpilot
-longitudinal is not the feature working. Whether that is engagement transients or the camera
-genuinely refusing is the next question, and drive A's log can answer it.
+**AND THE 18.6% CANCEL WAS MOSTLY SELF-INFLICTED. Traced 2026-08-18, and this is the finding.**
+
+    camera first asserts cancel            t+0.02    (whenever ACC is not running -- correct)
+    five clean engagements                 t+22.1 .. t+234.45, 11.6/46.4/27.6/15.4/20.9 s
+    camera asserts cancel WHILE ENGAGED    t+229.43
+    WE FORWARD THAT CANCEL                 t+234.44
+    the fifth engagement ends              t+234.45   <- ten milliseconds later
+    everything after                       70 windows, mean 1.91 s
+
+**Relaying the camera's cancel request knocked openpilot out, and every re-engagement relayed the
+still-asserted cancel and knocked it out again -- seventy times.** That is the chime cycling he
+reported, and the park brake at the stop is downstream of the same loop. It was ours, not Ford's.
+
+**The honest refusal rate is 4.1%**: before the first forwarded cancel, the camera refused for 5.0 s
+out of 121.8 s engaged. With cancel and deny now refused rather than relayed, the loop cannot form,
+and the expected forwarding rate is the admissible share plus the pinned-pred share plus most of
+what the loop was destroying.
+
+What is still unexplained is narrow and no longer catastrophic: why the camera began asserting
+cancel at t+229.43 at all, 15.8 s into a window when the previous one had run 46 s without it.
 
 **Do NOT enable this again until that is understood**, because the park-brake path is real: four
 transmitted frames carried `AccBrkPrkEl_B_Rq`. That is now refused along with cancel, deny, stop
