@@ -922,6 +922,7 @@ class PassingAssistDetector:
     # driver_change_was_exit comes out false on a freeway drive with known exits" -- and it now
     # rides along with the drive instead of needing a separate tool and a separate drive.
     self._exits_by = [0, 0, 0, 0]
+    self._build_sha: str | None = None   # see _build
     # See driverPasses in custom.capnp -- agreement with the driver, the readiness measure.
     self.driver_passes = 0
     self.driver_passes_agreed = 0
@@ -1671,7 +1672,12 @@ class PassingAssistDetector:
       # History is for aggregates; the timeline is for the drive he is describing.
       last = {k: v for k, v in last.items() if k != "timeline"}
       try:
-        last["build"] = str(self.params.get("GitCommit") or "")[:8]
+        # STAMPED HERE ONLY AS A FALLBACK. See _save_drive_summary: the build is now written into
+        # the record while the drive is RUNNING, because archiving happens at the start of the NEXT
+        # drive -- so a drive that ran on build A and was archived after an update was labelled B.
+        # Seen 2026-08-16: drives 5 and 6 were stamped 91e43d4f while plainly lacking the fields
+        # that build added. A stamp that records who ARCHIVED a drive answers nothing anyone asked.
+        last.setdefault("build", str(self.params.get("GitCommit") or "")[:8])
       except Exception:  # noqa: BLE001 - an unstamped drive is still worth keeping
         pass
       hist.append(last)
@@ -1738,6 +1744,25 @@ class PassingAssistDetector:
     if len(self._timeline) > TIMELINE_MAX:
       del self._timeline[0]
 
+  def _build(self) -> str:
+    """The short SHA of the running code, or "" if it cannot be read.
+
+    ITS OWN TRY, and not for tidiness. This is read inside the record dict passed to params.put, so
+    an exception here does not lose a field -- it loses THE WHOLE SUMMARY, silently, because the
+    caller wraps the write in a bare except by design ("a param write must never be able to take the
+    planner down"). Caught offline by a stub that raises on unknown keys exactly as the device does,
+    which is the behaviour that makes the stub worth having.
+
+    Cached after the first success: it cannot change without a restart, and this runs on every
+    periodic write.
+    """
+    if self._build_sha is None:
+      try:
+        self._build_sha = str(self.params.get("GitCommit") or "")[:8]
+      except Exception:
+        return ""
+    return self._build_sha
+
   def _save_drive_summary(self) -> None:
     """Persist what this drive measured. See LAST_DRIVE_WRITE_S.
 
@@ -1752,6 +1777,13 @@ class PassingAssistDetector:
     top_key, top_share = self.top_blocked
     try:
       self.params.put("PassingAssistLastDrive", {
+        # WHICH BUILD ACTUALLY DROVE THIS, stamped while the drive is running rather than when it is
+        # archived. Archiving happens at the start of the NEXT drive, so a drive recorded on build A
+        # and archived after an update was labelled with B -- and on 2026-08-16 drives 5 and 6 were
+        # stamped 91e43d4f while visibly lacking the fields that build introduced. The stamp exists
+        # to sort drives by the code that produced them, and stamping it at archive time answered
+        # the opposite question.
+        "build": self._build(),
         # See TIMELINE_MAX. Written with the rest rather than on its own schedule so a drive that
         # ends with a yanked ignition keeps whatever the last periodic write had.
         "timeline": list(self._timeline),
