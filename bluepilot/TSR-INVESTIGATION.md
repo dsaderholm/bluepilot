@@ -388,9 +388,32 @@ bus, from `ford_lincoln_base_pt.dbc`:
     APIMGPS_Data_Nav_3_FD1  (0x464)  speed, heading, altitude, HDOP/VDOP, satellites in view
     APIM_Data_FD1           (0x32B)  exterior light menus, distance to stopover, GoT edit times
 
-**No speed limit. No road class. No route geometry.** The navigation database stays inside SYNC; what
-leaves it is a GPS receiver feed plus route trivia. So there is no third speed-limit source here, and
-that question is closed rather than open.
+**No speed limit. No road class. No route geometry** -- ON THIS BUS.
+
+**THAT QUALIFIER WAS MISSING AND THE CONCLUSION DRAWN FROM IT WAS WRONG. Corrected 2026-08-17**, when
+he asked the question that breaks it: *"then how has my IPC shown speed limit before I even got my
+new IPMA?"* It did, so a working path existed, and "there is no third speed-limit source" cannot be
+true as stated.
+
+What the search actually covered was `ford_lincoln_base_pt.dbc`, the POWERTRAIN bus. **His car's
+MS-CAN is not modeled by any DBC in this repo** -- the only body-CAN file here is
+`ford_cgea1_2_bodycan_2011`, a different platform generation, and its single APIM message
+(`Personality_APIM_Data3_MS`) carries no limit either. Absence from the one bus we model is not
+absence from the car, and section 4b is direct evidence against it: the IPMA has a **"TSR data
+source"** setting whose options include **Camera + APIM**, and selecting it changed the camera's
+behavior immediately. A module cannot take TSR data from a source that sends none.
+
+So the honest state: the APIM CAN feed the camera speed limits, over a bus openpilot cannot see.
+
+**AND THAT MAKES FIXING 4b WORTH MORE THAN THIS DOCUMENT HAS BEEN TREATING IT.** The camera FUSES its
+sources and republishes the result in `Traffic_RecognitnData` (0x3CD), which is on bus 2 and which
+this fork already parses. So if "Camera + APIM" can be made to persist, SYNC's map limits reach
+Speed Limit Assist through the camera -- WITHOUT openpilot ever needing to see MS-CAN. That is a
+second speed-limit source for exactly the roads mapd has nothing for, which is the original problem.
+
+It also explains his report cleanly. His car had a working configuration; the Edge camera arrived set
+to Camera Only and will not hold the change. Which of those two is why the display stopped is not
+settled here -- the old camera doing TSR by itself would look the same from the driver's seat.
 
 **But the receiver list is the interesting part: `IPMA_ADAS` is listed on all three GPS messages.**
 The camera is *supposed* to be getting its position from the APIM, and `U0253` is precisely "lost
@@ -402,18 +425,49 @@ transmitting — a wiring or routing fault, and the DTC is literal. If they are 
 the frames exist and the camera is rejecting or not receiving them for some other reason, which
 points somewhere entirely different. Either answer narrows the search, and it costs one route read.
 
-The probe was written on 2026-08-16 and not run -- the device went to sleep first. It counts frames
-by address and bus over one segment, including `Traffic_RecognitnData` (973) for scale, since that
-one is known to be present and forwarded. Rebuild it or write it again; it is a dozen lines against
-`LogReader`, reading `can` and bucketing `(address, src)`.
+### RUN 2026-08-17. THE ANSWER IS NEITHER OF THE TWO EXPECTED ONES.
+
+`tools/bp_apim_probe.py`, on three independent routes (0000037d, 00000379, 00000378):
+
+    0x462  APIMGPS_Data_Nav_1  lat/lon/hemispheres              bus 0: ~240   forwarded to bus 2
+    0x463  APIMGPS_Data_Nav_2  UTC, PDOP, compass, GPS fault    NOT PRESENT
+    0x464  APIMGPS_Data_Nav_3  speed, heading, alt, HDOP, sats  NOT PRESENT
+    0x32B  APIM_Data_FD1       light menus, stopover distance   NOT PRESENT
+
+Controls were healthy on every run (`Traffic_RecognitnData`, `ACCDATA_3`, `Steering_Data_FD1` all
+present), so the probe was working.
+
+**THE APIM SENDS POSITION AND NOTHING ELSE.** Not silent, which would have meant a wiring fault, and
+not whole, which would have pointed at the camera. One message of four, at roughly 1 Hz, and
+openpilot's relay is faithfully forwarding it to the camera bus -- the `bus 130` column is
+openpilot's own TX echo (`src = bus | 0x80`), so the frames ARE reaching the camera side.
+
+**Why that is a strong lead on U0253.** `IPMA_ADAS` is a listed receiver on all three GPS messages.
+What it is missing is precisely the QUALITY half of a GPS fix: `Gps_B_Falt` (the fault bit),
+`GPS_Pdop`/`GPS_Hdop`/`GPS_Vdop`, `GPS_Sat_num_in_view`, `GPS_Actual_vs_Infer_pos` (is this position
+measured or dead-reckoned), and the UTC time. A consumer given coordinates with no way to tell a
+good fix from a stale one, and no timestamp to age it, has every reason to declare it unusable --
+which is exactly what `NoNavDataAvailable` says.
+
+So U0253 is not "the APIM is dead" and not "the camera is misconfigured about TSR". It is a
+PARTIAL feed. The next question is why two of four messages are absent: an APIM configuration that
+disables them, or gateway forwarding that carries 0x462 and not 0x463/0x464.
+
+**This does not need any as-built write to test further** -- comparing against the friend's Edge, or
+against any Ford with working TSR, would say whether a healthy car sends all three.
+
+The probe is `tools/bp_apim_probe.py` and is permanent now; it was written twice before and lost
+both times.
 
 Note this needs no as-built write, no GWM change and no FORScan -- it is reading frames off a bus we
 already parse.
 
 ## 7. Next steps, in order
 
-0. **Run the APIM bus probe above.** Free, read-only, one route, and it is the only outstanding test
-   that could move `U0253` from "recurring, cause unknown" to a specific fault.
+0. ~~Run the APIM bus probe.~~ **DONE 2026-08-17 -- see above. The APIM sends position only.**
+   The follow-up is to find out why 0x463 and 0x464 are absent: APIM configuration, or gateway
+   forwarding. Reading the friend's car for the same three addresses would settle which, and costs
+   him one route.
 
 1. **Ask the friend for two lines** — free, and decides whether anything else is worth doing:
    - his `706-01-01` (is his 3rd character a `5`?)
