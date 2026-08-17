@@ -25,7 +25,8 @@ import time
 import urllib.parse
 import urllib.request
 
-API = "https://taginfo.openstreetmap.org/api/4/key/stats?key="
+KEY_API = "https://taginfo.openstreetmap.org/api/4/key/stats?key="
+TAG_API = "https://taginfo.openstreetmap.org/api/4/tag/stats?key={}&value={}"
 
 # The question this list exists to answer, from pfeiferj on mapd issue 129: is there a more common
 # tag carrying roughly the same information as `change`? Grouped by what they actually state, since
@@ -48,11 +49,25 @@ FAMILIES = {
 }
 
 
+def _url(key):
+  """taginfo has separate endpoints for a KEY and for a key=value TAG.
+
+  `highway` is a key with 19 million objects; `highway=stop` is a tag with far fewer, and asking
+  the key endpoint for "highway=stop" returns the count for a key nobody uses rather than an
+  error. That is the shape of mistake this whole tool exists to stop making, so the distinction
+  is drawn on the argument rather than left to the caller.
+  """
+  if "=" in key:
+    k, v = key.split("=", 1)
+    return TAG_API.format(urllib.parse.quote(k), urllib.parse.quote(v))
+  return KEY_API + urllib.parse.quote(key)
+
+
 def stats(key, retries=3):
-  """Total object count for a key, or None if taginfo will not say."""
+  """Total object count for a key or a key=value tag, or None if taginfo will not say."""
   for attempt in range(retries):
     try:
-      with urllib.request.urlopen(API + urllib.parse.quote(key), timeout=45) as r:
+      with urllib.request.urlopen(_url(key), timeout=45) as r:
         data = json.load(r)
       for row in data.get("data", []):
         if row.get("type") == "all":

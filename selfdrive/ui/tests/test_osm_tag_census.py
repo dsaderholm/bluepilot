@@ -87,3 +87,26 @@ class TestStats:
                            side_effect=[OSError("flaky"), _Resp(REAL_SHAPE)]), \
          mock.patch.object(mod.time, "sleep"):
       assert mod.stats("overtaking") == 151_095
+
+
+class TestUrlSelection:
+  """A key and a key=value tag are different taginfo endpoints, and asking the wrong one returns
+  a plausible number rather than an error. `highway` has ~19M objects; `highway=stop` has far
+  fewer, and the key endpoint asked for "highway=stop" answers about a key nobody uses."""
+
+  def test_a_bare_key_uses_the_key_endpoint(self):
+    assert "/key/stats" in mod._url("hov:lanes")
+    assert "hov%3Alanes" in mod._url("hov:lanes") or "hov:lanes" in mod._url("hov:lanes")
+
+  def test_a_key_value_uses_the_tag_endpoint(self):
+    url = mod._url("highway=stop")
+    assert "/tag/stats" in url
+    assert "key=highway" in url and "value=stop" in url
+
+  def test_only_the_first_equals_splits(self):
+    """A value can contain '=' (rare but legal). Splitting on all of them drops the tail."""
+    url = mod._url("note=a=b")
+    assert "value=a%3Db" in url
+
+  def test_the_two_endpoints_are_actually_different(self):
+    assert mod._url("highway") != mod._url("highway=stop")

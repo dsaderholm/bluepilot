@@ -1089,3 +1089,40 @@ Observe mode went live 2026-08-16. Once a drive with `mapdOut` in it exists, run
 3. **What do the `only v2` rows look like?** Those are places v1 was blind. The measured US 40/189
    case -- tile holds 65 mph, SLA showed nothing -- should appear among them; if it does not, the
    residual defect is somewhere other than v1's way-matching and the 1.7% figure needs re-deriving.
+
+## THE FOUR ASKS AS FILED, 2026-08-17, AND WHAT EACH IS WORTH
+
+All four are open on pfeiferj/mapd. Each was measured BOTH ways before filing, after three
+single-window numbers went out wrong in one day: coverage on his roads via Overpass, and worldwide
+commonality via taginfo (`tools/bp_osm_tag_census.py`). The two questions have different answers and
+answering one with the other is what produced the retraction on 129.
+
+    issue  ask                     worldwide     his roads                    verdict
+    -----  ----------------------  ------------  ---------------------------  ----------------------
+     127   lanes:forward           1.41 M        52.9% US 6                   ACCEPTED, being built
+     129   change / change:lanes   80 k          27% US 6, 4% I-15, 0% US 89   weakest, ours to drop
+     130   hov:lanes               19 k          45% UT, 22% NV, 0% CA         real but bounded
+     131   highway=stop            2.47 M        5655 nodes in SLC alone       STRONGEST BY FAR
+
+**131 is the one to care about and it was ranked last for months.** `highway=stop` is 2,468,125
+objects worldwide, MORE COMMON THAN TRAFFIC SIGNALS (2.00 M), and over a hundred times either way tag
+we spent the day arguing for. It was filed last because it is ICBM's rather than passing assist's,
+which is an ownership fact and was never a value judgement -- and it sat behind two asks worth
+0.8% and 0.4% of its object count. Rank by what the tag is worth, not by which feature asked.
+
+**The two qualifiers are the whole engineering content of 131**, measured over 9,845 nodes in three
+metros:
+
+- `direction` on 90%, and directional rather than symmetric: forward 4,185, backward 4,177, both 438.
+  A stop node sits on a TWO-WAY way and usually governs ONE approach. Consuming stop nodes without
+  resolving direction slows the car for signs facing the other way roughly half the time. This is
+  the same direction-of-travel resolution pfeiferj already applies to lane tags, moved to a node.
+- `stop` on 30%, reading `minor` 2,077 against `all` 902. On `stop=minor` the MAJOR road does not
+  stop, so it is a refusal signal and not a detail.
+
+**131 is also a structurally bigger ask and the issue says so.** Every other request is a field on the
+Way struct; this one is node data, and mapd's offline format is built around ways. Stating that
+before he has to is what keeps the next request credible.
+
+**130's California zero is recorded above and is a design problem, not a coverage gap.** Read that
+section before treating `hov:lanes` as closing the express-lane gate.
