@@ -10,6 +10,7 @@ from openpilot.system.manager.process import PythonProcess, NativeProcess, Daemo
 from openpilot.system.hardware.hw import Paths
 
 from openpilot.sunnypilot.mapd.mapd_manager import MAPD_PATH
+from openpilot.sunnypilot.mapd import MAPD_V2_PATH
 
 from openpilot.sunnypilot.models.helpers import get_active_model_runner
 from openpilot.sunnypilot.sunnylink.utils import sunnylink_need_register, sunnylink_ready, use_sunnylink_uploader
@@ -94,6 +95,20 @@ def is_stock_model(started, params, CP: car.CarParams) -> bool:
 
 def mapd_ready(started: bool, params: Params, CP: car.CarParams) -> bool:
   return bool(os.path.exists(Paths.mapd_root()))
+
+def mapd_v2_ready(started: bool, params: Params, CP: car.CarParams) -> bool:
+  """FusionPilot: run mapd v2 whenever its binary is present, regardless of the MapdV2 param.
+
+  That is deliberate and it is the cutover plan. The param decides which source Speed Limit Assist
+  READS; this decides whether v2 is running at all. Running it as an observer first is what makes
+  the migration checkable: mapdOut lands in the route beside v1's behavior, so the two can be
+  compared over a real drive before anything depends on the new one.
+
+  The two together cost about a fifth of a core and 200 MB more than v1 alone, measured on this
+  device. That overlap is temporary -- v1 comes out once SCC-Map has moved to mapdExtendedOut and a
+  drive has confirmed the numbers.
+  """
+  return bool(os.path.exists(MAPD_V2_PATH) and os.path.exists(Paths.mapd_root()))
 
 def uploader_ready(started: bool, params: Params, CP: car.CarParams) -> bool:
   if not params.get_bool("OnroadUploads"):
@@ -184,6 +199,10 @@ procs += [
 
   # mapd
   NativeProcess("mapd", Paths.mapd_root(), ["bash", "-c", f"{MAPD_PATH} > /dev/null 2>&1"], mapd_ready),
+  # FusionPilot: mapd v2. Its output is NOT redirected to /dev/null the way v1's is -- v1 has
+  # nothing worth reading, but v2 reports which tiles it loaded and whether its matcher is lost, and
+  # that goes to swaglog where a route can be checked against it. See mapd_v2_ready.
+  NativeProcess("mapd_v2", Paths.mapd_root(), [MAPD_V2_PATH], mapd_v2_ready),
   PythonProcess("mapd_manager", "sunnypilot.mapd.mapd_manager", always_run),
 
   # locationd
