@@ -95,6 +95,8 @@ def main() -> int:
   v1 = None
   v2_frames = 0
   v1_frames = 0
+  fail_frames = 0
+  fail_with_limit = 0
   v1_stale = 0
   v1_stopped = 0
   vego_mph = 0.0
@@ -138,6 +140,14 @@ def main() -> int:
           v2_frames += 1
           tile_loaded[bool(m.tileLoaded)] += 1
           way_selection[str(m.waySelectionType)] += 1
+          # THE STATE-2 GATE QUESTION, answered from the route rather than guessed at. If mapd
+          # zeroes its limit when the matcher fails, nothing needs doing. If it publishes one
+          # anyway, that limit is a guess about WHICH ROAD WE ARE ON, arriving labelled exactly
+          # like a matched one -- the opposite of what this migration is for.
+          if str(m.waySelectionType) == "fail":
+            fail_frames += 1
+            if float(m.speedLimit) > 0:
+              fail_with_limit += 1
           highway_class[str(m.highwayClass)] += 1
           if m.roadName:
             road_names[str(m.roadName)] += 1
@@ -228,6 +238,21 @@ def main() -> int:
   print(f"  highwayClass     {dict(highway_class.most_common(8))}")
   if road_names:
     print(f"  roads seen:      {', '.join(n for n, _ in road_names.most_common(6))}")
+
+  print()
+  print("=== does a FAILED way match still carry a speed limit? (the state-2 gate question) ===")
+  if not fail_frames:
+    print("  the matcher never failed on this route, so this drive cannot answer it. Needs a route")
+    print("  with a stretch where mapd loses the road -- a tunnel, a new road, a complex interchange.")
+  elif fail_with_limit:
+    print(f"  YES: {fail_with_limit} of {fail_frames} fail frames carried a non-zero speedLimit "
+          f"({100.0 * fail_with_limit / fail_frames:.1f}%).")
+    print("  mapd does NOT zero its limit when it loses the road, so the confidence gate in")
+    print("  MapdV2MapData is load-bearing and must stay before MapdV2 goes to 2.")
+  else:
+    print(f"  NO: all {fail_frames} fail frames published speedLimit 0. mapd zeroes it itself, so")
+    print("  the gate in MapdV2MapData is belt-and-braces rather than load-bearing. Keep it anyway --")
+    print("  it costs nothing and it is our own confidence policy, not an assumption about mapd.")
 
   fail = way_selection.get("fail", 0)
   if fail:

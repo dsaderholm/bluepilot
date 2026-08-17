@@ -102,8 +102,18 @@ class MapdV2MapData(BaseMapData):
       self._last_way_selection = way_selection
       cloudlog.warning(f"mapd v2: waySelectionType={way_selection}")
 
+  @property
+  def way_match_failed(self) -> bool:
+    """mapd's matcher could not decide which way the car is on.
+
+    A limit published on such a frame is not "the limit here" -- it is a limit for a road mapd is
+    not confident we are on, arriving labelled exactly like a matched one. v1 has no way to express
+    this state at all, which is part of why it is worth migrating.
+    """
+    return str(self.sm['mapdOut'].waySelectionType) == "fail"
+
   def get_current_speed_limit(self) -> float:
-    if not self.mapd_alive:
+    if not self.mapd_alive or self.way_match_failed:
       return 0.0
     return float(self.sm['mapdOut'].speedLimit)
 
@@ -119,7 +129,7 @@ class MapdV2MapData(BaseMapData):
     why OsmMapData carries that arithmetic. mapd knows where it is along the way and we do not, so
     its number is better than one we derive from a position that is a frame or two stale.
     """
-    if not self.mapd_alive:
+    if not self.mapd_alive or self.way_match_failed:
       return 0.0, 0.0
     mapd = self.sm['mapdOut']
     return float(mapd.nextSpeedLimit), float(mapd.nextSpeedLimitDistance)

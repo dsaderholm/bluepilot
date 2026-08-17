@@ -390,6 +390,45 @@ reading post-v2 tiles in production all along. There is no countdown.
 it acceptable: divergence from sunnypilot inside their own files is the price CLAUDE.md says outranks
 being right elsewhere -- but a pure observer touches none of their map layer at all.
 
+### NO FORK IS ON v2. WE ARE FIRST, NOT LATE.
+
+Verified from source 2026-08-16, which matters because "everyone else is still on v1" reads as a
+warning and is actually the opposite:
+
+| fork | mapd version | how it is pinned |
+|---|---|---|
+| sunnypilot | v1.12.0 | hardcoded constant |
+| FrogPilot | v1.12.0 | resolved AT RUNTIME from a version JSON |
+| dragonpilot | none | ships no mapd at all |
+| pfeiferj's own latest | **v2.3.0** | |
+
+**FrogPilot's `VERSION = "v2"` IS THE FILE FORMAT OF THEIR VERSION JSON, NOT mapd v2.** Anyone
+reading their source will conclude FrogPilot has already migrated. They have not; they run the same
+v1.12.0 binary everyone else does.
+
+So there is no fork ahead of us to copy and none to be scooped by. The reason the field is stuck is
+not difficulty, it is that v1.12.0 works well enough for what those forks ask of it -- and this fork
+asks more, because passing assist needs lane counts and oneWay, and the exit problem needs
+`highwayClass` to tell a ramp from a freeway.
+
+**FrogPilot's DISTRIBUTION model is the part worth studying, and we have most of its benefit already.**
+They mirror the binary on GitLab and resolve the version at runtime, so their whole fleet moves by
+editing one JSON. That is the right design for a fork with a fleet. Two reasons it buys us less:
+
+- **We already vendor both binaries.** `third_party/mapd_pfeiferj/mapd` and `mapd_v2` are committed
+  here, so the upstream GitHub release disappearing does not strand us the way it would a fork that
+  downloads fresh at boot -- which is the failure the mirror exists to prevent. `mapd_installer.py`
+  still has a live path to `github.com/pfeiferj/openpilot-mapd/releases/download/v1.12.0/mapd` when
+  `download_needed()` fires, so the dependency is not gone, only no longer load-bearing.
+- **Runtime version resolution buys a fleet-wide move without a code push. A push here IS a deploy** --
+  the device pulls unattended, roughly hourly. The mechanism FrogPilot needs a JSON for, we get from
+  git.
+
+**What IS worth taking: they are the fork to watch.** Runtime resolution means FrogPilot can move to
+v2 by editing one file, with no code review anywhere. If they go, the whole v1 ecosystem can move in
+a day, and our v1 side inherits whatever they find. Check their version JSON before assuming v1.12.0
+is still what everyone runs.
+
 ## THE OPEN QUESTION — ANSWERED 2026-08-16: YES
 
 **Can the Minimal path run ALONGSIDE v1 without the SLA/SCC teardown that PR #1647 performs?**
@@ -537,13 +576,23 @@ Observe mode went live 2026-08-16. Once a drive with `mapdOut` in it exists, run
 1. **Is "only v1 had a limit" near zero?** That is the gate for state 2. Note the tool scores only
    frames above 5 mph, because v1 serves the PREVIOUS drive's limit out of `/dev/shm/params` while
    stationary and it reads exactly like a live one.
-2. **DOES mapd PUBLISH A NON-ZERO `speedLimit` ON FRAMES WHERE `waySelectionType` IS `fail`?** This is
-   the one review finding left deliberately open: it cannot be settled offline, and guessing at a
-   gate would be inventing behavior. `MapdV2MapData` passes `speedLimit` straight through today
-   without consulting the confidence field. If mapd zeroes the limit when its matcher fails, nothing
-   needs doing. **If it does not, the reader needs a gate before state 2** -- otherwise a guessed
-   limit reaches Speed Limit Assist labelled exactly like a matched one, which is the opposite of
-   what this migration is for.
+2. **DOES mapd PUBLISH A NON-ZERO `speedLimit` ON FRAMES WHERE `waySelectionType` IS `fail`?**
+   **ANSWERED BY THE TOOL NOW, 2026-08-17** -- `bp_mapd_compare.py` cross-tabs fail frames against
+   non-zero `speedLimit` and prints the verdict in words. Both fields are in `mapdOut` at 20 Hz, so
+   any observe route settles it; it needed a DRIVE, not a device.
+
+   **AND THE GATE IS ALREADY IN**, so the answer no longer blocks state 2 -- it only says whether the
+   gate is load-bearing or belt-and-braces. `MapdV2MapData.way_match_failed` zeroes both the current
+   and the next limit when the matcher failed, for the current limit AND the next one, since both are
+   matched against the same way.
+
+   That is not a guess about mapd's behavior, which is what the earlier note rightly refused to make.
+   It is OUR confidence policy: a limit published on a failed match is a limit for a road mapd is not
+   confident we are on, and it would arrive at Speed Limit Assist labelled exactly like a matched
+   one. The map-is-evidence rule settles which way to err -- a limit is an instruction to change
+   speed, so refusing one costs coverage and honoring a wrong one costs safety. If mapd zeroes it
+   anyway the gate never fires and costs nothing.
+
 3. **What do the `only v2` rows look like?** Those are places v1 was blind. The measured US 40/189
    case -- tile holds 65 mph, SLA showed nothing -- should appear among them; if it does not, the
    residual defect is somewhere other than v1's way-matching and the 1.7% figure needs re-deriving.
