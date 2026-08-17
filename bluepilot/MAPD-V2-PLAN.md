@@ -85,6 +85,24 @@ explicitly invites additions) or generate tiles ourselves, which is already poss
 self-hosting note. Neither is urgent; both are cheaper than any camera work aimed at the same
 question.
 
+**STOP SIGNS ARE A REAL ASK; TRAFFIC LIGHTS ARE NOT.** His reason for wanting either is that the
+MODEL is inaccurate, and he wants a cross-check rather than a replacement -- which is the allowed
+direction, since a mapped sign could refuse or corroborate and never opens anything. But the two
+split completely:
+
+  a traffic light is DYNAMIC. The map can say one exists; only the camera can say it is red. A
+  mapped light is a "be ready" prior and cannot check the thing that matters.
+  a stop sign is STATIC AND COMPLETE. On the matched way, in the direction of travel, it is always a
+  stop. Nothing is left to read, so it is a FULL independent check on the model rather than a hint.
+
+`highway=stop` is a NODE on the way it applies to, and mapd already matches us to a way -- so "is
+this sign mine or is it on the cross street" is answered for free by machinery that already exists.
+What blocks it is that mapd's tiles carry node POSITIONS only, for tracing road shape, and drop node
+tags at generation. That is a bigger change than a way tag: a new object in the tile format rather
+than a field on an existing struct. Not to be bundled into the `lanes:forward` issue -- a second ask
+in the same thread is how both get ignored. Coverage of `highway=stop` on his roads is UNMEASURED
+and should be checked before anyone spends effort on it.
+
 **Three ideas closed by the same measurement**, worth recording so nobody re-hopes them:
 `overtaking=no` would have been the dream tag and does not exist on US 6 at all; `turn:lanes:both_ways`
 is the canonical TWLTL tagging and is 0.2%, so the center-turn-lane case stays with
