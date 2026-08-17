@@ -35,6 +35,52 @@ It is not. The consequence is that an untested push reaches a car being driven, 
 - The command below is how he takes an update DELIBERATELY and immediately. It is not the only way
   code arrives.
 
+## WHEN THE CAR'S NETWORK INTERCEPTS TLS, SHIP A BUNDLE. DO NOT WAIT FOR THE UPDATER.
+
+Second occurrence, 2026-08-17, and the first time it was worked around rather than reported. On some
+networks the device gets a filtering proxy that presents its own certificate for github.com:
+
+    fatal: unable to access 'https://github.com/dsaderholm/bluepilot.git/':
+    SSL: certificate subject name (gw.intermountainchristian.org) does not match target host name
+
+Everything about the car looks healthy. It is on the right branch, the working tree is clean, and
+the UI says nothing. The only tells are in params:
+
+    UpdateFailedCount        47
+    LastUpdateException      command failed: ['git', 'ls-remote', '--heads']
+    UpdaterCurrentDescription  ... / 2d17964 / Aug 17     <- the commit it is STUCK on
+
+**SO "I PUSHED, THE CAR WILL PULL IT WITHIN THE HOUR" CAN BE FALSE FOR DAYS.** That sentence was
+said to him on 2026-08-17 while the car had taken nothing for six hours. **After any push that
+matters, read the device's HEAD rather than assuming the pull happened.**
+
+**The fix needs no network on the device**, because the laptop can reach both GitHub and the car even
+when the car cannot reach GitHub:
+
+```bash
+git bundle create /tmp/fp.bundle <device-HEAD>..<branch>       # on the laptop
+scp /tmp/fp.bundle comma@<host>:/tmp/fp.bundle
+```
+
+then on the device:
+
+```bash
+cd /data/openpilot && git bundle verify /tmp/fp.bundle
+git fetch /tmp/fp.bundle <branch>:refs/remotes/origin/<branch> -f
+git reset --hard origin/<branch>
+```
+
+35 commits came to 192 KB. The bundle is a thin pack against the commit the device already has, so
+it stays small however far behind the car is, and `git bundle verify` refuses up front if the device
+lacks the base rather than half-applying.
+
+**Do the reset, leave the reboot to him.** The code is inert until processes restart, so a reset on a
+parked car changes nothing until he chooses. Announce the write before running it, and never do any
+of this while he is driving.
+
+**Then verify by CONTENT, not by hash** -- see the rebase section below for why a matching hash has
+lied here before. `grep -c` for a string the new commit introduced and one it removed.
+
 ## START HERE if the owner asks to update
 
 They will open a fresh session and say something like *"update BluePilot"*, *"get the latest
