@@ -113,6 +113,65 @@ convention tied to their centre-line rules that nobody surveys here. Dead for th
 reason as `maxspeed:advisory` at 113K. So the two separate cleanly: the on-the-nose tag does not
 exist, and the unglamorous one does.
 
+#### THE DRAFT, ready to file. Conditions on sending it are below the text.
+
+**Do not send it yet.** Send it (a) after `pfeiferj/mapd#127` gets a response either way, because two
+open asks from one person on a volunteer project is how both slide, and (b) from whoever is actually
+building the model-stop cross-check, so they can answer follow-ups. Title:
+`Expose stop signs on the predicted path (highway=stop nodes)`
+
+```
+Hi. Following on from the lanes request, a second one that is a bigger change, so
+please treat it as a "would you ever consider" rather than a request.
+
+Would you consider carrying `highway=stop` nodes into the tiles and exposing the
+next one on MapdOut, in the same shape as the existing speed limit and hazard
+outputs? Something like nextStopSign and nextStopSignDistance would slot straight
+into the pattern already there.
+
+WHY, and it is a cross-check rather than a replacement. Our fork slows for stop
+signs using the driving model, which sees them with the camera. That works most of
+the time and is wrong often enough to matter, and there is currently no second
+source. A stop sign is unusual in being fully static: if the map says there is one
+on the way we are matched to, in our direction of travel, that is the whole answer.
+Nothing has to be read off it in real time.
+
+We measured coverage before asking. Salt Lake City, bbox 40.55/-112.05 to
+40.80/-111.80:
+
+    highway=stop              3,958 nodes
+    highway=traffic_signals   2,223 nodes
+
+More stop signs than signals, which is what the ground actually looks like, so
+mappers here have done the work rather than only tagging the obvious landmarks.
+
+NOT ASKING FOR TRAFFIC SIGNALS, deliberately. A light is dynamic state. The map can
+say one exists but only the camera can say it is red, so it would be a "be ready"
+prior at best and cannot check the thing that matters. Stop signs are the case
+where a map is strictly better than a detector, and they are the only part of this
+worth your time.
+
+The part I understand is the real cost: node tags are a new object in the tile
+format rather than a field on an existing struct, and that is a different scale of
+change from the lanes one. There is also direction to handle, since a node on a
+two-way way does not necessarily apply to us. Way matching already knows which way
+we are on and which direction we are travelling, so I think the pieces exist, but
+you would know whether that is true.
+
+If you do pick it up I am glad to test. I have v2 running on a device with tiles
+downloaded for Utah, so I can flash a build and check the output against roads
+where I know exactly where the stop signs are.
+
+Entirely understand if this is out of scope. Thanks either way.
+```
+
+**What the draft is doing, so it is not "improved" into uselessness later.** It concedes the scale in
+the first line, because a large request smuggled in as a small one reads badly. The strongest
+paragraph is the REFUSAL: declining traffic signals with a reason proves the ask was filtered rather
+than dumped, and it is the same filtering that kept `overtaking` and `incline` out of both issues. And
+it names the hard parts (format change, direction handling) rather than glossing them, so a "no" costs
+him no explanation. No em dashes, at the owner's request, so it does not read as generated.
+
 **Three ideas closed by the same measurement**, worth recording so nobody re-hopes them:
 `overtaking=no` would have been the dream tag and does not exist on US 6 at all; `turn:lanes:both_ways`
 is the canonical TWLTL tagging and is 0.2%, so the center-turn-lane case stays with
