@@ -1079,11 +1079,40 @@ printf "1" > /data/params/d/MapdV2      # 0 off, 1 observe, 2 on
 
 Otherwise it is reboot, set, reboot. True of any new param on its first flash, not just this one.
 
-**What is left, in order:** SCC-Map from v1's single corner speed onto `mapdExtendedOut.path` -- this
-is where the exit-ramp earliness setting lives, and the four SCC-Map defenses need RE-DERIVING
-against a profile rather than porting blindly, since they were built to interrogate a single number
-arriving with no context. Then passing assist consuming lanes / highwayClass / oneWay /
+**SCC-Map ALREADY READS THE v2 PATH at state 2** (`mapd_v2_path.py`, wired in
+`smart_cruise_control.py`, `mapdExtendedOut` subscribed in plannerd). It is a pure SOURCE SWAP: the
+walk, the trigger arithmetic, the corner-speed factor pair and all four camera defenses are
+untouched, and `curvature` per point is parsed and deliberately NOT used yet.
+
+**Do not "finish" that by re-deriving the defenses from reasoning.** They were each bought with a
+measured event on his roads and they were built to interrogate a SINGLE corner speed arriving with no
+context; against a full profile some of them answer a question nobody is asking any more. Which ones,
+and what replaces them, is a question for drive data. Changing the source and the judgement in one
+step would produce a drive that cannot say which half moved.
+
+SCC-Map also FALLS BACK to v1 when v2 is selected but silent, which is the opposite of what the SLA
+reader does. Deliberate: there a quiet fallback hides a broken install behind plausible speed limits,
+here v1 is still the shipped curve source and the failure being avoided is not slowing for a corner.
+
+**What is left, in order:** the curvature profile itself -- plan a descent against the ~3.3 mph/s the
+buttons actually deliver instead of reacting to a step, which is the exit-ramp problem, together with
+whatever the defenses become. Then passing assist consuming lanes / highwayClass / oneWay /
 distanceFromWayCenter. Then v1 comes out and gives back what the overlap costs.
+
+**TWO MERGE FACTS, both from 2026-08-16 and both cheap to get wrong:**
+
+- **plannerd's SubMaster list is edited by more than one branch and conflicts must be resolved as a
+  UNION.** Passing assist adds `liveTracks`, `rearRadarBP` and `selfdriveStateSP`; the base adds
+  `mapdExtendedOut`. Taking either side whole silently removes an input a controller already reads,
+  and nothing offline notices -- which is the next bullet.
+- **THE SUITE PASSES WITH `plannerd.py` FULL OF CONFLICT MARKERS.** 1674 tests green on a file that
+  could not possibly have imported, because nothing offline imports plannerd -- it needs `messaging`.
+  After any merge that touches it, parse it explicitly:
+
+      python -c "import ast; ast.parse(open('selfdrive/controls/plannerd.py',encoding='utf-8').read())"
+
+  A green run says nothing whatsoever about a file it never read. The same holds for anything else
+  requiring compiled extensions.
 
 ### THE MAP IS EVIDENCE, NEVER PERMISSION -- and that is the design, not a caveat
 
