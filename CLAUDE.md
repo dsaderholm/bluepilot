@@ -1048,6 +1048,36 @@ ours, is not a cost to hand to them. The binary ships either way; what it costs 
 - **A new setting family needs its prefix in `bp_sunnylink_settings_audit.py`.** `Mapd` was missing
   and the audit reported 33/33 reachable while the new control could not be changed remotely at all.
 
+**THREE OPERATIONAL FACTS, learned on the device 2026-08-16, each of which cost a round:**
+
+- **NEVER HAND-RUN `mapd_v2` WHILE MANAGER HAS IT.** Two publishers cannot hold the same msgq
+  endpoint, and it is the MANAGED instance that dies -- `managerState` reads `running=False
+  exitCode=2`, manager does NOT restart it, and only a reboot recovers. The nasty part: v1 is
+  untouched throughout, so the car looks perfectly healthy and the only dead thing is the one being
+  debugged. Subscribe to `mapdOut` instead. This is the easiest way to waste an evening here.
+- **OFFROAD IT PUBLISHES NOTHING AND THAT IS CORRECT.** Parked, `gpsLocation`, `gpsLocationExternal`
+  and `liveLocationKalman` are all silent, so v2 has no position and emits zero frames. **v1 looks
+  alive in the same moment only because `/dev/shm/params` still holds `MapSpeedLimit` and `RoadName`
+  from the PREVIOUS drive** -- stale values that read exactly like live ones. Offroad you can check
+  that the binary exists, `managerState` says running, and `MapdV2` is set. Nothing further, and do
+  not conclude v2 is broken from a parked car.
+- **That staleness is a trap for the COMPARISON, not just for a human reading params.** At the start
+  of a drive v1 confidently serves last trip's limit while v2 correctly serves nothing, which scores
+  as a run of "only v1 had a limit" -- THE number the cutover rests on, poisoned toward never
+  switching, by v1 being wrong rather than v2 being deficient. `bp_mapd_compare.py` scores only
+  frames above 5 mph for exactly this reason.
+
+**Setting `MapdV2` right after a flash needs the FILE, not `Params().put()`.** `common/params_pyx` is
+compiled from `params_keys.h`, so until scons rebuilds on the first boot the key does not exist and
+you get `UnknownKeyName: b'MapdV2'`. Writing the file directly lets ONE reboot do both, since manager
+will not overwrite a param that is already set:
+
+```bash
+printf "1" > /data/params/d/MapdV2      # 0 off, 1 observe, 2 on
+```
+
+Otherwise it is reboot, set, reboot. True of any new param on its first flash, not just this one.
+
 **What is left, in order:** SCC-Map from v1's single corner speed onto `mapdExtendedOut.path` -- this
 is where the exit-ramp earliness setting lives, and the four SCC-Map defenses need RE-DERIVING
 against a profile rather than porting blindly, since they were built to interrogate a single number
