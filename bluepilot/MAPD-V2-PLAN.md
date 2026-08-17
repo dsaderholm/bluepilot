@@ -60,6 +60,37 @@ curvature -- which SCC-Vision has never had and now will not get from the map.
 **`turn:lanes` at 6-28% confirms the center-turn-lane case is not solved by the map either**, which
 is what the passing assist section below already says for a different reason.
 
+### WHAT OSM HAS THAT MAPD DOES NOT PUBLISH -- measured on US 6, 2026-08-17
+
+He asked what OSM could give this fork as it grows. Measured rather than listed, on the road it
+matters most on: US 6, 497 way segments.
+
+    lanes:forward / lanes:backward   52.9%   <- THE PRIZE
+    shoulder                         35.4%
+    bridge                            7.6%
+    turn:lanes                        1.4%
+    turn:lanes:both_ways              0.2%   <- the TWLTL tag. dead.
+    overtaking                        0.0%   <- dead
+    incline                           0.0%   <- dead
+
+**`lanes:forward` ANSWERS THE ONE QUESTION NOTHING ELSE CAN.** On a 2+1 road `lanes = 3` is
+ambiguous: the lane to our left is either OUR passing lane or the oncoming side's. The camera cannot
+separate them -- that is the geometry problem -- and the radar only settles it once a vehicle
+appears, which is the oncoming veto arriving late. `lanes:forward=2, lanes:backward=1` states it
+from the map before anyone arrives, and US 6 / US 89 2+1 sections are the roads he drives.
+
+**mapd publishes `lanes` (the total) and drops the directional split.** So this is data in OSM, in
+the tile's source, discarded at the interface. Two routes to it: ask pfeiferj (his integration doc
+explicitly invites additions) or generate tiles ourselves, which is already possible -- see the
+self-hosting note. Neither is urgent; both are cheaper than any camera work aimed at the same
+question.
+
+**Three ideas closed by the same measurement**, worth recording so nobody re-hopes them:
+`overtaking=no` would have been the dream tag and does not exist on US 6 at all; `turn:lanes:both_ways`
+is the canonical TWLTL tagging and is 0.2%, so the center-turn-lane case stays with
+`geoLeftTravelProven`; and `incline` is 0%, so "do not pass uphill when the engine is stressed" gets
+nothing from OSM and stays with the sensors.
+
 ### THE 50x DISCREPANCY WAS NOT REAL. MEASURED AND WITHDRAWN 2026-08-16.
 
 **It was an artifact of a PARKED CAR.** This section used to read: OSM has a limit on 86-97% of his
