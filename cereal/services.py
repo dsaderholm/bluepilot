@@ -113,6 +113,18 @@ _services: dict[str, tuple] = {
   "livestreamRoadEncodeData": (False, 20., None, QueueSize.MEDIUM),
   "livestreamDriverEncodeData": (False, 20., None, QueueSize.MEDIUM),
   "customReservedRawData0": (True, 0.),
+
+  # FusionPilot: mapd v2. The rates are mapd's own -- mapdOut at 20 Hz, mapdExtendedOut internally
+  # rate-limited to 1 Hz because it carries the whole path ahead. mapdIn is event-driven, so its
+  # frequency is 0 and nothing checks it for liveness.
+  #
+  # should_log is True on all three ON PURPOSE, and it is half the reason for this migration: v1
+  # talks through /dev/shm/params and puts NOTHING in the route, which is why no drive analysis in
+  # this fork has ever been able to see what the map was saying. mapdOut at 20 Hz with decimation 20
+  # gives one frame a second in the qlog and the full rate in the rlog.
+  "mapdOut": (True, 20., 20, QueueSize.MEDIUM),
+  "mapdExtendedOut": (True, 1., 1, QueueSize.MEDIUM),
+  "mapdIn": (True, 0., 1),
 }
 SERVICE_LIST = {name: Service(*vals) for
                 idx, (name, vals) in enumerate(_services.items())}

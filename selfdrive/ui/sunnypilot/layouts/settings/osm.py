@@ -24,8 +24,9 @@ from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
 from openpilot.system.ui.widgets.list_view import text_item
 from openpilot.system.ui.widgets.scroller_tici import Scroller
 
+from openpilot.selfdrive.ui.bp.settings_defaults import recommended
 from openpilot.system.ui.sunnypilot.lib.utils import NoElideButtonAction
-from openpilot.system.ui.sunnypilot.widgets.list_view import ListItemSP
+from openpilot.system.ui.sunnypilot.widgets.list_view import ListItemSP, toggle_item_sp
 from openpilot.system.ui.sunnypilot.widgets.tree_dialog import TreeFolder, TreeNode, TreeOptionDialog
 from openpilot.system.ui.sunnypilot.widgets.progress_bar import progress_item
 
@@ -47,13 +48,28 @@ class OSMLayout(Widget):
 
   def _initialize_items(self):
     self._mapd_version = text_item(tr("Mapd Version"), lambda: ui_state.params.get("MapdVersion") or "Loading...")
+    # FusionPilot: which map program feeds Speed Limit Assist. Placed at the top of this screen,
+    # under the version, because that is where someone looks when the map is misbehaving -- and the
+    # symptom of having this on without the v2 binary installed is "no speed limits anywhere",
+    # which is indistinguishable from the map being broken unless the switch is visible.
+    self._mapd_v2 = toggle_item_sp(
+      title=tr("Use mapd v2"),
+      description=recommended(
+        tr("Read speed limits and curves from mapd v2 over cereal instead of v1's shared memory. "
+           "v2 also reports lane count, freeway-vs-ramp, one-way, and whether the map is lost -- "
+           "and unlike v1 it records what the map saw into the drive logs. Requires the v2 binary; "
+           "with this on and the binary missing there will be no speed limits at all."),
+        "MapdV2"),
+      param="MapdV2")
     self._delete_maps_btn = ListItemSP(tr("Downloaded Maps"), action_item=NoElideButtonAction(tr("DELETE"), enabled=True), callback=self._delete_maps)
     self._progress = progress_item(tr("Downloading Map"))
     self._update_btn = ListItemSP(tr("Database Update"), action_item=NoElideButtonAction(tr("CHECK"), enabled=True), callback=self._update_db)
     self._country_btn = ListItemSP(tr("Country"), action_item=NoElideButtonAction(tr("SELECT"), enabled=True), callback=lambda: self._select_region("Country"))
     self._state_btn = ListItemSP(tr("State"), action_item=NoElideButtonAction(tr("SELECT"), enabled=True), callback=lambda: self._select_region("State"))
 
-    self.items = [self._mapd_version, self._delete_maps_btn, self._progress, self._update_btn, self._country_btn, self._state_btn]
+    # A defined-but-unregistered item silently never renders -- see CLAUDE.md, IcbmModelStopEnabled.
+    self.items = [self._mapd_version, self._mapd_v2, self._delete_maps_btn, self._progress, self._update_btn,
+                  self._country_btn, self._state_btn]
 
   def _show_confirm(self, msg, confirm_text, func):
     gui_app.push_widget(ConfirmDialog(msg, confirm_text, callback=lambda res: func() if res == DialogResult.CONFIRM else None))

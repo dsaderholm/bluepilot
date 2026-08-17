@@ -496,6 +496,21 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // mapd
     {"MapAdvisorySpeedLimit", {CLEAR_ON_ONROAD_TRANSITION, FLOAT}},
     {"MapdVersion", {PERSISTENT, STRING}},
+    // FusionPilot: mapd v2's own settings blob. mapd reads and writes this file itself, in Go,
+    // straight to /data/params/d with the same lock protocol -- it is the ONE param it touches, and
+    // it never opens /dev/shm/params, which is what lets v1 and v2 run side by side without
+    // interfering. Declared here so our Params does not reject the key.
+    // JSON encodes itself: pass the dict, never json.dumps() -- see CLAUDE.md.
+    {"MapdSettings", {PERSISTENT, JSON}},
+    // FusionPilot: fill liveMapDataSP from mapd v2's mapdOut instead of v1's /dev/shm/params.
+    //
+    // DEFAULTS OFF, and the reason is about the car rather than caution about the code: the v2
+    // binary is not on the device yet, and with this on and nothing publishing mapdOut, Speed Limit
+    // Assist correctly reports no limit -- which would look exactly like the map being broken. It
+    // flips on once the binary is installed and one drive has confirmed the numbers match.
+    //
+    // Transitional by design. It exists to make the cutover reversible and is deleted with v1.
+    {"MapdV2", {PERSISTENT, BOOL, "0"}},
     {"MapSpeedLimit", {CLEAR_ON_ONROAD_TRANSITION, FLOAT, "0.0"}},
     {"NextMapSpeedLimit", {CLEAR_ON_ONROAD_TRANSITION, JSON}},
     {"Offroad_OSMUpdateRequired", {CLEAR_ON_MANAGER_START, JSON}},

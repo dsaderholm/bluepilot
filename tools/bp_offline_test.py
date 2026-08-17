@@ -122,6 +122,12 @@ DEFAULT_TARGETS = [
   # A sub-panel that builds a back button and never draws it opens and cannot be left. Found by
   # hand on the last check before a drive, in a panel added the same day.
   "selfdrive/car/tests/test_sub_layouts_have_a_way_out.py",
+  # Named file, not the directory: test_mapd_version.py beside it hashes the installed mapd binary
+  # and cannot run without the device. The schema guard pins mapd v2's ordinals, which are theirs
+  # rather than ours -- capnp reads by position, so drift decodes as different fields with no error.
+  "sunnypilot/mapd/tests/test_mapd_schema.py",
+  "sunnypilot/mapd/tests/test_mapd_v2_map_data.py",
+  "sunnypilot/mapd/tests/test_mapd_v2_binary.py",
   # The value behind every +/- control. The widget needs pyray and cannot collect here, which
   # is why its logic lives in param_value_cache.py -- there was nothing to test before, and
   # nothing caught the read that wiped his angle tuning.

@@ -2565,9 +2565,9 @@ struct Event {
     carStateBP @140 :Custom.CarStateBP;  # BluePilot: claims customReserved14 slot
     rearRadarBP @141 :Custom.RearRadarBP;  # FusionPilot: claims customReserved15 slot
     customReserved16 @142 :Custom.CustomReserved16;
-    customReserved17 @143 :Custom.CustomReserved17;
-    customReserved18 @144 :Custom.CustomReserved18;
-    customReserved19 @145 :Custom.CustomReserved19;
+    mapdExtendedOut @143 :Custom.MapdExtendedOut;  # FusionPilot: claims customReserved17 slot
+    mapdIn @144 :Custom.MapdIn;                    # FusionPilot: claims customReserved18 slot
+    mapdOut @145 :Custom.MapdOut;                  # FusionPilot: claims customReserved19 slot
 
     # *********** legacy + deprecated ***********
     model @9 :Deprecated.ModelData; # TODO: rename modelV2 and mark this as deprecated

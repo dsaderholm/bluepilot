@@ -1557,11 +1557,196 @@ struct RearRadarBP @0xbd443b539493bc68 {
 struct CustomReserved16 @0xfc6241ed8877b611 {
 }
 
-struct CustomReserved17 @0xa30662f84033036c {
+# FusionPilot: mapd v2 (pfeiferj/openpilot-mapd), copied from its cereal/custom/custom.capnp.
+#
+# THESE ARE NOT OURS TO EDIT. The mapd binary is compiled against its own copy of this schema and
+# writes these messages onto the wire; capnp reads by POSITION, so changing a field's ordinal here
+# does not rename a field, it silently reads a different one. If mapd adds a field, take theirs
+# verbatim. If we want a field of our own, it goes in a struct of ours, not in one of these.
+#
+# The three struct IDs below were already the reserved ones -- upstream cereal's rule is "DO rename
+# the structs, DON'T change the identifier", and mapd claims the same three, so this is a rename in
+# place rather than a new claim. CustomReserved17/18/19 they were, @143/@144/@145 they stay in
+# log.capnp's Event.
+#
+# NOTE `suggestedSpeed` is mapd's own final answer -- the minimum of its speed-limit and curve
+# numbers, meant to be clamped straight onto v_cruise by forks with nothing in that layer. WE DO NOT
+# CONSUME IT. It cannot know about ICBM's button presses, about holds, or about the four SCC-Map
+# defenses that were each built from a measured event on this car. The INGREDIENTS are what we take:
+# speedLimitSuggestedSpeed, mapCurveSpeed and visionCurveSpeed, as inputs beside the camera.
+
+struct MapdDownloadLocationDetails @0xff889853e7b0987f {
+  location @0 :Text;
+  totalFiles @1 :UInt32;
+  downloadedFiles @2 :UInt32;
 }
 
-struct CustomReserved18 @0xc86a3d38d13eb3ef {
+struct MapdDownloadProgress @0xfaa35dcac85073a2 {
+  active @0 :Bool;
+  cancelled @1 :Bool;
+  totalFiles @2 :UInt32;
+  downloadedFiles @3 :UInt32;
+  locations @4 :List(Text);
+  locationDetails @5 :List(MapdDownloadLocationDetails);
 }
 
-struct CustomReserved19 @0xa4f1eb3323f5f582 {
+# One point on the road ahead. This is the structural gain over v1: today SCC-Map is handed a single
+# corner speed at the instant braking must begin, with no context, which is why four defenses had to
+# be built to question it. A list of these is the whole profile ahead.
+struct MapdPathPoint @0xd6f78acca1bc3939 {
+  latitude @0 :Float64;
+  longitude @1 :Float64;
+  curvature @2 :Float32;
+  targetVelocity @3 :Float32;
+}
+
+struct MapdPosition @0xde9705979aca8339 {
+  latitude @0 :Float64;
+  longitude @1 :Float64;
+}
+
+struct MapdExtendedOut @0xa30662f84033036c {
+  downloadProgress @0 :MapdDownloadProgress;
+  settings @1 :Text;
+  path @2 :List(MapdPathPoint);
+  position @3 :MapdPosition;
+}
+
+enum MapdInputType {
+  download @0;
+  reloadSettings @9;
+  saveSettings @10;
+  loadDefaultSettings @21;
+  loadRecommendedSettings @22;
+  loadPersistentSettings @26;
+  cancelDownload @27;
+  setJsonPathFloat @43;
+  setJsonPathText @44;
+  setJsonPathBool @45;
+  acceptSpeedLimit @34;
+
+  # DEPRECATED settings inputs
+  setLogLevel @6;
+  setLogSource @29;
+  setLogJson @28;
+  setTargetLateralAccel @1;
+  setSpeedLimitOffset @2;
+  setSpeedLimitControl @3;
+  setMapCurveSpeedControl @4;
+  setVisionCurveSpeedControl @5;
+  setVisionCurveTargetLatA @7;
+  setVisionCurveMinTargetV @8;
+  setEnableSpeed @11;
+  setVisionCurveUseEnableSpeed @12;
+  setMapCurveUseEnableSpeed @13;
+  setSpeedLimitUseEnableSpeed @14;
+  setHoldLastSeenSpeedLimit @15;
+  setTargetSpeedJerk @16;
+  setTargetSpeedAccel @17;
+  setTargetSpeedTimeOffset @18;
+  setDefaultLaneWidth @19;
+  setMapCurveTargetLatA @20;
+  setSlowDownForNextSpeedLimit @23;
+  setSpeedUpForNextSpeedLimit @24;
+  setHoldSpeedLimitWhileChangingSetSpeed @25;
+  setExternalSpeedLimitControl @30;
+  setExternalSpeedLimit @31;
+  setSpeedLimitPriority @32;
+  setSpeedLimitChangeRequiresAccept @33;
+  setPressGasToAcceptSpeedLimit @35;
+  setAdjustSetSpeedToAcceptSpeedLimit @36;
+  setAcceptSpeedLimitTimeout @37;
+  setPressGasToOverrideSpeedLimit @38;
+  setConditionalSpeedLimitControl @39;
+  setShadowCarState @40;
+  setShadowModelV2 @41;
+  setShadowGpsLocation @42;
+  setShadowGpsLocationExternal @46;
+}
+
+# `fail` is the one this fork has been missing: it says the map is LOST rather than confident and
+# wrong. Six consecutive positions on US 40/189 were measured on 2026-08-16 where the tile on this
+# device holds 65 mph and Speed Limit Assist showed nothing, and today that failure is silent.
+enum WaySelectionType {
+  current @0;
+  predicted @1;
+  possible @2;
+  extended @3;
+  fail @4;
+}
+
+enum SpeedLimitOffsetType {
+  static @0;
+  percent @1;
+}
+
+struct MapdIn @0xc86a3d38d13eb3ef {
+  type @0 :MapdInputType;
+  float @1 :Float32;
+  str @2 :Text;
+  bool @3 :Bool;
+  jsonPath @4 :Text;
+}
+
+enum RoadContext {
+  freeway @0;
+  city @1;
+  unknown @2;
+}
+
+# WARNING: must be kept in perfect sync (names and values) with the
+# HighwayClass enum in cereal/offline/offline.capnp -- state.go casts directly
+# between the two generated enum types.
+# unknown either means the way's highway tag was not one of the listed values
+# or the loaded map tiles predate this field.
+#
+# FusionPilot note: motorway vs motorwayLink is freeway vs on/off-ramp, stated as a fact instead of
+# inferred. The tiles on this device already carry it -- 292 motorway against 403 motorwayLink in
+# the Salt Lake box, measured 2026-08-16 from a tile downloaded 2026-08-02. Our copy of the tile
+# schema is tools/bp_offline_tile.capnp and test_mapd_schema.py checks the two agree.
+enum HighwayClass {
+  unknown @0;
+  motorway @1;
+  motorwayLink @2;
+  trunk @3;
+  trunkLink @4;
+  primary @5;
+  primaryLink @6;
+  secondary @7;
+  secondaryLink @8;
+  tertiary @9;
+  tertiaryLink @10;
+  unclassified @11;
+  residential @12;
+  livingStreet @13;
+}
+
+struct MapdOut @0xa4f1eb3323f5f582 {
+  wayName @0 :Text;
+  wayRef @1 :Text;
+  roadName @2 :Text;
+  speedLimit @3 :Float32;
+  nextSpeedLimit @4 :Float32;
+  nextSpeedLimitDistance @5 :Float32;
+  hazard @6 :Text;
+  nextHazard @7 :Text;
+  nextHazardDistance @8 :Float32;
+  advisorySpeed @9 :Float32;
+  nextAdvisorySpeed @10 :Float32;
+  nextAdvisorySpeedDistance @11 :Float32;
+  oneWay @12 :Bool;
+  lanes @13 :UInt8;
+  tileLoaded @14 :Bool;
+  speedLimitSuggestedSpeed @15 :Float32;
+  suggestedSpeed @16 :Float32;
+  estimatedRoadWidth @17 :Float32;
+  roadContext @18 :RoadContext;
+  distanceFromWayCenter @19 :Float32;
+  visionCurveSpeed @20 :Float32;
+  mapCurveSpeed @21 :Float32;
+  waySelectionType @22 :WaySelectionType;
+  speedLimitAccepted @23 :Bool;
+  highwayClass @24 :HighwayClass;
+  wayId @25 :Int64;
+  conditionalSpeedLimit @26 :Text;
 }

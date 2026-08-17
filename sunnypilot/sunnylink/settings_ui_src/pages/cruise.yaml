@@ -130,7 +130,17 @@ sections:
 - id: speed_limits
   title: Speed Limits
   description: Speed limit detection and offset behavior
-  items: []
+  # FusionPilot: the SOURCE the settings below are fed from, so it sits above them. Section level
+  # rather than in the sub_panel because section-level items render only as toggles and this is one
+  # -- an option here would silently not appear, which is how the SCC and ICBM sliders went missing.
+  # Deliberately NOT capability-gated: the device screen (osm.py) gates it on nothing, and SunnyLink
+  # must never gate more tightly than the device or a setting he can change at the car reads as
+  # unavailable remotely.
+  items:
+  - key: MapdV2
+    widget: toggle
+    title: Use mapd v2
+    description: "Read speed limits and curves from mapd v2 over cereal instead of v1's shared memory. v2 also reports lane count, freeway-vs-ramp, one-way, and whether the map is lost -- and unlike v1 it records what the map saw into the drive logs. Requires the v2 binary; with this on and the binary missing there will be no speed limits at all."
   sub_panels:
   - id: speed_limit_settings
     label: Speed Limit Settings
