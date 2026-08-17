@@ -1126,3 +1126,48 @@ before he has to is what keeps the next request credible.
 
 **130's California zero is recorded above and is a design problem, not a coverage gap.** Read that
 section before treating `hov:lanes` as closing the express-lane gate.
+
+### WHY CALIFORNIA MAPS HOV SEPARATELY, AND WHAT THAT DOES TO THE GATE
+
+His observation, 2026-08-17: *"HOV lanes in California always have some kind of barrier thing that
+technically you can go through."* That is the explanation for the 0% in the section above, and the
+tag data supports it rather than merely being consistent with it.
+
+California express lanes are separated by a painted buffer that is legally uncrossable except at
+marked openings, so mappers treat the lane as its own carriageway. Two encodings result, and BOTH
+appear on the roads he will drive:
+
+    separate way        bare `hov=designated`, 1-2 lanes.  LA 419/501, San Diego 85/99.
+    lane in our way     `hov:lanes`, with the buffer stated as `change:lanes`.
+
+**The buffer IS mapped, where anyone bothered.** On LA ways carrying `hov:lanes`:
+
+    change:lanes = "no|not_left|yes|yes|yes|yes"     x13
+                   "no|not_left|yes|yes|yes|yes|yes" x7
+                   "no|not_left|yes|yes|yes"         x4
+
+Lane 1 is the HOV lane you may not leave; lane 2 may not move LEFT into it. That is the painted
+buffer written as a tag, and it is exactly the restriction the camera cannot see -- a buffer is
+paint, and paint is what the model already struggles with.
+
+**But it is thin: 27 of 240 LA ways, 27 of 597 in Riverside, 10 of 71 in San Diego.** So
+`change:lanes` does not rescue the California case; it covers about a tenth of it.
+
+**`designated` leftmost is NOT a Utah artifact** -- re-measured across four metros and 1,526 ways
+after nearly generalizing from Utah a second time: Utah 100%, Riverside 100%, LA 98%, San Diego 94%,
+all four 100% oneway. Issue 130 now carries this.
+
+**THE GATE STILL DOES NOT CLOSE, and it is worth being precise about why.** Three cases:
+
+    HOV as a lane on our way, hov:lanes present     SOLVED by issue 130.
+    HOV as a lane on our way, only change:lanes     solved by 129, ~10% of California.
+    HOV as a SEPARATE WAY                           NOT SOLVABLE from tags on our way.
+
+The third is the majority of the LA basin, and no map field on the matched way can fix it: the
+restriction lives on a different way, while the lane sits physically to our left across paint that
+radar and camera read as an ordinary lane marking. **Passing assist would move into a California
+express lane today and nothing in the map would object.**
+
+That makes it a PERCEPTION or GEOMETRY problem, not a tag problem -- the honest options are a
+spatial query for a parallel HOV way (which mapd does not expose and we should not ask it to), or
+refusing passes into a lane whose entry we never observed. Neither is designed. Recorded as open.
