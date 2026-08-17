@@ -143,3 +143,29 @@ def test_nothing_is_forwarded_with_openpilot_longitudinal_inactive():
   disengagement reaches the car, and forwarding would leave it asserted instead."""
   assert passthrough_admissible(_stock(), False)
   assert not passthrough_admissible(_stock(), True), "a benign frame must still pass when active"
+
+
+# --- drive A, 2026-08-18: what the road said -----------------------------------------------------
+
+def test_the_unpoliced_actuation_bits_are_refused():
+  """Panda checks five fields in ACCDATA. It does not check these, and the first version of this
+  function only asked "would panda allow it" -- which was never the same question as "do we
+  understand it".
+
+  `AccBrkPrkEl_B_Rq` is the one that made the point: four forwarded frames carried it and the car
+  applied the park brake behind a stopped vehicle. `AccCancl_B_Rq` is the one that mattered more --
+  the camera asserted it in 70.6% of its frames, so forwarding was relaying a CANCEL request for
+  most of the drive."""
+  for name in ("AccCancl_B_Rq", "AccDeny_B_Rq", "AccBrkPrkEl_B_Rq", "AccStopStat_B_Rq",
+               "AccBrkPulse_B_Rq", "AccAutoResum_D_Rq"):
+    assert passthrough_admissible(_stock(**{name: 1}), True), f"{name} was forwarded unchecked"
+
+
+def test_the_predicted_gas_band_is_what_actually_binds():
+  """The review said the gas band was never measured and was four times narrower than the brake cap.
+  Drive A: `AccPrpl_A_Pred outside panda's band` is the dominant refusal reason in the log, sweeping
+  -1.79 -> -1.29 while coasting. Every one of those frames would have been transmitted and then
+  DROPPED by panda without this check."""
+  for pred in (-1.79, -1.74, -1.69, -1.29):
+    assert passthrough_admissible(_stock(AccPrpl_A_Pred=pred), True), \
+      f"AccPrpl_A_Pred {pred} was admitted; panda would have dropped the whole frame"

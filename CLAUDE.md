@@ -803,6 +803,46 @@ frame that DENIES stock AEB, and forwarding Ford's own deny bit would trip it.
 **Also learned: NO route on the device has ever had op long enabled**, so the camera question below
 cannot be answered from existing data. It needs a drive.
 
+## DRIVE A ANSWERED IT: THE PREMISE IS FALSE. The camera does not keep working with the relay open.
+
+Route 00000383, 2026-08-18, `openpilotLongitudinalControl = True`, `StockAccPassthrough = 1`.
+29,890 camera ACCDATA frames, 29,525 transmitted by us.
+
+    camera asserted AccCancl_B_Rq   21,090 frames   70.6%
+    camera asserted CmbbDeny_B_Actl      0 frames    0.0%
+    we forwarded the camera's frame   4,940         16.7%
+    we fell back to our own          24,571         83.3%
+
+**The camera spent most of the drive asking the car to CANCEL.** It was not quietly computing ACC
+in the background. Its loop is open -- it commands and never sees the car respond -- and its state
+machine settles into cancel. "It still has all its inputs" was true about the INPUTS and wrong about
+the CONTROLLER. That is the whole idea, and it does not survive.
+
+Everything the owner reported follows from it:
+
+- **The park brake applied behind a stopped car.** Four of our transmitted frames carried
+  `AccBrkPrkEl_B_Rq`. `create_acc_msg` never sets it and the relay blocks the camera's own copy, so
+  the passthrough was the only path to the ABS. `carState.parkingBrake` was true for 2,231 frames
+  with 20 `parkBrake` events. He had never seen the car do this and there was no indicator light.
+- **It would not stay engaged.** `accFaulted` x82, and NOT from the camera --
+  `carstate.py:202` reads `EngBrakeData.CcStat_D_Actl in (1, 2)`, the PCM's own cruise status. The
+  PCM was being handed our authored command 83% of the time, Ford's 17%, and relayed cancels on top.
+- **The gap button changed openpilot's aggressiveness.** `personalityChanged` x3. Under op long the
+  stock handler takes the button first; it never reaches the camera.
+- **ICBM had to be re-enabled and did not stick.** `interfaces.py:83` deletes the param under op
+  long and it has no default, so it returns as off. Confirmed on the device: `unset`.
+
+**AND THE REVIEW FINDING WAS THE MAIN EVENT.** `AccPrpl_A_Pred outside panda's band` is the dominant
+refusal reason in the log, sweeping -1.79 -> -1.29 while coasting. That is the band recorded above as
+"never looked at". Without `passthrough_admissible`, every one of those frames would have gone out
+and panda would have dropped it -- 83% of a 50 Hz message vanishing and reappearing. The drive would
+have been far worse than it was.
+
+**What is left of the idea.** Forwarding is dead. What is not dead is the observation underneath it:
+the camera still computes something, and `ACCDATA_2` (stock AEB) reaches the car untouched either
+way. Any future version has to start from "the camera's loop is open and it knows", not from
+"the camera does not notice".
+
 **THE UNKNOWN THAT DECIDES IT, and it cannot be settled offline:** while we forward faithfully the
 camera's loop stays closed -- it commands, the car responds, its model stays consistent. During an
 override it commands "hold 20" and watches the car stop anyway. Does it re-plan, fault, or drop ACC?

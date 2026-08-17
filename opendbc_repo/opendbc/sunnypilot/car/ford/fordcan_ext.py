@@ -235,6 +235,44 @@ def passthrough_admissible(stock_values: dict, long_active: bool) -> str:
   if stock_values.get("CmbbDeny_B_Actl"):
     return "camera set CmbbDeny_B_Actl"
 
+  # THE PARKING BRAKE. Drive A, 2026-08-18: pressing resume behind a stopped car applied the
+  # ELECTRIC PARK BRAKE. `AccBrkPrkEl_B_Rq` is bit 38 of this message, its receivers are GWM and
+  # ABS_ESC, `create_acc_msg` never sets it, and the relay blocks the camera's own copy -- so the
+  # only path to the ABS was this function forwarding it.
+  #
+  # WHAT IS NOT KNOWN, and was stated too confidently the first time: whether Ford ACC normally
+  # does this at all. The owner has never heard it on this car, and **no indicator light came on**,
+  # which does not fit a genuine EPB application -- the lamp is driven off actual EPB state. So
+  # there are two live explanations and the logs decide between them:
+  #
+  #   - the ABS applied HYDRAULIC brake hold rather than the park brake, which is lampless, and the
+  #     signal name is describing a request the ABS services its own way; or
+  #   - the park brake really was applied and the lamp path was broken by the open relay, since the
+  #     cluster is told about ACC state over messages the camera no longer delivers.
+  #
+  # Either way the fault is ours, not Ford's: we relayed a stop-and-hold request out of a controller
+  # whose model of the car had diverged from the car, into an actuator panda does not police.
+  # `carState.parkingBrake` plus the raw ACCDATA bits in drive A's log settle which one it was.
+  #
+  # THAT IS THE GENERAL LESSON AND IT IS BIGGER THAN THIS BIT. Panda checks five things in ACCDATA.
+  # It does NOT check AccBrkPrkEl_B_Rq, AccStopStat_B_Rq, AccCancl_B_Rq, AccDeny_B_Rq,
+  # AccResumEnbl_B_Rq, AccAutoResum_D_Rq, AccBrkPulse_B_Rq, Cmbb_B_Enbl, CmbbOvrrd_B_RqDrv or
+  # CmbbEngTqMn_B_Rq. "Panda would allow it" was never the same question as "we understand it", and
+  # the first version of this function only asked the first one.
+  #
+  # Refusing rather than zeroing, deliberately: zeroing would hand the car a frame Ford never sent,
+  # mid-stop, which is its own new behaviour. Falling back to the authored command is a controller
+  # we already ship.
+  # AND THE ONE THAT ACTUALLY MATTERS, measured on drive A: the camera asserted `AccCancl_B_Rq` in
+  # **70.6% of its frames** (21,090 of 29,890). It was not quietly computing ACC with the relay
+  # open -- it spent most of the drive asking the car to CANCEL, and we relayed that request 219
+  # times. Forwarding a cancel is not a degraded version of forwarding a command; it is actuation
+  # in its own right, and the PCM's cruise status faulted 82 times over the drive.
+  for name in ("AccCancl_B_Rq", "AccDeny_B_Rq", "AccBrkPrkEl_B_Rq", "AccStopStat_B_Rq",
+               "AccBrkPulse_B_Rq", "AccAutoResum_D_Rq"):
+    if stock_values.get(name):
+      return "camera asserted %s -- unpoliced actuation, see drive A" % name
+
   accel = float(stock_values.get("AccBrkTot_A_Rq", 0.0))
   if not (_PANDA_ACCEL_MIN + _PANDA_MARGIN) <= accel <= (_PANDA_ACCEL_MAX - _PANDA_MARGIN):
     return "AccBrkTot_A_Rq %.3f outside panda's band" % accel
