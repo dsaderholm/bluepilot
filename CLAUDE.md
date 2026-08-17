@@ -782,6 +782,29 @@ coexist means changing sunnypilot's own gating in two places -- a permanent merg
 NOT needed for the first test, only for the feature. Do not pay it before the camera question is
 answered.
 
+**WHAT HAPPENS TO OPENPILOT'S LONGITUDINAL STACK: it runs, and every bit of it is DISCARDED.** He
+asked whether Dynamic Experimental Control is involved. It is not, and checking why is the clearest
+description of the mechanism. DEC lives entirely in `longitudinal_planner.py`, choosing MPC modes for
+openpilot's own plan; nothing in the Ford carcontroller path reads it. Under the passthrough DEC
+still picks a mode, the MPC still solves, `LongitudinalExt` still computes `lng.accel`/`lng.gas` --
+and then Ford's frame goes out instead.
+
+**That is the whole point rather than a side effect.** Op long is used purely as PERMISSION -- it is
+what opens the relay and puts `ACCDATA` in panda's TX list -- while the numbers stay Ford's. Expect
+experimental-mode and DEC indicators to keep showing state that is driving nothing.
+
+**AND THAT DECIDES THE SHAPE OF THE OVERRIDE, WHICH IS THE NEXT THING ANYONE WILL BUILD.**
+
+  THE TRAP: `min(ford_accel, openpilot_accel)` -- "use whichever brakes harder". One line, handles
+  stops and ramps and everything else automatically, and it is WRONG. openpilot's planner is more
+  conservative than Ford's most of the time, so it would win constantly and the passthrough becomes
+  op long again, arriving through a comparison operator. Every reason this idea exists is undone.
+
+  THE RULE: the override is a NAMED, BOUNDED CONDITION, never a comparison. "A stop line ahead and
+  within N seconds of needing to brake" fires explicitly, for a few seconds, and falls back to
+  Ford's number the moment it is done. Same discipline as the gap lease -- assert while needed,
+  silence restores.
+
 **The cheap first step is a pure passthrough that overrides NOTHING.** If the car drives identically
 to stock, the hard half is proven and the stop is a small addition. If the camera faults merely from
 being forwarded, it is dead and one drive found out.
