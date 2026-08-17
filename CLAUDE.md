@@ -805,6 +805,54 @@ experimental-mode and DEC indicators to keep showing state that is driving nothi
   Ford's number the moment it is done. Same discipline as the gap lease -- assert while needed,
   silence restores.
 
+**THE DIVISION OF LABOUR, settled 2026-08-17 across several of his corrections. Do not re-litigate
+it; DO settle the boundary with drive data.**
+
+  FORD DECIDES **HOW** TO SLOW. WE DECIDE **WHETHER** AND **BY HOW MUCH**.
+
+Three independent arguments converge on it, and the third is his and is the one that would be
+easiest to forget:
+
+1. **PERCEPTION.** Ford's radar sees leads and it has years of calibration on following and
+   stop-and-go. It has no idea about a mapped corner, a stop sign, a red light, or a car its radar
+   has not acquired. Those are ours.
+2. **RATE.** The set speed falls at 3.3 mph/s and stops at 20 mph. Anything needing more than that
+   cannot be expressed through buttons at all.
+3. **ACTUATION VOCABULARY -- his point, and the sharpest.** *"Coasting is a thing Ford ACC can
+   do."* Ford chooses between coasting, engine braking, precharge and friction brakes, and the DROP
+   LIMITER exists precisely to exploit that -- "stock ACC brakes for one large drop and coasts
+   through a series of small ones, so smaller steps trade braking for coasting at the same net
+   deceleration." **The set speed is a request for an OUTCOME and Ford picks the means. ACCDATA is a
+   command of the MEANS.** Overriding directly means choosing brake-versus-coast ourselves, every
+   frame.
+
+**And point 3 has a cost he already measures.** A direct override reaches for friction brakes and
+lights the stop lamps where a staged set-speed drop would have coasted there silently. The brake-lamp
+readout exists for that, `IcbmMaxTargetDrop` is tuned against it ("lower this if the lamps come on
+during routine slowing"), and the preview scenes name the states an override would flatten: COAST,
+ENG BRAKE, PRE-BRAKE, BRAKE.
+
+**So the override takes over ONLY where coasting could never have reached anyway:** below 20 mph,
+where the set speed cannot ask; and on ramps steep enough to need real braking regardless. Everywhere
+else the set speed is STRICTLY BETTER, because Ford's answer to "be doing 45 shortly" is a blend we
+do not have to write and could not easily match.
+
+**AND ICBM KEEPS WORKING UNDER THE PASSTHROUGH -- the earlier claim that it does not was wrong.**
+Both gates in `sunnypilot/selfdrive/car/interfaces.py` key on `CP.openpilotLongitudinalControl` and
+encode one assumption: op long is on, therefore openpilot drives, therefore the buttons are
+meaningless. **Under the passthrough that is false** -- Ford is still computing, the set speed still
+governs, and panda permits button injection in long mode (`Steering_Data_FD1` is in
+`FORD_COMMON_TX_MSGS`, which `FORD_LONG_TX_MSGS` inherits; verified). So holds, SLA, both curve
+controllers, pinned holds and the gap button all survive. They die today only because of two `if`
+statements written for a different mode, and teaching those gates about a third state is the work.
+
+**His other correction, and it is what makes any of this safe:** *"holds shouldn't even be a part of
+ICBM, they are a part of SLA."* Correct, and already recorded above as a known misnaming. It matters
+more here than as naming hygiene: **a hold is a statement about what speed he wants against a posted
+limit, and has nothing to do with how that speed is achieved** -- so it is actuator-independent by
+construction and survives any migration. Same for SLA and the curve controllers. These were never
+ICBM features; ICBM was merely the only actuator available.
+
 **The cheap first step is a pure passthrough that overrides NOTHING.** If the car drives identically
 to stock, the hard half is proven and the stop is a small addition. If the camera faults merely from
 being forwarded, it is dead and one drive found out.
