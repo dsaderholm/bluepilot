@@ -94,6 +94,27 @@ def history() -> int:
       print("    each term, independently: " +
             ", ".join(f"{n} {v * 100:.0f}%" for n, v in zip(GEO_TERMS, fails, strict=False)))
 
+      # ...AND SAY SO WHEN THE HEADLINE NAMES A DIFFERENT TERM THAN THE DATA DOES.
+      #
+      # geoRefusedBy is the most common FIRST failure in an if/elif chain, so a term can win it by
+      # being checked earlier rather than by binding more often. On drive 7, 2026-08-16, the headline
+      # read "refused by paint = 0.288, 46%" while lane width had failed 98% of the time -- paint is
+      # simply tested first. Reading that line at a stop sends him to move MIN_ADJACENT_LINE_PROB,
+      # which would have changed nothing.
+      #
+      # That is precisely the fault _record_refusal's own comment warns about for a different pair:
+      # "Reporting 'beyond' when the edge underneath it is unreliable would send him to tune the
+      # wrong constant." The principle was stated there and not applied here.
+      #
+      # Only when the gap is wide enough to matter. Terms overlap by design -- the shares sum past
+      # 100% -- so a few points of difference is the normal picture, not a contradiction.
+      by = d.get("geoRefusedBy")
+      if by is not None and by < len(fails):
+        top = max(range(len(fails)), key=lambda i: fails[i])
+        if top != by and fails[top] - fails[by] > 0.25:
+          print(f"    ...but {GEO_TERMS[top]} bound {fails[top] * 100:.0f}% of frames against "
+                f"{GEO_TERMS[by]}'s {fails[by] * 100:.0f}% -- {GEO_TERMS[top]} is the one to change")
+
     # WHERE OPPOSING TRAFFIC ACTUALLY SAT, which is the whole reason the histogram exists and was
     # being written to the param and read by nobody -- a bare sixteen-element array in a JSON dump
     # is not a readout. Printed as a profile because the SHAPE is the answer: a peak past a median
