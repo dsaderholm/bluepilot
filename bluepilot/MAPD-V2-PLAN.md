@@ -268,6 +268,38 @@ with. `turn:lanes:both_ways` at 0.2% is a different tag; I measured that one and
 90. That is a systematic offset in `distanceFromWayCenter`, and may explain part of its 11.58 m p90
 rather than the whole thing being noise. Worth checking before that field is written off for good.
 
+**HIS CHALLENGE, AND THE MEASUREMENT THAT ANSWERS IT.** *"No passing zones are only on two lane
+roads where we don't want this system to work at all, right?"* Reasonable, and wrong -- in a
+direction that makes the tag more useful rather than less. Of the 134 US 6 ways carrying `change`:
+
+    1 forward lane    19   14%   <- the two-lane road he means, where we already refuse
+    2 forward lanes   57   43%
+    3 forward lanes   38   28%
+    4 forward lanes   14   10%
+
+**86% is on multi-lane sections, which is exactly where the feature wants to work**, and the values
+there are not about oncoming at all. `2 lanes "no"` on 27 ways means two SAME-DIRECTION lanes with no
+lane change permitted -- a construction zone, a bridge, a gore area. `4 lanes "no|no|no|no"` likewise.
+Nothing in this system knows, and it would suggest a pass straight through one.
+
+So it is not a no-passing-zone tag. It is a **"may you change lanes here"** tag, and the two-lane case
+he described is a seventh of it.
+
+**Coverage on I-15 is only 4% (17 of 400 ways)**, but the values are worth knowing:
+`"no|not_left|yes|yes|yes|not_right|no"` on 12 of them -- seven lanes, lane 1 `no` and lane 2
+`not_left`. That is the express-lane barrier, the same restriction `hov:lanes` carries at 100%. So
+`change` does NOT displace the HOV ask; `hov:lanes` covers the California drive and `change` covers
+US 6.
+
+**Revised ordering of the asks:**
+
+    1. hov:lanes         100% on I-15. Closes a gate that is open TODAY. Drafted.
+    2. lanes:forward     52.9% on US 6. FILED as mapd issue 127, unanswered.
+    3. change/change:lanes  27% US 6, 4% I-15. States directly what lanes:forward infers, and adds
+                            the multi-lane restrictions nothing else covers. Third because two are
+                            already ahead of it, not because it is weak.
+    4. highway=stop      ICBM's, drafted.
+
 **The lesson, which is the reusable part:** ENUMERATE, DO NOT RECALL. Every earlier census here was a
 list of tags I thought to ask about, and each one came back mostly dead, which felt like evidence the
 map had nothing left. It was evidence about my list. The one census that asked "what is actually on
