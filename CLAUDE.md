@@ -1055,12 +1055,13 @@ ours, is not a cost to hand to them. The binary ships either way; what it costs 
   exitCode=2`, manager does NOT restart it, and only a reboot recovers. The nasty part: v1 is
   untouched throughout, so the car looks perfectly healthy and the only dead thing is the one being
   debugged. Subscribe to `mapdOut` instead. This is the easiest way to waste an evening here.
-- **OFFROAD IT PUBLISHES NOTHING AND THAT IS CORRECT.** Parked, `gpsLocation`, `gpsLocationExternal`
-  and `liveLocationKalman` are all silent, so v2 has no position and emits zero frames. **v1 looks
-  alive in the same moment only because `/dev/shm/params` still holds `MapSpeedLimit` and `RoadName`
-  from the PREVIOUS drive** -- stale values that read exactly like live ones. Offroad you can check
-  that the binary exists, `managerState` says running, and `MapdV2` is set. Nothing further, and do
-  not conclude v2 is broken from a parked car.
+- **OFFROAD IT PUBLISHES NOTHING AND THAT IS NOT A FAULT.** Parked, `gpsLocation`,
+  `gpsLocationExternal` and `liveLocationKalman` are all silent, so v2 has no position to resolve and
+  emits zero frames. **v1 looks alive in the same moment only because `/dev/shm/params` still holds
+  `MapSpeedLimit` and `RoadName` from the last drive -- STALE VALUES THAT READ AS LIVE ONES.**
+  **Observe mode cannot be verified from a parked car.** What IS checkable offroad: the binary
+  exists, the process is in `managerState` with `running=True`, and `MapdV2` is set. Everything else
+  needs a drive.
 - **That staleness is a trap for the COMPARISON, not just for a human reading params.** At the start
   of a drive v1 confidently serves last trip's limit while v2 correctly serves nothing, which scores
   as a run of "only v1 had a limit" -- THE number the cutover rests on, poisoned toward never
