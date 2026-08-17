@@ -2293,6 +2293,35 @@ class PassingAssistDetector:
     self.lead_ttc = (lead.dRel / closing) if closing > MIN_APPROACH_CLOSING_MS else NO_TTC_S
 
   @staticmethod
+  def _map_usable(sm):
+    """The mapdOut frame, or None if nothing on it may be believed.
+
+    THREE WAYS THE MAP CAN BE UNUSABLE and all three have to mean the same thing here, because the
+    gates below act on what it says:
+
+      not alive/valid   MapdV2 is off, or mapd is dead. No message at all.
+      tileLoaded false  no tile covers this point. The map cannot answer.
+      waySelectionType  == "fail" means mapd could not find an acceptable way to call ours. Its
+                        OTHER FIELDS ARE STILL POPULATED from whatever it last had, so this is the
+                        one that looks like data and is not.
+
+    That last one is a bug in the three gates shipped earlier tonight, which checked tileLoaded and
+    not waySelectionType. A `fail` on a two-way road carrying a stale one-way way would have
+    narrowed the oncoming band -- the dangerous direction, and the only one of these that could
+    open something rather than close it. ICBM's own MapdV2MapData refuses a speed limit on `fail`
+    for the same reason; this is that policy applied to the gates.
+    """
+    try:
+      if not (sm.alive['mapdOut'] and sm.valid['mapdOut']):
+        return None
+      o = sm['mapdOut']
+      if not bool(o.tileLoaded) or str(o.waySelectionType) == "fail":
+        return None
+      return o
+    except (KeyError, AttributeError, TypeError):
+      return None
+
+  @staticmethod
   def _map_says_no_room(sm) -> bool:
     """Does the map rule out a same-direction lane to our left? See Blocked.noRoomInMap.
 
@@ -2301,18 +2330,16 @@ class PassingAssistDetector:
     residential drive on missing data. Absent map, absent tile and absent tag all read the same
     here: no claim.
     """
-    try:
-      if not (sm.alive['mapdOut'] and sm.valid['mapdOut']):
-        return False
-      o = sm['mapdOut']
-      if not bool(o.tileLoaded):
-        return False
-      lanes = int(o.lanes)
-      if lanes <= 0:
-        return False
-      return lanes <= (1 if bool(o.oneWay) else 2)
-    except (KeyError, AttributeError, TypeError, ValueError):
+    o = PassingAssistDetector._map_usable(sm)
+    if o is None:
       return False
+    try:
+      lanes = int(o.lanes)
+    except (AttributeError, TypeError, ValueError):
+      return False
+    if lanes <= 0:
+      return False
+    return lanes <= (1 if bool(o.oneWay) else 2)
 
   @staticmethod
   def _on_a_ramp(sm) -> bool:
@@ -2321,13 +2348,8 @@ class PassingAssistDetector:
     Same absent-is-False discipline as _divided_carriageway, and the same reason: with no map this
     has to leave the feature exactly as it was.
     """
-    try:
-      if not (sm.alive['mapdOut'] and sm.valid['mapdOut']):
-        return False
-      o = sm['mapdOut']
-      return bool(o.tileLoaded) and str(o.highwayClass) == "motorwayLink"
-    except (KeyError, AttributeError, TypeError):
-      return False
+    o = PassingAssistDetector._map_usable(sm)
+    return o is not None and str(o.highwayClass) == "motorwayLink"
 
   @staticmethod
   def _divided_carriageway(sm) -> bool:
@@ -2344,13 +2366,8 @@ class PassingAssistDetector:
     Read every frame rather than latched. A way changes as he drives, and a stale "one-way" carried
     onto an undivided road is the one failure mode that matters here.
     """
-    try:
-      if not (sm.alive['mapdOut'] and sm.valid['mapdOut']):
-        return False
-      o = sm['mapdOut']
-      return bool(o.tileLoaded) and bool(o.oneWay)
-    except (KeyError, AttributeError, TypeError):
-      return False
+    o = PassingAssistDetector._map_usable(sm)
+    return o is not None and bool(o.oneWay)
 
   def _reference_speed(self, CS, sm, v_cruise: float, speed_limit_target: float) -> float:
     """The speed the driver asked for -- the operand the deficit is measured against.

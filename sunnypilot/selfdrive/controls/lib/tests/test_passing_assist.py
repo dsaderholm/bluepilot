@@ -118,7 +118,7 @@ def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., lead_y=0.0, status=Tr
             # opted in and of this one before MapdV2 was set -- so every existing test keeps
             # asserting the no-map behaviour without being touched.
             mapd_present=False, mapd_hwy="motorway", mapd_oneway=False, mapd_tile=True,
-            mapd_lanes=3):
+            mapd_lanes=3, mapd_sel="current"):
   # Being stuck behind a car means matching its speed, not still closing on it: vEgo tracks vLead
   # and the gap to the SET speed is what makes passing worth suggesting. Tests that need a genuine
   # approach pass v_ego explicitly.
@@ -160,7 +160,7 @@ def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., lead_y=0.0, status=Tr
   })
   if mapd_present:
     sm.data['mapdOut'] = NS(highwayClass=mapd_hwy, oneWay=mapd_oneway, tileLoaded=mapd_tile,
-                            lanes=mapd_lanes)
+                            lanes=mapd_lanes, waySelectionType=mapd_sel)
     sm.alive['mapdOut'] = True
     sm.valid['mapdOut'] = True
     sm.updated['mapdOut'] = True
@@ -1012,6 +1012,19 @@ class TestLaneAge:
     assert det.suggestion == Side.none, "suggested moving into an unproven lane"
     run(det, int(12.0 / DT_MDL), status=False, **IN_LEFT_LANE)
     assert det.suggestion == Side.right                       # and it comes back once proven
+
+  def test_a_lost_map_is_believed_by_nothing(self):
+    """waySelectionType == fail means mapd could not find an acceptable way to call ours -- and its
+    OTHER FIELDS STAY POPULATED from whatever it last had, so this is the failure that looks like
+    data. A stale one-way way carried onto a two-way road would narrow the oncoming band, which is
+    the only one of these that opens something rather than closing it.
+
+    Shipped without this guard earlier tonight; caught reviewing what else the map offers."""
+    det = keep_right_det()
+    run(det, int(4.0 / DT_MDL), v_lead=SLOW_LEAD_MS, mapd_present=True,
+        mapd_sel="fail", mapd_hwy="motorwayLink", mapd_oneway=True, mapd_lanes=1)
+    assert det.blocked_by not in (Blocked.onRamp, Blocked.noRoomInMap)
+    assert det.suggestion == Side.left, "a lost map must leave every gate as it was"
 
   def test_a_two_lane_two_way_road_has_no_passing_lane(self):
     """US 6 between its 2+1 sections. `lanes` counts BOTH directions on a two-way way, so 2 means one
