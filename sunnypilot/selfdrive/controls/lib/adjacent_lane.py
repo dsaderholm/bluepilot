@@ -254,6 +254,27 @@ UNTRUSTED_EDGE_ONCOMING_M = 9.0
 # reaches the OPPOSING CARRIAGEWAY, where the radar then correctly identifies real oncoming traffic
 # that is genuinely not ours. The classifier is not wrong; the band is asking the wrong question.
 #
+# THE SENSOR-ONLY FIX WAS TRIED AND MEASURED DEAD. Loosening MAX_ROAD_EDGE_STD looked like the
+# answer -- trust the edge more often and it excludes the far carriageway. Replayed against route
+# 00000383's own radar at 0.5 / 0.8 / 1.0 / 1.2 / 1.5:
+#
+#     threshold   left edge trusted   oncoming returns kept
+#           0.5                0.0%                      19
+#           1.5               13.9%                      19
+#
+# IDENTICAL AT EVERY VALUE. On motorway the LEFT edge is essentially never trusted, and on the
+# frames where it is, the opposing traffic is inside it anyway. The constant is not the lever.
+#
+# AND THE REAL MECHANISM IS MEMORY, NOT DETECTION. Nineteen returns across 1320 frames -- the veto is
+# not firing constantly, it is firing rarely and REMEMBERING for 90 s each time. Nineteen sightings
+# at DEFAULT_ONCOMING_MEMORY_S blanket a whole drive, which is how 19 becomes 58% of frames.
+#
+# So the band cannot separate them: at 7.4 m the opposing carriageway is inside the 9 m fallback by
+# construction, and narrowing back to 5.5 m re-breaks the TWLTL arterial the widening was for. There
+# is no sensor-only answer -- the two road types are geometrically identical from here, and `oneWay`
+# is the only thing that tells them apart. That is not the map being a convenience; it is the map
+# being the sole available discriminator, which changes the rule question below.
+#
 # NOT FIXED HERE, because the obvious fix has a rule problem worth deciding deliberately rather than
 # at the end of a session. Using `oneWay` to suppress the veto is map data making a maneuver CHEAPER
 # TO OPEN, which "the map is EVIDENCE, never PERMISSION" forbids. The defensible framing is that the
