@@ -34,6 +34,10 @@ from collections import Counter
 REALDATA = "/data/media/0/realdata"
 MS_TO_MPH = 2.23694
 
+# liveMapDataSP is 1 Hz. Three seconds without one means v1 has stopped talking, not
+# that it is standing by its last answer.
+V1_STALE_NS = 3_000_000_000
+
 
 def seg_index(name: str) -> int:
   """Segment order is NUMERIC -- sorted() puts --10 before --2. See bp_why_slow.py."""
@@ -85,9 +89,12 @@ def main() -> int:
     segs = [segs[int(i * step)] for i in range(args.max_segments)]
     print(f"# sampling {args.max_segments} of {total_segs} segments, spread across the route")
 
-  v1 = None            # last liveMapDataSP: (valid, limit)
+  # (valid, limit, logMonoTime) -- the timestamp is load-bearing, see V1_STALE_NS below.
+  v1 = None
   v2_frames = 0
   v1_frames = 0
+  v1_stale = 0
+  v1_consumed = True   # nothing to compare until the first v1 sample arrives
   agree = both_none = only_v1 = only_v2 = differ = 0
   differences: list[str] = []
   tile_loaded = Counter()
@@ -104,8 +111,9 @@ def main() -> int:
       try:
         if w == "liveMapDataSP":
           m = msg.liveMapDataSP
-          v1 = (bool(m.speedLimitValid), float(m.speedLimit))
+          v1 = (bool(m.speedLimitValid), float(m.speedLimit), msg.logMonoTime)
           v1_frames += 1
+          v1_consumed = False
         elif w == "mapdOut":
           m = msg.mapdOut
           v2_frames += 1
@@ -117,7 +125,28 @@ def main() -> int:
 
           if v1 is None:
             continue
-          v1_has, v1_limit = v1
+          v1_has, v1_limit, v1_time = v1
+
+          # STALENESS FIRST, and the order matters. If mapd_manager or v1 dies mid-drive,
+          # liveMapDataSP simply stops while mapdOut keeps going, and a frozen last value must not
+          # be scored against the rest of the route. Counting every unscored v2 frame here is also
+          # the diagnostic that says v1 went quiet, which is worth knowing on its own.
+          #
+          # Behind the consumed check it could never fire, since the frozen sample is consumed once
+          # and every later frame returns above -- a guard that cannot run, which is exactly what
+          # this review flagged elsewhere.
+          if msg.logMonoTime - v1_time > V1_STALE_NS:
+            v1_stale += 1
+            continue
+
+          # ONE comparison per v1 sample, not per v2 frame. v1 publishes at 1 Hz and v2 at 20, so
+          # comparing on every v2 frame counted each v1 sample twenty times: a one-second transient
+          # at a speed-limit boundary became twenty "differ" rows, and the percentages described v2
+          # frames while reading as percentages of the drive. This is the number that decides the
+          # cutover, so it gets the honest denominator.
+          if v1_consumed:
+            continue
+          v1_consumed = True
           v2_has = float(m.speedLimit) > 0
           v2_limit = float(m.speedLimit)
           if not v1_has and not v2_has:
@@ -163,6 +192,9 @@ def main() -> int:
   print(f"  ONLY v1 had a limit        {only_v1:7d}  {pct(only_v1)}   <-- must be near zero to flip")
   print(f"  only v2 had a limit        {only_v2:7d}  {pct(only_v2)}   <-- a win: v1 was blind here")
   print(f"  differ by >{args.tolerance:.0f} mph          {differ:7d}  {pct(differ)}")
+  if v1_stale:
+    print(f"\n  {v1_stale} v2 frames had no fresh v1 sample within 3 s and were NOT scored.")
+    print("  A large number here means v1 stopped publishing mid-drive -- check mapd_manager.")
 
   print("\nwhat v1 could never report:")
   print(f"  tileLoaded:      {dict(tile_loaded)}")

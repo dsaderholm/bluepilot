@@ -199,10 +199,19 @@ procs += [
 
   # mapd
   NativeProcess("mapd", Paths.mapd_root(), ["bash", "-c", f"{MAPD_PATH} > /dev/null 2>&1"], mapd_ready),
-  # FusionPilot: mapd v2. Its output is NOT redirected to /dev/null the way v1's is -- v1 has
-  # nothing worth reading, but v2 reports which tiles it loaded and whether its matcher is lost, and
-  # that goes to swaglog where a route can be checked against it. See mapd_v2_ready.
-  NativeProcess("mapd_v2", Paths.mapd_root(), [MAPD_V2_PATH], mapd_v2_ready),
+  # FusionPilot: mapd v2, launched exactly like v1 -- through bash, with stdout and stderr discarded.
+  #
+  # An earlier version of this line ran the binary bare, under a comment claiming its output "goes to
+  # swaglog where a route can be checked against it". That was wrong twice over: nativelauncher
+  # os.execvp's the binary with MANAGER's stdout inherited, so there is no swaglog routing at all,
+  # and mapd v2's default log level is unverified. An unbounded 20 Hz writer into manager's output,
+  # on a device already at 90% full, is not a thing to discover on a long drive.
+  #
+  # Nothing is lost by discarding it. What we actually want from v2 -- tileLoaded, waySelectionType,
+  # every other field -- is published on mapdOut and logged into the route, which is the point of the
+  # migration. If its stdout is ever wanted, raise the log level through MapdSettings and run it by
+  # hand rather than leaving it writing for every drive.
+  NativeProcess("mapd_v2", Paths.mapd_root(), ["bash", "-c", f"{MAPD_V2_PATH} > /dev/null 2>&1"], mapd_v2_ready),
   PythonProcess("mapd_manager", "sunnypilot.mapd.mapd_manager", always_run),
 
   # locationd

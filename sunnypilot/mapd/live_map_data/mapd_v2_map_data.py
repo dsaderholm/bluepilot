@@ -58,6 +58,13 @@ class MapdV2MapData(BaseMapData):
     changing the speed-limit source, which is exactly the kind of coupling that makes a migration
     look like it broke something unrelated. It goes when SCC-Map moves to mapdExtendedOut.position.
     """
+    # BEFORE the early return below, and that placement is the whole point. This reads self.sm and
+    # nothing else, so coupling it to having a position made it unreachable exactly when it matters:
+    # last_position is seeded from the LastGPSPositionLLK param, which is absent on a fresh device,
+    # so "mapdOut alive=False" -- the one line that explains a silent v2 at startup -- was the line
+    # that could not be printed at startup.
+    self._log_transitions()
+
     location = self.sm['liveLocationKalman']
     self.localizer_valid = (location.status == log.LiveLocationKalman.Status.valid) and location.positionGeodetic.valid
 
@@ -77,8 +84,6 @@ class MapdV2MapData(BaseMapData):
       params['bearing'] = self.last_bearing
 
     self.mem_params.put("LastGPSPosition", json.dumps(params), block=True)
-
-    self._log_transitions()
 
   def _log_transitions(self) -> None:
     alive = self.mapd_alive
