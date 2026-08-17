@@ -1578,6 +1578,14 @@ zero is a measurement rather than a guarantee.
 whether v1 can go.** Do not remove it before that drive: the fallback is silent, and a v2 that goes
 quiet without it costs curve slowing outright.
 
+**FOR PASSING ASSIST: `bluepilot/MAPD-V2-FOR-PASSING-ASSIST.md`.** Field-by-field availability
+measured on route 00000383 -- `oneWay` 100% and trustworthy (motorway and motorwayLink both 100%
+True across 41 distinct ways, residential and tertiary 0%), `highwayClass` 98.6%, `lanes` 91.5% and
+plausible by class, and `distanceFromWayCenter` with a p90 of 11.58 m that **does not fit any real
+road** and must not carry a lane-position gate until it is checked against the camera. Written so
+that session consumes rather than re-derives, and so the v1 removal stays here where its one
+remaining dependency lives.
+
 **What is left, in order:** the curvature profile itself -- plan a descent against the ~3.3 mph/s the
 buttons actually deliver instead of reacting to a step, which is the exit-ramp problem, together with
 whatever the defenses become. Then passing assist consuming lanes / highwayClass / oneWay /
