@@ -29,6 +29,11 @@ def main():
   # BluePilot: carStateBP carries Ford's own ACCDATA brake request. The radar-blind lead detector
   # needs it to tell "nothing is braking for this" from "stock ACC is already on it" -- without it
   # the detector kept commanding and kept alerting while Ford was visibly slowing for the same car.
+  # FusionPilot: mapdExtendedOut carries mapd v2's path ahead -- a list of points, each with its own
+  # curvature and target velocity -- which is what SCC-Map walks instead of v1's MapTargetVelocities
+  # once MapdV2 is on. Subscribed unconditionally: with v2 off nothing publishes it and the socket
+  # stays quiet at the cost of one dict entry, whereas a conditional list would make the SubMaster's
+  # contents depend on a param read once at process start.
   sm = messaging.SubMaster(['carControl', 'carState', 'controlsState', 'liveParameters', 'radarState', 'modelV2', 'selfdriveState',
                             # BluePilot: carStateBP carries the raw TSR and BLIS signals the
                             # passing-assist observer records. Not in any all_checks() list, so a
@@ -45,7 +50,7 @@ def main():
                             # fitted -- absent on every other car, where sm.valid stays False and
                             # RearApproach correctly reports unavailable rather than clear.
                             'liveMapDataSP', 'carStateSP', 'carStateBP', 'liveTracks', 'rearRadarBP',
-                            'selfdriveStateSP', gps_location_service],
+                            'selfdriveStateSP', 'mapdExtendedOut', gps_location_service],
                            poll='carState')
 
   while True:
