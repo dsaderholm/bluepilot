@@ -1355,8 +1355,20 @@ So the blocker is a COMMUNICATION fault between two modules, not a feature flag.
 off in the IPMA at `706-01-01` (third character of the first group: `1` = Off, `5` = SLIF) and SLIF is
 disabled in the cluster at `720-09-01`, but neither matters while the camera cannot reach the APIM.
 
-**See `bluepilot/TSR-INVESTIGATION.md`.** Note that the gateway -- the most likely place a retrofit
-routing fault would live -- is OFF LIMITS by his decision, and that is not to be reopened.
+**See `bluepilot/TSR-INVESTIGATION.md`.** The gateway is the most likely place a retrofit routing
+fault would live. **He does not want its FIRMWARE OR AS-BUILT CHANGED** -- *"I don't think I should
+touch the GWM. It took me forever to get where it is."* That is about WRITING to it, and nothing else.
+
+**STOP QUOTING THIS AS "THE GATEWAY IS OFF LIMITS."** It was written that way, it was then cited in
+conversations that had nothing to do with the gateway -- including, on 2026-08-16, as a reason map
+data could not come from the car -- and he had to say so twice: *"that was completely unrelated to
+openpilot... I didn't want to change firmware on it once and now you just keep taking it out of
+context."* Reading it, reasoning about what it broadcasts, and anything that does not modify it are
+all fine. This is the SECOND time the same overreach is recorded here: the ACCDATA_3 entry further up
+says "the owner's GWM ruling was about FLASHING FIRMWARE AND AS-BUILT, never about reading a
+broadcast frame. Stretching it to cover a message we already parse was my error, not his rule."
+
+A narrow no is not a standing rule. When his decision is quoted, quote what he actually decided.
 
 **And it does not need to be set**, which is the part worth noticing. Everything below was measured
 with the region UNSPECIFIED. The camera reads signs anyway; what the region appears to gate is the

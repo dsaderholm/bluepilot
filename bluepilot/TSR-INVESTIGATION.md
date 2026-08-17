@@ -205,7 +205,8 @@ Control Module Configuration Incompatible / Signal Plausibility Failure` means.
 **Do not spend more time on adapters, cables, voltage, power-saving, checksums or which FORScan view
 to use.** They are all ruled out by one sentence: other changes to the same module work.
 
-The authority is most likely the gateway, which is OFF LIMITS by his decision (section 6b). If that
+The authority is most likely the gateway, which he does not want WRITTEN to (section 6b -- reading it
+and reasoning about it are fine, and that distinction matters). If that
 is right, TSR is not reachable on this car by configuration alone. The remaining evidence that could
 overturn it is his friend's car -- same question, sharper: does a Fusion exist where the IPMA HOLDS a
 TSR-enabling configuration across a restart?
@@ -294,7 +295,7 @@ international sales.
 
 ---
 
-## 6b. THE GWM EXPLAINS IT — AND IS OFF LIMITS. DO NOT PROPOSE TOUCHING IT.
+## 6b. THE GWM EXPLAINS IT — AND HE DOES NOT WANT IT WRITTEN TO
 
 Reported 2026-08-12, and it reframes everything above:
 
@@ -318,11 +319,25 @@ incompatible pair, and the module is the one telling the truth.
 **It also undermines "the US IPC does not support TSR."** His cluster gained a new indicator from a
 gateway update. That claim was about hardware; what he observed is configuration.
 
-**HE HAS RULED IT OUT, 2026-08-12: "I don't think I should touch the GWM. It took me forever to get
-where it is."** That is his decision and it is the right one -- the gateway routes every module on the
-car, so a bad write there is not a reverted as-built, it is a car that does not start. He has already
-spent a long time getting the retrofit stable. Do not propose GWM changes, do not suggest "just
-reading" it as a way in, and do not treat this as an open question. It is closed.
+**HE HAS RULED OUT WRITING TO IT, 2026-08-12: "I don't think I should touch the GWM. It took me
+forever to get where it is."** Reasonable -- the gateway routes every module on the car, so a bad
+write there is not a reverted as-built, it is a car that does not start, and he spent a long time
+getting the retrofit stable. **So: do not propose changing its firmware or as-built.** That is the
+whole of it.
+
+**READ THE SCOPE OF THAT SENTENCE AND DO NOT WIDEN IT.** This section previously said the GWM was
+"OFF LIMITS", told the next reader not to suggest "just reading" it, and declared the subject closed.
+That was an overreach, it got quoted in conversations with nothing to do with the gateway, and he
+corrected it in plain terms on 2026-08-16:
+
+> "Bro always says the gateway is off limits but that was completely unrelated to openpilot! Stop
+> fucking saying that! That was because I didn't want to change firmware on it once and now you just
+> keep taking it out of context!"
+
+Reading the GWM, decoding what it broadcasts, and reasoning about its role are all fine and are how
+the paragraphs above were written in the first place. The same mistake is recorded once already in
+CLAUDE.md, where the ruling was stretched to cover reading ACCDATA_3 -- a frame `carstate.py` already
+parses. Twice is a pattern: **when quoting his decision, quote what he actually decided.**
 
 **What that means honestly.** If the gateway is the gate, then TSR via as-built may not be reachable
 at all on this car, because the camera validates against what the vehicle declares at runtime and a
