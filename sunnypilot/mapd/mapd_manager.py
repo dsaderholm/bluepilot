@@ -16,6 +16,7 @@ from openpilot.common.params import Params
 from openpilot.common.realtime import Ratekeeper, config_realtime_process
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.selfdrived.alertmanager import set_offroad_alert
+from openpilot.sunnypilot.mapd.live_map_data.mapd_v2_map_data import MapdV2MapData
 from openpilot.sunnypilot.mapd.live_map_data.osm_map_data import OsmMapData
 from openpilot.system.hardware.hw import Paths
 from openpilot.sunnypilot.mapd import MAPD_PATH
@@ -117,7 +118,12 @@ def main_thread():
   config_realtime_process([0, 1, 2, 3], 5)
 
   rk = Ratekeeper(1, print_delay_threshold=None)
-  live_map_sp = OsmMapData()
+  # FusionPilot: which map source fills liveMapDataSP. Read ONCE at start rather than per tick --
+  # swapping the source mid-drive would hand Speed Limit Assist a different set of numbers with no
+  # transition, and the setting is one a reboot follows anyway.
+  use_v2 = params.get_bool("MapdV2")
+  live_map_sp = MapdV2MapData() if use_v2 else OsmMapData()
+  cloudlog.warning(f"mapd: live map source = {'mapd v2 (mapdOut)' if use_v2 else 'v1 (/dev/shm/params)'}")
 
   # Create folder needed for OSM
   try:

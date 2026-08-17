@@ -42,7 +42,14 @@ SETTINGS_UI_JSON = ROOT / "sunnypilot/sunnylink/settings_ui.json"
 # The fork's own settings. Upstream's are upstream's problem: they are already carried in
 # settings_ui_src, and adding them here would turn every upstream settings change into a failure
 # here. See "Do not fix UNRELATED upstream bugs in this fork".
-OUR_PREFIXES = ("Icbm", "SmartCruiseControl", "SpeedLimit", "PassingAssist", "RadarDetector")
+#
+# ADDING A NEW PREFIX IS AN OBLIGATION, and it is silent when missed. `MapdV2` was added on
+# 2026-08-16 with a toggle on the OSM screen, and this audit reported "33/33 reachable, 0 missing"
+# while that toggle was unreachable from SunnyLink -- because a setting whose name matches no prefix
+# here is not a fork setting as far as this tool is concerned, so it is not counted OR checked. The
+# comma 4 rule is "every setting must be reachable"; a guard that cannot see a whole settings family
+# reads as compliance. If you introduce a name family, put it here in the same commit.
+OUR_PREFIXES = ("Icbm", "SmartCruiseControl", "SpeedLimit", "PassingAssist", "RadarDetector", "Mapd")
 
 # NOT a gap in the list above, and not to be "fixed" by adding it. `BPSentryEnabled` is the fork's
 # crash-reporting KILL SWITCH -- upstream inits Sentry unconditionally and this fork returns early

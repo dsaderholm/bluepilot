@@ -93,6 +93,7 @@ DEFAULT_TARGETS = [
   # and cannot run without the device. The schema guard pins mapd v2's ordinals, which are theirs
   # rather than ours -- capnp reads by position, so drift decodes as different fields with no error.
   "sunnypilot/mapd/tests/test_mapd_schema.py",
+  "sunnypilot/mapd/tests/test_mapd_v2_map_data.py",
   # The value behind every +/- control. The widget needs pyray and cannot collect here, which
   # is why its logic lives in param_value_cache.py -- there was nothing to test before, and
   # nothing caught the read that wiped his angle tuning.
