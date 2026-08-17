@@ -300,6 +300,111 @@ US 6.
                             already ahead of it, not because it is weak.
     4. highway=stop      ICBM's, drafted.
 
+### HE SAID YES, AND TOLD US HIS PATTERN. Both drafts below are shaped to it.
+
+pfeiferj on mapd issue 127, 2026-08-17: *"Yeah, I can work on adding this. I honestly didn't even
+know forward and backwards tags for lane counts was a thing in osm. The way I generally handle
+forward and backwards tags is by adding them to the offline file, but I don't add additional fields
+to mapdOut. Instead, I check if they exist for the direction of travel and if so then I use the
+correct one in the lanes output. That's how maxSpeed:forward and maxSpeed:backward are handled as the
+user probably doesn't care about the direction that isn't active."*
+
+**THE PATTERN, and every future ask should assume it:** directional tags are resolved to the
+direction of travel and folded into the EXISTING output. No new field. So do not ask for
+`change:lanes:forward` -- ask for `change`, resolved.
+
+**And it silently inverts our lane-count gate**; see the comment at `_map_says_no_room`. Flagged in
+the reply below because every other fork consuming `lanes` has the same problem and cannot detect it.
+
+#### REPLY TO ISSUE 127
+
+```
+That is a better shape than what I asked for, and it works for us -- we only care
+about the active direction too.
+
+One thing worth a line in the release notes when it lands, because it will not be
+visible to consumers: `lanes` changes meaning on two-way ways. Today it is the
+way total, so a 2+1 passing section reads 3. Afterwards it is the count for our
+direction, so the same section reads 2. Both are correct and there is no way to
+tell at runtime which one you are getting.
+
+We have a gate that reads `lanes <= 2` on a two-way way as "one lane each way, so
+the lane to my left is oncoming". After the change that same test would refuse a
+pass on a real passing lane. Ours is pinned by a test now so the version bump
+breaks loudly rather than quietly, but other forks reading `lanes` may not notice.
+
+Not asking you to change the approach -- it is the right one. Just that the
+release note say `lanes` is now direction-resolved on two-way ways.
+
+Happy to test a build when there is one.
+```
+
+#### DRAFT: `change` / `change:lanes`
+
+Title: `Expose the change tag, resolved to direction of travel`
+
+```
+Following the lanes one, and shaped the way you described there: resolved to the
+direction of travel, folded into one output, no per-direction fields.
+
+Would you consider carrying OSM's `change` / `change:lanes` and exposing the value
+for our direction as a single output?
+
+It is the closest thing OSM has to "may I change lanes here". `change=no` is a
+solid line; `change:lanes=not_left|yes` says the leftmost lane may not cross left
+while the next may. `overtaking` is the European tag for roughly this and reads 0%
+in Utah, so I had assumed the concept was unmapped here until I enumerated instead
+of guessing.
+
+Measured on US-6 in Utah, 497 ways, 134 carrying it:
+
+    1 forward lane    19   14%
+    2 forward lanes   57   43%
+    3 forward lanes   38   28%
+    4 forward lanes   14   10%
+
+86% is on multi-lane sections, which surprised me -- I expected it to be a
+two-lane-road tag. The values there are not about oncoming at all: `change=no`
+with two same-direction lanes is a work zone, a bridge, or a gore area. That is a
+restriction nothing on the vehicle can see.
+
+Coverage is lower on interstate: 17 of 400 I-15 motorway ways. Those encode the
+express lane barrier -- `no|not_left|yes|yes|yes|not_right|no`, lane 1 closed and
+lane 2 unable to enter it.
+
+For a lane-change feature this is more directly useful than the lane counts I
+asked for first, since it states the restriction rather than letting us infer it.
+
+Happy to test.
+```
+
+#### DRAFT: `lanes:both_ways`
+
+Title: `Expose lanes:both_ways (centre turn lane)`
+
+```
+A small one, and it gets more useful once `lanes` is direction-resolved.
+
+Would you consider exposing OSM's `lanes:both_ways`?
+
+It marks a centre turn lane explicitly -- the shared lane on a road tagged
+1 + TWLTL + 1. On US-6 in Utah it is on 73 of 497 ways, always with the value 1.
+
+The reason it matters to a lane-change feature: a centre turn lane is painted like
+a travel lane, sized like one, and has vehicles moving down it in our direction,
+so nothing on the vehicle can tell it from a passing lane. We reverted a change
+last year that tried, after it suggested moving into one three times.
+
+`turn:lanes:both_ways` would be the richer tag but reads 0.2% here, so the plain
+count is the one with coverage.
+
+It also becomes harder to infer once `lanes` is direction-resolved: today we can
+compare the total against the directional tags, and afterwards the total is gone.
+A small field or a boolean would cover it.
+
+Happy to test.
+```
+
 **The lesson, which is the reusable part:** ENUMERATE, DO NOT RECALL. Every earlier census here was a
 list of tags I thought to ask about, and each one came back mostly dead, which felt like evidence the
 map had nothing left. It was evidence about my list. The one census that asked "what is actually on
