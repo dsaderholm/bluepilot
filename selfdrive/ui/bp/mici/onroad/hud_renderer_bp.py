@@ -205,7 +205,7 @@ class MiciHudRendererBP(HudRenderer):
       self._hold_rect = None           # no badge on screen, no tap target
       return rect.y + HOLD_MARGIN      # nothing drawn; the stack closes up
 
-    value = str(hold.baseline)
+    value = str(hold.display_value)   # the hold, or the pin being offered when there is none
     label_w = measure_text_cached(self._font_semi_bold, HOLD_LABEL, HOLD_LABEL_SIZE).x
     value_w = measure_text_cached(self._font_bold, value, HOLD_VALUE_SIZE).x
     width = HOLD_PAD_X * 2 + label_w + HOLD_LABEL_GAP + value_w

@@ -44,6 +44,10 @@ SCENES = [
    True, "TSR NO NAV DATA", True),
   ("you have set this hold here before -- tap to remember it", 45, 55, 45, "", "COAST", 0.0, False,
    False, "", False, True),
+  # No posted limit, so no hold exists at all -- the badge is drawn ONLY to offer the pin, and it is
+  # the only tap target that can accept one. Added 2026-08-17 with the fix for it being unreachable.
+  ("no limit here: nothing held, only a pin offered -- tap to keep it", 45, 0, 45, "", "COAST", 0.0,
+   False, False, "", False, True),
 ]
 
 

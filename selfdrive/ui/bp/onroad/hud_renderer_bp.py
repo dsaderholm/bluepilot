@@ -182,7 +182,7 @@ class HudRendererBP(HudRendererSP):
     # different facts, which is why this is a separate readout rather than more colors.
     self._acc_state = ""      # "ACCEL" / "COAST" / "BRAKE", "" when unknown
     self._acc_accel = 0.0     # m/s^2, signed
-    self._icbm_baseline = 0   # the driver's held set speed; 0 = no hold
+    self._icbm_baseline = 0   # the number ON THE BADGE: the hold, or a pin being offered; 0 = none
     self._icbm_arrow = ""     # "+" / "-" while ICBM is actively moving the set speed, else ""
     self._icbm_hold_locked = False  # something else owns the target; a press cannot change the hold
     self._lamp_data_available = False  # the BCM/brake-system lamp signal is actually being decoded
@@ -293,7 +293,11 @@ class HudRendererBP(HudRendererSP):
     # worth_showing, not has_hold -- see IcbmHudState. The hold still governs the car either way;
     # this only decides whether a badge showing the same number as MAX is drawn.
     if icbm_state.worth_showing:
-      self._icbm_baseline = icbm_state.baseline
+      # display_value, not baseline: with a standing pin suggestion and no hold this is the speed
+      # being OFFERED, and the badge is the only tap target that can accept it. Taking `baseline`
+      # here drew a badge reading 0. Everything downstream -- the tap gate, the stack visibility,
+      # the drawn number -- keys off this one field, so it has to be the number on screen.
+      self._icbm_baseline = icbm_state.display_value
       self._icbm_hold_locked = icbm_state.hold_locked
       self._icbm_pinned = icbm_state.pinned
       self._icbm_pin_suggested = icbm_state.pin_suggested
