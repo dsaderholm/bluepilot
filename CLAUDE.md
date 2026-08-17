@@ -1081,6 +1081,19 @@ ours, is not a cost to hand to them. The binary ships either way; what it costs 
   map-is-evidence rule applied. Whether mapd zeroes it anyway is answered by
   `bp_mapd_compare.py`, which now cross-tabs fail frames against non-zero `speedLimit` -- so that
   question needed a DRIVE, never a device, and it no longer blocks state 2 either way.
+- **NEVER HAND-RUN mapd WHILE MANAGER HAS IT.** Launching the binary from a shell to see its output
+  kills the managed instance -- two publishers cannot hold the same msgq endpoint. Done on
+  2026-08-16 to find out why `mapdOut` was silent; `managerState` then read
+  `mapd_v2: running=False exitCode=2`, manager did NOT restart it, and it took a reboot. v1 was
+  unaffected, so the car looks fine and only the thing being debugged is dead. To see what v2 is
+  saying, SUBSCRIBE to `mapdOut` -- never start a second copy.
+- **AND OFFROAD IT PUBLISHES NOTHING, WHICH IS NOT A FAULT.** Parked, `gpsLocation`,
+  `gpsLocationExternal` and `liveLocationKalman` are all silent, so v2 has no position to resolve and
+  emits zero frames. v1 looks alive in the same moment only because `/dev/shm/params` still holds
+  `MapSpeedLimit` and `RoadName` from the last drive -- STALE VALUES THAT READ AS LIVE ONES.
+  **Observe mode cannot be verified from a parked car.** What is checkable offroad: the binary
+  exists, the process is in `managerState` with `running=True`, and `MapdV2` is set. Everything else
+  needs a drive.
 - **A new setting family needs its prefix in `bp_sunnylink_settings_audit.py`.** `Mapd` was missing
   and the audit reported 33/33 reachable while the new control could not be changed remotely at all.
 
