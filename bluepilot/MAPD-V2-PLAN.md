@@ -390,6 +390,45 @@ reading post-v2 tiles in production all along. There is no countdown.
 it acceptable: divergence from sunnypilot inside their own files is the price CLAUDE.md says outranks
 being right elsewhere -- but a pure observer touches none of their map layer at all.
 
+### NO FORK IS ON v2. WE ARE FIRST, NOT LATE.
+
+Verified from source 2026-08-16, which matters because "everyone else is still on v1" reads as a
+warning and is actually the opposite:
+
+| fork | mapd version | how it is pinned |
+|---|---|---|
+| sunnypilot | v1.12.0 | hardcoded constant |
+| FrogPilot | v1.12.0 | resolved AT RUNTIME from a version JSON |
+| dragonpilot | none | ships no mapd at all |
+| pfeiferj's own latest | **v2.3.0** | |
+
+**FrogPilot's `VERSION = "v2"` IS THE FILE FORMAT OF THEIR VERSION JSON, NOT mapd v2.** Anyone
+reading their source will conclude FrogPilot has already migrated. They have not; they run the same
+v1.12.0 binary everyone else does.
+
+So there is no fork ahead of us to copy and none to be scooped by. The reason the field is stuck is
+not difficulty, it is that v1.12.0 works well enough for what those forks ask of it -- and this fork
+asks more, because passing assist needs lane counts and oneWay, and the exit problem needs
+`highwayClass` to tell a ramp from a freeway.
+
+**FrogPilot's DISTRIBUTION model is the part worth studying, and we have most of its benefit already.**
+They mirror the binary on GitLab and resolve the version at runtime, so their whole fleet moves by
+editing one JSON. That is the right design for a fork with a fleet. Two reasons it buys us less:
+
+- **We already vendor both binaries.** `third_party/mapd_pfeiferj/mapd` and `mapd_v2` are committed
+  here, so the upstream GitHub release disappearing does not strand us the way it would a fork that
+  downloads fresh at boot -- which is the failure the mirror exists to prevent. `mapd_installer.py`
+  still has a live path to `github.com/pfeiferj/openpilot-mapd/releases/download/v1.12.0/mapd` when
+  `download_needed()` fires, so the dependency is not gone, only no longer load-bearing.
+- **Runtime version resolution buys a fleet-wide move without a code push. A push here IS a deploy** --
+  the device pulls unattended, roughly hourly. The mechanism FrogPilot needs a JSON for, we get from
+  git.
+
+**What IS worth taking: they are the fork to watch.** Runtime resolution means FrogPilot can move to
+v2 by editing one file, with no code review anywhere. If they go, the whole v1 ecosystem can move in
+a day, and our v1 side inherits whatever they find. Check their version JSON before assuming v1.12.0
+is still what everyone runs.
+
 ## THE OPEN QUESTION — ANSWERED 2026-08-16: YES
 
 **Can the Minimal path run ALONGSIDE v1 without the SLA/SCC teardown that PR #1647 performs?**
