@@ -755,6 +755,19 @@ NO BRAKING rather than a wrong set speed -- a real step up in blast radius from 
 Panda's existing `ACCDATA` checks still apply. And it is op long as far as the car and the safety
 mode are concerned, for the whole drive.
 
+**AND ICBM CANNOT COEXIST WITH IT TODAY, which is the wrinkle that decides the sequencing.** With
+`openpilotLongitudinalControl` true:
+
+- `_initialize_intelligent_cruise_button_management` never clears `pcmCruiseSpeed`, so the ICBM
+  controller's `run()` early-returns.
+- `_cleanup_unsupported_params` **REMOVES the `IntelligentCruiseButtonManagement` param outright.**
+
+So enabling op long costs holds, Speed Limit Assist, both curve controllers and pinned holds for the
+whole drive. Acceptable for a 20-minute experiment; not a state to leave the car in. Making the two
+coexist means changing sunnypilot's own gating in two places -- a permanent merge cost -- and it is
+NOT needed for the first test, only for the feature. Do not pay it before the camera question is
+answered.
+
 **The cheap first step is a pure passthrough that overrides NOTHING.** If the car drives identically
 to stock, the hard half is proven and the stop is a small addition. If the camera faults merely from
 being forwarded, it is dead and one drive found out.
