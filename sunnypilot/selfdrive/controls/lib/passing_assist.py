@@ -2047,6 +2047,29 @@ class PassingAssistDetector:
 
     The widening test stays as an OR rather than being replaced -- it still catches the ordinary
     kind of exit, where a ramp lane really does open up and he moves into that instead.
+
+    EVERY TEST HERE IS REACTIVE, AND HE WANTS A PREDICTIVE ONE. All three fire only after he has
+    already moved right. What he asked for on 2026-08-17 is the opposite: *"having Waze navigation
+    tell passing assist if I am exiting or not"* -- knowing BEFORE a pass is offered.
+
+    **WAZE CANNOT SUPPLY IT, and that is closed rather than unbuilt.** Relayed from the ICBM session,
+    which researched it: Android Auto nav metadata goes phone -> AA -> SYNC -> cluster, and that last
+    hop is MS-CAN, which this car cannot reach (see the no-MS-CAN entry in CLAUDE.md). A canbox
+    forwarding it perfectly would forward an ABSENCE, because Waze is not publishing the metadata in
+    the first place -- his original complaint. And what it carries is a maneuver plus a distance, not
+    geometry. Do not design a gate around knowing his route.
+
+    **THE SUBSTITUTE IS `waySelectionType: predicted`**, mapd's guess at which branch we take. It is
+    on the wire at 20 Hz under MapdV2 observe, already logged, and has never been examined by anyone.
+    `highwayClass == motorwayLink` and `MapdExtendedOut.path` bending onto a ramp are the same family.
+
+    Note what makes this ALLOWED where `lanes` proving a lane is not: refusing a pass because the map
+    thinks we are leaving the freeway is the map REFUSING, which it may do freely. It could never be
+    the thing that opens one. See "the map is EVIDENCE, never PERMISSION".
+
+    Nothing to build yet -- the first observe drive already records everything needed to score
+    `predicted` against the exits he actually takes, and `exitsBy` above is the ground truth to score
+    it against. Measure before wiring it to a gate.
     """
     if self._signalled_over_widening:
       self._exits_by[0] += 1
