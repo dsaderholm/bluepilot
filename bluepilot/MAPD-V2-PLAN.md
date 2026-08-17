@@ -110,8 +110,9 @@ More stop signs than signals, which is what the ground looks like and means mapp
 rather than only tagging the easy landmarks. Contrast `overtaking`, which would have been the dream
 tag for passing assist -- 151,009 uses WORLDWIDE against 299.8M ways, 0% on US 6, a European
 convention tied to their centre-line rules that nobody surveys here. Dead for the same structural
-reason as `maxspeed:advisory` at 113K. So the two separate cleanly: the on-the-nose tag does not
-exist, and the unglamorous one does.
+reason as `maxspeed:advisory` at 113K. So the two separate cleanly -- except that the on-the-nose tag DOES exist under a different name;
+see "I declared the no-passing tag dead by checking one spelling" below, which supersedes this
+paragraph's claim about `overtaking` being the only candidate.
 
 #### THE DRAFT, ready to file. Conditions on sending it are below the text.
 
@@ -239,6 +240,38 @@ Happy to test on hardware -- I have v2 running with Utah tiles downloaded.
 
 **Ordering unchanged**: after `pfeiferj/mapd#127` gets a response. Two open asks from one person is
 how both slide, and that applies to this one as much as to the stop signs.
+
+### I DECLARED THE NO-PASSING TAG DEAD BY CHECKING ONE SPELLING. IT IS NOT.
+
+He asked "so there is absolutely nothing else we want from OSM?" and the honest answer was no only
+because I had been answering from a list I chose. A full tag census of US 6 -- every tag on more than
+5% of 497 ways, rather than the ones I thought to query -- turned up four that matter and one that is
+the single most on-the-nose tag for this feature:
+
+    change:forward        = "no"            54 ways   NO PASSING, full stop
+    change:lanes:forward  = "not_left|yes"  80 ways   per lane: leftmost may not cross left
+    lanes:both_ways       = "1"             73 ways   a CENTRE TURN LANE, explicitly
+    placement:forward     = "left_of:1"     90 ways   where the centreline actually sits
+    shoulder              = "yes"          176 ways
+
+**`change` IS THE NO-PASSING-ZONE TAG.** `overtaking` is the European convention, tied to their
+centre-line rules; `change` is what is used here, and it encodes the solid-versus-dashed line
+directly, per lane. This document previously said the on-the-nose tag "does not exist" on the
+strength of `overtaking` reading 0%. That was checking one spelling and concluding the concept was
+absent. About 16% of US 6 carries it.
+
+**`lanes:both_ways = 1` IS THE CENTRE TURN LANE**, explicitly, on 14.7% of US 6 -- the exact case that
+reverted the road-edge waiver on 2026-08-09 and that this document says twice the map cannot help
+with. `turn:lanes:both_ways` at 0.2% is a different tag; I measured that one and generalised.
+
+**`placement:forward`** says where the way geometry sits relative to the lanes -- `left_of:1` on 74 of
+90. That is a systematic offset in `distanceFromWayCenter`, and may explain part of its 11.58 m p90
+rather than the whole thing being noise. Worth checking before that field is written off for good.
+
+**The lesson, which is the reusable part:** ENUMERATE, DO NOT RECALL. Every earlier census here was a
+list of tags I thought to ask about, and each one came back mostly dead, which felt like evidence the
+map had nothing left. It was evidence about my list. The one census that asked "what is actually on
+these ways" found the best candidate in the document.
 
 **Three ideas closed by the same measurement**, worth recording so nobody re-hopes them:
 `overtaking=no` would have been the dream tag and does not exist on US 6 at all; `turn:lanes:both_ways`
