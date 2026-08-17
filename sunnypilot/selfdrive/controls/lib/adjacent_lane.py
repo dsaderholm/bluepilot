@@ -238,6 +238,30 @@ ONCOMING_LAT_BUCKETS = 16
 # down, so they still see nothing past ADJACENT_MAX_M.
 UNTRUSTED_EDGE_ONCOMING_M = 9.0
 
+# MEASURED 2026-08-17 AND IT LEAKS BADLY. Route 00000383, motorway frames only, cross-tabbed against
+# mapd v2's `oneWay` -- which is 100% populated and 100% True on motorway, so a divided carriageway
+# has NO oncoming traffic in an adjacent lane by construction:
+#
+#     2305 motorway frames on a one-way carriageway, oncoming veto up on 1337 -- 58.0%
+#
+# Each firing is 90 s of silence, so this is the feature switched off for most of the highway, and it
+# is the I-15 report ("kept saying two-way road") still live after the speed-scaled floor was supposed
+# to fix it. The floor was not the problem.
+#
+# THE MECHANISM. This constant was widened from ADJACENT_MAX_M to reach opposing traffic at 7.4 m on a
+# 1 + TWLTL + 1 arterial. `oncomingEdgeTrusted` is FALSE on every drive record so far, so the fallback
+# is not a rare path -- it is the only path. And a 9 m band on a divided highway with a narrow median
+# reaches the OPPOSING CARRIAGEWAY, where the radar then correctly identifies real oncoming traffic
+# that is genuinely not ours. The classifier is not wrong; the band is asking the wrong question.
+#
+# NOT FIXED HERE, because the obvious fix has a rule problem worth deciding deliberately rather than
+# at the end of a session. Using `oneWay` to suppress the veto is map data making a maneuver CHEAPER
+# TO OPEN, which "the map is EVIDENCE, never PERMISSION" forbids. The defensible framing is that the
+# map is not overriding a veto but answering a GEOMETRY question the road edge was supposed to answer
+# and cannot -- is that return on our carriageway -- so `oneWay` should narrow the BAND in
+# `_on_our_carriageway`, not cancel the result. Same effect, different thing being claimed, and only
+# the second one survives the rule. Decide, then build.
+
 # Fraction of our own speed a vehicle in the next lane must be doing before it counts as proof that
 # lane is a TRAVEL lane rather than a turn lane.
 #
