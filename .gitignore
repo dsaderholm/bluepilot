@@ -101,3 +101,10 @@ bluepilot/agent_info/
 bluepilot/agent_tools/
 bluepilot/local_files/
 tools/jotpluggler/layouts/Path_Angle_Analysis.json
+
+# FusionPilot: preview renders. Build artifacts of the tools under
+# selfdrive/ui/bp/onroad/tools/, written into the repo root when they run. They were committed
+# once by a `git add -A` and blocked the push, because *.png is an LFS-tracked pattern here.
+acc_status_*.png
+mici_hold_*.png
+passing_panel_*.png

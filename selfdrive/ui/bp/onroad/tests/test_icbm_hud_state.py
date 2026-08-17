@@ -126,3 +126,36 @@ def test_no_hold_is_never_worth_showing_however_valid_the_limit():
 def test_missing_speed_limit_data_hides_the_badge_rather_than_raising():
   s = read_icbm_hud_state(_SM2(_Icbm(baseline=72.0), None))
   assert s.has_hold and not s.worth_showing
+
+
+class TestAPinCanStillBeCreatedWhereThereIsNoLimit:
+  """THE BADGE IS THE ONLY TAP TARGET FOR PINNING, so hiding it removes the gesture entirely.
+
+  `enforce_no_limit_no_hold` (2026-08-15) drops the baseline on a road with no posted limit. That
+  is what he asked for. But `_hold_rect` -- the rectangle a tap is tested against -- is set where
+  the badge is DRAWN and cleared to None everywhere else, so no hold meant no badge meant no way to
+  create a pin at all. On exactly the roads he says pins are for: *"we do still want pinned holds
+  since those are frequently done when SLA doesn't have a number."*
+
+  Found on 2026-08-17 from his device, not from the code: `IcbmHoldObservations` was 6 KB and
+  growing while `IcbmPinnedHolds` was `[]` and five days stale.
+  """
+
+  def test_a_bare_suggestion_shows_the_badge_with_no_hold_at_all(self):
+    s = read_icbm_hud_state(_SM2(_Icbm(baseline=0.0, suggestion=45.0), _SL(False, 0.0)))
+    assert not s.has_hold
+    assert s.worth_showing, "no badge means no tap target means the pin can never be created"
+    assert s.display_value == 45, "the badge would read 0 -- baseline is not the offered speed"
+
+  def test_a_real_hold_still_shows_its_own_number_not_the_suggestion(self):
+    s = read_icbm_hud_state(_SM2(_Icbm(baseline=72.0, suggestion=45.0), _SL(True, 24.6)))
+    assert s.display_value == 72
+
+  def test_the_suggestion_is_read_even_though_there_is_no_hold(self):
+    """It used to be read INSIDE the hold branch, so it was unreachable in the case it exists for."""
+    s = read_icbm_hud_state(_SM2(_Icbm(baseline=0.0, suggestion=45.0), _SL(False, 0.0)))
+    assert s.pin_suggested and s.pin_suggestion == 45
+
+  def test_no_hold_and_no_suggestion_still_shows_nothing(self):
+    s = read_icbm_hud_state(_SM2(_Icbm(baseline=0.0, suggestion=0.0), _SL(True, 24.6)))
+    assert not s.worth_showing

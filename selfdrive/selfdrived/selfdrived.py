@@ -503,6 +503,25 @@ class SelfdriveD(CruiseHelper):
     self.icbm.run(CS, self.sm['carControl'], self.sm['longitudinalPlanSP'], self.is_metric, lead_present,
                   self.update_pinned_holds())
 
+  def _pinnable_speed(self) -> int:
+    """BluePilot: the hold to learn from and to pin, INCLUDING the one the no-limit rule removed.
+
+    `enforce_no_limit_no_hold` drops the baseline on a road with no posted limit, which is what the
+    owner asked for -- the max speed is the whole interface there. But pinned holds keyed on
+    `v_baseline` for both halves of their machinery, so that change silently killed observing AND
+    pinning on exactly the roads he says pins are for: *"we do still want pinned holds since those
+    are frequently done when SLA doesn't have a number."*
+
+    Caught on 2026-08-17 from his own device rather than from the code -- `IcbmHoldObservations` was
+    6 KB and growing while `IcbmPinnedHolds` was `[]` and five days stale.
+
+    `no_limit_hold_speed` is that baseline as it stood one frame before being cleared, so this is
+    still the DELIBERATE press it always was, not the current cluster speed. Observing the cluster
+    instead would record every number he passes through and drown the signal that makes a suggestion
+    mean something.
+    """
+    return int(self.icbm.v_baseline) or int(self.icbm.no_limit_hold_speed)
+
   def update_pinned_holds(self) -> int:
     """BluePilot: pinned speed for where the car is now, in display units, or 0.
 
@@ -524,11 +543,11 @@ class SelfdriveD(CruiseHelper):
         # A tap accepts a standing suggestion if there is one, otherwise pins whatever is held.
         # Same gesture either way -- the badge shows which state you are in.
         suggested = self.pinned_holds.suggestion(lat, lon)
-        self.pinned_holds.toggle(lat, lon, suggested or int(self.icbm.v_baseline))
+        self.pinned_holds.toggle(lat, lon, suggested or self._pinnable_speed())
 
       # Learn from holds the DRIVER creates. Not ones a pin created -- counting those would make a
       # suggestion evidence for itself and it would re-suggest forever.
-      baseline = int(self.icbm.v_baseline)
+      baseline = self._pinnable_speed()
       if (baseline > 0 and baseline != self._last_observed_hold
           and self.icbm.baseline_source != BaselineSource.pinned):
         self._last_observed_hold = baseline

@@ -37,6 +37,7 @@ class IcbmHudState:
   hold_locked: bool = False     # something else owns the target, so the hold is not being honoured
   pinned: bool = False          # created by a pin, so tapping the badge removes it
   pin_suggested: bool = False   # this place is a candidate for pinning
+  pin_suggestion: int = 0       # the speed being offered, for when there is no hold to show
 
   # Is Speed Limit Assist actually producing a limit right now? NOT whether it is switched on --
   # SLA stays "active" on a road with no limit data, which is a documented trap in this fork.
@@ -66,10 +67,30 @@ class IcbmHudState:
     deliberately pinned to a place governing the car with nothing on screen saying so, and the tap
     target that removes it unreachable.
 
+    AND A STANDING PIN SUGGESTION IS THE SECOND EXCEPTION, added 2026-08-17 to fix a hole the first
+    one left open. THE BADGE IS THE ONLY TAP TARGET FOR PINNING -- `_hold_rect` is set where the
+    badge is drawn and cleared to None everywhere else. So with no limit, no hold and therefore no
+    badge, there was no way to CREATE a pin at all on exactly the roads he says pins are for. His
+    device proved it: 6 KB of hold observations accumulating, and `IcbmPinnedHolds` still `[]`.
+
+    When there is a suggestion but no hold, the badge shows the SUGGESTED speed -- see
+    `display_value`. That is not a second number competing with MAX; it is an offer, and tapping it
+    is the only way to accept.
+
     This is a DISPLAY rule. The hold itself is unchanged and still governs the car; hiding a
     readout must never change what the car does.
     """
-    return self.has_hold and (self.sla_has_limit or self.pinned)
+    return (self.has_hold and (self.sla_has_limit or self.pinned)) or self.pin_suggested
+
+
+  @property
+  def display_value(self) -> int:
+    """The number on the badge: the hold when there is one, otherwise the pin being offered.
+
+    Without this the badge drawn for a bare suggestion would read `0`, since the drawing code takes
+    `baseline` directly and a suggestion is not a hold.
+    """
+    return self.baseline if self.has_hold else self.pin_suggestion
 
 
 def read_icbm_hud_state(sm) -> IcbmHudState:
@@ -92,11 +113,14 @@ def read_icbm_hud_state(sm) -> IcbmHudState:
 
     icbm = sm['selfdriveStateSP'].intelligentCruiseButtonManagement
     state.arrow = _SEND_BUTTON_ARROW.get(icbm.sendButton.raw, "")
+    # OUTSIDE the hold branch below, deliberately. A suggestion is offered precisely when there is
+    # no hold yet, so reading it only when one exists made it unreachable in the case it is for.
+    state.pin_suggestion = round(icbm.pinSuggestion)
+    state.pin_suggested = icbm.pinSuggestion > 0
     if icbm.overrideState.raw == _OVERRIDE_STATE_HOLDING and icbm.vBaseline > 0:
       state.baseline = round(icbm.vBaseline)
       state.hold_locked = bool(icbm.holdSuppressed)
       state.pinned = icbm.baselineSource.raw == _BASELINE_SOURCE_PINNED
-      state.pin_suggested = icbm.pinSuggestion > 0
   except Exception:  # noqa: BLE001 -- see docstring; a HUD must not raise
     return IcbmHudState()
   return state

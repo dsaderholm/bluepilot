@@ -371,6 +371,12 @@ class IntelligentCruiseButtonManagement:
     self.gap_control_enabled = False
     self.gap_target = 0
 
+    # BluePilot: the speed enforce_no_limit_no_hold most recently took away. It WAS a deliberate
+    # hold a frame earlier -- captured by a real press -- so it is exactly the number pinned holds
+    # should learn from and offer to pin. Without it, clearing the baseline on no-limit roads also
+    # silently killed both halves of pinned holds on precisely the roads they exist for.
+    self.no_limit_hold_speed = 0
+
   def update_params(self) -> None:
     if self.frame % int(PARAMS_UPDATE_PERIOD / DT_CTRL) == 0:
       self.max_target_drop = self.params.get("IcbmMaxTargetDrop", return_default=True)
@@ -1319,10 +1325,16 @@ class IntelligentCruiseButtonManagement:
     three capture sites: `apply_pinned_hold` runs inside `update_manual_override` too, and a blanket
     rule there would silently delete the feature.
     """
+    if not self.cruise_enabled:
+      self.no_limit_hold_speed = 0
     if self.speed_limit_known or self.v_baseline <= 0:
       return
     if self.baseline_source == BaselineSource.pinned:
       return
+    # Remember it before it goes. Pinned holds learn from holds the DRIVER creates, and on a road
+    # with no posted limit this is the only trace one ever leaves -- selfdrived's observe/suggest/pin
+    # path keys on v_baseline, which is about to be zero for the rest of the drive.
+    self.no_limit_hold_speed = self.v_baseline
     self.clear_baseline()
 
   def clear_baseline(self) -> None:

@@ -640,6 +640,34 @@ an explicit place and is the one hold that still means something with no limit -
 and `worth_showing` now draws the badge for a pinned hold even with no SLA, or he would have a speed
 governing the car with nothing on screen and no tap target to remove it.
 
+**AND IT KILLED PINNED HOLDS OUTRIGHT FOR TWO DAYS. Found 2026-08-17 from his DEVICE, not the
+code**, when he asked whether everything was good: `IcbmHoldObservations` was 6 KB and written that
+morning, while `IcbmPinnedHolds` was `[]` and five days stale. **He has never successfully created a
+pin**, and he had described them as frequently used -- so the discrepancy was the finding.
+
+Both halves of the feature keyed on `v_baseline`, which the rule sets to zero:
+
+- `selfdrived.update_pinned_holds` calls `observe_hold` only when `baseline > 0`, so on a no-limit
+  road NOTHING was recorded and no suggestion could ever form.
+- **The badge is the ONLY tap target for pinning.** `_hold_rect` is set where the badge is drawn and
+  cleared to None everywhere else -- *"no badge on screen, no tap target"*. No hold meant no badge
+  meant the gesture did not exist. On precisely the roads pins are for.
+
+The fix is three pieces, and the middle one is the one that is easy to miss:
+
+1. `no_limit_hold_speed` keeps the baseline as it stood one frame before clearing. It is still the
+   DELIBERATE press it always was; observing `v_cruise_cluster` instead would record every number he
+   passes through and drown the signal that makes a suggestion mean anything.
+2. `worth_showing` is now also true for a BARE PIN SUGGESTION with no hold, and `display_value`
+   draws the offered speed -- taking `baseline` there rendered a badge reading `0`.
+3. `pinSuggestion` is read OUTSIDE the hold branch. It had been read inside it, so it was
+   unreachable in the exact case it exists for.
+
+**The lesson is where it was found.** Three sessions of tests, mutation testing and code review did
+not surface it, because every one of them asked whether the code did what it said. Two param files
+with mismatched timestamps did. **When a feature has persistent state, read the state off the
+device** -- an empty store beside a growing one is a defect report nobody had to write.
+
 **What this gives up, stated because he should hear it rather than discover it:** a number he sets
 on a road with no coverage is no longer carried in as a hold when coverage returns. SLA takes the
 speed at that point, and he presses + to override -- which now creates a hold, because a limit is

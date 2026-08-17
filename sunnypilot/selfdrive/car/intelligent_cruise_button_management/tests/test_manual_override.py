@@ -1459,6 +1459,24 @@ class TestNoPostedLimitMeansNoHold:
     icbm.run(make_cs(to, buttons=(ACCEL_RELEASE,)), CC, make_lp(LIMIT, limit_known=False), False)
     return icbm
 
+  def test_the_cleared_hold_is_kept_so_a_pin_can_still_be_made_from_it(self):
+    """Dropping the hold must not also delete the only trace pinned holds learn from.
+
+    selfdrived observes and pins `v_baseline`. Clearing it on no-limit roads therefore killed BOTH
+    halves of pinned holds on exactly the roads he says pins are for -- no observation was ever
+    recorded, so no suggestion could form, so the badge that is the only tap target never appeared.
+    Found on 2026-08-17 from his device: IcbmHoldObservations 6 KB and growing, IcbmPinnedHolds
+    still `[]` and five days stale.
+
+    `no_limit_hold_speed` is that baseline one frame before it went. It is still the DELIBERATE
+    press it always was -- not the current cluster speed, which would record every number he passes
+    through and drown the signal.
+    """
+    icbm = self._press_with_no_limit()
+    assert icbm.v_baseline == 0, "the no-limit rule itself stopped working"
+    assert icbm.no_limit_hold_speed == DRIVER, (
+      "the hold was dropped without a trace, so nothing can observe or pin it")
+
   def test_a_press_where_no_limit_is_known_creates_no_hold(self):
     icbm = self._press_with_no_limit()
     assert icbm.v_baseline == 0, "a hold was created with no posted limit to hold against"
