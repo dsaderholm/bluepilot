@@ -172,6 +172,28 @@ than dumped, and it is the same filtering that kept `overtaking` and `incline` o
 it names the hard parts (format change, direction handling) rather than glossing them, so a "no" costs
 him no explanation. No em dashes, at the owner's request, so it does not read as generated.
 
+### `hov:lanes` -- HIS DECISION, AND THE STRONGEST ASK FOR THE CALIFORNIA DRIVE
+
+*"Yes, the HOV lane is something we should never try to lane change into."* 2026-08-17. A decision,
+not a preference to be weighed later.
+
+**Measured at 100% on I-15 in Salt Lake** -- all 400 motorway ways carry both `hov:lanes` and
+`hov:minimum`, alongside `hgv` and `toll:hov`. That is the road he is driving to California, and the
+leftmost lane there is the tolled express lane.
+
+**Why it outranks stop signs as a request.** Stop signs cross-check a detector we do not trust;
+`hov:lanes` closes a gate that is currently WIDE OPEN. Passing assist will happily suggest moving
+into the express lane today, because nothing in the system knows it exists. Coverage is 100% where he
+drives, versus a measurement that still needs a road test.
+
+**What it needs from mapd.** `hov:lanes` is a per-lane list (`designated|yes|yes|yes`), so exposing
+it usefully means a lane-indexed field rather than a scalar -- a bigger shape than `lanes:forward`,
+smaller than node tags. Worth confirming the tag's value format across his corridor before asking, so
+the request names what it wants rather than the tag.
+
+**Ordering unchanged**: after `pfeiferj/mapd#127` gets a response. Two open asks from one person is
+how both slide, and that applies to this one as much as to the stop signs.
+
 **Three ideas closed by the same measurement**, worth recording so nobody re-hopes them:
 `overtaking=no` would have been the dream tag and does not exist on US 6 at all; `turn:lanes:both_ways`
 is the canonical TWLTL tagging and is 0.2%, so the center-turn-lane case stays with
