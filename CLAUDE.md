@@ -780,6 +780,26 @@ safety question -- the fallback handles it -- but a high rate would mean the pas
 car back at exactly the interesting moments, which makes it a worse idea rather than a broken one.
 **Run it before the first passthrough drive.**
 
+**STOCK AEB IS NOT LOST UNDER OP LONG. Answered 2026-08-17 from the safety code, not assumed.**
+The worry was that "trust Ford" is a weaker proposition if Ford's emergency braking cannot come
+along. It can:
+
+- `safety_fwd_hook` (opendbc/safety/safety.h:261) forwards camera -> car by default and blocks ONLY
+  addresses in the TX list carrying `check_relay = true` for the destination bus. Its own comment
+  names the reason: "Safety modes can opt out of this in the case of selective AEB forwarding."
+- Ford's blocked set is `ACCDATA`, `ACCDATA_3`, `Lane_Assist_Data1`, `IPMA_Data` and the
+  LateralMotionControl pair. **`ACCDATA_2` appears ZERO times in `modes/ford.h`**, so it is not in
+  the TX list and is never blocked.
+- `ford_hooks` sets no `.fwd`, so there is no Ford-specific blocking either.
+
+`ACCDATA_2` is the message carrying `CmbbBrkDecel_B_Rq` -- `ford/carstate.py:229` reads it as
+`ret.stockAeb`. It passes straight through to the ABS untouched, relay open or not. Stock AEB is
+Ford's the whole time and openpilot never touches it.
+
+This is also why `passthrough_admissible` refuses a frame with `CmbbDeny_B_Actl` set rather than
+forwarding it: panda's `violation |= cmbb_deny` exists precisely so openpilot can never transmit a
+frame that DENIES stock AEB, and forwarding Ford's own deny bit would trip it.
+
 **Also learned: NO route on the device has ever had op long enabled**, so the camera question below
 cannot be answered from existing data. It needs a drive.
 
