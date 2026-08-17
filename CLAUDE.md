@@ -721,10 +721,43 @@ verifies the camera's ACCDATA is relayed OUT before ours is let in. Openpilot lo
 therefore ALL-OR-NOTHING by construction. There is no arrangement where the camera keeps computing
 ACC and we send ACCDATA for just the last few mph of a stop; the two cannot coexist on the bus.
 
-**So: a commanded full stop requires op long, which he has tried and rejected. There is no side
-door.** Do not propose a fake lead, a fake target, or a partial ACCDATA takeover -- and note the
-naming rule reads the same way, since a stop that only exists under ICBM is scaffolding for a
-problem op long does not have.
+Do not propose a fake lead, a fake target, or a partial ACCDATA takeover.
+
+### BUT THERE IS ONE CANDIDATE SIDE DOOR: FORWARD THE CAMERA'S OWN ACCDATA, OVERRIDE ONLY THE STOP
+
+Raised 2026-08-17 after he pushed back on two flat "no" answers. **He was right to push.** An earlier
+version of this section ended "there is no side door", and that was too strong.
+
+**The observation it rests on was measured this morning and its meaning was missed at the time.** The
+APIM probe showed `0x462` with a `bus 130` count -- openpilot's own TX echo onto bus 2. **We forward
+bus 0 traffic to the camera**, so with the relay open the camera keeps all its inputs, keeps computing
+ACC, and keeps transmitting `ACCDATA` on bus 2.
+
+So: run op long, read the camera's `ACCDATA`, **republish it byte-for-byte on bus 0**, and substitute
+our own only for the seconds a stop needs. The car then behaves exactly as Ford ACC, because the
+commands ARE Ford ACC's. **This does not require improving op long to match stock -- it borrows stock's
+output and authors only the part stock will not do.**
+
+**The mechanical blocker is absent, checked rather than assumed: `ACCDATA` (0x186, 390) carries NO
+COUNTER AND NO CHECKSUM.** Every signal is a plain value, so verbatim forwarding is trivial and --
+the part that matters -- handing control BACK after an override needs no resynchronization. Two more
+facts from the same read: `AccVeh_V_Trg` ranges from 0 kph, so the control message has no floor and
+confirms the 20 mph limit is set-speed only; and `AccBrkPrkEl_B_Rq` is in the message, so the
+stop-and-hold vocabulary is already there.
+
+**THE UNKNOWN THAT DECIDES IT, and it cannot be settled offline:** while we forward faithfully the
+camera's loop stays closed -- it commands, the car responds, its model stays consistent. During an
+override it commands "hold 20" and watches the car stop anyway. Does it re-plan, fault, or drop ACC?
+Nobody knows, and the answer arrives on the first attempt.
+
+**What it costs, stated plainly.** Every ACC command would route through openpilot, so a bug produces
+NO BRAKING rather than a wrong set speed -- a real step up in blast radius from button injection.
+Panda's existing `ACCDATA` checks still apply. And it is op long as far as the car and the safety
+mode are concerned, for the whole drive.
+
+**The cheap first step is a pure passthrough that overrides NOTHING.** If the car drives identically
+to stock, the hard half is proven and the stop is a small addition. If the camera faults merely from
+being forwarded, it is dead and one drive found out.
 
 ### A HEREDOC EATS `
 `, AND IT HAS NOW SHIPPED A BROKEN PUSH
