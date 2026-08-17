@@ -117,7 +117,8 @@ def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., lead_y=0.0, status=Tr
             # mapd v2. ABSENT BY DEFAULT, because that is the state of every car that has not
             # opted in and of this one before MapdV2 was set -- so every existing test keeps
             # asserting the no-map behaviour without being touched.
-            mapd_present=False, mapd_hwy="motorway", mapd_oneway=False, mapd_tile=True):
+            mapd_present=False, mapd_hwy="motorway", mapd_oneway=False, mapd_tile=True,
+            mapd_lanes=3):
   # Being stuck behind a car means matching its speed, not still closing on it: vEgo tracks vLead
   # and the gap to the SET speed is what makes passing worth suggesting. Tests that need a genuine
   # approach pass v_ego explicitly.
@@ -158,7 +159,8 @@ def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., lead_y=0.0, status=Tr
     'liveTracks': NS(points=list(tracks)),
   })
   if mapd_present:
-    sm.data['mapdOut'] = NS(highwayClass=mapd_hwy, oneWay=mapd_oneway, tileLoaded=mapd_tile)
+    sm.data['mapdOut'] = NS(highwayClass=mapd_hwy, oneWay=mapd_oneway, tileLoaded=mapd_tile,
+                            lanes=mapd_lanes)
     sm.alive['mapdOut'] = True
     sm.valid['mapdOut'] = True
     sm.updated['mapdOut'] = True
@@ -1010,6 +1012,41 @@ class TestLaneAge:
     assert det.suggestion == Side.none, "suggested moving into an unproven lane"
     run(det, int(12.0 / DT_MDL), status=False, **IN_LEFT_LANE)
     assert det.suggestion == Side.right                       # and it comes back once proven
+
+  def test_a_two_lane_two_way_road_has_no_passing_lane(self):
+    """US 6 between its 2+1 sections. `lanes` counts BOTH directions on a two-way way, so 2 means one
+    each way and the lane to the left IS the oncoming lane. Today only the radar catches that, and
+    only once opposing traffic has actually appeared -- the veto arriving late by construction."""
+    det = keep_right_det()
+    run(det, int(4.0 / DT_MDL), v_lead=SLOW_LEAD_MS,
+        mapd_present=True, mapd_oneway=False, mapd_lanes=2)
+    assert det.blocked_by == Blocked.noRoomInMap
+    assert det.suggestion == Side.none
+
+  def test_a_one_way_carriageway_with_two_lanes_still_passes(self):
+    """The threshold differs by direction and reading it without oneWay is wrong both ways. On a
+    one-way way `lanes` counts OUR carriageway, so 2 is a genuine passing lane."""
+    det = keep_right_det()
+    run(det, int(4.0 / DT_MDL), v_lead=SLOW_LEAD_MS,
+        mapd_present=True, mapd_oneway=True, mapd_lanes=2)
+    assert det.blocked_by != Blocked.noRoomInMap
+    assert det.suggestion == Side.left
+
+  def test_a_single_lane_carriageway_refuses(self):
+    det = keep_right_det()
+    run(det, int(4.0 / DT_MDL), v_lead=SLOW_LEAD_MS,
+        mapd_present=True, mapd_oneway=True, mapd_lanes=1)
+    assert det.blocked_by == Blocked.noRoomInMap
+
+  def test_an_untagged_lane_count_is_unknown_and_never_refuses(self):
+    """THE ONE THAT WOULD HAVE BITTEN. `lanes` is 0 when OSM has no tag -- 8.5% of frames on the
+    measured drive -- and reading 0 as "one lane" would refuse most of a residential drive on missing
+    data. Absent map, absent tile and absent tag all mean the same thing here: no claim."""
+    det = keep_right_det()
+    run(det, int(4.0 / DT_MDL), v_lead=SLOW_LEAD_MS,
+        mapd_present=True, mapd_oneway=False, mapd_lanes=0)
+    assert det.blocked_by != Blocked.noRoomInMap
+    assert det.suggestion == Side.left
 
   def test_a_ramp_refuses_the_pass(self):
     """mapd v2's highwayClass is OSM's own classification: motorwayLink IS a ramp. Nothing on the car

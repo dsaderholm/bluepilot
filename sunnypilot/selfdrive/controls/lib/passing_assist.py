@@ -2293,6 +2293,28 @@ class PassingAssistDetector:
     self.lead_ttc = (lead.dRel / closing) if closing > MIN_APPROACH_CLOSING_MS else NO_TTC_S
 
   @staticmethod
+  def _map_says_no_room(sm) -> bool:
+    """Does the map rule out a same-direction lane to our left? See Blocked.noRoomInMap.
+
+    A COUNT OF ZERO IS UNKNOWN, NOT A SINGLE-LANE ROAD. `lanes` is 0 when OSM has no tag, which is
+    8.5% of frames on the measured drive, and treating that as "one lane" would refuse most of a
+    residential drive on missing data. Absent map, absent tile and absent tag all read the same
+    here: no claim.
+    """
+    try:
+      if not (sm.alive['mapdOut'] and sm.valid['mapdOut']):
+        return False
+      o = sm['mapdOut']
+      if not bool(o.tileLoaded):
+        return False
+      lanes = int(o.lanes)
+      if lanes <= 0:
+        return False
+      return lanes <= (1 if bool(o.oneWay) else 2)
+    except (KeyError, AttributeError, TypeError, ValueError):
+      return False
+
+  @staticmethod
   def _on_a_ramp(sm) -> bool:
     """Is the way we are matched to an on- or off-ramp? See Blocked.onRamp.
 
@@ -2996,6 +3018,25 @@ class PassingAssistDetector:
     # than about either lane, so naming a side for it would be arbitrary. keep_wanted for the same
     # reason too -- reached past "a pass is warranted", so it is the flicker case, and a ramp's
     # highwayClass flickers at every way transition.
+    # THE MAP SAYS THERE IS NO LANE TO THE LEFT, which needs no idea which lane we are in -- the one
+    # claim of that shape that survived measurement, since distanceFromWayCenter came back at 11.58 m
+    # p90 against a 3.7 m lane and cannot name a lane at all.
+    #
+    #   one-way, lanes <= 1   a single-lane carriageway. Nothing to move into.
+    #   two-way, lanes <= 2   one lane each way, so the lane to the LEFT IS THE ONCOMING LANE. On
+    #                         US 6 that is most of the road between the 2+1 passing sections, and
+    #                         today only the radar catches it -- and only once opposing traffic has
+    #                         actually appeared, which is the veto arriving late by construction.
+    #
+    # `lanes` counts BOTH directions on a two-way way and one carriageway on a one-way way, which is
+    # why the threshold differs and why reading it without oneWay would be wrong in both directions.
+    #
+    # Refusal only, and absent-is-permissive: lanes was 91.5% populated on route 00000383, so an
+    # unknown count must never refuse. A missing map leaves every gate exactly as it was.
+    if self._map_says_no_room(sm):
+      self._reset_outputs(Blocked.noRoomInMap, keep_wanted=True)
+      return
+
     if self._on_a_ramp(sm):
       self._reset_outputs(Blocked.onRamp, keep_wanted=True)
       return

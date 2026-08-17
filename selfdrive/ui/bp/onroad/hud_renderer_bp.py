@@ -190,6 +190,9 @@ _BLOCKED_TEXT = {
   # The map's own word for it, not a guess -- OSM calls a ramp a motorwayLink, and nothing on the
   # car can tell one from a road on its own.
   'onRamp': "On a ramp",
+  # Not "no lane available" -- that one is the camera's verdict and this is the map's, and telling
+  # them apart at a stop is the difference between tuning a threshold and tuning nothing.
+  'noRoomInMap': "Map says one lane each way",
 }
 
 # BluePilot: sunnypilot's "AHEAD" box hangs off the bottom of the speed-limit sign, in the same

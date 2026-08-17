@@ -637,7 +637,12 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       # off-ramp rather than anything inferred. Nothing on the car can tell a ramp from a road: the
       # camera sees lane lines and a drivable surface either way, which is why every exit test in
       # passing_assist is REACTIVE and fires only after he has already moved.
-      onRamp @18;           # the road is bending hard enough that a pass is the wrong place for it
+      onRamp @18;
+      # The map says the road has no same-direction lane to the left -- a single-lane carriageway, or
+      # a two-way road with one lane each way, where the lane to the left IS the oncoming lane. A
+      # claim about the ROAD, needing no idea which lane we are in, which is the only map claim of
+      # that shape that survived measurement.
+      noRoomInMap @19;           # the road is bending hard enough that a pass is the wrong place for it
     }
 
     # BluePilot: the maneuver this WOULD perform, run as a dry run. Nothing actuates; see
