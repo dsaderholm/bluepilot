@@ -7,9 +7,11 @@ OpenPilot could know more about where I'm going, like if I am going to take an e
 **Short version: the phone cannot supply it, the car barely can, and the one usable signal is already
 on the wire and has never been looked at.**
 
-Everything below is marked MEASURED or UNVERIFIED. Two claims in this area were made confidently and
-turned out to be wrong within the same day, both by reasoning past the edge of what had actually been
-checked; both corrections are recorded here rather than quietly fixed.
+Everything below is marked MEASURED or UNVERIFIED. **Several claims in this area were made
+confidently and were wrong within hours**, each by reasoning past the edge of what had been checked.
+Every correction is kept in place rather than quietly fixed, because in each case the WRONG version
+was the more persuasive one and would have been re-derived otherwise. Two came from him and one from
+the passing assist session; none were found by thinking harder.
 
 ---
 
@@ -41,12 +43,25 @@ an exit" needs to know whether the exit is his.
 On Ford that last hop is **MS-CAN**. The panda is wired to bus 0 (powertrain) and bus 2 (camera).
 openpilot would never see a byte of it, however well any app implemented it.
 
-**And what it carries is thinner than the phrase "navigation data" suggests.** The API is
-`NavigationManager.updateTrip()`, and Google's own documentation describes it as communicating a
-`Trip` containing `Step` (turn-by-turn instructions) and `Destination`, with the note that "the
-information provided in this call can be used by the vehicle's cluster and heads-up displays." A
-maneuver, a distance, a destination name. **A turn arrow, not road geometry.** `mapdExtendedOut.path`
-already gives curvature ahead, which is strictly more useful than "right turn in 500 m".
+**What it carries is a turn arrow: a maneuver, a distance, a destination name.** The API is
+`NavigationManager.updateTrip()`, communicating a `Trip` of `Step` and `Destination`, with the note
+that "the information provided in this call can be used by the vehicle's cluster and heads-up
+displays."
+
+**AN EARLIER VERSION OF THIS DOCUMENT CALLED THAT "THINNER THAN IT SOUNDS" AND ARGUED THAT
+`mapdExtendedOut.path` ALREADY GIVES CURVATURE, SO THE ARROW ADDS LITTLE. THAT IS BACKWARDS**, and he
+caught it: *"Where the ramp is, how it curves, and what speed it takes are handled by mapd v2..."*
+
+The two are COMPLEMENTARY, not competing. mapd matches POSITION to ways. It has no destination and
+structurally cannot have one -- which is exactly why `waySelectionType: predicted` is a guess from
+path continuation rather than knowledge. **The arrow is thin precisely BECAUSE it is the complement:
+the one bit the map layer cannot supply.** So thinness is not an objection to it at all, and the
+original argument would have led the next reader to believe the data would be useless even if it
+arrived.
+
+**The blocker is TRANSPORT, and only transport.** That argument stands on its own and needs no help:
+phone -> AA -> SYNC -> cluster, last hop MS-CAN, panda on bus 0 and 2. The conclusion below is
+unchanged; the reasoning that used to support it was wrong.
 
 ### 2a. The Waze situation, since it will come up again
 
@@ -65,14 +80,45 @@ Android Auto -- true for the new feature, useless for a SYNC 3 car.
 is active but no valid `Trip` metadata is arriving. That is the signature of `updateTrip` not being
 called, or called without Steps.
 
-**The discriminator he is running: does Google Maps still show turns on his IPC?** If yes, the car,
-SYNC 3 and Android Auto are all working and it is purely Waze's implementation -- most likely an
-unnoticed regression from their rewrite onto the Car App Library. If Maps is also dead, it is instead
-the acknowledged Android Auto regression that broke cluster and HUD guidance for both apps, which
-Google has said is being fixed.
+**The discriminator he is running: does Google Maps still show turns on his IPC?**
+
+**IT IS ONLY VALID IN ONE DIRECTION, which an earlier version of this got wrong.** The Android Auto
+regression is NOT uniform: Google Maps is the most commonly affected, Waze is reported broken by some
+owners and working by others, and HERE WeGo keeps working on several models. So "Waze is dead" is
+expected under BOTH explanations and proves nothing on its own.
+
+    Maps ALSO dead  ->  the Android Auto regression. Diagnostic.
+    Maps still works ->  suggestive of Waze's implementation, NOT conclusive, since the regression
+                         hits apps unevenly and could be sparing Maps on this head unit.
+
+**A stronger test exists, and it is actionable:** a reported workaround is downgrading Google Maps to
+**version 25**, which restores HUD navigation and points at the bug arriving with Maps 26. If Maps is
+dead on his car and v25 revives it, that pins it to the known regression conclusively. REPORTED,
+not verified here.
+
+On Google's position: what exists is a Google Community Specialist on a support forum saying the dev
+team has been informed and a fix is in the works. **No timeline, no version, no release note.** An
+earlier version of this document said "Google has said is being fixed", which reads as a commitment
+it is not.
 
 **Either way it does not unblock anything here.** Worth wanting for his cluster; worth zero as a
 feature dependency. **Do not sequence any work behind it.**
+
+### 2b. If "which branch" is the only missing input, it need not come through the car at all
+
+Worth stating because it follows directly from the correction above: the blocker is transport, so a
+transport that avoids the car is the shape of any answer.
+
+**phone -> WiFi -> comma device** never touches SYNC, MS-CAN, the cluster or the canbox, and
+sidesteps all four links in the chain below.
+
+**The catch is the same wall in a new place.** Waze exposes no route to third parties. The usual read
+is Android's persistent navigation notification, which returns to exactly the publishing question
+that produced his compass -- if the app is not emitting, there is nothing to scrape. Google Maps is
+the likelier source there.
+
+NOT PROPOSED, and nothing here should be sequenced behind it. Recorded so the next person reaches for
+the right shape rather than re-deriving that the bus is a dead end.
 
 ---
 
@@ -170,8 +216,8 @@ not driven -- which is the correct failure.
 
 Genuine intent, and openpilot already sees it in `carState.leftBlinker` / `rightBlinker`. But it
 arrives at the gore point, seconds after the decision needed to be made against an 8-second budget.
-Useful to CONFIRM a prediction after the fact -- for scoring 5a offline, in fact -- and useless to
-make one.
+Useful to CONFIRM a prediction after the fact, and useless to make one. Note the scoring tool does
+not need it: the resolved `wayId` labels each fork on its own.
 
 ---
 
@@ -196,9 +242,13 @@ comfort cost, not a safety one. For a passing gate it is not mild, and the rule 
 
 1. **Drive.** The next drive is the first with `mapdOut` in it, and it answers the state-2 gate
    question, `predicted` quality, and several unrelated open items at once.
-2. **Score `predicted` against the turn signal** offline. The blinker says what he actually did;
-   `predicted` said what mapd thought he would do. That is a free, self-labeling accuracy measurement
-   over every fork in every route already recorded from here on.
+2. **Score it with `tools/bp_route_intent_score.py`** -- already written, on
+   `passing-assist-phase1`. It scores `predicted` against the LATER RESOLVED `wayId`, which is
+   self-labelling and needs no blinker for the core number, and it scores ramps separately.
+
+   **It reports LEAD TIME, and that is the metric that matters.** Accuracy alone is a vanity figure
+   here: a prediction that is right but only lands 3 s before the fork does nothing against an 8 s
+   budget. Being right EARLY is the whole requirement.
 3. **Only then** decide whether 5b earns its place.
 4. **Separately, and not on this critical path:** ask what the canbox actually is.
 

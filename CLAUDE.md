@@ -686,6 +686,124 @@ others for the same hole.**
 rule initially failed only ONE of the two tests, because the existing baseline-equals-target rule was
 clearing the hold in the other. Green was not evidence; breaking the code on purpose was.
 
+## ICBM CANNOT STOP THE CAR, AND FAKING A LEAD IS NOT THE WAY ROUND IT
+
+Asked 2026-08-17: *"Can we not fake a lead vehicle to have Ford ACC come to a complete stop?"* The
+motivation is correct -- **`get_minimum_set_speed()` returns 20 mph** (30 kph), which is FORD's floor,
+not ours. Every ICBM feature commands through the set speed, so the model-stop path can walk the car
+down toward 20 and no further. Stock ACC comes to a full stop only when its OWN radar sees a lead.
+
+**AND THE 20 IS FORD'S, CONFIRMED BY HIM 2026-08-17: *"No, I can't set it lower than 20."*** Worth
+recording because `get_minimum_set_speed()` is UPSTREAM sunnypilot's and returns the same 20 mph /
+30 kph for Hyundai, Honda, Chrysler, Mazda and Ford alike -- a generic constant that nobody here had
+checked against this car. It happens to be exactly right. **The question is closed; do not re-open it
+hoping the floor is ours.**
+
+**But the answer is no, four times over, and any one of them is fatal:**
+
+1. **Panda's TX allowlist has no radar message at all.** `FORD_COMMON_TX_MSGS` is
+   `Steering_Data_FD1` (buses 0 and 2), `ACCDATA_3`, `Lane_Assist_Data1`, `IPMA_Data`; the LONG
+   variants add `ACCDATA` and `LateralMotionControl`. Nothing on bus 1, nothing radar.
+2. **We are not in line with the radar.** The relay is on the CAMERA. Bus 1 can be read but its real
+   frames cannot be removed, so injecting means two transmitters for the same IDs -- a conflict, not
+   an override. Bus 1 is also already 60-73% loaded.
+3. **A convincing stopped target is the exact input to AEB.** The camera fuses radar for FCW and
+   emergency braking (`Cmbb_B_Enbl`, `FcwVisblWarn_B_Rq`, `FcwAudioWarn_B_Rq`, all in `ACCDATA_3`
+   which the camera authors). Aiming for a smooth stop with no control over the transfer function
+   from target to brake force, the plausible failure is a panic stop.
+4. **The direct path already exists and is better.** `FORD_ACCDATA` IS the brake command --
+   `AccBrkTot_A_Rq`, `AccBrkDecel_B_Rq`, `AccStopStat_B_Rq` -- and it is already in the TX list.
+   Faking a target to persuade the camera to compute the braking we want is a worse version of
+   sending the braking command ourselves.
+
+**And 4 is the real conclusion: `ACCDATA` is LONG-only and carries `check_relay = true`**, so panda
+verifies the camera's ACCDATA is relayed OUT before ours is let in. Openpilot longitudinal control is
+therefore ALL-OR-NOTHING by construction. There is no arrangement where the camera keeps computing
+ACC and we send ACCDATA for just the last few mph of a stop; the two cannot coexist on the bus.
+
+Do not propose a fake lead, a fake target, or a partial ACCDATA takeover.
+
+### BUT THERE IS ONE CANDIDATE SIDE DOOR: FORWARD THE CAMERA'S OWN ACCDATA, OVERRIDE ONLY THE STOP
+
+Raised 2026-08-17 after he pushed back on two flat "no" answers. **He was right to push.** An earlier
+version of this section ended "there is no side door", and that was too strong.
+
+**The observation it rests on was measured this morning and its meaning was missed at the time.** The
+APIM probe showed `0x462` with a `bus 130` count -- openpilot's own TX echo onto bus 2. **We forward
+bus 0 traffic to the camera**, so with the relay open the camera keeps all its inputs, keeps computing
+ACC, and keeps transmitting `ACCDATA` on bus 2.
+
+So: run op long, read the camera's `ACCDATA`, **republish it byte-for-byte on bus 0**, and substitute
+our own only for the seconds a stop needs. The car then behaves exactly as Ford ACC, because the
+commands ARE Ford ACC's. **This does not require improving op long to match stock -- it borrows stock's
+output and authors only the part stock will not do.**
+
+**The mechanical blocker is absent, checked rather than assumed: `ACCDATA` (0x186, 390) carries NO
+COUNTER AND NO CHECKSUM.** Every signal is a plain value, so verbatim forwarding is trivial and --
+the part that matters -- handing control BACK after an override needs no resynchronization. Two more
+facts from the same read: `AccVeh_V_Trg` ranges from 0 kph, so the control message has no floor and
+confirms the 20 mph limit is set-speed only; and `AccBrkPrkEl_B_Rq` is in the message, so the
+stop-and-hold vocabulary is already there.
+
+**THE OTHER LIKELY KILLER WAS CHECKED AND IS NOT THERE.** Panda caps `AccBrkTot_A_Rq` at
+**-3.4991 m/s^2** (`FORD_LONG_LIMITS.min_accel`), while the signal itself can express -20 -- so if
+Ford ever brakes harder than panda allows, the forwarded frame is BLOCKED and the braking is lost at
+exactly the wrong moment. Measured across six routes, 2026-08-17, using
+`carStateBP.brakeLightStatus.accAccelRequest` which is that signal straight off the camera:
+
+    189,418 braking frames.  ZERO above the limit.  Hardest Ford ever commanded: -2.70 m/s^2.
+
+0.8 m/s^2 of headroom and nothing in the bulk of the distribution past -2.5. Stock AEB rides a
+separate path and panda refuses `cmbb_deny` outright, so it is unaffected either way.
+
+**Also learned: NO route on the device has ever had op long enabled**, so the camera question below
+cannot be answered from existing data. It needs a drive.
+
+**THE UNKNOWN THAT DECIDES IT, and it cannot be settled offline:** while we forward faithfully the
+camera's loop stays closed -- it commands, the car responds, its model stays consistent. During an
+override it commands "hold 20" and watches the car stop anyway. Does it re-plan, fault, or drop ACC?
+Nobody knows, and the answer arrives on the first attempt.
+
+**What it costs, stated plainly.** Every ACC command would route through openpilot, so a bug produces
+NO BRAKING rather than a wrong set speed -- a real step up in blast radius from button injection.
+Panda's existing `ACCDATA` checks still apply. And it is op long as far as the car and the safety
+mode are concerned, for the whole drive.
+
+**AND ICBM CANNOT COEXIST WITH IT TODAY, which is the wrinkle that decides the sequencing.** With
+`openpilotLongitudinalControl` true:
+
+- `_initialize_intelligent_cruise_button_management` never clears `pcmCruiseSpeed`, so the ICBM
+  controller's `run()` early-returns.
+- `_cleanup_unsupported_params` **REMOVES the `IntelligentCruiseButtonManagement` param outright.**
+
+So enabling op long costs holds, Speed Limit Assist, both curve controllers and pinned holds for the
+whole drive. Acceptable for a 20-minute experiment; not a state to leave the car in. Making the two
+coexist means changing sunnypilot's own gating in two places -- a permanent merge cost -- and it is
+NOT needed for the first test, only for the feature. Do not pay it before the camera question is
+answered.
+
+**The cheap first step is a pure passthrough that overrides NOTHING.** If the car drives identically
+to stock, the hard half is proven and the stop is a small addition. If the camera faults merely from
+being forwarded, it is dead and one drive found out.
+
+### A HEREDOC EATS `
+`, AND IT HAS NOW SHIPPED A BROKEN PUSH
+
+Three times on 2026-08-16/17, and the third one went out with a RED SUITE because the push was
+chained after the test command with `&&` and the failure scrolled past. Writing Python through a
+`<<'PY'` heredoc in this environment, an escape inside a triple-quoted string arrives as a LITERAL
+NEWLINE, producing an unterminated string literal. It hit `test_mapd_schema.py`, `bp_mapd_compare.py`
+and `cruise.py`.
+
+**Avoid the escape entirely** -- `print()` for a blank line, `", ".join(...)` instead of a joined
+newline, or a single spaced sentence. If a newline is genuinely required, use the Edit tool rather
+than a heredoc.
+
+**AND READ THE SUITE RESULT BEFORE THE PUSH LANDS, NOT AFTER.** `test && commit && push` prints the
+failure and then pushes anyway if the chain is written so the push does not depend on it. On a branch
+every other branch rebases onto, that is the worst possible place to be sloppy. The rule was already
+written down and it was still broken.
+
 ## Params, defaults, and his settings
 
 **Settings behave EXACTLY as they do on stock BluePilot, sunnypilot and openpilot.** Decided
