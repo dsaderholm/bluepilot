@@ -100,8 +100,18 @@ this sign mine or is it on the cross street" is answered for free by machinery t
 What blocks it is that mapd's tiles carry node POSITIONS only, for tracing road shape, and drop node
 tags at generation. That is a bigger change than a way tag: a new object in the tile format rather
 than a field on an existing struct. Not to be bundled into the `lanes:forward` issue -- a second ask
-in the same thread is how both get ignored. Coverage of `highway=stop` on his roads is UNMEASURED
-and should be checked before anyone spends effort on it.
+in the same thread is how both get ignored. MEASURED 2026-08-17 and it is GOOD, which is what
+makes this worth filing eventually. Salt Lake bbox 40.55/-112.05 to 40.80/-111.80:
+
+    highway=stop              3,958 nodes
+    highway=traffic_signals   2,223 nodes
+
+More stop signs than signals, which is what the ground looks like and means mappers did the work
+rather than only tagging the easy landmarks. Contrast `overtaking`, which would have been the dream
+tag for passing assist -- 151,009 uses WORLDWIDE against 299.8M ways, 0% on US 6, a European
+convention tied to their centre-line rules that nobody surveys here. Dead for the same structural
+reason as `maxspeed:advisory` at 113K. So the two separate cleanly: the on-the-nose tag does not
+exist, and the unglamorous one does.
 
 **Three ideas closed by the same measurement**, worth recording so nobody re-hopes them:
 `overtaking=no` would have been the dream tag and does not exist on US 6 at all; `turn:lanes:both_ways`
