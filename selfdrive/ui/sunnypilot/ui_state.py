@@ -207,9 +207,24 @@ class UIStateSP:
       self.params.remove("ExperimentalMode")
       self.params.remove("DynamicExperimentalControl")
 
-    # ICBM: clear if not available or if full longitudinal control is active
+    # ICBM: clear if not available or if full longitudinal control is actually DRIVING.
+    #
+    # FusionPilot: THE FOURTH ICBM GATE, and the one that outlived the fix to the other three. He
+    # reported "when I turn ICBM on, all its settings are grayed out" -- with the passthrough on,
+    # which is the configuration where ICBM is supposed to work.
+    #
+    # `has_long` alone is the wrong question now. Under the stock-ACC passthrough openpilot carries
+    # Ford's command rather than authoring one, so the set speed still governs and ICBM is still the
+    # thing that moves it. `op_long_drives` is the same expression cruise.py uses for its own gate;
+    # they are one decision and both files have to ask it the same way.
+    #
+    # And this one does not merely disable -- it REMOVES the param, on every render of any screen.
+    # That is why re-enabling ICBM never stuck and why the device read `unset` afterwards: the
+    # settings page would light the toggle, this would delete it a frame later, and `has_icbm` going
+    # false greyed out every child setting underneath.
+    op_long_drives = has_long and not self.params.get_bool("StockAccPassthrough")
     if self.CP_SP is not None:
-      if not self.CP_SP.intelligentCruiseButtonManagementAvailable or has_long:
+      if not self.CP_SP.intelligentCruiseButtonManagementAvailable or op_long_drives:
         self.params.remove("IntelligentCruiseButtonManagement")
         self.has_icbm = False
     else:
