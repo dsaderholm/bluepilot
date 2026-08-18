@@ -179,9 +179,29 @@ def test_the_unpoliced_actuation_bits_are_refused():
   applied the park brake behind a stopped vehicle. `AccCancl_B_Rq` is the one that mattered more --
   the camera asserted it in 70.6% of its frames, so forwarding was relaying a CANCEL request for
   most of the drive."""
-  for name in ("AccCancl_B_Rq", "AccDeny_B_Rq", "AccBrkPrkEl_B_Rq", "AccStopStat_B_Rq",
+  for name in ("AccCancl_B_Rq", "AccDeny_B_Rq", "AccBrkPrkEl_B_Rq",
                "AccBrkPulse_B_Rq", "AccAutoResum_D_Rq"):
     assert passthrough_admissible(_stock(**{name: 1}), True), f"{name} was forwarded unchecked"
+
+
+def test_the_stop_hold_status_is_forwarded_because_ford_needs_it():
+  """`AccStopStat_B_Rq` was on the list above and should not have been.
+
+  It went on by association with the park brake, which implicated `AccBrkPrkEl_B_Rq` -- still
+  refused above. Measured on 2026-08-18: this bit is asserted on 330 frames of route 388 and 10.5%
+  of route 389, and never co-occurs with `carState.parkingBrake` on any frame of either. It is
+  ordinary stop-hold traffic, appearing only now because route 389 is the first time this car has
+  ever held a stop under ACC.
+
+  Refusing it handed every stop-in-traffic to openpilot longitudinal -- the one case where Ford's
+  stop-and-go is most valuable and openpilot's is least trusted. He saw it from the seat: the OP
+  LONG pill coming on while stopped behind a car, "where Ford ACC does just fine".
+
+  So this asserts the OPPOSITE of the test above, deliberately and by name, so that putting it back
+  on the list is a decision someone has to make against this evidence rather than a tidy-up."""
+  assert not passthrough_admissible(_stock(AccStopStat_B_Rq=1), True), (
+    "AccStopStat_B_Rq is refused again -- that hands every stop behind a car to openpilot "
+    "longitudinal, which is the controller this whole feature exists to avoid")
 
 
 def test_the_predicted_accel_is_pinned_rather_than_costing_the_frame():

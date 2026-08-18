@@ -281,7 +281,33 @@ def passthrough_admissible(stock_values: dict, long_active: bool) -> str:
   # open -- it spent most of the drive asking the car to CANCEL, and we relayed that request 219
   # times. Forwarding a cancel is not a degraded version of forwarding a command; it is actuation
   # in its own right, and the PCM's cruise status faulted 82 times over the drive.
-  for name in ("AccCancl_B_Rq", "AccDeny_B_Rq", "AccBrkPrkEl_B_Rq", "AccStopStat_B_Rq",
+  # AccStopStat_B_Rq WAS ON THIS LIST AND SHOULD NOT HAVE BEEN. Removed 2026-08-18 on measurement,
+  # after it cost him the thing this feature exists to protect.
+  #
+  # It went on the list because drive A applied the park brake, and everything unpoliced went on at
+  # once. That was guilt by association: the bit actually implicated was `AccBrkPrkEl_B_Rq`, which
+  # STAYS refused. What the measurement says about this one specifically:
+  #
+  #   AccStopStat_B_Rq   asserted on 330 frames of route 388 and 10.5% of route 389 -- and it never
+  #                      once co-occurs with `carState.parkingBrake` on any frame of either. It is
+  #                      what Ford asserts while HOLDING a stop, which is why it only started
+  #                      appearing now: before 389 this car had never held one.
+  #
+  # (Sampling note: the park-brake attribution itself is not re-litigated here. The scan behind this
+  # change covered the first six segments of each route, which is enough to establish that
+  # AccStopStat is ordinary stop-hold traffic and not enough to prove any bit NEVER fires. So the
+  # rest of the list is left exactly as it was.)
+  #
+  # What the refusal DID do is hand every stop-in-traffic to openpilot
+  # longitudinal -- 10.5% of drive 389 -- because `AccStopStat_B_Rq` is exactly what Ford asserts
+  # while holding a stop. That is the single case where Ford's stop-and-go is most valuable and
+  # openpilot's is least trusted, and he saw it directly: the OP LONG pill coming on while stopped
+  # behind a car, "where Ford ACC does just fine".
+  #
+  # The others stay. They cost nothing observed -- AccBrkPrkEl_B_Rq has never fired, and a camera
+  # cancel is actuation in its own right (drive A relayed 219 of them). Refusing a bit that never
+  # appears is free; refusing one Ford uses on every stop is not.
+  for name in ("AccCancl_B_Rq", "AccDeny_B_Rq", "AccBrkPrkEl_B_Rq",
                "AccBrkPulse_B_Rq", "AccAutoResum_D_Rq"):
     if stock_values.get(name):
       return "camera asserted %s -- unpoliced actuation, see drive A" % name
