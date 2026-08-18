@@ -748,3 +748,49 @@ def test_the_set_speed_is_prepared_while_stopped_and_held():
     "Ford has not held is free to go, and raising the set speed there is the lurch the floor "
     "release existed to avoid")
   assert "restore_set_speed" in guard, "nothing to restore to; this would blank the set speed"
+
+
+def test_the_override_is_not_available_without_openpilot_longitudinal():
+  """The passthrough param outlives op long, and the floor release is what pays for it.
+
+  ICBM and openpilot longitudinal COEXIST under the passthrough -- that is what `op_long_drives` in
+  cruise.py is for -- so this code runs in both modes and cannot infer op long from being alive.
+  And the passthrough's settings toggle only greys out when op long is switched back off; unlike
+  the ICBM gate it does not `remove()` the param. So this sequence is reachable in three taps:
+
+      op long ON -> passthrough ON -> op long OFF
+
+  leaving `StockAccPassthrough` true on a car where the whole ACCDATA block never executes. With
+  `stop_override_available` reading only those two params, the floor release below 20 mph is
+  suppressed and ICBM holds the set speed at 20 waiting for a stop nothing can author. It never
+  releases -- in the pure-ICBM mode, which is the one he drives most.
+
+  Found re-reading after the tenth finding, 2026-08-18. Same shape as that one: a param outliving
+  the condition that gives it meaning."""
+  det = UnconfirmedLeadDetector()
+
+  real_get_bool = det.params.get_bool
+
+  def available(alpha_long, passthrough, override):
+    # The offline Params stub makes put_bool a no-op on purpose -- nothing in this suite may write
+    # his settings -- so the reads are patched instead. Unknown keys still raise through
+    # `real_get_bool`, which is what proves these three are declared in params_keys.h rather than
+    # silently defaulting false and making every assertion below pass for free.
+    overrides = {"AlphaLongitudinalEnabled": alpha_long, "StockAccPassthrough": passthrough,
+                 "StockAccStopOverride": override}
+
+    def get_bool(key, *a, **k):
+      real_get_bool(key, *a, **k)
+      return overrides.get(key, False)
+
+    det.params.get_bool = get_bool
+    det.frame = 0
+    det.update_params()
+    return det.stop_override_available
+
+  assert available(True, True, True), "the intended configuration must still arm"
+  assert not available(False, True, True), (
+    "the override reads as available with openpilot longitudinal OFF -- the ACCDATA block never "
+    "runs there, so the floor release is suppressed and ICBM holds 20 mph forever")
+  assert not available(True, False, True), "no passthrough means openpilot already authors it all"
+  assert not available(True, True, False), "the feature is switched off"

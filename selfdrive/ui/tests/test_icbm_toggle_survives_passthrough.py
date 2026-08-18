@@ -95,4 +95,14 @@ def test_the_op_stop_readout_is_gated_on_openpilot_longitudinal():
   assert "has_longitudinal_control" in cmp_site, (
     "the OP STOP comparison does not check that openpilot longitudinal is on, so it fires whenever "
     "Ford brakes with op long off")
+  # AND the passthrough, which is a SEPARATE precondition rather than a stronger version of the
+  # same one. With op long on and the passthrough off, `self.accel` is openpilot's own number while
+  # the camera computes its own independently -- they disagree past the deadband through every
+  # brake application, so plain alpha long painted OP STOP constantly. That is not noise, it is the
+  # pill claiming openpilot took the command away from Ford in the one configuration where Ford
+  # never had it. Neither condition implies the other: the param outlives op long being switched
+  # off, because the settings toggle greys out without clearing.
+  assert "_stock_acc_passthrough" in cmp_site or "StockAccPassthrough" in cmp_site, (
+    "the OP STOP comparison does not check the passthrough, so it fires through every brake "
+    "application under plain alpha long")
   assert i > 0

@@ -213,6 +213,7 @@ class HudRendererBP(HudRendererSP):
     self._show_brake_status = self._bp_params.get_bool("ShowBrakeStatus")
     self._hide_v_ego_ui = self._bp_params.get_bool("HideVEgoUI")
     self._show_lateral_control = self._bp_params.get_bool("BpShowLateralControl")
+    self._stock_acc_passthrough = self._bp_params.get_bool("StockAccPassthrough")
     # BluePilot: actual mode from controllerStateBP (None = not published, e.g. non-Ford)
     self._lateral_mode = None
 
@@ -233,6 +234,7 @@ class HudRendererBP(HudRendererSP):
       self._show_brake_status = self._bp_params.get_bool("ShowBrakeStatus")
       self._hide_v_ego_ui = self._bp_params.get_bool("HideVEgoUI")
       self._show_lateral_control = self._bp_params.get_bool("BpShowLateralControl")
+    self._stock_acc_passthrough = self._bp_params.get_bool("StockAccPassthrough")
 
     if self._show_lateral_control:
       sm = ui_state.sm
@@ -389,13 +391,28 @@ class HudRendererBP(HudRendererSP):
           # No new signal for this. `carOutput.actuatorsOutput.accel` is what we PUT ON THE WIRE --
           # it records the forwarded value under the passthrough and openpilot's own otherwise -- so
           # the two disagreeing IS the fact that openpilot has taken the command.
-          # GATED ON OPENPILOT LONGITUDINAL, and without this it was backwards. `self.accel` on the
-          # carcontroller is assigned ONLY inside the op-long ACCDATA block, so with op long off it
-          # keeps its init value of 0.0 for the whole drive -- while accAccelRequest carries Ford's
-          # real brake total. Every ordinary ACC brake application past the deadband then read as
-          # OP STOP, on the mode he drives nearly all the time. Caught in review before the drive.
+          # GATED ON THE PASSTHROUGH, which took two goes to get right, and the reason is that the
+          # comparison only MEANS anything when Ford's command was the one due to go out:
+          #
+          #   passthrough off, op long off  -- `self.accel` is never assigned (it stays 0.0 for the
+          #     whole drive, since it lives inside the op-long ACCDATA block) while accAccelRequest
+          #     carries Ford's real brake total. Every ordinary ACC brake read as OP STOP.
+          #   passthrough off, op long ON   -- `self.accel` is openpilot's own number and the camera
+          #     is computing its own independently. They disagree past 0.25 constantly, so plain
+          #     alpha long painted OP STOP through every brake application. That is not merely
+          #     noisy, it is INVERTED: the pill claims openpilot took the command away from Ford in
+          #     the one configuration where Ford never had it.
+          #   passthrough ON                -- `self.accel` records the FORWARDED value, so the two
+          #     agree exactly while Ford is driving and diverge only when we substitute. Which is
+          #     the fact the pill exists to report.
+          #
+          # Gating on op long fixed the first case and left the second, which is worse. BOTH are
+          # required and neither implies the other: the passthrough param survives op long being
+          # switched back off (the settings toggle only greys OUT, it does not clear), and op long
+          # without the passthrough is the inverted case above.
           ours = float(ui_state.sm['carOutput'].actuatorsOutput.accel)
-          if ui_state.has_longitudinal_control and abs(ours - bls.accAccelRequest) > OP_AUTHORING_DELTA:
+          authored_by_us = ui_state.has_longitudinal_control and self._stock_acc_passthrough
+          if authored_by_us and abs(ours - bls.accAccelRequest) > OP_AUTHORING_DELTA:
             self._op_authoring_frames = min(self._op_authoring_frames + 1, OP_AUTHORING_FRAMES)
           else:
             self._op_authoring_frames = 0

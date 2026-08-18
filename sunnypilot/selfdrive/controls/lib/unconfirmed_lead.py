@@ -240,9 +240,25 @@ class UnconfirmedLeadDetector:
       self.max_lead_distance = self.params.get("IcbmLeadMaxDistance", return_default=True)
       self.max_ttc = self.params.get("IcbmLeadMaxTtc", return_default=True) / 10.
       self.model_stop_enabled = self.params.get_bool("IcbmModelStopEnabled")
-      # Whether anything can act below Ford's 20 mph floor. Both are required: the override only
-      # exists under the passthrough, and without it the floor really is the end of the request.
-      self.stop_override_available = (self.params.get_bool("StockAccPassthrough")
+      # Whether anything can act below Ford's 20 mph floor. THREE conditions, and the op-long one
+      # is the easy one to leave out -- I did.
+      #
+      # ICBM and openpilot longitudinal coexist under the passthrough, which is the whole point of
+      # `op_long_drives` in cruise.py, so this code runs in both modes. But `StockAccPassthrough` is
+      # a param, and the settings toggle for it only GREYS OUT when op long is switched off -- it
+      # does not clear, the way the ICBM gate explicitly `remove()`s its own. So turn on op long,
+      # turn on the passthrough, then turn op long back off, and this read says the override is
+      # available on a car where the entire ACCDATA block never executes.
+      #
+      # What that costs: the floor release below is suppressed, so ICBM holds the set speed at 20
+      # and waits for a stop that nothing can author. It never releases. That is the pure-ICBM
+      # mode, which is the one he drives most.
+      #
+      # `AlphaLongitudinalEnabled` is the same param ui_state and sunnylink read for this car, and
+      # a false read here fails SAFE -- the floor release keeps working, which is what it did
+      # before any of this existed.
+      self.stop_override_available = (self.params.get_bool("AlphaLongitudinalEnabled")
+                                      and self.params.get_bool("StockAccPassthrough")
                                       and self.params.get_bool("StockAccStopOverride"))
       self.model_stop_min_decel = self.params.get("IcbmModelStopMinDecel", return_default=True) / 10.
 
