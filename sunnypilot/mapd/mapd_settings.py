@@ -85,6 +85,7 @@ class MapdSettingsSync:
     self.attempts: dict[str, int] = {}
     self.settled: set[str] = set()
     self._logged_unreadable = False
+    self._last_written: str | None = None
 
   def _desired(self) -> dict[str, float]:
     """The value we want at each mapd JSON path, expanded across the personalities."""
@@ -92,7 +93,7 @@ class MapdSettingsSync:
     for key, (leaf, scale) in _FLOAT_SETTINGS.items():
       try:
         raw = self.params.get(key, return_default=True)
-      except Exception:  # noqa: BLE001 -- an unknown key must not take mapd_manager down
+      except Exception:
         continue
       if raw is None:
         continue
@@ -146,10 +147,16 @@ class MapdSettingsSync:
       # Cache mapd's own account of itself. This is what MapdSettings was declared for, and it makes
       # "what was mapd configured as on that drive" answerable from the params rather than only from
       # a route that happened to log it.
-      try:
-        self.params.put("MapdSettings", blob)
-      except Exception:  # noqa: BLE001
-        pass
+      #
+      # ONLY WHEN IT CHANGES. The first version wrote here unconditionally, which is a 2 KB param
+      # write every tick -- 1 Hz, for the whole drive, to flash. mapd's settings change when
+      # somebody changes them, which is approximately never.
+      if raw != self._last_written:
+        try:
+          self.params.put("MapdSettings", blob)
+          self._last_written = raw
+        except Exception:
+          pass
 
       changed = False
       for path, want in self._desired().items():
@@ -174,7 +181,7 @@ class MapdSettingsSync:
 
       if changed:
         self._save()
-    except Exception:  # noqa: BLE001
+    except Exception:
       # mapd_manager also runs the live-map source and the OSM cleanup. A settings bridge must never
       # be the reason either of those stops.
       cloudlog.exception("mapd settings: sync failed")

@@ -20,6 +20,7 @@ from opendbc.sunnypilot.car.ford.hud_ext import HudExt
 from opendbc.sunnypilot.car.ford import fordcan_ext
 from opendbc.sunnypilot.car.ford.icbm import IntelligentCruiseButtonManagementInterface
 from opendbc.sunnypilot.car.ford.gap_control import FordGapController
+from opendbc.sunnypilot.car.ford.stop_override import FordStopOverride
 
 LongCtrlState = structs.CarControl.Actuators.LongControlState
 VisualAlert = structs.CarControl.HUDControl.VisualAlert
@@ -118,6 +119,20 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
     # the same line. Lives here for the same reason everything else does -- see the note above.
     self.passthrough_reason_last = "?"
     self.passthrough_cancel_frames = 0
+    # FusionPilot: the stop override -- the last few mph the set speed cannot ask for. Same
+    # placement reasoning as icbm_gap above; and same latch-off-on-exception discipline, because an
+    # exception here reaches card and stops the car.
+    self.stop_override = FordStopOverride()
+    self.stop_override_enabled = self.params.get_bool("StockAccStopOverride")
+    self.stop_override_failed = False
+    self.stop_override_last = False
+    # Latched when the override brought the car to a stop, and cleared once it is moving again.
+    # `resume_allowed` reads it: a stop WE authored is not resumed from automatically.
+    self.stop_override_stopped_us = False
+    # WHO IS AUTHORING ACCDATA, for the screen. Set every ACCDATA frame from the decision that was
+    # actually taken rather than inferred downstream from the numbers -- see the AccAuthority
+    # comment in custom.capnp for why the inference could not tell `opStop` from `inert`.
+    self.acc_authority = structs.ControllerStateBP.AccAuthority.stock
     # Note: main_on_last, lkas_enabled_last, steer_alert_last, lead_distance_bars_last,
     # distance_bar_frame are initialized by HudExt.__init__() above
 
@@ -336,8 +351,69 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
       # It also covers `CC.longActive`: with openpilot longitudinal inactive panda passes only the
       # inactive frame, and forwarding Ford's would both be blocked AND leave Cmbb_B_Enbl asserted
       # after openpilot had disengaged.
+      # FusionPilot: THE STOP OVERRIDE decides this BEFORE admissibility, because it is a decision
+      # about whose command to send rather than about whether Ford's is carriable. It authors
+      # nothing -- it selects the openpilot frame that `create_acc_msg` builds below, which already
+      # clamps to panda's bands and never touches the unpoliced bits.
+      override = False
+      if self.stop_override_enabled and not self.stop_override_failed:
+        try:
+          lead_d = 0.0
+          rs = self.sm['radarState'] if self.sm.alive.get('radarState') else None
+          if rs is not None and rs.leadOne.status:
+            lead_d = float(rs.leadOne.dRel)
+          # Read BEFORE the update, because the latch below is edge-triggered on this going False.
+          was_active = self.stop_override.active
+          override = self.stop_override.update(
+            long_active=bool(CC.longActive),
+            v_ego=float(CS.out.vEgo),
+            # alive AND valid: alive only means a message arrived recently, valid is the planner
+            # saying its own output is sound. Arming a stop off a plan plannerd has disowned is
+            # exactly what the other consumers in this fork check for.
+            has_slow_down=bool(self.sm['longitudinalPlanSP'].dec.hasSlowDown)
+            if (self.sm.alive.get('longitudinalPlanSP') and self.sm.valid.get('longitudinalPlanSP'))
+            else False,
+            op_stopping=bool(stopping),
+            lead_distance=lead_d,
+          )
+          # Latch that THIS stop was ours, so the resume gate knows not to pull away from it on the
+          # model's say-so. Keyed on the override's OWN outcome rather than on a speed window: the
+          # first version tested `override and vEgo < 0.5 m/s`, but the override ends at 0.2235 m/s,
+          # so it depended on frames landing inside a 0.28 m/s sliver. It worked, by about seven
+          # frames, and would have stopped working silently on a harder stop.
+          #
+          # EDGE-TRIGGERED, and that is the whole correctness of it. `last_result` is a string that
+          # persists until the next arm or end, so testing it on its own re-latches on every later
+          # stop for the rest of the drive -- including the queue-cleared open-road case the gate
+          # is supposed to let through, where he would sit at a green light waiting for a resume
+          # that never comes. The transition into "stopped" happens on exactly one frame.
+          if was_active and not override and self.stop_override.last_result == "stopped":
+            self.stop_override_stopped_us = True
+
+          if override != self.stop_override_last:
+            self.stop_override_last = override
+            cloudlog.warning("stop override %s: %s", "ON" if override else "off",
+                             self.stop_override.last_result)
+        # Deliberately broad. Nothing this decision can raise may reach card, because a raise here
+        # kills the whole ACCDATA block and with it the passthrough -- see the gap path for the
+        # same reasoning.
+        except Exception:
+          self.stop_override_failed = True
+          override = False
+          # Release the resume hold too. It lives inside the guard above, so a failure here would
+          # otherwise freeze it ON and block openpilot's automatic resume for the rest of the drive
+          # -- including the ordinary queue-cleared case that has nothing to do with this feature.
+          # Latching a feature off must not latch a neighbouring one on.
+          self.stop_override_stopped_us = False
+          cloudlog.exception("stop override disabled for this drive")
+
+      # Moving again clears the resume hold, outside the guard above so that a disabled or failed
+      # override cannot leave it asserted.
+      if float(CS.out.vEgo) > 1.5:
+        self.stop_override_stopped_us = False
+
       use_passthrough = False
-      if self.stock_acc_passthrough and getattr(CS, "acc_cam_valid", False) and getattr(CS, "acc_stock_values", None):
+      if not override and self.stock_acc_passthrough and getattr(CS, "acc_cam_valid", False) and getattr(CS, "acc_stock_values", None):
         reason = fordcan_ext.passthrough_admissible(CS.acc_stock_values, CC.longActive)
         use_passthrough = not reason
         if reason != self.passthrough_reason_last:
@@ -356,6 +432,22 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
                            "straight. openpilot longitudinal is driving from here.")
         else:
           self.passthrough_cancel_frames = 0
+
+      # WHO IS AUTHORING, decided here where the decision actually happens. Order matters: `inert`
+      # outranks `fallback` because they look identical frame-to-frame and only the duration tells
+      # them apart -- a scattered non-carriable frame is ordinary (8.9% of drive B) while five
+      # straight seconds of cancel means the passthrough is finished for the drive.
+      _AA = structs.ControllerStateBP.AccAuthority
+      if override:
+        self.acc_authority = _AA.opStop
+      elif use_passthrough:
+        self.acc_authority = _AA.ford
+      elif not self.stock_acc_passthrough:
+        self.acc_authority = _AA.openpilot
+      elif self.passthrough_cancel_frames >= 250:
+        self.acc_authority = _AA.inert
+      else:
+        self.acc_authority = _AA.fallback
 
       if use_passthrough:
         can_sends.append(fordcan_ext.create_acc_msg_passthrough(self.packer, self.CAN,

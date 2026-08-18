@@ -117,14 +117,14 @@ def main() -> int:
       continue
     try:
       lr = LogReader(p)
-    except Exception:  # noqa: BLE001
+    except Exception:
       continue
 
     oe = False
     for m in lr:
       try:
         w = m.which()
-      except Exception:  # noqa: BLE001
+      except Exception:
         continue
       if w == "carControl":
         oe = bool(m.carControl.enabled)

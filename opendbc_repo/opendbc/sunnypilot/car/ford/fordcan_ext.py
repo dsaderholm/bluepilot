@@ -306,7 +306,8 @@ def passthrough_admissible(stock_values: dict, long_active: bool) -> str:
 
 def create_acc_ui_msg(packer, CAN: CanBus, CP, main_on: bool, enabled: bool, fcw_alert: bool,
                       standstill: bool, hud_control, stock_values: dict, send_hands_free_msg: bool,
-                      send_ui: bool, send_bars: bool, tja_warn: int, tja_msg: int):
+                      send_ui: bool, send_bars: bool, tja_warn: int, tja_msg: int,
+                      gap_is_fords: bool = False):
   """
   Creates a CAN message for the Ford IPC adaptive cruise, FCW and TJA status.
 
@@ -382,8 +383,21 @@ def create_acc_ui_msg(packer, CAN: CanBus, CP, main_on: bool, enabled: bool, fcw
       "AccFllwMde_B_Dsply": 1 if hud_control.leadVisible else 0,  # Lead indicator
       "AccStopMde_B_Dsply": 1 if standstill else 0,
       "AccWarn_D_Dsply": 0,                                        # ACC warning
-      "AccTGap_D_Dsply": hud_control.leadDistanceBars,            # Time gap
     })
+    # THE GAP ON THE DASH MUST BE THE GAP THAT IS DRIVING THE CAR.
+    #
+    # `AccTGap_D_Dsply` is already passed through from the camera at the top of this function, and
+    # this line used to overwrite it with `hud_control.leadDistanceBars` -- openpilot's PERSONALITY,
+    # which has three states drawn on a five-state indicator.
+    #
+    # Under normal op long that is right: openpilot is the follow controller, so its personality IS
+    # the gap. Under the stock-ACC passthrough it is wrong, and measurably so. Drive B, 2026-08-18:
+    # seven physical presses, seven camera gap changes at the same timestamps, the camera cycling
+    # 4-3-2-1 through Ford's five settings -- while the dash drew 3-2-1. **His button was working
+    # the whole time and the display was showing something else**, which is why it read as an
+    # aggressiveness control that did nothing.
+    if not gap_is_fords:
+      values["AccTGap_D_Dsply"] = hud_control.leadDistanceBars
 
   # Forward FCW alert from IPMA
   if fcw_alert:

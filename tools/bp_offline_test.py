@@ -70,6 +70,7 @@ DEFAULT_TARGETS = [
   # That is also how test_settings_recommend_defaults.py sat here unrun on the day it was written:
   # the suite total did not move and nothing said why. test_bp_tests_are_registered guards it now.
   "selfdrive/ui/tests/test_settings_fit.py",
+  "selfdrive/ui/tests/test_icbm_toggle_survives_passthrough.py",
   "selfdrive/ui/tests/test_settings_recommend_defaults.py",
   "selfdrive/ui/tests/test_readme_is_built.py",
   "selfdrive/ui/tests/test_sunnylink_settings_complete.py",
@@ -131,6 +132,7 @@ DEFAULT_TARGETS = [
   # hand on the last check before a drive, in a panel added the same day.
   "selfdrive/car/tests/test_sub_layouts_have_a_way_out.py",
   "selfdrive/car/tests/test_dec_slow_down_published.py",
+  "selfdrive/car/tests/test_capnp_accepts_published_types.py",
   # Named file, not the directory: test_mapd_version.py beside it hashes the installed mapd binary
   # and cannot run without the device. The schema guard pins mapd v2's ordinals, which are theirs
   # rather than ours -- capnp reads by position, so drift decodes as different fields with no error.

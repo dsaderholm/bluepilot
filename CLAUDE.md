@@ -962,6 +962,75 @@ camera's loop stays closed -- it commands, the car responds, its model stays con
 override it commands "hold 20" and watches the car stop anyway. Does it re-plan, fault, or drop ACC?
 Nobody knows, and the answer arrives on the first attempt.
 
+**DRIVE B (00000387, 2026-08-18) DID NOT ANSWER IT, and the reason is the useful part.** With
+`AccPrpl_A_Pred` pinned, **91.1% of longActive frames carried Ford's own command** -- the passthrough
+worked, and he confirmed it from the seat: *"it sure felt like Ford ACC not op long."* The camera
+raised cancel **zero times** while longActive, and never asserted deny.
+
+But that is not evidence the camera tolerates contradiction, because there was almost none:
+
+    contradiction runs while longActive   347
+    total contradicted time               1.3 s     <- across the WHOLE drive
+    longest single run                    0.2 s
+    largest disagreement                  1.08 m/s^2, for 10 frames, with Ford braking
+
+Set that beside drive A, where **~40 s at ~51% refusal while the camera was braking** produced a
+cancel latch that never cleared. The two drives bracket the question and neither is near the
+override's regime: a stop from 20 mph is FIVE TO EIGHT SECONDS of continuous contradiction, two
+orders of magnitude past anything measured, and an order under drive A.
+
+**So the override's real unknown is a DURATION THRESHOLD nobody has measured**, and there is a second
+unknown inside it: drive A contradicted by UNDER-braking relative to Ford, while the stop override
+contradicts by OVER-braking. Whether the camera cares about the sign is not known either.
+
+Two consequences for building it:
+
+- **Bound the override in TIME explicitly**, not only by its trigger condition. "A stop line ahead"
+  says when to start and nothing about when to stop, and the thing that bites is total continuous
+  seconds of disagreement.
+- **The latch detector already exists** -- `passthrough_cancel_frames` logs at ERROR after 5 s of
+  continuous cancel. That is the instrument the first override drive is read with, and it should be
+  treated as the experiment's readout rather than as an error nobody expects.
+
+**THE ANSWER TO "WHAT DO I TURN ON" IS TWO TOGGLES, AND THE UI NOW SAYS SO.** He asked on
+2026-08-18 and it was a fair complaint -- three plausible candidates, no guidance:
+
+    openpilot Longitudinal Control (alpha)   ON     <- permission: opens the relay, puts ACCDATA in
+                                                       panda's TX list
+    Use Ford's Own ACC Commands              ON     <- who authors it: Ford
+    Dynamic Experimental Control                    <- irrelevant
+    Experimental Mode                               <- irrelevant
+
+DEC and Experimental Mode choose how OPENPILOT computes acceleration, which is exactly the job
+handed to Ford, so under the PURE passthrough they steer a plan that is discarded.
+
+**THAT STOPPED BEING TRUE THE MOMENT THE STOP OVERRIDE EXISTED, and he is the one who caught it:**
+*"Remember, I used to use alpha long with experimental mode and DEC."* That was the configuration
+his complete stops came from, and it is not incidental --
+`sunnypilot/.../longitudinal_planner.py:42`:
+
+    def is_e2e(self, sm) -> bool:
+      experimental_mode = sm['selfdriveState'].experimentalMode
+      if not self.dec.active():
+        return experimental_mode
+      return experimental_mode and self.dec.mode() == "blended"
+
+and `shouldStop` picks up `modelV2.action.shouldStop` -- the model's stop-for-a-light -- ONLY inside
+that branch. Without Experimental Mode, `should_stop` is the MPC's alone, which stops for leads and
+cruise targets and **never for a stop sign**.
+
+**So the override cannot arm without Experimental Mode.** It is the one consumer of openpilot's plan
+in this whole design, and the plan only contains a stop when the end-to-end model is driving it.
+DEC on is fine and is what he ran -- it selects `blended` on `has_slow_down`, which is the same
+signal the override triggers on -- but Experimental Mode is not optional.
+
+Corrected in three places that carried the old claim: the passthrough toggle description, the
+SunnyLink entry, and this file.
+
+Two UI changes so the state is not reachable by accident: **the passthrough toggle is disabled when
+op long is off** (it authors nothing in that state, so switching it on would silently do nothing),
+and its description now carries the whole answer including the two toggles that do not matter.
+
 **What it costs, stated plainly.** Every ACC command would route through openpilot, so a bug produces
 NO BRAKING rather than a wrong set speed -- a real step up in blast radius from button injection.
 Panda's existing `ACCDATA` checks still apply. And it is op long as far as the car and the safety
@@ -990,6 +1059,117 @@ and then Ford's frame goes out instead.
 **That is the whole point rather than a side effect.** Op long is used purely as PERMISSION -- it is
 what opens the relay and puts `ACCDATA` in panda's TX list -- while the numbers stay Ford's. Expect
 experimental-mode and DEC indicators to keep showing state that is driving nothing.
+
+### THE STOP OVERRIDE IS BUILT, 2026-08-18. `opendbc/sunnypilot/car/ford/stop_override.py`.
+
+**It authors NOTHING. It chooses which already-authored frame goes out.** `create_acc_msg` already
+clamps to panda's bands, already drives the split brake/precharge hysteresis, and already never
+touches the unpoliced bits that applied the park brake. So the override is a DECISION -- send
+openpilot's command instead of Ford's for these few seconds -- rather than a second CAN authoring
+path that would have to re-learn all of that. Keep it that way.
+
+    fires when   the model is planning a stop (dec.hasSlowDown), openpilot's plan has COMMITTED
+                 (longControlState == stopping), at or below 20 mph -- Ford's own set-speed floor, so the
+                 override starts exactly where the set speed runs out -- and NO radar lead within 60 m
+    ends on      stopped | lead appeared | plan stopped stopping | time bound | long inactive
+    then         SPENT -- refuses to re-arm until hasSlowDown drops, so a stop that does not
+                 complete cannot re-trigger every frame
+
+`hasSlowDown` reaches the carcontroller through `longitudinalPlanSP` on its own SubMaster -- one
+subscription rather than a capnp field plus controlsd plumbing. That is the field published the day
+before for diagnostics; it turned out to be the trigger.
+
+**A LEAD DISQUALIFIES IT** because stock ACC does that whole stop itself, better than openpilot
+would, and overriding there spends contradiction budget on a case Ford already handles.
+
+**THE TIME BOUND IS THE PART THAT IS EASY TO GET WRONG, AND IT WAS.** `update` runs inside the
+ACCDATA block, gated on `ACC_CONTROL_STEP = 2` -- so it ticks at **50 Hz, not the 100 Hz control
+rate**. The constant was first written as "800 = 8 s at 100 Hz" and would have been SIXTEEN seconds
+of continuous contradiction, against the ~40 s that latched the camera on drive A. It is now derived
+from `MAX_ACTIVE_S` and `OVERRIDE_HZ` with a test pinning `OVERRIDE_HZ` against `ACC_CONTROL_STEP`,
+so the factor of two cannot come back.
+
+**Ships OFF, and the reason is about the car:** the camera's tolerance for sustained contradiction
+is unmeasured. Toggle is `StockAccStopOverride`, "Come To A Complete Stop".
+
+**AND IT REQUIRED FIXING THE 20 MPH FLOOR RELEASE, which he had reported from the road as its own
+complaint:** *"occasionally the traffic light thing will set my speed back up after it has gotten
+down to 20."* Not occasional. `unconfirmed_lead.py` released the model stop at `ACC_FLOOR_MS`, and
+`_release()` goes to `restoring` whenever a restore point was captured -- so it happened every time
+the car crossed 20 with a model stop running.
+
+**That was CORRECT before the override existed.** Below the floor the set speed genuinely could not
+ask for anything, so the request was spent and handing it back was right. With the override it is
+actively wrong: the set speed climbs back while openpilot brakes, and the moment the time bound
+expires Ford accelerates away from the stop line. Now gated on `stop_override_available`, which
+requires BOTH the passthrough and the override -- with either off, the old behaviour is exactly
+unchanged.
+
+**THE HUD SAYS WHO IS DRIVING, because the ACC pill was about to lie.** It reads the CAMERA's
+ACCDATA, so during an override it would have shown COAST -- Ford's actual wish -- while openpilot
+braked the car to a stop. Same shape as the gap-display bug, and he had already confirmed he sees
+COAST on the road. `OP STOP` in violet, from `carOutput.actuatorsOutput.accel` disagreeing with
+`brakeLightStatus.accAccelRequest`: what we PUT ON THE WIRE versus what Ford asked for, both already
+subscribed, no new signal. Violet rather than another red, because it is a different AUTHOR and not
+a different amount of braking. Rendered before shipping, two new scenes in `preview_acc_status.py`.
+
+**RESUMING FROM A STOP WE AUTHORED IS HELD FOR THE DRIVER.** He asked how resume works and the
+chain turned out to end somewhere worth stopping:
+
+    controlsd.py:175   CC.cruiseControl.resume = enabled and CS.cruiseState.standstill
+                                                 and not longitudinalPlan.shouldStop
+
+`standstill` is Ford's own hold, `EngBrakeData.AccStopMde_D_Rq == 3`. So once the model judges the
+intersection clear, openpilot presses RESUME and **the car pulls away from a stop sign with no
+driver input**. That is upstream behaviour, not new -- but the override is what makes it REACHABLE
+on this car, because a standstill with cruise engaged has never existed here: three drives checked,
+**zero stopped-and-engaged frames**, since stock ACC cannot hold a stop without a lead.
+
+"Come to a complete stop" did not ask for "and then go when the model feels like it". So
+`resume_allowed` now holds a stop the OVERRIDE authored until he presses resume or the gas -- his own
+press never reaches this gate, so it is untouched. The no-lead branch used to mean only "the queue
+cleared, nothing to wait for"; it now has a second meaning and they needed separating.
+
+**AND THE SET SPEED IS PREPARED WHILE STOPPED, which is his spec:** *"Ideally while stopped at a
+stop sign or traffic light, the set speed is restored from 20mph, and when it is time to go it
+goes."* Without it the restore waited for `model_slow_down` to clear -- which at a red light is the
+moment it turns GREEN. The set speed would only start climbing when he wanted to move, and Ford
+would pull away toward 20 while ICBM spent seven seconds pressing it back to 45.
+
+Gated on `v_ego < 0.5 mph AND cruiseState.standstill`, and **`standstill` is the load-bearing
+half**: it is Ford's own hold, so a held car waits for resume whatever number it is aiming at.
+Stopped WITHOUT the hold means Ford is free to go, and raising the set speed there is exactly the
+lurch the floor release existed to avoid.
+
+**Which branch he actually gets is unknown until a drive**: if Ford does not enter its hold mode
+without a lead, `standstill` stays false, resume never fires at all, and he re-engages by hand.
+
+**AND HIS OWN EXPERIENCE NARROWS IT, 2026-08-18:** *"when I use OP long fully, it does come to a
+complete stop."* That is worth more than the log measurement it corrects. openpilot's authored
+ACCDATA CAN stop this car -- the ABS accepts the brake command to zero -- and the override sends
+exactly that frame, `create_acc_msg`, for a bounded window instead of a whole drive. **So the
+stopping mechanism is proven and only the handoff back to Ford is new.** If it also HOLDS there,
+`AccStopMde_D_Rq` is reachable and the standstill branch is the live one.
+
+**The "zero stopped-and-engaged frames on this car" measurement was true and did not mean what it
+was used for.** Two of the three routes had the passthrough forwarding Ford's command 91% of the
+time, and Ford will not stop without a lead -- so the state was absent because nothing tried to
+create it, not because it is unreachable. Absence in a log is evidence about the log's conditions
+first. Same shape as the 70.6% denominator error two entries above.
+
+**What is STILL genuinely unknown is narrower and it is the right one:** under full op long there is
+no forwarding, so there is no contradiction and the camera has nothing to disagree with. The
+override contradicts by construction. That remains the only thing the bound exists for.
+
+**And his own reason for the whole architecture, restated because it is the sharpest one:** *"the
+one other thing that always makes me prefer Ford ACC+ICBM over OP long is that it can COAST."* That
+is why the override is scoped to below 20 mph only -- it takes the part where coasting was never
+available, and leaves every mph above it to the blend Ford picks.
+
+**The structural guard against the documented trap:** `test_it_never_reads_fords_command` parses the
+module with `ast` and fails if Ford's signals, `acc_stock_values` or `passthrough_admissible` are
+referenced in CODE. Parsed rather than grepped because every explanation of the trap contains the
+words -- the same lesson `test_mapd_schema.py` records for `suggestedSpeed`.
 
 **AND THAT DECIDES THE SHAPE OF THE OVERRIDE, WHICH IS THE NEXT THING ANYONE WILL BUILD.**
 
@@ -1034,6 +1214,17 @@ ENG BRAKE, PRE-BRAKE, BRAKE.
 where the set speed cannot ask; and on ramps steep enough to need real braking regardless. Everywhere
 else the set speed is STRICTLY BETTER, because Ford's answer to "be doing 45 shortly" is a blend we
 do not have to write and could not easily match.
+
+**THERE ARE THREE GATES, NOT TWO, AND THE THIRD IS THE SETTINGS SCREEN.** Found 2026-08-18 from
+"ICBM was grayed out" -- after both `interfaces.py` gates were already fixed. `cruise.py`'s
+`_update_state` does not merely disable the toggle under op long, it calls
+`params.remove("IntelligentCruiseButtonManagement")` **on every render of the page**. So opening
+settings deleted the setting. That is why re-enabling ICBM mid-drive never stuck and why the device
+kept reading `unset`. Now gated on the same `op_long_drives` condition.
+
+**The lesson: when a param is being deleted, grep for every `remove()` of it before concluding you
+have found the one.** Two of the three were in the file that decides whether the feature RUNS; the
+third was in the file that decides whether he can SEE it, and only the screen could report it.
 
 **DONE, 2026-08-18: `_op_long_drives()` in `sunnypilot/selfdrive/car/interfaces.py`.** Both gates now
 ask whether op long DRIVES the car rather than whether it is merely on -- with `StockAccPassthrough`
@@ -1747,6 +1938,31 @@ here"**, which is the one reading that would invert the meaning.
 **This is the third time a value in this fork was computed correctly and never rendered.** The test
 asserts the WIRING and follows one level of indirection to do it: a field fed from `active()`
 instead of `has_slow_down()` would read plausibly and correlate, and the test fails on it.
+
+**AND IT KILLED plannerd ON THE FIRST FRAME OF THE NEXT DRIVE, 2026-08-18.**
+
+    dec.hasSlowDown = self.dec.has_slow_down()
+    KjException: Tried to set field: 'hasSlowDown' with a value of: 'False'
+    which is an unsupported type: '<class 'numpy.bool'>'
+
+`has_slow_down()` is `urgency_filtered > SLOW_DOWN_PROB` and urgency_filtered is a numpy scalar, so
+it returns `numpy.bool`. Python treats that as a bool everywhere except at the capnp boundary. The
+`float()` calls beside it were already right; the bool was bare.
+
+**THE STATIC TEST COULD NOT HAVE CAUGHT IT, AND I WROTE ONE ANYWAY.** `test_dec_slow_down_published`
+reads the AST -- it proved the field was fed from the right accessor and had no way to notice the
+type. Same category as the 2026-08-15 CarController crash: structural and pure-logic tests do not
+EXECUTE the boundary, and the boundary is where the process dies.
+`test_capnp_accepts_published_types.py` builds the real message and assigns real numpy values into
+it, plus an AST guard that every `dec.*` field goes through `bool()` or `float()` -- with `state`,
+`enabled` and `active` exempted because each was checked and is plain Python.
+
+**THE RULE, generalized: any numpy-derived value crossing into capnp needs an explicit Python cast**,
+and the test for it has to run the assignment rather than read it.
+
+**What it cost.** plannerd died at t+109.9 with exitCode 1 and `processNotRunning` fired 235 times.
+It is the whole of what he saw; the 905 exceptions in swaglog that day are all `sunnylinkd` and
+`athenad` websocket noise and none of them are plannerd.
 
 **It costs a drive to use.** `has_slow_down` is computed from modelV2 alone, so it is live whatever
 DEC is doing -- but it is not retroactive, and no existing route carries it. The measurement it

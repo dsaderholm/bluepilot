@@ -46,6 +46,23 @@ def _stock(**over):
   return vals
 
 
+def _dbc_signals_for(addr: int) -> set[str]:
+  """Every signal the DBC defines for one message id."""
+  import os, re
+  d = os.path.dirname(os.path.abspath(__file__))
+  while d != os.path.dirname(d) and not os.path.isdir(os.path.join(d, "dbc")):
+    d = os.path.dirname(d)
+  names, inside = set(), False
+  with open(os.path.join(d, "dbc", "ford_lincoln_base_pt.dbc"), encoding="utf-8", errors="replace") as f:
+    for line in f:
+      if line.startswith("BO_ "):
+        inside = re.match(rf"BO_ {addr} \w+\s*:", line) is not None
+      elif inside and line.strip().startswith("SG_ "):
+        names.add(line.strip().split()[1])
+  assert names, f"no signals found for message {addr}"
+  return names
+
+
 def _dbc_accdata_signals() -> set[str]:
   """Straight from the DBC. Comparing `_ACCDATA_SIGNALS` against ITSELF was the first version of
   this test, and deleting an entry changed both sides -- so it passed while the packer silently
@@ -183,3 +200,42 @@ def test_the_predicted_accel_is_pinned_rather_than_costing_the_frame():
   sent = packer.calls[0][2]
   assert sent["AccPrpl_A_Pred"] == -5.0
   assert sent["AccBrkTot_A_Rq"] == -2.1, "pinning one field must not disturb the real command"
+
+
+# --- the dash must show the gap that is actually driving the car -------------------------------
+
+def test_the_dash_shows_fords_gap_when_ford_owns_it():
+  """Drive B, 2026-08-18: seven physical gap presses, seven camera gap changes at the same
+  timestamps, the camera cycling 4-3-2-1 through Ford's five settings -- while the dash drew 3-2-1,
+  openpilot's three personalities on a five-state indicator.
+
+  His button was working the whole time and the display was showing something else, which is why it
+  read as an aggressiveness control that did nothing. Under the passthrough Ford owns the gap, so
+  Ford's number is what belongs on the dash."""
+  from opendbc.sunnypilot.car.ford.fordcan_ext import create_acc_ui_msg
+
+  class _CP:
+    openpilotLongitudinalControl = True
+
+  class _Hud:
+    leadDistanceBars = 2      # openpilot's personality
+    leadVisible = True
+    leftLaneDepart = False
+    rightLaneDepart = False
+    leftLaneVisible = True
+    rightLaneVisible = True
+    visualAlert = 0
+
+  # Every ACCDATA_3 signal, from the DBC -- which is what a real CANParser `vl` dict holds. Listing
+  # a subset by hand just fails one KeyError at a time as the passthrough list grows.
+  stock = dict.fromkeys(_dbc_signals_for(394), 0)
+  stock["AccTGap_D_Dsply"] = 4   # Ford's actual setting
+
+  def draw(gap_is_fords):
+    packer = _Packer()
+    create_acc_ui_msg(packer, _CAN, _CP(), True, True, False, False, _Hud(), stock,
+                      False, True, True, 0, 0, gap_is_fords=gap_is_fords)
+    return packer.calls[0][2]["AccTGap_D_Dsply"]
+
+  assert draw(True) == 4, "the dash drew openpilot's personality while Ford was deciding the gap"
+  assert draw(False) == 2, "without the passthrough openpilot IS the follow controller; show its own"

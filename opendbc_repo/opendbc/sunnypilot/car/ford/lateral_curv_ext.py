@@ -113,9 +113,15 @@ class LateralCurvExt:
   def __init__(self, CP, CP_SP):
     # SubMaster for model data, live parameters, and selfdrive state
     # liveDelay is consumed by LateralAngleExt (variable lookup time); harmless for curvature mode.
-    # BluePilot: longitudinalPlanSP carries the passing-assist verdict, which the cluster's lane
-    # display shows -- see create_lkas_ui_msg. Subscribing here because this is the SubMaster the
-    # car controller already updates every frame.
+    # FusionPilot: longitudinalPlanSP now has TWO consumers on this SubMaster, and both need it
+    # every frame:
+    #   passingAssist   the passing-assist verdict, which the cluster's lane display shows.
+    #                   See create_lkas_ui_msg.
+    #   dec.hasSlowDown the model's own "I am planning to stop for something ahead", which is the
+    #                   stop override's trigger.
+    # Subscribed here rather than routed through CC_SP because it is one entry against a capnp
+    # field plus controlsd plumbing, and the carcontroller already owns this SubMaster. Adding a
+    # third consumer needs no change here -- but REMOVING one does not free the subscription.
     self.sm = messaging.SubMaster(['modelV2', 'liveParameters', 'selfdriveState', 'radarState', 'liveDelay',
                                    'longitudinalPlanSP'])
     self.VM = VehicleModel(CP)

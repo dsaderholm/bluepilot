@@ -273,7 +273,9 @@ class HudExt:
         packer, CAN, CP, main_on, CC.latActive, fcw_alert, standstill,
         hud_control, CS.acc_tja_status_stock_values,
         self.send_hands_free_cluster_msg, send_ui, send_bars,
-        self.tja_warn, self.tja_msg))
+        self.tja_warn, self.tja_msg,
+        # Ford owns the gap whenever we are forwarding its command, so the dash shows Ford's number.
+        gap_is_fords=bool(getattr(self, "stock_acc_passthrough", False))))
 
     # Update state for next frame
     self.main_on_last = main_on

@@ -1305,6 +1305,38 @@ struct ControllerStateBP @0xcd96dafb67a082d0 {
   # Only published by Ford BP, so other cars show nothing.
   activeLateralMode @54 :LateralMode;
 
+  # FusionPilot: WHO IS AUTHORING ACCDATA, stated by the code that decides it.
+  #
+  # The HUD used to infer this by comparing `carOutput.actuatorsOutput.accel` against the camera's
+  # `accAccelRequest`. That comparison is honest but it cannot tell WHY they differ, and the two
+  # reasons could not be further apart: `opStop` is the stop override doing exactly its job for a
+  # few seconds, and `inert` is the camera having latched cancel with openpilot longitudinal
+  # driving for the rest of the drive. Same divergence on the wire, opposite meanings to the
+  # driver. Drive A latched at t+229 and was still latched 262 s later with nothing on screen
+  # saying so.
+  accAuthority @55 :AccAuthority;
+
+  enum AccAuthority {
+    # Not applicable: openpilot longitudinal is off, so the camera's command reaches the car
+    # directly through the relay and nothing here authors anything.
+    stock @0;
+    # Forwarding Ford's own command. The intended state under the passthrough, and the one the
+    # whole feature exists to be in.
+    ford @1;
+    # The stop override. Deliberate, bounded, seconds long.
+    opStop @2;
+    # This frame's Ford command could not be carried -- outside panda's bands, or longitudinal
+    # inactive -- so openpilot's own authored command went instead. Normally scattered frames:
+    # 8.9% of drive B, none of them consecutive for long.
+    fallback @3;
+    # The camera has asked to cancel for 5 s straight. The passthrough is dead for the rest of the
+    # drive and openpilot longitudinal is driving. THIS is the one that needs to be on screen.
+    inert @4;
+    # openpilot longitudinal with the passthrough switched off. Not a fault -- it is plain alpha
+    # long, which is a thing he can choose -- but it is not Ford driving either.
+    openpilot @5;
+  }
+
   enum LateralMode {
     openpilot @0;  # BP lateral bypassed (disable_BP_lat_UI)
     curvature @1;

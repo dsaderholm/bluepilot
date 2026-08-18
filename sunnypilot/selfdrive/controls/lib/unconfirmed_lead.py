@@ -11,12 +11,29 @@ as reaction time rather than being told once the car is already at the floor.
 
 Scope and limits, deliberately:
   - This is NOT an AEB change and NOT an attempt at an automated stop. The only actuation channel
-    is ICBM's existing cruise-button presses; no braking force is commanded anywhere.
-  - Ford's ACC floor is 20 mph and it HOLDS that speed. Below the floor the driver brakes, full
-    stop. Reaching the floor is the end of what this can do, not the start of a stop.
+    HERE is ICBM's existing cruise-button presses; no braking force is commanded in this file.
+  - Ford's ACC floor is 20 mph and it HOLDS that speed.
   - The best outcome is that the deceleration lets the radar acquire the lead, after which Ford's
     own ACC takes over and can follow to a complete stop. That is a release condition, not a
     failure, and it is the expected resolution path.
+
+WHAT CHANGED ON 2026-08-18, because the third bullet used to read "below the floor the driver
+brakes, full stop -- reaching the floor is the end of what this can do, not the start of a stop":
+
+That is no longer true, and nothing in this file had to change for it. Under the stock-ACC
+passthrough the stop override (`opendbc/sunnypilot/car/ford/stop_override.py`) authors the braking
+below 20 mph, so the floor is now a HANDOFF rather than an end. The two compose through
+`radarState` and nothing else:
+
+  - the override refuses to act when a radar lead is inside 60 m, and a radar-blind lead is by
+    definition not one -- so it arms for exactly the case this module exists for, unwired.
+  - the expected resolution above is the same seam read the other way. The frame the radar finally
+    acquires the lead is the frame the override hands back, and Ford's stop-and-go -- years of
+    calibration this has no business replacing -- takes the rest of it.
+
+The one thing that DID have to change is the floor release below: it now checks whether anything
+can act under 20 before handing the request back, because `_release()` routes to RESTORING and
+would raise the set speed toward a car openpilot was in the middle of braking for.
 
 Target speed is Ford's ACC floor, asked for the moment the lead is confirmed. This replaced pacing
 the request along the MPC's plan, which sounds gentler and is not: the set speed is a REQUEST, not
@@ -48,6 +65,9 @@ Trigger = custom.LongitudinalPlanSP.UnconfirmedLead.Trigger
 
 # Ford ACC's minimum settable speed. Not a workaround -- the hardware floor.
 ACC_FLOOR_MS = 20 * CV.MPH_TO_MS
+# Stopped enough to prepare the set speed for the getaway. Paired with cruiseState.standstill,
+# which is what makes raising it safe -- see the restore block in the model-stop branch.
+STOPPED_RESTORE_MS = 0.5 * CV.MPH_TO_MS
 
 # --- trigger gates (all must hold simultaneously) ---
 # radard's own lead gate is lead_prob > 0.5 (radard.py get_lead); sit meaningfully above it.
@@ -229,11 +249,34 @@ class UnconfirmedLeadDetector:
     self.model_stop_enabled = False
     self.model_stop_min_decel = 1.0
 
+  # Set in update_params; declared here so a frame before the first param read cannot raise.
+  stop_override_available = False
+
   def update_params(self) -> None:
     if self.frame % int(PARAMS_UPDATE_PERIOD / DT_MDL) == 0:
       self.max_lead_distance = self.params.get("IcbmLeadMaxDistance", return_default=True)
       self.max_ttc = self.params.get("IcbmLeadMaxTtc", return_default=True) / 10.
       self.model_stop_enabled = self.params.get_bool("IcbmModelStopEnabled")
+      # Whether anything can act below Ford's 20 mph floor. THREE conditions, and the op-long one
+      # is the easy one to leave out -- I did.
+      #
+      # ICBM and openpilot longitudinal coexist under the passthrough, which is the whole point of
+      # `op_long_drives` in cruise.py, so this code runs in both modes. But `StockAccPassthrough` is
+      # a param, and the settings toggle for it only GREYS OUT when op long is switched off -- it
+      # does not clear, the way the ICBM gate explicitly `remove()`s its own. So turn on op long,
+      # turn on the passthrough, then turn op long back off, and this read says the override is
+      # available on a car where the entire ACCDATA block never executes.
+      #
+      # What that costs: the floor release below is suppressed, so ICBM holds the set speed at 20
+      # and waits for a stop that nothing can author. It never releases. That is the pure-ICBM
+      # mode, which is the one he drives most.
+      #
+      # `AlphaLongitudinalEnabled` is the same param ui_state and sunnylink read for this car, and
+      # a false read here fails SAFE -- the floor release keeps working, which is what it did
+      # before any of this existed.
+      self.stop_override_available = (self.params.get_bool("AlphaLongitudinalEnabled")
+                                      and self.params.get_bool("StockAccPassthrough")
+                                      and self.params.get_bool("StockAccStopOverride"))
       self.model_stop_min_decel = self.params.get("IcbmModelStopMinDecel", return_default=True) / 10.
 
   @property
@@ -471,9 +514,41 @@ class UnconfirmedLeadDetector:
           self._release()
           return
 
-      # Below the floor the driver has taken over with the pedal; there is nothing left to ask for.
-      if v_ego < ACC_FLOOR_MS or CS.brakePressed:
+      # The driver's pedal always ends it.
+      if CS.brakePressed:
         self._release()
+        return
+
+      # Below the floor there was nothing left to ask for -- the set speed cannot go under 20 mph,
+      # so the request was spent and giving it back was right. **The stop override changes that**:
+      # below 25 mph openpilot authors the braking directly and finishes the stop.
+      #
+      # Releasing here anyway is what he reported on 2026-08-18: *"occasionally the traffic light
+      # thing will set my speed back up after it has gotten down to 20."* Not occasional -- it is
+      # this line, every time, because `_release()` goes to `restoring` whenever a restore point
+      # was captured. Harmless before, and actively wrong now: the set speed would climb back while
+      # openpilot brakes, and the moment the override's time bound expired Ford would accelerate
+      # away from the stop line.
+      if v_ego < ACC_FLOOR_MS and not self.stop_override_available:
+        self._release()
+        return
+
+      # STOPPED AND HELD: put the set speed back NOW, while it is free to move.
+      #
+      # His spec, 2026-08-18: *"Ideally while stopped at a stop sign or traffic light, the set speed
+      # is restored from 20mph, and when it is time to go it goes."* Without this the restore waits
+      # for `model_slow_down` to clear, which at a red light is the moment it turns green -- so the
+      # set speed would only START climbing when he wants to move, and Ford would pull away toward
+      # 20 while ICBM spent seven seconds pressing it back to 45.
+      #
+      # BOTH conditions are required and `standstill` is the load-bearing one. It is Ford's own hold
+      # (`EngBrakeData.AccStopMde_D_Rq == 3`), so raising the set speed cannot make the car move --
+      # a held Ford waits for resume whatever number it is aiming at. Stopped WITHOUT the hold means
+      # Ford is free to go, and raising it there would be asking for exactly the lurch the floor
+      # release was avoiding.
+      if v_ego < STOPPED_RESTORE_MS and CS.cruiseState.standstill and self.restore_set_speed > 0:
+        self.state = State.restoring
+        self.v_target = self.restore_set_speed
         return
 
       # RATCHET DOWN ONLY. Reported 2026-08-08: "it only ever got down to 28 and almost started

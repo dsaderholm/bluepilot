@@ -28,6 +28,22 @@ class PanelType(IntEnum):
 
 ICBM_DESC = tr_noop("When enabled, sunnypilot will attempt to manage the built-in cruise control buttons " +
                     "by emulating button presses for limited longitudinal control.")
+# FusionPilot: the whole answer to "what do I turn on", in the one place he will read it.
+PASSTHROUGH_DESC = tr_noop(
+  "Send the camera's own acceleration and braking instead of openpilot's. The car then drives "
+  "exactly like stock adaptive cruise, because the commands are Ford's -- openpilot only carries "
+  "them, and your holds, speed limits, curve slowing and gap button all keep working on top. "
+  "Needs openpilot Longitudinal Control on. Dynamic Experimental Control and Experimental Mode "
+  "change openpilot's own plan, which this replaces -- so on their own they make no difference "
+  "here. Come To A Complete Stop is the exception: that reads openpilot's plan, and it needs "
+  "Experimental Mode.")
+
+STOP_OVERRIDE_DESC = tr_noop(
+  "Bring the car to a complete stop for a stop sign or red light on an empty road. Ford's set "
+  "speed cannot go below 20 mph, so without this the car slows to 20 and no further unless its "
+  "own radar has a car ahead to follow down. For a few seconds at the end of the stop openpilot sends the braking instead of Ford, then hands straight back. It never takes over when a lead is "
+  "close -- Ford stops for those itself, better than we would. Needs Use Ford's Own ACC Commands on, AND Experimental Mode -- without it openpilot never plans a stop for a sign or a light, so this can never fire. Experimental: how the camera reacts to being overridden for several seconds has not been measured yet, so watch the first few stops.")
+
 ICMB_UNAVAILABLE = tr_noop("Intelligent Cruise Button Management is currently unavailable on this platform.")
 ICMB_UNAVAILABLE_LONG_AVAILABLE = tr_noop("Disable the sunnypilot Longitudinal Control (alpha) toggle to allow Intelligent Cruise Button Management.")
 ICMB_UNAVAILABLE_LONG_UNAVAILABLE = tr_noop("sunnypilot Longitudinal Control is the default longitudinal control for this platform.")
@@ -222,14 +238,14 @@ class CruiseLayout(Widget):
                      "IcbmGapControl"),
       param="IcbmGapControl")
 
+    self.stock_acc_stop_override = toggle_item_sp(
+      title=tr("Come To A Complete Stop"),
+      description=recommended(tr(STOP_OVERRIDE_DESC), "StockAccStopOverride"),
+      param="StockAccStopOverride")
+
     self.stock_acc_passthrough = toggle_item_sp(
       title=tr("Use Ford's Own ACC Commands"),
-      description=recommended(tr("With openpilot longitudinal control on, send the camera's own "
-                     "acceleration and braking instead of openpilot's. The car then drives exactly "
-                     "like stock adaptive cruise, because the commands are Ford's -- openpilot only "
-                     "carries them. Has no effect unless openpilot longitudinal control is enabled. "
-                     "Leave this off until a drive has confirmed the camera keeps working this way."),
-                     "StockAccPassthrough"),
+      description=recommended(tr(PASSTHROUGH_DESC), "StockAccPassthrough"),
       param="StockAccPassthrough")
 
     self.icbm_resume_min_gap = option_item_sp(
@@ -374,6 +390,7 @@ class CruiseLayout(Widget):
       self.icbm_resume_min_lead_speed,
       self.icbm_gap_control,
       self.stock_acc_passthrough,
+      self.stock_acc_stop_override,
 
       SectionHeader(tr("Curves")),
       self.scc_v_toggle,
@@ -487,6 +504,7 @@ class CruiseLayout(Widget):
       self.icbm_resume_min_lead_speed,
       self.icbm_gap_control,
       self.stock_acc_passthrough,
+      self.stock_acc_stop_override,
     )
 
   def _update_state(self):
@@ -499,7 +517,17 @@ class CruiseLayout(Widget):
       has_icbm = ui_state.has_icbm
       has_long = ui_state.has_longitudinal_control
 
-      if ui_state.CP_SP.intelligentCruiseButtonManagementAvailable and not has_long:
+      # FusionPilot: THE THIRD GATE. `interfaces.py` has two that decide whether ICBM runs; this one
+      # decides whether he can even SEE the toggle -- and it does not merely disable it, it REMOVES
+      # the param, on every render of this page. So with op long on, the setting was deleted each
+      # time he opened settings, which is why re-enabling it mid-drive never stuck and why the
+      # device read `unset` afterwards. Fixing the two in interfaces.py was not enough and the
+      # screen said so on 2026-08-18: "ICBM was grayed out".
+      #
+      # Same third state as `_op_long_drives`: under the stock-ACC passthrough Ford still authors
+      # the command and the set speed still governs, so ICBM is meaningful and must stay reachable.
+      op_long_drives = has_long and not ui_state.params.get_bool("StockAccPassthrough")
+      if ui_state.CP_SP.intelligentCruiseButtonManagementAvailable and not op_long_drives:
         self.icbm_toggle.action_item.set_enabled(ui_state.is_offroad())
         self.icbm_toggle.set_description(tr(ICBM_DESC))
       else:
@@ -507,7 +535,7 @@ class CruiseLayout(Widget):
         self.icbm_toggle.action_item.set_enabled(False)
 
         long_desc = ICMB_UNAVAILABLE
-        if has_long:
+        if op_long_drives:
           if ui_state.CP.alphaLongitudinalAvailable:
             long_desc += " " + ICMB_UNAVAILABLE_LONG_AVAILABLE
           else:
@@ -517,6 +545,32 @@ class CruiseLayout(Widget):
         if self.icbm_toggle.description != new_desc:
           self.icbm_toggle.set_description(new_desc)
           self.icbm_toggle.show_description(True)
+
+      # FusionPilot: THE PASSTHROUGH IS MEANINGLESS WITHOUT OPENPILOT LONGITUDINAL, so do not let
+      # him reach a state where it is on and doing nothing. It is the toggle that decides WHO
+      # authors ACCDATA, and with op long off openpilot never authors it at all.
+      #
+      # He asked for a simple answer to "what do I turn on": openpilot Longitudinal Control, then
+      # this. Not DEC, not Experimental Mode -- both only steer openpilot's own plan, which this
+      # discards. The description says so rather than leaving him to infer it from three toggles.
+      self.stock_acc_passthrough.action_item.set_enabled(has_long and ui_state.is_offroad())
+      # And the override needs the PASSTHROUGH, for the same reason: with it off openpilot already
+      # authors every frame, so the override selects a command that was going out anyway and changes
+      # nothing at all. Gating the passthrough on op long and leaving its dependent ungated was half
+      # a fix; caught in review.
+      passthrough_on = ui_state.params.get_bool("StockAccPassthrough")
+      self.stock_acc_stop_override.action_item.set_enabled(
+        has_long and passthrough_on and ui_state.is_offroad())
+      if has_long and not passthrough_on:
+        prefix = "<b>" + tr("Turn on Use Ford's Own ACC Commands first.") + "</b>"
+        self.stock_acc_stop_override.set_description(prefix + "\n\n" + tr(STOP_OVERRIDE_DESC))
+      else:
+        self.stock_acc_stop_override.set_description(tr(STOP_OVERRIDE_DESC))
+      if not has_long:
+        prefix = "<b>" + tr("Turn on openpilot Longitudinal Control first.") + "</b>"
+        self.stock_acc_passthrough.set_description(prefix + "\n\n" + tr(PASSTHROUGH_DESC))
+      else:
+        self.stock_acc_passthrough.set_description(tr(PASSTHROUGH_DESC))
 
       if has_long or has_icbm:
         self.custom_acc_toggle.action_item.set_enabled(((has_long and not ui_state.CP.pcmCruise) or has_icbm) and ui_state.is_offroad())

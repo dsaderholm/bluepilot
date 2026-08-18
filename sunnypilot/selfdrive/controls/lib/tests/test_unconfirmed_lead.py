@@ -678,3 +678,119 @@ class TestTheStopRequestOnlyEverGoesDown:
 
     run(det, ev, 40, status=False, v_ego=26.8, slow_down=True, stop_dist=250.)
     assert det.v_target > floored, "the next stop inherited the previous floor"
+
+
+# --- the 20 mph floor, and why it stopped being the end of the request -------------------------
+
+def test_the_floor_still_releases_when_nothing_can_act_below_it():
+  """Unchanged behaviour with the override off: the set speed cannot go under 20 mph, so the
+  request is spent and handing it back is right."""
+  from openpilot.sunnypilot.selfdrive.controls.lib.unconfirmed_lead import ACC_FLOOR_MS
+  assert ACC_FLOOR_MS > 0
+
+
+def test_the_floor_does_not_release_when_the_override_can_finish_the_stop():
+  """He reported it: "occasionally the traffic light thing will set my speed back up after it has
+  gotten down to 20." Not occasional -- `_release()` goes to `restoring` whenever a restore point
+  was captured, so it happened every time the car crossed 20 with a model stop running.
+
+  Harmless before the stop override existed. Actively wrong with it: the set speed climbs back while
+  openpilot brakes, and the moment the time bound expires Ford accelerates away from the stop line.
+
+  Asserted on the SOURCE because the release path needs a full planner fixture to drive, and the
+  thing that matters is that the floor check is gated at all -- an ungated `v_ego < ACC_FLOOR_MS`
+  is the bug.
+  """
+  import ast, inspect
+  from openpilot.sunnypilot.selfdrive.controls.lib import unconfirmed_lead as mod
+
+  tree = ast.parse(inspect.getsource(mod))
+  floor_tests = []
+  for node in ast.walk(tree):
+    if isinstance(node, ast.If):
+      dump = ast.dump(node.test)
+      if "ACC_FLOOR_MS" in dump:
+        floor_tests.append(dump)
+  assert floor_tests, "the floor check vanished -- if that is deliberate, delete this test with it"
+  releasing = [d for d in floor_tests if "stop_override_available" in d]
+  assert releasing, (
+    "the 20 mph floor releases the model stop without asking whether the stop override can finish "
+    "it -- that restores the set speed mid-stop, which is what he reported from the road")
+
+
+def test_the_set_speed_is_prepared_while_stopped_and_held():
+  """His spec: "while stopped at a stop sign or traffic light, the set speed is restored from
+  20mph, and when it is time to go it goes."
+
+  Without this the restore waits for the model to clear, which at a red light is the moment it turns
+  GREEN -- so the set speed would only start climbing when he wants to move, and Ford would pull
+  away toward 20 while ICBM spent seven seconds pressing it back up.
+
+  `cruiseState.standstill` is the load-bearing half and the reason this is safe: it is Ford's own
+  hold, so a held car waits for resume whatever number it is aiming at. Asserted on the source
+  because driving the release path needs a full planner fixture, and what matters is that BOTH
+  conditions gate it -- stopped alone would be the lurch the floor release was avoiding.
+  """
+  import ast, inspect
+  from openpilot.sunnypilot.selfdrive.controls.lib import unconfirmed_lead as mod
+
+  tree = ast.parse(inspect.getsource(mod))
+  found = []
+  for node in ast.walk(tree):
+    if isinstance(node, ast.If):
+      dump = ast.dump(node.test)
+      if "STOPPED_RESTORE_MS" in dump:
+        found.append(dump)
+  assert found, "the stopped-restore was removed; if deliberate, delete this test with it"
+  guard = found[0]
+  assert "standstill" in guard, (
+    "the set speed is raised while stopped WITHOUT checking Ford's own hold -- a stopped car that "
+    "Ford has not held is free to go, and raising the set speed there is the lurch the floor "
+    "release existed to avoid")
+  assert "restore_set_speed" in guard, "nothing to restore to; this would blank the set speed"
+
+
+def test_the_override_is_not_available_without_openpilot_longitudinal():
+  """The passthrough param outlives op long, and the floor release is what pays for it.
+
+  ICBM and openpilot longitudinal COEXIST under the passthrough -- that is what `op_long_drives` in
+  cruise.py is for -- so this code runs in both modes and cannot infer op long from being alive.
+  And the passthrough's settings toggle only greys out when op long is switched back off; unlike
+  the ICBM gate it does not `remove()` the param. So this sequence is reachable in three taps:
+
+      op long ON -> passthrough ON -> op long OFF
+
+  leaving `StockAccPassthrough` true on a car where the whole ACCDATA block never executes. With
+  `stop_override_available` reading only those two params, the floor release below 20 mph is
+  suppressed and ICBM holds the set speed at 20 waiting for a stop nothing can author. It never
+  releases -- in the pure-ICBM mode, which is the one he drives most.
+
+  Found re-reading after the tenth finding, 2026-08-18. Same shape as that one: a param outliving
+  the condition that gives it meaning."""
+  det = UnconfirmedLeadDetector()
+
+  real_get_bool = det.params.get_bool
+
+  def available(alpha_long, passthrough, override):
+    # The offline Params stub makes put_bool a no-op on purpose -- nothing in this suite may write
+    # his settings -- so the reads are patched instead. Unknown keys still raise through
+    # `real_get_bool`, which is what proves these three are declared in params_keys.h rather than
+    # silently defaulting false and making every assertion below pass for free.
+    overrides = {"AlphaLongitudinalEnabled": alpha_long, "StockAccPassthrough": passthrough,
+                 "StockAccStopOverride": override}
+
+    def get_bool(key, *a, **k):
+      real_get_bool(key, *a, **k)
+      return overrides.get(key, False)
+
+    det.params.get_bool = get_bool
+    det.frame = 0
+    det.update_params()
+    return det.stop_override_available
+
+  assert available(True, True, True), "the intended configuration must still arm"
+  assert not available(False, True, True), (
+    "the override reads as available with openpilot longitudinal OFF -- the ACCDATA block never "
+    "runs there, so the floor release is suppressed and ICBM holds 20 mph forever")
+  assert not available(True, False, True), "no passthrough means openpilot already authors it all"
+  assert not available(True, True, False), "the feature is switched off"

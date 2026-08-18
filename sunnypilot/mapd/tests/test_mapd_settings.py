@@ -10,10 +10,8 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from openpilot.sunnypilot.mapd import mapd_settings
-from openpilot.sunnypilot.mapd.mapd_settings import MAX_ATTEMPTS, MapdSettingsSync
+from openpilot.sunnypilot.mapd.mapd_settings import MAX_ATTEMPTS, MapdInputType, MapdSettingsSync
 
 BLOB = {
   "map_curve_speed_control_enabled": False,
@@ -65,6 +63,7 @@ def _sync(blob, params=None, **kw):
   s.pm = FakePM()
   s.attempts, s.settled = {}, set()
   s._logged_unreadable = False
+  s._last_written = None
   return s
 
 
@@ -105,9 +104,16 @@ def test_a_configured_setting_is_written_to_every_personality_then_stops(monkeyp
   monkeypatch.setitem(mapd_settings._FLOAT_SETTINGS, "MapdCurveLatA", ("map_curve_target_lat_a", 0.1))
   s = _sync(BLOB, params=FakeParams(MapdCurveLatA=25))  # 2.5 m/s^2
   s.tick()
-  paths = [m.mapdIn.jsonPath for n, m in s.pm.sent if n == "mapdIn" and m.mapdIn.which() != "saveSettings"] \
-    if False else None  # message shape is capnp; assert on counts instead
-  assert len(s.pm.sent) == 4, "expected three setJsonPathFloat plus one saveSettings"
+  # Assert the KINDS, not just the count. The previous version checked `len(sent) == 4` under a
+  # comment claiming "three setJsonPathFloat plus one saveSettings" -- which four saveSettings and
+  # no writes would also satisfy, and that is precisely the failure worth catching: a settings sync
+  # that saves without writing looks identical from the outside and changes nothing on the device.
+  kinds = [m.mapdIn.type for n, m in s.pm.sent if n == "mapdIn"]
+  assert kinds.count(MapdInputType.setJsonPathFloat) == 3, (
+    f"expected one write per personality, got {kinds}")
+  assert kinds.count(MapdInputType.saveSettings) == 1, (
+    f"expected exactly one save after the writes, got {kinds}")
+  assert kinds[-1] == MapdInputType.saveSettings, "saved before finishing the writes"
 
   # Once mapd reports the value, it stops asking.
   s.sm = FakeSM(json.dumps({"personalities": {p: {"map_curve_target_lat_a": 2.5} for p in
@@ -125,3 +131,20 @@ def test_a_setting_that_will_not_stick_gives_up(monkeypatch):
   # Three paths, each attempted at most MAX_ATTEMPTS times, plus one save per changed tick.
   writes = sum(1 for _ in s.pm.sent)
   assert writes <= 3 * MAX_ATTEMPTS + MAX_ATTEMPTS, "retried a stuck setting forever"
+
+
+def test_the_settings_blob_is_written_only_when_it_changes():
+  """The first version wrote 2 KB to flash every tick -- 1 Hz for a whole drive. mapd's settings
+  change when somebody changes them, which is approximately never."""
+  s = _sync(BLOB)
+  s.tick()
+  s.tick()
+  s.tick()
+  assert len(s.params.puts) == 1, f"wrote MapdSettings {len(s.params.puts)} times for one value"
+
+  changed = dict(BLOB)
+  changed["personalities"] = dict(BLOB["personalities"])
+  changed["personalities"]["standard"] = {"map_curve_target_lat_a": 2.5}
+  s.sm = FakeSM(json.dumps(changed))
+  s.tick()
+  assert len(s.params.puts) == 2, "a real change to mapd's settings was not recorded"

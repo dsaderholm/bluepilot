@@ -131,6 +131,11 @@ def publish_controller_state_bp(CI, pm):
     cs_bp.curvatureDeviationLimited = getattr(CI.CC, "curvatureDeviationLimited", False)
     cs_bp.humanTurnLateralPaused = bool(getattr(CI.CC, "humanTurnLateralPaused", False))
     cs_bp.stallBlipActive = bool(getattr(CI.CC, "stallBlipActive", False))
+    # FusionPilot: who authored ACCDATA this frame. Straight off the car controller, which is the
+    # only place that knows -- see the AccAuthority comment in custom.capnp. Defaults to `stock`
+    # for any car controller that does not set it, which is every non-Ford one.
+    cs_bp.accAuthority = getattr(CI.CC, "acc_authority",
+                                 structs.ControllerStateBP.AccAuthority.stock)
     # BluePilot: mode the controller actually ran, straight off the car controller (not Params).
     if getattr(CI.CC, "disable_BP_lat_UI", True):
       cs_bp.activeLateralMode = structs.ControllerStateBP.LateralMode.openpilot
