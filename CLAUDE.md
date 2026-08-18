@@ -916,6 +916,36 @@ camera's loop stays closed -- it commands, the car responds, its model stays con
 override it commands "hold 20" and watches the car stop anyway. Does it re-plan, fault, or drop ACC?
 Nobody knows, and the answer arrives on the first attempt.
 
+**DRIVE B (00000387, 2026-08-18) DID NOT ANSWER IT, and the reason is the useful part.** With
+`AccPrpl_A_Pred` pinned, **91.1% of longActive frames carried Ford's own command** -- the passthrough
+worked, and he confirmed it from the seat: *"it sure felt like Ford ACC not op long."* The camera
+raised cancel **zero times** while longActive, and never asserted deny.
+
+But that is not evidence the camera tolerates contradiction, because there was almost none:
+
+    contradiction runs while longActive   347
+    total contradicted time               1.3 s     <- across the WHOLE drive
+    longest single run                    0.2 s
+    largest disagreement                  1.08 m/s^2, for 10 frames, with Ford braking
+
+Set that beside drive A, where **~40 s at ~51% refusal while the camera was braking** produced a
+cancel latch that never cleared. The two drives bracket the question and neither is near the
+override's regime: a stop from 20 mph is FIVE TO EIGHT SECONDS of continuous contradiction, two
+orders of magnitude past anything measured, and an order under drive A.
+
+**So the override's real unknown is a DURATION THRESHOLD nobody has measured**, and there is a second
+unknown inside it: drive A contradicted by UNDER-braking relative to Ford, while the stop override
+contradicts by OVER-braking. Whether the camera cares about the sign is not known either.
+
+Two consequences for building it:
+
+- **Bound the override in TIME explicitly**, not only by its trigger condition. "A stop line ahead"
+  says when to start and nothing about when to stop, and the thing that bites is total continuous
+  seconds of disagreement.
+- **The latch detector already exists** -- `passthrough_cancel_frames` logs at ERROR after 5 s of
+  continuous cancel. That is the instrument the first override drive is read with, and it should be
+  treated as the experiment's readout rather than as an error nobody expects.
+
 **What it costs, stated plainly.** Every ACC command would route through openpilot, so a bug produces
 NO BRAKING rather than a wrong set speed -- a real step up in blast radius from button injection.
 Panda's existing `ACCDATA` checks still apply. And it is op long as far as the car and the safety
