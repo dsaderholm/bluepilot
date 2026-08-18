@@ -21,6 +21,7 @@ from opendbc.sunnypilot.car.ford.stop_override import (
   ENTER_SPEED,
   LEAD_DISQUALIFIES_M,
   MAX_ACTIVE_FRAMES,
+  MPH_TO_MS,
   FordStopOverride,
 )
 
@@ -200,3 +201,48 @@ def test_a_stop_we_authored_is_not_resumed_from_automatically():
   # And the gate being off still means off -- it is his switch, not ours to ignore.
   host.resume_gate_enabled = False
   assert LongitudinalExt.resume_allowed(host, sm) is True
+
+
+def _drive_to_a_stop(so, **kw):
+  """Run a full approach and return the (was_active, override, last_result) triple per frame."""
+  out = []
+  for v_mph in (24.0, 18.0, 12.0, 6.0, 2.0, 0.3):
+    was_active = so.active
+    override = so.update(long_active=True, v_ego=v_mph * MPH_TO_MS, has_slow_down=True,
+                         op_stopping=True, lead_distance=kw.get("lead", 0.0))
+    out.append((was_active, override, so.last_result))
+  return out
+
+
+def test_the_stopped_latch_must_be_edge_triggered():
+  """`last_result` persists, so the resume gate cannot key on its value alone.
+
+  The latch tells `resume_allowed` "this stop was ours, do not pull away on the model's say-so".
+  After one real override stop, `last_result` stays the string "stopped" until the next arm or end
+  -- so a later stop that the override never touched (a lead in front, the model never asking, the
+  feature never arming) still reads "stopped" and re-latches. That is the queue-cleared open-road
+  case, where openpilot's automatic resume is exactly what he wants, and he would instead sit at a
+  green light waiting for a press. Found re-checking my own fix, 2026-08-18."""
+  so = FordStopOverride()
+  frames = _drive_to_a_stop(so)
+  edges = [f for f in frames if f[0] and not f[1] and f[2] == "stopped"]
+  assert len(edges) == 1, f"the stop should latch on exactly one frame, got {len(edges)}"
+  assert so.last_result == "stopped"
+
+  # Now a SECOND stop that the override has nothing to do with: a lead close enough that Ford owns
+  # it, so the override never arms. `last_result` is still "stopped" from the first one.
+  so.update(long_active=True, v_ego=30.0 * MPH_TO_MS, has_slow_down=False,
+            op_stopping=False, lead_distance=0.0)
+  latched_again = False
+  for v_mph in (20.0, 10.0, 4.0, 0.3):
+    was_active = so.active
+    override = so.update(long_active=True, v_ego=v_mph * MPH_TO_MS, has_slow_down=True,
+                         op_stopping=True, lead_distance=25.0)
+    assert not override, "a lead inside 60 m is Ford's stop, not ours"
+    if was_active and not override and so.last_result == "stopped":
+      latched_again = True
+  assert not latched_again, (
+    "the second stop re-latched -- the carcontroller must read `was_active` from BEFORE update() "
+    "rather than testing last_result on its own")
+  # And the stale string is still sitting there, which is why the edge is the only safe test.
+  assert so.last_result == "stopped"

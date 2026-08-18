@@ -328,6 +328,8 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
           rs = self.sm['radarState'] if self.sm.alive.get('radarState') else None
           if rs is not None and rs.leadOne.status:
             lead_d = float(rs.leadOne.dRel)
+          # Read BEFORE the update, because the latch below is edge-triggered on this going False.
+          was_active = self.stop_override.active
           override = self.stop_override.update(
             long_active=bool(CC.longActive),
             v_ego=float(CS.out.vEgo),
@@ -345,7 +347,13 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
           # first version tested `override and vEgo < 0.5 m/s`, but the override ends at 0.2235 m/s,
           # so it depended on frames landing inside a 0.28 m/s sliver. It worked, by about seven
           # frames, and would have stopped working silently on a harder stop.
-          if self.stop_override.last_result == "stopped":
+          #
+          # EDGE-TRIGGERED, and that is the whole correctness of it. `last_result` is a string that
+          # persists until the next arm or end, so testing it on its own re-latches on every later
+          # stop for the rest of the drive -- including the queue-cleared open-road case the gate
+          # is supposed to let through, where he would sit at a green light waiting for a resume
+          # that never comes. The transition into "stopped" happens on exactly one frame.
+          if was_active and not override and self.stop_override.last_result == "stopped":
             self.stop_override_stopped_us = True
 
           if override != self.stop_override_last:
