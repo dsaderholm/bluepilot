@@ -1061,6 +1061,17 @@ on this car, because a standstill with cruise engaged has never existed here: th
 press never reaches this gate, so it is untouched. The no-lead branch used to mean only "the queue
 cleared, nothing to wait for"; it now has a second meaning and they needed separating.
 
+**AND THE SET SPEED IS PREPARED WHILE STOPPED, which is his spec:** *"Ideally while stopped at a
+stop sign or traffic light, the set speed is restored from 20mph, and when it is time to go it
+goes."* Without it the restore waited for `model_slow_down` to clear -- which at a red light is the
+moment it turns GREEN. The set speed would only start climbing when he wanted to move, and Ford
+would pull away toward 20 while ICBM spent seven seconds pressing it back to 45.
+
+Gated on `v_ego < 0.5 mph AND cruiseState.standstill`, and **`standstill` is the load-bearing
+half**: it is Ford's own hold, so a held car waits for resume whatever number it is aiming at.
+Stopped WITHOUT the hold means Ford is free to go, and raising the set speed there is exactly the
+lurch the floor release existed to avoid.
+
 **Which branch he actually gets is unknown until a drive**: if Ford does not enter its hold mode
 without a lead, `standstill` stays false, resume never fires at all, and he re-engages by hand. That
 is the same unmeasured thing as whether Ford holds the stop -- one drive answers both.

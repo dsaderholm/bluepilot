@@ -48,6 +48,9 @@ Trigger = custom.LongitudinalPlanSP.UnconfirmedLead.Trigger
 
 # Ford ACC's minimum settable speed. Not a workaround -- the hardware floor.
 ACC_FLOOR_MS = 20 * CV.MPH_TO_MS
+# Stopped enough to prepare the set speed for the getaway. Paired with cruiseState.standstill,
+# which is what makes raising it safe -- see the restore block in the model-stop branch.
+STOPPED_RESTORE_MS = 0.5 * CV.MPH_TO_MS
 
 # --- trigger gates (all must hold simultaneously) ---
 # radard's own lead gate is lead_prob > 0.5 (radard.py get_lead); sit meaningfully above it.
@@ -495,6 +498,24 @@ class UnconfirmedLeadDetector:
       # away from the stop line.
       if v_ego < ACC_FLOOR_MS and not self.stop_override_available:
         self._release()
+        return
+
+      # STOPPED AND HELD: put the set speed back NOW, while it is free to move.
+      #
+      # His spec, 2026-08-18: *"Ideally while stopped at a stop sign or traffic light, the set speed
+      # is restored from 20mph, and when it is time to go it goes."* Without this the restore waits
+      # for `model_slow_down` to clear, which at a red light is the moment it turns green -- so the
+      # set speed would only START climbing when he wants to move, and Ford would pull away toward
+      # 20 while ICBM spent seven seconds pressing it back to 45.
+      #
+      # BOTH conditions are required and `standstill` is the load-bearing one. It is Ford's own hold
+      # (`EngBrakeData.AccStopMde_D_Rq == 3`), so raising the set speed cannot make the car move --
+      # a held Ford waits for resume whatever number it is aiming at. Stopped WITHOUT the hold means
+      # Ford is free to go, and raising it there would be asking for exactly the lurch the floor
+      # release was avoiding.
+      if v_ego < STOPPED_RESTORE_MS and CS.cruiseState.standstill and self.restore_set_speed > 0:
+        self.state = State.restoring
+        self.v_target = self.restore_set_speed
         return
 
       # RATCHET DOWN ONLY. Reported 2026-08-08: "it only ever got down to 28 and almost started

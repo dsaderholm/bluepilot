@@ -716,3 +716,35 @@ def test_the_floor_does_not_release_when_the_override_can_finish_the_stop():
   assert releasing, (
     "the 20 mph floor releases the model stop without asking whether the stop override can finish "
     "it -- that restores the set speed mid-stop, which is what he reported from the road")
+
+
+def test_the_set_speed_is_prepared_while_stopped_and_held():
+  """His spec: "while stopped at a stop sign or traffic light, the set speed is restored from
+  20mph, and when it is time to go it goes."
+
+  Without this the restore waits for the model to clear, which at a red light is the moment it turns
+  GREEN -- so the set speed would only start climbing when he wants to move, and Ford would pull
+  away toward 20 while ICBM spent seven seconds pressing it back up.
+
+  `cruiseState.standstill` is the load-bearing half and the reason this is safe: it is Ford's own
+  hold, so a held car waits for resume whatever number it is aiming at. Asserted on the source
+  because driving the release path needs a full planner fixture, and what matters is that BOTH
+  conditions gate it -- stopped alone would be the lurch the floor release was avoiding.
+  """
+  import ast, inspect
+  from openpilot.sunnypilot.selfdrive.controls.lib import unconfirmed_lead as mod
+
+  tree = ast.parse(inspect.getsource(mod))
+  found = []
+  for node in ast.walk(tree):
+    if isinstance(node, ast.If):
+      dump = ast.dump(node.test)
+      if "STOPPED_RESTORE_MS" in dump:
+        found.append(dump)
+  assert found, "the stopped-restore was removed; if deliberate, delete this test with it"
+  guard = found[0]
+  assert "standstill" in guard, (
+    "the set speed is raised while stopped WITHOUT checking Ford's own hold -- a stopped car that "
+    "Ford has not held is free to go, and raising the set speed there is the lurch the floor "
+    "release existed to avoid")
+  assert "restore_set_speed" in guard, "nothing to restore to; this would blank the set speed"
