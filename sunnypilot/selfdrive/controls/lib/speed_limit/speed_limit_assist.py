@@ -332,7 +332,21 @@ class SpeedLimitAssist:
     elif self.state == SpeedLimitAssistState.disabled:
       if self.long_enabled and self.enabled:
         # start or reset preActive timer if initially enabled or manual set speed change detected
-        if not self.long_enabled_prev or self.v_cruise_cluster_changed:
+        # FusionPilot: `and not self.cluster_converging` -- WITHOUT IT SLA NEVER LEAVES DISABLED.
+        #
+        # This timer is the "wait for the driver to stop fiddling" guard, and `v_cruise_cluster_changed`
+        # is its proxy for the driver. That proxy is false on this car: SCC-Map, SCC-Vision and ICBM
+        # all move `v_cruise_cluster` themselves, so the timer was reset on nearly every frame and
+        # never reached zero. Route 389, 2026-08-18: `disabled` 1009 frames, `preActive` 978,
+        # `inactive` 4013 and **`active` exactly ZERO** across the whole drive, while the map supplied
+        # good limits (40/25/20/30 mph) throughout. He reported it as "I'm not sure if SLA was even
+        # working". It was not.
+        #
+        # `cluster_converging` is the existing answer to exactly this question -- set speed moving
+        # TOWARD our target is the system working, moving away is the driver. The ACTIVE branch
+        # already uses it; these two were written before it existed and never picked it up. It
+        # returns False whenever auto-follow is off, so this changes nothing for anyone not using it.
+        if not self.long_enabled_prev or (self.v_cruise_cluster_changed and not self.cluster_converging):
           self.long_engaged_timer = int(DISABLED_GUARD_PERIOD / DT_MDL)
 
         elif self.long_engaged_timer <= 0:
@@ -388,7 +402,21 @@ class SpeedLimitAssist:
     elif self.state == SpeedLimitAssistState.disabled:
       if self.long_enabled and self.enabled:
         # start or reset preActive timer if initially enabled or manual set speed change detected
-        if not self.long_enabled_prev or self.v_cruise_cluster_changed:
+        # FusionPilot: `and not self.cluster_converging` -- WITHOUT IT SLA NEVER LEAVES DISABLED.
+        #
+        # This timer is the "wait for the driver to stop fiddling" guard, and `v_cruise_cluster_changed`
+        # is its proxy for the driver. That proxy is false on this car: SCC-Map, SCC-Vision and ICBM
+        # all move `v_cruise_cluster` themselves, so the timer was reset on nearly every frame and
+        # never reached zero. Route 389, 2026-08-18: `disabled` 1009 frames, `preActive` 978,
+        # `inactive` 4013 and **`active` exactly ZERO** across the whole drive, while the map supplied
+        # good limits (40/25/20/30 mph) throughout. He reported it as "I'm not sure if SLA was even
+        # working". It was not.
+        #
+        # `cluster_converging` is the existing answer to exactly this question -- set speed moving
+        # TOWARD our target is the system working, moving away is the driver. The ACTIVE branch
+        # already uses it; these two were written before it existed and never picked it up. It
+        # returns False whenever auto-follow is off, so this changes nothing for anyone not using it.
+        if not self.long_enabled_prev or (self.v_cruise_cluster_changed and not self.cluster_converging):
           self.long_engaged_timer = int(DISABLED_GUARD_PERIOD / DT_MDL)
 
         elif self.long_engaged_timer <= 0:

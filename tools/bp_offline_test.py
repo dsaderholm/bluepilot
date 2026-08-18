@@ -98,6 +98,7 @@ DEFAULT_TARGETS = [
   "selfdrive/ui/tests/test_every_icbm_gate_knows_about_the_passthrough.py",
   "sunnypilot/mapd/tests/test_only_one_map_daemon_runs.py",
   "selfdrive/selfdrived/tests/test_passthrough_is_not_openpilot_driving.py",
+  "sunnypilot/selfdrive/controls/lib/speed_limit/tests/test_sla_leaves_disabled_while_icbm_moves_the_cluster.py",
   # Named file, not the directory: test_mapd_version.py beside it hashes the installed mapd binary
   # and cannot run without the device. The schema guard pins mapd v2's ordinals, which are theirs
   # rather than ours -- capnp reads by position, so drift decodes as different fields with no error.
