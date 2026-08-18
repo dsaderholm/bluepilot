@@ -1694,6 +1694,31 @@ here"**, which is the one reading that would invert the meaning.
 asserts the WIRING and follows one level of indirection to do it: a field fed from `active()`
 instead of `has_slow_down()` would read plausibly and correlate, and the test fails on it.
 
+**AND IT KILLED plannerd ON THE FIRST FRAME OF THE NEXT DRIVE, 2026-08-18.**
+
+    dec.hasSlowDown = self.dec.has_slow_down()
+    KjException: Tried to set field: 'hasSlowDown' with a value of: 'False'
+    which is an unsupported type: '<class 'numpy.bool'>'
+
+`has_slow_down()` is `urgency_filtered > SLOW_DOWN_PROB` and urgency_filtered is a numpy scalar, so
+it returns `numpy.bool`. Python treats that as a bool everywhere except at the capnp boundary. The
+`float()` calls beside it were already right; the bool was bare.
+
+**THE STATIC TEST COULD NOT HAVE CAUGHT IT, AND I WROTE ONE ANYWAY.** `test_dec_slow_down_published`
+reads the AST -- it proved the field was fed from the right accessor and had no way to notice the
+type. Same category as the 2026-08-15 CarController crash: structural and pure-logic tests do not
+EXECUTE the boundary, and the boundary is where the process dies.
+`test_capnp_accepts_published_types.py` builds the real message and assigns real numpy values into
+it, plus an AST guard that every `dec.*` field goes through `bool()` or `float()` -- with `state`,
+`enabled` and `active` exempted because each was checked and is plain Python.
+
+**THE RULE, generalized: any numpy-derived value crossing into capnp needs an explicit Python cast**,
+and the test for it has to run the assignment rather than read it.
+
+**What it cost.** plannerd died at t+109.9 with exitCode 1 and `processNotRunning` fired 235 times.
+It is the whole of what he saw; the 905 exceptions in swaglog that day are all `sunnylinkd` and
+`athenad` websocket noise and none of them are plannerd.
+
 **It costs a drive to use.** `has_slow_down` is computed from modelV2 alone, so it is live whatever
 DEC is doing -- but it is not retroactive, and no existing route carries it. The measurement it
 enables is scoring fire locations against OSM stop and give_way nodes from the tile store

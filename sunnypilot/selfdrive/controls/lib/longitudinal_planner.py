@@ -144,7 +144,11 @@ class LongitudinalPlannerSP:
     # endpoint_x() is inf when the model's plan is not full length. capnp Float32 takes inf, but a
     # tool reading it has to handle that, so it is clamped to 0 here and 0 means "no endpoint"
     # rather than "stopping right now" -- the one reading that would invert the meaning.
-    dec.hasSlowDown = self.dec.has_slow_down()
+    # bool(), not the bare value. `has_slow_down()` is `urgency_filtered > SLOW_DOWN_PROB` where
+    # urgency_filtered is a numpy scalar, so it returns numpy.bool -- which capnp REFUSES, killing
+    # plannerd on the first frame. It cost a drive on 2026-08-18. Any numpy-derived value crossing
+    # into capnp needs an explicit Python cast; the float() calls below were already right.
+    dec.hasSlowDown = bool(self.dec.has_slow_down())
     dec.slowDownUrgency = float(self.dec.urgency())
     endpoint = float(self.dec.endpoint_x())
     dec.slowDownEndpoint = 0.0 if not math.isfinite(endpoint) else endpoint
