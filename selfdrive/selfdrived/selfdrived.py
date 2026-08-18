@@ -462,7 +462,13 @@ class SelfdriveD(CruiseHelper):
         self.events.add(EventName.steerSaturated)
 
     # Check for FCW
-    stock_long_is_braking = self.enabled and not self.CP.openpilotLongitudinalControl and CS.aEgo < -1.25
+    # FusionPilot: `not openpilotLongitudinalControl` is upstream's way of asking "is STOCK the one
+    # braking", and under the stock-ACC passthrough the answer is yes while the flag says no. Ford
+    # authors the command, openpilot only carries it -- so without this the model FCW loses its
+    # suppression and chimes while Ford brakes normally for a lead. Found by auditing every
+    # consumer of that flag on 2026-08-18, before it fired on a road.
+    stock_is_the_brake = not self.CP.openpilotLongitudinalControl or self.params.get_bool("StockAccPassthrough")
+    stock_long_is_braking = self.enabled and stock_is_the_brake and CS.aEgo < -1.25
     model_fcw = self.sm['modelV2'].meta.hardBrakePredicted and not CS.brakePressed and not stock_long_is_braking
     planner_fcw = self.sm['longitudinalPlan'].fcw and self.enabled
     if (planner_fcw or model_fcw) and not self.CP.notCar:
