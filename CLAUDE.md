@@ -956,8 +956,30 @@ Two consequences for building it:
     Experimental Mode                               <- irrelevant
 
 DEC and Experimental Mode choose how OPENPILOT computes acceleration, which is exactly the job
-handed to Ford, so under the passthrough they steer a plan that is discarded. They are not wrong to
-leave on -- openpilot's plan does drive the ~9% fallback -- they simply do not answer his question.
+handed to Ford, so under the PURE passthrough they steer a plan that is discarded.
+
+**THAT STOPPED BEING TRUE THE MOMENT THE STOP OVERRIDE EXISTED, and he is the one who caught it:**
+*"Remember, I used to use alpha long with experimental mode and DEC."* That was the configuration
+his complete stops came from, and it is not incidental --
+`sunnypilot/.../longitudinal_planner.py:42`:
+
+    def is_e2e(self, sm) -> bool:
+      experimental_mode = sm['selfdriveState'].experimentalMode
+      if not self.dec.active():
+        return experimental_mode
+      return experimental_mode and self.dec.mode() == "blended"
+
+and `shouldStop` picks up `modelV2.action.shouldStop` -- the model's stop-for-a-light -- ONLY inside
+that branch. Without Experimental Mode, `should_stop` is the MPC's alone, which stops for leads and
+cruise targets and **never for a stop sign**.
+
+**So the override cannot arm without Experimental Mode.** It is the one consumer of openpilot's plan
+in this whole design, and the plan only contains a stop when the end-to-end model is driving it.
+DEC on is fine and is what he ran -- it selects `blended` on `has_slow_down`, which is the same
+signal the override triggers on -- but Experimental Mode is not optional.
+
+Corrected in three places that carried the old claim: the passthrough toggle description, the
+SunnyLink entry, and this file.
 
 Two UI changes so the state is not reachable by accident: **the passthrough toggle is disabled when
 op long is off** (it authors nothing in that state, so switching it on would silently do nothing),
