@@ -499,7 +499,18 @@ class SelfdriveD(CruiseHelper):
     CruiseHelper.update(self, CS, self.events_sp, self.experimental_mode)
 
     # decrement personality on distance button press
-    if self.CP.openpilotLongitudinalControl:
+    #
+    # FusionPilot: NOT under the stock-ACC passthrough. `openpilotLongitudinalControl` is upstream's
+    # way of asking "is openpilot's own plan driving", and with the passthrough on the answer is no
+    # -- Ford authors the command and openpilot's personality steers a plan that is discarded. So
+    # the gap button was cycling an aggressiveness setting that changes nothing, while the thing it
+    # is supposed to reach is Ford's own follow distance.
+    #
+    # He reported it twice: "the gap button changed openpilot's aggressiveness" on drive A, and
+    # again on 2026-08-18 -- "when I adjusted my gap, it said personality on the screen". Same flag,
+    # same wrong question, same file as the FCW suppression fixed earlier today; `stock_is_the_brake`
+    # below is the same test spelled out for the same reason.
+    if self.CP.openpilotLongitudinalControl and not self.stock_acc_passthrough:
       if any(not be.pressed and be.type == ButtonType.gapAdjustCruise for be in CS.buttonEvents):
         if not self.experimental_mode_switched:
           self.personality = (self.personality - 1) % 3

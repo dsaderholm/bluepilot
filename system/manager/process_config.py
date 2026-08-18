@@ -10,7 +10,7 @@ from openpilot.system.manager.process import PythonProcess, NativeProcess, Daemo
 from openpilot.system.hardware.hw import Paths
 
 from openpilot.sunnypilot.mapd.mapd_manager import MAPD_PATH
-from openpilot.sunnypilot.mapd import MAPD_V2_PATH
+from openpilot.sunnypilot.mapd import MAPD_V2_PATH, MAPD_V2_ON
 
 from openpilot.sunnypilot.models.helpers import get_active_model_runner
 from openpilot.sunnypilot.sunnylink.utils import sunnylink_need_register, sunnylink_ready, use_sunnylink_uploader
@@ -94,7 +94,31 @@ def is_stock_model(started, params, CP: car.CarParams) -> bool:
   return bool(get_active_model_runner(params, not started) == custom.ModelManagerSP.Runner.stock)
 
 def mapd_ready(started: bool, params: Params, CP: car.CarParams) -> bool:
-  return bool(os.path.exists(Paths.mapd_root()))
+  """FusionPilot: v1 stops running once v2 is the source, because nothing reads it any more.
+
+  In state 2 `mapd_manager` builds `MapdV2MapData`, so Speed Limit Assist takes its numbers from
+  `mapdOut` and v1's `/dev/shm/params` output goes to nobody. Running it anyway was TWO map daemons
+  for one consumer, and it showed up as heat rather than as a bug: route 389 ran a mean CPU of
+  87.1 C with the fan at 97% and a 93.9 C peak, against 79.3 C / 73% on route 388 which had no v2.
+  He heard the fan pinned for a whole drive.
+
+  In states 0 and 1 v1 still runs, and must: state 0 is v1 alone, and state 1 is the comparison --
+  v2 observing while v1 still feeds SLA. Only state 2 makes it redundant.
+
+  MapdV2 is read on every call rather than cached because manager re-evaluates this predicate as
+  the state changes; the process simply stops being started once the switch moves.
+  """
+  if not os.path.exists(Paths.mapd_root()):
+    return False
+  # The param read is guarded because this predicate previously COULD NOT FAIL -- it was a
+  # filesystem check. On a fresh flash, before scons rebuilds params_pyx from params_keys.h, reading
+  # a newly declared key raises UnknownKeyName; that is a documented first-boot window. Letting it
+  # propagate would take v1 down with v2 and leave the car with no speed limits at all, so an
+  # unreadable param falls back to running v1, which is what happened before this gate existed.
+  try:
+    return bool(params.get("MapdV2", return_default=True) != MAPD_V2_ON)
+  except Exception:
+    return True
 
 def mapd_v2_ready(started: bool, params: Params, CP: car.CarParams) -> bool:
   """FusionPilot: run mapd v2 in states 1 (observe) and 2 (on), never in 0.

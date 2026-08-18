@@ -442,6 +442,13 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
         self.acc_authority = _AA.opStop
       elif use_passthrough:
         self.acc_authority = _AA.ford
+      elif not CC.longActive:
+        # NOBODY IS DRIVING, and calling that a fallback was wrong. `passthrough_admissible` returns
+        # "openpilot longitudinal inactive" whenever cruise is not engaged, which is not a refusal at
+        # all -- it is the disengaged state, and the frame that goes out is the inactive one.
+        # Counting it as `fallback` made 23% of drive 389 read as openpilot substituting for Ford
+        # when in fact nothing was being asked of either. Measured, 2026-08-18.
+        self.acc_authority = _AA.stock
       elif not self.stock_acc_passthrough:
         self.acc_authority = _AA.openpilot
       elif self.passthrough_cancel_frames >= 250:

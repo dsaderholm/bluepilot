@@ -191,9 +191,17 @@ class CarStateExt:
             button_events.append(event)
           # Clear the tracking
           self.last_emitted_event.pop(button.can_msg, None)
-          # Update state for both event types
-          self.button_states[3] = False  # accelCruise
-          self.button_states[9] = False  # setCruise
+          # Update state for both event types -- THE SAME TWO THE PRESS PATH SET.
+          #
+          # This cleared 3 and 9, while the press path above sets 3 and 10. So `resumeCruise` (10)
+          # was set on the first RES+ press with cruise off and NEVER CLEARED. On the second press
+          # the guard `self.button_states.get(event_type) != signal_state` compared True against
+          # True and emitted nothing -- so every resume after the first one silently did not exist.
+          #
+          # 9 is `setCruise`, which this button has not emitted since the 2026-08-04 correction in
+          # the BUTTONS comment; clearing it here is a leftover from the version that did.
+          self.button_states[3] = False   # accelCruise
+          self.button_states[10] = False  # resumeCruise
         continue
 
       # CcAslButtnSetDecPress: setCruise (9) when disabled, decelCruise (4) when enabled
@@ -302,6 +310,35 @@ class CarStateExt:
     # When mainCruise enables cruise, also emit setCruise to set speed to current speed
     # This restores the old behavior where turning on cruise also sets it to current speed
     # Handle both immediate enable (same frame) and delayed enable (next frame)
+    # FusionPilot: AND NOT WHEN ANOTHER BUTTON IS WHAT ENGAGED IT.
+    #
+    # `main_cruise_pressed_recently` is sticky and had no bound at all -- set on any MAIN press and
+    # cleared only once cruise actually came on. So MAIN pressed early in a drive, then engaging
+    # later with SET- or RES+, synthesized a `setCruise` on top of the real event. And `setCruise`
+    # is the one button meaning that CLEARS THE DRIVER'S HOLD and hands the speed to SLA.
+    #
+    # That is his report: "I adjust my speed with +/- and it changes the ICBM little speed number,
+    # not the max". The press created a hold and the synthesized setCruise discarded it in the same
+    # frame, so the dash moved and MAX did not. Measured on route 389: one raw SET- edge with cruise
+    # on produced BOTH `decelCruise` and `setCruise`.
+    #
+    # The synthesis itself is right and stays -- MAIN alone should engage at the current speed. It
+    # just must not fire when the driver engaged with a button that carries its own meaning.
+    # CLEARING THE FLAG, NOT TESTING THIS FRAME. The first version of this guard scanned
+    # `button_events` for the current frame and would have missed the case it was written for:
+    # `main_cruise_pressed_recently` is sticky BECAUSE the PCM reports enabled a frame or two after
+    # the press (see the comment above). So SET- in frame N, enabled in frame N+1, and by N+1 the
+    # press is no longer in `button_events` -- the guard reads False and the synthesis fires anyway.
+    #
+    # Clearing the flag when another cruise button is pressed is persistent and says the right
+    # thing: MAIN is no longer what is engaging this car, whenever the PCM gets round to agreeing.
+    if any(e.pressed and e.type in (structs.CarState.ButtonEvent.Type.setCruise,
+                                    structs.CarState.ButtonEvent.Type.decelCruise,
+                                    structs.CarState.ButtonEvent.Type.accelCruise,
+                                    structs.CarState.ButtonEvent.Type.resumeCruise)
+           for e in button_events):
+      self.main_cruise_pressed_recently = False
+
     if cruise_just_enabled and (main_cruise_just_pressed or self.main_cruise_pressed_recently):
       set_cruise_event = structs.CarState.ButtonEvent.new_message()
       set_cruise_event.type = structs.CarState.ButtonEvent.Type.setCruise
