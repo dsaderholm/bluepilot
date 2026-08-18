@@ -678,3 +678,41 @@ class TestTheStopRequestOnlyEverGoesDown:
 
     run(det, ev, 40, status=False, v_ego=26.8, slow_down=True, stop_dist=250.)
     assert det.v_target > floored, "the next stop inherited the previous floor"
+
+
+# --- the 20 mph floor, and why it stopped being the end of the request -------------------------
+
+def test_the_floor_still_releases_when_nothing_can_act_below_it():
+  """Unchanged behaviour with the override off: the set speed cannot go under 20 mph, so the
+  request is spent and handing it back is right."""
+  from openpilot.sunnypilot.selfdrive.controls.lib.unconfirmed_lead import ACC_FLOOR_MS
+  assert ACC_FLOOR_MS > 0
+
+
+def test_the_floor_does_not_release_when_the_override_can_finish_the_stop():
+  """He reported it: "occasionally the traffic light thing will set my speed back up after it has
+  gotten down to 20." Not occasional -- `_release()` goes to `restoring` whenever a restore point
+  was captured, so it happened every time the car crossed 20 with a model stop running.
+
+  Harmless before the stop override existed. Actively wrong with it: the set speed climbs back while
+  openpilot brakes, and the moment the time bound expires Ford accelerates away from the stop line.
+
+  Asserted on the SOURCE because the release path needs a full planner fixture to drive, and the
+  thing that matters is that the floor check is gated at all -- an ungated `v_ego < ACC_FLOOR_MS`
+  is the bug.
+  """
+  import ast, inspect
+  from openpilot.sunnypilot.selfdrive.controls.lib import unconfirmed_lead as mod
+
+  tree = ast.parse(inspect.getsource(mod))
+  floor_tests = []
+  for node in ast.walk(tree):
+    if isinstance(node, ast.If):
+      dump = ast.dump(node.test)
+      if "ACC_FLOOR_MS" in dump:
+        floor_tests.append(dump)
+  assert floor_tests, "the floor check vanished -- if that is deliberate, delete this test with it"
+  releasing = [d for d in floor_tests if "stop_override_available" in d]
+  assert releasing, (
+    "the 20 mph floor releases the model stop without asking whether the stop override can finish "
+    "it -- that restores the set speed mid-stop, which is what he reported from the road")

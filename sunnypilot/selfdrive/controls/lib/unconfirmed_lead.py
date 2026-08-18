@@ -229,11 +229,18 @@ class UnconfirmedLeadDetector:
     self.model_stop_enabled = False
     self.model_stop_min_decel = 1.0
 
+  # Set in update_params; declared here so a frame before the first param read cannot raise.
+  stop_override_available = False
+
   def update_params(self) -> None:
     if self.frame % int(PARAMS_UPDATE_PERIOD / DT_MDL) == 0:
       self.max_lead_distance = self.params.get("IcbmLeadMaxDistance", return_default=True)
       self.max_ttc = self.params.get("IcbmLeadMaxTtc", return_default=True) / 10.
       self.model_stop_enabled = self.params.get_bool("IcbmModelStopEnabled")
+      # Whether anything can act below Ford's 20 mph floor. Both are required: the override only
+      # exists under the passthrough, and without it the floor really is the end of the request.
+      self.stop_override_available = (self.params.get_bool("StockAccPassthrough")
+                                      and self.params.get_bool("StockAccStopOverride"))
       self.model_stop_min_decel = self.params.get("IcbmModelStopMinDecel", return_default=True) / 10.
 
   @property
@@ -471,8 +478,22 @@ class UnconfirmedLeadDetector:
           self._release()
           return
 
-      # Below the floor the driver has taken over with the pedal; there is nothing left to ask for.
-      if v_ego < ACC_FLOOR_MS or CS.brakePressed:
+      # The driver's pedal always ends it.
+      if CS.brakePressed:
+        self._release()
+        return
+
+      # Below the floor there was nothing left to ask for -- the set speed cannot go under 20 mph,
+      # so the request was spent and giving it back was right. **The stop override changes that**:
+      # below 25 mph openpilot authors the braking directly and finishes the stop.
+      #
+      # Releasing here anyway is what he reported on 2026-08-18: *"occasionally the traffic light
+      # thing will set my speed back up after it has gotten down to 20."* Not occasional -- it is
+      # this line, every time, because `_release()` goes to `restoring` whenever a restore point
+      # was captured. Harmless before, and actively wrong now: the set speed would climb back while
+      # openpilot brakes, and the moment the override's time bound expired Ford would accelerate
+      # away from the stop line.
+      if v_ego < ACC_FLOOR_MS and not self.stop_override_available:
         self._release()
         return
 

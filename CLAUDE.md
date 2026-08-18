@@ -1023,6 +1023,32 @@ so the factor of two cannot come back.
 **Ships OFF, and the reason is about the car:** the camera's tolerance for sustained contradiction
 is unmeasured. Toggle is `StockAccStopOverride`, "Come To A Complete Stop".
 
+**AND IT REQUIRED FIXING THE 20 MPH FLOOR RELEASE, which he had reported from the road as its own
+complaint:** *"occasionally the traffic light thing will set my speed back up after it has gotten
+down to 20."* Not occasional. `unconfirmed_lead.py` released the model stop at `ACC_FLOOR_MS`, and
+`_release()` goes to `restoring` whenever a restore point was captured -- so it happened every time
+the car crossed 20 with a model stop running.
+
+**That was CORRECT before the override existed.** Below the floor the set speed genuinely could not
+ask for anything, so the request was spent and handing it back was right. With the override it is
+actively wrong: the set speed climbs back while openpilot brakes, and the moment the time bound
+expires Ford accelerates away from the stop line. Now gated on `stop_override_available`, which
+requires BOTH the passthrough and the override -- with either off, the old behaviour is exactly
+unchanged.
+
+**THE HUD SAYS WHO IS DRIVING, because the ACC pill was about to lie.** It reads the CAMERA's
+ACCDATA, so during an override it would have shown COAST -- Ford's actual wish -- while openpilot
+braked the car to a stop. Same shape as the gap-display bug, and he had already confirmed he sees
+COAST on the road. `OP STOP` in violet, from `carOutput.actuatorsOutput.accel` disagreeing with
+`brakeLightStatus.accAccelRequest`: what we PUT ON THE WIRE versus what Ford asked for, both already
+subscribed, no new signal. Violet rather than another red, because it is a different AUTHOR and not
+a different amount of braking. Rendered before shipping, two new scenes in `preview_acc_status.py`.
+
+**And his own reason for the whole architecture, restated because it is the sharpest one:** *"the
+one other thing that always makes me prefer Ford ACC+ICBM over OP long is that it can COAST."* That
+is why the override is scoped to below 20 mph only -- it takes the part where coasting was never
+available, and leaves every mph above it to the blend Ford picks.
+
 **The structural guard against the documented trap:** `test_it_never_reads_fords_command` parses the
 module with `ast` and fails if Ford's signals, `acc_stock_values` or `passthrough_admissible` are
 referenced in CODE. Parsed rather than grepped because every explanation of the trap contains the
