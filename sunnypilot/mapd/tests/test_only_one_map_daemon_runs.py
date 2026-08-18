@@ -58,3 +58,20 @@ def test_v2_still_never_runs_in_state_zero():
   src = _fn("mapd_v2_ready")
   assert "MapdV2" in src and "> 0" in src, (
     "mapd v2 no longer checks that the user opted in")
+
+
+def test_the_map_daemons_are_exec_ed_so_stopping_them_works():
+  """`bash -c "<binary> ..."` FORKS, so manager kills the wrapper and the daemon is orphaned.
+
+  Observed on the device 2026-08-18 with MapdV2 switched to 2: managerState read
+  `mapd running=False pid=0` while `ps` still showed the binary alive at the same age as mapd_v2.
+  The gate above was working -- the process simply outlived being stopped, so the two-daemon load
+  he heard as a pinned fan survived until a reboot.
+
+  `exec` makes bash replace itself with the binary, so the pid manager holds IS the daemon."""
+  for name in ("mapd", "mapd_v2"):
+    i = SRC.index(f'NativeProcess("{name}"')
+    line = SRC[i:SRC.index("\n", i)]
+    assert "exec " in line, (
+      f'{name} is launched without `exec`, so bash forks it and manager can only kill the wrapper '
+      f'-- stopping the process leaves the daemon running: {line.strip()}')
