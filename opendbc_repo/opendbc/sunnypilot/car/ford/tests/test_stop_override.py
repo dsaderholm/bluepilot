@@ -289,3 +289,32 @@ def test_the_override_starts_where_fords_floor_ends():
   assert abs(ENTER_SPEED - ACC_FLOOR_MS) < 1e-6, (
     f"the override arms at {ENTER_SPEED / MPH_TO_MS:.1f} mph but Ford's floor is "
     f"{ACC_FLOOR_MS / MPH_TO_MS:.1f} mph -- one of them moved without the other")
+
+
+def test_a_radar_blind_lead_is_ours_and_a_radar_lead_is_fords():
+  """The unconfirmed-lead case and the stop override compose, and the seam is `radarState`.
+
+  `unconfirmed_lead.py` exists because Ford's ACC follows only RADAR-confirmed leads, and the model
+  regularly sees a stopped car at the end of a queue that the radar never returns. Its own docstring
+  said reaching the 20 mph floor was "the end of what this can do, not the start of a stop" -- true
+  when it was written, and no longer true, because the override brakes below the floor.
+
+  The two need no wiring between them. `LEAD_DISQUALIFIES_M` reads `radarState.leadOne`, which is
+  exactly the thing that is ABSENT in the radar-blind case, so the override arms for it on its own.
+
+  And the handback is the same seam read the other way. `unconfirmed_lead`'s expected resolution is
+  that slowing lets the radar finally acquire the lead, after which Ford follows it down itself.
+  The frame the radar acquires is the frame `lead_distance` becomes real -- so the override ends and
+  hands Ford back its own stop-and-go, which is better than ours. That is one condition serving two
+  features, not a coincidence to leave untested."""
+  # Radar-blind: the model is planning a stop, the radar has nothing. lead_distance is 0.0, which
+  # is what `radarState.leadOne.status == False` produces in the carcontroller.
+  blind = FordStopOverride()
+  assert _stopping(blind, lead=0.0) is True, (
+    "the override refused a stop the radar cannot see -- the exact case unconfirmed_lead is for")
+
+  # ...and the moment the radar acquires it, Ford owns the stop again.
+  acquired = blind.update(long_active=True, v_ego=SLOW, has_slow_down=True, op_stopping=True,
+                          lead_distance=LEAD_DISQUALIFIES_M - 20.0)
+  assert acquired is False, "kept braking after the radar acquired the lead"
+  assert "lead appeared" in blind.last_result

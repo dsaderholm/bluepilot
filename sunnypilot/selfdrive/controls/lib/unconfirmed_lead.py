@@ -11,12 +11,29 @@ as reaction time rather than being told once the car is already at the floor.
 
 Scope and limits, deliberately:
   - This is NOT an AEB change and NOT an attempt at an automated stop. The only actuation channel
-    is ICBM's existing cruise-button presses; no braking force is commanded anywhere.
-  - Ford's ACC floor is 20 mph and it HOLDS that speed. Below the floor the driver brakes, full
-    stop. Reaching the floor is the end of what this can do, not the start of a stop.
+    HERE is ICBM's existing cruise-button presses; no braking force is commanded in this file.
+  - Ford's ACC floor is 20 mph and it HOLDS that speed.
   - The best outcome is that the deceleration lets the radar acquire the lead, after which Ford's
     own ACC takes over and can follow to a complete stop. That is a release condition, not a
     failure, and it is the expected resolution path.
+
+WHAT CHANGED ON 2026-08-18, because the third bullet used to read "below the floor the driver
+brakes, full stop -- reaching the floor is the end of what this can do, not the start of a stop":
+
+That is no longer true, and nothing in this file had to change for it. Under the stock-ACC
+passthrough the stop override (`opendbc/sunnypilot/car/ford/stop_override.py`) authors the braking
+below 20 mph, so the floor is now a HANDOFF rather than an end. The two compose through
+`radarState` and nothing else:
+
+  - the override refuses to act when a radar lead is inside 60 m, and a radar-blind lead is by
+    definition not one -- so it arms for exactly the case this module exists for, unwired.
+  - the expected resolution above is the same seam read the other way. The frame the radar finally
+    acquires the lead is the frame the override hands back, and Ford's stop-and-go -- years of
+    calibration this has no business replacing -- takes the rest of it.
+
+The one thing that DID have to change is the floor release below: it now checks whether anything
+can act under 20 before handing the request back, because `_release()` routes to RESTORING and
+would raise the set speed toward a car openpilot was in the middle of braking for.
 
 Target speed is Ford's ACC floor, asked for the moment the lead is confirmed. This replaced pacing
 the request along the MPC's plan, which sounds gentler and is not: the set speed is a REQUEST, not
