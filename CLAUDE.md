@@ -1215,7 +1215,63 @@ where the set speed cannot ask; and on ramps steep enough to need real braking r
 else the set speed is STRICTLY BETTER, because Ford's answer to "be doing 45 shortly" is a blend we
 do not have to write and could not easily match.
 
-**THERE ARE THREE GATES, NOT TWO, AND THE THIRD IS THE SETTINGS SCREEN.** Found 2026-08-18 from
+### BOTH "NEEDS A DRIVE" ITEMS WERE ANSWERABLE FROM LOGS ALREADY ON THE DEVICE
+
+2026-08-18. Two things were reported to him as unverifiable without another drive, and both were
+settled in minutes by replaying against route 0000038b. **Replaying a real class against a real log
+is the tool here; reach for it before saying something needs a drive.**
+
+**1. SLA DOES REACH `active` WITH THE FIXES. Confirmed, not hoped.** Built the real
+`SpeedLimitAssist` with his real CarParams, set `pcmCruiseSpeed = False` (what the ICBM fix
+produces), and fed it the recorded `longitudinalPlanSP.speedLimit.resolver` frames:
+
+    pcm_op_long        False   (was True -- so no PCM ceiling, no "set your speed to 70")
+    states             disabled 4213, ACTIVE 994
+    publishing a real speed-limit target   994 of 5207 frames
+
+On the drive as it actually ran, `active` was reached **zero** times. So both changes work and they
+work together: `cluster_converging` gets it out of `disabled`, and `pcm_op_long` makes the target the
+real limit instead of the ceiling.
+
+**2. THE LANE-CHANGE LEAD THEORY WAS WRONG.** The review flagged that the stop override's lead check
+reads `radarState.leadOne.dRel` with no in-path test, and his "red light with no cars, but I changed
+lanes right before it" fit perfectly. Measured, and it does not:
+
+    lead inside 60 m while slowing below 20 mph   923 frames  (373 with a blinker on)
+    lateral offset yRel   min -2.7   p50 -0.1   max 3.7 m
+    |yRel| > 1.8 m -- not our lane                44 of 923
+
+**p50 of -0.1 m is dead centre.** The radar was tracking a real car in his own lane, not one in the
+lane he left. An in-path filter would change 4.8% of those frames and would not have opened that
+stop. **Do not build the yRel gate on this evidence** -- the override refused because a lead was
+genuinely there, which is what it is supposed to do.
+
+**THERE ARE FIVE GATES. The FIFTH is the one that actually cost him two drives, and it is not
+about op long at all -- it fires when CarParamsSP has simply not been READ yet.**
+
+`ui_state._enforce_constraints`'s `else` branch -- reached whenever `self.CP_SP is None` -- called
+`params.remove("IntelligentCruiseButtonManagement")` unconditionally. That is every UI start, before
+a car has been seen. So the UI DELETED the setting on essentially every boot, and `card` then read it
+as False at car init.
+
+**One flag, both of his 2026-08-18 complaints.** With the param false,
+`_initialize_intelligent_cruise_button_management` never clears `pcmCruiseSpeed`, so:
+
+  - `v_cruise` stops being openpilot's and MIRRORS the dash (`cruise.py`'s else branch). MAX and the
+    ICBM number become the SAME NUMBER -- "it's still having me change the ICBM speed instead".
+    There is no separate max speed to move, and no hold can exist.
+  - `pcm_op_long = openpilotLongitudinalControl and pcmCruise` goes TRUE, so Speed Limit Assist runs
+    `update_state_machine_pcm_op_long`, which requires the set speed to sit at
+    `PCM_LONG_REQUIRED_MAX_SET_SPEED`. **That is the "set your speed to 70 for it to work"** -- a
+    protocol for cars with no button injection, reached because this car was reporting it had none.
+
+Measured on the device 2026-08-18: the param file read `1` early in the session and was simply GONE
+afterwards, with `icbm_enabled=False` while every other condition held.
+
+**"Not known yet" is not "not supported", and removing a PERSISTENT param is not a way to say it.**
+Report unavailable for display; never destroy the stored setting on missing evidence.
+
+**AND THE THIRD GATE IS THE SETTINGS SCREEN.** Found 2026-08-18 from
 "ICBM was grayed out" -- after both `interfaces.py` gates were already fixed. `cruise.py`'s
 `_update_state` does not merely disable the toggle under op long, it calls
 `params.remove("IntelligentCruiseButtonManagement")` **on every render of the page**. So opening

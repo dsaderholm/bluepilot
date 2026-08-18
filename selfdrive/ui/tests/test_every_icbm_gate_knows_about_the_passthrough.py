@@ -142,3 +142,106 @@ def test_no_icbm_gate_keys_on_openpilot_longitudinal_alone():
     "ICBM is cleared on openpilot longitudinal alone, so turning ICBM on under the stock-ACC "
     "passthrough deletes the param and greys out every setting under it:\n  " +
     "\n  ".join(offenders))
+
+
+def test_a_missing_carparams_does_not_destroy_the_setting():
+  """"Not known yet" is not "not supported". THE FIFTH GATE.
+
+  `ui_state.CP_SP` is None until `CarParamsSPPersistent` has been read -- every UI start, before any
+  car has been seen, and any frame that read is briefly unavailable. The `else` branch there deleted
+  `IntelligentCruiseButtonManagement` outright, so the UI destroyed the setting on essentially every
+  boot. `card` then read it as False at car init and never cleared `pcmCruiseSpeed`.
+
+  Both of his 2026-08-18 complaints came out of that one flag:
+    - `v_cruise` mirrors the dash instead of being openpilot's, so MAX and the ICBM number are the
+      same number and there is no separate max speed to move
+    - `pcm_op_long` goes True, so SLA runs the PCM machine that demands the set speed sit at
+      `PCM_LONG_REQUIRED_MAX_SET_SPEED` -- the "set your speed to 70 for it to work"
+
+  Verified on the device: the param file read `1` earlier in the session and was GONE afterwards.
+
+  Removing a PERSISTENT param is not a way to express "I have no evidence". Report unavailable for
+  display; leave the stored value alone."""
+  src = (REPO / "selfdrive" / "ui" / "sunnypilot" / "ui_state.py").read_text(encoding="utf-8")
+  tree = ast.parse(src)
+  for node in ast.walk(tree):
+    for child in ast.iter_child_nodes(node):
+      child.parent = node
+
+  for node in ast.walk(tree):
+    if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "remove"):
+      continue
+    if not any(isinstance(a, ast.Constant) and a.value == PARAM for a in node.args):
+      continue
+    # Walk up: any enclosing `if` whose test is a CP_SP presence check means this removal fires on
+    # missing evidence rather than on a real answer.
+    cur = getattr(node, "parent", None)
+    while cur is not None:
+      if isinstance(cur, ast.If):
+        cond = ast.unparse(cur.test)
+        assert not ("CP_SP is None" in cond or "CP_SP is not None" in cond and _in_else(cur, node)), (
+          "ICBM is deleted when CarParamsSP has not been read yet -- that is every UI start, so the "
+          "setting is destroyed on boot and card never clears pcmCruiseSpeed")
+      cur = getattr(cur, "parent", None)
+
+
+def _in_else(if_node, target):
+  """True when `target` sits in the `else` of `if_node`."""
+  for n in if_node.orelse:
+    for sub in ast.walk(n):
+      if sub is target:
+        return True
+  return False
+
+
+def test_no_persistent_setting_is_deleted_on_missing_carparams():
+  """Generalizes the fifth gate: NOTHING in `_enforce_constraints` may delete a stored setting just
+  because CarParams has not been read yet.
+
+  The ICBM gate was one instance. Four lines below it, `if not (has_long or self.has_icbm)` removes
+  three more PERSISTENT params -- `CustomAccIncrementsEnabled`, `SmartCruiseControlVision` and
+  `SmartCruiseControlMap`, two of them his curve controllers -- and both terms go False when
+  CarParams is unread.
+
+  That one was MASKED on his car by load order (`CP` populates before `CP_SP`, so `has_long` is
+  already True), which is a coincidence rather than a guarantee -- and the same ordering is exactly
+  why the ICBM param DID die. So this asserts on the shape, for every removal in the function, not
+  on the two known instances."""
+  src = (REPO / "selfdrive" / "ui" / "sunnypilot" / "ui_state.py").read_text(encoding="utf-8")
+  tree = ast.parse(src)
+  for node in ast.walk(tree):
+    for child in ast.iter_child_nodes(node):
+      child.parent = node
+
+  fn = next(n for n in ast.walk(tree)
+            if isinstance(n, ast.FunctionDef) and n.name == "_enforce_constraints")
+
+  offenders = []
+  for node in ast.walk(fn):
+    if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "remove"):
+      continue
+    # Collect every enclosing condition, plus any local binding they depend on.
+    conds, cur = [], getattr(node, "parent", None)
+    while cur is not None and cur is not fn:
+      if isinstance(cur, ast.If):
+        conds.append(ast.unparse(cur.test))
+      cur = getattr(cur, "parent", None)
+    names = set()
+    for c in conds:
+      names |= {n.id for n in ast.walk(ast.parse(c, mode="eval")) if isinstance(n, ast.Name)}
+    for n2 in ast.walk(fn):
+      if isinstance(n2, ast.Assign):
+        for t in n2.targets:
+          if isinstance(t, ast.Name) and t.id in names:
+            conds.append(ast.unparse(n2.value))
+    joined = " ;; ".join(conds)
+    # A removal is safe when SOMETHING in its guard chain establishes that CarParams was read.
+    if not ("CP is not None" in joined or "CP_SP is not None" in joined):
+      arg = next((a.value for a in node.args if isinstance(a, ast.Constant)), "?")
+      offenders.append(f"line {node.lineno}: removes {arg!r} guarded only by [{joined}]")
+
+  assert not offenders, (
+    "a stored setting is deleted without establishing that CarParams was ever read, so it dies on "
+    "any boot where the params are not loaded yet:\n  " + "\n  ".join(offenders))
