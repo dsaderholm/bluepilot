@@ -257,6 +257,11 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // computing ACC with the relay open. That cannot be checked offline and no route on the device
     // has ever had op long enabled.
     {"StockAccPassthrough", {PERSISTENT | BACKUP, BOOL, "0"}},
+    // Ships OFF, and the reason is about the CAR rather than caution about the code: the
+    // camera's tolerance for sustained contradiction is unmeasured. Drive A latched cancel
+    // after ~40 s of it; drive B saw 1.3 s total and no reaction. A stop is 5-8 s, between
+    // the two, so the first one is an experiment and is his to start.
+    {"StockAccStopOverride", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"DeviceBootMode", {PERSISTENT | BACKUP, INT, "0"}},
     {"DevUIInfo", {PERSISTENT | BACKUP, INT, "0"}},
     {"EnableCopyparty", {PERSISTENT | BACKUP, BOOL}},

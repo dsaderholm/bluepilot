@@ -17,6 +17,7 @@ from opendbc.sunnypilot.car.ford.hud_ext import HudExt
 from opendbc.sunnypilot.car.ford import fordcan_ext
 from opendbc.sunnypilot.car.ford.icbm import IntelligentCruiseButtonManagementInterface
 from opendbc.sunnypilot.car.ford.gap_control import FordGapController
+from opendbc.sunnypilot.car.ford.stop_override import FordStopOverride
 
 LongCtrlState = structs.CarControl.Actuators.LongControlState
 VisualAlert = structs.CarControl.HUDControl.VisualAlert
@@ -111,6 +112,13 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
     # the same line. Lives here for the same reason everything else does -- see the note above.
     self.passthrough_reason_last = "?"
     self.passthrough_cancel_frames = 0
+    # FusionPilot: the stop override -- the last few mph the set speed cannot ask for. Same
+    # placement reasoning as icbm_gap above; and same latch-off-on-exception discipline, because an
+    # exception here reaches card and stops the car.
+    self.stop_override = FordStopOverride()
+    self.stop_override_enabled = self.params.get_bool("StockAccStopOverride")
+    self.stop_override_failed = False
+    self.stop_override_last = False
     # Note: main_on_last, lkas_enabled_last, steer_alert_last, lead_distance_bars_last,
     # distance_bar_frame are initialized by HudExt.__init__() above
 
@@ -306,8 +314,36 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
       # It also covers `CC.longActive`: with openpilot longitudinal inactive panda passes only the
       # inactive frame, and forwarding Ford's would both be blocked AND leave Cmbb_B_Enbl asserted
       # after openpilot had disengaged.
+      # FusionPilot: THE STOP OVERRIDE decides this BEFORE admissibility, because it is a decision
+      # about whose command to send rather than about whether Ford's is carriable. It authors
+      # nothing -- it selects the openpilot frame that `create_acc_msg` builds below, which already
+      # clamps to panda's bands and never touches the unpoliced bits.
+      override = False
+      if self.stop_override_enabled and not self.stop_override_failed:
+        try:
+          lead_d = 0.0
+          rs = self.sm['radarState'] if self.sm.alive.get('radarState') else None
+          if rs is not None and rs.leadOne.status:
+            lead_d = float(rs.leadOne.dRel)
+          override = self.stop_override.update(
+            long_active=bool(CC.longActive),
+            v_ego=float(CS.out.vEgo),
+            has_slow_down=bool(self.sm['longitudinalPlanSP'].dec.hasSlowDown)
+            if self.sm.alive.get('longitudinalPlanSP') else False,
+            op_stopping=bool(stopping),
+            lead_distance=lead_d,
+          )
+          if override != self.stop_override_last:
+            self.stop_override_last = override
+            cloudlog.warning("stop override %s: %s", "ON" if override else "off",
+                             self.stop_override.last_result)
+        except Exception:  # noqa: BLE001 -- must never reach card; see the gap path
+          self.stop_override_failed = True
+          override = False
+          cloudlog.exception("stop override disabled for this drive")
+
       use_passthrough = False
-      if self.stock_acc_passthrough and getattr(CS, "acc_cam_valid", False) and getattr(CS, "acc_stock_values", None):
+      if not override and self.stock_acc_passthrough and getattr(CS, "acc_cam_valid", False) and getattr(CS, "acc_stock_values", None):
         reason = fordcan_ext.passthrough_admissible(CS.acc_stock_values, CC.longActive)
         use_passthrough = not reason
         if reason != self.passthrough_reason_last:

@@ -37,6 +37,12 @@ PASSTHROUGH_DESC = tr_noop(
   "Experimental Mode only change openpilot's own plan, which this replaces, so they make no "
   "difference here.")
 
+STOP_OVERRIDE_DESC = tr_noop(
+  "Bring the car to a complete stop for a stop sign or red light on an empty road. Ford's set "
+  "speed cannot go below 20 mph, so without this the car slows to 20 and no further unless its "
+  "own radar has a car ahead to follow down. For a few seconds at the end of the stop openpilot sends the braking instead of Ford, then hands straight back. It never takes over when a lead is "
+  "close -- Ford stops for those itself, better than we would. Needs Use Ford's Own ACC Commands on. Experimental: how the camera reacts to being overridden for several seconds has not been measured yet, so watch the first few stops.")
+
 ICMB_UNAVAILABLE = tr_noop("Intelligent Cruise Button Management is currently unavailable on this platform.")
 ICMB_UNAVAILABLE_LONG_AVAILABLE = tr_noop("Disable the sunnypilot Longitudinal Control (alpha) toggle to allow Intelligent Cruise Button Management.")
 ICMB_UNAVAILABLE_LONG_UNAVAILABLE = tr_noop("sunnypilot Longitudinal Control is the default longitudinal control for this platform.")
@@ -231,6 +237,11 @@ class CruiseLayout(Widget):
                      "IcbmGapControl"),
       param="IcbmGapControl")
 
+    self.stock_acc_stop_override = toggle_item_sp(
+      title=tr("Come To A Complete Stop"),
+      description=recommended(tr(STOP_OVERRIDE_DESC), "StockAccStopOverride"),
+      param="StockAccStopOverride")
+
     self.stock_acc_passthrough = toggle_item_sp(
       title=tr("Use Ford's Own ACC Commands"),
       description=recommended(tr(PASSTHROUGH_DESC), "StockAccPassthrough"),
@@ -378,6 +389,7 @@ class CruiseLayout(Widget):
       self.icbm_resume_min_lead_speed,
       self.icbm_gap_control,
       self.stock_acc_passthrough,
+      self.stock_acc_stop_override,
 
       SectionHeader(tr("Curves")),
       self.scc_v_toggle,
@@ -491,6 +503,7 @@ class CruiseLayout(Widget):
       self.icbm_resume_min_lead_speed,
       self.icbm_gap_control,
       self.stock_acc_passthrough,
+      self.stock_acc_stop_override,
     )
 
   def _update_state(self):

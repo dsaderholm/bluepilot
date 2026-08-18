@@ -992,6 +992,42 @@ and then Ford's frame goes out instead.
 what opens the relay and puts `ACCDATA` in panda's TX list -- while the numbers stay Ford's. Expect
 experimental-mode and DEC indicators to keep showing state that is driving nothing.
 
+### THE STOP OVERRIDE IS BUILT, 2026-08-18. `opendbc/sunnypilot/car/ford/stop_override.py`.
+
+**It authors NOTHING. It chooses which already-authored frame goes out.** `create_acc_msg` already
+clamps to panda's bands, already drives the split brake/precharge hysteresis, and already never
+touches the unpoliced bits that applied the park brake. So the override is a DECISION -- send
+openpilot's command instead of Ford's for these few seconds -- rather than a second CAN authoring
+path that would have to re-learn all of that. Keep it that way.
+
+    fires when   the model is planning a stop (dec.hasSlowDown), openpilot's plan has COMMITTED
+                 (longControlState == stopping), below 25 mph, and NO radar lead within 60 m
+    ends on      stopped | lead appeared | plan stopped stopping | time bound | long inactive
+    then         SPENT -- refuses to re-arm until hasSlowDown drops, so a stop that does not
+                 complete cannot re-trigger every frame
+
+`hasSlowDown` reaches the carcontroller through `longitudinalPlanSP` on its own SubMaster -- one
+subscription rather than a capnp field plus controlsd plumbing. That is the field published the day
+before for diagnostics; it turned out to be the trigger.
+
+**A LEAD DISQUALIFIES IT** because stock ACC does that whole stop itself, better than openpilot
+would, and overriding there spends contradiction budget on a case Ford already handles.
+
+**THE TIME BOUND IS THE PART THAT IS EASY TO GET WRONG, AND IT WAS.** `update` runs inside the
+ACCDATA block, gated on `ACC_CONTROL_STEP = 2` -- so it ticks at **50 Hz, not the 100 Hz control
+rate**. The constant was first written as "800 = 8 s at 100 Hz" and would have been SIXTEEN seconds
+of continuous contradiction, against the ~40 s that latched the camera on drive A. It is now derived
+from `MAX_ACTIVE_S` and `OVERRIDE_HZ` with a test pinning `OVERRIDE_HZ` against `ACC_CONTROL_STEP`,
+so the factor of two cannot come back.
+
+**Ships OFF, and the reason is about the car:** the camera's tolerance for sustained contradiction
+is unmeasured. Toggle is `StockAccStopOverride`, "Come To A Complete Stop".
+
+**The structural guard against the documented trap:** `test_it_never_reads_fords_command` parses the
+module with `ast` and fails if Ford's signals, `acc_stock_values` or `passthrough_admissible` are
+referenced in CODE. Parsed rather than grepped because every explanation of the trap contains the
+words -- the same lesson `test_mapd_schema.py` records for `suggestedSpeed`.
+
 **AND THAT DECIDES THE SHAPE OF THE OVERRIDE, WHICH IS THE NEXT THING ANYONE WILL BUILD.**
 
   THE TRAP: `min(ford_accel, openpilot_accel)` -- "use whichever brakes harder". One line, handles

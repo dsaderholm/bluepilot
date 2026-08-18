@@ -113,7 +113,12 @@ class LateralCurvExt:
   def __init__(self, CP, CP_SP):
     # SubMaster for model data, live parameters, and selfdrive state
     # liveDelay is consumed by LateralAngleExt (variable lookup time); harmless for curvature mode.
-    self.sm = messaging.SubMaster(['modelV2', 'liveParameters', 'selfdriveState', 'radarState', 'liveDelay'])
+    # FusionPilot: longitudinalPlanSP carries dec.hasSlowDown -- the model's own "I am planning to
+    # stop for something ahead" -- which is the trigger for the stop override. Subscribed here
+    # rather than routed through CC_SP because it is one entry against a capnp field plus
+    # controlsd plumbing, and the carcontroller already owns this SubMaster.
+    self.sm = messaging.SubMaster(['modelV2', 'liveParameters', 'selfdriveState', 'radarState', 'liveDelay',
+                                   'longitudinalPlanSP'])
     self.VM = VehicleModel(CP)
     self.model = None
     self.lp = None

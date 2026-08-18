@@ -525,14 +525,26 @@ sections:
       - {$ref: "#/macros/icbm_enabled"}
       enablement:
       - {$ref: "#/macros/icbm_enabled"}
+    # Gated on LONGITUDINAL, not icbm_enabled. The device gates this on has_long -- it decides who
+    # authors ACCDATA, which only exists as a question under openpilot longitudinal control. Gating
+    # it on ICBM was a different condition entirely, and SunnyLink must never be stricter or looser
+    # than the screen in the car.
     - key: StockAccPassthrough
       widget: toggle
       title: "Use Ford's Own ACC Commands"
-      description: "With openpilot longitudinal control on, send the camera's own acceleration and braking instead of openpilot's. The car then drives exactly like stock adaptive cruise, because the commands are Ford's -- openpilot only carries them. Has no effect unless openpilot longitudinal control is enabled. Leave this off until a drive has confirmed the camera keeps working this way."
+      description: "Send the camera's own acceleration and braking instead of openpilot's. The car then drives exactly like stock adaptive cruise, because the commands are Ford's -- openpilot only carries them, and your holds, speed limits, curve slowing and gap button all keep working on top. Needs openpilot Longitudinal Control on; nothing else. Dynamic Experimental Control and Experimental Mode only change openpilot's own plan, which this replaces, so they make no difference here."
       visibility:
-      - {$ref: "#/macros/icbm_enabled"}
+      - {$ref: "#/macros/longitudinal"}
       enablement:
-      - {$ref: "#/macros/icbm_enabled"}
+      - {$ref: "#/macros/longitudinal"}
+    - key: StockAccStopOverride
+      widget: toggle
+      title: "Come To A Complete Stop"
+      description: "Bring the car to a complete stop for a stop sign or red light on an empty road. Ford's set speed cannot go below 20 mph, so without this the car slows to 20 and no further unless its own radar has a car ahead to follow down. For a few seconds at the end of the stop openpilot sends the braking instead of Ford, then hands straight back. It never takes over when a lead is close -- Ford stops for those itself, better than we would. Needs Use Ford's Own ACC Commands on. Experimental: how the camera reacts to being overridden for several seconds has not been measured yet, so watch the first few stops."
+      visibility:
+      - {$ref: "#/macros/longitudinal"}
+      enablement:
+      - {$ref: "#/macros/longitudinal"}
     - key: IcbmGapControl
       widget: toggle
       title: "Let openpilot Change The Follow Gap"
