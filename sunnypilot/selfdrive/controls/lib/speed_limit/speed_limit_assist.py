@@ -346,6 +346,18 @@ class SpeedLimitAssist:
         # TOWARD our target is the system working, moving away is the driver. The ACTIVE branch
         # already uses it; these two were written before it existed and never picked it up. It
         # returns False whenever auto-follow is off, so this changes nothing for anyone not using it.
+        # THE COST OF THIS, stated because it is a real trade and not a free win. In `disabled`
+        # SLA is not serving a target, so `cluster_converging` cannot mean what its docstring says
+        # ("ICBM driving the cluster toward the target") -- it only means the number moved toward
+        # the limit. Winding 45 down to 30 in traffic passes through 40, and those steps read as
+        # converging, so SLA can come on at 40 while he is still lowering. The ACTIVE branch then
+        # releases it as soon as he continues past.
+        #
+        # Taken deliberately: the alternative measured on route 389 is SLA never activating at all,
+        # for the whole drive, and auto-follow is him asking SLA to manage the number in the first
+        # place. Narrowing this to `and self.is_active` was tried and is WRONG -- `is_active` is
+        # False by definition inside the `disabled` branch, so that guard cannot fire and silently
+        # restores the broken behaviour.
         if not self.long_enabled_prev or (self.v_cruise_cluster_changed and not self.cluster_converging):
           self.long_engaged_timer = int(DISABLED_GUARD_PERIOD / DT_MDL)
 
@@ -416,6 +428,18 @@ class SpeedLimitAssist:
         # TOWARD our target is the system working, moving away is the driver. The ACTIVE branch
         # already uses it; these two were written before it existed and never picked it up. It
         # returns False whenever auto-follow is off, so this changes nothing for anyone not using it.
+        # THE COST OF THIS, stated because it is a real trade and not a free win. In `disabled`
+        # SLA is not serving a target, so `cluster_converging` cannot mean what its docstring says
+        # ("ICBM driving the cluster toward the target") -- it only means the number moved toward
+        # the limit. Winding 45 down to 30 in traffic passes through 40, and those steps read as
+        # converging, so SLA can come on at 40 while he is still lowering. The ACTIVE branch then
+        # releases it as soon as he continues past.
+        #
+        # Taken deliberately: the alternative measured on route 389 is SLA never activating at all,
+        # for the whole drive, and auto-follow is him asking SLA to manage the number in the first
+        # place. Narrowing this to `and self.is_active` was tried and is WRONG -- `is_active` is
+        # False by definition inside the `disabled` branch, so that guard cannot fire and silently
+        # restores the broken behaviour.
         if not self.long_enabled_prev or (self.v_cruise_cluster_changed and not self.cluster_converging):
           self.long_engaged_timer = int(DISABLED_GUARD_PERIOD / DT_MDL)
 

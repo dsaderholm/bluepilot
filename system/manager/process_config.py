@@ -110,7 +110,15 @@ def mapd_ready(started: bool, params: Params, CP: car.CarParams) -> bool:
   """
   if not os.path.exists(Paths.mapd_root()):
     return False
-  return bool(params.get("MapdV2", return_default=True) != MAPD_V2_ON)
+  # The param read is guarded because this predicate previously COULD NOT FAIL -- it was a
+  # filesystem check. On a fresh flash, before scons rebuilds params_pyx from params_keys.h, reading
+  # a newly declared key raises UnknownKeyName; that is a documented first-boot window. Letting it
+  # propagate would take v1 down with v2 and leave the car with no speed limits at all, so an
+  # unreadable param falls back to running v1, which is what happened before this gate existed.
+  try:
+    return bool(params.get("MapdV2", return_default=True) != MAPD_V2_ON)
+  except Exception:
+    return True
 
 def mapd_v2_ready(started: bool, params: Params, CP: car.CarParams) -> bool:
   """FusionPilot: run mapd v2 in states 1 (observe) and 2 (on), never in 0.

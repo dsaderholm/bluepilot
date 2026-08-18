@@ -323,14 +323,22 @@ class CarStateExt:
     #
     # The synthesis itself is right and stays -- MAIN alone should engage at the current speed. It
     # just must not fire when the driver engaged with a button that carries its own meaning.
-    engaged_by_another_button = any(
-      e.pressed and e.type in (structs.CarState.ButtonEvent.Type.setCruise,
-                               structs.CarState.ButtonEvent.Type.decelCruise,
-                               structs.CarState.ButtonEvent.Type.accelCruise,
-                               structs.CarState.ButtonEvent.Type.resumeCruise)
-      for e in button_events)
-    if cruise_just_enabled and not engaged_by_another_button \
-       and (main_cruise_just_pressed or self.main_cruise_pressed_recently):
+    # CLEARING THE FLAG, NOT TESTING THIS FRAME. The first version of this guard scanned
+    # `button_events` for the current frame and would have missed the case it was written for:
+    # `main_cruise_pressed_recently` is sticky BECAUSE the PCM reports enabled a frame or two after
+    # the press (see the comment above). So SET- in frame N, enabled in frame N+1, and by N+1 the
+    # press is no longer in `button_events` -- the guard reads False and the synthesis fires anyway.
+    #
+    # Clearing the flag when another cruise button is pressed is persistent and says the right
+    # thing: MAIN is no longer what is engaging this car, whenever the PCM gets round to agreeing.
+    if any(e.pressed and e.type in (structs.CarState.ButtonEvent.Type.setCruise,
+                                    structs.CarState.ButtonEvent.Type.decelCruise,
+                                    structs.CarState.ButtonEvent.Type.accelCruise,
+                                    structs.CarState.ButtonEvent.Type.resumeCruise)
+           for e in button_events):
+      self.main_cruise_pressed_recently = False
+
+    if cruise_just_enabled and (main_cruise_just_pressed or self.main_cruise_pressed_recently):
       set_cruise_event = structs.CarState.ButtonEvent.new_message()
       set_cruise_event.type = structs.CarState.ButtonEvent.Type.setCruise
       set_cruise_event.pressed = True
