@@ -135,3 +135,42 @@ present or absent edge, both of which are decidable. It is FLICKER -- an edge ap
 and vanishing between them would let a pass open in the gaps. Route 00000383's 4-lane motorway
 already shows stdev-of-std at 2.83, so churn is the baseline behavior and a California run has to
 beat that rather than merely show movement.
+
+## `distanceFromWayCenter` CANNOT CARRY A LANE GATE. MEASURED, AND THE QUESTION IS CLOSED.
+
+The table at the top of this document flagged its 11.58 m p90 and said not to build a lane-position
+gate on it "without measuring it against something else first". Measured 2026-08-17,
+`tools/bp_way_center_sanity.py`, route 00000383, 8,740 frames.
+
+**The camera turned out to be the wrong referee** -- the left road edge is trusted 0.0% of the time
+on multi-lane motorway, so it cannot arbitrate anything at freeway speed. But mapd publishes
+`estimatedRoadWidth` on the SAME frame, and the two constrain each other with no third party:
+a car on the road must satisfy `|distanceFromWayCenter| <= estimatedRoadWidth / 2`.
+
+    IMPOSSIBLE (|dfwc| > roadWidth/2):  2203 of 8740   25.2%
+
+    by waySelectionType                    by highwayClass
+      current    n=7186   22.6% bad          motorway      n=2305   24.2% bad   p50 0.32
+      extended   n= 308  100.0% bad          secondary     n=2698    8.2% bad   p50 0.54
+      possible   n= 276   45.7% bad          residential   n=1575   53.1% bad   p50 1.29
+      fail       n= 313    0.0% (zeroed)     tertiary      n= 438   61.0% bad   p50 1.89
+
+**On motorway the median is fine and a quarter of frames are off the road.** Filtering to mapd's own
+confident match does not rescue it: `current` is still 22.6%. `extended` is 100% impossible, which
+is at least a clean rule -- never read the field on an extended match -- but it is 3.5% of frames.
+
+**So the answer is no, and it is no after filtering rather than before.** A gate firing on a field
+that is wrong a quarter of the time on the exact road class it is needed for is not a gate.
+
+**WHAT THIS CLOSES.** Lane position was the last path to the California HOV problem: knowing we are
+in the leftmost lane of our own way would refuse a pass into a separately-mapped express lane
+without needing any new tag. Both candidate signals are now measured dead rather than assumed weak:
+
+    left road edge            trusted 0.0% on multi-lane motorway
+    distanceFromWayCenter     24.2% physically impossible on motorway
+
+**THE ONE REMAINING CANDIDATE, UNTESTED:** `modelV2.laneLines` and `laneLineProbs` carry FOUR lines,
+not two. A high probability on the outermost left line means there is a lane beyond our immediate
+left neighbour, which is a lane COUNT rather than a lane position, and counting is all the HOV rule
+needs. That has not been measured and it is the next thing to try before declaring the problem
+unsolvable from the vehicle.
