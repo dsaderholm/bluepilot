@@ -48,6 +48,11 @@ SCENES = [
   # the only tap target that can accept one. Added 2026-08-17 with the fix for it being unreachable.
   ("no limit here: nothing held, only a pin offered -- tap to keep it", 45, 0, 45, "", "COAST", 0.0,
    False, False, "", False, True),
+  # FusionPilot: the stop override. openpilot has taken the command from Ford for a few seconds to
+  # finish a stop the set speed could not ask for. Violet so it does not read as "more braking" --
+  # it is a different AUTHOR, which on this car is the thing worth seeing.
+  ("stop override: openpilot is braking, not Ford", 20, 25, 0, "", "OP STOP", 2.1, True, False),
+  ("the same moment with a hold and the lamps lit", 20, 25, 45, "-", "OP STOP", 2.6, True, False),
 ]
 
 

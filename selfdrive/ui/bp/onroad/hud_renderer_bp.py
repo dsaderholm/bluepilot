@@ -49,6 +49,11 @@ ACC_STATUS_COLORS = {
   "ENG BRAKE": rl.Color(55, 185, 195, 235),
   "PRE-BRAKE": rl.Color(245, 145, 35, 235),
   "BRAKE": rl.Color(232, 58, 48, 240),
+  # FusionPilot: openpilot has taken the command away from Ford. Violet, because it must not read as
+  # a more-or-less version of the Ford states beside it -- it is a different AUTHOR, not a different
+  # amount of braking, and on a car whose whole design is "Ford drives" that distinction is the one
+  # worth seeing at a glance.
+  "OP STOP": rl.Color(150, 105, 235, 245),
 }
 # BluePilot: both readouts used to be 34 px unbacked text under the MAX box, which the owner could
 # not pick out at a glance while driving. They are now drawn as filled shapes sized against the
@@ -72,6 +77,12 @@ ACC_INK = rl.Color(10, 14, 20, 255)
 # States with no magnitude to report: no number, no intensity bar. They are still filled -- the
 # color IS the reading for these two.
 QUIET_ACC_STATES = ("COAST", "PRE-BRAKE")
+
+# FusionPilot: how far openpilot's command has to sit from Ford's before the pill says openpilot is
+# the author, and for how many consecutive frames. The passthrough forwards Ford's number exactly,
+# so in normal operation the difference is zero -- this only has to clear rounding.
+OP_AUTHORING_DELTA = 0.25   # m/s^2
+OP_AUTHORING_FRAMES = 5     # ~0.25 s at the UI's rate; the override runs for seconds
 ACC_PILL_WIDTH = 268   # wider than the MAX column: "BRAKE 1.4" does not fit 172 px legibly
 ACC_PILL_HEIGHT = 78
 ACC_LABEL_SIZE = 38
@@ -180,8 +191,11 @@ class HudRendererBP(HudRendererSP):
     # BluePilot: what Ford ACC is asking for, and what ICBM is doing about it. The speed colors
     # above say what traffic behind you sees; these say what the systems are requesting. Those are
     # different facts, which is why this is a separate readout rather than more colors.
-    self._acc_state = ""      # "ACCEL" / "COAST" / "BRAKE", "" when unknown
+    self._acc_state = ""      # "ACCEL" / "COAST" / "BRAKE" / "OP STOP", "" when unknown
     self._acc_accel = 0.0     # m/s^2, signed
+    # FusionPilot: how many consecutive frames openpilot's command has differed from Ford's. The
+    # pill must not flicker on a single frame of rounding, and the stop override runs for seconds.
+    self._op_authoring_frames = 0
     self._icbm_baseline = 0   # the number ON THE BADGE: the hold, or a pin being offered; 0 = none
     self._icbm_arrow = ""     # "+" / "-" while ICBM is actively moving the set speed, else ""
     self._icbm_hold_locked = False  # something else owns the target; a press cannot change the hold
@@ -365,6 +379,23 @@ class HudRendererBP(HudRendererSP):
             self._acc_state, self._acc_accel = "PRE-BRAKE", 0.0
           else:
             self._acc_state, self._acc_accel = "COAST", 0.0
+
+          # FusionPilot: WHO IS ACTUALLY DRIVING. Everything above reads the CAMERA's ACCDATA, which
+          # is Ford's request -- correct while we forward it, and a LIE the moment we do not. He saw
+          # exactly that with the gap display, and it would have happened again here: during a stop
+          # override the pill would have read COAST, which is what Ford wanted, while openpilot was
+          # braking the car to a halt.
+          #
+          # No new signal for this. `carOutput.actuatorsOutput.accel` is what we PUT ON THE WIRE --
+          # it records the forwarded value under the passthrough and openpilot's own otherwise -- so
+          # the two disagreeing IS the fact that openpilot has taken the command.
+          ours = float(ui_state.sm['carOutput'].actuatorsOutput.accel)
+          if abs(ours - bls.accAccelRequest) > OP_AUTHORING_DELTA:
+            self._op_authoring_frames = min(self._op_authoring_frames + 1, OP_AUTHORING_FRAMES)
+          else:
+            self._op_authoring_frames = 0
+          if self._op_authoring_frames >= OP_AUTHORING_FRAMES:
+            self._acc_state, self._acc_accel = "OP STOP", ours
       except Exception:
         pass
 
