@@ -316,3 +316,56 @@ def test_a_carcontroller_with_no_camera_acc_at_all_still_drives(carcontroller_pa
                            gap_target=0)
   for frame in range(200):
     cc.update(CC, CC_SP, CS, frame * 10_000_000)
+
+
+def test_the_gap_button_still_goes_out_under_the_passthrough(carcontroller_parts):
+  """The configuration he will actually drive: op long ON, passthrough ON, ICBM alive, a gap asked for.
+
+  Nothing covered this. The gap cases above run with the default CarParams (no op long), and the
+  passthrough case runs with `gap_target=0` -- so the one combination that matters had no test at
+  all, and it is the one where three separate gates had to be taught a new state before ICBM would
+  even run.
+
+  Asserts the PRESS REACHES THE WIRE, not merely that nothing raised. `create_button_msg` is called
+  for the camera bus and the main bus, so a gap press is two Steering_Data_FD1 sends carrying one of
+  the three gap signals.
+  """
+  from opendbc.car.ford.interface import CarInterface
+  from opendbc.car.ford.values import CAR
+  from opendbc.sunnypilot.car.ford.gap_control import GAP_MIN, SETTLE_FRAMES
+
+  CarController, dbc_names, CP, CP_SP, structs = carcontroller_parts
+  CP_long = CarInterface.get_non_essential_params(CAR.FORD_FUSION_MK5)
+  CP_long.openpilotLongitudinalControl = True
+
+  cc = CarController(dbc_names, CP_long, CP_SP)
+  cc.stock_acc_passthrough = True
+
+  out = structs.CarState()
+  out.vEgo = 25.0
+  out.vEgoRaw = 25.0
+  out.cruiseState.enabled = True
+  out.cruiseState.available = True
+  CS = FakeCarState(out)
+  CS.acc_cam_valid = True
+  # The camera reports gap 3; the requester wants 1. The readback is what the controller closes on,
+  # and drive B proved it tracks real presses (seven presses, seven changes, same timestamps).
+  CS.acc_tja_status_stock_values["AccTGap_D_Dsply"] = 3
+
+  CC, CC_SP = _car_control(structs, enabled=True,
+                           send_button=structs.IntelligentCruiseButtonManagement.SendButtonState.none,
+                           gap_target=GAP_MIN, long_active=True)
+
+  gap_signals = {"AccButtnGapIncPress", "AccButtnGapDecPress", "AccButtnGapTogglePress"}
+  pressed = 0
+  for frame in range(SETTLE_FRAMES + 200):
+    _, can_sends = cc.update(CC, CC_SP, CS, frame * 10_000_000)
+    for addr, dat, _bus in can_sends:
+      if addr == 0x083:
+        pressed += 1
+
+  assert not cc.icbm_gap_failed, "the gap path latched off under the passthrough"
+  assert cc.icbm_gap.active, "no lease opened for a gap request the camera reported differently"
+  assert pressed > 0, (
+    "no Steering_Data_FD1 went out -- the gap request never reached the wire under the passthrough, "
+    "which is the configuration the three ICBM gates were fixed for")
