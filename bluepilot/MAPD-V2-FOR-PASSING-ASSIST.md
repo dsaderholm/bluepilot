@@ -174,3 +174,45 @@ not two. A high probability on the outermost left line means there is a lane bey
 left neighbour, which is a lane COUNT rather than a lane position, and counting is all the HOV rule
 needs. That has not been measured and it is the next thing to try before declaring the problem
 unsolvable from the vehicle.
+
+## LANE LINE COUNTING WORKS. IT DOES NOT SOLVE THE HOV CASE.
+
+`tools/bp_lane_line_count.py`, route 00000383, above 34 mph. The third and last candidate for
+knowing what is to our left, after the road edge and `distanceFromWayCenter` were both measured dead.
+
+**INDEX ORDER VERIFIED, NOT ASSUMED.** Median lateral position per line: idx 0 at -5.1 m, idx 1 at
+-1.7, idx 2 at +1.8, idx 3 at +5.1. Negative is LEFT, which matches `adjacent_lane.py`'s own
+`lat < 0 is left`. So idx 0 is the outer left line and the probability below it is the right one.
+
+    road                     idx 0 p50   idx 0 p90   frames > 0.5
+    motorwayLink, 1 lane          0.03        0.27            0%     <- THE DECIDING ROW
+    motorway, 3 lanes             0.54        0.74           59%
+    motorwayLink, 2 lanes         0.70        0.85           88%
+    motorway, 4 lanes             0.77        0.87           83%
+    motorway, 5 lanes             0.75        0.82          100%
+
+**Zero false-permissive readings in 463 frames of single-lane ramp.** The model never claims a lane
+to our left where there is none, which is exactly the property a REFUSAL gate needs and the property
+neither dead signal had. As a "is there any lane to my left at all" detector this is usable.
+
+**AND IT STILL DOES NOT CLOSE CALIFORNIA.** It answers *is there a lane to my left*, never *may I
+enter it*. A painted buffer has an ordinary lane with ordinary lane lines beyond it, so on a
+California express lane `laneLineProbs[0]` reads HIGH and a gate built on it PERMITS precisely the
+move that must be refused. The signal is real and it is aimed at a different question.
+
+**So the HOV case is now closed to every vehicle signal**, which is a conclusion rather than a gap:
+
+    left road edge          trusted 0.0% on multi-lane motorway
+    distanceFromWayCenter   24.2% impossible on motorway
+    lane line count         works, answers the wrong question
+    separation tagging      `separation=flex_post` is ONE object worldwide
+
+**What remains is `hov:lanes` (issue 130), which is 0% in California**, and the boundary type itself,
+which the trip will measure via `bp_left_edge_profile.py`. If candlestick delineators produce a
+trusted left edge they are the only thing that can, and that is the whole hope.
+
+**DO NOT BUILD THE LANE-COUNT GATE ON THIS EVIDENCE ALONE.** `_on_a_ramp` already refuses every
+motorwayLink, which is where the clean 0% was measured, so the deciding row comes from a road the
+feature already declines. Its marginal value is on a two-lane road where we sit in the left lane, and
+that case is NOT measured here. Measure it before writing a gate, or the number that justified it
+will have come from somewhere the gate never runs.
