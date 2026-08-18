@@ -101,7 +101,7 @@ def _removal_sites():
     # Parent links, so a removal can be walked back up to the condition that guards it.
     for node in ast.walk(tree):
       for child in ast.iter_child_nodes(node):
-        child.parent = node                                    # noqa: B010
+        child.parent = node
     for node in ast.walk(tree):
       if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
               and node.func.attr == "remove"):
