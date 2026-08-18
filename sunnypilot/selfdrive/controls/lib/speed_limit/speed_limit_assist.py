@@ -90,7 +90,24 @@ class SpeedLimitAssist:
     self._distance = 0.
     self.state = SpeedLimitAssistState.disabled
     self._state_prev = SpeedLimitAssistState.disabled
-    self.pcm_op_long = CP.openpilotLongitudinalControl and CP.pcmCruise
+    # FusionPilot: `and CP_SP.pcmCruiseSpeed` -- THE THIRD CONDITION, and without it SLA demands a
+    # protocol this car does not need.
+    #
+    # `pcm_op_long` means "openpilot is braking BUT the car's own PCM owns the set speed", so SLA
+    # cannot move that number and instead rides below a fixed ceiling -- which is why
+    # `target_set_speed_conv` becomes `PCM_LONG_REQUIRED_MAX_SET_SPEED` below. That is the "set your
+    # speed to 70 for it to work" he reported twice, and asked, fairly: "why in God's green earth
+    # would I ever want to set my speed to 70 just to have it follow the speed limit?"
+    #
+    # He would not. The premise is false here. `CP.pcmCruise` is True on this car even under op
+    # long, but ICBM MOVES THE SET SPEED with button presses -- so the PCM is not the sole owner and
+    # the ceiling protocol is for a car this is not. `CP_SP.pcmCruiseSpeed` is exactly the flag that
+    # says so: False means something other than the PCM manages the setpoint.
+    #
+    # Same third-state problem as everything else under the passthrough. Checked rather than
+    # assumed on 2026-08-18: fixing the ICBM param alone leaves this True, because `pcmCruiseSpeed`
+    # appears nowhere in the original expression -- so the 70 would have survived that fix.
+    self.pcm_op_long = CP.openpilotLongitudinalControl and CP.pcmCruise and CP_SP.pcmCruiseSpeed
 
     self._plus_hold = 0.
     self._minus_hold = 0.

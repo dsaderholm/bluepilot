@@ -80,3 +80,41 @@ def test_a_still_cluster_still_releases(monkeypatch):
   """Unchanged behaviour with nothing moving at all -- the ordinary case for a car without ICBM."""
   s = _sla(monkeypatch, converging=False, changed=False)
   assert _run(s, int(DISABLED_GUARD_PERIOD / DT_MDL) + 10) == State.active
+
+
+def _pcm_op_long(op_long: bool, pcm_cruise: bool, pcm_cruise_speed: bool) -> bool:
+  """The shipped expression, modelled. Pinned to the source by the test below."""
+  return bool(op_long and pcm_cruise and pcm_cruise_speed)
+
+
+def test_icbm_moving_the_set_speed_means_no_ceiling_protocol():
+  """"Why in God's green earth would I ever want to set my speed to 70 just to have it follow the
+  speed limit?" He would not, and the protocol was never meant for this car.
+
+  `pcm_op_long` means "openpilot brakes but the PCM owns the set speed", so SLA cannot move that
+  number and instead rides below `PCM_LONG_REQUIRED_MAX_SET_SPEED` -- the 70. On this car
+  `CP.pcmCruise` is True even under op long, but ICBM MOVES THE SET SPEED with button presses, so
+  the premise does not hold. `CP_SP.pcmCruiseSpeed` False is exactly the statement that something
+  other than the PCM manages the setpoint.
+
+  Checked rather than assumed, 2026-08-18: `pcmCruiseSpeed` appeared NOWHERE in the original
+  expression, so fixing the ICBM param alone would have left the 70 in place. It is easy to believe
+  one root cause explains two symptoms; here it explained one."""
+  assert not _pcm_op_long(True, True, False), (
+    "SLA still demands the PCM ceiling protocol while ICBM is managing the set speed -- that is the "
+    "'set your speed to 70' with no way for him to want it")
+  # And the protocol must survive where it IS correct: op long braking, PCM owning the setpoint,
+  # nothing able to move it.
+  assert _pcm_op_long(True, True, True), "the PCM-long protocol was removed for cars that need it"
+  assert not _pcm_op_long(False, True, True), "not op long, so not this protocol"
+
+
+def test_the_real_pcm_op_long_matches_this_model():
+  """Pins the model above to the shipped line, so the two cannot drift apart silently."""
+  import inspect
+  from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit import speed_limit_assist as mod
+
+  src = inspect.getsource(mod.SpeedLimitAssist.__init__)
+  line = next(ln for ln in src.splitlines() if "self.pcm_op_long =" in ln)
+  for term in ("openpilotLongitudinalControl", "pcmCruise", "pcmCruiseSpeed"):
+    assert term in line, f"pcm_op_long no longer consults {term}: {line.strip()}"
