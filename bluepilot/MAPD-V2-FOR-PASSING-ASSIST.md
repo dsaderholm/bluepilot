@@ -216,3 +216,44 @@ motorwayLink, which is where the clean 0% was measured, so the deciding row come
 feature already declines. Its marginal value is on a two-lane road where we sit in the left lane, and
 that case is NOT measured here. Measure it before writing a gate, or the number that justified it
 will have come from somewhere the gate never runs.
+
+## HOW EVERYONE ELSE SOLVES RESTRICTED LANES: WITH A MAP. NOBODY USES PERCEPTION.
+
+Researched 2026-08-17, after every vehicle signal was measured dead. The point was to find the
+approach we had missed. There is not one, and that is the useful result.
+
+    Tesla          a NAVIGATION SETTING. "Use HOV Lanes" off means Navigate on Autopilot never
+                   routes through one, at any hour. It does not count occupants and it does not
+                   read the diamond. The strongest vision stack in the industry solves this
+                   from map data.
+    GM Super Cruise  LiDAR-surveyed HD maps, ~750,000 miles of North America, lane level.
+    Ford BlueCruise  curated "Blue Zones". The camera steers, but the MAP decides where the
+                   feature runs at all.
+
+**All three are MAP AS PERMISSION**, which is the model this fork deliberately rejects. So the
+conclusion is not that we are behind; it is that a vehicle-only answer to "may I enter this lane"
+does not exist in production anywhere, and `hov:lanes` is the OSM equivalent of what Tesla already
+reads from its nav data. **That makes issue 130 the correct ask rather than a consolation prize.**
+
+**AND IT NAMES THE TRADE EXACTLY.** BlueCruise's answer to a California express lane is that it does
+not do automatic lane changes there at all, because that road is not a Blue Zone. Ours works
+everywhere and cannot refuse that one lane. That is the same trade CLAUDE.md already records -- we
+give up the mapped-case ceiling to work on roads nobody surveyed -- showing up as a specific, named
+gap rather than as a general principle.
+
+### TWO CANDIDATE SIGNALS CHECKED AND ABSENT, both from the source rather than from search
+
+- **openpilot publishes NO lane line type.** `cereal/log.capnp` carries `laneLines`, `laneLineProbs`,
+  `laneLineStds`, `roadEdges`, `roadEdgeStds` and nothing else. `laneLineMeta` looks promising and is
+  not -- it is `leftY/rightY/leftProb/rightProb`, filled by `fill_lane_line_meta()` FROM the two
+  arrays above. A convenience summary, no new information.
+  **This is a real capability gap against production ADAS**, which routinely classifies
+  dashed / solid / double-solid; it is simply not what comma's model was trained to emit.
+- **The Ford camera publishes no lane data on CAN either.** Zero signals matching `Lane` in
+  `ford_lincoln_base_pt.dbc`. It computes lane geometry internally for LKA and keeps it. So the
+  retrofit Edge IPMA cannot supply what comma's model does not.
+
+**WHY LINE TYPE WAS THE PRIZE, and why it stays out of reach.** "Is the line to my left crossable"
+would have solved the California buffer, gore points at exits, and no-passing zones with ONE signal.
+It needs a model trained to emit it. That is not a fork-scale change, and it is the honest reason
+this line of work stops here rather than continuing.
