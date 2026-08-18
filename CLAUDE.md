@@ -1044,6 +1044,27 @@ COAST on the road. `OP STOP` in violet, from `carOutput.actuatorsOutput.accel` d
 subscribed, no new signal. Violet rather than another red, because it is a different AUTHOR and not
 a different amount of braking. Rendered before shipping, two new scenes in `preview_acc_status.py`.
 
+**RESUMING FROM A STOP WE AUTHORED IS HELD FOR THE DRIVER.** He asked how resume works and the
+chain turned out to end somewhere worth stopping:
+
+    controlsd.py:175   CC.cruiseControl.resume = enabled and CS.cruiseState.standstill
+                                                 and not longitudinalPlan.shouldStop
+
+`standstill` is Ford's own hold, `EngBrakeData.AccStopMde_D_Rq == 3`. So once the model judges the
+intersection clear, openpilot presses RESUME and **the car pulls away from a stop sign with no
+driver input**. That is upstream behaviour, not new -- but the override is what makes it REACHABLE
+on this car, because a standstill with cruise engaged has never existed here: three drives checked,
+**zero stopped-and-engaged frames**, since stock ACC cannot hold a stop without a lead.
+
+"Come to a complete stop" did not ask for "and then go when the model feels like it". So
+`resume_allowed` now holds a stop the OVERRIDE authored until he presses resume or the gas -- his own
+press never reaches this gate, so it is untouched. The no-lead branch used to mean only "the queue
+cleared, nothing to wait for"; it now has a second meaning and they needed separating.
+
+**Which branch he actually gets is unknown until a drive**: if Ford does not enter its hold mode
+without a lead, `standstill` stays false, resume never fires at all, and he re-engages by hand. That
+is the same unmeasured thing as whether Ford holds the stop -- one drive answers both.
+
 **And his own reason for the whole architecture, restated because it is the sharpest one:** *"the
 one other thing that always makes me prefer Ford ACC+ICBM over OP long is that it can COAST."* That
 is why the override is scoped to below 20 mph only -- it takes the part where coasting was never

@@ -154,3 +154,49 @@ def test_the_time_bound_is_expressed_in_SECONDS_at_the_rate_it_actually_ticks():
     f"off by {CarControllerParams.ACC_CONTROL_STEP * OVERRIDE_HZ / 100.0:.1f}x")
   assert MAX_ACTIVE_FRAMES == int(MAX_ACTIVE_S * OVERRIDE_HZ)
   assert MAX_ACTIVE_S <= 15.0, "well under drive A's 40 s is the entire point of this bound"
+
+
+# --- resuming from a stop WE authored ------------------------------------------------------------
+
+def test_a_stop_we_authored_is_not_resumed_from_automatically():
+  """`controlsd` sets cruiseControl.resume from `standstill and not shouldStop`, so once the model
+  judges an intersection clear the car would pull away with no driver input. That is upstream
+  behaviour, and the override is what makes it reachable on this car for the first time -- the
+  standstill state has never existed here, because stock ACC cannot hold a stop without a lead.
+
+  "Come to a complete stop" did not ask for "and then go when the model feels like it". Deciding an
+  intersection is clear is the side of the Level 2 line where the driver is responsible, and the
+  model alone is the cheapest evidence there is.
+  """
+  from opendbc.sunnypilot.car.ford.longitudinal_ext import LongitudinalExt
+
+  class FakeLead:
+    status = False
+    dRel = 0.0
+    vLead = 0.0
+
+  class FakeSM:
+    def __getitem__(self, _):
+      return type("_R", (), {"leadOne": FakeLead()})()
+
+  class Host:
+    resume_gate_enabled = True
+    resume_min_gap_m = 6.0
+    resume_min_lead_speed_ms = 1.0
+    resume_gate_blocking = False
+    stop_override_stopped_us = False
+
+  host = Host()
+  sm = FakeSM()
+
+  # No lead and no override stop: unchanged -- nothing to wait for.
+  assert LongitudinalExt.resume_allowed(host, sm) is True
+
+  # The same frame after WE stopped the car: held for the driver.
+  host.stop_override_stopped_us = True
+  assert LongitudinalExt.resume_allowed(host, sm) is False
+  assert host.resume_gate_blocking
+
+  # And the gate being off still means off -- it is his switch, not ours to ignore.
+  host.resume_gate_enabled = False
+  assert LongitudinalExt.resume_allowed(host, sm) is True

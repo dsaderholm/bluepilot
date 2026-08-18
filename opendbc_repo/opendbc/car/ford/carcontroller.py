@@ -119,6 +119,9 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
     self.stop_override_enabled = self.params.get_bool("StockAccStopOverride")
     self.stop_override_failed = False
     self.stop_override_last = False
+    # Latched when the override brought the car to a stop, and cleared once it is moving again.
+    # `resume_allowed` reads it: a stop WE authored is not resumed from automatically.
+    self.stop_override_stopped_us = False
     # Note: main_on_last, lkas_enabled_last, steer_alert_last, lead_distance_bars_last,
     # distance_bar_frame are initialized by HudExt.__init__() above
 
@@ -333,6 +336,13 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
             op_stopping=bool(stopping),
             lead_distance=lead_d,
           )
+          # Latch that THIS stop was ours, so the resume gate knows not to pull away from it on the
+          # model's say-so. Cleared as soon as the car is moving again.
+          if override and float(CS.out.vEgo) < 0.5:
+            self.stop_override_stopped_us = True
+          elif float(CS.out.vEgo) > 1.5:
+            self.stop_override_stopped_us = False
+
           if override != self.stop_override_last:
             self.stop_override_last = override
             cloudlog.warning("stop override %s: %s", "ON" if override else "off",
