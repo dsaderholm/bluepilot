@@ -1073,8 +1073,24 @@ Stopped WITHOUT the hold means Ford is free to go, and raising the set speed the
 lurch the floor release existed to avoid.
 
 **Which branch he actually gets is unknown until a drive**: if Ford does not enter its hold mode
-without a lead, `standstill` stays false, resume never fires at all, and he re-engages by hand. That
-is the same unmeasured thing as whether Ford holds the stop -- one drive answers both.
+without a lead, `standstill` stays false, resume never fires at all, and he re-engages by hand.
+
+**AND HIS OWN EXPERIENCE NARROWS IT, 2026-08-18:** *"when I use OP long fully, it does come to a
+complete stop."* That is worth more than the log measurement it corrects. openpilot's authored
+ACCDATA CAN stop this car -- the ABS accepts the brake command to zero -- and the override sends
+exactly that frame, `create_acc_msg`, for a bounded window instead of a whole drive. **So the
+stopping mechanism is proven and only the handoff back to Ford is new.** If it also HOLDS there,
+`AccStopMde_D_Rq` is reachable and the standstill branch is the live one.
+
+**The "zero stopped-and-engaged frames on this car" measurement was true and did not mean what it
+was used for.** Two of the three routes had the passthrough forwarding Ford's command 91% of the
+time, and Ford will not stop without a lead -- so the state was absent because nothing tried to
+create it, not because it is unreachable. Absence in a log is evidence about the log's conditions
+first. Same shape as the 70.6% denominator error two entries above.
+
+**What is STILL genuinely unknown is narrower and it is the right one:** under full op long there is
+no forwarding, so there is no contradiction and the camera has nothing to disagree with. The
+override contradicts by construction. That remains the only thing the bound exists for.
 
 **And his own reason for the whole architecture, restated because it is the sharpest one:** *"the
 one other thing that always makes me prefer Ford ACC+ICBM over OP long is that it can COAST."* That
