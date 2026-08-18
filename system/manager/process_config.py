@@ -224,7 +224,12 @@ procs += [
   PythonProcess("backup_manager", "sunnypilot.sunnylink.backups.manager", and_(only_offroad, sunnylink_ready_shim)),
 
   # mapd
-  NativeProcess("mapd", Paths.mapd_root(), ["bash", "-c", f"{MAPD_PATH} > /dev/null 2>&1"], mapd_ready),
+  # FusionPilot: `exec`, so stopping this actually stops it. Without it bash FORKS the binary and
+  # manager kills only the wrapper -- observed on the device 2026-08-18 with MapdV2 switched to 2:
+  # managerState read `mapd running=False pid=0` while ps still showed the daemon alive at the same
+  # age as mapd_v2. The gate that stops v1 was working; the process just outlived being stopped, so
+  # the two-daemon load survived until a reboot. `exec` makes bash replace itself with the binary.
+  NativeProcess("mapd", Paths.mapd_root(), ["bash", "-c", f"exec {MAPD_PATH} > /dev/null 2>&1"], mapd_ready),
   # FusionPilot: mapd v2, launched exactly like v1 -- through bash, with stdout and stderr discarded.
   #
   # An earlier version of this line ran the binary bare, under a comment claiming its output "goes to
@@ -237,7 +242,7 @@ procs += [
   # every other field -- is published on mapdOut and logged into the route, which is the point of the
   # migration. If its stdout is ever wanted, raise the log level through MapdSettings and run it by
   # hand rather than leaving it writing for every drive.
-  NativeProcess("mapd_v2", Paths.mapd_root(), ["bash", "-c", f"{MAPD_V2_PATH} > /dev/null 2>&1"], mapd_v2_ready),
+  NativeProcess("mapd_v2", Paths.mapd_root(), ["bash", "-c", f"exec {MAPD_V2_PATH} > /dev/null 2>&1"], mapd_v2_ready),  # exec: see mapd above
   PythonProcess("mapd_manager", "sunnypilot.mapd.mapd_manager", always_run),
 
   # locationd
