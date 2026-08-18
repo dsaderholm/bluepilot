@@ -203,7 +203,17 @@ class UIStateSP:
       self.params.remove("AlphaLongitudinalEnabled")
 
     # No longitudinal control: no experimental mode or DEC
-    if not has_long:
+    #
+    # FusionPilot: `CP is not None`, third instance of the same shape and the one with the most to
+    # lose. `has_long` reads False both when longitudinal is genuinely off AND when CarParams has
+    # simply not been read, so on any boot that reaches here before `CarParamsPersistent` loads,
+    # `ExperimentalMode` is DELETED -- and the stop override cannot arm without it (`is_e2e` gates
+    # `modelV2.action.shouldStop` on exactly that param).
+    #
+    # Masked on his car today by load order, same as the three below. Found by generalizing the
+    # fifth-gate test to every `remove()` in this function rather than to the one that had bitten:
+    # it named these two immediately, and neither had ever been looked at.
+    if CP is not None and not has_long:
       self.params.remove("ExperimentalMode")
       self.params.remove("DynamicExperimentalControl")
 
@@ -253,7 +263,19 @@ class UIStateSP:
       self.has_icbm = False
 
     # Cruise features requiring longitudinal or ICBM
-    if not (has_long or self.has_icbm):
+    #
+    # FusionPilot: `CP is not None` -- the SAME delete-on-missing-evidence shape as the ICBM gate
+    # directly above, on three more PERSISTENT params, found reviewing that fix.
+    #
+    # Both terms go False when CarParams has not been read, so on a device that has never seen a car
+    # this deletes `CustomAccIncrementsEnabled`, `SmartCruiseControlVision` and
+    # `SmartCruiseControlMap` -- two of which are his curve controllers.
+    #
+    # It is MASKED on his car today, and only incidentally: `CP` is populated before `CP_SP`, so
+    # `has_long` is already True by the time this line runs. That same ordering is exactly why the
+    # ICBM param DID die -- its branch fires on `CP_SP is None` alone. Relying on load order to keep
+    # a setting alive is not a guarantee, it is a coincidence that held.
+    if CP is not None and not (has_long or self.has_icbm):
       self.params.remove("CustomAccIncrementsEnabled")
       self.params.remove("SmartCruiseControlVision")
       self.params.remove("SmartCruiseControlMap")

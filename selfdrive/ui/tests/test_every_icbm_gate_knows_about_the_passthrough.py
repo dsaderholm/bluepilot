@@ -193,3 +193,55 @@ def _in_else(if_node, target):
       if sub is target:
         return True
   return False
+
+
+def test_no_persistent_setting_is_deleted_on_missing_carparams():
+  """Generalizes the fifth gate: NOTHING in `_enforce_constraints` may delete a stored setting just
+  because CarParams has not been read yet.
+
+  The ICBM gate was one instance. Four lines below it, `if not (has_long or self.has_icbm)` removes
+  three more PERSISTENT params -- `CustomAccIncrementsEnabled`, `SmartCruiseControlVision` and
+  `SmartCruiseControlMap`, two of them his curve controllers -- and both terms go False when
+  CarParams is unread.
+
+  That one was MASKED on his car by load order (`CP` populates before `CP_SP`, so `has_long` is
+  already True), which is a coincidence rather than a guarantee -- and the same ordering is exactly
+  why the ICBM param DID die. So this asserts on the shape, for every removal in the function, not
+  on the two known instances."""
+  src = (REPO / "selfdrive" / "ui" / "sunnypilot" / "ui_state.py").read_text(encoding="utf-8")
+  tree = ast.parse(src)
+  for node in ast.walk(tree):
+    for child in ast.iter_child_nodes(node):
+      child.parent = node
+
+  fn = next(n for n in ast.walk(tree)
+            if isinstance(n, ast.FunctionDef) and n.name == "_enforce_constraints")
+
+  offenders = []
+  for node in ast.walk(fn):
+    if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "remove"):
+      continue
+    # Collect every enclosing condition, plus any local binding they depend on.
+    conds, cur = [], getattr(node, "parent", None)
+    while cur is not None and cur is not fn:
+      if isinstance(cur, ast.If):
+        conds.append(ast.unparse(cur.test))
+      cur = getattr(cur, "parent", None)
+    names = set()
+    for c in conds:
+      names |= {n.id for n in ast.walk(ast.parse(c, mode="eval")) if isinstance(n, ast.Name)}
+    for n2 in ast.walk(fn):
+      if isinstance(n2, ast.Assign):
+        for t in n2.targets:
+          if isinstance(t, ast.Name) and t.id in names:
+            conds.append(ast.unparse(n2.value))
+    joined = " ;; ".join(conds)
+    # A removal is safe when SOMETHING in its guard chain establishes that CarParams was read.
+    if not ("CP is not None" in joined or "CP_SP is not None" in joined):
+      arg = next((a.value for a in node.args if isinstance(a, ast.Constant)), "?")
+      offenders.append(f"line {node.lineno}: removes {arg!r} guarded only by [{joined}]")
+
+  assert not offenders, (
+    "a stored setting is deleted without establishing that CarParams was ever read, so it dies on "
+    "any boot where the params are not loaded yet:\n  " + "\n  ".join(offenders))
