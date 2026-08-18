@@ -142,3 +142,54 @@ def test_no_icbm_gate_keys_on_openpilot_longitudinal_alone():
     "ICBM is cleared on openpilot longitudinal alone, so turning ICBM on under the stock-ACC "
     "passthrough deletes the param and greys out every setting under it:\n  " +
     "\n  ".join(offenders))
+
+
+def test_a_missing_carparams_does_not_destroy_the_setting():
+  """"Not known yet" is not "not supported". THE FIFTH GATE.
+
+  `ui_state.CP_SP` is None until `CarParamsSPPersistent` has been read -- every UI start, before any
+  car has been seen, and any frame that read is briefly unavailable. The `else` branch there deleted
+  `IntelligentCruiseButtonManagement` outright, so the UI destroyed the setting on essentially every
+  boot. `card` then read it as False at car init and never cleared `pcmCruiseSpeed`.
+
+  Both of his 2026-08-18 complaints came out of that one flag:
+    - `v_cruise` mirrors the dash instead of being openpilot's, so MAX and the ICBM number are the
+      same number and there is no separate max speed to move
+    - `pcm_op_long` goes True, so SLA runs the PCM machine that demands the set speed sit at
+      `PCM_LONG_REQUIRED_MAX_SET_SPEED` -- the "set your speed to 70 for it to work"
+
+  Verified on the device: the param file read `1` earlier in the session and was GONE afterwards.
+
+  Removing a PERSISTENT param is not a way to express "I have no evidence". Report unavailable for
+  display; leave the stored value alone."""
+  src = (REPO / "selfdrive" / "ui" / "sunnypilot" / "ui_state.py").read_text(encoding="utf-8")
+  tree = ast.parse(src)
+  for node in ast.walk(tree):
+    for child in ast.iter_child_nodes(node):
+      child.parent = node
+
+  for node in ast.walk(tree):
+    if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "remove"):
+      continue
+    if not any(isinstance(a, ast.Constant) and a.value == PARAM for a in node.args):
+      continue
+    # Walk up: any enclosing `if` whose test is a CP_SP presence check means this removal fires on
+    # missing evidence rather than on a real answer.
+    cur = getattr(node, "parent", None)
+    while cur is not None:
+      if isinstance(cur, ast.If):
+        cond = ast.unparse(cur.test)
+        assert not ("CP_SP is None" in cond or "CP_SP is not None" in cond and _in_else(cur, node)), (
+          "ICBM is deleted when CarParamsSP has not been read yet -- that is every UI start, so the "
+          "setting is destroyed on boot and card never clears pcmCruiseSpeed")
+      cur = getattr(cur, "parent", None)
+
+
+def _in_else(if_node, target):
+  """True when `target` sits in the `else` of `if_node`."""
+  for n in if_node.orelse:
+    for sub in ast.walk(n):
+      if sub is target:
+        return True
+  return False

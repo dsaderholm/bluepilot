@@ -228,7 +228,28 @@ class UIStateSP:
         self.params.remove("IntelligentCruiseButtonManagement")
         self.has_icbm = False
     else:
-      self.params.remove("IntelligentCruiseButtonManagement")
+      # NO CarParamsSP IS "NOT KNOWN YET", NOT "NOT SUPPORTED". THE FIFTH GATE, and the one that
+      # actually deleted his setting.
+      #
+      # `CP_SP` is None until `CarParamsSPPersistent` has been read -- every UI start, before a car
+      # has ever been seen, and any frame where that param is briefly unreadable. Deleting the
+      # setting there means the UI removes it on essentially every boot, so `card` reads
+      # `IntelligentCruiseButtonManagement` as FALSE at car init and never clears `pcmCruiseSpeed`.
+      #
+      # What that costs, and it is both of his 2026-08-18 complaints from ONE flag:
+      #   - `v_cruise` stops being openpilot's and mirrors the dash, so MAX and the ICBM number are
+      #     the SAME number -- "it's still having me change the ICBM speed instead". There is no
+      #     separate max speed to move.
+      #   - `pcm_op_long` becomes True, so Speed Limit Assist runs the PCM state machine, which
+      #     requires the set speed to sit at `PCM_LONG_REQUIRED_MAX_SET_SPEED`. That is the "set
+      #     your speed to 70 for it to work" -- a protocol for cars that have no button injection,
+      #     reached because this car was reporting it had none.
+      #
+      # Verified on the device: the file was `1` earlier in the session and simply GONE afterwards,
+      # with `icbm_enabled=False` while every other condition held.
+      #
+      # So: report unavailable for display, never destroy the stored setting on missing evidence.
+      # Removing a PERSISTENT param is not a way to express "I do not know yet".
       self.has_icbm = False
 
     # Cruise features requiring longitudinal or ICBM
