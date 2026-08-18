@@ -5,7 +5,7 @@ THE FIRST DRIVE IS AN EXPERIMENT AND THIS IS ITS READOUT. Five questions, and ev
 unanswered as of 2026-08-18:
 
   1. DID IT ARM AT ALL? It needs `dec.hasSlowDown`, openpilot's plan committed to stopping, below
-     25 mph, and no radar lead within 60 m. Any one of those missing and it never fires -- and from
+     20 mph, and no radar lead within 60 m. Any one of those missing and it never fires -- and from
      the seat that is indistinguishable from the car simply stopping at 20 as it always did.
   2. DID IT COMPLETE, OR HIT THE TIME BOUND? 8 s is a guess sized against drive A's 40 s latch. A
      stop that keeps hitting the bound is a number to change, not a feature that failed.
@@ -24,7 +24,7 @@ from the camera's while openpilot longitudinal is active. That is the same test 
 violet OP STOP pill, and it is honest -- what we put on the wire disagreeing with what Ford asked
 for IS openpilot having taken the command. It does not separate the override from a passthrough
 FALLBACK, so the report splits them by speed and duration, which is what actually distinguishes
-them: a fallback is milliseconds anywhere, an override is seconds below 25 mph.
+them: a fallback is milliseconds anywhere, an override is seconds below 20 mph.
 
 USAGE, on the device:
 

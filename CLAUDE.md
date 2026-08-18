@@ -1023,7 +1023,8 @@ openpilot's command instead of Ford's for these few seconds -- rather than a sec
 path that would have to re-learn all of that. Keep it that way.
 
     fires when   the model is planning a stop (dec.hasSlowDown), openpilot's plan has COMMITTED
-                 (longControlState == stopping), below 25 mph, and NO radar lead within 60 m
+                 (longControlState == stopping), at or below 20 mph -- Ford's own set-speed floor, so the
+                 override starts exactly where the set speed runs out -- and NO radar lead within 60 m
     ends on      stopped | lead appeared | plan stopped stopping | time bound | long inactive
     then         SPENT -- refuses to re-arm until hasSlowDown drops, so a stop that does not
                  complete cannot re-trigger every frame

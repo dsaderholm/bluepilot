@@ -21,6 +21,7 @@ from opendbc.sunnypilot.car.ford.stop_override import (
   ENTER_SPEED,
   LEAD_DISQUALIFIES_M,
   MAX_ACTIVE_FRAMES,
+  MAX_ACTIVE_S,
   MPH_TO_MS,
   FordStopOverride,
 )
@@ -246,3 +247,45 @@ def test_the_stopped_latch_must_be_edge_triggered():
     "rather than testing last_result on its own")
   # And the stale string is still sitting there, which is why the edge is the only safe test.
   assert so.last_result == "stopped"
+
+
+def test_the_entry_speed_is_reachable_within_the_time_bound():
+  """ENTER_SPEED and MAX_ACTIVE_S are one decision, and they were set independently.
+
+  The bound answers drive A: 8 s, five times under the ~40 s of sustained contradiction that latched
+  the camera. The entry speed answered a different question -- where the set speed stops being able
+  to express the request. Nobody checked they agreed, and at 25 mph they did not:
+
+      from 25 mph   1.5 m/s^2 -> 7.5 s    1.2 -> 9.3 s    1.0 -> 11.2 s
+      from 20 mph   1.5 m/s^2 -> 6.0 s    1.2 -> 7.5 s    1.0 ->  8.9 s
+
+  openpilot's e2e stops run about 1.0-1.5 m/s^2, so 25 put the LIKELY deceleration over the bound.
+  A stop that runs out of time hands back mid-stop while Ford's set speed is still 20 -- so the car
+  stops braking and accelerates toward 20 short of the line.
+
+  The bound is not the thing to relax: it is the only number here sized against a measured failure.
+  So the entry speed is what has to fit inside it. Asserted at 1.2 m/s^2, comfortably inside the
+  range openpilot actually plans, so this goes red if either constant drifts back out of agreement.
+  """
+  typical_decel = 1.2   # m/s^2, mid-range for an e2e stop
+  seconds_needed = ENTER_SPEED / typical_decel
+  assert seconds_needed <= MAX_ACTIVE_S, (
+    f"a {typical_decel} m/s^2 stop from the entry speed needs {seconds_needed:.1f} s and the bound "
+    f"is {MAX_ACTIVE_S:.1f} s -- the override would hand back mid-stop on an ordinary approach")
+
+
+def test_the_override_starts_where_fords_floor_ends():
+  """ENTER_SPEED is Ford's set-speed floor, and that is the point rather than a coincidence.
+
+  `get_minimum_set_speed()` is 20 mph and ICBM walks the set speed down to it, so above that Ford is
+  still fully able to carry the request and the division of labour says leave it there. Arming
+  higher spends the time bound on deceleration Ford is doing anyway.
+
+  Kept honest against `unconfirmed_lead.ACC_FLOOR_MS` rather than a second 20.0 literal -- these are
+  the same physical limit named in two files, and a drift between them would open a speed band where
+  neither ICBM nor the override is acting."""
+  from openpilot.sunnypilot.selfdrive.controls.lib.unconfirmed_lead import ACC_FLOOR_MS
+
+  assert abs(ENTER_SPEED - ACC_FLOOR_MS) < 1e-6, (
+    f"the override arms at {ENTER_SPEED / MPH_TO_MS:.1f} mph but Ford's floor is "
+    f"{ACC_FLOOR_MS / MPH_TO_MS:.1f} mph -- one of them moved without the other")

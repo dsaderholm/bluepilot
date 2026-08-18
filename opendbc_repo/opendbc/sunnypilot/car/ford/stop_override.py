@@ -74,7 +74,30 @@ MPH_TO_MS = CV.MPH_TO_MS
 
 # Above this the set speed can still do the work, so ICBM should -- Ford picks coast vs engine-brake
 # vs friction there and that blend is the thing the whole division of labour exists to keep.
-ENTER_SPEED = 25.0 * MPH_TO_MS
+#
+# LOWERED 25 -> 20 on 2026-08-18, at his instruction, because 25 was inconsistent with the time
+# bound below and the arithmetic says so:
+#
+#     from 25 mph   2.0 m/s^2 -> 5.6 s    1.5 -> 7.5 s    1.2 -> 9.3 s X   1.0 -> 11.2 s X
+#     from 20 mph   2.0 m/s^2 -> 4.5 s    1.5 -> 6.0 s    1.2 -> 7.5 s     1.0 ->  8.9 s X
+#
+# openpilot's e2e stops run about 1.0-1.5 m/s^2, so arming at 25 put the LIKELY case over the 8 s
+# bound rather than the exceptional one. At 20 the feature needs 1.12 m/s^2 instead of 1.4 to
+# finish in time. It does not remove the failure -- a 1.0 m/s^2 stop still runs out -- it moves the
+# threshold below where openpilot usually sits.
+#
+# It also stops the override burning bound-time on deceleration FORD IS ALREADY DOING. ICBM walks
+# the set speed to 20 on the approach; arming at 25 meant the first seconds of the override ran
+# while Ford was still perfectly capable of the request. Now it takes over where Ford genuinely
+# stops: at its own floor.
+#
+# THE COST, and it is the one to watch on the first drive: this is now exactly Ford's set-speed
+# floor, so the override arms only once the car is at or under the speed Ford is holding it at. If
+# Ford settles a little high -- holding 20.4 mph steady -- `v_ego` never crosses this and the
+# override never arms. The symptom is the car sitting at 20 through the intersection with no violet
+# pill, which looks identical to the feature not existing. A mph or two of margin here would remove
+# that failure for about 0.4 s of extra bound-time; see bp_stop_override.py's question 1 first.
+ENTER_SPEED = 20.0 * MPH_TO_MS
 
 # Stopped. Ford's own AccStopStat handling takes it from here, and holding a brake command against a
 # stationary car is exactly how the park brake got involved on drive A.
