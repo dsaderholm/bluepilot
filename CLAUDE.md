@@ -946,6 +946,23 @@ Two consequences for building it:
   continuous cancel. That is the instrument the first override drive is read with, and it should be
   treated as the experiment's readout rather than as an error nobody expects.
 
+**THE ANSWER TO "WHAT DO I TURN ON" IS TWO TOGGLES, AND THE UI NOW SAYS SO.** He asked on
+2026-08-18 and it was a fair complaint -- three plausible candidates, no guidance:
+
+    openpilot Longitudinal Control (alpha)   ON     <- permission: opens the relay, puts ACCDATA in
+                                                       panda's TX list
+    Use Ford's Own ACC Commands              ON     <- who authors it: Ford
+    Dynamic Experimental Control                    <- irrelevant
+    Experimental Mode                               <- irrelevant
+
+DEC and Experimental Mode choose how OPENPILOT computes acceleration, which is exactly the job
+handed to Ford, so under the passthrough they steer a plan that is discarded. They are not wrong to
+leave on -- openpilot's plan does drive the ~9% fallback -- they simply do not answer his question.
+
+Two UI changes so the state is not reachable by accident: **the passthrough toggle is disabled when
+op long is off** (it authors nothing in that state, so switching it on would silently do nothing),
+and its description now carries the whole answer including the two toggles that do not matter.
+
 **What it costs, stated plainly.** Every ACC command would route through openpilot, so a bug produces
 NO BRAKING rather than a wrong set speed -- a real step up in blast radius from button injection.
 Panda's existing `ACCDATA` checks still apply. And it is op long as far as the car and the safety
