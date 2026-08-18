@@ -93,7 +93,7 @@ class MapdSettingsSync:
     for key, (leaf, scale) in _FLOAT_SETTINGS.items():
       try:
         raw = self.params.get(key, return_default=True)
-      except Exception:  # noqa: BLE001 -- an unknown key must not take mapd_manager down
+      except Exception:
         continue
       if raw is None:
         continue
@@ -155,7 +155,7 @@ class MapdSettingsSync:
         try:
           self.params.put("MapdSettings", blob)
           self._last_written = raw
-        except Exception:  # noqa: BLE001
+        except Exception:
           pass
 
       changed = False
@@ -181,7 +181,7 @@ class MapdSettingsSync:
 
       if changed:
         self._save()
-    except Exception:  # noqa: BLE001
+    except Exception:
       # mapd_manager also runs the live-map source and the OSM cleanup. A settings bridge must never
       # be the reason either of those stops.
       cloudlog.exception("mapd settings: sync failed")

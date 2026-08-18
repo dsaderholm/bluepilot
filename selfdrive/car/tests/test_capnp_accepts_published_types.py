@@ -16,6 +16,7 @@ dies. So this one BUILDS THE REAL MESSAGE and assigns real numpy values into it.
 """
 from __future__ import annotations
 
+import capnp
 import numpy as np
 import pytest
 
@@ -30,7 +31,10 @@ def _dec():
 def test_a_numpy_bool_is_refused_by_capnp():
   """The failure itself, pinned. If pycapnp ever starts accepting numpy.bool this test tells us the
   cast is no longer load-bearing rather than silently becoming decoration."""
-  with pytest.raises(Exception):
+  # The specific exception, not a bare `Exception`: a blind raises() here would also be satisfied by
+  # an AttributeError from `hasSlowDown` being renamed out from under this test, which is the exact
+  # way a pinned-failure test rots into decoration.
+  with pytest.raises(capnp.KjException):
     _dec().hasSlowDown = np.bool_(False)
 
 
