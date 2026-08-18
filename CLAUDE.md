@@ -989,6 +989,17 @@ where the set speed cannot ask; and on ramps steep enough to need real braking r
 else the set speed is STRICTLY BETTER, because Ford's answer to "be doing 45 shortly" is a blend we
 do not have to write and could not easily match.
 
+**THERE ARE THREE GATES, NOT TWO, AND THE THIRD IS THE SETTINGS SCREEN.** Found 2026-08-18 from
+"ICBM was grayed out" -- after both `interfaces.py` gates were already fixed. `cruise.py`'s
+`_update_state` does not merely disable the toggle under op long, it calls
+`params.remove("IntelligentCruiseButtonManagement")` **on every render of the page**. So opening
+settings deleted the setting. That is why re-enabling ICBM mid-drive never stuck and why the device
+kept reading `unset`. Now gated on the same `op_long_drives` condition.
+
+**The lesson: when a param is being deleted, grep for every `remove()` of it before concluding you
+have found the one.** Two of the three were in the file that decides whether the feature RUNS; the
+third was in the file that decides whether he can SEE it, and only the screen could report it.
+
 **DONE, 2026-08-18: `_op_long_drives()` in `sunnypilot/selfdrive/car/interfaces.py`.** Both gates now
 ask whether op long DRIVES the car rather than whether it is merely on -- with `StockAccPassthrough`
 set, Ford is still authoring the command, so ICBM stays. It also fixes something that bit on drive A

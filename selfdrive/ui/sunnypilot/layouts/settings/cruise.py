@@ -499,7 +499,17 @@ class CruiseLayout(Widget):
       has_icbm = ui_state.has_icbm
       has_long = ui_state.has_longitudinal_control
 
-      if ui_state.CP_SP.intelligentCruiseButtonManagementAvailable and not has_long:
+      # FusionPilot: THE THIRD GATE. `interfaces.py` has two that decide whether ICBM runs; this one
+      # decides whether he can even SEE the toggle -- and it does not merely disable it, it REMOVES
+      # the param, on every render of this page. So with op long on, the setting was deleted each
+      # time he opened settings, which is why re-enabling it mid-drive never stuck and why the
+      # device read `unset` afterwards. Fixing the two in interfaces.py was not enough and the
+      # screen said so on 2026-08-18: "ICBM was grayed out".
+      #
+      # Same third state as `_op_long_drives`: under the stock-ACC passthrough Ford still authors
+      # the command and the set speed still governs, so ICBM is meaningful and must stay reachable.
+      op_long_drives = has_long and not ui_state.params.get_bool("StockAccPassthrough")
+      if ui_state.CP_SP.intelligentCruiseButtonManagementAvailable and not op_long_drives:
         self.icbm_toggle.action_item.set_enabled(ui_state.is_offroad())
         self.icbm_toggle.set_description(tr(ICBM_DESC))
       else:
@@ -507,7 +517,7 @@ class CruiseLayout(Widget):
         self.icbm_toggle.action_item.set_enabled(False)
 
         long_desc = ICMB_UNAVAILABLE
-        if has_long:
+        if op_long_drives:
           if ui_state.CP.alphaLongitudinalAvailable:
             long_desc += " " + ICMB_UNAVAILABLE_LONG_AVAILABLE
           else:

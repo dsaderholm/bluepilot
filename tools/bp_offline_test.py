@@ -68,6 +68,7 @@ DEFAULT_TARGETS = [
   # That is also how test_settings_recommend_defaults.py sat here unrun on the day it was written:
   # the suite total did not move and nothing said why. test_bp_tests_are_registered guards it now.
   "selfdrive/ui/tests/test_settings_fit.py",
+  "selfdrive/ui/tests/test_icbm_toggle_survives_passthrough.py",
   "selfdrive/ui/tests/test_settings_recommend_defaults.py",
   "selfdrive/ui/tests/test_readme_is_built.py",
   "selfdrive/ui/tests/test_sunnylink_settings_complete.py",
