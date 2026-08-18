@@ -309,7 +309,28 @@ class CarStateExt:
     # When mainCruise enables cruise, also emit setCruise to set speed to current speed
     # This restores the old behavior where turning on cruise also sets it to current speed
     # Handle both immediate enable (same frame) and delayed enable (next frame)
-    if cruise_just_enabled and (main_cruise_just_pressed or self.main_cruise_pressed_recently):
+    # FusionPilot: AND NOT WHEN ANOTHER BUTTON IS WHAT ENGAGED IT.
+    #
+    # `main_cruise_pressed_recently` is sticky and had no bound at all -- set on any MAIN press and
+    # cleared only once cruise actually came on. So MAIN pressed early in a drive, then engaging
+    # later with SET- or RES+, synthesized a `setCruise` on top of the real event. And `setCruise`
+    # is the one button meaning that CLEARS THE DRIVER'S HOLD and hands the speed to SLA.
+    #
+    # That is his report: "I adjust my speed with +/- and it changes the ICBM little speed number,
+    # not the max". The press created a hold and the synthesized setCruise discarded it in the same
+    # frame, so the dash moved and MAX did not. Measured on route 389: one raw SET- edge with cruise
+    # on produced BOTH `decelCruise` and `setCruise`.
+    #
+    # The synthesis itself is right and stays -- MAIN alone should engage at the current speed. It
+    # just must not fire when the driver engaged with a button that carries its own meaning.
+    engaged_by_another_button = any(
+      e.pressed and e.type in (structs.CarState.ButtonEvent.Type.setCruise,
+                               structs.CarState.ButtonEvent.Type.decelCruise,
+                               structs.CarState.ButtonEvent.Type.accelCruise,
+                               structs.CarState.ButtonEvent.Type.resumeCruise)
+      for e in button_events)
+    if cruise_just_enabled and not engaged_by_another_button \
+       and (main_cruise_just_pressed or self.main_cruise_pressed_recently):
       set_cruise_event = structs.CarState.ButtonEvent.new_message()
       set_cruise_event.type = structs.CarState.ButtonEvent.Type.setCruise
       set_cruise_event.pressed = True
