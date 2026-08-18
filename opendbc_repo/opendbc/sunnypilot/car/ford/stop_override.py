@@ -64,7 +64,13 @@ does not complete cannot re-trigger every frame and turn a bounded override into
 """
 from __future__ import annotations
 
-MPH_TO_MS = 0.44704
+# The opendbc-layer conversion, the same one ford/carstate.py and ford/interface.py use. This file
+# had its own 0.44704 literal, which is a second definition of the constant that scopes ENTER_SPEED
+# against `unconfirmed_lead.py`'s ACC_FLOOR_MS -- two literals for one relationship can drift, and
+# the drift would be silent because both would still look about right.
+from opendbc.car.common.conversions import Conversions as CV
+
+MPH_TO_MS = CV.MPH_TO_MS
 
 # Above this the set speed can still do the work, so ICBM should -- Ford picks coast vs engine-brake
 # vs friction there and that blend is the thing the whole division of labour exists to keep.
@@ -134,10 +140,11 @@ class FordStopOverride:
     # having stopped: a stop that gets abandoned half way must not be able to fire again on the
     # same approach.
     if not has_slow_down:
-      self.spent = False
       if self.active:
         self._end("model stopped asking")
-        self.spent = False
+      # After `_end`, not before: `_end` sets spent=True, so an assignment ahead of it is dead and
+      # reads as though one of the two paths needed it.
+      self.spent = False
       return False
 
     lead_close = 0.0 < lead_distance < LEAD_DISQUALIFIES_M

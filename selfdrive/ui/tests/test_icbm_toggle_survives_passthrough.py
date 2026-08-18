@@ -59,3 +59,40 @@ def test_the_param_removal_is_reachable_only_when_op_long_actually_drives():
     assert "op_long_drives" in guard, (
       f"the removal at line {lineno} is guarded by `{guard}` -- it deletes his ICBM setting "
       "whenever op long is on, including under the passthrough where ICBM still works")
+
+
+def test_the_stop_override_toggle_needs_the_passthrough():
+  """The passthrough toggle was gated on op long so a useless state would be unreachable; its
+  dependent was left ungated, which is half a fix.
+
+  With the passthrough OFF, openpilot already authors every ACCDATA frame, so the override selects a
+  command that was going out anyway -- the toggle changes nothing at all, and there is no way to
+  tell that from the override failing to arm. Caught in review, 2026-08-18."""
+  src = _source()
+  assert "stock_acc_stop_override.action_item.set_enabled" in src, (
+    "the stop override toggle is never enabled or disabled, so it is always reachable")
+  # The passthrough must be in THIS call's own argument, not merely somewhere nearby. The first
+  # version of this assertion took a 400-character window and passed against a mutant that dropped
+  # the term entirely -- the description branch below it mentions `passthrough_on` too, so the
+  # window found the word without the gate existing. Read to the closing paren instead.
+  i = src.index("stock_acc_stop_override.action_item.set_enabled")
+  expr = src[i:src.index("))", i) + 2]
+  assert "passthrough_on" in expr or "StockAccPassthrough" in expr, (
+    "the stop override toggle does not check the passthrough, without which it does nothing")
+
+
+def test_the_op_stop_readout_is_gated_on_openpilot_longitudinal():
+  """`self.accel` on the carcontroller is assigned ONLY inside the op-long ACCDATA block, so with op
+  long off it is 0.0 for the whole drive while accAccelRequest carries Ford's real brake total.
+  Ungated, every ordinary ACC brake application past the deadband read as OP STOP -- on the mode he
+  drives nearly all the time."""
+  import pathlib
+  hud = (pathlib.Path(__file__).resolve().parents[3] / "selfdrive" / "ui" / "bp" / "onroad" /
+         "hud_renderer_bp.py").read_text(encoding="utf-8")
+  i = hud.index("OP_AUTHORING_DELTA")
+  # the comparison itself, not the constant definition
+  cmp_site = hud[hud.index("abs(ours - bls.accAccelRequest)") - 200:][:300]
+  assert "has_longitudinal_control" in cmp_site, (
+    "the OP STOP comparison does not check that openpilot longitudinal is on, so it fires whenever "
+    "Ford brakes with op long off")
+  assert i > 0

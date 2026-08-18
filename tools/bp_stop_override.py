@@ -106,13 +106,13 @@ def main() -> int:
       continue
     try:
       lr = LogReader(p)
-    except Exception:  # noqa: BLE001
+    except Exception:
       continue
 
     for m in lr:
       try:
         w = m.which()
-      except Exception:  # noqa: BLE001
+      except Exception:
         continue
       t = m.logMonoTime / 1e9
       if t0 is None or t < t0:
@@ -134,7 +134,7 @@ def main() -> int:
         try:
           if m.longitudinalPlanSP.dec.hasSlowDown:
             slowdown_frames += 1
-        except Exception:  # noqa: BLE001
+        except Exception:
           pass
       elif w == "can":
         for c in m.can:
@@ -167,7 +167,7 @@ def main() -> int:
   overrides = [r for r in runs if (r[1] - r[0]) >= OVERRIDE_MIN_S and r[2] < OVERRIDE_SPEED_MPH]
   fallbacks = [r for r in runs if r not in overrides]
 
-  print(f"\n=== 1. DID IT ARM? ===")
+  print("\n=== 1. DID IT ARM? ===")
   print(f"  model asked for a stop (hasSlowDown) on {slowdown_frames} frames")
   print(f"  openpilot authored for >= {OVERRIDE_MIN_S}s below {OVERRIDE_SPEED_MPH:.0f} mph: "
         f"{len(overrides)} times")
@@ -178,7 +178,7 @@ def main() -> int:
     print("  nonzero means the plan never committed or a lead was inside 60 m.")
 
   if overrides:
-    print(f"\n=== 2. DID IT COMPLETE? ===")
+    print("\n=== 2. DID IT COMPLETE? ===")
     for r in overrides:
       dur = r[1] - r[0]
       how = "reached a STOP" if r[3] else "handed back while still moving"
@@ -187,7 +187,7 @@ def main() -> int:
     completed = sum(1 for r in overrides if r[3])
     print(f"  {completed} of {len(overrides)} came to a full stop")
 
-  print(f"\n=== 3. DID FORD HOLD THE STOP? ===")
+  print("\n=== 3. DID FORD HOLD THE STOP? ===")
   pct = 100.0 * standstill_frames / max(cs_frames, 1)
   print(f"  cruiseState.standstill true on {standstill_frames} of {cs_frames} frames ({pct:.2f}%)")
   if standstill_frames == 0:
@@ -196,7 +196,7 @@ def main() -> int:
   else:
     print("  YES -- and this is the first time it has ever been true on this car.")
 
-  print(f"\n=== 4. DID THE CAMERA REACT? ===")
+  print("\n=== 4. DID THE CAMERA REACT? ===")
   print(f"  camera raised cancel while openpilot was active: {len(cam_cancel_after)} times")
   if cam_cancel_after:
     print(f"    first at t+{cam_cancel_after[0]:.1f}")
@@ -206,7 +206,7 @@ def main() -> int:
     print("  No reaction. If an override ran for seconds and the camera said nothing, that is the")
     print("  answer the whole feature was bounded around.")
 
-  print(f"\n=== 5. WAS THE SET SPEED PREPARED? ===")
+  print("\n=== 5. WAS THE SET SPEED PREPARED? ===")
   if setspeed_while_stopped:
     lo, hi = min(setspeed_while_stopped), max(setspeed_while_stopped)
     print(f"  while stopped the set speed ran {lo} -> {hi} mph")

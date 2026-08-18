@@ -114,7 +114,7 @@ def main() -> int:
         continue
       try:
         lr = LogReader(path)
-      except Exception:  # noqa: BLE001
+      except Exception:
         continue
 
       for msg in lr:
@@ -147,7 +147,7 @@ def main() -> int:
               why = "AccPrpl_A_Pred"
             if why:
               refused[why] += 1
-        except Exception:  # noqa: BLE001
+        except Exception:
           continue
 
   if not total:

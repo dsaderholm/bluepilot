@@ -389,8 +389,13 @@ class HudRendererBP(HudRendererSP):
           # No new signal for this. `carOutput.actuatorsOutput.accel` is what we PUT ON THE WIRE --
           # it records the forwarded value under the passthrough and openpilot's own otherwise -- so
           # the two disagreeing IS the fact that openpilot has taken the command.
+          # GATED ON OPENPILOT LONGITUDINAL, and without this it was backwards. `self.accel` on the
+          # carcontroller is assigned ONLY inside the op-long ACCDATA block, so with op long off it
+          # keeps its init value of 0.0 for the whole drive -- while accAccelRequest carries Ford's
+          # real brake total. Every ordinary ACC brake application past the deadband then read as
+          # OP STOP, on the mode he drives nearly all the time. Caught in review before the drive.
           ours = float(ui_state.sm['carOutput'].actuatorsOutput.accel)
-          if abs(ours - bls.accAccelRequest) > OP_AUTHORING_DELTA:
+          if ui_state.has_longitudinal_control and abs(ours - bls.accAccelRequest) > OP_AUTHORING_DELTA:
             self._op_authoring_frames = min(self._op_authoring_frames + 1, OP_AUTHORING_FRAMES)
           else:
             self._op_authoring_frames = 0

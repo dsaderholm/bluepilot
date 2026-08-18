@@ -121,6 +121,11 @@ class SelfdriveD(CruiseHelper):
     if not self.CP.openpilotLongitudinalControl:
       self.params.remove("ExperimentalMode")
 
+    # FusionPilot: read ONCE. update_events runs every control frame and Params.get_bool reads the
+    # store each call, so testing this inline was 100 filesystem reads a second for a value the
+    # carcontroller itself reads once at init -- swapping it mid-drive is meaningless by design.
+    self.stock_acc_passthrough = self.params.get_bool("StockAccPassthrough")
+
     self.CS_prev = car.CarState.new_message()
     self.AM = AlertManager()
     self.events = Events()
@@ -467,7 +472,7 @@ class SelfdriveD(CruiseHelper):
     # authors the command, openpilot only carries it -- so without this the model FCW loses its
     # suppression and chimes while Ford brakes normally for a lead. Found by auditing every
     # consumer of that flag on 2026-08-18, before it fired on a road.
-    stock_is_the_brake = not self.CP.openpilotLongitudinalControl or self.params.get_bool("StockAccPassthrough")
+    stock_is_the_brake = not self.CP.openpilotLongitudinalControl or self.stock_acc_passthrough
     stock_long_is_braking = self.enabled and stock_is_the_brake and CS.aEgo < -1.25
     model_fcw = self.sm['modelV2'].meta.hardBrakePredicted and not CS.brakePressed and not stock_long_is_braking
     planner_fcw = self.sm['longitudinalPlan'].fcw and self.enabled

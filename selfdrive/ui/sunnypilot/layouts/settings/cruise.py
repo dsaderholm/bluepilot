@@ -554,6 +554,18 @@ class CruiseLayout(Widget):
       # this. Not DEC, not Experimental Mode -- both only steer openpilot's own plan, which this
       # discards. The description says so rather than leaving him to infer it from three toggles.
       self.stock_acc_passthrough.action_item.set_enabled(has_long and ui_state.is_offroad())
+      # And the override needs the PASSTHROUGH, for the same reason: with it off openpilot already
+      # authors every frame, so the override selects a command that was going out anyway and changes
+      # nothing at all. Gating the passthrough on op long and leaving its dependent ungated was half
+      # a fix; caught in review.
+      passthrough_on = ui_state.params.get_bool("StockAccPassthrough")
+      self.stock_acc_stop_override.action_item.set_enabled(
+        has_long and passthrough_on and ui_state.is_offroad())
+      if has_long and not passthrough_on:
+        prefix = "<b>" + tr("Turn on Use Ford's Own ACC Commands first.") + "</b>"
+        self.stock_acc_stop_override.set_description(prefix + "\n\n" + tr(STOP_OVERRIDE_DESC))
+      else:
+        self.stock_acc_stop_override.set_description(tr(STOP_OVERRIDE_DESC))
       if not has_long:
         prefix = "<b>" + tr("Turn on openpilot Longitudinal Control first.") + "</b>"
         self.stock_acc_passthrough.set_description(prefix + "\n\n" + tr(PASSTHROUGH_DESC))

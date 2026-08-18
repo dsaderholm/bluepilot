@@ -331,26 +331,44 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
           override = self.stop_override.update(
             long_active=bool(CC.longActive),
             v_ego=float(CS.out.vEgo),
+            # alive AND valid: alive only means a message arrived recently, valid is the planner
+            # saying its own output is sound. Arming a stop off a plan plannerd has disowned is
+            # exactly what the other consumers in this fork check for.
             has_slow_down=bool(self.sm['longitudinalPlanSP'].dec.hasSlowDown)
-            if self.sm.alive.get('longitudinalPlanSP') else False,
+            if (self.sm.alive.get('longitudinalPlanSP') and self.sm.valid.get('longitudinalPlanSP'))
+            else False,
             op_stopping=bool(stopping),
             lead_distance=lead_d,
           )
           # Latch that THIS stop was ours, so the resume gate knows not to pull away from it on the
-          # model's say-so. Cleared as soon as the car is moving again.
-          if override and float(CS.out.vEgo) < 0.5:
+          # model's say-so. Keyed on the override's OWN outcome rather than on a speed window: the
+          # first version tested `override and vEgo < 0.5 m/s`, but the override ends at 0.2235 m/s,
+          # so it depended on frames landing inside a 0.28 m/s sliver. It worked, by about seven
+          # frames, and would have stopped working silently on a harder stop.
+          if self.stop_override.last_result == "stopped":
             self.stop_override_stopped_us = True
-          elif float(CS.out.vEgo) > 1.5:
-            self.stop_override_stopped_us = False
 
           if override != self.stop_override_last:
             self.stop_override_last = override
             cloudlog.warning("stop override %s: %s", "ON" if override else "off",
                              self.stop_override.last_result)
-        except Exception:  # noqa: BLE001 -- must never reach card; see the gap path
+        # Deliberately broad. Nothing this decision can raise may reach card, because a raise here
+        # kills the whole ACCDATA block and with it the passthrough -- see the gap path for the
+        # same reasoning.
+        except Exception:
           self.stop_override_failed = True
           override = False
+          # Release the resume hold too. It lives inside the guard above, so a failure here would
+          # otherwise freeze it ON and block openpilot's automatic resume for the rest of the drive
+          # -- including the ordinary queue-cleared case that has nothing to do with this feature.
+          # Latching a feature off must not latch a neighbouring one on.
+          self.stop_override_stopped_us = False
           cloudlog.exception("stop override disabled for this drive")
+
+      # Moving again clears the resume hold, outside the guard above so that a disabled or failed
+      # override cannot leave it asserted.
+      if float(CS.out.vEgo) > 1.5:
+        self.stop_override_stopped_us = False
 
       use_passthrough = False
       if not override and self.stock_acc_passthrough and getattr(CS, "acc_cam_valid", False) and getattr(CS, "acc_stock_values", None):
