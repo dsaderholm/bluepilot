@@ -190,9 +190,17 @@ class CarStateExt:
             button_events.append(event)
           # Clear the tracking
           self.last_emitted_event.pop(button.can_msg, None)
-          # Update state for both event types
-          self.button_states[3] = False  # accelCruise
-          self.button_states[9] = False  # setCruise
+          # Update state for both event types -- THE SAME TWO THE PRESS PATH SET.
+          #
+          # This cleared 3 and 9, while the press path above sets 3 and 10. So `resumeCruise` (10)
+          # was set on the first RES+ press with cruise off and NEVER CLEARED. On the second press
+          # the guard `self.button_states.get(event_type) != signal_state` compared True against
+          # True and emitted nothing -- so every resume after the first one silently did not exist.
+          #
+          # 9 is `setCruise`, which this button has not emitted since the 2026-08-04 correction in
+          # the BUTTONS comment; clearing it here is a leftover from the version that did.
+          self.button_states[3] = False   # accelCruise
+          self.button_states[10] = False  # resumeCruise
         continue
 
       # CcAslButtnSetDecPress: setCruise (9) when disabled, decelCruise (4) when enabled
