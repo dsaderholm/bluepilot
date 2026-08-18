@@ -122,6 +122,10 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
     # Latched when the override brought the car to a stop, and cleared once it is moving again.
     # `resume_allowed` reads it: a stop WE authored is not resumed from automatically.
     self.stop_override_stopped_us = False
+    # WHO IS AUTHORING ACCDATA, for the screen. Set every ACCDATA frame from the decision that was
+    # actually taken rather than inferred downstream from the numbers -- see the AccAuthority
+    # comment in custom.capnp for why the inference could not tell `opStop` from `inert`.
+    self.acc_authority = structs.ControllerStateBP.AccAuthority.stock
     # Note: main_on_last, lkas_enabled_last, steer_alert_last, lead_distance_bars_last,
     # distance_bar_frame are initialized by HudExt.__init__() above
 
@@ -398,6 +402,22 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
                            "straight. openpilot longitudinal is driving from here.")
         else:
           self.passthrough_cancel_frames = 0
+
+      # WHO IS AUTHORING, decided here where the decision actually happens. Order matters: `inert`
+      # outranks `fallback` because they look identical frame-to-frame and only the duration tells
+      # them apart -- a scattered non-carriable frame is ordinary (8.9% of drive B) while five
+      # straight seconds of cancel means the passthrough is finished for the drive.
+      _AA = structs.ControllerStateBP.AccAuthority
+      if override:
+        self.acc_authority = _AA.opStop
+      elif use_passthrough:
+        self.acc_authority = _AA.ford
+      elif not self.stock_acc_passthrough:
+        self.acc_authority = _AA.openpilot
+      elif self.passthrough_cancel_frames >= 250:
+        self.acc_authority = _AA.inert
+      else:
+        self.acc_authority = _AA.fallback
 
       if use_passthrough:
         can_sends.append(fordcan_ext.create_acc_msg_passthrough(self.packer, self.CAN,

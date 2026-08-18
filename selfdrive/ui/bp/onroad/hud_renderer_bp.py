@@ -12,6 +12,7 @@ from openpilot.selfdrive.ui.bp.lib.ui_debug_logger import bp_ui_log
 from cereal import custom
 
 LateralMode = ControllerStateBP.LateralMode
+AccAuthority = ControllerStateBP.AccAuthority
 SpeedLimitSource = custom.LongitudinalPlanSP.SpeedLimit.Source
 
 # BluePilot: Y center for speed display (matching upstream hardcoded values)
@@ -54,6 +55,16 @@ ACC_STATUS_COLORS = {
   # amount of braking, and on a car whose whole design is "Ford drives" that distinction is the one
   # worth seeing at a glance.
   "OP STOP": rl.Color(150, 105, 235, 245),
+  # FusionPilot: openpilot is driving and NOBODY ASKED IT TO. Amber, deliberately not violet -- OP
+  # STOP is the system doing its job and this is the system falling back to the controller the
+  # whole feature exists to avoid. Different meaning, so a different colour family, and warmer than
+  # PRE-BRAKE's orange so the two do not read as neighbours on the braking scale.
+  "OP LONG": rl.Color(238, 170, 30, 240),
+  # FusionPilot: the camera has latched cancel and the passthrough is finished for the drive. Red,
+  # and the same red as BRAKE on purpose -- it is the loudest thing in this palette and this is the
+  # state that most needs to interrupt what he is doing. Drive A sat in it for 262 s with nothing on
+  # screen; there is no recovering it mid-drive, so the only useful response is to know.
+  "ACC LOST": rl.Color(232, 58, 48, 240),
 }
 # BluePilot: both readouts used to be 34 px unbacked text under the MAX box, which the owner could
 # not pick out at a glance while driving. They are now drawn as filled shapes sized against the
@@ -78,11 +89,13 @@ ACC_INK = rl.Color(10, 14, 20, 255)
 # color IS the reading for these two.
 QUIET_ACC_STATES = ("COAST", "PRE-BRAKE")
 
-# FusionPilot: how far openpilot's command has to sit from Ford's before the pill says openpilot is
-# the author, and for how many consecutive frames. The passthrough forwards Ford's number exactly,
-# so in normal operation the difference is zero -- this only has to clear rounding.
-OP_AUTHORING_DELTA = 0.25   # m/s^2
-OP_AUTHORING_FRAMES = 5     # ~0.25 s at the UI's rate; the override runs for seconds
+# FusionPilot: how many consecutive frames openpilot must be authoring UNASKED before the pill says
+# so. Only the fallback states are debounced -- `opStop` is deliberate and `inert` is already five
+# seconds old when it is published, so both show immediately.
+#
+# The accel-difference threshold that used to live here is gone with the inference it served: the
+# authority is published now, so there is nothing left to compare.
+OP_AUTHORING_FRAMES = 5     # ~0.25 s at the UI's rate; a real fallback run lasts longer
 ACC_PILL_WIDTH = 268   # wider than the MAX column: "BRAKE 1.4" does not fit 172 px legibly
 ACC_PILL_HEIGHT = 78
 ACC_LABEL_SIZE = 38
@@ -191,11 +204,13 @@ class HudRendererBP(HudRendererSP):
     # BluePilot: what Ford ACC is asking for, and what ICBM is doing about it. The speed colors
     # above say what traffic behind you sees; these say what the systems are requesting. Those are
     # different facts, which is why this is a separate readout rather than more colors.
-    self._acc_state = ""      # "ACCEL" / "COAST" / "BRAKE" / "OP STOP", "" when unknown
+    self._acc_state = ""      # "ACCEL" / "COAST" / "BRAKE" / "OP STOP" / "OP LONG" / "ACC LOST"
     self._acc_accel = 0.0     # m/s^2, signed
-    # FusionPilot: how many consecutive frames openpilot's command has differed from Ford's. The
-    # pill must not flicker on a single frame of rounding, and the stop override runs for seconds.
-    self._op_authoring_frames = 0
+    # FusionPilot: consecutive frames openpilot has been authoring without being asked to. Debounced
+    # because scattered non-carriable frames are ordinary -- 8.9% of drive B -- and a pill that
+    # flickers through them is a pill he learns to ignore. `opStop` and `inert` are NOT debounced
+    # through this: one is deliberate and the other is already 5 s old when it is published.
+    self._acc_fallback_frames = 0
     self._icbm_baseline = 0   # the number ON THE BADGE: the hold, or a pin being offered; 0 = none
     self._icbm_arrow = ""     # "+" / "-" while ICBM is actively moving the set speed, else ""
     self._icbm_hold_locked = False  # something else owns the target; a press cannot change the hold
@@ -213,9 +228,10 @@ class HudRendererBP(HudRendererSP):
     self._show_brake_status = self._bp_params.get_bool("ShowBrakeStatus")
     self._hide_v_ego_ui = self._bp_params.get_bool("HideVEgoUI")
     self._show_lateral_control = self._bp_params.get_bool("BpShowLateralControl")
-    self._stock_acc_passthrough = self._bp_params.get_bool("StockAccPassthrough")
     # BluePilot: actual mode from controllerStateBP (None = not published, e.g. non-Ford)
     self._lateral_mode = None
+    # FusionPilot: None until controllerStateBP arrives; see _update_state.
+    self._acc_authority = None
 
   def set_gradient_rect(self, rect: rl.Rectangle):
     """Set full-width rect for header gradient (when HUD renders offset for confidence ball)."""
@@ -234,11 +250,19 @@ class HudRendererBP(HudRendererSP):
       self._show_brake_status = self._bp_params.get_bool("ShowBrakeStatus")
       self._hide_v_ego_ui = self._bp_params.get_bool("HideVEgoUI")
       self._show_lateral_control = self._bp_params.get_bool("BpShowLateralControl")
-    self._stock_acc_passthrough = self._bp_params.get_bool("StockAccPassthrough")
 
     if self._show_lateral_control:
       sm = ui_state.sm
       self._lateral_mode = sm['controllerStateBP'].activeLateralMode if sm.alive['controllerStateBP'] else None
+
+    # FusionPilot: who is authoring ACCDATA, straight from the controller that decided it. Read
+    # every frame -- it changes within a frame and a cached copy would be exactly wrong at the
+    # moment it matters. This is a message read, not a param read; the earlier version of this
+    # gate consulted `StockAccPassthrough` from disk on EVERY frame, outside the 60-frame cache
+    # its neighbours use, which is the per-frame I/O that cache exists to prevent.
+    sm = ui_state.sm
+    self._acc_authority = (sm['controllerStateBP'].accAuthority
+                           if sm.alive['controllerStateBP'] else None)
 
     # Check brake status if enabled
     if self._show_brake_status:
@@ -382,42 +406,39 @@ class HudRendererBP(HudRendererSP):
           else:
             self._acc_state, self._acc_accel = "COAST", 0.0
 
-          # FusionPilot: WHO IS ACTUALLY DRIVING. Everything above reads the CAMERA's ACCDATA, which
-          # is Ford's request -- correct while we forward it, and a LIE the moment we do not. He saw
-          # exactly that with the gap display, and it would have happened again here: during a stop
-          # override the pill would have read COAST, which is what Ford wanted, while openpilot was
-          # braking the car to a halt.
+          # FusionPilot: WHO IS ACTUALLY DRIVING. Everything above reads the CAMERA's ACCDATA,
+          # which is Ford's request -- correct while we forward it, and a LIE the moment we do not.
+          # He saw exactly that with the gap display, and it would have happened again here: during
+          # a stop override the pill would have read COAST, which is what Ford wanted, while
+          # openpilot was braking the car to a halt.
           #
-          # No new signal for this. `carOutput.actuatorsOutput.accel` is what we PUT ON THE WIRE --
-          # it records the forwarded value under the passthrough and openpilot's own otherwise -- so
-          # the two disagreeing IS the fact that openpilot has taken the command.
-          # GATED ON THE PASSTHROUGH, which took two goes to get right, and the reason is that the
-          # comparison only MEANS anything when Ford's command was the one due to go out:
-          #
-          #   passthrough off, op long off  -- `self.accel` is never assigned (it stays 0.0 for the
-          #     whole drive, since it lives inside the op-long ACCDATA block) while accAccelRequest
-          #     carries Ford's real brake total. Every ordinary ACC brake read as OP STOP.
-          #   passthrough off, op long ON   -- `self.accel` is openpilot's own number and the camera
-          #     is computing its own independently. They disagree past 0.25 constantly, so plain
-          #     alpha long painted OP STOP through every brake application. That is not merely
-          #     noisy, it is INVERTED: the pill claims openpilot took the command away from Ford in
-          #     the one configuration where Ford never had it.
-          #   passthrough ON                -- `self.accel` records the FORWARDED value, so the two
-          #     agree exactly while Ford is driving and diverge only when we substitute. Which is
-          #     the fact the pill exists to report.
-          #
-          # Gating on op long fixed the first case and left the second, which is worse. BOTH are
-          # required and neither implies the other: the passthrough param survives op long being
-          # switched back off (the settings toggle only greys OUT, it does not clear), and op long
-          # without the passthrough is the inverted case above.
-          ours = float(ui_state.sm['carOutput'].actuatorsOutput.accel)
-          authored_by_us = ui_state.has_longitudinal_control and self._stock_acc_passthrough
-          if authored_by_us and abs(ours - bls.accAccelRequest) > OP_AUTHORING_DELTA:
-            self._op_authoring_frames = min(self._op_authoring_frames + 1, OP_AUTHORING_FRAMES)
-          else:
-            self._op_authoring_frames = 0
-          if self._op_authoring_frames >= OP_AUTHORING_FRAMES:
-            self._acc_state, self._acc_accel = "OP STOP", ours
+          # PUBLISHED, NOT INFERRED, and the previous two attempts are why. Comparing our accel
+          # against the camera's is an honest test of WHETHER they diverge and says nothing about
+          # WHY, and the two reasons are opposites: `opStop` is the override doing its job for a few
+          # seconds, `inert` is the camera having latched cancel with openpilot longitudinal driving
+          # for the rest of the drive. Identical on the wire. Getting the gate right took two goes
+          # and still could not have separated those, because the information is not in the numbers.
+          # It is in the carcontroller, which decided it -- so it says so now.
+          if self._acc_authority is not None:
+            auth = self._acc_authority
+            ours = float(ui_state.sm['carOutput'].actuatorsOutput.accel)
+            if auth == AccAuthority.opStop:
+              self._acc_state, self._acc_accel = "OP STOP", ours
+              self._acc_fallback_frames = 0
+            elif auth == AccAuthority.inert:
+              # No debounce. This state is already five seconds of latched cancel by the time it is
+              # published, and it does not clear for the rest of the drive.
+              self._acc_state, self._acc_accel = "ACC LOST", ours
+              self._acc_fallback_frames = 0
+            elif auth in (AccAuthority.fallback, AccAuthority.openpilot):
+              # Debounced. Scattered non-carriable frames are ordinary -- 8.9% of drive B, none of
+              # them consecutive for long -- and a pill that flickers through them trains him to
+              # ignore it. Sustained is the thing worth showing.
+              self._acc_fallback_frames = min(self._acc_fallback_frames + 1, OP_AUTHORING_FRAMES)
+              if self._acc_fallback_frames >= OP_AUTHORING_FRAMES:
+                self._acc_state, self._acc_accel = "OP LONG", ours
+            else:
+              self._acc_fallback_frames = 0
       except Exception:
         pass
 

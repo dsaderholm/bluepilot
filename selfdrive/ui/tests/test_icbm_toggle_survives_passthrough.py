@@ -81,28 +81,51 @@ def test_the_stop_override_toggle_needs_the_passthrough():
     "the stop override toggle does not check the passthrough, without which it does nothing")
 
 
-def test_the_op_stop_readout_is_gated_on_openpilot_longitudinal():
-  """`self.accel` on the carcontroller is assigned ONLY inside the op-long ACCDATA block, so with op
-  long off it is 0.0 for the whole drive while accAccelRequest carries Ford's real brake total.
-  Ungated, every ordinary ACC brake application past the deadband read as OP STOP -- on the mode he
-  drives nearly all the time."""
+def test_who_is_driving_is_published_not_inferred():
+  """Two attempts at inferring this from the numbers were wrong, and a third could not have worked.
+
+  The pill compared `carOutput.actuatorsOutput.accel` against the camera's `accAccelRequest`. That
+  is an honest test of WHETHER they diverge and carries nothing about WHY -- and the two reasons are
+  opposites. `opStop` is the override doing its job for a few seconds. `inert` is the camera having
+  latched cancel, with openpilot longitudinal driving for the rest of the drive; drive A sat in that
+  state for 262 s. Identical on the wire. No gate on the comparison could separate them, because the
+  information is not in the numbers -- it is in the carcontroller, which decided it.
+
+  So this asserts the CHAIN exists end to end: the controller sets it, the publisher carries it, the
+  renderer reads it. A field set and never published is the failure this fork has already had three
+  times over."""
+  import pathlib
+  root = pathlib.Path(__file__).resolve().parents[3]
+  cc = (root / "opendbc_repo" / "opendbc" / "car" / "ford" / "carcontroller.py").read_text(encoding="utf-8")
+  pub = (root / "bluepilot" / "selfdrive" / "car" / "bp_card_publisher.py").read_text(encoding="utf-8")
+  hud = (root / "selfdrive" / "ui" / "bp" / "onroad" / "hud_renderer_bp.py").read_text(encoding="utf-8")
+
+  assert "self.acc_authority = _AA.opStop" in cc, "the controller never reports the override"
+  assert "self.acc_authority = _AA.inert" in cc, "the controller never reports a latched cancel"
+  assert "self.acc_authority = _AA.ford" in cc, "the controller never reports the normal state"
+  assert "cs_bp.accAuthority" in pub, (
+    "the controller sets acc_authority and the publisher does not carry it -- the field is dead")
+  assert "AccAuthority.inert" in hud and '"ACC LOST"' in hud, (
+    "nothing on screen says the passthrough went inert, which is the state that does not recover")
+  assert "AccAuthority.opStop" in hud and '"OP STOP"' in hud
+  assert "AccAuthority.fallback" in hud and '"OP LONG"' in hud, (
+    "openpilot longitudinal driving unasked is not shown, so he cannot tell it from Ford driving")
+
+  # The inference must be GONE, not merely unused. Leaving it next to the published value is how a
+  # later edit reaches for the wrong one.
+  assert "abs(ours - bls.accAccelRequest)" not in hud, (
+    "the old accel comparison is still in the renderer alongside the published authority")
+
+
+def test_the_inert_state_is_not_debounced_away():
+  """`inert` is already five seconds of latched cancel by the time the controller publishes it, and
+  it never clears. Running it through the fallback debounce would delay the one readout that has to
+  interrupt him, and would do it for no reason at all."""
   import pathlib
   hud = (pathlib.Path(__file__).resolve().parents[3] / "selfdrive" / "ui" / "bp" / "onroad" /
          "hud_renderer_bp.py").read_text(encoding="utf-8")
-  i = hud.index("OP_AUTHORING_DELTA")
-  # the comparison itself, not the constant definition
-  cmp_site = hud[hud.index("abs(ours - bls.accAccelRequest)") - 200:][:300]
-  assert "has_longitudinal_control" in cmp_site, (
-    "the OP STOP comparison does not check that openpilot longitudinal is on, so it fires whenever "
-    "Ford brakes with op long off")
-  # AND the passthrough, which is a SEPARATE precondition rather than a stronger version of the
-  # same one. With op long on and the passthrough off, `self.accel` is openpilot's own number while
-  # the camera computes its own independently -- they disagree past the deadband through every
-  # brake application, so plain alpha long painted OP STOP constantly. That is not noise, it is the
-  # pill claiming openpilot took the command away from Ford in the one configuration where Ford
-  # never had it. Neither condition implies the other: the param outlives op long being switched
-  # off, because the settings toggle greys out without clearing.
-  assert "_stock_acc_passthrough" in cmp_site or "StockAccPassthrough" in cmp_site, (
-    "the OP STOP comparison does not check the passthrough, so it fires through every brake "
-    "application under plain alpha long")
-  assert i > 0
+  i = hud.index("AccAuthority.inert")
+  branch = hud[i:hud.index("elif", i + 10)] if "elif" in hud[i:] else hud[i:]
+  assert '"ACC LOST"' in branch, "the inert branch does not set the readout"
+  assert ">= OP_AUTHORING_FRAMES" not in branch, (
+    "the inert readout is debounced, delaying the one state that cannot recover")

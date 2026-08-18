@@ -55,7 +55,9 @@ def auto_dataclass(cls=None, /, **kwargs):
 class StrEnum(_StrEnum):
   @staticmethod
   def _generate_next_value_(name, *args):
-    # auto() defaults to name.lower()
+    # auto() defaults to name.lower(); keeping the name verbatim is what lets camelCase members
+    # survive the capnp conversion, which matches enumerants by name. Asserted in
+    # selfdrive/car/tests/test_capnp_accepts_published_types.py.
     return name
 
 
@@ -266,7 +268,26 @@ class ControllerStateBP:
   # --- Lateral mode the car controller actually ran (not the param) ---
   activeLateralMode: 'ControllerStateBP.LateralMode' = field(default_factory=lambda: ControllerStateBP.LateralMode.openpilot)
 
+  # --- Who is authoring ACCDATA; see custom.capnp AccAuthority for what each state means ---
+  accAuthority: 'ControllerStateBP.AccAuthority' = field(
+    default_factory=lambda: ControllerStateBP.AccAuthority.stock)
+
   class LateralMode(StrEnum):
     openpilot = auto()  # BP lateral bypassed
     curvature = auto()
     angle = auto()
+
+  class AccAuthority(StrEnum):
+    # `auto()` is safe here and it is worth knowing WHY, because it is not safe for the StrEnum in
+    # the standard library. `convert_to_capnp` hands each value to `new_message()`, where capnp
+    # matches the enumerant BY NAME -- and `enum.StrEnum`'s `auto()` lowercases, which would turn
+    # `opStop` into "opstop" and earn a `KjException: enum has no such enumerant`. The StrEnum at
+    # the top of this file overrides `_generate_next_value_` to return the name verbatim, which is
+    # exactly what keeps camelCase members working. The round trip is asserted in
+    # test_capnp_accepts_published_types.py so that override cannot quietly go away.
+    stock = auto()      # op long off; the camera reaches the car through the relay
+    ford = auto()       # forwarding Ford's own command -- the intended state
+    opStop = auto()     # the stop override, deliberate and bounded
+    fallback = auto()   # this frame's Ford command was not carriable; ours went instead
+    inert = auto()      # camera latched cancel; the passthrough is dead for the drive
+    openpilot = auto()  # passthrough off, plain alpha long
