@@ -92,3 +92,46 @@ SCC-Map's judgement and wants the state-2 drive as its baseline.
 3 residential, 2 tertiary. Enough to say a field is populated and behaves sensibly; **not** enough to
 set a threshold on. Anything with a number in it wants his roads under it first — which is the same
 rule the four SCC-Map defenses were each built under.
+
+## THE LEFT ROAD EDGE IS NEVER TRUSTED ON A FREEWAY. MEASURED, AND IT KILLS AN ASSUMPTION.
+
+Route 00000383, above 34 mph, `tools/bp_left_edge_profile.py`, 2026-08-17:
+
+    motorway, 4 lanes   1257 frames    left edge trusted   0.0%
+    motorway, 5 lanes   1024 frames                        0.0%
+    motorway, 3 lanes    779 frames                        0.0%
+    secondary, 5 lanes   576 frames                        0.0%
+    motorwayLink, 1 lane 463 frames                       14.7%   at p50 3.0 m
+
+**Zero, across 3,060 frames of multi-lane motorway.** The only place the left edge is ever trusted
+is a single-lane ramp, where it genuinely is beside the car.
+
+**WHAT THIS KILLS.** It was stated earlier the same day that a physically separated HOV lane -- a
+concrete wall or pylon barrier -- would produce a road edge and that "the existing left-edge logic
+already refuses" a target beyond it. **The premise is false.** `_on_our_carriageway` never has a
+trusted left edge to work from at freeway speed, so that path cannot refuse anything there. It is
+also why `UNTRUSTED_EDGE_ONCOMING_M` exists: untrusted is the NORMAL state, not an edge case.
+
+**SO NO CALIFORNIA HOV BOUNDARY IS HANDLED BY PERCEPTION TODAY**, in any of its three forms. The
+earlier three-case table implied two of them were covered. None are:
+
+    concrete or pylon wall   no trusted edge at freeway speed. NOT refused.
+    double white line        paint, and no edge either way. NOT refused.
+    candlestick delineators  unknown, and now the ONLY candidate for producing one.
+
+That inverts what the California drive is for. It is not confirming a fallback already works; it is
+testing whether candlesticks are the one boundary type that can produce a trusted left edge at all.
+**If they do, that is a NEW capability. If they do not, perception offers nothing and only
+`hov:lanes` can help -- which is 0% in California.**
+
+**THE MEASUREMENT IS ALREADY INSTRUMENTED, which is why no capnp field was added.** `modelV2`,
+`roadEdgeStds` and `mapdOut` are all in every route already, so the trip records what is needed
+whether or not anyone remembers to enable something. Run the tool on a California route and compare
+against the table above. Utah is the control: the owner reports Utah uses a double white line and no
+posts, so every existing route is the paint case.
+
+**Read the std VARIABILITY, not just the trusted fraction.** The failure that matters is not a
+present or absent edge, both of which are decidable. It is FLICKER -- an edge appearing at each post
+and vanishing between them would let a pass open in the gaps. Route 00000383's 4-lane motorway
+already shows stdev-of-std at 2.83, so churn is the baseline behavior and a California run has to
+beat that rather than merely show movement.

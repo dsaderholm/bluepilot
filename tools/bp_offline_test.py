@@ -78,6 +78,7 @@ DEFAULT_TARGETS = [
   "selfdrive/ui/tests/test_oncoming_falsepos.py",
   "selfdrive/ui/tests/test_mapd_restarts.py",
   "selfdrive/ui/tests/test_osm_tag_census.py",
+  "selfdrive/ui/tests/test_left_edge_profile.py",
   # Named files, not the directory: test_speed_limit_assist.py in the same folder imports the
   # sunnylink/API stack (jwt and friends) and cannot collect without the device environment.
   # Listing the folder pulled it in and broke collection for everything.
