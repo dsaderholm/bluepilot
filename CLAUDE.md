@@ -1951,6 +1951,43 @@ distanceFromWayCenter. Then v1 comes out and gives back what the overlap costs.
   A green run says nothing whatsoever about a file it never read. The same holds for anything else
   requiring compiled extensions.
 
+### LOW-SPEED CURVES: VISION IS STRUCTURALLY UNABLE TO HELP, AND THE MAP RARELY GETS A CHANCE
+
+*"Low speed curves, it isn't slowing down enough."* Attributed on route 00000393, 2026-08-19,
+BEFORE touching a single sensitivity -- which is the rule this fork keeps having to relearn.
+
+Every SCC activation under 40 mph, and the pattern is the whole answer:
+
+    t+ 271s  vision doing 35 mph, asking 48 mph   (+13)
+    t+ 592s  vision doing 39 mph, asking 49 mph   (+10)
+    t+ 598s  vision doing 33 mph, asking 48 mph   (+15)
+    t+ 600s  vision doing 32 mph, asking 53 mph   (+21)
+    t+1304s  vision doing 27 mph, asking 56 mph   (+29)
+    t+ 595s  map    doing 36 mph, asking 31 mph   (-5)   <- the only one that asked for LESS
+
+**SCC-Vision reports `active` and asks for a speed ABOVE the one the car is already doing.** That is
+not a tuning error, it is the formula: `v_target = v_ego * sqrt(a_lat_reg_max / max_pred_lat_acc)`
+is PROPORTIONAL TO CURRENT SPEED, so once the car is already slow the target scales down with it and
+can never demand a meaningful reduction. Lateral acceleration is `v^2 / R`, so at low speed even a
+tight radius produces a small number and the ratio stays above 1.
+
+**So vision contributes NOTHING below about 40 mph, and only the map can.** On this drive the map
+was active for 146 frames out of a 1542-second drive -- and it asked correctly every time it did.
+The deficit is map COVERAGE of low-speed corners, which is the same root cause as the section below:
+mapd smooths real tile geometry into nothing, so most corners never reach a controller at all.
+
+**DO NOT FIX THIS BY TUNING THE VISION FACTORS.** That has now been ruled out by measurement rather
+than by the old warning: the factors multiply a target that is already above current speed, so any
+value of them still asks for more than the car is doing.
+
+**And do not "fix" the `active` flag either.** Reporting `active` while asking for +21 mph is
+genuinely misleading, but `scc.vision.active` is read by the ICBM controller as `curve_active`,
+which drives `v_curve_target`, the curve ceiling and `curve_exit_frames`. It is not a display flag,
+and changing it changes driving.
+
+**The lever that exists TODAY is `SmartCruiseControlMapFactor`** -- his, currently 90, applied to
+corners at or below 25 mph. Lower means slower through tight corners, wherever the map sees them.
+
 ### THE TILES SEE THE CORNER. MAPD DOES NOT. THE CURVE FIX IS OURS TO WRITE.
 
 2026-08-18, and it REVERSES a conclusion stated twice the same evening. He reported a curve on
