@@ -185,7 +185,15 @@ def _load_strip():
     def draw_rectangle_rounded_lines_ex(box, *a):
       calls.append(("outline", box))
 
+  # The box geometry lives at module level so the preview and the car cannot drift apart. Lift it
+  # rather than restating it -- a test carrying its own copy stops testing the shipped size, which
+  # is the whole reason the first strip shipped too small to read.
+  consts = [n for n in tree.body
+            if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "").startswith("LANE_")]
+  assert consts, "LANE_* strip constants moved -- this test would pass on anything"
+
   ns = {"rl": FakeRl}
+  exec(compile(ast.Module(body=consts, type_ignores=[]), "<hud>", "exec"), ns)  # noqa: S102
   exec(compile(ast.Module(body=methods, type_ignores=[]), "<hud>", "exec"), ns)  # noqa: S102
   return ns, calls
 

@@ -172,7 +172,7 @@ def load_shipped_drawing_code():
 
   consts = [n for n in tree.body
             if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") in
-            ("SPEED_UNIT_CENTER_Y",)]
+            ("SPEED_UNIT_CENTER_Y", "LANE_BOX_W", "LANE_BOX_H", "LANE_BOX_GAP", "LANE_STRIP_H")]
 
   ns = {
     "rl": rl,

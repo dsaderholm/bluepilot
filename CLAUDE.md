@@ -2791,6 +2791,54 @@ one-lane bias, and 1918 green tests said nothing, because every fixture agreed w
 assumption. **When two sensors can be made to answer the same question, make them, and print the
 disagreement rate before trusting either.**
 
+## A DIAGNOSTIC THAT READS A FIELD THAT DOES NOT EXIST REPORTS ZERO, AND ZERO LOOKS LIKE A FINDING
+
+2026-08-19. `bp_anchor_replay.py` and a second tool both read
+`longitudinalPlanSP.passingAssist.leadIsSlow`. **That field has never existed.** `lead_is_slow` is
+internal to the detector and is not on the wire. capnp raised AttributeError, a broad
+`except (AttributeError, TypeError, ValueError)` swallowed it, and both tools reported
+
+    no slow-lead frames on this drive; the conjunction cannot be scored here
+
+across SIX routes and 60,000 moving frames -- on drives that produced 43 suggestions, which cannot
+happen without a slow lead. It was reported to him twice as a measurement before the arithmetic was
+questioned.
+
+**Reconstruct it instead: `speedDeficit >= minDeficitActive` with `hasLead`**, both of which are
+published. The real numbers, once fixed: 10,561 slow-lead frames on 0000038e, and the corrected
+anchor calls it LEFTMOST on 16.1% of them. That is the slow-pass warning's actual firing rate.
+
+**Two rules out of it, and the second is the general one:**
+
+- **A broad `except` around a SCHEMA read turns a typo into a confident zero.** It is right for a
+  field that is genuinely absent on some frames, and catastrophic for a misspelled one. Validate
+  field names against `custom.<Struct>.schema.fieldnames` at startup and `sys.exit` on a miss --
+  `bp_anchor_replay.py` now does.
+- **A zero from a new diagnostic is a claim about the TOOL until something independent agrees.**
+  The same shape as the mapd-v2 timing trap already in this file: absence in a log is evidence
+  about the log's conditions first. Here 43 suggestions were sitting in the same routes saying the
+  opposite, and nothing cross-checked them.
+
+## laneLineStds: MEASURED, AND THERE IS NOTHING THERE. DO NOT GATE ON IT.
+
+`laneLineStds` is published every frame and read by NOTHING in the whole tree, upstream included --
+only a replay visualizer. It looked like a real gap: `_geometry` trusts lane line POSITIONS to
+measure the width of the lane it would move into, checks only `MIN_ADJACENT_LINE_PROB`, and that
+gate OPENS a pass, so cheap opening evidence is exactly what the rules here forbid.
+
+Measured across three routes, at the REAL thresholds rather than assumed ones:
+
+    lines the gate trusts (prob >= 0.5)          44,891
+    ...located worse than MAX_ROAD_EDGE_STD 1.2       0     0.0%
+    p90 of those stds                           0.23-0.40 m
+
+**A std gate would refuse nothing.** Probability already implies a well-located line on these roads.
+Leave the field alone.
+
+**And the first run of this used prob >= 0.30 and a 0.5 m bar, both invented**, which returned a
+plausible 1.8% and would have justified building the gate. `MIN_ADJACENT_LINE_PROB` is 0.5 and
+`MAX_ROAD_EDGE_STD` is 1.2, in the file. **Read the constant before measuring against it.**
+
 ## PASSING ASSIST CANNOT SEE A CONSTRUCTION ZONE. Reported 2026-08-19.
 
 *"It also did try to change lanes into a construction zone's cones earlier today."*

@@ -83,6 +83,15 @@ def main():
   if not segs:
     sys.exit(f"no segments for {route}")
 
+  # Fail LOUDLY on a field that does not exist. Every read below is inside a try that treats a
+  # missing field as "no data", which is right for a field that is genuinely absent on some frames
+  # and catastrophic for one that is misspelled -- it turns a typo into a confident zero.
+  from cereal import custom
+  _pa_fields = set(custom.LongitudinalPlanSP.PassingAssist.schema.fieldnames)
+  for _f in ("speedDeficit", "minDeficitActive", "hasLead"):
+    if _f not in _pa_fields:
+      sys.exit(f"passingAssist has no field {_f!r} -- this tool would silently report zeros")
+
   anchor = LaneAnchor()
   speed = 0.0
   lanes = 0
@@ -124,10 +133,16 @@ def main():
         except (AttributeError, TypeError, ValueError):
           lanes, one_way = 0, False
       elif w == "longitudinalPlanSP":
-        try:
-          lead_slow = bool(m.longitudinalPlanSP.passingAssist.leadIsSlow)
-        except (AttributeError, TypeError, ValueError):
-          lead_slow = False
+        # RECONSTRUCTED, because `lead_is_slow` is internal to the detector and is NOT on the wire.
+        # This read `passingAssist.leadIsSlow` for a day. That field has never existed, the
+        # AttributeError was swallowed by a broad except, and the tool reported "no slow-lead
+        # frames on this drive" across six routes and 60,000 frames -- on drives that produced 43
+        # suggestions, which cannot happen without a slow lead. A diagnostic that answers zero
+        # when it should crash is worse than no diagnostic. Hence require_field() below.
+        pa = m.longitudinalPlanSP.passingAssist
+        deficit = float(pa.speedDeficit)
+        threshold = float(pa.minDeficitActive)
+        lead_slow = bool(pa.hasLead) and threshold > 0 and deficit >= threshold
       elif w == "modelV2":
         if speed < MIN_SPEED:
           continue

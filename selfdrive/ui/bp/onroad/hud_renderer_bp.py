@@ -305,6 +305,19 @@ def _suggested_deficit(missed_mph: float, active_mph: float) -> float | None:
   return suggested if suggested >= 1.0 else None
 
 
+# LANE STRIP GEOMETRY. Sized against the panel's own text rather than picked: he reported the first
+# version as "I can't see the lanes UI at all. It's tiny", and it was 18x12 next to a 40-52 px
+# headline and a 30 px sub-line -- under half the height of the smallest thing beside it. A readout
+# nobody can read on the road is the same as one that was never wired up, which has happened here
+# three times. Box height now matches the sub-line, so it reads as part of the panel.
+# One name per line: preview_passing_panel lifts these by AST and only sees simple assignments,
+# so a tuple assign here silently leaves the preview rendering different geometry from the car.
+LANE_BOX_W = 40
+LANE_BOX_H = 26
+LANE_BOX_GAP = 10
+LANE_STRIP_H = 38
+
+
 class HudRendererBP(HudRendererSP):
   """BluePilot HudRenderer with brake status display.
 
@@ -1754,7 +1767,7 @@ class HudRendererBP(HudRendererSP):
 
     pad_x, pad_y = 36, 18
     content_w = max(main_dims.x, sub_dims.x)
-    strip_h = 22 if self._lane_strip_worth_drawing() else 0
+    strip_h = LANE_STRIP_H if self._lane_strip_worth_drawing() else 0
     content_h = (main_dims.y + (sub_dims.y + 6 if self._pa_sub else 0)
                  + (14 if self._pa_progress > 0 else 0) + strip_h)
     panel_w = min(content_w + pad_x * 2, rect.width - 40)
@@ -1831,7 +1844,7 @@ class HudRendererBP(HudRendererSP):
     witness = bool(getattr(self, "_pa_no_lane_left", False))
     lo, hi = getattr(self, "_pa_lane_bound", (-1, -1))
 
-    box_w, box_h, gap = 18, 12, 5
+    box_w, box_h, gap = LANE_BOX_W, LANE_BOX_H, LANE_BOX_GAP
     total_w = n * box_w + (n - 1) * gap
     x0 = panel.x + panel.width / 2 - total_w / 2
 
@@ -1846,13 +1859,13 @@ class HudRendererBP(HudRendererSP):
         # Narrowed but not pinned: this lane is a candidate. Outlined, never filled -- a range is
         # not a position, and drawing it as one would be the strip claiming a measurement it does
         # not have.
-        rl.draw_rectangle_rounded_lines_ex(box, 0.35, 4, 2, self._pa_color)
+        rl.draw_rectangle_rounded_lines_ex(box, 0.35, 4, 3, self._pa_color)
       elif witness and lane == n - 1 and idx < 0:
         # Leftmost, asserted by the witness alone -- reachable when the map gave a lane count but
         # the outer RIGHT line was unreadable, so no bound could form.
-        rl.draw_rectangle_rounded_lines_ex(box, 0.35, 4, 2, self._pa_color)
+        rl.draw_rectangle_rounded_lines_ex(box, 0.35, 4, 3, self._pa_color)
       else:
-        rl.draw_rectangle_rounded(box, 0.35, 4, rl.Color(255, 255, 255, 45))
+        rl.draw_rectangle_rounded(box, 0.35, 4, rl.Color(255, 255, 255, 70))
 
   def _draw_lateral_control_overlay(self, center_x: float, center_y: float, wheel_size: int) -> None:
     """Draw the current lateral control mode over the steering wheel icon."""
