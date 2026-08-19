@@ -15,8 +15,7 @@ can currently back that intent with a sensor is a separate question, asked befor
 output. Suggesting a lane the car cannot see behind is acceptable, because the driver still looks;
 moving into it is the failure the module exists to prevent.
 
-What the decision is built from, on a car with no blind-spot input routed and no lane count in the
-map data:
+What the decision is built from, on a car with no blind-spot input routed:
 
 - **Adjacent-lane occupancy from the front radar.** The forward radar's returns are read for traffic
   beside and ahead rather than only in-lane, which is the difference between "the next lane is empty"
@@ -26,6 +25,18 @@ map data:
   closing head-on in a candidate lane vetoes that side for 90 s. A single frame is not enough —
   sightings must corroborate across frames before they count, which cut one drive's oncoming returns
   from 511 to 166 with no veto lost.
+- **Which lane it is in, anchored on the right road edge.** The map supplies how many lanes the road
+  has; the model's right road edge says how far the shoulder is, which converts to a lane index by
+  division. That edge is readable on only 5 to 15 percent of freeway frames, so the index is latched
+  between readings and dropped on a lane change or after twenty seconds, whichever comes first. The
+  left road edge is not used at all: on multi-lane freeway it was trusted on zero frames out of
+  3,060.
+- **All four lane lines, which is the only thing that speaks from a middle lane.** From the middle of
+  a wide road the right edge is out of reach and there is genuinely a line to the left, so the two
+  witnesses above both fall silent at once. A line beyond the left boundary and a line beyond the
+  right together mean the car is strictly between two lanes — exact on a three-lane road, a narrowed
+  range on anything wider. Both outer lines missing is a contradiction on a multi-lane road and
+  claims nothing rather than picking one.
 - **Signal first, then confirm.** The lamp comes on the moment a slow lead is noticed, and the gates
   are checked during that second of signalling rather than before it. The crossing starts only if
   every gate has held clear for the whole lead. This is deliberate and is the opposite of the usual
@@ -54,7 +65,10 @@ map data:
   above was set from those reports rather than chosen.
 - **It says what it is thinking while it drives** — on the onroad panel, and behind a toggle on the
   instrument cluster's own lane lines, which is the only vocabulary this cluster has. The intent is
-  that a refusal is legible at the time rather than only afterwards in a log.
+  that a refusal is legible at the time rather than only afterwards in a log. The panel carries a
+  row of boxes, one per lane the map says the road has, drawn in three states so an unavailable
+  estimate cannot be mistaken for a confident one: filled where the car has been placed, outlined
+  where it is one of several candidates, and all empty where the position is unknown.
 
 What it cannot do, stated plainly because the log looks the same in both cases:
 
