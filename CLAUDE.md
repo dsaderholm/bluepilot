@@ -2767,11 +2767,21 @@ everywhere.**
 of 4.6-4.8 m and that was read as "mostly lane 1". It was mostly lane 0 with a shoulder. A number
 measured correctly, interpreted against an assumption nobody had stated.
 
-So the edge is now a CORROBORATOR: it may pick a lane out of a range the lines allow -- the only
-way to resolve a middle lane on a road wider than three -- and it is refused when it contradicts
-the lines or when there is no bound to check it against. Restoring it to a first-class witness
-means measuring the shoulder, which the code cannot invent; mapd's `estimatedRoadWidth` is the
-candidate input and has not been checked.
+So the edge is now a CORROBORATOR: it may pick a lane out of a range the lines allow, and it is
+refused when it contradicts the lines or when there is no bound to check it against.
+
+**AND THE FOLLOW-UP IS "DO NOT BUILD IT".** The obvious next step is to learn the shoulder and
+correct the edge back into a first-class witness. Measured on the same drive, and the correction
+would work -- the shoulder is 3.22 m past our own right lane line, and 1.68 + 3.22 = 4.90 against
+a measured 4.81. **But on all 145 motorway frames where the edge was trustworthy at all, the lines
+already said RIGHTMOST: zero middle, zero leftmost.** The edge is only readable from the one lane
+the lines identify for free, so a corrected edge produces no reading we do not already have. An
+estimator, a cache and a staleness rule to buy nothing.
+
+The same drive measured the real lane width at **p50 3.36 m** against the 3.70 the anchor assumes
+-- 11-foot lanes, tightly distributed (p10 3.29, p90 3.43). Left alone deliberately: it feeds only
+the edge path, which no longer places us, and tuning a constant to one road is exactly how the
+shoulder assumption got baked in.
 
 **THE LESSON IS ABOUT THE DIAGNOSTIC, NOT THE GEOMETRY.** The cross-check was added the same
 morning as a quiet "measure it, do not act on it" counter, on the reasoning that refusing on a

@@ -257,8 +257,19 @@ class LaneAnchor:
     #
     # SO THE EDGE MAY NO LONGER PLACE US BY ITSELF. It is demoted to a corroborator: it may pick a
     # lane out of a range the lines allow, and it is refused outright when it falls outside one.
-    # Restoring it means measuring the shoulder, which is a real number this cannot invent -- and
-    # `estimatedRoadWidth` from mapd is the candidate input for it.
+    # AND DO NOT BUILD THE SHOULDER CORRECTION. Measured the same day, route 0000038f, motorway:
+    # the shoulder is 3.22 m beyond our own right lane line, and 1.68 + 3.22 = 4.90 against a
+    # measured 4.81 -- so a correction is easy and it is WORTHLESS, because of the other half of
+    # that measurement. On all 145 frames where the right edge was trustworthy at all, the lines
+    # said RIGHTMOST. Zero middle, zero leftmost.
+    #
+    # The edge is only ever readable from the one lane the lines already identify for free. A
+    # corrected edge would produce no reading the lines do not already have, so learning a shoulder
+    # would add an estimator, a cache and a staleness rule to buy nothing.
+    #
+    # (The same drive also measured the real lane width at p50 3.36 m against the 3.70 assumed
+    # here -- 11-foot lanes. It is left alone deliberately: it only feeds the edge path, which no
+    # longer places us, and tuning a constant to one road is how the last assumption got baked in.)
     #
     # The direction of this is deliberate: refusing costs coverage, and the lines now supply far
     # more of it than the edge ever did. Trusting a biased index would cost correctness.
