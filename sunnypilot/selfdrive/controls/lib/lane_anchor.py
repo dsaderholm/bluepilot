@@ -180,6 +180,9 @@ class LaneAnchor:
     self.confident = False       # True only on a frame that took a fresh reading
     self.no_lane_left = False    # the lane-line witness; see in_leftmost_lane
     self.line_bounds = None      # (lo, hi) from the four lines, or None
+    self.edge_index = None       # this frame's edge-derived index alone, before any fallback
+    # THE TWO WITNESSES DISAGREEING. Measured, not acted on -- see update().
+    self.contradiction = False
 
   def invalidate(self, reason=""):
     self.index = None
@@ -233,6 +236,20 @@ class LaneAnchor:
           fresh = lane_index_from_edge(edge_dist_m, lanes_total)
       except (TypeError, ValueError):
         fresh = None
+
+    self.edge_index = fresh
+
+    # DO THE TWO INDEPENDENT WITNESSES AGREE? The edge counts leftward from the shoulder; the lines
+    # bound us between what the model can see either side. They measure the same quantity by
+    # completely different means, so a disagreement means one of them is wrong -- and a confidently
+    # wrong index is the exact failure this module is shaped around.
+    #
+    # NOT ACTED ON. Refusing here would be the conservative choice and it may well be right, but it
+    # would also throw away good edge readings if the outer lines are merely noisy, and nobody has
+    # measured which. bp_anchor_replay counts it against a recorded drive; that number decides.
+    # Adding the refusal first and measuring afterwards would be a change nobody could attribute.
+    self.contradiction = (fresh is not None and self.line_bounds is not None
+                          and not self.line_bounds[0] <= fresh <= self.line_bounds[1])
 
     if fresh is None and self.line_bounds is not None and self.line_bounds[0] == self.line_bounds[1]:
       # The lines pinned it exactly. Counted as a FRESH reading because it is a measurement this

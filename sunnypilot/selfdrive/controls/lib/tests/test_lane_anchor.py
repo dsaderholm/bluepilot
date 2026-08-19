@@ -229,3 +229,49 @@ class TestTheBoundReachesTheAnchor:
     a = LaneAnchor()
     a.update(0.05, None, 9.9, 5, True, 0.02, 0.9)
     assert a.in_leftmost_lane() is True
+
+
+class TestTheTwoWitnessesCrossCheck:
+  """The edge and the lines measure the same quantity by completely different means, so they can
+  be compared. This is MEASUREMENT ONLY today -- the edge still wins -- and these tests exist so
+  the flag is trustworthy when the replay reports a number for it.
+  """
+
+  def test_edge_says_rightmost_while_the_lines_say_leftmost(self):
+    """The sharpest disagreement there is: 1.85 m from the right edge, and no line to our left on
+    a three-lane road. Both cannot be true, and this is the shape a bad edge reading takes."""
+    a = LaneAnchor()
+    a.update(0.05, HALF, 0.2, 3, True, 0.02, 0.9)
+    assert a.edge_index == 0
+    assert a.line_bounds == (2, 2)
+    assert a.contradiction is True
+
+  def test_the_edge_inside_the_range_agrees(self):
+    a = LaneAnchor()
+    a.update(0.05, HALF + LANE_WIDTH_M, 0.2, 3, True, 0.9, 0.9)   # edge 1, lines pin 1
+    assert a.edge_index == 1
+    assert a.contradiction is False
+
+  def test_the_edge_outside_the_range_is_flagged(self):
+    """Edge says the rightmost lane while the lines report a line beyond our right. One is wrong."""
+    a = LaneAnchor()
+    a.update(0.05, HALF, 0.2, 3, True, 0.9, 0.9)    # edge 0, lines say strictly between -> (1, 1)
+    assert a.edge_index == 0
+    assert a.contradiction is True
+
+  def test_the_edge_still_wins_despite_the_contradiction(self):
+    """Deliberate and temporary: refusing here is unmeasured, so it is counted, not acted on."""
+    a = LaneAnchor()
+    assert a.update(0.05, HALF, 0.2, 3, True, 0.9, 0.9) == 0
+
+  def test_no_bound_is_not_a_contradiction(self):
+    a = LaneAnchor()
+    a.update(0.05, HALF, 0.2, 3, True, None, None)
+    assert a.contradiction is False
+
+  def test_no_edge_reading_is_not_a_contradiction(self):
+    """A lane pinned by the lines alone has nothing to disagree with."""
+    a = LaneAnchor()
+    a.update(0.05, None, 9.9, 3, True, 0.9, 0.9)
+    assert a.edge_index is None
+    assert a.contradiction is False

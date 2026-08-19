@@ -103,6 +103,8 @@ def main():
   witness_left = 0
   bounded = 0
   pinned = 0
+  both_spoke = 0
+  contradictions = 0
   moving = 0
 
   for s in segs:
@@ -163,6 +165,10 @@ def main():
           bounded += 1
           if anchor.line_bounds[0] == anchor.line_bounds[1]:
             pinned += 1
+          if getattr(anchor, "edge_index", None) is not None:
+            both_spoke += 1
+            if getattr(anchor, "contradiction", False):
+              contradictions += 1
         if lead_slow:
           lead_frames += 1
           if anchor.in_leftmost_lane():
@@ -195,6 +201,16 @@ def main():
   print(f"FOUR-LINE BOUND   narrowed the lane on {bounded} frames "
         f"({100.0 * bounded / moving:.1f}%), PINNED it exactly on {pinned} "
         f"({100.0 * pinned / moving:.1f}%)")
+  print()
+  print("DO THE TWO WITNESSES AGREE?  (edge index vs the range the lines allow)")
+  if both_spoke:
+    print(f"  both spoke on {both_spoke} frames; they CONTRADICTED on {contradictions} "
+          f"({100.0 * contradictions / both_spoke:.1f}%)")
+    print("  Near zero means the edge and the lines corroborate and either may be trusted alone.")
+    print("  High means one is wrong often, and the anchor should REFUSE on a contradiction")
+    print("  rather than letting the edge win silently, which is what it does today.")
+  else:
+    print("  never both at once on this drive; the cross-check cannot be scored here")
   print()
   print("THE HOG CONJUNCTION")
   if lead_frames:
