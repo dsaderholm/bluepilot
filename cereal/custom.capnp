@@ -939,6 +939,17 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     # not a position, and a boolean promoted to a position is a fake measurement.
     noLaneLeft @103 :Bool;
 
+    # THE FOUR-LINE BOUND, 2026-08-19. The outer left AND right lane lines together, which narrow
+    # the lane even where the right road edge is out of reach -- the middle lanes, where he watched
+    # every box on the strip go empty at once.
+    #
+    # An inclusive range of candidate lane indices, or -1/-1 for none. On a three-lane road lo ==
+    # hi and the lane is pinned exactly, so it arrives as a real laneIndex instead and this merely
+    # agrees with it. On four or more it is a genuine range and this is the ONLY thing that has
+    # anything to say -- which is why it is on the wire rather than derived at the panel.
+    laneBoundLo @104 :Int8;
+    laneBoundHi @105 :Int8;
+
   }
 
   struct DynamicExperimentalControl {

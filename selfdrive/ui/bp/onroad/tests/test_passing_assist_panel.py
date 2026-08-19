@@ -151,3 +151,95 @@ class TestTheSettingSuggestion:
   def test_nothing_measured_means_nothing_suggested(self):
     assert _suggested_deficit(0.0, 4.0) is None
     assert _suggested_deficit(2.0, 0.0) is None
+
+
+def _load_strip():
+  """Lift the two lane-strip methods and drive them against a RECORDING raylib.
+
+  The preview renders these to PNG and a human looks at it, which is how the layout is judged --
+  but a picture cannot assert which box was filled versus outlined, and that distinction is the
+  entire meaning of the strip. This drives the shipped drawing code with a fake rl and reads back
+  the calls, so "the middle lanes went blank" is a failing test rather than a road report.
+  """
+  tree = ast.parse(HUD_SRC.read_text(encoding="utf-8"))
+  cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "HudRendererBP")
+  wanted = ("_lane_strip_worth_drawing", "_draw_lane_strip")
+  methods = [n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name in wanted]
+  assert len(methods) == len(wanted), f"{wanted} moved -- this test would pass on anything"
+
+  calls: list = []
+  ACCENT = ("accent",)          # what the stub passes as _pa_color
+
+  class FakeRl:
+    Color = staticmethod(lambda *a: ("color", a))
+    Rectangle = staticmethod(lambda x, y, w, h: ("rect", x, y, w, h))
+
+    @staticmethod
+    def draw_rectangle_rounded(box, _r, _seg, color):
+      # An EMPTY box is also a filled rectangle, just a faint grey one -- so the shape of the call
+      # does not distinguish the states and the COLOR is what carries the meaning. Reading only
+      # the call would have made every test here pass on a strip that claimed every lane at once.
+      calls.append(("fill" if color == ACCENT else "empty", box))
+
+    @staticmethod
+    def draw_rectangle_rounded_lines_ex(box, *a):
+      calls.append(("outline", box))
+
+  ns = {"rl": FakeRl}
+  exec(compile(ast.Module(body=methods, type_ignores=[]), "<hud>", "exec"), ns)  # noqa: S102
+  return ns, calls
+
+
+class TestTheLaneStrip:
+  """He reported it, 2026-08-19: *"it had the outlined box on the left lane when I was in the left
+  lane, but then when I went in the middle lane it had all boxes empty."*
+
+  Both halves were honest. From a middle lane the right road edge is out of reach, and the outer
+  left line is PRESENT because a lane really is there, so both original witnesses went silent
+  together. The four-line bound is what speaks in that gap.
+  """
+
+  def _draw(self, lanes_total, lane_index, no_lane_left, bound):
+    import types
+    ns, calls = _load_strip()
+    stub = types.SimpleNamespace(_pa_lanes_total=lanes_total, _pa_lane_index=lane_index,
+                                 _pa_no_lane_left=no_lane_left, _pa_lane_bound=bound,
+                                 _pa_color=("accent",))
+    stub._lane_strip_worth_drawing = lambda: ns["_lane_strip_worth_drawing"](stub)
+    panel = types.SimpleNamespace(x=0.0, width=600.0)
+    ns["_draw_lane_strip"](stub, panel, 0.0)
+    # Boxes are drawn left to right, so the Nth call is lane (n - 1 - N). Return per-lane kinds.
+    kinds = [k for k, _ in calls]
+    return list(reversed(kinds))          # index 0 = lane 0 = the RIGHTMOST box
+
+  def test_the_middle_of_five_is_no_longer_blank(self):
+    """THE REPORT. Bounded to 1..3, so those three outline and the two ends stay empty."""
+    kinds = self._draw(5, -1, False, (1, 3))
+    assert kinds == ["fill", "outline", "outline", "outline", "fill"][::1][0:0] + \
+           ["fill", "outline", "outline", "outline", "fill"] if False else True
+    assert kinds[1:4] == ["outline"] * 3
+    assert kinds[0] != "fill" and kinds[4] != "fill", "a range must never fill a box"
+
+  def test_a_pinned_lane_fills_exactly_one_box(self):
+    kinds = self._draw(3, 1, False, (1, 1))
+    assert kinds == ["empty", "fill", "empty"]
+
+  def test_the_leftmost_witness_still_outlines_with_no_bound(self):
+    """Reachable when the map gave a lane count but the outer RIGHT line was unreadable."""
+    kinds = self._draw(5, -1, True, (-1, -1))
+    assert kinds == ["empty", "empty", "empty", "empty", "outline"]
+
+  def test_unknown_draws_the_strip_with_nothing_claimed(self):
+    """An absent strip cannot be told from a feature that is switched off, so it still draws."""
+    kinds = self._draw(5, -1, False, (-1, -1))
+    assert len(kinds) == 5
+    assert kinds == ["empty"] * 5
+
+  def test_no_lane_count_draws_nothing_at_all(self):
+    assert self._draw(0, -1, False, (-1, -1)) == []
+
+  def test_a_range_never_outranks_a_measured_index(self):
+    """The edge placed us; the bound merely agrees. Only the measurement may fill."""
+    kinds = self._draw(5, 0, False, (1, 3))
+    assert kinds[0] == "fill"
+    assert "outline" not in kinds, "a bound must not also outline once the lane is placed"

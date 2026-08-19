@@ -6,7 +6,8 @@ permissive direction is worse than no anchor, which is the whole reason the modu
 shape it does.
 """
 from openpilot.sunnypilot.selfdrive.controls.lib.lane_anchor import (
-  LANE_WIDTH_M, MAX_LATCH_S, LaneAnchor, lane_index_from_edge, lanes_to_our_left,
+  LANE_WIDTH_M, MAX_LATCH_S, LaneAnchor, lane_bounds_from_lines, lane_index_from_edge,
+  lanes_to_our_left,
 )
 
 HALF = LANE_WIDTH_M / 2.0
@@ -159,3 +160,72 @@ class TestTheHogGateUsesTheAnchor:
       "the hog gate is back on camera geometry -- it fires on the camera being UNSURE, which is "
       "most of a freeway drive, and that is the reported false warning")
     assert "in_leftmost_lane" in body[0], "the hog gate must ask the anchor"
+
+
+class TestFourLineBound:
+  """The middle-lane fix. He watched the strip go blank whenever he moved to a middle lane, and it
+  was honest: the right edge is out of reach there and the far-left line is present because a lane
+  really is to the left, so both prior witnesses fall silent at once.
+
+  Reading all four lines answers it -- and on a three-lane road it pins the middle exactly.
+  """
+  def test_three_lanes_both_outer_lines_pins_the_middle(self):
+    """THE CASE HE REPORTED. Lines each side of us, three lanes total: only lane 1 fits."""
+    assert lane_bounds_from_lines(0.9, 0.9, 3) == (1, 1)
+
+  def test_no_line_left_is_the_leftmost_lane(self):
+    assert lane_bounds_from_lines(0.02, 0.9, 4) == (3, 3)
+
+  def test_no_line_right_is_the_rightmost_lane(self):
+    assert lane_bounds_from_lines(0.9, 0.02, 4) == (0, 0)
+
+  def test_four_lanes_both_present_narrows_without_pinning(self):
+    """A range is still worth having: lanes_to_our_left only needs 'not at either end'."""
+    assert lane_bounds_from_lines(0.9, 0.9, 4) == (1, 2)
+
+  def test_five_lanes_both_present(self):
+    assert lane_bounds_from_lines(0.9, 0.9, 5) == (1, 3)
+
+  def test_both_outer_lines_absent_is_a_contradiction_not_a_guess(self):
+    """Cannot be leftmost AND rightmost on a multi-lane road. Claim nothing rather than pick."""
+    assert lane_bounds_from_lines(0.02, 0.02, 4) is None
+
+  def test_two_lanes_with_a_line_each_side_is_inconsistent(self):
+    """On two lanes there is no 'strictly between', so both-present cannot be true."""
+    assert lane_bounds_from_lines(0.9, 0.9, 2) is None
+
+  def test_single_lane_road_claims_nothing(self):
+    assert lane_bounds_from_lines(0.02, 0.02, 1) is None
+
+  def test_missing_probability_propagates(self):
+    assert lane_bounds_from_lines(None, 0.9, 3) is None
+    assert lane_bounds_from_lines(0.9, None, 3) is None
+
+  def test_no_lane_count_claims_nothing(self):
+    assert lane_bounds_from_lines(0.9, 0.9, None) is None
+    assert lane_bounds_from_lines(0.9, 0.9, 0) is None
+
+  def test_garbage_is_none_rather_than_an_exception(self):
+    assert lane_bounds_from_lines("high", 0.9, 3) is None
+
+
+class TestTheBoundReachesTheAnchor:
+  def test_a_pinned_middle_lane_becomes_an_index_with_no_edge_at_all(self):
+    """The whole point: no usable right edge, and it still knows the lane."""
+    a = LaneAnchor()
+    assert a.update(0.05, None, 9.9, 3, True, 0.9, 0.9) == 1
+    assert a.confident, "a pin from the lines is a measurement, not a latch"
+
+  def test_the_edge_still_wins_when_both_are_available(self):
+    """The edge is the better evidence; the lines are the fallback."""
+    a = LaneAnchor()
+    assert a.update(0.05, HALF, 0.2, 3, True, 0.9, 0.9) == 0
+
+  def test_a_range_does_not_become_an_index(self):
+    a = LaneAnchor()
+    assert a.update(0.05, None, 9.9, 5, True, 0.9, 0.9) is None
+
+  def test_leftmost_from_the_bound_on_a_wide_road(self):
+    a = LaneAnchor()
+    a.update(0.05, None, 9.9, 5, True, 0.02, 0.9)
+    assert a.in_leftmost_lane() is True

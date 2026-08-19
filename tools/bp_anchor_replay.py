@@ -25,8 +25,15 @@ WHAT TO READ:
                  survive.
 
 Read-only. Run on the device from /data/openpilot.
+
+    python tools/bp_anchor_replay.py <route> [path/to/candidate/lane_anchor.py]
+
+The second argument replays a CANDIDATE module instead of the installed one, so a change can be
+scored against a recorded drive before it is shipped to a car that is driven. Without it there is
+no way to measure an anchor change except by deploying it first, which is backwards.
 """
 import glob
+import importlib.util
 import os
 import re
 import sys
@@ -48,10 +55,29 @@ def segments_in_order(route):
 
 def main():
   route = sys.argv[1] if len(sys.argv) > 1 else "0000038e"
+  candidate = sys.argv[2] if len(sys.argv) > 2 else None
   sys.path.insert(0, "/data/openpilot")
   from openpilot.tools.lib.logreader import LogReader
-  from openpilot.sunnypilot.selfdrive.controls.lib.lane_anchor import LaneAnchor
-  from openpilot.sunnypilot.selfdrive.controls.lib.passing_assist import LL_FAR_LEFT, RE_RIGHT
+
+  if candidate:
+    spec = importlib.util.spec_from_file_location("candidate_lane_anchor", candidate)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    LaneAnchor = mod.LaneAnchor
+    print(f"replaying CANDIDATE module: {candidate}")
+  else:
+    from openpilot.sunnypilot.selfdrive.controls.lib.lane_anchor import LaneAnchor
+
+  # Line and edge indices. Taken from the shipped module when it has them, so this cannot drift
+  # from the code it is scoring -- and falling back to the literals only when it does not, which
+  # is how a candidate gets replayed on a device whose passing_assist.py predates the fourth line.
+  try:
+    from openpilot.sunnypilot.selfdrive.controls.lib.passing_assist import (
+      LL_FAR_LEFT, LL_FAR_RIGHT, RE_RIGHT,
+    )
+  except ImportError:
+    LL_FAR_LEFT, LL_FAR_RIGHT, RE_RIGHT = 0, 3, 1
+    print("note: this openpilot predates LL_FAR_RIGHT; using literal line indices")
 
   segs = segments_in_order(route)
   if not segs:
@@ -75,6 +101,8 @@ def main():
   changes = 0
   fresh_frames = 0
   witness_left = 0
+  bounded = 0
+  pinned = 0
   moving = 0
 
   for s in segs:
@@ -119,9 +147,10 @@ def main():
 
         try:
           flp = float(m.modelV2.laneLineProbs[LL_FAR_LEFT])
+          frp = float(m.modelV2.laneLineProbs[LL_FAR_RIGHT])
         except (AttributeError, IndexError, TypeError, ValueError):
-          flp = None
-        idx = anchor.update(DT, d, std, lanes, one_way, flp)
+          flp = frp = None
+        idx = anchor.update(DT, d, std, lanes, one_way, flp, frp)
         if anchor.confident:
           fresh_frames += 1
         seen[idx] += 1
@@ -130,6 +159,10 @@ def main():
           by_class[hwy] += 1
         if anchor.no_lane_left:
           witness_left += 1
+        if anchor.line_bounds is not None:
+          bounded += 1
+          if anchor.line_bounds[0] == anchor.line_bounds[1]:
+            pinned += 1
         if lead_slow:
           lead_frames += 1
           if anchor.in_leftmost_lane():
@@ -158,6 +191,10 @@ def main():
   print()
   print(f"LANE-LINE WITNESS  said NO LANE LEFT on {witness_left} frames "
         f"({100.0 * witness_left / moving:.1f}%) -- this is what makes leftmost reachable")
+  print()
+  print(f"FOUR-LINE BOUND   narrowed the lane on {bounded} frames "
+        f"({100.0 * bounded / moving:.1f}%), PINNED it exactly on {pinned} "
+        f"({100.0 * pinned / moving:.1f}%)")
   print()
   print("THE HOG CONJUNCTION")
   if lead_frames:

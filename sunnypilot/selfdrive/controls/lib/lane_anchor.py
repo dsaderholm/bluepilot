@@ -113,6 +113,57 @@ def lanes_to_our_left(lane_index, lanes_total):
   return n - 1 - lane_index
 
 
+def lane_bounds_from_lines(far_left_prob, far_right_prob, lanes_total):
+  """Bound our lane index from the OUTER two lane lines. Returns (lo, hi) or None.
+
+  THE MIDDLE-LANE FIX, 2026-08-19. He watched the strip go blank whenever he moved to a middle
+  lane, and that was honest rather than broken: the right EDGE is out of reach from there, and the
+  far-left LINE is present because there really is a lane to the left, so both prior witnesses fall
+  silent at once and every box empties.
+
+  modelV2 publishes FOUR lines, and only the outer left was being read. The other three carry the
+  rest of the answer:
+
+      far-left ABSENT    nothing beyond our left boundary   -> we are the LEFTMOST lane
+      far-right ABSENT   nothing beyond our right boundary  -> we are the RIGHTMOST lane
+      both PRESENT       a lane each side                   -> strictly between, 1..n-2
+
+  On a THREE-lane road "strictly between" is a single value, so the middle lane becomes exactly
+  determined -- which is the case that was blank. On four or more it narrows rather than pins, and
+  a range is still worth having: `lanes_to_our_left` only needs to know we are not at either end.
+
+  BOTH ABSENT IS A CONTRADICTION on any multi-lane road -- we cannot be leftmost and rightmost at
+  once -- so it returns None rather than picking one. That is the case a single-lane road produces
+  legitimately, and `lanes_total == 1` is handled before we get here.
+
+  Index ordering is verified rather than assumed: measured medians are idx0 -5.1 m, idx1 -1.7,
+  idx2 +1.8, idx3 +5.1, and negative is left, matching adjacent_lane's own `lat < 0 is left`.
+  """
+  if lanes_total is None:
+    return None
+  try:
+    n = int(lanes_total)
+    fl = None if far_left_prob is None else float(far_left_prob)
+    fr = None if far_right_prob is None else float(far_right_prob)
+  except (TypeError, ValueError):
+    return None
+  if n <= 1 or fl is None or fr is None:
+    return None
+
+  left_open = fl < NO_LEFT_LINE_PROB       # no lane to our left
+  right_open = fr < NO_LEFT_LINE_PROB      # no lane to our right
+
+  if left_open and right_open:
+    return None                            # contradiction on a multi-lane road; claim nothing
+  if left_open:
+    return (n - 1, n - 1)
+  if right_open:
+    return (0, 0)
+  if n < 3:
+    return None                            # two lanes with a line each side is not consistent
+  return (1, n - 2)                        # strictly between; exact when n == 3
+
+
 class LaneAnchor:
   """Latches a lane index from intermittent right-edge readings and holds it between them.
 
@@ -128,6 +179,7 @@ class LaneAnchor:
     self.age_s = 0.0
     self.confident = False       # True only on a frame that took a fresh reading
     self.no_lane_left = False    # the lane-line witness; see in_leftmost_lane
+    self.line_bounds = None      # (lo, hi) from the four lines, or None
 
   def invalidate(self, reason=""):
     self.index = None
@@ -145,7 +197,8 @@ class LaneAnchor:
     """
     self.invalidate("lane change")
 
-  def update(self, dt, edge_dist_m, edge_std, lanes_total, one_way, far_left_line_prob=None):
+  def update(self, dt, edge_dist_m, edge_std, lanes_total, one_way, far_left_line_prob=None,
+             far_right_line_prob=None):
     """Advance one frame. Returns the current lane index, or None if unknown.
 
     `one_way` is required and must be True: on a two-way road the map's `lanes` is the total for
@@ -164,6 +217,11 @@ class LaneAnchor:
       except (TypeError, ValueError):
         self.no_lane_left = False
 
+    # FOUR-LINE BOUND. Independent of the edge and available every frame, and unlike the single
+    # outer-left witness it speaks in the middle lanes. Only an EXACT bound (lo == hi) becomes an
+    # index; a range is kept for to_our_left, which does not need the precise lane.
+    self.line_bounds = lane_bounds_from_lines(far_left_line_prob, far_right_line_prob, lanes_total)
+
     if not one_way:
       self.invalidate("not one-way")
       return None
@@ -175,6 +233,11 @@ class LaneAnchor:
           fresh = lane_index_from_edge(edge_dist_m, lanes_total)
       except (TypeError, ValueError):
         fresh = None
+
+    if fresh is None and self.line_bounds is not None and self.line_bounds[0] == self.line_bounds[1]:
+      # The lines pinned it exactly. Counted as a FRESH reading because it is a measurement this
+      # frame, not a latch -- but it never overrides an edge reading, which is the better evidence.
+      fresh = self.line_bounds[0]
 
     if fresh is not None:
       # A fresh reading always wins over a latched one, including when it disagrees.
@@ -226,6 +289,10 @@ class LaneAnchor:
     """
     if self.to_our_left() == 0:
       return True
+    if self.line_bounds is not None and self.lanes_total:
+      lo, hi = self.line_bounds
+      if lo == hi == self.lanes_total - 1:
+        return True
     return bool(getattr(self, "no_lane_left", False))
 
 

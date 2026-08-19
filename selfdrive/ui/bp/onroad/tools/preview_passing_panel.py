@@ -206,16 +206,24 @@ def _contact_sheet(ns, font, outdir):
 
   for i, (cap, main_text, sub, progress, alert, color) in enumerate(SCENES):
     top = 20 + i * ROW_H
-    # LANE STRIP. Cycled across the scenes rather than fixed, so every one of its three states
-    # (placed / witness-only / unknown) is rendered at least once on the contact sheet -- an
-    # unrendered state is exactly how three readouts shipped assembled-but-invisible before.
-    lane_cases = [(4, 0, False), (5, 4, False), (5, -1, True), (3, 1, False), (0, -1, False)]
-    lanes_total, lane_idx, no_left = lane_cases[i % len(lane_cases)]
+    # LANE STRIP. Cycled across the scenes rather than fixed, so every one of its states -- placed
+    # / narrowed-to-a-range / witness-only / unknown -- is rendered at least once on the contact
+    # sheet. An unrendered state is exactly how three readouts shipped assembled-but-invisible.
+    lane_cases = [
+      (4, 0, False, (0, 0)),        # placed in the rightmost lane
+      (5, 4, False, (4, 4)),        # placed in the leftmost
+      (5, -1, True, (-1, -1)),      # witness only, no bound (outer right line unreadable)
+      (3, 1, False, (1, 1)),        # three lanes, pinned by the lines alone
+      (5, -1, False, (1, 3)),       # I-15's middle: narrowed to three candidates, none pinned
+      (0, -1, False, (-1, -1)),     # no lane count at all -- the strip does not draw
+    ]
+    lanes_total, lane_idx, no_left, lane_bound = lane_cases[i % len(lane_cases)]
     stub = types.SimpleNamespace(
       _font_bold=font, _pa_main=main_text, _pa_sub=sub, _pa_progress=progress,
       _pa_alert=alert, _pa_color=rl.Color(*color, 255), _pa_panel_rect=None,
       _handle_panel_tap=lambda panel: None,
       _pa_lanes_total=lanes_total, _pa_lane_index=lane_idx, _pa_no_lane_left=no_left,
+      _pa_lane_bound=lane_bound,
     )
     stub._lane_strip_worth_drawing = lambda: ns["_lane_strip_worth_drawing"](stub)
     stub._draw_lane_strip = lambda panel, y: ns["_draw_lane_strip"](stub, panel, y)
@@ -281,6 +289,7 @@ def main(outdir):
     stub._pa_lanes_total = getattr(stub, '_pa_lanes_total', 5)
     stub._pa_lane_index = getattr(stub, '_pa_lane_index', 4)
     stub._pa_no_lane_left = getattr(stub, '_pa_no_lane_left', False)
+    stub._pa_lane_bound = getattr(stub, '_pa_lane_bound', (-1, -1))
     stub._lane_strip_worth_drawing = lambda: ns['_lane_strip_worth_drawing'](stub)
     stub._draw_lane_strip = lambda panel, y: ns['_draw_lane_strip'](stub, panel, y)
     rl.begin_texture_mode(tex)

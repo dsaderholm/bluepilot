@@ -811,6 +811,8 @@ class PassingAssistDetector:
     self.lane_index_out = -1
     self.lanes_total_out = 0
     self.no_lane_left_out = False
+    self.lane_bound_lo_out = -1
+    self.lane_bound_hi_out = -1
     self._hog_held_s = 0.0
     self._hog_counted = False
     self.elapsed_s = 0.0
@@ -1760,20 +1762,30 @@ class PassingAssistDetector:
     # of being in the leftmost lane, and unlike the right edge it is published every frame. It is
     # what makes in_leftmost_lane() reachable once we are actually over there -- the edge-only
     # anchor never claimed a lane past index 1 in 22,547 freeway frames.
-    far_left_prob = None
+    far_left_prob = far_right_prob = None
     try:
-      far_left_prob = float(sm['modelV2'].laneLineProbs[LL_FAR_LEFT])
+      probs = sm['modelV2'].laneLineProbs
+      far_left_prob = float(probs[LL_FAR_LEFT])
+      # The FOURTH line. With both outer lines present we are strictly between two lanes, which on
+      # a three-lane road pins the middle exactly -- the case that rendered blank on the road.
+      far_right_prob = float(probs[LL_FAR_RIGHT])
     except (AttributeError, IndexError, KeyError, TypeError, ValueError):
-      far_left_prob = None
+      far_left_prob = far_right_prob = None
 
     self.lane_index = self.lane_anchor.update(DT_MDL, edge_d, edge_std, lanes, one_way,
-                                              far_left_prob)
+                                              far_left_prob, far_right_prob)
     self.lanes_left_of_us = self.lane_anchor.to_our_left()
     # -1 rather than 0 for unknown: 0 is the rightmost lane, a real answer, and the panel must be
     # able to draw "no idea" differently from "far right".
     self.lane_index_out = -1 if self.lane_index is None else int(self.lane_index)
     self.lanes_total_out = int(lanes) if lanes else 0
     self.no_lane_left_out = bool(getattr(self.lane_anchor, "no_lane_left", False))
+    # The four-line bound, as an inclusive range. -1/-1 for none. This is the only readout that
+    # says anything in a middle lane of a road wider than three, where the edge cannot reach and
+    # the lane cannot be pinned -- so it goes on the wire rather than being re-derived at the panel.
+    bounds = getattr(self.lane_anchor, "line_bounds", None)
+    self.lane_bound_lo_out = -1 if bounds is None else int(bounds[0])
+    self.lane_bound_hi_out = -1 if bounds is None else int(bounds[1])
 
   def _track_lane_hog(self) -> None:
     """Time spent behind someone sitting in the leftmost lane below the set speed.
@@ -3642,3 +3654,5 @@ class PassingAssistDetector:
     passingAssist.laneIndex = int(getattr(pa, "lane_index_out", -1))
     passingAssist.lanesTotal = int(getattr(pa, "lanes_total_out", 0))
     passingAssist.noLaneLeft = bool(getattr(pa, "no_lane_left_out", False))
+    passingAssist.laneBoundLo = int(getattr(pa, "lane_bound_lo_out", -1))
+    passingAssist.laneBoundHi = int(getattr(pa, "lane_bound_hi_out", -1))

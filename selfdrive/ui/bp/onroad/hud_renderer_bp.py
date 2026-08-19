@@ -1124,8 +1124,10 @@ class HudRendererBP(HudRendererSP):
       self._pa_lane_index = int(pa.laneIndex)
       self._pa_lanes_total = int(pa.lanesTotal)
       self._pa_no_lane_left = bool(pa.noLaneLeft)
+      self._pa_lane_bound = (int(pa.laneBoundLo), int(pa.laneBoundHi))
     except (AttributeError, TypeError, ValueError):
       self._pa_lane_index, self._pa_lanes_total, self._pa_no_lane_left = -1, 0, False
+      self._pa_lane_bound = (-1, -1)
 
     # Reset the count on each new drive rather than each UI start, so it always means
     # "this trip" no matter when the display was switched on.
@@ -1811,16 +1813,23 @@ class HudRendererBP(HudRendererSP):
     THREE STATES, and drawing them alike is how an unavailable estimator reads as a confident one:
 
       filled box    the anchor placed us in that lane. A measurement.
-      outlined box  the lane-line witness alone says nothing is to our left. Weaker evidence -- a
-                    claim about the immediate neighbour, not a position -- so it is drawn weaker.
+      outlined box  it is one of THESE, we cannot say which. From the four-line bound, or from the
+                    lane-line witness alone. Weaker evidence, so it is drawn weaker.
       all empty     unknown. The strip still draws, because an absent strip cannot be told from a
                     feature that is switched off.
+
+    HE REPORTED THE MIDDLE LANE AS ALL-EMPTY, 2026-08-19, and it was: from a middle lane the right
+    edge is out of reach and a left line is genuinely present, so both of the original witnesses
+    fell silent at once. Outlining a RANGE is what puts something on the strip there -- on a
+    three-lane road the bound pins the lane and it fills instead, and on I-15's five it narrows to
+    the three middle boxes, which is a true statement rather than a blank one.
     """
     if not self._lane_strip_worth_drawing():
       return
     n = min(int(getattr(self, "_pa_lanes_total", 0)), 8)   # 8 boxes is already an unusual road
     idx = int(getattr(self, "_pa_lane_index", -1))
     witness = bool(getattr(self, "_pa_no_lane_left", False))
+    lo, hi = getattr(self, "_pa_lane_bound", (-1, -1))
 
     box_w, box_h, gap = 18, 12, 5
     total_w = n * box_w + (n - 1) * gap
@@ -1833,8 +1842,14 @@ class HudRendererBP(HudRendererSP):
       box = rl.Rectangle(x0 + i * (box_w + gap), y, box_w, box_h)
       if lane == idx:
         rl.draw_rectangle_rounded(box, 0.35, 4, self._pa_color)
+      elif idx < 0 and lo >= 0 and lo <= lane <= hi:
+        # Narrowed but not pinned: this lane is a candidate. Outlined, never filled -- a range is
+        # not a position, and drawing it as one would be the strip claiming a measurement it does
+        # not have.
+        rl.draw_rectangle_rounded_lines_ex(box, 0.35, 4, 2, self._pa_color)
       elif witness and lane == n - 1 and idx < 0:
-        # Leftmost, asserted by the witness with no numeric index behind it.
+        # Leftmost, asserted by the witness alone -- reachable when the map gave a lane count but
+        # the outer RIGHT line was unreadable, so no bound could form.
         rl.draw_rectangle_rounded_lines_ex(box, 0.35, 4, 2, self._pa_color)
       else:
         rl.draw_rectangle_rounded(box, 0.35, 4, rl.Color(255, 255, 255, 45))
