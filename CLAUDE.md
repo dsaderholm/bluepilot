@@ -1014,7 +1014,52 @@ and then Ford's frame goes out instead.
 what opens the relay and puts `ACCDATA` in panda's TX list -- while the numbers stay Ford's. Expect
 experimental-mode and DEC indicators to keep showing state that is driving nothing.
 
-### THE STOP OVERRIDE IS BUILT, 2026-08-18. `opendbc/sunnypilot/car/ford/stop_override.py`.
+### DRIVES C AND D (0000038e, 0000038f, 2026-08-19): EVERY FIX FROM THE 18th HELD
+
+`tools/bp_drive_checkup.py` asks all of it in one pass over the last N routes. Both drives ran the
+06:03 merge, verified BY CONTENT rather than by hash -- a rebase makes hashes lie, and every fix
+below was confirmed present in the running tree before any number was read.
+
+    ICBM actually ran        MAX/dash diverged 76% / 50%     was LOCKED (ICBM off)
+    SLA reached active       76.3% / 58.2% of plan frames    was ZERO, all drive
+    "set your speed to 70"   never                           was constant
+    +/- moved the MAX        3 of 3 presses                  moved the ICBM number
+    Ford authored ACC        99.9% / 99.3% of ENGAGED        91.1% on drive B
+    passthrough went inert   never                           bricked a whole drive
+    accFaulted               0                               82 on drive A
+
+He reported no complaints on either, and for once that agrees with the instruments.
+
+**THE DENOMINATOR ERROR HAPPENED A THIRD TIME, in the tool written to check for it.** `accAuthority`
+`stock` is `not CC.longActive` -- cruise not engaged, nobody driving -- and counting it made Ford's
+share read **42.8%** when Ford in fact authored **99.3%** of the frames where anything was asked of
+anyone. Same shape as the 70.6% on drive A and the 23% on drive 389. **Restrict to frames where the
+feature is LIVE before reading any rate**, and note that this is now a mistake with three instances
+and a written warning, so the warning is not enough on its own -- check the denominator explicitly.
+
+**A PEAK TEMPERATURE IS NOT EVIDENCE OF A RUNAWAY PROCESS.** The first version called 81 C "something
+is still burning a core". **The device idles at 75 C parked with the engine off in August**, and `ps`
+shows only `mapd_v2` at 0.7% CPU -- v1 is gone, so the two-daemon fix took. `deviceState` has no
+`ambientTempC`; the ambient proxy is **`intakeTempC`**, the fan intake air reading. The tool now
+prints peak beside intake and deliberately renders NO verdict.
+
+**AND `athenad`/`sunnylinkd` WEBSOCKET CHURN IS NOT A PROCESS DEATH** -- 22 and 25 of them, counted
+as failures. A check that fires every drive forever is how a real plannerd death gets scrolled past,
+which already happened once here.
+
+**THE TSR 80 LEAK IS CONFIRMED ON THE ROAD, having been predicted from the resolver first.** Route
+0000038e:
+
+    source:  map=22072   none=3214   car=700
+    limits:  70 mph x19915  ...  80 mph x700       <- the same 700 frames
+
+`Policy.map_data_priority` is `[map, car]` and takes the FIRST NON-ZERO, so it consults the map first
+and **falls through to the car wherever the map is quiet** -- and TSR is stuck at a constant 80.
+`combined` has the identical hole, since `min()` over a single source is that source. Only
+`map_data_only` excludes it. **His setting to make**, and the cost is real but small: no limit at all
+on unmapped road, which is the case he already asked to handle by editing the max speed directly.
+
+
 
 **It authors NOTHING. It chooses which already-authored frame goes out.** `create_acc_msg` already
 clamps to panda's bands, already drives the split brake/precharge hysteresis, and already never

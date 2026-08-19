@@ -97,6 +97,13 @@ def main() -> int:
   prev_cancel = 0
   setspeed_while_stopped = []
   resume_events = 0
+  # WHICH CONDITION BLOCKED IT. Its own output used to name two candidates -- "the plan never
+  # committed or a lead was inside 60 m" -- and had no way to separate them, which is the same
+  # "prints the same thing for two different causes" failure recorded twice in CLAUDE.md. These
+  # mirror stop_override.py exactly: has_slow_down, op_stopping, v <= ENTER_SPEED, no lead in 60 m.
+  fn_slow = fn_speed = fn_stopping = fn_nolead = fn_all = 0
+  op_stopping = False
+  lead_m = 0.0
 
   for seg in segs[:args.max_segments]:
     p = os.path.join(REALDATA, seg, "rlog")
@@ -130,10 +137,32 @@ def main() -> int:
         oe = bool(m.carControl.longActive)
         if m.carControl.cruiseControl.resume:
           resume_events += 1
+      elif w == "longitudinalPlan":
+        try:
+          op_stopping = str(m.longitudinalPlan.longControlState) == "stopping"
+        except Exception:
+          op_stopping = False
+      elif w == "radarState":
+        try:
+          lead = m.radarState.leadOne
+          lead_m = float(lead.dRel) if bool(lead.status) else 0.0
+        except Exception:
+          lead_m = 0.0
       elif w == "longitudinalPlanSP":
         try:
           if m.longitudinalPlanSP.dec.hasSlowDown:
             slowdown_frames += 1
+            fn_slow += 1
+            slow_enough = v_mph <= 20.0
+            no_lead = not (0.0 < lead_m < 60.0)
+            if slow_enough:
+              fn_speed += 1
+            if op_stopping:
+              fn_stopping += 1
+            if no_lead:
+              fn_nolead += 1
+            if slow_enough and op_stopping and no_lead:
+              fn_all += 1
         except Exception:
           pass
       elif w == "can":
