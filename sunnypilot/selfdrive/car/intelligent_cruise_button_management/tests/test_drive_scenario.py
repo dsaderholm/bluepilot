@@ -78,11 +78,17 @@ class Drive:
     # "no posted limit means no hold" landed and two scenarios began failing for a reason that had
     # nothing to do with the change.
     #
-    # Defaults TRUE because that is the ordinary road, and because these scenarios are all about
-    # holds -- which now only exist where a limit is known.
+    # Defaults TRUE because that is the ordinary road.
+    #
+    # AND `assist.enabled` WAS THE NEXT MISSING FIELD, found 2026-08-19 the same way -- the rule
+    # moved off "is a limit known" onto "is SLA in assist mode" and every scenario here began
+    # failing, because absent it read False and they all silently became "SLA switched off". Third
+    # time this pair of fixtures has been a field short of the real message. Defaults TRUE: these
+    # scenarios are all about holds, and a hold only exists in assist mode.
     lp = NS(vTarget=target * MPH, longitudinalPlanSource=source,
             speedLimit=NS(resolver=NS(speedLimitValid=limit_known,
-                                      speedLimitLastValid=limit_known)),
+                                      speedLimitLastValid=limit_known),
+                          assist=NS(enabled=True)),
             smartCruiseControl=NS(map=NS(active=map_on, vTarget=target * MPH),
                                   vision=NS(active=source == PlanSource.sccVision,
                                             vTarget=target * MPH)),

@@ -64,12 +64,18 @@ def make_cs(cluster, v_ego=None, buttons=(), enabled=True, gas_pressed=False, br
 
 def make_lp(target, lead_state=UnconfirmedLeadState.inactive, lead_target=0.0,
             source=PlanSource.speedLimitAssist, limit_known=True,
-            curve_active=False, curve_target=0.0, map_active=False):
+            curve_active=False, curve_target=0.0, map_active=False, sla_assist=True):
   """limit_known defaults TRUE because that is the ordinary road: OSM has a limit for most places.
 
   It was absent entirely at first, which made LP_SP.speedLimit raise and every test run as though no
   limit were ever known -- the rarer case, silently, everywhere. Holding a fixture constant at the
   wrong value is how the model-stop path passed its tests for weeks while doing nothing on the car.
+
+  sla_assist defaults TRUE for the SAME REASON, and it is the third time this fixture has been
+  found a field short. `assist.enabled` is `SpeedLimitMode == assist`, which is what his car runs
+  and what every hold test in this file assumes -- a hold cannot exist in any other mode (see
+  `enforce_hold_policy`). Absent, it read False and every one of these tests silently became "SLA is
+  switched off", which is not the scenario any of them were written for.
   """
   # smartCruiseControl was ABSENT here entirely, so the controller's try/except fired on every frame
   # of every test in this file and the whole curve-ceiling path was unreachable -- a fixture thinner
@@ -78,7 +84,8 @@ def make_lp(target, lead_state=UnconfirmedLeadState.inactive, lead_target=0.0,
   return NS(vTarget=target * MPH,
             longitudinalPlanSource=source,
             speedLimit=NS(resolver=NS(speedLimitValid=limit_known,
-                                      speedLimitLastValid=limit_known)),
+                                      speedLimitLastValid=limit_known),
+                          assist=NS(enabled=sla_assist)),
             smartCruiseControl=NS(map=NS(active=map_active, vTarget=target * MPH),
                                   vision=NS(active=curve_active, vTarget=curve_target * MPH)),
             unconfirmedLead=NS(state=lead_state, vTarget=lead_target * MPH))
@@ -1432,168 +1439,111 @@ class TestOvertakeReturnsToTheDriversNumber:
     assert icbm.baseline_source == BaselineSource.none
 
 
-class TestNoPostedLimitMeansNoHold:
-  """WITHOUT A LIMIT THERE IS NO HOLD. Asked for directly on 2026-08-15.
+class TestAHoldExistsOnlyInAssistMode:
+  """A HOLD EXISTS WHEN SPEED LIMIT ASSIST IS ASSISTING, AND NOT OTHERWISE.
 
-  His words: *"I want the +/- to just affect the max speed like normal, like when ICBM is off
-  entirely, not affect the little number above the max speed"* and *"there's no point in having the
-  max speed be stuck where I hit set when there is no SLA"*.
+  His spec, 2026-08-19, verbatim: *"have it do max speed when SLA is off or on at an informational
+  level, and do max speed and hold to be together and the same when SLA is on assist mode"*.
 
-  THIS CLASS REPLACES `TestAHoldMadeWhereNoLimitIsKnown`, which tested the opposite: a hold made
-  where no limit was known had to survive, and then clear when a matching limit was acquired. That
-  behaviour came from a 2026-08-06 report and was correct under the old model. The new rule deletes
-  its premise -- the hold is never created -- so the old test is not weakened here, it is obsolete.
+  THIS CLASS REPLACES `TestNoPostedLimitMeansNoHold`, which keyed the same idea on whether a POSTED
+  LIMIT was known this frame. That was a misreading of the 2026-08-15 request -- *"there's no point
+  in having the max speed be stuck where I hit set when there is no SLA"* meant the FEATURE is not
+  assisting, not "the map went quiet for a mile". The two agree on an unmapped road with SLA off and
+  disagree exactly where he kept seeing the bug: in assist mode, on a road with coverage gaps, the
+  hold was being destroyed and rebuilt at every gap. Reported the same day: *"it's still affecting
+  the little ICBM speed above, which seems to eventually reset back to the speed I pressed the set
+  button at, which is dumb."*
 
-  Measured justification, route 00000379: SLA had a limit in 1.7% of plan frames, yet a hold was
-  held for 36.5% of the drive with `baselineSource` reading fallbackIdle. He pressed SET five times
-  and nothing else, so nearly every one of those holds was inferred rather than chosen.
+  The older `TestAHoldMadeWhereNoLimitIsKnown` was itself replaced by that class for the opposite
+  reason. This is the third statement of the rule and the first one keyed on the thing he actually
+  described, so the history is left here rather than deleted: each version was right about the
+  behaviour he asked for and wrong about the signal to key it on.
   """
 
-  def _press_with_no_limit(self, to=DRIVER):
+  def _press(self, to=DRIVER, limit_known=False, sla_assist=True):
+    """Hold + from LIMIT up to `to`, under a chosen SLA mode and limit availability."""
     icbm = fresh()
+
+    def lp():
+      return make_lp(LIMIT, limit_known=limit_known, sla_assist=sla_assist)
+
     for _ in range(5):
-      icbm.run(make_cs(LIMIT), CC, make_lp(LIMIT, limit_known=False), False)
-    icbm.run(make_cs(LIMIT, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT, limit_known=False), False)
+      icbm.run(make_cs(LIMIT), CC, lp(), False)
+    icbm.run(make_cs(LIMIT, buttons=(ACCEL_PRESS,)), CC, lp(), False)
     for cluster in range(LIMIT, to + 1):
-      icbm.run(make_cs(cluster, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT, limit_known=False), False)
-    icbm.run(make_cs(to, buttons=(ACCEL_RELEASE,)), CC, make_lp(LIMIT, limit_known=False), False)
+      icbm.run(make_cs(cluster, buttons=(ACCEL_PRESS,)), CC, lp(), False)
+    icbm.run(make_cs(to, buttons=(ACCEL_RELEASE,)), CC, lp(), False)
     return icbm
 
-  def test_the_cleared_hold_is_kept_so_a_pin_can_still_be_made_from_it(self):
-    """Dropping the hold must not also delete the only trace pinned holds learn from.
+  def test_assist_mode_keeps_the_hold_where_no_limit_is_known(self):
+    """THE ONE HE ASKED FOR. Assist mode, coverage gap, press: the hold must live.
 
-    selfdrived observes and pins `v_baseline`. Clearing it on no-limit roads therefore killed BOTH
-    halves of pinned holds on exactly the roads he says pins are for -- no observation was ever
-    recorded, so no suggestion could form, so the badge that is the only tap target never appeared.
-    Found on 2026-08-17 from his device: IcbmHoldObservations 6 KB and growing, IcbmPinnedHolds
-    still `[]` and five days stale.
-
-    `no_limit_hold_speed` is that baseline one frame before it went. It is still the DELIBERATE
-    press it always was -- not the current cluster speed, which would record every number he passes
-    through and drown the signal.
+    This is the case the previous rule destroyed, and it is the case pinned holds exist for -- a
+    place with no posted limit that needs the same correction every trip. With the baseline zeroed
+    there was nothing for selfdrived to observe, so no suggestion could ever form and the badge that
+    is the only tap target never appeared.
     """
-    icbm = self._press_with_no_limit()
-    assert icbm.v_baseline == 0, "the no-limit rule itself stopped working"
-    assert icbm.no_limit_hold_speed == DRIVER, (
-      "the hold was dropped without a trace, so nothing can observe or pin it")
+    icbm = self._press(limit_known=False, sla_assist=True)
+    assert icbm.v_baseline == DRIVER, "assist mode must keep the hold through a coverage gap"
+    assert icbm.override_state == OverrideState.manual
 
-  def test_the_remembered_hold_is_dropped_when_a_posted_limit_returns(self):
-    """It must not follow the car onto the next road.
+  def test_assist_mode_keeps_the_hold_where_a_limit_is_known(self):
+    """The ordinary road, unchanged by this rewrite."""
+    icbm = self._press(limit_known=True, sla_assist=True)
+    assert icbm.v_baseline == DRIVER
+    assert icbm.override_state == OverrideState.manual
 
-    `_pinnable_speed()` in selfdrived is `v_baseline or no_limit_hold_speed`. Leaving the remembered
-    value set once a limit exists means that function can never return 0 again for the rest of the
-    drive -- which wedges `_last_observed_hold` at a number captured somewhere else, and a GENUINE
-    hold equal to it is then silently never observed. That is the exact failure this feature was
-    built to fix, reintroduced one road later. Found in review, 2026-08-17.
+  def test_informational_mode_creates_no_hold_even_with_a_limit(self):
+    """SLA showing a number but not acting on it is NOT assisting, so `+/-` is the MAX alone.
+
+    The limit being KNOWN here is the point: it separates this rule from the one it replaced, which
+    would have kept the hold on exactly this input.
     """
-    icbm = self._press_with_no_limit()
+    icbm = self._press(limit_known=True, sla_assist=False)
+    assert icbm.v_baseline == 0, "a hold was created while SLA was only informational"
+
+  def test_sla_off_creates_no_hold(self):
+    icbm = self._press(limit_known=False, sla_assist=False)
+    assert icbm.v_baseline == 0, "a hold was created with SLA switched off"
+
+  def test_leaving_assist_mode_mid_drive_drops_an_existing_hold(self):
+    """He can change the mode at any time, and the hold must not outlive the mode that justified it."""
+    icbm = self._press(limit_known=True, sla_assist=True)
+    assert icbm.v_baseline == DRIVER, "no hold was created in assist mode"
+    for _ in range(5):
+      icbm.run(make_cs(DRIVER), CC, make_lp(LIMIT, sla_assist=False), False)
+    assert icbm.v_baseline == 0, "the hold outlived assist mode"
+
+  def test_the_dropped_hold_is_kept_so_a_pin_can_still_be_made_from_it(self):
+    """Dropping the hold must not delete the only trace pinned holds learn from.
+
+    selfdrived observes and pins `v_baseline`. Found on his device 2026-08-17:
+    IcbmHoldObservations 6 KB and growing, IcbmPinnedHolds `[]` and five days stale -- he had never
+    once succeeded in creating a pin.
+    """
+    icbm = self._press(limit_known=True, sla_assist=True)
+    for _ in range(5):
+      icbm.run(make_cs(DRIVER), CC, make_lp(LIMIT, sla_assist=False), False)
+    assert icbm.v_baseline == 0
+    assert icbm.no_limit_hold_speed == DRIVER, "the dropped hold was not remembered for pinning"
+
+  def test_the_remembered_hold_is_dropped_when_assist_mode_returns(self):
+    """Stale once the real baseline can live again, and leaving it set wedges `_pinnable_speed()`
+    at a number from a different road for the rest of the drive."""
+    icbm = self._press(limit_known=True, sla_assist=True)
+    for _ in range(5):
+      icbm.run(make_cs(DRIVER), CC, make_lp(LIMIT, sla_assist=False), False)
     assert icbm.no_limit_hold_speed == DRIVER
-
     for _ in range(5):
-      icbm.run(make_cs(DRIVER), CC, make_lp(LIMIT), False)
+      icbm.run(make_cs(LIMIT), CC, make_lp(LIMIT, sla_assist=True), False)
+    assert icbm.no_limit_hold_speed == 0, "a stale remembered hold survived assist mode returning"
 
-    assert icbm.no_limit_hold_speed == 0, (
-      "a hold remembered from a road with no limit survived onto one with a posted limit")
-
-  def test_a_press_where_no_limit_is_known_creates_no_hold(self):
-    icbm = self._press_with_no_limit()
-    assert icbm.v_baseline == 0, "a hold was created with no posted limit to hold against"
-    assert icbm.override_state == OverrideState.auto, "the driver was latched into manual override"
-
-  def test_the_limit_going_away_mid_drive_drops_an_existing_hold(self):
-    """Coverage ends -- a tunnel, a new road, the edge of the map. The hold has nothing left to
-    mean, and leaving it would keep the max speed pinned where he last pressed."""
-    icbm = fresh()
-    icbm.run(make_cs(LIMIT, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT), False)
-    for cluster in range(LIMIT, DRIVER + 1):
-      icbm.run(make_cs(cluster, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT), False)
-    icbm.run(make_cs(DRIVER, buttons=(ACCEL_RELEASE,)), CC, make_lp(LIMIT), False)
-    assert icbm.v_baseline == DRIVER, "no hold was created against a KNOWN limit"
-
-    # The target stays at LIMIT, NOT at DRIVER. Publishing DRIVER lets the existing
-    # baseline-equals-target rule clear the hold on its own, so the test passed with the new rule
-    # disabled -- caught by mutation-testing it rather than by it being green.
-    for _ in range(50):
-      icbm.run(make_cs(DRIVER), CC, make_lp(LIMIT, limit_known=False), False)
-    assert icbm.v_baseline == 0, "the hold outlived the limit it was held against"
-
-  def test_a_hold_against_a_KNOWN_limit_is_untouched(self):
-    """The rule must not reach the ordinary road, which is where holds earn their place."""
-    icbm = fresh()
-    icbm.run(make_cs(LIMIT, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT), False)
-    for cluster in range(LIMIT, DRIVER + 1):
-      icbm.run(make_cs(cluster, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT), False)
-    icbm.run(make_cs(DRIVER, buttons=(ACCEL_RELEASE,)), CC, make_lp(LIMIT), False)
-    for _ in range(200):
-      icbm.run(make_cs(DRIVER), CC, make_lp(LIMIT), False)
-    assert icbm.v_baseline == DRIVER, "a hold against a real limit was discarded"
-
-  def test_a_hold_created_AT_a_known_limit_is_not_deleted_on_its_first_frame(self):
-    """Carried over from the class this replaced. A hold whose value already equals SLA's target
-    has NOT diverged from it, and the clear rule requires divergence first -- otherwise creating a
-    hold at the posted limit deletes it instantly. Distinct from the test above, where the hold sits
-    above the limit and so has legitimately diverged from frame one."""
-    icbm = fresh()
-    icbm.run(make_cs(LIMIT, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT), False)
-    icbm.run(make_cs(LIMIT, buttons=(ACCEL_RELEASE,)), CC, make_lp(LIMIT), False)
-    for _ in range(5):
-      icbm.run(make_cs(LIMIT), CC, make_lp(LIMIT), False)
-    assert icbm.baseline_diverged is False, "a hold at a known limit started already diverged"
-
-  def test_a_PINNED_hold_survives_with_no_limit(self):
-    """The one exception, and the reason this is not a blanket guard inside update_manual_override.
-
-    A pin is an explicit gesture at an explicit place, so it is the only hold that still means
-    something with no posted limit -- and `apply_pinned_hold` runs inside update_manual_override,
-    so a rule applied there without this carve-out would silently delete the whole feature.
-    """
-    icbm = fresh()
-    for _ in range(200):
-      icbm.run(make_cs(48, v_ego=48), CC, make_lp(LIMIT, limit_known=False), False, pinned_hold=45)
-    assert icbm.v_baseline == 45, "a pinned hold was discarded because no limit was known"
-    assert icbm.baseline_source == BaselineSource.pinned
-
-  def test_a_pin_is_not_relabeled_into_deletion_by_the_idle_fallback(self):
-    """The label is now load-bearing, not diagnostic.
-
-    `enforce_no_limit_no_hold` spares a hold only while it is still labeled `pinned`. The idle
-    fallback used to overwrite that label freely -- harmless when the label was only for reading
-    routes, a DELETION now, on exactly the roads the owner says he pins on. And the pin is
-    edge-triggered and already spent, so it would never re-apply for the rest of the drive.
-    """
-    icbm = fresh()
-    for _ in range(200):
-      icbm.run(make_cs(48, v_ego=48), CC, make_lp(LIMIT, limit_known=False), False, pinned_hold=45)
-    assert icbm.baseline_source == BaselineSource.pinned
-
-    # The set speed now moves while ICBM is idle -- the exact trigger for the inferred fallback.
-    for cluster in (46, 47, 48, 49, 50):
-      for _ in range(40):
-        icbm.run(make_cs(cluster, v_ego=48), CC, make_lp(LIMIT, limit_known=False), False)
-
-    assert icbm.baseline_source == BaselineSource.pinned, "the pin was relabeled as an inferred hold"
-    assert icbm.v_baseline == 45, "the pin was deleted after being relabeled"
-
-  def test_a_real_press_still_takes_the_baseline_over_from_a_pin(self):
-    """The other half of the pin guards, and the half that would make them a trap if it were wrong.
-
-    Protecting a pin from the INFERRED path must not make it unoverridable by hand. Overriding a pin
-    with the buttons is deliberate; drifting off one because the cluster moved is not. With no
-    posted limit the deliberate override then correctly leaves NO hold at all -- the max speed is
-    the interface there.
-    """
-    icbm = fresh()
-    for _ in range(200):
-      icbm.run(make_cs(48, v_ego=48), CC, make_lp(LIMIT, limit_known=False), False, pinned_hold=45)
-    assert icbm.baseline_source == BaselineSource.pinned
-
-    icbm.run(make_cs(48, v_ego=48, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT, limit_known=False), False)
-    for cluster in range(48, 54):
-      icbm.run(make_cs(cluster, v_ego=48, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT, limit_known=False), False)
-    icbm.run(make_cs(53, v_ego=48, buttons=(ACCEL_RELEASE,)), CC, make_lp(LIMIT, limit_known=False), False)
-
-    assert icbm.baseline_source != BaselineSource.pinned, "a real press could not override the pin"
-    assert icbm.v_baseline == 0, "no posted limit, so the hand override must leave no hold"
+  def test_a_hold_is_not_deleted_on_its_first_frame(self):
+    """The rule runs every frame straight after capture, so an off-by-one here deletes every hold
+    the instant it is made -- which is indistinguishable from the press never having worked."""
+    icbm = self._press(limit_known=True, sla_assist=True)
+    assert icbm.v_baseline == DRIVER
+    assert icbm.v_target == DRIVER, "ICBM is still chasing the SLA target"
 
 
 def in_zone(icbm, speed, frames, enabled=True, road_speed=48):
