@@ -143,3 +143,47 @@ def test_the_dicts_do_not_alias_capnp_readers():
   sm = FakeSM(points=[(40.76, -111.90, 20.1)])
   _, targets = path_from_mapd(sm)
   assert all(isinstance(v, float) for v in targets[0].values())
+
+
+# --- NaN, which mapd really does emit ------------------------------------------------------------
+
+NAN = float("nan")
+
+
+def test_a_nan_curvature_falls_back_to_v1_rather_than_reading_as_straight():
+  """THE BUG. `NaN > _STRAIGHT_CURVATURE` is False, so a path mapd could not compute fell through to
+  `return ..., []` -- "straight road, no corners ahead", the most confident answer this function can
+  give, produced by the one input that means the opposite.
+
+  SCC-Map then idles and never consults v1, which is precisely the fallback that branch exists to
+  reach. Confirmed that mapd emits NaN here on route 0000038e, 2026-08-18: reading the path crashed
+  a diagnostic with `cannot convert float NaN to integer`.
+
+  Same shape as several bugs found today: a comparison that answers False on a value meaning
+  "unknown" reads as a clean negative."""
+  sm = FakeSM(points=[(40.76, -111.9, 0.0, NAN), (40.77, -111.9, 0.0, NAN)])
+  assert path_from_mapd(sm) is None, (
+    "a path whose curvature mapd could not compute reported STRAIGHT ROAD -- SCC-Map idles and "
+    "never falls back to v1, so the corner is not taken and nothing says why")
+
+
+def test_a_nan_velocity_is_dropped_rather_than_walked():
+  """A NaN velocity reaching the walk poisons `min()` over the corner speeds, and a NaN v_target is
+  a set-speed request nobody can act on. `targetVelocity > 0` already excluded it -- but only
+  because NaN comparisons are False, not because anyone decided. Pinned so a later refactor to
+  `>= 0` or `!= 0` cannot quietly let it through."""
+  sm = FakeSM(points=[(40.76, -111.9, NAN, 0.02), (40.77, -111.9, 20.0, 0.02)])
+  result = path_from_mapd(sm)
+  assert result is not None
+  _, targets = result
+  assert len(targets) == 1, f"a NaN velocity survived into the walk: {targets}"
+  assert targets[0]["velocity"] == 20.0
+
+
+def test_a_real_straight_road_still_answers_straight():
+  """The other direction, so the NaN guard cannot be satisfied by refusing everything: genuine zero
+  curvature with no velocities is a real answer meaning no corners ahead, and must NOT fall back."""
+  sm = FakeSM(points=[(40.76, -111.9, 0.0, 0.0), (40.77, -111.9, 0.0, 0.0)])
+  result = path_from_mapd(sm)
+  assert result is not None, "a genuinely straight road fell back to v1"
+  assert result[1] == []
