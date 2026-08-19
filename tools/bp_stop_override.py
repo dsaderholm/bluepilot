@@ -196,6 +196,23 @@ def main() -> int:
   overrides = [r for r in runs if (r[1] - r[0]) >= OVERRIDE_MIN_S and r[2] < OVERRIDE_SPEED_MPH]
   fallbacks = [r for r in runs if r not in overrides]
 
+  print("\n=== 0. WHICH CONDITION BLOCKED IT? (frames where the model asked for a stop) ===")
+  if fn_slow == 0:
+    print("  the model never asked for a stop at all -- nothing downstream could have fired")
+  else:
+    def _row(label: str, n: int) -> None:
+      print("  {:<44} {:6d}   {:5.1f}%".format(label, n, 100.0 * n / fn_slow))
+    _row("model asked for a stop (hasSlowDown)", fn_slow)
+    _row("...and at or below 20 mph", fn_speed)
+    _row("...and openpilot's plan was STOPPING", fn_stopping)
+    _row("...and no radar lead inside 60 m", fn_nolead)
+    _row("ALL FOUR -- the override could arm here", fn_all)
+    if fn_all == 0:
+      worst = min((fn_speed, "speed: never reached 20 mph while the model wanted a stop"),
+                  (fn_stopping, "plan: longControlState never reached `stopping`"),
+                  (fn_nolead, "lead: a car was always inside 60 m"))[1]
+      print("  BLOCKER: " + worst)
+
   print("\n=== 1. DID IT ARM? ===")
   print(f"  model asked for a stop (hasSlowDown) on {slowdown_frames} frames")
   print(f"  openpilot authored for >= {OVERRIDE_MIN_S}s below {OVERRIDE_SPEED_MPH:.0f} mph: "

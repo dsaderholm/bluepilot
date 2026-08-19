@@ -1328,6 +1328,19 @@ and `cruise.py`.
 newline, or a single spaced sentence. If a newline is genuinely required, use the Edit tool rather
 than a heredoc.
 
+**AND THERE IS A SECOND, SILENT FAILURE MODE THAT IS WORSE THAN THE CRASH. 2026-08-19.** The
+documented case produces an unterminated string literal, which at least stops. But when the mangled
+string is a **`str.replace` ANCHOR**, nothing raises: the pattern simply does not match, `replace`
+returns the input unchanged, and the edit is silently dropped. That night a two-part patch to
+`bp_stop_override.py` landed its COUNTERS and dropped its PRINT block, because only the second
+anchor contained an escape. Ruff passed, `ast.parse` passed, the file was valid Python -- and the
+funnel was computed every frame and rendered nowhere.
+
+**That is this fork's oldest bug, for the FOURTH time**: a value computed correctly and never
+displayed. It was caught only by reading the tool's actual output and noticing a section header
+missing. So: **a multi-part `replace` patch must verify its own application** -- `grep -c` for a
+phrase from EACH part, not just one, since one hit reads as success while half the patch is gone.
+
 **AND READ THE SUITE RESULT BEFORE THE PUSH LANDS, NOT AFTER.** `test && commit && push` prints the
 failure and then pushes anyway if the chain is written so the push does not depend on it. On a branch
 every other branch rebases onto, that is the worst possible place to be sloppy. The rule was already
