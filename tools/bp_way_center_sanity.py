@@ -30,8 +30,24 @@ than scattering it, because the offset would be about half a road width nearly e
 """
 import glob
 import os
+import re
 import sys
 from collections import defaultdict
+
+
+def segments_in_order(route):
+  """Segment dirs for a route, in DRIVE order.
+
+  sorted(glob(...)) is a STRING sort, so --10 lands before --2 and the drive is walked out of
+  order. Harmless for whole-drive percentages, fatal for "what happened at the start", which is
+  exactly the question a road report asks. Sort on the trailing integer instead.
+  """
+  segs = glob.glob(f"/data/media/0/realdata/{route}--*")
+  def idx(p):
+    m = re.search(r"--(\d+)$", p)
+    return int(m.group(1)) if m else -1
+  return sorted(segs, key=idx)
+
 
 
 def q(sorted_vals, p):
@@ -45,7 +61,7 @@ def main():
   sys.path.insert(0, "/data/openpilot")
   from openpilot.tools.lib.logreader import LogReader
 
-  segs = sorted(glob.glob(f"/data/media/0/realdata/{route}--*"))
+  segs = segments_in_order(route)
   if not segs:
     sys.exit(f"no segments for {route}")
 

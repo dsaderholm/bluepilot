@@ -22,7 +22,23 @@ Read-only. Run on the device from /data/openpilot.
 """
 import glob
 import os
+import re
 import sys
+
+
+def segments_in_order(route):
+  """Segment dirs for a route, in DRIVE order.
+
+  sorted(glob(...)) is a STRING sort, so --10 lands before --2 and the drive is walked out of
+  order. Harmless for whole-drive percentages, fatal for "what happened at the start", which is
+  exactly the question a road report asks. Sort on the trailing integer instead.
+  """
+  segs = glob.glob(f"/data/media/0/realdata/{route}--*")
+  def idx(p):
+    m = re.search(r"--(\d+)$", p)
+    return int(m.group(1)) if m else -1
+  return sorted(segs, key=idx)
+
 
 PROC = "mapd_v2"
 # A gap longer than this is worth printing on its own. mapdOut is 20 Hz, so anything past a second
@@ -31,7 +47,7 @@ GAP_S = 1.0
 
 
 def route_segments(route):
-  segs = sorted(glob.glob(f"/data/media/0/realdata/{route}--*"))
+  segs = segments_in_order(route)
   if not segs:
     sys.exit(f"no segments for {route}")
   return segs

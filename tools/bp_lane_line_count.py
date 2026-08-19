@@ -29,8 +29,24 @@ position of each line and the caller can see the ordering rather than trust it.
 """
 import glob
 import os
+import re
 import sys
 from collections import defaultdict
+
+
+def segments_in_order(route):
+  """Segment dirs for a route, in DRIVE order.
+
+  sorted(glob(...)) is a STRING sort, so --10 lands before --2 and the drive is walked out of
+  order. Harmless for whole-drive percentages, fatal for "what happened at the start", which is
+  exactly the question a road report asks. Sort on the trailing integer instead.
+  """
+  segs = glob.glob(f"/data/media/0/realdata/{route}--*")
+  def idx(p):
+    m = re.search(r"--(\d+)$", p)
+    return int(m.group(1)) if m else -1
+  return sorted(segs, key=idx)
+
 
 MIN_SPEED = 15.0          # m/s
 LANE_M = 3.7
@@ -57,7 +73,7 @@ def main():
   sys.path.insert(0, "/data/openpilot")
   from openpilot.tools.lib.logreader import LogReader
 
-  segs = sorted(glob.glob(f"/data/media/0/realdata/{route}--*"))
+  segs = segments_in_order(route)
   if not segs:
     sys.exit(f"no segments for {route}")
 
