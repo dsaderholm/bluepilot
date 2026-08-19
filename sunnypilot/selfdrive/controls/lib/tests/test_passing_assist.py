@@ -699,12 +699,21 @@ class TestDrivingBelowTheLimit:
     assert abs(det.reference_speed - 80 * self.MPH) < 0.1
     assert det.suggestion == Side.left
 
-  def test_the_dash_still_floors_it_under_an_override(self):
-    # ICBM sets its baseline from the cluster when the override latches, so the two agree in
-    # normal operation. If they ever drift, the dash is the number the car is actually driving to.
+  def test_the_hold_wins_over_a_higher_dash(self):
+    # REPLACES test_the_dash_still_floors_it_under_an_override, which pinned max(baseline, cluster).
+    # Reported 2026-08-19: SLA had the dash at 80, he held 75, and passing assist differenced leads
+    # against 80. A hold is the driver stating the speed he wants; it OVERRIDES SLA rather than
+    # being floored by it, so the higher dash must not win.
     det = self._drive(v_ego=80 * self.MPH, v_lead=78 * self.MPH, d_rel=60.,
-                      set_speed=80 * self.MPH, icbm_hold=50 * self.MPH, icbm_manual=True)
-    assert det.reference_speed >= 79 * self.MPH
+                      set_speed=80 * self.MPH, icbm_hold=75 * self.MPH, icbm_manual=True)
+    assert abs(det.reference_speed - 75 * self.MPH) < 0.3
+
+  def test_the_hold_still_survives_a_dash_lowered_by_a_curve(self):
+    # The case the old max() existed to protect, kept: ICBM drops the DASH for a curve or a lead,
+    # and the driver's held number must still be what leads are differenced against.
+    det = self._drive(v_ego=60 * self.MPH, v_lead=58 * self.MPH, d_rel=60.,
+                      set_speed=45 * self.MPH, icbm_hold=75 * self.MPH, icbm_manual=True)
+    assert abs(det.reference_speed - 75 * self.MPH) < 0.3
 
 
 class TestLeadInLaneGate:
@@ -1447,10 +1456,11 @@ class TestReferenceSpeedIsTheDriversIntent:
     assert det.reference_source == RefSource.speedLimit
     assert det.reference_speed < 55 * self.MPH, "the MAX overrode a limit SLA was driving"
 
-  def test_reference_never_below_the_dash(self):
+  def test_the_hold_is_the_reference_even_when_the_dash_is_higher(self):
+    # Was test_reference_never_below_the_dash. Same inversion as above: his hold is the intent.
     det = self._drive(v_ego=80 * self.MPH, v_lead=78 * self.MPH, d_rel=60.,
-                      set_speed=80 * self.MPH, icbm_hold=50 * self.MPH, icbm_manual=True)
-    assert det.reference_speed >= 79 * self.MPH
+                      set_speed=80 * self.MPH, icbm_hold=75 * self.MPH, icbm_manual=True)
+    assert abs(det.reference_speed - 75 * self.MPH) < 0.3
 
 
 class TestLookAheadDistance:
@@ -3519,9 +3529,18 @@ class TestLeftLaneHogs:
 
   HOG_FRAMES = int(14.0 / DT_MDL)          # comfortably past HOG_MIN_S
   # Leftmost lane with a real lane to the right: no far-left paint, road edge well out on the right.
-  PASSING_LANE = IN_LEFT_LANE
+  #
+  # THE MAP IS NOW REQUIRED, and that is the point of the 2026-08-19 change. "We are as far left as
+  # the road goes" used to be `not left_geometry_ok` -- the CAMERA failing to find a left lane --
+  # which on his freeway drives was true on 83-99% of frames because the edge was merely unsure. It
+  # is now the right-edge lane anchor: `edges` right value 9.3 m is round((9.3-1.85)/3.7) = lane 2,
+  # and with 3 one-way lanes that is 0 lanes to our left, so leftmost.
+  PASSING_LANE = dict(IN_LEFT_LANE, mapd_present=True, mapd_oneway=True, mapd_lanes=3)
   # Leftmost, but only a shoulder to the right -- an ordinary two-lane road.
-  NOWHERE_TO_GO = dict(probs=(0.1, 0.99, 0.99, 0.2), edges=(-2.2, 2.4))
+  # Given the map as well, so this still fails for its OWN reason -- no lane to their right --
+  # rather than passing because the anchor happened to be unavailable.
+  NOWHERE_TO_GO = dict(probs=(0.1, 0.99, 0.99, 0.2), edges=(-2.2, 2.4),
+                       mapd_present=True, mapd_oneway=True, mapd_lanes=2)
 
   def test_a_car_camped_in_the_passing_lane_is_counted(self):
     det = run(PassingAssistDetector(), self.HOG_FRAMES, **self.PASSING_LANE)

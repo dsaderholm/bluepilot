@@ -139,3 +139,23 @@ class TestLeftmostQuery:
     a = LaneAnchor()
     assert a.in_leftmost_lane() is False
     assert a.to_our_left() is None
+
+
+class TestTheHogGateUsesTheAnchor:
+  """The 2026-08-19 report: the slow-pass warning fired while he was NOT in the far left lane.
+
+  Guards the SUBSTITUTION rather than the arithmetic -- that `not left_geometry_ok` is gone from
+  the hog condition. It was a camera-uncertainty proxy standing in for a road fact, and on his
+  freeway drives the camera was uncertain on 83-99% of frames, so the warning fired on silence.
+  """
+
+  def test_the_hog_condition_no_longer_reads_left_geometry(self):
+    import inspect
+    from openpilot.sunnypilot.selfdrive.controls.lib import passing_assist
+    src = inspect.getsource(passing_assist.PassingAssistDetector._track_lane_hog)
+    body = [ln for ln in src.splitlines() if ln.strip().startswith("hogging =")]
+    assert body, "the hog condition moved; re-point this test rather than deleting it"
+    assert "left_geometry_ok" not in body[0], (
+      "the hog gate is back on camera geometry -- it fires on the camera being UNSURE, which is "
+      "most of a freeway drive, and that is the reported false warning")
+    assert "in_leftmost_lane" in body[0], "the hog gate must ask the anchor"

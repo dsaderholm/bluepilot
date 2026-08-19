@@ -86,6 +86,7 @@ from openpilot.common.constants import CV
 from openpilot.common.params import Params
 from openpilot.common.realtime import DT_MDL
 from openpilot.sunnypilot import PARAMS_UPDATE_PERIOD
+from openpilot.sunnypilot.selfdrive.controls.lib.lane_anchor import LaneAnchor
 from openpilot.sunnypilot.selfdrive.controls.lib.adjacent_lane import (
   AdjacentLane, path_offset, DEFAULT_ONCOMING_MEMORY_S,
 )
@@ -801,6 +802,12 @@ class PassingAssistDetector:
     # See _track_lane_hog for what counts as one and, more importantly, what does not.
     self.hog_seconds = 0.0
     self.hog_count = 0
+    # Which lane we are in, anchored on the RIGHT road edge and counted leftward with the map's
+    # lane count. Replaces `not left_geometry_ok` as the test for 'we are already as far left as
+    # the road goes' -- see _track_lane_hog.
+    self.lane_anchor = LaneAnchor()
+    self.lane_index = None
+    self.lanes_left_of_us = None
     self._hog_held_s = 0.0
     self._hog_counted = False
     self.elapsed_s = 0.0
@@ -1715,6 +1722,40 @@ class PassingAssistDetector:
     except Exception:  # noqa: BLE001 - a param failure must never reach the planner
       pass
 
+  def _update_lane_anchor(self, sm) -> None:
+    """Estimate which lane we are in from the RIGHT road edge and the map's lane count.
+
+    HIS IDEA, 2026-08-19. It is the only route left: `distanceFromWayCenter` is physically
+    impossible on 24.2% of motorway frames and the LEFT road edge is trusted on 0.0% of them, both
+    measured on his own drives. The RIGHT edge is a shoulder rather than a median and is trusted on
+    5-15% -- intermittent, hence the latch inside LaneAnchor.
+
+    ABSENT IS UNKNOWN, and unknown must leave every caller exactly as it was. With no map, no
+    mapdOut, or an untrusted edge the anchor holds None and `in_leftmost_lane()` is False, which is
+    the refusing direction for the one gate that consumes it.
+    """
+    o = self._map_usable(sm)
+    lanes = 0
+    one_way = False
+    if o is not None:
+      try:
+        lanes = int(o.lanes)
+        one_way = bool(o.oneWay)
+      except (AttributeError, TypeError, ValueError):
+        lanes, one_way = 0, False
+
+    edge_d = None
+    edge_std = None
+    try:
+      model = sm['modelV2']
+      edge_std = float(model.roadEdgeStds[RE_RIGHT])
+      edge_d = float(model.roadEdges[RE_RIGHT].y[0])
+    except (AttributeError, IndexError, KeyError, TypeError, ValueError):
+      edge_d, edge_std = None, None
+
+    self.lane_index = self.lane_anchor.update(DT_MDL, edge_d, edge_std, lanes, one_way)
+    self.lanes_left_of_us = self.lane_anchor.to_our_left()
+
   def _track_lane_hog(self) -> None:
     """Time spent behind someone sitting in the leftmost lane below the set speed.
 
@@ -1741,7 +1782,17 @@ class PassingAssistDetector:
     HOG_MIN_S keeps a momentary queue out of the count: everyone slows for a moment, and a car that
     is genuinely camped there is there for a while.
     """
-    hogging = (self.lead_is_slow and not self.left_geometry_ok and self.right_geometry_ok)
+    # "NO LANE TO OUR LEFT" WAS `not left_geometry_ok` AND THAT IS THE CAMERA, NOT THE ROAD.
+    # He reported the slow-pass warning firing while he was NOT in the far left lane, 2026-08-19,
+    # and the drive says why: left geometry was refused on 83-99% of frames, almost all of it
+    # "edge unsure". So the term fired whenever the camera was UNCERTAIN, which on a freeway is
+    # nearly always -- it never meant "we are as far left as the road goes" at all.
+    #
+    # The anchor answers it directly: right road edge for the rightmost lane, map lane count to
+    # walk left. `in_leftmost_lane()` is False when unknown, so a frame with no anchor now counts
+    # no hog rather than counting one on the camera's silence. That is strictly fewer warnings, and
+    # the ones that remain are the ones he would agree with.
+    hogging = (self.lead_is_slow and self.lane_anchor.in_leftmost_lane() and self.right_geometry_ok)
     if not hogging:
       self._hog_held_s = 0.0
       self._hog_counted = False
@@ -2492,11 +2543,26 @@ class PassingAssistDetector:
       # own held speed was silently never honored rather than crashing. The same call crashed the
       # drive-summary panel outright on 2026-08-07; here it failed quietly, which is worse.
       if str(icbm.overrideState) == "manual" and baseline > 0:
-        held = max(baseline, cluster)
-        self.reference_speed = held
-        self.reference_source = RefSource.icbmHold if baseline >= cluster else RefSource.cluster
+        # THE BASELINE ALONE. `max(baseline, cluster)` was here and it inverted the hold.
+        #
+        # Reported 2026-08-19: "SLA had my speed at 80 but I set a hold for 75 and it looked like
+        # it wanted to pass going off of that 80." Exactly right. The max was written to recover
+        # his number when ICBM had driven the DASH DOWN for a curve or a lead -- a real case, and
+        # the reason this method does not simply read the dash. But it also fires when the dash is
+        # ABOVE the hold, and there the max returns SLA's number instead of his, which is the one
+        # thing a hold exists to override.
+        #
+        # A hold is the driver saying "this is the speed I want". It is not a floor and it is not a
+        # candidate among others; the branch comment above already says so and the arithmetic did
+        # not. Differencing a lead against 80 when he has asked for 75 makes a car doing 76 look
+        # worth passing when he is perfectly happy behind it.
+        #
+        # The curve case the max protected is unaffected: with the dash lowered, baseline is still
+        # his pressed number and is still what gets returned.
+        self.reference_speed = baseline
+        self.reference_source = RefSource.icbmHold
         self._apply_patience()
-        return held
+        return baseline
     except (KeyError, AttributeError, TypeError, ValueError):
       pass
 
@@ -2946,6 +3012,7 @@ class PassingAssistDetector:
     self._acc_braking(car_state_bp)
     self._traffic_signs(car_state_bp)
     self._geometry(sm['modelV2'])
+    self._update_lane_anchor(sm)
 
     # Advances every cycle regardless of the gates below, so it measures real elapsed time rather
     # than time-spent-in-a-particular-branch.
@@ -2995,6 +3062,9 @@ class PassingAssistDetector:
     if self.driver_change_standdown > 0.0:
       self._clear_confirmation()
       self.keep_right_seconds = 0.0
+      # The latched lane index describes a lane we are no longer in. Dropping it is not a lost
+      # measurement -- the anchor re-establishes on the next confident right-edge reading.
+      self.lane_anchor.note_lane_change()
       self._reset_outputs(Blocked.driverChangedLanes)
       return
 
