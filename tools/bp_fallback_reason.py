@@ -46,6 +46,33 @@ def seg_index(name: str) -> int:
   return int(tail) if tail.isdigit() else -1
 
 
+def decode_accdata(d: bytes) -> dict:
+  """The signals `passthrough_admissible` reads, straight out of the frame.
+
+  RAW, not via CANParser. The first version of this tool called
+  `cp.update_strings([m.as_builder().to_bytes()])`, which raised on every message and was swallowed
+  by the per-message `except`, so section 1 reported NO DATA -- correctly, but for a reason inside
+  the tool rather than in the drive. Raw decoding has no such failure mode and it is what
+  `bp_accdata_bands.py` already does for the same message.
+
+  Bit positions from ford_lincoln_base_pt.dbc, all `@0+` (Motorola). For a big-endian start bit N,
+  byte = N // 8 and shift = N % 8 -- verified against the two decoders already in tools/:
+  `AccCancl_B_Rq` at 39 gives (d[4] >> 7) & 1 and `CmbbDeny_B_Actl` at 37 gives (d[4] >> 5) & 1,
+  which is exactly what bp_stop_override.py and bp_accdata_bands.py use.
+  """
+  return {
+    "AccBrkTot_A_Rq": (((d[0] & 0x1F) << 8) | d[1]) * 0.0039 - 20.0,   # 4|13
+    "AccPrpl_A_Rq": (((d[6] & 0x03) << 8) | d[7]) * 0.01 - 5.0,        # 49|10
+    "AccStopStat_B_Rq": (d[4] >> 2) & 1,                               # 34|1
+    "AccBrkPulse_B_Rq": (d[4] >> 4) & 1,                               # 36|1
+    "CmbbDeny_B_Actl": (d[4] >> 5) & 1,                                # 37|1
+    "AccBrkPrkEl_B_Rq": (d[4] >> 6) & 1,                               # 38|1
+    "AccCancl_B_Rq": (d[4] >> 7) & 1,                                  # 39|1
+    "AccDeny_B_Rq": (d[6] >> 5) & 1,                                   # 53|1
+    "AccAutoResum_D_Rq": (d[0] >> 6) & 3,                              # 7|2
+  }
+
+
 def main() -> int:
   if len(sys.argv) < 2:
     sys.exit("usage: bp_fallback_reason.py <route>")
@@ -53,13 +80,9 @@ def main() -> int:
   sys.path.insert(0, "/data/openpilot")
   from openpilot.tools.lib.logreader import LogReader
   from opendbc.sunnypilot.car.ford import fordcan_ext as fe
-  from opendbc.car.ford.values import DBC
-  from opendbc.can.parser import CANParser
 
   segs = sorted([d for d in os.listdir(REALDATA) if d.startswith(route)], key=seg_index)
   print("# route {}  ({} segments)".format(route, len(segs)))
-
-  cp = CANParser(DBC["FORD_FUSION_MK5"]["pt"], [("ACCDATA", 50)], CAM_BUS)
 
   reasons: Counter[str] = Counter()
   reasons_slow: Counter[str] = Counter()
@@ -115,12 +138,11 @@ def main() -> int:
             pair["stopping+nolead"] += b and c
             pair["all three"] += a and b and c
         elif w == "can":
-          cp.update_strings([m.as_builder().to_bytes()])
           if auth != "fallback":
             continue
           for c_ in m.can:
             if c_.address == ACCDATA and c_.src == CAM_BUS:
-              sv = cp.vl["ACCDATA"]
+              sv = decode_accdata(bytes(c_.dat))
               seen += 1
               r = fe.passthrough_admissible(sv, True) or "(admissible -- fallback had another cause)"
               reasons[r] += 1
