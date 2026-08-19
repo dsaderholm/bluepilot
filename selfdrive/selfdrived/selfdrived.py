@@ -45,6 +45,7 @@ PandaType = log.PandaState.PandaType
 LaneChangeState = log.LaneChangeState
 LaneChangeDirection = log.LaneChangeDirection
 EventName = log.OnroadEvent.EventName
+EventNameSP = custom.OnroadEventSP.EventName
 ButtonType = car.CarState.ButtonEvent.Type
 SafetyModel = car.CarParams.SafetyModel
 AlertLevel = log.DriverMonitoringState.AlertLevel
@@ -103,7 +104,7 @@ class SelfdriveD(CruiseHelper):
                                    'carOutput', 'driverMonitoringState', 'longitudinalPlan', 'livePose', 'liveDelay',
                                    'managerState', 'liveParameters', 'radarState', 'liveTorqueParameters',
                                    'controlsState', 'carControl', 'driverAssistance', 'alertDebug', 'userBookmark', 'audioFeedback',
-                                   'lateralManeuverPlan', 'modelDataV2SP', 'longitudinalPlanSP'] + \
+                                   'lateralManeuverPlan', 'modelDataV2SP', 'longitudinalPlanSP', 'controllerStateBP'] + \
                                    self.camera_packets + self.sensor_packets + self.gps_packets,
                                   ignore_alive=ignore, ignore_avg_freq=ignore,
                                   ignore_valid=ignore, frequency=int(1/DT_CTRL))
@@ -125,6 +126,8 @@ class SelfdriveD(CruiseHelper):
     # store each call, so testing this inline was 100 filesystem reads a second for a value the
     # carcontroller itself reads once at init -- swapping it mid-drive is meaningless by design.
     self.stock_acc_passthrough = self.params.get_bool("StockAccPassthrough")
+    # Announce the inert passthrough once per occurrence; see where it is raised.
+    self.acc_passthrough_inert_announced = False
 
     self.CS_prev = car.CarState.new_message()
     self.AM = AlertManager()
@@ -497,6 +500,26 @@ class SelfdriveD(CruiseHelper):
       self.events.remove(EventName.canBusMissing)
 
     CruiseHelper.update(self, CS, self.events_sp, self.experimental_mode)
+
+    # FusionPilot: SAY IT ONCE WHEN THE PASSTHROUGH DIES.
+    #
+    # Route 0000038d: the camera asserted cancel and deny on 8,988 of 8,990 engaged frames from
+    # t+30.8, so Ford's command could not be carried for the rest of the drive and openpilot
+    # longitudinal drove instead. He found that out from the seat and described it as the feature
+    # being bricked for the whole drive. The `ACC LOST` pill said so, but only to someone looking.
+    #
+    # Fired ONCE per drive on the transition. It does not recover within a drive, and a repeating
+    # alert for a permanent condition is one he would learn to ignore -- which is worse than
+    # silence, because then it would not reach him the day it matters.
+    if self.sm.alive['controllerStateBP']:
+      inert = str(self.sm['controllerStateBP'].accAuthority) == "inert"
+      if inert and not self.acc_passthrough_inert_announced:
+        self.acc_passthrough_inert_announced = True
+        self.events_sp.add(EventNameSP.accPassthroughInert)
+      elif not inert:
+        # The camera clearing cancel restores the passthrough by itself -- `passthrough_cancel_frames`
+        # resets on any other reason -- so re-arm rather than latching for the ignition cycle.
+        self.acc_passthrough_inert_announced = False
 
     # decrement personality on distance button press
     #

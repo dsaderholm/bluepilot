@@ -450,6 +450,13 @@ struct OnroadEventSP @0xda96579883444c35 {
     unconfirmedLeadBraking @25;
     # BluePilot: model wants to stop (sign/signal) and Ford ACC will not
     modelStopBraking @26;
+    # FusionPilot: the stock-ACC passthrough has gone INERT -- the camera has asked to cancel for
+    # five straight seconds, so Ford's command can no longer be carried and openpilot longitudinal
+    # is driving from here. On route 0000038d it did this from t+30.8 for the whole drive with
+    # nothing but a pill saying so, and he had to work it out from the seat: "it's just annoying
+    # that it bricks it for the whole drive". Announced ONCE, because it does not recover within a
+    # drive and a repeating alert for a permanent condition is noise.
+    accPassthroughInert @27;
   }
 }
 

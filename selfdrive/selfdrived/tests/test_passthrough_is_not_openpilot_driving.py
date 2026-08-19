@@ -65,3 +65,43 @@ def test_the_fcw_suppression_still_knows_about_the_passthrough():
   assert "stock_acc_passthrough" in SRC[i:i + 200], (
     "stock_is_the_brake stopped consulting the passthrough, so the model FCW will chime while "
     "Ford brakes normally for a lead")
+
+
+def test_the_inert_passthrough_is_announced_and_only_once():
+  """The camera cancelling kills Ford ACC for the whole drive, and until now only a pill said so.
+
+  Route 0000038d: cancel and deny on 8,988 of 8,990 engaged frames from t+30.8. He worked it out
+  from the seat and called it "annoying that it bricks it for the whole drive" -- so it needs to
+  reach him rather than wait to be noticed.
+
+  ONCE, on the transition. It does not recover within a drive, and a repeating alert for a permanent
+  condition is one he learns to ignore, which is worse than silence: then it fails to reach him on
+  the day it matters. But it must RE-ARM if the camera ever clears, because
+  `passthrough_cancel_frames` resets on any other refusal reason -- latching for the ignition cycle
+  would hide a second occurrence."""
+  assert "accPassthroughInert" in SRC, "nothing raises the inert alert -- the event is dead"
+  i = SRC.index("EventNameSP.accPassthroughInert")
+  window = SRC[max(0, i - 900):i + 300]
+  assert "acc_passthrough_inert_announced" in window, (
+    "the alert is raised with no once-only latch, so it repeats every frame for a condition that "
+    "lasts the whole drive")
+  assert "= False" in SRC[i:i + 900], (
+    "nothing re-arms the latch when the camera clears, so a second occurrence in the same ignition "
+    "cycle would be silent")
+
+  # And it must be in the SUBMASTER LIST, not merely mentioned. The first version of this assertion
+  # searched the whole file, which the read `self.sm.alive['controllerStateBP']` satisfies on its
+  # own -- so removing it from the subscription still passed. Scope to the SubMaster construction.
+  sub = SRC[SRC.index("messaging.SubMaster(["):]
+  sub = sub[:sub.index(")")]
+  assert "'controllerStateBP'" in sub, (
+    "selfdrived does not SUBSCRIBE controllerStateBP, so `alive` is False forever, the branch never "
+    "runs and the alert cannot fire")
+
+  # And the SP events go on their own object; `self.events` would be a NameError-free silent no-op
+  # into the wrong stream.
+  assert "self.events_sp.add(EventNameSP.accPassthroughInert)" in SRC, (
+    "the inert alert is added to the wrong events object -- SP events publish on onroadEventsSP")
+  assert "EventNameSP = custom.OnroadEventSP.EventName" in SRC, (
+    "EventNameSP is undefined in this module -- raising the alert is a NameError in the control "
+    "loop, which takes selfdrived down")

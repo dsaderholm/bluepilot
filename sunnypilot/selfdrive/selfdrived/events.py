@@ -322,6 +322,25 @@ EVENTS_SP: dict[int, dict[str, Alert | AlertCallbackType]] = {
     ET.WARNING: model_stop_alert,
   },
 
+  # FusionPilot: the passthrough is finished for the drive and openpilot longitudinal is driving.
+  #
+  # Route 0000038d, 2026-08-18: the camera asserted cancel and deny on 8,988 of 8,990 engaged frames
+  # from t+30.8 onward, while the PCM reported cruise healthy the whole time. He worked it out from
+  # the seat -- "Ford ACC stopped working entirely, so I had to just use MADS the rest of the way" --
+  # and afterwards, "it's just annoying that it bricks it for the whole drive".
+  #
+  # It is not recoverable within a drive, so this fires ONCE. A repeating alert for a permanent
+  # condition is noise, and he would learn to ignore it. Priority LOW and a single prompt rather
+  # than a warning: nothing is unsafe, the car is being driven by a controller he does not prefer,
+  # and the useful response is a decision at the next stop rather than a reaction now.
+  EventNameSP.accPassthroughInert: {
+    ET.PERMANENT: Alert(
+      "Ford ACC unavailable",
+      "Camera cancelled; openpilot is driving longitudinal",
+      AlertStatus.userPrompt, AlertSize.mid,
+      Priority.LOW, VisualAlert.none, AudibleAlertSP.promptSingleHigh, 6.),
+  },
+
   EventNameSP.unconfirmedLeadBraking: {
     ET.WARNING: unconfirmed_lead_alert,
   },
