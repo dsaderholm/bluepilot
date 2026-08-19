@@ -1094,6 +1094,19 @@ struct OnroadEventSP @0xda96579883444c35 {
     # the agreement measurement needs -- a chime, then whether you would have gone anyway.
     passingAssistSuggested @27;
     passingAssistBackedOut @28;
+    # FusionPilot: the stock-ACC passthrough has gone INERT -- the camera has asked to cancel for
+    # five straight seconds, so Ford's command can no longer be carried and openpilot longitudinal
+    # is driving from here. On route 0000038d it did this from t+30.8 for the whole drive with
+    # nothing but a pill saying so, and he had to work it out from the seat: "it's just annoying
+    # that it bricks it for the whole drive". Announced ONCE, because it does not recover within a
+    # drive and a repeating alert for a permanent condition is noise.
+    #
+    # @29, NOT @27 where it was authored. Both branches added an event at @27 and the tiebreaker is
+    # WIRE HISTORY, not base branch: passingAssistSuggested has already been written to route logs
+    # -- 43 suggestions on 0000038e alone -- and capnp reads enums by VALUE, so renumbering it makes
+    # every recorded drive decode 27 as the wrong event. This field has never run anywhere, so it
+    # is the one that moves. See CLAUDE.md, "Capnp field numbers across branches".
+    accPassthroughInert @29;
   }
 }
 

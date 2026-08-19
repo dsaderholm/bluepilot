@@ -21,6 +21,8 @@ WHAT IS NOT USED YET, and is the reason to come back here:
   curvature along the path we could plan a descent against the 3.3 mph/s the buttons actually deliver
   instead of reacting to a step. That is the exit-ramp problem, and it is the next piece.
 """
+import math
+
 from openpilot.sunnypilot.navd.helpers import Coordinate
 
 # Below this the way is straight enough that mapd publishing no target velocity means "no corner"
@@ -52,8 +54,20 @@ def path_from_mapd(sm) -> tuple[Coordinate, list[dict]] | None:
 
   # Dicts rather than the capnp readers on purpose: the walk indexes by name, capnp readers are
   # invalidated when the underlying message is replaced, and this list is held across frames.
+  # NaN IS "COULD NOT COMPUTE", AND IT MUST NOT LOOK LIKE ANYTHING ELSE.
+  #
+  # mapd puts NaN in this path -- confirmed on route 0000038e, 2026-08-18, where reading it crashed a
+  # diagnostic with `cannot convert float NaN to integer`. Every comparison against NaN returns
+  # False, so it slips through any range check silently and arrives downstream as a number.
+  #
+  # `p.targetVelocity > 0` already drops a NaN velocity, which is right but accidental: it is False
+  # because NaN comparisons are False, not because anyone decided. Made explicit here so a later
+  # refactor to `>= 0` or `!= 0` cannot quietly let it through -- a NaN velocity reaching the walk
+  # poisons `min()` over the corner speeds, and a NaN v_target is a set-speed request nobody can act
+  # on.
   targets = [{"latitude": p.latitude, "longitude": p.longitude, "velocity": float(p.targetVelocity)}
-             for p in points if p.targetVelocity > 0]
+             for p in points
+             if not math.isnan(p.targetVelocity) and p.targetVelocity > 0]
   if not targets:
     # NO CORNERS AHEAD IS A REAL ANSWER, and returning None for it was a bug against this file's own
     # docstring. Measured on route 00000383: of 46 frames where no point carried a velocity, **all
@@ -66,6 +80,17 @@ def path_from_mapd(sm) -> tuple[Coordinate, list[dict]] | None:
     # velocity would mean mapd could not compute rather than that there was nothing to compute --
     # and THAT is worth v1. It happened zero times, and this stays because zero is a measurement
     # rather than a guarantee.
+    # AND A NaN CURVATURE IS THE SAME STATEMENT, which this branch got exactly backwards.
+    #
+    # `NaN > _STRAIGHT_CURVATURE` is False, so a path whose curvature mapd could not compute fell
+    # through to `return ... , []` -- "straight road, no corners ahead", the most confident answer
+    # this function can give, from the one input that means the opposite. SCC-Map then idles and
+    # never consults v1, which is the fallback this branch exists to reach.
+    #
+    # Same shape as the velocity check above and as several bugs today: a comparison that answers
+    # False on a value meaning "unknown" reads as a clean negative.
+    if any(math.isnan(p.curvature) for p in points):
+      return None
     if any(abs(float(p.curvature)) > _STRAIGHT_CURVATURE for p in points):
       return None
     return Coordinate(position.latitude, position.longitude), []
