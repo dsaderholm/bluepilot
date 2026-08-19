@@ -1951,6 +1951,36 @@ distanceFromWayCenter. Then v1 comes out and gives back what the overlap costs.
   A green run says nothing whatsoever about a file it never read. The same holds for anything else
   requiring compiled extensions.
 
+### A LOWER `nextSpeedLimit` ON A MOTORWAY IS AN EXIT RAMP. THAT WAS THE 45 ON I-215.
+
+*"At one point it said the speed limit was 45, even though the speed limit was 70."* Traced through
+every layer on route 00000393, 2026-08-19, and EVERY LAYER BELOW US WAS RIGHT:
+
+    the tile on his device   way 31535502, motorway, maxSpeed 31.2928 m/s = 70.0 mph
+    mapd published           speedLimit 70.0   nextSpeedLimit 45.0   waySelectionType current
+    our resolver used        45
+
+OSM right, tile right, mapd right. Upstream's ease-down then adopted the NEXT limit -- at 70 mph
+with `LIMIT_ADAPT_ACC` -1.0 the adopt window is ~288 m -- and the 45 belongs to an exit ramp.
+
+**HE SETTLED IT FROM THE SEAT:** *"I was in the left lane, which can't exit."* So it was not a road
+he could physically have taken, and no route prediction would ever have been right about it.
+
+**The root cause is a MISSING FIELD.** `mapdOut` has no `nextHighwayClass` and no `nextWayId`, so
+nothing in the message separates "this road slows ahead" from "there is a ramp ahead we are
+predicted onto". Upstream's ease-down assumes the first, which is right on a surface street and
+wrong on a motorway.
+
+Fixed in `MapdV2MapData.get_next_speed_limit_and_distance`, not in the resolver: the resolver's
+arithmetic is upstream's and correct, and what was wrong is the CONFIDENCE OF THE INPUT. On
+`motorway`, a LOWER next limit is refused. Narrow on purpose -- `motorwayLink` keeps it (on the ramp
+the drop is real), a HIGHER next limit is untouched, and if he does exit the ramp becomes the
+CURRENT way and its limit applies at once.
+
+**AND THIS IS THE SECOND TIME A CONFIDENT-LOOKING MAP NUMBER NEEDED A CONFIDENCE POLICY** -- the
+first was `waySelectionType == fail`. Both live in the same adapter for the same reason: mapd
+reports what it computed, and whether that answer applies TO US is our question, not its.
+
 ### THE STOP OVERRIDE CANNOT FIRE. ITS OWN TWO CONDITIONS ARE MUTUALLY EXCLUSIVE.
 
 Route 00000393, 2026-08-19, `tools/bp_fallback_reason.py`. Over the 11,519 frames where the model
