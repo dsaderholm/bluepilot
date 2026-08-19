@@ -2594,3 +2594,32 @@ diagnostics for the same question.
 radar; Fusion ABS, IPC, steering column). Platform `FORD_FUSION_MK5`, `flags 18` =
 `ALT_STEER_ANGLE | TSR`, **not** CAN FD — that combination is what exposed the duplicate-message
 bug, so keep it in mind when reasoning about flag-gated branches.
+
+## PASSING ASSIST CANNOT SEE A CONSTRUCTION ZONE. Reported 2026-08-19.
+
+*"It also did try to change lanes into a construction zone's cones earlier today."*
+
+**Every gate we have says that lane is clear, and by every signal we read, it is.** Cones return
+almost nothing on radar, so the lane is empty. The painted lines are still under them, so the
+geometry test passes. And the LEFT road edge -- the one thing that might notice a barrier -- is
+trusted **0.0% of the time** on multi-lane motorway, measured on route 0000038e. There is no signal
+in the system that carries "you may not go there".
+
+**Same shape as the California HOV lane**, and worth filing beside it: a lane that physically
+exists, looks empty, and must not be entered. Neither the map nor the sensors say so. A temporary
+work zone is not in OSM either -- `highway=construction` is for rebuilt roads, not this week's cones.
+
+**Two candidates, neither checked, and BOTH need the route rather than reasoning:**
+
+- **The model may already know.** `roadEdges` is trained on real scenes and a coned taper is a
+  common one. If the left edge moves inward through a work zone even at low confidence, that is the
+  signal -- and it would be the first thing the left edge has ever been good for here.
+- **The context around it.** Work zones usually carry a speed limit drop, sometimes a map lane-count
+  change, often an unusual `roadEdgeStds`. Any of those could gate it.
+
+**What is needed to find it: roughly WHEN and WHERE.** Two 21-minute drives is a large haystack and
+`bp_why_it_suggested.py` reports per-suggestion state once pointed at a window. Same ask as the
+unlocated Lagoon event, and this one matters more.
+
+**Until then the honest position is that this is a MISSING SENSE, not a tuning problem**, and it is
+a reason not to let the maneuver act unsupervised in a work zone.
