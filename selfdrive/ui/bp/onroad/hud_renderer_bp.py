@@ -1853,17 +1853,18 @@ class HudRendererBP(HudRendererSP):
       # from the driver's seat -- so lane 0 is the box on the RIGHT, and the list is reversed.
       lane = n - 1 - i
       box = rl.Rectangle(x0 + i * (box_w + gap), y, box_w, box_h)
+      # ONE SHAPE, THREE BRIGHTNESSES. It was a filled box, a hollow box and a grey box, and he
+      # said twice he could not tell them apart -- the second time after it had been explained.
+      # Two different SHAPES meaning two different confidences is a legend to memorize; brightness
+      # of the same shape is a gradient you read without one. The rule is now sayable in a
+      # sentence: the brightest box is you, a dim one is a maybe, grey is just a lane.
+      c = self._pa_color
       if lane == idx:
-        rl.draw_rectangle_rounded(box, 0.35, 4, self._pa_color)
-      elif idx < 0 and lo >= 0 and lo <= lane <= hi:
-        # Narrowed but not pinned: this lane is a candidate. Outlined, never filled -- a range is
-        # not a position, and drawing it as one would be the strip claiming a measurement it does
-        # not have.
-        rl.draw_rectangle_rounded_lines_ex(box, 0.35, 4, 3, self._pa_color)
-      elif witness and lane == n - 1 and idx < 0:
-        # Leftmost, asserted by the witness alone -- reachable when the map gave a lane count but
-        # the outer RIGHT line was unreadable, so no bound could form.
-        rl.draw_rectangle_rounded_lines_ex(box, 0.35, 4, 3, self._pa_color)
+        rl.draw_rectangle_rounded(box, 0.35, 4, c)
+      elif idx < 0 and ((lo >= 0 and lo <= lane <= hi) or (witness and lane == n - 1)):
+        # Narrowed, not pinned: we are in one of these. Dimmed rather than outlined, because a
+        # range is not a position and must never read as one.
+        rl.draw_rectangle_rounded(box, 0.35, 4, rl.Color(c.r, c.g, c.b, 150))
       else:
         rl.draw_rectangle_rounded(box, 0.35, 4, rl.Color(255, 255, 255, 70))
 

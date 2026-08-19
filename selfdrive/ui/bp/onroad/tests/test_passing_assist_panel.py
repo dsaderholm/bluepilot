@@ -153,6 +153,15 @@ class TestTheSettingSuggestion:
     assert _suggested_deficit(2.0, 0.0) is None
 
 
+class _C:
+  """Stands in for rl.Color and keeps its channels, because the ALPHA is now the whole signal."""
+  def __init__(self, r, g, b, a):
+    self.r, self.g, self.b, self.a = r, g, b, a
+
+
+ACCENT = _C(191, 148, 228, 255)      # what the stub passes as _pa_color
+
+
 def _load_strip():
   """Lift the two lane-strip methods and drive them against a RECORDING raylib.
 
@@ -168,22 +177,25 @@ def _load_strip():
   assert len(methods) == len(wanted), f"{wanted} moved -- this test would pass on anything"
 
   calls: list = []
-  ACCENT = ("accent",)          # what the stub passes as _pa_color
 
   class FakeRl:
-    Color = staticmethod(lambda *a: ("color", a))
+    Color = _C
     Rectangle = staticmethod(lambda x, y, w, h: ("rect", x, y, w, h))
 
     @staticmethod
     def draw_rectangle_rounded(box, _r, _seg, color):
-      # An EMPTY box is also a filled rectangle, just a faint grey one -- so the shape of the call
-      # does not distinguish the states and the COLOR is what carries the meaning. Reading only
-      # the call would have made every test here pass on a strip that claimed every lane at once.
-      calls.append(("fill" if color == ACCENT else "empty", box))
+      # EVERY box is a filled rectangle now -- one shape, three brightnesses -- so the call shape
+      # says nothing at all and the colour carries the entire meaning. Reading only the call would
+      # let every test here pass on a strip that claimed every lane at once.
+      if (color.r, color.g, color.b) == (ACCENT.r, ACCENT.g, ACCENT.b):
+        calls.append(("fill" if color.a == 255 else "maybe", box))
+      else:
+        calls.append(("empty", box))
 
     @staticmethod
     def draw_rectangle_rounded_lines_ex(box, *a):
-      calls.append(("outline", box))
+      raise AssertionError("the strip must not outline anything any more -- one shape, three "
+                           "brightnesses. See the note in _draw_lane_strip.")
 
   # The box geometry lives at module level so the preview and the car cannot drift apart. Lift it
   # rather than restating it -- a test carrying its own copy stops testing the shipped size, which
@@ -212,7 +224,7 @@ class TestTheLaneStrip:
     ns, calls = _load_strip()
     stub = types.SimpleNamespace(_pa_lanes_total=lanes_total, _pa_lane_index=lane_index,
                                  _pa_no_lane_left=no_lane_left, _pa_lane_bound=bound,
-                                 _pa_color=("accent",))
+                                 _pa_color=ACCENT)
     stub._lane_strip_worth_drawing = lambda: ns["_lane_strip_worth_drawing"](stub)
     panel = types.SimpleNamespace(x=0.0, width=600.0)
     ns["_draw_lane_strip"](stub, panel, 0.0)
@@ -221,21 +233,19 @@ class TestTheLaneStrip:
     return list(reversed(kinds))          # index 0 = lane 0 = the RIGHTMOST box
 
   def test_the_middle_of_five_is_no_longer_blank(self):
-    """THE REPORT. Bounded to 1..3, so those three outline and the two ends stay empty."""
+    """THE REPORT. Bounded to 1..3, so those three dim and the two ends stay grey."""
     kinds = self._draw(5, -1, False, (1, 3))
-    assert kinds == ["fill", "outline", "outline", "outline", "fill"][::1][0:0] + \
-           ["fill", "outline", "outline", "outline", "fill"] if False else True
-    assert kinds[1:4] == ["outline"] * 3
-    assert kinds[0] != "fill" and kinds[4] != "fill", "a range must never fill a box"
+    assert kinds == ["empty", "maybe", "maybe", "maybe", "empty"], \
+      "a range dims its candidates and never brightens one -- a range is not a position"
 
   def test_a_pinned_lane_fills_exactly_one_box(self):
     kinds = self._draw(3, 1, False, (1, 1))
     assert kinds == ["empty", "fill", "empty"]
 
-  def test_the_leftmost_witness_still_outlines_with_no_bound(self):
+  def test_the_leftmost_witness_still_shows_with_no_bound(self):
     """Reachable when the map gave a lane count but the outer RIGHT line was unreadable."""
     kinds = self._draw(5, -1, True, (-1, -1))
-    assert kinds == ["empty", "empty", "empty", "empty", "outline"]
+    assert kinds == ["empty", "empty", "empty", "empty", "maybe"]
 
   def test_unknown_draws_the_strip_with_nothing_claimed(self):
     """An absent strip cannot be told from a feature that is switched off, so it still draws."""
@@ -247,7 +257,13 @@ class TestTheLaneStrip:
     assert self._draw(0, -1, False, (-1, -1)) == []
 
   def test_a_range_never_outranks_a_measured_index(self):
-    """The edge placed us; the bound merely agrees. Only the measurement may fill."""
+    """The edge placed us; the bound merely agrees. Only the measurement may show at full."""
     kinds = self._draw(5, 0, False, (1, 3))
     assert kinds[0] == "fill"
-    assert "outline" not in kinds, "a bound must not also outline once the lane is placed"
+    assert "maybe" not in kinds, "a bound must not also dim once the lane is placed"
+
+  def test_nothing_is_ever_outlined_any_more(self):
+    """One shape, three brightnesses. The recorder raises on an outline call, so this pins the
+    decision rather than leaving the old two-shape design reachable by a future edit."""
+    for case in ((5, -1, False, (1, 3)), (3, 1, False, (1, 1)), (5, -1, True, (-1, -1))):
+      self._draw(*case)
