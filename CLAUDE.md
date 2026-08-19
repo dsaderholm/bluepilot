@@ -1060,6 +1060,91 @@ and then Ford's frame goes out instead.
 what opens the relay and puts `ACCDATA` in panda's TX list -- while the numbers stay Ford's. Expect
 experimental-mode and DEC indicators to keep showing state that is driving nothing.
 
+### DRIVES C AND D (0000038e, 0000038f, 2026-08-19): EVERY FIX FROM THE 18th HELD
+
+`tools/bp_drive_checkup.py` asks all of it in one pass over the last N routes. Both drives ran the
+06:03 merge, verified BY CONTENT rather than by hash -- a rebase makes hashes lie, and every fix
+below was confirmed present in the running tree before any number was read.
+
+    ICBM actually ran        MAX/dash diverged 76% / 50%     was LOCKED (ICBM off)
+    SLA reached active       76.3% / 58.2% of plan frames    was ZERO, all drive
+    "set your speed to 70"   never                           was constant
+    +/- moved the MAX        3 of 3 presses                  moved the ICBM number
+    Ford authored ACC        99.9% / 99.3% of ENGAGED        91.1% on drive B
+    passthrough went inert   never                           bricked a whole drive
+    accFaulted               0                               82 on drive A
+
+He reported no complaints on either, and for once that agrees with the instruments.
+
+**THE DENOMINATOR ERROR HAPPENED A THIRD TIME, in the tool written to check for it.** `accAuthority`
+`stock` is `not CC.longActive` -- cruise not engaged, nobody driving -- and counting it made Ford's
+share read **42.8%** when Ford in fact authored **99.3%** of the frames where anything was asked of
+anyone. Same shape as the 70.6% on drive A and the 23% on drive 389. **Restrict to frames where the
+feature is LIVE before reading any rate**, and note that this is now a mistake with three instances
+and a written warning, so the warning is not enough on its own -- check the denominator explicitly.
+
+**A PEAK TEMPERATURE IS NOT EVIDENCE OF A RUNAWAY PROCESS.** The first version called 81 C "something
+is still burning a core". **The device idles at 75 C parked with the engine off in August**, and `ps`
+shows only `mapd_v2` at 0.7% CPU -- v1 is gone, so the two-daemon fix took. `deviceState` has no
+`ambientTempC`; the ambient proxy is **`intakeTempC`**, the fan intake air reading. The tool now
+prints peak beside intake and deliberately renders NO verdict.
+
+**AND `athenad`/`sunnylinkd` WEBSOCKET CHURN IS NOT A PROCESS DEATH** -- 22 and 25 of them, counted
+as failures. A check that fires every drive forever is how a real plannerd death gets scrolled past,
+which already happened once here.
+
+**THE TSR 80 LEAK IS CONFIRMED ON THE ROAD AND ALREADY CLOSED -- BY HIM, BEFORE IT WAS RECOMMENDED.**
+The two drives BRACKET the setting change, which is what makes this a measurement rather than a
+prediction. `SpeedLimitPolicy` was written at **12:49**; 0000038e ran before it and 0000038f at 13:15
+after:
+
+    0000038e   policy 3, map_data_priority   map=22072  none=3214  car=700   <- 80 mph x700
+    0000038f   policy 1, MAP DATA ONLY       map=9889   none=3663  (no car at all)
+
+`Policy.map_data_priority` is `[map, car]` and takes the FIRST NON-ZERO, so it consults the map first
+and **falls through to the car wherever the map is quiet** -- and TSR is stuck at a constant 80.
+`combined` has the identical hole, since `min()` over a single source is that source. `map_data_only`
+is the only one that excludes it, and the later drive shows it working: zero car-sourced frames.
+
+**And the process lesson is worth more than the finding.** It was reported to him as a live problem
+he should go fix, hours after he had already fixed it, because the two drives were treated as one
+population. **A setting can change BETWEEN drives, so read the param's mtime against the route start
+times before attributing anything to a setting** -- `stat -c %y /data/params/d/<key>` is the whole
+check. He said "I swear I changed it to Map Data Only" and he was right.
+
+
+
+### THE STOP OVERRIDE CANNOT FIRE ON A STOP HE TAKES HIMSELF, AND HE TAKES ALL OF THEM
+
+Measured 2026-08-19 on route 0000038f with `StockAccStopOverride` ON. It never fired, and that is
+not a bug in it. Chased through the whole chain because the first two answers were both artifacts --
+a field read off the wrong struct, then a blocker named from a manufactured zero:
+
+    the model DID ask to stop        longitudinalPlan.shouldStop true on 878 of 13552 plan frames
+    longControlState                 off 20646, pid 15125, `stopping` ZERO -- those are the only two
+    engaged frames                   29174
+    ...engaged AND <= 20 mph            248      <- 0.85%, about 2.5 s of an 11-minute drive
+    ...engaged AND stopped (<1 mph)       0      <- never once
+
+**HE DISENGAGES BEFORE EVERY STOP.** Braking drops ACC, so by the time the car is actually stopping
+at a light, openpilot's longitudinal is `off` and `stopping` is unreachable -- `longcontrol.py` is
+`if not active: long_control_state = LongCtrlState.off`, evaluated BEFORE any stopping condition.
+The 878 frames where the model wanted a stop are frames where he was already on the brake.
+
+So the override needs him to STAY ENGAGED down to a standstill, which is a change in what he does
+rather than anything to change in the code. Worth saying plainly instead of tuning around: **it is
+asking for a trust he has no particular reason to extend yet**, on a car whose stock ACC has never
+once held a stop -- `standstill` is 0 frames here and on every drive checked before this one.
+
+**Do not "fix" this by loosening the arming conditions.** Each was put there for a measured reason
+and the honest reading is that the precondition never occurred. What settles it is one deliberate
+approach to a red light with no car ahead, foot off the brake; `passthrough_cancel_frames` is the
+readout, and the camera's tolerance for sustained contradiction is what the drive would measure.
+
+**And `hasSlowDown` IS NOT `shouldStop`** -- 3,490 frames of the first against 878 of the second on
+one drive. DEC's urgency filter means "slowing for something"; the plan committing to a stop is a
+different and much rarer state. Anything reasoning about STOPS has to read the second.
+
 ### THE STOP OVERRIDE IS BUILT, 2026-08-18. `opendbc/sunnypilot/car/ford/stop_override.py`.
 
 **It authors NOTHING. It chooses which already-authored frame goes out.** `create_acc_msg` already
@@ -1328,6 +1413,19 @@ and `cruise.py`.
 **Avoid the escape entirely** -- `print()` for a blank line, `", ".join(...)` instead of a joined
 newline, or a single spaced sentence. If a newline is genuinely required, use the Edit tool rather
 than a heredoc.
+
+**AND THERE IS A SECOND, SILENT FAILURE MODE THAT IS WORSE THAN THE CRASH. 2026-08-19.** The
+documented case produces an unterminated string literal, which at least stops. But when the mangled
+string is a **`str.replace` ANCHOR**, nothing raises: the pattern simply does not match, `replace`
+returns the input unchanged, and the edit is silently dropped. That night a two-part patch to
+`bp_stop_override.py` landed its COUNTERS and dropped its PRINT block, because only the second
+anchor contained an escape. Ruff passed, `ast.parse` passed, the file was valid Python -- and the
+funnel was computed every frame and rendered nowhere.
+
+**That is this fork's oldest bug, for the FOURTH time**: a value computed correctly and never
+displayed. It was caught only by reading the tool's actual output and noticing a section header
+missing. So: **a multi-part `replace` patch must verify its own application** -- `grep -c` for a
+phrase from EACH part, not just one, since one hit reads as success while half the patch is gone.
 
 **AND READ THE SUITE RESULT BEFORE THE PUSH LANDS, NOT AFTER.** `test && commit && push` prints the
 failure and then pushes anyway if the chain is written so the push does not depend on it. On a branch

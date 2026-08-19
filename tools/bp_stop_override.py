@@ -97,6 +97,14 @@ def main() -> int:
   prev_cancel = 0
   setspeed_while_stopped = []
   resume_events = 0
+  # WHICH CONDITION BLOCKED IT. Its own output used to name two candidates -- "the plan never
+  # committed or a lead was inside 60 m" -- and had no way to separate them, which is the same
+  # "prints the same thing for two different causes" failure recorded twice in CLAUDE.md. These
+  # mirror stop_override.py exactly: has_slow_down, op_stopping, v <= ENTER_SPEED, no lead in 60 m.
+  fn_slow = fn_speed = fn_stopping = fn_nolead = fn_all = 0
+  stopping_seen = False
+  op_stopping = False
+  lead_m = 0.0
 
   for seg in segs[:args.max_segments]:
     p = os.path.join(REALDATA, seg, "rlog")
@@ -130,10 +138,38 @@ def main() -> int:
         oe = bool(m.carControl.longActive)
         if m.carControl.cruiseControl.resume:
           resume_events += 1
+        # THE SAME EXPRESSION THE CARCONTROLLER ARMS ON -- carcontroller.py:293 is
+        # `CC.actuators.longControlState == LongCtrlState.stopping`, and `longControlState` lives on
+        # ControlsState and CarControl.Actuators, NOT on longitudinalPlan. Reading the wrong struct
+        # made every frame False through the except, and the funnel reported a confident 0.0% that
+        # was a missing field rather than a measurement. Hence stopping_seen: absence must not be
+        # able to masquerade as a zero.
+        try:
+          op_stopping = str(m.carControl.actuators.longControlState) == "stopping"
+          stopping_seen = True
+        except Exception:
+          op_stopping = False
+      elif w == "radarState":
+        try:
+          lead = m.radarState.leadOne
+          lead_m = float(lead.dRel) if bool(lead.status) else 0.0
+        except Exception:
+          lead_m = 0.0
       elif w == "longitudinalPlanSP":
         try:
           if m.longitudinalPlanSP.dec.hasSlowDown:
             slowdown_frames += 1
+            fn_slow += 1
+            slow_enough = v_mph <= 20.0
+            no_lead = not (0.0 < lead_m < 60.0)
+            if slow_enough:
+              fn_speed += 1
+            if op_stopping:
+              fn_stopping += 1
+            if no_lead:
+              fn_nolead += 1
+            if slow_enough and op_stopping and no_lead:
+              fn_all += 1
         except Exception:
           pass
       elif w == "can":
@@ -166,6 +202,30 @@ def main() -> int:
 
   overrides = [r for r in runs if (r[1] - r[0]) >= OVERRIDE_MIN_S and r[2] < OVERRIDE_SPEED_MPH]
   fallbacks = [r for r in runs if r not in overrides]
+
+  print("\n=== 0. WHICH CONDITION BLOCKED IT? (frames where the model asked for a stop) ===")
+  if fn_slow == 0:
+    print("  the model never asked for a stop at all -- nothing downstream could have fired")
+  else:
+    def _row(label: str, n: int) -> None:
+      print("  {:<44} {:6d}   {:5.1f}%".format(label, n, 100.0 * n / fn_slow))
+    _row("model asked for a stop (hasSlowDown)", fn_slow)
+    _row("...and at or below 20 mph", fn_speed)
+    if stopping_seen:
+      _row("...and openpilot's plan was STOPPING", fn_stopping)
+    else:
+      print("  ...and openpilot's plan was STOPPING       NO DATA -- field never read, not a zero")
+    _row("...and no radar lead inside 60 m", fn_nolead)
+    _row("ALL FOUR -- the override could arm here", fn_all)
+    if fn_all == 0:
+      if not stopping_seen:
+        print("  BLOCKER: UNKNOWN -- longControlState was never read, so `stopping` cannot be")
+        print("  ruled in or out. Do not report this as the plan failing to commit.")
+      else:
+        worst = min((fn_speed, "speed: never reached 20 mph while the model wanted a stop"),
+                    (fn_stopping, "plan: longControlState never reached `stopping`"),
+                    (fn_nolead, "lead: a car was always inside 60 m"))[1]
+        print("  BLOCKER: " + worst)
 
   print("\n=== 1. DID IT ARM? ===")
   print(f"  model asked for a stop (hasSlowDown) on {slowdown_frames} frames")
