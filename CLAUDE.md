@@ -2740,6 +2740,42 @@ radar; Fusion ABS, IPC, steering column). Platform `FORD_FUSION_MK5`, `flags 18`
 `ALT_STEER_ANGLE | TSR`, **not** CAN FD — that combination is what exposed the duplicate-message
 bug, so keep it in mind when reasoning about flag-gated branches.
 
+## THE MODEL'S ROAD EDGE IS THE EDGE OF THE SHOULDER, NOT OF THE RIGHTMOST LANE
+
+Measured 2026-08-19 on route 0000038f, and it invalidated the arithmetic the lane anchor was built
+on. Worth reading before ANY future use of `modelV2.roadEdges` as a distance-to-lane.
+
+The anchor converts metres-to-right-edge into a lane index by assuming a car centred in the
+rightmost lane sits half a lane -- 1.85 m -- from the edge. A cross-check against the four lane
+lines came back at **79.9%**: of 289 frames where both witnesses spoke, 231 disagreed, and every
+one had the same signature.
+
+    outer RIGHT line probability 0.01   ->  nothing to our right  ->  the RIGHTMOST lane
+    right road edge                     ->  3.7 to 5.1 m away
+    lane_index_from_edge                ->  "lane 1"
+
+1.85 m plus a two-to-three metre freeway shoulder is 3.7 to 5.1 m exactly. **The edge index has
+been reading about one lane too far left wherever a shoulder exists, which on his roads is
+everywhere.**
+
+**It also explains the survey the module was built on.** The trusted right-edge readings had a p50
+of 4.6-4.8 m and that was read as "mostly lane 1". It was mostly lane 0 with a shoulder. A number
+measured correctly, interpreted against an assumption nobody had stated.
+
+So the edge is now a CORROBORATOR: it may pick a lane out of a range the lines allow -- the only
+way to resolve a middle lane on a road wider than three -- and it is refused when it contradicts
+the lines or when there is no bound to check it against. Restoring it to a first-class witness
+means measuring the shoulder, which the code cannot invent; mapd's `estimatedRoadWidth` is the
+candidate input and has not been checked.
+
+**THE LESSON IS ABOUT THE DIAGNOSTIC, NOT THE GEOMETRY.** The cross-check was added the same
+morning as a quiet "measure it, do not act on it" counter, on the reasoning that refusing on a
+contradiction was unmeasured and might discard good readings. That caution was right and it is
+also what found the bug -- an estimator with no second opinion had been shipping a systematic
+one-lane bias, and 1918 green tests said nothing, because every fixture agreed with the same wrong
+assumption. **When two sensors can be made to answer the same question, make them, and print the
+disagreement rate before trusting either.**
+
 ## PASSING ASSIST CANNOT SEE A CONSTRUCTION ZONE. Reported 2026-08-19.
 
 *"It also did try to change lanes into a construction zone's cones earlier today."*
