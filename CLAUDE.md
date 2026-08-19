@@ -1068,6 +1068,39 @@ check. He said "I swear I changed it to Map Data Only" and he was right.
 
 
 
+### THE STOP OVERRIDE CANNOT FIRE ON A STOP HE TAKES HIMSELF, AND HE TAKES ALL OF THEM
+
+Measured 2026-08-19 on route 0000038f with `StockAccStopOverride` ON. It never fired, and that is
+not a bug in it. Chased through the whole chain because the first two answers were both artifacts --
+a field read off the wrong struct, then a blocker named from a manufactured zero:
+
+    the model DID ask to stop        longitudinalPlan.shouldStop true on 878 of 13552 plan frames
+    longControlState                 off 20646, pid 15125, `stopping` ZERO -- those are the only two
+    engaged frames                   29174
+    ...engaged AND <= 20 mph            248      <- 0.85%, about 2.5 s of an 11-minute drive
+    ...engaged AND stopped (<1 mph)       0      <- never once
+
+**HE DISENGAGES BEFORE EVERY STOP.** Braking drops ACC, so by the time the car is actually stopping
+at a light, openpilot's longitudinal is `off` and `stopping` is unreachable -- `longcontrol.py` is
+`if not active: long_control_state = LongCtrlState.off`, evaluated BEFORE any stopping condition.
+The 878 frames where the model wanted a stop are frames where he was already on the brake.
+
+So the override needs him to STAY ENGAGED down to a standstill, which is a change in what he does
+rather than anything to change in the code. Worth saying plainly instead of tuning around: **it is
+asking for a trust he has no particular reason to extend yet**, on a car whose stock ACC has never
+once held a stop -- `standstill` is 0 frames here and on every drive checked before this one.
+
+**Do not "fix" this by loosening the arming conditions.** Each was put there for a measured reason
+and the honest reading is that the precondition never occurred. What settles it is one deliberate
+approach to a red light with no car ahead, foot off the brake; `passthrough_cancel_frames` is the
+readout, and the camera's tolerance for sustained contradiction is what the drive would measure.
+
+**And `hasSlowDown` IS NOT `shouldStop`** -- 3,490 frames of the first against 878 of the second on
+one drive. DEC's urgency filter means "slowing for something"; the plan committing to a stop is a
+different and much rarer state. Anything reasoning about STOPS has to read the second.
+
+### THE STOP OVERRIDE IS BUILT, 2026-08-18. `opendbc/sunnypilot/car/ford/stop_override.py`.
+
 **It authors NOTHING. It chooses which already-authored frame goes out.** `create_acc_msg` already
 clamps to panda's bands, already drives the split brake/precharge hysteresis, and already never
 touches the unpoliced bits that applied the park brake. So the override is a DECISION -- send
