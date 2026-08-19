@@ -206,9 +206,11 @@ def main():
   if both_spoke:
     print(f"  both spoke on {both_spoke} frames; they CONTRADICTED on {contradictions} "
           f"({100.0 * contradictions / both_spoke:.1f}%)")
-    print("  Near zero means the edge and the lines corroborate and either may be trusted alone.")
-    print("  High means one is wrong often, and the anchor should REFUSE on a contradiction")
-    print("  rather than letting the edge win silently, which is what it does today.")
+    print("  ANSWERED 2026-08-19: 79.9% on route 0000038f, every one the same shape -- the edge")
+    print("  reads to the outer edge of the SHOULDER, so it lands about a lane left of the truth.")
+    print("  The anchor now refuses a contradicted edge reading, so this rate is a MONITOR: it")
+    print("  should stay roughly flat until a shoulder correction exists, and a jump toward zero")
+    print("  would mean one of the two witnesses went quiet rather than that they started agreeing.")
   else:
     print("  never both at once on this drive; the cross-check cannot be scored here")
   print()
