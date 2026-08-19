@@ -239,21 +239,38 @@ class LaneAnchor:
 
     self.edge_index = fresh
 
-    # DO THE TWO INDEPENDENT WITNESSES AGREE? The edge counts leftward from the shoulder; the lines
-    # bound us between what the model can see either side. They measure the same quantity by
-    # completely different means, so a disagreement means one of them is wrong -- and a confidently
-    # wrong index is the exact failure this module is shaped around.
+    # THE EDGE IS THE OUTER EDGE OF THE SHOULDER, NOT OF THE RIGHTMOST LANE. Measured 2026-08-19 on
+    # route 0000038f, and it invalidates the arithmetic this module was originally built on.
     #
-    # NOT ACTED ON. Refusing here would be the conservative choice and it may well be right, but it
-    # would also throw away good edge readings if the outer lines are merely noisy, and nobody has
-    # measured which. bp_anchor_replay counts it against a recorded drive; that number decides.
-    # Adding the refusal first and measuring afterwards would be a change nobody could attribute.
+    # The cross-check added that morning was meant to be a quiet diagnostic. It came back at 79.9%:
+    # of 289 frames where both witnesses spoke, 231 disagreed -- and every single one had the same
+    # signature. The outer RIGHT line absent (p ~0.01, so nothing to our right, so the rightmost
+    # lane) while the edge sat 3.7-5.1 m away and the formula called that lane 1.
+    #
+    # A car centred in the rightmost lane is half a lane -- 1.85 m -- from the edge of its LANE.
+    # It is 1.85 m plus the shoulder from the edge of the PAVEMENT, and a freeway shoulder is 2-3 m.
+    # 3.7-5.1 m is exactly that sum. So `lane_index_from_edge` has been reading about one lane too
+    # far left wherever a shoulder exists, which on his roads is everywhere.
+    #
+    # It also explains the survey this module was built on: the trusted right-edge readings had a
+    # p50 of 4.6-4.8 m, which was read as "mostly lane 1". It was mostly lane 0 with a shoulder.
+    #
+    # SO THE EDGE MAY NO LONGER PLACE US BY ITSELF. It is demoted to a corroborator: it may pick a
+    # lane out of a range the lines allow, and it is refused outright when it falls outside one.
+    # Restoring it means measuring the shoulder, which is a real number this cannot invent -- and
+    # `estimatedRoadWidth` from mapd is the candidate input for it.
+    #
+    # The direction of this is deliberate: refusing costs coverage, and the lines now supply far
+    # more of it than the edge ever did. Trusting a biased index would cost correctness.
     self.contradiction = (fresh is not None and self.line_bounds is not None
                           and not self.line_bounds[0] <= fresh <= self.line_bounds[1])
+    if self.contradiction or (fresh is not None and self.line_bounds is None):
+      fresh = None
 
     if fresh is None and self.line_bounds is not None and self.line_bounds[0] == self.line_bounds[1]:
       # The lines pinned it exactly. Counted as a FRESH reading because it is a measurement this
-      # frame, not a latch -- but it never overrides an edge reading, which is the better evidence.
+      # frame, not a latch. This is now the PRIMARY source rather than the fallback it was written
+      # as -- see the shoulder note above for why the edge lost that job.
       fresh = self.line_bounds[0]
 
     if fresh is not None:

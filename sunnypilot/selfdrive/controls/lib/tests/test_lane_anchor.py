@@ -75,12 +75,13 @@ class TestLanesToOurLeft:
 
 class TestLatching:
   def test_a_confident_reading_latches_and_survives_the_gap(self):
-    """The point of the whole class: the edge is trusted on 5-15% of frames, so the estimate has
-    to persist across the 85-95% where it is not."""
+    """The point of the whole class: a reading is intermittent, so the estimate has to persist
+    across the frames with none. The edge needs the lines to agree before it counts at all now,
+    so the reading here is corroborated -- 4.6 m is lane 1, and 1..3 is what the lines allow."""
     a = LaneAnchor()
-    assert a.update(0.05, 4.6, 0.2, 5, True) == 1
+    assert a.update(0.05, 4.6, 0.2, 5, True, 0.9, 0.9) == 1
     for _ in range(20):
-      assert a.update(0.05, None, 9.9, 5, True) == 1
+      assert a.update(0.05, None, 9.9, 5, True, 0.9, 0.9) == 1
     assert not a.confident, "carrying a latch is not the same as measuring"
 
   def test_an_untrusted_edge_never_establishes_an_anchor(self):
@@ -94,8 +95,8 @@ class TestLatching:
 
   def test_a_fresh_reading_overrides_a_disagreeing_latch(self):
     a = LaneAnchor()
-    a.update(0.05, 4.6, 0.2, 5, True)
-    assert a.update(0.05, HALF, 0.2, 5, True) == 0
+    a.update(0.05, 4.6, 0.2, 5, True, 0.9, 0.9)          # lane 1, lines allow 1..3
+    assert a.update(0.05, HALF, 0.2, 5, True, 0.9, 0.02) == 0    # no line right -> lane 0
 
   def test_a_lane_change_drops_the_anchor_rather_than_following_it(self):
     """Incrementing the index across a change would be dead reckoning on dead reckoning, and an
@@ -126,7 +127,7 @@ class TestLatching:
 class TestLeftmostQuery:
   def test_known_leftmost(self):
     a = LaneAnchor()
-    a.update(0.05, HALF + 4 * LANE_WIDTH_M, 0.2, 5, True)
+    a.update(0.05, HALF + 4 * LANE_WIDTH_M, 0.2, 5, True, 0.02, 0.9)
     assert a.in_leftmost_lane() is True
 
   def test_known_not_leftmost(self):
@@ -216,10 +217,24 @@ class TestTheBoundReachesTheAnchor:
     assert a.update(0.05, None, 9.9, 3, True, 0.9, 0.9) == 1
     assert a.confident, "a pin from the lines is a measurement, not a latch"
 
-  def test_the_edge_still_wins_when_both_are_available(self):
-    """The edge is the better evidence; the lines are the fallback."""
+  def test_the_lines_win_when_they_contradict_the_edge(self):
+    """REVERSED 2026-08-19 on measured evidence. The edge reads to the outer edge of the SHOULDER,
+    so it lands about one lane left of the truth wherever a shoulder exists. Here it claims the
+    rightmost lane while the lines report paint on both sides of us, which cannot both be true."""
     a = LaneAnchor()
-    assert a.update(0.05, HALF, 0.2, 3, True, 0.9, 0.9) == 0
+    assert a.update(0.05, HALF, 0.2, 3, True, 0.9, 0.9) == 1
+
+  def test_the_edge_narrows_a_range_it_agrees_with(self):
+    """It is still worth having. On five lanes the lines only bound us to 1..3; a corroborating
+    edge reading picks which one, and that is the one job it can still do honestly."""
+    a = LaneAnchor()
+    assert a.update(0.05, HALF + 2 * LANE_WIDTH_M, 0.2, 5, True, 0.9, 0.9) == 2
+
+  def test_an_uncorroborated_edge_reading_is_refused(self):
+    """With no lane-line bound there is nothing to check the edge against, and an unchecked edge
+    was wrong on 231 of the 289 frames where it could be checked. Unknown beats biased."""
+    a = LaneAnchor()
+    assert a.update(0.05, HALF, 0.2, 3, True, None, None) is None
 
   def test_a_range_does_not_become_an_index(self):
     a = LaneAnchor()
@@ -259,10 +274,12 @@ class TestTheTwoWitnessesCrossCheck:
     assert a.edge_index == 0
     assert a.contradiction is True
 
-  def test_the_edge_still_wins_despite_the_contradiction(self):
-    """Deliberate and temporary: refusing here is unmeasured, so it is counted, not acted on."""
+  def test_a_contradicted_edge_reading_is_discarded(self):
+    """The flag is still set for the replay to count, and the reading no longer reaches the index."""
     a = LaneAnchor()
-    assert a.update(0.05, HALF, 0.2, 3, True, 0.9, 0.9) == 0
+    assert a.update(0.05, HALF, 0.2, 3, True, 0.9, 0.9) == 1
+    assert a.contradiction is True
+    assert a.edge_index == 0, "what the edge said is still recorded, it just does not win"
 
   def test_no_bound_is_not_a_contradiction(self):
     a = LaneAnchor()
