@@ -1047,17 +1047,24 @@ prints peak beside intake and deliberately renders NO verdict.
 as failures. A check that fires every drive forever is how a real plannerd death gets scrolled past,
 which already happened once here.
 
-**THE TSR 80 LEAK IS CONFIRMED ON THE ROAD, having been predicted from the resolver first.** Route
-0000038e:
+**THE TSR 80 LEAK IS CONFIRMED ON THE ROAD AND ALREADY CLOSED -- BY HIM, BEFORE IT WAS RECOMMENDED.**
+The two drives BRACKET the setting change, which is what makes this a measurement rather than a
+prediction. `SpeedLimitPolicy` was written at **12:49**; 0000038e ran before it and 0000038f at 13:15
+after:
 
-    source:  map=22072   none=3214   car=700
-    limits:  70 mph x19915  ...  80 mph x700       <- the same 700 frames
+    0000038e   policy 3, map_data_priority   map=22072  none=3214  car=700   <- 80 mph x700
+    0000038f   policy 1, MAP DATA ONLY       map=9889   none=3663  (no car at all)
 
 `Policy.map_data_priority` is `[map, car]` and takes the FIRST NON-ZERO, so it consults the map first
 and **falls through to the car wherever the map is quiet** -- and TSR is stuck at a constant 80.
-`combined` has the identical hole, since `min()` over a single source is that source. Only
-`map_data_only` excludes it. **His setting to make**, and the cost is real but small: no limit at all
-on unmapped road, which is the case he already asked to handle by editing the max speed directly.
+`combined` has the identical hole, since `min()` over a single source is that source. `map_data_only`
+is the only one that excludes it, and the later drive shows it working: zero car-sourced frames.
+
+**And the process lesson is worth more than the finding.** It was reported to him as a live problem
+he should go fix, hours after he had already fixed it, because the two drives were treated as one
+population. **A setting can change BETWEEN drives, so read the param's mtime against the route start
+times before attributing anything to a setting** -- `stat -c %y /data/params/d/<key>` is the whole
+check. He said "I swear I changed it to Map Data Only" and he was right.
 
 
 

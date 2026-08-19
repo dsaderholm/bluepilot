@@ -102,6 +102,7 @@ def main() -> int:
   # "prints the same thing for two different causes" failure recorded twice in CLAUDE.md. These
   # mirror stop_override.py exactly: has_slow_down, op_stopping, v <= ENTER_SPEED, no lead in 60 m.
   fn_slow = fn_speed = fn_stopping = fn_nolead = fn_all = 0
+  stopping_seen = False
   op_stopping = False
   lead_m = 0.0
 
@@ -137,9 +138,15 @@ def main() -> int:
         oe = bool(m.carControl.longActive)
         if m.carControl.cruiseControl.resume:
           resume_events += 1
-      elif w == "longitudinalPlan":
+        # THE SAME EXPRESSION THE CARCONTROLLER ARMS ON -- carcontroller.py:293 is
+        # `CC.actuators.longControlState == LongCtrlState.stopping`, and `longControlState` lives on
+        # ControlsState and CarControl.Actuators, NOT on longitudinalPlan. Reading the wrong struct
+        # made every frame False through the except, and the funnel reported a confident 0.0% that
+        # was a missing field rather than a measurement. Hence stopping_seen: absence must not be
+        # able to masquerade as a zero.
         try:
-          op_stopping = str(m.longitudinalPlan.longControlState) == "stopping"
+          op_stopping = str(m.carControl.actuators.longControlState) == "stopping"
+          stopping_seen = True
         except Exception:
           op_stopping = False
       elif w == "radarState":
@@ -204,14 +211,21 @@ def main() -> int:
       print("  {:<44} {:6d}   {:5.1f}%".format(label, n, 100.0 * n / fn_slow))
     _row("model asked for a stop (hasSlowDown)", fn_slow)
     _row("...and at or below 20 mph", fn_speed)
-    _row("...and openpilot's plan was STOPPING", fn_stopping)
+    if stopping_seen:
+      _row("...and openpilot's plan was STOPPING", fn_stopping)
+    else:
+      print("  ...and openpilot's plan was STOPPING       NO DATA -- field never read, not a zero")
     _row("...and no radar lead inside 60 m", fn_nolead)
     _row("ALL FOUR -- the override could arm here", fn_all)
     if fn_all == 0:
-      worst = min((fn_speed, "speed: never reached 20 mph while the model wanted a stop"),
-                  (fn_stopping, "plan: longControlState never reached `stopping`"),
-                  (fn_nolead, "lead: a car was always inside 60 m"))[1]
-      print("  BLOCKER: " + worst)
+      if not stopping_seen:
+        print("  BLOCKER: UNKNOWN -- longControlState was never read, so `stopping` cannot be")
+        print("  ruled in or out. Do not report this as the plan failing to commit.")
+      else:
+        worst = min((fn_speed, "speed: never reached 20 mph while the model wanted a stop"),
+                    (fn_stopping, "plan: longControlState never reached `stopping`"),
+                    (fn_nolead, "lead: a car was always inside 60 m"))[1]
+        print("  BLOCKER: " + worst)
 
   print("\n=== 1. DID IT ARM? ===")
   print(f"  model asked for a stop (hasSlowDown) on {slowdown_frames} frames")
