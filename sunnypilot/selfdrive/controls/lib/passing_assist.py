@@ -808,6 +808,9 @@ class PassingAssistDetector:
     self.lane_anchor = LaneAnchor()
     self.lane_index = None
     self.lanes_left_of_us = None
+    self.lane_index_out = -1
+    self.lanes_total_out = 0
+    self.no_lane_left_out = False
     self._hog_held_s = 0.0
     self._hog_counted = False
     self.elapsed_s = 0.0
@@ -1766,6 +1769,11 @@ class PassingAssistDetector:
     self.lane_index = self.lane_anchor.update(DT_MDL, edge_d, edge_std, lanes, one_way,
                                               far_left_prob)
     self.lanes_left_of_us = self.lane_anchor.to_our_left()
+    # -1 rather than 0 for unknown: 0 is the rightmost lane, a real answer, and the panel must be
+    # able to draw "no idea" differently from "far right".
+    self.lane_index_out = -1 if self.lane_index is None else int(self.lane_index)
+    self.lanes_total_out = int(lanes) if lanes else 0
+    self.no_lane_left_out = bool(getattr(self.lane_anchor, "no_lane_left", False))
 
   def _track_lane_hog(self) -> None:
     """Time spent behind someone sitting in the leftmost lane below the set speed.
@@ -3628,3 +3636,9 @@ class PassingAssistDetector:
     passingAssist.oncomingAnySide = pa.adjacent.oncoming_any_side
     passingAssist.oncomingSecondsLeft = float(pa.adjacent.oncoming_seconds_left)
     passingAssist.oncomingSeen = pa.adjacent.oncoming_seen
+    # The lane strip. int()/bool() explicitly: these come from map fields and a numpy-adjacent
+    # estimator, and capnp raises on a numpy scalar -- the failure that killed plannerd on
+    # 2026-08-18. See test_capnp_accepts_published_types.
+    passingAssist.laneIndex = int(getattr(pa, "lane_index_out", -1))
+    passingAssist.lanesTotal = int(getattr(pa, "lanes_total_out", 0))
+    passingAssist.noLaneLeft = bool(getattr(pa, "no_lane_left_out", False))

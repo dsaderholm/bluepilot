@@ -916,6 +916,29 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       finishing @5;    # across, blinker out
       aborting @6;     # backing out of a crossing already begun -- something arrived behind us
     }
+    # WHERE THE SYSTEM THINKS WE ARE ACROSS THE ROAD -- the lane strip on the panel.
+    #
+    # Added 2026-08-19 because this fork has now computed a value correctly and never rendered it
+    # FOUR times, and the anchor was the fourth: lane index, lanes-to-our-left and the lane-line
+    # witness all gate the slow-pass warning and none of them reached a screen. A gate you cannot
+    # see is a gate he can only debug by reporting that it behaved oddly.
+    #
+    # NOT a redraw of the road. openpilot already draws lane lines and the path, and anything that
+    # merely repeats the camera is redundant with what he can see out of the window. These three
+    # carry what the camera CANNOT show: the map's lane count, our derived position within it, and
+    # the fact that the two disagree or are unknown.
+    #
+    # laneIndex is -1 for UNKNOWN, never 0. 0 is a real answer meaning the rightmost lane, and the
+    # panel must be able to draw "no idea" differently from "far right" -- conflating them is how
+    # an unavailable estimator reads as a confident one.
+    laneIndex @101 :Int8;
+    lanesTotal @102 :Int8;
+    # The lane-line witness ALONE: no line beyond our left boundary. Weaker evidence than a numeric
+    # index, and drawn differently for that reason -- an outline rather than a fill. Kept separate
+    # from laneIndex rather than folded in, because it is a claim about the immediate neighbour and
+    # not a position, and a boolean promoted to a position is a fake measurement.
+    noLaneLeft @103 :Bool;
+
   }
 
   struct DynamicExperimentalControl {

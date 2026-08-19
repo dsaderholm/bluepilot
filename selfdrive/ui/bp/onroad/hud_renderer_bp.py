@@ -1119,6 +1119,14 @@ class HudRendererBP(HudRendererSP):
     except (KeyError, AttributeError):
       return
 
+    # The lane strip. Read here with the rest of pa; drawn at the end of the panel.
+    try:
+      self._pa_lane_index = int(pa.laneIndex)
+      self._pa_lanes_total = int(pa.lanesTotal)
+      self._pa_no_lane_left = bool(pa.noLaneLeft)
+    except (AttributeError, TypeError, ValueError):
+      self._pa_lane_index, self._pa_lanes_total, self._pa_no_lane_left = -1, 0, False
+
     # Reset the count on each new drive rather than each UI start, so it always means
     # "this trip" no matter when the display was switched on.
     if ui_state.started_frame != self._pa_started_frame:
@@ -1744,7 +1752,9 @@ class HudRendererBP(HudRendererSP):
 
     pad_x, pad_y = 36, 18
     content_w = max(main_dims.x, sub_dims.x)
-    content_h = main_dims.y + (sub_dims.y + 6 if self._pa_sub else 0) + (14 if self._pa_progress > 0 else 0)
+    strip_h = 22 if self._lane_strip_worth_drawing() else 0
+    content_h = (main_dims.y + (sub_dims.y + 6 if self._pa_sub else 0)
+                 + (14 if self._pa_progress > 0 else 0) + strip_h)
     panel_w = min(content_w + pad_x * 2, rect.width - 40)
     panel_h = content_h + pad_y * 2
 
@@ -1780,6 +1790,54 @@ class HudRendererBP(HudRendererSP):
       rl.draw_rectangle_rounded(track, 1.0, 6, rl.Color(255, 255, 255, 50))
       fill = rl.Rectangle(track.x, track.y, max(8.0, bar_w * self._pa_progress), 8)
       rl.draw_rectangle_rounded(fill, 1.0, 6, self._pa_color)
+      y += 14
+
+    self._draw_lane_strip(panel, y)
+
+  def _lane_strip_worth_drawing(self) -> bool:
+    """Only when the map has given a lane count. Without one there is nothing to draw boxes for,
+    and inventing a width would be the strip asserting something nobody measured."""
+    return getattr(self, "_pa_lanes_total", 0) >= 2
+
+  def _draw_lane_strip(self, panel, y: float) -> None:
+    """Which lane the SYSTEM thinks we are in, out of the map's count.
+
+    NOT a redraw of the road. openpilot already draws lane lines and the path, and Tesla, Super
+    Cruise and BlueCruise all render a road view for the same reason -- to show what the car
+    believes before it acts. Repeating the camera here would be redundant with the window. What
+    this carries is the part the camera cannot: the MAP's lane count, our derived position in it,
+    and the difference between not knowing and knowing.
+
+    THREE STATES, and drawing them alike is how an unavailable estimator reads as a confident one:
+
+      filled box    the anchor placed us in that lane. A measurement.
+      outlined box  the lane-line witness alone says nothing is to our left. Weaker evidence -- a
+                    claim about the immediate neighbour, not a position -- so it is drawn weaker.
+      all empty     unknown. The strip still draws, because an absent strip cannot be told from a
+                    feature that is switched off.
+    """
+    if not self._lane_strip_worth_drawing():
+      return
+    n = min(int(getattr(self, "_pa_lanes_total", 0)), 8)   # 8 boxes is already an unusual road
+    idx = int(getattr(self, "_pa_lane_index", -1))
+    witness = bool(getattr(self, "_pa_no_lane_left", False))
+
+    box_w, box_h, gap = 18, 12, 5
+    total_w = n * box_w + (n - 1) * gap
+    x0 = panel.x + panel.width / 2 - total_w / 2
+
+    for i in range(n):
+      # Index 0 is the RIGHTMOST lane, and the strip is drawn left-to-right as the road looks
+      # from the driver's seat -- so lane 0 is the box on the RIGHT, and the list is reversed.
+      lane = n - 1 - i
+      box = rl.Rectangle(x0 + i * (box_w + gap), y, box_w, box_h)
+      if lane == idx:
+        rl.draw_rectangle_rounded(box, 0.35, 4, self._pa_color)
+      elif witness and lane == n - 1 and idx < 0:
+        # Leftmost, asserted by the witness with no numeric index behind it.
+        rl.draw_rectangle_rounded_lines_ex(box, 0.35, 4, 2, self._pa_color)
+      else:
+        rl.draw_rectangle_rounded(box, 0.35, 4, rl.Color(255, 255, 255, 45))
 
   def _draw_lateral_control_overlay(self, center_x: float, center_y: float, wheel_size: int) -> None:
     """Draw the current lateral control mode over the steering wheel icon."""

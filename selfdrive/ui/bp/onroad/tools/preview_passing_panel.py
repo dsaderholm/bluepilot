@@ -164,7 +164,9 @@ def load_shipped_drawing_code():
   """
   tree = ast.parse(open(HUD, encoding="utf-8").read())
   cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "HudRendererBP")
-  wanted = ("_draw_passing_assist", "_fit_sub")
+  # The lane strip is part of the shipped panel now, so it is lifted with it -- a preview that
+  # renders everything EXCEPT the new thing is exactly how a readout ships unlooked-at.
+  wanted = ("_draw_passing_assist", "_fit_sub", "_lane_strip_worth_drawing", "_draw_lane_strip")
   methods = [n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name in wanted]
   assert len(methods) == len(wanted), f"expected {wanted}, found {[m.name for m in methods]}"
 
@@ -204,11 +206,19 @@ def _contact_sheet(ns, font, outdir):
 
   for i, (cap, main_text, sub, progress, alert, color) in enumerate(SCENES):
     top = 20 + i * ROW_H
+    # LANE STRIP. Cycled across the scenes rather than fixed, so every one of its three states
+    # (placed / witness-only / unknown) is rendered at least once on the contact sheet -- an
+    # unrendered state is exactly how three readouts shipped assembled-but-invisible before.
+    lane_cases = [(4, 0, False), (5, 4, False), (5, -1, True), (3, 1, False), (0, -1, False)]
+    lanes_total, lane_idx, no_left = lane_cases[i % len(lane_cases)]
     stub = types.SimpleNamespace(
       _font_bold=font, _pa_main=main_text, _pa_sub=sub, _pa_progress=progress,
       _pa_alert=alert, _pa_color=rl.Color(*color, 255), _pa_panel_rect=None,
       _handle_panel_tap=lambda panel: None,
+      _pa_lanes_total=lanes_total, _pa_lane_index=lane_idx, _pa_no_lane_left=no_left,
     )
+    stub._lane_strip_worth_drawing = lambda: ns["_lane_strip_worth_drawing"](stub)
+    stub._draw_lane_strip = lambda panel, y: ns["_draw_lane_strip"](stub, panel, y)
     # The panel places itself relative to the rect it is given, so the rect is offset to put it
     # where this row wants it rather than moving the drawing code.
     off = ns["SPEED_UNIT_CENTER_Y"] + 60
@@ -268,6 +278,11 @@ def main(outdir):
       # Tap handling needs gui_app; it is input, not drawing, so it is stubbed out entirely.
       _handle_panel_tap=lambda panel: None,
     )
+    stub._pa_lanes_total = getattr(stub, '_pa_lanes_total', 5)
+    stub._pa_lane_index = getattr(stub, '_pa_lane_index', 4)
+    stub._pa_no_lane_left = getattr(stub, '_pa_no_lane_left', False)
+    stub._lane_strip_worth_drawing = lambda: ns['_lane_strip_worth_drawing'](stub)
+    stub._draw_lane_strip = lambda panel, y: ns['_draw_lane_strip'](stub, panel, y)
     rl.begin_texture_mode(tex)
     rl.draw_rectangle_gradient_v(0, 0, W, H, rl.Color(96, 100, 106, 255), rl.Color(52, 55, 60, 255))
     ns["_draw_passing_assist"](stub, rect)
