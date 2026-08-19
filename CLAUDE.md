@@ -2839,6 +2839,43 @@ Leave the field alone.
 plausible 1.8% and would have justified building the gate. `MIN_ADJACENT_LINE_PROB` is 0.5 and
 `MAX_ROAD_EDGE_STD` is 1.2, in the file. **Read the constant before measuring against it.**
 
+## THE UNUSED mapdOut FIELDS ARE UNUSED FOR A REASON. MEASURED ON HIS ROADS, 2026-08-19.
+
+Ten of mapdOut's twenty-seven fields are consumed. He asked whether ICBM should be reading some of
+the rest. Measured across routes 00000392 and 00000393, 22,696 mapdOut frames, and the answer is
+almost entirely no -- which is worth having written down, because every one of these looks useful
+in the schema.
+
+    hazard / nextHazard / nextHazardDistance    0.0%   EMPTY on his roads
+    conditionalSpeedLimit                       0.0%   EMPTY -- no school-zone / time-varying limits
+    speedLimitSuggestedSpeed                    0.0%   EMPTY
+    advisorySpeed                               0.1%   15 frames, all 65 mph
+    nextAdvisorySpeed                           1.8%   45-65 mph, p50 376 m ahead
+    speedLimitAccepted                        100% True   never refuses, so it says nothing
+    roadContext                    freeway 58% / city 42%   strictly coarser than highwayClass
+    estimatedRoadWidth                        100%   and it is FAKE -- see below
+    distanceFromWayCenter                    86.7%   max 43.42 m, still impossible, still unusable
+
+**`hazard` was the best candidate and it is empty.** A mapped hazard with a distance is exactly the
+input the set-speed descent needs, because the ramp problem is a DETECTION TIME problem and a map
+is the only thing that can see past the camera. OSM has no hazards on his roads. Do not plan around
+it.
+
+**`estimatedRoadWidth` IS `lanes * 3.7`. It is not a measurement of anything.** 19,296 of 22,696
+frames match exactly; the other 3,400 are `lanes == 0`, where it emits a fabricated 7.4 rather than
+nothing. So it carries zero information the lane count does not already carry, it is built on the
+same 3.7 m assumption the anchor makes -- which measured 3.36 m on his actual roads -- and a
+consumer treating it as measured gets an invented two-lane road 15% of the time. **It was the
+candidate input for a shoulder correction. It cannot serve that or any other measurement purpose.**
+
+**`nextAdvisorySpeed` is the only one with any life in it**, at 1.8% with a usable lookahead
+distance, and its distance goes NEGATIVE (min -2.68 m), so it would need its own sanity gate. Not
+worth it at that coverage.
+
+**The general shape:** a field being populated is not the same as a field carrying information.
+`speedLimitAccepted` is 100% populated and always True. `estimatedRoadWidth` is 100% populated and
+derived. `advisorySpeed` is honestly empty. Check what a field SAYS, not whether it is set.
+
 ## PASSING ASSIST CANNOT SEE A CONSTRUCTION ZONE. Reported 2026-08-19.
 
 *"It also did try to change lanes into a construction zone's cones earlier today."*

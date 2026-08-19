@@ -292,3 +292,70 @@ class TestTheTwoWitnessesCrossCheck:
     a.update(0.05, None, 9.9, 3, True, 0.9, 0.9)
     assert a.edge_index is None
     assert a.contradiction is False
+
+
+class TestFollowingALaneChange:
+  """HIS QUESTION, 2026-08-19: does it track the lane changes he makes? It does now, and only
+  because the lines can overrule it a frame later. Every test here is really about that bound.
+  """
+
+  def _in_lane_zero_of_five(self):
+    a = LaneAnchor()
+    assert a.update(0.05, HALF, 0.2, 5, True, 0.9, 0.02) == 0    # no line right -> rightmost
+    return a
+
+  def test_moving_left_from_the_rightmost_lane_lands_on_lane_one(self):
+    """THE CASE IT EXISTS FOR. On five lanes the lines can only say "one of the middle three";
+    knowing he was in lane 0 and went left says lane 1, which no line can."""
+    a = self._in_lane_zero_of_five()
+    a.note_lane_change(rightward=False)
+    assert a.index == 1
+    assert a.update(0.05, None, 9.9, 5, True, 0.9, 0.9) == 1     # lines allow 1..3, so it stands
+
+  def test_moving_right_decreases_the_index(self):
+    """0 is the far right, so rightward counts DOWN. Getting this backwards is silent."""
+    a = LaneAnchor()
+    a.update(0.05, HALF + 2 * LANE_WIDTH_M, 0.2, 5, True, 0.9, 0.9)
+    assert a.index == 2
+    a.note_lane_change(rightward=True)
+    assert a.index == 1
+
+  def test_a_followed_change_is_not_a_measurement(self):
+    a = self._in_lane_zero_of_five()
+    a.note_lane_change(rightward=False)
+    assert a.confident is False, "carried, not measured -- the strip must not draw it as a fix"
+    assert a.dead_reckoned is True
+
+  def test_the_lines_overrule_a_wrong_shift_on_the_next_frame(self):
+    """THE BOUND THAT MAKES THIS SAFE. Shift left off lane 0, then the lines say we are still
+    rightmost. The carried index loses."""
+    a = self._in_lane_zero_of_five()
+    a.note_lane_change(rightward=False)
+    assert a.index == 1
+    assert a.update(0.05, None, 9.9, 5, True, 0.9, 0.02) == 0    # still no line to our right
+    assert a.dead_reckoned is False, "a fresh reading replaces the dead reckoning outright"
+
+  def test_a_change_with_no_known_direction_still_drops_the_index(self):
+    a = self._in_lane_zero_of_five()
+    a.note_lane_change()
+    assert a.index is None, "half a fact is not a position"
+
+  def test_a_change_off_the_end_of_the_road_drops_it(self):
+    """Moving right out of the rightmost lane. One of the two inputs is wrong and we cannot say
+    which, so claim nothing rather than clamp back onto lane 0."""
+    a = self._in_lane_zero_of_five()
+    a.note_lane_change(rightward=True)
+    assert a.index is None
+
+  def test_a_change_with_nothing_latched_stays_unknown(self):
+    a = LaneAnchor()
+    a.note_lane_change(rightward=False)
+    assert a.index is None
+
+  def test_an_unobserved_lane_change_is_caught_by_the_same_bound(self):
+    """Not every change is announced -- a fully manual one may never reach note_lane_change. The
+    latch is checked against the lines every frame, so it self-corrects either way."""
+    a = LaneAnchor()
+    a.update(0.05, HALF + 2 * LANE_WIDTH_M, 0.2, 5, True, 0.9, 0.9)   # lane 2, lines allow 1..3
+    assert a.index == 2
+    assert a.update(0.05, None, 9.9, 5, True, 0.02, 0.9) == 4         # no line LEFT -> leftmost

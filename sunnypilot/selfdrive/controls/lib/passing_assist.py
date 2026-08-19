@@ -2266,6 +2266,10 @@ class PassingAssistDetector:
     self.driver_change_was_exit = was_exit
     self.driver_change_standdown = self.exit_standdown_s if was_exit else float(SETTLE_AFTER_CHANGE_S)
     self.since_driver_change_s = 0.0
+    # FOLLOW the change rather than forget it. Edge-triggered on purpose: this runs once per
+    # maneuver, where the direction is known, while the stand-down block below runs every frame
+    # for several seconds and would shift the index once per frame if it did this.
+    self.lane_anchor.note_lane_change(rightward=rightward)
     self._signalled_over_widening = False
     self.right_lane_age_s = 0.0
     # Cleared unconditionally first, so a second change during a watch replaces it rather than
@@ -3093,9 +3097,9 @@ class PassingAssistDetector:
     if self.driver_change_standdown > 0.0:
       self._clear_confirmation()
       self.keep_right_seconds = 0.0
-      # The latched lane index describes a lane we are no longer in. Dropping it is not a lost
-      # measurement -- the anchor re-establishes on the next confident right-edge reading.
-      self.lane_anchor.note_lane_change()
+      # The anchor was already told about this change, once, by _stand_down -- where the DIRECTION
+      # is known, so it follows the move instead of forgetting it. Doing it here as well would
+      # shift the index once per frame for the whole stand-down.
       self._reset_outputs(Blocked.driverChangedLanes)
       return
 

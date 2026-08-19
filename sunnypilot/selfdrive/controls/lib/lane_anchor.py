@@ -181,6 +181,7 @@ class LaneAnchor:
     self.no_lane_left = False    # the lane-line witness; see in_leftmost_lane
     self.line_bounds = None      # (lo, hi) from the four lines, or None
     self.edge_index = None       # this frame's edge-derived index alone, before any fallback
+    self.dead_reckoned = False   # the index came from following a lane change, not from a reading
     # THE TWO WITNESSES DISAGREEING. Measured, not acted on -- see update().
     self.contradiction = False
 
@@ -189,16 +190,41 @@ class LaneAnchor:
     self.lanes_total = None
     self.age_s = 0.0
     self.confident = False
+    self.dead_reckoned = False
     self.reason = reason
 
-  def note_lane_change(self):
-    """The driver or the system moved us. The latched index is now meaningless.
+  def note_lane_change(self, rightward=None):
+    """We moved a lane. Follow the move when the direction is known, drop the estimate when it is not.
 
-    Deliberately does NOT try to increment or decrement the index to follow the move. That would be
-    dead reckoning on top of dead reckoning, and a missed or aborted change would leave a confident
-    wrong answer -- the one failure mode this whole module is shaped to avoid.
+    HIS QUESTION, 2026-08-19: *"Is the lane indicator thing keeping track of what lane changes I
+    make to know what lane I am now in?"* It was not -- it threw the index away -- and that was the
+    right call when a reading arrived on 5-15% of frames, because following a move is dead
+    reckoning and a missed or aborted change leaves a confident wrong answer forever.
+
+    Two things changed. The lines now re-answer on 81% of frames, so a shift is corrected almost
+    immediately instead of running unchecked. And `update` invalidates any latch that falls outside
+    what the lines currently allow, so a wrong shift cannot survive contact with the next frame.
+    That bound is what makes this safe rather than the shift being clever.
+
+    WHERE IT ACTUALLY BUYS SOMETHING is the road he raised it about. On three lanes the lines pin
+    the lane outright and this adds nothing. On I-15's five they can only say "one of the middle
+    three" -- so knowing he was in lane 0 and moved left says lane 1, which no line can.
+
+    A change with no known direction still drops the index. Half a fact is not a position.
     """
-    self.invalidate("lane change")
+    if rightward is None or self.index is None or self.lanes_total is None:
+      self.invalidate("lane change")
+      return
+    # 0 is the FAR RIGHT lane, so moving right DECREASES the index.
+    shifted = self.index - 1 if rightward else self.index + 1
+    if not 0 <= shifted <= self.lanes_total - 1:
+      # Off the end of the road the map describes. One of the two is wrong and we cannot say which.
+      self.invalidate("lane change ran off the lane count")
+      return
+    self.index = shifted
+    self.age_s = 0.0
+    self.confident = False       # carried, not measured -- the strip must not read it as a fix
+    self.dead_reckoned = True
 
   def update(self, dt, edge_dist_m, edge_std, lanes_total, one_way, far_left_line_prob=None,
              far_right_line_prob=None):
@@ -228,6 +254,15 @@ class LaneAnchor:
     if not one_way:
       self.invalidate("not one-way")
       return None
+
+    # A LATCH THAT THE LINES NOW CONTRADICT IS STALE. Carried indices go wrong in exactly two ways
+    # -- an unobserved lane change, and a lane change we followed in the wrong direction -- and
+    # both show up here as an index outside the range the lines currently allow. Checking it costs
+    # one comparison and it is what makes following a lane change safe at all.
+    if self.index is not None and self.line_bounds is not None:
+      lo, hi = self.line_bounds
+      if not lo <= self.index <= hi:
+        self.invalidate("the lines no longer allow the latched lane")
 
     fresh = None
     if edge_std is not None and lanes_total:
@@ -290,6 +325,7 @@ class LaneAnchor:
       self.lanes_total = int(lanes_total)
       self.age_s = 0.0
       self.confident = True
+      self.dead_reckoned = False
       return self.index
 
     if self.index is None:
