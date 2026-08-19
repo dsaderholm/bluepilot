@@ -40,6 +40,27 @@ MAX_EDGE_M = 5.0 * LANE_WIDTH_M
 # than redefined so one number governs "do we believe this edge" everywhere.
 MAX_EDGE_STD = 0.5
 
+# THE SECOND WITNESS, added 2026-08-19 after replaying the edge-only anchor against a real drive.
+#
+# The right edge is trusted only when it is CLOSE, so an anchor built on it alone can see which
+# lane we are in exactly while we are on the right and goes blind as we move left. Measured on
+# route 0000038e: over 22,547 moving freeway frames it claimed lane 0 or lane 1 and NEVER lane 2 or
+# beyond. So `in_leftmost_lane()` was structurally unreachable on a wide road -- which is the one
+# road where the question is asked.
+#
+# `laneLineProbs[0]` is the outer LEFT lane line: the model asserting a line BEYOND our own left
+# boundary, which means a lane beyond it. Its ABSENCE is therefore direct evidence of being in the
+# leftmost lane, and it is published every frame rather than 5-15% of them.
+#
+# Measured before trusting it (bp_lane_line_count.py, route 00000383): on a single-lane ramp --
+# the road with genuinely no lane to the left -- it read p50 0.03 with 0% of frames above 0.5. Zero
+# false "there is a lane there" in 463 frames. On multi-lane motorway it ran 0.54-0.77. It
+# discriminates, and its errors are not in the direction that would invent a left lane.
+#
+# Used only to say LEFTMOST, never to place us in a numbered lane: it is a boolean about the
+# immediate neighbour, not a position.
+NO_LEFT_LINE_PROB = 0.25
+
 # A latched anchor is dead reckoning, and dead reckoning drifts. Hold it only this long without a
 # fresh confident reading. 20 s at 70 mph is 625 m, which is a realistic distance to hold a lane;
 # past that an unobserved lane change is likelier than not.
@@ -106,6 +127,7 @@ class LaneAnchor:
     self.lanes_total = None
     self.age_s = 0.0
     self.confident = False       # True only on a frame that took a fresh reading
+    self.no_lane_left = False    # the lane-line witness; see in_leftmost_lane
 
   def invalidate(self, reason=""):
     self.index = None
@@ -123,7 +145,7 @@ class LaneAnchor:
     """
     self.invalidate("lane change")
 
-  def update(self, dt, edge_dist_m, edge_std, lanes_total, one_way):
+  def update(self, dt, edge_dist_m, edge_std, lanes_total, one_way, far_left_line_prob=None):
     """Advance one frame. Returns the current lane index, or None if unknown.
 
     `one_way` is required and must be True: on a two-way road the map's `lanes` is the total for
@@ -132,6 +154,16 @@ class LaneAnchor:
     refused at the top rather than handled downstream.
     """
     self.confident = False
+    # Second witness, independent of the edge and available every frame. Kept as its own field
+    # rather than folded into the index, because it answers "is anything to my left" and NOT
+    # "which lane am I in" -- conflating those is how a boolean becomes a fake position.
+    self.no_lane_left = False
+    if far_left_line_prob is not None and one_way:
+      try:
+        self.no_lane_left = float(far_left_line_prob) < NO_LEFT_LINE_PROB
+      except (TypeError, ValueError):
+        self.no_lane_left = False
+
     if not one_way:
       self.invalidate("not one-way")
       return None
@@ -176,9 +208,25 @@ class LaneAnchor:
 
     Returns False for "unknown", not None, because every caller is asking "may I be told off for
     hogging the left lane" and the answer on no information must be no.
+
+    TWO INDEPENDENT WITNESSES, either of which suffices:
+
+      the anchor      lane index equals the map's last lane. Precise, and structurally unavailable
+                      on a wide road -- the very case this is asked about.
+      the lane line   no outer-left line, so no lane beyond our own left boundary. Available every
+                      frame, and the only one that works once we are actually over there.
+
+    OR rather than AND is deliberate and it is the safe direction HERE, which is the opposite of
+    the usual rule and worth stating. This gate does not open a maneuver: its only consumer is the
+    slow-pass warning, where True means "say something" and False means "stay quiet". Requiring
+    both would return the feature to silence on wide freeways, which is the state the edge-only
+    version was measured to produce. If a future caller ever uses this to permit a lane change,
+    that caller must require `self.index is not None` as well -- a warning may be wrong, a
+    maneuver may not.
     """
-    left = self.to_our_left()
-    return left == 0
+    if self.to_our_left() == 0:
+      return True
+    return bool(getattr(self, "no_lane_left", False))
 
 
 def mph(v_ms):

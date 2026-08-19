@@ -1753,7 +1753,18 @@ class PassingAssistDetector:
     except (AttributeError, IndexError, KeyError, TypeError, ValueError):
       edge_d, edge_std = None, None
 
-    self.lane_index = self.lane_anchor.update(DT_MDL, edge_d, edge_std, lanes, one_way)
+    # The outer-left lane line: absence of a line BEYOND our own left boundary is direct evidence
+    # of being in the leftmost lane, and unlike the right edge it is published every frame. It is
+    # what makes in_leftmost_lane() reachable once we are actually over there -- the edge-only
+    # anchor never claimed a lane past index 1 in 22,547 freeway frames.
+    far_left_prob = None
+    try:
+      far_left_prob = float(sm['modelV2'].laneLineProbs[LL_FAR_LEFT])
+    except (AttributeError, IndexError, KeyError, TypeError, ValueError):
+      far_left_prob = None
+
+    self.lane_index = self.lane_anchor.update(DT_MDL, edge_d, edge_std, lanes, one_way,
+                                              far_left_prob)
     self.lanes_left_of_us = self.lane_anchor.to_our_left()
 
   def _track_lane_hog(self) -> None:

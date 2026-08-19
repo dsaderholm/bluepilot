@@ -51,7 +51,7 @@ def main():
   sys.path.insert(0, "/data/openpilot")
   from openpilot.tools.lib.logreader import LogReader
   from openpilot.sunnypilot.selfdrive.controls.lib.lane_anchor import LaneAnchor
-  from openpilot.sunnypilot.selfdrive.controls.lib.passing_assist import RE_RIGHT
+  from openpilot.sunnypilot.selfdrive.controls.lib.passing_assist import LL_FAR_LEFT, RE_RIGHT
 
   segs = segments_in_order(route)
   if not segs:
@@ -74,6 +74,7 @@ def main():
   held_across_change = 0
   changes = 0
   fresh_frames = 0
+  witness_left = 0
   moving = 0
 
   for s in segs:
@@ -116,13 +117,19 @@ def main():
             held_across_change += 1
         prev_blinker = blinker
 
-        idx = anchor.update(DT, d, std, lanes, one_way)
+        try:
+          flp = float(m.modelV2.laneLineProbs[LL_FAR_LEFT])
+        except (AttributeError, IndexError, TypeError, ValueError):
+          flp = None
+        idx = anchor.update(DT, d, std, lanes, one_way, flp)
         if anchor.confident:
           fresh_frames += 1
         seen[idx] += 1
         cls_total[hwy] += 1
         if idx is not None:
           by_class[hwy] += 1
+        if anchor.no_lane_left:
+          witness_left += 1
         if lead_slow:
           lead_frames += 1
           if anchor.in_leftmost_lane():
@@ -148,6 +155,9 @@ def main():
     if cls_total[c] < 200:
       continue
     print(f"  {c:<14} {by_class[c]:>7} of {cls_total[c]:>7}  {100.0 * by_class[c] / cls_total[c]:>5.1f}%")
+  print()
+  print(f"LANE-LINE WITNESS  said NO LANE LEFT on {witness_left} frames "
+        f"({100.0 * witness_left / moving:.1f}%) -- this is what makes leftmost reachable")
   print()
   print("THE HOG CONJUNCTION")
   if lead_frames:
