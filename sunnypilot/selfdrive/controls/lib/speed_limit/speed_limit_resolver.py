@@ -162,6 +162,45 @@ class SpeedLimitResolver:
     self.limit_solutions[SpeedLimitSource.car] = sm['carStateSP'].speedLimit
     self.distance_solutions[SpeedLimitSource.car] = 0.
 
+
+  def _refuse_a_car_limit_above_the_map(self) -> None:
+    """FusionPilot: A CAR-SOURCED LIMIT MAY LOWER THE MAP'S, NEVER RAISE IT.
+
+    Route 0000038e, 2026-08-18: `carStateSP.speedLimit` sat at a CONSTANT 80 mph for 16,991 frames
+    -- through 70 mph freeway and 20 and 30 mph surface streets alike. That is not a sign being
+    read, it is a stuck value. With `SpeedLimitPolicy` on `combined` the car source is consulted
+    before the map, so it won 700 frames at 80 where the map correctly said 70, and his By-Limit
+    offset turned that into the **90 mph** he reported -- a number on no road in Utah.
+
+    TSR on this car has a KNOWN communication fault (U0253, the camera cannot reach the APIM; see
+    CLAUDE.md). Its output is exactly what the fork's own rule is about: a limit is an instruction
+    to change speed, so refusing one costs coverage while honoring a wrong one costs safety.
+    Refusing a HIGHER car reading costs a slower car; honoring it asks for 90 on a residential
+    street.
+
+    Deliberately asymmetric rather than dropping the source. A car reading LOWER than the map is
+    the case TSR exists for -- a work zone, a school zone, a limit the tiles do not carry -- and
+    that still gets through untouched. Only the direction that can SPEED HIM UP is refused.
+
+    Called after BOTH sources are resolved. `_get_from_car_state` runs first, so doing this inside
+    it compared against the PREVIOUS frame's map limit -- right almost always and wrong at exactly
+    the transitions where the two disagree, which is the only time it matters.
+    """
+    # NOT when he has explicitly chosen to trust the car source. `car_state_only` and
+    # `car_state_priority` are a deliberate statement that TSR is the authority on this
+    # vehicle, and silently overriding that would be the same class of mistake as the stuck
+    # reading itself. His policy is `combined`, where the car merely happens to be consulted
+    # first -- an ordering, not a preference.
+    if self.policy in (int(Policy.car_state_only), int(Policy.car_state_priority)):
+      return
+
+    map_limit = self.limit_solutions.get(SpeedLimitSource.map, 0.)
+    car_limit = self.limit_solutions.get(SpeedLimitSource.car, 0.)
+    if map_limit > 0. and car_limit > map_limit:
+      self.limit_solutions[SpeedLimitSource.car] = 0.
+      self.distance_solutions[SpeedLimitSource.car] = 0.
+
+
   def _get_from_map_data(self, sm: messaging.SubMaster) -> None:
     self._reset_limit_sources(SpeedLimitSource.map)
     self._process_map_data(sm)
@@ -254,6 +293,7 @@ class SpeedLimitResolver:
     """Get limit solutions from each data source"""
     self._get_from_car_state(sm)
     self._get_from_map_data(sm)
+    self._refuse_a_car_limit_above_the_map()
 
     source = self._get_source_solution_according_to_policy()
     speed_limit = self.limit_solutions[source] if source else 0.

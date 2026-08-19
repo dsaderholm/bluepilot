@@ -238,3 +238,73 @@ class TestNoLimitFallback:
   def test_no_limit_ever_seen_is_invalid_either_way(self):
     for fb in (Fallback.setSpeed, Fallback.lastKnown):
       assert not self._resolver(fb, 0.0, 0.0).speed_limit_last_valid
+
+
+# --- the 90 mph that exists on no road in Utah -------------------------------------------------
+
+def _resolver():
+  """A bare resolver with only the fields the refusal reads. Constructing the real one needs Params
+  and a GPS service, neither of which this decision touches."""
+  r = SpeedLimitResolver.__new__(SpeedLimitResolver)
+  r.policy = int(Policy.combined)
+  r.limit_solutions = {}
+  r.distance_solutions = {}
+  for src in ALL_SOURCES:
+    r.limit_solutions[src] = 0.
+    r.distance_solutions[src] = 0.
+  return r
+
+
+
+
+def test_a_car_limit_above_the_map_is_refused():
+  """Route 0000038e, 2026-08-18: `carStateSP.speedLimit` sat at a CONSTANT 80 mph for 16,991 frames
+  -- through 70 mph freeway and 20 and 30 mph surface streets alike. That is not a sign being read,
+  it is a stuck value, and TSR on this car has a known communication fault (U0253).
+
+  With `SpeedLimitPolicy` on `combined` the car source is consulted first, so it won 700 frames at
+  80 where the map correctly said 70, and his By-Limit offset made that the **90 mph** he reported.
+
+  A limit is an instruction to change speed: refusing one costs coverage, honoring a wrong one costs
+  safety. So a car reading ABOVE the map is dropped."""
+  r = _resolver()
+  r.limit_solutions[SpeedLimitSource.map] = 70 * CV.MPH_TO_MS
+  r.limit_solutions[SpeedLimitSource.car] = 80 * CV.MPH_TO_MS
+  r._refuse_a_car_limit_above_the_map()
+  assert r.limit_solutions[SpeedLimitSource.car] == 0., (
+    "a stuck 80 mph TSR reading still overrides the map's 70 -- that is the 90 he saw")
+
+
+def test_a_car_limit_below_the_map_still_gets_through():
+  """The case TSR exists for -- a work zone, a school zone, a limit the tiles do not carry. Only the
+  direction that can SPEED HIM UP is refused."""
+  r = _resolver()
+  r.limit_solutions[SpeedLimitSource.map] = 70 * CV.MPH_TO_MS
+  r.limit_solutions[SpeedLimitSource.car] = 45 * CV.MPH_TO_MS
+  r._refuse_a_car_limit_above_the_map()
+  assert r.limit_solutions[SpeedLimitSource.car] == pytest.approx(45 * CV.MPH_TO_MS), (
+    "a LOWER car-sourced limit was dropped -- that is the whole point of having the source")
+
+
+def test_the_car_source_survives_when_the_map_has_nothing():
+  """No map limit is not evidence against the car's. On a road with no coverage TSR is the only
+  source there is."""
+  r = _resolver()
+  r.limit_solutions[SpeedLimitSource.map] = 0.
+  r.limit_solutions[SpeedLimitSource.car] = 80 * CV.MPH_TO_MS
+  r._refuse_a_car_limit_above_the_map()
+  assert r.limit_solutions[SpeedLimitSource.car] > 0.
+
+
+def test_an_explicit_car_priority_policy_is_not_overridden():
+  """`car_state_only` and `car_state_priority` are a deliberate statement that TSR is the authority
+  on this vehicle. Silently overriding that would be the same class of mistake as the stuck reading
+  -- deciding for him. His own policy is `combined`, where the car merely happens to be consulted
+  first."""
+  for policy in (Policy.car_state_only, Policy.car_state_priority):
+    r = _resolver()
+    r.policy = int(policy)
+    r.limit_solutions[SpeedLimitSource.map] = 70 * CV.MPH_TO_MS
+    r.limit_solutions[SpeedLimitSource.car] = 80 * CV.MPH_TO_MS
+    r._refuse_a_car_limit_above_the_map()
+    assert r.limit_solutions[SpeedLimitSource.car] > 0., f"{policy} was overridden"
