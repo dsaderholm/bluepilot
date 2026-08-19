@@ -42,7 +42,10 @@ STOP_OVERRIDE_DESC = tr_noop(
   "Bring the car to a complete stop for a stop sign or red light on an empty road. Ford's set "
   "speed cannot go below 20 mph, so without this the car slows to 20 and no further unless its "
   "own radar has a car ahead to follow down. For a few seconds at the end of the stop openpilot sends the braking instead of Ford, then hands straight back. It never takes over when a lead is "
-  "close -- Ford stops for those itself, better than we would. Needs Use Ford's Own ACC Commands on, AND Experimental Mode -- without it openpilot never plans a stop for a sign or a light, so this can never fire. Experimental: how the camera reacts to being overridden for several seconds has not been measured yet, so watch the first few stops.")
+  "close -- Ford stops for those itself, better than we would. Needs Use Ford's Own ACC Commands on, AND Experimental Mode -- without it openpilot never plans a stop for a sign or a light, so this can never fire. "
+  "IT ONLY RUNS WHILE CRUISE IS STILL ENGAGED. Touching the brake disengages, which hands the stop "
+  "back to you, so the approach has to be one where you leave your foot off the brake. "
+  "Experimental: how the camera reacts to being overridden for several seconds has not been measured yet, so watch the first few stops.")
 
 ICMB_UNAVAILABLE = tr_noop("Intelligent Cruise Button Management is currently unavailable on this platform.")
 ICMB_UNAVAILABLE_LONG_AVAILABLE = tr_noop("Disable the sunnypilot Longitudinal Control (alpha) toggle to allow Intelligent Cruise Button Management.")
@@ -171,8 +174,11 @@ class CruiseLayout(Widget):
                      "the setting above cannot catch, since an empty intersection produces "
                      "no vehicle to measure. Weaker evidence than the vehicle case -- how long "
                      "the model insists, and a speed floor, are its only filters. "
-                     "IT SLOWS, IT DOES NOT STOP. Ford's cruise will not accept a set speed under "
-                     "20 mph, so the car arrives at the sign doing 20 and the stop itself is yours. "
+                     "ON ITS OWN IT SLOWS TO 20 AND NO FURTHER. Ford's cruise will not accept a set "
+                     "speed under 20 mph, so this brings the car to the sign doing 20 and the stop "
+                     "itself is yours. Come To A Complete Stop is what takes it the rest of the "
+                     "way, and that one only runs while cruise is still engaged -- braking "
+                     "disengages, which hands the stop back to you before it can start. "
                      "You are alerted when the slowing starts, not when it runs out, so the whole "
                      "deceleration is your warning."), "IcbmModelStopEnabled"),
       param="IcbmModelStopEnabled")
