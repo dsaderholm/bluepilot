@@ -69,6 +69,10 @@ def main():
   ap = argparse.ArgumentParser()
   ap.add_argument("route", nargs="?", default="00000383")
   ap.add_argument("--min-speed", type=float, default=MIN_SPEED_DEFAULT)
+  # HIS IDEA, 2026-08-19: if the RIGHT edge is trusted, it anchors the rightmost lane and
+  # OSM `lanes` counts leftward from there. The left edge was measured dead; the right
+  # one is a shoulder rather than a median and was never measured at all.
+  ap.add_argument("--side", choices=["left", "right"], default="left")
   args = ap.parse_args()
 
   sys.path.insert(0, "/data/openpilot")
@@ -102,7 +106,8 @@ def main():
         if speed < args.min_speed:
           continue
         try:
-          std = float(m.modelV2.roadEdgeStds[AL.RE_LEFT])
+          idx = AL.RE_LEFT if args.side == "left" else AL.RE_RIGHT
+          std = float(m.modelV2.roadEdgeStds[idx])
         except (AttributeError, IndexError, TypeError, ValueError):
           continue
         # Bucket by road class and lane count: a 2-lane road's left edge is the shoulder, a
@@ -114,7 +119,7 @@ def main():
         if std <= MAX_STD:
           b["t"] += 1
           try:
-            d = AL.road_edge_offset(m.modelV2, "left", 0.0)
+            d = AL.road_edge_offset(m.modelV2, args.side, 0.0)
             if d is not None:
               b["d"].append(abs(float(d)))
           except (AttributeError, TypeError, ValueError):
@@ -123,6 +128,7 @@ def main():
   if not buckets:
     sys.exit("no qualifying frames -- check the route and --min-speed")
 
+  print(f"SIDE: {args.side.upper()}")
   print(f"route {args.route}, above {args.min_speed:.0f} m/s "
         f"({args.min_speed * 2.237:.0f} mph)")
   print("BASELINE RUN: Utah uses a double white line and no candlestick posts, so these numbers")
