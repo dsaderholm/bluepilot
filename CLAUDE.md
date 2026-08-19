@@ -2549,6 +2549,11 @@ unavoidable, the branch whose field has never been written to a log is the one t
   the car does. **This is about answering HIM, and does not extend to documentation** -- see the
   README section above, where the opposite applies, because a stranger reading the README has no
   way to know what is scaffolding.
+- **KEEP REPLIES SHORT.** 2026-08-19: *"Wall of text..."* Lead with the answer in a sentence or two.
+  The reasoning, the measured tables and the ruled-out alternatives belong in the COMMIT MESSAGE and
+  in this file, not in the chat reply -- he reads those when he wants them. A finding is not more
+  credible for being longer, and burying the one thing he has to do inside six paragraphs means he
+  has to go looking for it.
 - **23 controls on the settings screen is not a usability problem.** Do not consolidate unless asked.
 - **Report test results only when the result is news.** No sign-off with a suite total every message.
 - **Changes made on one branch reach the others because he rebases every time.** So CLAUDE.md is the
