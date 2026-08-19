@@ -124,7 +124,9 @@ def main():
       w = m.which()
       if w == "carState":
         speed = float(m.carState.vEgo)
-        blinker = bool(m.carState.leftBlinker) or bool(m.carState.rightBlinker)
+        left_blink = bool(m.carState.leftBlinker)
+        right_blink = bool(m.carState.rightBlinker)
+        blinker = left_blink or right_blink
       elif w == "mapdOut":
         try:
           lanes = int(m.mapdOut.lanes)
@@ -153,11 +155,13 @@ def main():
         except (AttributeError, IndexError, TypeError, ValueError):
           std, d = None, None
 
-        # The real hook: the anchor is dropped on a driver lane change.
+        # The real hook. The anchor FOLLOWS the change when it knows the direction, so this has
+        # to pass one -- calling note_lane_change() bare made the replay measure the old
+        # forget-everything behaviour while the car was doing something else entirely.
         if blinker and not prev_blinker:
           changes += 1
           had = anchor.index is not None
-          anchor.note_lane_change()
+          anchor.note_lane_change(rightward=right_blink)
           if had and anchor.index is not None:
             held_across_change += 1
         prev_blinker = blinker
@@ -239,9 +243,12 @@ def main():
     print("  no slow-lead frames on this drive; the conjunction cannot be scored here")
   print()
   print("LANE CHANGES")
-  print(f"  blinker onsets: {changes}   anchor still held an index afterwards: {held_across_change}")
-  if held_across_change:
-    print("  *** the anchor survived a lane change. note_lane_change is not doing its job. ***")
+  print(f"  blinker onsets: {changes}   anchor FOLLOWED the change: {held_across_change}")
+  print("  Following is now the intended behaviour, not a bug -- the anchor shifts the index by one")
+  print("  in the direction of travel. What protects it is that update() drops any latched index")
+  print("  the lane lines no longer allow, so a wrong shift dies on the next frame rather than")
+  print("  being carried. A count near zero here means the shift is being refused every time,")
+  print("  which is worth looking at: either no index was latched, or the map lane count moved.")
 
 
 if __name__ == "__main__":
