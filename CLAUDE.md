@@ -1951,6 +1951,43 @@ distanceFromWayCenter. Then v1 comes out and gives back what the overlap costs.
   A green run says nothing whatsoever about a file it never read. The same holds for anything else
   requiring compiled extensions.
 
+### THE STOP OVERRIDE CANNOT FIRE. ITS OWN TWO CONDITIONS ARE MUTUALLY EXCLUSIVE.
+
+Route 00000393, 2026-08-19, `tools/bp_fallback_reason.py`. Over the 11,519 frames where the model
+asked for a stop:
+
+    <= 20 mph                    9004   78.2%
+    plan STOPPING                2689   23.3%
+    no lead in 60 m              4703   40.8%
+    -- pairwise --
+    speed + stopping             2689   23.3%
+    speed + nolead               3352   29.1%
+    STOPPING + NOLEAD               0    0.0%     <- never, not once
+    all three                       0    0.0%
+
+**openpilot's plan commits to `stopping` ONLY when there is a lead.** The override requires NO lead
+within 60 m. So its trigger and its safety carve-out are the same frames inverted, and it can never
+arm -- by construction, not by tuning. Independent, that intersection would have been ~9.5%; exactly
+zero across 2,689 stopping frames and 4,703 no-lead frames is a contradiction, not a rare event.
+
+**Both halves were individually well-reasoned, which is how this got built.** "A lead disqualifies it
+-- Ford's stop-and-go is better than ours" is right. "The plan must have COMMITTED, not merely
+wanted to" is right. Nobody checked whether the two could hold at once, and the funnel that was
+added earlier the same evening could not see it either: it reported each condition's own rate and
+their four-way intersection, so three healthy-looking percentages hid a pair that is disjoint.
+**PAIRWISE IS THE DIAGNOSTIC. A funnel of marginals cannot show an exclusion.**
+
+**Do NOT fix this by dropping the lead check.** That check is the reason the override never fights
+Ford's stop-and-go, which is the part of this car that works. The thing to change is what the
+override triggers ON: `longControlState == stopping` is the MPC's commitment, and the MPC stops for
+leads and cruise targets -- never for a sign or a signal. The model's own stop intent is what fires
+at a light, and it already reaches the carcontroller as `dec.hasSlowDown`, which the override
+ALREADY takes as a separate argument.
+
+**That is a real design change to a safety-relevant path and it was NOT made on 2026-08-19**, with
+him asleep and no way to validate offline. What is established is that the feature is dead as built,
+which is worth more than a rushed change that makes the car brake at the wrong moment.
+
 ### THE FAN IS NOT A FAULT. MEASURED, TWICE, AND CLOSED.
 
 *"I still feel like my fans are running pretty hard."* Route 00000393, 2026-08-19:
