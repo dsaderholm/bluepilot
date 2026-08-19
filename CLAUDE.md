@@ -1899,6 +1899,53 @@ distanceFromWayCenter. Then v1 comes out and gives back what the overlap costs.
   A green run says nothing whatsoever about a file it never read. The same holds for anything else
   requiring compiled extensions.
 
+### THE TILES SEE THE CORNER. MAPD DOES NOT. THE CURVE FIX IS OURS TO WRITE.
+
+2026-08-18, and it REVERSES a conclusion stated twice the same evening. He reported a curve on
+I-80 ("Dwight D. Eisenhower Highway", wayId 31532588, motorway, 3 lanes) where SCC did nothing. The
+first read said the map was blind and the corner was unfixable. **That was checking the wrong
+layer.** mapd's own settings were read -- no curvature or smoothing knob exists, only
+`map_curve_target_lat_a` which is `SmartCruiseControlMapFactor` in other units -- and the
+investigation stopped there instead of opening the tiles.
+
+    mapd published curvature        ~0.0002 1/m      ->  5,000 m radius, a straight
+    THE TILE ON HIS DEVICE          0.00790 1/m      ->    127 m radius at the tightest
+    node spacing                    min 6 m, MEDIAN 12 m, max 112 m, 56 nodes on the way
+    the model measured on the road  3.46 m/s^2 at 64 mph  ->  ~240 m radius
+
+**The tile geometry is accurate and dense.** 240 m sits between the tile's tightest triple (127 m)
+and its median (364 m); 12 m node spacing resolves a bend of that size easily. mapd is smoothing
+real geometry into nothing, by a factor of forty, and we consume its output rather than the data.
+
+`tools/bp_offline_map.py` ALREADY READS THAT TILE STORE. So the curve fix is computing curvature
+ourselves over consecutive node triples -- circumradius of three points, which is what produced the
+numbers above -- rather than reading `mapdOut.path[].curvature`.
+
+**AND THE TARGET SPEED IS NOT A COMFORT CONSTANT, WHICH IS HIS CORRECTION AND THE SHARPER HALF:**
+*"remember that my PSCM requires slower speeds for curves, so how I take the curve won't be
+accurate. I want to take the curve as fast as the PSCM can handle with angle steering."*
+
+So learning the corner from how he drives it -- proposed the same evening, and he pointed out it is
+both already built (pinned holds) and WRONG-SHAPED -- would learn a speed set by the PSCM's limits
+rather than by what the car can do. Same objection applies to `_A_LAT_REG_MAX` and the vision
+factors: somebody else's comfort numbers.
+
+The corner speed wanted here is **the fastest the retrofit Edge PSCM can hold the lane at in angle
+mode**. That is CAR FACTS, category 3 of "the model gets what he has no preference about" -- not a
+preference, not perception, a property of ONE car with no fleet to learn it from. Written code, no
+param. It is the same authority limit the passing-assist curve gate already rests on, and
+`FordLowSpeedFactor_ang` / `FordHighSpeedFactor_ang` are the calibration it lives in (see "Ford's
+angle gains are a PSCM calibration, not a detune").
+
+**Do not start this by tuning vision thresholds.** `SmartCruiseControlVisionEarliness` was deleted
+for exactly that and made gentle sweepers brake hard. On the approach at 74 mph the model predicted
+0.34-0.46 m/s^2 against vision's 1.3 entering threshold -- the camera had genuinely not seen the
+bend, and no threshold change fixes a sensor that cannot look that far. The far field is the map's
+job, which is why the tiles matter.
+
+**One more thing measured and closed: `advisorySpeed` is ZERO on his entire route.** 23,179 mapdOut
+frames, not one advisory speed. The yellow-sign shortcut does not exist here; do not plan around it.
+
 ### THE MAP IS EVIDENCE, NEVER PERMISSION -- and that is the design, not a caveat
 
 His, 2026-08-16, and it is the sentence to check any map integration against:

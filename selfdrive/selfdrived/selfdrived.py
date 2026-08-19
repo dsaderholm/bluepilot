@@ -94,7 +94,19 @@ class SelfdriveD(CruiseHelper):
     # TODO: de-couple selfdrived with card/conflate on carState without introducing controls mismatches
     self.car_state_sock = messaging.sub_sock('carState', timeout=20)
 
-    ignore = self.sensor_packets + self.gps_packets + ['alertDebug', 'lateralManeuverPlan'] + ['modelDataV2SP']
+    # FusionPilot: `controllerStateBP` is IGNORED, and it has to be. It is subscribed only to read
+    # `accAuthority` for the inert-passthrough alert -- a diagnostic -- but it is published solely by
+    # `bp_card_publisher` when the Ford BluePilot carcontroller sets `lateralUncertainty`. On any car
+    # or path where that attribute is absent the service never arrives, `sm.all_alive()` goes False,
+    # and selfdrived adds `EventName.commIssue`, which DISENGAGES. That would take openpilot out
+    # entirely on somebody else's car -- his friend runs this same branch for ICBM alone -- because
+    # of an alert added for diagnostics.
+    #
+    # `ignore_alive` still populates `sm.alive['controllerStateBP']`, so the alert that reads it is
+    # unaffected; only the aggregate check is. Same reason `alertDebug`, `lateralManeuverPlan` and
+    # `modelDataV2SP` sit here.
+    ignore = self.sensor_packets + self.gps_packets + ['alertDebug', 'lateralManeuverPlan'] + \
+             ['modelDataV2SP', 'controllerStateBP']
     if SIMULATION:
       ignore += ['driverCameraState', 'managerState']
     if REPLAY:
