@@ -63,7 +63,7 @@ class IcbmHudState:
     wins" is a live question and the two can genuinely differ.
 
     A PINNED hold is the exception, because as of 2026-08-15 it is the only hold that can exist
-    without a limit at all (see `enforce_no_limit_no_hold`). Hiding it would leave a speed he
+    without a limit at all (see `enforce_hold_policy`). Hiding it would leave a speed he
     deliberately pinned to a place governing the car with nothing on screen saying so, and the tap
     target that removes it unreachable.
 

@@ -330,6 +330,11 @@ class IntelligentCruiseButtonManagement:
     self.press_suppressed = False    # the press happened while a curve/lead owned the target
     self.baseline_diverged = False   # has the baseline ever actually differed from SLA?
     self.speed_limit_known = False   # did the resolver have a posted limit this frame?
+    # BluePilot: is Speed Limit Assist in ASSIST mode -- actually allowed to move the set speed --
+    # as opposed to off, informational or warning? This is `SpeedLimitMode == Mode.assist`, which
+    # SLA publishes as `assist.enabled`. It is the discriminator for whether a hold may exist at
+    # all; see `enforce_hold_policy`.
+    self.sla_assist_enabled = False
     # BluePilot: which mechanism last captured the hold. Logged, no longer shown on screen -- the
     # badge tag that used to display it existed to settle whether the press path was dead, and it
     # is not (see RESUME_BUTTONS above). Kept because it is the only way to tell the two capture
@@ -371,7 +376,7 @@ class IntelligentCruiseButtonManagement:
     self.gap_control_enabled = False
     self.gap_target = 0
 
-    # BluePilot: the speed enforce_no_limit_no_hold most recently took away. It WAS a deliberate
+    # BluePilot: the speed enforce_hold_policy most recently took away. It WAS a deliberate
     # hold a frame earlier -- captured by a real press -- so it is exactly the number pinned holds
     # should learn from and offer to pin. Without it, clearing the baseline on no-limit roads also
     # silently killed both halves of pinned holds on precisely the roads they exist for.
@@ -439,6 +444,13 @@ class IntelligentCruiseButtonManagement:
       self.speed_limit_known = bool(resolver.speedLimitValid or resolver.speedLimitLastValid)
     except (AttributeError, KeyError):
       self.speed_limit_known = False
+    # Read SEPARATELY from the resolver above, and defaulting False. `assist.enabled` is SLA's own
+    # copy of `SpeedLimitMode == assist`, so it answers "may a hold exist" without this file having
+    # to read a param every frame or learn SLA's enum.
+    try:
+      self.sla_assist_enabled = bool(LP_SP.speedLimit.assist.enabled)
+    except (AttributeError, KeyError):
+      self.sla_assist_enabled = False
     # Is there a mapped corner ahead with a deadline on it? NOT "is SCC-Map the source this frame",
     # which is a different and much less stable question: when the map and vision targets are close
     # the plan source alternates between them frame by frame. Measured on the 2026-08-07 exit, the
@@ -1298,36 +1310,49 @@ class IntelligentCruiseButtonManagement:
     self.v_cluster_at_press = self.v_cruise_cluster
     return True
 
-  def enforce_no_limit_no_hold(self) -> None:
-    """BluePilot: WITHOUT A POSTED LIMIT THERE IS NO HOLD. The max speed is the whole interface.
+  def enforce_hold_policy(self) -> None:
+    """BluePilot: A HOLD EXISTS ONLY WHEN SPEED LIMIT ASSIST IS IN ASSIST MODE.
 
-    Asked for directly on 2026-08-15: *"I want the +/- to just affect the max speed like normal,
-    like when ICBM is off entirely, not affect the little number above the max speed"*, and
-    *"there's no point in having the max speed be stuck where I hit set when there is no SLA"*.
+    RESTATED 2026-08-19 and the discriminator MOVED, because the first version keyed on the wrong
+    thing. His spec, in his words:
 
-    A hold only ever meant one thing: "for this posted limit, I want a different number". With no
-    limit there is nothing to want a different number THAN. The baseline then equals the max speed
-    by construction -- `v_baseline = v_cruise_cluster` at every capture site -- so it is a second
-    name for a value the driver can already see and already controls, and inventing it costs him a
-    concept to learn for no behaviour he did not already have.
+      *"have it do max speed when SLA is off or on at an informational level, and do max speed and
+      hold to be together and the same when SLA is on assist mode"*
 
-    Measured on route 00000379 (SLA had a limit in 1.7% of plan frames): a hold was held for 36.5%
-    of the drive, `overrideState` read manual, and `baselineSource` read fallbackIdle -- the path
-    that infers a press from set-speed movement. He pressed SET five times and nothing else. Almost
-    every one of those holds was inferred, not chosen.
+    The 2026-08-15 version keyed on WHETHER A POSTED LIMIT WAS KNOWN THIS FRAME. That was a
+    misreading of the original request, which said *"there's no point in having the max speed be
+    stuck where I hit set when there is no SLA"* -- "no SLA" meaning the FEATURE is not assisting,
+    not "the map went quiet for a mile". Those two come apart exactly where he kept seeing it: on a
+    road with coverage gaps, in assist mode, the hold was being destroyed and rebuilt at every gap.
+    Reported 2026-08-19: *"it's still affecting the little ICBM speed above, which seems to
+    eventually reset back to the speed I pressed the set button at, which is dumb."*
+
+    So:
+
+      SLA off / information / warning   NO HOLD, ever. `+/-` moves the MAX and nothing else, exactly
+                                        as it behaves with ICBM switched off. There is no second
+                                        number to learn and nothing to reset to.
+      SLA assist                        The hold lives, whether or not a limit is known right now.
+                                        It equals the max speed by construction -- `v_baseline =
+                                        v_cruise_cluster` at every capture site -- so "together and
+                                        the same" is what the existing capture already produces.
+
+    Keeping the hold alive through a coverage gap is the whole point: it is what lets a place with
+    no posted limit be PINNED and remembered, which he has called the common case. Under the old
+    rule the baseline was zeroed the moment the map went quiet, so the pin had nothing to observe
+    on precisely the roads pins are for.
 
     With no baseline, `apply_baseline` is the identity, ICBM aims at the planner's cruise target,
     and the max speed behaves exactly as it does with ICBM switched off -- while curves, leads and
     the hazard path all keep working, because none of them ever depended on a baseline existing.
 
-    PINNED HOLDS SURVIVE. A pin is an explicit gesture at an explicit place, so it is the one hold
-    that means something without a limit -- and it is the reason this is not simply a guard at the
-    three capture sites: `apply_pinned_hold` runs inside `update_manual_override` too, and a blanket
-    rule there would silently delete the feature.
+    PINNED HOLDS SURVIVE either way. A pin is an explicit gesture at an explicit place, and it is
+    the reason this is not simply a guard at the three capture sites: `apply_pinned_hold` runs
+    inside `update_manual_override` too, and a blanket rule there would silently delete the feature.
     """
     if not self.cruise_enabled:
       self.no_limit_hold_speed = 0
-    if self.speed_limit_known:
+    if self.sla_assist_enabled:
       # CLEAR IT, do not just decline to update it. A limit means v_baseline survives on its own, so
       # a remembered no-limit hold has no job here -- and leaving it set makes `_pinnable_speed()`
       # unable to return 0 for the rest of the drive, which wedges `_last_observed_hold` at a value
@@ -1442,7 +1467,7 @@ class IntelligentCruiseButtonManagement:
       self.cruise_cycle_frames = 0
 
     self.update_manual_override(CS)
-    self.enforce_no_limit_no_hold()
+    self.enforce_hold_policy()
 
     # BluePilot: the state machine runs unconditionally. A baseline changes WHAT ICBM aims for,
     # not WHETHER it aims -- see apply_baseline. The previous design forced State.inactive here,

@@ -131,7 +131,7 @@ def test_missing_speed_limit_data_hides_the_badge_rather_than_raising():
 class TestAPinCanStillBeCreatedWhereThereIsNoLimit:
   """THE BADGE IS THE ONLY TAP TARGET FOR PINNING, so hiding it removes the gesture entirely.
 
-  `enforce_no_limit_no_hold` (2026-08-15) drops the baseline on a road with no posted limit. That
+  `enforce_hold_policy` (2026-08-15) drops the baseline on a road with no posted limit. That
   is what he asked for. But `_hold_rect` -- the rectangle a tap is tested against -- is set where
   the badge is DRAWN and cleared to None everywhere else, so no hold meant no badge meant no way to
   create a pin at all. On exactly the roads he says pins are for: *"we do still want pinned holds

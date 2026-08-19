@@ -563,7 +563,7 @@ class SelfdriveD(CruiseHelper):
   def _pinnable_speed(self) -> int:
     """BluePilot: the hold to learn from and to pin, INCLUDING the one the no-limit rule removed.
 
-    `enforce_no_limit_no_hold` drops the baseline on a road with no posted limit, which is what the
+    `enforce_hold_policy` drops the baseline on a road with no posted limit, which is what the
     owner asked for -- the max speed is the whole interface there. But pinned holds keyed on
     `v_baseline` for both halves of their machinery, so that change silently killed observing AND
     pinning on exactly the roads he says pins are for: *"we do still want pinned holds since those
