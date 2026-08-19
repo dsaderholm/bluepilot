@@ -105,3 +105,22 @@ def test_the_inert_passthrough_is_announced_and_only_once():
   assert "EventNameSP = custom.OnroadEventSP.EventName" in SRC, (
     "EventNameSP is undefined in this module -- raising the alert is a NameError in the control "
     "loop, which takes selfdrived down")
+
+
+def test_controllerstatebp_is_ignored_so_its_absence_cannot_disengage():
+  """A DIAGNOSTIC SUBSCRIPTION MUST NOT BE ABLE TO TAKE OPENPILOT OUT.
+
+  `controllerStateBP` is subscribed only to read `accAuthority` for the inert alert, but it is
+  published solely by `bp_card_publisher` when the Ford BluePilot carcontroller sets
+  `lateralUncertainty`. Where that is absent the service never arrives, `sm.all_alive()` is False,
+  and selfdrived adds `EventName.commIssue` -- a DISENGAGING event. openpilot would be unusable on
+  somebody else's car because of an alert added for diagnostics, and his friend runs this same
+  branch for ICBM alone.
+
+  `ignore_alive` still populates `sm.alive[...]`, so the alert keeps working; only the aggregate
+  check is relaxed. Caught in review the same night it was written."""
+  i = SRC.index("ignore = ")
+  block = SRC[i:SRC.index("self.sm = messaging.SubMaster(", i)]
+  assert "'controllerStateBP'" in block, (
+    "controllerStateBP is subscribed but not ignored, so a car that does not publish it raises "
+    "commIssue every frame and openpilot disengages -- for a diagnostic")
