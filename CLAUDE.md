@@ -1951,6 +1951,26 @@ distanceFromWayCenter. Then v1 comes out and gives back what the overlap costs.
   A green run says nothing whatsoever about a file it never read. The same holds for anything else
   requiring compiled extensions.
 
+### THE FAN IS NOT A FAULT. MEASURED, TWICE, AND CLOSED.
+
+*"I still feel like my fans are running pretty hard."* Route 00000393, 2026-08-19:
+
+    peak 95 C at t+546   fan 100%   cpu 45-66%   mem 76-78%
+    sustained 86-91 C for most of a 26-minute drive
+    thermalStatus:  ok on ALL 3,084 frames.  Zero thermal or resource events.
+
+**Nothing throttled and nothing degraded.** `procLog` puts the CPU where it always is -- locationd,
+card, ui, loggerd, controlsd, modeld -- with `mapd_v2` NINTH at 76 MB peak. v1 is confirmed gone
+(`ps` shows only `mapd_v2` and its manager), so the two-daemon fix took and stayed taken.
+
+So the honest answer is that the fan is loud because it is WORKING, in a car in Utah in August, and
+there is nothing to fix. Recorded so the next session does not spend an evening hunting a runaway
+process that three separate measurements now say is not there.
+
+**And the earlier `intakeTempC` idea was worthless** -- it reads 0.0 on this hardware, so the
+"ambient proxy" added to `bp_drive_checkup` that morning proves nothing. The temperature TRACE over
+the drive, beside cpu and mem, is what actually answers the question; a single peak never could.
+
 ### LOW-SPEED CURVES: VISION IS STRUCTURALLY UNABLE TO HELP, AND THE MAP RARELY GETS A CHANCE
 
 *"Low speed curves, it isn't slowing down enough."* Attributed on route 00000393, 2026-08-19,
