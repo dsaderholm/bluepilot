@@ -71,11 +71,14 @@ def make_lp(target, lead_state=UnconfirmedLeadState.inactive, lead_target=0.0,
   limit were ever known -- the rarer case, silently, everywhere. Holding a fixture constant at the
   wrong value is how the model-stop path passed its tests for weeks while doing nothing on the car.
 
-  sla_assist defaults TRUE for the SAME REASON, and it is the third time this fixture has been
-  found a field short. `assist.enabled` is `SpeedLimitMode == assist`, which is what his car runs
-  and what every hold test in this file assumes -- a hold cannot exist in any other mode (see
-  `enforce_hold_policy`). Absent, it read False and every one of these tests silently became "SLA is
-  switched off", which is not the scenario any of them were written for.
+  sla_assist still populates `assist.enabled` so the fixture matches the real message, BUT THE
+  CONTROLLER NO LONGER READS IT -- see `IntelligentCruiseButtonManagement.sla_assist_enabled`. That
+  field is SLA's state machine (`state in ENABLED_STATES`), not its mode, and it goes False on the
+  very press that creates a hold. The mode now comes from the `SpeedLimitMode` param, so tests set
+  `icbm.sla_assist_enabled` directly; `fresh()` defaults it True.
+
+  The kwarg is kept rather than deleted precisely because it is a trap: a future reader reaching for
+  `assist.enabled` to mean "assist mode" needs to find this note, not an absent field.
   """
   # smartCruiseControl was ABSENT here entirely, so the controller's try/except fired on every frame
   # of every test in this file and the whole curve-ceiling path was unreachable -- a fixture thinner
@@ -102,6 +105,11 @@ def fresh(max_rise=0, max_drop=0):
   for k in icbm.cruise_button_timers:
     icbm.cruise_button_timers[k] = 0
   icbm.update_params = lambda: None
+  # `update_params` is stubbed above, so the SpeedLimitMode read never runs and the mode has to be
+  # set here. TRUE because that is the car these tests describe -- a hold cannot exist in any other
+  # mode, so defaulting False would silently turn every hold test in this file into "SLA switched
+  # off", which is not the scenario any of them were written for.
+  icbm.sla_assist_enabled = True
   icbm.max_target_rise, icbm.max_target_drop = max_rise, max_drop
   icbm.baseline_reset_delta = DEFAULT_BASELINE_RESET_DELTA
   for _ in range(5):
@@ -1463,6 +1471,7 @@ class TestAHoldExistsOnlyInAssistMode:
   def _press(self, to=DRIVER, limit_known=False, sla_assist=True):
     """Hold + from LIMIT up to `to`, under a chosen SLA mode and limit availability."""
     icbm = fresh()
+    icbm.sla_assist_enabled = sla_assist
 
     def lp():
       return make_lp(LIMIT, limit_known=limit_known, sla_assist=sla_assist)
@@ -1510,6 +1519,7 @@ class TestAHoldExistsOnlyInAssistMode:
     """He can change the mode at any time, and the hold must not outlive the mode that justified it."""
     icbm = self._press(limit_known=True, sla_assist=True)
     assert icbm.v_baseline == DRIVER, "no hold was created in assist mode"
+    icbm.sla_assist_enabled = False
     for _ in range(5):
       icbm.run(make_cs(DRIVER), CC, make_lp(LIMIT, sla_assist=False), False)
     assert icbm.v_baseline == 0, "the hold outlived assist mode"
@@ -1522,6 +1532,7 @@ class TestAHoldExistsOnlyInAssistMode:
     once succeeded in creating a pin.
     """
     icbm = self._press(limit_known=True, sla_assist=True)
+    icbm.sla_assist_enabled = False
     for _ in range(5):
       icbm.run(make_cs(DRIVER), CC, make_lp(LIMIT, sla_assist=False), False)
     assert icbm.v_baseline == 0
@@ -1531,12 +1542,47 @@ class TestAHoldExistsOnlyInAssistMode:
     """Stale once the real baseline can live again, and leaving it set wedges `_pinnable_speed()`
     at a number from a different road for the rest of the drive."""
     icbm = self._press(limit_known=True, sla_assist=True)
+    icbm.sla_assist_enabled = False
     for _ in range(5):
       icbm.run(make_cs(DRIVER), CC, make_lp(LIMIT, sla_assist=False), False)
     assert icbm.no_limit_hold_speed == DRIVER
+    icbm.sla_assist_enabled = True
     for _ in range(5):
       icbm.run(make_cs(LIMIT), CC, make_lp(LIMIT, sla_assist=True), False)
     assert icbm.no_limit_hold_speed == 0, "a stale remembered hold survived assist mode returning"
+
+  def test_slas_own_enabled_flag_going_false_does_not_touch_the_hold(self):
+    """THE 2026-08-20 BUG, pinned so it cannot come back.
+
+    `enforce_hold_policy` briefly keyed on `LP_SP.speedLimit.assist.enabled`, on the stated belief
+    that it was SLA's copy of `SpeedLimitMode == assist`. It is not: `longitudinal_planner.py`
+    publishes `assist.enabled = sla.is_enabled`, which is `state in ENABLED_STATES` -- and
+    `ENABLED_STATES` excludes `inactive`.
+
+    SLA's state machine moves ACTIVE -> INACTIVE on `v_cruise_cluster_changed`, which is a manual
+    `+/-` press. So the press captured the hold and, in the same frame, made this flag False; the
+    policy read "not assist mode" and deleted the hold it had just created. Self-cancelling: no
+    hold could survive the gesture that makes one.
+
+    Measured on his device -- route 0000039a, before the flag existed: 7,473 frames of
+    `vBaseline > 0`, every one source `press`. Route 0000039c, after: ZERO, across the whole drive.
+    Reported as *"when I changed the speed with plus and minus it changed the ICBM speed and didn't
+    do a hold"*.
+
+    So this drives the message field to False -- SLA saying "I am not currently assisting" -- while
+    the MODE stays assist, and requires the hold to be untouched. It fails against the old code.
+    """
+    icbm = fresh()
+    icbm.sla_assist_enabled = True
+    set_baseline(icbm)
+    assert icbm.v_baseline == DRIVER, "the press never made a hold; fixture is wrong, not the rule"
+
+    for _ in range(20):
+      icbm.run(make_cs(DRIVER), CC, make_lp(LIMIT, sla_assist=False), False)
+
+    assert icbm.v_baseline == DRIVER,       "SLA reporting itself inactive destroyed the hold -- the mode is the discriminator, not the state"
+    assert icbm.override_state == OverrideState.manual
+    assert icbm.no_limit_hold_speed == 0, "the hold was quietly filed away as if the mode had changed"
 
   def test_a_hold_is_not_deleted_on_its_first_frame(self):
     """The rule runs every frame straight after capture, so an off-by-one here deletes every hold

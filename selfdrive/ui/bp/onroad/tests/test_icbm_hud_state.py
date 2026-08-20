@@ -97,16 +97,25 @@ class _SM2:
     raise KeyError(k)
 
 
-def test_the_badge_is_hidden_when_speed_limit_assist_has_no_limit():
-  """Without SLA the hold IS the MAX speed -- drawing it twice invents a second concept.
+def test_a_hold_with_no_posted_limit_is_still_drawn():
+  """REVERSED 2026-08-20. This asserted the opposite until the rule it tested expired.
 
-  The controller sets v_baseline = v_cruise_cluster on a press and falls back to v_cruise_cluster
-  with no hold, so ICBM aims at the driver's own number either way. An owner running without SLA
-  reported exactly this confusion: two numbers on screen and no idea which was his.
+  The old rule hid a hold whenever SLA had no number, on the reasoning that the hold IS the MAX
+  speed so a second readout invents a concept. That was true while a hold could not exist without a
+  limit. `enforce_hold_policy` was rekeyed on 2026-08-19 to "is SLA in assist mode", specifically so
+  a hold would survive a coverage gap -- and from that moment this rule was hiding real holds on the
+  roads the policy change existed to serve.
+
+  He reported it from the seat: *"when I do plus and minus, when SLA doesn't have a number, it
+  should change my max speed and set up a hold at the same time."* The hold was being set up. It
+  drew nothing, which is indistinguishable from it not existing.
+
+  The two-numbers confusion is answered by the MODE now: with SLA off, informational or warning the
+  controller clears the baseline outright, so `has_hold` is False and no badge is drawn at all.
   """
   s = read_icbm_hud_state(_SM2(_Icbm(baseline=72.0), _SL(False, 0.0)))
-  assert s.has_hold, "the hold still exists and still governs the car"
-  assert not s.worth_showing, "but there is nothing to show that MAX does not already say"
+  assert s.has_hold, "the hold exists and governs the car"
+  assert s.worth_showing, "a hold governing the car must say so on screen"
 
 
 def test_the_badge_appears_once_a_real_limit_exists():
@@ -114,18 +123,24 @@ def test_the_badge_appears_once_a_real_limit_exists():
   assert s.worth_showing
 
 
-def test_a_valid_flag_with_no_limit_is_not_a_limit():
-  """SLA stays active on a road with no data -- a documented trap in this fork."""
-  assert not read_icbm_hud_state(_SM2(_Icbm(baseline=72.0), _SL(True, 0.0))).worth_showing
+def test_a_valid_flag_with_no_limit_still_draws_the_hold():
+  """SLA stays active on a road with no data -- a documented trap in this fork.
+
+  It no longer changes the badge either way (see above), but the input is kept as a test because it
+  is the shape that used to decide visibility, and a future rule keying on it again should fail here.
+  """
+  assert read_icbm_hud_state(_SM2(_Icbm(baseline=72.0), _SL(True, 0.0))).worth_showing
 
 
 def test_no_hold_is_never_worth_showing_however_valid_the_limit():
   assert not read_icbm_hud_state(_SM2(_Icbm(baseline=0.0), _SL(True, 24.6))).worth_showing
 
 
-def test_missing_speed_limit_data_hides_the_badge_rather_than_raising():
+def test_missing_speed_limit_data_does_not_raise():
+  """The point of this one was always that a HUD must not raise; the visibility half moved."""
   s = read_icbm_hud_state(_SM2(_Icbm(baseline=72.0), None))
-  assert s.has_hold and not s.worth_showing
+  assert s.has_hold and s.worth_showing
+  assert not s.sla_has_limit, "absent SLA data must still read as no limit"
 
 
 class TestAPinCanStillBeCreatedWhereThereIsNoLimit:
@@ -161,22 +176,23 @@ class TestAPinCanStillBeCreatedWhereThereIsNoLimit:
     assert not s.worth_showing
 
 
-def test_a_pin_suggestion_does_not_re_expose_a_hold_the_no_limit_rule_hides():
-  """The two badge exceptions answer different questions, and OR-ing them flat conflated them.
+def test_a_hold_outranks_a_suggestion_on_the_badge():
+  """The `and not has_hold` guard on the suggestion term is gone with the rule that needed it.
 
-  `sla_has_limit` exists to stop a badge drawing the same number as MAX on a road with no posted
-  limit. The suggestion exception is for the case where there is NO hold and the badge is the only
-  tap target for creating a pin. Without `and not has_hold`, a hold on a no-limit road became
-  visible purely because the car happened to be somewhere pinnable.
+  It existed only to stop a standing suggestion re-exposing a hold `sla_has_limit` was hiding.
+  Nothing is hidden now, so there is no leak to plug -- but the badge must still read the HOLD when
+  both exist, or a tap target would offer to pin a number the car is not holding.
   """
-  hidden = IcbmHudState(baseline=70, sla_has_limit=False, pinned=False, pin_suggested=False)
-  assert not hidden.worth_showing
+  held = IcbmHudState(baseline=70, sla_has_limit=False, pinned=False, pin_suggested=False)
+  assert held.worth_showing
+  assert held.display_value == 70
 
-  still_hidden = IcbmHudState(baseline=70, sla_has_limit=False, pinned=False,
-                              pin_suggested=True, pin_suggestion=65)
-  assert not still_hidden.worth_showing, "a suggestion re-exposed a hold the rule deliberately hides"
+  both = IcbmHudState(baseline=70, sla_has_limit=False, pinned=False,
+                      pin_suggested=True, pin_suggestion=65)
+  assert both.worth_showing
+  assert both.display_value == 70, "the suggestion overwrote the hold the car is actually holding"
 
-  # The case the exception is actually for: a suggestion with no hold behind it.
+  # The case the suggestion exception is actually for: an offer with no hold behind it.
   offered = IcbmHudState(baseline=0, sla_has_limit=False, pin_suggested=True, pin_suggestion=65)
   assert offered.worth_showing
   assert offered.display_value == 65
