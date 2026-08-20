@@ -359,3 +359,55 @@ class TestFollowingALaneChange:
     a.update(0.05, HALF + 2 * LANE_WIDTH_M, 0.2, 5, True, 0.9, 0.9)   # lane 2, lines allow 1..3
     assert a.index == 2
     assert a.update(0.05, None, 9.9, 5, True, 0.02, 0.9) == 4         # no line LEFT -> leftmost
+
+
+class TestTwoWayClearsEverything:
+  """Found on route 00000397, a surface-street drive, 2026-08-19.
+
+  The two-way gate returns EARLY. Anything not cleared before it survives onto a road it does not
+  describe, and the diagnostics did exactly that -- `edge_index` and `contradiction` held values
+  from the last one-way stretch for thousands of frames, so the replay reported 7,571 frames where
+  "both witnesses spoke" on roads where neither had.
+  """
+
+  def _one_way_reading_then_two_way(self, **kw):
+    a = LaneAnchor()
+    a.update(0.05, HALF, 0.2, 3, True, 0.9, 0.9)     # a real reading on a one-way road
+    a.update(0.05, HALF, 0.2, 3, False, 0.9, 0.9)    # ...then the road goes two-way
+    return a
+
+  def test_the_edge_reading_does_not_survive_onto_a_two_way_road(self):
+    a = self._one_way_reading_then_two_way()
+    assert a.edge_index is None
+
+  def test_the_contradiction_flag_does_not_survive_either(self):
+    a = LaneAnchor()
+    a.update(0.05, HALF, 0.2, 3, True, 0.9, 0.9)
+    assert a.contradiction is True, "set up the flag first, or this test proves nothing"
+    a.update(0.05, HALF, 0.2, 3, False, 0.9, 0.9)
+    assert a.contradiction is False
+
+  def test_a_bound_does_not_survive_onto_a_two_way_road(self):
+    """`lanes` counts BOTH directions on a two-way road, so a bound off it describes a road that
+    includes oncoming traffic. It must not exist there.
+
+    THE SET-UP IS THE TEST. A fresh anchor has no bound, so starting from one proves nothing
+    whatever the code does -- the first version of this passed against the bug it was written for.
+    Establish a real bound on a one-way frame FIRST, then cross onto the two-way road.
+    """
+    a = LaneAnchor()
+    a.update(0.05, None, 9.9, 3, True, 0.9, 0.9)
+    assert a.line_bounds == (1, 1), "set up a real bound, or the assertion below is vacuous"
+    a.update(0.05, None, 9.9, 3, False, 0.9, 0.9)
+    assert a.line_bounds is None
+
+  def test_a_two_way_road_can_never_report_leftmost(self):
+    """The one that would matter. Leftmost drives the slow-pass warning."""
+    a = LaneAnchor()
+    a.update(0.05, None, 9.9, 4, False, 0.02, 0.9)   # no left line, but two-way
+    assert a.in_leftmost_lane() is False
+
+  def test_the_index_is_gone_too(self):
+    a = self._one_way_reading_then_two_way()
+    assert a.index is None
+    assert a.lanes_total is None

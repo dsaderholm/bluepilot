@@ -191,6 +191,8 @@ class LaneAnchor:
     self.age_s = 0.0
     self.confident = False
     self.dead_reckoned = False
+    self.edge_index = None
+    self.contradiction = False
     self.reason = reason
 
   def note_lane_change(self, rightward=None):
@@ -246,14 +248,30 @@ class LaneAnchor:
       except (TypeError, ValueError):
         self.no_lane_left = False
 
-    # FOUR-LINE BOUND. Independent of the edge and available every frame, and unlike the single
-    # outer-left witness it speaks in the middle lanes. Only an EXACT bound (lo == hi) becomes an
-    # index; a range is kept for to_our_left, which does not need the precise lane.
-    self.line_bounds = lane_bounds_from_lines(far_left_line_prob, far_right_line_prob, lanes_total)
+    # EVERY per-frame field is cleared BEFORE the two-way gate, because that gate returns early and
+    # anything left set survives into a road it does not describe. Found 2026-08-19 on route
+    # 00000397, a surface-street drive: `edge_index` and `contradiction` kept their values from the
+    # last one-way stretch for thousands of frames, which put 7,571 frames into the replay's
+    # "both witnesses spoke" count on roads where neither had. The diagnostic then read 12%
+    # disagreement against 78% on freeway and looked like a real change in the world.
+    self.line_bounds = None
+    self.edge_index = None
+    self.contradiction = False
 
     if not one_way:
       self.invalidate("not one-way")
       return None
+
+    # FOUR-LINE BOUND. Independent of the edge and available every frame, and unlike the single
+    # outer-left witness it speaks in the middle lanes. Only an EXACT bound (lo == hi) becomes an
+    # index; a range is kept for to_our_left, which does not need the precise lane.
+    #
+    # Computed AFTER the one-way gate on purpose. On a two-way road the map's `lanes` counts BOTH
+    # directions, so a bound derived from it describes a road that includes oncoming traffic. It
+    # was previously computed above the gate, which was harmless only because `lanes_total` is
+    # None by then and `in_leftmost_lane` checks it -- one guard away from claiming the leftmost
+    # lane of a two-way road.
+    self.line_bounds = lane_bounds_from_lines(far_left_line_prob, far_right_line_prob, lanes_total)
 
     # A LATCH THAT THE LINES NOW CONTRADICT IS STALE. Carried indices go wrong in exactly two ways
     # -- an unobserved lane change, and a lane change we followed in the wrong direction -- and
