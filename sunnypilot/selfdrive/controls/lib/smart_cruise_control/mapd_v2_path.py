@@ -121,7 +121,7 @@ def path_from_mapd(sm) -> tuple[Coordinate, list[dict]] | None:
   # THE VALUE ITSELF, and why it moved, is at `_CORNER_LAT_ACC` -- kept in one place so a tuning
   # change cannot leave a stale argument for the old number sitting next to the code that uses it.
   # `SmartCruiseControlMapFactor` still trims on top and is still his: at his current 90 the
-  # effective figure is 2.5 * 0.81 = 2.03 m/s^2, comfortably under the measured ceiling.
+  # effective figure is 2.4 * 0.81 = 1.94 m/s^2, under the 2.5 collapse point.
   # AND THE CURVATURE IS OURS TOO NOW, computed from the path's own COORDINATES.
   #
   # mapd smooths curvature over a window long enough to average a bend away -- on his I-80 corner it

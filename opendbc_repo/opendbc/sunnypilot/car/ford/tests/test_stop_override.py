@@ -24,6 +24,7 @@ from opendbc.sunnypilot.car.ford.stop_override import (
   MAX_ACTIVE_S,
   MAX_HOLD_S,
   MPH_TO_MS,
+  NO_ASK_RELEASE_FRAMES,
   OVERRIDE_HZ,
   FordStopOverride,
 )
@@ -111,7 +112,10 @@ def test_the_model_dropping_the_request_is_what_re_arms_it():
   for _ in range(MAX_ACTIVE_FRAMES + 2):
     _stopping(o)
   assert _stopping(o) is False
-  _stopping(o, has_slow_down=False)          # the reason went away
+  # DEBOUNCED: one frame of has_slow_down False is a dropped `longitudinalPlanSP`, not a change of
+  # mind, and acting on it would drop the brake at a light and reset the once-per-approach latch.
+  for _ in range(NO_ASK_RELEASE_FRAMES + 1):
+    _stopping(o, has_slow_down=False)      # the reason went away, and stayed away
   assert _stopping(o) is True, "a genuinely new stop was refused"
 
 
@@ -257,8 +261,9 @@ def test_only_a_stop_WE_are_holding_latches_the_resume_gate():
   # A SECOND stop the override has nothing to do with: a lead close enough that Ford owns it, so it
   # never arms. `last_result` is still the string from the first stop, which is exactly why the gate
   # must not read that.
-  so.update(long_active=True, v_ego=30.0 * MPH_TO_MS, has_slow_down=False,
-            op_stopping=False, lead_distance=0.0, stop_endpoint_m=NEAR)
+  for _ in range(NO_ASK_RELEASE_FRAMES + 1):
+    so.update(long_active=True, v_ego=30.0 * MPH_TO_MS, has_slow_down=False,
+              op_stopping=False, lead_distance=0.0, stop_endpoint_m=NEAR)
   assert so.holding is False, "the reason going away must release the hold"
   for v_mph in (20.0, 10.0, 4.0, 0.3):
     override = so.update(long_active=True, v_ego=v_mph * MPH_TO_MS, has_slow_down=True,
@@ -411,11 +416,21 @@ class TestTheEndpointArmsItNotShouldStop:
     assert fast_ok is True, "19 mph with a 25 m stop should be arming"
     assert slow_no is False, "6 mph with a 25 m stop is far too early"
 
-  def test_a_floor_keeps_the_last_few_mph_reachable(self):
-    """Below about 8 mph the computed range is a couple of metres, which is too tight for a takeover
-    to accomplish anything. The floor is what keeps the end of the stop reachable."""
+  def test_a_crawl_with_nothing_ahead_does_not_arm(self):
+    """THE FLOOR IS GONE, and this is why. `STOP_MIN_RANGE_M = 10.0` was added so the last few mph
+    stayed reachable. It did the opposite: the model's trajectory horizon is roughly 10*v, so below
+    about 2.2 mph the horizon is ITSELF under 10 m and the gate armed with NOTHING AHEAD -- a
+    spurious brake-to-a-stop at walking pace, in traffic. The arithmetic needs no floor: at low
+    speed the remaining stopping distance is short too."""
     o = FordStopOverride()
-    assert _stopping(o, v=4 * 0.44704, endpoint=8.0) is True
+    # 1.5 mph, free-flow: the model's horizon is ~6.7 m and there is no stop at all.
+    assert _stopping(o, v=1.5 * 0.44704, endpoint=6.7) is False,       "armed at a crawl with an empty road ahead"
+
+  def test_the_last_few_mph_of_a_REAL_stop_still_arm(self):
+    """Removing the floor must not cost the end of a genuine stop -- the endpoint is much closer
+    than the free-flow horizon there, which is the whole distinction."""
+    o = FordStopOverride()
+    assert _stopping(o, v=4 * 0.44704, endpoint=1.0) is True
 
   def test_every_other_gate_still_refuses(self):
     """The trigger got cheaper, so the gates that make it SAFE must be untouched -- speed ceiling,
@@ -424,3 +439,64 @@ class TestTheEndpointArmsItNotShouldStop:
     assert _stopping(FordStopOverride(), lead=25.0) is False, "a lead is Ford's stop-and-go"
     assert _stopping(FordStopOverride(), long_active=False) is False
     assert _stopping(FordStopOverride(), has_slow_down=False) is False
+
+
+def test_it_survives_a_WHOLE_approach_with_the_plan_never_committing():
+  """THE REGRESSION TEST FOR THE BUG THE REVIEW FOUND, and the reason no test caught it.
+
+  `op_stopping` was removed from ARMING and left as the per-frame SUSTAIN gate, so the override
+  armed on frame 1 and `_end`ed on frame 2 with `spent = True` -- dead for the rest of the approach,
+  exactly as dead as before the fix, with the circularity moved sixty lines down instead of removed.
+
+  Every existing fixture hid it: `_stopping` defaults `op_stopping=True`, `_drive_to_a_stop`
+  hardcodes it True, and the one test that passed False called `update` ONCE and asserted the return
+  value. A single-frame assertion cannot see a state machine that dies on frame two.
+
+  So this drives a whole approach with `op_stopping` False throughout -- which is what a real
+  approach looks like, since `shouldStop` is a stopped-car state.
+  """
+  o = FordStopOverride()
+  v = 20.0 * MPH_TO_MS
+  took = 0
+  for _ in range(800):
+    endpoint = max(0.0, (v * v) / (2 * 1.2))          # a 1.2 m/s^2 model stop, always ahead
+    if o.update(long_active=True, v_ego=v, has_slow_down=True, op_stopping=False,
+                lead_distance=0.0, stop_endpoint_m=endpoint):
+      took += 1
+      v = max(0.0, v - 1.2 / OVERRIDE_HZ)             # it is braking, so the car slows
+    if v <= 0.05:
+      break
+  assert took > OVERRIDE_HZ, f"the override held the car for only {took / OVERRIDE_HZ:.2f}s"
+  assert o.holding is True, "it never reached the standstill it was braking toward"
+
+
+def test_a_NaN_endpoint_fails_closed():
+  """`stop_endpoint_m <= 0.0` does NOT catch NaN -- every comparison against NaN is False, so it
+  fell through both the zero test and the range test straight into arming, which is the exact
+  opposite of the "FAILS CLOSED" comment above it. The publisher's isfinite guard is in a different
+  repo, so this file cannot lean on it."""
+  assert _stopping(FordStopOverride(), endpoint=float("nan")) is False
+
+
+def test_a_lead_arriving_mid_hold_hands_back_to_ford():
+  """The standstill branch used to return before `lead_close` was evaluated, so this was
+  unreachable -- and the module docstring's "a lead appeared. Hand back." was false at a standstill.
+  Ford's stop-and-go holds behind a car better than we do; that is why a lead disqualifies the
+  override at all."""
+  o = FordStopOverride()
+  _drive_to_a_stop(o)
+  assert o.holding is True
+  assert _stopping(o, v=0.0, lead=20.0) is False
+  assert o.holding is False
+
+
+def test_the_corner_target_stays_under_the_measured_collapse():
+  """A GUARD, not a mirror. The mapd tests import `_CORNER_LAT_ACC` and assert against it, which
+  makes them track any value rather than bound it -- setting it to 9.9 leaves them all green. The
+  collapse point is measured: tracking shortfall is flat to 2.5 m/s^2 and jumps to 0.909 above it,
+  so the constant may never reach that without new measurement saying otherwise."""
+  from openpilot.sunnypilot.selfdrive.controls.lib.smart_cruise_control.mapd_v2_path import (
+    _CORNER_LAT_ACC,
+  )
+  assert 1.0 < _CORNER_LAT_ACC <= 2.5, \
+    f"{_CORNER_LAT_ACC} m/s2 is at or past the measured tracking collapse"

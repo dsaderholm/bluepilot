@@ -54,7 +54,8 @@ road: a stop sign, a red light, a stop line the radar has no target for.
 
 WHAT ENDS IT, in order of how likely each is
 --------------------------------------------
-  - the car is stopped. Done, hand back.
+  - the car is stopped -- NO LONGER. It HOLDS; Ford will not hold a stop without a lead. See the
+    creep note in `update`.
   - the reason went away -- the model stopped planning a stop, or a lead appeared. Hand back.
   - `MAX_ACTIVE_FRAMES`. The bound above.
   - openpilot longitudinal went inactive. Nothing may be authored at all then.
@@ -99,8 +100,9 @@ MPH_TO_MS = CV.MPH_TO_MS
 # that failure for about 0.4 s of extra bound-time; see bp_stop_override.py's question 1 first.
 ENTER_SPEED = 20.0 * MPH_TO_MS
 
-# Stopped. Ford's own AccStopStat handling takes it from here, and holding a brake command against a
-# stationary car is exactly how the park brake got involved on drive A.
+# Stopped. NOT a hand-back any more -- see the creep note in `update`: Ford does not hold a stop
+# without a lead, so handing back here is what made the car roll. `create_acc_msg` never sets
+# `AccBrkPrkEl_B_Rq`, so holding cannot reproduce drive A's park brake.
 STOPPED_SPEED = 0.5 * MPH_TO_MS
 
 # THE TIME BOUND, and mind the RATE. `update` is called from inside the carcontroller's ACCDATA
@@ -125,6 +127,12 @@ MAX_ACTIVE_FRAMES = int(MAX_ACTIVE_S * OVERRIDE_HZ)  # 400
 MAX_HOLD_S = 45.0
 MAX_HOLD_FRAMES = int(MAX_HOLD_S * OVERRIDE_HZ)
 
+# How long the model must stop asking before that is believed, in 50 Hz frames. `has_slow_down`
+# arrives as False whenever `longitudinalPlanSP` is merely not alive-and-valid, so an undebounced
+# read turns a dropped message into a released brake at a light. Half a second is long enough to
+# ride out a hiccup and short enough that a genuine change of mind is acted on promptly.
+NO_ASK_RELEASE_FRAMES = int(0.5 * OVERRIDE_HZ)
+
 # Long enough for a 20 mph stop at a comfortable rate, five times under drive A's 40 s. If a real
 # stop needs longer than this, that is a finding to act on rather than a number to quietly raise.
 
@@ -141,9 +149,12 @@ STOP_DECEL = 1.5
 # because arriving late is the failure this feature exists to remove.
 STOP_MARGIN = 1.3
 
-# At 5 mph the computed range is under 3 m, which is too tight for a takeover to accomplish
-# anything. A floor keeps the last few mph reachable without widening the window at speed.
-STOP_MIN_RANGE_M = 10.0
+# WHAT THIS GATE ACTUALLY TESTS, stated honestly after review took it apart: comparing the model's
+# endpoint against `v^2/(2*STOP_DECEL)*STOP_MARGIN` reduces to "the model is planning a stop harder
+# than STOP_DECEL/STOP_MARGIN = 1.15 m/s^2", INDEPENDENT OF SPEED. It is an URGENCY test, not a
+# proximity one. That is defensible -- a stop gentler than that is one Ford's set speed can still
+# deliver, which is exactly when the override should stay out -- but it is not what "the stop point
+# is close enough that braking is due" describes, so do not reason about it that way.
 
 
 class FordStopOverride:
@@ -162,6 +173,7 @@ class FordStopOverride:
     # regimes with different bounds -- see MAX_HOLD_S.
     self.holding = False
     self.hold_frames = 0
+    self.no_ask_frames = 0      # consecutive frames the model has not asked for a stop
     self.last_result = ""       # for logging only, never used to decide
 
   def _end(self, why: str) -> None:
@@ -179,7 +191,9 @@ class FordStopOverride:
       long_active:     openpilot longitudinal is actually active this frame.
       v_ego:           m/s.
       has_slow_down:   the MODEL is planning to stop for something ahead (dec.has_slow_down()).
-      op_stopping:     openpilot's plan has reached its stopping state. NO LONGER ARMS -- see below.
+      op_stopping:     openpilot's plan has reached its stopping state. UNUSED -- see below. Kept
+                       on the signature because the carcontroller still has it and removing an
+                       argument is a change to the call site for no gain.
       lead_distance:   metres to the radar lead, or 0.0 / inf when there is none.
       stop_endpoint_m: metres to the model's own stop point, 0.0 when it has none.
 
@@ -203,12 +217,28 @@ class FordStopOverride:
     # having stopped: a stop that gets abandoned half way must not be able to fire again on the
     # same approach.
     if not has_slow_down:
+      # DEBOUNCED, and both halves of that matter. `carcontroller.py` falls back to
+      # `has_slow_down = False` whenever `longitudinalPlanSP` is not alive-and-valid, so ONE dropped
+      # message used to do two bad things at once: release a hold -- dropping the brake at a light
+      # for a planner hiccup -- and clear `spent`, which is the once-per-approach latch. Cleared,
+      # the override could re-arm the moment the car rolled, brake, release, and cycle.
+      #
+      # Under the old design neither mattered: the override had already ended at the standstill, so
+      # there was no hold to drop and nothing to re-arm into. Holding through the stop is what made
+      # a single frame load-bearing.
+      self.no_ask_frames += 1
+      if self.no_ask_frames <= NO_ASK_RELEASE_FRAMES:
+        # Not yet convinced. Keep whatever we were doing, including a hold.
+        return self.active
       if self.active:
         self._end("model stopped asking")
       # After `_end`, not before: `_end` sets spent=True, so an assignment ahead of it is dead and
       # reads as though one of the two paths needed it.
       self.spent = False
       return False
+
+    # The model is asking again, so the debounce starts over.
+    self.no_ask_frames = 0
 
     lead_close = 0.0 < lead_distance < LEAD_DISQUALIFIES_M
 
@@ -237,19 +267,36 @@ class FordStopOverride:
       # standstill with no lead there is far less to contradict -- Ford has no target and its ACC is
       # below its own operating speed. That is REASONING, not measurement, so the bound stays finite
       # and generous rather than absent, and the first drive with a real light is what checks it.
+      if v_ego <= STOPPED_SPEED and lead_close:
+        # A CAR STOPPED IN FRONT OF US WHILE WE WERE HOLDING. Ford's stop-and-go holds behind a lead
+        # -- that is the one case it does well and the reason a lead disqualifies the override at
+        # all -- so hand it back rather than keeping a brake command the radar now has a better
+        # answer for. The standstill branch below returned before `lead_close` was ever evaluated,
+        # so this case was unreachable and the module docstring's "a lead appeared. Hand back." was
+        # false at a standstill.
+        self._end("a lead arrived while holding; Ford's stop-and-go owns this")
+        return False
+
       if v_ego <= STOPPED_SPEED:
+        # THE APPROACH BOUND MUST NOT COUNT HOLD FRAMES. `frames` used to stop accumulating here
+        # because this branch ended the override; now it does not, so without this the 8 s approach
+        # bound expires DURING a normal light and the first frame the car rolls above STOPPED_SPEED
+        # hands it back to Ford permanently, mid-roll -- the exact failure the hold exists to stop.
+        self.frames = 0
         self.holding = True
+        self.hold_frames += 1
         if self.hold_frames > MAX_HOLD_FRAMES:
           self._end("hold bound reached -- the car may roll, see the creep note")
           return False
-        self.hold_frames += 1
         self.last_result = "holding a stop Ford will not hold"
         return True
+
+      # MOVING AGAIN. `holding` has to clear here or it reads as "has held" rather than "is
+      # holding", and the resume gate keys on it -- it would re-assert on a moving car.
+      self.holding = False
+
       if lead_close:
         self._end("a lead appeared; Ford's stop-and-go owns this")
-        return False
-      if not op_stopping:
-        self._end("the plan is no longer stopping")
         return False
       if self.frames > MAX_ACTIVE_FRAMES:
         # The bound from drive A. Handing back mid-stop is not comfortable; a latched camera for the
@@ -296,9 +343,20 @@ class FordStopOverride:
     # FAILS CLOSED ON A MISSING ENDPOINT. `endpoint_x()` is inf when the model's plan is not full
     # length and inf is clamped to 0 on the wire, so 0 means "no endpoint" -- never "stopping right
     # here". Arming on 0 would fire at every light the model merely felt uneasy about.
-    if stop_endpoint_m <= 0.0:
+    # NaN FAILS BOTH COMPARISONS AND WOULD FALL THROUGH INTO ARMING -- the exact opposite of what
+    # the paragraph above claims. `not (x > 0.0)` catches NaN where `x <= 0.0` does not, and the
+    # publisher's `isfinite` guard lives in a DIFFERENT REPO from this consumer, so this file has no
+    # structural claim on it.
+    if not (stop_endpoint_m > 0.0):
       return False
-    brake_range = max(STOP_MIN_RANGE_M, (v_ego * v_ego) / (2.0 * STOP_DECEL) * STOP_MARGIN)
+    # NO FLOOR. `STOP_MIN_RANGE_M = 10.0` was added on the reasoning that the computed range gets
+    # too tight to be useful at a crawl. It does the opposite: the model's trajectory horizon is
+    # roughly 10*v, so below about 2.2 mph the horizon is ITSELF under 10 m and the gate armed with
+    # NOTHING AHEAD -- a spurious brake-to-a-stop at walking pace. The arithmetic needs no help:
+    # `brake_range` is below the free-flow horizon at every speed under ~51 mph, so it is already a
+    # real test across this feature's whole range, and at low speed a short range is CORRECT because
+    # the remaining stopping distance is short too.
+    brake_range = (v_ego * v_ego) / (2.0 * STOP_DECEL) * STOP_MARGIN
     if stop_endpoint_m > brake_range:
       return False          # the stop is real but still far enough that the set speed owns it
 

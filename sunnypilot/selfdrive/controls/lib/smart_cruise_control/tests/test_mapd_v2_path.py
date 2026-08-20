@@ -68,7 +68,7 @@ def test_the_corner_speed_is_ours_and_comes_from_curvature():
 
 
 def test_it_plans_corners_faster_than_mapd_did_and_by_the_expected_ratio():
-  """Wiring 2.5 where mapd used 2.2 RAISES corner speeds by sqrt(_CORNER_LAT_ACC/2.2) = 6.6%. Pinned because it
+  """Wiring 2.5 where mapd used 2.2 RAISES corner speeds by sqrt(_CORNER_LAT_ACC/2.2), 4.4% at 2.4. Pinned because it
   is the opposite direction from "low speed curves don't slow enough" and must stay a deliberate,
   visible consequence rather than a surprise -- that complaint was measured to be map COVERAGE
   (SCC-Map active 146 frames in 26 minutes), not this constant."""

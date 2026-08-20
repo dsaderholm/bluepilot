@@ -176,7 +176,26 @@ def _haversine_m(a: tuple[float, float], b: tuple[float, float]) -> float:
 # 21 m turn clears at 30 m (0.0476 * 900 = 42.8), where 70 m would have flattened it.
 _JITTER_M = 0.5          # OSM node position noise; the 0.5 that made 127 m out of a straight road
 _SNR = 5.0               # signal-to-noise a reading must clear before it is believed
-_BASELINE_LADDER = (20.0, 30.0, 45.0, 70.0)
+#
+# THE LADDER MUST REACH THE GENTLE END, and the first version did not. Each rung can only resolve
+# radii down to `L^2 / (8 * jitter * SNR)`, so a 70 m top rung caps out at 245 m -- and his I-80
+# corner, the one this whole module was built for and validated against at 259 m, came back as
+# EXACTLY 0.0: a straight road. Every highway sweeper above about 54 mph was invisible to our own
+# geometry and silently fell through to mapd's flattened number, which is the symptom the module
+# exists to remove, reintroduced by the module.
+#
+#     rung   resolves down to
+#      20 m       20 m radius
+#      30 m       45 m
+#      45 m      101 m
+#      70 m      245 m      <- the old top; his 259 m corner is just past it
+#     100 m      500 m
+#     140 m      980 m
+#
+# 140 m is the sensible stop: past that the baseline is long enough to start averaging a real
+# sweeper away, which is mapd's failure, and a corner gentler than 980 m radius is 100 mph at
+# 2.4 m/s^2 -- nothing this car will ever be asked to slow for.
+_BASELINE_LADDER = (20.0, 30.0, 45.0, 70.0, 100.0, 140.0)
 
 
 def curvature_profile_multiscale(nodes: list[tuple[float, float]]) -> list[float]:
