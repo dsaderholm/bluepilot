@@ -344,6 +344,14 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
             if (self.sm.alive.get('longitudinalPlanSP') and self.sm.valid.get('longitudinalPlanSP'))
             else False,
             op_stopping=bool(stopping),
+            # The model's own stop point, metres. 0.0 means it has none -- `endpoint_x()` is inf
+            # when the plan is not full length and inf is clamped to 0 on the wire. This ARMS the
+            # override now, in place of `stopping`, which was measured to be a stopped-car state
+            # and made the trigger circular. Same alive/valid guard as has_slow_down above: arming
+            # a stop off a plan plannerd has disowned is exactly what that check exists for.
+            stop_endpoint_m=float(self.sm['longitudinalPlanSP'].dec.slowDownEndpoint)
+            if (self.sm.alive.get('longitudinalPlanSP') and self.sm.valid.get('longitudinalPlanSP'))
+            else 0.0,
             lead_distance=lead_d,
           )
           # Latch that THIS stop was ours, so the resume gate knows not to pull away from it on the

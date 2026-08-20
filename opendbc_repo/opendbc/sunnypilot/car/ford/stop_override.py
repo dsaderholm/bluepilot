@@ -118,6 +118,20 @@ MAX_ACTIVE_FRAMES = int(MAX_ACTIVE_S * OVERRIDE_HZ)  # 400
 # A lead this close is Ford's business. Beyond it the radar has nothing useful and the stop is ours.
 LEAD_DISQUALIFIES_M = 60.0
 
+# The deceleration the arming distance is computed against, m/s^2. Deliberately gentler than the
+# 1.3 that lights the stop lamps: this decides WHEN to take over, and taking over early enough to
+# stop comfortably is the whole point. It is not a commanded rate -- `create_acc_msg` still authors
+# the actual braking.
+STOP_DECEL = 1.5
+
+# Take over a little before the arithmetic says we must, because the handover itself costs time and
+# because arriving late is the failure this feature exists to remove.
+STOP_MARGIN = 1.3
+
+# At 5 mph the computed range is under 3 m, which is too tight for a takeover to accomplish
+# anything. A floor keeps the last few mph reachable without widening the window at speed.
+STOP_MIN_RANGE_M = 10.0
+
 
 class FordStopOverride:
   """Decide, per frame, whether to send openpilot's ACCDATA instead of Ford's.
@@ -141,13 +155,14 @@ class FordStopOverride:
     self.frames = 0
 
   def update(self, long_active: bool, v_ego: float, has_slow_down: bool, op_stopping: bool,
-             lead_distance: float) -> bool:
+             lead_distance: float, stop_endpoint_m: float = 0.0) -> bool:
     """Args:
-      long_active:   openpilot longitudinal is actually active this frame.
-      v_ego:         m/s.
-      has_slow_down: the MODEL is planning to stop for something ahead (dec.has_slow_down()).
-      op_stopping:   openpilot's own plan has reached its stopping state.
-      lead_distance: metres to the radar lead, or 0.0 / inf when there is none.
+      long_active:     openpilot longitudinal is actually active this frame.
+      v_ego:           m/s.
+      has_slow_down:   the MODEL is planning to stop for something ahead (dec.has_slow_down()).
+      op_stopping:     openpilot's plan has reached its stopping state. NO LONGER ARMS -- see below.
+      lead_distance:   metres to the radar lead, or 0.0 / inf when there is none.
+      stop_endpoint_m: metres to the model's own stop point, 0.0 when it has none.
 
     Returns True when openpilot's authored command should go out in place of Ford's.
     """
@@ -200,8 +215,39 @@ class FordStopOverride:
       return False          # already stopped, nothing to do
     if lead_close:
       return False          # Ford's radar has it, and Ford's stop-and-go is better than ours
-    if not op_stopping:
-      return False          # the model wants to stop but the plan has not committed yet
+
+    # `op_stopping` NO LONGER ARMS THIS, and the reason is measured. 2026-08-20, three drives and
+    # 21,936 frames where `longitudinalPlan.shouldStop` was true:
+    #
+    #     0000039a  5169 frames  max 1.7 mph      00000393  7103  max 2.9 mph
+    #     00000397  9664 frames  max 2.8 mph      ABOVE 5 MPH: 0.0% ON ALL THREE
+    #
+    # It is a STOPPED-CAR state, not an approach state. Combined with the `v_ego > STOPPED_SPEED`
+    # clause above, the arming window was 0.5 to 2.9 mph -- by which point there is nothing left to
+    # stop. THE TRIGGER WAS CIRCULAR: it needed the plan committed to stopping in order to do the
+    # stopping, and the plan only commits once the car has already stopped. It never fired on any
+    # drive, and no amount of leaving the brake alone could reach it.
+    #
+    # His own light, route 0000039a: engaged, foot off the brake, ICBM walking the set speed 80 ->
+    # 57, sitting at 20 mph, `shouldStop` false the whole way. He braked.
+    #
+    # WHAT ARMS IT NOW IS A DISTANCE, which keeps this a named bounded condition rather than a mood.
+    # `has_slow_down` alone is far too loose -- 8,207 frames on that one drive -- so the model's own
+    # stop point has to be close enough that braking is actually due:
+    #
+    #     endpoint <= v^2 / (2 * STOP_DECEL) * STOP_MARGIN,  floored at STOP_MIN_RANGE_M
+    #
+    # which is the same trigger-distance arithmetic SCC-Map uses, and for the same reason: a fixed
+    # metre count is wrong at both ends of the speed range.
+    #
+    # FAILS CLOSED ON A MISSING ENDPOINT. `endpoint_x()` is inf when the model's plan is not full
+    # length and inf is clamped to 0 on the wire, so 0 means "no endpoint" -- never "stopping right
+    # here". Arming on 0 would fire at every light the model merely felt uneasy about.
+    if stop_endpoint_m <= 0.0:
+      return False
+    brake_range = max(STOP_MIN_RANGE_M, (v_ego * v_ego) / (2.0 * STOP_DECEL) * STOP_MARGIN)
+    if stop_endpoint_m > brake_range:
+      return False          # the stop is real but still far enough that the set speed owns it
 
     self.active = True
     self.frames = 0
