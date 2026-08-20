@@ -10,6 +10,7 @@ from openpilot.common.constants import CV
 from openpilot.common.params import Params
 from openpilot.common.realtime import DT_CTRL
 from openpilot.sunnypilot import PARAMS_UPDATE_PERIOD
+from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.common import Mode as SpeedLimitMode
 from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management.helpers import get_minimum_set_speed
 from openpilot.sunnypilot.selfdrive.car.cruise_ext import CRUISE_BUTTON_TIMER, V_CRUISE_MAX, update_manual_button_timers
 
@@ -331,9 +332,30 @@ class IntelligentCruiseButtonManagement:
     self.baseline_diverged = False   # has the baseline ever actually differed from SLA?
     self.speed_limit_known = False   # did the resolver have a posted limit this frame?
     # BluePilot: is Speed Limit Assist in ASSIST mode -- actually allowed to move the set speed --
-    # as opposed to off, informational or warning? This is `SpeedLimitMode == Mode.assist`, which
-    # SLA publishes as `assist.enabled`. It is the discriminator for whether a hold may exist at
-    # all; see `enforce_hold_policy`.
+    # as opposed to off, informational or warning? It is the discriminator for whether a hold may
+    # exist at all; see `enforce_hold_policy`.
+    #
+    # READ FROM THE PARAM, NOT FROM SLA'S MESSAGE, and that distinction is the whole bug of
+    # 2026-08-20. This was `LP_SP.speedLimit.assist.enabled`, on the stated belief that it was
+    # "SLA's own copy of `SpeedLimitMode == assist`". IT IS NOT. `longitudinal_planner.py` publishes
+    # `assist.enabled = sla.is_enabled`, and `is_enabled` is the STATE MACHINE's output --
+    # `state in ENABLED_STATES`, which excludes `inactive`. SLA's own param copy is `self.enabled`,
+    # a different attribute that is never published at all.
+    #
+    # The two come apart on exactly the gesture this policy is about. `update_state_machine_*`
+    # moves ACTIVE -> INACTIVE on `v_cruise_cluster_changed` -- a manual `+/-` press. So the press
+    # captured the hold and, in the same frame, knocked SLA out of ENABLED_STATES; the policy below
+    # then read "not in assist mode" and destroyed the hold it had just made. Self-cancelling, so
+    # no hold could ever survive a press.
+    #
+    # MEASURED, route 0000039c vs 0000039a: 7,473 frames of `vBaseline > 0` (all source `press`)
+    # before this field was introduced, and ZERO across the whole later drive after it. Reported as
+    # *"when I changed the speed with plus and minus it changed the ICBM speed and didn't do a
+    # hold"*, which is precisely what a hold deleted on its own creation frame looks like.
+    #
+    # The mode is CONFIGURATION -- it changes when he changes a setting, never because of where the
+    # car is or what he just pressed -- so it belongs with the other cached params and must never
+    # again be inferred from a runtime state.
     self.sla_assist_enabled = False
     # BluePilot: which mechanism last captured the hold. Logged, no longer shown on screen -- the
     # badge tag that used to display it existed to settle whether the press path was dead, and it
@@ -388,6 +410,11 @@ class IntelligentCruiseButtonManagement:
       self.max_target_rise = self.params.get("IcbmMaxTargetRise", return_default=True)
       self.baseline_reset_delta = self.params.get("IcbmBaselineResetDelta", return_default=True)
       self.gap_control_enabled = self.params.get_bool("IcbmGapControl")
+      # See `self.sla_assist_enabled` for why this is a param read and not a message field.
+      # `return_default=True` so a device that has never written the key reads SLA's own default
+      # rather than raising -- and a missing key must not silently mean "no holds allowed".
+      self.sla_assist_enabled = (self.params.get("SpeedLimitMode", return_default=True)
+                                 == SpeedLimitMode.assist)
 
   @property
   def v_cruise_equal(self) -> bool:
@@ -444,13 +471,6 @@ class IntelligentCruiseButtonManagement:
       self.speed_limit_known = bool(resolver.speedLimitValid or resolver.speedLimitLastValid)
     except (AttributeError, KeyError):
       self.speed_limit_known = False
-    # Read SEPARATELY from the resolver above, and defaulting False. `assist.enabled` is SLA's own
-    # copy of `SpeedLimitMode == assist`, so it answers "may a hold exist" without this file having
-    # to read a param every frame or learn SLA's enum.
-    try:
-      self.sla_assist_enabled = bool(LP_SP.speedLimit.assist.enabled)
-    except (AttributeError, KeyError):
-      self.sla_assist_enabled = False
     # Is there a mapped corner ahead with a deadline on it? NOT "is SCC-Map the source this frame",
     # which is a different and much less stable question: when the map and vision targets are close
     # the plan source alternates between them frame by frame. Measured on the 2026-08-07 exit, the

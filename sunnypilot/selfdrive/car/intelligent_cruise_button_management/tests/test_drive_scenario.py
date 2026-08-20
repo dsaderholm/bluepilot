@@ -46,6 +46,11 @@ class Drive:
     for k in self.icbm.cruise_button_timers:
       self.icbm.cruise_button_timers[k] = 0
     self.icbm.update_params = lambda: None
+    # `update_params` is stubbed, so the SpeedLimitMode read never runs. Set it here: a hold
+    # can only exist in assist mode, and without it every tap in this file is re-chased away
+    # by SLA -- which is the on-road bug `test_taps_are_never_undone_at_any_lag` exists to
+    # catch, so a fixture short this field turns that test into a false alarm about itself.
+    self.icbm.sla_assist_enabled = True
     self.icbm.max_target_drop = DEFAULT_MAX_TARGET_DROP
     self.icbm.max_target_rise = DEFAULT_MAX_TARGET_RISE
     self.icbm.baseline_reset_delta = DEFAULT_BASELINE_RESET_DELTA

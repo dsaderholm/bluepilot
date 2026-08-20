@@ -67,6 +67,25 @@ class IcbmHudState:
     deliberately pinned to a place governing the car with nothing on screen saying so, and the tap
     target that removes it unreachable.
 
+    THAT PREMISE EXPIRED ON 2026-08-19 AND THIS RULE DID NOT FOLLOW IT. `enforce_hold_policy` was
+    rekeyed that day from "is a limit known this frame" to "is SLA in assist mode", precisely so a
+    hold would SURVIVE a coverage gap and let a no-limit place be pinned. From that moment an
+    ordinary press-hold could exist with no limit -- so `sla_has_limit` stopped meaning "a hold is
+    worth drawing" and started hiding real holds on the roads the policy change existed to serve.
+
+    Reported 2026-08-20: *"when I do plus and minus, when SLA doesn't have a number, it should
+    change my max speed and set up a hold at the same time."* Both halves were already the intent;
+    the second half just could not be seen. A hold governing the car with nothing on screen saying
+    so is the same defect the pinned exception above was written to prevent, reached a different
+    way.
+
+    So the limit test is gone: A HOLD THAT EXISTS IS DRAWN. The original confusion this rule
+    addressed -- two numbers, neither labelled -- is now answered by the mode instead. With SLA off,
+    informational or warning, `enforce_hold_policy` clears the baseline outright, so `has_hold` is
+    False and no badge appears; that owner never sees a second number. In assist mode the two
+    numbers are *supposed* to agree -- his words, *"max speed and hold to be together and the same"*
+    -- so a badge matching MAX is confirmation that the press took, not a competing readout.
+
     AND A STANDING PIN SUGGESTION IS THE SECOND EXCEPTION, added 2026-08-17 to fix a hole the first
     one left open. THE BADGE IS THE ONLY TAP TARGET FOR PINNING -- `_hold_rect` is set where the
     badge is drawn and cleared to None everywhere else. So with no limit, no hold and therefore no
@@ -80,12 +99,11 @@ class IcbmHudState:
     This is a DISPLAY rule. The hold itself is unchanged and still governs the car; hiding a
     readout must never change what the car does.
     """
-    # `and not self.has_hold` on the suggestion term, because the two exceptions answer different
-    # questions. Without it a standing suggestion re-exposed a hold that the sla_has_limit rule
-    # deliberately hides -- the badge would appear on a no-limit road purely because the car
-    # happened to be somewhere pinnable, which is the readout that rule exists to suppress.
-    return ((self.has_hold and (self.sla_has_limit or self.pinned))
-            or (self.pin_suggested and not self.has_hold))
+    # The suggestion term no longer needs `and not self.has_hold`. It carried that guard only to
+    # stop a standing suggestion re-exposing a hold `sla_has_limit` was hiding; with nothing hidden
+    # there is no leak to plug, and `display_value` already prefers the hold over the suggestion
+    # when both exist.
+    return self.has_hold or self.pin_suggested
 
 
   @property

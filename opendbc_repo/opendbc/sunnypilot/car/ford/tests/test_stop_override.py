@@ -324,21 +324,34 @@ def test_the_entry_speed_is_reachable_within_the_time_bound():
     f"is {MAX_ACTIVE_S:.1f} s -- the override would hand back mid-stop on an ordinary approach")
 
 
-def test_the_override_starts_where_fords_floor_ends():
-  """ENTER_SPEED is Ford's set-speed floor, and that is the point rather than a coincidence.
+def test_the_override_overlaps_fords_floor_rather_than_meeting_it():
+  """The override must arm ABOVE Ford's floor, and the two must never leave a gap.
 
-  `get_minimum_set_speed()` is 20 mph and ICBM walks the set speed down to it, so above that Ford is
-  still fully able to carry the request and the division of labour says leave it there. Arming
-  higher spends the time bound on deceleration Ford is doing anyway.
+  This asserted EQUALITY until 2026-08-20, on the reasoning that above the floor Ford is still able
+  to carry the request so the division of labour says leave it there. True as far as it goes, and it
+  produced a feature that could not fire: arming exactly AT the floor makes this a race against the
+  instant Ford bails rather than a decision taken before it.
 
-  Kept honest against `unconfirmed_lead.ACC_FLOOR_MS` rather than a second 20.0 literal -- these are
-  the same physical limit named in two files, and a drift between them would open a speed band where
-  neither ICBM nor the override is acting."""
+  Measured, route 0000039a: 930 frames refused here for "too fast", and the whole window where the
+  car was slow enough, had no lead and the model had an endpoint was 13 frames -- 0.26 s.
+
+  So the invariant is an ORDERING, not an equality. `ENTER_SPEED >= ACC_FLOOR_MS` is what actually
+  matters: an overlap means both authorities can act in the band and the handoff has somewhere to
+  happen, while ENTER_SPEED *below* the floor is the real defect -- a band where Ford has quit and
+  the override is not yet allowed, which is precisely where a light goes unstopped.
+
+  The upper bound keeps it honest. Arming far above the floor spends the time bound on deceleration
+  Ford is doing perfectly well by itself."""
   from openpilot.sunnypilot.selfdrive.controls.lib.unconfirmed_lead import ACC_FLOOR_MS
 
-  assert abs(ENTER_SPEED - ACC_FLOOR_MS) < 1e-6, (
-    f"the override arms at {ENTER_SPEED / MPH_TO_MS:.1f} mph but Ford's floor is "
-    f"{ACC_FLOOR_MS / MPH_TO_MS:.1f} mph -- one of them moved without the other")
+  assert ENTER_SPEED >= ACC_FLOOR_MS, (
+    f"the override arms at {ENTER_SPEED / MPH_TO_MS:.1f} mph but Ford quits at "
+    f"{ACC_FLOOR_MS / MPH_TO_MS:.1f} mph -- that band belongs to nobody and a stop in it is missed")
+
+  margin_mph = (ENTER_SPEED - ACC_FLOOR_MS) / MPH_TO_MS
+  assert margin_mph <= 10.0, (
+    f"the override arms {margin_mph:.1f} mph above Ford's floor -- that is deceleration Ford is "
+    f"already doing, spent against MAX_ACTIVE_S")
 
 
 def test_a_radar_blind_lead_is_ours_and_a_radar_lead_is_fords():

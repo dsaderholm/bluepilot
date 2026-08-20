@@ -98,7 +98,21 @@ MPH_TO_MS = CV.MPH_TO_MS
 # override never arms. The symptom is the car sitting at 20 through the intersection with no violet
 # pill, which looks identical to the feature not existing. A mph or two of margin here would remove
 # that failure for about 0.4 s of extra bound-time; see bp_stop_override.py's question 1 first.
-ENTER_SPEED = 20.0 * MPH_TO_MS
+# RAISED 20 -> 25 ON 2026-08-20, and the paragraph above is the measurement that forced it. The
+# predicted failure happened exactly as written: on route 0000039a the arming path refused 930
+# frames at this gate for "too fast", and the entire window where the car was slow enough, had no
+# lead and the model had an endpoint was **13 frames -- 0.26 seconds**. A quarter second is not a
+# window, it is a coincidence.
+#
+# 20.0 was Ford's set-speed floor exactly, which made this gate a race against the moment Ford bails
+# rather than a decision made before it. The override cannot take a stop Ford is abandoning if it is
+# only allowed to arm at the instant of abandonment. 25 gives the approach room to be owned before
+# the handoff instead of after it.
+#
+# The cost is that between 20 and 25 mph this takes stops ICBM would otherwise walk the set speed
+# down for. That is the intended trade: walking the set speed down cannot stop the car, and every
+# such approach ends at 20 mph with Ford quitting anyway.
+ENTER_SPEED = 25.0 * MPH_TO_MS
 
 # Stopped. NOT a hand-back any more -- see the creep note in `update`: Ford does not hold a stop
 # without a lead, so handing back here is what made the car roll. `create_acc_msg` never sets
@@ -111,7 +125,18 @@ STOPPED_SPEED = 0.5 * MPH_TO_MS
 # not comfortably under the 40 s that latched the camera on drive A. Stated as seconds and derived,
 # so the next person cannot inherit the same factor of two.
 OVERRIDE_HZ = 50.0
-MAX_ACTIVE_S = 8.0
+# 8.0 -> 15.0 ON 2026-08-20. The note above says "if a real stop needs longer than this, that is a
+# finding to act on rather than a number to quietly raise" -- so, the finding, with arithmetic:
+#
+# Route 0000039a, at the gate, measured: 19.8 mph (8.85 m/s) with the model's stop point 41.8 m
+# away. That stop needs 8.85^2 / (2 * 41.8) = 0.94 m/s^2 and takes 2 * 41.8 / 8.85 = **9.4 s**.
+# Against an 8.0 s bound the override would have handed back MID-STOP even if it had armed -- while
+# moving, below Ford's floor, with the light still ahead. Two independent bugs on the same approach.
+#
+# 15.0 covers a stop from the new 25 mph ENTER_SPEED at the same comfortable rate (11.2 m/s at
+# 0.9 m/s^2 = 12.4 s) with margin, and is still well under drive A's 40 s camera latch -- which is
+# the only thing this bound was ever protecting.
+MAX_ACTIVE_S = 15.0
 MAX_ACTIVE_FRAMES = int(MAX_ACTIVE_S * OVERRIDE_HZ)  # 400
 
 # THE HOLD, which is a different regime from the approach and so gets its own bound.
@@ -143,7 +168,23 @@ LEAD_DISQUALIFIES_M = 60.0
 # 1.3 that lights the stop lamps: this decides WHEN to take over, and taking over early enough to
 # stop comfortably is the whole point. It is not a commanded rate -- `create_acc_msg` still authors
 # the actual braking.
-STOP_DECEL = 1.5
+# 1.5 -> 0.9 ON 2026-08-20, because the honest description of this gate at the bottom of this block
+# turned out to describe a FALSE PREMISE.
+#
+# The gate reduces to "arm only if the stop needs harder than STOP_DECEL/STOP_MARGIN", which at
+# 1.5/1.3 was 1.15 m/s^2. The justification was: "a stop gentler than that is one Ford's set speed
+# can still deliver, which is exactly when the override should stay out."
+#
+# FORD DELIVERS NOTHING BELOW 20 MPH. It quits at its set-speed floor and, with no lead, holds no
+# stop at all -- which is the entire reason this feature exists. So on a real approach the model
+# planned 0.94 m/s^2, the gate demanded 1.15, the override stayed out for being "too gentle", and
+# Ford stayed out for having given up. Nobody stopped the car. Measured on route 0000039a: 13 of 13
+# frames that reached this gate refused here, endpoint 41.8-43.9 m against a 33.9-34.2 m range.
+#
+# 0.9 puts the threshold at 0.69 m/s^2, below the ~0.95 a real light plans, so an ordinary stop
+# arms. It is still a bounded urgency test rather than "any stop anywhere": a stop 200 m out at
+# 25 mph needs 0.31 m/s^2 and is still correctly refused.
+STOP_DECEL = 0.9
 
 # Take over a little before the arithmetic says we must, because the handover itself costs time and
 # because arriving late is the failure this feature exists to remove.
@@ -151,10 +192,19 @@ STOP_MARGIN = 1.3
 
 # WHAT THIS GATE ACTUALLY TESTS, stated honestly after review took it apart: comparing the model's
 # endpoint against `v^2/(2*STOP_DECEL)*STOP_MARGIN` reduces to "the model is planning a stop harder
-# than STOP_DECEL/STOP_MARGIN = 1.15 m/s^2", INDEPENDENT OF SPEED. It is an URGENCY test, not a
-# proximity one. That is defensible -- a stop gentler than that is one Ford's set speed can still
-# deliver, which is exactly when the override should stay out -- but it is not what "the stop point
-# is close enough that braking is due" describes, so do not reason about it that way.
+# than STOP_DECEL/STOP_MARGIN", INDEPENDENT OF SPEED. It is an URGENCY test, not a proximity one,
+# and it is not what "the stop point is close enough that braking is due" describes -- so do not
+# reason about it that way.
+#
+# THE SECOND HALF OF THIS NOTE USED TO SAY the threshold was defensible because "a stop gentler than
+# that is one Ford's set speed can still deliver". That was WRONG and it cost a real stop. Below
+# `ENTER_SPEED` Ford delivers nothing: it is at its floor, and with no lead it holds no stop. There
+# is no gentler authority to defer TO. The threshold therefore has to sit below what a real light
+# plans (~0.95 m/s^2), not above it -- see STOP_DECEL for the measurement.
+#
+# The general lesson, because this shape has now appeared three times in this file: a gate that
+# defers to another controller must name what that controller will actually DO, not what it is
+# nominally responsible for.
 
 
 class FordStopOverride:
