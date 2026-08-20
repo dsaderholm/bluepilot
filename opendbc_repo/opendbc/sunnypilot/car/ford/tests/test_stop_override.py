@@ -18,6 +18,8 @@ import inspect
 
 from opendbc.sunnypilot.car.ford import stop_override as mod
 from opendbc.sunnypilot.car.ford.stop_override import (
+  CLOSING_CONFIRM_FRAMES,
+  CLOSING_FRACTION,
   ENTER_SPEED,
   LEAD_DISQUALIFIES_M,
   MAX_ACTIVE_FRAMES,
@@ -30,7 +32,10 @@ from opendbc.sunnypilot.car.ford.stop_override import (
 )
 
 SLOW = 15 * 0.44704       # 15 mph, inside the regime the set speed cannot reach
-FAST = 40 * 0.44704
+# 40 mph was "comfortably above the entry speed" while the entry was 20. It is now BELOW the 45 mph
+# entry, because measured empty-light approaches happen at 28-44 mph and the gate had to move to
+# reach them. Anything meant to be refused for speed has to be above the entry, not merely fast.
+FAST = 55 * 0.44704
 
 
 # The model's stop point, metres. Defaults INSIDE the braking range for SLOW so the existing tests
@@ -41,7 +46,36 @@ FAR = 200.0
 
 
 def _stopping(o, v=SLOW, lead=0.0, has_slow_down=True, op_stopping=True, long_active=True,
-              endpoint=NEAR):
+              endpoint=NEAR, confirm=True):
+  """One call now means ONE APPROACH, not one frame.
+
+  The trigger requires CLOSING_CONFIRM_FRAMES of the stop point closing like a fixed place before it
+  will arm -- added 2026-08-20 after he reported that some stop alerts were false positives that
+  self-corrected, which became load-bearing once ENTER_SPEED reached 45 mph and a phantom would cost
+  a brake rather than a message.
+
+  So this drives a short closing approach ending at `endpoint` and returns the final frame. Every
+  test that said "on this input, does it fire?" keeps exactly that meaning, and the input is now a
+  realistic approach rather than a single frame that could never happen alone.
+
+  The pre-roll uses the SAME arguments, so a test about a refusal still refuses at its own gate:
+  speed, lead and long_active are all checked BEFORE the closing tracker runs, so those inputs never
+  accumulate evidence. Pass `confirm=False` to test the confirmation requirement itself.
+  """
+  # No pre-roll for an endpoint that is not a real distance. There is no realistic approach to a
+  # stop point that does not exist, and synthesising one would arm the override DURING the pre-roll
+  # and make "no endpoint fails closed" pass for the wrong reason -- or fail, as it did.
+  if confirm and endpoint > 0.0:
+    travelled = v / OVERRIDE_HZ
+    # Start far enough back that the window closes by a full `travelled` per frame, comfortably over
+    # the CLOSING_FRACTION the tracker demands. One extra frame so the window is FULL on the final
+    # call rather than one sample short.
+    n = CLOSING_CONFIRM_FRAMES + 1
+    ep = endpoint + n * travelled
+    for _ in range(n):
+      o.update(long_active=long_active, v_ego=v, has_slow_down=has_slow_down,
+               op_stopping=op_stopping, lead_distance=lead, stop_endpoint_m=ep)
+      ep -= travelled
   return o.update(long_active=long_active, v_ego=v, has_slow_down=has_slow_down,
                   op_stopping=op_stopping, lead_distance=lead, stop_endpoint_m=endpoint)
 
@@ -54,7 +88,12 @@ def test_it_fires_for_a_stop_the_radar_cannot_see():
 
 def test_it_does_not_fire_where_the_set_speed_could_still_have_asked():
   """Above the entry speed ICBM is strictly better -- Ford picks coast vs engine-brake vs friction
-  and that blend is the whole reason the division of labour exists."""
+  and that blend is the whole reason the division of labour exists.
+
+  The ENTRY MOVED on 2026-08-20 (20 -> 45 mph) but this test did not change meaning: there is still
+  a speed above which this must not arm, and the point of the ceiling is that the blend above it is
+  Ford's to choose. What changed is only where the line sits, because empty lights turn out to be
+  approached at 28-44 mph and a 20 mph line put every one of them on the wrong side."""
   o = FordStopOverride()
   assert _stopping(o, v=FAST) is False
   assert _stopping(o, v=ENTER_SPEED + 1.0) is False
@@ -179,7 +218,10 @@ def test_the_time_bound_is_expressed_in_SECONDS_at_the_rate_it_actually_ticks():
     "the override's assumed tick rate no longer matches ACC_CONTROL_STEP, so the time bound is "
     f"off by {CarControllerParams.ACC_CONTROL_STEP * OVERRIDE_HZ / 100.0:.1f}x")
   assert MAX_ACTIVE_FRAMES == int(MAX_ACTIVE_S * OVERRIDE_HZ)
-  assert MAX_ACTIVE_S <= 15.0, "well under drive A's 40 s is the entire point of this bound"
+  # 20.0, raised with ENTER_SPEED so the bound can finish the approach it now permits. Still HALF
+  # drive A's 40 s, which is the only thing this bound protects. If this ever needs to go past 20,
+  # that is a design question about how long we may contradict the camera, not a number to nudge.
+  assert MAX_ACTIVE_S <= 20.0, "half of drive A's 40 s is the entire point of this bound"
 
 
 # --- resuming from a stop WE authored ------------------------------------------------------------
@@ -229,12 +271,27 @@ def test_a_stop_we_authored_is_not_resumed_from_automatically():
 
 
 def _drive_to_a_stop(so, **kw):
-  """Run a full approach and return the (was_active, override, last_result) triple per frame."""
+  """Run a full approach and return the (was_active, override, last_result) triple per frame.
+
+  The six speed rows are preceded by the closing evidence the trigger requires (2026-08-20). Without
+  it this fixture held `stop_endpoint_m` at a constant NEAR for the whole approach -- a stop point
+  that never gets nearer while the car drives at it, which is precisely the signature of the phantom
+  stops the confirmation exists to reject. The rows themselves are unchanged: once armed, the
+  tracker is not consulted again.
+  """
   out = []
+  lead = kw.get("lead", 0.0)
+  v0 = 24.0 * MPH_TO_MS
+  travelled = v0 / OVERRIDE_HZ
+  ep = NEAR + (CLOSING_CONFIRM_FRAMES + 1) * travelled
+  for _ in range(CLOSING_CONFIRM_FRAMES + 1):
+    so.update(long_active=True, v_ego=v0, has_slow_down=True, op_stopping=True,
+              lead_distance=lead, stop_endpoint_m=ep)
+    ep -= travelled
   for v_mph in (24.0, 18.0, 12.0, 6.0, 2.0, 0.3):
     was_active = so.active
     override = so.update(long_active=True, v_ego=v_mph * MPH_TO_MS, has_slow_down=True,
-                         op_stopping=True, lead_distance=kw.get("lead", 0.0), stop_endpoint_m=NEAR)
+                         op_stopping=True, lead_distance=lead, stop_endpoint_m=NEAR)
     out.append((was_active, override, so.last_result))
   return out
 
@@ -348,10 +405,15 @@ def test_the_override_overlaps_fords_floor_rather_than_meeting_it():
     f"the override arms at {ENTER_SPEED / MPH_TO_MS:.1f} mph but Ford quits at "
     f"{ACC_FLOOR_MS / MPH_TO_MS:.1f} mph -- that band belongs to nobody and a stop in it is missed")
 
+  # The upper bound is 30 mph of margin, not 10. 10 was picked by reasoning the same day and was
+  # immediately wrong: measured empty-light approaches on route 0000039c happen at 28.3, 32.5 and
+  # 43.9 mph, so anything under ~25 mph of margin refuses the very approaches this exists for.
+  # The bound still has a job -- arming at highway speed for a distant stop is not this feature --
+  # but the distance gate is what actually decides that, and this only has to stay finite.
   margin_mph = (ENTER_SPEED - ACC_FLOOR_MS) / MPH_TO_MS
-  assert margin_mph <= 10.0, (
-    f"the override arms {margin_mph:.1f} mph above Ford's floor -- that is deceleration Ford is "
-    f"already doing, spent against MAX_ACTIVE_S")
+  assert margin_mph <= 30.0, (
+    f"the override arms {margin_mph:.1f} mph above Ford's floor -- past this the distance gate is "
+    f"carrying the whole decision and the time bound cannot finish the stop")
 
 
 def test_a_radar_blind_lead_is_ours_and_a_radar_lead_is_fords():
@@ -422,10 +484,10 @@ class TestTheEndpointArmsItNotShouldStop:
   def test_the_arming_range_scales_with_speed(self):
     """A fixed metre count is wrong at both ends -- the same reason SCC-Map uses a trigger distance
     rather than a constant. Faster means arm sooner."""
-    fast_ok = FordStopOverride().update(long_active=True, v_ego=19 * 0.44704, has_slow_down=True,
-                                        op_stopping=False, lead_distance=0.0, stop_endpoint_m=25.0)
-    slow_no = FordStopOverride().update(long_active=True, v_ego=6 * 0.44704, has_slow_down=True,
-                                        op_stopping=False, lead_distance=0.0, stop_endpoint_m=25.0)
+    # Through `_stopping` so both sides get the closing evidence the trigger now requires; a bare
+    # single `update` can no longer arm anything and would make this test read as "19 mph refuses".
+    fast_ok = _stopping(FordStopOverride(), v=19 * 0.44704, op_stopping=False, endpoint=25.0)
+    slow_no = _stopping(FordStopOverride(), v=6 * 0.44704, op_stopping=False, endpoint=25.0)
     assert fast_ok is True, "19 mph with a 25 m stop should be arming"
     assert slow_no is False, "6 mph with a 25 m stop is far too early"
 
@@ -448,7 +510,7 @@ class TestTheEndpointArmsItNotShouldStop:
   def test_every_other_gate_still_refuses(self):
     """The trigger got cheaper, so the gates that make it SAFE must be untouched -- speed ceiling,
     the lead carve-out, and longitudinal being active."""
-    assert _stopping(FordStopOverride(), v=FAST) is False, "above 20 mph the set speed owns it"
+    assert _stopping(FordStopOverride(), v=FAST) is False, "above the entry speed the set speed owns it"
     assert _stopping(FordStopOverride(), lead=25.0) is False, "a lead is Ford's stop-and-go"
     assert _stopping(FordStopOverride(), long_active=False) is False
     assert _stopping(FordStopOverride(), has_slow_down=False) is False
@@ -470,17 +532,91 @@ def test_it_survives_a_WHOLE_approach_with_the_plan_never_committing():
   """
   o = FordStopOverride()
   v = 20.0 * MPH_TO_MS
+  # A STOP POINT FIXED IN THE WORLD, closed at the speed the car is travelling. This used to be
+  # recomputed from `v` every frame, so before the override took over -- when `v` is constant -- the
+  # endpoint was constant too: a stop that never gets closer while you drive at it. That is the
+  # phantom signature, so with the closing confirmation it could never arm, and the fixture would
+  # have reported the feature broken when it was the fixture that was unphysical.
+  dist = (v * v) / (2 * 1.2)                          # a 1.2 m/s^2 model stop from here
   took = 0
-  for _ in range(800):
-    endpoint = max(0.0, (v * v) / (2 * 1.2))          # a 1.2 m/s^2 model stop, always ahead
+  for _ in range(1200):
     if o.update(long_active=True, v_ego=v, has_slow_down=True, op_stopping=False,
-                lead_distance=0.0, stop_endpoint_m=endpoint):
+                lead_distance=0.0, stop_endpoint_m=max(0.0, dist)):
       took += 1
       v = max(0.0, v - 1.2 / OVERRIDE_HZ)             # it is braking, so the car slows
+    dist = max(0.0, dist - v / OVERRIDE_HZ)
     if v <= 0.05:
       break
   assert took > OVERRIDE_HZ, f"the override held the car for only {took / OVERRIDE_HZ:.2f}s"
   assert o.holding is True, "it never reached the standstill it was braking toward"
+
+
+class TestAPhantomStopDoesNotArmABrake:
+  """HIS THREE MEASURED SHAPES, from route 0000039c. *"Maybe there were some false positives but
+  they self-corrected."*
+
+  That remark was harmless while ENTER_SPEED was 20 mph -- a phantom cost an alert. At 45 mph it
+  costs a brake on an open road, so the trigger has to tell them apart. Every engaged asking-episode
+  over 3 s on that drive, with the endpoint at the start and end:
+
+      REAL      t=68    13.9 s   105 ->  32 m   (he confirmed this one as his traffic light)
+                t=281   29.4 s     6 ->   0 m
+                t=1009  57.5 s   139 ->   0 m
+      PHANTOM   t=329    4.1 s   132 -> 148 m
+                t=965    5.0 s   141 -> 142 m
+                t=370    4.2 s    32 ->  73 m
+
+  A stop point fixed in the world must get closer as the car drives at it. None of the phantoms do.
+  """
+
+  @staticmethod
+  def _episode(first_ep, last_ep, seconds, v_mph=32.0):
+    """Drive an endpoint linearly from first_ep to last_ep and report whether it ever armed."""
+    o = FordStopOverride()
+    v = v_mph * MPH_TO_MS
+    n = max(2, int(seconds * OVERRIDE_HZ))
+    armed = False
+    for i in range(n):
+      ep = first_ep + (last_ep - first_ep) * (i / (n - 1))
+      if o.update(long_active=True, v_ego=v, has_slow_down=True, op_stopping=False,
+                  lead_distance=0.0, stop_endpoint_m=ep):
+        armed = True
+    return armed
+
+  def test_an_endpoint_that_grows_never_arms(self):
+    assert self._episode(132.0, 148.0, 4.1, v_mph=35.0) is False, "armed on a stop moving AWAY"
+    assert self._episode(32.0, 73.0, 4.2, v_mph=18.0) is False, "armed on a stop moving AWAY"
+
+  def test_an_endpoint_that_does_not_close_never_arms(self):
+    """141 -> 142 m over 5 s while covering ~94 m of road. Whatever that is, it is not a place."""
+    assert self._episode(141.0, 142.0, 5.0, v_mph=42.0) is False, "armed on a stop that never neared"
+
+  def test_his_real_traffic_light_still_arms(self):
+    """The one that matters: t=68, 105 -> 32 m over 13.9 s at ~30 mph, no car at the light.
+
+    The confirmation must not cost this. If this ever goes red the feature is off again and he
+    drives through another light."""
+    assert self._episode(105.0, 32.0, 13.9, v_mph=30.0) is True, "his actual traffic light no longer arms"
+
+  def test_a_real_stop_that_reaches_zero_still_arms(self):
+    """t=1009 ran 43 mph to a standstill. Modelled as a real fixed point rather than replayed
+    linearly: that episode's 57.5 s window spans the approach, the standstill and a second stop, so
+    its 139 -> 42 m net figure describes the WINDOW, not the approach. Driving a constant 43 mph
+    across it -- as this test first did -- covers 1.1 km while the endpoint gives up 139 m, which is
+    not an approach at all and correctly fails. The fixture was wrong, not the gate."""
+    o = FordStopOverride()
+    v = 43.0 * MPH_TO_MS
+    dist = 139.0
+    armed = False
+    for _ in range(int(30.0 * OVERRIDE_HZ)):
+      if o.update(long_active=True, v_ego=v, has_slow_down=True, op_stopping=False,
+                  lead_distance=0.0, stop_endpoint_m=max(0.0, dist)):
+        armed = True
+        v = max(0.0, v - 1.2 / OVERRIDE_HZ)
+      dist = max(0.0, dist - v / OVERRIDE_HZ)
+      if v <= 0.05:
+        break
+    assert armed is True, "a genuine approach to a fixed stop point never armed"
 
 
 def test_a_NaN_endpoint_fails_closed():

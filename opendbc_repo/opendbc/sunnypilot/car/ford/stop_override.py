@@ -65,6 +65,8 @@ does not complete cannot re-trigger every frame and turn a bounded override into
 """
 from __future__ import annotations
 
+from collections import deque
+
 # The opendbc-layer conversion, the same one ford/carstate.py and ford/interface.py use. This file
 # had its own 0.44704 literal, which is a second definition of the constant that scopes ENTER_SPEED
 # against `unconfirmed_lead.py`'s ACC_FLOOR_MS -- two literals for one relationship can drift, and
@@ -112,7 +114,31 @@ MPH_TO_MS = CV.MPH_TO_MS
 # The cost is that between 20 and 25 mph this takes stops ICBM would otherwise walk the set speed
 # down for. That is the intended trade: walking the set speed down cannot stop the car, and every
 # such approach ends at 20 mph with Ford quitting anyway.
-ENTER_SPEED = 25.0 * MPH_TO_MS
+# 25 -> 45 THE SAME DAY, because 25 was still the wrong axis and his own report is what showed it:
+# *"The light had no car at it and it did slow down to 20 and alert me."*
+#
+# Indexed by the alert he actually saw ("Stop sign or signal ahead") rather than by a speed window
+# guessed at in advance, route 0000039c has three empty-light approaches, ALL ENGAGED, ALL WITH THE
+# MODEL ASKING, ALL WITH NO LEAD:
+#
+#     t=76.0     32.5 mph, stop 97 m out      t=827.3   43.9 mph, stop 146 m out
+#     t=1017.1   28.3 mph, stop 64 m out
+#
+# LIGHTS ARE APPROACHED AT CRUISING SPEED. Every one of those is above 25, so a 25 mph gate refuses
+# all three -- and a 20 mph gate refused them harder. The distance test passes at each (1.08, 1.32
+# and 1.05 m/s^2 required, against a 0.69 threshold); the speed gate was the only thing refusing.
+#
+# The old justification -- "the set speed can still express this; ICBM is strictly better" -- is
+# true for SLOWING and false for STOPPING. ICBM walks the set speed down to Ford's 20 mph floor and
+# has nothing below it. On an empty approach that is not a division of labour, it is a handoff to
+# nobody, which is exactly what he keeps driving through.
+#
+# 45 covers his measured approaches with margin. THE COST IS REAL AND IS THE THING TO WATCH: the
+# override may now take longitudinal authority from Ford at cruising speed for a full stop. The
+# defenses against a bad model call are unchanged and are what bound it -- a lead disqualifies, the
+# model must keep asking through a 0.5 s debounce, the distance test still refuses a stop that is
+# merely distant, and MAX_ACTIVE_S ends it.
+ENTER_SPEED = 45.0 * MPH_TO_MS
 
 # Stopped. NOT a hand-back any more -- see the creep note in `update`: Ford does not hold a stop
 # without a lead, so handing back here is what made the car roll. `create_acc_msg` never sets
@@ -133,10 +159,12 @@ OVERRIDE_HZ = 50.0
 # Against an 8.0 s bound the override would have handed back MID-STOP even if it had armed -- while
 # moving, below Ford's floor, with the light still ahead. Two independent bugs on the same approach.
 #
-# 15.0 covers a stop from the new 25 mph ENTER_SPEED at the same comfortable rate (11.2 m/s at
-# 0.9 m/s^2 = 12.4 s) with margin, and is still well under drive A's 40 s camera latch -- which is
-# the only thing this bound was ever protecting.
-MAX_ACTIVE_S = 15.0
+# 20.0 covers a stop from the 45 mph ENTER_SPEED at a comfortable rate (20.1 m/s at 1.2 m/s^2 =
+# 16.8 s) with margin, and is still HALF drive A's 40 s camera latch -- which is the only thing this
+# bound was ever protecting. It was 15.0 for a few minutes on the way here, sized for a 25 mph
+# entry; the entry moved to 45 once his empty lights were measured, and a bound that cannot finish
+# the approach it now permits would hand back mid-stop at speed, which is worse than not arming.
+MAX_ACTIVE_S = 20.0
 MAX_ACTIVE_FRAMES = int(MAX_ACTIVE_S * OVERRIDE_HZ)  # 400
 
 # THE HOLD, which is a different regime from the approach and so gets its own bound.
@@ -160,6 +188,48 @@ NO_ASK_RELEASE_FRAMES = int(0.5 * OVERRIDE_HZ)
 
 # Long enough for a 20 mph stop at a comfortable rate, five times under drive A's 40 s. If a real
 # stop needs longer than this, that is a finding to act on rather than a number to quietly raise.
+
+# HOW LONG THE MODEL'S STOP POINT MUST BEHAVE LIKE A REAL PLACE BEFORE WE ACT ON IT, in 50 Hz
+# frames. THIS EXISTS BECAUSE HE SAID SO: *"Maybe there were some false positives but they
+# self-corrected."*
+#
+# Raising ENTER_SPEED to 45 made that remark load-bearing. At 20 mph a phantom stop cost an alert
+# and nothing else; at 45 mph it would cost a brake application on an open road, so the trigger now
+# has to tell a real stop from a spurious one rather than trusting `has_slow_down`.
+#
+# THE TEST IS PHYSICS, NOT A TIMER. A real stop point is fixed in the world, so driving toward it
+# must make the distance shrink at roughly the speed we are travelling. A phantom does not close --
+# it grows, or it sits at a constant range while the car moves. Measured on route 0000039c, every
+# engaged asking-episode over 3 s:
+#
+#     REAL (he confirmed the first as his traffic light, and two ended at a standstill)
+#       t=68     13.9 s   endpoint 105 ->  32 m      t=281    29.4 s   endpoint   6 ->   0 m
+#       t=1009   57.5 s   endpoint 139 ->   0 m
+#     SPURIOUS -- all short, none closing
+#       t=329     4.1 s   endpoint 132 -> 148 m      t=965     5.0 s   endpoint 141 -> 142 m
+#       t=370     4.2 s   endpoint  32 ->  73 m
+#
+# 1.5 s of consistent closing separates them with room to spare, and costs the real light only the
+# first 1.5 s of a 13.9 s approach.
+CLOSING_CONFIRM_FRAMES = int(1.5 * OVERRIDE_HZ)
+
+# MEASURED OVER THE WINDOW, NOT FRAME TO FRAME, and that distinction is the whole gate.
+#
+# The first version counted CONSECUTIVE frames where the endpoint had closed since the previous
+# frame, and it rejected EVERY approach on both drives -- his real traffic light included. The raw
+# 50 Hz endpoint jitters: measured on route 0000039a, consecutive samples on a genuine approach read
+# 41.8, 41.8, 43.5, 43.5, 43.9 m. It is closing over seconds and rising over frames, so any
+# consecutive test resets on noise and never completes.
+#
+# It passed its unit test because the fixture interpolated a perfectly smooth line, which is the
+# same fixture-is-unphysical trap this file has now hit three times: a constant endpoint, a constant
+# speed, and now a noiseless one. Compare against the sample from CLOSING_CONFIRM_FRAMES ago and the
+# road covered in between, and jitter cancels.
+
+# How much of the distance actually travelled the endpoint must give up to count as closing. Not
+# 100%: the model re-plans every frame and the endpoint carries real jitter, so demanding perfect
+# tracking would reject genuine approaches. Not 0 either -- that is the flat 141 -> 142 m case.
+CLOSING_FRACTION = 0.35
 
 # A lead this close is Ford's business. Beyond it the radar has nothing useful and the stop is ours.
 LEAD_DISQUALIFIES_M = 60.0
@@ -224,6 +294,10 @@ class FordStopOverride:
     self.holding = False
     self.hold_frames = 0
     self.no_ask_frames = 0      # consecutive frames the model has not asked for a stop
+    # Consecutive frames the model's stop point has closed like a fixed place in the world. See
+    # CLOSING_CONFIRM_FRAMES -- this is what keeps a phantom stop from arming a brake at 45 mph.
+    # (endpoint, metres travelled since the previous sample) over the confirmation window.
+    self.closing_window: deque = deque(maxlen=CLOSING_CONFIRM_FRAMES)
     self.last_result = ""       # for logging only, never used to decide
 
   def _end(self, why: str) -> None:
@@ -255,6 +329,9 @@ class FordStopOverride:
       self.active = False
       self.spent = False
       self.frames = 0
+      # The closing evidence is about ONE approach. Carrying it across a disengagement would let a
+      # confirmation earned before the driver took over arm instantly on re-engagement somewhere else.
+      self.closing_window.clear()
       # THE HOLD MUST DIE HERE TOO. Missed on the first pass and caught by its own test: this branch
       # reset `active` and `frames` and left `holding` set, so a hold survived longitudinal going
       # inactive -- and `holding` is what latches the resume gate. He presses the gas to pull away,
@@ -308,6 +385,9 @@ class FordStopOverride:
       # After `_end`, not before: `_end` sets spent=True, so an assignment ahead of it is dead and
       # reads as though one of the two paths needed it.
       self.spent = False
+      # The model gave up on this stop, so the evidence for it is gone too. A phantom that flickers
+      # off and back on must start earning confirmation again rather than resuming a part-built case.
+      self.closing_window.clear()
       return False
 
     # The model is asking again, so the debounce starts over.
@@ -427,7 +507,20 @@ class FordStopOverride:
     # publisher's `isfinite` guard lives in a DIFFERENT REPO from this consumer, so this file has no
     # structural claim on it.
     if not (stop_endpoint_m > 0.0):
+      # No endpoint is no evidence -- do not let a gap in the plan preserve a part-built case.
+      self.closing_window.clear()
       return False
+
+    # DOES THE STOP POINT BEHAVE LIKE A REAL PLACE? Over the window, a fixed point ahead must give
+    # up at least CLOSING_FRACTION of the road actually covered.
+    self.closing_window.append((stop_endpoint_m, v_ego / OVERRIDE_HZ))
+    if len(self.closing_window) < CLOSING_CONFIRM_FRAMES:
+      return False          # not enough history yet to tell a place from a phantom
+    oldest_endpoint = self.closing_window[0][0]
+    # Skip the oldest sample's own increment: it is the road covered BEFORE that reading was taken.
+    travelled = sum(step for _, step in list(self.closing_window)[1:])
+    if oldest_endpoint - stop_endpoint_m < CLOSING_FRACTION * travelled:
+      return False          # not closing like a place in the world -- see CLOSING_FRACTION
     # NO FLOOR. `STOP_MIN_RANGE_M = 10.0` was added on the reasoning that the computed range gets
     # too tight to be useful at a crawl. It does the opposite: the model's trajectory horizon is
     # roughly 10*v, so below about 2.2 mph the horizon is ITSELF under 10 m and the gate armed with
@@ -443,5 +536,6 @@ class FordStopOverride:
     self.frames = 0
     self.holding = False
     self.hold_frames = 0
+    self.closing_window.clear()
     self.last_result = "stopping for something the radar cannot see"
     return True
