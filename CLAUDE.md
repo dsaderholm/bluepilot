@@ -3230,8 +3230,24 @@ reason to refuse. Fixed, and it is a warning about diagnostic prose generally --
 a VERDICT rather than a number gets believed, so its reasoning has to survive the same scrutiny as
 the code.
 
-**The 32.1% "lane position unknown" is the honest remaining gap**, and it is a coverage question
-for the anchor rather than a fault in the gate.
+**AND THE 32% "lane position unknown" IS MOSTLY NOT A GAP EITHER.** Measured with
+`tools/bp_lane_unknown_why.py --refusals`, restricted to those exact frames:
+
+    empty noLaneAvailable refusals            1,335    anchor knew the lane on 63.7%
+    UNKNOWN                                     485
+      road is TWO-WAY                           338   69.7%   refusal BY DESIGN
+      two lanes with a line each side            61   12.6%   map count vs paint disagree
+      bound is a RANGE (1,2), edge untrusted     54   11.1%   middle of a 4-lane road
+      bound is a RANGE (1,3), edge untrusted     32    6.6%   middle of a 5-lane road
+
+Two-way roads are 70% of it and they are not coverage to close: the map's `lanes` counts BOTH
+directions there, so counting leftward from the shoulder walks into oncoming. Refusing is the
+whole point. What is left -- the two RANGE rows -- is 86 frames, and on a 4 or 5 lane road the
+lines can only ever narrow, never pin, so the strip already shows it correctly as a range.
+
+**So the actionable remainder across all three drives is under a hundred frames.** Whole-drive
+anchor coverage is a different number with a different denominator (61.9% known, 76.7% of unknowns
+two-way) and the two must not be quoted for each other.
 
 ## PASSING ASSIST CANNOT SEE A CONSTRUCTION ZONE. Reported 2026-08-19.
 
