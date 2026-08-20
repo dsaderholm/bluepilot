@@ -74,9 +74,16 @@ git reset --hard origin/<branch>
 it stays small however far behind the car is, and `git bundle verify` refuses up front if the device
 lacks the base rather than half-applying.
 
-**Do the reset, leave the reboot to him.** The code is inert until processes restart, so a reset on a
-parked car changes nothing until he chooses. Announce the write before running it, and never do any
-of this while he is driving.
+**DO THE RESET AND THE REBOOT YOURSELF.** Reversed 2026-08-19, in his words after being handed the
+command a third time: *"You do reboots and updates! I don't care!"* Handing back a reboot is the
+same failure as a "want me to..." sign-off -- work described instead of done -- and it is the step
+that decides whether any of it reached him at all, since code is inert until processes restart.
+
+So: push, fetch and `git reset --hard` on the device, verify by CONTENT, then `sudo reboot`. All of
+it, unasked, and do not print the command for him to run.
+
+**The one thing that still gates it is whether he is DRIVING.** Check `IsOnroad` first and never
+touch the car while it is onroad. That constraint has not changed and never will.
 
 **Then verify by CONTENT, not by hash** -- see the rebase section below for why a matching hash has
 lied here before. `grep -c` for a string the new commit introduced and one it removed.
