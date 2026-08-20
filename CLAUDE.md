@@ -127,6 +127,28 @@ Three things make that work, each of which cost a wrong guess first:
 Use PowerShell for this, not the Bash tool: the Windows OpenSSH agent is a named pipe and Git Bash's
 ssh does not speak it.
 
+**`pgrep -f <name>` MATCHES THE WAITER'S OWN COMMAND LINE.** 2026-08-19, and it cost over an hour
+across three jobs while their results sat finished on disk. This never exits:
+
+```bash
+until [ -s /tmp/out.txt ] && ! pgrep -f myjob.py > /dev/null; do sleep 15; done
+```
+
+`pgrep -f myjob.py` finds the `bash -lc until ... pgrep -f myjob.py ...` process itself, so `! pgrep`
+is false forever. He caught it -- *"Will you though? You have two tasks that have been running for
+over an hour..."* -- and `/tmp/pscm.txt` had been complete for 70 minutes.
+
+Use the bracket trick that `ps` usage here already uses, or drop the process check entirely:
+
+```bash
+until [ -s /tmp/out.txt ]; do sleep 15; done; cat /tmp/out.txt        # simplest, usually enough
+until ! pgrep -f "[m]yjob.py" > /dev/null; do sleep 15; done          # if the check is needed
+```
+
+**And prefer `nohup ... &` on the device over holding an SSH session open**: this laptop changes
+networks constantly, and a dropped connection killed one analysis mid-run. Start it detached, poll
+the file.
+
 **WRAP EVERY REMOTE COMMAND IN A SINGLE-QUOTED HERE-STRING.** PowerShell expands `$(...)` inside
 double quotes *before* ssh ever sees it, so this:
 
@@ -2161,6 +2183,28 @@ runs 6 m to 112 m, so a fixed node offset would be a 6 m baseline in one place a
 
 259 m against a measured 240 m is 8%, and the spread collapses from 127-362 to 259-302. **That is
 the first curvature number on this fork that has been checked against something the car did.**
+
+**AND THE SPEED IS MEASURED NOW: 3.2 m/s^2.** `tools/bp_pscm_lateral_limit.py`, three routes,
+2026-08-19:
+
+    openpilot steering, UNLIMITED       n=6013   p50 1.15   p90 2.05   p99 3.21   max 4.20
+    openpilot steering, a limiter bit   n= 130   p50 1.79   p90 3.10   p99 3.71
+    HE was steering                     NO DATA
+
+**A 259 m corner at 3.21 m/s^2 is 64 mph, which is exactly the speed he took that corner at.** Two
+independent measurements -- the tile's geometry and the car's achieved lateral acceleration --
+converge on what he actually drove. mapd's 2.2 would have asked for 53.
+
+This was only measurable because of a find while looking for it: **`MAX_LATERAL_ACCEL` (~2.4) is
+applied in `carcontroller.py` and `lateral_curv_ext.py` and appears ZERO times in
+`lateral_angle_ext.py`**, which is his car's path. Angle mode has no lateral-accel cap, so every
+corner driven with MADS on is already a sample of what the PSCM will do.
+
+**Two honest limits on it.** The driver-steered comparison is empty -- MADS is always on, so
+`latActive` is true nearly always and there is no hand-steered baseline to prove openpilot's ceiling
+sits BELOW his. And p99 is not a hard limit: max was 4.20 and the 130 limiter-bitten frames ran
+HIGHER (p99 3.71), which is the expected shape -- our own clips bite during the hardest cornering.
+So 3.2 is "sustained and demonstrated", not "the most the PSCM can do".
 
 **WHAT IS STILL MISSING IS THE SPEED, and it is deliberately not invented.** Turning 259 m into a
 corner speed needs `v = sqrt(a_lat * R)`, and `a_lat` is the open question -- his own correction:
