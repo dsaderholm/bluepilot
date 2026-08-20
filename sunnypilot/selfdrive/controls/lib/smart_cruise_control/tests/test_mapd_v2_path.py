@@ -9,6 +9,9 @@ import math
 
 import pytest
 
+from openpilot.sunnypilot.selfdrive.controls.lib.smart_cruise_control.mapd_v2_path import (
+  _CORNER_LAT_ACC,
+)
 from openpilot.sunnypilot.selfdrive.controls.lib.smart_cruise_control.mapd_v2_path import path_from_mapd
 
 
@@ -58,21 +61,21 @@ def test_the_corner_speed_is_ours_and_comes_from_curvature():
   assert position.latitude == pytest.approx(40.75)
   assert targets == [
     {"latitude": pytest.approx(40.76), "longitude": pytest.approx(-111.90),
-     "velocity": pytest.approx(math.sqrt(2.5 / 0.01))},      # 100 m radius -> 15.8 m/s
+     "velocity": pytest.approx(math.sqrt(_CORNER_LAT_ACC / 0.01))},      # 100 m radius -> 15.8 m/s
     {"latitude": pytest.approx(40.77), "longitude": pytest.approx(-111.91),
-     "velocity": pytest.approx(math.sqrt(2.5 / 0.0025))},    # 400 m radius -> 31.6 m/s
+     "velocity": pytest.approx(math.sqrt(_CORNER_LAT_ACC / 0.0025))},    # 400 m radius -> 31.6 m/s
   ]
 
 
 def test_it_plans_corners_faster_than_mapd_did_and_by_the_expected_ratio():
-  """Wiring 2.5 where mapd used 2.2 RAISES corner speeds by sqrt(2.5/2.2) = 6.6%. Pinned because it
+  """Wiring 2.5 where mapd used 2.2 RAISES corner speeds by sqrt(_CORNER_LAT_ACC/2.2) = 6.6%. Pinned because it
   is the opposite direction from "low speed curves don't slow enough" and must stay a deliberate,
   visible consequence rather than a surprise -- that complaint was measured to be map COVERAGE
   (SCC-Map active 146 frames in 26 minutes), not this constant."""
   k = 0.004
   _, targets = path_from_mapd(FakeSM(points=[(40.76, -111.90, 0.0, k)]))
   mapd_would_have = math.sqrt(2.2 / k)
-  assert targets[0]["velocity"] == pytest.approx(mapd_would_have * math.sqrt(2.5 / 2.2))
+  assert targets[0]["velocity"] == pytest.approx(mapd_would_have * math.sqrt(_CORNER_LAT_ACC / 2.2))
 
 
 def test_none_when_mapd_is_not_publishing():
@@ -99,7 +102,7 @@ def test_a_point_with_no_curvature_yields_no_target():
   sm = FakeSM(points=[(40.76, -111.90, 0.0, 0.0), (40.77, -111.91, 0.0, 0.01)])
   _, targets = path_from_mapd(sm)
   assert len(targets) == 1
-  assert targets[0]["velocity"] == pytest.approx(math.sqrt(2.5 / 0.01))
+  assert targets[0]["velocity"] == pytest.approx(math.sqrt(_CORNER_LAT_ACC / 0.01))
   assert all(t["velocity"] > 0 for t in targets), "a zero corner speed would be walked as a stop"
 
 
@@ -126,7 +129,7 @@ def test_curvature_with_no_velocity_is_now_a_CORNER_not_a_fallback():
   result = path_from_mapd(sm)
   assert result is not None, "a bend mapd could not price must now be priced by us, not sent to v1"
   _, targets = result
-  assert targets[0]["velocity"] == pytest.approx(math.sqrt(2.5 / 0.01))
+  assert targets[0]["velocity"] == pytest.approx(math.sqrt(_CORNER_LAT_ACC / 0.01))
 
 
 def test_the_controller_actually_walks_the_v2_path():
@@ -210,7 +213,7 @@ def test_a_nan_curvature_among_good_points_is_dropped_rather_than_priced():
   assert result is not None, "one bad point must not cost the whole path"
   _, targets = result
   assert len(targets) == 1, f"the NaN-curvature point was priced: {targets}"
-  assert targets[0]["velocity"] == pytest.approx(math.sqrt(2.5 / 0.01))
+  assert targets[0]["velocity"] == pytest.approx(math.sqrt(_CORNER_LAT_ACC / 0.01))
   assert not any(math.isnan(t["velocity"]) for t in targets)
 
 
@@ -245,7 +248,7 @@ def test_a_bend_mapd_flattened_is_still_priced_as_a_bend():
   assert targets, "a real 240 m bend produced no corner at all"
   slowest = min(t["velocity"] for t in targets)
   # sqrt(2.5/240) = 0.102 rad/s -> 15.6 m/s. mapd's 2e-5 would have priced it at 354 m/s.
-  assert slowest == pytest.approx(math.sqrt(2.5 / (1 / 240.0)), rel=0.15), \
+  assert slowest == pytest.approx(math.sqrt(_CORNER_LAT_ACC / (1 / 240.0)), rel=0.15), \
     f"priced at {slowest:.1f} m/s -- mapd's flattened curvature won"
 
 
@@ -255,7 +258,7 @@ def test_mapd_still_wins_where_it_sees_a_tighter_corner_than_we_resolve():
   pts = [(40.76 + i * 1e-5, -111.9, 0.0, 0.02) for i in range(6)]   # straight coords, mapd says 50 m
   _, targets = path_from_mapd(FakeSM(points=pts))
   assert targets, "mapd's own corner was discarded"
-  assert min(t["velocity"] for t in targets) == pytest.approx(math.sqrt(2.5 / 0.02))
+  assert min(t["velocity"] for t in targets) == pytest.approx(math.sqrt(_CORNER_LAT_ACC / 0.02))
 
 
 def test_a_genuinely_straight_road_is_still_straight_with_both_sources():
