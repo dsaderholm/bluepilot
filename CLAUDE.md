@@ -2184,16 +2184,46 @@ runs 6 m to 112 m, so a fixed node offset would be a 6 m baseline in one place a
 259 m against a measured 240 m is 8%, and the spread collapses from 127-362 to 259-302. **That is
 the first curvature number on this fork that has been checked against something the car did.**
 
-**AND THE SPEED IS MEASURED NOW: 3.2 m/s^2.** `tools/bp_pscm_lateral_limit.py`, three routes,
-2026-08-19:
+**THE SPEED IS MEASURED: THE PSCM HOLDS ABOUT 2.5 m/s^2, AND HE TAKES CORNERS AT 4.**
 
-    openpilot steering, UNLIMITED       n=6013   p50 1.15   p90 2.05   p99 3.21   max 4.20
-    openpilot steering, a limiter bit   n= 130   p50 1.79   p90 3.10   p99 3.71
-    HE was steering                     NO DATA
+The first answer was **3.21 m/s^2** and it was WRONG, in the most instructive way available. He
+called it twice -- *"So that's how fast I take them?"* then *"I bet that 3.2 is how fast I am taking
+them"* -- and he was right both times. `latActive` only means openpilot was PERMITTED to steer; it
+says nothing about whose hands were on the wheel. Splitting on `steeringPressed`:
 
-**A 259 m corner at 3.21 m/s^2 is 64 mph, which is exactly the speed he took that corner at.** Two
-independent measurements -- the tile's geometry and the car's achieved lateral acceleration --
-converge on what he actually drove. mapd's 2.2 would have asked for 53.
+    openpilot alone (no hands)   n=5251   p50 1.09   p90 1.93   p99 2.73   max 3.19
+    HIS hands on the wheel       n= 892   p50 1.95   p90 3.09   p99 4.14   max 4.20
+
+**openpilot has never once exceeded 3.2. The 3.21 was his 892 frames leaking into the number.**
+
+**AND THE "CONVERGENCE" WAS CIRCULAR, which is the part to remember.** 3.21 on a 259 m corner gives
+64 mph, and he drove that corner at 64 -- reported as two independent measurements agreeing. They
+were not independent: one was derived from his driving, so it had to come out at his speed. This is
+the file's own rule -- *a number only one tool can produce has never been checked* -- failing in a
+new costume, because there APPEARED to be two numbers.
+
+**WHERE THE PSCM STOPS KEEPING UP, which is the question he actually asked** (achieved is not
+comfortable -- it can produce 3.2 while tracking badly and running wide):
+
+    lat_acc bin   frames  limiter%  devLim%  hands-on%
+    0.5 - 1.0       2511     0.8      0.4       6.2
+    1.5 - 2.0       1269     3.1      2.0      19.8
+    2.0 - 2.5        491     3.7      1.8      36.9
+    2.5 - 3.0        198     9.1      8.1      55.6
+    3.0 - 3.5         73    27.4     27.4      90.4
+    3.5 - 4.0         25    12.0     12.0     100.0
+
+The deviation limiter is quiet to 2.5 (<= 3.7%), then 9.1%, then **27.4%**. And `hands-on%` climbs
+the same curve -- 6% low, 90%+ above 3.0 -- so he TAKES OVER exactly where the PSCM starts losing
+the line. Two independent signatures of the same ceiling, and this pair genuinely is independent.
+
+    the PSCM comfortably holds     ~2.5 m/s^2      259 m corner -> 57 mph
+    openpilot's own p99             2.73           259 m corner -> 59 mph
+    he drives it at                 ~4.1           259 m corner -> 64 mph, measured
+
+**So his original correction was exactly right and is now quantified: he takes corners about 1.5
+m/s^2 harder than his PSCM can hold, which is 5-7 mph on that bend.** The corner target belongs near
+2.5, NOT at what the car has been observed doing.
 
 This was only measurable because of a find while looking for it: **`MAX_LATERAL_ACCEL` (~2.4) is
 applied in `carcontroller.py` and `lateral_curv_ext.py` and appears ZERO times in

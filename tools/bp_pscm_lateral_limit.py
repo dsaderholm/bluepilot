@@ -109,6 +109,7 @@ def main() -> int:
     print("# {}  ({} segments)".format(route, len(segs)))
 
     lat_active = False
+    steering_pressed = False
     rate_lim = dev_lim = False
     v_mph = 0.0
 
@@ -131,6 +132,7 @@ def main() -> int:
         try:
           if w == "carState":
             v_mph = float(m.carState.vEgo) * MS_TO_MPH
+            steering_pressed = bool(m.carState.steeringPressed)
           elif w == "carControl":
             lat_active = bool(m.carControl.latActive)
           elif w == "controllerStateBP":
@@ -142,7 +144,12 @@ def main() -> int:
             a = abs(float(m.longitudinalPlanSP.smartCruiseControl.vision.currentLateralAccel))
             if v_mph < MIN_MPH or a < MIN_LAT_ACC:
               continue
-            if not lat_active:
+            # `latActive` alone is NOT "openpilot was steering" -- it means openpilot was PERMITTED
+            # to steer. He caught the first version reporting 3.21 m/s^2 as openpilot's capability
+            # when 892 of those frames had his own hands on the wheel, and above 3.0 m/s^2 NINETY
+            # PERCENT of them did. steeringPressed is the discriminator and it moves the answer by
+            # half a metre per second squared.
+            if not lat_active or steering_pressed:
               driver.append(a)
             elif rate_lim or dev_lim:
               op_limited.append(a)
@@ -156,7 +163,7 @@ def main() -> int:
     MIN_MPH, MIN_LAT_ACC))
   report("openpilot steering, UNLIMITED", op_clean)
   report("openpilot steering, a limiter bit", op_limited)
-  report("HE was steering", driver)
+  report("HE was steering (or hands on)", driver)
   if no_flag_data:
     print("  !! controllerStateBP never arrived -- the limiter split above is NOT trustworthy.")
 
