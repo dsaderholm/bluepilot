@@ -112,6 +112,19 @@ OVERRIDE_HZ = 50.0
 MAX_ACTIVE_S = 8.0
 MAX_ACTIVE_FRAMES = int(MAX_ACTIVE_S * OVERRIDE_HZ)  # 400
 
+# THE HOLD, which is a different regime from the approach and so gets its own bound.
+#
+# The approach contradicts Ford while the car is MOVING -- that is what drive A's 40 s cancel latch
+# was about, and why MAX_ACTIVE_S is a tight 8. A standstill is not that: Ford has no lead to hold
+# against, its ACC is below its own operating speed, and our frame asserts `AccStopStat_B_Rq`, the
+# same bit Ford asserts while holding a stop of its own.
+#
+# 45 s covers an ordinary light without being unbounded. It is REASONED, not measured -- nothing has
+# ever held a stop on this car for us to measure -- so it stays finite, and the end is logged rather
+# than silent, because the failure it produces is the car starting to roll.
+MAX_HOLD_S = 45.0
+MAX_HOLD_FRAMES = int(MAX_HOLD_S * OVERRIDE_HZ)
+
 # Long enough for a 20 mph stop at a comfortable rate, five times under drive A's 40 s. If a real
 # stop needs longer than this, that is a finding to act on rather than a number to quietly raise.
 
@@ -145,6 +158,10 @@ class FordStopOverride:
     self.active = False
     self.spent = False          # fired already; will not re-arm until the model stops asking
     self.frames = 0
+    # The hold phase. Separate counter from `frames` because the approach and the hold are different
+    # regimes with different bounds -- see MAX_HOLD_S.
+    self.holding = False
+    self.hold_frames = 0
     self.last_result = ""       # for logging only, never used to decide
 
   def _end(self, why: str) -> None:
@@ -153,6 +170,8 @@ class FordStopOverride:
     self.active = False
     self.spent = True
     self.frames = 0
+    self.holding = False
+    self.hold_frames = 0
 
   def update(self, long_active: bool, v_ego: float, has_slow_down: bool, op_stopping: bool,
              lead_distance: float, stop_endpoint_m: float = 0.0) -> bool:
@@ -172,6 +191,12 @@ class FordStopOverride:
       self.active = False
       self.spent = False
       self.frames = 0
+      # THE HOLD MUST DIE HERE TOO. Missed on the first pass and caught by its own test: this branch
+      # reset `active` and `frames` and left `holding` set, so a hold survived longitudinal going
+      # inactive -- and `holding` is what latches the resume gate. He presses the gas to pull away,
+      # longitudinal drops, and the gate stays latched telling the car this stop was still ours.
+      self.holding = False
+      self.hold_frames = 0
       return False
 
     # The reason going away is the only thing that re-arms it. Deliberately NOT keyed on the car
@@ -189,9 +214,37 @@ class FordStopOverride:
 
     if self.active:
       self.frames += 1
+
+      # THE CREEP. Reported 2026-08-20: *"OP long tried to stop, but it crept forward a bit so I
+      # gave up."* This block used to `_end("stopped")` the instant the car reached STOPPED_SPEED,
+      # on the reasoning that "Ford's own AccStopStat handling takes it from here". IT DOES NOT --
+      # not without a lead. Ford's stop-and-go holds a stop behind a CAR; at an empty light there is
+      # nothing for its radar to hold against, so handing back at 0.5 mph hands back to a controller
+      # that has no reason to keep the car still. The car rolls.
+      #
+      # So the override now HOLDS through standstill, and two things make that safe rather than
+      # bold:
+      #
+      #   - `create_acc_msg` NEVER SETS `AccBrkPrkEl_B_Rq`. It is not in the values dict at all, so
+      #     holding openpilot's frame against a stationary car cannot reproduce drive A's park
+      #     brake -- that came from the PASSTHROUGH forwarding Ford's own copy of that bit.
+      #   - `AccStopStat_B_Rq` is set from `stopping`, and `shouldStop` is measured to be true
+      #     exactly at a standstill. So while holding, our frame asserts the SAME bit Ford asserts
+      #     while holding a stop. We are speaking its language, not inventing one.
+      #
+      # The hold is bounded SEPARATELY from the approach, because they are different regimes. The
+      # approach contradicts Ford while moving, which is what drive A's 40 s latch was about. At a
+      # standstill with no lead there is far less to contradict -- Ford has no target and its ACC is
+      # below its own operating speed. That is REASONING, not measurement, so the bound stays finite
+      # and generous rather than absent, and the first drive with a real light is what checks it.
       if v_ego <= STOPPED_SPEED:
-        self._end("stopped")
-        return False
+        self.holding = True
+        if self.hold_frames > MAX_HOLD_FRAMES:
+          self._end("hold bound reached -- the car may roll, see the creep note")
+          return False
+        self.hold_frames += 1
+        self.last_result = "holding a stop Ford will not hold"
+        return True
       if lead_close:
         self._end("a lead appeared; Ford's stop-and-go owns this")
         return False
@@ -251,5 +304,7 @@ class FordStopOverride:
 
     self.active = True
     self.frames = 0
+    self.holding = False
+    self.hold_frames = 0
     self.last_result = "stopping for something the radar cannot see"
     return True

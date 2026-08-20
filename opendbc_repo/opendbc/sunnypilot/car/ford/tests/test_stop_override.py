@@ -22,7 +22,9 @@ from opendbc.sunnypilot.car.ford.stop_override import (
   LEAD_DISQUALIFIES_M,
   MAX_ACTIVE_FRAMES,
   MAX_ACTIVE_S,
+  MAX_HOLD_S,
   MPH_TO_MS,
+  OVERRIDE_HZ,
   FordStopOverride,
 )
 
@@ -67,11 +69,18 @@ def test_a_lead_disqualifies_it_because_ford_stops_for_those_itself():
   assert "lead" in o2.last_result
 
 
-def test_it_ends_when_the_car_is_stopped():
+def test_it_HOLDS_when_the_car_is_stopped():
+  """THE CREEP FIX, 2026-08-20. This used to end at a standstill on the reasoning that "Ford's own
+  AccStopStat handling takes it from here". It does not -- not without a lead. Ford's stop-and-go
+  holds a stop behind a CAR; at an empty light its radar has nothing to hold against, so handing
+  back at 0.5 mph handed back to a controller with no reason to keep the car still.
+
+  He reported it directly: *"OP long tried to stop, but it crept forward a bit so I gave up."*
+  """
   o = FordStopOverride()
   assert _stopping(o) is True
-  assert _stopping(o, v=0.0) is False
-  assert o.last_result == "stopped"
+  assert _stopping(o, v=0.0) is True, "handing back at a standstill is what makes the car creep"
+  assert o.holding is True
 
 
 def test_the_time_bound_ends_it_even_if_the_reason_persists():
@@ -226,38 +235,63 @@ def _drive_to_a_stop(so, **kw):
   return out
 
 
-def test_the_stopped_latch_must_be_edge_triggered():
-  """`last_result` persists, so the resume gate cannot key on its value alone.
+def test_only_a_stop_WE_are_holding_latches_the_resume_gate():
+  """The gate tells `resume_allowed` "this stop was ours, do not pull away on the model's say-so".
 
-  The latch tells `resume_allowed` "this stop was ours, do not pull away on the model's say-so".
-  After one real override stop, `last_result` stays the string "stopped" until the next arm or end
-  -- so a later stop that the override never touched (a lead in front, the model never asking, the
-  feature never arming) still reads "stopped" and re-latches. That is the queue-cleared open-road
-  case, where openpilot's automatic resume is exactly what he wants, and he would instead sit at a
-  green light waiting for a press. Found re-checking my own fix, 2026-08-18."""
+  It used to key on `last_result == "stopped"` read on the frame the override ENDED, which had to be
+  edge-triggered: `last_result` is a string that persists, so testing it on its own re-latched on
+  every later stop for the rest of the drive -- including the queue-cleared open-road case where
+  automatic resume is exactly what he wants, and he would instead sit at a green light waiting for a
+  press. (Found re-checking my own fix, 2026-08-18.)
+
+  The override HOLDS through a standstill now rather than ending at one, so that end never comes and
+  that edge never fires. The gate keys on `holding` instead -- state that is true only while this
+  override actually has the car, and that `_end` clears. This test is the same requirement against
+  the new signal: it must be true through OUR stop and false through a stop we never touched.
+  """
   so = FordStopOverride()
   frames = _drive_to_a_stop(so)
-  edges = [f for f in frames if f[0] and not f[1] and f[2] == "stopped"]
-  assert len(edges) == 1, f"the stop should latch on exactly one frame, got {len(edges)}"
-  assert so.last_result == "stopped"
+  assert any(f[1] for f in frames), "the override never took the stop at all"
+  assert so.holding is True, "the override must still have the car while it is stopped"
 
-  # Now a SECOND stop that the override has nothing to do with: a lead close enough that Ford owns
-  # it, so the override never arms. `last_result` is still "stopped" from the first one.
+  # A SECOND stop the override has nothing to do with: a lead close enough that Ford owns it, so it
+  # never arms. `last_result` is still the string from the first stop, which is exactly why the gate
+  # must not read that.
   so.update(long_active=True, v_ego=30.0 * MPH_TO_MS, has_slow_down=False,
             op_stopping=False, lead_distance=0.0, stop_endpoint_m=NEAR)
-  latched_again = False
+  assert so.holding is False, "the reason going away must release the hold"
   for v_mph in (20.0, 10.0, 4.0, 0.3):
-    was_active = so.active
     override = so.update(long_active=True, v_ego=v_mph * MPH_TO_MS, has_slow_down=True,
                          op_stopping=True, lead_distance=25.0, stop_endpoint_m=NEAR)
     assert not override, "a lead inside 60 m is Ford's stop, not ours"
-    if was_active and not override and so.last_result == "stopped":
-      latched_again = True
-  assert not latched_again, (
-    "the second stop re-latched -- the carcontroller must read `was_active` from BEFORE update() "
-    "rather than testing last_result on its own")
-  # And the stale string is still sitting there, which is why the edge is the only safe test.
-  assert so.last_result == "stopped"
+    assert so.holding is False, (
+      "a stop the override never took latched the resume gate -- he would sit at a green light")
+
+
+def test_the_hold_is_released_when_longitudinal_goes_inactive():
+  """His brake or his gas ends longitudinal, and the hold must not outlive it -- nothing may be
+  authored with longitudinal inactive at all."""
+  so = FordStopOverride()
+  _drive_to_a_stop(so)
+  assert so.holding is True
+  assert so.update(long_active=False, v_ego=0.0, has_slow_down=True, op_stopping=True,
+                   lead_distance=0.0, stop_endpoint_m=NEAR) is False
+  assert so.holding is False
+
+
+def test_the_hold_is_bounded_so_a_wedged_hold_cannot_last_the_drive():
+  """45 s covers an ordinary light. It is REASONED rather than measured -- nothing has ever held a
+  stop on this car -- so it stays finite, and the car rolling is the failure it trades against."""
+  so = FordStopOverride()
+  _drive_to_a_stop(so)
+  held = 0
+  for _ in range(int(MAX_HOLD_S * OVERRIDE_HZ) + 50):
+    if not so.update(long_active=True, v_ego=0.0, has_slow_down=True, op_stopping=True,
+                     lead_distance=0.0, stop_endpoint_m=NEAR):
+      break
+    held += 1
+  assert held > OVERRIDE_HZ * 30, f"gave up after {held / OVERRIDE_HZ:.0f}s -- too short for a light"
+  assert held <= MAX_HOLD_S * OVERRIDE_HZ + 2, "the hold is effectively unbounded"
 
 
 def test_the_entry_speed_is_reachable_within_the_time_bound():

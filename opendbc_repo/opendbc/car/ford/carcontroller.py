@@ -365,7 +365,17 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
           # stop for the rest of the drive -- including the queue-cleared open-road case the gate
           # is supposed to let through, where he would sit at a green light waiting for a resume
           # that never comes. The transition into "stopped" happens on exactly one frame.
-          if was_active and not override and self.stop_override.last_result == "stopped":
+          # KEYED ON `holding` SINCE 2026-08-20, and the rename is not cosmetic. The override used
+          # to `_end("stopped")` the moment the car reached a standstill, so this edge existed. It
+          # now HOLDS the car instead -- Ford does not hold a stop without a lead, which is the
+          # creep he reported -- so that end never comes and this latch would never fire. openpilot
+          # would then be free to pull away from a stop the override itself authored.
+          #
+          # Level, not edge, and deliberately: the gate has to hold for the WHOLE standstill, not
+          # just the frame it began on. The edge-triggering that mattered was about `last_result`
+          # being a string that persists and re-latches on unrelated later stops; `holding` is state
+          # that is true only while this override actually has the car, and `_end` clears it.
+          if self.stop_override.holding:
             self.stop_override_stopped_us = True
 
           if override != self.stop_override_last:
