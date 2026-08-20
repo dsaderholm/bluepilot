@@ -168,3 +168,60 @@ def test_the_ends_of_a_way_report_straight_rather_than_a_short_baseline():
 def test_a_way_shorter_than_the_baseline_reads_straight_not_noisy():
   nodes = _circle_nodes(240.0, spacing_m=12.0)[:4]
   assert all(c == 0.0 for c in tc.curvature_profile_baseline(nodes))
+
+
+# --- multiscale: the finest baseline that still clears the noise floor --------------------------
+
+def test_a_tight_corner_needs_a_SHORT_baseline_and_gets_one():
+  """MEASURED ON HIS OWN mapd PATH, 2026-08-19. A 21 m turn read 30 m at the fixed 70 m baseline --
+  the baseline was longer than the corner and averaged it away, which is mapd's own failure
+  reproduced by the fix for it. The ladder must pick a short rung here."""
+  nodes = _circle_nodes(21.0, spacing_m=4.0, arc_deg=180.0)
+  fixed = [abs(c) for c in tc.curvature_profile_baseline(nodes, 70.0) if c > 0]
+  multi = [abs(c) for c in tc.curvature_profile_multiscale(nodes) if c > 0]
+  assert multi, "the ladder produced no reading on a real 21 m corner"
+  best = tc.radius_m(sorted(multi)[len(multi) // 2])
+  assert abs(best - 21.0) / 21.0 < 0.25, f"multiscale read {best:.0f} m on a 21 m corner"
+  if fixed:
+    worst = tc.radius_m(sorted(fixed)[len(fixed) // 2])
+    assert abs(best - 21.0) < abs(worst - 21.0), "the ladder is no better than the fixed baseline"
+
+
+def test_a_sweeper_still_gets_the_LONG_baseline():
+  """The other end, unchanged: a 240 m bend at 12 m spacing is below the jitter floor on a short
+  rung, so the ladder must keep walking out to one that clears it."""
+  nodes = _circle_nodes(240.0, spacing_m=12.0)
+  multi = [abs(c) for c in tc.curvature_profile_multiscale(nodes) if c > 0]
+  assert multi, "no rung of the ladder resolved a 240 m sweeper"
+  mid = tc.radius_m(sorted(multi)[len(multi) // 2])
+  assert abs(mid - 240.0) / 240.0 < 0.10, f"multiscale read {mid:.0f} m on a 240 m sweeper"
+
+
+def test_jitter_on_a_straight_still_reads_straight():
+  """The property the whole ladder exists to keep. A short rung is available now, so the noise floor
+  has to be what rejects it -- not the absence of a short baseline."""
+  import math as _m
+  lat0, lon0 = 40.76, -111.89
+  mlat, mlon = 111320.0, 111320.0 * _m.cos(_m.radians(lat0))
+  nodes = [(lat0 + (i * 12.0) / mlat, lon0 + (0.5 if i % 2 else -0.5) / mlon) for i in range(60)]
+
+  multi = [abs(c) for c in tc.curvature_profile_multiscale(nodes) if c != 0.0]
+  narrow = [abs(c) for c in tc.curvature_profile(nodes)[1:-1] if c > 0]
+  worst_narrow = tc.radius_m(max(narrow))
+  if multi:
+    assert tc.radius_m(max(multi)) > 5 * worst_narrow, \
+      f"the ladder let jitter through at {tc.radius_m(max(multi)):.0f} m"
+
+
+def test_every_reading_clears_the_noise_floor_it_was_measured_at():
+  """The ladder's whole contract, asserted directly rather than via an example: whatever rung a
+  reading came from, k * L^2 must have cleared 8 * jitter * SNR -- otherwise it is a number the
+  module itself does not believe."""
+  need = 8.0 * tc._JITTER_M * tc._SNR
+  for r, spacing in ((21.0, 4.0), (60.0, 8.0), (240.0, 12.0), (600.0, 20.0)):
+    nodes = _circle_nodes(r, spacing_m=spacing, arc_deg=180.0)
+    for k in tc.curvature_profile_multiscale(nodes):
+      if k == 0.0:
+        continue
+      assert any(abs(k) * L * L >= need for L in tc._BASELINE_LADDER), \
+        f"R={r}: emitted k={k} that clears no rung's noise floor"

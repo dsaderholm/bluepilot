@@ -23,6 +23,10 @@ WHAT IS NOT USED YET, and is the reason to come back here:
 """
 import math
 
+from openpilot.sunnypilot.selfdrive.controls.lib.smart_cruise_control.tile_curvature import (
+  curvature_profile_multiscale,
+)
+
 from openpilot.sunnypilot.navd.helpers import Coordinate
 
 # Below this the way is straight enough that mapd publishing no target velocity means "no corner"
@@ -104,16 +108,36 @@ def path_from_mapd(sm) -> tuple[Coordinate, list[dict]] | None:
   #
   # `SmartCruiseControlMapFactor` still trims on top and is still his: at his current 90 the
   # effective figure is 2.5 * 0.81 = 2.03 m/s^2, comfortably under the measured ceiling.
+  # AND THE CURVATURE IS OURS TOO NOW, computed from the path's own COORDINATES.
+  #
+  # mapd smooths curvature over a window long enough to average a bend away -- on his I-80 corner it
+  # published 5,000 m where the tile geometry and the car both say ~250 m. But the COORDINATES it
+  # publishes are not smoothed: measured 2026-08-19, a path whose curvature mapd gave as 21 m
+  # recomputes to the same order from its own lat/lon. So the real shape is already in this message,
+  # and there is no need to open the tile store -- which matters, because reading tiles here would
+  # put blocking file I/O in the planner, the exact design flaw v2 exists to escape.
+  #
+  # TAKE WHICHEVER IS TIGHTER. Ours resolves bends mapd flattens; mapd may still have a corner at a
+  # scale no rung of the ladder clears. The larger |curvature| is never worse than today and better
+  # wherever mapd smoothed -- and a spurious tight reading is exactly what the ladder's noise floor
+  # refuses, so this does not import jitter.
+  coords = [(float(p.latitude), float(p.longitude)) for p in points]
+  ours = curvature_profile_multiscale(coords)
+
   targets = []
-  for p in points:
-    k = float(p.curvature)
+  for p, k_ours in zip(points, ours, strict=True):
+    k_mapd = float(p.curvature)
     # NaN and straight both mean "no corner speed here", for different reasons, and both must fail
     # closed. A NaN reaching the walk poisons min() over the corner speeds and a NaN v_target is a
-    # set-speed request nobody can act on -- the same trap this file already documents twice.
-    if math.isnan(k) or abs(k) <= _STRAIGHT_CURVATURE:
+    # set-speed request nobody can act on -- the same trap this file already documents twice. NaN is
+    # dropped from the COMPARISON rather than propagated: our own reading may be a real corner there.
+    k = abs(k_ours)
+    if not math.isnan(k_mapd):
+      k = max(k, abs(k_mapd))
+    if k <= _STRAIGHT_CURVATURE:
       continue
     targets.append({"latitude": p.latitude, "longitude": p.longitude,
-                    "velocity": math.sqrt(_CORNER_LAT_ACC / abs(k))})
+                    "velocity": math.sqrt(_CORNER_LAT_ACC / k)})
   if not targets:
     # NO CORNERS AHEAD IS A REAL ANSWER, and returning None for it was a bug against this file's own
     # docstring. Measured on route 00000383: of 46 frames where no point carried a velocity, **all

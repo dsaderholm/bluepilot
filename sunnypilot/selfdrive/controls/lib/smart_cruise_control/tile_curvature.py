@@ -151,6 +151,59 @@ def _haversine_m(a: tuple[float, float], b: tuple[float, float]) -> float:
   return math.hypot(bx - ax, by - ay)
 
 
+# ONE BASELINE CANNOT SERVE BOTH ENDS, measured 2026-08-19 on his own mapd path.
+#
+# A fixed 70 m was derived for a 240 m sweeper and is right there. On a TIGHT corner it is longer
+# than the corner itself and averages it away -- mapd's exact failure, reproduced by the fix for it:
+#
+#     a real 21 m turn (mapd's own number)      70 m baseline read 30 m       too loose
+#     the same path, adjacent triples            read 8 m                     noise
+#
+# The two constraints pull opposite ways and both are quantitative, so the baseline is DERIVED per
+# node rather than chosen:
+#
+#   NOISE FLOOR   jitter d over baseline L fakes a curvature of 8d/L^2, so a reading is only
+#                 trustworthy when k >> 8d/L^2. That wants L LARGE.
+#   AVERAGING     L longer than the corner's own arc flattens it. That wants L SMALL.
+#
+# So: walk a ladder of baselines from short to long and take the FIRST -- the finest scale -- whose
+# reading clears the noise floor by `_SNR`. Finest-that-clears is the least-averaged measurement
+# that is still real, which is exactly the trade above with no room left for taste.
+#
+#     k * L^2 >= 8 * _JITTER_M * _SNR
+#
+# Checks out at both ends: the 240 m sweeper clears at 70 m (0.00417 * 4900 = 20.4 >= 20) and the
+# 21 m turn clears at 30 m (0.0476 * 900 = 42.8), where 70 m would have flattened it.
+_JITTER_M = 0.5          # OSM node position noise; the 0.5 that made 127 m out of a straight road
+_SNR = 5.0               # signal-to-noise a reading must clear before it is believed
+_BASELINE_LADDER = (20.0, 30.0, 45.0, 70.0)
+
+
+def curvature_profile_multiscale(nodes: list[tuple[float, float]]) -> list[float]:
+  """Curvature at each node, each measured at the finest baseline that clears the noise floor.
+
+  Same length and index meaning as the other two profiles, and 0.0 wherever no baseline on the
+  ladder produced a trustworthy reading -- which is a straight road, a way too short to measure, or
+  the ends of one. All three mean "no corner here", and reporting a noisy number instead is what
+  this whole family of functions exists to avoid.
+  """
+  n = len(nodes)
+  if n < 3:
+    return [0.0] * n
+
+  per_scale = [curvature_profile_baseline(nodes, L) for L in _BASELINE_LADDER]
+  need = 8.0 * _JITTER_M * _SNR
+
+  out = [0.0] * n
+  for i in range(n):
+    for L, prof in zip(_BASELINE_LADDER, per_scale, strict=True):
+      k = abs(prof[i])
+      if k > 0.0 and k * L * L >= need:
+        out[i] = prof[i]
+        break
+  return out
+
+
 def curvature_profile_baseline(nodes: list[tuple[float, float]],
                                baseline_m: float = _BASELINE_M) -> list[float]:
   """Curvature at each node, measured across ~`baseline_m` of road instead of to its neighbours.

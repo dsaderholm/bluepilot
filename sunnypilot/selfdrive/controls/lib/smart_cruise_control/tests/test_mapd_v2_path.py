@@ -221,3 +221,47 @@ def test_a_real_straight_road_still_answers_straight():
   result = path_from_mapd(sm)
   assert result is not None, "a genuinely straight road fell back to v1"
   assert result[1] == []
+
+
+# --- our own curvature, from the path's coordinates ----------------------------------------------
+
+def _arc(lat0, lon0, radius_m, n, spacing_m):
+  """Points on a real circle of known radius, as (lat, lon)."""
+  out, step = [], spacing_m / radius_m
+  mlat, mlon = 111320.0, 111320.0 * math.cos(math.radians(lat0))
+  for i in range(n):
+    t = i * step
+    out.append((lat0 + radius_m * math.sin(t) / mlat,
+                lon0 + radius_m * (1 - math.cos(t)) / mlon))
+  return out
+
+
+def test_a_bend_mapd_flattened_is_still_priced_as_a_bend():
+  """THE WHOLE POINT OF THE CURVATURE SWAP. On his I-80 corner mapd published ~5,000 m where the
+  tile geometry and the car both say ~250 m. Here mapd claims a near-straight on coordinates that
+  describe a real 240 m bend, and the corner speed must come from the GEOMETRY, not the claim."""
+  pts = [(lat, lon, 0.0, 2e-5) for lat, lon in _arc(40.76, -111.9, 240.0, 40, 12.0)]
+  _, targets = path_from_mapd(FakeSM(points=pts))
+  assert targets, "a real 240 m bend produced no corner at all"
+  slowest = min(t["velocity"] for t in targets)
+  # sqrt(2.5/240) = 0.102 rad/s -> 15.6 m/s. mapd's 2e-5 would have priced it at 354 m/s.
+  assert slowest == pytest.approx(math.sqrt(2.5 / (1 / 240.0)), rel=0.15), \
+    f"priced at {slowest:.1f} m/s -- mapd's flattened curvature won"
+
+
+def test_mapd_still_wins_where_it_sees_a_tighter_corner_than_we_resolve():
+  """Not a replacement -- whichever is TIGHTER. A corner at a scale no rung of the ladder clears
+  must not be lost just because we could not measure it ourselves."""
+  pts = [(40.76 + i * 1e-5, -111.9, 0.0, 0.02) for i in range(6)]   # straight coords, mapd says 50 m
+  _, targets = path_from_mapd(FakeSM(points=pts))
+  assert targets, "mapd's own corner was discarded"
+  assert min(t["velocity"] for t in targets) == pytest.approx(math.sqrt(2.5 / 0.02))
+
+
+def test_a_genuinely_straight_road_is_still_straight_with_both_sources():
+  """Neither source may invent a corner on a straight road -- the failure that would make every
+  highway mile slow down."""
+  pts = [(40.76 + i * 1e-4, -111.9, 0.0, 0.0) for i in range(40)]
+  position, targets = path_from_mapd(FakeSM(points=pts))
+  assert targets == [], f"a straight road produced {len(targets)} corners"
+  assert position is not None
