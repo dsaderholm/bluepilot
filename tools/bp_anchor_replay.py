@@ -225,11 +225,13 @@ def main():
   if both_spoke:
     print(f"  both spoke on {both_spoke} frames; they CONTRADICTED on {contradictions} "
           f"({100.0 * contradictions / both_spoke:.1f}%)")
-    print("  ANSWERED 2026-08-19: 79.9% on route 0000038f, every one the same shape -- the edge")
-    print("  reads to the outer edge of the SHOULDER, so it lands about a lane left of the truth.")
-    print("  The anchor now refuses a contradicted edge reading, so this rate is a MONITOR: it")
-    print("  should stay roughly flat until a shoulder correction exists, and a jump toward zero")
-    print("  would mean one of the two witnesses went quiet rather than that they started agreeing.")
+    print("  ANSWERED: the edge reads to the outer edge of the SHOULDER, so it lands about a lane")
+    print("  left of the truth, and the disagreement is not occasional. Measured CLEAN on freeway")
+    print("  after the stale-state fix: 95.4% and 99.2%. The 79-80% quoted before that fix was")
+    print("  diluted by frames where neither witness had actually spoken.")
+    print("  The anchor refuses a contradicted edge reading, so this is a MONITOR, and near 100%")
+    print("  is the healthy reading. A drop toward zero means a witness went quiet, not that the")
+    print("  two started agreeing -- check availability before reading anything into it.")
   else:
     print("  never both at once on this drive; the cross-check cannot be scored here")
   print()

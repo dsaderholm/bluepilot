@@ -3075,7 +3075,10 @@ on. Worth reading before ANY future use of `modelV2.roadEdges` as a distance-to-
 The anchor converts metres-to-right-edge into a lane index by assuming a car centred in the
 rightmost lane sits half a lane -- 1.85 m -- from the edge. A cross-check against the four lane
 lines came back at **79.9%**: of 289 frames where both witnesses spoke, 231 disagreed, and every
-one had the same signature.
+one had the same signature. **Re-measured clean on 2026-08-20 after a stale-state fix, it is 95.4%
+and 99.2% on two freeway drives** -- the earlier figure was diluted by frames where neither witness
+had spoken. The edge does not disagree occasionally; it disagrees essentially always, which is what
+a systematic one-lane bias looks like.
 
     outer RIGHT line probability 0.01   ->  nothing to our right  ->  the RIGHTMOST lane
     right road edge                     ->  3.7 to 5.1 m away
