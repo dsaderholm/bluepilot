@@ -27,10 +27,24 @@ def _alert(monkeypatch, available: bool):
   return ev.model_stop_alert(None, None, None, False, 0, None)
 
 
-def test_it_tells_him_what_to_do_when_the_override_can_run(monkeypatch):
-  a = _alert(monkeypatch, True)
-  assert "brake" in a.alert_text_2.lower(), a.alert_text_2
-  assert "will not stop" not in a.alert_text_2.lower()
+def test_it_never_asks_him_to_leave_the_brake_alone(monkeypatch):
+  """WITHDRAWN 2026-08-20, and this test is now its opposite.
+
+  The alert used to say "Stay off the brake to let it stop" whenever the override was available. It
+  fires on `hasSlowDown`; the override arms on `shouldStop`; and `shouldStop` is measured to be a
+  STOPPED-CAR state -- never true above 3 mph across 21,936 frames on three drives. He followed the
+  instruction at a red light and the car did not stop, because the trigger cannot become true until
+  the car already has.
+
+  An alert that asks the driver to WITHHOLD a control input has to be keyed on the same signal as
+  the thing that will act. Until the override triggers on approach intent, no wording can honestly
+  ask that -- so none may.
+  """
+  for available in (True, False):
+    a = _alert(monkeypatch, available)
+    t = a.alert_text_2.lower()
+    assert "stay off" not in t and "foot off" not in t,       f"available={available}: the alert is asking him not to brake for a stop that cannot happen"
+    assert "will not stop" not in t
 
 
 def test_it_says_the_stop_is_his_when_the_override_cannot_run(monkeypatch):
