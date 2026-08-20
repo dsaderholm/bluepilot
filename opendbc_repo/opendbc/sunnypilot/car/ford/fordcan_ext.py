@@ -202,6 +202,32 @@ def create_acc_msg_passthrough(packer, CAN: CanBus, stock_values: dict):
   # what this car's PCM sees on every normal op-long frame. Pinning it costs Ford a hint the PCM
   # already lives without, and buys back nearly ten points of forwarding.
   values["AccPrpl_A_Pred"] = _PANDA_GAS_INACTIVE
+
+  # AND `AccPrpl_A_Rq` IS CLAMPED AT THE TOP, WHICH IS THE WHOLE OF "OP LONG LAUNCHES SLOWLY".
+  #
+  # Measured on route 00000393, 2026-08-19: of 994 frames where the passthrough fell back, 624 were
+  # under 15 mph, and the reason is a smear of values sitting just over panda's ceiling --
+  #
+  #     AccPrpl_A_Rq  2.000  2.020  2.030  2.050  2.060  2.070  2.080  2.090 ...
+  #
+  # Ford's ordinary pull-away propulsion IS 2.0 m/s^2, which is exactly `_PANDA_GAS_MAX`, and the
+  # 0.005 margin puts even a clean 2.000 outside. So essentially every launch was refused and handed
+  # to openpilot, whose launch is far gentler. He reported it as the car switching to op long and
+  # going "ridiculously slow" -- and he was right that it was not a tuning preference: nothing ever
+  # chose openpilot for launches, this refusal is all it was.
+  #
+  # CLAMPING BEATS REFUSING because refusing throws away the WHOLE frame -- Ford's brake command,
+  # its stop status, everything -- and substitutes a different controller's idea of the moment.
+  # Clamping keeps every other signal Ford authored and gives up 0.005 m/s^2 of propulsion.
+  #
+  # THE TOP ONLY, and the asymmetry is the point: clamping DOWN from 2.07 to 1.995 asks for LESS
+  # acceleration than Ford wanted, which is the conservative direction. Clamping UP from -0.77 to
+  # -0.495 would ask for less ENGINE BRAKING than Ford wanted, which is not -- so the low side is
+  # still refused and still falls back. That case is 3.5% of fallbacks and none of the launches.
+  gas = float(values["AccPrpl_A_Rq"])
+  if gas > (_PANDA_GAS_MAX - _PANDA_MARGIN) and abs(gas - _PANDA_GAS_INACTIVE) >= 0.005:
+    values["AccPrpl_A_Rq"] = _PANDA_GAS_MAX - _PANDA_MARGIN
+
   return packer.make_can_msg("ACCDATA", CAN.main, values)
 
 
@@ -318,12 +344,17 @@ def passthrough_admissible(stock_values: dict, long_active: bool) -> str:
 
   # AccPrpl_A_Pred is NOT checked here: create_acc_msg_passthrough pins it to the inactive value,
   # so Ford's number never reaches the wire and cannot make panda drop the frame.
-  for name in ("AccPrpl_A_Rq",):
-    gas = float(stock_values.get(name, 0.0))
-    if abs(gas - _PANDA_GAS_INACTIVE) < 0.005:
-      continue
-    if not (_PANDA_GAS_MIN + _PANDA_MARGIN) <= gas <= (_PANDA_GAS_MAX - _PANDA_MARGIN):
-      return "%s %.3f outside panda's band" % (name, gas)
+  # AccPrpl_A_Rq is checked at the BOTTOM ONLY. `create_acc_msg_passthrough` clamps the top, because
+  # Ford's ordinary launch propulsion is 2.0 m/s^2 -- exactly panda's ceiling -- and refusing there
+  # threw away the entire frame on every pull-away (624 of 994 fallback frames on route 00000393,
+  # all under 15 mph). Clamping down asks for less acceleration than Ford wanted, which is safe.
+  #
+  # The bottom is NOT clamped and so is still a refusal: raising -0.77 to -0.495 would ask for less
+  # ENGINE BRAKING than Ford wanted, and quietly under-decelerating is not a thing to do to a frame
+  # nobody is watching. Falling back to a controller we already ship is the honest answer there.
+  gas = float(stock_values.get("AccPrpl_A_Rq", 0.0))
+  if abs(gas - _PANDA_GAS_INACTIVE) >= 0.005 and gas < (_PANDA_GAS_MIN + _PANDA_MARGIN):
+    return "AccPrpl_A_Rq %.3f below panda's band" % gas
 
   return ""
 
