@@ -374,11 +374,29 @@ def test_the_entry_speed_is_reachable_within_the_time_bound():
   So the entry speed is what has to fit inside it. Asserted at 1.2 m/s^2, comfortably inside the
   range openpilot actually plans, so this goes red if either constant drifts back out of agreement.
   """
-  typical_decel = 1.2   # m/s^2, mid-range for an e2e stop
-  seconds_needed = ENTER_SPEED / typical_decel
+  # ASSERTED AGAINST THE BEHAVIOUR, NOT A HARDCODED RATE. This used to assume 1.2 m/s^2, which
+  # tracked the gate only while arming required 1.15; when STOP_DECEL moved to 0.9 in the same
+  # commit that raised ENTER_SPEED, the two silently decoupled and this test certified a bound the
+  # code could exceed by 9 s. Review caught it, not the suite.
+  #
+  # So: find the furthest stop the code will ACTUALLY arm on at the entry speed, and require the
+  # time bound to cover it. Binary search rather than arithmetic, so it keeps holding if the gate
+  # is ever rewritten.
+  lo, hi = 0.0, 1000.0
+  for _ in range(60):
+    mid = (lo + hi) / 2.0
+    if _stopping(FordStopOverride(), v=ENTER_SPEED, op_stopping=False, endpoint=mid):
+      lo = mid
+    else:
+      hi = mid
+  furthest = lo
+  assert furthest > 1.0, "nothing arms at the entry speed at all -- the gate is broken, not the bound"
+  # Stopping from v over distance d takes 2d/v.
+  seconds_needed = 2.0 * furthest / ENTER_SPEED
   assert seconds_needed <= MAX_ACTIVE_S, (
-    f"a {typical_decel} m/s^2 stop from the entry speed needs {seconds_needed:.1f} s and the bound "
-    f"is {MAX_ACTIVE_S:.1f} s -- the override would hand back mid-stop on an ordinary approach")
+    f"the gate arms up to {furthest:.0f} m at the entry speed, which needs {seconds_needed:.1f} s "
+    f"to stop, and the bound is {MAX_ACTIVE_S:.1f} s -- it would hand back mid-stop, below Ford's "
+    f"floor, with the stop still ahead")
 
 
 def test_the_override_overlaps_fords_floor_rather_than_meeting_it():
@@ -405,15 +423,24 @@ def test_the_override_overlaps_fords_floor_rather_than_meeting_it():
     f"the override arms at {ENTER_SPEED / MPH_TO_MS:.1f} mph but Ford quits at "
     f"{ACC_FLOOR_MS / MPH_TO_MS:.1f} mph -- that band belongs to nobody and a stop in it is missed")
 
-  # The upper bound is 30 mph of margin, not 10. 10 was picked by reasoning the same day and was
-  # immediately wrong: measured empty-light approaches on route 0000039c happen at 28.3, 32.5 and
-  # 43.9 mph, so anything under ~25 mph of margin refuses the very approaches this exists for.
-  # The bound still has a job -- arming at highway speed for a distant stop is not this feature --
-  # but the distance gate is what actually decides that, and this only has to stay finite.
+  # THE UPPER BOUND IS DERIVED, NOT PICKED. It was `<= 30.0` for about an hour -- a ceiling chosen
+  # after the fact to accommodate the 25 mph margin the same change had just introduced, which
+  # cannot fail for any ENTER_SPEED under 50 mph and so constrained nothing. Review called that
+  # passing by construction, correctly.
+  #
+  # The real limit on how far above the floor this may arm is whether the time bound can still
+  # deliver the stop: `test_the_time_bound_is_expressed_in_SECONDS_at_the_rate_it_actually_ticks`
+  # owns that and asserts it against the gate's own behaviour. What belongs HERE is the other half
+  # -- that the two authorities overlap rather than leaving a band owned by nobody -- plus a sanity
+  # ceiling that is a statement about the road rather than about the current constant.
+  #
+  # 60 mph: above that a "stop ahead" is a highway event, and taking it is a different feature with
+  # a different argument, not a wider margin on this one.
   margin_mph = (ENTER_SPEED - ACC_FLOOR_MS) / MPH_TO_MS
-  assert margin_mph <= 30.0, (
-    f"the override arms {margin_mph:.1f} mph above Ford's floor -- past this the distance gate is "
-    f"carrying the whole decision and the time bound cannot finish the stop")
+  assert ENTER_SPEED / MPH_TO_MS <= 60.0, (
+    f"the override arms at {ENTER_SPEED / MPH_TO_MS:.0f} mph -- a stop ahead at highway speed is a "
+    f"different feature, argued separately, not a wider margin on this one (currently "
+    f"{margin_mph:.0f} mph above Ford's floor)")
 
 
 def test_a_radar_blind_lead_is_ours_and_a_radar_lead_is_fords():
@@ -617,6 +644,89 @@ class TestAPhantomStopDoesNotArmABrake:
       if v <= 0.05:
         break
     assert armed is True, "a genuine approach to a fixed stop point never armed"
+
+
+def test_a_lead_does_not_freeze_the_closing_window():
+  """THE REVIEW BUG, 2026-08-20. A refusal must not leave stale evidence behind.
+
+  The closing tracker sat below the speed and lead gates, which `return False` without appending or
+  clearing. So while a lead refused the override, the window FROZE -- and its samples aged while the
+  car kept driving. When the lead cleared, `closing_window[0]` was a reading from tens of seconds
+  and hundreds of metres earlier, and comparing it against the current endpoint passed the
+  confirmation instantly.
+
+  That defeats the phantom filter on the most ordinary event on the road: `a lead appeared` ended
+  the override on 13,012 frames of the 0000039c replay.
+
+  So: earn honest evidence, sit behind a lead while the world moves on, then present a stop point
+  that DOES NOT CLOSE AT ALL. It must be refused on its own merits.
+  """
+  o = FordStopOverride()
+  v = 30.0 * MPH_TO_MS
+  step = v / OVERRIDE_HZ
+
+  ep = 200.0
+  for _ in range(CLOSING_CONFIRM_FRAMES - 1):
+    o.update(long_active=True, v_ego=v, has_slow_down=True, op_stopping=False,
+             lead_distance=0.0, stop_endpoint_m=ep)
+    ep -= step
+
+  for _ in range(int(20 * OVERRIDE_HZ)):
+    o.update(long_active=True, v_ego=v, has_slow_down=True, op_stopping=False,
+             lead_distance=25.0, stop_endpoint_m=ep)
+
+  armed = False
+  for _ in range(20):
+    if o.update(long_active=True, v_ego=v, has_slow_down=True, op_stopping=False,
+                lead_distance=0.0, stop_endpoint_m=20.0):
+      armed = True
+  assert not armed, "armed on stale evidence banked before a lead, with a static endpoint since"
+
+
+def test_a_lead_clearing_on_a_REAL_approach_still_arms():
+  """The other half, so the fix above cannot be 'clear the window and re-earn it'.
+
+  A lead ahead does not make the stop behind it imaginary. The endpoint keeps closing while the car
+  follows, that evidence is true, and throwing it away would make the override re-earn 1.5 s of
+  confirmation after every car that merges in -- at exactly the moment it is needed.
+  """
+  o = FordStopOverride()
+  v = 30.0 * MPH_TO_MS
+  step = v / OVERRIDE_HZ
+  # Starts inside the arming range for 30 mph so the DISTANCE gate is not what this test measures.
+  ep = 100.0
+
+  # Behind a lead the whole time, genuinely closing on a real stop.
+  for _ in range(int(3 * OVERRIDE_HZ)):
+    o.update(long_active=True, v_ego=v, has_slow_down=True, op_stopping=False,
+             lead_distance=25.0, stop_endpoint_m=ep)
+    ep -= step
+
+  # The lead changes lanes. The stop is real and close; it should be taken at once.
+  armed = o.update(long_active=True, v_ego=v, has_slow_down=True, op_stopping=False,
+                   lead_distance=0.0, stop_endpoint_m=ep)
+  assert armed is True, "a real closing approach had to re-earn confirmation after the lead left"
+
+
+def test_the_arming_range_never_exceeds_what_the_time_bound_can_finish():
+  """Checked across the speed range, not just at ENTER_SPEED.
+
+  `brake_range` grows with v^2 while the reachable range grows with v, so the two cross and the
+  quadratic one wins at the top. Sampling several speeds keeps this honest if either constant moves.
+  """
+  for mph in (25.0, 30.0, 35.0, 40.0, 45.0):
+    v = mph * MPH_TO_MS
+    lo, hi = 0.0, 1000.0
+    for _ in range(60):
+      mid = (lo + hi) / 2.0
+      if _stopping(FordStopOverride(), v=v, op_stopping=False, endpoint=mid):
+        lo = mid
+      else:
+        hi = mid
+    seconds = 2.0 * lo / v
+    assert seconds <= MAX_ACTIVE_S + 0.01, (
+      f"at {mph:.0f} mph the gate arms up to {lo:.0f} m, a {seconds:.1f} s stop, against a "
+      f"{MAX_ACTIVE_S:.1f} s bound")
 
 
 def test_a_NaN_endpoint_fails_closed():
