@@ -2131,6 +2131,50 @@ and changing it changes driving.
 **The lever that exists TODAY is `SmartCruiseControlMapFactor`** -- his, currently 90, applied to
 corners at or below 25 mph. Lower means slower through tight corners, wherever the map sees them.
 
+### THE CURVATURE IS VALIDATED NOW -- AND THE "40x WIN" NUMBER WAS NODE JITTER
+
+2026-08-19. The tile curvature module was validated on "tightest triple = 127 m" against mapd's
+5,000 m. **That 127 m was measuring OSM node jitter, not the bend**, and wiring it in would have
+demanded a 127 m corner on a road that has none.
+
+The arithmetic, which is worth keeping because it applies to any polyline curvature: for three
+points on a chord `L` with sagitta `d`, `R = L^2 / 8d`. At the 12 m median node spacing on his way,
+`L = 24 m`, so a REAL 240 m corner offsets the middle node by only
+
+    d = 24^2 / (8 * 240) = 0.30 m          <- BELOW an OSM node's position noise
+
+and inverted, half a metre of jitter alone reads as `R = 24^2 / (8 * 0.5) = 144 m`. Adjacent-node
+curvature simply cannot resolve a 240 m corner at 12 m spacing; the two are the same size.
+
+**`curvature_profile_baseline` measures across ~70 m of ROAD instead.** Noise falls as `L^2` while
+signal grows as `L^2 / R`, so at 70 m the same corner gives `d = 2.55 m` against 0.5 m of jitter --
+five to one instead of worse-than-one. Cumulative distance, not a node count: spacing on that way
+runs 6 m to 112 m, so a fixed node offset would be a 6 m baseline in one place and 224 m in another.
+
+**MEASURED ON HIS TILE, and this is the number to trust:**
+
+    way 31532588, I-80, 56 nodes
+      mapd published            ~5000 m       21x too loose
+      ADJACENT triples   tightest 127 m, median 362 m     2x too tight, and a huge spread
+      BASELINE (70 m)    tightest 259 m, median 302 m     53 readings
+      the car actually pulled     240 m       (3.46 m/s^2 at 64 mph)
+
+259 m against a measured 240 m is 8%, and the spread collapses from 127-362 to 259-302. **That is
+the first curvature number on this fork that has been checked against something the car did.**
+
+**WHAT IS STILL MISSING IS THE SPEED, and it is deliberately not invented.** Turning 259 m into a
+corner speed needs `v = sqrt(a_lat * R)`, and `a_lat` is the open question -- his own correction:
+
+    "I want to take the curve as fast as the PSCM can handle with angle steering."
+
+At 2.2 (mapd's constant) a 259 m corner asks for 53 mph. He took it at 64. His 3.46 m/s^2 is what
+the car achieved with HIM steering, and he has said the PSCM needs the car slower than that -- so
+3.46 is an upper bound on the answer and 2.2 is somebody else's comfort number. **The PSCM's
+angle-mode authority limit is a CAR FACT nobody here has measured yet**, and guessing it is exactly
+the "somebody else's comfort constants" mistake he already corrected once.
+
+So: the geometry is done and trustworthy, and the controller wiring waits on that one number.
+
 ### THE TILES SEE THE CORNER. MAPD DOES NOT. THE CURVE FIX IS OURS TO WRITE.
 
 2026-08-18, and it REVERSES a conclusion stated twice the same evening. He reported a curve on
