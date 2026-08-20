@@ -228,7 +228,30 @@ class FordStopOverride:
       # a single frame load-bearing.
       self.no_ask_frames += 1
       if self.no_ask_frames <= NO_ASK_RELEASE_FRAMES:
-        # Not yet convinced. Keep whatever we were doing, including a hold.
+        # Not yet convinced -- keep doing whatever we were doing, INCLUDING COUNTING.
+        #
+        # Returning here without advancing the bounds made them count only frames where the model
+        # was asking, while the override TRANSMITTED on every frame. `has_slow_down` is a threshold
+        # on a 5-sample moving average sampled at 50 Hz off a 20 Hz publisher, so chatter near the
+        # threshold is the ordinary case on a marginal stop -- and at a 1-in-26 duty cycle this ran
+        # 208 s of continuous contradiction against an 8 s bound. That bound exists for exactly one
+        # reason: to stay under drive A's ~40 s camera latch.
+        if self.active:
+          if self.holding:
+            self.hold_frames += 1
+            if self.hold_frames > MAX_HOLD_FRAMES:
+              self._end("hold bound reached during a model-request dropout")
+              return False
+          else:
+            self.frames += 1
+            if self.frames > MAX_ACTIVE_FRAMES:
+              self._end("time bound reached during a model-request dropout")
+              return False
+          # A lead arriving during the dropout is still Ford's. Half a second of ignoring it is half
+          # a second at precisely the moment a car pulls in front.
+          if 0.0 < lead_distance < LEAD_DISQUALIFIES_M:
+            self._end("a lead arrived during a model-request dropout")
+            return False
         return self.active
       if self.active:
         self._end("model stopped asking")
@@ -282,7 +305,13 @@ class FordStopOverride:
         # because this branch ended the override; now it does not, so without this the 8 s approach
         # bound expires DURING a normal light and the first frame the car rolls above STOPPED_SPEED
         # hands it back to Ford permanently, mid-roll -- the exact failure the hold exists to stop.
-        self.frames = 0
+        #
+        # ON ENTRY ONLY. Resetting every stopped frame let a creep oscillating either side of
+        # STOPPED_SPEED zero the approach bound on alternate frames, so it could never fire in that
+        # band -- and a 45 s hold measured 90 s of wall clock. The creep regime is precisely what
+        # this feature was rewritten for, so that oscillation is the expected input, not an edge.
+        if not self.holding:
+          self.frames = 0
         self.holding = True
         self.hold_frames += 1
         if self.hold_frames > MAX_HOLD_FRAMES:

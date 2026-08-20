@@ -198,6 +198,22 @@ _SNR = 5.0               # signal-to-noise a reading must clear before it is bel
 _BASELINE_LADDER = (20.0, 30.0, 45.0, 70.0, 100.0, 140.0)
 
 
+def _finite(nodes: list[tuple[float, float]]) -> bool:
+  """Every coordinate usable? NON-FINITE INPUT HERE IS NOT ROUNDING, IT IS A CRASH.
+
+  `math.cos(inf)` RAISES ValueError -- not NaN, an exception -- and `_to_local_m` calls it on every
+  node. Nothing between here and `LongitudinalPlannerSP.update` catches it, so one infinite latitude
+  in mapd's path takes plannerd down: the 2026-08-18 numpy/capnp failure again, one field over.
+
+  A NaN coordinate is quieter and worse. It poisons the cumulative distance from that node onward,
+  and `NaN < half` is False -- so the reach guard ACCEPTS instead of refusing, handing
+  `curvature_through` three identical points, which reads 0.0. The rest of the way then reports
+  STRAIGHT, `path_from_mapd` finds no corners and no NaN curvature, and returns "no corners ahead",
+  the most confident answer it has -- so SCC-Map idles and never falls back to v1.
+  """
+  return all(math.isfinite(lat) and math.isfinite(lon) for lat, lon in nodes)
+
+
 def curvature_profile_multiscale(nodes: list[tuple[float, float]]) -> list[float]:
   """Curvature at each node, each measured at the finest baseline that clears the noise floor.
 
@@ -208,6 +224,10 @@ def curvature_profile_multiscale(nodes: list[tuple[float, float]]) -> list[float
   """
   n = len(nodes)
   if n < 3:
+    return [0.0] * n
+  if not _finite(nodes):
+    # Refuse the WHOLE path, not part of it. A partial answer is indistinguishable from "straight
+    # road", and that is the one reading that stops the caller falling back to v1.
     return [0.0] * n
 
   per_scale = [curvature_profile_baseline(nodes, L) for L in _BASELINE_LADDER]

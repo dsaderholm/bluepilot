@@ -268,3 +268,17 @@ def test_a_genuinely_straight_road_is_still_straight_with_both_sources():
   position, targets = path_from_mapd(FakeSM(points=pts))
   assert targets == [], f"a straight road produced {len(targets)} corners"
   assert position is not None
+
+
+def test_an_absurd_mapd_curvature_is_refused_not_priced():
+  """mapd's number bypasses the ladder's jitter floor through `max()`, so it needs its own bound.
+  Unbounded, k=100 prices the corner at 0.155 m/s -- floored to MIN_V and published as a live
+  interstate slowdown to 12.4 mph, under the 45 mph ramp threshold so camera defenses 2 and 3 skip
+  it. k=inf gives exactly 0.0, which passes the straight test, wins min() in the walk, and reads as
+  "no corner" -- one bad point masking every real corner ahead."""
+  for bad in (100.0, 5.0, float("inf")):
+    pts = [(40.76 + i * 1e-5, -111.9, 0.0, bad) for i in range(6)]
+    res = path_from_mapd(FakeSM(points=pts))
+    targets = [] if res is None else res[1]
+    assert all(t["velocity"] > 1.0 for t in targets), \
+      f"curvature {bad} was priced at {[t['velocity'] for t in targets]}"
