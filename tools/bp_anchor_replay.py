@@ -99,7 +99,7 @@ def main():
   # and catastrophic for one that is misspelled -- it turns a typo into a confident zero.
   from cereal import custom
   _pa_fields = set(custom.LongitudinalPlanSP.PassingAssist.schema.fieldnames)
-  for _f in ("speedDeficit", "minDeficitActive", "hasLead"):
+  for _f in ("speedDeficit", "minDeficitActive", "hasLead", "rightGeometryOk"):
     if _f not in _pa_fields:
       sys.exit(f"passingAssist has no field {_f!r} -- this tool would silently report zeros")
 
@@ -159,6 +159,9 @@ def main():
         deficit = float(pa.speedDeficit)                              # m/s
         threshold = float(pa.minDeficitActive) * DEFICIT_MPH_TO_MS     # mph on the wire -> m/s
         lead_slow = bool(pa.hasLead) and threshold > 0 and deficit >= threshold
+        # The gate's THIRD term. Without it this prints two thirds of a conjunction, which is
+        # always higher than the warning's real rate and invites blaming the anchor.
+        right_geo = bool(pa.rightGeometryOk)
       elif w == "modelV2":
         if speed < MIN_SPEED:
           continue
