@@ -165,7 +165,7 @@ OVERRIDE_HZ = 50.0
 # entry; the entry moved to 45 once his empty lights were measured, and a bound that cannot finish
 # the approach it now permits would hand back mid-stop at speed, which is worse than not arming.
 MAX_ACTIVE_S = 20.0
-MAX_ACTIVE_FRAMES = int(MAX_ACTIVE_S * OVERRIDE_HZ)  # 400
+MAX_ACTIVE_FRAMES = int(MAX_ACTIVE_S * OVERRIDE_HZ)  # 1000 at 20 s; DERIVED, never restate it
 
 # THE HOLD, which is a different regime from the approach and so gets its own bound.
 #
@@ -231,6 +231,20 @@ CLOSING_CONFIRM_FRAMES = int(1.5 * OVERRIDE_HZ)
 # tracking would reject genuine approaches. Not 0 either -- that is the flat 141 -> 142 m case.
 CLOSING_FRACTION = 0.35
 
+# A single-frame endpoint move larger than this is a DIFFERENT STOP POINT, not this one moving, so
+# the evidence gathered about the old one is void. Metres.
+#
+# Found by the regression test for the frozen-window bug, 2026-08-20: the window compares net change
+# across 1.5 s, and a net test cannot tell a steady approach from ONE DISCONTINUITY. Sit behind a
+# lead with the endpoint parked at 180 m, then have the model re-plan to 20 m, and the window reads
+# a 160 m "close" over 20 m of road and confirms instantly. That is not a car approaching a place;
+# it is the model changing its mind about which place.
+#
+# 15 m is comfortably above the real jitter and far below a re-plan. Measured frame-to-frame noise
+# on a genuine approach is ~2 m (41.8 -> 43.5 -> 43.9), while true closing is under 0.5 m per frame
+# at these speeds, so nothing legitimate comes near this.
+ENDPOINT_JUMP_M = 15.0
+
 # A lead this close is Ford's business. Beyond it the radar has nothing useful and the stop is ours.
 LEAD_DISQUALIFIES_M = 60.0
 
@@ -294,9 +308,11 @@ class FordStopOverride:
     self.holding = False
     self.hold_frames = 0
     self.no_ask_frames = 0      # consecutive frames the model has not asked for a stop
-    # Consecutive frames the model's stop point has closed like a fixed place in the world. See
-    # CLOSING_CONFIRM_FRAMES -- this is what keeps a phantom stop from arming a brake at 45 mph.
-    # (endpoint, metres travelled since the previous sample) over the confirmation window.
+    # (endpoint, metres travelled since the previous sample), one entry per asking frame over the
+    # confirmation window. This is what keeps a phantom stop from arming a brake at 45 mph; see
+    # CLOSING_CONFIRM_FRAMES for why it is a WINDOW and not the consecutive-frame counter it
+    # replaced -- that counter armed zero times on both logged drives, because the endpoint jitters
+    # frame to frame and any single rise reset it.
     self.closing_window: deque = deque(maxlen=CLOSING_CONFIRM_FRAMES)
     self.last_result = ""       # for logging only, never used to decide
 
@@ -464,6 +480,34 @@ class FordStopOverride:
         return False
       return True
 
+    # ---- the closing tracker runs BEFORE every gate below, and that ordering is the fix ---------
+    #
+    # It used to sit down with the endpoint checks, after the speed and lead gates. Those gates
+    # `return False` without appending OR clearing, so the window FROZE while they refused and the
+    # samples in it aged out of relevance while the car kept driving.
+    #
+    # Found by review, 2026-08-20, and reproduced: build honest closing evidence at 30 mph, let a
+    # lead sit inside 60 m for 20 s, then drop the lead and feed a COMPLETELY STATIC endpoint. The
+    # override armed within 10 frames -- `closing_window[0]` was a 200 m reading from 20 s and
+    # ~270 m of road earlier, while `travelled` summed only the stale stored steps. That is the
+    # phantom filter defeated by the most ordinary event on the road: `a lead appeared` ended the
+    # override on 13,012 frames of the 0000039c replay, so nearly every approach passes through it.
+    #
+    # KEPT RATHER THAN CLEARED, deliberately. A lead ahead does not make the stop point behind it
+    # imaginary -- the endpoint is still closing and that evidence is still true. Clearing would
+    # throw away a real observation and make the override re-earn it after every car that merges
+    # in. Updating the window on every asking frame keeps it both fresh and honest, and a gap can no
+    # longer open because there is no path that skips it.
+    if stop_endpoint_m > 0.0:
+      # A JUMP MEANS A NEW PLACE. See ENDPOINT_JUMP_M -- without this the net-change test below
+      # confirms on a single discontinuity, which is how the model re-planning reads.
+      if self.closing_window and abs(stop_endpoint_m - self.closing_window[-1][0]) > ENDPOINT_JUMP_M:
+        self.closing_window.clear()
+      self.closing_window.append((stop_endpoint_m, v_ego / OVERRIDE_HZ))
+    else:
+      # No endpoint is no evidence -- and a gap in the plan must not preserve a part-built case.
+      self.closing_window.clear()
+
     if self.spent:
       return False
 
@@ -507,13 +551,11 @@ class FordStopOverride:
     # publisher's `isfinite` guard lives in a DIFFERENT REPO from this consumer, so this file has no
     # structural claim on it.
     if not (stop_endpoint_m > 0.0):
-      # No endpoint is no evidence -- do not let a gap in the plan preserve a part-built case.
-      self.closing_window.clear()
       return False
 
     # DOES THE STOP POINT BEHAVE LIKE A REAL PLACE? Over the window, a fixed point ahead must give
-    # up at least CLOSING_FRACTION of the road actually covered.
-    self.closing_window.append((stop_endpoint_m, v_ego / OVERRIDE_HZ))
+    # up at least CLOSING_FRACTION of the road actually covered. The window itself is maintained
+    # above, before the gates, so that a refusal cannot freeze it.
     if len(self.closing_window) < CLOSING_CONFIRM_FRAMES:
       return False          # not enough history yet to tell a place from a phantom
     oldest_endpoint = self.closing_window[0][0]
@@ -529,8 +571,23 @@ class FordStopOverride:
     # real test across this feature's whole range, and at low speed a short range is CORRECT because
     # the remaining stopping distance is short too.
     brake_range = (v_ego * v_ego) / (2.0 * STOP_DECEL) * STOP_MARGIN
-    if stop_endpoint_m > brake_range:
-      return False          # the stop is real but still far enough that the set speed owns it
+    # AND NEVER FURTHER THAN THE TIME BOUND CAN CARRY. Found by review, 2026-08-20.
+    #
+    # `brake_range` reduces to "any stop needing harder than STOP_DECEL/STOP_MARGIN = 0.69 m/s^2",
+    # which at ENTER_SPEED admits a stop 292 m away. Decelerating to a standstill over 292 m from
+    # 20.12 m/s takes 2*292/20.12 = 29.1 s against a 20 s bound -- so the override would arm, brake,
+    # and hand back at 14.0 mph with ~30 m still to run. That is BELOW Ford's 20 mph floor, where
+    # Ford will not carry it either: the abandoned stop this feature exists to remove, recreated by
+    # the feature itself.
+    #
+    # Stopping from `v` over distance `d` takes 2d/v, so the reachable range is `v * MAX_ACTIVE_S /
+    # 2`. Derived from the bound rather than picked, so the two can never drift apart again.
+    #
+    # It does not cost his measured lights: 43.9 mph/148 m against a 196 m cap, 28.7 mph/98.6 m
+    # against 128 m, 32.5 mph/97 m against 145 m. All three still arm.
+    reachable_range = v_ego * MAX_ACTIVE_S / 2.0
+    if stop_endpoint_m > min(brake_range, reachable_range):
+      return False          # too far for the set speed to hand over, or too far to finish in time
 
     self.active = True
     self.frames = 0
