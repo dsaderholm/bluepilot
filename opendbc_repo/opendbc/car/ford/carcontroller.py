@@ -332,8 +332,11 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
           rs = self.sm['radarState'] if self.sm.alive.get('radarState') else None
           if rs is not None and rs.leadOne.status:
             lead_d = float(rs.leadOne.dRel)
-          # Read BEFORE the update, because the latch below is edge-triggered on this going False.
-          was_active = self.stop_override.active
+          # `was_active` used to be read here, because the latch below was edge-triggered on the
+          # override ENDING at a standstill. It holds through the standstill now, so there is no
+          # such edge and the latch reads `holding` directly -- see below. Removed rather than left
+          # assigned: a variable that survives the reason it existed is the next person's evidence
+          # for a gate that is no longer there.
           override = self.stop_override.update(
             long_active=bool(CC.longActive),
             v_ego=float(CS.out.vEgo),
