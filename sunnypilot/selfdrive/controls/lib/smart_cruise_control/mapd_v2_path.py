@@ -40,10 +40,40 @@ _STRAIGHT_CURVATURE = 1e-4
 # he has no preference about". It is a property of one car with no fleet to learn it from, and
 # `SmartCruiseControlMapFactor` already exists for the preference part.
 #
-# Do not move it toward mapd's 2.2 (someone else's comfort constant) or toward the 3.2 that a first
-# pass reported -- that figure was his own hands on the wheel leaking into the measurement, and the
-# 64 mph it produced "agreeing" with the 64 mph he drives was circular, not corroboration.
-_CORNER_LAT_ACC = 2.5
+# 2.5 -> 2.0 -> 2.4, AND THE THIRD NUMBER IS THE FIRST ONE MEASURED AGAINST THE RIGHT FAILURE.
+#
+# He reported curves too fast, then made it precise: *"I got steering exhausted warnings from the
+# PSCM."* I lowered to 2.0 against `steerSaturated`. Then he said the thing that mattered: *"I just
+# ignore most steering saturated errors until it starts to stray enough from my lane."*
+#
+# SATURATION IS NOT THE FAILURE. RUNNING WIDE IS. Measured as the lateral-acceleration SHORTFALL --
+# how much less cornering the car delivered than was commanded, `(desiredCurvature - curvature) *
+# v^2`, hands off the wheel, above 25 mph:
+#
+#     lat_acc bin   frames   mean |shortfall|   >0.5 short   saturated
+#      0.5 - 1.0      4022       0.165            3.2%         0.0%
+#      1.0 - 1.5      1443       0.245           10.0%         0.6%
+#      1.5 - 2.0      1580       0.214            8.7%         3.2%
+#      2.0 - 2.5       281       0.288           11.4%         2.8%
+#      2.5 - 3.0        20       0.909           85.0%         0.0%
+#
+# Tracking is FLAT to 2.5 and collapses above it. And saturation does not predict it at all -- 3.2%
+# saturated where tracking is clean, 0% in the bin that actually runs wide. He was right that the
+# warnings are noise; I had tuned against them.
+#
+# 2.4 keeps a margin under the collapse without giving away speed for warnings he ignores -- and he
+# has been explicit that he would take curves faster, not slower. The 2.5-3.0 bin is only 20 frames,
+# so the collapse point is established in KIND rather than to a decimal; that is the reason for a
+# margin rather than sitting exactly on 2.5.
+#
+# The lesson is the signal, not the number: three values came out of three different failure
+# definitions, and only the last one was the failure HE cares about. Ask which failure before
+# measuring a limit.
+#
+# Do not move it back toward the 3.2 an earlier pass reported: that figure was his own hands on the
+# wheel leaking into the measurement, and the 64 mph it produced "agreeing" with the 64 mph he
+# drives was circular, not corroboration.
+_CORNER_LAT_ACC = 2.4
 
 
 def path_from_mapd(sm) -> tuple[Coordinate, list[dict]] | None:
@@ -88,24 +118,8 @@ def path_from_mapd(sm) -> tuple[Coordinate, list[dict]] | None:
   # It carries no information `curvature` does not, so replacing it costs nothing and gains the one
   # number this car actually has evidence for.
   #
-  # 2.5 IS MEASURED, NOT CHOSEN. `tools/bp_pscm_lateral_limit.py` over three routes, splitting on
-  # `steeringPressed` because `latActive` only means openpilot was PERMITTED to steer:
-  #
-  #     openpilot alone (no hands)   n=5251   p50 1.09  p90 1.93  p99 2.73  max 3.19
-  #     HIS hands on the wheel       n= 892   p50 1.95  p90 3.09  p99 4.14  max 4.20
-  #
-  # and the deviation limiter, binned by lateral acceleration, is quiet to 2.5 (<= 3.7% of frames),
-  # then 9.1% at 2.5-3.0 and 27.4% at 3.0-3.5. `hands-on%` climbs the same curve -- 6% low, 90%+
-  # above 3.0 -- so he takes the wheel exactly where the PSCM starts losing the line. Two
-  # independent signatures of one ceiling.
-  #
-  # THIS RAISES CORNER SPEEDS BY sqrt(2.5/2.2) = 6.6%, which is the opposite direction from "low
-  # speed curves don't slow enough" -- and deliberately so. That complaint was measured to be a
-  # COVERAGE problem: SCC-Map was active for 146 frames of a 26-minute drive, and SCC-Vision cannot
-  # help below ~40 mph because its target is proportional to current speed. Slowing harder on the
-  # few corners the map DOES see would not have addressed it, and would have made every one of them
-  # wrong in a way he would feel.
-  #
+  # THE VALUE ITSELF, and why it moved, is at `_CORNER_LAT_ACC` -- kept in one place so a tuning
+  # change cannot leave a stale argument for the old number sitting next to the code that uses it.
   # `SmartCruiseControlMapFactor` still trims on top and is still his: at his current 90 the
   # effective figure is 2.5 * 0.81 = 2.03 m/s^2, comfortably under the measured ceiling.
   # AND THE CURVATURE IS OURS TOO NOW, computed from the path's own COORDINATES.

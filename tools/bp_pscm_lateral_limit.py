@@ -31,6 +31,18 @@ WHAT IT MEASURES
   the top of that distribution is capability that has been DEMONSTRATED, not inferred. Frames with a
   flag are where our own code intervened, and they bound the answer from the other side.
 
+WHY THIS TOOL'S ANSWER IS NOT THE CORNER TARGET, added 2026-08-20 after it produced two wrong ones.
+
+  It measures ACHIEVED lateral acceleration and where our own limiters bite. Neither is the failure
+  that matters. He settled it from the seat: *"I just ignore most steering saturated errors until it
+  starts to stray enough from my lane."* The failure is RUNNING WIDE, and the signal for it is the
+  lateral-acceleration SHORTFALL -- `(desiredCurvature - curvature) * v^2` -- which is flat to
+  2.5 m/s^2 on his car and collapses above it, while `steerSaturated` fires where tracking is clean
+  and NOT in the bin that actually runs wide.
+
+  So: this tool tells you what the car HAS done. It does not tell you what it can hold. Ask which
+  failure you are measuring before taking a number from here.
+
 WHY A PERCENTILE AND NOT THE MAXIMUM. A single frame at 4 m/s^2 is a pothole, a lane change, or the
 driver's own hand on the wheel. p99 over thousands of frames is a number the car reached and held.
 

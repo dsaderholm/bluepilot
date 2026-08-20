@@ -143,13 +143,22 @@ def model_stop_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaste
   #
   # Read once and cached: this fires a few times a drive, and the carcontroller reads the same two
   # params once at init, so a mid-drive change is already meaningless by design.
-  if _stop_override_available():
-    return Alert(
-      "Stop sign or signal ahead",
-      "Slowing. Stay off the brake to let it stop.",
-      AlertStatus.userPrompt, AlertSize.mid,
-      Priority.MID, VisualAlert.none, AudibleAlertSP.prompt, 2.)
-
+  # WITHDRAWN 2026-08-20: "Stay off the brake to let it stop" WAS A PROMISE THE CAR CANNOT KEEP.
+  #
+  # It fired on `hasSlowDown`, while the override arms on `shouldStop` -- and `shouldStop` is
+  # measured to be a STOPPED-CAR state, not an approach state. Across three drives and 21,936
+  # frames it was never once true above 3 mph:
+  #
+  #     0000039a  5169 frames  max 1.7 mph      00000393  7103  max 2.9 mph
+  #     00000397  9664 frames  max 2.8 mph      above 5 mph: 0.0% on all three
+  #
+  # So he did exactly what the alert asked -- foot off the brake at a red light, engaged, at 20 mph
+  # with the set speed walking down 80 -> 57 -- and nothing stopped, because the override's trigger
+  # cannot become true until the car has already stopped. He braked. The alert had told him not to.
+  #
+  # An alert that asks the driver to withhold a control input MUST be keyed on the same signal as
+  # the thing that will act. Until the override triggers on approach intent rather than on a stopped
+  # car, there is no wording that can honestly ask him to leave the brake alone -- so it does not.
   return Alert(
     "Stop sign or signal ahead",
     "Slowing to 20 mph -- the stop is yours.",
