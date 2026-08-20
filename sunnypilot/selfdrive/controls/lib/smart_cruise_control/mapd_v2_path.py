@@ -40,33 +40,40 @@ _STRAIGHT_CURVATURE = 1e-4
 # he has no preference about". It is a property of one car with no fleet to learn it from, and
 # `SmartCruiseControlMapFactor` already exists for the preference part.
 #
-# LOWERED 2.5 -> 2.0 on 2026-08-20, ON HIS ROAD REPORT AND THE SIGNAL IT POINTED AT.
+# 2.5 -> 2.0 -> 2.4, AND THE THIRD NUMBER IS THE FIRST ONE MEASURED AGAINST THE RIGHT FAILURE.
 #
-# He said curves felt "a little fast" and then made it precise: *"When I say they feel too fast, I'm
-# saying I got steering exhausted warnings from the PSCM. Remember, if it was up to me, I would take
-# curves way faster."* That is not a comfort complaint -- it is the steering running out of
-# authority, and it is a harder limit than anything I had measured.
+# He reported curves too fast, then made it precise: *"I got steering exhausted warnings from the
+# PSCM."* I lowered to 2.0 against `steerSaturated`. Then he said the thing that mattered: *"I just
+# ignore most steering saturated errors until it starts to stray enough from my lane."*
 #
-# `steerSaturated` is openpilot's own event for the lateral command hitting its limit, which on an
-# angle-mode car IS the PSCM's authority. Across his drives:
+# SATURATION IS NOT THE FAILURE. RUNNING WIDE IS. Measured as the lateral-acceleration SHORTFALL --
+# how much less cornering the car delivered than was commanded, `(desiredCurvature - curvature) *
+# v^2`, hands off the wheel, above 25 mph:
 #
-#     00000397  x8   lat acc  p50 1.77   max 2.11
-#     00000399  x8   lat acc  p50 1.46   max 1.59
+#     lat_acc bin   frames   mean |shortfall|   >0.5 short   saturated
+#      0.5 - 1.0      4022       0.165            3.2%         0.0%
+#      1.0 - 1.5      1443       0.245           10.0%         0.6%
+#      1.5 - 2.0      1580       0.214            8.7%         3.2%
+#      2.0 - 2.5       281       0.288           11.4%         2.8%
+#      2.5 - 3.0        20       0.909           85.0%         0.0%
 #
-# THE PSCM SATURATES BETWEEN 1.4 AND 2.1. I had targeted 2.5 -- above everything it has ever
-# managed -- because I read the knee off `curvatureDeviationLimited`, which is OUR OWN clip biting,
-# not the steering giving up. Two different signals, and I picked the one that flattered the answer.
+# Tracking is FLAT to 2.5 and collapses above it. And saturation does not predict it at all -- 3.2%
+# saturated where tracking is clean, 0% in the bin that actually runs wide. He was right that the
+# warnings are noise; I had tuned against them.
 #
-# 2.0 sits under every observed saturation, and under mapd's 2.2, so this is now strictly more
-# conservative than before any of tonight's work. IT MAY STILL BE TOO HIGH: 00000399 saturated at
-# 1.46, and whether those were highway sweepers or tight turns needing more angle for their geometry
-# is not separated yet. If the warnings continue, this goes down again -- and `SmartCruiseControlMapFactor`
-# at his current 90 already trims it to 1.62 on corners at or below 25 mph.
+# 2.4 keeps a margin under the collapse without giving away speed for warnings he ignores -- and he
+# has been explicit that he would take curves faster, not slower. The 2.5-3.0 bin is only 20 frames,
+# so the collapse point is established in KIND rather than to a decimal; that is the reason for a
+# margin rather than sitting exactly on 2.5.
+#
+# The lesson is the signal, not the number: three values came out of three different failure
+# definitions, and only the last one was the failure HE cares about. Ask which failure before
+# measuring a limit.
 #
 # Do not move it back toward the 3.2 an earlier pass reported: that figure was his own hands on the
 # wheel leaking into the measurement, and the 64 mph it produced "agreeing" with the 64 mph he
 # drives was circular, not corroboration.
-_CORNER_LAT_ACC = 2.0
+_CORNER_LAT_ACC = 2.4
 
 
 def path_from_mapd(sm) -> tuple[Coordinate, list[dict]] | None:
