@@ -31,7 +31,7 @@ from openpilot.sunnypilot.selfdrive.controls.lib.passing_assist import (
   SUGGESTION_HOLD_S, HOLD_THROUGH,
   DEFAULT_PERSISTENCE_S, DRIVE_HISTORY_MAX, CHIME_MIN_INTERVAL_S,
   TIMELINE_MAX, GAP_WHILE_PASSING, GAP_GIVE_UP_S, WANTED_RISE_S, WANTED_FALL_S,
-  LEAD_GAP_GRACE_S, EXIT_WATCH_S, EXIT_DECEL_MS)
+  LEAD_GAP_GRACE_S, EXIT_WATCH_S, EXIT_DECEL_MS, AGREE_WINDOW_S)
 
 Side = custom.LongitudinalPlanSP.PassingAssist.Side
 Blocked = custom.LongitudinalPlanSP.PassingAssist.Blocked
@@ -4212,3 +4212,84 @@ class TestTheSignalDoesNotFlicker:
     # waiting out WANTED_FALL_S, which is longer.
     run(det, int((LEAD_GAP_GRACE_S + 0.1) / DT_MDL), status=False)
     assert det.wanted_side == Side.none
+
+
+class TestAgreementAfterWaitingForTheLane:
+  """HIS REPORT, 2026-08-20: "A lot of lane changes are correct, I just have to wait for no one to
+  be in that lane."
+
+  Agreement was sampled on the rising edge of the stalk and required the suggestion to be live in
+  that exact frame. So the sequence that actually happens on the road -- suggest, look, someone is
+  there, wait, go -- scored as a miss. 82 passes, 3 agreements, and the metric was measuring
+  simultaneity rather than whether the decision was right.
+  """
+
+  def _det(self):
+    d = PassingAssistDetector.__new__(PassingAssistDetector)
+    d.driver_passes = 0
+    d.driver_passes_eligible = 0
+    d.driver_passes_agreed = 0
+    d.driver_passes_agreed_late = 0
+    d.driver_pass_late_delay_s = 0.0
+    d.driver_pass_lead_s = 0.0
+    d._since_left_suggest_s = 1e4
+    d._suggest_held_s = 0.0
+    d._episode_taken = False
+    d.suggestions_taken = 0
+    d._miss_reasons = {}
+    d._missed_deficit_n = 0
+    d.missed_deficit_mph = 0.0
+    d.patience_missed = 0
+    d.patience_scale = 1.0
+    d.has_lead = True
+    d.speed_deficit = 0.0
+    d.min_deficit_ms = 0.0
+    d.suggestion = Side.none
+    d.reason = Reason.none
+    d.blocked_by = Blocked.noLaneAvailable
+    return d
+
+  def test_a_pass_made_while_suggesting_is_a_strict_agreement(self):
+    d = self._det()
+    d.suggestion, d.reason = Side.left, Reason.passing
+    d._record_driver_pass()
+    assert d.driver_passes_agreed == 1
+    assert d.driver_passes_agreed_late == 0
+
+  def test_a_pass_made_after_waiting_for_the_lane_counts_as_agreed_late(self):
+    """THE REPORTED CASE. Suggested, blocked, he waits twelve seconds, then goes."""
+    d = self._det()
+    d._since_left_suggest_s = 12.0
+    d._record_driver_pass()
+    assert d.driver_passes_agreed == 0, "not simultaneous, so not a strict agreement"
+    assert d.driver_passes_agreed_late == 1
+    assert d.driver_pass_late_delay_s == 12.0
+
+  def test_the_delay_is_a_running_mean(self):
+    d = self._det()
+    d._since_left_suggest_s = 10.0
+    d._record_driver_pass()
+    d._since_left_suggest_s = 20.0
+    d._record_driver_pass()
+    assert d.driver_passes_agreed_late == 2
+    assert d.driver_pass_late_delay_s == 15.0
+
+  def test_a_pass_long_after_any_suggestion_is_not_agreement(self):
+    """The bound has to bite, or every pass on the drive counts and the number means nothing."""
+    d = self._det()
+    d._since_left_suggest_s = AGREE_WINDOW_S + 1.0
+    d._record_driver_pass()
+    assert d.driver_passes_agreed_late == 0
+
+  def test_a_pass_with_no_suggestion_ever_is_not_agreement(self):
+    d = self._det()
+    d._record_driver_pass()
+    assert d.driver_passes_agreed == 0
+    assert d.driver_passes_agreed_late == 0
+
+  def test_a_late_agreement_is_still_attributed_to_what_refused_it(self):
+    """The refusal is the reason he had to wait. Losing it would hide the thing worth fixing."""
+    d = self._det()
+    d._since_left_suggest_s = 8.0
+    d._record_driver_pass()
+    assert d._miss_reasons.get(int(Blocked.noLaneAvailable)) == 1

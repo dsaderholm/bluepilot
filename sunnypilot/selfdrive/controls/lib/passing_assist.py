@@ -745,6 +745,22 @@ TSR_OVTK_UNRESTRICTED = (0, 1) + TSR_OVTK_CANCELLED
 TSR_OVTK_STATUS_RELIABLE = 2
 
 
+# HOW LONG AFTER A SUGGESTION A PASS STILL COUNTS AS AGREEING WITH IT.
+#
+# HIS REPORT, 2026-08-20: *"A lot of lane changes are correct, I just have to wait for no one to be
+# in that lane."* Agreement was sampled on the RISING EDGE of his stalk and required the suggestion
+# to be live in that exact frame, so the sequence that actually happens -- it suggests, he looks,
+# someone is in the lane, he waits for them to clear, he goes -- scored as a MISS. Across 21 drives
+# and 82 passes it had recorded 3 agreements, which was measuring whether we moved in the same
+# FRAME rather than whether we wanted the same thing.
+#
+# 30 s is deliberately generous, because the number that matters is the DELAY DISTRIBUTION and not
+# this bound: the mean delay is recorded beside the count, so the honest window can be read off his
+# own driving instead of guessed at twice. Strict agreement is still counted separately -- the two
+# answer different questions, and collapsing them would lose the lead-time claim.
+AGREE_WINDOW_S = 30.0
+
+
 class PassingAssistDetector:
   def __init__(self):
     self.suggestion = Side.none
@@ -963,6 +979,10 @@ class PassingAssistDetector:
     # See driverPasses in custom.capnp -- agreement with the driver, the readiness measure.
     self.driver_passes = 0
     self.driver_passes_agreed = 0
+    # Agreed, but after waiting for the lane to clear. See AGREE_WINDOW_S.
+    self.driver_passes_agreed_late = 0
+    self.driver_pass_late_delay_s = 0.0
+    self._since_left_suggest_s = 1e4
     self.driver_pass_lead_s = 0.0
     self._suggest_held_s = 0.0
     self._miss_reasons: dict[int, int] = {}
@@ -1950,6 +1970,8 @@ class PassingAssistDetector:
         "patienceMissed": int(self.patience_missed),
         "driverPasses": int(self.driver_passes),
         "driverPassesAgreed": int(self.driver_passes_agreed),
+        "driverPassesAgreedLate": int(self.driver_passes_agreed_late),
+        "driverPassLateDelay": round(float(self.driver_pass_late_delay_s), 1),
         "driverPassLead": round(self.driver_pass_lead_s, 1),
         # A REASON CODE, not a count, and the key name has misled a reader of this record more
         # than once. Kept for continuity with the archived history; the unambiguous name is
@@ -2067,6 +2089,14 @@ class PassingAssistDetector:
     if not suggesting:
       self._suggest_held_s = 0.0
     self._prev_suggesting = suggesting
+
+    # How long since we last asked for a LEFT pass. Zero while asking, so a pass made during the
+    # suggestion and one made twenty seconds after it are the same measurement with a different
+    # delay. Capped rather than unbounded so a quiet hour cannot overflow the mean.
+    if suggesting and self.suggestion == Side.left:
+      self._since_left_suggest_s = 0.0
+    else:
+      self._since_left_suggest_s = min(self._since_left_suggest_s + DT_MDL, 1e4)
 
     # A takeover with no stalk. Tracked alongside the blinker rather than instead of it: doing
     # both at once is normal, and whichever ends last is what the stand-down should follow.
@@ -2311,6 +2341,19 @@ class PassingAssistDetector:
       n = self.driver_passes_agreed
       self.driver_pass_lead_s += (self._suggest_held_s - self.driver_pass_lead_s) / n
     else:
+      # AGREED, BUT LATE. He looked, the lane was occupied, he waited for it to clear, then went.
+      # That is the system and the driver wanting the same thing, and counting it as a miss is what
+      # made 82 passes look like 3 agreements. Recorded separately from strict agreement rather
+      # than folded into it: the strict number is the one that supports the lead-time claim, and
+      # this one is the one that says whether the DECISION was right.
+      if self._since_left_suggest_s <= AGREE_WINDOW_S:
+        self.driver_passes_agreed_late += 1
+        n_late = self.driver_passes_agreed_late
+        self.driver_pass_late_delay_s += (
+          (self._since_left_suggest_s - self.driver_pass_late_delay_s) / n_late)
+      # Still attributed to whatever refused it. A late agreement does not make the refusal
+      # uninteresting -- it is the reason he had to wait, and on these drives it is almost always
+      # noLaneAvailable, which is the thing worth fixing.
       key = int(self.blocked_by)
       self._miss_reasons[key] = self._miss_reasons.get(key, 0) + 1
       # Only for the threshold's own refusals. A pass refused for a blind spot says nothing about
