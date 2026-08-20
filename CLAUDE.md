@@ -975,12 +975,29 @@ So every symptom he reported -- the cycling, the chime, the park brake at the st
 for a little bit" -- traces to `AccPrpl_A_Pred` not being pinned. Pinning it takes that same window
 from 51.7% refused to 0.5%.
 
-**What is NOT proven:** that the camera releases cancel once its commands are honoured. The latch
-was never seen to clear -- it was still asserting 262 s later at the end of the drive. So a latched
-cancel is now logged at ERROR after 5 s straight (`passthrough_cancel_frames`), because from that
-moment the passthrough is inert and openpilot longitudinal is driving with nothing saying so.
+**CLOSED 2026-08-19: THE BRICK HAS NOT RECURRED IN SIX CONSECUTIVE DRIVES.** He said the DTCs he had
+offered probably no longer mattered, and the logs agree -- every route after 0000038d:
 
-**Do NOT enable this again until that is understood**, because the park-brake path is real: four
+    0000038e  22 segs   inert 0   accFaulted 0   ford 99.9% of engaged
+    0000038f  12 segs   inert 0   accFaulted 0   ford 99.3%
+    00000390   6 segs   inert 0   accFaulted 0   ford 99.6%
+    00000391  12 segs   inert 0   accFaulted 0   ford 98.3%
+    00000392   1 seg    inert 0   accFaulted 0   (too short to score)
+    00000393  26 segs   inert 0   accFaulted 0   ford 97.8%
+
+Zero inert frames, zero `accFaulted`, Ford authoring 97.8-99.9% of engaged frames throughout. Both
+mechanisms were identified from logs and neither ever needed a fault code: we were RELAYING THE
+CAMERA'S OWN CANCEL back at it (70 re-engagement cycles) while discarding roughly half its braking
+commands over `AccPrpl_A_Pred` (51.7% refused in the 40 s before it gave up). A DTC would only have
+said the camera was unhappy, which was never the open question.
+
+**The narrower thing still unproven** -- whether a camera that HAS latched releases cancel once its
+commands are honoured -- is now unfalsifiable from this car, because it has not latched since. So
+`passthrough_cancel_frames` stays as the ERROR-level detector rather than being removed: it is the
+instrument that would catch a THIRD mechanism, and a third mechanism is the only thing that would
+make the DTCs matter again.
+
+**The park-brake path is real and its refusal stays**: four
 transmitted frames carried `AccBrkPrkEl_B_Rq`. That is now refused along with cancel, deny, stop
 status, brake pulse and auto-resume -- the bits panda does not police at all. **"Panda would allow
 it" was never the same question as "we understand it", and the first version only asked the first
