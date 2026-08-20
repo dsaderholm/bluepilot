@@ -1951,6 +1951,43 @@ distanceFromWayCenter. Then v1 comes out and gives back what the overlap costs.
   A green run says nothing whatsoever about a file it never read. The same holds for anything else
   requiring compiled extensions.
 
+### FORD'S LAUNCH IS 2.0 m/s^2, WHICH *IS* PANDA'S CEILING. EVERY PULL-AWAY WAS REFUSED.
+
+*"It switched to OP long for acceleration and it went ridiculously slow."* Then the question that
+reframed it: *"Why is OP long launching at all? Is that because I told you that Ford ACC has slow
+launches?"* **He never said that and nothing chooses openpilot for launches.** `fallback` is not a
+choice, it is a REFUSAL -- and refusing hands the WHOLE frame to openpilot, because a 50 Hz message
+cannot simply stop.
+
+Route 00000393, 994 fallback frames with a camera ACCDATA, 624 of them under 15 mph:
+
+    AccPrpl_A_Rq  2.000  2.020  2.030  2.050  2.060  2.070  2.080  2.090 ...  all "outside the band"
+
+`_PANDA_GAS_MAX` is exactly **2.0**, and `_PANDA_MARGIN` 0.005 puts even a clean 2.000 outside. Ford's
+ordinary pull-away propulsion sits right on the number, so the passthrough abandoned Ford on
+essentially every launch.
+
+**CLAMPED AT THE TOP, NOT REFUSED**, in `create_acc_msg_passthrough`. Costs 0.005 m/s^2 and keeps
+every other signal Ford authored. Same shape as pinning `AccPrpl_A_Pred`.
+
+**THE ASYMMETRY IS THE ARGUMENT, and it is the part to preserve:**
+
+    clamping DOWN 2.07 -> 1.995    asks for LESS ACCELERATION than Ford wanted   -> conservative
+    clamping UP  -0.77 -> -0.495   asks for LESS ENGINE BRAKING than Ford wanted -> NOT
+
+So the low side is still a refusal and still falls back. Quietly under-decelerating a frame nobody
+is watching is not a thing to do. That case is 3.5% of fallbacks and none of the launches.
+
+**And -5.0 is never clamped.** It is panda's legal escape and sits BELOW the band, so treating it as
+out-of-range would turn "no propulsion request" into "maximum propulsion request". That inversion is
+the one way this change could be dangerous rather than merely wrong, so it has its own test.
+
+**THE GENERAL LESSON: a band violation is not automatically a refusal.** Ask which direction the
+clamp errs in. Three fields in this message have now needed three different answers -- pin
+(`AccPrpl_A_Pred`, an advisory hint), clamp-one-side (`AccPrpl_A_Rq`), and carry verbatim
+(`AccBrkTot_A_Rq`, where a silent softening would be indistinguishable from working until it
+mattered).
+
 ### A LOWER `nextSpeedLimit` ON A MOTORWAY IS AN EXIT RAMP. THAT WAS THE 45 ON I-215.
 
 *"At one point it said the speed limit was 45, even though the speed limit was 70."* Traced through
@@ -1995,10 +2032,24 @@ asked for a stop:
     STOPPING + NOLEAD               0    0.0%     <- never, not once
     all three                       0    0.0%
 
-**openpilot's plan commits to `stopping` ONLY when there is a lead.** The override requires NO lead
-within 60 m. So its trigger and its safety carve-out are the same frames inverted, and it can never
-arm -- by construction, not by tuning. Independent, that intersection would have been ~9.5%; exactly
-zero across 2,689 stopping frames and 4,703 no-lead frames is a contradiction, not a rare event.
+**CORRECTED THE SAME NIGHT, and the correction matters.** The first reading of this was "openpilot's
+plan commits to `stopping` ONLY when there is a lead", i.e. a logical contradiction between the
+override's trigger and its own carve-out. A sharper measurement says otherwise:
+
+    plan frames                       30735
+    shouldStop                         7103
+    shouldStop & NO lead               2570     <- the plan DOES want to stop with no lead
+    shouldStop & engaged               2894
+    shouldStop & engaged & NO lead        0     <- and THIS is the empty set
+
+**The plan asks to stop at an empty stop line perfectly well. What never happens is being ENGAGED
+while it does.** Every engaged stop-request on the drive had a lead; every no-lead stop-request came
+while he was already braking. So the conditions are not contradictory in principle -- the state just
+does not occur, because he takes empty stops himself.
+
+That is the SAME root cause the previous drive found ("he disengages before every stop"), now
+confirmed on a drive where Ford held 12,056 standstill frames behind leads. **Do not write it up as
+a design contradiction; it is a precondition he has never had reason to satisfy.**
 
 **Both halves were individually well-reasoned, which is how this got built.** "A lead disqualifies it
 -- Ford's stop-and-go is better than ours" is right. "The plan must have COMMITTED, not merely
@@ -2007,16 +2058,21 @@ added earlier the same evening could not see it either: it reported each conditi
 their four-way intersection, so three healthy-looking percentages hid a pair that is disjoint.
 **PAIRWISE IS THE DIAGNOSTIC. A funnel of marginals cannot show an exclusion.**
 
-**Do NOT fix this by dropping the lead check.** That check is the reason the override never fights
-Ford's stop-and-go, which is the part of this car that works. The thing to change is what the
-override triggers ON: `longControlState == stopping` is the MPC's commitment, and the MPC stops for
-leads and cruise targets -- never for a sign or a signal. The model's own stop intent is what fires
-at a light, and it already reaches the carcontroller as `dec.hasSlowDown`, which the override
-ALREADY takes as a separate argument.
+**Do NOT fix this by dropping the lead check**, and do not rewrite the trigger either. Both were
+proposed on the strength of the wrong reading above. With the corrected numbers there is nothing
+structurally broken to repair -- the four conditions are individually right and the car has simply
+never been in the state they describe.
 
-**That is a real design change to a safety-relevant path and it was NOT made on 2026-08-19**, with
-him asleep and no way to validate offline. What is established is that the feature is dead as built,
-which is worth more than a rushed change that makes the car brake at the wrong moment.
+**WHAT IT ACTUALLY NEEDS IS ONE DELIBERATE APPROACH**: an empty stop line, no car ahead, cruise left
+engaged, foot off the brake, all the way to a standstill. That single event moves this from
+untestable to measured, and `passthrough_cancel_frames` is its readout -- the camera's tolerance for
+sustained contradiction is the real unknown and always was.
+
+**And the diagnostic lesson survives the correction, which is why it is kept:** the funnel printed
+each condition's own rate plus the four-way intersection, and three healthy marginals hid an empty
+triple. PAIRWISE, AND AGAINST ENGAGEMENT, is what showed it. A funnel of marginals cannot show an
+exclusion -- nor can it tell a contradiction from a state that merely never arose, which is exactly
+the distinction the first write-up got wrong.
 
 ### THE FAN IS NOT A FAULT. MEASURED, TWICE, AND CLOSED.
 
