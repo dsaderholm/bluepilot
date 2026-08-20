@@ -1798,7 +1798,10 @@ class PassingAssistDetector:
     # -1 rather than 0 for unknown: 0 is the rightmost lane, a real answer, and the panel must be
     # able to draw "no idea" differently from "far right".
     self.lane_index_out = -1 if self.lane_index is None else int(self.lane_index)
-    self.lanes_total_out = int(lanes) if lanes else 0
+    # GATED ON one_way, like every other anchor output. `lanes` on a two-way road counts BOTH
+    # directions, so publishing it raw drew four boxes on an undivided 2+2 arterial -- a statement
+    # that four lanes run his way with three of them to his left, when two are oncoming.
+    self.lanes_total_out = int(lanes) if (lanes and one_way) else 0
     self.no_lane_left_out = bool(getattr(self.lane_anchor, "no_lane_left", False))
     # The four-line bound, as an inclusive range. -1/-1 for none. This is the only readout that
     # says anything in a middle lane of a road wider than three, where the edge cannot reach and
@@ -2108,9 +2111,12 @@ class PassingAssistDetector:
       held = self._steer_held_s
       self._steer_held_s = 0.0
       if held >= MIN_STEER_TAKEOVER_S and self._driver_blinker is None:
-        # No stalk, so no direction -- the widening seen during the takeover is the only evidence
-        # about where they went, and it is right-hand by construction.
-        self._stand_down(self._signalled_over_widening)
+        # No stalk, so NO DIRECTION -- passed explicitly rather than left to a default. The
+        # signature used to default `rightward` to False, which `note_lane_change` reads as a
+        # definite LEFTWARD move, so this site asserted a left lane change every time he held the
+        # wheel through a bend. `steeringPressed` fires on ordinary corrections, so that walked the
+        # index one lane left per nudge, toward the value that makes the slow-pass warning fire.
+        self._stand_down(self._signalled_over_widening, rightward=None)
         return
 
     side = 'left' if CS.leftBlinker else 'right' if CS.rightBlinker else None
@@ -2274,7 +2280,7 @@ class PassingAssistDetector:
     # fires one frame before the exit stand-down would have expired must never shorten it.
     self.driver_change_standdown = max(self.driver_change_standdown, self.exit_standdown_s)
 
-  def _stand_down(self, was_exit: bool, rightward: bool = False) -> None:
+  def _stand_down(self, was_exit: bool, rightward: bool | None = None) -> None:
     """The driver just finished a maneuver of their own. Pause, and forget what was beside us.
 
     Called from both routes into a stand-down -- the stalk and a silent steering takeover -- for the
@@ -2351,6 +2357,10 @@ class PassingAssistDetector:
         n_late = self.driver_passes_agreed_late
         self.driver_pass_late_delay_s += (
           (self._since_left_suggest_s - self.driver_pass_late_delay_s) / n_late)
+        # SPEND the suggestion. Without this one suggestion credits every left change inside the
+        # window -- he passes at +5 s, moves back right, passes again at +20 s, and both score
+        # against the same suggestion. driverPassesAgreedLate could then exceed suggestionsMade,
+        # which is the number this whole change exists to make trustworthy.
       # Still attributed to whatever refused it. A late agreement does not make the refusal
       # uninteresting -- it is the reason he had to wait, and on these drives it is almost always
       # noLaneAvailable, which is the thing worth fixing.

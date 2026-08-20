@@ -39,6 +39,17 @@ import re
 import sys
 from collections import Counter
 
+# THE UNITS DO NOT MATCH, AND THIS COST A REPORTED NUMBER. `speedDeficit` is published in m/s
+# (custom.capnp @6) and `minDeficitActive` in MPH (passing_assist.py: `min_deficit_ms * MS_TO_MPH`).
+# Comparing them directly demands a lead 2.237x slower than the real gate does, so every
+# slow-lead count published from this tool was over a far too strict population.
+#
+# `minDeficitActive` is also the SETTING, not the live threshold: the gate tests
+# `min_deficit_active_ms`, which is the setting times `patience_scale`. Patience only ever RAISES
+# the bar, so treating the setting as the threshold over-counts where patience was active. That
+# part cannot be reconstructed from the wire, so it is stated rather than silently absorbed.
+DEFICIT_MPH_TO_MS = 0.44704
+
 MIN_SPEED = 15.0     # m/s -- freeway only; the anchor is not for parking lots
 DT = 0.05
 
@@ -99,12 +110,15 @@ def main():
   hwy = ""
   blinker = False
   prev_blinker = False
+  prev_right = False
   lead_slow = False
 
   seen = Counter()          # lane index (or None) -> frames
   by_class = Counter()      # highwayClass -> frames with an answer
   cls_total = Counter()
   leftmost_with_lead = 0
+  full_gate = 0
+  right_geo = False
   lead_frames = 0
   held_across_change = 0
   changes = 0
@@ -142,8 +156,8 @@ def main():
         # suggestions, which cannot happen without a slow lead. A diagnostic that answers zero
         # when it should crash is worse than no diagnostic. Hence require_field() below.
         pa = m.longitudinalPlanSP.passingAssist
-        deficit = float(pa.speedDeficit)
-        threshold = float(pa.minDeficitActive)
+        deficit = float(pa.speedDeficit)                              # m/s
+        threshold = float(pa.minDeficitActive) * DEFICIT_MPH_TO_MS     # mph on the wire -> m/s
         lead_slow = bool(pa.hasLead) and threshold > 0 and deficit >= threshold
       elif w == "modelV2":
         if speed < MIN_SPEED:
@@ -155,16 +169,18 @@ def main():
         except (AttributeError, IndexError, TypeError, ValueError):
           std, d = None, None
 
-        # The real hook. The anchor FOLLOWS the change when it knows the direction, so this has
-        # to pass one -- calling note_lane_change() bare made the replay measure the old
-        # forget-everything behaviour while the car was doing something else entirely.
-        if blinker and not prev_blinker:
+        # THE FALLING EDGE, because that is when the car does it. `_stand_down` is reached from
+        # the stalk path when the blinker goes OFF, not when it comes on -- so hooking the rising
+        # edge shifted the replay's anchor a whole lane change early and every number below was
+        # measured against behavior the car does not have.
+        if prev_blinker and not blinker:
           changes += 1
           had = anchor.index is not None
-          anchor.note_lane_change(rightward=right_blink)
+          anchor.note_lane_change(rightward=prev_right)
           if had and anchor.index is not None:
             held_across_change += 1
         prev_blinker = blinker
+        prev_right = right_blink if blinker else prev_right
 
         try:
           flp = float(m.modelV2.laneLineProbs[LL_FAR_LEFT])
@@ -192,6 +208,8 @@ def main():
           lead_frames += 1
           if anchor.in_leftmost_lane():
             leftmost_with_lead += 1
+            if right_geo:
+              full_gate += 1
 
   if not moving:
     sys.exit("no moving frames")
@@ -240,13 +258,17 @@ def main():
     print(f"  slow lead present: {lead_frames} frames")
     print(f"  ...and anchor says LEFTMOST: {leftmost_with_lead} "
           f"({100.0 * leftmost_with_lead / lead_frames:.1f}%)")
-    print("  Compare with hogCount/hogSeconds from bp_passing_report for the same drive.")
+    print(f"  ...and the FULL gate (+ a lane to our right): {full_gate} "
+          f"({100.0 * full_gate / lead_frames:.1f}%)")
+    print("  The warning fires on the FULL gate. The middle line is two of its three terms and is")
+    print("  always higher -- reading that gap as the anchor over-claiming leftmost sends work at")
+    print("  the wrong term, which is what the two-term version of this invited.")
   else:
     print("  no slow-lead frames on this drive; the conjunction cannot be scored here")
   print()
   print("LANE CHANGES")
   print(f"  blinker onsets: {changes}   anchor FOLLOWED the change: {held_across_change}")
-  print("  Following is now the intended behaviour, not a bug -- the anchor shifts the index by one")
+  print("  Following is now the intended behavior, not a bug -- the anchor shifts the index by one")
   print("  in the direction of travel. What protects it is that update() drops any latched index")
   print("  the lane lines no longer allow, so a wrong shift dies on the next frame rather than")
   print("  being carried. A count near zero here means the shift is being refused every time,")

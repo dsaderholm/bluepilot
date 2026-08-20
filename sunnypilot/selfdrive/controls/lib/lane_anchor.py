@@ -24,6 +24,8 @@ So every ambiguous case resolves to `None` (unknown), and a `None` must leave th
 it was before this existed. An anchor that says "you are in lane 3 of 5" wrongly, in the permissive
 direction, is worse than no anchor at all.
 """
+import math
+
 from openpilot.common.constants import CV
 
 # US Interstate standard is 12 ft. Ford's own lane-width estimates and mapd's estimatedRoadWidth
@@ -72,12 +74,12 @@ MAX_LATCH_S = 20.0
 
 
 def lane_index_from_edge(edge_dist_m, lanes_total):
-  """Which lane are we in, counting 0 = FAR RIGHT, given metres to the right road edge?
+  """Which lane are we in, counting 0 = FAR RIGHT, given meters to the right road edge?
 
   Returns None when the answer is not determinable, which the caller must treat as "unknown" and
   never as "lane 0".
 
-  The arithmetic: sitting centred in the rightmost lane puts the right edge half a lane away, so
+  The arithmetic: sitting centered in the rightmost lane puts the right edge half a lane away, so
   index = round((edge - half a lane) / a lane). A car 1.85 m from the edge is index 0; 5.55 m is
   index 1; 9.25 m is index 2.
   """
@@ -149,6 +151,12 @@ def lane_bounds_from_lines(far_left_prob, far_right_prob, lanes_total):
     return None
   if n <= 1 or fl is None or fr is None:
     return None
+  # NaN COMPARES FALSE AGAINST EVERYTHING, so a NaN probability makes both `open` tests below
+  # False and lands in the both-lines-present branch -- which MANUFACTURES a position out of
+  # missing data. Every other bad input here returns None; this was the one that invented an
+  # answer, and on a three-lane road it would pin the middle lane and publish it as a measurement.
+  if not (math.isfinite(fl) and math.isfinite(fr)):
+    return None
 
   left_open = fl < NO_LEFT_LINE_PROB       # no lane to our left
   right_open = fr < NO_LEFT_LINE_PROB      # no lane to our right
@@ -182,6 +190,7 @@ class LaneAnchor:
     self.line_bounds = None      # (lo, hi) from the four lines, or None
     self.edge_index = None       # this frame's edge-derived index alone, before any fallback
     self.dead_reckoned = False   # the index came from following a lane change, not from a reading
+    self.reason = ""             # set only by invalidate(); absent here meant AttributeError
     # THE TWO WITNESSES DISAGREEING. Measured, not acted on -- see update().
     self.contradiction = False
 
@@ -193,6 +202,9 @@ class LaneAnchor:
     self.dead_reckoned = False
     self.edge_index = None
     self.contradiction = False
+    # `in_leftmost_lane()` returns this unguarded as its last resort, so leaving it set means the
+    # anchor answers True on a frame where it has just declared it knows nothing at all.
+    self.no_lane_left = False
     self.reason = reason
 
   def note_lane_change(self, rightward=None):
@@ -224,9 +236,22 @@ class LaneAnchor:
       self.invalidate("lane change ran off the lane count")
       return
     self.index = shifted
-    self.age_s = 0.0
+    # AGE IS DELIBERATELY NOT RESET. A shift measures nothing, so it must not buy a fresh
+    # MAX_LATCH_S lease -- otherwise a driver who nudges the wheel every fifteen seconds carries an
+    # unmeasured index indefinitely, and the staleness bound that is supposed to bound dead
+    # reckoning would be reset BY the dead reckoning. The clock keeps running from the last real
+    # reading, which is what it was always meant to measure.
     self.confident = False       # carried, not measured -- the strip must not read it as a fix
     self.dead_reckoned = True
+    # The per-frame witnesses describe the frame BEFORE the change. Leaving them set lets
+    # `in_leftmost_lane()` answer from a bound belonging to the lane we just left -- a caller
+    # reading between a lane change and the next update gets "you are in the leftmost lane"
+    # immediately after moving right out of it. Same class as the two-way staleness fixed in
+    # 405d821185; that fix covered one of the two paths that can strand these.
+    self.line_bounds = None
+    self.edge_index = None
+    self.contradiction = False
+    self.no_lane_left = False
 
   def update(self, dt, edge_dist_m, edge_std, lanes_total, one_way, far_left_line_prob=None,
              far_right_line_prob=None):
@@ -300,7 +325,7 @@ class LaneAnchor:
     # signature. The outer RIGHT line absent (p ~0.01, so nothing to our right, so the rightmost
     # lane) while the edge sat 3.7-5.1 m away and the formula called that lane 1.
     #
-    # A car centred in the rightmost lane is half a lane -- 1.85 m -- from the edge of its LANE.
+    # A car centered in the rightmost lane is half a lane -- 1.85 m -- from the edge of its LANE.
     # It is 1.85 m plus the shoulder from the edge of the PAVEMENT, and a freeway shoulder is 2-3 m.
     # 3.7-5.1 m is exactly that sum. So `lane_index_from_edge` has been reading about one lane too
     # far left wherever a shoulder exists, which on his roads is everywhere.

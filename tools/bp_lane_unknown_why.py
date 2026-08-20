@@ -45,7 +45,7 @@ def main():
     sys.exit("usage: bp_lane_unknown_why.py [--refusals] <route> [route ...]")
   from openpilot.tools.lib.logreader import LogReader
   from openpilot.sunnypilot.selfdrive.controls.lib.lane_anchor import (
-    LaneAnchor, MAX_EDGE_M, MAX_EDGE_STD, NO_LEFT_LINE_PROB, lane_bounds_from_lines,
+    LaneAnchor, NO_LEFT_LINE_PROB, lane_bounds_from_lines,
   )
 
   anchor = LaneAnchor()
@@ -60,6 +60,11 @@ def main():
   known = 0
 
   for route in routes:
+    # A FRESH ANCHOR AND FRESH CARRIED STATE PER ROUTE. One object across several routes carries
+    # the last latched index and the last mapdOut of one drive into the opening frames of the
+    # next, which is the stale-state class that produced a bogus 12% reading once already.
+    anchor = LaneAnchor()
+    speed, lanes, one_way, hwy = 0.0, 0, False, "?"
     for s in segments_in_order(route):
       p = os.path.join(s, "rlog.zst")
       if not os.path.exists(p):
@@ -103,6 +108,13 @@ def main():
           if lanes <= 0:
             cause["map has no lane count here"] += 1
             continue
+          if lanes == 1:
+            # `lane_bounds_from_lines` refuses n <= 1 BEFORE it looks at the lines, so a one-lane
+            # carriageway has no bound by design. Without this bucket every ramp fell through to
+            # "NEITHER outer line seen -- contradiction" or "two lanes with a line each side",
+            # which reads as an actionable map-vs-camera disagreement when nothing disagreed.
+            cause["single-lane road -- no bound is possible"] += 1
+            continue
           bound = lane_bounds_from_lines(fl, fr, lanes)
           if bound is None:
             if fl < NO_LEFT_LINE_PROB and fr < NO_LEFT_LINE_PROB:
@@ -112,8 +124,11 @@ def main():
             else:
               cause["no bound for another reason"] += 1
             continue
-          # A bound exists but did not pin, and the edge could not narrow it.
-          edge_ok = std <= MAX_EDGE_STD and d <= MAX_EDGE_M
+          # A bound exists but did not pin, and the edge could not narrow it. Taken from the
+          # anchor rather than recomputed: a local copy of the trust rule omitted
+          # `lane_index_from_edge`'s out-of-range refusal, so frames the anchor never trusted were
+          # being reported as "edge trusted but contradicted it".
+          edge_ok = anchor.edge_index is not None
           if bound[0] != bound[1]:
             if not edge_ok:
               cause[f"bound is a RANGE {bound} and the edge was untrusted"] += 1

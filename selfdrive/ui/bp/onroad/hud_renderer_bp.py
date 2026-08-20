@@ -1766,7 +1766,7 @@ class HudRendererBP(HudRendererSP):
     sub_dims = measure_text_cached(self._font_bold, self._pa_sub, sub_size) if self._pa_sub else rl.Vector2(0, 0)
 
     pad_x, pad_y = 36, 18
-    content_w = max(main_dims.x, sub_dims.x)
+    content_w = max(main_dims.x, sub_dims.x, self._lane_strip_width())
     strip_h = LANE_STRIP_H if self._lane_strip_worth_drawing() else 0
     content_h = (main_dims.y + (sub_dims.y + 6 if self._pa_sub else 0)
                  + (14 if self._pa_progress > 0 else 0) + strip_h)
@@ -1809,6 +1809,19 @@ class HudRendererBP(HudRendererSP):
 
     self._draw_lane_strip(panel, y)
 
+  def _lane_strip_width(self) -> float:
+    """How wide the strip needs to be, so the PANEL can be sized to hold it.
+
+    The panel used to size itself on text alone, which was fine when a box was 18 px wide. At 40 px
+    a five-lane strip is 240 px against a panel that can be ~210 px for a short headline like
+    "Paused" -- and since the strip is CENTRED on the panel, the outer box on each side was drawn
+    past the rounded black background, straight onto the camera image with no backing.
+    """
+    if not self._lane_strip_worth_drawing():
+      return 0.0
+    n = min(int(getattr(self, "_pa_lanes_total", 0)), 8)
+    return n * LANE_BOX_W + (n - 1) * LANE_BOX_GAP
+
   def _lane_strip_worth_drawing(self) -> bool:
     """Only when the map has given a lane count. Without one there is nothing to draw boxes for,
     and inventing a width would be the strip asserting something nobody measured."""
@@ -1826,14 +1839,14 @@ class HudRendererBP(HudRendererSP):
     THREE STATES, and drawing them alike is how an unavailable estimator reads as a confident one:
 
       filled box    the anchor placed us in that lane. A measurement.
-      outlined box  it is one of THESE, we cannot say which. From the four-line bound, or from the
+      dim box       it is one of THESE, we cannot say which. From the four-line bound, or from the
                     lane-line witness alone. Weaker evidence, so it is drawn weaker.
       all empty     unknown. The strip still draws, because an absent strip cannot be told from a
                     feature that is switched off.
 
     HE REPORTED THE MIDDLE LANE AS ALL-EMPTY, 2026-08-19, and it was: from a middle lane the right
     edge is out of reach and a left line is genuinely present, so both of the original witnesses
-    fell silent at once. Outlining a RANGE is what puts something on the strip there -- on a
+    fell silent at once. Dimming a RANGE is what puts something on the strip there -- on a
     three-lane road the bound pins the lane and it fills instead, and on I-15's five it narrows to
     the three middle boxes, which is a true statement rather than a blank one.
     """
@@ -1853,11 +1866,11 @@ class HudRendererBP(HudRendererSP):
       # from the driver's seat -- so lane 0 is the box on the RIGHT, and the list is reversed.
       lane = n - 1 - i
       box = rl.Rectangle(x0 + i * (box_w + gap), y, box_w, box_h)
-      # ONE SHAPE, THREE BRIGHTNESSES. It was a filled box, a hollow box and a grey box, and he
+      # ONE SHAPE, THREE BRIGHTNESSES. It was a filled box, a hollow box and a gray box, and he
       # said twice he could not tell them apart -- the second time after it had been explained.
       # Two different SHAPES meaning two different confidences is a legend to memorize; brightness
       # of the same shape is a gradient you read without one. The rule is now sayable in a
-      # sentence: the brightest box is you, a dim one is a maybe, grey is just a lane.
+      # sentence: the brightest box is you, a dim one is a maybe, gray is just a lane.
       c = self._pa_color
       if lane == idx:
         rl.draw_rectangle_rounded(box, 0.35, 4, c)

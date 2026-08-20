@@ -18,6 +18,19 @@ def segments_in_order(route):
     return int(m.group(1)) if m else -1
   return sorted(segs, key=idx)
 
+
+# THE UNITS DO NOT MATCH. `speedDeficit` is published in m/s (custom.capnp @6) and
+# `minDeficitActive` in MPH (passing_assist.py: `min_deficit_ms * MS_TO_MPH`). Comparing them
+# directly demands a lead 2.237x slower than the real gate does, and every slow-lead count this
+# tool published was over that far too strict population.
+#
+# `minDeficitActive` is also the SETTING, not the live threshold -- the gate tests
+# `min_deficit_active_ms`, the setting times `patience_scale`. Patience only ever RAISES the bar,
+# so the setting over-counts wherever patience was active. That part is not on the wire, so it is
+# stated here rather than silently absorbed.
+DEFICIT_MPH_TO_MS = 0.44704
+
+
 def main():
   sys.path.insert(0, "/data/openpilot")
   from openpilot.tools.lib.logreader import LogReader
@@ -49,7 +62,8 @@ def main():
             lanes, one_way, hwy = 0, False, "?"
         elif w == "longitudinalPlanSP":
           pa = m.longitudinalPlanSP.passingAssist
-          d, t = float(pa.speedDeficit), float(pa.minDeficitActive)
+          # See DEFICIT_MPH_TO_MS: speedDeficit is m/s, minDeficitActive is mph.
+          d, t = float(pa.speedDeficit), float(pa.minDeficitActive) * DEFICIT_MPH_TO_MS
           lead_slow = bool(pa.hasLead) and t > 0 and d >= t
           right_ok = bool(pa.rightGeometryOk)
         elif w == "modelV2":

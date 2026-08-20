@@ -14,7 +14,7 @@ HALF = LANE_WIDTH_M / 2.0
 
 
 class TestLaneIndexFromEdge:
-  def test_centred_in_the_rightmost_lane_is_index_zero(self):
+  def test_centered_in_the_rightmost_lane_is_index_zero(self):
     assert lane_index_from_edge(HALF, 4) == 0
 
   def test_one_lane_in(self):
@@ -85,31 +85,36 @@ class TestLatching:
     assert not a.confident, "carrying a latch is not the same as measuring"
 
   def test_an_untrusted_edge_never_establishes_an_anchor(self):
+    """Corroborated by the lines, so the ONLY thing refusing it is the std. Without the probs the
+    edge was refused for lack of a bound and this said nothing about MAX_EDGE_STD at all."""
     a = LaneAnchor()
-    assert a.update(0.05, 4.6, 9.9, 5, True) is None
+    assert a.update(0.05, 4.6, 9.9, 5, True, 0.9, 0.9) is None
 
   def test_the_latch_expires(self):
     a = LaneAnchor()
-    a.update(0.05, 4.6, 0.2, 5, True)
-    assert a.update(MAX_LATCH_S + 1.0, None, 9.9, 5, True) is None
+    a.update(0.05, 4.6, 0.2, 5, True, 0.9, 0.9)   # lane 1; lines allow 1..3, so it latches
+    assert a.index == 1, "the latch must exist, or the expiry below is asserted against nothing"
+    assert a.update(MAX_LATCH_S + 1.0, None, 9.9, 5, True, 0.9, 0.9) is None
 
   def test_a_fresh_reading_overrides_a_disagreeing_latch(self):
     a = LaneAnchor()
     a.update(0.05, 4.6, 0.2, 5, True, 0.9, 0.9)          # lane 1, lines allow 1..3
     assert a.update(0.05, HALF, 0.2, 5, True, 0.9, 0.02) == 0    # no line right -> lane 0
 
-  def test_a_lane_change_drops_the_anchor_rather_than_following_it(self):
-    """Incrementing the index across a change would be dead reckoning on dead reckoning, and an
-    aborted change would leave a confident wrong answer."""
+  def test_a_lane_change_with_no_direction_drops_the_anchor(self):
+    """REVERSED 2026-08-20: a change WITH a direction is now followed. With none it still drops,
+    and that is the case this test now pins -- half a fact is not a position."""
     a = LaneAnchor()
-    a.update(0.05, 4.6, 0.2, 5, True)
+    a.update(0.05, 4.6, 0.2, 5, True, 0.9, 0.9)   # lane 1; lines allow 1..3, so it latches
+    assert a.index == 1, "set up a real latch, or the assertion below proves nothing"
     a.note_lane_change()
     assert a.update(0.05, None, 9.9, 5, True) is None
 
   def test_a_changed_lane_count_drops_the_anchor(self):
     """A different cross-section means the index refers to a different road."""
     a = LaneAnchor()
-    a.update(0.05, 4.6, 0.2, 5, True)
+    a.update(0.05, 4.6, 0.2, 5, True, 0.9, 0.9)   # lane 1; lines allow 1..3, so it latches
+    assert a.index == 1, "set up a real latch, or the assertion below proves nothing"
     assert a.update(0.05, None, 9.9, 3, True) is None
 
   def test_a_two_way_road_refuses_outright(self):
@@ -120,8 +125,9 @@ class TestLatching:
 
   def test_going_two_way_drops_an_existing_anchor(self):
     a = LaneAnchor()
-    a.update(0.05, 4.6, 0.2, 5, True)
-    assert a.update(0.05, 4.6, 0.2, 5, False) is None
+    a.update(0.05, 4.6, 0.2, 5, True, 0.9, 0.9)   # lane 1; lines allow 1..3, so it latches
+    assert a.index == 1, "an EXISTING anchor is the whole point of this test"
+    assert a.update(0.05, 4.6, 0.2, 5, False, 0.9, 0.9) is None
 
 
 class TestLeftmostQuery:
@@ -131,8 +137,12 @@ class TestLeftmostQuery:
     assert a.in_leftmost_lane() is True
 
   def test_known_not_leftmost(self):
+    """A KNOWN lane that is not the leftmost. Without the line probs the edge was refused and this
+    was a duplicate of the unknown case below, so nothing in the suite covered `to_our_left() != 0`
+    returning False from a real position."""
     a = LaneAnchor()
-    a.update(0.05, HALF, 0.2, 5, True)
+    a.update(0.05, HALF, 0.2, 5, True, 0.9, 0.02)   # no line right -> lane 0 of 5
+    assert a.index == 0
     assert a.in_leftmost_lane() is False
 
   def test_unknown_is_not_leftmost(self):
@@ -411,3 +421,86 @@ class TestTwoWayClearsEverything:
     a = self._one_way_reading_then_two_way()
     assert a.index is None
     assert a.lanes_total is None
+
+
+class TestTheUnknownDirectionDefault:
+  """The review's most severe finding, 2026-08-20, and three independent finders reached it.
+
+  `_stand_down(self, was_exit, rightward: bool = False)` was called with one argument at the
+  silent-steering-takeover site -- whose own comment reads "No stalk, so no direction". `False` is
+  not "unknown" to `note_lane_change`, it is "moved LEFT", so every time he held the wheel through
+  a bend the index walked one lane toward the value that makes the slow-pass warning fire.
+  """
+
+  def test_the_signature_default_is_None_not_False(self):
+    """Pinned at the SIGNATURE, because the bug was a default and no call-site test can see one.
+    A bool default cannot express the third state the anchor requires."""
+    import inspect
+
+    from openpilot.sunnypilot.selfdrive.controls.lib.passing_assist import PassingAssistDetector
+    sig = inspect.signature(PassingAssistDetector._stand_down)
+    assert sig.parameters["rightward"].default is None, \
+      "False means 'moved left'; unknown direction must be None or the anchor asserts a lane change"
+
+  def test_false_really_does_mean_left(self):
+    """The reason the default mattered. If this ever stops being true the finding changes shape."""
+    a = LaneAnchor()
+    a.update(0.05, HALF, 0.2, 5, True, 0.9, 0.02)
+    assert a.index == 0
+    a.note_lane_change(rightward=False)
+    assert a.index == 1, "False is a positive claim of leftward, never an absence of information"
+
+
+class TestNaNProbabilitiesClaimNothing:
+  def test_a_nan_line_probability_does_not_manufacture_a_lane(self):
+    """NaN compares False against everything, so both `open` tests failed and it fell into the
+    both-lines-present branch -- inventing 'strictly between' out of missing data, and on three
+    lanes pinning the middle and publishing it as a measurement."""
+    assert lane_bounds_from_lines(float("nan"), 0.9, 3) is None
+    assert lane_bounds_from_lines(0.9, float("nan"), 3) is None
+    assert lane_bounds_from_lines(float("nan"), float("nan"), 5) is None
+
+  def test_an_infinite_probability_is_refused_too(self):
+    assert lane_bounds_from_lines(float("inf"), 0.9, 3) is None
+
+
+class TestNothingSurvivesALaneChange:
+  """The per-frame witnesses describe the frame BEFORE the change. A caller reading between a lane
+  change and the next update was getting answers about the lane he had just left."""
+
+  def test_the_bound_does_not_survive(self):
+    a = LaneAnchor()
+    a.update(0.05, None, 9.9, 3, True, 0.02, 0.9)     # no left line -> leftmost, bound (2,2)
+    assert a.line_bounds == (2, 2), "set up a real bound or the assertion below is vacuous"
+    a.note_lane_change(rightward=True)
+    assert a.line_bounds is None
+
+  def test_leftmost_is_not_claimed_from_the_lane_we_just_left(self):
+    """THE ONE THAT MATTERS. He moves RIGHT out of the left lane; the anchor must not still say
+    he is in it, because that is what drives the slow-pass warning."""
+    a = LaneAnchor()
+    a.update(0.05, None, 9.9, 3, True, 0.02, 0.9)
+    assert a.in_leftmost_lane() is True
+    a.note_lane_change(rightward=True)
+    assert a.in_leftmost_lane() is False
+
+  def test_a_lane_change_does_not_buy_a_fresh_latch_lease(self):
+    """A shift measures nothing, so it must not reset the staleness clock. Otherwise a nudge every
+    fifteen seconds carries an unmeasured index forever."""
+    a = LaneAnchor()
+    a.update(0.05, 4.6, 0.2, 5, True, 0.9, 0.9)
+    for _ in range(200):
+      a.update(0.05, None, 9.9, 5, True, 0.9, 0.9)
+    aged = a.age_s
+    assert aged > 5.0, "let the clock actually run, or the assertion below proves nothing"
+    a.note_lane_change(rightward=False)
+    assert a.age_s == aged, "the clock must keep running from the last real reading"
+
+  def test_invalidate_clears_the_leftmost_witness(self):
+    """`in_leftmost_lane()` returns no_lane_left unguarded as its last resort, so leaving it set
+    made the anchor answer True on a frame where it had declared it knew nothing."""
+    a = LaneAnchor()
+    a.update(0.05, None, 9.9, 3, True, 0.02, 0.9)
+    assert a.in_leftmost_lane() is True
+    a.invalidate("test")
+    assert a.in_leftmost_lane() is False

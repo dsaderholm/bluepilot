@@ -166,7 +166,8 @@ def load_shipped_drawing_code():
   cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "HudRendererBP")
   # The lane strip is part of the shipped panel now, so it is lifted with it -- a preview that
   # renders everything EXCEPT the new thing is exactly how a readout ships unlooked-at.
-  wanted = ("_draw_passing_assist", "_fit_sub", "_lane_strip_worth_drawing", "_draw_lane_strip")
+  wanted = ("_draw_passing_assist", "_fit_sub", "_lane_strip_worth_drawing", "_draw_lane_strip",
+            "_lane_strip_width")
   methods = [n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name in wanted]
   assert len(methods) == len(wanted), f"expected {wanted}, found {[m.name for m in methods]}"
 
@@ -226,6 +227,7 @@ def _contact_sheet(ns, font, outdir):
       _pa_lane_bound=lane_bound,
     )
     stub._lane_strip_worth_drawing = lambda: ns["_lane_strip_worth_drawing"](stub)
+    stub._lane_strip_width = lambda: ns["_lane_strip_width"](stub)
     stub._draw_lane_strip = lambda panel, y: ns["_draw_lane_strip"](stub, panel, y)
     # The panel places itself relative to the rect it is given, so the rect is offset to put it
     # where this row wants it rather than moving the drawing code.
@@ -291,6 +293,7 @@ def main(outdir):
     stub._pa_no_lane_left = getattr(stub, '_pa_no_lane_left', False)
     stub._pa_lane_bound = getattr(stub, '_pa_lane_bound', (-1, -1))
     stub._lane_strip_worth_drawing = lambda: ns['_lane_strip_worth_drawing'](stub)
+    stub._lane_strip_width = lambda: ns['_lane_strip_width'](stub)
     stub._draw_lane_strip = lambda panel, y: ns['_draw_lane_strip'](stub, panel, y)
     rl.begin_texture_mode(tex)
     rl.draw_rectangle_gradient_v(0, 0, W, H, rl.Color(96, 100, 106, 255), rl.Color(52, 55, 60, 255))

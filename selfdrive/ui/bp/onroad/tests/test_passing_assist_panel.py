@@ -185,7 +185,7 @@ def _load_strip():
     @staticmethod
     def draw_rectangle_rounded(box, _r, _seg, color):
       # EVERY box is a filled rectangle now -- one shape, three brightnesses -- so the call shape
-      # says nothing at all and the colour carries the entire meaning. Reading only the call would
+      # says nothing at all and the color carries the entire meaning. Reading only the call would
       # let every test here pass on a strip that claimed every lane at once.
       if (color.r, color.g, color.b) == (ACCENT.r, ACCENT.g, ACCENT.b):
         calls.append(("fill" if color.a == 255 else "maybe", box))
@@ -233,7 +233,7 @@ class TestTheLaneStrip:
     return list(reversed(kinds))          # index 0 = lane 0 = the RIGHTMOST box
 
   def test_the_middle_of_five_is_no_longer_blank(self):
-    """THE REPORT. Bounded to 1..3, so those three dim and the two ends stay grey."""
+    """THE REPORT. Bounded to 1..3, so those three dim and the two ends stay gray."""
     kinds = self._draw(5, -1, False, (1, 3))
     assert kinds == ["empty", "maybe", "maybe", "maybe", "empty"], \
       "a range dims its candidates and never brightens one -- a range is not a position"

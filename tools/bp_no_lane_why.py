@@ -82,6 +82,11 @@ def main():
   hwy = "?"
 
   for route in routes:
+    # A FRESH ANCHOR AND FRESH CARRIED STATE PER ROUTE. One object across several routes carries
+    # the last latched index and the last mapdOut of one drive into the opening frames of the
+    # next, which is the stale-state class that produced a bogus 12% reading once already.
+    anchor = LaneAnchor()
+    speed, lanes, one_way, hwy = 0.0, 0, False, "?"
     for s in segments_in_order(route):
       p = os.path.join(s, "rlog.zst")
       if not os.path.exists(p):
