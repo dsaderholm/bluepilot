@@ -162,7 +162,28 @@ def lane_bounds_from_lines(far_left_prob, far_right_prob, lanes_total):
   right_open = fr < NO_LEFT_LINE_PROB      # no lane to our right
 
   if left_open and right_open:
-    return None                            # contradiction on a multi-lane road; claim nothing
+    # NOT A CONTRADICTION ON THREE LANES OR MORE -- it is the far-right line being out of RANGE.
+    #
+    # He reported being on I-215 and the strip never filling the left box. Measured on 17,090
+    # motorway frames: the witness said "no lane to my left" on 383 I-215 frames while the bound
+    # pinned lane 2 on only 80, so ~300 frames were thrown away here.
+    #
+    # The two outer lines are NOT symmetric, and that is the whole justification. Keyed on frames
+    # where the ROAD EDGE proves we are in the rightmost lane -- ground truth from something other
+    # than the lines, so the reasoning is not circular:
+    #
+    #     far-LEFT line, one lane away    read as ABSENT on   0.7%    p50 0.76
+    #     far-RIGHT line, off the road    read as ABSENT on 100.0%    p50 0.01
+    #
+    # So a missing far-left line is strong evidence of being leftmost, while a missing far-right
+    # line at two lanes' distance is mostly range. Both absent is therefore the LEFTMOST lane with
+    # the far side out of reach, not an impossibility.
+    #
+    # ON TWO LANES IT REALLY IS ANOMALOUS and still claims nothing: from either lane the other
+    # outer line is only one lane away, the distance the measurement above shows is reliable.
+    if n < 3:
+      return None
+    return (n - 1, n - 1)
   if left_open:
     return (n - 1, n - 1)
   if right_open:

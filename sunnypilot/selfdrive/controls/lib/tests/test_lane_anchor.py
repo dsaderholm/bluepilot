@@ -197,9 +197,15 @@ class TestFourLineBound:
   def test_five_lanes_both_present(self):
     assert lane_bounds_from_lines(0.9, 0.9, 5) == (1, 3)
 
-  def test_both_outer_lines_absent_is_a_contradiction_not_a_guess(self):
-    """Cannot be leftmost AND rightmost on a multi-lane road. Claim nothing rather than pick."""
-    assert lane_bounds_from_lines(0.02, 0.02, 4) is None
+  def test_both_outer_lines_absent_is_the_leftmost_lane_on_three_or_more(self):
+    """REVERSED 2026-08-20 on measured evidence. This asserted None, on the reasoning that a car
+    cannot be leftmost and rightmost at once. That reasoning treats the two outer lines as equally
+    reliable and they are not: from the rightmost lane the far-LEFT line reads absent on 0.7% and
+    the far-RIGHT on 100%. Both absent is the leftmost lane with the far side out of range.
+
+    See TestBothOuterLinesAbsent for the full case; kept here so the old claim is visibly retired
+    rather than quietly deleted."""
+    assert lane_bounds_from_lines(0.02, 0.02, 4) == (3, 3)
 
   def test_two_lanes_with_a_line_each_side_is_inconsistent(self):
     """On two lanes there is no 'strictly between', so both-present cannot be true."""
@@ -504,3 +510,35 @@ class TestNothingSurvivesALaneChange:
     assert a.in_leftmost_lane() is True
     a.invalidate("test")
     assert a.in_leftmost_lane() is False
+
+
+class TestBothOuterLinesAbsent:
+  """He was on I-215 and the left box never filled. Measured on 17,090 motorway frames: the
+  witness said leftmost on 383 of them while the bound pinned lane 2 on 80, so ~300 were discarded
+  as an impossibility. The two outer lines are not symmetric -- from the rightmost lane, proved by
+  the road edge, the far-left line reads absent on 0.7% and the far-right on 100%.
+  """
+
+  def test_three_lanes_both_absent_is_the_leftmost_lane(self):
+    """THE I-215 CASE. Unpainted median to the left, far-right line two lanes away in traffic."""
+    assert lane_bounds_from_lines(0.02, 0.02, 3) == (2, 2)
+
+  def test_five_lanes_both_absent_is_the_leftmost_lane(self):
+    assert lane_bounds_from_lines(0.02, 0.02, 5) == (4, 4)
+
+  def test_two_lanes_both_absent_still_claims_nothing(self):
+    """On two lanes the other outer line is one lane away -- the distance the measurement shows is
+    reliable -- so absence there is anomalous rather than range-limited."""
+    assert lane_bounds_from_lines(0.02, 0.02, 2) is None
+
+  def test_it_reaches_the_anchor_as_a_real_index(self):
+    a = LaneAnchor()
+    assert a.update(0.05, None, 9.9, 3, True, 0.02, 0.02) == 2
+    assert a.in_leftmost_lane() is True
+
+  def test_the_witness_and_the_bound_no_longer_disagree(self):
+    """The defect in one line: both said leftmost, and only one of them was allowed to say so."""
+    a = LaneAnchor()
+    a.update(0.05, None, 9.9, 3, True, 0.02, 0.02)
+    assert a.no_lane_left is True
+    assert a.line_bounds == (2, 2), "the witness and the bound must agree on the same evidence"

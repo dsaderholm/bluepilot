@@ -3261,6 +3261,38 @@ lines can only ever narrow, never pin, so the strip already shows it correctly a
 anchor coverage is a different number with a different denominator (61.9% known, 76.7% of unknowns
 two-way) and the two must not be quoted for each other.
 
+## THE TWO OUTER LANE LINES ARE NOT SYMMETRIC. BOTH ABSENT MEANS LEFTMOST, NOT IMPOSSIBLE.
+
+He reported driving I-215 and the strip never filling the left box. Route 0000039c, "Belt Route",
+motorway, 3 lanes, one-way, 2,429 frames:
+
+    anchor said lane 1 (middle)          1,646
+    anchor said lane 0 (right)             677
+    anchor said lane 2 (LEFT)               80
+    witness said "no lane to my left"      383   <- the same state, 300 frames apart
+
+`lane_bounds_from_lines` called both-outer-lines-absent a contradiction -- a car cannot be leftmost
+and rightmost at once -- and threw those ~300 frames away. That reasoning treats the two outer
+lines as equally reliable. **They are not**, measured across 17,090 motorway frames and keyed on
+the ROAD EDGE so the ground truth does not come from the lines themselves:
+
+    IN THE RIGHTMOST LANE, proved by the edge:
+      far-LEFT line, one lane away     read as ABSENT on   0.7%    p50 0.76
+      far-RIGHT line, off the road     read as ABSENT on 100.0%    p50 0.01
+
+A missing far-left line is therefore strong evidence of being leftmost; a missing far-RIGHT line at
+two lanes' distance is mostly RANGE. Both absent is the leftmost lane with the far side out of
+reach. It is 7.2% of 3-lane frames and only 0.6-0.8% on wider roads.
+
+**On TWO lanes it stays a refusal**, because from either lane the other outer line is one lane
+away -- exactly the distance the measurement shows is reliable -- so absence there is anomalous
+rather than range-limited.
+
+**AND THE ASYMMETRY IS THE GENERAL LESSON.** `NO_LEFT_LINE_PROB` was measured against the outer
+LEFT line and then reused for the right one with no equivalent measurement, which the max review
+flagged before this drive did. A threshold validated on one signal is not validated on its mirror,
+however symmetric the code looks. `tools/bp_outer_lines.py` is the measurement.
+
 ## PASSING ASSIST CANNOT SEE A CONSTRUCTION ZONE. Reported 2026-08-19.
 
 *"It also did try to change lanes into a construction zone's cones earlier today."*
