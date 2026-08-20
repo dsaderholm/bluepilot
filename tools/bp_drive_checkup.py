@@ -19,7 +19,9 @@ WHAT IT CHECKS, and which complaint each one answers:
                            press, which of the two numbers moved in the second after it.
   4. ACC AUTHORITY         Who drove. ford / opStop / fallback / inert / openpilot, as a share of
                            longitudinal frames, from the field published for exactly this.
-  5. CAMERA CANCEL BRICK   The one still-undiagnosed failure. First assert, transition count, and
+  5. CAMERA CANCEL BRICK   CLOSED 2026-08-19 -- six consecutive drives with zero inert frames and
+                           zero accFaulted. Kept as a WATCH, not an open question: it is what would
+                           catch a third mechanism. First assert, transition count, and
                            whether it EVER cleared -- on route 0000038d it asserted at t+0.0 and
                            never cleared for the whole drive.
   6. GAP BUTTON            "when I adjusted my gap, it said personality on the screen".
