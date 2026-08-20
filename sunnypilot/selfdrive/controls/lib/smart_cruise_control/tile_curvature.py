@@ -114,3 +114,77 @@ def curvature_profile(nodes: list[tuple[float, float]]) -> list[float]:
 def radius_m(curvature: float) -> float:
   """Curvature back to a radius, with straight reported as infinity rather than a divide error."""
   return math.inf if curvature <= 0.0 else 1.0 / curvature
+
+
+# THE BASELINE. Why adjacent nodes CANNOT be used, worked out 2026-08-19 before wiring any of this
+# into a controller -- and it explains the number that looked like a win.
+#
+# For three points on a chord of length L with the middle one offset by a sagitta d,
+#
+#     d = L^2 / 8R        so      R = L^2 / 8d
+#
+# At the 12 m median node spacing on his way, L = 24 m. A REAL 240 m corner then bulges the middle
+# node by only d = 24^2 / (8 * 240) = 0.30 m -- which is BELOW the position noise of an OSM node.
+# Turn it around: half a metre of jitter, on its own, reads as
+#
+#     R = 24^2 / (8 * 0.5) = 144 m
+#
+# and the "tightest triple = 127 m" figure this module was first validated on is indistinguishable
+# from exactly that. It was measuring node jitter, not the bend. Wiring it in would have asked for
+# a 127 m corner on a road that has none -- the "gentle sweepers brake hard" regression that got
+# SmartCruiseControlVisionEarliness deleted, arriving through a different door.
+#
+# Noise falls as L^2 while the real signal grows as L^2 / R, so a longer baseline buys signal
+# quadratically. At L = 70 m the same 240 m corner gives d = 2.55 m against the same 0.5 m of
+# jitter -- five to one instead of worse-than-one.
+#
+# It is NOT free: a baseline longer than the corner averages the corner away, which is precisely
+# what mapd does at 40x. 70 m is chosen to sit above the jitter floor and well below the length of
+# the bends that matter here; anything much longer starts reproducing mapd's own failure.
+_BASELINE_M = 70.0
+
+
+def _haversine_m(a: tuple[float, float], b: tuple[float, float]) -> float:
+  lat0 = 0.5 * (a[0] + b[0])
+  ax, ay = _to_local_m(a[0], a[1], lat0)
+  bx, by = _to_local_m(b[0], b[1], lat0)
+  return math.hypot(bx - ax, by - ay)
+
+
+def curvature_profile_baseline(nodes: list[tuple[float, float]],
+                               baseline_m: float = _BASELINE_M) -> list[float]:
+  """Curvature at each node, measured across ~`baseline_m` of road instead of to its neighbours.
+
+  Same length and same index meaning as `curvature_profile`, and the same 0.0 where no triple
+  exists -- here that is any node without `baseline_m / 2` of way on both sides, so the ends of a
+  short way read straight rather than reading noise.
+
+  A circle sampled at ANY spacing still gives its own radius, so widening the baseline costs nothing
+  on real geometry; what it drops is the jitter that scales as 1 / L^2. See `_BASELINE_M`.
+  """
+  n = len(nodes)
+  if n < 3:
+    return [0.0] * n
+
+  # Cumulative distance along the way, so the reach is in METRES of road rather than in nodes --
+  # spacing on this way runs 6 m to 112 m, so a fixed node offset would be a 6 m baseline in one
+  # place and a 224 m one in another.
+  cum = [0.0] * n
+  for i in range(1, n):
+    cum[i] = cum[i - 1] + _haversine_m(nodes[i - 1], nodes[i])
+
+  half = 0.5 * baseline_m
+  out = [0.0] * n
+  for i in range(n):
+    j = i
+    while j > 0 and cum[i] - cum[j] < half:
+      j -= 1
+    k = i
+    while k < n - 1 and cum[k] - cum[i] < half:
+      k += 1
+    # Refuse rather than shrink. A truncated baseline at the ends would silently be the noisy
+    # short-baseline measurement again, reported as though it carried the same confidence.
+    if cum[i] - cum[j] < half or cum[k] - cum[i] < half:
+      continue
+    out[i] = curvature_through(nodes[j], nodes[i], nodes[k])
+  return out

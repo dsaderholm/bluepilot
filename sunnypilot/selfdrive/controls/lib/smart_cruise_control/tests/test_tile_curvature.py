@@ -10,6 +10,7 @@ import math
 
 import pytest
 
+from openpilot.sunnypilot.selfdrive.controls.lib.smart_cruise_control import tile_curvature as tc
 from openpilot.sunnypilot.selfdrive.controls.lib.smart_cruise_control.tile_curvature import (
   curvature_profile,
   curvature_through,
@@ -99,3 +100,71 @@ def test_his_corner_reads_as_a_corner_and_not_as_a_straight():
     "SCC-Map, which is exactly the failure this replaces")
   assert radius_m(tightest) == pytest.approx(240.0, rel=0.05)
   assert tightest > 0.0002 * 10, "not meaningfully sharper than the number mapd published"
+
+
+# --- the baseline: rejecting node jitter without averaging the corner away ----------------------
+
+def _circle_nodes(radius_m_: float, spacing_m: float, arc_deg: float = 90.0,
+                  lat0: float = 40.76, lon0: float = -111.89):
+  """Points on a real circle of known radius, at a given along-arc spacing."""
+  import math as _m
+  out = []
+  step = spacing_m / radius_m_
+  n = int(_m.radians(arc_deg) / step)
+  mlat = 111320.0
+  mlon = 111320.0 * _m.cos(_m.radians(lat0))
+  for i in range(n + 1):
+    t = i * step
+    out.append((lat0 + (radius_m_ * _m.sin(t)) / mlat,
+                lon0 + (radius_m_ * (1 - _m.cos(t))) / mlon))
+  return out
+
+
+def test_a_wide_baseline_still_measures_a_real_circle_exactly():
+  """Widening the baseline must cost NOTHING on real geometry. A circle sampled at any spacing is
+  still that circle, so if this drifts the baseline is averaging the corner away -- which is mapd's
+  failure, reproduced."""
+  for r in (150.0, 240.0, 400.0, 800.0):
+    nodes = _circle_nodes(r, spacing_m=12.0)
+    prof = [c for c in tc.curvature_profile_baseline(nodes) if c > 0]
+    assert prof, f"no interior node had a full baseline at R={r}"
+    mid = sorted(prof)[len(prof) // 2]
+    assert abs(tc.radius_m(mid) - r) / r < 0.05, \
+      f"R={r} measured {tc.radius_m(mid):.0f} m -- the baseline is distorting real geometry"
+
+
+def test_the_baseline_rejects_the_node_jitter_that_adjacent_triples_cannot():
+  """THE WHOLE REASON THIS EXISTS. A STRAIGHT road with half a metre of node jitter reads as a
+  ~144 m corner on adjacent 12 m triples -- which is what the '127 m tightest' figure this module
+  was first validated on actually was. The wide baseline must see a straight."""
+  import math as _m
+  lat0, lon0 = 40.76, -111.89
+  mlat, mlon = 111320.0, 111320.0 * _m.cos(_m.radians(lat0))
+  nodes = []
+  for i in range(60):
+    jitter = 0.5 if i % 2 else -0.5      # worst case: alternating, maximum apparent curvature
+    nodes.append((lat0 + (i * 12.0) / mlat, lon0 + jitter / mlon))
+
+  narrow = [abs(c) for c in tc.curvature_profile(nodes)[1:-1]]
+  wide = [abs(c) for c in tc.curvature_profile_baseline(nodes) if c != 0.0]
+
+  assert wide, "the wide baseline produced no reading at all on a 700 m way"
+  worst_narrow = tc.radius_m(max(narrow))
+  worst_wide = tc.radius_m(max(wide))
+  assert worst_narrow < 300.0, \
+    f"the premise is wrong: jitter read as {worst_narrow:.0f} m, not a tight corner"
+  assert worst_wide > 5 * worst_narrow, \
+    f"jitter still reads as {worst_wide:.0f} m -- the baseline is not rejecting it"
+
+
+def test_the_ends_of_a_way_report_straight_rather_than_a_short_baseline():
+  """A truncated baseline is the NOISY measurement wearing the wide one's confidence. Refuse it."""
+  nodes = _circle_nodes(240.0, spacing_m=12.0)
+  prof = tc.curvature_profile_baseline(nodes)
+  assert prof[0] == 0.0 and prof[-1] == 0.0
+  assert len(prof) == len(nodes), "the profile must stay index-aligned with the way"
+
+
+def test_a_way_shorter_than_the_baseline_reads_straight_not_noisy():
+  nodes = _circle_nodes(240.0, spacing_m=12.0)[:4]
+  assert all(c == 0.0 for c in tc.curvature_profile_baseline(nodes))
