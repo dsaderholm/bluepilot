@@ -5,6 +5,8 @@ SCC-Map read v2, and when does it fall back to v1? Getting that wrong silently i
 an empty list instead of None would leave the controller correctly idle in a way that is
 indistinguishable from v2 being absent, and nobody would notice until a corner was not taken.
 """
+import math
+
 import pytest
 
 from openpilot.sunnypilot.selfdrive.controls.lib.smart_cruise_control.mapd_v2_path import path_from_mapd
@@ -41,17 +43,36 @@ class FakeSM:
     return self._data[name]
 
 
-def test_points_become_the_dicts_the_walk_indexes_by_name():
-  """SCC-Map indexes latitude/longitude/velocity by NAME. mapd calls the third one targetVelocity."""
-  sm = FakeSM(points=[(40.76, -111.90, 20.1), (40.77, -111.91, 17.9)])
+def test_the_corner_speed_is_ours_and_comes_from_curvature():
+  """THE SOURCE SWAP, 2026-08-19. mapd's targetVelocity is exactly sqrt(2.2 / k) -- 2.2 being
+  `map_curve_target_lat_a`, a constant belonging to somebody else's car. We derive it ourselves at
+  the lateral acceleration his PSCM was MEASURED to hold, and mapd's own velocity is now ignored
+  entirely (note the deliberately absurd values in the fixture).
+
+  2.5 comes from tools/bp_pscm_lateral_limit.py: openpilot alone, hands off, p99 2.73 and max 3.19,
+  with the deviation limiter quiet below 2.5 and biting 27.4% of frames by 3.0-3.5.
+  """
+  sm = FakeSM(points=[(40.76, -111.90, 999.0, 0.01), (40.77, -111.91, 999.0, 0.0025)])
   position, targets = path_from_mapd(sm)
 
   assert position.latitude == pytest.approx(40.75)
-  assert position.longitude == pytest.approx(-111.9)
   assert targets == [
-    {"latitude": pytest.approx(40.76), "longitude": pytest.approx(-111.90), "velocity": pytest.approx(20.1)},
-    {"latitude": pytest.approx(40.77), "longitude": pytest.approx(-111.91), "velocity": pytest.approx(17.9)},
+    {"latitude": pytest.approx(40.76), "longitude": pytest.approx(-111.90),
+     "velocity": pytest.approx(math.sqrt(2.5 / 0.01))},      # 100 m radius -> 15.8 m/s
+    {"latitude": pytest.approx(40.77), "longitude": pytest.approx(-111.91),
+     "velocity": pytest.approx(math.sqrt(2.5 / 0.0025))},    # 400 m radius -> 31.6 m/s
   ]
+
+
+def test_it_plans_corners_faster_than_mapd_did_and_by_the_expected_ratio():
+  """Wiring 2.5 where mapd used 2.2 RAISES corner speeds by sqrt(2.5/2.2) = 6.6%. Pinned because it
+  is the opposite direction from "low speed curves don't slow enough" and must stay a deliberate,
+  visible consequence rather than a surprise -- that complaint was measured to be map COVERAGE
+  (SCC-Map active 146 frames in 26 minutes), not this constant."""
+  k = 0.004
+  _, targets = path_from_mapd(FakeSM(points=[(40.76, -111.90, 0.0, k)]))
+  mapd_would_have = math.sqrt(2.2 / k)
+  assert targets[0]["velocity"] == pytest.approx(mapd_would_have * math.sqrt(2.5 / 2.2))
 
 
 def test_none_when_mapd_is_not_publishing():
@@ -70,16 +91,16 @@ def test_none_when_mapd_has_no_position():
   assert path_from_mapd(FakeSM(position=(0.0, 0.0))) is None
 
 
-def test_points_with_no_target_velocity_are_dropped():
-  """A point mapd publishes with targetVelocity 0 is not a corner to slow to 0 mph for.
-
-  The walk compares `tv > self.v_ego` to skip points faster than the car; a zero would pass that
-  test at any speed and then be treated as a corner requiring a stop.
-  """
-  sm = FakeSM(points=[(40.76, -111.90, 0.0), (40.77, -111.91, 17.9)])
+def test_a_point_with_no_curvature_yields_no_target():
+  """REPLACES "points with no targetVelocity are dropped" -- mapd's velocity is no longer read, so
+  a zero there means nothing. What must still be dropped is a STRAIGHT point: the walk compares
+  `tv > self.v_ego` to skip points faster than the car, and a zero velocity would pass that at any
+  speed and be treated as a corner requiring a stop."""
+  sm = FakeSM(points=[(40.76, -111.90, 0.0, 0.0), (40.77, -111.91, 0.0, 0.01)])
   _, targets = path_from_mapd(sm)
   assert len(targets) == 1
-  assert targets[0]["velocity"] == pytest.approx(17.9)
+  assert targets[0]["velocity"] == pytest.approx(math.sqrt(2.5 / 0.01))
+  assert all(t["velocity"] > 0 for t in targets), "a zero corner speed would be walked as a stop"
 
 
 def test_a_straight_road_with_no_velocities_is_an_ANSWER_not_a_fallback():
@@ -91,12 +112,21 @@ def test_a_straight_road_with_no_velocities_is_an_ANSWER_not_a_fallback():
   assert position.latitude == pytest.approx(40.75)
 
 
-def test_but_curvature_with_no_velocity_DOES_fall_back():
-  """mapd derives velocity from curvature alone, so a bend with no velocity means it could not
-  compute rather than that there was nothing to compute. That is worth v1. It happened zero times
-  on the measured drive, and this stays because zero is a measurement, not a guarantee."""
-  sm = FakeSM(points=[(40.76, -111.90, 0.0, 0.01)])   # 100 m radius, no velocity
-  assert path_from_mapd(sm) is None
+def test_curvature_with_no_velocity_is_now_a_CORNER_not_a_fallback():
+  """THIS FALLBACK IS GONE ON PURPOSE, and it is the one behavioural removal in the source swap.
+
+  It existed because mapd sometimes published a bend it could not price -- curvature present,
+  velocity absent -- which meant "mapd failed here", and v1 was worth asking. We compute the price
+  ourselves now, so that state is no longer a failure: it is simply a corner, and it gets a speed.
+
+  Measured as happening zero times on route 00000383, so this removes a path that never ran; it is
+  recorded because a fallback disappearing is exactly the kind of change that is invisible until the
+  day it would have fired."""
+  sm = FakeSM(points=[(40.76, -111.90, 0.0, 0.01)])   # 100 m radius, mapd priced nothing
+  result = path_from_mapd(sm)
+  assert result is not None, "a bend mapd could not price must now be priced by us, not sent to v1"
+  _, targets = result
+  assert targets[0]["velocity"] == pytest.approx(math.sqrt(2.5 / 0.01))
 
 
 def test_the_controller_actually_walks_the_v2_path():
@@ -140,7 +170,7 @@ def test_the_dicts_do_not_alias_capnp_readers():
   frame, and SCC-Map keeps self.target_velocities between updates. Storing readers would mean the
   path silently becoming whatever arrived later, or a segfault-class error in pycapnp.
   """
-  sm = FakeSM(points=[(40.76, -111.90, 20.1)])
+  sm = FakeSM(points=[(40.76, -111.90, 20.1, 0.01)])
   _, targets = path_from_mapd(sm)
   assert all(isinstance(v, float) for v in targets[0].values())
 
@@ -167,17 +197,21 @@ def test_a_nan_curvature_falls_back_to_v1_rather_than_reading_as_straight():
     "never falls back to v1, so the corner is not taken and nothing says why")
 
 
-def test_a_nan_velocity_is_dropped_rather_than_walked():
-  """A NaN velocity reaching the walk poisons `min()` over the corner speeds, and a NaN v_target is
-  a set-speed request nobody can act on. `targetVelocity > 0` already excluded it -- but only
-  because NaN comparisons are False, not because anyone decided. Pinned so a later refactor to
-  `>= 0` or `!= 0` cannot quietly let it through."""
-  sm = FakeSM(points=[(40.76, -111.9, NAN, 0.02), (40.77, -111.9, 20.0, 0.02)])
+def test_a_nan_curvature_among_good_points_is_dropped_rather_than_priced():
+  """REPLACES "a NaN velocity is dropped" -- mapd's velocity is no longer read at all, so a NaN
+  there cannot reach anything. The equivalent hazard is now a NaN CURVATURE on one point of an
+  otherwise good path: `sqrt(2.5 / nan)` is NaN, and a NaN velocity in the walk poisons `min()`
+  over the corner speeds and produces a set-speed request nobody can act on.
+
+  The all-NaN case still returns None and falls back to v1 -- that is the test above. This is the
+  MIXED case, which must neither fall back nor emit a NaN."""
+  sm = FakeSM(points=[(40.76, -111.9, 0.0, NAN), (40.77, -111.9, 0.0, 0.01)])
   result = path_from_mapd(sm)
-  assert result is not None
+  assert result is not None, "one bad point must not cost the whole path"
   _, targets = result
-  assert len(targets) == 1, f"a NaN velocity survived into the walk: {targets}"
-  assert targets[0]["velocity"] == 20.0
+  assert len(targets) == 1, f"the NaN-curvature point was priced: {targets}"
+  assert targets[0]["velocity"] == pytest.approx(math.sqrt(2.5 / 0.01))
+  assert not any(math.isnan(t["velocity"]) for t in targets)
 
 
 def test_a_real_straight_road_still_answers_straight():

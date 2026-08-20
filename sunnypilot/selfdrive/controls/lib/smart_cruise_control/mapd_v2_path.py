@@ -29,6 +29,18 @@ from openpilot.sunnypilot.navd.helpers import Coordinate
 # rather than "could not compute". 1e-4 1/m is a 10 km radius -- nothing any controller would act on.
 _STRAIGHT_CURVATURE = 1e-4
 
+# FusionPilot: the lateral acceleration a mapped corner is planned against, m/s^2.
+#
+# A CAR FACT, measured on 2026-08-19 rather than borrowed: this is where his retrofit Edge PSCM
+# stops holding the line in angle mode. NO PARAM, deliberately -- category 3 of "the model gets what
+# he has no preference about". It is a property of one car with no fleet to learn it from, and
+# `SmartCruiseControlMapFactor` already exists for the preference part.
+#
+# Do not move it toward mapd's 2.2 (someone else's comfort constant) or toward the 3.2 that a first
+# pass reported -- that figure was his own hands on the wheel leaking into the measurement, and the
+# 64 mph it produced "agreeing" with the 64 mph he drives was circular, not corroboration.
+_CORNER_LAT_ACC = 2.5
+
 
 def path_from_mapd(sm) -> tuple[Coordinate, list[dict]] | None:
   """(position, target velocities) from mapdExtendedOut, or None to fall back to v1.
@@ -65,9 +77,43 @@ def path_from_mapd(sm) -> tuple[Coordinate, list[dict]] | None:
   # refactor to `>= 0` or `!= 0` cannot quietly let it through -- a NaN velocity reaching the walk
   # poisons `min()` over the corner speeds, and a NaN v_target is a set-speed request nobody can act
   # on.
-  targets = [{"latitude": p.latitude, "longitude": p.longitude, "velocity": float(p.targetVelocity)}
-             for p in points
-             if not math.isnan(p.targetVelocity) and p.targetVelocity > 0]
+  # THE CORNER SPEED IS OURS NOW, DERIVED FROM CURVATURE AT A MEASURED LATERAL ACCELERATION.
+  #
+  # mapd's `targetVelocity` is exactly `sqrt(2.2 / k)` -- verified across 6,725 points, where 2.2 is
+  # `/personalities/standard/map_curve_target_lat_a`, a constant belonging to somebody else's car.
+  # It carries no information `curvature` does not, so replacing it costs nothing and gains the one
+  # number this car actually has evidence for.
+  #
+  # 2.5 IS MEASURED, NOT CHOSEN. `tools/bp_pscm_lateral_limit.py` over three routes, splitting on
+  # `steeringPressed` because `latActive` only means openpilot was PERMITTED to steer:
+  #
+  #     openpilot alone (no hands)   n=5251   p50 1.09  p90 1.93  p99 2.73  max 3.19
+  #     HIS hands on the wheel       n= 892   p50 1.95  p90 3.09  p99 4.14  max 4.20
+  #
+  # and the deviation limiter, binned by lateral acceleration, is quiet to 2.5 (<= 3.7% of frames),
+  # then 9.1% at 2.5-3.0 and 27.4% at 3.0-3.5. `hands-on%` climbs the same curve -- 6% low, 90%+
+  # above 3.0 -- so he takes the wheel exactly where the PSCM starts losing the line. Two
+  # independent signatures of one ceiling.
+  #
+  # THIS RAISES CORNER SPEEDS BY sqrt(2.5/2.2) = 6.6%, which is the opposite direction from "low
+  # speed curves don't slow enough" -- and deliberately so. That complaint was measured to be a
+  # COVERAGE problem: SCC-Map was active for 146 frames of a 26-minute drive, and SCC-Vision cannot
+  # help below ~40 mph because its target is proportional to current speed. Slowing harder on the
+  # few corners the map DOES see would not have addressed it, and would have made every one of them
+  # wrong in a way he would feel.
+  #
+  # `SmartCruiseControlMapFactor` still trims on top and is still his: at his current 90 the
+  # effective figure is 2.5 * 0.81 = 2.03 m/s^2, comfortably under the measured ceiling.
+  targets = []
+  for p in points:
+    k = float(p.curvature)
+    # NaN and straight both mean "no corner speed here", for different reasons, and both must fail
+    # closed. A NaN reaching the walk poisons min() over the corner speeds and a NaN v_target is a
+    # set-speed request nobody can act on -- the same trap this file already documents twice.
+    if math.isnan(k) or abs(k) <= _STRAIGHT_CURVATURE:
+      continue
+    targets.append({"latitude": p.latitude, "longitude": p.longitude,
+                    "velocity": math.sqrt(_CORNER_LAT_ACC / abs(k))})
   if not targets:
     # NO CORNERS AHEAD IS A REAL ANSWER, and returning None for it was a bug against this file's own
     # docstring. Measured on route 00000383: of 46 frames where no point carried a velocity, **all
