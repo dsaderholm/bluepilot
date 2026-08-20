@@ -23,6 +23,28 @@ EventNameSP = custom.OnroadEventSP.EventName
 # get event name from enum
 EVENT_NAME_SP = {v: k for k, v in EventNameSP.schema.enumerants.items()}
 
+
+# FusionPilot: can the stop override actually take a stop to a standstill this drive? Both toggles
+# have to be on -- the override sends openpilot's braking IN PLACE OF Ford's, which only exists
+# under the passthrough. Cached because an alert must not do a filesystem read per call, and because
+# the carcontroller reads these same two once at init: changing either mid-drive already does
+# nothing, by design.
+_STOP_OVERRIDE_AVAILABLE: bool | None = None
+
+
+def _stop_override_available() -> bool:
+  global _STOP_OVERRIDE_AVAILABLE
+  if _STOP_OVERRIDE_AVAILABLE is None:
+    try:
+      from openpilot.common.params import Params
+      p = Params()
+      _STOP_OVERRIDE_AVAILABLE = p.get_bool("StockAccPassthrough") and p.get_bool("StockAccStopOverride")
+    except Exception:
+      # An alert that raises takes selfdrived's alert path down. Unknown means say the conservative
+      # thing, which is that the stop is his.
+      _STOP_OVERRIDE_AVAILABLE = False
+  return _STOP_OVERRIDE_AVAILABLE
+
 IS_MICI = HARDWARE.get_device_type() == 'mici'
 
 _METER_TO_FOOT = 3.28084  # common.constants.CV has no length conversions
@@ -110,9 +132,27 @@ def model_stop_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaste
   # carries no distance because there is no object to measure, and uses the lower tone: an empty
   # intersection is the less urgent of the two, and the tone is what tells them apart when the
   # driver is looking at the road rather than the screen.
+  # FusionPilot: "Cruise will not stop for it" became a HALF-TRUTH the day the stop override
+  # shipped, and he caught it: *"I still got a few alerts that cruise would not stop, which doesn't
+  # make sense because it should stop for everything now, right?"*
+  #
+  # It does not, yet, and the alert must not promise otherwise -- measured 2026-08-19, the override
+  # has never once fired. But the reason is a PRECONDITION he can act on, and no screen was telling
+  # him: it only runs while cruise is still ENGAGED, and braking disengages. So the alert now says
+  # what he can DO about it rather than only what the car will not do.
+  #
+  # Read once and cached: this fires a few times a drive, and the carcontroller reads the same two
+  # params once at init, so a mid-drive change is already meaningless by design.
+  if _stop_override_available():
+    return Alert(
+      "Stop sign or signal ahead",
+      "Slowing. Stay off the brake to let it stop.",
+      AlertStatus.userPrompt, AlertSize.mid,
+      Priority.MID, VisualAlert.none, AudibleAlertSP.prompt, 2.)
+
   return Alert(
     "Stop sign or signal ahead",
-    "Cruise will not stop for it.",
+    "Slowing to 20 mph -- the stop is yours.",
     AlertStatus.userPrompt, AlertSize.mid,
     Priority.MID, VisualAlert.none, AudibleAlertSP.prompt, 2.)
 

@@ -85,6 +85,7 @@ DEFAULT_TARGETS = [
   # Listing the folder pulled it in and broke collection for everything.
   "sunnypilot/selfdrive/controls/lib/speed_limit/tests/test_upcoming_limit.py",
   "sunnypilot/selfdrive/controls/lib/speed_limit/tests/test_sla_unset_invariant.py",
+  "sunnypilot/selfdrive/selfdrived/tests/test_model_stop_alert_wording.py",
   "sunnypilot/selfdrive/controls/lib/speed_limit/tests/test_speed_limit_resolver.py",
   "selfdrive/car/tests/test_structs_capnp_parity.py",
   "selfdrive/car/tests/test_pre_enable_standstill.py",

@@ -141,7 +141,13 @@ def test_the_gas_band_is_enforced_and_not_only_the_brake_cap():
   assert not passthrough_admissible(_stock(AccPrpl_A_Rq=-5.0), True), "the inactive value is legal"
 
   assert passthrough_admissible(_stock(AccPrpl_A_Rq=-1.2), True), "a coasting request must be refused"
-  assert passthrough_admissible(_stock(AccPrpl_A_Rq=2.5), True)
+
+  # THE TOP IS NO LONGER A REFUSAL -- it is CLAMPED on the way out, 2026-08-19. Ford's ordinary
+  # launch propulsion is 2.0 m/s^2, which is exactly panda's ceiling, so refusing there threw the
+  # whole frame away on every pull-away: 624 of 994 fallback frames on route 00000393 were under
+  # 15 mph, all of them a smear of 2.00-2.09. See test_the_launch_clamp_keeps_fords_frame below.
+  assert not passthrough_admissible(_stock(AccPrpl_A_Rq=2.5), True), \
+    "the top is clamped by the builder, not refused -- refusing it costs every launch"
   # AccPrpl_A_Pred is NOT refused -- it is pinned on the way out, so Ford's value never reaches
   # panda. Drive A: refusing on it cost 9.6% of engaged frames for an advisory field.
   assert not passthrough_admissible(_stock(AccPrpl_A_Pred=-1.2), True)
@@ -220,6 +226,58 @@ def test_the_predicted_accel_is_pinned_rather_than_costing_the_frame():
   sent = packer.calls[0][2]
   assert sent["AccPrpl_A_Pred"] == -5.0
   assert sent["AccBrkTot_A_Rq"] == -2.1, "pinning one field must not disturb the real command"
+
+
+def test_the_launch_clamp_keeps_fords_frame():
+  """HIS "IT SWITCHED TO OP LONG AND WENT RIDICULOUSLY SLOW", 2026-08-19.
+
+  Route 00000393: 994 frames where the passthrough fell back, 624 of them UNDER 15 MPH, and the
+  reason is a smear sitting just over panda's ceiling --
+
+      AccPrpl_A_Rq  2.000  2.020  2.030  2.050  2.060  2.070  2.080  2.090 ...
+
+  Ford's ordinary pull-away propulsion IS 2.0 m/s^2, which is exactly _PANDA_GAS_MAX, and the 0.005
+  margin puts even a clean 2.000 outside. So essentially every launch was refused, and openpilot --
+  whose launch is far gentler -- authored it instead. Nothing ever CHOSE openpilot for launches;
+  this refusal was the whole of it.
+  """
+  packer = _Packer()
+  for gas in (2.0, 2.03, 2.07, 2.5):
+    packer.calls.clear()
+    create_acc_msg_passthrough(packer, _CAN, _stock(AccPrpl_A_Rq=gas, AccBrkTot_A_Rq=-1.1))
+    sent = packer.calls[0][2]
+    assert sent["AccPrpl_A_Rq"] <= 2.0 - 0.005 + 1e-9, f"{gas} went out unclamped"
+    assert sent["AccPrpl_A_Rq"] == 2.0 - 0.005, f"{gas} was not clamped to panda's ceiling"
+    assert sent["AccBrkTot_A_Rq"] == -1.1, "clamping the gas must not disturb the brake command"
+
+
+def test_the_launch_clamp_leaves_ordinary_propulsion_alone():
+  """It must only bind at the ceiling. A normal cruise request has to pass through untouched, or
+  every frame is being rewritten to the limit."""
+  packer = _Packer()
+  for gas in (-0.4, 0.0, 1.0, 1.9):
+    packer.calls.clear()
+    create_acc_msg_passthrough(packer, _CAN, _stock(AccPrpl_A_Rq=gas))
+    assert packer.calls[0][2]["AccPrpl_A_Rq"] == gas, f"{gas} was rewritten and should not have been"
+
+
+def test_the_inactive_escape_value_is_never_clamped():
+  """-5.0 is panda's one legal escape and is BELOW the band by construction. Clamping it to the
+  ceiling would turn 'no propulsion request' into 'maximum propulsion request'."""
+  packer = _Packer()
+  create_acc_msg_passthrough(packer, _CAN, _stock(AccPrpl_A_Rq=-5.0))
+  assert packer.calls[0][2]["AccPrpl_A_Rq"] == -5.0
+
+
+def test_the_bottom_of_the_gas_band_is_still_refused_not_clamped():
+  """THE ASYMMETRY IS THE POINT. Clamping DOWN from 2.07 asks for less acceleration than Ford
+  wanted, which is conservative. Clamping UP from -0.77 would ask for less ENGINE BRAKING than Ford
+  wanted, which is not -- so the low side still falls back to a controller we already ship. That
+  case was 3.5% of fallbacks on 00000393 and none of the launches."""
+  assert passthrough_admissible(_stock(AccPrpl_A_Rq=-0.77), True),     "under-braking was clamped through instead of falling back"
+  packer = _Packer()
+  create_acc_msg_passthrough(packer, _CAN, _stock(AccPrpl_A_Rq=-0.77))
+  assert packer.calls[0][2]["AccPrpl_A_Rq"] == -0.77, "the low side must not be rewritten either"
 
 
 # --- the dash must show the gap that is actually driving the car -------------------------------

@@ -132,4 +132,39 @@ class MapdV2MapData(BaseMapData):
     if not self.mapd_alive or self.way_match_failed:
       return 0.0, 0.0
     mapd = self.sm['mapdOut']
-    return float(mapd.nextSpeedLimit), float(mapd.nextSpeedLimitDistance)
+    nxt = float(mapd.nextSpeedLimit)
+    dist = float(mapd.nextSpeedLimitDistance)
+
+    # BluePilot: A LOWER NEXT LIMIT ON A MOTORWAY IS AN EXIT RAMP, NOT THIS ROAD SLOWING DOWN.
+    #
+    # Measured 2026-08-19 on route 00000393, and it is exactly the "why did it think 45" report.
+    # On I-215 -- way 31535502, highwayClass motorway, and the tile on his own device carries
+    # maxSpeed 31.2928 m/s = 70.0 mph -- mapd published:
+    #
+    #     speedLimit 70.0    nextSpeedLimit 45.0    waySelectionType current
+    #
+    # so mapd was right about both. The resolver's ease-down then adopted the 45: at 70 mph with
+    # LIMIT_ADAPT_ACC -1.0 m/s^2 the adopt window is ~288 m, and inside it the map solution becomes
+    # `next_speed_limit`. His set speed dropped to 45 on a freeway.
+    #
+    # THE ROOT CAUSE IS THAT MAPD PUBLISHES NO `nextHighwayClass` AND NO `nextWayId`. There is
+    # nothing in the message that separates "the limit drops ahead ON THIS ROAD" from "there is a
+    # 45 mph ramp ahead that mapd predicts we take". Upstream's ease-down assumes the former, which
+    # is right on a surface street and wrong on a motorway.
+    #
+    # Motorway limits do not step down mid-way; a lower next limit there means a link. So refuse it
+    # -- and note the refusal is narrow on purpose:
+    #
+    #   - `motorwayLink` is NOT included. Once the car is actually ON the ramp the drop is real and
+    #     adopting it early is the whole point of the ease-down.
+    #   - A HIGHER next limit is untouched, so leaving a zone onto a faster road still works.
+    #   - If he does exit, the ramp becomes the CURRENT way and its limit applies immediately, and
+    #     SCC-Map already owns the corner itself.
+    #
+    # What it costs: no pre-emptive set-speed drop for a ramp's posted limit while still on the
+    # freeway. That was never reachable anyway -- the set speed falls at ~3.3 mph/s, which is the
+    # whole of "the exit that never slows enough is not a tuning problem".
+    if nxt > 0.0 and 0.0 < nxt < float(mapd.speedLimit) and str(mapd.highwayClass) == "motorway":
+      return 0.0, 0.0
+
+    return nxt, dist

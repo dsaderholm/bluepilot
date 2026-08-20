@@ -23,6 +23,10 @@ class FakeMapdOut:
     self.nextSpeedLimitDistance = kw.get("nextSpeedLimitDistance", 0.0)
     self.tileLoaded = kw.get("tileLoaded", True)
     self.waySelectionType = kw.get("waySelectionType", "current")
+    # Defaults to a NON-motorway class deliberately. The motorway rule is a REFUSAL, so defaulting
+    # to "motorway" would switch it on for every fixture in this file and hide the ordinary
+    # ease-down it is meant to leave alone. `primary` is the road most of these describe (US 40).
+    self.highwayClass = kw.get("highwayClass", "primary")
 
 
 class FakeSubMaster:
@@ -146,3 +150,57 @@ class TestALostRoadPublishesNoLimit:
     for kind in ("current", "predicted", "possible", "extended"):
       m = make(True, speedLimit=29.058, waySelectionType=kind)
       assert m.get_current_speed_limit() == 29.058, f"{kind} was gated as though it had failed"
+
+
+class TestALowerNextLimitOnAMotorwayIsARamp:
+  """HIS 45 ON I-215, 2026-08-19, and mapd was RIGHT about every number it published.
+
+  Route 00000393, way 31535502. The tile on his own device carries maxSpeed 31.2928 m/s = 70.0 mph,
+  and mapd published exactly that, with `waySelectionType current`:
+
+      speedLimit 70.0    nextSpeedLimit 45.0    sel current
+
+  Upstream's ease-down then adopted the 45 -- at 70 mph with LIMIT_ADAPT_ACC -1.0 the adopt window
+  is ~288 m -- and his set speed dropped to 45 on a freeway. The 45 belongs to an exit ramp.
+
+  HE SETTLED IT FROM THE SEAT: *"I was in the left lane, which can't exit."* So the ramp was not a
+  road he could physically have taken, and no amount of route prediction would have been right.
+
+  mapd publishes no `nextHighwayClass` and no `nextWayId`, so nothing in the message separates
+  "this road slows ahead" from "there is a ramp ahead we are predicted onto". On a motorway it is
+  always the second: motorway limits do not step down mid-way.
+  """
+
+  def test_a_lower_next_limit_on_a_motorway_is_refused(self):
+    m = make(True, speedLimit=31.2928, nextSpeedLimit=20.1168,
+             nextSpeedLimitDistance=280.0, highwayClass="motorway")
+    assert m.get_next_speed_limit_and_distance() == (0.0, 0.0), \
+      "a 45 mph ramp was adopted while still on a 70 mph motorway"
+
+  def test_the_current_limit_survives_the_refusal(self):
+    """Refusing the ramp must not cost him the road he is actually on."""
+    m = make(True, speedLimit=31.2928, nextSpeedLimit=20.1168,
+             nextSpeedLimitDistance=280.0, highwayClass="motorway")
+    assert m.get_current_speed_limit() == pytest.approx(31.2928)
+
+  def test_a_lower_next_limit_off_a_motorway_still_eases_down(self):
+    """The ordinary case the ease-down exists for. The refusal must not reach it."""
+    m = make(True, speedLimit=29.058, nextSpeedLimit=24.587,
+             nextSpeedLimitDistance=412.0, highwayClass="primary")
+    assert m.get_next_speed_limit_and_distance() == (pytest.approx(24.587), pytest.approx(412.0))
+
+  def test_a_motorway_LINK_keeps_its_lower_next_limit(self):
+    """Once actually ON the ramp the drop is real and adopting it early is the point.
+
+    This is why the rule compares `motorway` EXACTLY rather than by prefix -- `motorwayLink` shares
+    its first eight characters and is the opposite case.
+    """
+    m = make(True, speedLimit=29.058, nextSpeedLimit=20.1168,
+             nextSpeedLimitDistance=200.0, highwayClass="motorwayLink")
+    assert m.get_next_speed_limit_and_distance() == (pytest.approx(20.1168), pytest.approx(200.0))
+
+  def test_a_higher_next_limit_on_a_motorway_is_kept(self):
+    """Only the LOWER direction is a ramp signature; leaving a zone onto a faster road is untouched."""
+    m = make(True, speedLimit=20.1168, nextSpeedLimit=31.2928,
+             nextSpeedLimitDistance=300.0, highwayClass="motorway")
+    assert m.get_next_speed_limit_and_distance() == (pytest.approx(31.2928), pytest.approx(300.0))

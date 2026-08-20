@@ -173,6 +173,28 @@ Three things make that work, each of which cost a wrong guess first:
 Use PowerShell for this, not the Bash tool: the Windows OpenSSH agent is a named pipe and Git Bash's
 ssh does not speak it.
 
+**`pgrep -f <name>` MATCHES THE WAITER'S OWN COMMAND LINE.** 2026-08-19, and it cost over an hour
+across three jobs while their results sat finished on disk. This never exits:
+
+```bash
+until [ -s /tmp/out.txt ] && ! pgrep -f myjob.py > /dev/null; do sleep 15; done
+```
+
+`pgrep -f myjob.py` finds the `bash -lc until ... pgrep -f myjob.py ...` process itself, so `! pgrep`
+is false forever. He caught it -- *"Will you though? You have two tasks that have been running for
+over an hour..."* -- and `/tmp/pscm.txt` had been complete for 70 minutes.
+
+Use the bracket trick that `ps` usage here already uses, or drop the process check entirely:
+
+```bash
+until [ -s /tmp/out.txt ]; do sleep 15; done; cat /tmp/out.txt        # simplest, usually enough
+until ! pgrep -f "[m]yjob.py" > /dev/null; do sleep 15; done          # if the check is needed
+```
+
+**And prefer `nohup ... &` on the device over holding an SSH session open**: this laptop changes
+networks constantly, and a dropped connection killed one analysis mid-run. Start it detached, poll
+the file.
+
 **WRAP EVERY REMOTE COMMAND IN A SINGLE-QUOTED HERE-STRING.** PowerShell expands `$(...)` inside
 double quotes *before* ssh ever sees it, so this:
 
@@ -1996,6 +2018,282 @@ distanceFromWayCenter. Then v1 comes out and gives back what the overlap costs.
 
   A green run says nothing whatsoever about a file it never read. The same holds for anything else
   requiring compiled extensions.
+
+### FORD'S LAUNCH IS 2.0 m/s^2, WHICH *IS* PANDA'S CEILING. EVERY PULL-AWAY WAS REFUSED.
+
+*"It switched to OP long for acceleration and it went ridiculously slow."* Then the question that
+reframed it: *"Why is OP long launching at all? Is that because I told you that Ford ACC has slow
+launches?"* **He never said that and nothing chooses openpilot for launches.** `fallback` is not a
+choice, it is a REFUSAL -- and refusing hands the WHOLE frame to openpilot, because a 50 Hz message
+cannot simply stop.
+
+Route 00000393, 994 fallback frames with a camera ACCDATA, 624 of them under 15 mph:
+
+    AccPrpl_A_Rq  2.000  2.020  2.030  2.050  2.060  2.070  2.080  2.090 ...  all "outside the band"
+
+`_PANDA_GAS_MAX` is exactly **2.0**, and `_PANDA_MARGIN` 0.005 puts even a clean 2.000 outside. Ford's
+ordinary pull-away propulsion sits right on the number, so the passthrough abandoned Ford on
+essentially every launch.
+
+**CLAMPED AT THE TOP, NOT REFUSED**, in `create_acc_msg_passthrough`. Costs 0.005 m/s^2 and keeps
+every other signal Ford authored. Same shape as pinning `AccPrpl_A_Pred`.
+
+**THE ASYMMETRY IS THE ARGUMENT, and it is the part to preserve:**
+
+    clamping DOWN 2.07 -> 1.995    asks for LESS ACCELERATION than Ford wanted   -> conservative
+    clamping UP  -0.77 -> -0.495   asks for LESS ENGINE BRAKING than Ford wanted -> NOT
+
+So the low side is still a refusal and still falls back. Quietly under-decelerating a frame nobody
+is watching is not a thing to do. That case is 3.5% of fallbacks and none of the launches.
+
+**And -5.0 is never clamped.** It is panda's legal escape and sits BELOW the band, so treating it as
+out-of-range would turn "no propulsion request" into "maximum propulsion request". That inversion is
+the one way this change could be dangerous rather than merely wrong, so it has its own test.
+
+**THE GENERAL LESSON: a band violation is not automatically a refusal.** Ask which direction the
+clamp errs in. Three fields in this message have now needed three different answers -- pin
+(`AccPrpl_A_Pred`, an advisory hint), clamp-one-side (`AccPrpl_A_Rq`), and carry verbatim
+(`AccBrkTot_A_Rq`, where a silent softening would be indistinguishable from working until it
+mattered).
+
+### A LOWER `nextSpeedLimit` ON A MOTORWAY IS AN EXIT RAMP. THAT WAS THE 45 ON I-215.
+
+*"At one point it said the speed limit was 45, even though the speed limit was 70."* Traced through
+every layer on route 00000393, 2026-08-19, and EVERY LAYER BELOW US WAS RIGHT:
+
+    the tile on his device   way 31535502, motorway, maxSpeed 31.2928 m/s = 70.0 mph
+    mapd published           speedLimit 70.0   nextSpeedLimit 45.0   waySelectionType current
+    our resolver used        45
+
+OSM right, tile right, mapd right. Upstream's ease-down then adopted the NEXT limit -- at 70 mph
+with `LIMIT_ADAPT_ACC` -1.0 the adopt window is ~288 m -- and the 45 belongs to an exit ramp.
+
+**HE SETTLED IT FROM THE SEAT:** *"I was in the left lane, which can't exit."* So it was not a road
+he could physically have taken, and no route prediction would ever have been right about it.
+
+**The root cause is a MISSING FIELD.** `mapdOut` has no `nextHighwayClass` and no `nextWayId`, so
+nothing in the message separates "this road slows ahead" from "there is a ramp ahead we are
+predicted onto". Upstream's ease-down assumes the first, which is right on a surface street and
+wrong on a motorway.
+
+Fixed in `MapdV2MapData.get_next_speed_limit_and_distance`, not in the resolver: the resolver's
+arithmetic is upstream's and correct, and what was wrong is the CONFIDENCE OF THE INPUT. On
+`motorway`, a LOWER next limit is refused. Narrow on purpose -- `motorwayLink` keeps it (on the ramp
+the drop is real), a HIGHER next limit is untouched, and if he does exit the ramp becomes the
+CURRENT way and its limit applies at once.
+
+**AND THIS IS THE SECOND TIME A CONFIDENT-LOOKING MAP NUMBER NEEDED A CONFIDENCE POLICY** -- the
+first was `waySelectionType == fail`. Both live in the same adapter for the same reason: mapd
+reports what it computed, and whether that answer applies TO US is our question, not its.
+
+### THE STOP OVERRIDE CANNOT FIRE. ITS OWN TWO CONDITIONS ARE MUTUALLY EXCLUSIVE.
+
+Route 00000393, 2026-08-19, `tools/bp_fallback_reason.py`. Over the 11,519 frames where the model
+asked for a stop:
+
+    <= 20 mph                    9004   78.2%
+    plan STOPPING                2689   23.3%
+    no lead in 60 m              4703   40.8%
+    -- pairwise --
+    speed + stopping             2689   23.3%
+    speed + nolead               3352   29.1%
+    STOPPING + NOLEAD               0    0.0%     <- never, not once
+    all three                       0    0.0%
+
+**CORRECTED THE SAME NIGHT, and the correction matters.** The first reading of this was "openpilot's
+plan commits to `stopping` ONLY when there is a lead", i.e. a logical contradiction between the
+override's trigger and its own carve-out. A sharper measurement says otherwise:
+
+    plan frames                       30735
+    shouldStop                         7103
+    shouldStop & NO lead               2570     <- the plan DOES want to stop with no lead
+    shouldStop & engaged               2894
+    shouldStop & engaged & NO lead        0     <- and THIS is the empty set
+
+**The plan asks to stop at an empty stop line perfectly well. What never happens is being ENGAGED
+while it does.** Every engaged stop-request on the drive had a lead; every no-lead stop-request came
+while he was already braking. So the conditions are not contradictory in principle -- the state just
+does not occur, because he takes empty stops himself.
+
+That is the SAME root cause the previous drive found ("he disengages before every stop"), now
+confirmed on a drive where Ford held 12,056 standstill frames behind leads. **Do not write it up as
+a design contradiction; it is a precondition he has never had reason to satisfy.**
+
+**Both halves were individually well-reasoned, which is how this got built.** "A lead disqualifies it
+-- Ford's stop-and-go is better than ours" is right. "The plan must have COMMITTED, not merely
+wanted to" is right. Nobody checked whether the two could hold at once, and the funnel that was
+added earlier the same evening could not see it either: it reported each condition's own rate and
+their four-way intersection, so three healthy-looking percentages hid a pair that is disjoint.
+**PAIRWISE IS THE DIAGNOSTIC. A funnel of marginals cannot show an exclusion.**
+
+**Do NOT fix this by dropping the lead check**, and do not rewrite the trigger either. Both were
+proposed on the strength of the wrong reading above. With the corrected numbers there is nothing
+structurally broken to repair -- the four conditions are individually right and the car has simply
+never been in the state they describe.
+
+**WHAT IT ACTUALLY NEEDS IS ONE DELIBERATE APPROACH**: an empty stop line, no car ahead, cruise left
+engaged, foot off the brake, all the way to a standstill. That single event moves this from
+untestable to measured, and `passthrough_cancel_frames` is its readout -- the camera's tolerance for
+sustained contradiction is the real unknown and always was.
+
+**And the diagnostic lesson survives the correction, which is why it is kept:** the funnel printed
+each condition's own rate plus the four-way intersection, and three healthy marginals hid an empty
+triple. PAIRWISE, AND AGAINST ENGAGEMENT, is what showed it. A funnel of marginals cannot show an
+exclusion -- nor can it tell a contradiction from a state that merely never arose, which is exactly
+the distinction the first write-up got wrong.
+
+### THE FAN IS NOT A FAULT. MEASURED, TWICE, AND CLOSED.
+
+*"I still feel like my fans are running pretty hard."* Route 00000393, 2026-08-19:
+
+    peak 95 C at t+546   fan 100%   cpu 45-66%   mem 76-78%
+    sustained 86-91 C for most of a 26-minute drive
+    thermalStatus:  ok on ALL 3,084 frames.  Zero thermal or resource events.
+
+**Nothing throttled and nothing degraded.** `procLog` puts the CPU where it always is -- locationd,
+card, ui, loggerd, controlsd, modeld -- with `mapd_v2` NINTH at 76 MB peak. v1 is confirmed gone
+(`ps` shows only `mapd_v2` and its manager), so the two-daemon fix took and stayed taken.
+
+So the honest answer is that the fan is loud because it is WORKING, in a car in Utah in August, and
+there is nothing to fix. Recorded so the next session does not spend an evening hunting a runaway
+process that three separate measurements now say is not there.
+
+**And the earlier `intakeTempC` idea was worthless** -- it reads 0.0 on this hardware, so the
+"ambient proxy" added to `bp_drive_checkup` that morning proves nothing. The temperature TRACE over
+the drive, beside cpu and mem, is what actually answers the question; a single peak never could.
+
+### LOW-SPEED CURVES: VISION IS STRUCTURALLY UNABLE TO HELP, AND THE MAP RARELY GETS A CHANCE
+
+*"Low speed curves, it isn't slowing down enough."* Attributed on route 00000393, 2026-08-19,
+BEFORE touching a single sensitivity -- which is the rule this fork keeps having to relearn.
+
+Every SCC activation under 40 mph, and the pattern is the whole answer:
+
+    t+ 271s  vision doing 35 mph, asking 48 mph   (+13)
+    t+ 592s  vision doing 39 mph, asking 49 mph   (+10)
+    t+ 598s  vision doing 33 mph, asking 48 mph   (+15)
+    t+ 600s  vision doing 32 mph, asking 53 mph   (+21)
+    t+1304s  vision doing 27 mph, asking 56 mph   (+29)
+    t+ 595s  map    doing 36 mph, asking 31 mph   (-5)   <- the only one that asked for LESS
+
+**SCC-Vision reports `active` and asks for a speed ABOVE the one the car is already doing.** That is
+not a tuning error, it is the formula: `v_target = v_ego * sqrt(a_lat_reg_max / max_pred_lat_acc)`
+is PROPORTIONAL TO CURRENT SPEED, so once the car is already slow the target scales down with it and
+can never demand a meaningful reduction. Lateral acceleration is `v^2 / R`, so at low speed even a
+tight radius produces a small number and the ratio stays above 1.
+
+**So vision contributes NOTHING below about 40 mph, and only the map can.** On this drive the map
+was active for 146 frames out of a 1542-second drive -- and it asked correctly every time it did.
+The deficit is map COVERAGE of low-speed corners, which is the same root cause as the section below:
+mapd smooths real tile geometry into nothing, so most corners never reach a controller at all.
+
+**DO NOT FIX THIS BY TUNING THE VISION FACTORS.** That has now been ruled out by measurement rather
+than by the old warning: the factors multiply a target that is already above current speed, so any
+value of them still asks for more than the car is doing.
+
+**And do not "fix" the `active` flag either.** Reporting `active` while asking for +21 mph is
+genuinely misleading, but `scc.vision.active` is read by the ICBM controller as `curve_active`,
+which drives `v_curve_target`, the curve ceiling and `curve_exit_frames`. It is not a display flag,
+and changing it changes driving.
+
+**The lever that exists TODAY is `SmartCruiseControlMapFactor`** -- his, currently 90, applied to
+corners at or below 25 mph. Lower means slower through tight corners, wherever the map sees them.
+
+### THE CURVATURE IS VALIDATED NOW -- AND THE "40x WIN" NUMBER WAS NODE JITTER
+
+2026-08-19. The tile curvature module was validated on "tightest triple = 127 m" against mapd's
+5,000 m. **That 127 m was measuring OSM node jitter, not the bend**, and wiring it in would have
+demanded a 127 m corner on a road that has none.
+
+The arithmetic, which is worth keeping because it applies to any polyline curvature: for three
+points on a chord `L` with sagitta `d`, `R = L^2 / 8d`. At the 12 m median node spacing on his way,
+`L = 24 m`, so a REAL 240 m corner offsets the middle node by only
+
+    d = 24^2 / (8 * 240) = 0.30 m          <- BELOW an OSM node's position noise
+
+and inverted, half a metre of jitter alone reads as `R = 24^2 / (8 * 0.5) = 144 m`. Adjacent-node
+curvature simply cannot resolve a 240 m corner at 12 m spacing; the two are the same size.
+
+**`curvature_profile_baseline` measures across ~70 m of ROAD instead.** Noise falls as `L^2` while
+signal grows as `L^2 / R`, so at 70 m the same corner gives `d = 2.55 m` against 0.5 m of jitter --
+five to one instead of worse-than-one. Cumulative distance, not a node count: spacing on that way
+runs 6 m to 112 m, so a fixed node offset would be a 6 m baseline in one place and 224 m in another.
+
+**MEASURED ON HIS TILE, and this is the number to trust:**
+
+    way 31532588, I-80, 56 nodes
+      mapd published            ~5000 m       21x too loose
+      ADJACENT triples   tightest 127 m, median 362 m     2x too tight, and a huge spread
+      BASELINE (70 m)    tightest 259 m, median 302 m     53 readings
+      the car actually pulled     240 m       (3.46 m/s^2 at 64 mph)
+
+259 m against a measured 240 m is 8%, and the spread collapses from 127-362 to 259-302. **That is
+the first curvature number on this fork that has been checked against something the car did.**
+
+**THE SPEED IS MEASURED: THE PSCM HOLDS ABOUT 2.5 m/s^2, AND HE TAKES CORNERS AT 4.**
+
+The first answer was **3.21 m/s^2** and it was WRONG, in the most instructive way available. He
+called it twice -- *"So that's how fast I take them?"* then *"I bet that 3.2 is how fast I am taking
+them"* -- and he was right both times. `latActive` only means openpilot was PERMITTED to steer; it
+says nothing about whose hands were on the wheel. Splitting on `steeringPressed`:
+
+    openpilot alone (no hands)   n=5251   p50 1.09   p90 1.93   p99 2.73   max 3.19
+    HIS hands on the wheel       n= 892   p50 1.95   p90 3.09   p99 4.14   max 4.20
+
+**openpilot has never once exceeded 3.2. The 3.21 was his 892 frames leaking into the number.**
+
+**AND THE "CONVERGENCE" WAS CIRCULAR, which is the part to remember.** 3.21 on a 259 m corner gives
+64 mph, and he drove that corner at 64 -- reported as two independent measurements agreeing. They
+were not independent: one was derived from his driving, so it had to come out at his speed. This is
+the file's own rule -- *a number only one tool can produce has never been checked* -- failing in a
+new costume, because there APPEARED to be two numbers.
+
+**WHERE THE PSCM STOPS KEEPING UP, which is the question he actually asked** (achieved is not
+comfortable -- it can produce 3.2 while tracking badly and running wide):
+
+    lat_acc bin   frames  limiter%  devLim%  hands-on%
+    0.5 - 1.0       2511     0.8      0.4       6.2
+    1.5 - 2.0       1269     3.1      2.0      19.8
+    2.0 - 2.5        491     3.7      1.8      36.9
+    2.5 - 3.0        198     9.1      8.1      55.6
+    3.0 - 3.5         73    27.4     27.4      90.4
+    3.5 - 4.0         25    12.0     12.0     100.0
+
+The deviation limiter is quiet to 2.5 (<= 3.7%), then 9.1%, then **27.4%**. And `hands-on%` climbs
+the same curve -- 6% low, 90%+ above 3.0 -- so he TAKES OVER exactly where the PSCM starts losing
+the line. Two independent signatures of the same ceiling, and this pair genuinely is independent.
+
+    the PSCM comfortably holds     ~2.5 m/s^2      259 m corner -> 57 mph
+    openpilot's own p99             2.73           259 m corner -> 59 mph
+    he drives it at                 ~4.1           259 m corner -> 64 mph, measured
+
+**So his original correction was exactly right and is now quantified: he takes corners about 1.5
+m/s^2 harder than his PSCM can hold, which is 5-7 mph on that bend.** The corner target belongs near
+2.5, NOT at what the car has been observed doing.
+
+This was only measurable because of a find while looking for it: **`MAX_LATERAL_ACCEL` (~2.4) is
+applied in `carcontroller.py` and `lateral_curv_ext.py` and appears ZERO times in
+`lateral_angle_ext.py`**, which is his car's path. Angle mode has no lateral-accel cap, so every
+corner driven with MADS on is already a sample of what the PSCM will do.
+
+**Two honest limits on it.** The driver-steered comparison is empty -- MADS is always on, so
+`latActive` is true nearly always and there is no hand-steered baseline to prove openpilot's ceiling
+sits BELOW his. And p99 is not a hard limit: max was 4.20 and the 130 limiter-bitten frames ran
+HIGHER (p99 3.71), which is the expected shape -- our own clips bite during the hardest cornering.
+So 3.2 is "sustained and demonstrated", not "the most the PSCM can do".
+
+**WHAT IS STILL MISSING IS THE SPEED, and it is deliberately not invented.** Turning 259 m into a
+corner speed needs `v = sqrt(a_lat * R)`, and `a_lat` is the open question -- his own correction:
+
+    "I want to take the curve as fast as the PSCM can handle with angle steering."
+
+At 2.2 (mapd's constant) a 259 m corner asks for 53 mph. He took it at 64. His 3.46 m/s^2 is what
+the car achieved with HIM steering, and he has said the PSCM needs the car slower than that -- so
+3.46 is an upper bound on the answer and 2.2 is somebody else's comfort number. **The PSCM's
+angle-mode authority limit is a CAR FACT nobody here has measured yet**, and guessing it is exactly
+the "somebody else's comfort constants" mistake he already corrected once.
+
+So: the geometry is done and trustworthy, and the controller wiring waits on that one number.
 
 ### THE TILES SEE THE CORNER. MAPD DOES NOT. THE CURVE FIX IS OURS TO WRITE.
 
