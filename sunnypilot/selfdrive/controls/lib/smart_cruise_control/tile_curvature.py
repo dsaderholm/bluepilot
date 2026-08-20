@@ -176,7 +176,42 @@ def _haversine_m(a: tuple[float, float], b: tuple[float, float]) -> float:
 # 21 m turn clears at 30 m (0.0476 * 900 = 42.8), where 70 m would have flattened it.
 _JITTER_M = 0.5          # OSM node position noise; the 0.5 that made 127 m out of a straight road
 _SNR = 5.0               # signal-to-noise a reading must clear before it is believed
-_BASELINE_LADDER = (20.0, 30.0, 45.0, 70.0)
+#
+# THE LADDER MUST REACH THE GENTLE END, and the first version did not. Each rung can only resolve
+# radii down to `L^2 / (8 * jitter * SNR)`, so a 70 m top rung caps out at 245 m -- and his I-80
+# corner, the one this whole module was built for and validated against at 259 m, came back as
+# EXACTLY 0.0: a straight road. Every highway sweeper above about 54 mph was invisible to our own
+# geometry and silently fell through to mapd's flattened number, which is the symptom the module
+# exists to remove, reintroduced by the module.
+#
+#     rung   resolves down to
+#      20 m       20 m radius
+#      30 m       45 m
+#      45 m      101 m
+#      70 m      245 m      <- the old top; his 259 m corner is just past it
+#     100 m      500 m
+#     140 m      980 m
+#
+# 140 m is the sensible stop: past that the baseline is long enough to start averaging a real
+# sweeper away, which is mapd's failure, and a corner gentler than 980 m radius is 100 mph at
+# 2.4 m/s^2 -- nothing this car will ever be asked to slow for.
+_BASELINE_LADDER = (20.0, 30.0, 45.0, 70.0, 100.0, 140.0)
+
+
+def _finite(nodes: list[tuple[float, float]]) -> bool:
+  """Every coordinate usable? NON-FINITE INPUT HERE IS NOT ROUNDING, IT IS A CRASH.
+
+  `math.cos(inf)` RAISES ValueError -- not NaN, an exception -- and `_to_local_m` calls it on every
+  node. Nothing between here and `LongitudinalPlannerSP.update` catches it, so one infinite latitude
+  in mapd's path takes plannerd down: the 2026-08-18 numpy/capnp failure again, one field over.
+
+  A NaN coordinate is quieter and worse. It poisons the cumulative distance from that node onward,
+  and `NaN < half` is False -- so the reach guard ACCEPTS instead of refusing, handing
+  `curvature_through` three identical points, which reads 0.0. The rest of the way then reports
+  STRAIGHT, `path_from_mapd` finds no corners and no NaN curvature, and returns "no corners ahead",
+  the most confident answer it has -- so SCC-Map idles and never falls back to v1.
+  """
+  return all(math.isfinite(lat) and math.isfinite(lon) for lat, lon in nodes)
 
 
 def curvature_profile_multiscale(nodes: list[tuple[float, float]]) -> list[float]:
@@ -189,6 +224,10 @@ def curvature_profile_multiscale(nodes: list[tuple[float, float]]) -> list[float
   """
   n = len(nodes)
   if n < 3:
+    return [0.0] * n
+  if not _finite(nodes):
+    # Refuse the WHOLE path, not part of it. A partial answer is indistinguishable from "straight
+    # road", and that is the one reading that stops the caller falling back to v1.
     return [0.0] * n
 
   per_scale = [curvature_profile_baseline(nodes, L) for L in _BASELINE_LADDER]

@@ -225,3 +225,35 @@ def test_every_reading_clears_the_noise_floor_it_was_measured_at():
         continue
       assert any(abs(k) * L * L >= need for L in tc._BASELINE_LADDER), \
         f"R={r}: emitted k={k} that clears no rung's noise floor"
+
+
+def test_the_ladder_reaches_the_GENTLE_end_not_just_the_tight_one():
+  """THE REGRESSION THAT SHIPPED AND NOTHING CAUGHT, 2026-08-20.
+
+  Every rung resolves only down to `L^2 / (8 * jitter * SNR)`, so a 70 m top rung caps at 245 m --
+  and HIS I-80 corner, the one this module exists for and was validated against at 259 m, came back
+  as exactly 0.0: a straight road. Every highway sweeper above ~54 mph was invisible to our own
+  geometry and fell through to mapd's flattened number, which is the symptom the module removes,
+  reintroduced by the module.
+
+  The existing tests all used tight-to-moderate radii, so restoring the 70 m cap left the whole
+  suite green. This is the test that fails.
+  """
+  for r in (259.0, 300.0, 400.0, 600.0):
+    prof = [abs(c) for c in tc.curvature_profile_multiscale(_circle_nodes(r, spacing_m=12.0)) if c > 0]
+    assert prof, f"a real {r:.0f} m sweeper read as a STRAIGHT ROAD -- the ladder cannot reach it"
+    got = tc.radius_m(sorted(prof)[len(prof) // 2])
+    assert abs(got - r) / r < 0.10, f"R={r:.0f} m measured {got:.0f} m"
+
+
+def test_a_non_finite_coordinate_does_not_kill_the_planner():
+  """`math.cos(inf)` RAISES ValueError -- not NaN, an exception -- and `_to_local_m` calls it on
+  every node. Nothing between here and LongitudinalPlannerSP.update catches it, so one infinite
+  latitude in mapd's path would take plannerd down."""
+  good = _circle_nodes(240.0, spacing_m=12.0)
+  for bad in ((float("inf"), -111.9), (40.76, float("inf")), (float("nan"), -111.9)):
+    nodes = list(good)
+    nodes[len(nodes) // 2] = bad
+    prof = tc.curvature_profile_multiscale(nodes)     # must not raise
+    assert len(prof) == len(nodes)
+    assert all(c == 0.0 for c in prof), "a poisoned path must be refused WHOLE, not in part"

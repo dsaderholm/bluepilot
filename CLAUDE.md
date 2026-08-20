@@ -1199,12 +1199,24 @@ touches the unpoliced bits that applied the park brake. So the override is a DEC
 openpilot's command instead of Ford's for these few seconds -- rather than a second CAN authoring
 path that would have to re-learn all of that. Keep it that way.
 
-    fires when   the model is planning a stop (dec.hasSlowDown), openpilot's plan has COMMITTED
-                 (longControlState == stopping), at or below 20 mph -- Ford's own set-speed floor, so the
-                 override starts exactly where the set speed runs out -- and NO radar lead within 60 m
-    ends on      stopped | lead appeared | plan stopped stopping | time bound | long inactive
+    fires when   the model is planning a stop (dec.hasSlowDown), the model's own stop ENDPOINT is
+                 inside v^2/(2*1.5)*1.3 -- an URGENCY test, which is what that arithmetic reduces to
+                 independent of speed: "a stop harder than 1.15 m/s^2, which the set speed cannot
+                 deliver" -- at or below 20 mph, and NO radar lead within 60 m
+    ends on      lead appeared | time bound | hold bound | long inactive | the model stops asking
+                 for 0.5 s straight
+    HOLDS ON     reaching a standstill. It does NOT hand back there: Ford will not hold a stop
+                 without a lead, and handing back at 0.5 mph is what made the car creep.
     then         SPENT -- refuses to re-arm until hasSlowDown drops, so a stop that does not
                  complete cannot re-trigger every frame
+
+**REWRITTEN 2026-08-20 and the old spec is kept nowhere, because it described behaviour that could
+never happen.** `longControlState == stopping` is `shouldStop`, measured across 21,936 frames on
+three drives as a STOPPED-CAR state -- never true above 3 mph. Requiring it to START a stop was
+circular, and it is why the override had never fired on any drive. The section further down that
+says "do NOT rewrite the trigger" was written before that measurement existed; the deliberate
+approach it asked for is exactly what produced it (route 0000039a, his light, engaged, foot off the
+brake, set speed walking 80 -> 57, `shouldStop` false the whole way).
 
 `hasSlowDown` reaches the carcontroller through `longitudinalPlanSP` on its own SubMaster -- one
 subscription rather than a capnp field plus controlsd plumbing. That is the field published the day

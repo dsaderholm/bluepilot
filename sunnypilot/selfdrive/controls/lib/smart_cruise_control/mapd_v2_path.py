@@ -33,6 +33,11 @@ from openpilot.sunnypilot.navd.helpers import Coordinate
 # rather than "could not compute". 1e-4 1/m is a 10 km radius -- nothing any controller would act on.
 _STRAIGHT_CURVATURE = 1e-4
 
+# The tightest curvature worth believing from mapd, 1/m. 0.05 is a 20 m radius -- tighter than any
+# road this car is driven on at a speed SCC-Map acts at, and the same scale the ladder's shortest
+# rung resolves. Past it is a bad tile or a bad way match, not a corner.
+_MAX_TRUSTED_CURVATURE = 0.05
+
 # FusionPilot: the lateral acceleration a mapped corner is planned against, m/s^2.
 #
 # A CAR FACT, measured on 2026-08-19 rather than borrowed: this is where his retrofit Edge PSCM
@@ -121,7 +126,7 @@ def path_from_mapd(sm) -> tuple[Coordinate, list[dict]] | None:
   # THE VALUE ITSELF, and why it moved, is at `_CORNER_LAT_ACC` -- kept in one place so a tuning
   # change cannot leave a stale argument for the old number sitting next to the code that uses it.
   # `SmartCruiseControlMapFactor` still trims on top and is still his: at his current 90 the
-  # effective figure is 2.5 * 0.81 = 2.03 m/s^2, comfortably under the measured ceiling.
+  # effective figure is 2.4 * 0.81 = 1.94 m/s^2, under the 2.5 collapse point.
   # AND THE CURVATURE IS OURS TOO NOW, computed from the path's own COORDINATES.
   #
   # mapd smooths curvature over a window long enough to average a bend away -- on his I-80 corner it
@@ -145,8 +150,17 @@ def path_from_mapd(sm) -> tuple[Coordinate, list[dict]] | None:
     # closed. A NaN reaching the walk poisons min() over the corner speeds and a NaN v_target is a
     # set-speed request nobody can act on -- the same trap this file already documents twice. NaN is
     # dropped from the COMPARISON rather than propagated: our own reading may be a real corner there.
+    # BOUNDED ABOVE, and only mapd's number needs it. Ours is geometrically limited -- a 20 m
+    # baseline cannot resolve below roughly a 5 m radius -- while mapd's arrives unchecked, and the
+    # `max()` routes it straight past the ladder's entire jitter-refusing purpose.
+    #
+    # Two measured outcomes without the bound. k = 100 prices the corner at 0.155 m/s, which the
+    # walk floors to MIN_V and publishes as a live interstate slowdown to 12.4 mph -- and since that
+    # is under the 45 mph ramp threshold, camera defenses 2 and 3 skip it, so NOTHING questions it.
+    # k = inf gives a velocity of exactly 0.0, which passes the straight test, wins `min()` in the
+    # walk, and then reads as "no corner" downstream: one bad point masking every real corner ahead.
     k = abs(k_ours)
-    if not math.isnan(k_mapd):
+    if math.isfinite(k_mapd) and abs(k_mapd) <= _MAX_TRUSTED_CURVATURE:
       k = max(k, abs(k_mapd))
     if k <= _STRAIGHT_CURVATURE:
       continue
