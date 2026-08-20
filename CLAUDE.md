@@ -3293,6 +3293,35 @@ LEFT line and then reused for the right one with no equivalent measurement, whic
 flagged before this drive did. A threshold validated on one signal is not validated on its mirror,
 however symmetric the code looks. `tools/bp_outer_lines.py` is the measurement.
 
+## THE SLOW-PASS WARNING IS CONFIRMED CORRECT ON THE ROAD. 2026-08-20.
+
+His words after route 0000039f: *"I think the slow pass thing was valid."* That closes the
+2026-08-19 report -- *"I also got slow pass when I wasn't in the far left lane"* -- which is the
+complaint the whole lane anchor was built to answer.
+
+    slow-lead frames                     10,022
+    ...and the anchor says LEFTMOST       5,208   52.0%
+    ...and the FULL three-term gate         610    6.1%   <- what he actually saw, and it was right
+
+**DO NOT RETUNE THE HOG GATE.** It is now confirmed by the only instrument that can confirm it.
+The three terms are `lead_is_slow AND in_leftmost_lane() AND right_geometry_ok`, and the third does
+most of the filtering: he was in the left lane behind someone slow for half the drive and it spoke
+on the 6% where there was somewhere to move.
+
+**The chain that got here, so none of it gets undone:**
+
+- the hog gate keyed on `not left_geometry_ok`, which is not a lane position at all -- that was the
+  2026-08-19 bug
+- it moved onto `in_leftmost_lane()`, which was then structurally unreachable on a wide road
+  because the right edge cannot be seen from the left lane
+- reading all FOUR lane lines made it reachable, and both-outer-lines-absent made it reachable on
+  three-lane roads specifically
+- and the review found the `_stand_down` direction default that was walking the index left on every
+  steering nudge, which would have made this fire in the RIGHT lane again
+
+**What is still unconfirmed** is the five-lane case. Route 0000039f claimed lane 4 on 0.2% of
+frames, so I-15's five lanes remain almost unexercised.
+
 ## PASSING ASSIST CANNOT SEE A CONSTRUCTION ZONE. Reported 2026-08-19.
 
 *"It also did try to change lanes into a construction zone's cones earlier today."*
