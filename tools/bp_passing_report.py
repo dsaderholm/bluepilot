@@ -132,12 +132,22 @@ def history() -> int:
     # line" and "a line the camera missed" refuse identically. The radar is the independent witness:
     # a vehicle tracked to our left proves a left lane exists no matter what the paint says.
     #
+    # BUT PROVING THE LANE EXISTS DOES NOT MAKE THE REFUSAL WRONG, and this line used to say it
+    # did. A vehicle tracked there means the lane is OCCUPIED, which is the single best reason to
+    # refuse. Measured 2026-08-20 across three drives: of 2,116 noLaneAvailable refusals, 36.6%
+    # were occupied and another 65.9% of the remainder were in the leftmost lane already. The
+    # refusals that are genuinely wrong -- lane empty, and not leftmost -- are 1.3%.
+    #
+    # The old verdict sent a whole session at "the camera cannot find paint" as though it were the
+    # feature's main problem. Use bp_no_lane_why.py, which splits the refusals properly.
+    #
     # Printed with an explicit verdict rather than a bare share, because the whole failure this
     # prevents was reading a number and inferring the wrong cause from it twice in one day.
     proven = d.get("geoLeftProven")
     if proven is not None and proven >= 0:
       if proven > 0:
-        verdict = "a left lane EXISTS -- these refusals are the camera, not the road"
+        verdict = ("a left lane EXISTS -- but a tracked vehicle means it was OCCUPIED, so "
+                   "refusing was RIGHT. See bp_no_lane_why.py")
       else:
         verdict = "no traffic ever seen left; consistent with already being in the left lane"
       print(f"    radar saw a vehicle left on {proven * 100:.0f}% of refused frames: {verdict}")

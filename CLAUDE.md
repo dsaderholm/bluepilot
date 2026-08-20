@@ -3201,6 +3201,38 @@ worth it at that coverage.
 `speedLimitAccepted` is 100% populated and always True. `estimatedRoadWidth` is 100% populated and
 derived. `advisorySpeed` is honestly empty. Check what a field SAYS, not whether it is set.
 
+## noLaneAvailable IS MOSTLY THE SYSTEM BEING RIGHT. 1.3% OF IT IS WORTH FIXING.
+
+Measured 2026-08-20 across routes 00000397/99/9a with `tools/bp_no_lane_why.py`. It is the top
+blocker at 59-89% of refused frames, and that number invites exactly one wrong conclusion, which
+was reached and reported to him before it was checked.
+
+    noLaneAvailable refusals above 34 mph                     2,116
+      a vehicle was IN that lane -- correct                     774   36.6%
+      lane empty                                              1,342   63.4%
+        ...and we were already in the LEFTMOST lane -- correct   884   65.9% of empty
+        ...lane position unknown                                431   32.1% of empty
+        ...A LANE DID EXIST AND IT STILL REFUSED                  27    2.0% of empty
+
+**The genuinely wrong refusals are 27 frames, 1.3% of the total.** The gate is not broken and the
+camera is not the feature's main problem.
+
+**HIS FRAMING IS THE CORRECT ONE**, 2026-08-20: *"A lot of lane changes are correct, I just have to
+wait for no one to be in that lane. Once we get BLIS and rear radar, it won't make these
+suggestions as much."* The 36.6% occupied share is precisely that, and BLIS plus a rear radar will
+let those be stated as "occupied" rather than collapsed into "no lane".
+
+**WHAT SENT THE INVESTIGATION THE WRONG WAY** was `bp_passing_report.py`'s own verdict line, which
+read *"a left lane EXISTS -- these refusals are the camera, not the road"* whenever the radar had
+tracked a vehicle to the left. The premise is right and the conclusion does not follow: a tracked
+vehicle proves the lane EXISTS and simultaneously proves it was OCCUPIED, which is the single best
+reason to refuse. Fixed, and it is a warning about diagnostic prose generally -- a tool that prints
+a VERDICT rather than a number gets believed, so its reasoning has to survive the same scrutiny as
+the code.
+
+**The 32.1% "lane position unknown" is the honest remaining gap**, and it is a coverage question
+for the anchor rather than a fault in the gate.
+
 ## PASSING ASSIST CANNOT SEE A CONSTRUCTION ZONE. Reported 2026-08-19.
 
 *"It also did try to change lanes into a construction zone's cones earlier today."*
