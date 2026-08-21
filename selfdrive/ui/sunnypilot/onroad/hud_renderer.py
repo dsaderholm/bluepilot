@@ -42,6 +42,7 @@ class HudRendererSP(HudRenderer):
     self.circular_alerts_renderer = CircularAlertsRenderer()
     self.speed_renderer = SpeedRenderer()
     self._torque_bar = TorqueBar(scale=3.0, always=True)
+    self._box = max_box_state(0.0, None, 0.0, 0.0)
 
     self.pcm_cruise_speed: bool = True
     self.show_icbm_status: bool = False
@@ -106,7 +107,7 @@ class HudRendererSP(HudRenderer):
     # not at your number right now", and the thing it should differ from is what ICBM is steering
     # toward -- otherwise it fires on the harmless drift between openpilot's own count and Ford's.
     if not self.pcm_cruise_speed and ui_state.sm['carControl'].enabled:
-      if round(self._set_speed_aim().aim) != round(self.speed_cluster):
+      if round(self._box.aim) != round(self.speed_cluster):
         self.icbm_active_counter = 3 * gui_app.target_fps  # 3 seconds usually
       elif self.icbm_active_counter > 0:
         self.icbm_active_counter -= 1
@@ -118,6 +119,10 @@ class HudRendererSP(HudRenderer):
   def _draw_set_speed(self, rect: rl.Rectangle) -> None:
     long_plan_sp = ui_state.sm['longitudinalPlanSP']
     long_override = ui_state.sm['carControl'].cruiseControl.override
+    # RESOLVED ONCE PER FRAME. `_get_icbm_status` and the drawing below both need the aim, and
+    # calling it twice re-read both messages -- and could disagree, since a message arriving between
+    # the two calls would decide `show_icbm_status` from a different aim than the one drawn.
+    self._box = self._set_speed_aim()
     self._get_icbm_status()
 
     set_speed_width = UI_CONFIG.set_speed_width_metric if ui_state.is_metric else UI_CONFIG.set_speed_width_imperial
@@ -143,7 +148,7 @@ class HudRendererSP(HudRenderer):
         elif ui_state.status == UIStatus.OVERRIDE:
           max_color = COLORS.OVERRIDE
 
-    box = self._set_speed_aim()
+    box = self._box
 
     # THE LABEL SLOT, in priority order. It can only say one thing, so the order is the ranking of
     # what he needs to know:
