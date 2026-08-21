@@ -93,6 +93,13 @@ def get_hev_engine_on_reason_text(reason_value):
   return engine_on_reasons.get(int(reason_value), "Unknown")
 
 
+# BluePilot: every signal that means "RES +" on a Ford wheel. The car sends `CcAslButtnResIncPress`
+# and ICBM injects `CcAslButtnSetIncPress`; both must take the combo path below, which picks
+# resumeCruise or accelCruise from the cruise state. Measured 2026-08-20 -- see the BUTTONS comment
+# in values_ext for why the original single-signal mapping made his `+` button invisible.
+RES_INC_SIGNALS = ("CcAslButtnSetIncPress", "CcAslButtnResIncPress")
+
+
 class CarStateExt:
   """
   Extension class for Ford CarState to parse cruise control buttons.
@@ -154,7 +161,7 @@ class CarStateExt:
       # CcAslButtnSetIncPress is the "RES +" button: resumeCruise (10) when cruise is disabled,
       # accelCruise (3) when enabled. It emitted setCruise (9) when disabled, which reported every
       # resume as a set and discarded the driver's hold -- see the BUTTONS comment in values_ext.
-      if button.can_msg == "CcAslButtnSetIncPress" and button.can_msg not in processed_signals:
+      if button.can_msg in RES_INC_SIGNALS and button.can_msg not in processed_signals:
         processed_signals.add(button.can_msg)
         signal_state = state
         prev_accel_state = self.button_states.get(3, False)  # accelCruise

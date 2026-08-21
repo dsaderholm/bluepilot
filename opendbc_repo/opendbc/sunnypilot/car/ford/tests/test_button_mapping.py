@@ -45,8 +45,17 @@ class TestWheelLabelsMatchTheEvents:
     assert any(ButtonType.resumeCruise in types_for(b.can_msg) for b in BUTTONS)
 
   def test_every_button_reads_a_real_ford_signal(self):
-    """A typo here is silent: the signal never fires and the button simply does nothing."""
-    known = {"CcAslButtnSetIncPress", "CcAslButtnSetDecPress", "CcAslButtnCnclResPress",
+    """A typo here is silent: the signal never fires and the button simply does nothing.
+
+    AND SO IS A REAL SIGNAL THE WHEEL NEVER SENDS, which this list could not catch and which cost
+    weeks. `CcAslButtnSetIncPress` is a real Ford signal, spelled correctly, present in the DBC --
+    and measured on 2026-08-20 to have ZERO driver-side rising edges across two full drives, while
+    `CcAslButtnResIncPress` had six on each. His `+` button was invisible to openpilot the whole
+    time. A whitelist of plausible names cannot tell "this signal exists" from "this car sends it";
+    only the wire can.
+    """
+    known = {"CcAslButtnSetIncPress", "CcAslButtnResIncPress",
+             "CcAslButtnSetDecPress", "CcAslButtnCnclResPress",
              "CcButtnOnOffPress"}
     for b in BUTTONS:
       assert b.can_msg in known, f"{b.can_msg} is not a signal this car's mapping expects"

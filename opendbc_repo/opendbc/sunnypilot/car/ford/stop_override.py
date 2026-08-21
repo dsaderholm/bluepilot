@@ -140,6 +140,50 @@ MPH_TO_MS = CV.MPH_TO_MS
 # merely distant, and MAX_ACTIVE_S ends it.
 ENTER_SPEED = 45.0 * MPH_TO_MS
 
+# THE LOWEST SPEED AT WHICH WE MAY TAKE AUTHORITY. Not the lowest speed we may HOLD it -- once
+# armed, carrying the car all the way to a standstill is fine and is measured to be fine.
+#
+# THIS IS THE FIX FOR LOSING FORD ACC FOR A WHOLE DRIVE, 2026-08-20. Every override episode across
+# four drives, against what the camera did afterwards:
+#
+#     armed 19.3 mph  0.8 s  -> cancel +7.7 s, released
+#     armed 19.8 mph  7.3 s  -> cancel +1.7 s, LATCHED FOR THE REST OF THE DRIVE
+#     armed 26.3 mph  2.8 s  -> no cancel
+#     armed 28.3 mph 35.4 s  -> no cancel, AND IT RAN TO A FULL STANDSTILL
+#     armed 32.2 mph  1.1 s  -> no cancel
+#     armed 32.9 mph  8.9 s  -> cancel +3.5 s, released after 18 s
+#     armed 33.9 mph  6.3 s  -> cancel +6.8 s, released after 5 s
+#     armed 40.0 mph  3.8 s  -> cancel +2.1 s, released after 29 s
+#     armed 42.3 mph  0.2 s  -> no cancel
+#     armed 44.9 mph  9.6 s  -> no cancel, down to 8.9 mph
+#
+# BOTH arms below Ford's floor provoked a cancel; one latched permanently. EVERY arm above it was
+# tolerated -- including the 35 s one that took the car to zero. So it is not stopping the camera
+# objects to, nor duration, nor going below 20 once underway. It is TAKING THE COMMAND AWAY FROM AN
+# ACC THAT IS ALREADY AT ITS OPERATING LIMIT.
+#
+# When that latch happens the camera asserts `AccCancl_B_Rq` and never releases it -- measured on
+# route 000003a0, exactly one cancel transition in the last 550 s of the drive, and it was the ON.
+# `passthrough_admissible` then refuses every frame, Ford's command is never forwarded again, and he
+# is on openpilot longitudinal until he restarts the car. He reported precisely that, and reported
+# the drive whose arms were both above the floor as fine.
+#
+# 25, NOT 20, AND THE 5 MPH IS MEASURED RATHER THAN PADDING. Setting it at Ford's own floor was
+# tried first and replayed against the same drives: the bad arm at 19.8 mph simply became a 20.0 mph
+# arm 0.2 s later, because the car HOVERS at the floor -- Ford accelerates to hold 20 while the
+# model wants to stop, so v_ego oscillates across the boundary and the override catches it on the
+# way through. A bound exactly on the hover point is not a bound.
+#
+# The measured arms separate cleanly with a gap in between:
+#
+#     provoked a cancel   19.3   19.8   (and 20.0 once the floor was set at 20)
+#     tolerated           26.3   28.3   32.2   32.9   33.9   40.0   42.3   44.9
+#
+# 25 sits in that gap: above every arm that has ever provoked the camera, below every arm it has
+# ever tolerated. It also reads as a rule rather than a coincidence -- 5 mph of separation is enough
+# that Ford is still comfortably inside its envelope rather than at the edge of handing off.
+ARM_MIN_SPEED = 25.0 * MPH_TO_MS
+
 # Stopped. NOT a hand-back any more -- see the creep note in `update`: Ford does not hold a stop
 # without a lead, so handing back here is what made the car roll. `create_acc_msg` never sets
 # `AccBrkPrkEl_B_Rq`, so holding cannot reproduce drive A's park brake.
@@ -245,6 +289,87 @@ CLOSING_FRACTION = 0.35
 # at these speeds, so nothing legitimate comes near this.
 ENDPOINT_JUMP_M = 15.0
 
+# ---- THE CURVE PATH: braking the buttons cannot deliver -------------------------------------
+#
+# ICBM lowers the set speed by tapping the stalk, and the car recognises about one press per 0.30 s
+# -- 1 mph a time, 3.3 mph/s, roughly 1.5 m/s^2. That is a HARD CEILING and not a tuning choice: our
+# frames assert the button bit continuously, but his steering column module transmits the same
+# message with the bit CLEAR at 10 Hz on the same bus, interleaved with ours, so the car sees
+# press-release-press-release and counts taps. Measured on the wire, route 000003a1.
+#
+# WHAT THAT COSTS, from the drive he asked about. A 77 mph approach to a 28 mph corner:
+#
+#     t+1.2   SCC-Map asks for 28.4 mph while the car is doing 77
+#     t+3.7   already in the corner, lateral acceleration 4.68 m/s^2
+#     t+5.0   peak 5.20 m/s^2, against a 2.4 target
+#     t+15.0  finally down to 25 mph
+#
+# The set speed walked 78 -> 26 one mile per hour at a time and took 15 seconds. Nothing was
+# malfunctioning; that is simply the fastest the buttons go. Closing 49 mph at 1.5 m/s^2 needs about
+# 650 m of road and the map showed the corner at 613 m.
+#
+# AUTHORING THE COMMAND DIRECTLY HAS NO SUCH LIMIT. At a comfortable 2.5 m/s^2 the same reduction
+# needs 207 m -- well inside what he had. So when openpilot's own plan asks for harder braking than
+# the buttons can deliver, take the command instead of tapping at it.
+#
+# His framing, and it is the right one: *"we want to switch to OP long anyway in a situation like
+# this since with a sharp exit like this there will likely be a red light at the end or an
+# unconfirmed lead"*. The corner and the stop are one event.
+
+# HOW FAR BELOW THE CURRENT SPEED THE CORNER TARGET HAS TO BE, m/s. This is the SPEED GAP, not a
+# requested deceleration, and the difference cost a rewrite.
+#
+# The first version armed on `actuators.accel` -- openpilot's own requested deceleration -- on the
+# reasoning that "the plan wants harder braking than the buttons can deliver" is exactly the
+# question. It is, and that number cannot answer it. Measured over 117,105 engaged frames:
+# `actuators.accel` sits at its -3.50 floor for more than 10% of them and below -3.0 for 36%.
+#
+# Of course it does. Under ICBM openpilot's longitudinal controller is not driving anything -- ICBM
+# taps the stalk and Ford brakes. The controller watches the car ignore its commands and winds up to
+# the limit. It is a saturated number, not a plan, and arming on it fired about once a minute.
+#
+# THE GAP IS THE HONEST SIGNAL because it is what the buttons actually have to close, at the 3.3
+# mph/s the car recognises presses. 20 mph is six seconds of tapping; below that ICBM closes it
+# quickly enough and should be left alone. Measured across four drives, a gap this size appears on
+# 0.89% of engaged time -- his 77 mph corner into a 28 mph bend was a 49 mph gap.
+SLOWDOWN_ARM_GAP = 20.0 * MPH_TO_MS
+
+# Release once the gap is small enough for the stalk again. Well clear of the arm threshold: every
+# arm and release is a handoff, and handoffs are what the camera reacts to, so flapping across a
+# single threshold would be the worst possible shape.
+SLOWDOWN_RELEASE_GAP = 8.0 * MPH_TO_MS
+
+# How long the plan must keep asking before we act, in 50 Hz frames. Short, because a corner does
+# not wait -- but long enough that one noisy frame cannot take the command.
+SLOWDOWN_CONFIRM_FRAMES = int(0.4 * OVERRIDE_HZ)
+
+# The ceiling for the curve path, and it is HIGHER than the stop path's ENTER_SPEED on purpose.
+# ENTER_SPEED exists because above it "the set speed can still express this" -- true for a stop,
+# false for a corner, which is the entire reason this path exists.
+#
+# STATED PLAINLY: every override the camera has been measured tolerating armed at 44.9 mph or below.
+# Above that is unmeasured. What the measurements DO say is that the permanent latch -- the one that
+# costs Ford ACC for a whole drive -- is associated with arming BELOW Ford's floor, not above it;
+# high-speed arms produced only transient cancels that released in 5-29 s. So the risk here is
+# believed to be a brief cancel rather than a brick, and 80 covers his 77 mph corner.
+SLOWDOWN_ENTER_SPEED = 80.0 * MPH_TO_MS
+
+# The curve path gets its OWN time bound, longer than the stop path's 20 s.
+#
+# Replaying his 77 mph corner against MAX_ACTIVE_S showed why: the corner needed about 24 s of
+# continuous braking, so the override hit the 20 s bound at 32.8 mph, released for 0.4 s WHILE STILL
+# DECELERATING HARD, and immediately re-armed. That is a lurch mid-corner and two extra handoffs --
+# and handoffs are the thing the camera reacts to, so churning them is the worst possible shape.
+#
+# 30 s covers that corner with margin and is inside what the camera has been measured tolerating: on
+# route 000003a0 an override ran 35.4 s to a full standstill with no cancel at all.
+#
+# NOT a raise of MAX_ACTIVE_S. That bound is about contradicting Ford on a STOP, where the car ends
+# up stationary and the approach is short; a corner is a longer, gentler event and the two should
+# not be forced to share a number just because they share a class.
+SLOWDOWN_MAX_ACTIVE_S = 30.0
+SLOWDOWN_MAX_ACTIVE_FRAMES = int(SLOWDOWN_MAX_ACTIVE_S * OVERRIDE_HZ)
+
 # A lead this close is Ford's business. Beyond it the radar has nothing useful and the stop is ours.
 LEAD_DISQUALIFIES_M = 60.0
 
@@ -314,6 +439,11 @@ class FordStopOverride:
     # replaced -- that counter armed zero times on both logged drives, because the endpoint jitters
     # frame to frame and any single rise reset it.
     self.closing_window: deque = deque(maxlen=CLOSING_CONFIRM_FRAMES)
+    # The curve path -- see SLOWDOWN_ARM_GAP. Separate state from the stop path because they arm on
+    # different evidence and only one may own the command at a time.
+    self.slowdown_active = False
+    self.slowdown_frames = 0
+    self.slowdown_confirm = 0
     self.last_result = ""       # for logging only, never used to decide
 
   def _end(self, why: str) -> None:
@@ -325,8 +455,73 @@ class FordStopOverride:
     self.holding = False
     self.hold_frames = 0
 
+  def _end_slowdown(self, why: str) -> None:
+    if self.slowdown_active:
+      self.last_result = why
+    self.slowdown_active = False
+    self.slowdown_frames = 0
+    self.slowdown_confirm = 0
+
+  def _update_slowdown(self, v_ego: float, lead_close: bool, slowdown_gap: float):
+    """The curve path. Returns True/False when it owns the frame, None when it does not.
+
+    Runs BEFORE the stop machinery and independently of `has_slow_down`: a corner is not a stop and
+    the model publishes no endpoint for one, so every gate the stop path uses is the wrong question
+    here. See SLOWDOWN_ARM_GAP for why this exists at all.
+    """
+    if self.active:
+      # The stop path already owns the command. Only one of them may author.
+      self.slowdown_confirm = 0
+      return None
+
+    if self.slowdown_active:
+      self.slowdown_frames += 1
+      if lead_close:
+        self._end_slowdown("a lead arrived; Ford's stop-and-go owns this")
+        return False
+      if self.slowdown_frames > SLOWDOWN_MAX_ACTIVE_FRAMES:
+        self._end_slowdown("time bound reached while braking for a curve")
+        return False
+      if v_ego <= STOPPED_SPEED:
+        # IT BROUGHT THE CAR TO A STOP. Hand into the stop path's hold rather than releasing at a
+        # standstill -- releasing there is exactly the creep this whole feature was rewritten for,
+        # and his own question was whether a curve takeover can carry through to a stop and back.
+        # Measured on route 000003a0 that it can: Ford's cruise status follows into Que_Assist on
+        # the way down, holds through the standstill, and resumes to 40 mph by itself afterwards.
+        self._end_slowdown("curve became a stop; handing to the hold")
+        self.active = True
+        self.holding = True
+        self.frames = 0
+        self.hold_frames = 0
+        self.last_result = "holding a stop the curve path brought us to"
+        return True
+      if slowdown_gap < SLOWDOWN_RELEASE_GAP:
+        self._end_slowdown("the gap is small enough for the buttons again")
+        return False
+      return True
+
+    # ---- arming ----
+    if v_ego < ARM_MIN_SPEED or v_ego > SLOWDOWN_ENTER_SPEED:
+      self.slowdown_confirm = 0
+      return None
+    if lead_close:
+      self.slowdown_confirm = 0
+      return None
+    if slowdown_gap < SLOWDOWN_ARM_GAP:
+      self.slowdown_confirm = 0
+      return None
+
+    self.slowdown_confirm += 1
+    if self.slowdown_confirm < SLOWDOWN_CONFIRM_FRAMES:
+      return None
+    self.slowdown_active = True
+    self.slowdown_frames = 0
+    self.slowdown_confirm = 0
+    self.last_result = "closing a gap the buttons cannot close in time"
+    return True
+
   def update(self, long_active: bool, v_ego: float, has_slow_down: bool, op_stopping: bool,
-             lead_distance: float, stop_endpoint_m: float = 0.0) -> bool:
+             lead_distance: float, stop_endpoint_m: float = 0.0, slowdown_gap: float = 0.0) -> bool:
     """Args:
       long_active:     openpilot longitudinal is actually active this frame.
       v_ego:           m/s.
@@ -354,7 +549,15 @@ class FordStopOverride:
       # longitudinal drops, and the gate stays latched telling the car this stop was still ours.
       self.holding = False
       self.hold_frames = 0
+      self._end_slowdown("longitudinal went inactive")
       return False
+
+    # THE CURVE PATH RUNS FIRST, and independently of everything below. `has_slow_down` gates the
+    # whole stop machinery, and a corner never sets it.
+    lead_close_now = 0.0 < lead_distance < LEAD_DISQUALIFIES_M
+    curve = self._update_slowdown(v_ego, lead_close_now, slowdown_gap)
+    if curve is not None:
+      return curve
 
     # The reason going away is the only thing that re-arms it. Deliberately NOT keyed on the car
     # having stopped: a stop that gets abandoned half way must not be able to fire again on the
@@ -514,8 +717,8 @@ class FordStopOverride:
     # ---- arming, and every clause is a REASON rather than a comparison with Ford ----------------
     if v_ego > ENTER_SPEED:
       return False          # the set speed can still express this; ICBM is strictly better
-    if v_ego <= STOPPED_SPEED:
-      return False          # already stopped, nothing to do
+    if v_ego < ARM_MIN_SPEED:
+      return False          # below Ford's floor, seizing authority latches the camera -- see below
     if lead_close:
       return False          # Ford's radar has it, and Ford's stop-and-go is better than ours
 

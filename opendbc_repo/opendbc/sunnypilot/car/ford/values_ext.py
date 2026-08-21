@@ -25,6 +25,31 @@ Button = namedtuple('Button', ['event_type', 'can_addr', 'can_msg', 'values'])
 # captures when the owner builds a hold with the + side. Pressing RES to resume was therefore
 # reported to openpilot as SET, which is the one event that DISCARDS the driver's hold.
 #
+# THAT "CONFIRMED" WAS CIRCULAR AND WRONG, and it cost weeks. 2026-08-20, measured off the wire:
+# ICBM's press path captures a hold when the SET SPEED MOVES, via the idle-adopt fallback -- it does
+# not need a button event at all. So "ICBM captured a hold" was never evidence about which signal
+# the wheel sends, and nobody had looked.
+#
+# Rising edges of each signal on Steering_Data_FD1, bus 0 -- the DRIVER side, with ICBM's own
+# injections excluded (those land on bus 128/130 as TX echoes):
+#
+#     route 0000039d    CcAslButtnSetIncPress  0     CcAslButtnResIncPress  6
+#     route 0000039f    CcAslButtnSetIncPress  0     CcAslButtnResIncPress  6
+#
+# HIS "+" BUTTON HAS NEVER ONCE REACHED OPENPILOT. `CcAslButtnSetIncPress` is not a signal this
+# wheel sends; the car sends `CcAslButtnResIncPress`. openpilot therefore saw no accelCruise event
+# ever, so `vCruiseCluster` never incremented on a `+` press and ICBM never captured a hold from
+# one -- while the CAR moved its own set speed, because the stalk talks to the PCM directly.
+#
+# That is the whole of his long-running complaint: *"Increasing my speed with the plus when SLA
+# doesn't have a number still does the ICBM speed sometimes... and then decreases back down to what
+# I originally pressed set at."* The dash went up, openpilot did not know, and ICBM drove it back to
+# a hold that his press could not update.
+#
+# ICBM's own INJECTION still uses CcAslButtnSetIncPress and is left alone: the PCM plainly accepts
+# it, since that is how ICBM has been moving the set speed all along. Send and receive are simply
+# not the same signal on this car.
+#
 # That is the original "holds are not remembered on resume" report. The behavioural detector added
 # later works around it by comparing the landed set speed against the pre-cancel value, and that is
 # why holds survive today -- the label was still wrong underneath.
@@ -39,8 +64,14 @@ Button = namedtuple('Button', ['event_type', 'can_addr', 'can_msg', 'values'])
 # this wheel has no such button.
 BUTTONS = [
   # RES + : resume when cruise is off, increase the set speed when engaged.
+  #
+  # BOTH SIGNALS, because the wheel sends ResInc and only ICBM sends SetInc. Kept rather than
+  # swapped: SetInc costs nothing here (it has zero driver-side edges on this car, and openpilot
+  # does not read its own transmissions), and another Ford wheel may well use it.
   Button(ButtonType.accelCruise, "Steering_Data_FD1", "CcAslButtnSetIncPress", [1]),
   Button(ButtonType.resumeCruise, "Steering_Data_FD1", "CcAslButtnSetIncPress", [1]),
+  Button(ButtonType.accelCruise, "Steering_Data_FD1", "CcAslButtnResIncPress", [1]),
+  Button(ButtonType.resumeCruise, "Steering_Data_FD1", "CcAslButtnResIncPress", [1]),
 
   # SET - : set when cruise is off, decrease the set speed when engaged.
   Button(ButtonType.decelCruise, "Steering_Data_FD1", "CcAslButtnSetDecPress", [1]),

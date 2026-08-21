@@ -147,3 +147,63 @@ def read_icbm_hud_state(sm) -> IcbmHudState:
   except Exception:  # noqa: BLE001 -- see docstring; a HUD must not raise
     return IcbmHudState()
   return state
+
+
+@dataclass
+class MaxBoxState:
+  """FusionPilot: what the MAX box shows. Pure, so it can be tested without raylib.
+
+  THE BIG NUMBER IS WHAT THE CAR IS BEING DRIVEN TO. Settled with the owner on 2026-08-20 after
+  walking the five on-screen speeds one at a time. It replaces "the big number is `vCruiseCluster`",
+  which under ICBM is openpilot's own bookkeeping and drives nothing -- ICBM drives the car by
+  tapping the stalk, so the number that means anything is ICBM's aim.
+
+  His three cases collapse into one rule:
+
+    hold exists              -> the hold. *"should we have the target be the hold when there is a
+                                hold at all"* -- yes.
+    no hold, SLA has a limit -> limit + offset. *"I like having that fall back if I cancel my
+                                hold."* Unchanged from today.
+    neither                  -> wherever SET left him. On a road with no limit that number is
+                                arbitrary, which is exactly why a hold should take over from it.
+  """
+  aim: float = 0.0
+  label: str = "MAX"
+  label_is_number: bool = False
+  hold_driving: bool = False
+
+
+def max_box_state(hold: float, sla_fallback: float | None, set_speed: float, dash: float) -> MaxBoxState:
+  """Resolve the big number and the label slot.
+
+  THE LABEL SLOT CAN ONLY SAY ONE THING, so this is a ranking of what he needs to know:
+
+    1. the DASH number, whenever the car is not at the aim. Something is actively pulling him down
+       -- a curve, a lead, a limit ahead -- and that outranks everything else.
+    2. the SLA FALLBACK, while a hold is driving and SLA has a limit. The number that cancelling the
+       hold would give back, at full size. It already exists on the speed-limit sign, but only as
+       the offset, in a corner: *"the offset is such a small number in the top right, that it's hard
+       to see."* Shown exactly when it is actionable and never when it is not.
+    3. the word MAX.
+
+  With a hold and NO limit there is no fallback to offer, so it falls through to MAX with his own
+  number under it -- the common case on the roads where holds matter most.
+
+  A PIN SUGGESTION IS NOT A HOLD and must never reach `hold`: it is an offer made where no hold
+  exists, and letting it move the big number would display a speed the car is not driving to.
+  A PINNED hold, by contrast, IS a hold -- it drives the car exactly like a pressed one, and the
+  badge below distinguishes them.
+  """
+  hold_driving = hold > 0
+  if hold_driving:
+    aim = hold
+  elif sla_fallback is not None and sla_fallback > 0:
+    aim = sla_fallback
+  else:
+    aim = set_speed
+
+  if aim > 0 and round(dash) != round(aim):
+    return MaxBoxState(aim, str(round(dash)), True, hold_driving)
+  if hold_driving and sla_fallback is not None and sla_fallback > 0:
+    return MaxBoxState(aim, str(round(sla_fallback)), True, True)
+  return MaxBoxState(aim, "MAX", False, hold_driving)
