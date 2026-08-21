@@ -140,6 +140,50 @@ MPH_TO_MS = CV.MPH_TO_MS
 # merely distant, and MAX_ACTIVE_S ends it.
 ENTER_SPEED = 45.0 * MPH_TO_MS
 
+# THE LOWEST SPEED AT WHICH WE MAY TAKE AUTHORITY. Not the lowest speed we may HOLD it -- once
+# armed, carrying the car all the way to a standstill is fine and is measured to be fine.
+#
+# THIS IS THE FIX FOR LOSING FORD ACC FOR A WHOLE DRIVE, 2026-08-20. Every override episode across
+# four drives, against what the camera did afterwards:
+#
+#     armed 19.3 mph  0.8 s  -> cancel +7.7 s, released
+#     armed 19.8 mph  7.3 s  -> cancel +1.7 s, LATCHED FOR THE REST OF THE DRIVE
+#     armed 26.3 mph  2.8 s  -> no cancel
+#     armed 28.3 mph 35.4 s  -> no cancel, AND IT RAN TO A FULL STANDSTILL
+#     armed 32.2 mph  1.1 s  -> no cancel
+#     armed 32.9 mph  8.9 s  -> cancel +3.5 s, released after 18 s
+#     armed 33.9 mph  6.3 s  -> cancel +6.8 s, released after 5 s
+#     armed 40.0 mph  3.8 s  -> cancel +2.1 s, released after 29 s
+#     armed 42.3 mph  0.2 s  -> no cancel
+#     armed 44.9 mph  9.6 s  -> no cancel, down to 8.9 mph
+#
+# BOTH arms below Ford's floor provoked a cancel; one latched permanently. EVERY arm above it was
+# tolerated -- including the 35 s one that took the car to zero. So it is not stopping the camera
+# objects to, nor duration, nor going below 20 once underway. It is TAKING THE COMMAND AWAY FROM AN
+# ACC THAT IS ALREADY AT ITS OPERATING LIMIT.
+#
+# When that latch happens the camera asserts `AccCancl_B_Rq` and never releases it -- measured on
+# route 000003a0, exactly one cancel transition in the last 550 s of the drive, and it was the ON.
+# `passthrough_admissible` then refuses every frame, Ford's command is never forwarded again, and he
+# is on openpilot longitudinal until he restarts the car. He reported precisely that, and reported
+# the drive whose arms were both above the floor as fine.
+#
+# 25, NOT 20, AND THE 5 MPH IS MEASURED RATHER THAN PADDING. Setting it at Ford's own floor was
+# tried first and replayed against the same drives: the bad arm at 19.8 mph simply became a 20.0 mph
+# arm 0.2 s later, because the car HOVERS at the floor -- Ford accelerates to hold 20 while the
+# model wants to stop, so v_ego oscillates across the boundary and the override catches it on the
+# way through. A bound exactly on the hover point is not a bound.
+#
+# The measured arms separate cleanly with a gap in between:
+#
+#     provoked a cancel   19.3   19.8   (and 20.0 once the floor was set at 20)
+#     tolerated           26.3   28.3   32.2   32.9   33.9   40.0   42.3   44.9
+#
+# 25 sits in that gap: above every arm that has ever provoked the camera, below every arm it has
+# ever tolerated. It also reads as a rule rather than a coincidence -- 5 mph of separation is enough
+# that Ford is still comfortably inside its envelope rather than at the edge of handing off.
+ARM_MIN_SPEED = 25.0 * MPH_TO_MS
+
 # Stopped. NOT a hand-back any more -- see the creep note in `update`: Ford does not hold a stop
 # without a lead, so handing back here is what made the car roll. `create_acc_msg` never sets
 # `AccBrkPrkEl_B_Rq`, so holding cannot reproduce drive A's park brake.
@@ -514,8 +558,8 @@ class FordStopOverride:
     # ---- arming, and every clause is a REASON rather than a comparison with Ford ----------------
     if v_ego > ENTER_SPEED:
       return False          # the set speed can still express this; ICBM is strictly better
-    if v_ego <= STOPPED_SPEED:
-      return False          # already stopped, nothing to do
+    if v_ego < ARM_MIN_SPEED:
+      return False          # below Ford's floor, seizing authority latches the camera -- see below
     if lead_close:
       return False          # Ford's radar has it, and Ford's stop-and-go is better than ours
 

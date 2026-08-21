@@ -31,7 +31,11 @@ from opendbc.sunnypilot.car.ford.stop_override import (
   FordStopOverride,
 )
 
-SLOW = 15 * 0.44704       # 15 mph, inside the regime the set speed cannot reach
+# 15 -> 30 mph on 2026-08-20. 15 was "inside the regime the set speed cannot reach", which is still
+# true and is no longer sufficient: arming below Ford's 20 mph floor is what latches the camera and
+# costs the whole drive's ACC (see ARM_MIN_SPEED). 28 is an ordinary measured arm speed -- route
+# 000003a0 armed at 28.3 mph, ran 35 s to a full standstill, and drew no cancel at all.
+SLOW = 30 * 0.44704
 # 40 mph was "comfortably above the entry speed" while the entry was 20. It is now BELOW the 45 mph
 # entry, because measured empty-light approaches happen at 28-44 mph and the gate had to move to
 # reach them. Anything meant to be refused for speed has to be above the entry, not merely fast.
@@ -281,14 +285,16 @@ def _drive_to_a_stop(so, **kw):
   """
   out = []
   lead = kw.get("lead", 0.0)
-  v0 = 24.0 * MPH_TO_MS
+  # 24 -> 30 mph: ARM_MIN_SPEED is 25, and an approach that never gets above it never arms, so the
+  # fixture would be testing the floor instead of the hold behaviour it is named for.
+  v0 = 30.0 * MPH_TO_MS
   travelled = v0 / OVERRIDE_HZ
   ep = NEAR + (CLOSING_CONFIRM_FRAMES + 1) * travelled
   for _ in range(CLOSING_CONFIRM_FRAMES + 1):
     so.update(long_active=True, v_ego=v0, has_slow_down=True, op_stopping=True,
               lead_distance=lead, stop_endpoint_m=ep)
     ep -= travelled
-  for v_mph in (24.0, 18.0, 12.0, 6.0, 2.0, 0.3):
+  for v_mph in (30.0, 18.0, 12.0, 6.0, 2.0, 0.3):
     was_active = so.active
     override = so.update(long_active=True, v_ego=v_mph * MPH_TO_MS, has_slow_down=True,
                          op_stopping=True, lead_distance=lead, stop_endpoint_m=NEAR)
@@ -513,10 +519,18 @@ class TestTheEndpointArmsItNotShouldStop:
     rather than a constant. Faster means arm sooner."""
     # Through `_stopping` so both sides get the closing evidence the trigger now requires; a bare
     # single `update` can no longer arm anything and would make this test read as "19 mph refuses".
-    fast_ok = _stopping(FordStopOverride(), v=19 * 0.44704, op_stopping=False, endpoint=25.0)
-    slow_no = _stopping(FordStopOverride(), v=6 * 0.44704, op_stopping=False, endpoint=25.0)
-    assert fast_ok is True, "19 mph with a 25 m stop should be arming"
-    assert slow_no is False, "6 mph with a 25 m stop is far too early"
+    # Both speeds moved above Ford's floor on 2026-08-20: below it the arm is refused outright by
+    # ARM_MIN_SPEED, so 19 vs 6 mph no longer measures the distance gate at all -- it measures the
+    # floor twice and would pass for the wrong reason.
+    # 120 m sits between the two gates: 178.8 m at 40 mph, 69.9 m at 22 mph. A distance inside BOTH
+    # would pass for the wrong reason -- the first version of this used 60 m and did exactly that.
+    # BOTH speeds above ARM_MIN_SPEED, or the slow side is refused by the floor and this measures
+    # the floor twice instead of the distance gate. 140 m sits between the two gates: 178.8 m at
+    # 40 mph, 105 m at 27 mph.
+    fast_ok = _stopping(FordStopOverride(), v=40 * 0.44704, op_stopping=False, endpoint=140.0)
+    slow_no = _stopping(FordStopOverride(), v=27 * 0.44704, op_stopping=False, endpoint=140.0)
+    assert fast_ok is True, "40 mph with a 140 m stop should be arming"
+    assert slow_no is False, "27 mph with a 140 m stop is far too early"
 
   def test_a_crawl_with_nothing_ahead_does_not_arm(self):
     """THE FLOOR IS GONE, and this is why. `STOP_MIN_RANGE_M = 10.0` was added so the last few mph
@@ -528,11 +542,36 @@ class TestTheEndpointArmsItNotShouldStop:
     # 1.5 mph, free-flow: the model's horizon is ~6.7 m and there is no stop at all.
     assert _stopping(o, v=1.5 * 0.44704, endpoint=6.7) is False,       "armed at a crawl with an empty road ahead"
 
-  def test_the_last_few_mph_of_a_REAL_stop_still_arm(self):
-    """Removing the floor must not cost the end of a genuine stop -- the endpoint is much closer
-    than the free-flow horizon there, which is the whole distinction."""
+  def test_the_last_few_mph_of_a_REAL_stop_no_longer_ARM(self):
+    """REVERSED 2026-08-20, and the road is why. This asserted `is True`.
+
+    Arming at a crawl was thought harmless -- the endpoint is close, so the arithmetic agrees. What
+    the arithmetic could not see is the CAMERA. Taking ACC authority below Ford's 20 mph floor makes
+    it assert `AccCancl_B_Rq`, and on route 000003a0 it then never released: one cancel transition
+    in the last 550 s of the drive, and it was the ON. Ford's command was never forwarded again and
+    he was on openpilot longitudinal until he restarted the car.
+
+    Both arms below the floor across four drives provoked a cancel; every arm above it was tolerated,
+    including a 35 s one that ran to a full standstill. So the last few mph of a stop are reached by
+    ARMING EARLIER AND CARRYING THE CAR DOWN, never by grabbing authority at the bottom.
+    """
     o = FordStopOverride()
-    assert _stopping(o, v=4 * 0.44704, endpoint=1.0) is True
+    assert _stopping(o, v=4 * 0.44704, endpoint=1.0) is False,       "armed below Ford's floor -- this is what latched the camera and cost a whole drive of ACC"
+
+  def test_an_override_armed_above_the_floor_carries_the_car_below_it(self):
+    """The other half, and the reason the bound is on ARMING only.
+
+    Once it has authority, going under 20 mph is fine and measured to be fine -- route 000003a0
+    armed at 28.3 mph and ran 35 s to a standstill with no cancel at all. A bound that ended the
+    override at 20 would abandon every stop at exactly the point Ford also gives up.
+    """
+    o = FordStopOverride()
+    assert _stopping(o, v=30 * 0.44704, endpoint=40.0) is True, "did not arm above the floor"
+    # Now below the floor, still asking: it must keep the car.
+    for mph in (18.0, 12.0, 6.0, 1.0):
+      out = o.update(long_active=True, v_ego=mph * 0.44704, has_slow_down=True, op_stopping=False,
+                     lead_distance=0.0, stop_endpoint_m=max(0.5, 40.0 * mph / 30.0))
+      assert out is True, f"handed back at {mph} mph -- the stop is abandoned where Ford also quits"
 
   def test_every_other_gate_still_refuses(self):
     """The trigger got cheaper, so the gates that make it SAFE must be untouched -- speed ceiling,
@@ -558,7 +597,7 @@ def test_it_survives_a_WHOLE_approach_with_the_plan_never_committing():
   approach looks like, since `shouldStop` is a stopped-car state.
   """
   o = FordStopOverride()
-  v = 20.0 * MPH_TO_MS
+  v = 30.0 * MPH_TO_MS          # above ARM_MIN_SPEED, or it never arms and tests nothing
   # A STOP POINT FIXED IN THE WORLD, closed at the speed the car is travelling. This used to be
   # recomputed from `v` every frame, so before the override took over -- when `v` is constant -- the
   # endpoint was constant too: a stop that never gets closer while you drive at it. That is the
