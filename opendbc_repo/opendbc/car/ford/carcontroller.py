@@ -456,12 +456,55 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
         self.accel = float(CS.acc_stock_values["AccBrkTot_A_Rq"])
         self.gas = float(CS.acc_stock_values["AccPrpl_A_Rq"])
       else:
+        send_accel = lng.accel
+        send_brake = lng.brake_actuate
+        send_prchg = lng.precharge_actuate
+        # THE OVERRIDE MAY ONLY EVER ADD BRAKING, NEVER REMOVE IT. Measured 2026-08-20, and it is
+        # the most serious thing this feature has done.
+        #
+        # Taking authority means Ford's command stops reaching the car. Nothing made ours at least
+        # as strong as the one it displaced, so on three of four measured episodes the override
+        # braked SOFTER than the camera was already asking:
+        #
+        #     armed 40.0 mph   camera -1.22   ours -1.47    (harder -- fine)
+        #     armed 32.9 mph   camera -1.14   ours -0.10    <-- 8.9 s of this
+        #     armed 26.3 mph   camera -0.82   ours -0.41
+        #     armed 28.3 mph   camera -1.07   ours -0.76
+        #
+        # The 32.9 mph case is a stop override that spent nearly nine seconds requesting a TENTH of
+        # the braking the car would have had if this feature had not existed. He reported the
+        # consequence from the seat the same day: a stopped car ahead, *"it didn't seem to set my
+        # speed down that much at all"*, and a hard manual brake to avoid it.
+        #
+        # `min` on a signed accel takes the harder brake. Ford's number is the FLOOR, so:
+        #   - while Ford is braking and we are weaker, we send Ford's -- byte-identical to the
+        #     passthrough, no divergence, and nothing for the camera to object to.
+        #   - below Ford's floor, where it has given up and asks for nothing, `.get` reads 0.0 and
+        #     our braking stands unchanged. That case is the entire feature.
+        #
+        # It cannot weaken braking under any input: 0.0 is the neutral element of `min` against any
+        # deceleration we would author, so a missing, stale or absent camera frame degrades to
+        # exactly today's behaviour rather than to less braking.
+        #
+        # SCOPED TO `override` DELIBERATELY. `fallback` authors our command precisely when Ford's
+        # frame was judged uncarriable -- an asserted cancel, or a value outside panda's band -- and
+        # adopting a number from a frame we just refused would undo that refusal.
+        if override:
+          stock = CS.acc_stock_values or {}
+          ford_accel = float(stock.get("AccBrkTot_A_Rq", 0.0))
+          if ford_accel < send_accel:
+            send_accel = ford_accel
+            # Follow the request with the bits that make the car act on it. Deepening the number
+            # while leaving these clear asks for a deceleration and does not request the actuation.
+            send_brake = send_brake or bool(stock.get("AccBrkDecel_B_Rq", 0))
+            send_prchg = send_prchg or bool(stock.get("AccBrkPrchg_B_Rq", 0))
+
         can_sends.append(fordcan_ext.create_acc_msg(
-          self.packer, self.CAN, CC.longActive, lng.gas, lng.accel, lng.accel_pred_send,
-          lng.stopping, lng.brake_actuate, lng.precharge_actuate, v_ego_kph=lng.target_speed
+          self.packer, self.CAN, CC.longActive, lng.gas, send_accel, lng.accel_pred_send,
+          lng.stopping, send_brake, send_prchg, v_ego_kph=lng.target_speed
         ))
 
-        self.accel = lng.accel
+        self.accel = send_accel
         self.gas = lng.gas
 
     ### ui ###

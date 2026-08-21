@@ -122,7 +122,7 @@ def carcontroller_parts():
   return CarController, {Bus.pt: "ford_lincoln_base_pt"}, CP, CP_SP, structs
 
 
-def _car_control(structs, *, enabled, send_button, gap_target, long_active=False):
+def _car_control(structs, *, enabled, send_button, gap_target, long_active=False, accel=None):
   """Match card's call convention EXACTLY: CC is a capnp READER, CC_SP is the opendbc dataclass.
 
   `selfdrive/car/card.py` does `self.CI.apply(CC, convert_carControlSP(CC_SP), now_nanos)` with CC
@@ -140,6 +140,13 @@ def _car_control(structs, *, enabled, send_button, gap_target, long_active=False
   msg.hudControl.leftLaneVisible = True
   msg.hudControl.rightLaneVisible = True
   msg.hudControl.leadDistanceBars = 3
+  # `accel` lets a test ask openpilot for real braking. Without it `actuators.accel` is 0.0, so any
+  # test about openpilot's OWN deceleration is asserting against a plan that requests nothing --
+  # the fixture-more-orderly-than-reality trap, caught here by a test that failed for the fixture's
+  # reason rather than the code's.
+  if accel is not None:
+    msg.actuators.accel = accel
+    msg.actuators.longControlState = capnp_car.CarControl.Actuators.LongControlState.pid
 
   CC_SP = structs.CarControlSP()
   CC_SP.intelligentCruiseButtonManagement.sendButton = send_button
@@ -369,6 +376,111 @@ def test_the_gap_button_still_goes_out_under_the_passthrough(carcontroller_parts
   assert pressed > 0, (
     "no Steering_Data_FD1 went out -- the gap request never reached the wire under the passthrough, "
     "which is the configuration the three ICBM gates were fixed for")
+
+
+def _decode_acc_brake(data: bytes) -> float:
+  """AccBrkTot_A_Rq out of a raw ACCDATA frame: start bit 4, 13 bits, 0.0039, -20, big-endian."""
+  v = int.from_bytes(data, "big")
+  total = len(data) * 8
+  idx = (4 // 8) * 8 + (7 - (4 % 8))
+  return ((v >> (total - idx - 13)) & ((1 << 13) - 1)) * 0.0039 - 20.0
+
+
+def test_the_override_never_brakes_softer_than_ford_was_asking(carcontroller_parts):
+  """THE NEAR-MISS, 2026-08-20. Taking authority must never mean taking braking AWAY.
+
+  Measured on his own drives, the override braked softer than the camera it displaced on three of
+  four episodes -- worst case Ford asking -1.14 m/s^2 and the override sending -0.10 for 8.9
+  seconds, on an approach to a stopped car he then had to brake hard to avoid. Nothing in the code
+  had ever compared the two.
+
+  So: Ford asking for real braking, openpilot asking for almost none, override forced on. Every
+  ACCDATA frame that goes out must carry AT LEAST Ford's deceleration.
+  """
+  from opendbc.car.ford.interface import CarInterface
+  from opendbc.car.ford.values import CAR
+
+  CarController, dbc_names, CP, CP_SP, structs = carcontroller_parts
+  CP_long = CarInterface.get_non_essential_params(CAR.FORD_FUSION_MK5)
+  CP_long.openpilotLongitudinalControl = True
+
+  cc = CarController(dbc_names, CP_long, CP_SP)
+  cc.stock_acc_passthrough = True
+  cc.stop_override_enabled = True
+  # Force the override on rather than driving it through a whole arming sequence: this test is
+  # about what goes on the wire WHILE it is active, not about when it arms.
+  cc.stop_override.update = lambda **kw: True
+
+  out = structs.CarState()
+  out.vEgo = 14.0
+  out.vEgoRaw = 14.0
+  out.cruiseState.enabled = True
+  out.cruiseState.available = True
+  CS = FakeCarState(out)
+  CS.acc_cam_valid = True
+  FORD_BRAKE = -1.75
+  CS.acc_stock_values["AccBrkTot_A_Rq"] = FORD_BRAKE
+
+  CC, CC_SP = _car_control(structs, enabled=True,
+                           send_button=structs.IntelligentCruiseButtonManagement.SendButtonState.none,
+                           gap_target=0, long_active=True)
+
+  softest = None
+  for frame in range(200):
+    _, can_sends = cc.update(CC, CC_SP, CS, frame * 10_000_000)
+    for m in can_sends:
+      if m[0] == 390:
+        b = _decode_acc_brake(bytes(m[1]))
+        softest = b if softest is None else max(softest, b)
+
+  assert softest is not None, "no ACCDATA went out at all"
+  assert softest <= FORD_BRAKE + 0.02, (
+    f"the override sent {softest:.2f} m/s^2 while Ford was asking {FORD_BRAKE:.2f} -- taking "
+    f"authority took braking away, which is the near-miss of 2026-08-20")
+
+
+def test_the_override_keeps_its_own_braking_when_ford_asks_for_none(carcontroller_parts):
+  """The other half, and the whole point of the feature.
+
+  Below Ford's floor the camera has given up and asks for nothing. The floor must not clamp our
+  braking back toward zero there -- if it did, `min` would have turned the feature off entirely on
+  exactly the approach it exists for.
+  """
+  from opendbc.car.ford.interface import CarInterface
+  from opendbc.car.ford.values import CAR
+
+  CarController, dbc_names, CP, CP_SP, structs = carcontroller_parts
+  CP_long = CarInterface.get_non_essential_params(CAR.FORD_FUSION_MK5)
+  CP_long.openpilotLongitudinalControl = True
+
+  cc = CarController(dbc_names, CP_long, CP_SP)
+  cc.stock_acc_passthrough = True
+  cc.stop_override_enabled = True
+  cc.stop_override.update = lambda **kw: True
+
+  out = structs.CarState()
+  out.vEgo = 4.0
+  out.vEgoRaw = 4.0
+  out.cruiseState.enabled = True
+  out.cruiseState.available = True
+  CS = FakeCarState(out)
+  CS.acc_cam_valid = True
+  CS.acc_stock_values["AccBrkTot_A_Rq"] = 0.0      # Ford has given up
+
+  CC, CC_SP = _car_control(structs, enabled=True,
+                           send_button=structs.IntelligentCruiseButtonManagement.SendButtonState.none,
+                           gap_target=0, long_active=True, accel=-1.5)
+
+  hardest = 0.0
+  for frame in range(200):
+    _, can_sends = cc.update(CC, CC_SP, CS, frame * 10_000_000)
+    for m in can_sends:
+      if m[0] == 390:
+        hardest = min(hardest, _decode_acc_brake(bytes(m[1])))
+
+  assert hardest < -0.05, (
+    f"with Ford asking 0.0 the override only ever sent {hardest:.2f} m/s^2 -- the floor clamped our "
+    f"own braking away and the feature does nothing below Ford's floor")
 
 
 @pytest.mark.parametrize("stop_override", [False, True])
