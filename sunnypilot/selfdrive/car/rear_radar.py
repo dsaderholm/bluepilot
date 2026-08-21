@@ -14,11 +14,15 @@ WHY IT IS NOT A SECOND RadarInterface, which is the tempting shape. `RadarInterf
 the car for a vehicle behind it with clear road ahead. Keeping this a separate object publishing a
 separate message is the entire isolation, and test_rear_radar_isolation.py pins it.
 
-THE FEEDER ITSELF DOES NOT EXIST. Its firmware specification is
-`bluepilot/REAR-RADAR-FEEDER-SPEC.md` -- the message layout, the reduction algorithm, the two sign
-conventions that are easy to invert, the failure behaviour, and a bench acceptance list. Read it
-before writing anything on the microcontroller side, and treat this file plus bp_rear_radar.dbc as
-the authority wherever the two disagree.
+WHERE THE OTHER HALF LIVES, because it is not obvious and was missed once: the feeder firmware is
+`tools/rear_radar_feeder/rear_radar_feeder.ino` (Teensy 4.0, written and bench-tested 2026-08-14),
+it MIRRORS `tools/bp_rear_digest_sim.py` which is the reference implementation, and that reduction
+is unit tested in `selfdrive/car/tests/test_rear_digest_reduction.py`. The hardware reasoning --
+part choice, mounting, why bus 1 cannot be shared -- is `BP-REAR-RADAR-PLAN.md` at the repo root,
+whose sections 3 and 4 are STALE: they plan around an ESR that needs Vehicle_Data and SensorInput
+to radiate, and the part is now an MRR that free-runs with no transmit path at all.
+
+When the simulator and the firmware disagree, Python is right.
 """
 from opendbc.can import CANParser
 

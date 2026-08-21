@@ -106,9 +106,24 @@ def decode_detections(db, addr_to_index, frames, azimuth_offset_rad: float = 0.0
 def reduce_to_sides(dets) -> tuple[SideDigest, SideDigest]:
   """Detections -> nearest CLOSING target per side. This is the entire feeder algorithm.
 
-  NEAREST, not strongest and not fastest. The consumer computes TTC from range and closing speed,
-  and the target that matters is the one arriving first. Amplitude is decoded but deliberately
-  unused: a big slow lorry is not more urgent than a small fast car.
+  NEAREST, not strongest and not fastest. Amplitude is decoded but deliberately unused: a big slow
+  lorry is not more urgent than a small fast car.
+
+  OPEN, 2026-08-21: "the target that matters is the one arriving first" is a TTC argument, and this
+  picks the nearest, which is not the same target. Worked example, both closing, both on the left:
+
+      80 m back at 15 m/s   ->  TTC  5.3 s   would REFUSE the pass (UNSAFE_TTC_S is 8.0)
+      20 m back at  2 m/s   ->  TTC 10.0 s   would allow it
+
+  min(d_rel) reports the second and discards the first, so the digest hands openpilot a clear
+  answer while the target that would have refused is thrown away at the feeder -- where nothing
+  downstream can see that it existed. target_count says two, which is the only tell.
+
+  NOT CHANGED HERE. The firmware is bench-tested and this file is what it mirrors, so switching the
+  key is a reflash and a re-run of the bench list, not an edit. It is also possible the case is rare
+  enough not to be worth it -- a slow car close behind while a fast one closes from distance. But
+  the reduction is the one place in this whole chain where evidence is destroyed rather than
+  weighed, so the rule deserves to be chosen deliberately rather than inherited.
   """
   left, right = SideDigest(), SideDigest()
   for side, keep in ((left, lambda d: d.y_rel > OWN_LANE_HALF_WIDTH_M),
