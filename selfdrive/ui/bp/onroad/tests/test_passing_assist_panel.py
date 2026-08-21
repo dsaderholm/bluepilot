@@ -267,3 +267,32 @@ class TestTheLaneStrip:
     decision rather than leaving the old two-shape design reachable by a future edit."""
     for case in ((5, -1, False, (1, 3)), (3, 1, False, (1, 1)), (5, -1, True, (-1, -1))):
       self._draw(*case)
+
+
+class TestTheLateAgreementReachesTheScreen:
+  """This fork's oldest recurring fault is a value computed correctly and never rendered, and the
+  late-agreement count was the fifth instance -- written to the history JSON and nowhere else,
+  while the panel kept showing the strict count that motivated the change.
+
+  These assert the WIRE and the LINE, because the bug was never in the arithmetic.
+  """
+
+  def test_the_fields_exist_on_the_wire(self):
+    pa = make_plan(driverPassesAgreedLate=4, driverPassLateDelay=11.5)
+    assert pa.driverPassesAgreedLate == 4
+    assert pa.driverPassLateDelay == pytest.approx(11.5)
+
+  def test_the_summary_line_names_them(self):
+    """Reads the shipped source rather than the docstring: the string has to be built from the
+    field, or the number is on the wire and still invisible."""
+    src = HUD_SRC.read_text(encoding="utf-8")
+    assert "driverPassesAgreedLate" in src, "the panel must read the field, not just the schema"
+    assert "driverPassLateDelay" in src, "the delay is what a future AGREE_WINDOW_S is read off"
+
+  def test_it_is_drawn_beside_the_strict_count_not_instead_of_it(self):
+    """They answer different questions -- strict supports the lead-time claim, late says whether
+    the decision was right -- so replacing one with the other would lose a real measurement."""
+    src = HUD_SRC.read_text(encoding="utf-8")
+    i_strict = src.index("driverPassesAgreed")
+    i_late = src.index("driverPassesAgreedLate")
+    assert i_strict < i_late, "the strict count must still be rendered"

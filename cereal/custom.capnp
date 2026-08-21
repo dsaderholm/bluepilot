@@ -950,6 +950,19 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     laneBoundLo @104 :Int8;
     laneBoundHi @105 :Int8;
 
+    # AGREEMENT AFTER WAITING FOR THE LANE TO CLEAR. His report: "A lot of lane changes are
+    # correct, I just have to wait for no one to be in that lane." Strict agreement is sampled at
+    # the instant of his stalk, so that sequence scored as a MISS -- 82 passes read as 3
+    # agreements, which measured simultaneity rather than whether the decision was right.
+    #
+    # ON THE WIRE because the readout is the whole point. It was computed and written only to the
+    # history JSON for a day, which is this fork's oldest recurring fault -- a value derived
+    # correctly and never rendered, now on its fifth instance. The panel shows it beside the
+    # strict count; the delay says how long he waited, and that distribution is what a future
+    # AGREE_WINDOW_S should be read off rather than guessed at twice.
+    driverPassesAgreedLate @106 :UInt16;
+    driverPassLateDelay @107 :Float32;
+
   }
 
   struct DynamicExperimentalControl {

@@ -727,6 +727,13 @@ class HudRendererBP(HudRendererSP):
                 f"{eligible} of {pa.driverPasses} passes, {agreed} agreed")
         if agreed:
           line += f" ({pa.driverPassLeadSeconds:.0f}s early)"
+        # AND THE ONES HE AGREED WITH AFTER WAITING FOR THE LANE TO CLEAR. Without this the line
+        # reads "82 passes, 3 agreed" on a feature that mostly wanted the same thing he did, just
+        # not in the same frame -- which is what the strict count measures. His words: "A lot of
+        # lane changes are correct, I just have to wait for no one to be in that lane."
+        late = pa.driverPassesAgreedLate
+        if late:
+          line += f", {late} after waiting ({pa.driverPassLateDelay:.0f}s)"
         lines.append(line)
         if agreed < pa.driverPasses:
           # str(), NOT int(). A capnp enum read off a live message is a _DynamicEnum and int()

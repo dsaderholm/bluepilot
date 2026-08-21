@@ -3653,6 +3653,8 @@ class PassingAssistDetector:
     passingAssist.patienceMissed = int(pa.patience_missed)
     passingAssist.driverPasses = min(pa.driver_passes, 65535)
     passingAssist.driverPassesAgreed = min(pa.driver_passes_agreed, 65535)
+    passingAssist.driverPassesAgreedLate = min(pa.driver_passes_agreed_late, 65535)
+    passingAssist.driverPassLateDelay = float(pa.driver_pass_late_delay_s)
     passingAssist.driverPassLeadSeconds = float(pa.driver_pass_lead_s)
     passingAssist.driverPassMissReason = pa.driver_pass_miss_reason
     passingAssist.driverPassesEligible = min(pa.driver_passes_eligible, 65535)
