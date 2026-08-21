@@ -93,7 +93,7 @@ from openpilot.sunnypilot.selfdrive.controls.lib.adjacent_lane import (
 from openpilot.sunnypilot.selfdrive.controls.lib.overtake_progress import OvertakeProgress
 from openpilot.sunnypilot.selfdrive.controls.lib.passing_maneuver import PassingManeuver
 
-from openpilot.sunnypilot.selfdrive.controls.lib.rear_approach import RearApproach
+from openpilot.sunnypilot.selfdrive.controls.lib.rear_approach import RearApproach, Source
 
 Phase = custom.LongitudinalPlanSP.PassingAssist.Maneuver
 Side = custom.LongitudinalPlanSP.PassingAssist.Side
@@ -1600,6 +1600,21 @@ class PassingAssistDetector:
     self.blindspot_available = bool((left is not None and left.dataAvailable) or
                                     (right is not None and right.dataAvailable))
 
+    # NOT WIRED INTO RearApproach YET, AND THE ATTEMPT IS WHY. `RearApproach.from_blis` has been
+    # written and tested since the module was built and has never had a caller -- its docstring
+    # still says "Nothing produces this today", which is why `may_actuate` sees available=False on
+    # every side and the feature commands nothing.
+    #
+    # Feeding it from here is three lines and it is NOT a wiring job: `rear.left.blocks_lane_change`
+    # is read by the keep-right decision and by the lane-change gate, both of which have only ever
+    # seen an unavailable sensor. Making it live changes what those gates do, and the suite caught
+    # it immediately -- four chime tests stopped producing a reversal at all. That is a behavior
+    # change to a lane-change gate and it needs its own pass with those gates read, not a
+    # fill-in at the end of an unrelated question.
+    #
+    # `may_actuate` is already tightened for it: a BLIS source cannot authorize, only a radar one
+    # can. So the wiring can land later without that door being open in the meantime.
+
   def _traffic_signs(self, car_state_bp) -> None:
     """Read the TSR overtaking zone state.
 
@@ -2955,10 +2970,27 @@ class PassingAssistDetector:
     if not self.actuate_enabled:
       return False
     if side == Side.left:
-      return self.rear.left.available
+      return self._rear_can_authorize(self.rear.left)
     if side == Side.right:
-      return self.rear.right.available
+      return self._rear_can_authorize(self.rear.right)
     return False
+
+  @staticmethod
+  def _rear_can_authorize(rear) -> bool:
+    """May THIS side's rear coverage open a commanded lane change?
+
+    AVAILABILITY IS NOT ENOUGH, and the difference is the whole reason `source` is recorded.
+    `from_blis` sets `available = True`, so a BLIS-only car would satisfy a bare availability test
+    and start moving on presence-only evidence. BLIS answers "is something beside me". It cannot
+    answer "is something closing", which is the question a lane change actually asks -- a car
+    two hundred feet back at a 20 mph delta is invisible to it and arrives during the crossing.
+
+    So BLIS VETOES and radar AUTHORIZES. That keeps the rule this module is built on: evidence
+    that opens a maneuver must never be cheaper than evidence that refuses one. The practical
+    effect is that fitting the canbox alone makes refusals better the day it lands, and does not
+    quietly promote the car to moving itself.
+    """
+    return rear.available and rear.source == Source.radar
 
   def _own_blinker(self) -> int:
     """The side WE are lighting the blinker for, or none.

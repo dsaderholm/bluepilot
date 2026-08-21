@@ -32,6 +32,7 @@ from openpilot.sunnypilot.selfdrive.controls.lib.passing_assist import (
   DEFAULT_PERSISTENCE_S, DRIVE_HISTORY_MAX, CHIME_MIN_INTERVAL_S,
   TIMELINE_MAX, GAP_WHILE_PASSING, GAP_GIVE_UP_S, WANTED_RISE_S, WANTED_FALL_S,
   LEAD_GAP_GRACE_S, EXIT_WATCH_S, EXIT_DECEL_MS, AGREE_WINDOW_S)
+from openpilot.sunnypilot.selfdrive.controls.lib.rear_approach import Source
 
 Side = custom.LongitudinalPlanSP.PassingAssist.Side
 Blocked = custom.LongitudinalPlanSP.PassingAssist.Blocked
@@ -142,7 +143,12 @@ def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., lead_y=0.0, status=Tr
                      brakeLightStatus=NS(accDataAvailable=acc_avail, accDecelRequest=acc_braking,
                                          accPrechargeRequest=acc_precharge,
                                          accPropulsionRequest=acc_propulsion),
-                     blisLeft=NS(dataAvailable=blis_avail), blisRight=NS(dataAvailable=blis_avail),
+                     # sodDetect is the OCCUPANCY bit and the fixture omitted it entirely, so the
+                     # stub was laxer than the real SideDetect message -- exactly the shape
+                     # CLAUDE.md records as hiding the bugs a stub exists to catch. It defaults to
+                     # the blind-spot state so `left_bs`/`right_bs` drive one field, not two.
+                     blisLeft=NS(dataAvailable=blis_avail, sodDetect=int(left_bs)),
+                     blisRight=NS(dataAvailable=blis_avail, sodDetect=int(right_bs)),
                      trafficSignData=NS(dataAvailable=tsr_avail, overtakeMsg=ovtk_msg,
                                         overtakeStatus=ovtk_status)),
     # What SCC computes current_lat_acc from. Passing assist records the same quantity at
@@ -3801,11 +3807,18 @@ class TestNothingActuatesWithoutRearCoverage:
   """
 
   @staticmethod
-  def _det(enabled=True, left=False, right=False):
+  def _det(enabled=True, left=False, right=False, source=None):
     d = PassingAssistDetector()
     d.actuate_enabled = enabled
+    src = Source.radar if source is None else source
     d.rear.left.available = left
     d.rear.right.available = right
+    # A SOURCE IS PART OF AVAILABILITY NOW. Setting the flag alone left `source` at none, which
+    # these tests never noticed because nothing read it -- see TestBlisMayVetoButNotAuthorize.
+    if left:
+      d.rear.left.source = src
+    if right:
+      d.rear.right.source = src
     return d
 
   def test_no_rear_sensor_means_no_actuation_on_either_side(self):
@@ -4293,3 +4306,46 @@ class TestAgreementAfterWaitingForTheLane:
     d._since_left_suggest_s = 8.0
     d._record_driver_pass()
     assert d._miss_reasons.get(int(Blocked.noLaneAvailable)) == 1
+
+
+class TestBlisMayVetoButNotAuthorize:
+  """BLIS can say something is BESIDE us. It cannot say something is CLOSING, which is the question
+  a lane change actually asks -- a car two hundred feet back at a 20 mph delta is invisible to it
+  and arrives during the crossing.
+
+  `from_blis` sets `available = True`, and availability used to be the whole actuation gate, so
+  wiring BLIS into RearApproach without this would have promoted a presence-only sensor into
+  permission to move the car. That is the rule this module is built on, inverted.
+  """
+
+  @staticmethod
+  def _det(source):
+    d = PassingAssistDetector()
+    d.actuate_enabled = True
+    for side in (d.rear.left, d.rear.right):
+      side.available = True
+      side.source = source
+    return d
+
+  def test_a_radar_source_authorizes(self):
+    d = self._det(Source.radar)
+    assert d.may_actuate(Side.left)
+    assert d.may_actuate(Side.right)
+
+  def test_a_BLIS_source_does_NOT_authorize(self):
+    """THE ONE THAT MATTERS. Available and useful for refusing, and still not permission to move."""
+    d = self._det(Source.blis)
+    assert not d.may_actuate(Side.left)
+    assert not d.may_actuate(Side.right)
+
+  def test_a_BLIS_source_can_still_VETO(self):
+    """The half that BLIS is genuinely good for, and the reason to wire it at all: the day the
+    canbox lands, refusals get better without the car being promoted to moving itself."""
+    d = self._det(Source.none)
+    d.rear.left.from_blis(True)
+    assert d.rear.left.blocks_lane_change, "a car beside us must still block the change"
+    assert not d.may_actuate(Side.left), "and must still not authorize one"
+
+  def test_no_source_never_authorizes(self):
+    d = self._det(Source.none)
+    assert not d.may_actuate(Side.left)
