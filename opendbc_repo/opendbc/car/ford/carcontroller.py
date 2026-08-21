@@ -134,6 +134,25 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
     # Note: main_on_last, lkas_enabled_last, steer_alert_last, lead_distance_bars_last,
     # distance_bar_frame are initialized by HudExt.__init__() above
 
+  def _curve_speed_gap(self, CS) -> float:
+    """FusionPilot: how far below the current speed a CURVE wants us, m/s. 0.0 when none does.
+
+    Gated on the plan source so this can only ever describe a corner: SCC-Vision and SCC-Map are the
+    two that publish a corner speed. A speed-limit drop or a lead is somebody else's job -- ICBM
+    handles the first at its own pace and Ford's radar owns the second.
+
+    Never raises: a missing or invalid plan reads as no gap, which is the same as no curve.
+    """
+    try:
+      if not (self.sm.alive.get('longitudinalPlanSP') and self.sm.valid.get('longitudinalPlanSP')):
+        return 0.0
+      lp = self.sm['longitudinalPlanSP']
+      if str(lp.longitudinalPlanSource) not in ("sccVision", "sccMap"):
+        return 0.0
+      return max(0.0, float(CS.out.vEgo) - float(lp.vTarget))
+    except Exception:  # noqa: BLE001 -- see docstring
+      return 0.0
+
   def update(self, CC, CC_SP, CS, now_nanos):
     can_sends = []
 
@@ -361,6 +380,15 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
             if (self.sm.alive.get('longitudinalPlanSP') and self.sm.valid.get('longitudinalPlanSP'))
             else 0.0,
             lead_distance=lead_d,
+            # THE CURVE SPEED GAP: how far below the current speed a mapped or vision corner wants
+            # us, and therefore how much road the stalk has to close at 3.3 mph/s. Zero unless a
+            # curve source actually owns the plan this frame, so the curve path cannot fire for
+            # anything else.
+            #
+            # NOT `actuators.accel`, which was the first attempt: under ICBM openpilot's
+            # longitudinal controller is not driving, watches the car ignore it, and winds up to its
+            # -3.5 floor for over 10% of engaged frames. See CURVE_ARM_GAP.
+            curve_gap=self._curve_speed_gap(CS),
           )
           # Latch that THIS stop was ours, so the resume gate knows not to pull away from it on the
           # model's say-so. Keyed on the override's OWN outcome rather than on a speed window: the
@@ -408,6 +436,7 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
       if float(CS.out.vEgo) > 1.5:
         self.stop_override_stopped_us = False
 
+      # (helper defined on the class; see _curve_speed_gap)
       use_passthrough = False
       if not override and self.stock_acc_passthrough and getattr(CS, "acc_cam_valid", False) and getattr(CS, "acc_stock_values", None):
         reason = fordcan_ext.passthrough_admissible(CS.acc_stock_values, CC.longActive)

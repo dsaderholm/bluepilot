@@ -19,6 +19,7 @@ import inspect
 from opendbc.sunnypilot.car.ford import stop_override as mod
 from opendbc.sunnypilot.car.ford.stop_override import (
   CLOSING_CONFIRM_FRAMES,
+  CURVE_CONFIRM_FRAMES,
   CLOSING_FRACTION,
   ENTER_SPEED,
   LEAD_DISQUALIFIES_M,
@@ -201,9 +202,15 @@ def test_it_never_reads_fords_command():
     assert forbidden not in used, (
       f"{forbidden} reached the stop override -- it decides WHETHER to override, never by comparing "
       "against what Ford asked for")
+  # THE SIGNATURE IS THE DEFENCE, so every addition has to be argued rather than appended.
+  # `curve_gap` is how far below the current speed OPENPILOT'S OWN plan wants us for a corner, added
+  # 2026-08-20 for the curve path. It is not Ford's number and not a comparison against Ford's: it
+  # says "the stalk cannot close this in time", a fact about our plan and the car's press-recognition
+  # rate, both of which this file may legitimately know. The forbidden set above is what guards the
+  # trap; this list guards against absent-minded plumbing.
   sig = inspect.signature(FordStopOverride.update)
   assert set(sig.parameters) == {"self", "long_active", "v_ego", "has_slow_down", "op_stopping",
-                                 "stop_endpoint_m",
+                                 "stop_endpoint_m", "curve_gap",
                                  "lead_distance"}, sig
 
 
@@ -766,6 +773,108 @@ def test_the_arming_range_never_exceeds_what_the_time_bound_can_finish():
     assert seconds <= MAX_ACTIVE_S + 0.01, (
       f"at {mph:.0f} mph the gate arms up to {lo:.0f} m, a {seconds:.1f} s stop, against a "
       f"{MAX_ACTIVE_S:.1f} s bound")
+
+
+class TestTheCurvePath:
+  """Braking a corner harder than the stalk can. Added 2026-08-20 from a measured drive.
+
+  A 77 mph approach to a 28 mph corner: SCC-Map asked at t+1.2, the car was already pulling
+  4.68 m/s^2 lateral by t+3.7 and peaked at 5.20 against a 2.4 target, and the set speed did not
+  reach 25 mph until t+15.0. Nothing malfunctioned -- the buttons move 1 mph per 0.30 s and that is
+  the ceiling. Authoring the command directly has no such limit.
+
+  ARMED ON THE SPEED GAP, not on a requested deceleration. `actuators.accel` was the first attempt
+  and is unusable here: under ICBM openpilot's longitudinal controller is not driving, so it winds
+  up to its -3.5 floor for more than 10% of engaged frames. The gap is what the stalk has to close.
+
+  MOST CURVES DO NOT END IN A STOP, which is his point and the reason the release path matters more
+  than the standstill one: the ordinary exit is the corner ending and the gap closing.
+  """
+
+  @staticmethod
+  def _drive(o, mph, gap_mph, frames):
+    out = False
+    for _ in range(frames):
+      out = o.update(long_active=True, v_ego=mph * MPH_TO_MS, has_slow_down=False,
+                     op_stopping=False, lead_distance=0.0, stop_endpoint_m=0.0,
+                     curve_gap=gap_mph * MPH_TO_MS)
+    return out
+
+  def test_it_arms_on_a_gap_the_buttons_cannot_close_in_time(self):
+    """His corner was a 49 mph gap. The stalk closes 3.3 mph/s, so that is 15 s of tapping."""
+    o = FordStopOverride()
+    assert self._drive(o, 60.0, 49.0, CURVE_CONFIRM_FRAMES + 2) is True
+    assert o.curve_active
+
+  def test_it_stays_out_of_gaps_the_buttons_can_manage(self):
+    """A 12 mph gap is under four seconds of tapping. Taking the command there would contradict the
+    camera for no gain -- ICBM had it. Measured: gaps this small are the ordinary case."""
+    o = FordStopOverride()
+    self._drive(o, 60.0, 12.0, CURVE_CONFIRM_FRAMES + 40)
+    assert not o.curve_active
+
+  def test_the_ordinary_exit_is_the_gap_closing(self):
+    """THE COMMON CASE. Through the corner, the gap shrinks, Ford gets the car back. No standstill
+    involved -- his words: *"it won't always reach a standstill"*."""
+    o = FordStopOverride()
+    assert self._drive(o, 60.0, 49.0, CURVE_CONFIRM_FRAMES + 2) is True
+    assert self._drive(o, 35.0, 3.0, 2) is False, "did not hand back once the gap closed"
+    assert not o.curve_active
+
+  def test_hysteresis_so_it_cannot_flap(self):
+    """Every arm and release is a handoff, and handoffs are what the camera reacts to. A gap
+    hovering near the arm threshold must not toggle the command on and off."""
+    o = FordStopOverride()
+    assert self._drive(o, 60.0, 49.0, CURVE_CONFIRM_FRAMES + 2) is True
+    # Below the arm threshold but above the release threshold: keep it.
+    assert self._drive(o, 50.0, 14.0, 20) is True, "released inside the hysteresis band"
+    assert o.curve_active
+
+  def test_a_lead_hands_it_straight_back(self):
+    o = FordStopOverride()
+    assert self._drive(o, 60.0, 49.0, CURVE_CONFIRM_FRAMES + 2) is True
+    out = o.update(long_active=True, v_ego=60.0 * MPH_TO_MS, has_slow_down=False, op_stopping=False,
+                   lead_distance=25.0, stop_endpoint_m=0.0, curve_gap=49.0 * MPH_TO_MS)
+    assert out is False and not o.curve_active
+
+  def test_it_will_not_arm_below_fords_floor(self):
+    """The same rule as the stop path, and for the same measured reason -- arming under Ford's floor
+    is what latches the camera for the whole drive."""
+    o = FordStopOverride()
+    self._drive(o, 18.0, 49.0, CURVE_CONFIRM_FRAMES + 20)
+    assert not o.curve_active
+
+  def test_it_will_not_arm_above_the_curve_ceiling(self):
+    o = FordStopOverride()
+    self._drive(o, 95.0, 49.0, CURVE_CONFIRM_FRAMES + 20)
+    assert not o.curve_active
+
+  def test_a_curve_that_does_reach_a_stop_hands_into_the_hold(self):
+    """When the corner IS the stop -- his sharp exit into a red light -- releasing at a standstill
+    would be the creep this feature was rewritten to remove."""
+    o = FordStopOverride()
+    assert self._drive(o, 40.0, 39.0, CURVE_CONFIRM_FRAMES + 2) is True
+    out = o.update(long_active=True, v_ego=0.1 * MPH_TO_MS, has_slow_down=False, op_stopping=False,
+                   lead_distance=0.0, stop_endpoint_m=0.0, curve_gap=39.0 * MPH_TO_MS)
+    assert out is True, "let go at a standstill"
+    assert o.holding and not o.curve_active, "should be the stop path's hold now"
+
+  def test_longitudinal_going_inactive_drops_it(self):
+    o = FordStopOverride()
+    assert self._drive(o, 60.0, 49.0, CURVE_CONFIRM_FRAMES + 2) is True
+    out = o.update(long_active=False, v_ego=60.0 * MPH_TO_MS, has_slow_down=False,
+                   op_stopping=False, lead_distance=0.0, stop_endpoint_m=0.0,
+                   curve_gap=49.0 * MPH_TO_MS)
+    assert out is False and not o.curve_active
+
+  def test_the_stop_path_still_outranks_it(self):
+    """Only one may author. A stop already underway must not be interrupted by the curve path."""
+    o = FordStopOverride()
+    assert _stopping(o) is True and o.active
+    out = o.update(long_active=True, v_ego=SLOW, has_slow_down=True, op_stopping=False,
+                   lead_distance=0.0, stop_endpoint_m=NEAR, curve_gap=49.0 * MPH_TO_MS)
+    assert out is True
+    assert o.active and not o.curve_active
 
 
 def test_a_NaN_endpoint_fails_closed():
