@@ -8,7 +8,7 @@ driver has a hold at all.
 The enum RAW VALUES are what this really guards. They are positions in a capnp enum, not names, so
 an upstream reorder changes their meaning with nothing failing to compile.
 """
-from openpilot.selfdrive.ui.bp.onroad.icbm_hud_state import IcbmHudState, read_icbm_hud_state
+from openpilot.selfdrive.ui.bp.onroad.icbm_hud_state import IcbmHudState, max_box_state, read_icbm_hud_state
 
 
 class _Raw:
@@ -196,3 +196,63 @@ def test_a_hold_outranks_a_suggestion_on_the_badge():
   offered = IcbmHudState(baseline=0, sla_has_limit=False, pin_suggested=True, pin_suggestion=65)
   assert offered.worth_showing
   assert offered.display_value == 65
+
+
+class TestTheBigNumberIsWhatTheCarIsDrivenTo:
+  """The 2026-08-20 rule, from the owner, after walking the five on-screen speeds one at a time.
+
+  *"Should we have the target be the hold when there is a hold at all and then have the SLA speed +
+  offset be a different number?"* -- yes, with the fallback in the label slot rather than as a
+  fourth number.
+  """
+
+  def test_sla_drives_the_number_when_there_is_no_hold(self):
+    """His words: *"I like having that fall back if I cancel my hold."* Unchanged from today."""
+    box = max_box_state(hold=0.0, sla_fallback=45.0, set_speed=45.0, dash=45.0)
+    assert box.aim == 45.0
+    assert box.label == "MAX"
+    assert not box.hold_driving
+
+  def test_a_hold_takes_the_number_over_from_sla(self):
+    box = max_box_state(hold=80.0, sla_fallback=45.0, set_speed=45.0, dash=80.0)
+    assert box.aim == 80.0
+    assert box.hold_driving
+    assert box.label == "45", "the fallback he would get back by cancelling is not offered"
+    assert box.label_is_number
+
+  def test_a_hold_with_no_limit_falls_through_to_MAX(self):
+    """The common case on the roads holds are for: no limit, so no fallback exists to show."""
+    box = max_box_state(hold=80.0, sla_fallback=None, set_speed=52.0, dash=80.0)
+    assert box.aim == 80.0
+    assert box.hold_driving
+    assert box.label == "MAX"
+    assert not box.label_is_number
+
+  def test_being_slowed_outranks_the_fallback(self):
+    """The label slot can say one thing. "Something is pulling you down right now" beats "here is
+    what you would get back", because only one of them is happening to the car."""
+    box = max_box_state(hold=80.0, sla_fallback=45.0, set_speed=45.0, dash=38.0)
+    assert box.aim == 80.0, "the aim must not follow the car down; that is what the little number is for"
+    assert box.label == "38"
+    assert box.label_is_number
+
+  def test_with_no_hold_and_no_limit_the_set_speed_stands(self):
+    """Where SET left him. Arbitrary on an unmapped road -- which is the whole reason a press should
+    take over from it -- but it is what the car is driving to until he presses."""
+    box = max_box_state(hold=0.0, sla_fallback=None, set_speed=52.0, dash=52.0)
+    assert box.aim == 52.0
+    assert box.label == "MAX"
+    assert not box.hold_driving
+
+  def test_a_pinned_hold_drives_the_number_like_any_other(self):
+    """A pin is a hold that was placed earlier; it steers the car identically. The badge below is
+    what distinguishes them, not the big number."""
+    box = max_box_state(hold=64.0, sla_fallback=None, set_speed=30.0, dash=64.0)
+    assert box.aim == 64.0
+    assert box.hold_driving
+
+  def test_the_little_number_never_fires_on_a_matching_aim(self):
+    """It means "the car is not at your number". Equal values must show the word, or it would appear
+    on every press from the ordinary drift between openpilot's count and Ford's."""
+    for dash in (80.0, 80.4, 79.6):
+      assert max_box_state(80.0, None, 52.0, dash).label == "MAX", f"fired at dash={dash}"
