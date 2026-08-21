@@ -154,8 +154,14 @@ class CarStateExt:
         # Signal not available in this frame, skip
         continue
 
-      # Handle combo buttons: emit only the appropriate event based on cruise state
-      # Track which signals we've already processed to avoid duplicate events
+      # Handle combo buttons: emit only the appropriate event based on cruise state.
+      #
+      # `processed_signals` IS RE-CREATED EVERY ITERATION, so `not in processed_signals` below is
+      # always true and this set dedupes nothing across buttons. Kept and documented rather than
+      # deleted, because deleting it would read as "dedup was removed" when in fact there never was
+      # any: what actually prevents duplicate events is the `self.button_states` comparison inside
+      # each branch. Noted 2026-08-20 after mapping two signals to the RES+ branch doubled the
+      # traffic through here and the guard did not notice.
       processed_signals = set()
 
       # CcAslButtnSetIncPress is the "RES +" button: resumeCruise (10) when cruise is disabled,

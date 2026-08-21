@@ -23,7 +23,15 @@ import sunnypilot.selfdrive.selfdrived.events as ev
 
 
 def _alert(monkeypatch, available: bool):
-  monkeypatch.setattr(ev, "_STOP_OVERRIDE_AVAILABLE", available)
+  """`available` is kept in the signature and deliberately IGNORED.
+
+  It used to monkeypatch `_STOP_OVERRIDE_AVAILABLE`, back when the alert changed its wording
+  depending on whether the stop override could run. That branch was withdrawn on 2026-08-19 -- the
+  alert says "the stop is yours" unconditionally now -- and the global was removed on 2026-08-20.
+  The parameter stays so both call sites keep reading as "either availability, same wording", which
+  IS the property these tests exist to pin.
+  """
+  del available
   return ev.model_stop_alert(None, None, None, False, 0, None)
 
 
@@ -68,25 +76,3 @@ def test_both_wordings_still_name_the_cause(monkeypatch):
   for available in (True, False):
     a = _alert(monkeypatch, available)
     assert "Stop sign or signal" in a.alert_text_1
-
-
-def test_the_availability_probe_never_raises_into_the_alert_path(monkeypatch):
-  """An alert that throws takes selfdrived's alert path down, so an unreadable param must degrade
-  to the conservative wording rather than propagate. Same shape as the guard-inside-the-guard
-  failures recorded in CLAUDE.md."""
-  import sys
-  import types
-
-  monkeypatch.setattr(ev, "_STOP_OVERRIDE_AVAILABLE", None)
-
-  class Boom:
-    def get_bool(self, *a, **k):
-      raise RuntimeError("params store is gone")
-
-  # Replace the MODULE the function imports from, so the failure happens where it really would --
-  # inside the lazy import -- rather than at a name the runner has already stubbed.
-  mod = types.ModuleType("openpilot.common.params")
-  mod.Params = lambda *a, **k: Boom()
-  monkeypatch.setitem(sys.modules, "openpilot.common.params", mod)
-
-  assert ev._stop_override_available() is False

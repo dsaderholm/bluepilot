@@ -444,6 +444,9 @@ class FordStopOverride:
     self.slowdown_active = False
     self.slowdown_frames = 0
     self.slowdown_confirm = 0
+    # Set when the slowdown path handed a standstill into the hold. Only used to make that hold's
+    # release honest in the log -- see the handoff block.
+    self.slowdown_handed_off = False
     self.last_result = ""       # for logging only, never used to decide
 
   def _end(self, why: str) -> None:
@@ -454,6 +457,7 @@ class FordStopOverride:
     self.frames = 0
     self.holding = False
     self.hold_frames = 0
+    self.slowdown_handed_off = False
 
   def _end_slowdown(self, why: str) -> None:
     if self.slowdown_active:
@@ -463,7 +467,7 @@ class FordStopOverride:
     self.slowdown_confirm = 0
 
   def _update_slowdown(self, v_ego: float, lead_close: bool, slowdown_gap: float):
-    """The curve path. Returns True/False when it owns the frame, None when it does not.
+    """The slowdown path. Returns True/False when it owns the frame, None when it does not.
 
     Runs BEFORE the stop machinery and independently of `has_slow_down`: a corner is not a stop and
     the model publishes no endpoint for one, so every gate the stop path uses is the wrong question
@@ -480,7 +484,7 @@ class FordStopOverride:
         self._end_slowdown("a lead arrived; Ford's stop-and-go owns this")
         return False
       if self.slowdown_frames > SLOWDOWN_MAX_ACTIVE_FRAMES:
-        self._end_slowdown("time bound reached while braking for a curve")
+        self._end_slowdown("time bound reached while closing a gap the buttons could not")
         return False
       if v_ego <= STOPPED_SPEED:
         # IT BROUGHT THE CAR TO A STOP. Hand into the stop path's hold rather than releasing at a
@@ -488,16 +492,39 @@ class FordStopOverride:
         # and his own question was whether a curve takeover can carry through to a stop and back.
         # Measured on route 000003a0 that it can: Ford's cruise status follows into Que_Assist on
         # the way down, holds through the standstill, and resumes to 40 mph by itself afterwards.
-        self._end_slowdown("curve became a stop; handing to the hold")
+        self._end_slowdown("a slowdown became a stop; handing to the hold")
         self.active = True
         self.holding = True
         self.frames = 0
         self.hold_frames = 0
-        self.last_result = "holding a stop the curve path brought us to"
+        # AND THE HOLD MUST NOT DIE BECAUSE NOBODY IS ASKING FOR A STOP. The stop machinery below is
+        # gated on `has_slow_down`, and a corner never sets it -- so without this the no-ask debounce
+        # released the hold half a second after the handoff, at a dead standstill. That is the exact
+        # creep this feature was rewritten to remove, and it failed silently: at a red light
+        # something else happens to be asking, so it worked there and only broke on a corner that
+        # merely ends at rest.
+        #
+        # See the `slowdown_handed_off` branch in the no-ask release below for what keeps it alive:
+        # resetting the debounce counter here was the first attempt and buys only another half
+        # second, because the release fires on the counter EXPIRING, not on it starting.
+        self.no_ask_frames = 0
+        self.slowdown_handed_off = True
+        self.last_result = "holding a stop the slowdown path brought us to"
         return True
-      if slowdown_gap < SLOWDOWN_RELEASE_GAP:
+      if slowdown_gap < SLOWDOWN_RELEASE_GAP and v_ego >= ARM_MIN_SPEED:
         self._end_slowdown("the gap is small enough for the buttons again")
         return False
+      # BELOW FORD'S FLOOR THERE IS NOBODY TO HAND BACK TO, so the gap closing cannot be a reason to
+      # let go. Found 2026-08-20 by a test that drives the descent instead of jumping to standstill.
+      #
+      # The gap shrinks as the car slows, so on an approach that is genuinely heading for a STOP it
+      # falls under SLOWDOWN_RELEASE_GAP at around 8 mph -- well under Ford's 20 mph floor. Releasing
+      # there hands the car to a controller that has already given up: exactly the creep this
+      # feature exists to remove, reached from the one direction nobody had tested.
+      #
+      # Above the floor the release is right and unchanged -- Ford takes the car back and ICBM
+      # carries on. Below it the only correct exits are the standstill handoff, a lead, or the time
+      # bound, all of which are still checked above.
       return True
 
     # ---- arming ----
@@ -520,15 +547,16 @@ class FordStopOverride:
     self.last_result = "closing a gap the buttons cannot close in time"
     return True
 
-  def update(self, long_active: bool, v_ego: float, has_slow_down: bool, op_stopping: bool,
+  def update(self, long_active: bool, v_ego: float, has_slow_down: bool,
              lead_distance: float, stop_endpoint_m: float = 0.0, slowdown_gap: float = 0.0) -> bool:
     """Args:
       long_active:     openpilot longitudinal is actually active this frame.
       v_ego:           m/s.
       has_slow_down:   the MODEL is planning to stop for something ahead (dec.has_slow_down()).
-      op_stopping:     openpilot's plan has reached its stopping state. UNUSED -- see below. Kept
-                       on the signature because the carcontroller still has it and removing an
-                       argument is a change to the call site for no gain.
+      (`op_stopping` was removed 2026-08-20. It had been UNUSED for some time and kept "because the
+       carcontroller still has it" -- but the carcontroller had been passing a literal False, so the
+       stated cost of removing it was one line. A dead argument on a safety-critical entry point
+       invites someone to start using it again on the assumption that it means something.)
       lead_distance:   metres to the radar lead, or 0.0 / inf when there is none.
       stop_endpoint_m: metres to the model's own stop point, 0.0 when it has none.
 
@@ -554,10 +582,10 @@ class FordStopOverride:
 
     # THE CURVE PATH RUNS FIRST, and independently of everything below. `has_slow_down` gates the
     # whole stop machinery, and a corner never sets it.
-    lead_close_now = 0.0 < lead_distance < LEAD_DISQUALIFIES_M
-    curve = self._update_slowdown(v_ego, lead_close_now, slowdown_gap)
-    if curve is not None:
-      return curve
+    lead_close = 0.0 < lead_distance < LEAD_DISQUALIFIES_M
+    slowdown = self._update_slowdown(v_ego, lead_close, slowdown_gap)
+    if slowdown is not None:
+      return slowdown
 
     # The reason going away is the only thing that re-arms it. Deliberately NOT keyed on the car
     # having stopped: a stop that gets abandoned half way must not be able to fire again on the
@@ -599,6 +627,27 @@ class FordStopOverride:
             self._end("a lead arrived during a model-request dropout")
             return False
         return self.active
+      if self.active and self.holding and self.slowdown_handed_off:
+        # A HOLD THE SLOWDOWN PATH CREATED WAS NEVER PREDICATED ON THE MODEL ASKING, so "the model
+        # stopped asking" cannot be a reason to release it. Found by review 2026-08-20.
+        #
+        # The slowdown path arms on a SPEED GAP -- a corner, or a radar-blind stopped car -- and a
+        # corner never sets `has_slow_down`. So the handoff into this hold was followed half a
+        # second later by `_end("model stopped asking")` at a dead standstill: the exact creep the
+        # hold exists to prevent. It failed silently, because at a red light something else IS
+        # asking and the hold survived there; only a corner that merely ends at rest broke.
+        #
+        # It is still bounded. `MAX_HOLD_FRAMES` and the lead check below govern it, the same two
+        # things that govern any other hold -- this removes one release reason, not all of them.
+        self.hold_frames += 1
+        if self.hold_frames > MAX_HOLD_FRAMES:
+          self._end("hold bound reached -- the car may roll, see the creep note")
+          return False
+        if 0.0 < lead_distance < LEAD_DISQUALIFIES_M:
+          self._end("a lead arrived while holding; Ford's stop-and-go owns this")
+          return False
+        self.last_result = "holding a stop the slowdown path brought us to"
+        return True
       if self.active:
         self._end("model stopped asking")
       # After `_end`, not before: `_end` sets spent=True, so an assignment ahead of it is dead and
@@ -612,8 +661,9 @@ class FordStopOverride:
     # The model is asking again, so the debounce starts over.
     self.no_ask_frames = 0
 
-    lead_close = 0.0 < lead_distance < LEAD_DISQUALIFIES_M
-
+    # `lead_close` is computed once, at the top, and shared with the slowdown path. Two names for
+    # one predicate in the function whose whole subject is who owns the command is how the two paths
+    # end up disagreeing about whether Ford has the car.
     if self.active:
       self.frames += 1
 

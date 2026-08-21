@@ -94,14 +94,24 @@ translates openpilot's desired speed into cruise-button presses. **The set speed
 this car has**, and most of the work here is making that lever behave.
 
 That constraint is worth understanding before reading anything else: the set speed falls at roughly
-**3.3 mph per second**, which is the car's own repeat rate for a held cruise button. It is not a
-parameter. Every feature that slows the car has to fit inside that budget, and a few requests that
-sound reasonable are simply impossible because of it.
+**3.3 mph per second**, and not because of any parameter. openpilot asserts the cruise button
+continuously and never releases it — but the car's own steering-column module transmits the same
+message with the button released ten times a second on the same bus, interleaved with ours, so the
+car sees a stream of taps rather than a hold and acts on about one press every 0.30 seconds.
+Blocking the column's messages would also block the driver's own presses, so the rate is fixed.
+
+Every feature that slows the car has to fit inside that budget, and a few requests that sound
+reasonable are simply impossible because of it. Where a slowdown genuinely cannot fit, openpilot
+takes the ACC command directly instead — see the slowdown section below.
 
 - **A button contract settled on the road.** `RES +` creates or raises a HOLD — the driver's own set
   speed — and `SET −` lowers it or, with cruise off, hands the speed back to Speed Limit Assist.
   Every other feature keeps working against a hold: curves still slow the car, hazards still fire,
   and the speed returns to the driver's number afterwards rather than to the posted limit.
+  **Which CAN signal carries `RES +` differs between Ford wheels**, and reading the wrong one is
+  silent: the button simply never arrives, the dash moves because the stalk talks to the powertrain
+  directly, and openpilot never learns the driver asked for anything. Both known signals are read
+  here. If presses seem not to stick on some other Ford, that is the first thing to check.
 - **Holds pinned to a location.** Tap the HOLD badge and that hold returns whenever you drive through
   the same place. A hold you set by hand always outranks a pinned one.
 - **A standstill resume gate.** openpilot asserts resume from its own plan, which on a stock-ACC car
@@ -114,6 +124,11 @@ sound reasonable are simply impossible because of it.
 - **Stop signs and red lights**, on the same channel, for the case the lead trigger structurally
   cannot catch: an empty intersection with no vehicle to measure. Gated so it acts only once the stop
   actually requires braking, rather than while coasting would still arrive in time.
+- **Two set speeds on screen, and they are supposed to differ.** The large number is what the car is
+  being driven to — the driver's hold if there is one, otherwise the posted limit plus offset. The
+  small number that replaces the word `MAX` is the car's own dash set speed, and it appears only
+  while something is actively pulling the car below its target. Seeing it during ordinary cruising
+  means something is fighting the driver.
 - **Rate limiters that only meter what has no deadline.** Ford coasts for small set-speed steps and
   brakes for large ones, and coasting into a lower speed limit is nicer than braking into it. But a
   curve or a mapped corner is a fixed place in the road, so those go straight to target — metering
@@ -167,15 +182,72 @@ stays Ford's.
 
 **The complete stop is what it is for.** Ford's set speed cannot go below 20 mph, and stock ACC
 completes a stop only when its own radar has a lead — so a stop sign or red light on an empty road
-is the one thing the car cannot do. For a few seconds at the end of such a stop openpilot sends the
-braking instead of Ford, bounded in time, and hands straight back. It never takes over when a lead
-is close, because Ford's stop-and-go already owns that case.
+is the one thing the car cannot do. openpilot sends the braking instead of Ford for a bounded
+window, then hands straight back. It never takes over when a lead is close, because Ford's
+stop-and-go already owns that case, and **it has never yet been observed bringing a car to a
+standstill and holding it** — the trigger is measured against recorded drives, the braking is not.
 
-**Both ship off, and the reason is not caution about the code.** How the camera reacts to being
-overridden for several seconds has not been measured: one drive saw it stop accepting commands after
-about forty seconds of disagreement, another saw a second and a half and no reaction at all, and a
-stop sits between the two. The on-screen ACC readout turns violet and reads `OP STOP` whenever
-openpilot has taken the command, so it is visible rather than inferred.
+**Whatever it sends is never softer than what Ford asked for.** Taking the command means Ford's
+command stops reaching the car, and nothing originally guaranteed ours was at least as strong: on
+one measured approach to a stopped vehicle the override held the command for nine seconds while
+requesting a tenth of the deceleration Ford was already asking for. Ford's own request is now a
+floor, so taking over can only ever add braking.
+
+**It will not take the command below 25 mph.** Every measured takeover that began under Ford's own
+20 mph floor made the forward camera assert cancel, and one latched it for the rest of the drive,
+after which stock ACC was unavailable until the car was restarted. Above the floor the camera
+tolerated every takeover measured, including one that ran 35 seconds to a full standstill. The cost
+of that rule is real: a light you are already crawling towards at 20 mph is yours.
+
+**Both ship off**, and the on-screen ACC readout turns violet and reads `OP STOP` whenever openpilot
+has taken the command, so it is visible rather than inferred.
+
+### Slowdowns the cruise buttons cannot deliver
+
+**Ford-specific, and unproven on the road at the time of writing.** The trigger is measured against
+recorded drives; the braking behaviour it produces has never been driven, so treat everything below
+as a design that has been checked rather than a feature that has been used.
+
+The set speed is the only lever a stock-ACC car has, and it moves at about **3.3 mph per second**.
+That is not a tuning choice: openpilot asserts the cruise button continuously, but the car's own
+steering-column module transmits the same message with the button released ten times a second on the
+same bus, so the car sees a stream of taps rather than a hold and recognises roughly one press every
+0.30 seconds. Blocking the column's messages would also block the driver's own presses.
+
+Most of the time that budget is plenty. Twice it is not:
+
+- **A corner that arrives faster than the lever moves.** Approaching a 28 mph bend at 77, the map
+  asks for a 49 mph reduction — fifteen seconds of tapping, and about 650 m of road. Measured on one
+  such approach the car was already pulling 5.2 m/s² of lateral acceleration, against a 2.4 target,
+  while the set speed was still walking down.
+- **A stopped car the radar cannot see.** The driving model spots it, and the request goes to Ford's
+  20 mph floor — which from highway speed is the same enormous gap, closed at the same 3.3 mph/s.
+
+In both cases openpilot takes the ACC command directly for a bounded window and brakes properly,
+then hands back. Authoring the command has no button-rate limit, so the same 49 mph reduction needs
+about 200 m instead of 650.
+
+**It arms on the size of the gap, not on how urgent the plan feels.** A corner or a radar-blind lead
+wanting more than 20 mph below the current speed qualifies — six seconds of tapping — and anything
+smaller is left to the buttons, which close it quickly enough. Measured across four drives, gaps that
+large occur on under 1% of engaged driving: one or two takeovers per drive, and none at all on two of
+the four. A posted speed limit never qualifies, however large the drop: nothing is arriving, and the
+buttons walking the number down is the right answer.
+
+**It will not take the command below 25 mph**, and that floor is the difference between a feature
+and a bricked drive. Every measured takeover that began under Ford's own 20 mph floor made the
+forward camera assert cancel, and one of them latched it for the remaining nine minutes of the drive
+— after which Ford ACC was gone until the car was restarted. Every takeover that began above the
+floor was tolerated, including one that ran 35 seconds to a complete standstill. Once it has the
+command, carrying the car below 25 and down to a stop is fine; it is the *taking* that the camera
+objects to.
+
+Handing back is measured in both shapes. When the corner ends the gap closes and Ford is still
+engaged and simply carries on. When the corner ends in a stop, it holds the standstill rather than
+releasing into a creep, and Ford's own cruise status follows into its stop-and-go state on the way
+down — so resuming afterwards is an ordinary Ford resume, and the car pulls away under stock ACC.
+The moment the radar acquires a lead it hands back on that frame, because Ford's stop-and-go is
+years of calibration this has no business replacing.
 
 ### Passing assist
 

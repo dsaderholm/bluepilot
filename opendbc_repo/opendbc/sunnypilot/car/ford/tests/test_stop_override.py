@@ -19,6 +19,7 @@ import inspect
 from opendbc.sunnypilot.car.ford import stop_override as mod
 from opendbc.sunnypilot.car.ford.stop_override import (
   CLOSING_CONFIRM_FRAMES,
+  MAX_HOLD_FRAMES,
   SLOWDOWN_CONFIRM_FRAMES,
   CLOSING_FRACTION,
   ENTER_SPEED,
@@ -50,7 +51,7 @@ NEAR = 12.0
 FAR = 200.0
 
 
-def _stopping(o, v=SLOW, lead=0.0, has_slow_down=True, op_stopping=True, long_active=True,
+def _stopping(o, v=SLOW, lead=0.0, has_slow_down=True, long_active=True,
               endpoint=NEAR, confirm=True):
   """One call now means ONE APPROACH, not one frame.
 
@@ -78,11 +79,9 @@ def _stopping(o, v=SLOW, lead=0.0, has_slow_down=True, op_stopping=True, long_ac
     n = CLOSING_CONFIRM_FRAMES + 1
     ep = endpoint + n * travelled
     for _ in range(n):
-      o.update(long_active=long_active, v_ego=v, has_slow_down=has_slow_down,
-               op_stopping=op_stopping, lead_distance=lead, stop_endpoint_m=ep)
+      o.update(long_active=long_active, v_ego=v, has_slow_down=has_slow_down, lead_distance=lead, stop_endpoint_m=ep)
       ep -= travelled
-  return o.update(long_active=long_active, v_ego=v, has_slow_down=has_slow_down,
-                  op_stopping=op_stopping, lead_distance=lead, stop_endpoint_m=endpoint)
+  return o.update(long_active=long_active, v_ego=v, has_slow_down=has_slow_down, lead_distance=lead, stop_endpoint_m=endpoint)
 
 
 def test_it_fires_for_a_stop_the_radar_cannot_see():
@@ -177,7 +176,7 @@ def test_it_waits_for_the_plan_to_commit():
   o = FordStopOverride()
   # `op_stopping` NO LONGER GATES -- it was measured to be a stopped-car state (never true above
   # 3 mph in 21,936 frames), which made the trigger circular and it never fired on any drive.
-  assert _stopping(o, op_stopping=False) is True,     "op_stopping must no longer gate: it cannot be true while still approaching"
+  assert _stopping(o) is True,     "op_stopping must no longer gate: it cannot be true while still approaching"
   assert _stopping(o) is True
 
 
@@ -209,7 +208,7 @@ def test_it_never_reads_fords_command():
   # rate, both of which this file may legitimately know. The forbidden set above is what guards the
   # trap; this list guards against absent-minded plumbing.
   sig = inspect.signature(FordStopOverride.update)
-  assert set(sig.parameters) == {"self", "long_active", "v_ego", "has_slow_down", "op_stopping",
+  assert set(sig.parameters) == {"self", "long_active", "v_ego", "has_slow_down",
                                  "stop_endpoint_m", "slowdown_gap",
                                  "lead_distance"}, sig
 
@@ -298,13 +297,11 @@ def _drive_to_a_stop(so, **kw):
   travelled = v0 / OVERRIDE_HZ
   ep = NEAR + (CLOSING_CONFIRM_FRAMES + 1) * travelled
   for _ in range(CLOSING_CONFIRM_FRAMES + 1):
-    so.update(long_active=True, v_ego=v0, has_slow_down=True, op_stopping=True,
-              lead_distance=lead, stop_endpoint_m=ep)
+    so.update(long_active=True, v_ego=v0, has_slow_down=True, lead_distance=lead, stop_endpoint_m=ep)
     ep -= travelled
   for v_mph in (30.0, 18.0, 12.0, 6.0, 2.0, 0.3):
     was_active = so.active
-    override = so.update(long_active=True, v_ego=v_mph * MPH_TO_MS, has_slow_down=True,
-                         op_stopping=True, lead_distance=lead, stop_endpoint_m=NEAR)
+    override = so.update(long_active=True, v_ego=v_mph * MPH_TO_MS, has_slow_down=True, lead_distance=lead, stop_endpoint_m=NEAR)
     out.append((was_active, override, so.last_result))
   return out
 
@@ -332,12 +329,10 @@ def test_only_a_stop_WE_are_holding_latches_the_resume_gate():
   # never arms. `last_result` is still the string from the first stop, which is exactly why the gate
   # must not read that.
   for _ in range(NO_ASK_RELEASE_FRAMES + 1):
-    so.update(long_active=True, v_ego=30.0 * MPH_TO_MS, has_slow_down=False,
-              op_stopping=False, lead_distance=0.0, stop_endpoint_m=NEAR)
+    so.update(long_active=True, v_ego=30.0 * MPH_TO_MS, has_slow_down=False, lead_distance=0.0, stop_endpoint_m=NEAR)
   assert so.holding is False, "the reason going away must release the hold"
   for v_mph in (20.0, 10.0, 4.0, 0.3):
-    override = so.update(long_active=True, v_ego=v_mph * MPH_TO_MS, has_slow_down=True,
-                         op_stopping=True, lead_distance=25.0, stop_endpoint_m=NEAR)
+    override = so.update(long_active=True, v_ego=v_mph * MPH_TO_MS, has_slow_down=True, lead_distance=25.0, stop_endpoint_m=NEAR)
     assert not override, "a lead inside 60 m is Ford's stop, not ours"
     assert so.holding is False, (
       "a stop the override never took latched the resume gate -- he would sit at a green light")
@@ -349,8 +344,7 @@ def test_the_hold_is_released_when_longitudinal_goes_inactive():
   so = FordStopOverride()
   _drive_to_a_stop(so)
   assert so.holding is True
-  assert so.update(long_active=False, v_ego=0.0, has_slow_down=True, op_stopping=True,
-                   lead_distance=0.0, stop_endpoint_m=NEAR) is False
+  assert so.update(long_active=False, v_ego=0.0, has_slow_down=True, lead_distance=0.0, stop_endpoint_m=NEAR) is False
   assert so.holding is False
 
 
@@ -361,8 +355,7 @@ def test_the_hold_is_bounded_so_a_wedged_hold_cannot_last_the_drive():
   _drive_to_a_stop(so)
   held = 0
   for _ in range(int(MAX_HOLD_S * OVERRIDE_HZ) + 50):
-    if not so.update(long_active=True, v_ego=0.0, has_slow_down=True, op_stopping=True,
-                     lead_distance=0.0, stop_endpoint_m=NEAR):
+    if not so.update(long_active=True, v_ego=0.0, has_slow_down=True, lead_distance=0.0, stop_endpoint_m=NEAR):
       break
     held += 1
   assert held > OVERRIDE_HZ * 30, f"gave up after {held / OVERRIDE_HZ:.0f}s -- too short for a light"
@@ -398,7 +391,7 @@ def test_the_entry_speed_is_reachable_within_the_time_bound():
   lo, hi = 0.0, 1000.0
   for _ in range(60):
     mid = (lo + hi) / 2.0
-    if _stopping(FordStopOverride(), v=ENTER_SPEED, op_stopping=False, endpoint=mid):
+    if _stopping(FordStopOverride(), v=ENTER_SPEED, endpoint=mid):
       lo = mid
     else:
       hi = mid
@@ -479,7 +472,7 @@ def test_a_radar_blind_lead_is_ours_and_a_radar_lead_is_fords():
     "the override refused a stop the radar cannot see -- the exact case unconfirmed_lead is for")
 
   # ...and the moment the radar acquires it, Ford owns the stop again.
-  acquired = blind.update(long_active=True, v_ego=SLOW, has_slow_down=True, op_stopping=True, stop_endpoint_m=NEAR,
+  acquired = blind.update(long_active=True, v_ego=SLOW, has_slow_down=True, stop_endpoint_m=NEAR,
                           lead_distance=LEAD_DISQUALIFIES_M - 20.0)
   assert acquired is False, "kept braking after the radar acquired the lead"
   assert "lead appeared" in blind.last_result
@@ -504,7 +497,7 @@ class TestTheEndpointArmsItNotShouldStop:
   def test_it_arms_while_still_approaching_with_the_plan_uncommitted(self):
     """THE WHOLE POINT. This is the state his light was actually in."""
     o = FordStopOverride()
-    assert _stopping(o, op_stopping=False, endpoint=NEAR) is True
+    assert _stopping(o, endpoint=NEAR) is True
 
   def test_a_far_stop_does_not_arm_it(self):
     """`has_slow_down` alone is far too loose -- 8,207 frames on one drive. The model's own stop
@@ -534,8 +527,8 @@ class TestTheEndpointArmsItNotShouldStop:
     # BOTH speeds above ARM_MIN_SPEED, or the slow side is refused by the floor and this measures
     # the floor twice instead of the distance gate. 140 m sits between the two gates: 178.8 m at
     # 40 mph, 105 m at 27 mph.
-    fast_ok = _stopping(FordStopOverride(), v=40 * 0.44704, op_stopping=False, endpoint=140.0)
-    slow_no = _stopping(FordStopOverride(), v=27 * 0.44704, op_stopping=False, endpoint=140.0)
+    fast_ok = _stopping(FordStopOverride(), v=40 * 0.44704, endpoint=140.0)
+    slow_no = _stopping(FordStopOverride(), v=27 * 0.44704, endpoint=140.0)
     assert fast_ok is True, "40 mph with a 140 m stop should be arming"
     assert slow_no is False, "27 mph with a 140 m stop is far too early"
 
@@ -576,8 +569,7 @@ class TestTheEndpointArmsItNotShouldStop:
     assert _stopping(o, v=30 * 0.44704, endpoint=40.0) is True, "did not arm above the floor"
     # Now below the floor, still asking: it must keep the car.
     for mph in (18.0, 12.0, 6.0, 1.0):
-      out = o.update(long_active=True, v_ego=mph * 0.44704, has_slow_down=True, op_stopping=False,
-                     lead_distance=0.0, stop_endpoint_m=max(0.5, 40.0 * mph / 30.0))
+      out = o.update(long_active=True, v_ego=mph * 0.44704, has_slow_down=True, lead_distance=0.0, stop_endpoint_m=max(0.5, 40.0 * mph / 30.0))
       assert out is True, f"handed back at {mph} mph -- the stop is abandoned where Ford also quits"
 
   def test_every_other_gate_still_refuses(self):
@@ -613,8 +605,7 @@ def test_it_survives_a_WHOLE_approach_with_the_plan_never_committing():
   dist = (v * v) / (2 * 1.2)                          # a 1.2 m/s^2 model stop from here
   took = 0
   for _ in range(1200):
-    if o.update(long_active=True, v_ego=v, has_slow_down=True, op_stopping=False,
-                lead_distance=0.0, stop_endpoint_m=max(0.0, dist)):
+    if o.update(long_active=True, v_ego=v, has_slow_down=True, lead_distance=0.0, stop_endpoint_m=max(0.0, dist)):
       took += 1
       v = max(0.0, v - 1.2 / OVERRIDE_HZ)             # it is braking, so the car slows
     dist = max(0.0, dist - v / OVERRIDE_HZ)
@@ -651,8 +642,7 @@ class TestAPhantomStopDoesNotArmABrake:
     armed = False
     for i in range(n):
       ep = first_ep + (last_ep - first_ep) * (i / (n - 1))
-      if o.update(long_active=True, v_ego=v, has_slow_down=True, op_stopping=False,
-                  lead_distance=0.0, stop_endpoint_m=ep):
+      if o.update(long_active=True, v_ego=v, has_slow_down=True, lead_distance=0.0, stop_endpoint_m=ep):
         armed = True
     return armed
 
@@ -682,8 +672,7 @@ class TestAPhantomStopDoesNotArmABrake:
     dist = 139.0
     armed = False
     for _ in range(int(30.0 * OVERRIDE_HZ)):
-      if o.update(long_active=True, v_ego=v, has_slow_down=True, op_stopping=False,
-                  lead_distance=0.0, stop_endpoint_m=max(0.0, dist)):
+      if o.update(long_active=True, v_ego=v, has_slow_down=True, lead_distance=0.0, stop_endpoint_m=max(0.0, dist)):
         armed = True
         v = max(0.0, v - 1.2 / OVERRIDE_HZ)
       dist = max(0.0, dist - v / OVERRIDE_HZ)
@@ -713,18 +702,15 @@ def test_a_lead_does_not_freeze_the_closing_window():
 
   ep = 200.0
   for _ in range(CLOSING_CONFIRM_FRAMES - 1):
-    o.update(long_active=True, v_ego=v, has_slow_down=True, op_stopping=False,
-             lead_distance=0.0, stop_endpoint_m=ep)
+    o.update(long_active=True, v_ego=v, has_slow_down=True, lead_distance=0.0, stop_endpoint_m=ep)
     ep -= step
 
   for _ in range(int(20 * OVERRIDE_HZ)):
-    o.update(long_active=True, v_ego=v, has_slow_down=True, op_stopping=False,
-             lead_distance=25.0, stop_endpoint_m=ep)
+    o.update(long_active=True, v_ego=v, has_slow_down=True, lead_distance=25.0, stop_endpoint_m=ep)
 
   armed = False
   for _ in range(20):
-    if o.update(long_active=True, v_ego=v, has_slow_down=True, op_stopping=False,
-                lead_distance=0.0, stop_endpoint_m=20.0):
+    if o.update(long_active=True, v_ego=v, has_slow_down=True, lead_distance=0.0, stop_endpoint_m=20.0):
       armed = True
   assert not armed, "armed on stale evidence banked before a lead, with a static endpoint since"
 
@@ -744,13 +730,11 @@ def test_a_lead_clearing_on_a_REAL_approach_still_arms():
 
   # Behind a lead the whole time, genuinely closing on a real stop.
   for _ in range(int(3 * OVERRIDE_HZ)):
-    o.update(long_active=True, v_ego=v, has_slow_down=True, op_stopping=False,
-             lead_distance=25.0, stop_endpoint_m=ep)
+    o.update(long_active=True, v_ego=v, has_slow_down=True, lead_distance=25.0, stop_endpoint_m=ep)
     ep -= step
 
   # The lead changes lanes. The stop is real and close; it should be taken at once.
-  armed = o.update(long_active=True, v_ego=v, has_slow_down=True, op_stopping=False,
-                   lead_distance=0.0, stop_endpoint_m=ep)
+  armed = o.update(long_active=True, v_ego=v, has_slow_down=True, lead_distance=0.0, stop_endpoint_m=ep)
   assert armed is True, "a real closing approach had to re-earn confirmation after the lead left"
 
 
@@ -765,7 +749,7 @@ def test_the_arming_range_never_exceeds_what_the_time_bound_can_finish():
     lo, hi = 0.0, 1000.0
     for _ in range(60):
       mid = (lo + hi) / 2.0
-      if _stopping(FordStopOverride(), v=v, op_stopping=False, endpoint=mid):
+      if _stopping(FordStopOverride(), v=v, endpoint=mid):
         lo = mid
       else:
         hi = mid
@@ -795,8 +779,7 @@ class TestTheCurvePath:
   def _drive(o, mph, gap_mph, frames):
     out = False
     for _ in range(frames):
-      out = o.update(long_active=True, v_ego=mph * MPH_TO_MS, has_slow_down=False,
-                     op_stopping=False, lead_distance=0.0, stop_endpoint_m=0.0,
+      out = o.update(long_active=True, v_ego=mph * MPH_TO_MS, has_slow_down=False, lead_distance=0.0, stop_endpoint_m=0.0,
                      slowdown_gap=gap_mph * MPH_TO_MS)
     return out
 
@@ -833,8 +816,7 @@ class TestTheCurvePath:
   def test_a_lead_hands_it_straight_back(self):
     o = FordStopOverride()
     assert self._drive(o, 60.0, 49.0, SLOWDOWN_CONFIRM_FRAMES + 2) is True
-    out = o.update(long_active=True, v_ego=60.0 * MPH_TO_MS, has_slow_down=False, op_stopping=False,
-                   lead_distance=25.0, stop_endpoint_m=0.0, slowdown_gap=49.0 * MPH_TO_MS)
+    out = o.update(long_active=True, v_ego=60.0 * MPH_TO_MS, has_slow_down=False, lead_distance=25.0, stop_endpoint_m=0.0, slowdown_gap=49.0 * MPH_TO_MS)
     assert out is False and not o.slowdown_active
 
   def test_it_will_not_arm_below_fords_floor(self):
@@ -849,21 +831,82 @@ class TestTheCurvePath:
     self._drive(o, 95.0, 49.0, SLOWDOWN_CONFIRM_FRAMES + 20)
     assert not o.slowdown_active
 
-  def test_a_curve_that_does_reach_a_stop_hands_into_the_hold(self):
-    """When the corner IS the stop -- his sharp exit into a red light -- releasing at a standstill
-    would be the creep this feature was rewritten to remove."""
+  def test_the_handed_off_hold_survives_the_model_never_asking(self):
+    """THE REVIEW BUG, 2026-08-20, and the reason the old test could not see it.
+
+    The slowdown path arms on a SPEED GAP. A corner never sets `has_slow_down`, so after the handoff
+    into the hold the stop machinery reached `_end("model stopped asking")` half a second later --
+    releasing the brake at a dead standstill, which is the exact creep the hold exists to prevent.
+
+    It failed SILENTLY: at a red light something else is asking, so the hold survived there. Only a
+    corner that merely ends at rest broke, which is his case -- *"sometimes there won't be a car or
+    red light at the end of the exit"*.
+
+    So: hand off, then drive well past NO_ASK_RELEASE_FRAMES with nothing asking for a stop.
+    """
     o = FordStopOverride()
     assert self._drive(o, 40.0, 39.0, SLOWDOWN_CONFIRM_FRAMES + 2) is True
-    out = o.update(long_active=True, v_ego=0.1 * MPH_TO_MS, has_slow_down=False, op_stopping=False,
+    out = o.update(long_active=True, v_ego=0.1 * MPH_TO_MS, has_slow_down=False,
                    lead_distance=0.0, stop_endpoint_m=0.0, slowdown_gap=39.0 * MPH_TO_MS)
-    assert out is True, "let go at a standstill"
+    assert out is True and o.holding
+
+    for _ in range(NO_ASK_RELEASE_FRAMES * 4):
+      out = o.update(long_active=True, v_ego=0.0, has_slow_down=False,
+                     lead_distance=0.0, stop_endpoint_m=0.0, slowdown_gap=0.0)
+      assert out is True, "let go of a standstill because the model was not asking for a stop"
+    assert o.holding
+
+  def test_the_handed_off_hold_is_still_bounded(self):
+    """Removing one release reason must not remove them all. The hold bound still governs."""
+    o = FordStopOverride()
+    assert self._drive(o, 40.0, 39.0, SLOWDOWN_CONFIRM_FRAMES + 2) is True
+    o.update(long_active=True, v_ego=0.1 * MPH_TO_MS, has_slow_down=False,
+             lead_distance=0.0, stop_endpoint_m=0.0, slowdown_gap=39.0 * MPH_TO_MS)
+    out = True
+    for _ in range(MAX_HOLD_FRAMES + 10):
+      out = o.update(long_active=True, v_ego=0.0, has_slow_down=False,
+                     lead_distance=0.0, stop_endpoint_m=0.0, slowdown_gap=0.0)
+      if not out:
+        break
+    assert out is False, "the handed-off hold never ended -- it is unbounded"
+
+  def test_a_lead_still_ends_the_handed_off_hold(self):
+    """Ford's stop-and-go holds behind a car better than we do, and that stays true here."""
+    o = FordStopOverride()
+    assert self._drive(o, 40.0, 39.0, SLOWDOWN_CONFIRM_FRAMES + 2) is True
+    o.update(long_active=True, v_ego=0.1 * MPH_TO_MS, has_slow_down=False,
+             lead_distance=0.0, stop_endpoint_m=0.0, slowdown_gap=39.0 * MPH_TO_MS)
+    out = o.update(long_active=True, v_ego=0.0, has_slow_down=False,
+                   lead_distance=8.0, stop_endpoint_m=0.0, slowdown_gap=0.0)
+    assert out is False and not o.holding
+
+  def test_a_curve_that_does_reach_a_stop_hands_into_the_hold(self):
+    """When the corner IS the stop -- his sharp exit into a red light -- releasing at a standstill
+    would be the creep this feature was rewritten to remove.
+
+    THE DESCENT IS DRIVEN, not skipped. The first version jumped 40 mph to 0.1 in a single frame,
+    which no car does and which steps over everything interesting: the passage below ARM_MIN_SPEED,
+    below Ford's floor, and the many frames where the release conditions are evaluated. A bug that
+    handed back at 18 mph on the way down would have left that version green.
+    """
+    o = FordStopOverride()
+    assert self._drive(o, 40.0, 39.0, SLOWDOWN_CONFIRM_FRAMES + 2) is True
+
+    # Coast down at a plausible 2.5 m/s^2, gap shrinking with the speed as a real corner target does.
+    mph = 40.0
+    while mph > 0.3:
+      mph = max(0.0, mph - 2.5 * 2.23694 / OVERRIDE_HZ)
+      out = o.update(long_active=True, v_ego=mph * MPH_TO_MS, has_slow_down=False,
+                     lead_distance=0.0, stop_endpoint_m=0.0,
+                     slowdown_gap=max(0.0, mph - 1.0) * MPH_TO_MS)
+      assert out is True, f"handed back at {mph:.1f} mph on the way down"
+
     assert o.holding and not o.slowdown_active, "should be the stop path's hold now"
 
   def test_longitudinal_going_inactive_drops_it(self):
     o = FordStopOverride()
     assert self._drive(o, 60.0, 49.0, SLOWDOWN_CONFIRM_FRAMES + 2) is True
-    out = o.update(long_active=False, v_ego=60.0 * MPH_TO_MS, has_slow_down=False,
-                   op_stopping=False, lead_distance=0.0, stop_endpoint_m=0.0,
+    out = o.update(long_active=False, v_ego=60.0 * MPH_TO_MS, has_slow_down=False, lead_distance=0.0, stop_endpoint_m=0.0,
                    slowdown_gap=49.0 * MPH_TO_MS)
     assert out is False and not o.slowdown_active
 
@@ -881,8 +924,7 @@ class TestTheCurvePath:
     assert o.slowdown_active, "did not cover the radar-blind window"
 
     # The radar finally returns it. Ford owns everything from here.
-    out = o.update(long_active=True, v_ego=45.0 * MPH_TO_MS, has_slow_down=False, op_stopping=False,
-                   lead_distance=40.0, stop_endpoint_m=0.0, slowdown_gap=32.0 * MPH_TO_MS)
+    out = o.update(long_active=True, v_ego=45.0 * MPH_TO_MS, has_slow_down=False, lead_distance=40.0, stop_endpoint_m=0.0, slowdown_gap=32.0 * MPH_TO_MS)
     assert out is False, "kept the command after the radar acquired the lead"
     assert not o.slowdown_active
 
@@ -890,8 +932,7 @@ class TestTheCurvePath:
     """Only one may author. A stop already underway must not be interrupted by the curve path."""
     o = FordStopOverride()
     assert _stopping(o) is True and o.active
-    out = o.update(long_active=True, v_ego=SLOW, has_slow_down=True, op_stopping=False,
-                   lead_distance=0.0, stop_endpoint_m=NEAR, slowdown_gap=49.0 * MPH_TO_MS)
+    out = o.update(long_active=True, v_ego=SLOW, has_slow_down=True, lead_distance=0.0, stop_endpoint_m=NEAR, slowdown_gap=49.0 * MPH_TO_MS)
     assert out is True
     assert o.active and not o.slowdown_active
 

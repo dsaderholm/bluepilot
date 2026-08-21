@@ -29,22 +29,11 @@ EVENT_NAME_SP = {v: k for k, v in EventNameSP.schema.enumerants.items()}
 # under the passthrough. Cached because an alert must not do a filesystem read per call, and because
 # the carcontroller reads these same two once at init: changing either mid-drive already does
 # nothing, by design.
-_STOP_OVERRIDE_AVAILABLE: bool | None = None
-
-
-def _stop_override_available() -> bool:
-  global _STOP_OVERRIDE_AVAILABLE
-  if _STOP_OVERRIDE_AVAILABLE is None:
-    try:
-      from openpilot.common.params import Params
-      p = Params()
-      _STOP_OVERRIDE_AVAILABLE = p.get_bool("StockAccPassthrough") and p.get_bool("StockAccStopOverride")
-    except Exception:
-      # An alert that raises takes selfdrived's alert path down. Unknown means say the conservative
-      # thing, which is that the stop is his.
-      _STOP_OVERRIDE_AVAILABLE = False
-  return _STOP_OVERRIDE_AVAILABLE
-
+# `_stop_override_available()` lived here and was REMOVED 2026-08-20. It read two params to decide
+# whether the model-stop alert could promise the car would stop. That promise was withdrawn on
+# 2026-08-19 -- the alert says "the stop is yours" unconditionally now -- and the helper has fed
+# nothing since; only a test kept it alive. A function that reads configuration and changes no
+# behaviour is a false lead in exactly the file where alert wording gets debugged.
 IS_MICI = HARDWARE.get_device_type() == 'mici'
 
 _METER_TO_FOOT = 3.28084  # common.constants.CV has no length conversions

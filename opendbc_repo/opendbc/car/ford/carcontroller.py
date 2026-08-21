@@ -424,7 +424,6 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
             has_slow_down=bool(self.sm['longitudinalPlanSP'].dec.hasSlowDown)
             if (self.sm.alive.get('longitudinalPlanSP') and self.sm.valid.get('longitudinalPlanSP'))
             else False,
-            op_stopping=bool(stopping),
             # The model's own stop point, metres. 0.0 means it has none -- `endpoint_x()` is inf
             # when the plan is not full length and inf is clamped to 0 on the wire. This ARMS the
             # override now, in place of `stopping`, which was measured to be a stopped-car state
@@ -611,7 +610,18 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
         # -0.5 is twice Ford's deepest observed, so this never binds where Ford would have asked for
         # more, and it only applies once `standstill` is true -- the approach is untouched.
         if CS.out.standstill:
-          send_accel = max(send_accel, _STANDSTILL_ACCEL_FLOOR)
+          # NEVER ABOVE WHAT FORD ASKED FOR. Found by review 2026-08-20: this clamp runs AFTER the
+          # override's Ford floor and could raise the request back up past it, so with the override
+          # active at a standstill and Ford asking -1.0 we would have sent -0.5 -- half the braking
+          # Ford wanted, which is the precise failure the floor was added to make impossible.
+          #
+          # Ford's measured standstill requests top out at -0.25, so it does not bind on today's
+          # data. That is luck, not structure. Taking `min` with Ford's own number means the floor
+          # can only ever soften OUR excess, never Ford's request.
+          floor = _STANDSTILL_ACCEL_FLOOR
+          if override:
+            floor = min(floor, float((CS.acc_stock_values or {}).get("AccBrkTot_A_Rq", 0.0)))
+          send_accel = max(send_accel, floor)
 
         can_sends.append(fordcan_ext.create_acc_msg(
           self.packer, self.CAN, CC.longActive, lng.gas, send_accel, lng.accel_pred_send,
