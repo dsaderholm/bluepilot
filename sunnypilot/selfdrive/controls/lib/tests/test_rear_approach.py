@@ -6,12 +6,21 @@ See the LICENSE.md file in the root directory for more details.
 
 FusionPilot: tests for the rear-approach interface.
 
-No source is fitted, so these are interface tests, not behavior tests. They pin the two decisions
-that would be expensive to get wrong once a sensor arrives:
+Neither source is live on his car, but BOTH PRODUCERS ARE WIRED, so TestTheProducer at the bottom
+drives RearApproach.update itself rather than assigning fields. That distinction found a real bug:
+the empty-lane radar branch set `available` without setting `source`, so a working radar reporting
+a CLEAR lane failed the authorization gate while the same radar reporting a car passed it. Every
+hand-built fixture in the tree assigns the two together and none of them could have seen it.
+
+The decisions these pin, all expensive to get wrong once a sensor arrives:
 
   - unavailable must never read as clear, at any layer
   - a BLIS source must not be able to masquerade as a radar source in the log
+  - a source must be named wherever availability is claimed
+  - a dying radar must fall back to BLIS rather than going blind
 """
+
+from types import SimpleNamespace as NS
 
 from openpilot.sunnypilot.selfdrive.controls.lib.rear_approach import (
   RearApproach, RearApproachSide, Source, UNSAFE_TTC_S, MIN_CLOSING_MS, NO_THREAT_TTC_S,
@@ -125,3 +134,92 @@ class TestSidesAreIndependent:
     assert not rear.available
     rear.right.from_blis(detected=False)
     assert rear.available
+
+
+class _FakeSM:
+  """Enough SubMaster to drive RearApproach.update for real.
+
+  THE POINT IS THAT IT IS THE REAL PRODUCER. The actuation-gate tests in test_passing_assist.py
+  set `available` and `source` together by hand, which guarantees an invariant the producer did
+  not hold: the empty-lane radar branch left `source` at none, so a working radar reporting a
+  CLEAR lane failed `_rear_can_authorize` while the same radar reporting a car passed it. A
+  fixture that assigns both fields can never see that. Drive the class.
+  """
+
+  def __init__(self, data, valid=None, updated=None):
+    self.data = data
+    self.valid = {k: True for k in data} if valid is None else valid
+    self.updated = {k: True for k in data} if updated is None else updated
+
+  def __getitem__(self, k):
+    return self.data[k]
+
+
+def _radar(dataAvailable=True, left=None, right=None):
+  empty = NS(detected=False, dRel=0.0, vRel=0.0)
+  return NS(dataAvailable=dataAvailable, left=left or empty, right=right or empty)
+
+
+class TestTheProducer:
+  def test_a_clear_lane_under_radar_is_still_SOURCED_BY_THE_RADAR(self):
+    """The bug this class exists for. Availability without a source reads as 'nobody is watching'
+    to may_actuate, so a radar that saw an empty lane could not open the pass it was fitted for."""
+    rear = RearApproach()
+    rear.update(_FakeSM({'rearRadarBP': _radar()}))
+    for side in (rear.left, rear.right):
+      assert side.available
+      assert not side.blocks_lane_change
+      assert side.source == Source.radar, "a live radar reporting a clear lane named no source"
+
+  def test_a_target_behind_is_sourced_by_the_radar_too(self):
+    rear = RearApproach()
+    rear.update(_FakeSM({'rearRadarBP': _radar(left=NS(detected=True, dRel=40.0, vRel=12.0))}))
+    assert rear.left.source == Source.radar and rear.left.blocks_lane_change
+    assert rear.right.source == Source.radar and not rear.right.blocks_lane_change
+
+  def test_no_message_at_all_leaves_both_sides_unavailable(self):
+    rear = RearApproach()
+    rear.update(_FakeSM({}))
+    assert not rear.available
+    assert rear.left.source == Source.none
+
+  def test_blis_fills_when_no_digest_is_arriving(self):
+    rear = RearApproach()
+    rear.update(_FakeSM({'carStateBP': NS(blisLeft=NS(dataAvailable=True, sodDetect=1),
+                                          blisRight=NS(dataAvailable=True, sodDetect=0))}))
+    assert rear.left.source == Source.blis and rear.left.blocks_lane_change
+    assert rear.right.available and not rear.right.blocks_lane_change
+
+  def test_a_DEAD_RADAR_falls_back_to_blis_rather_than_going_blind(self):
+    """dataAvailable false is the feeder saying its own sensor died. Returning bare there would
+    drop both sides to unavailable and take every BLIS refusal with them -- so a dying radar would
+    make the car LESS careful than one that never had it."""
+    rear = RearApproach()
+    rear.update(_FakeSM({'rearRadarBP': _radar(dataAvailable=False),
+                         'carStateBP': NS(blisLeft=NS(dataAvailable=True, sodDetect=1),
+                                          blisRight=NS(dataAvailable=True, sodDetect=0))}))
+    assert rear.left.source == Source.blis
+    assert rear.left.blocks_lane_change, "a dead radar silently removed the blind-spot veto"
+
+  def test_a_live_radar_wins_over_blis_on_the_same_frame(self):
+    rear = RearApproach()
+    rear.update(_FakeSM({'rearRadarBP': _radar(),
+                         'carStateBP': NS(blisLeft=NS(dataAvailable=True, sodDetect=1),
+                                          blisRight=NS(dataAvailable=True, sodDetect=1))}))
+    assert rear.left.source == Source.radar and not rear.left.blocks_lane_change
+
+  def test_a_MALFORMED_blis_message_leaves_both_sides_unavailable_not_half_filled(self):
+    """A capnp read that raises must not leave a side carrying a reading nothing checked -- and
+    must not escape into plannerd, which is how a drive was lost on 2026-08-18."""
+    rear = RearApproach()
+    rear.update(_FakeSM({'carStateBP': NS(blisLeft=NS(dataAvailable=True, sodDetect=1),
+                                          blisRight=NS(dataAvailable=True))}))   # no sodDetect
+    assert not rear.left.available and not rear.right.available
+
+  def test_stale_state_does_not_survive_a_frame_with_no_source(self):
+    rear = RearApproach()
+    rear.update(_FakeSM({'carStateBP': NS(blisLeft=NS(dataAvailable=True, sodDetect=1),
+                                          blisRight=NS(dataAvailable=True, sodDetect=1))}))
+    assert rear.left.blocks_lane_change
+    rear.update(_FakeSM({}))
+    assert not rear.available and not rear.left.blocks_lane_change

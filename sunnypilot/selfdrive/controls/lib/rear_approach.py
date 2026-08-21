@@ -1,13 +1,29 @@
 """
-FusionPilot: rear-approach input for passing assist. NO SOURCE FITTED YET.
+FusionPilot: rear-approach input for passing assist. TWO PRODUCERS WIRED, NEITHER LIVE ON THIS CAR.
 
 Answers one question per side: is something coming up behind me in that lane, and how fast.
 
-Nothing produces this today. Every side reports `available=False`, which the decision chain treats
-as "unknown", NOT as "clear" -- that distinction is the entire reason this module exists rather
-than a couple of extra fields on the detector. carState.leftBlindspot already defaults False when
-no sensor is fitted, so an absent sensor and an empty lane are indistinguishable downstream unless
-availability is carried explicitly and separately.
+  radar   `rearRadarBP`, a digest from a rear-facing radar. No feeder is built, so the message
+          never arrives and `update` takes the quiet early return.
+  BLIS    `carStateBP.blisLeft/blisRight`, the fallback wherever the digest is absent or stale.
+          `dataAvailable` stays False until the canbox routes Side_Detect_L/R_Stat (0x3A6/0x3A7)
+          onto a bus openpilot reads, so today it fills nothing either.
+
+**BOTH ARE INERT ON HIS CAR AND NEITHER IS DEAD CODE.** Fitting the canbox turns BLIS on with no
+software change; building the feeder turns the radar on and it takes precedence per side. Do not
+"clean up" either path on the grounds that nothing populates it.
+
+With no source, every side reports `available=False`, which the decision chain treats as "unknown",
+NOT as "clear" -- that distinction is the entire reason this module exists rather than a couple of
+extra fields on the detector. carState.leftBlindspot already defaults False when no sensor is
+fitted, so an absent sensor and an empty lane are indistinguishable downstream unless availability
+is carried explicitly and separately.
+
+**AND A SOURCE IS PART OF AVAILABILITY.** `source` is not a log label: `may_actuate` reads it, and
+so does the panel's rear caveat, because BLIS VETOES AND ONLY RADAR AUTHORIZES. Any path that sets
+`available` must set `source` in the same breath -- the empty-lane radar branch did not, and a
+working radar reporting a clear lane consequently failed the authorization gate while the same
+radar reporting a car passed it.
 
 WHY BUILD THE CONSUMER BEFORE THE PRODUCER
 The gate has to sit in a specific place in the decision order (after geometry, before the
@@ -33,8 +49,10 @@ rate a radar provides -- which are precisely the numbers a lane-change decision 
 for the weaker source would have to be undone the moment the stronger one is fitted.
 
 Given what BLIS turned out to be, the radar is not a fallback for it -- it is the only source that
-can fill these fields properly. BLIS remains worth wiring as a veto: a lane known to be occupied
-right now is still a lane not to move into.
+can fill these fields properly. BLIS is wired as a VETO ONLY, which is worth having: a lane known
+to be occupied right now is still a lane not to move into. It carries no range and no closing rate,
+so it never fills `ttc`, never authorizes, and never demands the reversal of a crossing already
+begun -- see the two properties below, where each of those is refused by name.
 """
 
 from cereal import custom
@@ -193,13 +211,25 @@ class RearApproach:
     # frames are still arriving. A feeder that outlived its sensor would otherwise report an empty
     # road indefinitely, which is the one failure this module was written to refuse.
     if not bool(rr.dataAvailable):
+      # AND FALL BACK HERE TOO. This is the feeder saying its own sensor is dead, which is exactly
+      # when the cheaper source is worth having -- returning bare would drop both sides to
+      # unavailable and take every BLIS refusal with them, so a dying radar would make the car
+      # LESS careful than one that never had it.
+      self._update_from_blis(sm)
       return
 
     for side, msg in ((self.left, rr.left), (self.right, rr.right)):
       if not bool(msg.detected):
         # SEEN AND EMPTY is a real answer, and a different one from not looking. The side is
         # available with no target, so blocks_lane_change can clear it rather than veto by silence.
+        #
+        # AND THE SOURCE IS STILL THE RADAR. Leaving it at Source.none here read as "nobody is
+        # watching" to every consumer that asks WHICH sensor answered -- `_rear_can_authorize` and
+        # the panel's rear caveat both do -- so a working radar reporting a CLEAR lane failed the
+        # authorization gate while the same radar reporting a CAR passed it. Exactly inverted, and
+        # it would have disabled actuation on precisely the lane a pass wants.
         side.available = True
+        side.source = Source.radar
         continue
       side.from_radar(float(msg.dRel), float(msg.vRel))
 
@@ -221,18 +251,41 @@ class RearApproach:
     `dataAvailable` stays False until then -- so on his car today this is inert, exactly as the
     radar branch above is.
     """
+    # RESETS ITS OWN SIDES rather than trusting the caller to have done it. Every call site today
+    # sits immediately after update()'s reset pair, so this is a no-op -- but a helper that is only
+    # correct because of where it happens to be called is one refactor from breaking the rule the
+    # top of update() states in capitals, and nothing would fail.
+    self.left.reset()
+    self.right.reset()
+
+    # ONE try AROUND THE WHOLE READ, field accesses included. The first version guarded only the
+    # message lookup and then read det.dataAvailable and det.sodDetect bare, which is inconsistent
+    # with the getattr below and, more to the point, is a capnp boundary: an AttributeError there
+    # propagates out through PassingAssistDetector.update and kills plannerd. That exact failure
+    # cost a drive on 2026-08-18.
     try:
+      # `valid` ONLY, WHERE THE RADAR BRANCH ALSO WANTS `updated`, and that asymmetry is
+      # deliberate. This module's policy for carStateBP is stated at its consumer: availability
+      # comes from the message's own dataAvailable flag rather than SubMaster liveness. A wedged
+      # publisher therefore freezes the last occupancy -- frozen-occupied refuses forever, which is
+      # safe, and frozen-clear is exactly as permissive as going unavailable would be. Neither is
+      # worse than dropping the side, and dropping it would cost a refusal.
       if not sm.valid.get("carStateBP", False):
         return
       bp = sm["carStateBP"]
-    except (KeyError, AttributeError, TypeError):
-      return
 
-    for side, det in ((self.left, getattr(bp, "blisLeft", None)),
-                      (self.right, getattr(bp, "blisRight", None))):
-      if det is None or not bool(det.dataAvailable):
-        continue
-      # `sodDetect` is the occupancy bit. blis_ext.py states that `carState.leftBlindspot` is
-      # `SodDetct*_D_Stat != 0` and nothing else -- `SodAlrt*` is the MIRROR LAMP, whose flash
-      # follows the driver's own turn signal rather than the other vehicle, so it is about us.
-      side.from_blis(bool(det.sodDetect))
+      for side, det in ((self.left, getattr(bp, "blisLeft", None)),
+                        (self.right, getattr(bp, "blisRight", None))):
+        if det is None or not bool(det.dataAvailable):
+          continue
+        # `sodDetect` is the occupancy bit, a plain UInt8. blis_ext.py states that
+        # `carState.leftBlindspot` is `SodDetct*_D_Stat != 0` and nothing else -- `SodAlrt*` is the
+        # MIRROR LAMP, whose flash follows the driver's own turn signal rather than the other
+        # vehicle, so it is about us.
+        side.from_blis(bool(det.sodDetect))
+    except (KeyError, AttributeError, TypeError):
+      # Partial fill is worse than none: a side already written before the raise would keep a
+      # reading nothing checked. Back out to unavailable, which is what the whole module means by
+      # "we cannot see".
+      self.left.reset()
+      self.right.reset()

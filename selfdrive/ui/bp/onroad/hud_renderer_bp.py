@@ -318,6 +318,42 @@ LANE_BOX_GAP = 10
 LANE_STRIP_H = 38
 
 
+def _rear_caveat(left_avail: bool, left_source: str, right_avail: bool, right_source: str) -> str:
+  """What the panel must say about rear coverage. Empty string means say nothing.
+
+  FOUR STATES, NOT TWO, and the two in the middle are the ones a bare availability test got wrong.
+
+    nothing fitted        "no rear data"
+    BLIS only             "rear: blind spot only"
+    one side uncovered    "no rear data left" / "no rear data right"
+    radar                 nothing -- this is the case the feature was built for
+
+  WHY THE BLIS STATE NEEDS SAYING. Wiring the BLIS producer makes both sides `available`, so a
+  bare availability test DROPS the caveat the day the canbox lands, and the screen then reads as
+  properly rear-checked by a sensor that cannot see a car closing from two hundred feet back. Same
+  rule as `_rear_can_authorize`: a BLIS-sourced decision must not pass for one a radar cleared, on
+  the panel exactly as in the log.
+
+  WHY PER-SIDE. `RearApproach.available` is left OR right -- the permissive combiner -- and
+  `may_actuate` already had to learn that one working sensor answers yes for both sides. A panel
+  that repeats it tells the driver the rear is covered while one side has nothing at all, which on
+  a half-finished canbox retrofit is the likely state rather than an exotic one.
+
+  Takes plain values rather than the capnp readers so it can be lifted and tested without pyray.
+  """
+  if not (left_avail or right_avail):
+    return "no rear data"
+  if not left_avail:
+    return "no rear data left"
+  if not right_avail:
+    return "no rear data right"
+  if left_source != 'radar' or right_source != 'radar':
+    # EITHER side short of radar downgrades the line. Saying nothing because the OTHER side has a
+    # radar would be the permissive combiner again, one level down.
+    return "rear: blind spot only"
+  return ""
+
+
 class HudRendererBP(HudRendererSP):
   """BluePilot HudRenderer with brake status display.
 
@@ -1303,8 +1339,10 @@ class HudRendererBP(HudRendererSP):
       caveats.append("no blind spot data")
     if not pa.tsrAvailable:
       caveats.append("no sign data")
-    if not (pa.rearLeft.available or pa.rearRight.available):
-      caveats.append("no rear data")
+    rear_caveat = _rear_caveat(pa.rearLeft.available, str(pa.rearLeft.source),
+                               pa.rearRight.available, str(pa.rearRight.source))
+    if rear_caveat:
+      caveats.append(rear_caveat)
     if not (pa.adjacentLeft.available or pa.adjacentRight.available):
       caveats.append("no next-lane data")
     # Say so even when it is not what is blocking. On a four-lane two-way road a pass can still be

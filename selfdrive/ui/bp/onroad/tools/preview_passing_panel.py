@@ -82,6 +82,23 @@ SCENES = [
    "No lane to move into",
    "no sign data  -  no rear data  -  no next-lane data  -  oncoming seen  -  3 this drive",
    0.0, False, GREY),
+  # BLIS FITTED, NO REAR RADAR -- the state the canbox creates the day it lands. Nine characters
+  # longer than "no rear data" and it has to survive on the same line beside the others, which is
+  # why this is here at all: the sub-line has already run off both edges of the panel once.
+  ("refused, with blind spot fitted but no rear radar",
+   "No lane to move into",
+   # WITHOUT the trailing count, which is what _fit_sub drops here: it breaks at the first item
+   # that will not fit, and the nine extra characters of the rear caveat are enough to push the
+   # per-drive count off the end. Priority order puts the count last precisely so that is what goes.
+   #
+   # THIS STRING IS A LITERAL AND THEREFORE PROVES ONLY THAT IT FITS. Which caveat gets CHOSEN is
+   # the part that was wrong, and no scene here can check it -- the harness takes a finished
+   # sub-line. TestTheRearCaveat in tests/test_passing_assist_panel.py lifts `_rear_caveat` and
+   # asserts the choice; this scene is the width half of the same question.
+   "no sign data  -  rear: blind spot only  -  no next-lane data  -  oncoming seen",
+   0.0, False, GREY),
+  ("keep right, with blind spot fitted but no rear radar",
+   "MOVE RIGHT  >>>", "rear: blind spot only", 0.0, True, BLUE),
   ("turned off with the LKA button, and staying off",
    "PASSING ASSIST OFF", "LKA button turns it back on", 0.0, False, GREY),
   ("keep right",

@@ -296,3 +296,48 @@ class TestTheLateAgreementReachesTheScreen:
     i_strict = src.index("driverPassesAgreed")
     i_late = src.index("driverPassesAgreedLate")
     assert i_strict < i_late, "the strict count must still be rendered"
+
+
+_rear_caveat = _load_fn("_rear_caveat")
+
+
+class TestTheRearCaveat:
+  """What the panel says about rear coverage, which is the only place the driver learns that the
+  thing behind him was checked by a sensor that cannot see anything approaching.
+
+  This is a lifted function rather than a rendered scene on purpose: the preview supplies the
+  sub-line as a literal string, so it proves the line FITS and proves nothing about which line is
+  chosen. Choosing is where this was wrong.
+  """
+
+  def test_nothing_fitted_says_so(self):
+    assert _rear_caveat(False, 'none', False, 'none') == "no rear data"
+
+  def test_radar_on_both_sides_says_nothing(self):
+    assert _rear_caveat(True, 'radar', True, 'radar') == ""
+
+  def test_a_CLEAR_radar_lane_still_counts_as_radar(self):
+    """The panel half of the source-on-empty bug. A live radar watching an empty road must not be
+    reported as a downgrade -- it is the configuration the whole feature is for."""
+    assert _rear_caveat(True, 'radar', True, 'radar') == ""
+
+  def test_blis_only_is_named_as_a_downgrade(self):
+    """It must NOT fall through to silence. Wiring BLIS makes both sides available, so a bare
+    availability test drops the caveat the day the canbox lands and the screen reads as properly
+    rear-checked by a sensor that cannot see a car closing from two hundred feet back."""
+    assert _rear_caveat(True, 'blis', True, 'blis') == "rear: blind spot only"
+
+  def test_one_radar_side_does_not_launder_the_other(self):
+    # The permissive combiner, one level down: radar on the left must not silence a BLIS right.
+    assert _rear_caveat(True, 'radar', True, 'blis') == "rear: blind spot only"
+    assert _rear_caveat(True, 'blis', True, 'radar') == "rear: blind spot only"
+
+  def test_an_uncovered_side_is_named_rather_than_averaged_away(self):
+    """RearApproach.available is left OR right, and may_actuate already had to learn that one
+    working sensor answers yes for both sides. The panel must not repeat it."""
+    assert _rear_caveat(False, 'none', True, 'radar') == "no rear data left"
+    assert _rear_caveat(True, 'radar', False, 'none') == "no rear data right"
+
+  def test_an_uncovered_side_outranks_the_blis_downgrade(self):
+    # No coverage at all is the more serious of the two, so it is the one that gets the line.
+    assert _rear_caveat(False, 'none', True, 'blis') == "no rear data left"

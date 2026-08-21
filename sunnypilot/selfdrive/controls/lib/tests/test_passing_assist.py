@@ -3844,11 +3844,44 @@ class TestNothingActuatesWithoutRearCoverage:
     d.rear.right.available = right
     # A SOURCE IS PART OF AVAILABILITY NOW. Setting the flag alone left `source` at none, which
     # these tests never noticed because nothing read it -- see TestBlisMayVetoButNotAuthorize.
+    #
+    # AND ASSIGNING THE PAIR BY HAND IS WHY THIS CLASS MISSED A REAL BUG. It guarantees an
+    # invariant the producer did not hold: RearApproach.update's empty-lane radar branch set
+    # `available` and left `source` at none, so a working radar reporting a CLEAR lane failed
+    # this very gate while the same radar reporting a car passed it. No fixture that writes both
+    # fields together can see that. TestTheProducer in test_rear_approach.py drives the real
+    # class, and the case below crosses the two.
     if left:
       d.rear.left.source = src
     if right:
       d.rear.right.source = src
     return d
+
+  def test_the_gate_agrees_with_what_the_real_producer_builds(self):
+    """THE CROSSOVER. Everything else here hand-builds the rear state; this one asks the producer
+    for it, because the gate and the producer disagreeing is exactly the failure that got past a
+    green suite."""
+    from openpilot.sunnypilot.selfdrive.controls.lib.rear_approach import RearApproach
+
+    class _SM:
+      def __init__(self, data):
+        self.data, self.valid, self.updated = data, dict.fromkeys(data, True), dict.fromkeys(data, True)
+
+      def __getitem__(self, k):
+        return self.data[k]
+
+    empty = NS(detected=False, dRel=0.0, vRel=0.0)
+    d = PassingAssistDetector()
+    d.actuate_enabled = True
+    d.rear = RearApproach()
+    d.rear.update(_SM({'rearRadarBP': NS(dataAvailable=True, left=empty, right=empty)}))
+    assert d.may_actuate(Side.left), "a live radar on a clear lane did not authorize"
+    assert d.may_actuate(Side.right)
+
+    d.rear.update(_SM({'carStateBP': NS(blisLeft=NS(dataAvailable=True, sodDetect=0),
+                                        blisRight=NS(dataAvailable=True, sodDetect=0))}))
+    assert not d.may_actuate(Side.left), "BLIS authorized a lane change"
+    assert not d.may_actuate(Side.right)
 
   def test_no_rear_sensor_means_no_actuation_on_either_side(self):
     d = self._det()
