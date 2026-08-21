@@ -19,6 +19,11 @@ from opendbc.sunnypilot.car.ford.icbm import IntelligentCruiseButtonManagementIn
 from opendbc.sunnypilot.car.ford.gap_control import FordGapController
 from opendbc.sunnypilot.car.ford.stop_override import FordStopOverride
 
+# FusionPilot: the deepest deceleration we will request while the car is ALREADY STOPPED, m/s^2.
+# Ford's own standstill requests span -0.25 to +0.47 across 7,168 measured frames; this is twice its
+# deepest, so it never binds where Ford would have asked for more. See the block that applies it.
+_STANDSTILL_ACCEL_FLOOR = -0.5
+
 LongCtrlState = structs.CarControl.Actuators.LongControlState
 VisualAlert = structs.CarControl.HUDControl.VisualAlert
 
@@ -498,6 +503,32 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
             # while leaving these clear asks for a deceleration and does not request the actuation.
             send_brake = send_brake or bool(stock.get("AccBrkDecel_B_Rq", 0))
             send_prchg = send_prchg or bool(stock.get("AccBrkPrchg_B_Rq", 0))
+
+        # AND NEVER DEEPER THAN FORD ITSELF ASKS WHILE THE CAR IS ALREADY STOPPED.
+        #
+        # openpilot's stopping state ramps the request toward `stopAccel` to pin a stationary car,
+        # which is ordinary upstream behaviour and fine on a car openpilot fully controls. On this
+        # one it is far outside the envelope the ACC system ever sees. Measured over every
+        # standstill frame of routes 0000039d and 0000039f -- `AccBrkTot_A_Rq` in m/s^2:
+        #
+        #     FORD   n=7168   min -0.25   median -0.02
+        #     OURS   n=6730   min -2.61   p5  -2.61
+        #
+        # Ten times Ford's deepest, on 5% of stopped frames. FORD DOES NOT HOLD A STOP WITH A
+        # DECELERATION NUMBER -- it holds it with `AccStopStat_B_Rq`, which we already assert, and
+        # asks for essentially nothing on top.
+        #
+        # Observed on route 0000039d: at a dead standstill the request ramped -1.03 -> -2.61 over
+        # four seconds and sat there, then re-armed and ramped again while he was on the brake
+        # pedal. The next ignition came up with `CcStat_D_Actl = Denied` -- cruise refused before
+        # the drive began -- and cost him a pull-over and two restarts to clear. Attribution is
+        # circumstantial, but a sustained near-maximum brake request against a stationary car is the
+        # only thing in that window outside anything Ford does, and it is wrong on its own terms.
+        #
+        # -0.5 is twice Ford's deepest observed, so this never binds where Ford would have asked for
+        # more, and it only applies once `standstill` is true -- the approach is untouched.
+        if CS.out.standstill:
+          send_accel = max(send_accel, _STANDSTILL_ACCEL_FLOOR)
 
         can_sends.append(fordcan_ext.create_acc_msg(
           self.packer, self.CAN, CC.longActive, lng.gas, send_accel, lng.accel_pred_send,

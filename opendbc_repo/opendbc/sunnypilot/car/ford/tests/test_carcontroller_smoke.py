@@ -483,6 +483,94 @@ def test_the_override_keeps_its_own_braking_when_ford_asks_for_none(carcontrolle
     f"own braking away and the feature does nothing below Ford's floor")
 
 
+def test_a_stopped_car_is_never_asked_for_ford_scale_braking(carcontroller_parts):
+  """THE WIND-UP, 2026-08-20. openpilot must not pin a stationary car with a huge brake request.
+
+  openpilot's stopping state ramps toward `stopAccel` to hold a stopped car -- normal upstream, and
+  wildly outside what this ACC system ever sees. Measured across every standstill frame of routes
+  0000039d and 0000039f: Ford's own `AccBrkTot_A_Rq` spans -0.25 to +0.47, while ours reached -2.61
+  on 5% of stopped frames. Ford holds a stop with `AccStopStat_B_Rq`, not with a deceleration.
+
+  On 0000039d the request ramped -1.03 -> -2.61 over four seconds against a dead-stopped car and
+  held; the next ignition came up with cruise `Denied`.
+
+  So: car stopped, openpilot asking for hard braking, and the wire must stay inside Ford's envelope.
+  """
+  from opendbc.car.ford.interface import CarInterface
+  from opendbc.car.ford.values import CAR
+  from opendbc.car.ford.carcontroller import _STANDSTILL_ACCEL_FLOOR
+
+  CarController, dbc_names, CP, CP_SP, structs = carcontroller_parts
+  CP_long = CarInterface.get_non_essential_params(CAR.FORD_FUSION_MK5)
+  CP_long.openpilotLongitudinalControl = True
+
+  cc = CarController(dbc_names, CP_long, CP_SP)
+  cc.stock_acc_passthrough = True
+
+  out = structs.CarState()
+  out.vEgo = 0.0
+  out.vEgoRaw = 0.0
+  out.standstill = True
+  out.cruiseState.enabled = True
+  out.cruiseState.available = True
+  CS = FakeCarState(out)
+  CS.acc_cam_valid = True
+  CS.acc_stock_values["AccBrkTot_A_Rq"] = -0.02        # what Ford actually asks while holding
+
+  CC, CC_SP = _car_control(structs, enabled=True,
+                           send_button=structs.IntelligentCruiseButtonManagement.SendButtonState.none,
+                           gap_target=0, long_active=True, accel=-2.61)
+
+  hardest = 0.0
+  for frame in range(300):
+    _, can_sends = cc.update(CC, CC_SP, CS, frame * 10_000_000)
+    for m in can_sends:
+      if m[0] == 390:
+        hardest = min(hardest, _decode_acc_brake(bytes(m[1])))
+
+  assert hardest >= _STANDSTILL_ACCEL_FLOOR - 0.02, (
+    f"a stopped car was asked for {hardest:.2f} m/s^2 -- Ford's deepest standstill request across "
+    f"7,168 measured frames was -0.25, and this is the shape that preceded cruise coming up Denied")
+
+
+def test_the_standstill_floor_does_not_touch_a_moving_car(carcontroller_parts):
+  """The clamp is about holding, not stopping. If it bled into the approach it would cap the
+  braking that brings the car to rest -- turning a fix for the standstill into a much worse bug on
+  every deceleration."""
+  from opendbc.car.ford.interface import CarInterface
+  from opendbc.car.ford.values import CAR
+
+  CarController, dbc_names, CP, CP_SP, structs = carcontroller_parts
+  CP_long = CarInterface.get_non_essential_params(CAR.FORD_FUSION_MK5)
+  CP_long.openpilotLongitudinalControl = True
+
+  cc = CarController(dbc_names, CP_long, CP_SP)
+  cc.stock_acc_passthrough = False        # author our own, no camera frame to floor against
+
+  out = structs.CarState()
+  out.vEgo = 13.0
+  out.vEgoRaw = 13.0
+  out.standstill = False
+  out.cruiseState.enabled = True
+  out.cruiseState.available = True
+  CS = FakeCarState(out)
+
+  CC, CC_SP = _car_control(structs, enabled=True,
+                           send_button=structs.IntelligentCruiseButtonManagement.SendButtonState.none,
+                           gap_target=0, long_active=True, accel=-2.2)
+
+  hardest = 0.0
+  for frame in range(300):
+    _, can_sends = cc.update(CC, CC_SP, CS, frame * 10_000_000)
+    for m in can_sends:
+      if m[0] == 390:
+        hardest = min(hardest, _decode_acc_brake(bytes(m[1])))
+
+  assert hardest < -1.0, (
+    f"a MOVING car asking for -2.2 m/s^2 only got {hardest:.2f} -- the standstill floor leaked into "
+    f"the approach and is now capping real braking")
+
+
 @pytest.mark.parametrize("stop_override", [False, True])
 def test_the_stop_override_never_takes_the_car_with_it(carcontroller_parts, stop_override):
   """The 2026-08-15 rule applied to the newest addition: anything that adds state or a call to the
