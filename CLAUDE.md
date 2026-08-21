@@ -3396,3 +3396,51 @@ fabricated TTC turned into a 50 Hz event. Ask what a consumer DOES, not what it 
 bug routed every blocked frame into `emergency_aborts` -- a counter split made for exactly this
 distinction, doing its job years before anyone read it. Keep counters separated by CAUSE even when
 nothing yet distinguishes them.
+
+## A FIELD STOPS BEING A LOG LABEL THE MOMENT A GATE READS IT
+
+2026-08-21, from the code review of the BLIS producer, and it is the sharper half of that day.
+
+`RearApproachSide.source` was written to record WHICH SENSOR ANSWERED so a drive log full of
+BLIS-sourced decisions could not be read as though a radar had cleared them. Then `may_actuate`
+started reading it -- `available and source == Source.radar` -- and nothing anywhere said the field
+had changed job. Meanwhile the radar producer's "seen and empty" branch had always done this:
+
+    if not bool(msg.detected):
+      side.available = True      # a real answer: watched, and nothing there
+      continue                   # ...and source stays Source.none
+
+So once a rear radar is fitted:
+
+    radar reports a CAR behind     source=radar   may_actuate True   ...then vetoed below
+    radar reports a CLEAR lane     source=none    may_actuate FALSE
+
+**Permission was granted only in the case the next gate refuses.** Actuation would have been dead
+on precisely the lane a pass wants, and the failure is silent -- no error, no log line, just a
+feature that never fires.
+
+**THE REVIEW FOUND IT BY ASKING WHO READS THE FIELD, NOT BY READING THE DIFF.** The diff was three
+properties and a producer; the bug was in an unchanged line four screens away that the diff gave a
+new consumer. **When a change adds a reader of an existing field, audit every WRITER of that field
+-- the diff shows you the reader and hides the writers.**
+
+**AND IT WAS PROBED, NOT REASONED.** `RearApproach.update` was driven against a hand-built digest
+and asked to print `source`: empty gives 0, a target gives 2. That took two minutes and settled
+what an hour of reading the call chain had not.
+
+**WHY 2000 GREEN TESTS SAID NOTHING.** The actuation-gate fixture assigns `available` and `source`
+together:
+
+    d.rear.left.available = left
+    if left:
+      d.rear.left.source = src
+
+which GUARANTEES an invariant the producer does not hold. Same shape as every entry in "Fixtures
+more orderly than reality", and the same answer as "Replay the class, not a funnel": one test now
+drives the real `RearApproach.update` into `may_actuate`. **A fixture that writes two fields
+together can never catch a producer that writes only one.**
+
+**And the panel inherited it within the hour** -- a caveat added the same session tested
+`str(source) == 'radar'` and would have rendered "rear: blind spot only" on a car with a working
+radar. A wrong invariant propagates to every new consumer until someone writes it down, which is
+what the module header now does: *a source must be set wherever availability is claimed*.
