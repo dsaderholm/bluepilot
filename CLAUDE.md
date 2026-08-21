@@ -3350,3 +3350,49 @@ unlocated Lagoon event, and this one matters more.
 
 **Until then the honest position is that this is a MISSING SENSE, not a tuning problem**, and it is
 a reason not to let the maneuver act unsupervised in a work zone.
+
+## A SENSOR THAT CANNOT MEASURE SOMETHING MUST NOT BE GIVEN A NUMBER FOR IT
+
+2026-08-21, found by wiring the BLIS producer into `RearApproach` -- the code had been sitting
+unwired since it was written, so nothing had ever exercised it.
+
+`RearApproachSide.from_blis` set `ttc = 0.0`. BLIS reports no range and no closing rate, so that
+number was invented; it was there so the veto in `blocks_lane_change` -- which tests
+`ttc < UNSAFE_TTC_S` -- would fire at all. **The same field is tested by `demands_abort` at
+`ttc < COLLISION_TTC_S`, which is the ONE input allowed to reverse a crossing already begun.** So a
+car merely SITTING in the blind spot would have commanded an emergency reversal, at 50 Hz, on
+presence-only evidence.
+
+Its own docstring said the opposite -- *"blocks_lane_change therefore cannot fire on the TTC test,
+and a BLIS source can only ever veto on presence"* -- and the code had contradicted it from the
+first line. **A docstring describing a property the code does not have is not a comment drift
+problem; it is the design that was meant to be there.**
+
+    ttc                 stays NO_THREAT_TTC_S on a BLIS source
+    blocks_lane_change  tests `closing` directly for BLIS -- presence IS the veto, and an explicit
+                        not-closing still clears it
+    demands_abort       refuses a BLIS source outright
+
+**Refusing to START on presence stays, because that costs a pass. Backing out half-way between two
+lanes is a maneuver in its own right** -- at 8 s the right answer is to keep going and let them
+settle behind, at 3 s they are arriving whatever anyone does, and BLIS cannot tell those apart.
+Same rule as everywhere else here: evidence that opens a maneuver, or commands one, must never be
+cheaper than evidence that refuses one.
+
+**THE GATE REVIEW IS THE REUSABLE PART.** Before wiring any new source into a shared struct,
+enumerate every consumer and label each REFUSES / AUTHORIZES / DISPLAYS:
+
+    may_actuate            AUTHORIZES a commanded move    radar only
+    _must_abort            reverses a committed crossing  refuses -- and it is an ACTION
+    left_ok / right_ok     refuses the pass               refuses
+    the blockedBy branch   names rearApproaching          display
+    keep-right timer       resets the wait                delays
+
+Six consumers, one authorizes, and the review as first written called `_must_abort` a refusal
+because it stops a maneuver. **It stops one maneuver by performing another**, which is what the
+fabricated TTC turned into a 50 Hz event. Ask what a consumer DOES, not what it prevents.
+
+**And the four `TestTheBackedOutChime` tests are what caught it**, by asserting `aborts` while the
+bug routed every blocked frame into `emergency_aborts` -- a counter split made for exactly this
+distinction, doing its job years before anyone read it. Keep counters separated by CAUSE even when
+nothing yet distinguishes them.
