@@ -17,12 +17,22 @@ stays Ford's.
 
 **The complete stop is what it is for.** Ford's set speed cannot go below 20 mph, and stock ACC
 completes a stop only when its own radar has a lead — so a stop sign or red light on an empty road
-is the one thing the car cannot do. For a few seconds at the end of such a stop openpilot sends the
-braking instead of Ford, bounded in time, and hands straight back. It never takes over when a lead
-is close, because Ford's stop-and-go already owns that case.
+is the one thing the car cannot do. openpilot sends the braking instead of Ford for a bounded
+window, then hands straight back. It never takes over when a lead is close, because Ford's
+stop-and-go already owns that case, and **it has never yet been observed bringing a car to a
+standstill and holding it** — the trigger is measured against recorded drives, the braking is not.
 
-**Both ship off, and the reason is not caution about the code.** How the camera reacts to being
-overridden for several seconds has not been measured: one drive saw it stop accepting commands after
-about forty seconds of disagreement, another saw a second and a half and no reaction at all, and a
-stop sits between the two. The on-screen ACC readout turns violet and reads `OP STOP` whenever
-openpilot has taken the command, so it is visible rather than inferred.
+**Whatever it sends is never softer than what Ford asked for.** Taking the command means Ford's
+command stops reaching the car, and nothing originally guaranteed ours was at least as strong: on
+one measured approach to a stopped vehicle the override held the command for nine seconds while
+requesting a tenth of the deceleration Ford was already asking for. Ford's own request is now a
+floor, so taking over can only ever add braking.
+
+**It will not take the command below 25 mph.** Every measured takeover that began under Ford's own
+20 mph floor made the forward camera assert cancel, and one latched it for the rest of the drive,
+after which stock ACC was unavailable until the car was restarted. Above the floor the camera
+tolerated every takeover measured, including one that ran 35 seconds to a full standstill. The cost
+of that rule is real: a light you are already crawling towards at 20 mph is yours.
+
+**Both ship off**, and the on-screen ACC readout turns violet and reads `OP STOP` whenever openpilot
+has taken the command, so it is visible rather than inferred.
