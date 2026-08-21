@@ -134,22 +134,46 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
     # Note: main_on_last, lkas_enabled_last, steer_alert_last, lead_distance_bars_last,
     # distance_bar_frame are initialized by HudExt.__init__() above
 
-  def _curve_speed_gap(self, CS) -> float:
-    """FusionPilot: how far below the current speed a CURVE wants us, m/s. 0.0 when none does.
+  def _urgent_speed_gap(self, CS) -> float:
+    """FusionPilot: how far below the current speed something URGENT wants us, m/s. 0.0 if nothing.
 
-    Gated on the plan source so this can only ever describe a corner: SCC-Vision and SCC-Map are the
-    two that publish a corner speed. A speed-limit drop or a lead is somebody else's job -- ICBM
-    handles the first at its own pace and Ford's radar owns the second.
+    His framing, 2026-08-20, and it is the right generalisation: *"If a red light, stop sign, or
+    unconfirmed lead can't be reached by ICBM fast enough, we need to switch to OP long sooner."*
+    The stalk closes a gap at 3.3 mph/s and does not care what opened it.
 
-    Never raises: a missing or invalid plan reads as no gap, which is the same as no curve.
+    TWO SOURCES QUALIFY, and the exclusions matter as much as the inclusions:
+
+      SCC-Vision / SCC-Map   a corner. Physics, and it arrives on a schedule the road sets.
+      an unconfirmed lead    a stopped car the radar cannot see. Measured on his drives: episodes
+                             at 48.6 and 52.4 mph opened gaps of 28 and 32 mph, which the stalk
+                             needs 8-10 s to close. That is the near-miss he reported -- *"it didn't
+                             seem to set my speed down that much at all"* -- and it was never a
+                             detection failure.
+
+      NOT a speed limit. A limit change is not urgent: nothing is arriving, ICBM walking the number
+      down over a few seconds is exactly right, and taking the command for it would contradict the
+      camera several times a drive for no gain.
+      NOT a radar lead either. That is Ford's stop-and-go, which is better than ours, and the
+      override refuses one anyway.
+
+    Never raises: a missing or invalid plan reads as no gap.
     """
     try:
       if not (self.sm.alive.get('longitudinalPlanSP') and self.sm.valid.get('longitudinalPlanSP')):
         return 0.0
       lp = self.sm['longitudinalPlanSP']
-      if str(lp.longitudinalPlanSource) not in ("sccVision", "sccMap"):
-        return 0.0
-      return max(0.0, float(CS.out.vEgo) - float(lp.vTarget))
+      v_ego = float(CS.out.vEgo)
+      gap = 0.0
+      if str(lp.longitudinalPlanSource) in ("sccVision", "sccMap"):
+        gap = max(gap, v_ego - float(lp.vTarget))
+      ul = lp.unconfirmedLead
+      if str(ul.state) in ("active", "tracking"):
+        target = float(ul.vTarget)
+        # A zero target means "no request", not "stop immediately" -- the same trap the endpoint
+        # gate documents. Reading it as a target would make every idle frame a maximum gap.
+        if target > 0.0:
+          gap = max(gap, v_ego - target)
+      return max(0.0, gap)
     except Exception:  # noqa: BLE001 -- see docstring
       return 0.0
 
@@ -380,15 +404,15 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
             if (self.sm.alive.get('longitudinalPlanSP') and self.sm.valid.get('longitudinalPlanSP'))
             else 0.0,
             lead_distance=lead_d,
-            # THE CURVE SPEED GAP: how far below the current speed a mapped or vision corner wants
-            # us, and therefore how much road the stalk has to close at 3.3 mph/s. Zero unless a
-            # curve source actually owns the plan this frame, so the curve path cannot fire for
-            # anything else.
+            # THE URGENT SPEED GAP: how far below the current speed a corner or a radar-blind
+            # stopped car wants us, and therefore how much the stalk has to close at 3.3 mph/s.
+            # Zero unless one of those actually wants something, so this cannot fire for a speed
+            # limit or an ordinary lead.
             #
             # NOT `actuators.accel`, which was the first attempt: under ICBM openpilot's
             # longitudinal controller is not driving, watches the car ignore it, and winds up to its
-            # -3.5 floor for over 10% of engaged frames. See CURVE_ARM_GAP.
-            curve_gap=self._curve_speed_gap(CS),
+            # -3.5 floor for over 10% of engaged frames. See SLOWDOWN_ARM_GAP.
+            slowdown_gap=self._urgent_speed_gap(CS),
           )
           # Latch that THIS stop was ours, so the resume gate knows not to pull away from it on the
           # model's say-so. Keyed on the override's OWN outcome rather than on a speed window: the
@@ -436,7 +460,7 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
       if float(CS.out.vEgo) > 1.5:
         self.stop_override_stopped_us = False
 
-      # (helper defined on the class; see _curve_speed_gap)
+      # (helper defined on the class; see _urgent_speed_gap)
       use_passthrough = False
       if not override and self.stock_acc_passthrough and getattr(CS, "acc_cam_valid", False) and getattr(CS, "acc_stock_values", None):
         reason = fordcan_ext.passthrough_admissible(CS.acc_stock_values, CC.longActive)

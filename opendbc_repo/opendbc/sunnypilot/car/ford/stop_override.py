@@ -332,16 +332,16 @@ ENDPOINT_JUMP_M = 15.0
 # mph/s the car recognises presses. 20 mph is six seconds of tapping; below that ICBM closes it
 # quickly enough and should be left alone. Measured across four drives, a gap this size appears on
 # 0.89% of engaged time -- his 77 mph corner into a 28 mph bend was a 49 mph gap.
-CURVE_ARM_GAP = 20.0 * MPH_TO_MS
+SLOWDOWN_ARM_GAP = 20.0 * MPH_TO_MS
 
 # Release once the gap is small enough for the stalk again. Well clear of the arm threshold: every
 # arm and release is a handoff, and handoffs are what the camera reacts to, so flapping across a
 # single threshold would be the worst possible shape.
-CURVE_RELEASE_GAP = 8.0 * MPH_TO_MS
+SLOWDOWN_RELEASE_GAP = 8.0 * MPH_TO_MS
 
 # How long the plan must keep asking before we act, in 50 Hz frames. Short, because a corner does
 # not wait -- but long enough that one noisy frame cannot take the command.
-CURVE_CONFIRM_FRAMES = int(0.4 * OVERRIDE_HZ)
+SLOWDOWN_CONFIRM_FRAMES = int(0.4 * OVERRIDE_HZ)
 
 # The ceiling for the curve path, and it is HIGHER than the stop path's ENTER_SPEED on purpose.
 # ENTER_SPEED exists because above it "the set speed can still express this" -- true for a stop,
@@ -352,7 +352,7 @@ CURVE_CONFIRM_FRAMES = int(0.4 * OVERRIDE_HZ)
 # costs Ford ACC for a whole drive -- is associated with arming BELOW Ford's floor, not above it;
 # high-speed arms produced only transient cancels that released in 5-29 s. So the risk here is
 # believed to be a brief cancel rather than a brick, and 80 covers his 77 mph corner.
-CURVE_ENTER_SPEED = 80.0 * MPH_TO_MS
+SLOWDOWN_ENTER_SPEED = 80.0 * MPH_TO_MS
 
 # The curve path gets its OWN time bound, longer than the stop path's 20 s.
 #
@@ -367,8 +367,8 @@ CURVE_ENTER_SPEED = 80.0 * MPH_TO_MS
 # NOT a raise of MAX_ACTIVE_S. That bound is about contradicting Ford on a STOP, where the car ends
 # up stationary and the approach is short; a corner is a longer, gentler event and the two should
 # not be forced to share a number just because they share a class.
-CURVE_MAX_ACTIVE_S = 30.0
-CURVE_MAX_ACTIVE_FRAMES = int(CURVE_MAX_ACTIVE_S * OVERRIDE_HZ)
+SLOWDOWN_MAX_ACTIVE_S = 30.0
+SLOWDOWN_MAX_ACTIVE_FRAMES = int(SLOWDOWN_MAX_ACTIVE_S * OVERRIDE_HZ)
 
 # A lead this close is Ford's business. Beyond it the radar has nothing useful and the stop is ours.
 LEAD_DISQUALIFIES_M = 60.0
@@ -439,11 +439,11 @@ class FordStopOverride:
     # replaced -- that counter armed zero times on both logged drives, because the endpoint jitters
     # frame to frame and any single rise reset it.
     self.closing_window: deque = deque(maxlen=CLOSING_CONFIRM_FRAMES)
-    # The curve path -- see CURVE_ARM_GAP. Separate state from the stop path because they arm on
+    # The curve path -- see SLOWDOWN_ARM_GAP. Separate state from the stop path because they arm on
     # different evidence and only one may own the command at a time.
-    self.curve_active = False
-    self.curve_frames = 0
-    self.curve_confirm = 0
+    self.slowdown_active = False
+    self.slowdown_frames = 0
+    self.slowdown_confirm = 0
     self.last_result = ""       # for logging only, never used to decide
 
   def _end(self, why: str) -> None:
@@ -455,32 +455,32 @@ class FordStopOverride:
     self.holding = False
     self.hold_frames = 0
 
-  def _end_curve(self, why: str) -> None:
-    if self.curve_active:
+  def _end_slowdown(self, why: str) -> None:
+    if self.slowdown_active:
       self.last_result = why
-    self.curve_active = False
-    self.curve_frames = 0
-    self.curve_confirm = 0
+    self.slowdown_active = False
+    self.slowdown_frames = 0
+    self.slowdown_confirm = 0
 
-  def _update_curve(self, v_ego: float, lead_close: bool, curve_gap: float):
+  def _update_slowdown(self, v_ego: float, lead_close: bool, slowdown_gap: float):
     """The curve path. Returns True/False when it owns the frame, None when it does not.
 
     Runs BEFORE the stop machinery and independently of `has_slow_down`: a corner is not a stop and
     the model publishes no endpoint for one, so every gate the stop path uses is the wrong question
-    here. See CURVE_ARM_GAP for why this exists at all.
+    here. See SLOWDOWN_ARM_GAP for why this exists at all.
     """
     if self.active:
       # The stop path already owns the command. Only one of them may author.
-      self.curve_confirm = 0
+      self.slowdown_confirm = 0
       return None
 
-    if self.curve_active:
-      self.curve_frames += 1
+    if self.slowdown_active:
+      self.slowdown_frames += 1
       if lead_close:
-        self._end_curve("a lead arrived; Ford's stop-and-go owns this")
+        self._end_slowdown("a lead arrived; Ford's stop-and-go owns this")
         return False
-      if self.curve_frames > CURVE_MAX_ACTIVE_FRAMES:
-        self._end_curve("time bound reached while braking for a curve")
+      if self.slowdown_frames > SLOWDOWN_MAX_ACTIVE_FRAMES:
+        self._end_slowdown("time bound reached while braking for a curve")
         return False
       if v_ego <= STOPPED_SPEED:
         # IT BROUGHT THE CAR TO A STOP. Hand into the stop path's hold rather than releasing at a
@@ -488,40 +488,40 @@ class FordStopOverride:
         # and his own question was whether a curve takeover can carry through to a stop and back.
         # Measured on route 000003a0 that it can: Ford's cruise status follows into Que_Assist on
         # the way down, holds through the standstill, and resumes to 40 mph by itself afterwards.
-        self._end_curve("curve became a stop; handing to the hold")
+        self._end_slowdown("curve became a stop; handing to the hold")
         self.active = True
         self.holding = True
         self.frames = 0
         self.hold_frames = 0
         self.last_result = "holding a stop the curve path brought us to"
         return True
-      if curve_gap < CURVE_RELEASE_GAP:
-        self._end_curve("the gap is small enough for the buttons again")
+      if slowdown_gap < SLOWDOWN_RELEASE_GAP:
+        self._end_slowdown("the gap is small enough for the buttons again")
         return False
       return True
 
     # ---- arming ----
-    if v_ego < ARM_MIN_SPEED or v_ego > CURVE_ENTER_SPEED:
-      self.curve_confirm = 0
+    if v_ego < ARM_MIN_SPEED or v_ego > SLOWDOWN_ENTER_SPEED:
+      self.slowdown_confirm = 0
       return None
     if lead_close:
-      self.curve_confirm = 0
+      self.slowdown_confirm = 0
       return None
-    if curve_gap < CURVE_ARM_GAP:
-      self.curve_confirm = 0
+    if slowdown_gap < SLOWDOWN_ARM_GAP:
+      self.slowdown_confirm = 0
       return None
 
-    self.curve_confirm += 1
-    if self.curve_confirm < CURVE_CONFIRM_FRAMES:
+    self.slowdown_confirm += 1
+    if self.slowdown_confirm < SLOWDOWN_CONFIRM_FRAMES:
       return None
-    self.curve_active = True
-    self.curve_frames = 0
-    self.curve_confirm = 0
+    self.slowdown_active = True
+    self.slowdown_frames = 0
+    self.slowdown_confirm = 0
     self.last_result = "closing a gap the buttons cannot close in time"
     return True
 
   def update(self, long_active: bool, v_ego: float, has_slow_down: bool, op_stopping: bool,
-             lead_distance: float, stop_endpoint_m: float = 0.0, curve_gap: float = 0.0) -> bool:
+             lead_distance: float, stop_endpoint_m: float = 0.0, slowdown_gap: float = 0.0) -> bool:
     """Args:
       long_active:     openpilot longitudinal is actually active this frame.
       v_ego:           m/s.
@@ -549,13 +549,13 @@ class FordStopOverride:
       # longitudinal drops, and the gate stays latched telling the car this stop was still ours.
       self.holding = False
       self.hold_frames = 0
-      self._end_curve("longitudinal went inactive")
+      self._end_slowdown("longitudinal went inactive")
       return False
 
     # THE CURVE PATH RUNS FIRST, and independently of everything below. `has_slow_down` gates the
     # whole stop machinery, and a corner never sets it.
     lead_close_now = 0.0 < lead_distance < LEAD_DISQUALIFIES_M
-    curve = self._update_curve(v_ego, lead_close_now, curve_gap)
+    curve = self._update_slowdown(v_ego, lead_close_now, slowdown_gap)
     if curve is not None:
       return curve
 
