@@ -82,6 +82,15 @@ class RearApproachSide:
     """
     if not self.available:
       return False
+    # A BLIS SOURCE MAY NEVER DEMAND ONE. It answers "is something beside me", never "is something
+    # arriving", and the distance between those two is the entire question here: at 8 s the right
+    # answer is to keep going and let them settle behind, at 3 s they are arriving whatever anyone
+    # does, and BLIS cannot tell those apart. Reversing is itself a maneuver, made half-way between
+    # two lanes, so it demands a measurement rather than a presumption. Refusing to start on the
+    # same evidence still happens -- see blocks_lane_change -- because a refusal costs a pass and
+    # this costs a maneuver nobody chose.
+    if self.source == Source.blis:
+      return False
     return self.detected and self.closing and self.ttc < COLLISION_TTC_S
 
   @property
@@ -93,9 +102,20 @@ class RearApproachSide:
     silently disable passing on a car with no rear radar, and one that returned False would be a
     lie. Neither belongs here; the policy lives at the call site where it is visible.
     """
-    if not self.available:
+    if not self.available or not self.detected:
       return False
-    return self.detected and self.closing and self.ttc < UNSAFE_TTC_S
+    # PRESENCE IS THE WHOLE SIGNAL ON BLIS, and it is tested here rather than smuggled in as a
+    # fabricated ttc. `from_blis` used to set ttc to 0.0 so this line would fire, which quietly
+    # made `demands_abort` true as well -- so a car merely SITTING in the blind spot commanded an
+    # emergency reversal of a crossing already begun. Zero was not a measurement; it was the most
+    # alarming number available, invented from a sensor that reports no range at all.
+    #
+    # `closing` is the answer, not `detected`: with no distinguishing signal from_blis sets it from
+    # presence, but if sodStat/sodAlert ever turn out to distinguish, an explicit not-closing stops
+    # being a veto without this property changing.
+    if self.source == Source.blis:
+      return self.closing
+    return self.closing and self.ttc < UNSAFE_TTC_S
 
   def from_radar(self, d_rel: float, v_rel: float) -> None:
     """Fill from a rear-facing radar target. v_rel positive = closing on us.
@@ -130,7 +150,10 @@ class RearApproachSide:
     self.closing = bool(detected) if closing is None else bool(closing)
     self.d_rel = 0.0
     self.v_rel = 0.0
-    self.ttc = 0.0 if self.closing and self.detected else NO_THREAT_TTC_S
+    # LEFT UNSET, deliberately. There is no range and no closing rate in this message, so any
+    # number here is invented -- and the one that used to be here (0.0) read as "contact now" to
+    # every consumer that compares against a threshold.
+    self.ttc = NO_THREAT_TTC_S
 
 
 class RearApproach:
@@ -159,9 +182,11 @@ class RearApproach:
     # why this is a quiet return rather than anything that logs or alerts.
     try:
       if not sm.valid.get("rearRadarBP", False) or not sm.updated.get("rearRadarBP", False):
+        self._update_from_blis(sm)
         return
       rr = sm["rearRadarBP"]
     except (KeyError, AttributeError, TypeError):
+      self._update_from_blis(sm)
       return
 
     # dataAvailable is the feeder's own verdict: it is talking AND its radar is alive AND detection
@@ -177,3 +202,37 @@ class RearApproach:
         side.available = True
         continue
       side.from_radar(float(msg.dRel), float(msg.vRel))
+
+  def _update_from_blis(self, sm) -> None:
+    """Fall back to blind-spot occupancy when no rear radar digest is arriving.
+
+    THE ONLY REASON THIS IS SAFE is that a BLIS source cannot authorize anything. Every consumer of
+    a side except one is a REFUSAL -- the pass gate, the abort on a committed crossing, the
+    keep-right timer, the blockedBy label. The single consumer that grants permission is
+    `may_actuate`, and it requires `source == Source.radar`, so filling a side from BLIS adds
+    refusals and no permissions. That asymmetry is the whole design, not a detail of it: BLIS
+    answers "is something beside me" and cannot answer "is something closing", which is the
+    question a lane change actually asks.
+
+    RADAR WINS WHEN BOTH EXIST. This runs only where the digest is absent or stale, so fitting the
+    feeder later silently upgrades every side rather than needing this removed.
+
+    Nothing populates it until the canbox routes 0x3A6/0x3A7 onto a bus openpilot reads, and
+    `dataAvailable` stays False until then -- so on his car today this is inert, exactly as the
+    radar branch above is.
+    """
+    try:
+      if not sm.valid.get("carStateBP", False):
+        return
+      bp = sm["carStateBP"]
+    except (KeyError, AttributeError, TypeError):
+      return
+
+    for side, det in ((self.left, getattr(bp, "blisLeft", None)),
+                      (self.right, getattr(bp, "blisRight", None))):
+      if det is None or not bool(det.dataAvailable):
+        continue
+      # `sodDetect` is the occupancy bit. blis_ext.py states that `carState.leftBlindspot` is
+      # `SodDetct*_D_Stat != 0` and nothing else -- `SodAlrt*` is the MIRROR LAMP, whose flash
+      # follows the driver's own turn signal rather than the other vehicle, so it is about us.
+      side.from_blis(bool(det.sodDetect))

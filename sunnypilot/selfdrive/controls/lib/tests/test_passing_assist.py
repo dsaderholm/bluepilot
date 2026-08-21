@@ -596,10 +596,39 @@ class TestKeepRightIsOnForMeasurement:
 
 class TestRearApproachGate:
   def test_no_rear_sensor_does_not_block_a_suggestion(self):
-    """Today's behavior: nothing is fitted, so the gate must not silently kill the feature."""
-    det = run(PassingAssistDetector(), STUCK_FRAMES)
+    """A car with NOTHING fitted -- no digest, no BLIS routed through -- must still suggest."""
+    det = run(PassingAssistDetector(), STUCK_FRAMES, blis_avail=False)
     assert det.suggestion == Side.left
     assert not det.rear.available
+
+  def test_blis_alone_is_a_source_but_never_an_authorization(self):
+    """THE WHOLE POINT OF THE PRODUCER, stated as a test.
+
+    Wiring BLIS in makes a side AVAILABLE, and availability used to be the entire actuation gate --
+    so a sensor that answers "is something beside me" would have started granting permission for a
+    maneuver whose real question is "is something closing". `may_actuate` requires Source.radar for
+    exactly this frame.
+    """
+    det = run(PassingAssistDetector(), STUCK_FRAMES)
+    assert det.rear.available, "the producer did not fill either side from BLIS"
+    assert det.rear.left.source == Source.blis
+    det.actuate_enabled = True
+    assert not det.may_actuate(Side.left), "BLIS authorized a lane change"
+    assert not det.may_actuate(Side.right)
+
+  def test_blis_occupancy_refuses_the_pass(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES, left_bs=True)
+    assert det.rear.left.blocks_lane_change
+    assert det.suggestion != Side.left
+
+  def test_blis_never_reverses_a_crossing_already_begun(self):
+    """Presence is not arrival. See RearApproachSide.demands_abort -- backing out half-way between
+    two lanes is a maneuver in its own right and BLIS cannot measure whether it is warranted."""
+    det = PassingAssistDetector()
+    det.rear.left.from_blis(True)
+    assert det.rear.left.blocks_lane_change
+    assert not det.rear.left.demands_abort
+    assert not det._must_abort(Side.left)
 
   def test_closing_vehicle_on_the_left_blocks_the_left_pass(self):
     det = PassingAssistDetector()
