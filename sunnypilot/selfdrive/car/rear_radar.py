@@ -13,6 +13,12 @@ WHY IT IS NOT A SECOND RadarInterface, which is the tempting shape. `RadarInterf
 -- which ICBM acts on by commanding the SET SPEED DOWN. A rear target reaching that path would brake
 the car for a vehicle behind it with clear road ahead. Keeping this a separate object publishing a
 separate message is the entire isolation, and test_rear_radar_isolation.py pins it.
+
+THE FEEDER ITSELF DOES NOT EXIST. Its firmware specification is
+`bluepilot/REAR-RADAR-FEEDER-SPEC.md` -- the message layout, the reduction algorithm, the two sign
+conventions that are easy to invert, the failure behaviour, and a bench acceptance list. Read it
+before writing anything on the microcontroller side, and treat this file plus bp_rear_radar.dbc as
+the authority wherever the two disagree.
 """
 from opendbc.can import CANParser
 

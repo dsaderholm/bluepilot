@@ -3444,3 +3444,36 @@ together can never catch a producer that writes only one.**
 `str(source) == 'radar'` and would have rendered "rear: blind spot only" on a car with a working
 radar. A wrong invariant propagates to every new consumer until someone writes it down, which is
 what the module header now does: *a source must be set wherever availability is claimed*.
+
+## THE REAR RADAR FEEDER: SPEC WRITTEN, NOTHING BUILT
+
+`bluepilot/REAR-RADAR-FEEDER-SPEC.md`, 2026-08-21. Written after tracing the actuation chain end to
+end to answer "if I added rear radar today, would we have a functioning system".
+
+**The openpilot side is COMPLETE and shipped.** `RearRadarParser` in card, `bp_rear_radar.dbc`,
+`rearRadarBP`, `RearApproach`, `may_actuate`, then `passing_assist_desire` -> `desire_helper` for
+the lane change and `PassingAssistBlinker` for the lamp. `PassingAssistRearRadar` and
+`PassingAssistActuate` both default to 1, so **a fitted feeder makes the system live at the next
+boot with no software step.**
+
+**The missing piece is a microcontroller nobody has written.** `rear_radar.py` decodes a DIGEST,
+not a radar: three messages at 20 Hz. A Delphi MRR emits 64 detections at 33 Hz, ~2150 frames/s,
+and bus 1 is 60-73% loaded -- so the radar needs a PRIVATE bus and something in between to reduce
+it. That is the feeder, and it is two boxes of work, not one.
+
+**BLIS ALONE CANNOT ACTUATE AND THAT IS NOT A GAP.** `actuating` is
+`may_actuate(left) AND may_actuate(right)`, both requiring `source == Source.radar`. Piping BLIS in
+buys better refusals and an honest panel. It never moves the car.
+
+**Two sign conventions in the spec are the ones that bite**, and both are bench measurements rather
+than derivations:
+
+- **`VRel` positive means CLOSING**, so it is the NEGATION of the radar's range rate -- a target
+  behind you closes as its range falls. Invert it and every approaching car reads as receding, the
+  system never refuses, and it AUTHORIZES lane changes into traffic with a green `dataAvailable`.
+  Nothing looks broken.
+- **`YRel` azimuth sign is UNDETERMINED.** The front decoder uses `-sin(az)`; a rear sensor is
+  rotated 180 degrees, which suggests it flips back. Do not ship that reasoning -- `ESR.dbc` and
+  `ford_fusion_2018_adas.dbc` already disagree about angle sign for the same hardware.
+
+Addresses 0x640-0x642 were checked against all three Ford DBCs and collide with nothing.
