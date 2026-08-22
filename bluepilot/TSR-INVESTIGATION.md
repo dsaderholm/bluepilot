@@ -1649,10 +1649,40 @@ Measured: `0x462` arrives 3494 times a drive, `0x463` and `0x464` **zero**, and 
 It is a real fault and it is **not** what stops sign reads. Conflating the two cost most of
 2026-08-21. Open question: APIM or gateway. The gateway may not be written to.
 
-**openpilot can synthesize both messages from the comma's own GPS** -- built and tested
-2026-08-21, ships on, stands down the moment the car sends the real ones. It is on
-`icbm-manual-override-and-tuning` and has never been driven. It is not a TSR fix and must not be
-described as one.
+**openpilot can synthesize both messages from the comma's own GPS** -- built 2026-08-21, ships on,
+stands down the moment the car sends the real ones. It is not a TSR fix and must not be described
+as one.
+
+**AND IT HAD NEVER TRANSMITTED A SINGLE FRAME UNTIL 2026-08-22.** The line above used to end "and
+has never been driven", which was wrong and hid the defect: it HAD been driven, three times, and
+sent nothing. Measured across routes a8/a9/aa on every bus --
+
+    0x462  src 0    905    the APIM's position message, arriving fine
+    0x462  src 130  894    us forwarding it to the camera
+    0x463  ---        0
+    0x464  ---        0
+
+`LateralCurvExt` owned the SubMaster and subscribed to `gpsLocationExternal` alone -- the ublox on
+a comma two / panda. A 3X takes its fix from the qcom modem and publishes `gpsLocation`; his routes
+carry 322 frames of it and none of the other. So `self.gps` stayed None for the life of every drive
+and the carcontroller's `if gps is not None` never passed. `selfdrived` gets this right through
+`get_gps_location_service(params)`; the car process hardcoded the wrong one. Both are subscribed
+now, and a static test parses the `SubMaster(...)` call so it cannot regress silently.
+
+**THIS STRENGTHENS THE SEPARATION RATHER THAN WEAKENING IT.** The one sign this camera has ever read
+came with `U0253` asserted, `NoNavDataAvailable` on every frame -- and now it is known the synthesis
+was silent then too. That read had no nav data from ANY source. Nav data and sign reads are
+independent, which is what section 4j says and this confirms from a second direction.
+
+**WHAT IT DOES UNLOCK: nibble 8 = `A` becomes testable for the first time.** The 2026-08-22 write to
+`A` ("Reading + GPS") downgraded the camera to `LimitOutdated` precisely because the GPS half never
+arrived (4n). `A` WITH GPS actually flowing is the friend's configuration and has never existed on
+this car.
+
+**AND IT IS A VARIABLE IN ANY TSR EXPERIMENT NOW, because it enables itself.** The param defaults to
+`1`, so the feature starts transmitting on the next drive after the code lands -- no toggle, nothing
+to remember. Before the confound-separating night drive he was told to switch "Send GPS To The
+Camera" OFF, so that night stays the only change. Turn it back on afterwards.
 
 ### 4. CLOSED. Do not re-open any of these.
 
