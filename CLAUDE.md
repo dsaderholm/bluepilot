@@ -3971,6 +3971,19 @@ came to list two parts for a board that is one.
 5. **NEW INFORMATION ARRIVES ATTACHED TO OLD WRONG INFORMATION.** The vendor reply invalidated a
    BOM. The bench session invalidated a memory. After writing the new fact, go and find what it
    makes stale -- that is the half that gets skipped.
+6. **CONCLUSIONS REACHED IN CONVERSATION COUNT, NOT JUST FACTS FROM OUTSIDE.** This rule was written
+   on 2026-08-21 naming vendor replies and bench measurements, and **it failed the next day on
+   exactly the case it did not name.** A recommendation had been worked out with him -- report the
+   Waze bug through the BETA program rather than the support ticket, because beta reports reach the
+   integration team and skip triage -- and what reached the repo was a bare URL in a source list.
+   When he asked "do you remember what we were doing with that?", the answer was no.
+
+   **A SOURCE LINK IS NOT A DECISION.** If a link is worth keeping, the sentence saying what it is
+   for is worth keeping with it, in the section where the decision lives rather than in a citation
+   list at the bottom. The same goes for any option weighed and chosen in chat: the reasoning is the
+   artifact, and it evaporates unless it is written where the next reader is looking.
+
+   His words: *"I wish you had written all that down."*
 
 ## `oncomingAdjacent` FIRES ON ONE-WAY ROADS, AND ONLY BELOW 43 MPH. 2026-08-21.
 

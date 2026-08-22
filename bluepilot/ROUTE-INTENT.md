@@ -91,10 +91,59 @@ expected under BOTH explanations and proves nothing on its own.
     Maps still works ->  suggestive of Waze's implementation, NOT conclusive, since the regression
                          hits apps unevenly and could be sparing Maps on this head unit.
 
+**THE DISCRIMINATOR CAME BACK, 2026-08-22, AND IT POINTS AT WAZE.** His words: *"Google Maps still
+shows turns on my IPC!"*
+
+    Maps ALSO dead   -> the Android Auto regression
+    Maps still works -> suggestive of WAZE'S IMPLEMENTATION      <- this is his car
+
+**So the Maps v25 test below is now moot** -- there is nothing to revive, Maps was never broken here.
+
+**AND IT REVERSES WHAT TO DO.** Waze Support asked him for debug logs in the app's debug mode
+(search `2##2`, then Report -> Debug), and the working assumption had been that this was the wrong
+channel because the bug was Android Auto's. With Maps working, Waze's own request is the RIGHT
+channel: they would be collecting logs for a bug that looks like theirs, from a car that reproduces
+it. Sending them is now the sensible move rather than a detour.
+
+**THE BETTER ROUTE IS THE WAZE BETA PROGRAM, AND THIS IS THE THING THAT WAS NEVER WRITTEN DOWN.**
+He remembered it and this document did not have it -- it survived only as a bare URL in the source
+list at the bottom, with no statement of what it was for. On 2026-08-22 he asked *"do you remember
+what we were doing with that?"* and the honest answer was no, because a link is not a record.
+
+    https://support.google.com/waze/beta/answer/7576732   Start Testing Waze on Android Auto
+
+**Why the beta channel beats the support ticket**, which is the reasoning that was lost:
+
+- Beta builds carry their own in-app bug reporting, and those reports land with the team that owns
+  the Android Auto integration rather than with front-line support triage.
+- The support reply he got is a generic template -- it asks for username, device model, car make and
+  the `2##2` debug dance, and it opens by asking him to update to the newest version, which is the
+  first thing a triage script says. A beta report skips that loop.
+- If the fix already exists unreleased, the beta is where it shows up first, so joining answers
+  "is this fixed" as a side effect of reporting it.
+
+**Cost, stated because it is the reason not to:** beta builds are less stable, and it is a
+navigation app he relies on. It is reversible -- leave the program and reinstall the release build --
+but that is the trade.
+
+**THE LOGGING RULE FAILED HERE, one day after it was written.** CLAUDE.md's "LOG IT THE SESSION IT
+ARRIVES" says a fact from outside the code gets transcribed, put where it will be used, with source
+and date. This was reasoning produced IN conversation and it left behind only a citation. **A source
+link is not a decision. If a link is worth keeping, the sentence saying what it is for is worth
+keeping with it.**
+
+**Still NOT conclusive**, and the reason is already in this section: the Android Auto regression hits
+apps unevenly and could be sparing Maps on this head unit. What his test rules out is the strongest
+version of the "it is not Waze's fault" story, which is what the debug-log request was being weighed
+against.
+
+**And it changes nothing about scope.** This remains a cluster nicety -- see the paragraph below --
+and no work here is sequenced behind it.
+
 **A stronger test exists, and it is actionable:** a reported workaround is downgrading Google Maps to
 **version 25**, which restores HUD navigation and points at the bug arriving with Maps 26. If Maps is
 dead on his car and v25 revives it, that pins it to the known regression conclusively. REPORTED,
-not verified here.
+not verified here. **Superseded for his car by the paragraph above: Maps is not dead here.**
 
 On Google's position: what exists is a Google Community Specialist on a support forum saying the dev
 team has been informed and a fix is in the works. **No timeline, no version, no release note.** An
