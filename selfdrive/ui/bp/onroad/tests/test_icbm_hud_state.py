@@ -206,6 +206,65 @@ class TestTheBigNumberIsWhatTheCarIsDrivenTo:
   fourth number.
   """
 
+  def test_the_offered_pin_takes_the_label_when_there_is_no_hold(self):
+    """RANK 3, added 2026-08-22 when the HOLD badge was deleted.
+
+    The badge used to carry this number: `display_value` fell back to `pin_suggestion` when there
+    was no hold, and tapping the badge was the only way to accept the offer. Deleting the badge
+    left the offer with a mark in the box corner and no way to say WHAT SPEED it was for.
+
+    It cannot become the big number -- that is what the car is being driven to, and an offer is
+    not -- so the label slot is the only place left."""
+    box = max_box_state(hold=0.0, sla_fallback=None, set_speed=55.0, dash=55.0,
+                        pin_suggestion=45.0)
+    assert box.aim == 55.0, "an OFFER must never move the number the car is being driven to"
+    assert box.label == "45"
+    assert box.label_is_number
+    assert box.pin_offer, "nothing would draw the ring, so the offer is unacceptable"
+    assert not box.hold_driving
+
+  def test_the_dash_still_outranks_an_offer(self):
+    """A pin is never urgent; "the car is not at your number" always is."""
+    box = max_box_state(hold=0.0, sla_fallback=None, set_speed=55.0, dash=38.0,
+                        pin_suggestion=45.0)
+    assert box.label == "38"
+    assert box.pin_offer, "the ring must survive even when the label is showing something else"
+
+  def test_a_hold_suppresses_the_offer_entirely(self):
+    """`pin_offer` and `hold_driving` are mutually exclusive by construction -- rank 2 and rank 3
+    can never both be live, which is what keeps the label unambiguous."""
+    box = max_box_state(hold=70.0, sla_fallback=55.0, set_speed=55.0, dash=70.0,
+                        pin_suggestion=45.0)
+    assert not box.pin_offer
+    assert box.label == "55", "the offer displaced the fallback, which is the actionable number"
+
+  def test_a_pinned_hold_is_marked_and_a_pressed_one_is_not(self):
+    """The badge used to be what told a pinned hold from a pressed one. Now it is this flag, drawn
+    as a filled dot in the corner the badge's dot used to occupy."""
+    assert max_box_state(hold=45.0, sla_fallback=None, set_speed=45.0, dash=45.0,
+                         pinned=True).pinned
+    assert not max_box_state(hold=45.0, sla_fallback=None, set_speed=45.0, dash=45.0,
+                             pinned=False).pinned
+    # A pin flag with no hold behind it is not a pinned hold and must not draw the filled dot --
+    # that would claim the car is holding a speed it is not.
+    assert not max_box_state(hold=0.0, sla_fallback=None, set_speed=45.0, dash=45.0,
+                             pinned=True).pinned
+
+  def test_a_locked_hold_does_not_claim_the_number_is_his(self):
+    """`hold_locked` means something else owns the target, so a press cannot move the hold. The
+    badge said this by going grey; the box says it by not tinting.
+
+    NOT the same statement as "the car is not at your number", which rank 1 already makes -- a hold
+    can be locked while the car sits exactly on it."""
+    locked = max_box_state(hold=70.0, sla_fallback=None, set_speed=70.0, dash=70.0,
+                           hold_locked=True)
+    assert locked.hold_driving, "the hold still governs the car; only the tint is withheld"
+    assert locked.hold_locked
+    assert not max_box_state(hold=70.0, sla_fallback=None, set_speed=70.0, dash=70.0).hold_locked
+    # With no hold there is nothing to lock, so the flag must not survive on its own.
+    assert not max_box_state(hold=0.0, sla_fallback=55.0, set_speed=55.0, dash=55.0,
+                             hold_locked=True).hold_locked
+
   def test_sla_drives_the_number_when_there_is_no_hold(self):
     """His words: *"I like having that fall back if I cancel my hold."* Unchanged from today."""
     box = max_box_state(hold=0.0, sla_fallback=45.0, set_speed=45.0, dash=45.0)

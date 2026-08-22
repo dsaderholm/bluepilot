@@ -165,7 +165,7 @@ _ACCDATA_SIGNALS = (
 )
 
 
-def create_acc_msg_passthrough(packer, CAN: CanBus, stock_values: dict):
+def create_acc_msg_passthrough(packer, CAN: CanBus, stock_values: dict, clear_cancel: bool = False):
   """FusionPilot: re-send the CAMERA's own ACC command, unchanged.
 
   Under openpilot longitudinal control the relay is open, so the camera's ACCDATA never reaches the
@@ -192,6 +192,20 @@ def create_acc_msg_passthrough(packer, CAN: CanBus, stock_values: dict):
   looking clever.
   """
   values = {s: stock_values[s] for s in _ACCDATA_SIGNALS}
+
+  # CLEARING A CANCEL WE PROVOKED OURSELVES, 2026-08-22. Off unless the caller has established both
+  # that the stop override ran and that the camera has been asking to cancel ever since -- see the
+  # recovery block in `carcontroller.py`. Every other refusal in `passthrough_admissible` still
+  # applies, so a frame that reaches here has already cleared the deny bits, the park brake and
+  # both panda bands; the ONLY thing being ignored is the request to stop doing ACC.
+  #
+  # Without this the latch is permanent and it is OURS: the cancel makes every subsequent frame
+  # inadmissible, so Ford's command never reaches the car again, so the camera never observes the
+  # car obeying it, so it has no reason to release. Measured on route 000003a8 -- he re-engaged at
+  # t+886 and the camera was computing a sane 46 kph target while still asserting cancel.
+  if clear_cancel:
+    values["AccCancl_B_Rq"] = 0
+
   # ONE FIELD IS OVERRIDDEN, and only because panda will not carry Ford's version of it.
   #
   # `AccPrpl_A_Pred` is the PREDICTED acceleration -- a feed-forward hint to the powertrain, not a
@@ -248,7 +262,7 @@ _PANDA_GAS_INACTIVE = -5.0
 _PANDA_MARGIN = 0.005
 
 
-def passthrough_admissible(stock_values: dict, long_active: bool) -> str:
+def passthrough_admissible(stock_values: dict, long_active: bool, allow_cancel: bool = False) -> str:
   """FusionPilot: would panda actually let this camera frame through? "" if yes, else the reason.
 
   THIS IS THE FIX FOR THE THING THAT MAKES THIS FEATURE FAIL WORST. `ford_tx_hook` does not clamp a
@@ -334,8 +348,16 @@ def passthrough_admissible(stock_values: dict, long_active: bool) -> str:
   # The others stay. They cost nothing observed -- AccBrkPrkEl_B_Rq has never fired, and a camera
   # cancel is actuation in its own right (drive A relayed 219 of them). Refusing a bit that never
   # appears is free; refusing one Ford uses on every stop is not.
-  for name in ("AccCancl_B_Rq", "AccDeny_B_Rq", "AccBrkPrkEl_B_Rq",
-               "AccBrkPulse_B_Rq", "AccAutoResum_D_Rq"):
+  unpoliced = ["AccCancl_B_Rq", "AccDeny_B_Rq", "AccBrkPrkEl_B_Rq",
+               "AccBrkPulse_B_Rq", "AccAutoResum_D_Rq"]
+  # `allow_cancel` drops ONE bit from that list, for the recovery path only. It is NOT a relaxation
+  # of drive A's finding -- relaying a cancel the camera raised on its own is still what caused the
+  # 70 re-engagement cycles. It applies solely where the override provoked the cancel and the
+  # refusal has become self-sustaining. AccDeny and CmbbDeny are never dropped: "I will not let ACC
+  # run" is a different statement from "stop the ACC that is running".
+  if allow_cancel:
+    unpoliced.remove("AccCancl_B_Rq")
+  for name in unpoliced:
     if stock_values.get(name):
       return "camera asserted %s -- unpoliced actuation, see drive A" % name
 

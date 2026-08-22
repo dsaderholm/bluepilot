@@ -21,8 +21,19 @@ from openpilot.selfdrive.ui.bp.mici.onroad.torque_bar_bp import TorqueBarBP as T
 
 LateralMode = ControllerStateBP.LateralMode
 
-# BluePilot: the HOLD badge on a 536x240 screen. Deliberately NOT the big screen's numbers -- see
-# _draw_hold_badge. Colors ARE shared with it, so the same state reads the same on either display.
+# BluePilot: the HOLD badge on a 536x240 screen. Deliberately NOT the big screen's numbers.
+#
+# THE BIG SCREEN NO LONGER HAS A BADGE AT ALL, as of 2026-08-22 -- it draws the hold as the big
+# number in the set-speed box and tints the box while the hold owns it, so a badge there was a
+# second copy of a number already on screen. This one STAYS, and the reason is not inertia:
+# `MiciHudRendererBP` extends mici's own renderer rather than sunnypilot's, so `_draw_set_speed`
+# here has no `max_box_state` and no aim concept. On this display the badge is the ONLY place the
+# hold appears, and the only tap target that can pin one. Deleting it would remove the readout, not
+# de-duplicate it.
+#
+# So the two screens now draw the hold differently, which `icbm_hud_state` has always allowed --
+# what must not diverge is what is TRUE, and both still read it from `read_icbm_hud_state`. The way
+# to retire this badge is to port the aim-in-the-box rule to mici first.
 HOLD_LABEL = "HOLD"
 HOLD_HEIGHT = 44
 HOLD_MARGIN = 14          # from the top and right edges of the screen

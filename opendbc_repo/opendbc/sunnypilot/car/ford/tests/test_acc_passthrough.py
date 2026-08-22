@@ -190,6 +190,54 @@ def test_the_unpoliced_actuation_bits_are_refused():
     assert passthrough_admissible(_stock(**{name: 1}), True), f"{name} was forwarded unchecked"
 
 
+def test_the_cancel_refusal_is_dropped_only_when_asked_and_only_for_itself():
+  """Recovery from a cancel WE provoked, 2026-08-22, routes a8/a9/aa.
+
+  The override takes authority, the camera watches the car brake harder than it asked, and ~1.6 s
+  later it cancels. That much is inherent -- a stop is 5-8 s of contradiction and the camera
+  tolerates about 1.5. What was NOT inherent is that the cancel never released: it made every
+  subsequent frame inadmissible, so Ford's command stopped reaching the car, so the camera could
+  never observe the car obeying it again. He lost Ford ACC for the rest of two drives and had to
+  restart the ignition both times.
+
+  `allow_cancel` exists for that one case. It must drop the cancel refusal and NOTHING else -- the
+  deny bits are a different statement ("I will not let ACC run", not "stop the ACC that is
+  running"), and the panda bands are not ours to relax at all."""
+  assert passthrough_admissible(_stock(AccCancl_B_Rq=1), True), "cancel is refused by default"
+  assert not passthrough_admissible(_stock(AccCancl_B_Rq=1), True, allow_cancel=True), (
+    "the recovery path could not forward a cancelling frame, so the latch stays permanent")
+
+  # Everything else on the unpoliced list stays refused even in recovery.
+  for name in ("AccDeny_B_Rq", "AccBrkPrkEl_B_Rq", "AccBrkPulse_B_Rq", "AccAutoResum_D_Rq"):
+    assert passthrough_admissible(_stock(AccCancl_B_Rq=1, **{name: 1}), True, allow_cancel=True), \
+      f"{name} was forwarded during cancel recovery -- allow_cancel must drop ONE bit, not the list"
+
+  # And the bands still bind, so recovery cannot put a frame panda would drop onto the wire.
+  assert passthrough_admissible(_stock(AccCancl_B_Rq=1, AccBrkTot_A_Rq=-19.0), True,
+                                allow_cancel=True), "recovery skipped the brake band"
+  assert passthrough_admissible(_stock(AccCancl_B_Rq=1, AccPrpl_A_Rq=-1.2), True,
+                                allow_cancel=True), "recovery skipped the gas band"
+
+
+def test_clearing_the_cancel_changes_that_bit_and_nothing_else():
+  """The forwarded frame is Ford's, minus one bit. If this ever zeroed more than the cancel it would
+  be authoring a command Ford never sent, mid-recovery, with no checksum to reveal it."""
+  packer = _Packer()
+  stock = _stock(AccBrkTot_A_Rq=-0.9, AccPrpl_A_Rq=0.4, AccVeh_V_Trg=56.0,
+                 Cmbb_B_Enbl=1, AccCancl_B_Rq=1, AccResumEnbl_B_Rq=1)
+
+  create_acc_msg_passthrough(packer, _CAN, stock)
+  _, _, plain = packer.calls[-1]
+  assert plain["AccCancl_B_Rq"] == 1, "the default path must forward Ford's frame untouched"
+
+  create_acc_msg_passthrough(packer, _CAN, stock, clear_cancel=True)
+  _, _, cleared = packer.calls[-1]
+  assert cleared["AccCancl_B_Rq"] == 0
+  assert {k: v for k, v in cleared.items() if k != "AccCancl_B_Rq"} == \
+         {k: v for k, v in plain.items() if k != "AccCancl_B_Rq"}, \
+    "clearing the cancel disturbed another signal"
+
+
 def test_the_stop_hold_status_is_forwarded_because_ford_needs_it():
   """`AccStopStat_B_Rq` was on the list above and should not have been.
 
