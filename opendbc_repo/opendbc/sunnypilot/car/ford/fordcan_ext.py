@@ -18,6 +18,7 @@ from collections import namedtuple
 
 from opendbc.car import structs
 from opendbc.car.ford.fordcan import CanBus, calculate_lat_ctl2_checksum
+from opendbc.sunnypilot.car.ford import apim_gps
 
 HUDControl = structs.CarControl.HUDControl
 
@@ -703,3 +704,24 @@ def create_button_msg(packer, bus: int, stock_values: dict, cancel=False, resume
     values["TurnLghtSwtch_D_Stat"] = turn_signal
 
   return packer.make_can_msg("Steering_Data_FD1", bus, values)
+
+
+def create_apim_gps_nav2_msg(packer, CAN: CanBus, gps):
+  """FusionPilot: synthesize APIMGPS_Data_Nav_2_FD1 (0x463) toward the IPMA.
+
+  The APIM on this car transmits 0x462 (position) but never 0x463 or 0x464, which
+  is what the camera reports as U0253 "Missing Message". See apim_gps.py for the
+  measurement. Sent on the CAMERA bus, because that is the side the IPMA sits on
+  once openpilot has the relay; the vehicle side is unaffected.
+
+  1Hz, matching the observed rate of the 0x462 the APIM does send.
+  """
+  return packer.make_can_msg("APIMGPS_Data_Nav_2_FD1", CAN.camera, apim_gps.nav2_signals(gps))
+
+
+def create_apim_gps_nav3_msg(packer, CAN: CanBus, gps):
+  """FusionPilot: synthesize APIMGPS_Data_Nav_3_FD1 (0x464) toward the IPMA.
+
+  See create_apim_gps_nav2_msg. 1Hz.
+  """
+  return packer.make_can_msg("APIMGPS_Data_Nav_3_FD1", CAN.camera, apim_gps.nav3_signals(gps))

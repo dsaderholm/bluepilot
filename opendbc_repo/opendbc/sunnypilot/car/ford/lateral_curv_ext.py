@@ -122,12 +122,15 @@ class LateralCurvExt:
     # Subscribed here rather than routed through CC_SP because it is one entry against a capnp
     # field plus controlsd plumbing, and the carcontroller already owns this SubMaster. Adding a
     # third consumer needs no change here -- but REMOVING one does not free the subscription.
+    # FusionPilot: gpsLocationExternal feeds the synthesized APIM GPS messages (apim_gps.py). It is
+    # the comma's own receiver, which is the only source of the GPS telemetry the IPMA is missing.
     self.sm = messaging.SubMaster(['modelV2', 'liveParameters', 'selfdriveState', 'radarState', 'liveDelay',
-                                   'longitudinalPlanSP'])
+                                   'longitudinalPlanSP', 'gpsLocationExternal'])
     self.VM = VehicleModel(CP)
     self.model = None
     self.lp = None
     self.ss = None
+    self.gps = None
 
     # Primary lateral control variable: consumed by CarController's lateral dispatch.
     self.primary_lateral_control = PrimaryLateralControl.curvature
@@ -286,6 +289,8 @@ class LateralCurvExt:
       self.lp = self.sm['liveParameters']
     if self.sm.updated['selfdriveState']:
       self.ss = self.sm['selfdriveState']
+    if self.sm.updated['gpsLocationExternal']:
+      self.gps = self.sm['gpsLocationExternal']
 
     if self.lp is not None:
       x = max(self.lp.stiffnessFactor, 0.1)

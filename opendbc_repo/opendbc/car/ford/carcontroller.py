@@ -115,6 +115,13 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
     # card's control loop.
     self.icbm_gap = FordGapController()
     self.icbm_gap_failed = False
+    # FusionPilot: synthesize the two APIM GPS messages the IPMA never receives, so it can leave
+    # NoNavDataAvailable and enter Fusion mode -- the state in which it actually reads signs. Read
+    # once at init like the passthrough above; this changes what a module on the bus is fed and is
+    # not something to toggle mid-drive. Latched off on ANY failure, and the getattr default in
+    # the send path is True so a missing attribute disables the feature rather than the car.
+    self.apim_gps_enabled = self.params.get_bool("FordSynthesizeApimGps")
+    self.apim_gps_failed = False
     # FusionPilot: stock ACC passthrough -- forward the camera's own ACCDATA under op long rather
     # than authoring our own. Read once at init: this decides which controller drives the car, and
     # swapping it mid-drive would hand over between two different longitudinal behaviors with no
@@ -637,6 +644,23 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
     hud_can_sends = HudExt.update_hud(self, CC, CS, hud_control, main_on, fcw_alert,
                                        self.frame, self.packer, self.CAN, self.CP, lane_test)
     can_sends.extend(hud_can_sends)
+
+    ### FusionPilot: synthesized APIM GPS toward the IPMA ###
+    # 1Hz, matching the rate the APIM sends 0x462 at. Stands down entirely if the car turns out to
+    # send the real messages -- one received frame latches carstate_ext.apim_gps_nav_seen and we
+    # never compete with the APIM. Whole block is latched off on any exception: an unhandled one
+    # here propagates through card's control loop and stops the car (2026-08-15).
+    if (self.apim_gps_enabled and not getattr(self, "apim_gps_failed", True)
+        and self.frame % CarControllerParams.LKAS_UI_STEP == 0):
+      try:
+        if not getattr(CS, "apim_gps_nav_seen", False):
+          gps = getattr(self, "gps", None)
+          if gps is not None:
+            can_sends.append(fordcan_ext.create_apim_gps_nav2_msg(self.packer, self.CAN, gps))
+            can_sends.append(fordcan_ext.create_apim_gps_nav3_msg(self.packer, self.CAN, gps))
+      except Exception:  # noqa: BLE001 -- a GPS convenience must never take the car off the road
+        self.apim_gps_failed = True
+        cloudlog.exception("FusionPilot: synthesized APIM GPS disabled for this drive")
 
     new_actuators = actuators.as_builder()
     new_actuators.curvature = float(self.apply_curvature_last)

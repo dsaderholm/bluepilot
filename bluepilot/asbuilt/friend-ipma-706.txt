@@ -1,0 +1,39 @@
+# Friend's IPMA (706) as-built -- COMPLETE dump, all 29 blocks.
+# Source: screenshot supplied by the owner, 2026-08-21. Transcribed and checksum-verified.
+# This is the car where TSR WORKS. Same strategy and calibration as his (KT4T-14F397-AE /
+# KT4T-14F398-AE); module assembly differs (LV4T-19H406-CF vs his KT4T-19H406-CE).
+#
+# Section 4d of TSR-INVESTIGATION.md previously recorded only the 12 blocks that DIFFER.
+# All 12 match this dump exactly -- no transcription drift. The other 17 are new here.
+#
+# Format: block  <5 data bytes>  <checksum byte>   (short rows carry 3 data bytes)
+
+706-01-01  0810 A9DA A953
+706-01-02  101A A535 6478
+706-01-03  4000 0000 0051
+706-01-04  0000 0000 0012
+706-01-05  0000 0013
+706-02-01  FD56 16DB 5FB3
+706-02-02  FFC3 55AA E1B3
+706-02-03  F840 0800 0052
+706-02-04  0008 0000 001B
+706-02-05  0800 0000 0824
+706-02-06  0000 0008 001D
+706-02-07  0000 0084 009A
+706-02-08  0000 0000 0017
+706-02-09  0000 0000 0018
+706-02-10  0000 0000 001F
+706-03-01  8000 0000 8011
+706-03-02  0000 0080 0092
+706-03-03  0000 8000 0093
+706-03-04  0089 0000 009D
+706-03-05  8000 0000 8015
+706-03-06  0000 0080 0096
+706-03-07  0000 8000 0097
+706-03-08  0080 0000 0098
+706-03-09  0000 0000 0019
+706-03-10  0000 0000 0020
+706-04-01  1EFC 26C3 485D
+706-04-02  0000 0000 0013
+706-05-01  566A B800 008B
+706-05-02  0000 0014

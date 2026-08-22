@@ -17,6 +17,17 @@
 #define FORD_LateralMotionControl  0x3D3U   // TX by OP, Lateral Control message
 #define FORD_LateralMotionControl2 0x3D6U   // TX by OP, alternate Lateral Control message
 #define FORD_IPMA_Data             0x3D8U   // TX by OP, IPMA and LKAS user interface
+// FusionPilot: the two APIM GPS messages the IPMA never receives. Measured on this car over a
+// full 27-segment drive (2026-08-21), decoding every bus the comma can see:
+//     0x462 APIMGPS_Data_Nav_1   3494 frames
+//     0x463 APIMGPS_Data_Nav_2      0 frames   <- IPMA_ADAS is a listed receiver
+//     0x464 APIMGPS_Data_Nav_3      0 frames   <- IPMA_ADAS is a listed receiver
+// One of three arrives, which is exactly the U0253 "Missing Message" the camera itself raises.
+// openpilot synthesizes the other two from the comma's own GPS and puts them on the camera bus.
+// These carry GPS time, heading and accuracy ONLY -- no actuator command of any kind. They cannot
+// influence steering, throttle or braking, and the vehicle-side bus is untouched.
+#define FORD_APIMGPS_Data_Nav_2    0x463U   // TX by OP on the camera bus, synthesized GPS telemetry
+#define FORD_APIMGPS_Data_Nav_3    0x464U   // TX by OP on the camera bus, synthesized GPS telemetry
 
 // CAN bus numbers.
 #define FORD_MAIN_BUS 0U
@@ -979,6 +990,8 @@ static safety_config ford_init(uint16_t param) {
     {FORD_ACCDATA_3, 0, 8, .check_relay = true},          \
     {FORD_Lane_Assist_Data1, 0, 8, .check_relay = true},  \
     {FORD_IPMA_Data, 0, 8, .check_relay = true},          \
+    {FORD_APIMGPS_Data_Nav_2, 2, 8, .check_relay = false}, \
+    {FORD_APIMGPS_Data_Nav_3, 2, 8, .check_relay = false}, \
 
   static const CanMsg FORD_CANFD_LONG_TX_MSGS[] = {
     FORD_COMMON_TX_MSGS

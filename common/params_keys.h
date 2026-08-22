@@ -757,6 +757,11 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"vbatt_pause_charging", {PERSISTENT | BACKUP, FLOAT, "11.8"}},
     {"show_lead_speed", {PERSISTENT | BACKUP, BOOL, "1"}},
     {"FordPrefSteerAngleCurvature", {PERSISTENT | BACKUP, BOOL, "0"}},  // pinion-sourced curvature measurement (bad-yaw-sensor workaround); read at car init
+    // Synthesize APIMGPS_Data_Nav_2/3 (0x463/0x464) toward the IPMA from the comma's own GPS. Ships
+    // ON: measured on this car, the APIM sends 0x462 3494 times a drive and these two zero times,
+    // which is the U0253 the camera raises and why it never leaves NoNavDataAvailable. Stands down
+    // by itself the moment the car sends the real ones. Read at car init.
+    {"FordSynthesizeApimGps", {PERSISTENT | BACKUP, BOOL, "1"}},
     {"FordPrefShowRadarLeadOverlay", {PERSISTENT | BACKUP, BOOL, "1"}},
     {"FordPrefRadarOverlaySize", {PERSISTENT | BACKUP, INT, "1"}},
     {"FordPrefHybridBatteryStatus", {PERSISTENT | BACKUP, BOOL, "0"}},

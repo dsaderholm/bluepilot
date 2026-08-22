@@ -1686,6 +1686,12 @@
                   ]
                 },
                 {
+                  "key": "FordSynthesizeApimGps",
+                  "widget": "toggle",
+                  "title": "Send GPS To The Camera",
+                  "description": "Give the forward camera the GPS data your SYNC module never sends it. The camera expects three GPS messages from SYNC and only ever receives one, which is the U0253 fault it reports and the reason it sits on \"no navigation data\" and never reads speed limit signs. This sends the other two, built from the comma's own GPS. It stops automatically if your car ever starts sending them itself, and it only sends position, time and heading -- it cannot steer, accelerate or brake. Turn it off if the camera starts reporting speed limits that are wrong."
+                },
+                {
                   "key": "IcbmGapControl",
                   "widget": "toggle",
                   "title": "Let openpilot Change The Follow Gap",

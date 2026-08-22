@@ -1,67 +1,85 @@
 # TSR on the retrofit Fusion — full investigation log
 
-Session of **2026-08-11**, in the car, several hours. Written so this can be picked up cold.
+Opened **2026-08-11**. **Rewritten at the top on 2026-08-21**, because four load-bearing claims in
+this header had become false and a cold session reads them first.
 
-**The car is currently REVERTED and healthy.** Every IPMA change was undone, the radar fault cleared
-without needing an alignment drive, and ACC works. The one change left in place is on the APIM, and
-**it did not help** -- see below.
+## READ THIS BEFORE ANYTHING ELSE
 
-**RE-OPENED 2026-08-21: THE CAMERA IS NOT READING SIGNS AT ALL.** Measured on routes 0000039f and
-000003a1 by decoding `Traffic_RecognitnData` (0x3CD) off bus 2: **`TsrVLim1MsgTxt` is 255 -- the
-no-data sentinel -- on every frame of both drives.** 000003a1 carries just TWO distinct payloads
-across 909 frames, differing only in `TsrMsgTxt` and `TsrStatMsgTxt`, which are status enumerants.
+**THE CAMERA READS SIGNS. It did it once, and it is verified.** Route `000003a7`, segment 6, seven
+consecutive frames: `TsrVLim1MsgTxt` went `255 NoLimit` -> `30 Message30`, and the camera set
+`TsrVl1PrmntMsgTxt` to `ShowPermanentlyWithoutSupp` in the same frames. Position decoded from the
+car's own `0x462`: **40.725463, -111.829903**, which is 2011 2100 S in Salt Lake City, and Street
+View shows a **SPEED LIMIT 30** on a pole at exactly that spot. Full detail in **section 4j**.
 
-This contradicts the note that had been carried forward as settled -- "the camera reads signs anyway,
-what the region gates is the STATUS enumerants, not the detection" -- and that note is why this was
-treated as a display problem not worth chasing. **It is not a display problem. There is no detection
-happening.** He said so directly: *"the signs it's reading are wrong. Those aren't actually signs."*
+**So the question is no longer "is the camera broken". It is "why is it bad at this".** Across every
+route pulled to date -- 50 segments -- there is exactly **one** detection event.
 
-So the as-built is the LIVE question, not a closed one, and section 4d's targeted write -- `706-01-01`
-to `0810 A9DA A953` -- is still the sharpest untried experiment. Its blocker was never knowing the
-value; it is write access (section 6).
+**Four claims that led this file and are now WRONG. Do not carry them forward:**
 
-**`U0253` IS UNRESOLVED, AND IT IS PROBABLY NOT IN THIS PATH. Demoted 2026-08-21 -- it led this
-document as "THE BLOCKER" and that was framing, not measurement.**
+| was written here | actually |
+|---|---|
+| "the car is currently REVERTED and healthy" | **two writes are in place and persisted** across an ignition cycle -- `706-01-01` = `0810 A9DB B964`, `706-02-01` = `FD56 16DB 7FD3` |
+| "the camera is NOT reading signs at all" | it read one, verified against Street View (4j) |
+| "IPMA write refused by FORScan" | **FORScan writes `706-01-01` fine.** It refused ONE VALUE, `0450`, which was the only value ever tried (4e) |
+| "the blocker is the tool, not the car" | the tool was never the blocker (4e) |
 
-The fault is the IPMA failing to reach the **APIM**, which is the nav module. That explains missing
-nav-sourced limits and the `NoNavDataAvailable` message the camera threw -- which is what was being
-chased on 2026-08-11, and why it ended up as the headline.
+**And four theories killed on 2026-08-21, each by measurement:**
 
-**But sign reading does not need nav.** That is the entire meaning of the camera's "TSR data source:
-Camera Only" mode, which is what this camera is set to: it reads a sign with its own optics, and nav
-is a second source to fuse, not a prerequisite. So `U0253` does not explain `TsrVLim1MsgTxt` sitting
-at the no-data sentinel on every frame. That is the camera not DETECTING, which is upstream of any
-fusion. He put it plainly: *"Why do we care about U0253?"*
+- **Hardware.** `KT4T-19H406-CE` is a **Cx** camera -- per Ford's own part scheme, Cx adds autonomous
+  braking on top of Bx's AHB, TSR and tiredness alert. It read a sign. Every "replace the camera /
+  replace the cluster" theory is dead (4j, 4l).
+- **Fusion mode.** Not required. The sign was read in `Available_CameraOnly` with
+  `NoNavDataAvailable` asserted on all 747 frames including those seven (4j).
+- **Android Auto.** Not the cause. He drove with the phone off USB and `0x463`/`0x464` are still at
+  zero frames (4j).
+- **Firmware.** EU and US IPMA firmware are byte-identical -- same SBL, strategy and calibration,
+  confirmed by an owner who obtained both (4l).
 
-What keeps it on the page at all, and no more than that: the camera rejects TSR configuration with
-`U2101 Configuration Incompatible`, instantly, and if part of what it validates at startup is
-"do I have the data sources my configuration claims", a missing APIM link could be one of the checks
-it fails. **That is a plausible mechanism, not a measured one.** Do not treat it as established, and
-do not let it gate the as-built experiment in section 7.
+**One real defect remains measured and unexplained:** the APIM sends `0x462` (position) 3494 times a
+drive and `0x463`/`0x464` **zero** times, which is the `U0253` "Missing Message" the camera raises.
+Its Nav Repeater settings are already correct (4h). This is real, it is not what stops sign reads,
+and it should not be conflated with TSR again.
 
-Also worth recording about the fault itself: it was called fixed on 2026-08-11 because a read came
-back "Previously Set - Not Present at Time of Request". That means not present at that instant, not
-resolved -- the same read said "Test not complete" -- and he said repeatedly that it keeps coming
-back.
+**THE NEXT WRITE is in section 4k**: `706-01-01` -> `0810 A9DA B963`, one nibble, restore
+`0810 A9DB B964`. It may fix nothing, and 4k says why.
 
-**TWO OF TWO load-bearing claims in this file have now turned out to be framing rather than
-measurement** -- this one, and "the camera reads signs anyway". Treat anything else here that leads
-with emphasis and no numbers the same way.
+**DO NOT chase a US-market as-built** -- retracted in 4l, and the reason matters.
+
+---
+
+## HOW TO READ THE REST OF THIS FILE
+
+Sections 4a through 4l were appended in the order they were discovered, not in numeric order, and
+several supersede earlier ones. When two sections disagree, **the higher letter wins** and the
+earlier one says so. In particular:
+
+- **4f** argues Fusion mode is the answer. **4j disproves it.**
+- **4g** recommends a US-market as-built and calls `FF` an unset region. **4k corrects the region,
+  4l retracts the recommendation.**
+- **4h** names Android Auto as the leading hypothesis. **4j disproves it.**
+
+**Three confident framings about markets were wrong in one day** -- "the friend's car is a different
+market so his nibbles are dangerous", "`FF` is an unset region", "get a US as-built". Every one was a
+plausible story reasoned from a search result with no control to check it against. What survived is
+what was measured on this car.
 
 ---
 
 ## 1. Where it stands
 
-| | state |
-|---|---|
-| **APIM** | TSR **enabled** (`7D0-09-02`). Write succeeded. **`U0253` STILL RECURS -- this fixed nothing.** |
-| **IPC** | SLIF **disabled**. Write refused by FORScan. Reverted. |
-| **IPMA** | TSR **off** at `706-01-01`. Write refused by FORScan. Reverted. |
-| **comma** | still reports `NoNavDataAvailable`; SLA has no camera speed limit source |
+| | state | as of |
+|---|---|---|
+| **IPMA `706-01-01`** | `0810 A9DB B964` -- nibble 2 written `4`->`8`, **persisted** | 2026-08-21 |
+| **IPMA `706-02-01`** | `FD56 16DB 7FD3` -- nibble 4 = `6`, TSR data source Camera + APIM, **persisted** | 2026-08-21 |
+| **IPMA region `706-04-01`** | `FFFC 26C3 847A`, untouched. `FF` is NORMAL here -- a working car reads `FFFC` too | 4k |
+| **APIM** | TSR enabled at `7D0-09-02`. Nav Repeater format/conformance already correct. Sends 1 of 3 GPS messages | 4h |
+| **IPC** | untouched, and it **physically lacks** `720-10-01`/`720-10-02`. Governs the DASH only -- he does not want TSR on the cluster | 4f |
+| **camera output** | **one** detection in 50 segments. `NoNavDataAvailable` on every frame | 4j |
+| **openpilot** | already parses `Traffic_RecognitnData` and feeds `SpeedLimitSource.car`. The consumer side is DONE -- the moment the camera emits a limit, openpilot uses it | |
 
-**The blocker is the tool, not the car.** FORScan accepted the APIM change and refuses the IPC and
-IPMA ones with *"Writing blocks failed - incompatible configuration"*, regardless of value or
-checksum. Its vehicle profile is a 2020 Fusion, and a Fusion never had TSR.
+**The whole configuration originally came from a Brazilian car off the internet, and there is no
+original** (4g). That is still the most load-bearing fact in this file, but 4l changes what to do
+about it.
 
 ---
 
@@ -177,6 +195,787 @@ other module. **`U0253` still recurs**, so it did not restore IPMA-to-APIM commu
 Checksum behavior observed on `706-01-01`: **additive on the low byte.** `0410`→`B960`,
 `0415`→`B965`. FORScan does **not** recalculate it when you edit the data, so it must be typed.
 (Correcting it did not make the write succeed, so it was not the cause of the refusals.)
+
+---
+
+## 4a. A SECOND RESTORE POINT NOBODY KNEW EXISTED — PRE-CAMERA, ALL 29 MODULES
+
+**Found 2026-08-21 on his own machine**, not on the car: `C:%BS%UCDS_V3%BS%Session%BS%3FA6P0D94LR115239.xml`,
+written **11 March 2026**. It is a complete UCDS as-built export — **515 blocks across 29 modules**.
+It is a genuine read of this car, not a template: two demo sessions sit beside it
+(`WF0EXXWPCELA25401`, `WF0EXXWPCELR15787` — Euro Mondeo VINs) and they share values with each other
+that his file does not share with either.
+
+**IT PREDATES THE CAMERA SWAP. Do not treat its `706` as current.**
+
+```
+node 706 in that file      F111 HS7T-14G025-CC     F188 HS7T-14G019-CC     <- STOCK FUSION camera
+his IPMA per section 2     part KT4T-19H406-CE     strategy KT4T-14F397-AE <- the Edge camera, now
+```
+
+This resolves a discrepancy that otherwise looks alarming. That file reads
+**`706-01-01 = 1FA8 2A40 4080`**, nothing like FORScan's **`0410 A9DB B960`** recorded in section 4.
+**It is not a tool disagreement and not corruption — it is a different physical camera.** Anyone
+comparing the two without reading the part numbers will conclude UCDS and FORScan disagree about
+as-built. They do not.
+
+`730` (PSCM) and `764` (CCM radar) already read non-Fusion in that file, so the steering and radar
+retrofits were in before 11 March 2026 and **the camera went in after it**. That makes the file
+specifically a *pre-camera, post-steering* snapshot.
+
+Two uses:
+
+1. **A restore reference far wider than section 4**, which covers only IPMA and IPC. This has all 29
+   modules — including everything a GWM or CCC write could disturb.
+2. **Proof that reading is not EXT-gated.** This read succeeded on 11 March 2026, five weeks after
+   the licence expired on 4 February 2026.
+
+Full module inventory is in the file itself; extract with the `<NODEID>` + `F111`/`F188`/`F113`
+pattern. Note the XML nests DIDs *inside* the NODEID text node (`<NODEID>706<F10A>...`), so a
+`<NODEID>(.*?)</NODEID>` regex matches nothing — that cost a pass on 2026-08-21.
+
+---
+
+## 4e. FORSCAN WRITES `706-01-01`. THE "FORSCAN REFUSES" PREMISE WAS WRONG.
+
+**2026-08-21, live at the car.** `706-01-01` was written to **`0810 A9DB B964`** — nibble 2 only
+(`4`->`8`), his own nibbles 8-9 kept, checksum computed. **FORScan accepted it. No new DTCs.**
+
+This overturns something asserted throughout this document since day one.
+
+```
+OLD CLAIM   "FORScan cannot write these. Its profile is a 2020 Fusion; the IPMA
+             changes are feature enables a Fusion never had."
+REALITY     FORScan refused ONE VALUE -- 0450 -- and 0450 was the only value ever
+             tried on this block. The refusal was value validation, not profile
+             validation. The block writes fine.
+```
+
+**Consequence: the €130 UCDS EXT licence may be unnecessary.** A writing tool already exists and is
+already in his hands. Do not buy the licence to get past mode 1; mode 1 is not where this stops.
+
+The `U0253` seen straight after carries `EVENT_TIME` = Fri Aug 21 19:52:03 2026 — the write itself
+resetting the module — and reads **"Previously Set DTC - Not Present at Time of Request"** with the
+MIL off. It is the write, not a fault. Module voltage 13.5 V, ECU internal 109 °F, 125,456 miles.
+
+### The checksum, solved
+
+Every candidate value in this document can now be generated rather than copied from another car:
+
+```
+checksum = (0x07 + 0x06 + section + block + sum(data_bytes)) & 0xFF
+```
+
+Section and block are the **literal hex of the printed label** — `706-02-10` contributes `0x02` and
+`0x10`, not decimal 2 and 10. Verified against all 58 blocks of both complete IPMA dumps with zero
+failures. Tooling and both dumps live in `bluepilot/asbuilt/`; run `asbuilt.py` to re-verify and diff.
+
+### `706-02-01` nibble 4 is the TSR data source — a 13th difference 4d never had
+
+His live read on 2026-08-21 is **`FD52 16DB 7FCF`**. Section 4d recorded **`FD56 16DB 7FD3`** on
+2026-08-12. Computing the checksum for nibble 4 = `6` reproduces 4d's value exactly, so **4d was not
+a transcription error — the car changed.**
+
+That is section 4b happening: he set *TSR data source -> Camera + APIM*, `NoNavDataAvailable` cleared,
+and it reverted at the next boot. 4d caught the car inside that window.
+
+| | nibble 4 | meaning |
+|---|---|---|
+| friend, TSR works | `6` | Camera + APIM — **and it holds** |
+| his, 2026-08-12 | `6` | just written, section 4b |
+| his, 2026-08-21 | `2` | Camera Only — reverted |
+
+Target value, checksum valid: **`706-02-01` -> `FD56 16DB 7FD3`**.
+
+### BOTH WRITES PERSISTED. THE TWO FIELDS ARE INTERLOCKED.
+
+**Confirmed 2026-08-21, re-read after ignition off and on:**
+
+```
+706-01-01   0810 A9DB B964     held   (nibble 2, 4 -> 8)
+706-02-01   FD56 16DB 7FD3     held   (nibble 4, 2 -> 6 = TSR data source Camera + APIM)
+```
+
+**The second one is the result.** That exact write reverted at every previous attempt — it is
+section 4b, the only thing that had ever visibly worked and the only thing that had ever undone
+itself at boot. It holds now, and the single thing that changed is that `706-01-01` nibble 2 is `8`.
+
+**So 4b was never a mystery about persistence. The module was rejecting a data-source setting
+inconsistent with its own feature configuration.** Set the feature config first and the data source
+stays. That is what has been undoing changes on this car since day one.
+
+Pre-change restore values, both checksum-valid:
+
+```
+706-01-01 -> 0410 A9DB B960
+706-02-01 -> FD52 16DB 7FCF
+```
+
+### CAUTION: THE FRIEND'S CAR IS NOT A US CAR
+
+**Learned 2026-08-21, and it changes how section 4d may be used.** Section 4d treats his car as a
+matched control — same strategy, same calibration, TSR works, therefore the difference is as-built.
+The firmware match is real. **The market is not.** He is in a different country.
+
+So an unknown subset of the 12 differing blocks encodes **country configuration, not TSR**, and the
+hex alone cannot say which. **Do not chase the remaining nibbles toward his values.** The prime
+suspects are exactly the ones that were on the target list:
+
+- `706-01-01` nibbles **8, 9**
+- `706-02-01` nibble **9**
+- `706-04-01` and `706-05-01`, which differ heavily
+
+He has already had a region change throw DTCs, and that topic is closed. This is the same hazard
+arriving as a nibble copied off a car built for another market.
+
+**What this does NOT weaken:** the two writes above persisted on HIS car, threw no new DTCs, and the
+interlock was demonstrated on his hardware rather than inferred from the diff. That stands.
+
+**Open and worth knowing:** which country. EU sign recognition is circular km/h plates, US is
+rectangular mph. If the same firmware carries a market config, that bears directly on whether
+as-built alone can produce US sign reads.
+
+### 0x3CD MEASURED ACROSS A WHOLE PRE-CHANGE DRIVE — AND THE REGION THEORY WEAKENS
+
+**2026-08-21, route `000003a1--1c5cc52d49`, 16 segments, started 17:00, i.e. BEFORE the writes.**
+Scanner is `bluepilot/asbuilt/tsr_scan.py`; run it on device against a route glob.
+
+909 frames of `Traffic_RecognitnData` on bus 2. **Exactly two payloads, and `TsrVLim1MsgTxt` was
+255 on every single frame:**
+
+```
+372320fffcc80220  x878   Available_CameraOnly   NoNavDataAvailable   Mph
+172220fffcc80220  x31    Available_FusionMode   NoInformationAllOK   Mph
+```
+
+**The second payload is the important one.** For 31 frames the camera sat in `Available_FusionMode`
+reporting `NoInformationAllOK` — its healthy state, nav data flowing, nothing wrong — **and read no
+sign anyway.** So `NoNavDataAvailable` is NOT what stops sign reads. That theory is dead.
+
+**The camera does not believe it is in an unsupported market.** `TsrMsgTxt_D_Rq` carries dedicated
+codes for exactly that and never emits them:
+
+```
+TsrMsgTxt_D_Rq     5 = CountryNotSupported     6 = RegionNotSupported     <- NEVER SEEN
+                   3 = NoNavDataAvailable      1 = NoInformationAllOK     <- what it actually says
+TsrStatMsgTxt_D_Rq 1 = TSR_Off   5 = TSR_Error                           <- NEVER SEEN
+                   3 = Available_CameraOnly    2 = Available_FusionMode   <- what it actually says
+TsrVlUnitMsgTxt    2 = Mph                                               <- correct for the US
+```
+
+TSR reports itself **available**, in **mph**, with **no region or country complaint**, and reads
+nothing. Any future theory has to explain that combination.
+
+**Today's writes have not changed `0x3CD`.** The live parked payload is `372320fffcc80220` — byte for
+byte the dominant pre-change payload. That is not yet a negative result: the car was stationary at
+`vEgo` 0.00 for the whole capture, and the `FusionMode` frames in the pre-change route only appeared
+while moving. **The comparison is only valid after a drive on the new configuration.**
+
+### THE POST-WRITE DRIVE: ZERO SIGN READS, AND THE CONFIG MATCHED THE WORKING CAR
+
+**2026-08-21, route `000003a2`, 27 segments + `000003a3`, decoded LOCALLY** (375 MB pulled to the
+laptop — see the warning at the end of this section).
+
+```
+1765 frames of 0x3CD    peak 71.9 mph    772 frames above 10 mph
+372320fffcc80220  x1765  VLim1=255  Available_CameraOnly  NoNavDataAvailable  Mph
+```
+
+**One distinct payload for the entire drive.** `TsrVLim1MsgTxt` never left 255 on a real highway run
+that certainly passed posted limits.
+
+**And the camera never reached `FusionMode` again.** The pre-write route had two payloads including
+31 frames of `Available_FusionMode` / `NoInformationAllOK`. After setting the data source to
+Camera + APIM — the change meant to *enable* fusion — the camera sat in `NoNavDataAvailable` for
+1765 straight frames and never fused once.
+
+**THE CONFIG MATCHED THE WORKING CAR ON BOTH IDENTIFIED NIBBLES AND STILL READ NOTHING:**
+
+```
+706-01-01 nibble 2    his 8   friend 8    MATCHED
+706-02-01 nibble 4    his 6   friend 6    MATCHED
+result                zero sign reads
+```
+
+That is the strongest evidence so far that **configuration is not the gate.** Still unmatched on
+those two blocks: `706-01-01` nibbles 8 and 9, and `706-02-01` nibble 9 — all flagged in the
+market-config caution above, because the control car is not a US car.
+
+### TWO MISTAKES IN THIS SESSION, RECORDED SO THEY ARE NOT REPEATED
+
+**1. Two variables were changed before the drive.** `706-01-01` nibble 2 and `706-02-01` nibble 4
+both moved, so the 1765 frames cannot attribute anything to either one. Change one thing, drive,
+then change the next.
+
+**2. Camera + APIM was pursued as if it were the goal. It is not.** Line 30 of this document already
+said so: *sign reading does not need nav; Camera Only means the camera reads a sign with its own
+optics, and nav is a second source, not a prerequisite.* Camera + APIM matters for a **different**
+feature — routing SYNC's map limits to openpilot (section 6d). It was chased here because it silenced
+`NoNavDataAvailable`, which is a symptom, not the objective.
+
+**But note the tension, because it is not resolved:** the friend's working car sits at nibble 4 = `6`
+(Camera + APIM). So "Camera Only is what we want" is the theory, and "the working car runs Camera +
+APIM" is the observation. Both are in the record; neither has been shown to produce a sign read.
+
+**3. Do not ask the friend for his TSR data source. It is already in his as-built.** `706-02-01`
+nibble 4 = `6`. The complete dumps in `bluepilot/asbuilt/` answer most questions of this shape —
+read them before asking for anything.
+
+### THE MATRIX, AND THE ONE CELL NEVER RUN
+
+```
+706-01-01 nibble 2 | 706-02-01 nibble 4 | signs?
+       4 (old)     |   2  Camera Only   | tested for months -- no
+       4 (old)     |   6  Camera + APIM | never persisted before 2026-08-21
+       8 (new)     |   6  Camera + APIM | TESTED 2026-08-21 -- no
+       8 (new)     |   2  Camera Only   | NEVER RUN
+```
+
+### THE €130 IS DEAD
+
+Do not buy the UCDS EXT licence for this. FORScan writes `706-01-01` (section 4e), the writes
+persist, and the resulting configuration matched the working car on every nibble identified so far
+and produced nothing. A writing tool was never the blocker and neither, on this evidence, is
+configuration.
+
+### THE LEADING REMAINING HYPOTHESIS IS THE HARDWARE
+
+```
+HIS      IPMA assembly  KT4T-19H406-CE     strategy KT4T-14F397-AE
+FRIEND   IPMA assembly  LV4T-19H406-CF     strategy KT4T-14F397-AE   <- SAME software
+```
+
+Same firmware, different camera assembly. This fits every observation: the software reports TSR
+`Available` in `Mph` with no `CountryNotSupported` and no `RegionNotSupported` because the *software*
+supports TSR, and no sign is ever recognised because the *assembly* cannot do it. It would also
+explain five months of as-built work moving nothing. **Unproven** — but it is now the hypothesis that
+explains the most, and it points at a part, not a parameter.
+
+### NEVER RUN THE SCAN ON THE DEVICE
+
+`tsr_scan.py` was run on the comma while `IsOnroad=1` and he was driving. It decompressed and
+capnp-parsed ~200 MB on the device's own CPU, with load already at 7.23 and 87 °F ambient. He
+reported lag, then could not engage. It cleared when the processes were killed.
+
+**Use `bluepilot/asbuilt/tsr_local.py` instead** — `scp` the `rlog.zst` files off and decode on the
+laptop. The car must never pay CPU for analysis.
+
+### THE REMAINING QUESTION IS A DRIVE
+
+**What is NOT yet proven.** A value persisting is not TSR working. The measurement is
+`TsrVLim1MsgTxt` in `Traffic_RecognitnData` (`0x3CD`): **255 is the no-data sentinel** and it has been
+255 on every frame ever captured on this car. Anything else means the camera is genuinely reading a
+sign. That needs a drive past a posted limit; it cannot be settled in the driveway.
+
+Two separate things are gated separately, and only the first matters for openpilot:
+
+| what | readout | state |
+|---|---|---|
+| camera reads signs | `TsrVLim1MsgTxt` on `0x3CD` | needs a drive with the comma recording |
+| cluster draws a sign | IPC SLIF at `720-09-01` | **still unwritten** — and the IPC is LKA-only for everything else, so the dash is not a trustworthy TSR indicator either way |
+
+Restore value, exact: **`706-01-01` -> `0410 A9DB B960`**.
+
+Bisect candidates, all checksum-valid, from `bluepilot/asbuilt/asbuilt.py`:
+
+```
+0810 A9DB B964   nibble 2 only            <- WRITTEN 2026-08-21, accepted
+0410 A9DA A94F   nibbles 8-9 only
+0810 A9DA A953   full copy of the friend's block
+0400 A9DB B950   diagnostic: IACC not TSR
+```
+
+---
+
+## 4f. FUSION MODE IS THE ANSWER, AND `U0253` IS WHAT BLOCKS IT
+
+> **SUPERSEDED BY 4j. Fusion mode is NOT required.** The camera read a sign in
+> `Available_CameraOnly` with `NoNavDataAvailable` asserted on all 747 frames, including the seven
+> that carried the limit. The `U0253` measurement below is real and stands; the conclusion drawn
+> from it does not. Kept because the missing-message evidence is the best in this file and because
+> the reasoning error is worth seeing.
+
+**2026-08-21, late. This supersedes the Camera Only advice given earlier the same day, which was
+wrong.**
+
+### Two independent reports: Fusion mode is what produces sign reads
+
+From the FORScan forum, `Focus MK4 - Activation Traffic Sign Recognition (TSR) Impossible` (t=13385):
+
+> **`adiandy`**: "I also changed to **FUSION rather than Camera only**, and now I get the Speed sign
+> as soon as i move the car."
+
+> **`sanglt`**, vehicle listed as **Ford Mondeo MK5** -- *this platform, CD391*: "I try to active TSR
+> on Mondeo MK5 too. So far I can get these thing works: **IPMA: TSR in Fusion mode**; IPC: TSR menu
+> + icon show"
+
+**A CD391 car has TSR working and it runs Fusion mode.** Line 30 of this document says sign reading
+does not need nav, and that reasoning produced the instruction to revert `706-02-01` to Camera Only.
+It was wrong. The working car sits at nibble 4 = `6`, and so do these reports.
+
+### And it explains the 1765 frames
+
+The post-write drive ran at nibble 4 = `6` (Camera + APIM) the whole way, yet `0x3CD` reported
+`Available_CameraOnly` with `NoNavDataAvailable` on **every single frame**. The camera never entered
+Fusion mode. It could not: Fusion mode needs the APIM feeding it nav data.
+
+```
+U0253  Lost Communication With Accessory Protocol Interface Module
+       Module: Image Processing Module A
+       status -2C  DTC Maturing - Intermittent at Time of Request   (2026-08-21 20:07)
+```
+
+**The camera has been saying all along that it cannot reach the APIM.** Section 6d already measured
+the other half: the APIM sends position only, and `0x463` / `0x464` are absent. Nothing in five
+months of as-built work touches that.
+
+**THE BLOCKER IS THE APIM LINK, NOT THE CAMERA AND NOT ITS AS-BUILT.**
+
+### The confirmed-working Focus MK4 recipe, for reference
+
+```
+1 - IPMA   "Traffic Sign Recognition Mode: SLOIF"
+2 - IPC    "Traffic Sign Recognition"  Disabled > Enabled
+3 - ASBUILT enable menus:
+    IPC 720-03-01  x7xx xxxx xx   TSR IOD
+    IPC 720-04-01  xxxx xxCx xx   TSR overspeed chime
+    IPC 720-09-01  xxxx xxxx 0x   TSR SLIF deactivation
+    IPC 720-10-01  x0xx xxxx xx   TSR NCAP deactivation
+    IPC 720-03-02  xx8x xx        "Traffic Sign Recognition"
+SLIF  = speed limit information function
+SLOIF = speed limit and other information (overtaking signs)
+```
+
+### HIS IPC PHYSICALLY LACKS TWO OF THOSE BLOCKS
+
+Diffing his IPC against the Euro Mondeo CD391 (same `LS7T-14C026` strategy family):
+
+```
+720-10-01   HIS --ABSENT--       EURO 0401 0000 003D    <- named in the Focus fix
+720-10-02   HIS --ABSENT--       EURO 4000 0079
+720-09-01   HIS 2000 0000 0051   EURO 2000 1504 016B    <- zeros where the euro car has data
+```
+
+18 blocks on his IPC, 20 on the Euro. **A missing block is not a wrong value -- the record does not
+exist and no checksum gets past it.** This is structural confirmation of what BartBK said on
+2026-08-09: *"The US IPC does not support TSR. You have to replace it to have TSR on the IPC."*
+
+**But that governs the DASH, not the bus.** openpilot never reads the cluster; it reads `0x3CD`. If
+the camera enters Fusion mode it broadcasts there regardless of what the IPC can render. **Do not buy
+a cluster to fix an openpilot feature.**
+
+If the dash display is ever wanted for its own sake, the donor is a **UK-market** CD391 Mondeo IPC --
+mph and TSR -- not a continental km/h one.
+
+### The as-built checksum, generalised
+
+```
+checksum = (0x0H + 0xLL of the address) + section + block + sum(data_bytes)  &  0xFF
+```
+
+The address contributes as **bytes**: `706` -> `0x07 + 0x06`, `720` -> `0x07 + 0x20`,
+`726` -> `0x07 + 0x26`, `7D0` -> `0x07 + 0xD0`. The earlier 706-only formula summed three nibbles and
+worked only because `0x06 == 6`. **Verified against all 201 blocks of four modules with zero
+failures.** Any candidate value for any module can now be generated rather than copied off another
+car.
+
+### UCDS CANNOT DECODE THIS CAR'S CCC. THE STEP THAT SAID IT COULD WAS NEVER VERIFIED.
+
+The `AsBuilt Editor (CCC)` model list contains, in full: GALAXY/S-Max CD340, Mondeo IV CD345, C-MAX,
+Focus III, Kuga II, Escape C520, Fiesta, B-MAX, Transit and its variants, EcoSport, Ranger, Territory.
+**No Edge. No Mondeo V. No CD391 at all**, and nothing newer than roughly 2017.
+
+Selecting a model and proceeding returns:
+
+```
+Unable to find JU5T-14B476-BAR part number of BCMii module in base! Check model of car selected!
+```
+
+That is his BdyCM. The data is not in UCDS. **"Select `EDGE/S-MAX 2015-`, open AsBuilt Editor (CCC)"
+was step 2 of section 7 from 2026-08-12 onward and was never possible.** Three sections were built on
+a step nobody had checked existed. Delete it on sight.
+
+### Standing caution on the two demo sessions
+
+`WF0EXXWPCELA25401` and `WF0EXXWPCELR15787` are CD391 with a **byte-identical BdyCM** to his
+(`JU5T-14F141-BAC` / `JU5T-14B476-BAR` / `JU5T-14C184-AAN`), so block layouts are directly
+comparable. **But there is NO evidence either car has TSR.** They may be UCDS reference files rather
+than real configured vehicles. That assumption was leaned on three times on 2026-08-21 and must be
+verified before any value is copied from them.
+
+---
+
+## 4g. THE ENTIRE IPMA CONFIGURATION IS A BRAZILIAN FILE OFF THE INTERNET
+
+> **PARTIALLY SUPERSEDED.** The Brazilian-origin fact is correct and remains the most load-bearing
+> thing in this file. Two conclusions drawn from it are not: the `FF` region reading is corrected in
+> **4k** (a working car reads `FFFC` too), and the "get a US-market as-built" recommendation is
+> retracted in **4l** (US 2019+ builds may have had sign recognition removed, so a correct US config
+> could turn off the one thing that works here).
+
+**Learned from the owner 2026-08-21, and it is the most load-bearing fact in this document.** It
+appears nowhere else in it, and every conclusion above was drawn without it.
+
+He wrote a complete IPMA as-built taken from a Brazilian car, a long time ago, and **he does not have
+the original**. The Edge camera's own factory configuration is gone.
+
+**THEREFORE SECTION 4's "RESTORE POINT -- as-built as of before any changes" IS THE BRAZILIAN
+CONFIGURATION.** There is no US baseline anywhere in this investigation. Every revert performed here,
+including two on 2026-08-21, restored the car to Brazil.
+
+**Why it matters more than any nibble.** Brazil follows the Vienna Convention: speed limit signs are
+**circular, red-ringed, in km/h**. US signs are **rectangular, white, in mph**. A camera configured
+for Brazilian signs drives past every sign in Utah and correctly reports nothing -- while still
+reporting TSR `Available`, still reporting `Mph` for its DISPLAY units, and never emitting
+`CountryNotSupported`, because as far as it is concerned it is working perfectly in Brazil.
+
+That explains the whole measured picture better than anything else in this file.
+
+**The clean fix is a correct US-market as-built for this module.** Ford publishes factory as-built by
+VIN at motorcraftservice.com. What is needed is a **US 2019-2020 Edge with Co-Pilot360** carrying the
+same IPMA part (`KT4T-19H406-CE`). He does NOT know the donor module's VIN -- it was bought used --
+so the source is a US Edge owner's published `706` blocks, which these forums trade routinely.
+
+### THE REGION FIELD IS ALREADY EXPLAINED, AND IT STAYS CLOSED
+
+`706-04-01`'s first byte is the region/units field. Community values:
+
+```
+01 = region undefined / KPH        08 = North America / sign type undefined
+02 = region undefined / MPH        09 = North America / KPH
+                                   0A = NORTH AMERICA / MPH
+```
+
+His reads **`FF`**. That is not a defined region -- and it is exactly consistent with CLAUDE.md's
+record that he set the region back to **UNSPECIFIED** after it threw DTCs. His memory and the byte
+agree.
+
+**DO NOT PROPOSE CHANGING IT.** He reminded me of this on 2026-08-21 while I was mid-research:
+*"Remember when I tried to change the region in the regular config and not the as built it broke
+everything."* It is explored, the answer was no, and CLAUDE.md already says so.
+
+Recorded only because the `FF` would otherwise look like an unexplained anomaly to the next session
+and get picked up as a fresh lead. It is not fresh.
+
+## 4h. THE NAV REPEATER IS ALREADY CORRECT. THE ABSENCE IS BEHAVIOURAL.
+
+> **The Nav Repeater finding stands. The Android Auto conclusion is SUPERSEDED BY 4j** -- he drove
+> with the phone off USB and `0x463`/`0x464` were still at zero frames. The APIM is configured to
+> repeat navigation data and does not, and why remains open.
+
+The strongest-looking lead of 2026-08-21, checked and closed the same hour.
+
+`roylion15` -- the FORScan forum's authority on this, whom every TSR thread defers to -- on what
+makes an APIM feed the camera at all:
+
+> "need two settings activation in APIM to **send nav data to IPC /IPMA** ... (in direct config with
+> forscan). **nav repeater conformance, set current**. **nav repeater format, set motorola**"
+
+"Nav Repeater" is literally the APIM function that repeats navigation data onto the bus for the IPC
+and IPMA -- the exact thing measured missing. And it is Direct Config, not as-built, so nothing in
+this investigation had ever looked at it.
+
+**HIS CAR IS ALREADY SET CORRECTLY:**
+
+```
+Navigation Repeater format        Motorolla                 <- as recommended
+Navigation Repeater conformance   Current                   <- as recommended
+Navigation                        Enabled common interface
+Non-Metric Units for NAV          Miles/Feet                <- correctly US
+```
+
+**So the APIM is configured to repeat navigation data and sends one of three GPS messages anyway.**
+That is the finding: the defect is not configuration, it is runtime behaviour.
+
+**Which leaves Android Auto as the leading explanation, unopposed.** Ford's own documentation: the
+built-in GPS *"can only be used if CarPlay or Android Auto are disabled, or the phone is connected
+via Bluetooth"*, and once a phone is set up for Android Auto, *"SYNC 3 will always defer to it when
+that phone is plugged in -- mapping and navigation are deferred too."* He always projects. A deferred
+nav stack has nothing to repeat, while `0x462` keeps flowing because raw position is wanted by
+modules that do not care about navigation.
+
+**THE TEST IS FREE AND NEEDS NO SOFTWARE:** one drive with the phone off USB (Bluetooth is fine --
+it is projection that defers, not pairing), first half with no destination and second half actively
+navigating in SYNC, past posted limits. Raw CAN is in the route log on any branch. Three outcomes,
+all useful: the messages appear (Android Auto was it), they appear only once routed (same answer,
+and unusable day to day), or still nothing (the APIM is configured to repeat and does not, which
+points at the gateway and is genuinely new).
+
+## 4i. TWO ERRORS ON 2026-08-21, BOTH FROM REASONING PAST THE RECORD
+
+**1. I talked him into reverting `706-02-01` to Camera Only.** Line 30 of this document says sign
+reading does not need nav, so Camera Only looked like the mode that targets optical recognition. But
+the friend's working car sits at nibble 4 = `6`, and two forum reports name **Fusion mode** as the
+state in which signs are actually read. Section 4f has the detail. The advice was wrong and was
+reversed the same day.
+
+**2. I reconstructed a change to `706-02-01` that the record already contradicted.** Section 4d
+recorded `FD56` on 2026-08-12 and the live read was `FD52` on 2026-08-21, and I concluded the `6` was
+a transient from 4b that had reverted. **Section 4's restore point ALSO reads `FD56`** -- so `6` was
+the value "before any changes", and the movement was `6` -> `2`, the opposite direction. Checking
+section 4 against 4d before reasoning from the difference would have caught it in one grep.
+
+---
+
+## 4j. THE CAMERA READ A SIGN. VERIFIED AGAINST STREET VIEW. 2026-08-21.
+
+**Route `000003a7--f0fee7f062`, segment 6, seven consecutive frames:**
+
+```
+                        every previous frame       these seven
+TsrVLim1MsgTxt_D_Rq     255  NoLimit          ->   30  Message30
+TsrVl1PrmntMsgTxt_D_Rq  0    DoNotShowSign    ->   1   ShowPermanentlyWithoutSupp
+payload                 372320fffcc80220      ->   3723201efcc90220
+```
+
+Byte 3 went `ff` -> `1e`. That is a whole byte, not a packed field. And the camera independently set
+"show this sign permanently" in the same frames -- **two semantically coherent fields moving
+together, which noise does not do.**
+
+**GROUND TRUTH: `40.725463, -111.829903`, 2011 2100 S, Salt Lake City.** Street View shows a
+**SPEED LIMIT 30** on a pole at exactly that spot. He confirmed it: *"Bingo. Literally right there."*
+Decoded from the car's own `0x462`, at 15.9 -> 6.7 mph, at night.
+
+**THIS IS THE FIRST SIGN THIS CAMERA HAS EVER BEEN OBSERVED TO READ.**
+
+### What it kills
+
+- **Every hardware theory.** `KT4T-19H406-CE` can recognise a US speed limit sign and report it. The
+  base-camera-variant theory, the `LV4T` assembly difference against the friend's car, the "US IPC
+  means replace the cluster" reading -- all dead. It is configuration, and configuration is fixable.
+- **Fusion mode is NOT required.** It read the sign in `Available_CameraOnly` with
+  `NoNavDataAvailable` asserted on all 747 frames including the seven. Line 30 of this document was
+  right the whole time: sign reading does not need nav.
+- **Android Auto was not suppressing anything.** He drove with the phone off USB and `0x463`/`0x464`
+  are still at **zero frames**. Section 4h's leading hypothesis is wrong.
+- **The synthesized-GPS feature is not the fix.** The missing messages are a real, measured defect
+  and `U0253` is real, but they are not what was stopping sign reads. The code stays -- it addresses
+  a genuine fault and stands down by itself -- but it must not be described as the TSR fix.
+
+### THE DETECTION RANGE IS ZERO. THIS IS THE DEFECT, AND IT IS MEASURABLE.
+
+**The most useful number from 2026-08-21.** Distance from the sign against what the camera reported,
+decoded from the car's own `0x462`:
+
+```
+ dist to sign    mph   VLim1        heading   turn
+      183 m     ~29     255            90
+      157 m     ~28     255            91      +1
+      130 m     ~28     255            91      +0
+      104 m     28.2    255            90      -1
+       78 m     27.1    255            91      +2
+       54 m     26.0    255            89      -2
+       31 m     24.3    255            89      -1
+       10 m     22.3    255            89      +1
+        0 m     15.9     30   <- read   89      -0
+       11 m      8.0     30              111    +19   <- turn STARTS, after the sign
+       18 m      7.9     30              163
+       21 m      7.9    255              148
+```
+
+**183 metres of dead-straight approach at a constant 89-91 degrees, and the camera recognised
+nothing until level with the sign.** The turn only begins AFTER passing it, which is what ends the
+read five seconds later as the sign leaves frame. So there is no "it was around a corner"
+explanation -- he had two hundred metres of clear line of sight.
+
+**A working TSR recognises a sign 30-50 m out. This one has an effective range of about zero.** That
+is the entire explanation for the hit rate:
+
+```
+at  7 mph   ~3.1 m/s    several seconds beside the sign   ->  read
+at 30 mph  ~13.4 m/s    well under a second                ->  missed
+at 70 mph  ~31 m/s      no chance
+```
+
+He got this one because he crawled past at 16 mph and slowed to 7. Every sign on the 72 mph drive
+was gone before the camera could commit.
+
+**AND THE SLOW SPEED WAS NOT INCIDENTAL -- he was turning around.** His words: *"I was going slow
+because this is actually right before I turned around!"* The heading trace agrees: +19, +24, +28
+degrees immediately after the sign, then swinging back. So this was a deliberate deceleration for a
+maneuver, not a representative moment of driving.
+
+**Which means the one detection this camera has ever produced happened under about the most
+favourable conditions available on a public road**: head-on approach, 183 m of clear sightline,
+decelerating through 16 to 7 mph, at night with headlights on a retroreflective sign, and several
+extra seconds beside it during the turn. It needed ALL of that to get one read.
+
+Recorded because "he was slow" is exactly the detail that gets lost and then misread later as
+evidence that low speed is the FIX. It is not a fix; it is how far conditions had to be stacked
+before a 0 m detection range produced anything at all.
+
+**WHY THIS REFRAMES EVERYTHING.** A DISABLED system reads nothing at any range. This one reads at
+0 m. So TSR is not switched off -- it is a recognition pipeline running at the absolute edge of its
+capability, which is what a camera matching against the WRONG SIGN TEMPLATE looks like: it only
+scores a hit when the sign fills the frame. That is exactly what a Brazilian configuration
+(circular, metric) would do on US roads (rectangular, mph).
+
+**It also gives every future change a metric instead of a yes/no.** Score with
+`bluepilot/asbuilt/detect_range.py`. **The number to beat is 0 m.** A config change that moves
+recognition out to even 20 m would multiply the hit rate several-fold and would be unmistakable in
+one drive.
+
+**And it lowers expectations for the 4k write.** A single mode nibble is unlikely to move a
+detection range from 0 m to 40 m. Still worth the drive -- it is one nibble with a clean restore --
+but do not expect it, and score it on RANGE rather than on whether any sign is read at all.
+
+### What it does NOT show
+
+**One sign, out of many 20s, 25s and 30s on a 13-minute drive.** 739 of 747 frames still read 255.
+That is not a working camera; it is a physically capable camera recognising almost nothing.
+
+**The configuration was IDENTICAL to the 1765-frame drive that read zero** -- `706-01-01` at
+`0810 A9DB B964`, `706-02-01` at `FD56 16DB 7FD3`, confirmed by him. So configuration is not what
+changed between the two drives. What differed was **night, and 32 mph instead of 72**. Speed limit
+signs are retroreflective, so under headlights at 7 mph they are far higher contrast than the same
+sign in daylight at highway speed. A camera hunting for the wrong sign STANDARD would plausibly get
+a lucky match exactly there and nowhere else.
+
+Which points back at section 4g: the configuration came from Brazil, where signs are circular and
+metric, and the region byte reads `FF`. **The evidence now points there rather than at nav data.**
+The region control is still closed -- he has said no twice and the DTCs were real -- but a correct
+**US-market as-built for `706`**, written as raw blocks with computed checksums, is a different
+action from the friendly-name control that burned him.
+
+### A decode bug worth remembering
+
+The first coordinates reported were `40.725463, -110.170097` -- Ashley National Forest, 1.7 degrees
+east of the truth, and he said so immediately. `0x462`'s minutes are a MAGNITUDE: they move the
+position away from zero, so on a western longitude they must be SUBTRACTED from a negative degree.
+Adding them walks the fix east. Latitude was unaffected because Utah is north. **A position that
+lands in the wrong place is obvious; one that lands 400 m away is not** -- check a decoded
+coordinate against something known before quoting it.
+
+---
+
+## 4k. NIBBLE 8 OF `706-01-01` IS THE TSR MODE FIELD. THE NEXT WRITE.
+
+**Found 2026-08-21 on the FORScan forum, thread 9806 page 32.** `Dragunov`, on a **Mondeo MK5 --
+CD391, this platform**, names the field outright:
+
+> "Activated TSR by changing the code in this line ... **IPMA `706-01-01` `xxxx xxx* xx`, `*` to `A`
+> (Reading + GPS), the `*` was `9` (Disable)**"
+
+That is nibble 8. Against the two cars in this document:
+
+```
+his              0810 A9DB B964      nibble 8 = B      one sign in 747 frames
+his friend       0810 A9DA A953      nibble 8 = A      TSR works
+documented       9 = Disable,  A = Reading + GPS
+```
+
+**THE NEXT WRITE, checksum computed and verified:**
+
+```
+706-01-01  ->  0810 A9DA B963       nibble 8: B -> A
+restore    ->  0810 A9DB B964
+```
+
+Nibble 9 is deliberately LEFT at `B` rather than copying the friend's whole block. Nibble 8 has a
+documented meaning; nibble 9 does not, and the same thread's advice is *"make the changes per
+function and not all in one."*
+
+**What it is expected to fix: UNKNOWN, and possibly nothing.** Stated plainly because this was
+oversold once already:
+
+- `9` is Disable and the camera **read a sign**, so whatever `B` is, it is not disabled. This field
+  is therefore not what is holding the hit rate at one-in-many.
+- `A` is "Reading **+ GPS**", a fused mode, and **this car's APIM does not send GPS** -- `0x463` and
+  `0x464` measured at zero frames. Whether `A` degrades gracefully without it or waits on data that
+  never arrives is not known. It could be a step backwards.
+- `Dragunov` made exactly this change and reported signs still did not appear.
+
+It is worth doing anyway because it is ONE nibble, on a named field, toward the value a working car
+on this platform runs, with a clean restore and a measured baseline to compare against. **Drive the
+same roads past the same signs and count reads against one-in-747.**
+
+### AND THE REGION READING FROM 4g WAS WRONG
+
+Section 4g called `FF` in `706-04-01` an unset region, from a community value table where `0A` is
+"North America / MPH". **`fred4009`'s WORKING Fiesta reads `FFFC 27xx xx`** -- so `FF` in that
+position is normal, not unspecified. The table is for a different position or a different vehicle
+line.
+
+So the region is not the anomaly 4g claimed, there is no reason to go near the control that threw
+DTCs, and the `FF` should not be picked up as a lead again. That is the SECOND time a value table
+found by search has been applied to this car's blocks without a control to check it against.
+
+### Two other things from thread 9806 worth keeping
+
+- **A write that reports success and silently reverts is a known IPMA behaviour.** `alextheboss96`:
+  *"Once I press write it says blocks programmed successfully, but when I close the module and
+  reopen it, it has the previous value."* That is section 4b's failure mode, on someone else's car.
+  **His module does NOT do this** -- both 2026-08-21 writes persisted across an ignition cycle,
+  which is a real difference in his favour.
+- **`WWA` (Wrong Way Alert) gave `Dragunov` a camera error.** If a future block touches it, expect a
+  fault.
+
+---
+
+## 4l. TWO OTHER OWNERS OF THIS EXACT CAMERA GET NOTHING. AND A US AS-BUILT IS THE WRONG TARGET.
+
+**FORScan forum topic 30014, "TSR in Ford Edge 2.7 [2019]", January-February 2026.** Found
+2026-08-21. It is the closest match to this car that exists anywhere, and it reverses the
+recommendation section 4g/4j were building toward.
+
+**`lucuszysko`, Ford Edge ST 2019, IPMA `KT4T-19H406-CE` -- the same part number:**
+
+> "It seems that everything I enabled in the configuration - there are no errors from the modules -
+> IPMA calibration has been performed - a menu option regarding sign reading appeared ... **Despite
+> all of this, no signs are detected while driving.**"
+
+Then, after more work:
+
+> "It looks like the **Region configuration is not equal for all three modules: IPC, APIM, and
+> IPMA.** For the first two, I was able to set the Region to PL, but **for IPMA it is somehow
+> blocked -- any attempt to change this value ends up in failure.**"
+
+**`marjanoos`, same part number:**
+
+> "I think the IPMA fw has to be european. **I have the same issue with the same part number.**"
+
+and after getting EU Edge Vignale calibration files:
+
+> "It has the same names, SBL, Strategy and Calibration. **So it looks like we have the same
+> firmware.** However **I can't change the region as well.** ... Found european coding but **it
+> doesn't contain 706-04-XXX section at all.**"
+
+**`pdxpeter`, 2020 Ford Edge ST -- a US car:**
+
+> "**the speed signs were removed from the 2019+ firmware, at least in the US.**"
+
+### What this establishes
+
+1. **This car is AHEAD of both of them.** They report zero signs. His camera read a 30 and set
+   `ShowPermanentlyWithoutSupp` in the same frames (section 4j). Whatever his configuration is
+   doing, it is doing more than two people who did everything by the book.
+2. **The IPMA region is WRITE-BLOCKED on this module for both of them**, and his is not -- both
+   2026-08-21 writes persisted across an ignition cycle. That is a real capability they do not have,
+   and it is worth not squandering.
+3. **EU and US IPMA firmware are IDENTICAL** -- same SBL, strategy and calibration, confirmed by
+   someone who obtained both. **The firmware theory is dead**, and the standing rule against running
+   the IPMA update to `CF` loses its last competing justification but stays for its own reasons.
+4. **A EUROPEAN as-built has no `706-04-xx` section at all.** His car has `706-04-01` and
+   `706-04-02`. So block presence differs by market, and a wholesale foreign import is not a
+   like-for-like swap.
+
+### THE RETRACTION: DO NOT CHASE A US-MARKET AS-BUILT
+
+Sections 4g and 4j worked toward "get a correct US-market `706` config for this module". **On this
+evidence that is the wrong target and may be actively harmful.**
+
+If US 2019+ builds had sign recognition removed, a correct US configuration would plausibly turn off
+the one thing that works here. **The Brazilian configuration may be WHY this camera reads anything
+at all**, rather than why it reads so little -- the exact opposite of section 4g's reasoning.
+
+**Which makes the friend's car the right reference after all**: a non-US vehicle where TSR genuinely
+works, running the same strategy and calibration. Section 4d's caution about copying his
+market-specific nibbles was written before any of this was known, and it now points the wrong way.
+
+**This is the third time in one day that a confident framing about markets has been wrong** -- first
+"the friend's car is a different market so his nibbles are dangerous", then "`FF` is an unset
+region", now "get a US as-built". Every one was reasoning from a plausible story rather than from a
+control. The measurements that survived are the ones taken on his own car.
 
 ---
 
@@ -315,19 +1114,85 @@ expect a revert to undo it.
 
 ## 6. Tooling
 
-**FORScan** cannot write these. Its profile is a 2020 Fusion; the IPC and IPMA changes are feature
-enables a Fusion never had. The APIM one was allowed, which is why that single change worked.
+**FORScan** — **THIS PARAGRAPH WAS WRONG, see section 4e.** It used to read "cannot write these.
+Its profile is a 2020 Fusion; the IPC and IPMA changes are feature enables a Fusion never had."
+On 2026-08-21 FORScan wrote `706-01-01` to `0810 A9DB B964` and accepted it. It had refused exactly
+one value, `0450`, which was the only value ever tried on that block. Value validation, not profile
+validation. The APIM write was never the outlier it was assumed to be.
 
 **UCDS** is installed (`v3.0.001.023`), adapter connected via USB, SN `7E 4E 6A 9B`. **All three
-licences read "Not activated"** despite having been purchased and used before. Most likely their
-activation server is unreachable from the US — same reason their site stopped international sales.
+licences read "Not activated".**
+
+**THE LICENCE EXPIRED. IT IS NOT A GEOBLOCK. Established 2026-08-21.** This paragraph used to say
+"most likely their activation server is unreachable from the US", which was a guess written as a
+finding, and it aimed the next step at a VPN.
+
+The receipt settles it. Order #7238 from autodiagnosticsolutions.com, **4 February 2025**, €535.50,
+"UCDS PRO Wireless (V5 ODO+Extended license)". The product page lists package contents verbatim as
+**"1 x EXT+ODO Extended license 12 months"**. Twelve months from 4 Feb 2025 is **4 February 2026** —
+roughly seven months before the TSR session that found all three licences dead.
+
+Confirmed against this machine so nobody hunts for it again: there is no licence file anywhere under
+`C:\UCDS_V3\`, `HKCU:\SOFTWARE\UCDS_V3` holds only settings and an empty `Adapter_SN`, the
+`.ulog` files are encrypted, and none of the launcher, main binary or `ucdsj2534.dll` contains an
+activation host. **The licence state lives on the adapter and on their server. Nothing local can
+report it.**
+
+One red herring, recorded as such: session files show it reading cars on **11 March 2026**, thirteen
+months after purchase, which briefly looked like evidence against a twelve-month term. It is not.
+Reading never needed the extended licence — per the product page, EXT is what unlocks **VBF Loader,
+Update Wizard and Direct Config**.
+
+**BENCH-CONFIRMED 2026-08-21, adapter plugged in, no car.** The expiry is no longer an inference
+from the receipt. UCDS was launched with the adapter on USB and the network watched:
+
+| Test | Result |
+|---|---|
+| adapter enumerates | `UCDS Adapter V5`, `USB\VID_0483&PID_1236\UCDS_V5`, WinUSB driver (NOT a COM port) |
+| Adapter SN | `7E 4E 6A 9B` — matches this document |
+| licence panel | EXT / ODO / PATS all **"Not activated"** |
+| host contacted | **`ucdsys-server.online` → `147.93.88.191`**, freshly resolved |
+| TCP 443 and 80 | **both succeed** from his machine |
+| TLS cert | valid `CN=ucdsys-server.online`, Sectigo, **renewed 23 Mar 2026** |
+| VPN | **none** — default route is his own Wi-Fi via `192.168.1.1` |
+| connection state | contacted, answered, closed — no hang, no timeout |
+
+Their server is up, answers over an ordinary Utah connection with no VPN, and the answer is "not
+activated". **A geoblocked or dead host cannot produce that reply.** The VPN idea is dead by
+measurement. The cert having been renewed in March 2026 also says they are still trading, so a
+renewal should actually land.
+
+**THE ADAPTER IS NOT LICENCE-GATED — the application is.** `ucdsj2534.dll` is registered at
+`HKLM:\SOFTWARE\WOW6432Node\PassThruSupport.04.04` as `UCDS Team / UCDS-J2534 V3`, `CAN=1`,
+`ISO15765=1`, and exports the full standard PassThru set (`PassThruOpen/Connect/WriteMsgs/ReadMsgs/
+StartMsgFilter/Ioctl/SetProgrammingVoltage`). The only URLs inside it are GlobalSign code-signing and
+timestamp endpoints — Authenticode metadata, not runtime calls. So **any J2534 application can drive
+this adapter with the licence expired.**
+
+**PROVEN BY USE, not by string-scanning.** He runs FORScan on this same adapter. Every FORScan
+session in this document is dated 11–21 August 2026 — six months after the licence expired on
+4 February — and the APIM write `7D0-09-02` **succeeded** in that window. So as-built reading AND
+writing both work through this adapter with all three UCDS licences dead. No hedge required.
+
+It still **does not unblock FORScan**, which refuses the IPMA write on *profile* grounds — a Fusion
+profile against an Edge module — not adapter grounds.
+
+Static analysis of the gate is a dead end and should not be attempted again: `UCDS_V3.exe` is packed
+(37 MB, 55,800 extractable strings, not one matching `licen|activat|expire`), and the definitions
+live in a 906 MB `ucds.udb`. None of the visible UI text exists in plaintext on disk.
+
+Renewal is **`UCDS V5 EXT License (12 Months)`, €130**, same seller. The ODO (€100, odometer) and
+PATS (€80, keys) licences are irrelevant to as-built work — do not buy them. **But test before
+paying:** As-Built editing may be base functionality, since only Direct Config is named on the
+extended-licence list. Section 7 step 2 is now what decides that.
 
 UCDS matters for one specific reason: **it lets you pick the vehicle manually.** `EDGE/S-MAX 2015-`
 is in its list, so the IPMA can be decoded and validated as the Edge module it actually is, instead
 of through Fusion definitions. That is precisely the wall FORScan hits.
 
-Pricing if it can be bought: EXT licence 6,000 ₽/year, ~$60-70. Their site no longer does direct
-international sales.
+Pricing is settled: **€130/year for EXT alone** from autodiagnosticsolutions.com, which is where
+order #7238 came from. The old note here said "6,000 ₽/year" and "their site no longer does direct
+international sales" — both stale; he bought internationally from this reseller in 2025.
 
 ---
 
@@ -500,36 +1365,73 @@ already parse.
 
 ## 7. Next steps, in order
 
-0. ~~Run the APIM bus probe.~~ **DONE 2026-08-17 -- see above. The APIM sends position only.**
-   The follow-up is to find out why 0x463 and 0x464 are absent: APIM configuration, or gateway
-   forwarding. Reading the friend's car for the same three addresses would settle which, and costs
-   him one route.
+**Rewritten 2026-08-21. Every step of the previous list was premised on something since disproved**
+-- UCDS Edge definitions (impossible, 4f), the EUR 130 licence (dead, 4e), "if a writing tool becomes
+available" (FORScan writes, 4e), and a diagnostic write to prove the field is writable (already
+proved -- two writes persisted).
 
-1. ~~**Ask the friend for his `706-01-01`.**~~ **DONE 2026-08-12, section 4d.** `0810 A9DA A953`.
-   Nibble 3 is `1` on BOTH cars, so the reference map's "TSR enable" position is wrong and the answer
-   is not a single documented bit. **His `720-09-01` (IPC SLIF) is still unasked** and still free.
+### 1. THE ONE WRITE, and measure it against a real baseline
 
-2. **UCDS free tests**, no licence needed if reading is ungated:
-   - select `EDGE/S-MAX 2015-`, open `AsBuilt Editor (CCC)` and `Direct Config`
-   - read `706-01-01` under **Edge** definitions and compare against FORScan's Fusion decode
-   - if the nonsense fields resolve into sane values, the mapping theory is confirmed outright
+```
+706-01-01  ->  0810 A9DA B963      nibble 8: B -> A  ("Reading + GPS")
+restore    ->  0810 A9DB B964
+```
 
-3. **Recover the UCDS licences** — Setup → re-activate; try a VPN if the server is geoblocked; check
-   whether an older UCDS build still shows them activated.
+Rationale, limits and the forum citation are in **4k**. It may fix nothing -- `9` is Disable and the
+camera is not disabled, so this field is probably not what holds the hit rate down.
 
-4. **Untried, if a writing tool becomes available.** THE TARGET LIST CHANGED on 2026-08-12 and this
-   step listed dead values until 2026-08-21:
-   - **IPMA `706-01-01` → `0810 A9DA A953`** — the friend's ACTUAL value on a same-strategy,
-     same-calibration camera where TSR works. This is the experiment. Differences from his own are
-     nibble 2 (`4`→`8`) and nibbles 8-9 (`B`→`A`). Section 4's restore point in hand, and expect the
-     radar calibration to be disturbed and to come back on revert (section 5).
-   - IPC `720-09-01` → SLIF enabled, only if the above does not hold across a boot.
-   - ~~IPMA `706-01-01` → `0450`~~ **DEAD.** Nibble 3 is `1` on the working car too.
-   - ~~IPMA `706-02-01` → `4D56`~~ **DEAD.** `FD` on the working car too.
+**Hold everything else constant.** Same roads, same time of night, so the nibble is the only thing
+that moved. The baseline to beat, across every route pulled so far:
 
-5. **A diagnostic write worth doing once**, to learn whether the nibble is writable at all:
-   `706-01-01` → `0400` (changes IACC, not TSR). If `0` writes and `5` does not, the field is
-   writable and TSR values specifically are blocked. Revert immediately after.
+```
+route a2   31 segments   0 detections
+"latest"    6 segments   0 detections
+route a7   13 segments   1 detection
+           ------------------------
+           50 segments   1 detection
+```
+
+Score it with `bluepilot/asbuilt/tsr_drive.py` against a locally-pulled route. Several detections per
+drive means it worked. One or zero means restore.
+
+### 2. FREE, and neither has been asked
+
+One message to the friend, whose car runs the same strategy and calibration with TSR working:
+
+- **His `706-04-01`.** Section 4d recorded 12 differing blocks but this one was never interpreted,
+  and 4k shows the first byte is not what a search result claimed. His value is `1EFC 26C3 485D`
+  against this car's `FFFC 26C3 847A` -- that difference is unexplained and it is in the block a
+  working Fiesta also differs on.
+- **Whether his APIM sends `0x463` / `0x464`.** Needs a comma or a bus tool, so it may not be
+  answerable, but it separates "this APIM is broken" from "no CD391 APIM sends these".
+
+### 3. THE APIM GPS DEFECT -- a separate track, do not merge it with TSR again
+
+Measured: `0x462` arrives 3494 times a drive, `0x463` and `0x464` **zero**, and the camera raises
+`U0253 Missing Message` because of it. Nav Repeater format and conformance are already correct
+(4h), and Android Auto is not the cause (4j).
+
+It is a real fault and it is **not** what stops sign reads. Conflating the two cost most of
+2026-08-21. Open question: APIM or gateway. The gateway may not be written to.
+
+**openpilot can synthesize both messages from the comma's own GPS** -- built and tested
+2026-08-21, ships on, stands down the moment the car sends the real ones. It is on
+`icbm-manual-override-and-tuning` and has never been driven. It is not a TSR fix and must not be
+described as one.
+
+### 4. CLOSED. Do not re-open any of these.
+
+| | why |
+|---|---|
+| Buy the UCDS EXT licence | FORScan writes the block. The licence is irrelevant (4e) |
+| UCDS `AsBuilt Editor (CCC)` | its model list has no CD391 at all, and the app says so by name (4f) |
+| Replace the IPMA | it is a Cx camera and it read a sign (4j, 4l) |
+| Replace the IPC | governs the dash only, and he does not want TSR on the cluster |
+| IPMA firmware update | EU and US firmware are byte-identical (4l) |
+| Change the region | he has said no twice, the DTCs were real, and `FF` is normal anyway (4k) |
+| A US-market as-built | retracted -- US 2019+ builds may have had TSR removed (4l) |
+| Android Auto | tested, not the cause (4j) |
+| Fusion mode as a prerequisite | tested, not required (4j) |
 
 ---
 

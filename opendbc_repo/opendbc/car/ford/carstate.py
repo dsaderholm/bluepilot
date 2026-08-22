@@ -321,6 +321,15 @@ class CarState(CarStateBase, MadsCarState, CarStateExt):
       ("Steering_Data_FD1", 10),
       ("BodyInfo_3_FD1", 2),
       ("RCMStatusMessage2_FD1", 10),
+      # FusionPilot: watched ONLY to find out whether the APIM ever sends them. On this car it
+      # sends 0x462 (position) 3494 times a drive and these two zero times, which is the U0253 the
+      # IPMA raises -- see opendbc/sunnypilot/car/ford/apim_gps.py. We synthesize them, and this
+      # registration is how the synthesizer knows to stop if the real ones ever appear (e.g. with
+      # Android Auto disconnected). nan because they legitimately never arrive: they must not
+      # invalidate the rest of carState, which is the failure mode that stranded the car on
+      # "waiting to start" when Traffic_RecognitnData was registered twice.
+      ("APIMGPS_Data_Nav_2_FD1", float('nan')),
+      ("APIMGPS_Data_Nav_3_FD1", float('nan')),
     ]
 
     # HEV overlay messages - use float('nan') to mark as non-critical for CAN validity
