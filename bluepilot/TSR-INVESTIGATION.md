@@ -405,10 +405,13 @@ StartMsgFilter/Ioctl/SetProgrammingVoltage`). The only URLs inside it are Global
 timestamp endpoints — Authenticode metadata, not runtime calls. So **any J2534 application can drive
 this adapter with the licence expired.**
 
-Two limits on that, stated so nobody over-reads it later: only ASCII strings were scanned, so an
-obfuscated check or one living in the adapter firmware would not have shown; and **it does not
-unblock FORScan**, which refused the IPMA write on *profile* grounds — a Fusion profile against an
-Edge module — not adapter grounds. A different adapter changes nothing there.
+**PROVEN BY USE, not by string-scanning.** He runs FORScan on this same adapter. Every FORScan
+session in this document is dated 11–21 August 2026 — six months after the licence expired on
+4 February — and the APIM write `7D0-09-02` **succeeded** in that window. So as-built reading AND
+writing both work through this adapter with all three UCDS licences dead. No hedge required.
+
+It still **does not unblock FORScan**, which refuses the IPMA write on *profile* grounds — a Fusion
+profile against an Edge module — not adapter grounds.
 
 Static analysis of the gate is a dead end and should not be attempted again: `UCDS_V3.exe` is packed
 (37 MB, 55,800 extractable strings, not one matching `licen|activat|expire`), and the definitions
@@ -615,6 +618,27 @@ already parse.
      profile.
    - **then see whether it offers to WRITE.** Only `Direct Config` is named as an extended-licence
      feature. If the AsBuilt Editor writes without EXT, the expired licence never mattered here.
+
+2a. **FREE AND STILL UNASKED — do these before spending anything.** Both are one message to the
+   friend. Neither needs the car, the adapter, or the licence:
+   - **What is his TSR data source set to?** Section 4b is the only positive result in this whole
+     document: setting *Camera + APIM* cleared `NoNavDataAvailable` immediately, then reverted at the
+     next boot. If his reads *Camera + APIM* and holds, that is the exact target state.
+   - **His `720-09-01`** (IPC SLIF), open since 2026-08-12.
+   - His `0x463` / `0x464` presence, from step 0.
+
+**WHAT €130 ACTUALLY BUYS — read this before paying.** Section 4b records two distinct failure
+modes, and the licence only addresses one of them:
+
+| mode | what happens | does EXT help? |
+|---|---|---|
+| **FORScan refuses** | error dialog, nothing reaches the car, no DTC | **yes** — a tool with Edge definitions would send it |
+| **Module accepts, then reverts** | write lands, behavior changes, power cycle undoes it | **no** — this is the module validating its own config at startup |
+
+The known-working change (*Camera + APIM*) already got past mode 1 and still died at mode 2. So
+€130 buys the ability to *attempt* `0810 A9DA A953`; it does not buy persistence. That is still worth
+knowing — it is the only way to move the question from mode 1 to mode 2 — but do not expect the
+purchase to end this on its own.
 
 3. **Renew the UCDS EXT licence, €130** — `UCDS V5 EXT License (12 Months)`, autodiagnosticsolutions
    .com, the seller from order #7238. **Only if step 2 shows the editor refusing to write.** This is
