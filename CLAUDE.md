@@ -3788,6 +3788,26 @@ edges they must keep.
 edges, so something downstream is already declining to act on them. The flag is one input away from
 a refusal, which is why it is worth fixing and not worth rushing.
 
+**TEN MORE DRIVES, 2026-08-22, AND "SEVEN OF TEN" WAS ITSELF A SMALL SAMPLE.** Routes 3a2 through
+3ab added 20 more edges: **17 plausible two-way, 3 impossible.** Pooled over all thirteen drives:
+
+    30 rising edges     10 ON A ONE-WAY ROAD (33%)     20 two-way, plausible
+
+**So the false rate is a THIRD, not seven in ten.** The first three drives were unrepresentative and
+were reported as though they settled it -- the fourth time in two days a small sample was quoted as
+a rate here, and the second time in this very entry. **Sample size before rate, every time.**
+
+**WHAT SURVIVED, AND IT IS STRONGER NOW:** every one of the ten impossible edges is at or below
+**43 mph** -- 0, -0, 2, 11, 21, 22, 28, 29, 30, 43 -- against a scaled floor that is inert below 22
+and only reaches 9.6 m/s at 43. Ten points instead of seven, spanning three more drives and a
+different network of roads, all on the same side of the same threshold. The low-speed diagnosis is
+now the well-supported half and the frequency was the weak half, which is the opposite of how the
+first write-up read.
+
+**And the clearest single case is new:** route 000003aa, `highwayClass=primary`, `oneWay=True`, at
+**-0 mph** -- stationary. Whatever the radar called opposing traffic in the adjacent lane, the car
+was not moving on a one-way road at the time.
+
 ## (superseded) `oncomingAdjacent` READS TRUE ON 28.9% OF LEFT FRAMES ON A FREEWAY. FIRST READ 2026-08-21.
 
 The struct audit that found 25 unread `PassingAssist` fields was widened to every fork-authored
