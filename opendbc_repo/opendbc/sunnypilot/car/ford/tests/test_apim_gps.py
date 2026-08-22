@@ -201,3 +201,66 @@ class TestItDoesNotInventAFix:
     sigs = apim_gps.nav2_signals(FakeGps(hasFix=False))
     assert sigs["GPS_Actual_vs_Infer_pos"] == 1
     assert sigs["Gps_B_Falt"] == 1
+
+
+class TestTheFixActuallyReachesTheSendBlock:
+  """IT NEVER DID. Measured 2026-08-22 across three drives: `0x463` and `0x464` appear ZERO times
+  from any source, while `0x462` arrives 905 times from the APIM and is forwarded 894 times by us.
+
+  `LateralCurvExt` owned the SubMaster and subscribed to `gpsLocationExternal` alone. That is the
+  ublox on a comma two / panda; a 3X takes its fix from the qcom modem and publishes `gpsLocation`,
+  which the routes confirm -- 322 frames of it and not one of the other. So `self.gps` stayed None
+  for the life of every drive, the `if gps is not None` in the carcontroller never passed, and a
+  feature shipping ON by default transmitted nothing for its entire existence.
+
+  Nothing could have caught this: the send block is exception-guarded, the param defaulted on, and
+  the failure is silence. Hence a static test -- the shape is what has to hold, and it is invisible
+  at runtime.
+  """
+
+  @staticmethod
+  def _src() -> str:
+    import pathlib
+    return (pathlib.Path(__file__).resolve().parents[1] / "lateral_curv_ext.py").read_text(encoding="utf-8")
+
+  def test_both_gps_services_are_subscribed(self):
+    """PARSES THE `SubMaster(...)` CALL, not the file.
+
+    The first version of this test was a substring check for `'gpsLocation'` anywhere in the
+    source -- and it PASSED with the subscription reverted, because the read site
+    `self.sm.updated['gpsLocation']` contains the same characters. It verified that the string was
+    somewhere in the file, which is not the property that matters and is not the one that broke."""
+    import ast
+    subscribed: set[str] = set()
+    for node in ast.walk(ast.parse(self._src())):
+      if not isinstance(node, ast.Call):
+        continue
+      fn = node.func
+      if not (isinstance(fn, ast.Attribute) and fn.attr == "SubMaster"):
+        continue
+      for arg in node.args:
+        for sub in ast.walk(arg):
+          if isinstance(sub, ast.Constant) and isinstance(sub.value, str):
+            subscribed.add(sub.value)
+    assert subscribed, "no SubMaster construction found -- the extractor is broken, not the code"
+    assert "gpsLocation" in subscribed, (
+      f"the SubMaster subscribes {sorted(subscribed)}. Without `gpsLocation`, any device with no "
+      "ublox -- which is his 3X -- never sets self.gps, and the synthesized APIM GPS cannot fire. "
+      "That was true for the entire life of the feature and nothing noticed.")
+    assert "gpsLocationExternal" in subscribed, "the ublox path was dropped"
+
+  def test_both_are_read_into_self_gps(self):
+    """Subscribing is not enough; the assignment has to read both."""
+    import ast
+    reads = set()
+    for node in ast.walk(ast.parse(self._src())):
+      if not isinstance(node, ast.Assign):
+        continue
+      if not any(isinstance(t, ast.Attribute) and t.attr == "gps" for t in node.targets):
+        continue
+      for sub in ast.walk(node.value):
+        if isinstance(sub, ast.Constant) and isinstance(sub.value, str):
+          reads.add(sub.value)
+    assert {"gpsLocation", "gpsLocationExternal"} <= reads, (
+      f"self.gps is fed from {sorted(reads)} -- a service that is subscribed but never read into "
+      "self.gps leaves the send block with None, which is exactly the original bug")
