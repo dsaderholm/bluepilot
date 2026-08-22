@@ -164,6 +164,8 @@ def main() -> int:
   cur_hwy = "?"
   cur_speed = 0.0
   cur_farleft = 0.0
+  cur_fl_std = float("nan")
+  cur_fl_y = float("nan")
 
   for route, seg in segs:
     p = os.path.join(REALDATA, seg, "rlog")
@@ -196,6 +198,23 @@ def main() -> int:
           cur_farleft = float(probs[0]) if probs else 0.0
         except Exception:  # noqa: BLE001
           cur_farleft = 0.0
+        # THE OTHER TWO CANDIDATES, so one run answers all three rather than three runs answering
+        # one each. `flStd` is laneLineStds on the far-left line SPECIFICALLY -- the pooled version
+        # of that field was measured and found empty as a REFUSAL gate, which is a different
+        # question from whether it separates two classes, and CLAUDE.md currently lists it as
+        # unmeasured in one place and measured in another. `flY` is the far-left line's ABSOLUTE
+        # distance, which `left_lane_width` is not: width is measured against our OWN left line, so
+        # a wide ego lane and a phantom line at a plausible offset produce the same width. If the
+        # two disagree, that difference is itself the finding.
+        try:
+          st = list(m.modelV2.laneLineStds)
+          cur_fl_std = float(st[0]) if st else float("nan")
+        except Exception:  # noqa: BLE001
+          cur_fl_std = float("nan")
+        try:
+          cur_fl_y = abs(float(m.modelV2.laneLines[0].y[0]))
+        except Exception:  # noqa: BLE001
+          cur_fl_y = float("nan")
         continue
       if w != "longitudinalPlanSP":
         continue
@@ -234,6 +253,11 @@ def main() -> int:
       sep[cur_hwy][f"{v} beyond"].append(float(pa.leftEdgeBeyond))
       sep[cur_hwy][f"{v} prob"].append(float(pa.leftLineProb))
       sep[cur_hwy][f"{v} std"].append(std)
+      sep[cur_hwy][f"{v} farLeftProb"].append(cur_farleft)
+      if cur_fl_std == cur_fl_std:
+        sep[cur_hwy][f"{v} farLeftStd"].append(cur_fl_std)
+      if cur_fl_y == cur_fl_y:
+        sep[cur_hwy][f"{v} farLeftY"].append(cur_fl_y)
       if float(pa.leftLineProb) >= MIN_ADJACENT_LINE_PROB and width_ok and beyond_ok:
         # Everything EXCEPT the edge-std term passes. This frame is one the sweep can win.
         c["othersOk"] += 1
@@ -329,7 +353,7 @@ def main() -> int:
     d = sep[hwy]
     print(f"\n    {hwy}")
     print(f"      {'term':<10} {'':>18} {'p10':>8} {'p50':>8} {'p90':>8}   {'n':>7}")
-    for term in ("width", "beyond", "prob", "std"):
+    for term in ("width", "beyond", "prob", "std", "farLeftProb", "farLeftStd", "farLeftY"):
       for verdict in ("lane exists", "leftmost", "unknown"):
         v = d.get(f"{verdict} {term}", [])
         if not v:
@@ -345,6 +369,19 @@ def main() -> int:
   print("    `width` is the far-left line's POSITION relative to ego's own left line, so it is the")
   print("    positional test directly, and it is ALREADY IN THE GATE -- if it separates, the fix is")
   print("    to lean on it rather than to add anything.")
+  print("    ALL THREE NAMED CANDIDATES ARE SCORED HERE, so one run closes the list rather than")
+  print("    three runs closing one each:")
+  print("      width / farLeftY   the far-left line's POSITION, relative and absolute. They can")
+  print("                         disagree -- a wide ego lane and a phantom line at a plausible")
+  print("                         offset give the same WIDTH -- and that disagreement is a finding.")
+  print("      farLeftStd         laneLineStds on that line SPECIFICALLY. The pooled version was")
+  print("                         measured empty as a REFUSAL gate, which is a different question")
+  print("                         from whether it separates two classes.")
+  print("      farLeftProb        the one already known to be useless. It is kept as the CONTROL:")
+  print("                         a term that separates should look visibly unlike this row, and if")
+  print("                         everything looks like this row the method is what is failing.")
+  print("    The third candidate -- the radar seeing traffic two lanes out -- is NOT here, because")
+  print("    nothing computes it yet. It is the only one that would need building.")
   print()
 
   # ---- per route, so pooling cannot hide a drive that disagrees --------------------------------

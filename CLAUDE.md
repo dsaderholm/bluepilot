@@ -4303,6 +4303,28 @@ RIGHTMOST lane, where there genuinely ARE lanes to the left -- so a believed far
 the model being right, not the model being useless. What was never measured is what that line does
 from the LEFTMOST lane, and position and probability may well part company there.
 
+**AND THE SECOND CANDIDATE IS NOT UNMEASURED EITHER -- THIS FILE CONTRADICTED ITSELF.** The list
+above names "`laneLineStds` on that specific line" as something nobody has measured, while the
+entry **laneLineStds: MEASURED, AND THERE IS NOTHING THERE** sits a few hundred lines earlier. Two
+places in this file disagreeing about one measured fact is the exact thing recorded elsewhere here
+as how a line of investigation gets closed on the wrong evidence.
+
+They are not quite the same question, which is why this is a narrowing rather than a deletion. The
+earlier entry measured every trusted line POOLED and asked whether a std gate would REFUSE anything
+(0 of 44,891, so no). The left-gate candidate is the far-left line SPECIFICALLY, asked as a
+DISCRIMINATOR between two classes. A field can be useless as a refusal gate and still separate.
+
+But it is strongly suggestive: if far-left stds are all under 1.2, the distribution is compressed
+and has little room to separate. **`bp_left_gate_reach.py` now scores it in the same run**, so this
+gets a real answer instead of a third opinion.
+
+**All three named candidates are now scored by one run**, with the far-left line's PROBABILITY kept
+in the table as the CONTROL -- it is the one already known to carry nothing, so a term that
+separates should look visibly unlike it, and everything looking like it means the METHOD is what
+failed. The absolute position `farLeftY` is scored beside the relative `width` because the two can
+disagree: a wide ego lane with a phantom line at a plausible offset produces the same width. Only
+the third candidate, the radar seeing traffic two lanes out, needs building -- nothing computes it.
+
 **Two things that look like next steps and are already answered by the table in the entry above**,
 so nobody spends a drive on them:
 
