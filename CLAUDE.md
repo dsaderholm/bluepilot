@@ -3695,3 +3695,42 @@ one object reading 17 degrees apart by scan mode is what unreliable angle estima
 **`AZIMUTH_OFFSET_RAD` and the azimuth SIGN need a reflector at 10-20 m outdoors with clear space**,
 placed unambiguously on one side. Getting the sign wrong swaps left and right: the veto guards the
 lane you are not entering, and every gate downstream looks healthy doing it.
+
+## LOG IT THE SESSION IT ARRIVES. A COMMIT MESSAGE IS NOT LOGGING.
+
+Asked for on 2026-08-21, twice: *"Make sure to log everything"*, then *"We need to remember to log
+more in the future! For all sessions."*
+
+**What prompted it.** That one day produced five facts that were real, load-bearing and written
+nowhere a future session would look:
+
+- **A vendor email from 2026-08-14.** Electroneering's answers on the feeder board -- 6" pigtails,
+  per-channel termination, CAN H/L per wire colour, enclosure size, MAX3051. Seven facts, three not
+  derivable from anything else, one that changes the install. It sat in his inbox for a week while
+  this repo carried a WRONG bill of materials, and it was logged only because he pasted it in.
+- **A bench session from 2026-08-14.** 2140 frames/s and the MRR free-running with no transmit
+  path. It survived as ONE SENTENCE inside a code docstring -- so a memory file still said to buy
+  an ESR and feed it four gateway frames, which is the dead path the bench had already closed.
+- **Two decisions** -- the digest pick rule moving to `min(TTC)`, and `bp_radar_bench.py` existing
+  at all -- lived only in commit messages and a tool docstring.
+
+**WHY A COMMIT MESSAGE DOES NOT COUNT.** Nobody greps `git log`. The next session reads this file,
+the module docstring, and the plan document. A decision recorded only in a commit is functionally
+lost, and worse than lost when a document still says the old thing -- that is exactly how the BOM
+came to list two parts for a board that is one.
+
+**The rule:**
+
+1. **A fact from outside the code gets transcribed the same session.** Vendor replies, bench
+   measurements, part numbers, prices, road observations, anything he states as decided. The test:
+   did this come from somewhere `grep` cannot reach? Then write it down.
+2. **Put it where it will be USED.** Wiring goes in the firmware header, because that is what is
+   open with a crimper in hand. Part choices go in the BOM. Cross-cutting rules go here.
+3. **Record the SOURCE and DATE.** "Vendor, Tindie 2026-08-14" is checkable. "The board has 6 inch
+   wires" is not.
+4. **Audit before reporting done.** List what the session established, then grep for each item.
+   Anything living only in scrollback or `git log` is not logged. Run on the day this was written,
+   that audit found two gaps immediately.
+5. **NEW INFORMATION ARRIVES ATTACHED TO OLD WRONG INFORMATION.** The vendor reply invalidated a
+   BOM. The bench session invalidated a memory. After writing the new fact, go and find what it
+   makes stale -- that is the half that gets skipped.
