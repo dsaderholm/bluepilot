@@ -1140,6 +1140,66 @@ investigation stops here rather than why it should continue.
 
 ---
 
+## 4n. THE NIBBLE-8 WRITE: TOOK EFFECT, CHANGED THE STATUS FOR THE WORSE, READ NOTHING
+
+**2026-08-22.** `706-01-01` written to `0810 A9DA B963` -- nibble 8 `B` -> `A`, "Reading + GPS"
+(section 4k). One change only; the `706-04-01` difference reported at the time was a misread, see
+the correction above. Three daylight drives followed, one of them a deliberate repeat of the route
+from 4j **past the same sign at the same speed.**
+
+```
+000003a7   2026-08-21  NIGHT      747 frames  peak 32.2 mph   7 frames, 1 sign
+000003a8   2026-08-22  daylight   913 frames  peak 36.6 mph   0
+000003a9   2026-08-22  daylight   265 frames  peak 35.1 mph   0
+000003aa   2026-08-22  daylight   953 frames  peak 74.5 mph   0
+```
+
+**Zero detections in 37 segments**, including the controlled repeat.
+
+### THE WRITE REACHED THE CAMERA, AND ITS ONLY EFFECT WAS A REGRESSION
+
+The broadcast changed -- byte 2 went `20` -> `30`, and exactly one signal moved:
+
+```
+TsrVl1StatMsgTxt_D_Rq    before  2  LimitReiable
+                         after   3  LimitOutdated
+```
+
+So `A` = "Reading + **GPS**" genuinely engaged the fused mode, and because the GPS half never
+arrives -- `0x463`/`0x464` still zero on all three drives -- the camera now rates its (nonexistent)
+limit as OUTDATED rather than reliable. **That is the risk written into 4k before the write, and it
+is what happened.**
+
+**RESTORE `706-01-01` -> `0810 A9DB B964`.** The change bought a status regression and nothing else.
+
+### THE CONFOUND, STATED PLAINLY
+
+**Two variables moved between the drive that read a sign and the drives that did not**: night ->
+daylight, AND the nibble. This does not isolate either. The experiment that separates them is to
+restore the nibble and drive the same loop AT NIGHT. If the 30 comes back, night was the factor and
+the nibble was neutral-to-harmful.
+
+Worth weighing before assuming the nibble is the culprit: a retroreflective sign under headlights at
+7 mph is a far easier target than the same sign in daylight at 30, and 4j already measured that the
+one detection needed about the most favourable conditions a public road offers.
+
+### AND FUSION MODE IS NOW CONCLUSIVELY NOT THE ANSWER
+
+Both 2026-08-22 drives reached `Available_FusionMode` with `NoInformationAllOK` -- the camera's
+fully healthy state, nothing wrong, nav data flowing -- for ~30 frames each, **and read nothing**.
+Route `000003a1` showed the same on 2026-08-21 (section 4f). Three independent drives now.
+
+**Fused mode is reachable on this car and it is not what produces sign reads.** Do not re-open it.
+
+### A SCORER DEFECT WORTH KNOWING
+
+`tsr_score.py` reported "2 with a limit" on route `000003a9`. Both were BOOT frames -- `VLim1 = 0`,
+with `TsrStatMsgTxt` reading `Null` and `NoDataExists`. Zero is not a limit, it is an uninitialised
+frame. Fixed: a detection now requires `VLim1` outside `(0, 255)`. **A tool that counts the
+uninitialised state as a success will eventually report a fix that did not happen.**
+
+---
+
 ## 4b. THE ONLY THING THAT DEMONSTRABLY WORKED: "TSR data source = Camera + APIM"
 
 Filed as a dead end at first. It is the opposite -- it is the single piece of positive evidence from

@@ -135,7 +135,10 @@ def main(pattern):
     except Exception as e:  # noqa: BLE001 -- a bad segment must not lose the rest of the drive
       print(f"  {os.path.basename(path)}: {type(e).__name__}: {e}", flush=True)
 
-  hits = [s for s in samples if s[3] != NO_LIMIT]
+  # A detection is a REAL posted limit. 255 is the no-data sentinel, and 0 is an uninitialised
+  # frame -- at boot the camera emits all-zero and near-zero payloads whose TsrStatMsgTxt reads
+  # Null or NoDataExists. Counting those reported "2 with a limit" on a drive that had none.
+  hits = [s for s in samples if s[3] not in (0, NO_LIMIT)]
 
   print()
   print("=" * 74)
