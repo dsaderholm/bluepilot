@@ -4269,6 +4269,53 @@ POSITION rather than its probability (a line at 5.5 m is a lane away, one at 1.9
 `laneLineStds` on that specific line, or the adjacent-lane radar seeing traffic two lanes out.
 The first is cheap and is where to start.
 
+### AND THE FIRST ONE IS ALREADY IN THE GATE. IT IS `left_lane_width`. 2026-08-22.
+
+The paragraph above sent the next session off to build "the far-left line's LATERAL POSITION rather
+than its probability". Reading `_lane_and_beyond` before building it, that is what the gate's own
+width term already is:
+
+    width = sign * (far_y - near_y)      far_y = laneLines[LL_FAR_LEFT], near_y = laneLines[LL_LEFT]
+
+The far-left line's position measured against ego's OWN left line -- exactly "a line at 5.5 m is a
+lane away, one at 1.9 m is our own", computed every frame, published as `leftLaneWidth`, and gated
+by `MIN_LANE_WIDTH_M <= width <= MAX_LANE_WIDTH_M`. **So there is nothing to add. The open question
+is whether the term we already have DISCRIMINATES**, which is a different and much cheaper question
+than building a new signal.
+
+**AND THE TOOL THAT WOULD ANSWER IT HAD BEEN COLLECTING BOTH REMAINING TERMS AND PRINTING NEITHER.**
+`bp_left_gate_reach.py` counted `widthOk` and `beyondOk` from the day it was written and printed
+only `edge ok` and `paint ok` -- this fork's oldest bug, inside the tool built to diagnose the gate,
+which is why the four-term table in the entry above has two columns missing. That is also why the
+sweep could report a 52-83% "ceiling" without anyone noticing which term owns the other half.
+
+**The measurement now queued** is the separation test: label frames by the LANE ANCHOR -- "a lane
+exists to my left" vs "leftmost" -- and report each CAMERA term's p10/p50/p90 in each class. Using
+the map to LABEL a measurement is legitimate; using it to OPEN a gate is not, and the anchor scoring
+~100% "lane exists" on the sole-refuser frames is precisely why it can label this and never carry it.
+
+A term whose distribution is the same in both classes carries no information about whether a lane is
+there. That is what sank the far-left line's PROBABILITY, and the same test applied to its POSITION
+is the whole remaining question.
+
+**Do not read the 0.7% absence figure as evidence about position.** It was measured from the
+RIGHTMOST lane, where there genuinely ARE lanes to the left -- so a believed far-left line there is
+the model being right, not the model being useless. What was never measured is what that line does
+from the LEFTMOST lane, and position and probability may well part company there.
+
+**Two things that look like next steps and are already answered by the table in the entry above**,
+so nobody spends a drive on them:
+
+- **`left_edge_beyond` is not the binding half of `left_edge_ok`.** `bp_left_edge_truth.py` measured
+  the shoulder gap -- which is the same quantity -- at p10 1.1-1.5 m in the std band the gate
+  accepts, against `MIN_EDGE_BEYOND_LINE_M` of 0.8. It passes ~90% of the time there, so `edge ok`
+  is the std cutoff almost alone. The hypothesis that the two halves of that term pull in opposite
+  directions -- a close edge leaving no room past the paint, a far edge failing the std -- is
+  refuted by data already collected.
+- **The edge POSITION is usable at every std.** Frame-to-frame jump is flat at 0.13-0.14 m from
+  std 0.5 to std 8+, and the gap never goes negative. So a future replacement for the std cutoff may
+  legitimately read the edge's POSITION; what it must not do is read its std as a confidence.
+
 ## ROUTE INTENT: mapd's PREDICTION IS 96-100% RIGHT AND ARRIVES ONE SECOND EARLY
 
 2026-08-22, `tools/bp_route_intent_score.py`, four drives, 63,000 mapdOut frames. This is
