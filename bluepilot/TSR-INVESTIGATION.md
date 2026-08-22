@@ -6,11 +6,47 @@ Session of **2026-08-11**, in the car, several hours. Written so this can be pic
 without needing an alignment drive, and ACC works. The one change left in place is on the APIM, and
 **it did not help** -- see below.
 
-**THE BLOCKER IS `U0253`, AND IT IS UNRESOLVED.** The IPMA cannot reach the APIM. It was recorded as
-fixed on 2026-08-11 because a read came back "Previously Set - Not Present at Time of Request"; that
-means not present at that instant, not resolved, and the same read said "Test not complete". He said
-repeatedly that it keeps coming back and was ignored. Every as-built theory below is downstream of a
-communication fault that is still there.
+**RE-OPENED 2026-08-21: THE CAMERA IS NOT READING SIGNS AT ALL.** Measured on routes 0000039f and
+000003a1 by decoding `Traffic_RecognitnData` (0x3CD) off bus 2: **`TsrVLim1MsgTxt` is 255 -- the
+no-data sentinel -- on every frame of both drives.** 000003a1 carries just TWO distinct payloads
+across 909 frames, differing only in `TsrMsgTxt` and `TsrStatMsgTxt`, which are status enumerants.
+
+This contradicts the note that had been carried forward as settled -- "the camera reads signs anyway,
+what the region gates is the STATUS enumerants, not the detection" -- and that note is why this was
+treated as a display problem not worth chasing. **It is not a display problem. There is no detection
+happening.** He said so directly: *"the signs it's reading are wrong. Those aren't actually signs."*
+
+So the as-built is the LIVE question, not a closed one, and section 4d's targeted write -- `706-01-01`
+to `0810 A9DA A953` -- is still the sharpest untried experiment. Its blocker was never knowing the
+value; it is write access (section 6).
+
+**`U0253` IS UNRESOLVED, AND IT IS PROBABLY NOT IN THIS PATH. Demoted 2026-08-21 -- it led this
+document as "THE BLOCKER" and that was framing, not measurement.**
+
+The fault is the IPMA failing to reach the **APIM**, which is the nav module. That explains missing
+nav-sourced limits and the `NoNavDataAvailable` message the camera threw -- which is what was being
+chased on 2026-08-11, and why it ended up as the headline.
+
+**But sign reading does not need nav.** That is the entire meaning of the camera's "TSR data source:
+Camera Only" mode, which is what this camera is set to: it reads a sign with its own optics, and nav
+is a second source to fuse, not a prerequisite. So `U0253` does not explain `TsrVLim1MsgTxt` sitting
+at the no-data sentinel on every frame. That is the camera not DETECTING, which is upstream of any
+fusion. He put it plainly: *"Why do we care about U0253?"*
+
+What keeps it on the page at all, and no more than that: the camera rejects TSR configuration with
+`U2101 Configuration Incompatible`, instantly, and if part of what it validates at startup is
+"do I have the data sources my configuration claims", a missing APIM link could be one of the checks
+it fails. **That is a plausible mechanism, not a measured one.** Do not treat it as established, and
+do not let it gate the as-built experiment in section 7.
+
+Also worth recording about the fault itself: it was called fixed on 2026-08-11 because a read came
+back "Previously Set - Not Present at Time of Request". That means not present at that instant, not
+resolved -- the same read said "Test not complete" -- and he said repeatedly that it keeps coming
+back.
+
+**TWO OF TWO load-bearing claims in this file have now turned out to be framing rather than
+measurement** -- this one, and "the camera reads signs anyway". Treat anything else here that leads
+with emphasis and no numbers the same way.
 
 ---
 
@@ -469,12 +505,9 @@ already parse.
    forwarding. Reading the friend's car for the same three addresses would settle which, and costs
    him one route.
 
-1. **Ask the friend for two lines** — free, and decides whether anything else is worth doing:
-   - his `706-01-01` (is his 3rd character a `5`?)
-   - his `720-09-01` (is SLIF enabled?)
-
-   If his look like a working target, the config is known and only the tool is missing. If they look
-   like his own, TSR is coming from somewhere we have not identified.
+1. ~~**Ask the friend for his `706-01-01`.**~~ **DONE 2026-08-12, section 4d.** `0810 A9DA A953`.
+   Nibble 3 is `1` on BOTH cars, so the reference map's "TSR enable" position is wrong and the answer
+   is not a single documented bit. **His `720-09-01` (IPC SLIF) is still unasked** and still free.
 
 2. **UCDS free tests**, no licence needed if reading is ungated:
    - select `EDGE/S-MAX 2015-`, open `AsBuilt Editor (CCC)` and `Direct Config`
@@ -484,11 +517,15 @@ already parse.
 3. **Recover the UCDS licences** — Setup → re-activate; try a VPN if the server is geoblocked; check
    whether an older UCDS build still shows them activated.
 
-4. **Untried, if a writing tool becomes available**, in this order:
-   - IPC `720-09-01` → SLIF enabled (the dependency the camera is most likely checking)
-   - IPC `720-03-01` → TSR IOD enabled
-   - IPMA `706-01-01` → `0450` (TSR SLIF, IACC stays enabled)
-   - IPMA `706-02-01` → `4D56` (TSRMode CameraOnlyOn) — never attempted
+4. **Untried, if a writing tool becomes available.** THE TARGET LIST CHANGED on 2026-08-12 and this
+   step listed dead values until 2026-08-21:
+   - **IPMA `706-01-01` → `0810 A9DA A953`** — the friend's ACTUAL value on a same-strategy,
+     same-calibration camera where TSR works. This is the experiment. Differences from his own are
+     nibble 2 (`4`→`8`) and nibbles 8-9 (`B`→`A`). Section 4's restore point in hand, and expect the
+     radar calibration to be disturbed and to come back on revert (section 5).
+   - IPC `720-09-01` → SLIF enabled, only if the above does not hold across a boot.
+   - ~~IPMA `706-01-01` → `0450`~~ **DEAD.** Nibble 3 is `1` on the working car too.
+   - ~~IPMA `706-02-01` → `4D56`~~ **DEAD.** `FD` on the working car too.
 
 5. **A diagnostic write worth doing once**, to learn whether the nibble is writable at all:
    `706-01-01` → `0400` (changes IACC, not TSR). If `0` writes and `5` does not, the field is
@@ -502,6 +539,12 @@ Not the cluster icon — he has said repeatedly he does not want it. **Speed Lim
 camera speed limit source.** On the 2026-08-11 drive the set speed froze because the road had no map
 speed limit data and nothing else was asking. A working TSR would give SLA a second source on exactly
 those roads.
+
+**And the payoff is larger than this section assumed.** It was written while the notes said the
+camera read signs about 10% of the time, which made TSR look like a partial improvement. Measured
+2026-08-21, `TsrVLim1MsgTxt` is the no-data sentinel on every frame — the camera contributes
+NOTHING today. Enabling it is the difference between no camera source and a camera source, not
+between a poor one and a good one.
 
 See `tools/bp_tsr_check.py` for the on-device measurement side, and `CLAUDE.md` for the standing
 rules — in particular that the region change has been tried twice and is not to be proposed again.
