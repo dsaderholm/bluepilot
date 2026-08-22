@@ -58,7 +58,11 @@ import os
 import sys
 from collections import Counter, defaultdict
 
-REALDATA = "/data/media/0/realdata"
+# Overridable so the tool can be validated against routes pulled off the device, rather than only
+# ever running where its answers cannot be checked against known data. Added 2026-08-22 after the
+# new checks below were written -- shipping a diagnostic nobody has seen produce a correct answer
+# is how this fork got two tools that pointed at the wrong controller.
+REALDATA = os.environ.get("BP_REALDATA", "/data/media/0/realdata")
 MS_TO_MPH = 2.23694
 KPH_TO_MPH = 0.621371
 MOVING_MPH = 5.0
@@ -142,6 +146,16 @@ class Checkup:
     self.max_temp: float | None = None
     self.max_ambient: float | None = None  # intakeTempC -- fan intake air, the ambient proxy
     self.max_fan: float | None = None
+
+    # 10. the 2026-08-22 fixes. Three things shipped that day whose whole verification is a drive,
+    # and every one of them was found with a throwaway script. They belong here instead.
+    self.hold_births: list[dict] = []   # every 0 -> nonzero baseline, with what created it
+    self.hold_deaths: list[dict] = []   # every nonzero -> 0, with whether it looked like a clear
+    self.resume_t: float | None = None  # last resumeCruise press, for the phantom test
+    self._prev_baseline = 0.0
+    self._prev_raw = 0.0
+    self._last_btn = ("none", -99.0)
+    self._enabled = False
 
     # 9. SCC
     self.scc_map_active = 0
@@ -255,6 +269,58 @@ class Checkup:
 
   def acc_faulted(self) -> None:
     self.acc_faults += 1
+
+  def buttons(self, cs, t: float) -> None:
+    """Remember the last press, and specifically the last RESUME. Both feed check 10."""
+    try:
+      # Cruise state, for the hold-death test below. Route 000003a8 is exactly why it is needed:
+      # the hold there died while SITTING ON SLA's number, which looks like the clear firing and
+      # was not -- he had switched cruise off. Without this the check reports a false success on
+      # the very drive that proved the bug.
+      self._enabled = bool(cs.cruiseState.enabled)
+    except Exception:
+      pass
+    try:
+      for b in cs.buttonEvents:
+        if not b.pressed:
+          continue
+        name = str(b.type).split(".")[-1]
+        self._last_btn = (name, t)
+        if name == "resumeCruise":
+          self.resume_t = t
+    except Exception:
+      pass
+
+  def icbm_hold(self, icbm, t: float) -> None:
+    """Every birth and death of a hold, which is what all three of the day's fixes turn on.
+
+    Births carry the button that made them and how long since the last RESUME -- a birth within a
+    fraction of a second of one is the phantom (route 000003aa, 0.02 s).
+
+    Deaths carry whether the baseline had ARRIVED at SLA's own number first. A hold walked back to
+    that number and then vanishing is the clear working; vanishing from somewhere else is cruise
+    being switched off, which is what the old measurement mistook for a late clear.
+    """
+    try:
+      base = float(icbm.vBaseline)
+      raw = float(getattr(icbm, "vTargetRaw", 0.0))
+      if self._prev_baseline == 0.0 and base > 0.0:
+        btn, bt = self._last_btn
+        self.hold_births.append({
+          "t": t, "speed": round(base), "button": btn,
+          "since_press": t - bt,
+          "since_resume": (t - self.resume_t) if self.resume_t is not None else 1e9,
+        })
+      elif self._prev_baseline > 0.0 and base == 0.0:
+        self.hold_deaths.append({
+          "t": t, "was": round(self._prev_baseline),
+          # Was it sitting on SLA's number when it went? That is a clear; anything else is not.
+          "at_sla": abs(self._prev_baseline - self._prev_raw) < 0.51 and self._prev_raw > 0,
+          "engaged": self._enabled,
+        })
+      self._prev_baseline, self._prev_raw = base, raw
+    except Exception:
+      pass
 
 def render(c: Checkup, capped: bool) -> None:
   dur = c.tmax - c.t0 if c.t0 is not None else 0.0
@@ -414,6 +480,45 @@ def render(c: Checkup, capped: bool) -> None:
       "NEVER FIRED -- needs hasSlowDown + plan committed to stopping + <=20 mph + no lead in 60 m"))
     print("   Ford standstill (its own hold): {} frames".format(c.standstill_frames))
 
+  # 11 -- the 2026-08-22 fixes, which all three needed a drive to verify -------------------
+  rec = c.authority.get("recovery", 0)
+  print("11. Cancel recovery    " + verdict(
+    None if c.authority.get("opStop", 0) == 0 else rec > 0,
+    "ran on {} frames -- grep swaglog for RECOVERY WORKED to see if the camera let go".format(rec),
+    "the override fired and the recovery NEVER ran: either no cancel followed it (good) or "
+    "attribution refused it -- check the cancel timing against RESUME of Ford authority",
+    "the override never fired, so there was no cancel of ours to recover from"))
+  if rec:
+    print("   Ford authored {} frames after it -- a non-zero count here IS the recovery working"
+          .format(c.authority.get("ford", 0)))
+
+  # 12 ------------------------------------------------------------------------------------
+  phantoms = [b for b in c.hold_births if b["since_resume"] < 0.4]
+  print("12. Phantom holds      " + verdict(
+    not phantoms,
+    "none -- every hold was asked for",
+    "{} hold(s) born within 0.4 s of a RESUME press: {} -- the resume-tail guard is not holding"
+    .format(len(phantoms),
+            ", ".join("{:.0f} mph at t+{:.0f}".format(b["speed"], b["t"]) for b in phantoms))))
+  for b in c.hold_births:
+    print("   born t+{:<7.1f} {:>3} mph  from {:<14} ({:.2f} s after that press)".format(
+      b["t"], b["speed"], b["button"], b["since_press"]))
+
+  # 13 ------------------------------------------------------------------------------------
+  # A hold walked back to SLA's number must CLEAR. Before 2026-08-22 it never could, and the tell
+  # was a death that did not happen at SLA's number -- cruise being switched off instead.
+  # BOTH terms. Sitting on SLA's number is not enough -- see the note in `buttons`.
+  clean = [d for d in c.hold_deaths if d["at_sla"] and d["engaged"]]
+  off = [d for d in c.hold_deaths if not d["engaged"]]
+  print("13. Hold clears at SLA " + verdict(
+    None if not c.hold_deaths else bool(clean),
+    "{} of {} hold(s) ended sitting on SLA's own number -- the clear is firing".format(
+      len(clean), len(c.hold_deaths)),
+    "{} hold(s) ended and NOT ONE ended cleanly while engaged at SLA's number -- {} went when "
+    "cruise was switched off. That is the exact shape of the bug fixed on 2026-08-22.".format(
+      len(c.hold_deaths), len(off)),
+    "no hold ended this drive"))
+
 
 def main() -> int:
   ap = argparse.ArgumentParser()
@@ -460,6 +565,9 @@ def main() -> int:
         try:
           if w == "carState":
             c.car_state(m.carState, t)
+            c.buttons(m.carState, t)
+          elif w == "selfdriveStateSP":
+            c.icbm_hold(m.selfdriveStateSP.intelligentCruiseButtonManagement, t)
           elif w == "longitudinalPlanSP":
             c.plan_sp(m.longitudinalPlanSP)
           elif w == "controllerStateBP":
