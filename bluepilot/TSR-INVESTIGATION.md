@@ -776,7 +776,22 @@ decoded from the car's own `0x462`:
 **183 metres of dead-straight approach at a constant 89-91 degrees, and the camera recognised
 nothing until level with the sign.** The turn only begins AFTER passing it, which is what ends the
 read five seconds later as the sign leaves frame. So there is no "it was around a corner"
-explanation -- he had two hundred metres of clear line of sight.
+explanation.
+
+**BUT "TWO HUNDRED METRES OF CLEAR LINE OF SIGHT" WAS OVERSTATED, AND THE DASHCAM FOOTAGE SHOWS IT.**
+Frames pulled from segment 6's `qcamera.ts`: at 104 m out the road ahead is DARK -- streetlights
+overhead, nothing resolvable at that distance. **This was a night drive, and a retroreflective sign
+is only visible once headlights reach it** -- roughly 50-80 m on low beams for a retroreflector, less
+for anything else. For most of that approach the sign was not there to be seen by ANY camera.
+
+What survives: it recognised nothing from about 50 m in, where the sign WAS illuminated, until level
+with it. Still short. What does not survive: the 237 m figure, which measures how far he drove
+straight, not how far the sign was visible.
+
+**AND IT INVERTS THE TEST.** Night was recommended here so conditions would match the one detection.
+That is backwards for measuring RANGE: night caps the sightline at the headlights and hides the
+quantity being measured. **Measure detection range in DAYLIGHT**, where a sign is visible from
+200 m+, and the number means something.
 
 **A working TSR recognises a sign 30-50 m out. This one has an effective range of about zero.** That
 is the entire explanation for the hit rate:
