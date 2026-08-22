@@ -790,6 +790,20 @@ at 70 mph  ~31 m/s      no chance
 He got this one because he crawled past at 16 mph and slowed to 7. Every sign on the 72 mph drive
 was gone before the camera could commit.
 
+**AND THE SLOW SPEED WAS NOT INCIDENTAL -- he was turning around.** His words: *"I was going slow
+because this is actually right before I turned around!"* The heading trace agrees: +19, +24, +28
+degrees immediately after the sign, then swinging back. So this was a deliberate deceleration for a
+maneuver, not a representative moment of driving.
+
+**Which means the one detection this camera has ever produced happened under about the most
+favourable conditions available on a public road**: head-on approach, 183 m of clear sightline,
+decelerating through 16 to 7 mph, at night with headlights on a retroreflective sign, and several
+extra seconds beside it during the turn. It needed ALL of that to get one read.
+
+Recorded because "he was slow" is exactly the detail that gets lost and then misread later as
+evidence that low speed is the FIX. It is not a fix; it is how far conditions had to be stacked
+before a 0 m detection range produced anything at all.
+
 **WHY THIS REFRAMES EVERYTHING.** A DISABLED system reads nothing at any range. This one reads at
 0 m. So TSR is not switched off -- it is a recognition pipeline running at the absolute edge of its
 capability, which is what a camera matching against the WRONG SIGN TEMPLATE looks like: it only
