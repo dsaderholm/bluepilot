@@ -752,6 +752,59 @@ Decoded from the car's own `0x462`, at 15.9 -> 6.7 mph, at night.
   and `U0253` is real, but they are not what was stopping sign reads. The code stays -- it addresses
   a genuine fault and stands down by itself -- but it must not be described as the TSR fix.
 
+### THE DETECTION RANGE IS ZERO. THIS IS THE DEFECT, AND IT IS MEASURABLE.
+
+**The most useful number from 2026-08-21.** Distance from the sign against what the camera reported,
+decoded from the car's own `0x462`:
+
+```
+ dist to sign    mph   VLim1        heading   turn
+      183 m     ~29     255            90
+      157 m     ~28     255            91      +1
+      130 m     ~28     255            91      +0
+      104 m     28.2    255            90      -1
+       78 m     27.1    255            91      +2
+       54 m     26.0    255            89      -2
+       31 m     24.3    255            89      -1
+       10 m     22.3    255            89      +1
+        0 m     15.9     30   <- read   89      -0
+       11 m      8.0     30              111    +19   <- turn STARTS, after the sign
+       18 m      7.9     30              163
+       21 m      7.9    255              148
+```
+
+**183 metres of dead-straight approach at a constant 89-91 degrees, and the camera recognised
+nothing until level with the sign.** The turn only begins AFTER passing it, which is what ends the
+read five seconds later as the sign leaves frame. So there is no "it was around a corner"
+explanation -- he had two hundred metres of clear line of sight.
+
+**A working TSR recognises a sign 30-50 m out. This one has an effective range of about zero.** That
+is the entire explanation for the hit rate:
+
+```
+at  7 mph   ~3.1 m/s    several seconds beside the sign   ->  read
+at 30 mph  ~13.4 m/s    well under a second                ->  missed
+at 70 mph  ~31 m/s      no chance
+```
+
+He got this one because he crawled past at 16 mph and slowed to 7. Every sign on the 72 mph drive
+was gone before the camera could commit.
+
+**WHY THIS REFRAMES EVERYTHING.** A DISABLED system reads nothing at any range. This one reads at
+0 m. So TSR is not switched off -- it is a recognition pipeline running at the absolute edge of its
+capability, which is what a camera matching against the WRONG SIGN TEMPLATE looks like: it only
+scores a hit when the sign fills the frame. That is exactly what a Brazilian configuration
+(circular, metric) would do on US roads (rectangular, mph).
+
+**It also gives every future change a metric instead of a yes/no.** Score with
+`bluepilot/asbuilt/detect_range.py`. **The number to beat is 0 m.** A config change that moves
+recognition out to even 20 m would multiply the hit rate several-fold and would be unmistakable in
+one drive.
+
+**And it lowers expectations for the 4k write.** A single mode nibble is unlikely to move a
+detection range from 0 m to 40 m. Still worth the drive -- it is one nibble with a clean restore --
+but do not expect it, and score it on RANGE rather than on whether any sign is read at all.
+
 ### What it does NOT show
 
 **One sign, out of many 20s, 25s and 30s on a 13-minute drive.** 739 of 747 frames still read 255.
