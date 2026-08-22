@@ -425,6 +425,13 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
             # longitudinal controller is not driving, watches the car ignore it, and winds up to its
             # -3.5 floor for over 10% of engaged frames. See SLOWDOWN_ARM_GAP.
             slowdown_gap=self._urgent_speed_gap(CS),
+            # WITHOUT THIS THE STOP PATH ARMS OFF THE MODEL AND BRAKES OFF AN MPC THAT NEVER
+            # PLANNED THE STOP -- see the gate in `stop_override.update`. Defaults to FALSE when
+            # the message is missing, which is the conservative direction here: refusing to arm
+            # costs a stop he takes himself, arming without the plan costs him Ford ACC.
+            experimental_mode=bool(self.sm['selfdriveState'].experimentalMode)
+            if (self.sm.alive.get('selfdriveState') and self.sm.valid.get('selfdriveState'))
+            else False,
           )
           # Latch that THIS stop was ours, so the resume gate knows not to pull away from it on the
           # model's say-so. Keyed on the override's OWN outcome rather than on a speed window: the

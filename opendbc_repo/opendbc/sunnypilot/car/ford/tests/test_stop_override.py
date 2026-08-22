@@ -52,7 +52,7 @@ FAR = 200.0
 
 
 def _stopping(o, v=SLOW, lead=0.0, has_slow_down=True, long_active=True,
-              endpoint=NEAR, confirm=True):
+              endpoint=NEAR, confirm=True, experimental_mode=True):
   """One call now means ONE APPROACH, not one frame.
 
   The trigger requires CLOSING_CONFIRM_FRAMES of the stop point closing like a fixed place before it
@@ -79,9 +79,54 @@ def _stopping(o, v=SLOW, lead=0.0, has_slow_down=True, long_active=True,
     n = CLOSING_CONFIRM_FRAMES + 1
     ep = endpoint + n * travelled
     for _ in range(n):
-      o.update(long_active=long_active, v_ego=v, has_slow_down=has_slow_down, lead_distance=lead, stop_endpoint_m=ep)
+      o.update(long_active=long_active, v_ego=v, has_slow_down=has_slow_down, lead_distance=lead,
+               stop_endpoint_m=ep, experimental_mode=experimental_mode)
       ep -= travelled
-  return o.update(long_active=long_active, v_ego=v, has_slow_down=has_slow_down, lead_distance=lead, stop_endpoint_m=endpoint)
+  return o.update(long_active=long_active, v_ego=v, has_slow_down=has_slow_down, lead_distance=lead,
+                  stop_endpoint_m=endpoint, experimental_mode=experimental_mode)
+
+
+def test_it_will_not_arm_a_stop_without_experimental_mode():
+  """A MISMATCH guard, 2026-08-22. The override arms off the MODEL (`has_slow_down`, which
+  `DEC.update()` computes every frame whatever the toggles say) and then transmits the MPC's
+  `lng.accel`. Without Experimental Mode the MPC's `should_stop` never fires for a light or a stop
+  sign, so arming would take authority from Ford, spend the camera's ~1.5 s of tolerance, provoke a
+  cancel that costs him ACC for the drive -- and then not brake to a stop, because openpilot's plan
+  never had one in it.
+
+  CLAUDE.md claimed this was already true. It was, while the trigger was `shouldStop`; it stopped
+  being true when the trigger became `has_slow_down` on 2026-08-20 and nothing enforced it after."""
+  o = FordStopOverride()
+  assert _stopping(o, experimental_mode=False) is False
+  assert not o.active
+  assert "experimental mode" in o.last_result
+
+
+def test_the_curve_path_does_not_need_experimental_mode():
+  """THE GATE IS PLACED AFTER THE SLOWDOWN BLOCK ON PURPOSE, and this is what says so.
+
+  The curve/gap path closes a gap to a corner or a radar-blind lead, and the MPC brakes for both in
+  either mode -- Experimental Mode only decides whether the model's stop for a LIGHT reaches the
+  plan. Moving the gate up to the top of `update` would look tidier and would silently take the
+  curve path out on every drive he runs without Experimental Mode."""
+  o = FordStopOverride()
+  out = False
+  for _ in range(SLOWDOWN_CONFIRM_FRAMES + 2):
+    out = o.update(long_active=True, v_ego=40.0 * MPH_TO_MS, has_slow_down=False,
+                   lead_distance=0.0, stop_endpoint_m=0.0, slowdown_gap=39.0 * MPH_TO_MS,
+                   experimental_mode=False)
+  assert out is True, "the curve path was taken out by the stop path's experimental-mode gate"
+  assert o.slowdown_active
+
+
+def test_a_stop_already_underway_is_not_dropped_mid_approach():
+  """Arming only. Releasing the brakes half way through a stop because a flag flickered is a worse
+  failure than never arming, and the guard is placed after `self.active` for that reason."""
+  o = FordStopOverride()
+  assert _stopping(o) is True
+  assert o.update(long_active=True, v_ego=SLOW * 0.5, has_slow_down=True, lead_distance=0.0,
+                  stop_endpoint_m=NEAR, experimental_mode=False) is True
+  assert o.active
 
 
 def test_it_fires_for_a_stop_the_radar_cannot_see():
@@ -207,9 +252,14 @@ def test_it_never_reads_fords_command():
   # says "the stalk cannot close this in time", a fact about our plan and the car's press-recognition
   # rate, both of which this file may legitimately know. The forbidden set above is what guards the
   # trap; this list guards against absent-minded plumbing.
+  #
+  # `experimental_mode` is OPENPILOT'S OWN setting, added 2026-08-22, and it is argued the same way:
+  # it says whether openpilot's plan CONTAINS the stop this file is about to take authority for.
+  # Nothing about Ford, and not a comparison -- without it the override arms off the model while the
+  # accel on the wire comes from an MPC that never planned a stop for a light.
   sig = inspect.signature(FordStopOverride.update)
   assert set(sig.parameters) == {"self", "long_active", "v_ego", "has_slow_down",
-                                 "stop_endpoint_m", "slowdown_gap",
+                                 "stop_endpoint_m", "slowdown_gap", "experimental_mode",
                                  "lead_distance"}, sig
 
 

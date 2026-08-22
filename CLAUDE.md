@@ -1060,6 +1060,22 @@ in this whole design, and the plan only contains a stop when the end-to-end mode
 DEC on is fine and is what he ran -- it selects `blended` on `has_slow_down`, which is the same
 signal the override triggers on -- but Experimental Mode is not optional.
 
+**THAT SENTENCE WENT STALE ON 2026-08-20 AND NOBODY NOTICED FOR TWO DAYS.** It was true while the
+trigger was `shouldStop`, which only reaches the plan under Experimental Mode. The 2026-08-20
+rewrite moved the trigger to `dec.has_slow_down()` -- and `DEC.update()` is called unconditionally
+in `longitudinal_planner.py:120`, with only `dec.active()` gated on the mode. So from that day the
+override COULD arm with Experimental Mode off, and what it would then transmit is `lng.accel` from
+an MPC that never planned a stop for a light: take authority from Ford, spend the camera's ~1.5 s
+of tolerance, provoke a cancel that costs him ACC for the drive, and not brake to a stop.
+
+**Now enforced rather than assumed** -- `experimental_mode` is an argument to
+`FordStopOverride.update`, gated at ARMING only (a stop underway finishes) and placed AFTER the
+curve/gap path, which brakes for leads and corners in either mode. Mutation-tested.
+
+**The lesson is the one this file keeps recording: a claim about behaviour that lives only in prose
+stops being true the moment the code moves.** The fix is not "check the note more often", it is to
+make the note executable -- which is what the argument and its two tests now are.
+
 Corrected in three places that carried the old claim: the passthrough toggle description, the
 SunnyLink entry, and this file.
 
