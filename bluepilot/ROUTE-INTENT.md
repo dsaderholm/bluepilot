@@ -631,8 +631,27 @@ His instruction, 2026-08-22: *"we would want to create a new session and branch 
 keep passing assist as it is."*
 
 **So nothing here lands on `passing-assist-phase1`.** That branch is measured, shipped and driven
-daily; the route-intent consumer is built beside it and reaches it by rebase, the way every other
-line of work in this fork does. This document is the handoff and is written to be read cold.
+daily. This document is the handoff and is written to be read cold.
+
+**IT BUILDS ON PASSING ASSIST, NOT BESIDE IT** -- his correction, and the first version of this
+paragraph got it wrong by calling it a sibling:
+
+    icbm-manual-override-and-tuning        the base every line of work takes updates from
+      └── passing-assist-phase1            takes ICBM by MERGE (per the reflog, not rebase)
+            └── route-intent  (new)        takes passing assist the same way
+
+**Why a child and not a sibling, which is the part that matters.** The radar detector is a sibling
+because it needs nothing passing assist owns. Route intent is the opposite: its entire purpose is to
+feed passing assist's gates, and it consumes the lane anchor, `_geometry`'s terms, the maneuver state
+machine and the panel -- all of which live here. A sibling branching off ICBM would have none of
+them and would have to duplicate or wait.
+
+**The consequence for the new session:** it inherits passing assist AND, transitively, ICBM, so it
+gets mapd v2, the tiles, the anchor and the whole gate structure for free. It adds only the
+instruction source and the gate that consumes it. **And passing assist stays additive-only from that
+side** -- if the new work needs a change in passing assist's own code, that change belongs HERE and
+reaches the child by the normal update, exactly as "a fix belongs to the branch that owns the code"
+already requires.
 
 **WHAT THE NEW SESSION SHOULD DO FIRST, in order:**
 

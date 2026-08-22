@@ -4367,3 +4367,14 @@ new session and branch and everything and keep passing assist as it is."* So non
 `passing-assist-phase1`. That branch stays where it is; the route-intent consumer is built beside
 it and reaches it the way everything else does, by rebase. `ROUTE-INTENT.md` is the handoff document
 for that session and is written to be read cold.
+
+**AND IT IS A CHILD OF PASSING ASSIST, NOT A SIBLING** -- his correction: *"It will build off of
+passing assist, right? Just like passing assist builds off ICBM?"* Yes.
+
+    icbm-manual-override-and-tuning
+      └── passing-assist-phase1        takes ICBM by MERGE, per the reflog
+            └── route-intent  (new)    takes passing assist the same way
+
+The radar detector is a sibling because it needs nothing passing assist owns. Route intent is the
+opposite -- it exists to feed passing assist's gates and consumes the lane anchor, `_geometry`, the
+maneuver state machine and the panel. Branching it off ICBM would leave it without all of them.
