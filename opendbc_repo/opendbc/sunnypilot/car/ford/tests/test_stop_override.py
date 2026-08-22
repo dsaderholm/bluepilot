@@ -329,6 +329,22 @@ def test_a_stop_we_authored_is_not_resumed_from_automatically():
   host.resume_gate_enabled = False
   assert LongitudinalExt.resume_allowed(host, sm) is True
 
+  # `StockAccStopAutoResume` opts back into upstream's behaviour. Asked for by name on 2026-08-22,
+  # ships OFF: the "go" signal is `shouldStop` going false, which means the MODEL stopped wanting
+  # to stop -- not that the light turned green. openpilot does not read signal state at all.
+  host.resume_gate_enabled = True
+  host.stop_override_stopped_us = True
+  assert LongitudinalExt.resume_allowed(host, sm) is False, "default must still hold the stop"
+  host.stop_auto_resume_enabled = True
+  assert LongitudinalExt.resume_allowed(host, sm) is True
+  assert not host.resume_gate_blocking
+
+  # A MISSING attribute must leave the stop HELD. Both flags are read through getattr, and for this
+  # one the safe fallback is the direction that keeps the car where the driver last saw it -- the
+  # opposite of the usual "default a feature to on" instinct.
+  del host.stop_auto_resume_enabled
+  assert LongitudinalExt.resume_allowed(host, sm) is False
+
 
 def _drive_to_a_stop(so, **kw):
   """Run a full approach and return the (was_active, override, last_result) triple per frame.

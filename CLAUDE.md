@@ -1371,6 +1371,25 @@ on this car, because a standstill with cruise engaged has never existed here: th
 press never reaches this gate, so it is untouched. The no-lead branch used to mean only "the queue
 cleared, nothing to wait for"; it now has a second meaning and they needed separating.
 
+**AND IT IS HIS CHOICE NOW, not ours: `StockAccStopAutoResume`, added 2026-08-22 because he asked
+for it by name after having the behaviour explained.** Ships OFF at his request, and the reason
+belongs in the "reason about the car" category rather than caution about the code: the "go" signal
+is `shouldStop` going false, which means the MODEL stopped wanting to stop, **not that the light
+turned green.** openpilot does not read signal state at all. Turning it on is choosing to let the
+car decide an intersection is clear on the cheapest evidence there is, which is the exact thing the
+evidence rule elsewhere in this file forbids for a lane change -- so it is a toggle, with the reason
+written where he reads it, rather than a default either way.
+
+**Scope, and it is narrower than the title suggests:** only stops the OVERRIDE authored. Behind a
+lead Ford is holding the stop, `stop_override_stopped_us` was never set, and the ordinary
+queue-cleared resume is unchanged with the toggle in either position. Both flags are read through
+`getattr(..., False)`, and for the new one the safe fallback is the one that keeps the car STOPPED
+-- the opposite of this fork's usual "a missing attribute should not disable a feature" instinct,
+because here the feature being missing is what keeps the car where the driver last saw it.
+
+The UI gates it on the override being on, one level below the override's own gate on the
+passthrough. Ungated it would read as a general "pull away from stops" setting that does nothing.
+
 **AND THE SET SPEED IS PREPARED WHILE STOPPED, which is his spec:** *"Ideally while stopped at a
 stop sign or traffic light, the set speed is restored from 20mph, and when it is time to go it
 goes."* Without it the restore waited for `model_slow_down` to clear -- which at a red light is the

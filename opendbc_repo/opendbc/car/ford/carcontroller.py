@@ -135,6 +135,9 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
     # exception here reaches card and stops the car.
     self.stop_override = FordStopOverride()
     self.stop_override_enabled = self.params.get_bool("StockAccStopOverride")
+    # Read once at init like every other toggle here -- see the note at the top of __init__ on why
+    # per-drive state lives on the Ford CarController rather than on the mixin classes.
+    self.stop_auto_resume_enabled = self.params.get_bool("StockAccStopAutoResume")
     self.stop_override_failed = False
     self.stop_override_last = False
     # Latched when the override brought the car to a stop, and cleared once it is moving again.
