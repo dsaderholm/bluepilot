@@ -20,11 +20,33 @@ So the as-built is the LIVE question, not a closed one, and section 4d's targete
 to `0810 A9DA A953` -- is still the sharpest untried experiment. Its blocker was never knowing the
 value; it is write access (section 6).
 
-**THE BLOCKER IS `U0253`, AND IT IS UNRESOLVED.** The IPMA cannot reach the APIM. It was recorded as
-fixed on 2026-08-11 because a read came back "Previously Set - Not Present at Time of Request"; that
-means not present at that instant, not resolved, and the same read said "Test not complete". He said
-repeatedly that it keeps coming back and was ignored. Every as-built theory below is downstream of a
-communication fault that is still there.
+**`U0253` IS UNRESOLVED, AND IT IS PROBABLY NOT IN THIS PATH. Demoted 2026-08-21 -- it led this
+document as "THE BLOCKER" and that was framing, not measurement.**
+
+The fault is the IPMA failing to reach the **APIM**, which is the nav module. That explains missing
+nav-sourced limits and the `NoNavDataAvailable` message the camera threw -- which is what was being
+chased on 2026-08-11, and why it ended up as the headline.
+
+**But sign reading does not need nav.** That is the entire meaning of the camera's "TSR data source:
+Camera Only" mode, which is what this camera is set to: it reads a sign with its own optics, and nav
+is a second source to fuse, not a prerequisite. So `U0253` does not explain `TsrVLim1MsgTxt` sitting
+at the no-data sentinel on every frame. That is the camera not DETECTING, which is upstream of any
+fusion. He put it plainly: *"Why do we care about U0253?"*
+
+What keeps it on the page at all, and no more than that: the camera rejects TSR configuration with
+`U2101 Configuration Incompatible`, instantly, and if part of what it validates at startup is
+"do I have the data sources my configuration claims", a missing APIM link could be one of the checks
+it fails. **That is a plausible mechanism, not a measured one.** Do not treat it as established, and
+do not let it gate the as-built experiment in section 7.
+
+Also worth recording about the fault itself: it was called fixed on 2026-08-11 because a read came
+back "Previously Set - Not Present at Time of Request". That means not present at that instant, not
+resolved -- the same read said "Test not complete" -- and he said repeatedly that it keeps coming
+back.
+
+**TWO OF TWO load-bearing claims in this file have now turned out to be framing rather than
+measurement** -- this one, and "the camera reads signs anyway". Treat anything else here that leads
+with emphasis and no numbers the same way.
 
 ---
 
