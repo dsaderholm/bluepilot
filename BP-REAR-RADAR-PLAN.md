@@ -877,6 +877,40 @@ python tools/bp_radar_bench.py --record cap.json --seconds 30
 python tools/bp_rear_digest_sim.py cap.json                  # replay the recording
 ```
 
+### FIRST REPLAYABLE CAPTURE, 2026-08-21. THE CHAIN IS PROVEN ON REAL HARDWARE.
+
+15 s recorded off the RH-02 with `bp_radar_bench.py --record`, then replayed through
+`bp_rear_digest_sim.py`. Every number the 2026-08-14 bench session produced by hand is reproduced,
+and this time from a file that can be replayed again:
+
+    32,558 frames in 15.0 s      2172 frames/s      (bench measured ~2140)
+    500 radar cycles             33.4 Hz            (bench measured 33)
+    digest out                   60 frames/s        36x reduction  (the .ino claims 36x)
+    valid detections             500
+    closing and off-centre       0                  <- correct: nothing was moving
+
+**The MRR free-runs, confirmed live with nothing transmitted** -- the header rotates through all
+four scan modes evenly (4 distinct payloads, ~125 each) with no `Vehicle_Data` and no
+`SensorInput`. Sections 3 and 4 of this document plan around an ESR that needs those frames to
+radiate; that is now doubly dead.
+
+**What it was looking at, and why it CANNOT calibrate the angle.** Only 2 of the 64 detection slots
+were ever non-empty, and both sat at a fixed range:
+
+    range     2.55 - 2.59 m across all 500 detections
+    rate      ~0.00 m/s          stationary, as expected on a bench
+    azimuth   two clusters, +3.4 deg and +20.2 deg, one per scan mode
+    slots     0x120 and 0x121 only
+
+**2.57 m is the near field of a long-range automotive radar** -- short-range mode reaches 42-45 m,
+so this is under 6% of it -- and the same object reading 17 degrees apart depending on scan mode is
+what unreliable angle estimation looks like. **Do not take an `AZIMUTH_OFFSET_RAD` from this.**
+
+**So the sign and offset still need a proper setup**, and now the requirement is known rather than
+guessed: a reflector at **10-20 m with clear space around it**, outdoors, placed unambiguously on
+ONE side. `--live` prints the strongest return per cycle; move the reflector, read the `y` column,
+and write down which physical side a positive `y` is.
+
 `--live` exists for the two bench questions still open: **the azimuth SIGN** (the feeder and the
 simulator both ship `-sin(az)`, inherited from the FRONT decoder, and a rear sensor is rotated 180
 degrees -- get it wrong and left and right are swapped) and **`AZIMUTH_OFFSET_RAD`**, which is
