@@ -6,6 +6,20 @@ Session of **2026-08-11**, in the car, several hours. Written so this can be pic
 without needing an alignment drive, and ACC works. The one change left in place is on the APIM, and
 **it did not help** -- see below.
 
+**RE-OPENED 2026-08-21: THE CAMERA IS NOT READING SIGNS AT ALL.** Measured on routes 0000039f and
+000003a1 by decoding `Traffic_RecognitnData` (0x3CD) off bus 2: **`TsrVLim1MsgTxt` is 255 -- the
+no-data sentinel -- on every frame of both drives.** 000003a1 carries just TWO distinct payloads
+across 909 frames, differing only in `TsrMsgTxt` and `TsrStatMsgTxt`, which are status enumerants.
+
+This contradicts the note that had been carried forward as settled -- "the camera reads signs anyway,
+what the region gates is the STATUS enumerants, not the detection" -- and that note is why this was
+treated as a display problem not worth chasing. **It is not a display problem. There is no detection
+happening.** He said so directly: *"the signs it's reading are wrong. Those aren't actually signs."*
+
+So the as-built is the LIVE question, not a closed one, and section 4d's targeted write -- `706-01-01`
+to `0810 A9DA A953` -- is still the sharpest untried experiment. Its blocker was never knowing the
+value; it is write access (section 6).
+
 **THE BLOCKER IS `U0253`, AND IT IS UNRESOLVED.** The IPMA cannot reach the APIM. It was recorded as
 fixed on 2026-08-11 because a read came back "Previously Set - Not Present at Time of Request"; that
 means not present at that instant, not resolved, and the same read said "Test not complete". He said

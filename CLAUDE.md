@@ -1095,7 +1095,14 @@ after:
     0000038f   policy 1, MAP DATA ONLY       map=9889   none=3663  (no car at all)
 
 `Policy.map_data_priority` is `[map, car]` and takes the FIRST NON-ZERO, so it consults the map first
-and **falls through to the car wherever the map is quiet** -- and TSR is stuck at a constant 80.
+and **falls through to the car wherever the map is quiet** -- and the car source was returning a
+constant 80.
+
+**That 80 was NOT the camera reading a sign, corrected 2026-08-21.** `TsrVLim1MsgTxt` is the no-data
+sentinel 255 on every frame of every recent drive (see the TSR section below), so it cannot be the
+source. Where the 80 actually came from is still open. The fix is unaffected either way: only
+`map_data_only` excludes the car source, and that remains right.
+
 `combined` has the identical hole, since `min()` over a single source is that source. `map_data_only`
 is the only one that excludes it, and the later drive shows it working: zero car-sourced frames.
 
@@ -2967,18 +2974,35 @@ broadcast frame. Stretching it to cover a message we already parse was my error,
 
 A narrow no is not a standing rule. When his decision is quoted, quote what he actually decided.
 
-**And it does not need to be set**, which is the part worth noticing. Everything below was measured
-with the region UNSPECIFIED. The camera reads signs anyway; what the region appears to gate is the
-STATUS enumerants, not the detection.
+**THE CAMERA IS NOT READING SIGNS.** This section said the opposite until 2026-08-21, and that
+sentence is what closed the investigation prematurely.
 
-What the camera actually does, measured from route 00000333 on 2026-08-09 rather than assumed:
+Re-measured on routes 0000039f and 000003a1, decoding `Traffic_RecognitnData` (0x3CD) off bus 2:
 
-- `Traffic_RecognitnData` (0x3CD) IS on the bus -- 366 frames on bus 2, forwarded to bus 0. The
-  IPMA transmits it.
-- `vLimit1` is NOT constant: 255 (the no-data sentinel) for most of the drive, and a real value for
-  roughly 10% of it, with `vLimit1Permanent` flipping in lockstep. So the camera does read signs.
-- Everything else in the message is pinned across 36,000 frames -- `tsrStatus`, `vLimit1Status`,
-  `vLimit2`, `vLimitUnit`, the overtake and warning fields. One field doing real work, the rest idle.
+    000003a1   909 frames, TWO distinct payloads
+               372320FFFCC80220   x878  (96.6%)
+               172220FFFCC80220   x31   (3.4%)
+    0000039f   1175 frames, four payloads, 97.2% the same dominant one
+
+**`TsrVLim1MsgTxt` is 255 in BOTH payloads, on every frame of both drives.** 255 is the no-data
+sentinel. The only fields that move between them are `TsrMsgTxt` (3 -> 1) and `TsrStatMsgTxt`
+(3 -> 2) -- status enumerants, not a limit. The camera publishes "I have no speed limit"
+continuously.
+
+The old claim -- "a real value for roughly 10% of it, so the camera does read signs", from route
+00000333 on 2026-08-09 -- holds on no recent drive, and it CONTRADICTED the TSR 80 leak entry
+earlier in this same file, which says TSR is "stuck at a constant 80". Both were wrong, and the
+contradiction sat here unnoticed until he said flatly *"the signs it's reading are wrong. Those
+aren't actually signs."* He was right, and I had quoted one of the two halves back to him as settled.
+
+**What it changes:** TSR on this camera is OFF, not merely undisplayed -- there is no detection
+happening to render. That is what a configuration gate looks like, and it makes the as-built the
+LIVE question rather than a closed one. Enabling it would buy real capability, not tidier status
+bits. The known-untried write is `bluepilot/TSR-INVESTIGATION.md` section 4d.
+
+**Two places in one file disagreeing about one measured fact is how a line of investigation gets
+closed on the wrong evidence.** If a claim here is contradicted anywhere else in this file,
+re-measure before quoting either.
 
 **The IPC is a separate question and an irrelevant one.** He asked and was told "the US IPC does not
 support TSR, you have to replace it." That is about the CLUSTER drawing a sign, which he does not
