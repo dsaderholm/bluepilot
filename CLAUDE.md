@@ -4268,3 +4268,34 @@ that is not true almost everywhere. Candidates nobody has measured: the far-left
 POSITION rather than its probability (a line at 5.5 m is a lane away, one at 1.9 m is our own),
 `laneLineStds` on that specific line, or the adjacent-lane radar seeing traffic two lanes out.
 The first is cheap and is where to start.
+
+## ROUTE INTENT: mapd's PREDICTION IS 96-100% RIGHT AND ARRIVES ONE SECOND EARLY
+
+2026-08-22, `tools/bp_route_intent_score.py`, four drives, 63,000 mapdOut frames. This is
+`bluepilot/ROUTE-INTENT.md` step 2, which said to score the guess already running before building
+anything, and it closes the cheap option.
+
+    route      resolved   correct        lead: median / best / worst
+    000003ab       88       88 (100%)      1.0 s / 1.2 s / 0.5 s
+    000003aa       77       75 ( 97%)      1.0 s / 2.7 s / 0.4 s
+    000003a8       22       21 ( 95%)      1.0 s / 3.1 s / 0.9 s
+    0000039f       76       73 ( 96%)      1.0 s / 1.9 s / 0.7 s
+
+**The budget is about 8 SECONDS** -- a 65 -> 38 mph exit at the 3.3 mph/s the set speed actually
+delivers. One second is an eighth of it. `waySelectionType == predicted` is not predicting the fork,
+it is confirming it at about the moment the road does.
+
+**ACCURACY WAS THE VANITY FIGURE AND THE TOOL WAS BUILT KNOWING THAT.** Its docstring says "two
+numbers, and the second one decides it". Had this been scored on accuracy alone, 96-100% would have
+read as a solved problem and something would have been built on top of a signal that arrives too
+late to act on. **When a signal has to beat a deadline, the metric is lead time, not correctness.**
+
+Ramps -- the case the exit problem is about -- are 25/25, 8/8 and 3/5, at the same 1.0 s median. The
+blinker was `none` at resolution on 35 of 38, so his signal is not carrying it either.
+
+**This does not say mapd is doing badly.** Predicting a fork earlier needs the DESTINATION, which
+mapd does not have and this car cannot supply. It answers a different question well.
+
+**What it changes:** ROUTE-INTENT 5a is closed, and 5b -- learning his own forks from repeated
+driving, the `IcbmHoldObservations` shape -- is now justified by evidence rather than by argument.
+It is the only candidate that can be early, because it knows before the fork is in sight.

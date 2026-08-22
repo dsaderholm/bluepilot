@@ -273,11 +273,35 @@ map limits would reach Speed Limit Assist through the camera, with openpilot nev
 / `extended` / `fail`. **`predicted` is mapd doing exactly this job** -- inferring which way he is on
 when it is not yet certain. It is published at **20 Hz** and logged in every observe route.
 
-**It has never been examined.** Before anyone builds route prediction, measure the one already
-running: at the forks he actually drives, how often is `predicted` right? If it is good, the problem
-is far smaller than it looks. If it is poor, that is the evidence that justifies 5b.
+**MEASURED 2026-08-22, four drives, 63,000 mapdOut frames. IT IS ACCURATE AND IT IS USELESS.**
 
-The data is being collected now -- `MapdV2=1`, observe mode.
+    route      predictions resolved   correct        lead time: median / best / worst
+    000003ab            88             88  (100%)         1.0 s / 1.2 s / 0.5 s
+    000003aa            77             75  ( 97%)         1.0 s / 2.7 s / 0.4 s
+    000003a8            22             21  ( 95%)         1.0 s / 3.1 s / 0.9 s
+    0000039f            76             73  ( 96%)         1.0 s / 1.9 s / 0.7 s
+
+**Accuracy 95-100%. Lead time a median of ONE SECOND on every drive, best ever 3.1 s.** The budget,
+from section 1, is about **8 seconds** -- a 65 -> 38 mph exit at 3.3 mph/s of set-speed travel. So
+`predicted` delivers roughly an eighth of what the exit-ramp problem needs.
+
+**This is why the tool reports lead time and not accuracy**, and the warning in step 2 was exactly
+right: accuracy alone is a vanity figure here. A guess that is right but lands one second before the
+road resolves it is not a prediction, it is a confirmation. `waySelectionType == predicted` tells us
+which way he went at about the moment he went.
+
+**Ramps specifically, which is the case that matters:** 25/25, 8/8 and 3/5 correct across the three
+drives that had any -- and the same 1.0 s median lead. The blinker was `none` at resolution on 35 of
+38, so it is not being helped by his signal either, consistent with 5c.
+
+**SO 5a IS CLOSED AND 5b IS NOW JUSTIFIED BY EVIDENCE RATHER THAN BY ARGUMENT.** The cheap option was
+worth measuring first and it is not enough; learning his own forks from repeated driving is the
+remaining candidate, and it is the one that can be early because it does not wait for geometry to
+disambiguate -- it knows before the fork is in sight.
+
+**What this does NOT say:** that mapd is doing badly. Predicting a fork earlier than one second
+requires knowing the destination, which mapd does not have and this car cannot supply -- that is
+sections 2 through 4. mapd is answering a different question well.
 
 ### 5b. His own driving history, if 5a is not enough
 
