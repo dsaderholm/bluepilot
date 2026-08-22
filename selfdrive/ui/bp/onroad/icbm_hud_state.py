@@ -39,9 +39,17 @@ class IcbmHudState:
   pin_suggested: bool = False   # this place is a candidate for pinning
   pin_suggestion: int = 0       # the speed being offered, for when there is no hold to show
 
-  # Is Speed Limit Assist actually producing a limit right now? NOT whether it is switched on --
-  # SLA stays "active" on a road with no limit data, which is a documented trap in this fork.
-  sla_has_limit: bool = False
+  # `sla_has_limit` LIVED HERE AND IS GONE, 2026-08-22. It answered "is SLA producing a limit right
+  # now", and `worth_showing` was the only thing that ever asked -- until 2026-08-20, when the limit
+  # test was removed from that rule because it was hiding real holds on the roads holds are for.
+  #
+  # From that day it was computed on every frame of every render, on two screens, and read by
+  # nothing. It was also the ONLY reason this reader touched `longitudinalPlanSP` at all, so
+  # deleting it takes a whole second message out of the HUD path.
+  #
+  # Deleted rather than parked, per the rule about additions that stopped earning their place: a
+  # field nobody reads still reads as load-bearing to whoever finds it next. If a future rule wants
+  # the question again it is four lines to ask it, and it should ask with its own reason attached.
 
   @property
   def has_hold(self) -> bool:
@@ -128,12 +136,8 @@ def read_icbm_hud_state(sm) -> IcbmHudState:
   """
   state = IcbmHudState()
   try:
-    try:
-      sl = sm['longitudinalPlanSP'].speedLimit
-      state.sla_has_limit = bool(sl.resolver.speedLimitValid and sl.resolver.speedLimit > 0)
-    except Exception:  # noqa: BLE001 -- no SLA data reads as "no limit", which hides the badge
-      state.sla_has_limit = False
-
+    # ONE MESSAGE. The `longitudinalPlanSP` read that used to open this function went with
+    # `sla_has_limit` on 2026-08-22 -- see the note on the dataclass.
     icbm = sm['selfdriveStateSP'].intelligentCruiseButtonManagement
     state.arrow = _SEND_BUTTON_ARROW.get(icbm.sendButton.raw, "")
     # OUTSIDE the hold branch below, deliberately. A suggestion is offered precisely when there is

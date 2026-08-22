@@ -140,7 +140,9 @@ def test_missing_speed_limit_data_does_not_raise():
   """The point of this one was always that a HUD must not raise; the visibility half moved."""
   s = read_icbm_hud_state(_SM2(_Icbm(baseline=72.0), None))
   assert s.has_hold and s.worth_showing
-  assert not s.sla_has_limit, "absent SLA data must still read as no limit"
+  # The `sla_has_limit` assertion that used to close this test went with the field on 2026-08-22.
+  # What this test is actually about -- a HUD must not raise on a missing message -- is unchanged,
+  # and the reader no longer opens `longitudinalPlanSP` at all, so the shape it guarded is gone too.
 
 
 class TestAPinCanStillBeCreatedWhereThereIsNoLimit:
@@ -183,17 +185,17 @@ def test_a_hold_outranks_a_suggestion_on_the_badge():
   Nothing is hidden now, so there is no leak to plug -- but the badge must still read the HOLD when
   both exist, or a tap target would offer to pin a number the car is not holding.
   """
-  held = IcbmHudState(baseline=70, sla_has_limit=False, pinned=False, pin_suggested=False)
+  held = IcbmHudState(baseline=70, pinned=False, pin_suggested=False)
   assert held.worth_showing
   assert held.display_value == 70
 
-  both = IcbmHudState(baseline=70, sla_has_limit=False, pinned=False,
+  both = IcbmHudState(baseline=70, pinned=False,
                       pin_suggested=True, pin_suggestion=65)
   assert both.worth_showing
   assert both.display_value == 70, "the suggestion overwrote the hold the car is actually holding"
 
   # The case the suggestion exception is actually for: an offer with no hold behind it.
-  offered = IcbmHudState(baseline=0, sla_has_limit=False, pin_suggested=True, pin_suggestion=65)
+  offered = IcbmHudState(baseline=0, pin_suggested=True, pin_suggestion=65)
   assert offered.worth_showing
   assert offered.display_value == 65
 

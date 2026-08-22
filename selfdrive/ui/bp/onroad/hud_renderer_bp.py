@@ -583,20 +583,6 @@ class HudRendererBP(HudRendererSP):
                     TSR_PILL_INK)
     return LAMP_PILL_HEIGHT
 
-  @staticmethod
-  def _draw_arrow(center_x: float, center_y: float, size: float, up: bool) -> None:
-    """Drawn rather than typed: the device loads bitmap .fnt fonts and an arrow glyph is not
-    guaranteed to be baked into them, whereas a triangle always renders."""
-    half = size / 2
-    if up:
-      a = rl.Vector2(center_x, center_y - half)
-      b = rl.Vector2(center_x - half, center_y + half)
-      c = rl.Vector2(center_x + half, center_y + half)
-    else:
-      a = rl.Vector2(center_x, center_y + half)
-      b = rl.Vector2(center_x + half, center_y - half)
-      c = rl.Vector2(center_x - half, center_y - half)
-    rl.draw_triangle(a, b, c, COLORS.WHITE)
 
   def _draw_brake_lamp_pill(self, x: float, y: float) -> int:
     """BluePilot: are the stop lamps lit, right now. See LAMP_* for why this is its own readout."""
