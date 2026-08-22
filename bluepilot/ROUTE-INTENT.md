@@ -126,6 +126,33 @@ what we were doing with that?"* and the honest answer was no, because a link is 
 navigation app he relies on. It is reversible -- leave the program and reinstall the release build --
 but that is the trade.
 
+**AND THE PREMISE IS REFUTED, SAME DAY, BY HIM ACTUALLY DOING IT.** He submitted through the app and
+the reply was the **identical template** -- same agent, same steps, and the same thread identifier
+`thread::gmI37q7JcPaPnyjfsPIBMSs::` as the support ticket. So the in-app route did NOT reach a
+different team; it landed in the same front-line queue and produced the same `2##2` debug-log
+request.
+
+**The "beta reports skip triage" reasoning above was wrong**, and it is left in place rather than
+deleted because it is the persuasive version and would be re-derived. What is actually true, from
+one attempt:
+
+    support ticket   -> template asking for username, device, car, AA version, debug logs
+    in-app report    -> the SAME template, the SAME thread
+
+**So there is one channel, and it wants the debug logs.** If this is pursued at all, the move is to
+answer the template once: the `2##2` debug-mode capture with the drive reproduced, plus username,
+device model, car (2020 Ford Fusion, SYNC 3), AA version, and timestamps. Bounded work, one round.
+
+**The scope verdict is unchanged and now doubly earned.** This is a cluster nicety, nothing here is
+sequenced behind it, and it has now cost two rounds of research and one live attempt. **Do not spend
+a third.**
+
+**A note on how the earlier reasoning went wrong**, since the shape recurs: "beta programs have
+direct developer channels" is true of many products and was applied to this one without a way to
+check it. That is the same move as reading `roadEdgeStds` as a 0..1 scale from a rendering clamp, or
+inferring a US as-built would help TSR -- **a plausible general fact, asserted about a specific
+system nobody had tested.** He tested it in one afternoon.
+
 **THE LOGGING RULE FAILED HERE, one day after it was written.** CLAUDE.md's "LOG IT THE SESSION IT
 ARRIVES" says a fact from outside the code gets transcribed, put where it will be used, with source
 and date. This was reasoning produced IN conversation and it left behind only a citation. **A source
