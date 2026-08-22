@@ -1426,8 +1426,14 @@ restore    ->  0810 A9DB B964
 Rationale, limits and the forum citation are in **4k**. It may fix nothing -- `9` is Disable and the
 camera is not disabled, so this field is probably not what holds the hit rate down.
 
-**Hold everything else constant.** Same roads, same time of night, so the nibble is the only thing
-that moved. The baseline to beat, across every route pulled so far:
+**Drive it in DAYLIGHT, and drive the same roads.** Daylight is not a detail -- the one detection
+happened at night, and the dashcam shows the sign was not lit until the headlights reached it, so a
+night drive caps the sightline at 50-80 m and hides the quantity being measured. In daylight a sign
+is visible from 200 m+, and "recognised at N metres" becomes a real number.
+
+**The route is known-good for this**: `bp_offline_map.py` puts six limit transitions on it
+(20 residential -> 25 tertiary -> 30 secondary, out and back) plus mid-block repeaters, so there is
+plenty to detect. The baseline to beat, across every route pulled so far:
 
 ```
 route a2   31 segments   0 detections
