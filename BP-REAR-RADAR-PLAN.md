@@ -830,14 +830,18 @@ already in this car, since it is the same part number.
 | Barrel-jack to screw-terminal adapter | **$5** | THE EASY-TO-MISS ONE. The supply ends in a 5.5x2.1 mm barrel and the radar pigtail is bare wire, so without this the bench session stops before it starts. Screw terminals rather than cutting the plug off, so the supply stays general-purpose. **Center/tip positive, sleeve negative** -- reversing it is one of the few ways to kill the radar before learning anything from it. |
 | **Phase 1 total** | **$110–255** | money spent regardless of which way the answer goes |
 
-**Phase 2 — only if phase 1 shows detections.**
+**Phase 2 — THE GATE IS PASSED.** Phase 1 ran on the bench 2026-08-14: the MRR emits detections
+with **nothing sent to it**, all 64 detection addresses plus the 0x174 header, measured at ~2140
+frames/s. That was the question that decided the project and it came back yes -- so this table is a
+shopping list now, not a contingency. The ESR handshake that sections 3 and 4 plan around is moot;
+this part needs no transmit path at all.
 
 | Item | Price | Note |
 |---|---|---|
 | Teensy 4.0 | $24 | 4.1 is $30 and unnecessary; three CAN controllers either way, two used |
-| Dual CAN-Bus adapter for Teensy | $15 | transceivers *and* termination on board |
+| **Electroneering dual-CAN hat for Teensy 4.0** | $15 | **NAME THE PART, because the firmware is written against its silkscreen.** `rear_radar_feeder.ino` assigns CAN1 = the CAR (white/light blue) and CAN2 = the RADAR (yellow/green) to match the board's own labels, confirmed with the seller 2026-08-14. A different dual-CAN board means re-checking that mapping before flashing, not just re-wiring. **Cut CAN1's 120 ohm** -- bus 1 already has its two terminators and a third takes it to ~40 ohm, which can stop the front radar and ACC the car actually drives on. **Keep CAN2's**: the radar carries the other one, so that pair should read ~60. |
 | Wiring, fuse, inline connectors, DC-DC | ~$30 | |
-| Bracket / radome | $0–40 | 3D print, or fabricate from the donor's own bracket |
+| Bracket / radome | $0–40 | **`tools/rear_radar_mount.scad` is already written** -- parametric, implementing the chosen low-behind-the-valance layout. It is a FIRST PASS, not a part: every number carrying a `MEASURE:` comment is a placeholder. Filling those in is the whole job and needs three measurements off the car -- cover-to-beam depth, height above ground, and a caliper of the front MRR. |
 | **Phase 2 total** | **$70–110** | |
 
 ### The bench adapter, settled 2026-08-09
