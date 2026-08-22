@@ -804,6 +804,29 @@ Recorded because "he was slow" is exactly the detail that gets lost and then mis
 evidence that low speed is the FIX. It is not a fix; it is how far conditions had to be stacked
 before a 0 m detection range produced anything at all.
 
+### THE DENOMINATOR, FROM HIS OWN TILE STORE
+
+"many signs" is not a number. `tools/bp_offline_map.py --at` against the OSM tiles on his device,
+sampled along the route-a7 track, gives one:
+
+```
+1500 East / Chadwick / Parkway Ave    residential     20 mph
+1700 East                             tertiary        25 mph
+2100 South                            secondary       30 mph   <- the one it read
+```
+
+The drive ran **20 -> 25 -> 30 and back down**, out and back. That is at least SIX limit transitions,
+each of which carries a sign, plus the repeater signs a secondary road like 2100 South carries
+mid-block. **The camera reported exactly one value all drive.**
+
+It also confirms the read was CORRECT, with three independent sources agreeing: OSM has 2100 South
+at 30, Street View has a `SPEED LIMIT 30` on the pole at those coordinates, and the camera said 30.
+No ambiguity anywhere in that chain -- this was a true positive, not a lucky wrong number.
+
+And it makes the arithmetic concrete. On 20-30 mph residential and tertiary streets a sign is in
+useful view for **one to two seconds**. With a detection range of zero the camera needs the sign to
+fill the frame, so it catches one when he happens to crawl past at 7 mph and nothing otherwise.
+
 **WHY THIS REFRAMES EVERYTHING.** A DISABLED system reads nothing at any range. This one reads at
 0 m. So TSR is not switched off -- it is a recognition pipeline running at the absolute edge of its
 capability, which is what a camera matching against the WRONG SIGN TEMPLATE looks like: it only
