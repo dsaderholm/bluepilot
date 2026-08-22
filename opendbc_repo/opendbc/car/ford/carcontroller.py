@@ -512,7 +512,22 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
           # BOUNDED, because whether it releases is exactly the unknown. 30 s of trying; if the
           # camera is still asserting after that it is not going to release for this reason and we
           # stop pretending otherwise, which also keeps the drive readable afterwards.
+          # NEVER WHILE WE ARE HOLDING A STOP WE AUTHORED. Found 2026-08-22 by tracing the
+          # radar-never-acquires case, hours after the rest of this shipped.
+          #
+          # The override holds a standstill for up to MAX_HOLD_S and then ends. If the car is
+          # stopped behind a vehicle Ford's radar never returned -- which is the entire premise of
+          # `unconfirmed_lead.py` -- handing Ford back there means forwarding an ACC command with
+          # no lead in it and a set speed of 20. The camera's own `AccBrkTot_A_Rq` measured **+0.05
+          # m/s^2** in the seconds after the stop on route a8: not braking. The car would pull away
+          # into the stopped vehicle.
+          #
+          # `stop_override_stopped_us` is exactly the right flag: it is true while a standstill WE
+          # authored is still unresumed, and it is cleared by the car moving above 1.5 mph. So the
+          # recovery resumes being possible the moment he drives away, which is when Ford having
+          # the car is what he wants.
           elif (self.override_ran and CC.longActive and self.passthrough_cancel_frames > 250
+                and not self.stop_override_stopped_us
                 and self.cancel_recovery_frames < 1500):  # 30 s at ACC_CONTROL_STEP
             if not fordcan_ext.passthrough_admissible(CS.acc_stock_values, CC.longActive,
                                                       allow_cancel=True):
