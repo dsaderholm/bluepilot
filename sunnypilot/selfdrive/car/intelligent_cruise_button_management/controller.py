@@ -1336,10 +1336,31 @@ class IntelligentCruiseButtonManagement:
     #
     # Source-gated like the reset-delta rule below. Under `cruise` there is no posted limit for
     # v_target_raw to represent, and equality there is coincidence rather than intent.
+    # A LEVEL RULE, NOT AN EDGE ONE, since 2026-08-22. His words, twice: *"if I set the speed back
+    # to the SLA speed, there shouldn't be a hold"* and *"I don't want a hold if I +/- back to SLA
+    # speed."* That is a statement about the CURRENT state, and the code was asking a question about
+    # history instead.
+    #
+    # `baseline_diverged` used to gate this: the hold had to have DIFFERED from SLA at some point
+    # before equality would clear it. Measured on route 000003ac -- a hold born at 35 with
+    # `v_target_raw` already 35 sat there for 164.7 SECONDS with the source speedLimitAssist the
+    # whole time, because it had never differed and the latch could never arm. It survived until
+    # something else killed it. He photographed exactly this and asked, correctly, whether the hold
+    # was still there.
+    #
+    # THE LATCH'S ONE REAL JOB IS ALREADY DONE ELSEWHERE. Its comment says it exists "to stop a
+    # fresh hold being deleted on its first frame" -- but this rule is unreachable during a press:
+    # the press path returns near the top of this method, and the press-settle stand-down returns
+    # above it. By the time execution arrives here the press has finished and the driver has
+    # deliberately landed on SLA's number. There is nothing left to protect.
+    #
+    # `baseline_diverged` is still maintained above (see `update_calculations`) because the
+    # reset-delta rule below and the no-limit seeding still read it. Only THIS branch stopped
+    # asking.
     if self.plan_source == LongitudinalPlanSource.speedLimitAssist:
       if self.v_baseline != self.v_target_raw:
         self.baseline_diverged = True
-      elif self.baseline_diverged:
+      else:
         self.clear_baseline()
         return
 

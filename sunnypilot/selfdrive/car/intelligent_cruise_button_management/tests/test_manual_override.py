@@ -562,6 +562,36 @@ class TestReturningToTheLimitHandsItBack:
       f"(baseline={icbm.v_baseline}, diverged={icbm.baseline_diverged})")
     assert icbm.override_state == OverrideState.auto
 
+  def test_a_hold_that_never_differed_from_SLA_still_clears(self):
+    """THE SECOND INSTANCE, measured on route 000003ac and photographed by him.
+
+    The clearing rule used to require `baseline_diverged` -- the hold had to have DIFFERED from
+    SLA at some point before equality would clear it. A hold born already equal to SLA's number
+    therefore had an unreachable exit:
+
+        t+299.7  hold born at 35   vTargetRaw already 35   <-- equal from the first frame
+                 ... 164.7 SECONDS, plan source speedLimitAssist throughout ...
+        t+464.4  cleared by something else entirely
+
+    He said it twice and both times it was a statement about the CURRENT state, not about history:
+    *"if I set the speed back to the SLA speed, there shouldn't be a hold"*, and *"I don't want a
+    hold if I +/- back to SLA speed."*
+
+    The latch's stated job -- not deleting a fresh hold on its first frame -- is done by the press
+    path and the press-settle stand-down, both of which return before this rule is reached."""
+    icbm = fresh()
+    set_baseline(icbm, to=LIMIT)          # a press that lands on SLA's own number
+    # 800 FRAMES, not 400. This press never MOVES the cluster -- it is already at LIMIT -- so the
+    # stand-down cannot end on `settled` (which requires movement) and only expires on
+    # PRESS_SETTLE_MAX_FRAMES, 600. A shorter settle leaves the rule unreached and the test fails
+    # identically with the fix in place and reverted, which is exactly what it did first time.
+    settle(icbm, LIMIT, cluster=LIMIT, frames=800)
+
+    assert icbm.v_baseline == 0, (
+      f"a hold sitting on SLA's number survived (baseline={icbm.v_baseline}, "
+      f"diverged={icbm.baseline_diverged}) -- it never differed, so it could never clear")
+    assert icbm.override_state == OverrideState.auto
+
   def test_a_hold_walked_back_without_ever_leaving_the_stand_down(self):
     """THE ONE THAT REACHED THE ROAD TWICE, measured on route 000003a8 on 2026-08-22.
 
