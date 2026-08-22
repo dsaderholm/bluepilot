@@ -810,8 +810,16 @@ capability, which is what a camera matching against the WRONG SIGN TEMPLATE look
 scores a hit when the sign fills the frame. That is exactly what a Brazilian configuration
 (circular, metric) would do on US roads (rectangular, mph).
 
-**It also gives every future change a metric instead of a yes/no.** Score with
-`bluepilot/asbuilt/detect_range.py`. **The number to beat is 0 m.** A config change that moves
+**It also gives every future change a metric instead of a yes/no.** Score with one command:
+
+```
+python bluepilot/asbuilt/tsr_score.py "route_dir/*.rlog.zst"
+```
+
+It reports every detection with a maps link, the approach profile and range for each, whether the
+APIM sent `0x463`/`0x464`, and the camera's status enumerants across the drive. Re-run against
+route `000003a7` and it reproduces everything above -- and measures the straight approach at
+**237 m**, longer than the 183 m first quoted. **The number to beat is 0 m.** A config change that moves
 recognition out to even 20 m would multiply the hit rate several-fold and would be unmistakable in
 one drive.
 
