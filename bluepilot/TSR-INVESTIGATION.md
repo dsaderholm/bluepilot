@@ -683,6 +683,70 @@ section 4 against 4d before reasoning from the difference would have caught it i
 
 ---
 
+## 4j. THE CAMERA READ A SIGN. VERIFIED AGAINST STREET VIEW. 2026-08-21.
+
+**Route `000003a7--f0fee7f062`, segment 6, seven consecutive frames:**
+
+```
+                        every previous frame       these seven
+TsrVLim1MsgTxt_D_Rq     255  NoLimit          ->   30  Message30
+TsrVl1PrmntMsgTxt_D_Rq  0    DoNotShowSign    ->   1   ShowPermanentlyWithoutSupp
+payload                 372320fffcc80220      ->   3723201efcc90220
+```
+
+Byte 3 went `ff` -> `1e`. That is a whole byte, not a packed field. And the camera independently set
+"show this sign permanently" in the same frames -- **two semantically coherent fields moving
+together, which noise does not do.**
+
+**GROUND TRUTH: `40.725463, -111.829903`, 2011 2100 S, Salt Lake City.** Street View shows a
+**SPEED LIMIT 30** on a pole at exactly that spot. He confirmed it: *"Bingo. Literally right there."*
+Decoded from the car's own `0x462`, at 15.9 -> 6.7 mph, at night.
+
+**THIS IS THE FIRST SIGN THIS CAMERA HAS EVER BEEN OBSERVED TO READ.**
+
+### What it kills
+
+- **Every hardware theory.** `KT4T-19H406-CE` can recognise a US speed limit sign and report it. The
+  base-camera-variant theory, the `LV4T` assembly difference against the friend's car, the "US IPC
+  means replace the cluster" reading -- all dead. It is configuration, and configuration is fixable.
+- **Fusion mode is NOT required.** It read the sign in `Available_CameraOnly` with
+  `NoNavDataAvailable` asserted on all 747 frames including the seven. Line 30 of this document was
+  right the whole time: sign reading does not need nav.
+- **Android Auto was not suppressing anything.** He drove with the phone off USB and `0x463`/`0x464`
+  are still at **zero frames**. Section 4h's leading hypothesis is wrong.
+- **The synthesized-GPS feature is not the fix.** The missing messages are a real, measured defect
+  and `U0253` is real, but they are not what was stopping sign reads. The code stays -- it addresses
+  a genuine fault and stands down by itself -- but it must not be described as the TSR fix.
+
+### What it does NOT show
+
+**One sign, out of many 20s, 25s and 30s on a 13-minute drive.** 739 of 747 frames still read 255.
+That is not a working camera; it is a physically capable camera recognising almost nothing.
+
+**The configuration was IDENTICAL to the 1765-frame drive that read zero** -- `706-01-01` at
+`0810 A9DB B964`, `706-02-01` at `FD56 16DB 7FD3`, confirmed by him. So configuration is not what
+changed between the two drives. What differed was **night, and 32 mph instead of 72**. Speed limit
+signs are retroreflective, so under headlights at 7 mph they are far higher contrast than the same
+sign in daylight at highway speed. A camera hunting for the wrong sign STANDARD would plausibly get
+a lucky match exactly there and nowhere else.
+
+Which points back at section 4g: the configuration came from Brazil, where signs are circular and
+metric, and the region byte reads `FF`. **The evidence now points there rather than at nav data.**
+The region control is still closed -- he has said no twice and the DTCs were real -- but a correct
+**US-market as-built for `706`**, written as raw blocks with computed checksums, is a different
+action from the friendly-name control that burned him.
+
+### A decode bug worth remembering
+
+The first coordinates reported were `40.725463, -110.170097` -- Ashley National Forest, 1.7 degrees
+east of the truth, and he said so immediately. `0x462`'s minutes are a MAGNITUDE: they move the
+position away from zero, so on a western longitude they must be SUBTRACTED from a negative degree.
+Adding them walks the fix east. Latitude was unaffected because Utah is north. **A position that
+lands in the wrong place is obvious; one that lands 400 m away is not** -- check a decoded
+coordinate against something known before quoting it.
+
+---
+
 ## 4b. THE ONLY THING THAT DEMONSTRABLY WORKED: "TSR data source = Camera + APIM"
 
 Filed as a dead end at first. It is the opposite -- it is the single piece of positive evidence from
