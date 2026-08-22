@@ -1072,6 +1072,54 @@ control. The measurements that survived are the ones taken on his own car.
 
 ---
 
+## 4m. THE CAUSAL CHAIN, END TO END -- AND WHY ITS ENDPOINT IS HIS CALL, NOT A RECOMMENDATION
+
+Assembled 2026-08-21 from the Mobileye research plus everything measured that day. **Every step is
+sourced. The endpoint is the one thing he has ruled out twice, so it is recorded as analysis and
+explicitly NOT proposed.**
+
+1. **EU and US IPMA firmware are byte-identical.** `marjanoos` obtained EU Edge Vignale calibration
+   files and compared against a US car: same SBL, same Strategy, same Calibration (4l). One image
+   serves both markets.
+2. **Therefore sign templates cannot be baked into the firmware.** If one binary serves Europe and
+   North America, the sign set must be selected at RUNTIME by a configuration value.
+3. **Mobileye confirms TSR is region-parameterized.** The IPMA is a Mobileye EyeQ unit. Their ISA
+   product is *"certified for use in all 27 EU countries as well as Israel, Norway, Switzerland and
+   Turkey"* -- a per-country certification -- and they describe *"signature-based classification
+   that loads the 'signature' of a new traffic sign to the vehicle"*. Sign signatures are DATA,
+   selected per region.
+4. **This camera resolves a sign at 86-118 px and matches nothing.** Not optics, not resolution, not
+   distance -- see the pixel arithmetic above. The classifier is comparing against the wrong
+   signature set.
+5. **The runtime selector is the region field**, and this car's entire IPMA configuration came from a
+   Brazilian file with no original kept (4g). Brazil is Vienna Convention: circular, metric.
+6. **And he may be UNIQUELY able to change it.** Both other owners of `KT4T-19H406-CE` report the
+   IPMA region write FAILS -- *"for IPMA it is somehow blocked, any attempt to change this value ends
+   up in failure"*, and *"I can't change the region as well"* (4l). **His module accepts writes**:
+   two landed on 2026-08-21 and persisted across an ignition cycle.
+
+**This is the strongest causal story this investigation has produced.** It explains the 118-pixel
+failure, which nothing else does.
+
+### AND IT IS STILL NOT A RECOMMENDATION
+
+**He set the region once, got DTCs, and set it back to unspecified.** He has said no twice, most
+recently on 2026-08-21 while this research was in progress: *"Remember when I tried to change the
+region in the regular config and not the as built it broke everything."* **That is a decision, not an
+obstacle to route around. Do not pitch it, do not re-raise it in a later session as though it were
+unexplored, and do not treat this section as permission.**
+
+One fact recorded beside it, because it is fact rather than argument: that attempt went through
+FORScan's **friendly-name control**, on the one module FORScan decodes through a 2020 Fusion profile
+-- the same profile that reports "wheel arch height 1338 mm" for a feature-configuration byte
+(section 3). Whether it wrote the field it claimed to is unknown. Raw as-built with a computed
+checksum is a different mechanism from that control.
+
+**If he ever chooses to revisit it, this is the reasoning.** If he does not, this section is why the
+investigation stops here rather than why it should continue.
+
+---
+
 ## 4b. THE ONLY THING THAT DEMONSTRABLY WORKED: "TSR data source = Camera + APIM"
 
 Filed as a dead end at first. It is the opposite -- it is the single piece of positive evidence from
