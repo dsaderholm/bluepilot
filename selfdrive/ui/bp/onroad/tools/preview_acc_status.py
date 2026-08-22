@@ -113,7 +113,7 @@ def load_shipped_drawing_code():
     except NameError:
       pass
   # The box's own palette moved to the sunnypilot renderer with the pin mark. Pulled from the
-  # SOURCE rather than copied, so a colour change there cannot leave this preview showing the old
+  # SOURCE rather than copied, so a color change there cannot leave this preview showing the old
   # one -- which is the whole reason the tool is trusted.
   sp_tree = ast.parse(open(SP_HUD, encoding="utf-8").read())
   for node in (n for n in sp_tree.body if isinstance(n, ast.Assign)):
@@ -141,10 +141,10 @@ def _draw_max_box(f_semi, f_bold, x, y, box, ns):
   """The set-speed box, which since 2026-08-22 is where the HOLD lives.
 
   MIRRORS `HudRendererSP._draw_set_speed` rather than extracting it: that method starts by reading
-  two capnp messages off `ui_state.sm` and resolving colours from `UIStatus`, none of which exists
+  two capnp messages off `ui_state.sm` and resolving colors from `UIStatus`, none of which exists
   here. What it does NOT re-derive is the part that decides anything -- `box` comes from the real
   `max_box_state`, and the palette is pulled out of the real source file. So a change to the RULE
-  or to a COLOUR shows up here; a change to the pixel offsets is the one thing that could drift,
+  or to a COLOR shows up here; a change to the pixel offsets is the one thing that could drift,
   which is why they are quoted from the shipped method beside each call.
   """
   r = rl.Rectangle(x, y, SET_W, SET_H)

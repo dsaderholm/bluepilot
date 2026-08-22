@@ -126,7 +126,7 @@ class LongitudinalExt:
       # cheapest evidence there is. So a stop WE authored is held until he presses resume or the
       # gas -- his own press goes through untouched, because it never reaches this gate.
       #
-      # `StockAccStopAutoResume` opts back INTO upstream's behaviour, off by default. Read through
+      # `StockAccStopAutoResume` opts back INTO upstream's behavior, off by default. Read through
       # getattr with a False fallback for the same reason as the flag above: a missing attribute
       # must leave the stop HELD, never released. The conservative direction for a defaulted read
       # is whichever one keeps the car where the driver last saw it.

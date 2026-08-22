@@ -14,6 +14,23 @@ from opendbc.sunnypilot.car.ford.lateral_curv_ext import LateralCurvExt, Primary
 from opendbc.sunnypilot.car.ford.lateral_angle_ext import LateralAngleExt
 from opendbc.sunnypilot.car.ford.longitudinal_ext import LongitudinalExt
 from opendbc.sunnypilot.car.ford.hud_ext import HudExt
+# OVERRIDE_HZ, not a literal. `update` runs inside the ACC_CONTROL_STEP block, so the rate is 50 Hz
+# and not the 100 Hz control rate -- a factor of two that has already hidden in this file's bounds
+# once. stop_override.py's own note: "DERIVED, never restate it."
+from opendbc.sunnypilot.car.ford.stop_override import OVERRIDE_HZ
+
+# THE CANCEL-RECOVERY BOUNDS, in seconds, with the frame counts DERIVED. Never restate a frame
+# count here: `update` runs inside the ACC_CONTROL_STEP block at 50 Hz, not the 100 Hz control
+# rate, and that factor of two already hid in this feature's sibling bound once.
+_CANCEL_INERT_S = 5.0                                            # cancel held this long = deadlock
+_CANCEL_INERT_FRAMES = int(_CANCEL_INERT_S * OVERRIDE_HZ)
+_CANCEL_RECOVERY_MAX_S = 30.0                                    # then stop pretending it will let go
+_CANCEL_RECOVERY_MAX_FRAMES = int(_CANCEL_RECOVERY_MAX_S * OVERRIDE_HZ)
+# How soon after the override lets go a new cancel run still counts as ITS cancel. The measured lag
+# is 1.6 s and the run begins on the first frame after the override ends, so this is generous
+# already -- it exists to make a cancel raised much later unmistakably the camera's own.
+_CANCEL_ATTRIBUTION_S = 3.0
+_CANCEL_ATTRIBUTION_FRAMES = int(_CANCEL_ATTRIBUTION_S * OVERRIDE_HZ)
 from opendbc.sunnypilot.car.ford import fordcan_ext
 from opendbc.sunnypilot.car.ford.icbm import IntelligentCruiseButtonManagementInterface
 from opendbc.sunnypilot.car.ford.gap_control import FordGapController
@@ -124,10 +141,13 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
     # the same line. Lives here for the same reason everything else does -- see the note above.
     self.passthrough_reason_last = "?"
     self.passthrough_cancel_frames = 0
-    # FusionPilot 2026-08-22: the cancel-recovery latch. `override_ran` is what makes a cancel
-    # ATTRIBUTABLE to us rather than to the camera's own judgement, and it is per-drive on purpose --
-    # once the override has provoked a cancel, the refusal is self-sustaining for the whole drive.
-    self.override_ran = False
+    # FusionPilot 2026-08-22: the cancel-recovery state. Attribution is what decides whether a
+    # cancel is OURS to mask, and it is a distance in frames from the override letting go rather
+    # than a per-drive bool -- a bool meant a cancel the camera raised on its own an hour later was
+    # still treated as ours. Starts effectively infinite so nothing is attributable before the
+    # override has ever run.
+    self.frames_since_override = 1 << 30
+    self.cancel_is_ours = False
     self.cancel_recovery_frames = 0
     self.cancel_recovery_said = False
     # FusionPilot: the stop override -- the last few mph the set speed cannot ask for. Same
@@ -485,8 +505,14 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
       # (helper defined on the class; see _urgent_speed_gap)
       use_passthrough = False
       clear_cancel = False
-      if override:
-        self.override_ran = True
+      # HOW LONG AGO THE OVERRIDE LET GO, which is what makes a cancel attributable to it. Replaces
+      # a permanent `override_ran` bool: that latched for the whole drive, so a cancel raised for
+      # the camera's OWN reasons forty minutes later was still treated as ours and masked.
+      #
+      # Counted rather than timed because everything else in this block is in frames, and held at 0
+      # for the whole standstill hold -- the override is still `active` there, so a 45 s hold does
+      # not age out its own cancel.
+      self.frames_since_override = 0 if override else self.frames_since_override + 1
       if not override and self.stock_acc_passthrough and getattr(CS, "acc_cam_valid", False) and getattr(CS, "acc_stock_values", None):
         reason = fordcan_ext.passthrough_admissible(CS.acc_stock_values, CC.longActive)
         use_passthrough = not reason
@@ -500,8 +526,14 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
         # the controller this feature exists to avoid, and nothing on the screen or in the log said
         # so. Count it and say it once.
         if reason.startswith("camera asserted AccCancl"):
+          # A NEW RUN IS WHERE ATTRIBUTION IS DECIDED, once, rather than re-asked every frame. The
+          # override asserts cancel about 1.6 s in and holds it, so the first frame after the
+          # override lets go is the frame this run starts on -- anything that starts later than
+          # ATTRIBUTION_FRAMES after it belongs to the camera, not to us.
+          if self.passthrough_cancel_frames == 0:
+            self.cancel_is_ours = self.frames_since_override <= _CANCEL_ATTRIBUTION_FRAMES
           self.passthrough_cancel_frames += 1
-          if self.passthrough_cancel_frames == 250:  # 5 s at ACC_CONTROL_STEP
+          if self.passthrough_cancel_frames == _CANCEL_INERT_FRAMES:
             cloudlog.error("stock ACC passthrough INERT: camera has asked to cancel for 5 s "
                            "straight. openpilot longitudinal is driving from here.")
 
@@ -536,25 +568,54 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
           # authored is still unresumed, and it is cleared by the car moving above 1.5 mph. So the
           # recovery resumes being possible the moment he drives away, which is when Ford having
           # the car is what he wants.
-          elif (self.override_ran and CC.longActive and self.passthrough_cancel_frames > 250
+          elif (self.cancel_is_ours and CC.longActive
+                and self.passthrough_cancel_frames > _CANCEL_INERT_FRAMES
                 and not self.stop_override_stopped_us
-                and self.cancel_recovery_frames < 1500):  # 30 s at ACC_CONTROL_STEP
-            if not fordcan_ext.passthrough_admissible(CS.acc_stock_values, CC.longActive,
-                                                      allow_cancel=True):
-              self.cancel_recovery_frames += 1
-              use_passthrough = True
-              clear_cancel = True
-              if not self.cancel_recovery_said:
-                self.cancel_recovery_said = True
-                cloudlog.error("stock ACC passthrough RECOVERY: the stop override provoked this "
-                               "cancel, so Ford's command is being forwarded with AccCancl_B_Rq "
-                               "cleared. Watching for the camera to release.")
+                and self.cancel_recovery_frames < _CANCEL_RECOVERY_MAX_FRAMES):
+            # WRAPPED, because everything else that touches `acc_stock_values` in this method is.
+            # An exception here does not disable a feature, it propagates out of `update`, through
+            # card, and stops the car -- the 2026-08-15 failure, in a block that runs 50 times a
+            # second. Failing closed means no recovery, which costs him a hand-back and nothing else.
+            try:
+              if not fordcan_ext.passthrough_admissible(CS.acc_stock_values, CC.longActive,
+                                                        allow_cancel=True):
+                self.cancel_recovery_frames += 1
+                use_passthrough = True
+                clear_cancel = True
+                if not self.cancel_recovery_said:
+                  self.cancel_recovery_said = True
+                  cloudlog.error("stock ACC passthrough RECOVERY: the stop override provoked this "
+                                 "cancel, so Ford's command is being forwarded with AccCancl_B_Rq "
+                                 "cleared. Watching for the camera to release.")
+                if self.cancel_recovery_frames == _CANCEL_RECOVERY_MAX_FRAMES:
+                  # SAY SO WHEN IT GIVES UP. Without this the bound is silent, `cancel_recovery_said`
+                  # stays latched, and a second genuine attempt later in the drive logs nothing at
+                  # all -- which reads in the route as "the recovery never triggered".
+                  cloudlog.error("stock ACC passthrough RECOVERY GAVE UP: %.0f s of forwarding and "
+                                 "the camera is still asking to cancel.", _CANCEL_RECOVERY_MAX_S)
+            except Exception:
+              self.cancel_is_ours = False
+              use_passthrough = False
+              clear_cancel = False
+              cloudlog.exception("stock ACC cancel recovery disabled for this cancel")
         else:
-          if self.cancel_recovery_frames:
+          # ONLY AN EMPTY REASON MEANS THE CAMERA LET GO. Review finding, 2026-08-22, and it broke
+          # the one instrument this whole experiment has.
+          #
+          # `passthrough_admissible` returns "openpilot longitudinal inactive" and "camera set
+          # CmbbDeny_B_Actl" BEFORE it ever looks at the cancel bit. So this branch is reached on an
+          # ordinary disengagement, and the old code logged RECOVERY WORKED there -- claiming the
+          # camera had released a cancel that was still asserted, every time he lifted off cruise.
+          # It also zeroed both counters, so re-engaging handed out a fresh 30 s window and the
+          # bound could be walked past indefinitely by braking at each light.
+          if not reason and self.cancel_recovery_frames:
             cloudlog.error("stock ACC passthrough RECOVERY WORKED: camera released its cancel "
-                           "after %.1f s of forwarding.", self.cancel_recovery_frames / 50.0)
+                           "after %.1f s of forwarding.",
+                           self.cancel_recovery_frames / OVERRIDE_HZ)
             self.cancel_recovery_frames = 0
             self.cancel_recovery_said = False
+          # The cancel RUN still breaks on any other refusal -- it only ever meant "consecutive
+          # frames of cancel", and this branch is every reason that is not one.
           self.passthrough_cancel_frames = 0
 
       # WHO IS AUTHORING, decided here where the decision actually happens. Order matters: `inert`

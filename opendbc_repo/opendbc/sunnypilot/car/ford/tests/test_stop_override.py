@@ -329,7 +329,7 @@ def test_a_stop_we_authored_is_not_resumed_from_automatically():
   host.resume_gate_enabled = False
   assert LongitudinalExt.resume_allowed(host, sm) is True
 
-  # `StockAccStopAutoResume` opts back into upstream's behaviour. Asked for by name on 2026-08-22,
+  # `StockAccStopAutoResume` opts back into upstream's behavior. Asked for by name on 2026-08-22,
   # ships OFF: the "go" signal is `shouldStop` going false, which means the MODEL stopped wanting
   # to stop -- not that the light turned green. openpilot does not read signal state at all.
   host.resume_gate_enabled = True

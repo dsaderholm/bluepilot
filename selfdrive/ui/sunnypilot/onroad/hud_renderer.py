@@ -26,7 +26,7 @@ from openpilot.system.ui.lib.text_measure import measure_text_cached
 SLA_ACTIVE_COLOR = rl.Color(0x91, 0x9b, 0x95, 0xff)
 
 # FusionPilot: the MAX box while the driver's own HOLD is the number being driven to. Matches
-# HOLD_LABEL_COLOR in hud_renderer_bp so the box and the badge below it read as one statement.
+# what the deleted HOLD badge used for its label, so a hold reads the same as it always has.
 HOLD_DRIVING_COLOR = rl.Color(175, 210, 255, 0xff)
 # FusionPilot: the pin mark, moved onto the box when the HOLD badge was deleted on 2026-08-22.
 # Same values the badge used, so a pinned hold looks the same as it always has.
@@ -189,7 +189,7 @@ class HudRendererSP(HudRenderer):
     #
     # NOT while the hold is LOCKED. Something else owns the target then, so the hold is not the
     # thing being honoured and claiming the number is his would be a lie. The badge said this by
-    # going grey; the box says it by simply not tinting.
+    # going gray; the box says it by simply not tinting.
     if box.hold_driving and self.is_cruise_set and not box.hold_locked:
       set_speed_color = HOLD_DRIVING_COLOR
       if not self.show_icbm_status:
@@ -221,7 +221,7 @@ class HudRendererSP(HudRenderer):
     #
     # A ring rather than `draw_circle_lines`, which is a single hairline and vanished at a glance
     # against the badge fill -- for a mark whose whole job is to be noticed that is no mark at all.
-    # Top-LEFT, because the label is centred and the right corner is where the ICBM arrow used to
+    # Top-LEFT, because the label is centered and the right corner is where the ICBM arrow used to
     # hang; the two once landed within a pixel of each other.
     if box.pinned:
       rl.draw_circle(int(x + 20), int(y + 20), PIN_DOT_RADIUS, PIN_DOT_COLOR)

@@ -4,7 +4,6 @@ from opendbc.car.structs import ControllerStateBP
 from openpilot.bluepilot.ui.lib.bp_shaders import draw_shader_circle_gradient
 from openpilot.selfdrive.ui.onroad.hud_renderer import UI_CONFIG, FONT_SIZES, COLORS
 from openpilot.selfdrive.ui.sunnypilot.onroad.hud_renderer import HudRendererSP
-from openpilot.selfdrive.ui.bp.onroad.icbm_hud_state import read_icbm_hud_state
 from openpilot.selfdrive.ui.bp.onroad.exp_button_bp import ExpButtonBP
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.text_measure import measure_text_cached
@@ -72,7 +71,7 @@ ACC_STATUS_COLORS = {
 #
 # Where each piece went, so none of it has to be rediscovered:
 #   the number        the big number in the set-speed box (`max_box_state`, aim)
-#   "not yours to     the box stops tinting while `hold_locked` -- what the grey badge said
+#   "not yours to     the box stops tinting while `hold_locked` -- what the gray badge said
 #    change" state
 #   the +/- arrow     DROPPED. The label slot already shows the dash number whenever the car is not
 #                     at the aim, which is every moment the arrow would have been drawn, and it
@@ -204,14 +203,13 @@ class HudRendererBP(HudRendererSP):
     # flickers through them is a pill he learns to ignore. `opStop` and `inert` are NOT debounced
     # through this: one is deliberate and the other is already 5 s old when it is published.
     self._acc_fallback_frames = 0
-    self._icbm_baseline = 0   # the number ON THE BADGE: the hold, or a pin being offered; 0 = none
-    self._icbm_arrow = ""     # "+" / "-" while ICBM is actively moving the set speed, else ""
-    self._icbm_hold_locked = False  # something else owns the target; a press cannot change the hold
     self._lamp_data_available = False  # the BCM/brake-system lamp signal is actually being decoded
     self._tsr_fault = ""      # why TSR is not producing a limit; "" when it is working or silent
-    self._icbm_pinned = False   # this hold came from a pin, so tapping the badge removes it
-    self._icbm_pin_suggested = False  # set the same hold here before; tapping accepts
-    self._hold_rect = None      # last drawn badge rect; the tap target for pinning
+    # FIVE `_icbm_*` FIELDS LIVED HERE AND ALL FIVE WERE READ ONLY BY THE HOLD BADGE. Deleted with
+    # it on 2026-08-22 rather than left assigned: four of them had already become write-only, two
+    # were not reset per frame, and the next person to draw a pin state would have reached for
+    # last frame's answer. The box resolves all of it now, once, in `max_box_state`.
+    self._hold_rect = None      # the set-speed box, while there is a hold or an offer to tap
     self._acc_status_failed = False   # latched on any error; keeps a display bug off the screen
     self.speed_right = 0
     self._gradient_rect = None  # BluePilot: Full-width rect for header gradient
@@ -293,7 +291,6 @@ class HudRendererBP(HudRendererSP):
       except Exception as e:
         self._acc_status_failed = True
         self._acc_state, self._acc_accel = "", 0.0
-        self._icbm_baseline, self._icbm_arrow = 0, ""
         bp_ui_log.state("HudRendererBP", "acc_status_error", repr(e))
 
     bp_ui_log.state("HudRendererBP", "brakes_on", self._brakes_on)
@@ -307,33 +304,14 @@ class HudRendererBP(HudRendererSP):
     openpilot is not the longitudinal controller.
     """
     self._acc_state, self._acc_accel = "", 0.0
-    self._icbm_baseline, self._icbm_arrow = 0, ""
-    # Reset with the rest. Today it cannot be read stale -- the badge only draws when
-    # _icbm_baseline is non-zero, and both are written together below -- but leaving one field of
-    # the group holding last frame's value is a trap for whoever next draws the lock state.
-    self._icbm_hold_locked = False
     sm = ui_state.sm
 
-    # BluePilot: the ICBM line is NOT gated on the brake-status toggle. Whether ICBM is holding
-    # the driver's own set speed or chasing Speed Limit Assist is basic state, not a debug
-    # readout -- and hiding it behind an unrelated toggle meant the driver spent days unable to
-    # see whether an override had taken at all. The ACC accel/coast/brake line below stays behind
-    # the toggle; that one really is diagnostic.
-    # Read through the shared reader, not inline: the comma 4 screen draws the same hold from its own
-    # renderer tree, and two copies of this would drift apart on the next enum change.
-    icbm_state = read_icbm_hud_state(sm)
-    self._icbm_arrow = icbm_state.arrow
-    # worth_showing, not has_hold -- see IcbmHudState. The hold still governs the car either way;
-    # this only decides whether a badge showing the same number as MAX is drawn.
-    if icbm_state.worth_showing:
-      # display_value, not baseline: with a standing pin suggestion and no hold this is the speed
-      # being OFFERED, and the badge is the only tap target that can accept it. Taking `baseline`
-      # here drew a badge reading 0. Everything downstream -- the tap gate, the stack visibility,
-      # the drawn number -- keys off this one field, so it has to be the number on screen.
-      self._icbm_baseline = icbm_state.display_value
-      self._icbm_hold_locked = icbm_state.hold_locked
-      self._icbm_pinned = icbm_state.pinned
-      self._icbm_pin_suggested = icbm_state.pin_suggested
+    # THE ICBM READ USED TO LIVE HERE and it is gone, 2026-08-22, with the badge it fed.
+    #
+    # `HudRendererSP._set_speed_aim` already calls `read_icbm_hud_state` once per frame to resolve
+    # the set-speed box, so doing it again here parsed the same two messages a second time for
+    # fields nothing draws any more. The one thing still wanted -- whether there is anything to tap
+    # -- comes off `self._box` in `_render`, which `_draw_set_speed` has just written.
 
     # BluePilot: TSR fault reason. Read before the brake-status gate below -- it has nothing to do
     # with brakes and must not disappear when that toggle is off.
@@ -457,7 +435,11 @@ class HudRendererBP(HudRendererSP):
       # returns early in several states (lamps-only, nothing to report) and the tap must keep
       # working in all of them. A hold governing the car with no way to pin or unpin it is the
       # defect that killed pinned holds for two days in August.
-      self._hold_rect = self._set_speed_rect if self._icbm_baseline else None
+      # Straight off the box's own resolved state, which `_draw_set_speed` wrote one line ago.
+      # `hold_driving` covers a hold worth unpinning; `pin_offer` covers a place worth pinning with
+      # no hold yet -- which is exactly the pair the old `display_value` collapsed into one number.
+      tappable = bool(self._box.hold_driving or self._box.pin_offer) if self._box else False
+      self._hold_rect = self._set_speed_rect if tappable else None
     else:
       self._hold_rect = None   # no box on screen, no tap target
     # BluePilot: the ACC readouts describe what ACC is doing, so they follow cruise availability.
@@ -504,7 +486,10 @@ class HudRendererBP(HudRendererSP):
     #
     # Checking our own target first and returning is what makes it a real button rather than a
     # side effect of a tap that also does something else.
-    if (self._hold_rect is not None and self._icbm_baseline
+    # `_hold_rect` is None unless there is something to pin -- see `_render`. The second condition
+    # that used to be here read `_icbm_baseline`, which no longer exists and was saying the same
+    # thing twice.
+    if (self._hold_rect is not None
         and rl.check_collision_point_rec(mouse_pos, self._hold_rect)):
       try:
         self._bp_params.put_bool("IcbmPinHoldRequest", True)
@@ -546,7 +531,7 @@ class HudRendererBP(HudRendererSP):
     # is true whether or not cruise is engaged and has nothing to do with the brake-status toggle.
     if lamps_only and not self._tsr_fault and not (self._show_brake_status and self._lamp_data_available):
       return
-    # `_icbm_baseline` is NOT a reason to draw this stack any more. It was, while the HOLD badge
+    # THE HOLD is NOT a reason to draw this stack any more. It was, while the HOLD badge
     # lived here; the hold is now drawn by the set-speed box above and nothing in this column
     # depends on it. Leaving it in the gate would reserve the stack for a readout that no longer
     # exists, and push the ACC pill down for no reason.

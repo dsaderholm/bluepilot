@@ -176,7 +176,7 @@ class MaxBoxState:
   # hold and tapping would CREATE one at the offered speed.
   pinned: bool = False
   pin_offer: bool = False
-  # Something else owns the target, so a press cannot move the hold. The badge greyed itself out to
+  # Something else owns the target, so a press cannot move the hold. The badge grayed itself out to
   # say this; the box says it by de-tinting. Kept rather than dropped because "the car is not at
   # your number" (which rank 1 already shows) is NOT the same statement as "your number is not
   # currently yours to change".

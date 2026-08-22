@@ -252,7 +252,7 @@ class TestTheBigNumberIsWhatTheCarIsDrivenTo:
 
   def test_a_locked_hold_does_not_claim_the_number_is_his(self):
     """`hold_locked` means something else owns the target, so a press cannot move the hold. The
-    badge said this by going grey; the box says it by not tinting.
+    badge said this by going gray; the box says it by not tinting.
 
     NOT the same statement as "the car is not at your number", which rank 1 already makes -- a hold
     can be locked while the car sits exactly on it."""
