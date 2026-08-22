@@ -374,3 +374,61 @@ support whichever conclusion you arrive with.
 - [Waze Rolls Out Instrument Cluster Integration -- BMWBlog](https://www.bmwblog.com/2025/03/01/waze-instrument-cluster-carplay-android-auto-update/)
 - [Top Android Auto Feature Stops Working After Recent Update -- autoevolution](https://www.autoevolution.com/news/top-android-auto-feature-stops-working-after-recent-update-266075.html) -- the acknowledged AA cluster/HUD regression affecting both Maps and Waze
 - [Start Testing Waze on Android Auto -- Waze Beta Help](https://support.google.com/waze/beta/answer/7576732) -- bug reporting and log submission
+
+---
+
+## 8. ACTUAL NAVIGATION -- destination, turn-by-turn. Measured 2026-08-22.
+
+Everything above is about ROUTE INTENT: which branch, for the exit problem. He asked the separate
+question -- *"I am thinking of actual navigation, eventually"* -- meaning enter a destination and get
+turn-by-turn. Different feature, different answer, so it gets its own section.
+
+**THERE IS NO NAVIGATION IN THIS FORK, AND NOTHING TO BUILD ON. Three layers, all empty:**
+
+    comma        DELETED it. log.capnp carries navInstructionDEPRECATED @82,
+                 navRouteDEPRECATED @83, navModelDEPRECATED @104. No selfdrive/navd/.
+                 No NavDestination or Mapbox token in params_keys.h.
+    sunnypilot   `sunnypilot/navd/` is ONE FILE, helpers.py -- a Coordinate class and geometry,
+                 surviving only because mapd and SCC import it for coordinate math. No process.
+                 `settings/navigation.py` is a stub: `items = []`, renders nothing.
+    mapd         has no destination, route, maneuver or instruction concept anywhere in its
+                 schema. It is a map MATCHER, not a router. `waySelectionType` is the whole of
+                 its opinion about where you are going, and section 5a measured that at 1 s.
+
+`helpers.py` still has `from_mapbox_tuple`, which is the fossil of comma's Mapbox-based navd. That
+is the only trace left of a working implementation.
+
+**THE TILES ARE THE REAL ASSET, AND THEY CANNOT ROUTE.** mapd already downloads OSM for his region
+to `/data/media/0/osm/offline` and it is there today. What a tile holds, from
+`tools/bp_offline_tile.capnp`:
+
+    Way    name, ref, id, highwayClass, maxSpeed (+ forward/backward/conditional),
+           lanes, oneWay, advisorySpeed, hazard, bbox, nodes
+    Coordinates    latitude, longitude          <- AND NOTHING ELSE
+
+**`Coordinates` has no node ID.** OSM ways connect by SHARING node ids, and that identity is not in
+the file. So the tiles carry geometry and attributes but no junction topology, no connectivity, and
+no turn restrictions -- the three things a router is made of.
+
+**So offline routing here means RECONSTRUCTING THE GRAPH FIRST**, by matching way vertices that
+coincide within some epsilon, across tile boundaries too (the `overlap` field exists for that). It
+is possible and it is approximate, and it is least reliable exactly where it matters most: complex
+interchanges, where several ways pass near each other without connecting and a float-coordinate
+match cannot tell a junction from an overpass.
+
+**HONEST DISTANCE, for the version he means:**
+
+    a router                     the whole project. Graph reconstruction, or an ONLINE router
+                                 (Mapbox / OSRM / Graphhopper) which skips it but needs a token
+                                 and connectivity. comma's deleted navd was the online shape.
+    destination entry            no UI exists. comma's came through the app and Connect.
+    turn-by-turn transport       the nav messages are deprecated; new structs, or ours.
+    rendering                    nothing draws a maneuver today.
+    consumers                    SCC, SLA and passing assist would each want maneuver+distance.
+
+**AND THE STRATEGIC POINT, so this is not started for the wrong reason:** navigation is a
+heavyweight way to obtain a lightweight fact. Everything sections 1-7 want is answered by 5b --
+learning his own forks from repeated driving -- with no router, no destination to enter, and no
+network. **If the goal is the exit-ramp problem, build 5b. If the goal is turn-by-turn on the
+screen because he wants turn-by-turn on the screen, that is a legitimate and separate want, and
+this section is the map of what it costs.**
