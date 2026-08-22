@@ -317,6 +317,42 @@ interlock was demonstrated on his hardware rather than inferred from the diff. T
 rectangular mph. If the same firmware carries a market config, that bears directly on whether
 as-built alone can produce US sign reads.
 
+### 0x3CD MEASURED ACROSS A WHOLE PRE-CHANGE DRIVE — AND THE REGION THEORY WEAKENS
+
+**2026-08-21, route `000003a1--1c5cc52d49`, 16 segments, started 17:00, i.e. BEFORE the writes.**
+Scanner is `bluepilot/asbuilt/tsr_scan.py`; run it on device against a route glob.
+
+909 frames of `Traffic_RecognitnData` on bus 2. **Exactly two payloads, and `TsrVLim1MsgTxt` was
+255 on every single frame:**
+
+```
+372320fffcc80220  x878   Available_CameraOnly   NoNavDataAvailable   Mph
+172220fffcc80220  x31    Available_FusionMode   NoInformationAllOK   Mph
+```
+
+**The second payload is the important one.** For 31 frames the camera sat in `Available_FusionMode`
+reporting `NoInformationAllOK` — its healthy state, nav data flowing, nothing wrong — **and read no
+sign anyway.** So `NoNavDataAvailable` is NOT what stops sign reads. That theory is dead.
+
+**The camera does not believe it is in an unsupported market.** `TsrMsgTxt_D_Rq` carries dedicated
+codes for exactly that and never emits them:
+
+```
+TsrMsgTxt_D_Rq     5 = CountryNotSupported     6 = RegionNotSupported     <- NEVER SEEN
+                   3 = NoNavDataAvailable      1 = NoInformationAllOK     <- what it actually says
+TsrStatMsgTxt_D_Rq 1 = TSR_Off   5 = TSR_Error                           <- NEVER SEEN
+                   3 = Available_CameraOnly    2 = Available_FusionMode   <- what it actually says
+TsrVlUnitMsgTxt    2 = Mph                                               <- correct for the US
+```
+
+TSR reports itself **available**, in **mph**, with **no region or country complaint**, and reads
+nothing. Any future theory has to explain that combination.
+
+**Today's writes have not changed `0x3CD`.** The live parked payload is `372320fffcc80220` — byte for
+byte the dominant pre-change payload. That is not yet a negative result: the car was stationary at
+`vEgo` 0.00 for the whole capture, and the `FusionMode` frames in the pre-change route only appeared
+while moving. **The comparison is only valid after a drive on the new configuration.**
+
 ### THE REMAINING QUESTION IS A DRIVE
 
 **What is NOT yet proven.** A value persisting is not TSR working. The measurement is
