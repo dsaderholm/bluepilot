@@ -353,6 +353,95 @@ byte the dominant pre-change payload. That is not yet a negative result: the car
 `vEgo` 0.00 for the whole capture, and the `FusionMode` frames in the pre-change route only appeared
 while moving. **The comparison is only valid after a drive on the new configuration.**
 
+### THE POST-WRITE DRIVE: ZERO SIGN READS, AND THE CONFIG MATCHED THE WORKING CAR
+
+**2026-08-21, route `000003a2`, 27 segments + `000003a3`, decoded LOCALLY** (375 MB pulled to the
+laptop — see the warning at the end of this section).
+
+```
+1765 frames of 0x3CD    peak 71.9 mph    772 frames above 10 mph
+372320fffcc80220  x1765  VLim1=255  Available_CameraOnly  NoNavDataAvailable  Mph
+```
+
+**One distinct payload for the entire drive.** `TsrVLim1MsgTxt` never left 255 on a real highway run
+that certainly passed posted limits.
+
+**And the camera never reached `FusionMode` again.** The pre-write route had two payloads including
+31 frames of `Available_FusionMode` / `NoInformationAllOK`. After setting the data source to
+Camera + APIM — the change meant to *enable* fusion — the camera sat in `NoNavDataAvailable` for
+1765 straight frames and never fused once.
+
+**THE CONFIG MATCHED THE WORKING CAR ON BOTH IDENTIFIED NIBBLES AND STILL READ NOTHING:**
+
+```
+706-01-01 nibble 2    his 8   friend 8    MATCHED
+706-02-01 nibble 4    his 6   friend 6    MATCHED
+result                zero sign reads
+```
+
+That is the strongest evidence so far that **configuration is not the gate.** Still unmatched on
+those two blocks: `706-01-01` nibbles 8 and 9, and `706-02-01` nibble 9 — all flagged in the
+market-config caution above, because the control car is not a US car.
+
+### TWO MISTAKES IN THIS SESSION, RECORDED SO THEY ARE NOT REPEATED
+
+**1. Two variables were changed before the drive.** `706-01-01` nibble 2 and `706-02-01` nibble 4
+both moved, so the 1765 frames cannot attribute anything to either one. Change one thing, drive,
+then change the next.
+
+**2. Camera + APIM was pursued as if it were the goal. It is not.** Line 30 of this document already
+said so: *sign reading does not need nav; Camera Only means the camera reads a sign with its own
+optics, and nav is a second source, not a prerequisite.* Camera + APIM matters for a **different**
+feature — routing SYNC's map limits to openpilot (section 6d). It was chased here because it silenced
+`NoNavDataAvailable`, which is a symptom, not the objective.
+
+**But note the tension, because it is not resolved:** the friend's working car sits at nibble 4 = `6`
+(Camera + APIM). So "Camera Only is what we want" is the theory, and "the working car runs Camera +
+APIM" is the observation. Both are in the record; neither has been shown to produce a sign read.
+
+**3. Do not ask the friend for his TSR data source. It is already in his as-built.** `706-02-01`
+nibble 4 = `6`. The complete dumps in `bluepilot/asbuilt/` answer most questions of this shape —
+read them before asking for anything.
+
+### THE MATRIX, AND THE ONE CELL NEVER RUN
+
+```
+706-01-01 nibble 2 | 706-02-01 nibble 4 | signs?
+       4 (old)     |   2  Camera Only   | tested for months -- no
+       4 (old)     |   6  Camera + APIM | never persisted before 2026-08-21
+       8 (new)     |   6  Camera + APIM | TESTED 2026-08-21 -- no
+       8 (new)     |   2  Camera Only   | NEVER RUN
+```
+
+### THE €130 IS DEAD
+
+Do not buy the UCDS EXT licence for this. FORScan writes `706-01-01` (section 4e), the writes
+persist, and the resulting configuration matched the working car on every nibble identified so far
+and produced nothing. A writing tool was never the blocker and neither, on this evidence, is
+configuration.
+
+### THE LEADING REMAINING HYPOTHESIS IS THE HARDWARE
+
+```
+HIS      IPMA assembly  KT4T-19H406-CE     strategy KT4T-14F397-AE
+FRIEND   IPMA assembly  LV4T-19H406-CF     strategy KT4T-14F397-AE   <- SAME software
+```
+
+Same firmware, different camera assembly. This fits every observation: the software reports TSR
+`Available` in `Mph` with no `CountryNotSupported` and no `RegionNotSupported` because the *software*
+supports TSR, and no sign is ever recognised because the *assembly* cannot do it. It would also
+explain five months of as-built work moving nothing. **Unproven** — but it is now the hypothesis that
+explains the most, and it points at a part, not a parameter.
+
+### NEVER RUN THE SCAN ON THE DEVICE
+
+`tsr_scan.py` was run on the comma while `IsOnroad=1` and he was driving. It decompressed and
+capnp-parsed ~200 MB on the device's own CPU, with load already at 7.23 and 87 °F ambient. He
+reported lag, then could not engage. It cleared when the processes were killed.
+
+**Use `bluepilot/asbuilt/tsr_local.py` instead** — `scp` the `rlog.zst` files off and decode on the
+laptop. The car must never pay CPU for analysis.
+
 ### THE REMAINING QUESTION IS A DRIVE
 
 **What is NOT yet proven.** A value persisting is not TSR working. The measurement is
