@@ -778,20 +778,24 @@ nothing until level with the sign.** The turn only begins AFTER passing it, whic
 read five seconds later as the sign leaves frame. So there is no "it was around a corner"
 explanation.
 
-**BUT "TWO HUNDRED METRES OF CLEAR LINE OF SIGHT" WAS OVERSTATED, AND THE DASHCAM FOOTAGE SHOWS IT.**
-Frames pulled from segment 6's `qcamera.ts`: at 104 m out the road ahead is DARK -- streetlights
-overhead, nothing resolvable at that distance. **This was a night drive, and a retroreflective sign
-is only visible once headlights reach it** -- roughly 50-80 m on low beams for a retroreflector, less
-for anything else. For most of that approach the sign was not there to be seen by ANY camera.
+**THE SIGN IS VISIBLE AT 104 m IN THE DASHCAM FOOTAGE, AND HE HAD TO POINT IT OUT.** Frames were
+pulled from segment 6's `qcamera.ts` and the 104 m one was read as "the road ahead is dark, the sign
+was not lit yet" -- which was WRONG, and would have retracted a correct finding. **He marked the sign
+in the frame: a small bright rectangle, plainly there.** Retroreflective signs return headlight light
+far beyond the distance at which headlights illuminate the ROAD, which is the entire point of them.
+The mistake was looking at road illumination instead of the retroreflector.
 
-What survives: it recognised nothing from about 50 m in, where the sign WAS illuminated, until level
-with it. Still short. What does not survive: the 237 m figure, which measures how far he drove
-straight, not how far the sign was visible.
+So the finding stands and is better supported than before: **the sign was visible from at least
+104 m and the camera reported nothing at 104, 78, 54, 42, 31, 20 or 10 m.**
 
-**AND IT INVERTS THE TEST.** Night was recommended here so conditions would match the one detection.
-That is backwards for measuring RANGE: night caps the sightline at the headlights and hides the
-quantity being measured. **Measure detection range in DAYLIGHT**, where a sign is visible from
-200 m+, and the number means something.
+**The one fair caveat is RESOLVABILITY, not visibility.** At 104 m that sign is a handful of pixels
+-- enough to see something is there, not enough to read the digits. A production TSR typically
+commits at 30-50 m. **But this camera failed at 31 m and at 10 m as well**, which is well inside
+where the numerals are readable, so the conclusion does not depend on the far end of the approach.
+
+**Daylight is still the better measurement**, because it removes the argument entirely: a sign is
+visible AND resolvable from 200 m+, and "recognised at N metres" becomes a number nobody has to
+argue about.
 
 **A working TSR recognises a sign 30-50 m out. This one has an effective range of about zero.** That
 is the entire explanation for the hit rate:
