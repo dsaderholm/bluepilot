@@ -2287,6 +2287,38 @@ Also first-read: 15 decisions, of which ACC was already braking on 3 and merely 
 `driverChangeStandDown` frames and reported 2,413 lane changes where there were 16. The docstring
 warns about denominators; the file broke its own rule. Count rising edges.
 
+**BOTH NUMBERS ABOVE WERE ONE DRIVE, AND FIVE DRIVES CORRECT BOTH.** 0000039a / 39c / 39f / 3a0 / 3a1:
+
+    accBrakingOnsetDRel      n      p50      MAX
+    0000039a              2245     42 m     71 m
+    0000039c               364     31 m    117 m
+    0000039f              3435     85 m    125 m
+    000003a1              1134     64 m    117 m
+    000003a0              never -- ACC did not brake for a lead at all on that drive
+
+**The MAX is stable at 117-125 m across every drive that has one, so the close-in hold clearing
+125 m is a real bound.** The p50 is NOT stable -- 31 to 85 m depending on the drive -- so quoting
+85 as "the typical case" was itself a one-drive number. The 137 m recorded elsewhere sits above all
+four maxima, which confirms it was a tail; it is not far above, so the old bound was conservative
+rather than wrong.
+
+**AND THE ONCOMING-VETO FINDING NEEDS ITS DENOMINATOR STATED, which the first write-up did not.**
+It fired on TWO of the five drives, for **0.9 s and 6.7 s** -- 7.6 seconds across five drives. The
+"99.3% remembered" is true and describes almost nothing:
+
+    0000039a   never fired        000003a0   never fired        000003a1   never fired
+    0000039c   0.9 s, 100% remembered
+    0000039f   6.7 s,  99.3% remembered
+
+So the sentence "the 90 s window is doing essentially all the work" is right about the SHARE and
+wrong about the implication -- it invites retuning a window that governs seven seconds per five
+drives. **Do not touch `ONCOMING_MEMORY_S` on this evidence.** The I-15 report is a rare event and
+the measurement needed to chase it is the one already asked for: roughly when and where.
+
+**This is the denominator rule biting in the other direction, and it is worth noticing.** Every
+previous instance in this file was a rate inflated by dead frames in the denominator. This one is a
+share that is perfectly correct over a numerator too small to act on. Check BOTH ends.
+
 ### LOW-SPEED CURVES: VISION IS STRUCTURALLY UNABLE TO HELP, AND THE MAP RARELY GETS A CHANCE
 
 *"Low speed curves, it isn't slowing down enough."* Attributed on route 00000393, 2026-08-19,
