@@ -12,7 +12,10 @@ car's own `0x462`: **40.725463, -111.829903**, which is 2011 2100 S in Salt Lake
 View shows a **SPEED LIMIT 30** on a pole at exactly that spot. Full detail in **section 4j**.
 
 **So the question is no longer "is the camera broken". It is "why is it bad at this".** Across every
-route pulled to date -- 50 segments -- there is exactly **one** detection event.
+route pulled to date -- **87 segments** -- there is exactly **one** detection event, and it needed
+night, a retroreflective sign under headlights, a head-on approach and a crawl to 7 mph to happen.
+
+**A deliberate repeat of that exact sign, at the same speed, in daylight, read nothing** (4n).
 
 **Four claims that led this file and are now WRONG. Do not carry them forward:**
 
@@ -40,8 +43,13 @@ drive and `0x463`/`0x464` **zero** times, which is the `U0253` "Missing Message"
 Its Nav Repeater settings are already correct (4h). This is real, it is not what stops sign reads,
 and it should not be conflated with TSR again.
 
-**THE NEXT WRITE is in section 4k**: `706-01-01` -> `0810 A9DA B963`, one nibble, restore
-`0810 A9DB B964`. It may fix nothing, and 4k says why.
+**THE NEXT WRITE FROM 4k HAS BEEN DONE, AND IT DID NOT WORK.** See 4n: it engaged the fused mode,
+moved `TsrVl1StatMsgTxt` from `LimitReliable` to `LimitOutdated`, and produced zero detections in 37
+segments. **Restore `706-01-01` -> `0810 A9DB B964`.**
+
+**THE ONE EXPERIMENT LEFT THAT COSTS NOTHING**: restore the nibble, then drive the 4j loop AT NIGHT
+again. Night and the nibble both changed between the drive that read a sign and the drives that did
+not, so neither is isolated. If the 30 comes back, night was the factor.
 
 **DO NOT chase a US-market as-built** -- retracted in 4l, and the reason matters.
 
@@ -69,12 +77,12 @@ what was measured on this car.
 
 | | state | as of |
 |---|---|---|
-| **IPMA `706-01-01`** | `0810 A9DB B964` -- nibble 2 written `4`->`8`, **persisted** | 2026-08-21 |
+| **IPMA `706-01-01`** | `0810 A9DA B963` -- nibble 2 `4`->`8` then nibble 8 `B`->`A`. **RESTORE TO `0810 A9DB B964`** -- the second write only regressed the status (4n) | 2026-08-22 |
 | **IPMA `706-02-01`** | `FD56 16DB 7FD3` -- nibble 4 = `6`, TSR data source Camera + APIM, **persisted** | 2026-08-21 |
 | **IPMA region `706-04-01`** | `FFFC 27C3 847B`, **never written**. `FF` is NORMAL here -- a working car reads `FFFC` too | 4k |
 | **APIM** | TSR enabled at `7D0-09-02`. Nav Repeater format/conformance already correct. Sends 1 of 3 GPS messages | 4h |
 | **IPC** | untouched, and it **physically lacks** `720-10-01`/`720-10-02`. Governs the DASH only -- he does not want TSR on the cluster | 4f |
-| **camera output** | **one** detection in 50 segments. `NoNavDataAvailable` on every frame | 4j |
+| **camera output** | **one** detection in 87 segments. Reaches `Available_FusionMode` and still reads nothing | 4j, 4n |
 | **openpilot** | already parses `Traffic_RecognitnData` and feeds `SpeedLimitSource.car`. The consumer side is DONE -- the moment the camera emits a limit, openpilot uses it | |
 
 **The whole configuration originally came from a Brazilian car off the internet, and there is no
