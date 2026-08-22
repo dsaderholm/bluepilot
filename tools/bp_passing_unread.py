@@ -83,6 +83,12 @@ def main() -> int:
   dec_acc_braking = dec_acc_precharge = 0
   driver_change = Counter()
   steering_active = 0
+  # THE TWO FACTS A DISPUTED ONCOMING REFUSAL COMES DOWN TO. custom.capnp says they are "logged
+  # because they are what a disputed decision comes down to and neither is visible from the road"
+  # -- and an audit on 2026-08-21 found nothing in the tree had ever read either one. So the fields
+  # recorded to settle the I-15 false fire have been sitting unread since they were added.
+  adj = {"left": Counter(), "right": Counter()}
+  overtaken = {"left": [], "right": []}
 
   prev_sug = 0
   prev_dc = False
@@ -120,6 +126,21 @@ def main() -> int:
         approach.append(float(pa.approachSeconds))
       if abs(float(pa.leadAccel)) > 0.01:
         lead_accel.append(float(pa.leadAccel))
+      for side_name, a in (("left", pa.adjacentLeft), ("right", pa.adjacentRight)):
+        if not bool(a.available):
+          adj[side_name]["unavailable"] += 1
+          continue
+        adj[side_name]["available"] += 1
+        # ADJACENT means the lane RIGHT NEXT to us is theirs, and no setting overrides it. A
+        # sighting further out only says the ROAD is two-way, which sameDirectionRecent then has
+        # to disambiguate -- a center turn lane and an ordinary passing lane are geometrically
+        # identical.
+        if bool(a.oncomingAdjacent):
+          adj[side_name]["oncomingADJACENT"] += 1
+        if bool(a.sameDirectionRecent):
+          adj[side_name]["sameDirectionRecent"] += 1
+        if float(a.overtakenVAbs) > 0:
+          overtaken[side_name].append(float(a.overtakenVAbs))
       cs = str(pa.crawlSide)
       if cs != "none":
         crawl[cs] += 1
@@ -163,6 +184,25 @@ def main() -> int:
     print("  as beating ACC to the decision rather than reacting to it.")
     for t, n in triggers.most_common():
       print(f"    trigger {t:<14} {n:4d}")
+  print()
+
+  print("THE TWO FACTS A DISPUTED ONCOMING REFUSAL TURNS ON -- first read, 2026-08-21")
+  for side_name in ("left", "right"):
+    c = adj[side_name]
+    live = c.get("available", 0)
+    if not live:
+      print(f"  {side_name:5s}  never available")
+      continue
+    ov = overtaken[side_name]
+    ovs = (f"   overtaken n={len(ov)} p50 {sorted(ov)[len(ov)//2] * 2.23694:.0f} mph"
+           if ov else "   overtaken never")
+    print(f"  {side_name:5s}  available {live:6d}   oncomingADJACENT {c.get('oncomingADJACENT', 0):5d} "
+          f"({pct(c.get('oncomingADJACENT', 0), live)})   sameDirectionRecent "
+          f"{c.get('sameDirectionRecent', 0):5d} ({pct(c.get('sameDirectionRecent', 0), live)})")
+    print(f"         {ovs}")
+  print("  oncomingADJACENT is the one no setting overrides -- opposing traffic in the lane RIGHT")
+  print("  NEXT to us. A sighting further out only says the road is two-way, and sameDirectionRecent")
+  print("  is what then separates a center turn lane from an ordinary passing lane.")
   print()
 
   print("THE ONCOMING VETO, live sighting vs memory")

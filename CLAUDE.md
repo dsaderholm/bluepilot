@@ -3734,3 +3734,42 @@ came to list two parts for a board that is one.
 5. **NEW INFORMATION ARRIVES ATTACHED TO OLD WRONG INFORMATION.** The vendor reply invalidated a
    BOM. The bench session invalidated a memory. After writing the new fact, go and find what it
    makes stale -- that is the half that gets skipped.
+
+## `oncomingAdjacent` READS TRUE ON 28.9% OF LEFT FRAMES ON A FREEWAY. FIRST READ 2026-08-21.
+
+The struct audit that found 25 unread `PassingAssist` fields was widened to every fork-authored
+capnp struct: **53 fields across 13 structs have at most one mention in the whole tree** (one
+mention being the publish line). Most are deliberate raw logging -- `SideDetect` says so in its own
+comment. Two are not, and they are the sharpest thing found all day.
+
+`AdjacentLane.oncomingAdjacent` and `.sameDirectionRecent`. custom.capnp introduces them as *"the
+two facts that decide whether this side is refused, logged because they are what a disputed
+decision comes down to and neither is visible from the road."* **Nothing had ever read either
+one** -- so the fields recorded specifically to settle the I-15 oncoming false fire had been
+accumulating unread since the day they were added.
+
+Route 0000039f, 23,308 frames, now readable through `tools/bp_passing_unread.py`:
+
+    left    oncomingADJACENT  6737  28.9%    sameDirectionRecent 19231  82.5%   overtaken p50 74 mph
+    right   oncomingADJACENT  3207  13.8%    sameDirectionRecent 21902  94.0%   overtaken p50 27 mph
+
+**`oncomingAdjacent` means opposing traffic in the lane RIGHT NEXT to us, and no setting overrides
+it.** On a divided highway it should be near zero. 28.9% on the left, on a drive where the same
+side also reports same-direction traffic at a p50 of 74 mph on 82.5% of frames, cannot both be
+describing that road.
+
+**AND IT DOES NOT REACH THE VETO, WHICH IS THE OTHER HALF.** The oncoming veto fired for 6.7 s on
+this same drive. So the flag is noisy and something downstream is refusing to act on it -- the
+guard is working. **Do not "fix" this by tightening the veto; it is already tight.** What is wrong
+is the flag, and the flag being wrong is only interesting because it is one input away from a
+refusal that would be.
+
+**This is the strongest lead yet on the one confirmed on-road bug**, and it still needs the same
+thing every other attempt needed: roughly WHEN and WHERE the false fire happened, so
+`bp_why_it_suggested.py` can be pointed at the window. What has changed is that the two fields that
+settle it are now readable instead of theoretical.
+
+**And the general finding is the audit technique.** Compare every field of a struct against every
+consumer in the tree, counting a single mention as "published and never read". It found 25 fields
+in one struct, then 53 across thirteen, then this. **A schema comment saying a field exists to
+settle disputes is a promise that something reads it. Check.**
