@@ -243,14 +243,12 @@ years of calibration this has no business replacing.
 
 ### Giving the forward camera the GPS its own car withholds
 
-**Ford-specific, and unproven on the road at the time of writing.** The defect below is measured; the
-fix has never been driven. Whether the camera actually starts reading signs once it has the data is
-the open question, and it is the whole reason the feature exists.
-
-Ford's traffic sign recognition runs on the forward camera, and on this car it has never reported a
-single speed limit. Not a wrong one — none. The signal that carries it, `TsrVLim1MsgTxt`, reads the
-"no data" sentinel on every frame of every drive ever recorded here, including a 27-segment highway
-run at 72 mph past dozens of posted signs.
+**Ford-specific, unproven on the road, and — stated plainly because it was written the other way
+first — this is NOT what makes traffic sign recognition work.** The defect below is measured and
+real. It was also, for several hours, believed to be the reason this car's camera read no speed
+limit signs. It isn't: the camera has since read one, correctly, with this fault fully present. What
+the feature fixes is a genuine fault the camera reports every drive. What it does not fix is sign
+recognition, and anyone reading this looking for that should stop here.
 
 The camera is not broken and does not think it is in an unsupported country. Asked directly, it
 reports traffic sign recognition **available**, in **mph**, with no region complaint — it has
@@ -268,8 +266,8 @@ from the SYNC module, and across a full drive:
 | `0x464` `APIMGPS_Data_Nav_3` | heading, altitude, satellites, speed, accuracy | **0** |
 
 One of three arrives. The camera spends every drive waiting on two messages that are never
-transmitted, never leaves its "no navigation data" state, and never enters the fused mode that other
-owners report as the state in which signs are actually read.
+transmitted, and reports `no navigation data` continuously as a result. It is a real fault with a
+real cause, independent of anything to do with reading signs.
 
 None of that is map data — there is no map speed limit anywhere in those messages. It is plain GPS
 telemetry, of the kind any navigation-equipped SYNC broadcasts whether or not a destination has ever
