@@ -3880,3 +3880,58 @@ settle it are now readable instead of theoretical.
 consumer in the tree, counting a single mention as "published and never read". It found 25 fields
 in one struct, then 53 across thirteen, then this. **A schema comment saying a field exists to
 settle disputes is a promise that something reads it. Check.**
+
+## THE LEFT PASS GATE OPENS ON 0-30% OF MOTORWAY, AND NO ONE THRESHOLD FIXES IT
+
+2026-08-22, `tools/bp_left_gate_reach.py`. Prompted by five straight drives where the drive report
+named `edge unsure` as the top left-refusal term at 50-62%.
+
+**FIRST, TWO NUMBERS IN THIS FILE WERE WRONG.**
+
+- *"the LEFT road edge is trusted 0.0% of the time on multi-lane motorway"* -- measured on one
+  route. Across four drives the left edge passes its own threshold on **14%, 32%, 67%** of moving
+  motorway frames. Not zero, and not consistent.
+- **`bp_passing_report`'s "road edge refused, by mph: 70+ 100%" is NOT a reachability figure.** Its
+  denominator is REFUSED frames -- `_edge_by_speed[band][0]` counts refusals, not frames. So 100%
+  means "when it refused, the edge was among the reasons", which is compatible with the gate opening
+  most of the time. Reading it the other way is the denominator error, for the fifth time.
+
+**WHAT REACHABILITY ACTUALLY IS**, moving frames only, by road class:
+
+    route     class        frames  GATE OPEN  edge ok  paint ok  edgeStd p50   p10
+    000003ab  motorway       5528       27%      32%       84%         1.53   0.93
+    0000039f  motorway       9054       30%      67%       52%         0.95   0.59
+    000003aa  motorway       5155        0%      14%       70%         6.60   0.56
+    000003a8  secondary      2500        6%      90%       71%         0.91   0.77
+
+**THE BINDING TERM ALTERNATES.** On 3ab the edge refuses (32% ok) while paint is fine (84%). On 39f
+paint refuses (52%) while the edge is fine (67%). **No single threshold is the answer**, which is
+the same shape as the oncoming-floor result the same day.
+
+**AND ON 3aa THE EDGE MEASUREMENT IS NOT MARGINAL, IT IS GARBAGE:** p50 **6.60** against a 1.2
+threshold, with p10 at 0.56 -- a bimodal distribution, fine on a tenth of frames and five times the
+threshold in the middle. That is a measurement failure, not a threshold that needs moving, and it
+is why loosening buys nothing there.
+
+**WHAT LOOSENING `MAX_ROAD_EDGE_STD` WOULD ACTUALLY BUY**, with the CEILING stated -- the share of
+frames where paint, width and room-beyond ALL already pass, so the edge is the only refuser:
+
+    route     ceiling   1.2    1.5    1.8    2.1    2.5    3.0
+    000003ab      83%   27%    43%    47%    50%    52%    55%
+    0000039f      52%   30%    33%    35%    37%    39%    40%
+    000003aa      70%    0%     1%     2%     3%     5%     7%
+
+Best case 27 -> 52%, worst case nothing. **The ceiling is the number to notice**: on 52-83% of
+motorway frames the edge-std term is the ONLY thing refusing, so the coverage genuinely is there to
+win -- but not by this lever, and not evenly.
+
+**DO NOT LOOSEN IT ON THIS EVIDENCE.** Coverage is not the test, because this direction OPENS a
+maneuver: *evidence that opens must never be cheaper than evidence that refuses*. The threshold's
+own comment already records that its units were once inferred from a rendering clamp and were wrong,
+and that 0.5 -> 1.2 was made on the same kind of argument. What is missing is what `roadEdgeStds`
+MEANS physically at 1.5 versus 6.6, and whether the model is uncertain or simply wrong there.
+
+**The honest state: this is the largest coverage loss in the feature and its cause is not a
+threshold.** The next step is the measurement nobody has done -- what the left edge is doing on the
+frames where its std explodes, checked against the lane lines on the same frame, which is the
+technique that found the shoulder bias.
