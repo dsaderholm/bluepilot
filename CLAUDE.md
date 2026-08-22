@@ -3750,7 +3750,45 @@ came to list two parts for a board that is one.
    BOM. The bench session invalidated a memory. After writing the new fact, go and find what it
    makes stale -- that is the half that gets skipped.
 
-## `oncomingAdjacent` READS TRUE ON 28.9% OF LEFT FRAMES ON A FREEWAY. FIRST READ 2026-08-21.
+## `oncomingAdjacent` FIRES ON ONE-WAY ROADS, AND ONLY BELOW 43 MPH. 2026-08-21.
+
+**THE 28.9% BELOW IS WITHDRAWN AS A RATE, BY THE SAME MISTAKE THIS FILE RECORDS FOUR TIMES.**
+`oncoming_adjacent_seconds` is set to `memory_s` on a corroborated sighting and DECAYS by dt every
+cycle; the published flag is just `> 0.0`. So a frame share measures how long the 90 s window stays
+open, not how often anything was seen. Counting RISING EDGES instead, with
+`tools/bp_oncoming_adjacent.py`:
+
+    route       edges L/R   on a road mapdOut calls ONE-WAY   plausible (two-way)
+    0000039c        3 / 2                 2                          3
+    0000039f        3 / 1                 4                          0
+    000003a1        1 / 0                 1                          0
+
+**TEN sightings across three drives, and SEVEN of them on one-way roads** -- where opposing traffic
+in the adjacent lane is impossible. That is provable from evidence already recorded and needed no
+"when and where" from him, which is what every previous attempt at this stalled on.
+
+**AND EVERY FALSE EDGE IS AT OR BELOW 43 MPH, five at or below 30:**
+
+    0 mph, 2 mph, 11 mph, 22 mph, 28 mph, 30 mph, 43 mph
+    highwayClass: primary x4, secondary x2, motorwayLink x1
+
+**The reason is arithmetic.** `min_oncoming_ms(v_ego)` is `max(MIN_ONCOMING_MS, 0.5 * v_ego)` with
+`MIN_ONCOMING_MS = 5.0`. Below **22 mph** the scaled term is under the flat floor, so the floor IS
+5 m/s. The speed-scaled fix added 2026-08-15 was built for the freeway case -- its own comment says
+it "rejects -8.4 at freeway speed" -- and **by construction it does nothing at low speed.** It
+addressed the case that was measured and left the case that was not.
+
+**DO NOT JUST LOWER OR RAISE THE CONSTANT.** What that would cost is unmeasured: the 5 m/s floor
+exists for the 25 mph arterial, which is a real two-way case this car drives, and tightening it
+trades a false veto for a missed one. The measurement that decides it is the same shape as the one
+that produced this table -- score candidate floors against these ten edges AND against the two-way
+edges they must keep.
+
+**The veto itself is fine and this is not urgent.** It fired 6.7 s on the drive with four bad
+edges, so something downstream is already declining to act on them. The flag is one input away from
+a refusal, which is why it is worth fixing and not worth rushing.
+
+## (superseded) `oncomingAdjacent` READS TRUE ON 28.9% OF LEFT FRAMES ON A FREEWAY. FIRST READ 2026-08-21.
 
 The struct audit that found 25 unread `PassingAssist` fields was widened to every fork-authored
 capnp struct: **53 fields across 13 structs have at most one mention in the whole tree** (one
