@@ -562,6 +562,55 @@ class TestReturningToTheLimitHandsItBack:
       f"(baseline={icbm.v_baseline}, diverged={icbm.baseline_diverged})")
     assert icbm.override_state == OverrideState.auto
 
+  def test_a_hold_walked_back_without_ever_leaving_the_stand_down(self):
+    """THE ONE THAT REACHED THE ROAD TWICE, measured on route 000003a8 on 2026-08-22.
+
+    He reported it plainly -- *"setting the hold back to SLA does not clear the hold"* -- and the
+    test above says it does, because the test lets go of the button long enough for ICBM to LOOK.
+
+    The clearing rule is two halves: arm `baseline_diverged` while the hold differs from
+    `v_target_raw`, then clear when it comes back. The only frames where it DIFFERS are the ones
+    where he is mid-press -- and `press_settle_frames > 0` used to `return` before the arm ran. Each
+    press re-arms that stand-down, so a continuous walk from the hold down to SLA's number never
+    gives the arm a single frame. By the time it expired the baseline had already arrived, there was
+    nothing left to diverge from, and the latch stayed False for the rest of the drive:
+
+        t+816.7   baseline 39   vTargetRaw 35   diverged False   <-- should have armed
+        t+817.4   baseline 35   vTargetRaw 35   diverged False   <-- nothing left to see
+        t+826.2   he switched cruise off, which is what actually ended it
+
+    So this walks the hold down with NO gap between presses -- the button is held on every frame
+    until the cluster arrives -- which is what his stalk actually does and what the fixture above
+    never reproduces. It fails on the old code with the hold still standing."""
+    icbm = fresh()
+
+    # THE HOLD IS RAISED WHILE CRUISE IS OFF, which is the half that makes this unreachable. The
+    # arm is gated on `cruise_enabled` -- correctly, because holds must not be judged while ICBM is
+    # doing nothing -- so none of these frames can observe the divergence either.
+    cluster = LIMIT
+    icbm.run(make_cs(cluster, buttons=(ACCEL_PRESS,), enabled=False), CC, make_lp(LIMIT), False)
+    while cluster < DRIVER:
+      cluster += 1
+      icbm.run(make_cs(cluster, buttons=(ACCEL_PRESS,), enabled=False), CC, make_lp(LIMIT), False)
+    icbm.run(make_cs(cluster, buttons=(ACCEL_RELEASE,), enabled=False), CC, make_lp(LIMIT), False)
+
+    # Engaged, and straight into the walk back down with the button held on every frame -- each
+    # press re-arms the stand-down, so there is never an idle engaged frame in between. This is
+    # what his stalk does; the fixture above releases and waits, which is what hid it.
+    while cluster > LIMIT:
+      icbm.run(make_cs(cluster, buttons=(DECEL_PRESS,)), CC, make_lp(LIMIT), False)
+      cluster -= 1
+    icbm.run(make_cs(cluster, buttons=(DECEL_RELEASE,)), CC, make_lp(LIMIT), False)
+
+    # Then ordinary driving at SLA's number. Long enough to clear PRESS_SETTLE_MAX_FRAMES twice
+    # over, so a failure here is the rule never firing rather than it merely being slow.
+    settle(icbm, LIMIT, cluster=LIMIT, frames=1400)
+
+    assert icbm.v_baseline == 0, (
+      f"the hold survived being walked back to SLA's own number with no gap between presses "
+      f"(baseline={icbm.v_baseline}, diverged={icbm.baseline_diverged}) -- he reported this twice")
+    assert icbm.override_state == OverrideState.auto
+
   def test_a_curve_matching_the_baseline_does_not_clear_it(self):
     icbm = fresh()
     set_baseline(icbm)

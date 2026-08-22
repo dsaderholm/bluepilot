@@ -688,6 +688,38 @@ The fix is three pieces, and the middle one is the one that is easy to miss:
 3. `pinSuggestion` is read OUTSIDE the hold branch. It had been read inside it, so it was
    unreachable in the exact case it exists for.
 
+### A HOLD WALKED BACK TO SLA'S NUMBER COULD NEVER CLEAR. HE REPORTED IT TWICE.
+
+*"It looks like setting the hold back to SLA does not clear the hold."* Said on 2026-08-21 and
+again earlier, answered both times with a test that says it does. He was right and the test was
+measuring something else.
+
+**The rule is two halves** -- arm `baseline_diverged` while the hold DIFFERS from `v_target_raw`,
+then clear when it comes back -- **and both halves lived at the bottom of `update_manual_override`,
+which returns early on any frame a cruise button is pressed** (line ~1111). The only frames in which
+the hold actually differs are the ones where he is pressing it down toward SLA's number. So the arm
+never ran on a single one of them:
+
+    t+816.7   baseline 39   vTargetRaw 35   diverged False   <-- should have armed here
+    t+817.4   baseline 35   vTargetRaw 35   diverged False   <-- nothing left to observe
+    ...9 s at baseline == target, the hold never clears...
+    t+826.2   he switched cruise off, which is what actually ended it
+
+**Measured on route 000003a8, and the earlier diagnosis was wrong.** This session first reported it
+as "clears 9.4 s late, delayed by the press-settle stand-down". It does not clear at all -- what
+looked like a late clear was him pressing the main cruise button. Press-settle was a red herring:
+the press PATH returns long before the press-settle block is even reached.
+
+**Fixed by moving the ARM to `update_calculations`**, which runs every frame and which no early
+return in the override path can skip. Only the arm moved; clearing stays where it was, because
+clearing ACTS on the car and acting mid-press would undo the press he is making. Observing is free.
+
+**THE TEST THAT SAID OTHERWISE IS THE LESSON.** `test_the_hold_clears_when_the_source_oscillates`
+walks the speed down too -- but it RELEASES the button and runs 12 idle frames between presses,
+which hands the arm exactly the frame the real stalk never gives it. Fixtures more orderly than
+reality, for the fourth recorded time in this file. The new test holds the button on every frame
+and raises the hold while cruise is OFF, which is what the log shows him doing.
+
 ### THE HOLD BADGE IS GONE, 2026-08-22. THE SET-SPEED BOX IS THE HOLD NOW.
 
 His instruction, and he was right that it was overdue: *"the hold badge is completely removed from

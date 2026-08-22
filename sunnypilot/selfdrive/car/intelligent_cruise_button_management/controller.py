@@ -464,6 +464,37 @@ class IntelligentCruiseButtonManagement:
     # Comparing post-limiter values is exactly how the original re-arm bug worked.
     self.v_target_raw = self.v_target
     self.plan_source = LP_SP.longitudinalPlanSource
+
+    # ARM THE DIVERGENCE LATCH HERE, WHERE NOTHING CAN SKIP IT. Fixed 2026-08-22, measured on route
+    # 000003a8, and reported from the road twice before that: *"setting the hold back to SLA does
+    # not clear the hold."* He was right and the tests said otherwise.
+    #
+    # The clearing rule in `update_manual_override` is two halves -- arm while the hold DIFFERS from
+    # `v_target_raw`, then clear when it comes back. It lived entirely at the bottom of that method,
+    # and the method returns early on any frame a cruise button is pressed. So the only frames in
+    # which the hold actually differs, which are the ones where he is pressing it down toward SLA's
+    # number, were exactly the frames that never reached the arm:
+    #
+    #     t+816.7   baseline 39   vTargetRaw 35   diverged False   <-- should have armed here
+    #     t+817.4   baseline 35   vTargetRaw 35   diverged False   <-- nothing left to observe
+    #     ...9 s at baseline == target, hold never clears...
+    #     t+826.2   he switched cruise off, which is what actually ended it
+    #
+    # A hold walked back to SLA's own number could therefore NEVER clear. The existing test passed
+    # because its fixture releases the button and waits between presses, which hands the arm a frame
+    # the real stalk never gives it. Fixtures more orderly than reality, again.
+    #
+    # ONLY THE ARM MOVES. Clearing stays where it was: it acts on the car, and acting mid-press
+    # would undo the press he is in the middle of making. Observing is free.
+    #
+    # Gated exactly as the arm always was -- engaged, SLA owning the target, a real limit behind it.
+    # Under `cruise` there is no posted limit for `v_target_raw` to represent and a difference means
+    # nothing; while disengaged ICBM is not driving and holds are not judged.
+    if (self.v_target_valid and self.v_baseline > 0 and
+        CS.cruiseState.available and CS.cruiseState.enabled and
+        self.plan_source == LongitudinalPlanSource.speedLimitAssist and
+        self.v_baseline != self.v_target_raw):
+      self.baseline_diverged = True
     # Did SLA have a posted limit at all this frame? Not the same as "is SLA the active source" --
     # a limit can exist while a curve owns the target. See where baseline_diverged is seeded.
     try:
@@ -1217,6 +1248,9 @@ class IntelligentCruiseButtonManagement:
       settled = moved and not held and self.cluster_stable_frames >= PRESS_SETTLE_STABLE_FRAMES
       if settled:
         self.press_settle_frames = 0
+
+      # The divergence latch is NOT armed here. It is armed in `update_calculations`, which no early
+      # return in this method can skip -- see the note there.
       return
 
     if not self.v_target_valid:
