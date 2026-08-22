@@ -4316,11 +4316,28 @@ engine serve a navigation product he is not asking for.
 
 **Three things measured that day, each of which kills a cheaper idea:**
 
-- **The CAN path is closed.** Ford does broadcast route state -- `APIM_Data_FD1` (0x32B) carries
-  `DistToStopover_L_Actl` -- but that message is ABSENT from every bus the comma logs, along with
-  Nav_2/Nav_3 and every other APIM address except position (0x462) and a static personality frame.
-  It also carries exterior-light signals, so its absence is about the BUS, not about navigation
-  being off. Consistent with "there is no MS-CAN on this car".
+- **The CAN path is PENDING THE CANBOX, not closed** -- and it may be the best path of the three.
+  Ford does broadcast route state: `APIM_Data_FD1` (0x32B) carries `DistToStopover_L_Actl`. That
+  message is ABSENT from every bus the comma logs today, along with Nav_2/Nav_3 and every APIM
+  address except position (0x462). It also carries exterior-light signals, so the absence is about
+  the BUS rather than navigation being off.
+
+  **It was written up as "closed" and he corrected it:** *"MS-CAN will be routed with the CANBOX,
+  though, just like we are using it for BLIS!"* So it arrives WITH BLIS rather than never.
+
+  **The argument that it exists at all is structural:** the IPC is a separate module from the APIM
+  and it renders turn-by-turn, so the instruction must cross SOME bus. Which bus and which message
+  are the open questions; the canbox answers the first.
+
+  **And it decouples from the Waze bug entirely** -- Google Maps still renders on his IPC, so that
+  data crosses the bus TODAY. A routed MS-CAN delivers route intent from whichever app works, making
+  Waze the preferred source rather than a prerequisite.
+
+  **Still not established:** that the maneuver is broadcast at all rather than only a distance.
+  `APIM_Data_FD1` has no turn field and the DBC is community reverse-engineered.
+
+  **THE MEASUREMENT NEEDS NO HARDWARE AND COMES FIRST:** drive with Google Maps NAVIGATING, diff the
+  logged buses against a no-route drive. Anything that appears or starts varying is the channel.
 - **The notification fallback is ALIVE**, and `ROUTE-INTENT.md` section 2b said it might not be. His
   screenshot shows Waze's notification carrying a maneuver glyph and a distance while the CLUSTER
   path is dead. **The two publishing paths fail independently** -- 2b treated one failure as
@@ -4344,3 +4361,9 @@ the same triage template both times.
 **Do not wait for comma.** They did not pause navigation, they REMOVED it: no `selfdrive/navd/`, and
 `navInstruction`/`navRoute`/`navModel` are all DEPRECATED ordinals. Same shape as the mapd v1
 situation recorded above, same answer.
+
+**AND THIS IS A DIFFERENT BRANCH'S WORK. His instruction, 2026-08-22:** *"we would want to create a
+new session and branch and everything and keep passing assist as it is."* So none of it lands on
+`passing-assist-phase1`. That branch stays where it is; the route-intent consumer is built beside
+it and reaches it the way everything else does, by rebase. `ROUTE-INTENT.md` is the handoff document
+for that session and is written to be read cold.

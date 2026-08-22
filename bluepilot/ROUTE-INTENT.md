@@ -560,14 +560,46 @@ during that drive. That distinction matters, because "absence in a log is eviden
 conditions first" is a rule this file already carries, and it does not rescue this one.
 
 **This is consistent with what CLAUDE.md already records: there is no MS-CAN on this car.** The
-APIM-to-cluster navigation traffic evidently lives on a bus the comma is not tapped into, and the
-retrofit gives no way to reach it.
+APIM-to-cluster navigation traffic evidently lives on a bus the comma is not tapped into.
 
-**So the CAN path is closed** and the transports in 9a are the only ones. Worth one more check
-before it is called dead for good: a deliberate drive with **Google Maps navigating** -- which he
-has confirmed still renders on his IPC -- to see whether anything new appears on bus 0/1/2. If
-nothing does, the cluster is being fed over a link the comma cannot see and no software change here
-reaches it.
+**"CLOSED" WAS WRONG AND HE CORRECTED IT THE SAME DAY:** *"MS-CAN will be routed with the CANBOX,
+though, just like we are using it for BLIS! I am confident with that!"*
+
+**So the CAN path is not closed, it is PENDING THE SAME HARDWARE BLIS IS PENDING ON.** That is a
+completely different status, and it reorders everything below -- because if MS-CAN reaches a bus
+openpilot reads, the APIM's own navigation broadcast becomes readable with no phone, no app, no
+WiFi, no notification, and no dependency on Waze exposing anything to third parties.
+
+**AND THE ARGUMENT THAT MAKES IT LIKELY IS STRUCTURAL, not hopeful.** The IPC is a separate module
+from the APIM. It renders turn-by-turn. Therefore the instruction MUST cross a bus to reach it.
+There is no third possibility. The only questions are which bus and which message, and the canbox
+answers the first.
+
+**IT ALSO DECOUPLES THIS FROM THE WAZE BUG ENTIRELY.** He confirmed Google Maps still renders turns
+on his IPC -- so that data is crossing the bus TODAY, from Maps, while Waze is broken. A canbox
+routing MS-CAN would deliver route intent from whichever app is working, and Waze becomes his
+PREFERRED source rather than a prerequisite.
+
+**What is confirmed and what is not, kept separate because the memory
+[[canbox-capabilities-unknown]] says only BLIS routing is confirmed:**
+
+    HIS PLAN, stated                 the canbox routes MS-CAN, as it will for BLIS
+    STRUCTURAL, near-certain         the instruction crosses SOME bus, or the IPC could not draw it
+    NOT ESTABLISHED                  that it is on MS-CAN specifically
+    NOT ESTABLISHED                  that a MANEUVER is broadcast at all, not merely a DISTANCE.
+                                     `APIM_Data_FD1` gives `DistToStopover_L_Actl` and no turn
+                                     field, and this DBC is community reverse-engineered, so the
+                                     maneuver may be in a message nobody has decoded -- or in one
+                                     nobody has named.
+
+**THE MEASUREMENT THAT SETTLES IT NEEDS NO NEW HARDWARE AND SHOULD BE DONE FIRST.** Drive with
+**Google Maps navigating**, then diff the logged buses against a drive with no route active. Any
+address that appears or starts varying is the navigation channel, and its bus tells us whether the
+canbox is even needed. That is the "diff the wire against the decoder" technique already in memory,
+and it is a single deliberate drive.
+
+If it shows up on bus 0/1/2 today, this is buildable now. If it does not, it is on MS-CAN and the
+canbox is the whole unlock -- and it arrives with BLIS rather than after it.
 
 ### 9f. Why WAZE and not a router, in his words -- and why passing assist outranks all of it
 
@@ -592,3 +624,37 @@ diagnostic style.
 
 It also explains why the notification fallback is attractive rather than a hack: the data is already
 being produced on a device already in the car, and the only missing piece is a wire.
+
+### 9g. THIS IS A DIFFERENT BRANCH. Passing assist stays as it is.
+
+His instruction, 2026-08-22: *"we would want to create a new session and branch and everything and
+keep passing assist as it is."*
+
+**So nothing here lands on `passing-assist-phase1`.** That branch is measured, shipped and driven
+daily; the route-intent consumer is built beside it and reaches it by rebase, the way every other
+line of work in this fork does. This document is the handoff and is written to be read cold.
+
+**WHAT THE NEW SESSION SHOULD DO FIRST, in order:**
+
+1. **The Google Maps diff drive.** No hardware, no code. Drive with Maps NAVIGATING, then diff the
+   logged buses against a no-route drive. Anything that appears or starts varying is the channel.
+   This decides whether the canbox is needed at all, and it is one drive. `tools/bp_offline_map.py`
+   and the APIM probe in this session's history are the starting shapes.
+2. **Only then choose a transport.** MS-CAN via canbox (9e), Waze notification (9b), or Mapbox
+   routing (9c) -- and the interface must make them interchangeable, because two of the three depend
+   on other people.
+3. **Build the REFUSAL, not the opener.** "Do not offer a pass N metres before his exit" needs a
+   maneuver and a distance and nothing else -- no wayId join, no map join. It is useful the day any
+   source lands and it satisfies *evidence that opens must never be cheaper than evidence that
+   refuses*. Opening a lane change on route intent is a later and much higher bar.
+
+**WHAT IT MUST NOT DO:** consume route intent as PERMISSION. The same rule that governs map data
+governs this -- a wrong instruction that merely costs a missed pass is a bad day; one that opens a
+lane change is a different category. And the fork already has the precedent written down twice this
+week, where `oneWay` and the lane anchor both scored perfectly on questions they were not allowed
+to answer.
+
+**WHAT PASSING ASSIST ALREADY PROVIDES IT**, so the new session does not rebuild any of it: the lane
+anchor (index, bounds, `noLaneLeft`), `mapdOut` (`highwayClass`, `oneWay`, `lanes`, `waySelectionType`),
+the adjacent-lane radar, the maneuver state machine, and the panel. The missing piece really is only
+the instruction.
