@@ -2955,9 +2955,26 @@ supply it.
 was taken as resolved, when it means only "not present at this instant" and the same read said "Test
 not complete". He said repeatedly that it keeps coming back. Believe the owner over a status byte.
 
-So the blocker is a COMMUNICATION fault between two modules, not a feature flag. TSR is also switched
-off in the IPMA at `706-01-01` (third character of the first group: `1` = Off, `5` = SLIF) and SLIF is
-disabled in the cluster at `720-09-01`, but neither matters while the camera cannot reach the APIM.
+**AND THE MECHANISM IS NOW MEASURED, 2026-08-21.** The IPMA is a listed receiver of THREE APIM GPS
+messages. Decoded across a whole 27-segment drive, on every bus the comma can see:
+
+    0x462  APIMGPS_Data_Nav_1   lat/lon                      3494 frames
+    0x463  APIMGPS_Data_Nav_2   UTC date+time, PDOP, compass     0 frames
+    0x464  APIMGPS_Data_Nav_3   heading, HDOP, VDOP, altitude    0 frames
+
+One of three arrives. That IS the `U0253 Missing Message`, precisely. The APIM's Nav Repeater format
+and conformance are already set correctly (Motorolla / Current), Navigation is enabled, and units are
+Miles/Feet -- so it is configured to repeat and does not. Android Auto was tested and is not the
+cause. Whether it is the APIM or the gateway is open; the gateway is not to be written to.
+
+**BUT THIS IS NOT WHAT STOPS SIGN READS, and saying otherwise cost most of 2026-08-21.** The camera
+read a sign with `U0253` asserted and `NoNavDataAvailable` on every frame. Two separate faults; do
+not merge them again.
+
+**AND "TSR IS SWITCHED OFF AT `706-01-01` third character" IS WRONG.** That mapping came from a Ford
+reference for a different vehicle line, and section 4d killed it: **nibble 3 is `1` on the friend's
+car too, and TSR works there.** The field that IS named, by a Mondeo MK5 owner on the FORScan forum,
+is **nibble 8** -- `9` = Disable, `A` = Reading + GPS. This car reads `B`, the friend's reads `A`.
 
 **See `bluepilot/TSR-INVESTIGATION.md`.** The gateway is the most likely place a retrofit routing
 fault would live. **He does not want its FIRMWARE OR AS-BUILT CHANGED** -- *"I don't think I should
@@ -2974,8 +2991,22 @@ broadcast frame. Stretching it to cover a message we already parse was my error,
 
 A narrow no is not a standing rule. When his decision is quoted, quote what he actually decided.
 
-**THE CAMERA IS NOT READING SIGNS.** This section said the opposite until 2026-08-21, and that
-sentence is what closed the investigation prematurely.
+**THE CAMERA READS SIGNS. It has done it once, and it is VERIFIED. Corrected 2026-08-21 (late).**
+
+This section said "the camera is NOT reading signs at all" earlier the same day, which was true of
+every route measured up to that point and is no longer true.
+
+    route 000003a7, segment 6, seven consecutive frames
+      TsrVLim1MsgTxt     255 NoLimit  ->  30 Message30
+      TsrVl1PrmntMsgTxt  DoNotShow    ->  ShowPermanentlyWithoutSupp
+      position, from the car's own 0x462:  40.725463, -111.829903
+      = 2011 2100 S, Salt Lake City.  Street View shows a SPEED LIMIT 30 on a pole there.
+
+Two semantically coherent fields moving together, and byte 3 of the payload went `ff` -> `1e`, a
+whole byte rather than a packed field. He confirmed the location: *"Bingo. Literally right there."*
+
+**So the question is no longer whether the camera works. It is why it is BAD at it: one detection
+across 50 segments of driving.**
 
 Re-measured on routes 0000039f and 000003a1, decoding `Traffic_RecognitnData` (0x3CD) off bus 2:
 
@@ -2995,10 +3026,36 @@ earlier in this same file, which says TSR is "stuck at a constant 80". Both were
 contradiction sat here unnoticed until he said flatly *"the signs it's reading are wrong. Those
 aren't actually signs."* He was right, and I had quoted one of the two halves back to him as settled.
 
-**What it changes:** TSR on this camera is OFF, not merely undisplayed -- there is no detection
-happening to render. That is what a configuration gate looks like, and it makes the as-built the
-LIVE question rather than a closed one. Enabling it would buy real capability, not tidier status
-bits. The known-untried write is `bluepilot/TSR-INVESTIGATION.md` section 4d.
+**What it changes, and four theories it kills.** `KT4T-19H406-CE` is a **Cx** camera -- Ford's own
+part scheme has Bx adding AHB, TSR and tiredness alert, Cx adding autonomous braking on top -- and it
+demonstrably recognised a US sign. So:
+
+- **Hardware is fine.** Do not propose replacing the camera, and do not propose replacing the IPC.
+- **Fusion mode is NOT required.** The read happened in `Available_CameraOnly` with
+  `NoNavDataAvailable` asserted on all 747 frames including those seven.
+- **Android Auto is not the cause** of anything here. Tested by driving with the phone off USB.
+- **Firmware is not the issue.** EU and US IPMA firmware are byte-identical -- same SBL, strategy
+  and calibration, confirmed by an owner who obtained both.
+
+**A separate, real, measured defect: the APIM sends `0x462` (position) 3494 times a drive and
+`0x463`/`0x464` ZERO times.** Those two are addressed to `IPMA_ADAS` and their absence is exactly the
+`U0253 Missing Message` the camera raises. Its Nav Repeater settings are already correct. **This is
+NOT what stops sign reads** -- conflating the two cost most of 2026-08-21. openpilot can synthesize
+both from the comma's own GPS (built, tested, ships on, stands down if the car ever sends them), and
+that feature must never be described as the TSR fix.
+
+**DO NOT chase a US-market as-built.** A 2020 US Edge ST owner reports sign recognition was removed
+from 2019+ US firmware, and this car's whole IPMA configuration came from a Brazilian file off the
+internet with no original kept. So a "correct" US config could plausibly turn off the one thing that
+works. Two other owners of this exact part number, with textbook configurations, get zero signs --
+**this car is ahead of both of them.**
+
+**Three confident framings about MARKETS were wrong in one day** -- "the friend's car is a different
+market so his nibbles are dangerous", "`FF` is an unset region", "get a US as-built". Each was a
+plausible story reasoned from a search result with no control to check it against. What survived is
+what was measured on this car.
+
+The next write, and its limits, are in `bluepilot/TSR-INVESTIGATION.md` section 4k.
 
 **Two places in one file disagreeing about one measured fact is how a line of investigation gets
 closed on the wrong evidence.** If a claim here is contradicted anywhere else in this file,
