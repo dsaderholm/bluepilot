@@ -73,9 +73,21 @@ ACC_STATUS_COLORS = {
 #   the number        the big number in the set-speed box (`max_box_state`, aim)
 #   "not yours to     the box stops tinting while `hold_locked` -- what the gray badge said
 #    change" state
-#   the +/- arrow     DROPPED. The label slot already shows the dash number whenever the car is not
-#                     at the aim, which is every moment the arrow would have been drawn, and it
-#                     says how far off rather than merely which way.
+#   the +/- arrow     DROPPED, and NOT replaced -- the first version of this note claimed rank 1
+#                     covered "every moment the arrow would have been drawn", which is not true and
+#                     was corrected on review the same day. The arrow came from `sendButton.raw`
+#                     (ICBM is holding a button THIS FRAME); rank 1 fires on
+#                     `round(dash) != round(aim)` (the car is not at the target). They diverge both
+#                     ways: the dash sits a mile off the aim for seconds with no press in flight,
+#                     which is Ford's own increment lag, and a press can be in flight on a frame
+#                     where the two happen to agree.
+#
+#                     So what is genuinely lost is "openpilot is working on it right now" as
+#                     distinct from "openpilot and the car disagree and nothing is happening" --
+#                     the distinction behind the set-speed hunting report on route 00000361. It is
+#                     left lost rather than given a corner of the box, because the box has one
+#                     number worth reading and the arrow's home was the badge. If the hunting ever
+#                     comes back, this is the readout to rebuild first.
 #   the pin dot/ring  the same corner of the box, drawn by `HudRendererSP._draw_set_speed`
 #   the offered pin   the label slot, rank 3
 # Dark ink on the filled ACCEL/BRAKE pills; they are bright enough that white text greys out.

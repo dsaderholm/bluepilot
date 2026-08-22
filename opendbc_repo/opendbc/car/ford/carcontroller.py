@@ -626,7 +626,11 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
       if override:
         self.acc_authority = _AA.opStop
       elif use_passthrough:
-        self.acc_authority = _AA.ford
+        # `recovery` OUTRANKS `ford` here even though the numbers on the wire are Ford's, because a
+        # suppressed actuation bit is a different state and every offline tool scores this field.
+        # Folding it into `ford` would count masked frames as clean Ford authorship, which is the
+        # denominator mistake this fork has now made three separate times.
+        self.acc_authority = _AA.recovery if clear_cancel else _AA.ford
       elif not CC.longActive:
         # NOBODY IS DRIVING, and calling that a fallback was wrong. `passthrough_admissible` returns
         # "openpilot longitudinal inactive" whenever cruise is not engaged, which is not a refusal at

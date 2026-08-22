@@ -279,13 +279,18 @@ class TestTheBigNumberIsWhatTheCarIsDrivenTo:
     assert box.label == "45", "the fallback he would get back by cancelling is not offered"
     assert box.label_is_number
 
-  def test_a_hold_with_no_limit_falls_through_to_MAX(self):
-    """The common case on the roads holds are for: no limit, so no fallback exists to show."""
+  def test_a_hold_with_no_limit_is_labelled_HOLD(self):
+    """The common case on the roads holds are for: no limit, so no fallback exists to show.
+
+    SAID "MAX" UNTIL 2026-08-22 and that was wrong once the badge was deleted -- the number under it
+    is his held speed, not a maximum, and with no badge nothing else on screen named it. Rank 2
+    already covers the case where a limit exists, because the fallback number is itself evidence a
+    hold is on; this is the case that had no evidence left."""
     box = max_box_state(hold=80.0, sla_fallback=None, set_speed=52.0, dash=80.0)
     assert box.aim == 80.0
     assert box.hold_driving
-    assert box.label == "MAX"
-    assert not box.label_is_number
+    assert box.label == "HOLD"
+    assert not box.label_is_number, "HOLD is a word, and must render at the word's size"
 
   def test_being_slowed_outranks_the_fallback(self):
     """The label slot can say one thing. "Something is pulling you down right now" beats "here is
@@ -313,5 +318,10 @@ class TestTheBigNumberIsWhatTheCarIsDrivenTo:
   def test_the_little_number_never_fires_on_a_matching_aim(self):
     """It means "the car is not at your number". Equal values must show the word, or it would appear
     on every press from the ordinary drift between openpilot's count and Ford's."""
+    # ASSERTS `label_is_number`, NOT the literal word. Comparing against "MAX" was a proxy for "the
+    # slot is not showing the dash" that happened to hold while MAX was the only word this slot
+    # could contain; rank 4 added "HOLD" and broke it, on a rule that had not changed at all. The
+    # thing this test is about is whether the DASH NUMBER leaked in.
     for dash in (80.0, 80.4, 79.6):
-      assert max_box_state(80.0, None, 52.0, dash).label == "MAX", f"fired at dash={dash}"
+      box = max_box_state(80.0, None, 52.0, dash)
+      assert not box.label_is_number, f"the little number fired at dash={dash}"

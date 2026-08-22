@@ -71,9 +71,9 @@ SCENES = [
   # already doing renders as "45 over 45" and proves nothing about whether the slot is readable.
   dict(cap="no limit here: nothing held, a 45 offered -- tap the ring to keep it",
        dash=55, limit=0, hold=0, acc="COAST", mag=0.0, lamps=False, offer=45),
-  # A HOLD WITH NO LIMIT: rank 2 has no fallback to offer, so the label falls through to MAX and
+  # A HOLD WITH NO LIMIT: rank 2 has no fallback to offer, so the label falls through to HOLD and
   # the box tints. His common case on the roads holds are actually for.
-  dict(cap="hold with no posted limit -- MAX, tinted, his own number",
+  dict(cap="hold with no posted limit -- labelled HOLD, tinted, his own number",
        dash=45, limit=0, hold=45, acc="COAST", mag=0.0, lamps=False),
   # FusionPilot: the stop override. openpilot has taken the command from Ford for a few seconds to
   # finish a stop the set speed could not ask for. Violet so it does not read as "more braking" --

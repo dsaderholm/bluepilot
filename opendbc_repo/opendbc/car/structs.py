@@ -295,3 +295,4 @@ class ControllerStateBP:
     fallback = auto()   # this frame's Ford command was not carriable; ours went instead
     inert = auto()      # camera latched cancel; the passthrough is dead for the drive
     openpilot = auto()  # passthrough off, plain alpha long
+    recovery = auto()   # Ford's command, with the cancel bit we provoked cleared

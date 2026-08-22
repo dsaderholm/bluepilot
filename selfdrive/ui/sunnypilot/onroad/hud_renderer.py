@@ -182,7 +182,10 @@ class HudRendererSP(HudRenderer):
     # his common case on the roads where holds matter most.
     max_str_size = 60 if box.label_is_number else 40
     max_str_y = 15 if box.label_is_number else 27
-    max_text = box.label if box.label_is_number else tr("MAX")
+    # `tr(box.label)`, not `tr("MAX")`. The literal was fine while MAX was the only non-number this
+    # slot could hold; rank 4 now puts "HOLD" here and hardcoding the fallback would have thrown it
+    # away silently -- the value computed correctly and never rendered, for the fifth time.
+    max_text = box.label if box.label_is_number else tr(box.label)
 
     # Tinted while the hold owns the number, so whose number it is reads at a glance without
     # anything being spelled out. Only when a hold is actually driving -- SLA keeps its own colours.

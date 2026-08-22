@@ -198,10 +198,12 @@ def max_box_state(hold: float, sla_fallback: float | None, set_speed: float, das
        to see."* Shown exactly when it is actionable and never when it is not.
     3. the PIN BEING OFFERED, when there is no hold. Added 2026-08-22 -- the HOLD badge used to
        carry this number and there is no badge any more.
-    4. the word MAX.
+    4. the word HOLD, when a hold is driving and there is no fallback to offer. The badge used to
+       be what named the number; with it gone, "MAX" over his own held speed was actively wrong.
+    5. the word MAX.
 
-  With a hold and NO limit there is no fallback to offer, so it falls through to MAX with his own
-  number under it -- the common case on the roads where holds matter most.
+  With a hold and NO limit there is no fallback to offer, so it falls through to the LABEL "HOLD"
+  with his own number under it -- the common case on the roads where holds matter most.
 
   A PIN SUGGESTION IS NOT A HOLD and must never reach `hold`: it is an offer made where no hold
   exists, and letting it move the big number would display a speed the car is not driving to. It
@@ -239,5 +241,17 @@ def max_box_state(hold: float, sla_fallback: float | None, set_speed: float, das
   # a pin is never urgent and the dash number always is.
   if offer:
     return MaxBoxState(aim, str(round(pin_suggestion)), True, False, pin_offer=True)
-  return MaxBoxState(aim, "MAX", False, hold_driving,
+  # RANK 4: THE WORD "HOLD", added 2026-08-22 on review, and it costs nothing to reach here.
+  #
+  # Deleting the badge took the only thing on screen that NAMED the number. Rank 2 covers the case
+  # where a hold and a limit coexist -- the fallback number is itself the evidence a hold is on --
+  # but a hold with NO limit fell through to the generic "MAX", which is not merely uninformative,
+  # it is wrong: the number below it is his hold, not a maximum, and the pale-blue tint was the
+  # only thing saying so on a sunlit screen.
+  #
+  # He hit this exact confusion once already, which is the whole reason `worth_showing` exists:
+  # "two numbers on screen, no idea which one was his". A word costs no space the label slot was
+  # using for anything else, and adds no second number -- which is what he actually asked to be
+  # rid of.
+  return MaxBoxState(aim, "HOLD" if hold_driving else "MAX", False, hold_driving,
                      pinned=pin_dot, pin_offer=False, hold_locked=locked)

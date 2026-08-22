@@ -712,6 +712,19 @@ struct ControllerStateBP @0xcd96dafb67a082d0 {
     # openpilot longitudinal with the passthrough switched off. Not a fault -- it is plain alpha
     # long, which is a thing he can choose -- but it is not Ford driving either.
     openpilot @5;
+    # Forwarding Ford's command with `AccCancl_B_Rq` CLEARED, to give a camera that cancelled
+    # because of our own stop override a way to observe the car obeying it again.
+    #
+    # Its own enumerant rather than `ford`, added 2026-08-22 on review. The numbers on the wire are
+    # Ford's, so it reads as ordinary forwarding -- but an actuation bit is being suppressed, which
+    # is a materially different state, and every offline tool in this fork scores drives by this
+    # field. Counting these as clean Ford authorship is exactly the denominator mistake recorded
+    # three times over in CLAUDE.md, and a replayed route could not otherwise say how many frames
+    # were masked.
+    #
+    # APPENDED, never inserted: capnp enumerants are positions, and every existing route on the
+    # device decodes @0..@5 by number.
+    recovery @6;
   }
 
   enum LateralMode {

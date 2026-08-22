@@ -100,9 +100,29 @@ def test_who_is_driving_is_published_not_inferred():
   pub = (root / "bluepilot" / "selfdrive" / "car" / "bp_card_publisher.py").read_text(encoding="utf-8")
   hud = (root / "selfdrive" / "ui" / "bp" / "onroad" / "hud_renderer_bp.py").read_text(encoding="utf-8")
 
-  assert "self.acc_authority = _AA.opStop" in cc, "the controller never reports the override"
-  assert "self.acc_authority = _AA.inert" in cc, "the controller never reports a latched cancel"
-  assert "self.acc_authority = _AA.ford" in cc, "the controller never reports the normal state"
+  # PARSED, NOT GREPPED, since 2026-08-22. These were three substring checks for
+  # `self.acc_authority = _AA.<name>`, and adding a ternary -- `_AA.recovery if clear_cancel else
+  # _AA.ford` -- broke the `ford` one while the controller went on reporting `ford` perfectly well.
+  # A test that fails on the SHAPE of an assignment rather than on what is assigned is a test that
+  # has to be edited every time the code is, which is how a real check gets weakened into a
+  # rubber stamp. This walks every assignment to `acc_authority` and collects the enumerants,
+  # however they are spelled.
+  import ast
+  reported = set()
+  for node in ast.walk(ast.parse(cc)):
+    if not isinstance(node, ast.Assign):
+      continue
+    if not any(isinstance(t, ast.Attribute) and t.attr == "acc_authority" for t in node.targets):
+      continue
+    for sub in ast.walk(node.value):
+      if isinstance(sub, ast.Attribute) and isinstance(sub.value, ast.Name) and sub.value.id == "_AA":
+        reported.add(sub.attr)
+  assert "opStop" in reported, "the controller never reports the override"
+  assert "inert" in reported, "the controller never reports a latched cancel"
+  assert "ford" in reported, "the controller never reports the normal state"
+  assert "recovery" in reported, (
+    "a masked cancel recovery is reported as plain `ford`, so every offline tool counts those "
+    "frames as clean Ford authorship -- the denominator mistake this fork has made three times")
   assert "cs_bp.accAuthority" in pub, (
     "the controller sets acc_authority and the publisher does not carry it -- the field is dead")
   assert "AccAuthority.inert" in hud and '"ACC LOST"' in hud, (
