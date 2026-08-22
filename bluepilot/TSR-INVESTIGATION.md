@@ -71,7 +71,7 @@ what was measured on this car.
 |---|---|---|
 | **IPMA `706-01-01`** | `0810 A9DB B964` -- nibble 2 written `4`->`8`, **persisted** | 2026-08-21 |
 | **IPMA `706-02-01`** | `FD56 16DB 7FD3` -- nibble 4 = `6`, TSR data source Camera + APIM, **persisted** | 2026-08-21 |
-| **IPMA region `706-04-01`** | `FFFC 26C3 847A`, untouched. `FF` is NORMAL here -- a working car reads `FFFC` too | 4k |
+| **IPMA region `706-04-01`** | `FFFC 27C3 847B`, **never written**. `FF` is NORMAL here -- a working car reads `FFFC` too | 4k |
 | **APIM** | TSR enabled at `7D0-09-02`. Nav Repeater format/conformance already correct. Sends 1 of 3 GPS messages | 4h |
 | **IPC** | untouched, and it **physically lacks** `720-10-01`/`720-10-02`. Governs the DASH only -- he does not want TSR on the cluster | 4f |
 | **camera output** | **one** detection in 50 segments. `NoNavDataAvailable` on every frame | 4j |
@@ -982,6 +982,26 @@ It is worth doing anyway because it is ONE nibble, on a named field, toward the 
 on this platform runs, with a clean restore and a measured baseline to compare against. **Drive the
 same roads past the same signs and count reads against one-in-747.**
 
+### CORRECTION: `706-04-01` WAS MISREAD, AND IT WAS NEARLY WRITTEN UP AS A SECOND CHANGE
+
+This file recorded his `706-04-01` as `FFFC 26C3 847A` from 2026-08-21 onward. **The car reads
+`FFFC 27C3 847B`, and he confirms he has never written that block.**
+
+Both values are checksum-valid, so the checksum cannot arbitrate between them. But `7 -> 6` and
+`B -> A` are each "one less" -- the shape of a transcription slip off a screenshot, not of a module
+rewriting itself. **Treat `FFFC 27C3 847B` as the true value throughout.**
+
+**Why it matters beyond tidiness.** On 2026-08-22 he wrote the nibble-8 change from 4k, sent a fresh
+screenshot, and the difference against the misrecorded value read as a SECOND concurrent write. It
+was reported to him that way -- "that's two changes, the drive can't attribute" -- and he corrected
+it: *"I only made one change... I only changed 706-01-01."* He was right. One change is in place and
+the next drive CAN attribute.
+
+**The lesson is the one this file keeps re-learning**: a value transcribed by eye from an image is
+not a measurement, and a self-consistent checksum does not make it one -- an off-by-one in two
+digits preserved validity perfectly. Re-read the block off the car before reasoning from a
+difference.
+
 ### AND THE REGION READING FROM 4g WAS WRONG
 
 Section 4g called `FF` in `706-04-01` an unset region, from a community value table where `0A` is
@@ -1204,7 +1224,7 @@ block       yours            friend           differing nibbles (1-based, checks
 706-02-07   0000 0004 001A   0000 0084 009A   7
 706-03-01   C000 5200 80A3   8000 0000 8011   1, 5, 6
 706-03-04   0080 0000 0094   0089 0000 009D   4
-706-04-01   FFFC 26C3 847A   1EFC 26C3 485D   1, 2, 9, 10
+706-04-01   FFFC 27C3 847B   1EFC 26C3 485D   1, 2, 6, 9, 10   (his was MISREAD as ...26C3 847A)
 706-05-01   53AA 7400 0084   566A B800 008B   2, 3, 5, 6
 ```
 
@@ -1547,7 +1567,7 @@ One message to the friend, whose car runs the same strategy and calibration with
 
 - **His `706-04-01`.** Section 4d recorded 12 differing blocks but this one was never interpreted,
   and 4k shows the first byte is not what a search result claimed. His value is `1EFC 26C3 485D`
-  against this car's `FFFC 26C3 847A` -- that difference is unexplained and it is in the block a
+  against this car's `FFFC 27C3 847B` -- that difference is unexplained and it is in the block a
   working Fiesta also differs on.
 - **Whether his APIM sends `0x463` / `0x464`.** Needs a comma or a bus tool, so it may not be
   answerable, but it separates "this APIM is broken" from "no CD391 APIM sends these".
