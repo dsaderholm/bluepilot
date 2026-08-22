@@ -1,4 +1,5 @@
-"""The navigating-vs-control CAN diff must not report a nav channel that is only a sample size.
+"""FusionPilot: the navigating-vs-control CAN diff must not report a nav channel that is only a
+sample size.
 
 `tools/bp_can_nav_diff.py` answers the question that decides whether route intent needs the canbox
 at all, off one deliberate drive. Its whole output is two lists, and there are exactly two ways it
