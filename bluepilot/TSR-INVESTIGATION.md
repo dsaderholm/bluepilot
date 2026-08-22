@@ -811,6 +811,73 @@ found by search has been applied to this car's blocks without a control to check
 
 ---
 
+## 4l. TWO OTHER OWNERS OF THIS EXACT CAMERA GET NOTHING. AND A US AS-BUILT IS THE WRONG TARGET.
+
+**FORScan forum topic 30014, "TSR in Ford Edge 2.7 [2019]", January-February 2026.** Found
+2026-08-21. It is the closest match to this car that exists anywhere, and it reverses the
+recommendation section 4g/4j were building toward.
+
+**`lucuszysko`, Ford Edge ST 2019, IPMA `KT4T-19H406-CE` -- the same part number:**
+
+> "It seems that everything I enabled in the configuration - there are no errors from the modules -
+> IPMA calibration has been performed - a menu option regarding sign reading appeared ... **Despite
+> all of this, no signs are detected while driving.**"
+
+Then, after more work:
+
+> "It looks like the **Region configuration is not equal for all three modules: IPC, APIM, and
+> IPMA.** For the first two, I was able to set the Region to PL, but **for IPMA it is somehow
+> blocked -- any attempt to change this value ends up in failure.**"
+
+**`marjanoos`, same part number:**
+
+> "I think the IPMA fw has to be european. **I have the same issue with the same part number.**"
+
+and after getting EU Edge Vignale calibration files:
+
+> "It has the same names, SBL, Strategy and Calibration. **So it looks like we have the same
+> firmware.** However **I can't change the region as well.** ... Found european coding but **it
+> doesn't contain 706-04-XXX section at all.**"
+
+**`pdxpeter`, 2020 Ford Edge ST -- a US car:**
+
+> "**the speed signs were removed from the 2019+ firmware, at least in the US.**"
+
+### What this establishes
+
+1. **This car is AHEAD of both of them.** They report zero signs. His camera read a 30 and set
+   `ShowPermanentlyWithoutSupp` in the same frames (section 4j). Whatever his configuration is
+   doing, it is doing more than two people who did everything by the book.
+2. **The IPMA region is WRITE-BLOCKED on this module for both of them**, and his is not -- both
+   2026-08-21 writes persisted across an ignition cycle. That is a real capability they do not have,
+   and it is worth not squandering.
+3. **EU and US IPMA firmware are IDENTICAL** -- same SBL, strategy and calibration, confirmed by
+   someone who obtained both. **The firmware theory is dead**, and the standing rule against running
+   the IPMA update to `CF` loses its last competing justification but stays for its own reasons.
+4. **A EUROPEAN as-built has no `706-04-xx` section at all.** His car has `706-04-01` and
+   `706-04-02`. So block presence differs by market, and a wholesale foreign import is not a
+   like-for-like swap.
+
+### THE RETRACTION: DO NOT CHASE A US-MARKET AS-BUILT
+
+Sections 4g and 4j worked toward "get a correct US-market `706` config for this module". **On this
+evidence that is the wrong target and may be actively harmful.**
+
+If US 2019+ builds had sign recognition removed, a correct US configuration would plausibly turn off
+the one thing that works here. **The Brazilian configuration may be WHY this camera reads anything
+at all**, rather than why it reads so little -- the exact opposite of section 4g's reasoning.
+
+**Which makes the friend's car the right reference after all**: a non-US vehicle where TSR genuinely
+works, running the same strategy and calibration. Section 4d's caution about copying his
+market-specific nibbles was written before any of this was known, and it now points the wrong way.
+
+**This is the third time in one day that a confident framing about markets has been wrong** -- first
+"the friend's car is a different market so his nibbles are dangerous", then "`FF` is an unset
+region", now "get a US as-built". Every one was reasoning from a plausible story rather than from a
+control. The measurements that survived are the ones taken on his own car.
+
+---
+
 ## 4b. THE ONLY THING THAT DEMONSTRABLY WORKED: "TSR data source = Camera + APIM"
 
 Filed as a dead end at first. It is the opposite -- it is the single piece of positive evidence from
