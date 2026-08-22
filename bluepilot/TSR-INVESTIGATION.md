@@ -776,7 +776,69 @@ decoded from the car's own `0x462`:
 **183 metres of dead-straight approach at a constant 89-91 degrees, and the camera recognised
 nothing until level with the sign.** The turn only begins AFTER passing it, which is what ends the
 read five seconds later as the sign leaves frame. So there is no "it was around a corner"
-explanation -- he had two hundred metres of clear line of sight.
+explanation.
+
+**THE SIGN IS VISIBLE AT 104 m IN THE DASHCAM FOOTAGE, AND HE HAD TO POINT IT OUT.** Frames were
+pulled from segment 6's `qcamera.ts` and the 104 m one was read as "the road ahead is dark, the sign
+was not lit yet" -- which was WRONG, and would have retracted a correct finding. **He marked the sign
+in the frame: a small bright rectangle, plainly there.** Retroreflective signs return headlight light
+far beyond the distance at which headlights illuminate the ROAD, which is the entire point of them.
+The mistake was looking at road illumination instead of the retroreflector.
+
+So the finding stands and is better supported than before: **the sign was visible from at least
+104 m and the camera reported nothing at 104, 78, 54, 42, 31, 20 or 10 m.**
+
+**The one fair caveat is RESOLVABILITY, not visibility, and the footage bounds that too.** At 104 m
+the sign is a handful of pixels -- enough to see something is there, not enough to read digits. But
+**at 31 m it is an unambiguous white rectangle on the pole, clearly resolved in a heavily compressed
+526x330 qcam frame, at night.** The IPMA is purpose-built for this and far higher resolution than
+the comma's qcam. It reported `255 NoLimit` at that exact moment.
+
+```
+ 104 m   visible as a retroreflective point         camera: 255
+  31 m   clearly resolved as a white rectangle      camera: 255
+  10 m   unmissable                                 camera: 255
+   0 m                                              camera: 30
+```
+
+So the conclusion does not depend on the far end of the approach at all. A production TSR commits at
+30-50 m; this one failed at 31 m, at 20 m and at 10 m.
+
+**Daylight is still the better measurement**, because it removes the argument entirely: a sign is
+visible AND resolvable from 200 m+, and "recognised at N metres" becomes a number nobody has to
+argue about.
+
+### THE CAMERA IS A MOBILEYE, AND THE PIXEL ARITHMETIC CLOSES THE ARGUMENT
+
+**The IPMA is a Mobileye unit.** Ford has a global agreement with Mobileye for the EyeQ family, and
+a teardown of a 2018 F-150 IPMA (`JL3T-19H406-AD`) found a **Mobileye EyeQ3** fabricated by ST
+Micro. This car's `KT4T-19H406-CE` is the same part series one generation on, so EyeQ3 or EyeQ4.
+
+Taking the EyeQ3-era Mobileye mono camera -- 1280 px wide, 38-52 degrees horizontal FOV, typical for
+that generation though not confirmed for this exact part -- a 24-inch US `SPEED LIMIT` sign subtends:
+
+```
+ dist     38 deg lens   52 deg lens    camera reported
+ 104 m        11 px         8 px       255 NoLimit
+  78 m        15 px        11 px       255 NoLimit
+  54 m        22 px        16 px       255 NoLimit
+  42 m        28 px        20 px       255 NoLimit
+  31 m        38 px        28 px       255 NoLimit
+  20 m        59 px        43 px       255 NoLimit
+  10 m       118 px        86 px       255 NoLimit
+```
+
+Numerals need roughly 20-30 px of sign width to classify. **Even on the wider lens that is satisfied
+from about 31 m in.** So at 10 metres the sign occupied 86-118 px of width -- unmissable, filling a
+substantial fraction of the frame -- and the camera reported no limit.
+
+**THIS IS NOT AN OPTICS, RESOLUTION OR DISTANCE PROBLEM.** The sign was present, lit, resolved and
+enormous. The classifier did not match it.
+
+And it quantifies the gap: an EyeQ3 doing TSR normally commits around 20-30 px, which on this lens is
+**40-50 metres**. This one needed zero. That is not a degraded system -- it is a system matching
+against the wrong thing, which is exactly what a Vienna-Convention circular-plate template does
+against a US rectangle no matter how many pixels it is given.
 
 **A working TSR recognises a sign 30-50 m out. This one has an effective range of about zero.** That
 is the entire explanation for the hit rate:
@@ -804,14 +866,45 @@ Recorded because "he was slow" is exactly the detail that gets lost and then mis
 evidence that low speed is the FIX. It is not a fix; it is how far conditions had to be stacked
 before a 0 m detection range produced anything at all.
 
+### THE DENOMINATOR, FROM HIS OWN TILE STORE
+
+"many signs" is not a number. `tools/bp_offline_map.py --at` against the OSM tiles on his device,
+sampled along the route-a7 track, gives one:
+
+```
+1500 East / Chadwick / Parkway Ave    residential     20 mph
+1700 East                             tertiary        25 mph
+2100 South                            secondary       30 mph   <- the one it read
+```
+
+The drive ran **20 -> 25 -> 30 and back down**, out and back. That is at least SIX limit transitions,
+each of which carries a sign, plus the repeater signs a secondary road like 2100 South carries
+mid-block. **The camera reported exactly one value all drive.**
+
+It also confirms the read was CORRECT, with three independent sources agreeing: OSM has 2100 South
+at 30, Street View has a `SPEED LIMIT 30` on the pole at those coordinates, and the camera said 30.
+No ambiguity anywhere in that chain -- this was a true positive, not a lucky wrong number.
+
+And it makes the arithmetic concrete. On 20-30 mph residential and tertiary streets a sign is in
+useful view for **one to two seconds**. With a detection range of zero the camera needs the sign to
+fill the frame, so it catches one when he happens to crawl past at 7 mph and nothing otherwise.
+
 **WHY THIS REFRAMES EVERYTHING.** A DISABLED system reads nothing at any range. This one reads at
 0 m. So TSR is not switched off -- it is a recognition pipeline running at the absolute edge of its
 capability, which is what a camera matching against the WRONG SIGN TEMPLATE looks like: it only
 scores a hit when the sign fills the frame. That is exactly what a Brazilian configuration
 (circular, metric) would do on US roads (rectangular, mph).
 
-**It also gives every future change a metric instead of a yes/no.** Score with
-`bluepilot/asbuilt/detect_range.py`. **The number to beat is 0 m.** A config change that moves
+**It also gives every future change a metric instead of a yes/no.** Score with one command:
+
+```
+python bluepilot/asbuilt/tsr_score.py "route_dir/*.rlog.zst"
+```
+
+It reports every detection with a maps link, the approach profile and range for each, whether the
+APIM sent `0x463`/`0x464`, and the camera's status enumerants across the drive. Re-run against
+route `000003a7` and it reproduces everything above -- and measures the straight approach at
+**237 m**, longer than the 183 m first quoted. **The number to beat is 0 m.** A config change that moves
 recognition out to even 20 m would multiply the hit rate several-fold and would be unmistakable in
 one drive.
 
@@ -976,6 +1069,54 @@ market-specific nibbles was written before any of this was known, and it now poi
 "the friend's car is a different market so his nibbles are dangerous", then "`FF` is an unset
 region", now "get a US as-built". Every one was reasoning from a plausible story rather than from a
 control. The measurements that survived are the ones taken on his own car.
+
+---
+
+## 4m. THE CAUSAL CHAIN, END TO END -- AND WHY ITS ENDPOINT IS HIS CALL, NOT A RECOMMENDATION
+
+Assembled 2026-08-21 from the Mobileye research plus everything measured that day. **Every step is
+sourced. The endpoint is the one thing he has ruled out twice, so it is recorded as analysis and
+explicitly NOT proposed.**
+
+1. **EU and US IPMA firmware are byte-identical.** `marjanoos` obtained EU Edge Vignale calibration
+   files and compared against a US car: same SBL, same Strategy, same Calibration (4l). One image
+   serves both markets.
+2. **Therefore sign templates cannot be baked into the firmware.** If one binary serves Europe and
+   North America, the sign set must be selected at RUNTIME by a configuration value.
+3. **Mobileye confirms TSR is region-parameterized.** The IPMA is a Mobileye EyeQ unit. Their ISA
+   product is *"certified for use in all 27 EU countries as well as Israel, Norway, Switzerland and
+   Turkey"* -- a per-country certification -- and they describe *"signature-based classification
+   that loads the 'signature' of a new traffic sign to the vehicle"*. Sign signatures are DATA,
+   selected per region.
+4. **This camera resolves a sign at 86-118 px and matches nothing.** Not optics, not resolution, not
+   distance -- see the pixel arithmetic above. The classifier is comparing against the wrong
+   signature set.
+5. **The runtime selector is the region field**, and this car's entire IPMA configuration came from a
+   Brazilian file with no original kept (4g). Brazil is Vienna Convention: circular, metric.
+6. **And he may be UNIQUELY able to change it.** Both other owners of `KT4T-19H406-CE` report the
+   IPMA region write FAILS -- *"for IPMA it is somehow blocked, any attempt to change this value ends
+   up in failure"*, and *"I can't change the region as well"* (4l). **His module accepts writes**:
+   two landed on 2026-08-21 and persisted across an ignition cycle.
+
+**This is the strongest causal story this investigation has produced.** It explains the 118-pixel
+failure, which nothing else does.
+
+### AND IT IS STILL NOT A RECOMMENDATION
+
+**He set the region once, got DTCs, and set it back to unspecified.** He has said no twice, most
+recently on 2026-08-21 while this research was in progress: *"Remember when I tried to change the
+region in the regular config and not the as built it broke everything."* **That is a decision, not an
+obstacle to route around. Do not pitch it, do not re-raise it in a later session as though it were
+unexplored, and do not treat this section as permission.**
+
+One fact recorded beside it, because it is fact rather than argument: that attempt went through
+FORScan's **friendly-name control**, on the one module FORScan decodes through a 2020 Fusion profile
+-- the same profile that reports "wheel arch height 1338 mm" for a feature-configuration byte
+(section 3). Whether it wrote the field it claimed to is unknown. Raw as-built with a computed
+checksum is a different mechanism from that control.
+
+**If he ever chooses to revisit it, this is the reasoning.** If he does not, this section is why the
+investigation stops here rather than why it should continue.
 
 ---
 
@@ -1380,8 +1521,14 @@ restore    ->  0810 A9DB B964
 Rationale, limits and the forum citation are in **4k**. It may fix nothing -- `9` is Disable and the
 camera is not disabled, so this field is probably not what holds the hit rate down.
 
-**Hold everything else constant.** Same roads, same time of night, so the nibble is the only thing
-that moved. The baseline to beat, across every route pulled so far:
+**Drive it in DAYLIGHT, and drive the same roads.** Daylight is not a detail -- the one detection
+happened at night, and the dashcam shows the sign was not lit until the headlights reached it, so a
+night drive caps the sightline at 50-80 m and hides the quantity being measured. In daylight a sign
+is visible from 200 m+, and "recognised at N metres" becomes a real number.
+
+**The route is known-good for this**: `bp_offline_map.py` puts six limit transitions on it
+(20 residential -> 25 tertiary -> 30 secondary, out and back) plus mid-block repeaters, so there is
+plenty to detect. The baseline to beat, across every route pulled so far:
 
 ```
 route a2   31 segments   0 detections
