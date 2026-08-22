@@ -118,6 +118,10 @@ class IntelligentCruiseButtonManagement:
   )
   pinSuggestion: float = auto_field()
   gapTarget: int = auto_field()  # BluePilot: requested ACC follow gap, 0 = none
+  # FusionPilot: the two values the hold-clearing rule compares. vTarget above is POST-baseline and
+  # equals vBaseline whenever a hold is active, so it cannot answer "did the rule see equality".
+  vTargetRaw: float = auto_field()
+  baselineDiverged: bool = auto_field()
 
   class IntelligentCruiseButtonManagementState(StrEnum):
     inactive = auto()
