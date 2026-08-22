@@ -747,6 +747,70 @@ coordinate against something known before quoting it.
 
 ---
 
+## 4k. NIBBLE 8 OF `706-01-01` IS THE TSR MODE FIELD. THE NEXT WRITE.
+
+**Found 2026-08-21 on the FORScan forum, thread 9806 page 32.** `Dragunov`, on a **Mondeo MK5 --
+CD391, this platform**, names the field outright:
+
+> "Activated TSR by changing the code in this line ... **IPMA `706-01-01` `xxxx xxx* xx`, `*` to `A`
+> (Reading + GPS), the `*` was `9` (Disable)**"
+
+That is nibble 8. Against the two cars in this document:
+
+```
+his              0810 A9DB B964      nibble 8 = B      one sign in 747 frames
+his friend       0810 A9DA A953      nibble 8 = A      TSR works
+documented       9 = Disable,  A = Reading + GPS
+```
+
+**THE NEXT WRITE, checksum computed and verified:**
+
+```
+706-01-01  ->  0810 A9DA B963       nibble 8: B -> A
+restore    ->  0810 A9DB B964
+```
+
+Nibble 9 is deliberately LEFT at `B` rather than copying the friend's whole block. Nibble 8 has a
+documented meaning; nibble 9 does not, and the same thread's advice is *"make the changes per
+function and not all in one."*
+
+**What it is expected to fix: UNKNOWN, and possibly nothing.** Stated plainly because this was
+oversold once already:
+
+- `9` is Disable and the camera **read a sign**, so whatever `B` is, it is not disabled. This field
+  is therefore not what is holding the hit rate at one-in-many.
+- `A` is "Reading **+ GPS**", a fused mode, and **this car's APIM does not send GPS** -- `0x463` and
+  `0x464` measured at zero frames. Whether `A` degrades gracefully without it or waits on data that
+  never arrives is not known. It could be a step backwards.
+- `Dragunov` made exactly this change and reported signs still did not appear.
+
+It is worth doing anyway because it is ONE nibble, on a named field, toward the value a working car
+on this platform runs, with a clean restore and a measured baseline to compare against. **Drive the
+same roads past the same signs and count reads against one-in-747.**
+
+### AND THE REGION READING FROM 4g WAS WRONG
+
+Section 4g called `FF` in `706-04-01` an unset region, from a community value table where `0A` is
+"North America / MPH". **`fred4009`'s WORKING Fiesta reads `FFFC 27xx xx`** -- so `FF` in that
+position is normal, not unspecified. The table is for a different position or a different vehicle
+line.
+
+So the region is not the anomaly 4g claimed, there is no reason to go near the control that threw
+DTCs, and the `FF` should not be picked up as a lead again. That is the SECOND time a value table
+found by search has been applied to this car's blocks without a control to check it against.
+
+### Two other things from thread 9806 worth keeping
+
+- **A write that reports success and silently reverts is a known IPMA behaviour.** `alextheboss96`:
+  *"Once I press write it says blocks programmed successfully, but when I close the module and
+  reopen it, it has the previous value."* That is section 4b's failure mode, on someone else's car.
+  **His module does NOT do this** -- both 2026-08-21 writes persisted across an ignition cycle,
+  which is a real difference in his favour.
+- **`WWA` (Wrong Way Alert) gave `Dragunov` a camera error.** If a future block touches it, expect a
+  fault.
+
+---
+
 ## 4b. THE ONLY THING THAT DEMONSTRABLY WORKED: "TSR data source = Camera + APIM"
 
 Filed as a dead end at first. It is the opposite -- it is the single piece of positive evidence from
