@@ -180,6 +180,44 @@ Checksum behavior observed on `706-01-01`: **additive on the low byte.** `0410`�
 
 ---
 
+## 4a. A SECOND RESTORE POINT NOBODY KNEW EXISTED — PRE-CAMERA, ALL 29 MODULES
+
+**Found 2026-08-21 on his own machine**, not on the car: `C:%BS%UCDS_V3%BS%Session%BS%3FA6P0D94LR115239.xml`,
+written **11 March 2026**. It is a complete UCDS as-built export — **515 blocks across 29 modules**.
+It is a genuine read of this car, not a template: two demo sessions sit beside it
+(`WF0EXXWPCELA25401`, `WF0EXXWPCELR15787` — Euro Mondeo VINs) and they share values with each other
+that his file does not share with either.
+
+**IT PREDATES THE CAMERA SWAP. Do not treat its `706` as current.**
+
+```
+node 706 in that file      F111 HS7T-14G025-CC     F188 HS7T-14G019-CC     <- STOCK FUSION camera
+his IPMA per section 2     part KT4T-19H406-CE     strategy KT4T-14F397-AE <- the Edge camera, now
+```
+
+This resolves a discrepancy that otherwise looks alarming. That file reads
+**`706-01-01 = 1FA8 2A40 4080`**, nothing like FORScan's **`0410 A9DB B960`** recorded in section 4.
+**It is not a tool disagreement and not corruption — it is a different physical camera.** Anyone
+comparing the two without reading the part numbers will conclude UCDS and FORScan disagree about
+as-built. They do not.
+
+`730` (PSCM) and `764` (CCM radar) already read non-Fusion in that file, so the steering and radar
+retrofits were in before 11 March 2026 and **the camera went in after it**. That makes the file
+specifically a *pre-camera, post-steering* snapshot.
+
+Two uses:
+
+1. **A restore reference far wider than section 4**, which covers only IPMA and IPC. This has all 29
+   modules — including everything a GWM or CCC write could disturb.
+2. **Proof that reading is not EXT-gated.** This read succeeded on 11 March 2026, five weeks after
+   the licence expired on 4 February 2026.
+
+Full module inventory is in the file itself; extract with the `<NODEID>` + `F111`/`F188`/`F113`
+pattern. Note the XML nests DIDs *inside* the NODEID text node (`<NODEID>706<F10A>...`), so a
+`<NODEID>(.*?)</NODEID>` regex matches nothing — that cost a pass on 2026-08-21.
+
+---
+
 ## 4b. THE ONLY THING THAT DEMONSTRABLY WORKED: "TSR data source = Camera + APIM"
 
 Filed as a dead end at first. It is the opposite -- it is the single piece of positive evidence from
@@ -340,6 +378,41 @@ One red herring, recorded as such: session files show it reading cars on **11 Ma
 months after purchase, which briefly looked like evidence against a twelve-month term. It is not.
 Reading never needed the extended licence — per the product page, EXT is what unlocks **VBF Loader,
 Update Wizard and Direct Config**.
+
+**BENCH-CONFIRMED 2026-08-21, adapter plugged in, no car.** The expiry is no longer an inference
+from the receipt. UCDS was launched with the adapter on USB and the network watched:
+
+| Test | Result |
+|---|---|
+| adapter enumerates | `UCDS Adapter V5`, `USB\VID_0483&PID_1236\UCDS_V5`, WinUSB driver (NOT a COM port) |
+| Adapter SN | `7E 4E 6A 9B` — matches this document |
+| licence panel | EXT / ODO / PATS all **"Not activated"** |
+| host contacted | **`ucdsys-server.online` → `147.93.88.191`**, freshly resolved |
+| TCP 443 and 80 | **both succeed** from his machine |
+| TLS cert | valid `CN=ucdsys-server.online`, Sectigo, **renewed 23 Mar 2026** |
+| VPN | **none** — default route is his own Wi-Fi via `192.168.1.1` |
+| connection state | contacted, answered, closed — no hang, no timeout |
+
+Their server is up, answers over an ordinary Utah connection with no VPN, and the answer is "not
+activated". **A geoblocked or dead host cannot produce that reply.** The VPN idea is dead by
+measurement. The cert having been renewed in March 2026 also says they are still trading, so a
+renewal should actually land.
+
+**THE ADAPTER IS NOT LICENCE-GATED — the application is.** `ucdsj2534.dll` is registered at
+`HKLM:\SOFTWARE\WOW6432Node\PassThruSupport.04.04` as `UCDS Team / UCDS-J2534 V3`, `CAN=1`,
+`ISO15765=1`, and exports the full standard PassThru set (`PassThruOpen/Connect/WriteMsgs/ReadMsgs/
+StartMsgFilter/Ioctl/SetProgrammingVoltage`). The only URLs inside it are GlobalSign code-signing and
+timestamp endpoints — Authenticode metadata, not runtime calls. So **any J2534 application can drive
+this adapter with the licence expired.**
+
+Two limits on that, stated so nobody over-reads it later: only ASCII strings were scanned, so an
+obfuscated check or one living in the adapter firmware would not have shown; and **it does not
+unblock FORScan**, which refused the IPMA write on *profile* grounds — a Fusion profile against an
+Edge module — not adapter grounds. A different adapter changes nothing there.
+
+Static analysis of the gate is a dead end and should not be attempted again: `UCDS_V3.exe` is packed
+(37 MB, 55,800 extractable strings, not one matching `licen|activat|expire`), and the definitions
+live in a 906 MB `ucds.udb`. None of the visible UI text exists in plaintext on disk.
 
 Renewal is **`UCDS V5 EXT License (12 Months)`, €130**, same seller. The ODO (€100, odometer) and
 PATS (€80, keys) licences are irrelevant to as-built work — do not buy them. **But test before
