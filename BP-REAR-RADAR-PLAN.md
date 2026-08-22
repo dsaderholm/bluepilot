@@ -917,6 +917,43 @@ degrees -- get it wrong and left and right are swapped) and **`AZIMUTH_OFFSET_RA
 
 **All-in: roughly $180–365**, with the go/no-go decision reached after the first $110–255.
 
+### The feeder unit, from the vendor. Tindie, 2026-08-14.
+
+**Automotive Teensy 4.0 with Dual CANbus Hat**, Electroneering / CANtrolls LLC (Vadim
+Belogorodsky). He asked three questions before ordering and this is the reply, recorded verbatim in
+substance because two of the answers are not derivable from anything else and one of them changes
+the install.
+
+| | |
+|---|---|
+| Enclosure | **1.5" long x 0.8" wide x 1" tall** -- vendor expects it to fit behind an A-pillar |
+| Pigtails | **6 inches.** See below; this is the one that bites. |
+| Power / ground | red / black |
+| CAN1 -- VEHICLE side | **White = HIGH, Light Blue = LOW** |
+| CAN2 -- DEVICE side | **Yellow = HIGH, Green = LOW** |
+| Spare | purple, PWM-able or switchable on/off |
+| Termination | **each channel has its OWN resistor**, removable by cutting the legs |
+| Transceiver | MAX3051 |
+
+**THE PER-CHANNEL TERMINATION IS CONFIRMED, AND THE WHOLE DESIGN DEPENDS ON IT.** That was his
+third question, asked in exactly these terms: one channel joins a vehicle bus that already has its
+two 120 ohm terminators, so a third would take it to roughly 40 ohm. The answer is yes -- separate
+resistor per channel -- so **cut CAN1's and keep CAN2's** is physically possible. It is not an
+assumption any more.
+
+**THE 6" PIGTAILS ARE THE PART THAT CHANGES THE INSTALL, and nothing else in this document knows
+it.** `rear_radar_feeder.ino` documents the wire colours and says nothing about length. Six inches
+means the unit effectively mounts AT one end of its wiring, and this build has two ends far apart:
+bus 1 is tapped in the cabin, the radar is behind the rear valance. So one of the two CAN runs is a
+spliced extension the length of the car whichever way the box is mounted, and that run is a
+twisted pair carrying 500 kbit/s. Plan the splice, the twist and the strain relief as part of the
+loom rather than discovering it with the trim off.
+
+**AND THE HIGH/LOW ASSIGNMENT IS NEW INFORMATION.** The firmware records which colour PAIR is which
+channel and not which wire of the pair is H and which is L. Reversing CANH and CANL does not
+damage anything but the bus simply will not communicate, and it is an easy thing to get wrong
+twice. White is CAN1-H, Light Blue is CAN1-L, Yellow is CAN2-H, Green is CAN2-L.
+
 ### The alternative, and why it is second
 
 eFiniLan's `openpilot-ext-radar-addon` — the sunnypilot author's own external-radar project — is

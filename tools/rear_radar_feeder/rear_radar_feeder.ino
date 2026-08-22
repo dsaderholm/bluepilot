@@ -16,14 +16,25 @@
 // selfdrive/car/tests/test_rear_digest_reduction.py. When the two disagree, Python is right --
 // a sign error here inverts closing and receding, which looks entirely reasonable in a log.
 //
-// WIRING, by the board's wire colours
+// WIRING, by the board's wire colours. FROM THE VENDOR, Tindie 2026-08-14 -- Electroneering /
+// CANtrolls, on the "Automotive Teensy 4.0 with Dual CANbus Hat". H/L per wire, not just the pair.
 //   red / black        12 V switched and ground
-//   CAN1 white/lt blue THE CAR, bus 1, 500 kbps. CUT ITS 120 OHM RESISTOR -- that bus already has
-//                      its two terminators and a third takes it to ~40 ohm, which can stop the
-//                      front radar and ACC this car actually drives on.
-//   CAN2 yellow/green  the radar's private bus, 500 kbps. KEEP its 120 ohm: the radar carries the
-//                      other one, giving the ~60 ohm a healthy pair should read.
-//   purple             spare switched output, unused
+//   CAN1  WHITE = H, LIGHT BLUE = L   THE CAR, bus 1, 500 kbps. CUT ITS 120 OHM RESISTOR -- that
+//                      bus already has its two terminators and a third takes it to ~40 ohm, which
+//                      can stop the front radar and ACC this car actually drives on.
+//   CAN2  YELLOW = H, GREEN = L       the radar's private bus, 500 kbps. KEEP its 120 ohm: the
+//                      radar carries the other one, giving the ~60 ohm a healthy pair should read.
+//   purple             spare output, PWM-able or switchable. Unused.
+//
+// EACH CHANNEL HAS ITS OWN RESISTOR, confirmed by the vendor -- so cutting one and keeping the
+// other is physically possible rather than assumed. That was the question the whole two-bus design
+// rested on.
+//
+// THE PIGTAILS ARE SIX INCHES and the enclosure is 1.5 x 0.8 x 1 inch. Bus 1 is tapped in the
+// cabin and the radar lives behind the rear valance, so ONE of these two CAN runs is a spliced
+// extension the length of the car whichever end the box is mounted at -- twisted pair, 500 kbit/s,
+// with real strain relief. Reversing H and L damages nothing and the bus simply will not talk,
+// which is an easy thing to chase for an evening.
 //
 #include <FlexCAN_T4.h>
 
