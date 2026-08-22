@@ -860,6 +860,24 @@ what the bench session looks like:
 
 USB Type-C, cable not included -- and it has to be a data cable, not charge-only.
 
+**THE SCRIPT EXISTS NOW: `tools/bp_radar_bench.py`**, added 2026-08-21. This section assumed
+SavvyCAN or cangaroo, which are fine for looking but produce nothing the simulator can replay --
+and `bp_rear_digest_sim.py` has named `bp_radar_bench` as its input source since it was written,
+against a tool nobody had made. Run it with `../.venv-bp312/Scripts/python.exe`, which is where
+python-can lives:
+
+```
+python tools/bp_radar_bench.py --list                        # finds the adapter by VID:PID
+python tools/bp_radar_bench.py --live                        # angle readout
+python tools/bp_radar_bench.py --record cap.json --seconds 30
+python tools/bp_rear_digest_sim.py cap.json                  # replay the recording
+```
+
+`--live` exists for the two bench questions still open: **the azimuth SIGN** (the feeder and the
+simulator both ship `-sin(az)`, inherited from the FRONT decoder, and a rear sensor is rotated 180
+degrees -- get it wrong and left and right are swapped) and **`AZIMUTH_OFFSET_RAD`**, which is
+0.0f and uncalibrated where "3 degrees is 2.6 m at 50 m". Both are one reflector and one column.
+
 **All-in: roughly $180–365**, with the go/no-go decision reached after the first $110–255.
 
 ### The alternative, and why it is second

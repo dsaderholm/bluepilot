@@ -31,10 +31,8 @@ about a side that a rear radar would have refused.
 from __future__ import annotations
 
 import argparse
-import io
 import math
 import os
-import re
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -42,70 +40,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from openpilot.tools.bp_rear_digest_sim import (  # noqa: E402
   EMPTY_PREFIX, LONG_RANGE_SCANS, MAX_RANGE_M, MIN_CLOSING_MS, MIN_LONG_RANGE_DIST_M,
   MRR_END, MRR_HEADER, MRR_START, OWN_LANE_HALF_WIDTH_M, Detection,
+  mrr_layout, sig,   # ONE copy of the decoder, in the reference module
 )
 
 # THE CONSUMER'S threshold, imported rather than restated -- this whole tool exists to ask whether
 # the feeder can hide a target that would cross it.
 from openpilot.sunnypilot.selfdrive.controls.lib.rear_approach import UNSAFE_TTC_S  # noqa: E402
-
-
-def be_raw(d: bytes, start: int, length: int) -> int:
-  """One @0+ (Motorola) signal out of an 8-byte frame.
-
-  DBC big-endian numbering: `start` is the MSB, bits run 7..0 within a byte and then continue at
-  bit 7 of the NEXT byte. Verified against FORD_CADS: CAN_DET_RANGE at 31|14 comes out as all of
-  byte 3 plus the top 6 bits of byte 4, which is what the layout has to be for a 14-bit field
-  starting at the top of byte 3.
-
-  Raw rather than CANParser deliberately -- bp_fallback_reason.py records that
-  `cp.update_strings([m.as_builder().to_bytes()])` raises on every route message and gets swallowed
-  by a per-message except, reporting NO DATA for a reason inside the tool. And cantools is not
-  installed on the device.
-  """
-  val = 0
-  bit = start
-  for _ in range(length):
-    val = (val << 1) | ((d[bit // 8] >> (bit % 8)) & 1)
-    bit = bit + 15 if bit % 8 == 0 else bit - 1
-  return val
-
-
-def sig(d: bytes, spec) -> float:
-  start, length, scale, offset = spec
-  return be_raw(d, start, length) * scale + offset
-
-
-def mrr_layout(dbc_path: str) -> dict:
-  """Start bit, length, scale and offset for the six signals we need, READ FROM THE DBC.
-
-  All 64 MRR_Detection messages share one layout with only the name suffix changing, so parsing
-  MRR_Detection_001 gives the offsets for every address. Nothing is transcribed by hand, so the
-  tool cannot drift from the DBC the car is actually decoded with.
-  """
-  want = ("VALID_LEVEL", "RANGE", "RANGE_RATE", "AZIMUTH", "AMPLITUDE", "SCAN_INDEX_2LSB")
-  out: dict = {}
-  # WALKED LINE BY LINE rather than matched as one block. The first version took "everything up to
-  # the next BO_", and MRR_Detection_001 is the LAST message in FORD_CADS.dbc -- so the lookahead
-  # never matched and the parse silently returned nothing at all.
-  sig_re = re.compile(r"SG_ (\w+) : (\d+)\|(\d+)@(\d)\+ \(([-\d.eE]+),([-\d.eE]+)\)")
-  inside = False
-  for line in io.open(dbc_path, encoding="utf-8"):
-    if line.startswith("BO_ "):
-      inside = line.startswith("BO_ 288 MRR_Detection_001:")
-      continue
-    if not inside:
-      continue
-    m = sig_re.search(line)
-    if not m:
-      continue
-    name, start, length, order, scale, offset = m.groups()
-    assert order == "0", f"{name} is not @0+ -- this decoder assumes Motorola"
-    key = name.removeprefix("CAN_DET_").removeprefix("CAN_").removesuffix("_01")
-    if key in want:
-      out[key] = (int(start), int(length), float(scale), float(offset))
-  missing = [w for w in want if w not in out]
-  assert not missing, f"not found in FORD_CADS.dbc: {missing}"
-  return out
 
 
 def ttc(det: Detection) -> float:
