@@ -1,18 +1,24 @@
 # HIS IPMA (706) as-built -- COMPLETE dump, all 29 blocks.
-# Source: FORScan "IPMA Module configuration (AS BUILT format)", screenshot 2026-08-21.
-# Module: KT4T-19H406-CE, strategy KT4T-14F397-AE. TSR does NOT work on this car.
+# Source: FORScan "IPMA Module configuration (AS BUILT format)".
+# Module: KT4T-19H406-CE, strategy KT4T-14F397-AE.
 #
-# WARNING: 706-02-01 does NOT match what section 4d recorded for this car on 2026-08-12.
-#   2026-08-12 (4d):  FD56 16DB 7FD3
-#   2026-08-21 (this): FD52 16DB 7FCF
-# Both are checksum-valid, so the checksum cannot arbitrate between them. See TSR-INVESTIGATION.md.
+# STATE: 2026-08-21, AFTER two writes, both CONFIRMED PERSISTENT across an ignition cycle.
+#   706-01-01  0410 A9DB B960 -> 0810 A9DB B964   (nibble 2, 4->8)
+#   706-02-01  FD52 16DB 7FCF -> FD56 16DB 7FD3   (nibble 4, 2->6 = TSR data source Camera + APIM)
+#
+# The second write had reverted at boot every previous attempt (section 4b). It holds now that
+# nibble 2 of 706-01-01 is 8 -- the two fields are validated together.
+#
+# PRE-CHANGE RESTORE VALUES:
+#   706-01-01 -> 0410 A9DB B960
+#   706-02-01 -> FD52 16DB 7FCF
 
-706-01-01  0410 A9DB B960
+706-01-01  0810 A9DB B964
 706-01-02  301A 6535 6458
 706-01-03  4000 0000 0051
 706-01-04  0000 0000 0012
 706-01-05  0000 0013
-706-02-01  FD52 16DB 7FCF
+706-02-01  FD56 16DB 7FD3
 706-02-02  FFC1 55AA E1B1
 706-02-03  0842 1000 006C
 706-02-04  0000 0000 0013

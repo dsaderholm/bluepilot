@@ -269,28 +269,67 @@ and it reverted at the next boot. 4d caught the car inside that window.
 
 Target value, checksum valid: **`706-02-01` -> `FD56 16DB 7FD3`**.
 
-### IT PERSISTED ACROSS AN IGNITION CYCLE
+### BOTH WRITES PERSISTED. THE TWO FIELDS ARE INTERLOCKED.
 
-**Confirmed 2026-08-21.** `706-01-01` = `0810 A9DB B964` survived ignition off and on.
+**Confirmed 2026-08-21, re-read after ignition off and on:**
 
-**This is the first change in the entire investigation that has ever held.** *Camera + APIM* landed
-and reverted; `0450` was never sent; the IPC SLIF change was refused. Nibble 2 wrote, was accepted,
-and stayed. Mode 2 passed.
+```
+706-01-01   0810 A9DB B964     held   (nibble 2, 4 -> 8)
+706-02-01   FD56 16DB 7FD3     held   (nibble 4, 2 -> 6 = TSR data source Camera + APIM)
+```
 
-**And it suggests why 4b failed.** Section 4b guessed the revert was "the module accepting into
-working memory and then failing its own configuration validation at startup". If nibble 2 of
-`706-01-01` is part of what that validation checks, then *Camera + APIM* reverted **because
-`706-01-01` was still `4`** — the module rejecting a data-source setting inconsistent with its own
-feature configuration.
+**The second one is the result.** That exact write reverted at every previous attempt — it is
+section 4b, the only thing that had ever visibly worked and the only thing that had ever undone
+itself at boot. It holds now, and the single thing that changed is that `706-01-01` nibble 2 is `8`.
 
-That is directly testable on the block that failed before: write **`706-02-01` -> `FD56 16DB 7FD3`**,
-key cycle, re-read. **If it holds now where it reverted in August, the two fields are interlocked and
-that was the whole problem.**
+**So 4b was never a mystery about persistence. The module was rejecting a data-source setting
+inconsistent with its own feature configuration.** Set the feature config first and the data source
+stays. That is what has been undoing changes on this car since day one.
+
+Pre-change restore values, both checksum-valid:
+
+```
+706-01-01 -> 0410 A9DB B960
+706-02-01 -> FD52 16DB 7FCF
+```
+
+### CAUTION: THE FRIEND'S CAR IS NOT A US CAR
+
+**Learned 2026-08-21, and it changes how section 4d may be used.** Section 4d treats his car as a
+matched control — same strategy, same calibration, TSR works, therefore the difference is as-built.
+The firmware match is real. **The market is not.** He is in a different country.
+
+So an unknown subset of the 12 differing blocks encodes **country configuration, not TSR**, and the
+hex alone cannot say which. **Do not chase the remaining nibbles toward his values.** The prime
+suspects are exactly the ones that were on the target list:
+
+- `706-01-01` nibbles **8, 9**
+- `706-02-01` nibble **9**
+- `706-04-01` and `706-05-01`, which differ heavily
+
+He has already had a region change throw DTCs, and that topic is closed. This is the same hazard
+arriving as a nibble copied off a car built for another market.
+
+**What this does NOT weaken:** the two writes above persisted on HIS car, threw no new DTCs, and the
+interlock was demonstrated on his hardware rather than inferred from the diff. That stands.
+
+**Open and worth knowing:** which country. EU sign recognition is circular km/h plates, US is
+rectangular mph. If the same firmware carries a market config, that bears directly on whether
+as-built alone can produce US sign reads.
+
+### THE REMAINING QUESTION IS A DRIVE
 
 **What is NOT yet proven.** A value persisting is not TSR working. The measurement is
 `TsrVLim1MsgTxt` in `Traffic_RecognitnData` (`0x3CD`): **255 is the no-data sentinel** and it has been
 255 on every frame ever captured on this car. Anything else means the camera is genuinely reading a
 sign. That needs a drive past a posted limit; it cannot be settled in the driveway.
+
+Two separate things are gated separately, and only the first matters for openpilot:
+
+| what | readout | state |
+|---|---|---|
+| camera reads signs | `TsrVLim1MsgTxt` on `0x3CD` | needs a drive with the comma recording |
+| cluster draws a sign | IPC SLIF at `720-09-01` | **still unwritten** — and the IPC is LKA-only for everything else, so the dash is not a trustworthy TSR indicator either way |
 
 Restore value, exact: **`706-01-01` -> `0410 A9DB B960`**.
 
