@@ -319,15 +319,40 @@ expect a revert to undo it.
 enables a Fusion never had. The APIM one was allowed, which is why that single change worked.
 
 **UCDS** is installed (`v3.0.001.023`), adapter connected via USB, SN `7E 4E 6A 9B`. **All three
-licences read "Not activated"** despite having been purchased and used before. Most likely their
-activation server is unreachable from the US — same reason their site stopped international sales.
+licences read "Not activated".**
+
+**THE LICENCE EXPIRED. IT IS NOT A GEOBLOCK. Established 2026-08-21.** This paragraph used to say
+"most likely their activation server is unreachable from the US", which was a guess written as a
+finding, and it aimed the next step at a VPN.
+
+The receipt settles it. Order #7238 from autodiagnosticsolutions.com, **4 February 2025**, €535.50,
+"UCDS PRO Wireless (V5 ODO+Extended license)". The product page lists package contents verbatim as
+**"1 x EXT+ODO Extended license 12 months"**. Twelve months from 4 Feb 2025 is **4 February 2026** —
+roughly seven months before the TSR session that found all three licences dead.
+
+Confirmed against this machine so nobody hunts for it again: there is no licence file anywhere under
+`C:\UCDS_V3\`, `HKCU:\SOFTWARE\UCDS_V3` holds only settings and an empty `Adapter_SN`, the
+`.ulog` files are encrypted, and none of the launcher, main binary or `ucdsj2534.dll` contains an
+activation host. **The licence state lives on the adapter and on their server. Nothing local can
+report it.**
+
+One red herring, recorded as such: session files show it reading cars on **11 March 2026**, thirteen
+months after purchase, which briefly looked like evidence against a twelve-month term. It is not.
+Reading never needed the extended licence — per the product page, EXT is what unlocks **VBF Loader,
+Update Wizard and Direct Config**.
+
+Renewal is **`UCDS V5 EXT License (12 Months)`, €130**, same seller. The ODO (€100, odometer) and
+PATS (€80, keys) licences are irrelevant to as-built work — do not buy them. **But test before
+paying:** As-Built editing may be base functionality, since only Direct Config is named on the
+extended-licence list. Section 7 step 2 is now what decides that.
 
 UCDS matters for one specific reason: **it lets you pick the vehicle manually.** `EDGE/S-MAX 2015-`
 is in its list, so the IPMA can be decoded and validated as the Edge module it actually is, instead
 of through Fusion definitions. That is precisely the wall FORScan hits.
 
-Pricing if it can be bought: EXT licence 6,000 ₽/year, ~$60-70. Their site no longer does direct
-international sales.
+Pricing is settled: **€130/year for EXT alone** from autodiagnosticsolutions.com, which is where
+order #7238 came from. The old note here said "6,000 ₽/year" and "their site no longer does direct
+international sales" — both stale; he bought internationally from this reseller in 2025.
 
 ---
 
@@ -509,13 +534,19 @@ already parse.
    Nibble 3 is `1` on BOTH cars, so the reference map's "TSR enable" position is wrong and the answer
    is not a single documented bit. **His `720-09-01` (IPC SLIF) is still unasked** and still free.
 
-2. **UCDS free tests**, no licence needed if reading is ungated:
-   - select `EDGE/S-MAX 2015-`, open `AsBuilt Editor (CCC)` and `Direct Config`
-   - read `706-01-01` under **Edge** definitions and compare against FORScan's Fusion decode
-   - if the nonsense fields resolve into sane values, the mapping theory is confirmed outright
+2. **UCDS free tests. This decides whether €130 is needed at all — do it before paying:**
+   - select `EDGE/S-MAX 2015-`, open `AsBuilt Editor (CCC)`
+   - read `706-01-01` under **Edge** definitions and compare against FORScan's Fusion decode. If the
+     nonsense fields resolve into sane values the mapping theory is confirmed outright — and that is
+     also the explanation for FORScan's refusal, since it decodes an Edge module through a Fusion
+     profile.
+   - **then see whether it offers to WRITE.** Only `Direct Config` is named as an extended-licence
+     feature. If the AsBuilt Editor writes without EXT, the expired licence never mattered here.
 
-3. **Recover the UCDS licences** — Setup → re-activate; try a VPN if the server is geoblocked; check
-   whether an older UCDS build still shows them activated.
+3. **Renew the UCDS EXT licence, €130** — `UCDS V5 EXT License (12 Months)`, autodiagnosticsolutions
+   .com, the seller from order #7238. **Only if step 2 shows the editor refusing to write.** This is
+   NOT a VPN or re-activation problem: the licence expired 4 February 2026, twelve months from
+   purchase. Do not buy ODO or PATS.
 
 4. **Untried, if a writing tool becomes available.** THE TARGET LIST CHANGED on 2026-08-12 and this
    step listed dead values until 2026-08-21:
