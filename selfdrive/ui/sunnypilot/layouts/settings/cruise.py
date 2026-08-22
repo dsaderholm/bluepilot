@@ -38,6 +38,14 @@ PASSTHROUGH_DESC = tr_noop(
   "here. Come To A Complete Stop is the exception: that reads openpilot's plan, and it needs "
   "Experimental Mode.")
 
+APIM_GPS_DESC = tr_noop(
+  "Give the forward camera the GPS data your SYNC module never sends it. The camera expects three "
+  "GPS messages from SYNC and only ever receives one, which is the U0253 fault it reports and the "
+  "reason it sits on \"no navigation data\" and never reads speed limit signs. This sends the "
+  "other two, built from the comma's own GPS. It stops automatically if your car ever starts "
+  "sending them itself, and it only sends position, time and heading -- it cannot steer, "
+  "accelerate or brake. Turn it off if the camera starts reporting speed limits that are wrong.")
+
 STOP_OVERRIDE_DESC = tr_noop(
   "Bring the car to a complete stop for a stop sign or red light on an empty road. Ford's set "
   "speed cannot go below 20 mph, so without this the car slows to 20 and no further unless its "
@@ -254,6 +262,11 @@ class CruiseLayout(Widget):
       description=recommended(tr(PASSTHROUGH_DESC), "StockAccPassthrough"),
       param="StockAccPassthrough")
 
+    self.ford_synthesize_apim_gps = toggle_item_sp(
+      title=tr("Send GPS To The Camera"),
+      description=recommended(tr(APIM_GPS_DESC), "FordSynthesizeApimGps"),
+      param="FordSynthesizeApimGps")
+
     self.icbm_resume_min_gap = option_item_sp(
       title=tr("Resume Minimum Gap"),
       description=recommended(tr("How far the car ahead must have pulled away before resuming counts as safe."), "IcbmResumeMinGap", lambda v: f"{v} m"),
@@ -397,6 +410,7 @@ class CruiseLayout(Widget):
       self.icbm_gap_control,
       self.stock_acc_passthrough,
       self.stock_acc_stop_override,
+      self.ford_synthesize_apim_gps,
 
       SectionHeader(tr("Curves")),
       self.scc_v_toggle,
@@ -511,6 +525,7 @@ class CruiseLayout(Widget):
       self.icbm_gap_control,
       self.stock_acc_passthrough,
       self.stock_acc_stop_override,
+      self.ford_synthesize_apim_gps,
     )
 
   def _update_state(self):

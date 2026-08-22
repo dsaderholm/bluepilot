@@ -106,6 +106,9 @@ class FakeCarState:
     # for -- see the 2026-08-15 crash in the module docstring.
     self.acc_stock_values = dict.fromkeys(_dbc_signals("ACCDATA"), 0)
     self.acc_cam_valid = True
+    # Has the APIM ever sent the GPS messages the IPMA waits on? False on this car -- measured
+    # zero frames across a whole drive -- which is why the synthesizer exists.
+    self.apim_gps_nav_seen = False
 
 
 @pytest.fixture(scope="module")
@@ -616,3 +619,143 @@ def test_the_stop_override_never_takes_the_car_with_it(carcontroller_parts, stop
   # ACCDATA is on its own frame divider, so assert it kept flowing across the run rather than
   # guessing the divider -- an earlier version of this line guessed it and was wrong.
   assert accdata > len(profile) // 4, f"ACCDATA nearly stopped: {accdata} frames over {len(profile)}"
+
+
+# --- FusionPilot: synthesized APIM GPS (0x463 / 0x464) toward the IPMA -------------------------
+#
+# Measured on this car: the APIM sends 0x462 3494 times a drive and these two ZERO times, which is
+# the U0253 "Missing Message" the camera raises. See opendbc/sunnypilot/car/ford/apim_gps.py.
+
+_NAV2_ADDR = 0x463
+_NAV3_ADDR = 0x464
+
+
+class _FakeGps:
+  """Strict, like FakeCarState -- a Mock would satisfy every getattr and prove nothing."""
+  hasFix = True
+  latitude, longitude, altitude = 40.7608, -111.8910, 1288.0
+  speed, bearingDeg = 31.3, 87.0
+  horizontalAccuracy, verticalAccuracy = 3.0, 5.0
+  satelliteCount = 14
+  unixTimestampMillis = 1787270400000
+
+
+def _run(cc, CC, CC_SP, CS, frames=250):
+  sent = []
+  for frame in range(frames):
+    _, can_sends = cc.update(CC, CC_SP, CS, frame * 10_000_000)
+    sent.extend(can_sends)
+  return sent
+
+
+def _addrs(can_sends):
+  return [m[0] for m in can_sends]
+
+
+def _gps_case(carcontroller_parts, *, enabled=True):
+  CarController, dbc_names, CP, CP_SP, structs = carcontroller_parts
+  SendButtonState = structs.IntelligentCruiseButtonManagement.SendButtonState
+  cc = CarController(dbc_names, CP, CP_SP)
+  out = structs.CarState()
+  out.vEgo = 20.0
+  out.vEgoRaw = 20.0
+  out.cruiseState.enabled = enabled
+  out.cruiseState.available = True
+  out.cruiseState.speedCluster = 29.0
+  CS = FakeCarState(out)
+  CC, CC_SP = _car_control(structs, enabled=enabled,
+                           send_button=SendButtonState.none, gap_target=3)
+  return cc, CC, CC_SP, CS
+
+
+def test_the_synthesized_gps_goes_out_on_the_camera_bus(carcontroller_parts):
+  """Both messages, at 1Hz, addressed to the bus the IPMA is on."""
+  cc, CC, CC_SP, CS = _gps_case(carcontroller_parts)
+  cc.apim_gps_enabled = True
+  cc.gps = _FakeGps()
+
+  sent = _run(cc, CC, CC_SP, CS)
+  addrs = _addrs(sent)
+  assert _NAV2_ADDR in addrs, "APIMGPS_Data_Nav_2 was never transmitted"
+  assert _NAV3_ADDR in addrs, "APIMGPS_Data_Nav_3 was never transmitted"
+
+  # The camera bus, not the vehicle bus. Putting these on bus 0 would talk to the gateway instead
+  # of the camera, and would be a message the car does not expect from us.
+  buses = {m[2] for m in sent if m[0] in (_NAV2_ADDR, _NAV3_ADDR)}
+  assert buses == {cc.CAN.camera}, f"expected camera bus only, got {buses}"
+
+  # 250 frames at 100Hz is 2.5 s, so 1Hz means 2 or 3 of each -- never one per frame.
+  assert 2 <= addrs.count(_NAV2_ADDR) <= 3, addrs.count(_NAV2_ADDR)
+  assert addrs.count(_NAV2_ADDR) == addrs.count(_NAV3_ADDR)
+
+
+def test_it_stands_down_when_the_car_sends_the_real_ones(carcontroller_parts):
+  """The whole point of the carstate watcher: never compete with a working APIM.
+
+  If Android Auto turns out to be what suppresses them, unplugging the phone makes the car send
+  them for real -- and two transmitters for one address is a worse bug than the one being fixed.
+  """
+  cc, CC, CC_SP, CS = _gps_case(carcontroller_parts)
+  cc.apim_gps_enabled = True
+  cc.gps = _FakeGps()
+  CS.apim_gps_nav_seen = True
+
+  addrs = _addrs(_run(cc, CC, CC_SP, CS))
+  assert _NAV2_ADDR not in addrs
+  assert _NAV3_ADDR not in addrs
+
+
+def test_the_toggle_off_sends_nothing(carcontroller_parts):
+  cc, CC, CC_SP, CS = _gps_case(carcontroller_parts)
+  cc.apim_gps_enabled = False
+  cc.gps = _FakeGps()
+
+  addrs = _addrs(_run(cc, CC, CC_SP, CS))
+  assert _NAV2_ADDR not in addrs
+  assert _NAV3_ADDR not in addrs
+
+
+def test_no_gps_fix_yet_sends_nothing_rather_than_raising(carcontroller_parts):
+  """gpsLocationExternal has not arrived. self.gps is None and must simply mean 'not yet'."""
+  cc, CC, CC_SP, CS = _gps_case(carcontroller_parts)
+  cc.apim_gps_enabled = True
+  cc.gps = None
+
+  addrs = _addrs(_run(cc, CC, CC_SP, CS))
+  assert _NAV2_ADDR not in addrs
+  assert cc.apim_gps_failed is False, "a missing fix is not a failure and must not latch the path off"
+
+
+def test_a_broken_gps_does_not_take_the_car_with_it(carcontroller_parts):
+  """Same contract as the gap controller: a telemetry convenience degrades to doing nothing.
+
+  An unhandled exception here propagates out of CarController.update, through card's control loop,
+  and stops the car -- the 2026-08-15 failure, in a new place.
+  """
+  cc, CC, CC_SP, CS = _gps_case(carcontroller_parts)
+  cc.apim_gps_enabled = True
+
+  class ExplodingGps:
+    def __getattr__(self, name):
+      raise RuntimeError("boom")
+
+  cc.gps = ExplodingGps()
+
+  addrs = _addrs(_run(cc, CC, CC_SP, CS))   # must not raise
+  assert cc.apim_gps_failed is True, "the path must latch OFF after a failure, not retry forever"
+  assert _NAV2_ADDR not in addrs
+
+
+def test_a_missing_attribute_disables_the_feature_not_the_car(carcontroller_parts):
+  """`getattr(self, 'apim_gps_failed', True)` defaults to True on purpose.
+
+  A merge that drops the __init__ line must silently disable the synthesizer, exactly the shape
+  that took the car off the road when `self.gap` went missing.
+  """
+  cc, CC, CC_SP, CS = _gps_case(carcontroller_parts)
+  cc.apim_gps_enabled = True
+  cc.gps = _FakeGps()
+  del cc.apim_gps_failed
+
+  addrs = _addrs(_run(cc, CC, CC_SP, CS))   # must not raise
+  assert _NAV2_ADDR not in addrs
