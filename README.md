@@ -333,6 +333,47 @@ down — so resuming afterwards is an ordinary Ford resume, and the car pulls aw
 The moment the radar acquires a lead it hands back on that frame, because Ford's stop-and-go is
 years of calibration this has no business replacing.
 
+### Route intent
+
+**Nothing publishes this today, on any car, so it refuses nothing and changes nothing.** What it is
+meant to become is one fact reaching passing assist that no sensor on the car can supply: which way
+the driver is actually going. The map knows where every ramp is and cannot know which one is his,
+so the existing ramp test is reactive — it fires once the car is already on the ramp. A route is
+the only thing that can say so beforehand.
+
+What exists is the consumer and the wire, not a source. A `routeIntentBP` message carries four
+values — a maneuver, a distance to it, whether that distance is real, and the moment the
+instruction was last confirmed — and passing assist goes quiet when a committing maneuver is inside
+roughly twenty seconds of driving. With no transport fitted the message never arrives, the gate
+never fires, and passing assist behaves exactly as it does without any of this.
+
+- **It may refuse a pass and may never open one**, and that is enforced rather than intended. Every
+  candidate source is somebody else's software arriving over a link this car does not control, so
+  the two failure directions are not symmetric: a source that wrongly says "exit ahead" costs a
+  pass, and a source that wrongly says nothing leaves the feature as it is. The version that reads
+  "his route goes left, so a left pass is fine" would let a stale instruction move the car. The
+  consumer exposes one predicate and no way to say yes; the module and its call site are parsed by
+  a test that fails if a permission-shaped path appears in either.
+- **The transport is deliberately unnamed.** Three could supply it — the car's own CAN, which the
+  instrument cluster must already be receiving to draw turn-by-turn; a navigation app on the
+  driver's phone relayed to the device; or a router running on the device with a destination
+  entered. Two of the three depend on other people, so the order they arrive in is not this fork's
+  to choose, and nothing is sequenced behind any one of them.
+- **Freshness is the message's own, not the socket's.** A phone bridge whose link has died keeps
+  sending perfectly fresh messages carrying a minutes-old instruction, so the stamp is taken when
+  the transport last *confirmed* the instruction rather than when it published. Anything older than
+  three seconds is not evidence, and there is no extrapolation: a silent source means no claim, not
+  a distance guessed forward.
+- **A source that cannot measure the distance is not asked to invent one.** The maneuver glyph and
+  the distance are separate reads for every candidate transport, and an instruction with no
+  distance carries no bound — so it is treated as no claim rather than as a refusal, which would go
+  quiet for a whole route instead of for an approach.
+- **An instruction the source cannot classify still refuses.** That is the conservative direction
+  and it is free, so a transport can ship before its classifier is complete rather than guessing at
+  the nearest label.
+- **A scripted route can be published on the bench**, labelled as scripted, so the whole chain is
+  exercisable before any transport lands and cannot be mistaken for a real navigator in a drive log.
+
 ### Giving the forward camera the GPS its own car withholds
 
 **Ford-specific, unproven on the road, and — stated plainly because it was written the other way
@@ -407,6 +448,12 @@ tuning the wrong controller. These read the device's own logs:
 
 - **`tools/bp_passing_report.py`** — every pass passing assist wanted, what refused it, for how long,
   and which geometry term did the refusing
+
+- **`tools/bp_can_nav_diff.py`** — diffs a drive recorded while a navigation app was routing against
+  one with no route active, per address and per byte, to find whether the turn instruction is
+  already on a bus the device reads
+- **`tools/bp_route_intent_stub.py`** — publishes a scripted route, so the refusal gate can be
+  driven end to end with no transport fitted
 
 ### Guards for what tests cannot reach
 

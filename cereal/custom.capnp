@@ -660,6 +660,16 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       # A speed limit DROP is close enough that a pass started now would be finished while braking
       # for it. The map is the only thing that can see a limit change before the sign does.
       limitDropAhead @20;           # the road is bending hard enough that a pass is the wrong place for it
+      # HIS NAVIGATOR SAYS HE IS ABOUT TO LEAVE THIS ROAD. See RouteIntentBP and route_intent.py.
+      #
+      # This is the PREDICTIVE half of `onRamp`. That gate fires once the map already places him on
+      # a motorwayLink, which is after he has moved -- the map knows where every ramp is and cannot
+      # know which one is his. A route does, and it is the only thing on the car that does.
+      #
+      # Inert until a transport is fitted: with nothing publishing RouteIntentBP this never fires
+      # and the feature behaves exactly as it does today, which is the whole safety story for a
+      # gate fed by somebody else's software.
+      routeManeuver @21;
     }
 
     # BluePilot: the maneuver this WOULD perform, run as a dry run. Nothing actuates; see
@@ -1697,7 +1707,94 @@ struct RearRadarBP @0xbd443b539493bc68 {
   }
 }
 
-struct CustomReserved16 @0xfc6241ed8877b611 {
+# FusionPilot: ROUTE INTENT -- what the driver's own navigator says he is about to do next.
+#
+# THE POINT OF THIS MESSAGE IS THAT IT NAMES NO TRANSPORT. The instruction may come off the car's
+# own CAN (the APIM broadcasts route state to the cluster, which is why the cluster can draw it),
+# from a navigation app on his phone relayed to the device, or one day from a router running here.
+# Those arrive in a different order than anyone can predict -- two of the three depend on other
+# people -- so the consumer subscribes to THIS and never to a transport. See
+# `sunnypilot/selfdrive/controls/lib/route_intent.py` for the consumer and
+# `sunnypilot/routeintent/source.py` for what a transport has to implement.
+#
+# WHAT IT IS ALLOWED TO DO, and this is not a caveat, it is the design. Route intent may REFUSE a
+# maneuver and may never OPEN one. The fork's rule -- evidence that opens must never be cheaper
+# than evidence that refuses -- bites unusually hard here, because every source on the list is
+# somebody else's software running on somebody else's schedule. Read the refusal direction and both
+# failure modes are benign: a source that wrongly says "exit ahead" costs a pass, and a source that
+# wrongly says "nothing ahead" leaves the feature exactly as it is today. Read the OPENING
+# direction and a stale instruction moves the car.
+struct RouteIntentBP @0xfc6241ed8877b611 {
+  maneuver @0 :Maneuver;
+
+  # Metres to the point where the maneuver happens. MEANINGLESS UNLESS distanceKnown -- see below.
+  distance @1 :Float32;
+
+  # A SOURCE THAT CANNOT MEASURE THE DISTANCE MUST NOT INVENT ONE. That rule is already written in
+  # CLAUDE.md, in blood: RearApproachSide.from_blis set ttc = 0.0 for a sensor with no range, and a
+  # car merely sitting in the blind spot would have commanded an emergency abort at 50 Hz.
+  #
+  # The maneuver GLYPH and the DISTANCE are separate reads for every transport on the list -- a CAN
+  # message may carry one without the other, and a notification scraper may fail to parse the
+  # number while the icon is unambiguous. So the schema lets a source say "a turn is coming and I
+  # do not know how far", and the consumer treats that as NO CLAIM rather than as a refusal: a
+  # refusal with no bound on it would go quiet for the whole route.
+  distanceKnown @2 :Bool;
+
+  source @3 :Source;
+
+  # DEVICE monotonic nanoseconds at which the transport last CONFIRMED this instruction. Not when
+  # the message was sent, and never a timestamp from the far end of a link.
+  #
+  # The distinction is the whole freshness story and it cannot be got from the message's own
+  # logMonoTime. A phone bridge whose WiFi has died keeps republishing its last instruction at
+  # whatever rate it likes: every message is freshly SENT and the instruction inside it is minutes
+  # old. Stamping at RECEIPT and caching the stamp is what makes the consumer able to tell those
+  # apart, and it is why nothing here relies on SubMaster liveness -- the publish rate is a
+  # property of the transport, which is exactly the thing this message exists not to know about.
+  observedMonoTime @4 :UInt64;
+
+  # The vocabulary every transport normalises onto. Modelled on the banner instructions Mapbox,
+  # OSRM and Google all emit, because a transport author's job should be a lookup table rather
+  # than a judgement call.
+  #
+  # `unknown` is deliberately expressible: a source that HAS an instruction but cannot classify it
+  # should say so rather than pick the nearest label or stay silent. The consumer refuses on it,
+  # which is the conservative direction and free -- so a transport can ship before its classifier
+  # is complete.
+  enum Maneuver {
+    none @0;          # no route active -- nothing to say
+    # `continueAhead` and not `continue`, which is what every banner vocabulary calls it: capnp is
+    # happy with the keyword and Python is not, so `Maneuver.continue` is a SyntaxError and the
+    # only way to reach it is getattr. A name nobody can type is a name somebody works around.
+    continueAhead @1; # a route is active and the next instruction is "stay on this road"
+    turnLeft @2;
+    turnRight @3;
+    slightLeft @4;
+    slightRight @5;
+    sharpLeft @6;
+    sharpRight @7;
+    uTurn @8;
+    exitLeft @9;      # leaving a motorway on the left
+    exitRight @10;    # leaving a motorway on the right
+    forkLeft @11;     # the road splits and his route takes the left branch
+    forkRight @12;
+    merge @13;
+    roundabout @14;
+    destination @15;  # arriving
+    unknown @16;      # an instruction exists and this source could not classify it
+  }
+
+  # WHICH KIND of transport spoke, so a drive log cannot read a scripted bench route as a real one.
+  # Categories rather than product names: `phoneBridge` is the shape, whether the app behind it is
+  # Waze or Google Maps, and a log that recorded the brand would age faster than it is useful.
+  enum Source {
+    none @0;             # nothing has ever published -- the explicit value, not a default
+    stub @1;             # tools/bp_route_intent_stub.py, a scripted route for the bench
+    carCan @2;           # the car's own navigation broadcast, read off a bus
+    phoneBridge @3;      # a navigation app on the phone, relayed to the device
+    router @4;           # an on-device router with a destination entered here
+  }
 }
 
 # FusionPilot: mapd v2 (pfeiferj/openpilot-mapd), copied from its cereal/custom/custom.capnp.

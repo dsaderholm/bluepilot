@@ -223,6 +223,14 @@ _BLOCKED_TEXT = {
   # them apart at a stop is the difference between tuning a threshold and tuning nothing.
   'noRoomInMap': "Map says one lane each way",
   'limitDropAhead': "Slower zone ahead",
+  # NOT "exit ahead". The map sees an exit ahead constantly and this gate does not fire for those
+  # -- it fires because HIS ROUTE turns off here, which is a thing only a navigator knows and the
+  # only reason this reason exists separately from `onRamp`. The wording has to carry the "your"
+  # or it reads as the map's claim and explains a silence that the map never caused.
+  #
+  # Covers every committing maneuver, not just exits: a turn, a fork and an arrival all reach this
+  # label, and naming one of them would be wrong on the other three.
+  'routeManeuver': "Your turn is coming up",
 }
 
 # BluePilot: sunnypilot's "AHEAD" box hangs off the bottom of the speed-limit sign, in the same

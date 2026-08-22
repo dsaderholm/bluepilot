@@ -94,6 +94,7 @@ from openpilot.sunnypilot.selfdrive.controls.lib.overtake_progress import Overta
 from openpilot.sunnypilot.selfdrive.controls.lib.passing_maneuver import PassingManeuver
 
 from openpilot.sunnypilot.selfdrive.controls.lib.rear_approach import RearApproach, Source
+from openpilot.sunnypilot.selfdrive.controls.lib.route_intent import RouteIntent
 
 Phase = custom.LongitudinalPlanSP.PassingAssist.Maneuver
 Side = custom.LongitudinalPlanSP.PassingAssist.Side
@@ -921,6 +922,10 @@ class PassingAssistDetector:
     self.road_name = ""
     self.rear = RearApproach()
     self.adjacent = AdjacentLane()
+    # FusionPilot (route-intent branch): his own navigator, whichever transport carries it. Inert
+    # until one is fitted -- nothing publishes routeIntentBP today, so this reports unavailable on
+    # every frame of every drive and the gate below never fires. See route_intent.py.
+    self.route_intent = RouteIntent()
 
     self.params = Params()
     self.frame = 0
@@ -3113,6 +3118,10 @@ class PassingAssistDetector:
     except KeyError:
       car_state_bp = None
     self.rear.update(sm)
+    # Every cycle and before any gate, exactly like the map and the radar: what his navigator is
+    # saying is worth logging on the frames where nothing is suggested too, and that is how the
+    # lookahead gets fitted once a transport exists.
+    self.route_intent.update(sm)
     # Both sides, because the maneuver timings in passing_maneuver.py are properties of the whole
     # sequence rather than of a side. may_actuate() is what decides whether a PARTICULAR move is
     # allowed, and it is the one that must be consulted before anything is commanded.
@@ -3324,6 +3333,26 @@ class PassingAssistDetector:
     #
     # Refusal only, and absent-is-permissive: lanes was 91.5% populated on route 00000383, so an
     # unknown count must never refuse. A missing map leaves every gate exactly as it was.
+    # HIS ROUTE TURNS OFF HERE. The one claim on this list that comes from outside the car, and the
+    # only one that is about HIM rather than about the road.
+    #
+    # FIRST OF THE ROAD-FACT GATES, deliberately. Near an exit the others are true as well -- the
+    # limit drops on the ramp, the map calls it a motorwayLink the moment he is on it -- and
+    # "Your turn is coming up" explains the silence in a way "Slower zone ahead" does not. Ordering
+    # decides which reason he reads, since blockedBy records the FIRST failure.
+    #
+    # SUGGESTION ONLY, and keep_wanted for the same reason its neighbours carry it: this is reached
+    # past "a pass is warranted", so it is the flicker case. A crossing already underway is left
+    # alone -- a car cannot un-change lanes because an exit arrived, and backing out between two
+    # lanes is a maneuver in its own right rather than the absence of one.
+    #
+    # Inert with no transport fitted: RouteIntent reports unavailable and this is False on every
+    # frame, which is today's behaviour exactly. That is the whole safety argument for a gate fed by
+    # somebody else's software, and it is why this may only ever refuse.
+    if self.route_intent.refuses_pass(CS.vEgo):
+      self._reset_outputs(Blocked.routeManeuver, keep_wanted=True)
+      return
+
     # A LOWER LIMIT IS CLOSE. The map sees a limit change before the sign is readable, which is the
     # one thing it can do here that no sensor can. Refusal only, and absent map or absent next-limit
     # both mean no claim.

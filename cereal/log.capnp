@@ -2564,7 +2564,7 @@ struct Event {
     controllerStateBP @139 :Custom.ControllerStateBP;  # BluePilot: claims customReserved13 slot
     carStateBP @140 :Custom.CarStateBP;  # BluePilot: claims customReserved14 slot
     rearRadarBP @141 :Custom.RearRadarBP;  # FusionPilot: claims customReserved15 slot
-    customReserved16 @142 :Custom.CustomReserved16;
+    routeIntentBP @142 :Custom.RouteIntentBP;      # FusionPilot: claims customReserved16 slot
     mapdExtendedOut @143 :Custom.MapdExtendedOut;  # FusionPilot: claims customReserved17 slot
     mapdIn @144 :Custom.MapdIn;                    # FusionPilot: claims customReserved18 slot
     mapdOut @145 :Custom.MapdOut;                  # FusionPilot: claims customReserved19 slot

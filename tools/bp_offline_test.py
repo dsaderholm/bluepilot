@@ -77,6 +77,10 @@ DEFAULT_TARGETS = [
   "selfdrive/ui/tests/test_drive_clock.py",
   "selfdrive/ui/tests/test_route_intent_score.py",
   "selfdrive/ui/tests/test_oncoming_falsepos.py",
+  # The navigating-vs-control CAN diff. Named here because selfdrive/ui/tests/ cannot be globbed,
+  # and because the tool's EXPECTED answer is "nothing appeared" -- so a broken one produces the
+  # expected output and a test that never runs would not say otherwise.
+  "selfdrive/ui/tests/test_can_nav_diff.py",
   "selfdrive/ui/tests/test_mapd_restarts.py",
   "selfdrive/ui/tests/test_osm_tag_census.py",
   "selfdrive/ui/tests/test_left_edge_profile.py",

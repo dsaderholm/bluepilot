@@ -657,15 +657,16 @@ already requires.
 
 1. **The Google Maps diff drive.** No hardware, no code. Drive with Maps NAVIGATING, then diff the
    logged buses against a no-route drive. Anything that appears or starts varying is the channel.
-   This decides whether the canbox is needed at all, and it is one drive. `tools/bp_offline_map.py`
-   and the APIM probe in this session's history are the starting shapes.
+   This decides whether the canbox is needed at all, and it is one drive. **TOOLED, 2026-08-22:
+   `tools/bp_can_nav_diff.py`. The drive is still owed.**
 2. **Only then choose a transport.** MS-CAN via canbox (9e), Waze notification (9b), or Mapbox
    routing (9c) -- and the interface must make them interchangeable, because two of the three depend
-   on other people.
+   on other people. **The interface exists as of 2026-08-22; see section 10.**
 3. **Build the REFUSAL, not the opener.** "Do not offer a pass N metres before his exit" needs a
    maneuver and a distance and nothing else -- no wayId join, no map join. It is useful the day any
    source lands and it satisfies *evidence that opens must never be cheaper than evidence that
-   refuses*. Opening a lane change on route intent is a later and much higher bar.
+   refuses*. Opening a lane change on route intent is a later and much higher bar. **DONE,
+   2026-08-22; see section 10.**
 
 **WHAT IT MUST NOT DO:** consume route intent as PERMISSION. The same rule that governs map data
 governs this -- a wrong instruction that merely costs a missed pass is a bad day; one that opens a
@@ -677,3 +678,134 @@ to answer.
 anchor (index, bounds, `noLaneLeft`), `mapdOut` (`highwayClass`, `oneWay`, `lanes`, `waySelectionType`),
 the adjacent-lane radar, the maneuver state machine, and the panel. The missing piece really is only
 the instruction.
+
+---
+
+## 10. BUILT 2026-08-22: THE INTERFACE AND THE REFUSAL. NO TRANSPORT, ON PURPOSE.
+
+Section 9d said build the consumer first behind a transport-agnostic interface, against a stub.
+That is what exists now. **Every line of it is inert until a transport is fitted**, which is not a
+limitation to work around -- it is the property that makes a gate fed by somebody else's software
+safe to ship at all.
+
+### 10a. What was added
+
+    cereal/custom.capnp          struct RouteIntentBP -- renamed from CustomReserved16, keeping
+                                 its struct id, per upstream's own "rename the struct, keep the
+                                 identifier" rule
+    cereal/log.capnp             routeIntentBP @142   (claims the customReserved16 slot)
+    cereal/services.py           frequency 0, should_log True
+    sunnypilot/selfdrive/controls/lib/route_intent.py     the CONSUMER and the whole policy
+    sunnypilot/routeintent/source.py                      what a TRANSPORT implements, + StubSource
+    tools/bp_route_intent_stub.py                         publishes a scripted route, bounded
+    tools/bp_can_nav_diff.py                              the Maps-vs-no-route CAN diff (step 1)
+
+Footprint inside passing assist, which is deliberately four lines: construct `RouteIntent`, update
+it each cycle, one gate, one `Blocked` enumerant with its panel wording. Per 9g, passing assist
+stays additive-only from this side.
+
+### 10b. THE FOUR VALUES, AND WHY THERE ARE ONLY FOUR
+
+`maneuver`, `distance`, `distanceKnown`, `observedMonoTime`. Nothing else, because a field recorded
+and never read is this fork's oldest bug one level out -- the passing-assist audit found 25 of them
+in one struct, and 53 across thirteen.
+
+**`distanceKnown` is not ceremony.** The glyph and the number are SEPARATE READS for every
+transport on the list: a CAN message may carry one without the other, and a notification scraper may
+parse the icon while the number defeats it. A source that cannot measure the distance must not
+invent one -- the `RearApproachSide.from_blis` rule, where a fabricated `ttc = 0.0` would have
+commanded an emergency abort at 50 Hz on presence-only evidence.
+
+**`observedMonoTime` is stamped at RECEIPT and cached, never at publish.** This is the only thing
+standing between a dead link and a believed instruction, and SubMaster cannot supply it: it holds
+the last message forever, so a publisher that died an hour ago still presents a well-formed frame,
+and a phone bridge whose WiFi is gone keeps SENDING fresh messages carrying minutes-old content.
+Hence frequency 0 in services.py -- a declared rate would make `sm.alive` report on the TRANSPORT
+and be read as a statement about the INSTRUCTION.
+
+### 10c. THE POLICY, in one table
+
+    no message / not valid              no claim
+    observedMonoTime == 0               no claim  <- capnp's default; an unstamped source
+    age > 3 s, or a stamp in the future no claim
+    maneuver none / continueAhead       no claim
+    distanceKnown false                 NO CLAIM -- the one deliberately permissive branch
+    distance < 0                        no claim
+    distance <= max(150 m, v * 20 s)    REFUSE
+    anything else                       no claim
+
+**The permissive branch is the interesting one.** A maneuver with no distance carries no bound, so
+refusing on it goes quiet for the ENTIRE ROUTE rather than for the approach. That is not a
+conservative version of this gate, it is a different and much worse feature.
+
+**Everything not in the no-claim set refuses, including `unknown` and including enumerants nobody
+has added yet.** Written as "not in this short set" rather than "in the set of committing
+maneuvers", so the DEFAULT for a new maneuver type is to refuse. A new type silently not refusing is
+invisible in a log; one that refuses costs a pass and shows up as `routeManeuver` in `blockedBy`.
+
+**20 s is derived, not measured** -- ~15 s for the pass itself (the figure `LIMIT_DROP_LOOKAHEAD_M`
+is already reasoned from) plus ~5 s to get back across and settle. At 70 mph that is ~620 m, which
+is long deliberately: the limit-drop gate chose 250 m over 300 because a limit change is on the
+horizon most of the time, and **this gate has the opposite economics** -- it fires only for
+maneuvers on HIS OWN ROUTE, one or two per trip. That asymmetry is the whole reason route intent
+beats the map here. Fit it from drive data once a transport lands.
+
+### 10d. THE REFUSAL-ONLY GUARANTEE IS PARSED, NOT PROMISED
+
+Four structural tests, each verified to fail with the property broken:
+
+    the consumer's public surface is exactly {update, reset, refuses_pass}   -- no way to say yes
+    passing_assist calls only update and refuses_pass on it
+    the gate's body is one _reset_outputs(Blocked.routeManeuver) and no else branch
+    `route_intent` is reachable from __init__ and _decide ONLY -- never may_actuate, never
+      _must_abort, never _run_maneuver
+
+The last one is CLAUDE.md's gate review made executable: enumerate every consumer, label each
+REFUSES / AUTHORIZES / DISPLAYS. `may_actuate` AUTHORIZES and `_must_abort` performs a maneuver of
+its own, and the BLIS bug was exactly a refusal-shaped input reaching the second of those.
+
+Prose is not enough here and this file should say why: the identical argument has now been made
+three times in a week about signals that scored PERFECTLY on questions they were not allowed to
+answer -- `oneWay` for the oncoming flag, the lane anchor for the left gate, and now this.
+
+### 10e. MUTATION-TESTED, AND ONE TEST WAS VACUOUS UNTIL IT WAS
+
+Nine mutations, eight caught. **The one that was not is worth the whole exercise:** deleting the
+`observedMonoTime <= 0` guard left the entire suite green, because the test used a clock value of
+1e12 ns, where an unstamped message ages out at 1000 seconds and the FRESHNESS check catches it for
+the wrong reason.
+
+`time.monotonic_ns()` counts from BOOT. One second into the clock, an unstamped message is 1.0 s
+old -- comfortably fresh -- and would have been believed. plannerd starts seconds after boot, which
+is exactly when a new transport is coming up too. The test now runs at that instant and the guard
+is covered. Same lesson as everywhere else in this file: green was not evidence.
+
+Two behaviours had no test at all until mutation found them -- `keep_wanted` on the refusal, and
+the gate's position ahead of the map gates.
+
+### 10f. THE CAPNP SLOT, so a collision is anticipated rather than discovered
+
+`routeIntentBP` claims **`customReserved16` @142**, the next free slot after `rearRadarBP` @141 and
+before mapd's @143-145. **The radar-detector branch has claimed no slot and is not yet rebased past
+`rearRadarBP`**, so when it is, @142 is the number it would naturally reach for next.
+
+The tiebreaker is WIRE HISTORY, not base branch -- a field already written to a route log cannot
+move, because capnp reads by position and every recorded drive would decode as garbage.
+`routeIntentBP` has never been published anywhere, so if the radar detector gets there first, THIS
+one moves. `test_capnp_ordinals_unique.py` catches the collision either way, loudly, which is the
+point of it.
+
+### 10g. WHAT IS STILL OWED, and the first item is a drive
+
+1. **The Google Maps diff drive.** `tools/bp_can_nav_diff.py` is written and unit-tested; the drive
+   is not done. Navigate somewhere real with **Google Maps** (not Waze -- Maps demonstrably still
+   renders turns on his IPC), then a second drive over similar roads with no route. Expect nothing
+   to appear, which locates the data on MS-CAN and means route intent arrives WITH the canbox.
+2. **A transport.** Nothing here is sequenced behind any particular one.
+3. **Fit the 20 s** against how often it goes quiet, and whether a pass offered inside the window
+   was one he would have made.
+4. **NOT the opener.** "His route goes left, so a left pass is fine" is the version that moves the
+   car on a stale instruction. It stays unbuilt until there is a source with measured accuracy AND
+   measured lead time -- and note that the one source ever measured on this car, mapd's own fork
+   prediction, was 96-100% accurate with a lead of 1.0 s against an 8 s budget. Accuracy was never
+   the binding number.

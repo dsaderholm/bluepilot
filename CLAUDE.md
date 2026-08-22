@@ -4378,3 +4378,80 @@ passing assist, right? Just like passing assist builds off ICBM?"* Yes.
 The radar detector is a sibling because it needs nothing passing assist owns. Route intent is the
 opposite -- it exists to feed passing assist's gates and consumes the lane anchor, `_geometry`, the
 maneuver state machine and the panel. Branching it off ICBM would leave it without all of them.
+
+## ROUTE INTENT IS BUILT AND INERT. THAT IS THE DESIGN, NOT A GAP. 2026-08-22.
+
+`bluepilot/ROUTE-INTENT.md` section 10 is the full write-up. What a session in this worktree needs
+before touching any of it:
+
+**THE CONSUMER EXISTS, NO TRANSPORT DOES.** `routeIntentBP` (custom.capnp, `@142`, the
+customReserved16 slot) carries four values -- a maneuver, a distance, whether that distance is REAL,
+and the monotonic instant the transport last CONFIRMED the instruction. Nothing publishes it today,
+so `RouteIntent` reports unavailable on every frame and passing assist behaves exactly as it does
+now. **Do not "fix" the inertness.** The three candidate transports are the car's own CAN (pending
+the canbox, with BLIS), a phone bridge (the fallback), and an on-device router (nobody is asking);
+two of the three depend on other people, so the consumer was built first precisely so nothing is
+sequenced behind them.
+
+**IT MAY REFUSE A PASS AND MAY NEVER OPEN ONE, AND THAT IS PARSED RATHER THAN PROMISED.** Four
+structural tests in `test_route_intent.py`, each verified to fail with the property broken: the
+consumer's public surface is exactly `{update, reset, refuses_pass}`; passing assist calls only
+those two; the gate's body is one `_reset_outputs(Blocked.routeManeuver)` with no `else`; and
+`route_intent` is reachable from `__init__` and `_decide` ONLY -- never `may_actuate`, never
+`_must_abort`, never `_run_maneuver`. That last one is this file's own gate review made executable,
+and the BLIS bug was exactly a refusal-shaped input reaching `_must_abort`.
+
+**The opening version scores better and is forbidden. That is now three in one week** -- `oneWay`
+would separate the false oncoming vetoes perfectly, the lane anchor would open the left gate on
+essentially every motorway frame, and "his route goes left so a left pass is fine" would too. All
+three refused for the same reason.
+
+**FRESHNESS COMES FROM THE MESSAGE'S OWN STAMP, NEVER FROM `sm.alive`,** and services.py declares
+frequency **0** to make that unavoidable. SubMaster holds the last message forever, and a phone
+bridge whose link died keeps SENDING fresh messages carrying minutes-old content -- so the publish
+rate is a fact about the TRANSPORT and says nothing about the INSTRUCTION. Anything older than 3 s
+is no claim, and there is NO extrapolation: guessing a distance forward while the source is silent
+is inventing evidence.
+
+**A MANEUVER WITH NO DISTANCE IS NO CLAIM, not a refusal.** The one deliberately permissive branch.
+The glyph and the number are separate reads for every candidate transport, so a source is allowed
+to say "a turn is coming and I do not know how far" rather than invent a number -- the
+`RearApproachSide.from_blis` rule -- and a refusal with no bound on it would go quiet for the whole
+route instead of for the approach.
+
+**Everything else refuses, including `unknown` and including enumerants nobody has added yet.** The
+set is written as "not in `{none, continueAhead}`" so the DEFAULT for a new maneuver type is to
+refuse: one that silently does not refuse is invisible in a log, one that does costs a pass and
+shows up as `routeManeuver` in `blockedBy`.
+
+**THE 20 s LOOKAHEAD IS DERIVED, NOT MEASURED**, and it is long on purpose -- ~620 m at 70 mph.
+`LIMIT_DROP_LOOKAHEAD_M` chose 250 over 300 because a limit change is on the horizon most of the
+time on an arterial; **this gate has the opposite economics**, firing only for maneuvers on HIS OWN
+ROUTE, one or two per trip. That asymmetry is the whole reason route intent beats the map here. Fit
+it from drive data once a transport lands, not before.
+
+**MUTATION TESTING FOUND A VACUOUS TEST AND TWO UNCOVERED BEHAVIOURS.** Deleting the "a source that
+did not stamp is not evidence" guard left the WHOLE SUITE GREEN, because the test's clock was 1e12
+ns, where an unstamped message ages out at 1000 s and the freshness check catches it for the wrong
+reason. `time.monotonic_ns()` counts from BOOT: one second in, an unstamped message is 1.0 s old and
+would have been BELIEVED -- and plannerd starts seconds after boot, which is when a new transport is
+coming up too. **A clock-based test written at an arbitrary large `now` cannot exercise the
+near-boot window**, and that window is where a transport's first frames live.
+
+**THE ONE THING STILL OWED IS A DRIVE, and it needs no hardware:** `tools/bp_can_nav_diff.py` diffs
+a **Google Maps**-navigating route against a no-route one, per address AND PER BYTE -- because
+`APIM_Data_FD1` also carries light menus, so a nav channel may be a message present in both drives
+that merely says something different in one. Maps rather than Waze: Maps demonstrably still renders
+turns on his IPC. Expect nothing to appear; that is a LOCATION (MS-CAN, so route intent arrives with
+the canbox) rather than a dead end.
+
+**AND `tools/bp_route_intent_stub.py` EXISTS SO THE GATE IS NOT UNREACHABLE** -- it publishes a
+scripted route, bounded in time, labelled `source=stub` so a drive log can never read it as a real
+navigator. That is the `IcbmModelStopEnabled` lesson applied in advance: a feature that cannot be
+turned on is one that gets reported broken when it is merely unenableable.
+
+**CAPNP SLOT WARNING.** `routeIntentBP` took `@142` (customReserved16). **The radar-detector branch
+has claimed no slot and is not rebased past `rearRadarBP` @141**, so @142 is the number it will
+reach for next. The tiebreaker is WIRE HISTORY, not base branch -- `routeIntentBP` has never been
+published, so if the radar detector gets there first, THIS one moves.
+`test_capnp_ordinals_unique.py` catches it either way.

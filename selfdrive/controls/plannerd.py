@@ -56,8 +56,16 @@ def main():
                             # sensor-only fix was replayed against a real drive and measured dead.
                             # Absent unless MapdV2 is 1 or 2, where sm.valid stays False and the
                             # oncoming veto keeps its pre-map behaviour exactly.
+                            # routeIntentBP is his own navigator's next instruction, published by
+                            # whichever transport is fitted -- the car's own CAN, a phone bridge, a
+                            # router -- and by none of them today. Absent on every car including
+                            # this one, where sm.valid stays False and RouteIntent reports
+                            # unavailable, so passing assist behaves exactly as it does now. See
+                            # route_intent.py; freshness comes from the message's own stamp rather
+                            # than from liveness here, because the publish rate belongs to the
+                            # transport and this subscription must not know about transports.
                             'liveMapDataSP', 'carStateSP', 'carStateBP', 'liveTracks', 'rearRadarBP', 'mapdOut',
-                            'selfdriveStateSP', 'mapdExtendedOut', gps_location_service],
+                            'selfdriveStateSP', 'mapdExtendedOut', 'routeIntentBP', gps_location_service],
                            poll='carState')
 
   while True:

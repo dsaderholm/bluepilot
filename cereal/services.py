@@ -125,6 +125,19 @@ _services: dict[str, tuple] = {
   "mapdOut": (True, 20., 20, QueueSize.MEDIUM),
   "mapdExtendedOut": (True, 1., 1, QueueSize.MEDIUM),
   "mapdIn": (True, 0., 1),
+
+  # FusionPilot: route intent -- the driver's own navigator, whichever transport carries it.
+  #
+  # FREQUENCY 0 ON PURPOSE, like mapdIn, and this one is load-bearing rather than incidental. The
+  # publish rate is a property of whichever transport is fitted -- a CAN reader runs at the bus
+  # rate, a phone bridge at whatever the link manages -- so a declared frequency would make
+  # sm.alive report on the TRANSPORT and be mistaken for a statement about the INSTRUCTION. Those
+  # are different questions and the consumer answers the second one itself, from
+  # RouteIntentBP.observedMonoTime. Nothing checks this for liveness; see route_intent.py.
+  #
+  # should_log True: with no transport fitted nothing publishes and it costs nothing, and the day
+  # one does, the first drive has to be readable or the source cannot be scored at all.
+  "routeIntentBP": (True, 0., 1),
 }
 SERVICE_LIST = {name: Service(*vals) for
                 idx, (name, vals) in enumerate(_services.items())}
