@@ -109,6 +109,14 @@ SCENES = [
    "Nothing slower ahead", "want 65  lead 60  [cluster]  need 7", 0.0, False, GREY),
   ("held: you just took an exit yourself",
    "You just changed lanes", "no rear data", 0.0, False, GREY),
+  # ROUTE INTENT. Nothing publishes routeIntentBP today, so this is the one scene on the sheet that
+  # cannot appear on a drive -- rendered anyway, because the day a transport lands is the day the
+  # words go in front of him at 70 mph, and a layout nobody has looked at is not something to find
+  # out about then. "Your turn is coming up" and not "exit ahead": the map sees an exit ahead
+  # constantly and this fires because HIS ROUTE turns off, which is the only reason the reason
+  # exists separately from "On a ramp".
+  ("refused: his own navigator says he is about to leave this road",
+   "Your turn is coming up", "no rear data  -  2 this drive", 0.0, False, GREY),
   ("stopped: what this drive measured",
    "THIS DRIVE", "7 passes, 6 agreed (11s early)  -  at-limit fussiness cost 2 passes",
    0.0, False, INFO),
