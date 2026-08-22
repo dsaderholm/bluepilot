@@ -432,3 +432,163 @@ learning his own forks from repeated driving -- with no router, no destination t
 network. **If the goal is the exit-ramp problem, build 5b. If the goal is turn-by-turn on the
 screen because he wants turn-by-turn on the screen, that is a legitimate and separate want, and
 this section is the map of what it costs.**
+
+---
+
+## 9. HIS ARCHITECTURE: WAZE DECIDES, OSM IS THE MAP. Stated 2026-08-22, in his words.
+
+Section 8 measured what building navigation from scratch costs and concluded it is a heavyweight way
+to get a lightweight fact. **That framing was answering the wrong question**, and he corrected it:
+
+  *"my thought was to have Waze IPC data sort of drive passing assist to make turns and lane
+   changes... Waze would drive the decisions and OSM would be the map."*
+
+**THIS IS NOT "BUILD NAVIGATION". IT IS A SOURCE SWAP.** Nobody writes a router. Waze already routes
+-- it knows traffic, closures and reroutes, which no offline OSM router on a comma ever will -- and
+the tiles already on the device supply geometry, lane counts, classes and speed limits. What is
+missing is only the WIRE between them.
+
+That also disposes of section 8's main objection. The graph-reconstruction problem, the missing node
+ids, the destination-entry UI: all of it belongs to building a router, and this design does not build
+one.
+
+### 9a. Two transports, and his priority order is explicit
+
+  *"The notification interception is the fallback if we can't just get the data that Waze should put
+   on the IPC."*
+
+    1. WAZE IPC DATA  -- the updateTrip() metadata Ford's cluster renders. This is what he HAD and
+       lost, and why the Waze bug matters. See 2a: his symptom is a compass, the signature of
+       updateTrip not being called or called without Steps.
+    2. NOTIFICATION INTERCEPTION -- the fallback. Read Waze's own navigation notification on the
+       phone and ship it to the comma over WiFi.
+
+### 9b. THE NOTIFICATION IS ALIVE, AND SECTION 2b SAID IT MIGHT NOT BE. He has a screenshot.
+
+2b dismissed this path with: *"the usual read is Android's persistent navigation notification, which
+returns to exactly the publishing question that produced his compass -- if the app is not emitting,
+there is nothing to scrape."*
+
+**That is now measured and it is wrong for this car.** His screenshot, 2026-08-22, shows Waze's live
+navigation notification carrying a **maneuver icon (U-turn) and a distance (60 ft)**, updating.
+
+**So the two paths fail INDEPENDENTLY.** Waze is not emitting to the cluster and IS emitting to the
+notification, which means the fallback does not inherit the bug that killed the primary. 2b's
+reasoning treated one publishing failure as evidence about a different publisher, and the screenshot
+separates them.
+
+**What the notification carries, from the screenshot:** app identity, a maneuver glyph, a distance,
+and a freshness stamp. Enough for "there is a turn in 60 ft" -- which is the whole input passing
+assist needs. What it does NOT carry is the road it turns ONTO, so joining it to a `wayId` is
+inference, not a read.
+
+### 9c. What other forks do -- surveyed 2026-08-22, because none of this needs inventing
+
+| fork / project | what it does | relevance |
+|---|---|---|
+| **FrogPilot** | **Primeless Navigation**: full turn-by-turn with the user's OWN Mapbox keys, no comma prime. Destination via a web console on `:8082` or iOS Shortcuts. **Navigate-on-openpilot feeds route info to the MODEL**, and it *"will keep left or right appropriately at forks and exits"*. | **The CONSUMER side is proven.** A fork already turns route intent into lane positioning, which is exactly what he wants passing assist to do. |
+| **CarrotPilot** (jixiexiaoge) | An Android **"Navigation Data Bridge"** for comma3. Ingests AMAP, Tencent and **Google Maps**, normalizes it and delivers it to the fork for NOO. Web console on port 7000. | **The TRANSPORT side is proven**, and it is precisely 9a's fallback shape: phone app scrapes a nav source, ships it to the device. Waze is not among its sources. |
+| **twilsonco/OpenPilotSiriShortcuts** | iOS Shortcuts that set the openpilot DESTINATION from Waze, Google Maps or Apple Maps via the share sheet. | Sets a destination; does NOT stream maneuvers. Wrong shape here -- he does not want to re-enter a destination, he wants the live instruction. |
+| **dragonpilot** | OSM speed limits, stop signs, road names. | Map data, not routing. Same layer this fork already has via mapd. |
+| **comma** | DELETED. See section 8. | -- |
+
+**Neither half is novel.** FrogPilot proves a fork can act on route intent; CarrotPilot proves a
+phone can feed one. What nobody has done is use **Waze** as the source, and the reason is visible in
+the table: CarrotPilot bridges AMAP, Tencent and Google Maps -- apps with usable outputs -- and skips
+Waze, which exposes no route to third parties (2b).
+
+### 9d. THE RECOMMENDATION: build the consumer first, behind a transport-agnostic interface
+
+**Do NOT wait for comma.** He asked. They did not pause navigation, they REMOVED it -- `navd` gone,
+`navInstruction`/`navRoute`/`navModel` all `DEPRECATED` ordinals. Deprecated ordinals do not come
+back. This is the same shape as the mapd v1 situation already recorded in CLAUDE.md, where "wait for
+upstream" was measurably false, and the same answer applies.
+
+**Do NOT drop Waze either**, and the reason is the part that makes his design better than
+FrogPilot's: a Mapbox route is a route through GEOMETRY. Waze's is the route he is actually going to
+drive, because it reroutes around traffic. If the point is for the car to know which fork he takes,
+the router that knows about the accident ahead is the one that predicts him correctly.
+
+**But nothing may be SEQUENCED behind Waze**, and today is the evidence: he filed the bug and got a
+triage template, twice, through two channels. So:
+
+    passing assist consumes  ->  a maneuver + a distance + (later) a target wayId
+                                 from an INTERFACE, not from Waze
+
+    sources behind it, interchangeable and added in any order:
+       Waze IPC          if the bug is ever fixed
+       Waze notification the fallback, ALIVE today per 9b
+       Mapbox/FrogPilot  if he ever wants destination-entry routing
+       nothing           the current state, and everything must degrade to it
+
+**That ordering also matches the fork's own rule.** Route intent OPENS or REFUSES a maneuver, so it
+is evidence, and *evidence that opens must never be cheaper than evidence that refuses*. A turn
+instruction may freely REFUSE a pass -- "do not offer one 300 m before his exit" is the first and
+safest consumer, needs no wayId join, and is useful the day any source lands. Letting it OPEN a lane
+change is a later and much higher bar.
+
+**So the first build is the refusal**, against a stub source, with the anchor and the map already
+providing everything else. Then whichever transport arrives first fills it.
+
+### 9e. THE CHEAPEST VERSION -- read it straight off CAN -- IS CLOSED. Measured 2026-08-22.
+
+Before any phone bridge, the obvious question: **Ford's own cluster renders turn-by-turn, so does
+the instruction cross a bus the comma already reads?** If it did, there is no app, no WiFi, no
+notification and no dependency on Waze's publishing at all -- just a DBC entry.
+
+**Ford does put navigation state on CAN.** `ford_lincoln_base_pt.dbc`, `BO_ 811 APIM_Data_FD1`:
+
+    DistToStopover_L_Actl   31|16@0+ (0.1,0) [0|6553.4] "kilometer"
+    StopoverType_D_Stat     47|3@0+
+
+A stopover is a route waypoint. So the APIM broadcasts route DISTANCE. There is no maneuver field in
+this DBC, but it is community reverse-engineered and incomplete, so that alone proves nothing.
+
+**AND THE MESSAGE IS NOT ON ANY BUS WE LOG.** Route 000003ab, six segments, every APIM address in
+the DBC:
+
+    0x105  APIM_Req            bus 1     x358    1 payload  (static)
+    0x3E2  Personality_APIM    bus 0/2/130       1 payload  (static)
+    0x462  APIMGPS_Nav_1       bus 0/2/130       6 payloads, VARYING  <- position, as known
+    0x32B  APIM_Data_FD1       ABSENT
+    0x463 / 0x464  Nav_2 / Nav_3   ABSENT   (already known -- this is the U0253 finding)
+    0x3F1 / 0x215 / 0x227 / 0x211   ABSENT
+
+**`APIM_Data_FD1` also carries exterior-light and menu signals**, which are published whether or not
+a route is active -- so its total absence is evidence about the BUS, not about navigation being off
+during that drive. That distinction matters, because "absence in a log is evidence about the log's
+conditions first" is a rule this file already carries, and it does not rescue this one.
+
+**This is consistent with what CLAUDE.md already records: there is no MS-CAN on this car.** The
+APIM-to-cluster navigation traffic evidently lives on a bus the comma is not tapped into, and the
+retrofit gives no way to reach it.
+
+**So the CAN path is closed** and the transports in 9a are the only ones. Worth one more check
+before it is called dead for good: a deliberate drive with **Google Maps navigating** -- which he
+has confirmed still renders on his IPC -- to see whether anything new appears on bus 0/1/2. If
+nothing does, the cluster is being fed over a link the comma cannot see and no software change here
+reaches it.
+
+### 9f. Why WAZE and not a router, in his words -- and why passing assist outranks all of it
+
+Two corrections he made while this section was being written, both of which change the priority
+rather than the design:
+
+  *"Of course I care more about automatic passing than navigation."*
+
+**So navigation here is INSTRUMENTAL. It is not a feature being built for its own sake** -- it is an
+input to passing assist, and any work on it that does not make passes better is off-scope. That
+retires most of section 8 as a curiosity: destination entry, turn-by-turn rendering and a routing
+engine serve a navigation PRODUCT, and he is not asking for one.
+
+  *"Waze is already running on my phone and going to Android Auto, you know?"*
+
+**And that is the strongest argument in the whole design, stronger than route quality.** A Mapbox or
+FrogPilot-style router needs a destination entered on the device before every drive. Waze needs
+NOTHING -- it is already open, already routing, already streaming to Android Auto on every trip he
+takes. The marginal cost to him is zero, and a feature with zero marginal cost is one that is
+actually used, which is the same reasoning that killed "run this on your next drive" as a
+diagnostic style.
+
+It also explains why the notification fallback is attractive rather than a hack: the data is already
+being produced on a device already in the car, and the only missing piece is a wire.

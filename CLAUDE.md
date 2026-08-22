@@ -4299,3 +4299,48 @@ mapd does not have and this car cannot supply. It answers a different question w
 **What it changes:** ROUTE-INTENT 5a is closed, and 5b -- learning his own forks from repeated
 driving, the `IcbmHoldObservations` shape -- is now justified by evidence rather than by argument.
 It is the only candidate that can be early, because it knows before the fork is in sight.
+
+## ROUTE INTENT FOR PASSING ASSIST: WAZE DECIDES, OSM IS THE MAP. His design, 2026-08-22.
+
+Full write-up in `bluepilot/ROUTE-INTENT.md` sections 8-9. The short version, because the framing
+matters more than any single finding:
+
+**IT IS NOT "BUILD NAVIGATION", IT IS A SOURCE SWAP.** Nobody writes a router. Waze already routes,
+knows traffic and reroutes, and **is already running on his phone into Android Auto on every drive**
+-- zero marginal cost, nothing to enter. The OSM tiles already on the device are the map. Only the
+WIRE between them is missing.
+
+**AND PASSING ASSIST OUTRANKS IT:** *"Of course I care more about automatic passing than
+navigation."* So this is INSTRUMENTAL. Destination entry, turn-by-turn rendering and a routing
+engine serve a navigation product he is not asking for.
+
+**Three things measured that day, each of which kills a cheaper idea:**
+
+- **The CAN path is closed.** Ford does broadcast route state -- `APIM_Data_FD1` (0x32B) carries
+  `DistToStopover_L_Actl` -- but that message is ABSENT from every bus the comma logs, along with
+  Nav_2/Nav_3 and every other APIM address except position (0x462) and a static personality frame.
+  It also carries exterior-light signals, so its absence is about the BUS, not about navigation
+  being off. Consistent with "there is no MS-CAN on this car".
+- **The notification fallback is ALIVE**, and `ROUTE-INTENT.md` section 2b said it might not be. His
+  screenshot shows Waze's notification carrying a maneuver glyph and a distance while the CLUSTER
+  path is dead. **The two publishing paths fail independently** -- 2b treated one failure as
+  evidence about the other.
+- **Neither half needs inventing.** FrogPilot already turns route intent into lane positioning
+  ("keeps left or right appropriately at forks and exits") with primeless Mapbox routing.
+  CarrotPilot already ships an Android **Navigation Data Bridge** that scrapes AMAP/Tencent/Google
+  Maps and feeds a fork. Nobody uses Waze, because Waze exposes no route to third parties -- which
+  is exactly why the notification is the fallback.
+
+**THE RULE THAT DECIDES THE BUILD ORDER.** Route intent OPENS or REFUSES a maneuver, so *evidence
+that opens must never be cheaper than evidence that refuses*. A turn instruction may freely REFUSE
+-- "do not offer a pass 300 m before his exit" -- which needs no wayId join, no map join, and is
+useful the day any source lands. Letting it OPEN a lane change is a much higher bar.
+
+**So build the REFUSAL first, behind a transport-agnostic interface, against a stub.** Waze IPC,
+Waze notification and Mapbox then become interchangeable sources, and **nothing is sequenced behind
+Waze fixing a bug** -- which matters, because he filed it through two channels the same day and got
+the same triage template both times.
+
+**Do not wait for comma.** They did not pause navigation, they REMOVED it: no `selfdrive/navd/`, and
+`navInstruction`/`navRoute`/`navModel` are all DEPRECATED ordinals. Same shape as the mapd v1
+situation recorded above, same answer.
