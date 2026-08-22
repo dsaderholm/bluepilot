@@ -3984,3 +3984,52 @@ edge term should ask instead needs that separation, and this measurement cannot 
 
 **Nothing changed on the strength of this.** It reframes the problem and retires one candidate fix,
 which is what it was for.
+
+## NOTHING AVAILABLE CAN OPEN THE LEFT GATE MORE THAN THE EDGE ALREADY DOES
+
+2026-08-22. The close of the left-gate investigation, and the answer is that both candidate
+replacements fail -- for opposite reasons, and neither is a tuning problem.
+
+**The setup.** `bp_left_edge_truth.py` established that `leftEdgeStd` tracks DISTANCE rather than
+confidence, so `MAX_ROAD_EDGE_STD` acts as a distance cutoff and refuses wide roads -- the wrong
+shape for a gate that should open where there are more lanes. So: what could ask the right question
+instead?
+
+**CANDIDATE 1, THE LANE ANCHOR. It answers, and it is forbidden.** On the motorway frames where
+edge-std is the SOLE refuser -- 8,650 across three drives -- the anchor is not blind at all:
+
+    000003ab  motorway  3080 frames   LANE EXISTS 19% pinned + 81% range   unknown  0%
+    000003aa  motorway  3591 frames   LANE EXISTS  9% pinned + 91% range   unknown  0%
+    0000039f  motorway  1980 frames   LANE EXISTS         100% pinned      unknown  0%
+
+Essentially 100% say a lane exists to the left. **But `lanes_total_out` comes from the MAP** --
+mapdOut `lanes`, gated on `one_way` -- so letting it open the gate is the map opening a maneuver.
+*Map data MAY REFUSE, MUST NEVER OPEN.* A stale tile would then admit a pass into whatever is
+actually there. This is the second time in two days that the map has scored perfectly on a question
+it is not allowed to answer; the first was `oneWay` for the oncoming flag.
+
+**CANDIDATE 2, THE FAR-LEFT LANE LINE. Camera-only, legal -- and it carries no information.** It is
+believed on **100%** of those same frames, on every road class and every drive, which looks like a
+strong signal and is the opposite. This file already measured why:
+
+    far-LEFT line, one lane away, read as ABSENT on 0.7% of frames -- even from the RIGHTMOST lane
+
+The far-left line is believed ~99% of the time regardless of how many lanes there are. A test that
+is true almost always opens almost everything, which is not a gate.
+
+**AND THAT ASYMMETRY IS THE REAL FINDING, not a limitation of these two candidates.** Absence of
+the far-left line is RARE, so it is informative -- which is exactly why `no_lane_left` works and why
+both-outer-lines-absent could be turned into a leftmost verdict. Presence is near-universal, so it
+is not. **The camera can refuse on this question and cannot open on it.** Combined with the map rule
+above, nothing currently on the car can open the left gate more than the road edge already does.
+
+**So the edge term stays, and its wrongness is now understood rather than suspected.** It refuses
+wide roads because std tracks distance; the coverage lost is real (52-83% of motorway frames have
+the edge as sole refuser); and there is no legal, informative substitute available today.
+
+**What WOULD change it, stated so the next session does not re-derive these three dead ends:** a
+signal that says "there is a travel lane to my left" from the camera, in the POSITIVE direction,
+that is not true almost everywhere. Candidates nobody has measured: the far-left line's LATERAL
+POSITION rather than its probability (a line at 5.5 m is a lane away, one at 1.9 m is our own),
+`laneLineStds` on that specific line, or the adjacent-lane radar seeing traffic two lanes out.
+The first is cheap and is where to start.

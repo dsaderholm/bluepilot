@@ -68,6 +68,7 @@ def main() -> int:
   others_std = defaultdict(list)
   cur_hwy = "?"
   cur_speed = 0.0
+  cur_farleft = 0.0
 
   for seg in segs:
     p = os.path.join(REALDATA, seg, "rlog")
@@ -90,6 +91,16 @@ def main() -> int:
         continue
       if w == "carState":
         cur_speed = float(m.carState.vEgo)
+        continue
+      if w == "modelV2":
+        # THE CAMERA-ONLY WITNESS. The anchor's "a lane exists to my left" rests on the MAP's lane
+        # count, and map data may refuse but must never OPEN -- so it cannot carry a gate that
+        # opens a pass. The far-left LANE LINE is the same claim from the camera alone, and it can.
+        try:
+          probs = list(m.modelV2.laneLineProbs)
+          cur_farleft = float(probs[0]) if probs else 0.0
+        except Exception:  # noqa: BLE001
+          cur_farleft = 0.0
         continue
       if w != "longitudinalPlanSP":
         continue
@@ -117,6 +128,29 @@ def main() -> int:
         # Everything EXCEPT the edge-std term passes. This frame is one the sweep can win.
         c["othersOk"] += 1
         others_std[cur_hwy].append(std)
+        # CAN THE LANE ANCHOR CARRY THIS FRAME? The edge-std term measures the wrong thing here
+        # (it tracks distance, see bp_left_edge_truth.py), and the instrument built for "is there a
+        # lane to my left" is the anchor. So on exactly the frames the edge term is the sole
+        # refuser, ask what the anchor says -- that decides whether it could replace the term or
+        # whether it is just as blind.
+        if std > MAX_ROAD_EDGE_STD:
+          c["edgeSoleRefuser"] += 1
+          if cur_farleft >= MIN_ADJACENT_LINE_PROB:
+            c["farLeftLine"] += 1
+          idx = int(pa.laneIndex)
+          total = int(pa.lanesTotal)
+          lo, hi = int(pa.laneBoundLo), int(pa.laneBoundHi)
+          if bool(pa.noLaneLeft):
+            # The lines say we are LEFTMOST. Correct refusal, and the anchor knew.
+            c["anchor: leftmost, refuse"] += 1
+          elif idx >= 0 and total > 0 and idx < total - 1:
+            # A pinned index with room above it: there IS a lane to the left.
+            c["anchor: LANE EXISTS"] += 1
+          elif lo >= 0 and hi >= 0 and total > 0 and hi < total - 1:
+            # A RANGE, but even its top leaves a lane above. Still a definite yes.
+            c["anchor: LANE EXISTS (range)"] += 1
+          else:
+            c["anchor: unknown"] += 1
 
   if not by_class:
     sys.exit("no moving frames with mapdOut on this route")
@@ -146,6 +180,21 @@ def main() -> int:
       opened = sum(1 for x in v if x <= cand)
       row.append(f"{cand:.1f}->{100*opened/n:.0f}%")
     print("    gate open at threshold:  " + "   ".join(row))
+  print()
+  print("  ON THE FRAMES WHERE EDGE-STD IS THE SOLE REFUSER, WHAT DOES THE LANE ANCHOR SAY?")
+  for hwy in sorted(by_class, key=lambda h: -by_class[h]["frames"]):
+    c = by_class[hwy]
+    n = c["edgeSoleRefuser"]
+    if not n:
+      continue
+    parts = [f"{k.split(': ')[1]} {v} ({100*v/n:.0f}%)" for k, v in sorted(c.items())
+             if k.startswith("anchor: ")]
+    fl = c["farLeftLine"]
+    print(f"    {hwy:<14} {n:6d} frames   " + "   ".join(parts))
+    print(f"    {'':<14} {'':>6}   far-left LANE LINE believed (camera only): {fl} ({100*fl/n:.0f}%)")
+  print("    A high 'LANE EXISTS' share means the anchor could carry this gate and the edge term")
+  print("    is replaceable. A high 'unknown' means the anchor is just as blind and it cannot.")
+  print()
   print("  THE CEILING IS THE POINT: past it, loosening the edge buys nothing because another term")
   print("  is already refusing. And this direction OPENS passes, so it needs more than a coverage")
   print("  argument -- evidence that opens must never be cheaper than evidence that refuses.")
