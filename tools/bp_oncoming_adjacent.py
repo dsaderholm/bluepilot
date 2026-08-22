@@ -65,6 +65,9 @@ def main() -> int:
   cur = {"oneway": None, "hwy": None, "speed": 0.0}
   verdict = Counter()
   examples = {"left": [], "right": []}
+  # EVERY EDGE, with what it was seen at. This is what makes the floor question answerable rather
+  # than arguable: a candidate floor is scored by which of these it would have rejected.
+  events = []
   map_frames = 0
   pa_frames = 0
 
@@ -104,6 +107,10 @@ def main() -> int:
         if now and not prev[name]:
           edges[name] += 1
           ow, hwy = cur["oneway"], cur["hwy"]
+          impossible = ow is not None and (ow or hwy in ("motorway", "motorwayLink"))
+          events.append({"side": name, "v_ego": cur["speed"],
+                         "v_abs": float(a.oncomingVAbs), "hwy": hwy, "oneway": ow,
+                         "impossible": impossible, "known": ow is not None})
           if ow is None:
             verdict["no map data"] += 1
           elif ow or hwy in ("motorway", "motorwayLink"):
@@ -126,6 +133,36 @@ def main() -> int:
     for hwy, ow, mph in examples[name]:
       print(f"    example {name}: highwayClass={hwy} oneWay={ow} at {mph:.0f} mph")
   print()
+
+  # ---- what a different floor would have cost ------------------------------------------------
+  # The live rule, imported rather than restated so this cannot drift from what the car runs.
+  from openpilot.sunnypilot.selfdrive.controls.lib.adjacent_lane import (
+    MIN_ONCOMING_MS, ONCOMING_SPEED_FRACTION,
+  )
+  known = [e for e in events if e["known"]]
+  if known:
+    print(f"  WHAT A DIFFERENT FLOOR WOULD COST. Live rule: max({MIN_ONCOMING_MS:.1f}, "
+          f"{ONCOMING_SPEED_FRACTION:.2f} * v_ego)")
+    print(f"  {'flat floor':>10} {'fraction':>9} {'FALSE killed':>13} {'real LOST':>10}")
+    for flat in (5.0, 7.0, 9.0, 11.0):
+      for frac in (ONCOMING_SPEED_FRACTION, 0.7):
+        killed = lost = 0
+        for e in known:
+          thresh = max(flat, frac * max(0.0, e["v_ego"]))
+          survives = abs(e["v_abs"]) >= thresh
+          if not survives:
+            if e["impossible"]:
+              killed += 1
+            else:
+              lost += 1
+        star = "  <- live" if (flat == MIN_ONCOMING_MS and frac == ONCOMING_SPEED_FRACTION) else ""
+        n_imp = sum(1 for e in known if e["impossible"])
+        n_ok = len(known) - n_imp
+        print(f"  {flat:10.1f} {frac:9.2f} {killed:8d}/{n_imp:<4d} {lost:6d}/{n_ok:<4d}{star}")
+    print("  FALSE killed is the gain; real LOST is what it costs -- edges on two-way roads that")
+    print("  a higher floor would also reject. Both are counted over edges whose road the MAP knew.")
+    print()
+
   print("  A rising edge on a one-way road is the flag being wrong on evidence already recorded --")
   print("  no 'when and where' needed. It is one input away from a refusal; the veto itself is")
   print("  separately guarded, so do not read a bad edge here as a bad refusal.")

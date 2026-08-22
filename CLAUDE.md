@@ -3808,6 +3808,40 @@ first write-up read.
 **-0 mph** -- stationary. Whatever the radar called opposing traffic in the adjacent lane, the car
 was not moving on a one-way road at the time.
 
+### AND RAISING THE FLOOR DOES NOT SEPARATE THEM. MEASURED, 2026-08-22.
+
+`bp_oncoming_adjacent.py` now scores candidate floors against every recorded edge -- how many FALSE
+ones a floor would have killed against how many REAL two-way ones it would have taken with them.
+Pooled over eleven drives, 30 edges:
+
+    flat  frac      FALSE killed        REAL lost
+     5.0  0.50    0 of 10    0%      2 of 20   10%   <- LIVE
+     5.0  0.70    3 of 10   30%      2 of 20   10%
+     7.0  0.70    5 of 10   50%      5 of 20   25%
+     9.0  0.50    7 of 10   70%      9 of 20   45%
+    11.0  0.50    7 of 10   70%     13 of 20   65%
+
+**Every gain costs roughly proportionally, so |v_abs| does not discriminate.** The false edges and
+the real ones live in the same speed band. This is the measurement the previous entry asked for and
+it says the change it was leaning toward is not available.
+
+**The one FREE move is the FRACTION, not the flat floor:** 0.50 -> 0.70 kills 3 of 10 false edges
+and loses NO real edge the live rule was not already losing. Cheap, real, and small.
+
+**AND THE OBVIOUS DISCRIMINATOR IS FORBIDDEN, which is worth stating before someone reaches for it.**
+`oneWay` from the map separates these perfectly by construction -- it is what labels them. But
+suppressing an oncoming sighting because the map says one-way is **the map REMOVING a refusal**,
+which is the map opening a maneuver. The rule in this file is absolute: *map data MAY REFUSE, MUST
+NEVER OPEN*. A stale tile would then admit a pass into oncoming traffic, and "no map costs coverage,
+never safety" would stop being true. **Do not use `oneWay` to gate this flag**, however well it
+would score.
+
+**A caveat on the table, because the tool cannot be exact here.** Two REAL edges score as lost under
+the LIVE rule, which is impossible if the scored `oncomingVAbs` were the value that triggered them --
+so on ~7% of edges the value at the edge frame is not the triggering sighting's. The flag latches
+after `ONCOMING_FRAMES` of corroboration and the tool reads the frame the latch appears on. Treat
+the columns as accurate to a couple of edges, which does not change the shape.
+
 ## (superseded) `oncomingAdjacent` READS TRUE ON 28.9% OF LEFT FRAMES ON A FREEWAY. FIRST READ 2026-08-21.
 
 The struct audit that found 25 unread `PassingAssist` fields was widened to every fork-authored
