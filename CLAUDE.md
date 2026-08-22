@@ -3935,3 +3935,52 @@ MEANS physically at 1.5 versus 6.6, and whether the model is uncertain or simply
 threshold.** The next step is the measurement nobody has done -- what the left edge is doing on the
 frames where its std explodes, checked against the lane lines on the same frame, which is the
 technique that found the shoulder bias.
+
+## `roadEdgeStds` IS A DISTANCE PROXY, NOT A CONFIDENCE FLAG. THE LEFT GATE REFUSES WIDE ROADS.
+
+2026-08-22, `tools/bp_left_edge_truth.py`, three drives, 44,000 moving frames. This is the
+measurement the previous entry said was missing, and it settles which lever is wrong.
+
+**The question was whether a big `leftEdgeStd` means the POSITION is bad.** Two witnesses on the
+same frame, which is the technique that found the shoulder bias: the road edge and the outermost
+believed left lane line both measure the left side of the road, so their gap is a shoulder -- real,
+positive, roughly constant. Plus frame-to-frame jump, which needs no second witness at all.
+
+    leftEdgeStd     frames    shoulder gap p50    frame jump p50 / p90    |edge| p50
+    0.0-1.2          34-62%       2.56 - 3.95        0.13-0.16 / 0.38-0.49    5.5 - 7.6
+    1.2-2.0          18-26%       4.47 - 4.69        0.14-0.19 / 0.45-0.55    7.9 - 8.8
+    2.0-4.0           9-13%       4.54 - 4.89        0.13-0.15 / 0.37-0.43    8.9 - 9.3
+    4.0-8.0           5-15%       4.90 - 5.16        0.12-0.14 / 0.31-0.36    9.3 - 9.9
+    8.0+              6-20%       5.40 - 5.50        0.14-0.15 / 0.38-0.40   10.0 - 10.4
+
+**THE FRAME-TO-FRAME JUMP IS FLAT.** 0.13 m at std 0.5 and 0.14 m at std 8+, with p90 identical
+too. The edge position does not wander at high std -- it is exactly as steady as at low std. So the
+std is NOT reporting an unstable measurement.
+
+**THE GAP NEVER GOES NEGATIVE AND NEVER GOES WILD.** It grows smoothly, and its p10 grows with it
+(1.1-1.5 at the bottom band, 4.5-4.9 at the top), so the whole distribution shifts rather than a
+bad tail appearing. Nothing here looks like garbage.
+
+**WHAT THE STD ACTUALLY TRACKS IS DISTANCE.** `|edge|` goes 5.5-7.6 m at the bottom band to
+10.0-10.4 m at the top, monotonically, on all three drives. The model is less certain about things
+further away, which is ordinary and correct behaviour for it.
+
+**SO `MAX_ROAD_EDGE_STD` IS ACTING AS A DISTANCE CUTOFF ON THE LEFT ROAD EDGE**, and that is
+backwards for this gate. A distant left edge means a WIDE road -- more lanes out there, more room to
+pass into. The gate refuses hardest exactly where passing is most available, which is why route
+000003aa read `gate open 0%` on motorway with an edge-std p50 of 6.60: a wide freeway, a far median,
+a high std, and a refusal.
+
+**THE LEVER IS THE WRONG SHAPE, NOT THE WRONG VALUE.** The previous entry's sweep (1.2 -> 2.5 buys
+27 -> 52% on one drive and 0 -> 5% on another) now makes sense: raising a distance cutoff helps only
+where the distance happened to be near it. Loosening it further is not the fix and neither is
+leaving it.
+
+**WHAT THIS DOES NOT ESTABLISH, and it is the part that stops this becoming a change today.** The
+gap being 5.4 m past the outer paint does not say WHAT is out there. Shoulder, median, barrier, or
+two more lanes all produce the same number, and `_geometry` already has a term for room past the
+paint (`MIN_EDGE_BEYOND_LINE_M`) which is a different question from confidence. Deciding what the
+edge term should ask instead needs that separation, and this measurement cannot make it.
+
+**Nothing changed on the strength of this.** It reframes the problem and retires one candidate fix,
+which is what it was for.
