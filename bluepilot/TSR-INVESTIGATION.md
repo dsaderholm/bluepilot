@@ -218,6 +218,79 @@ pattern. Note the XML nests DIDs *inside* the NODEID text node (`<NODEID>706<F10
 
 ---
 
+## 4e. FORSCAN WRITES `706-01-01`. THE "FORSCAN REFUSES" PREMISE WAS WRONG.
+
+**2026-08-21, live at the car.** `706-01-01` was written to **`0810 A9DB B964`** — nibble 2 only
+(`4`->`8`), his own nibbles 8-9 kept, checksum computed. **FORScan accepted it. No new DTCs.**
+
+This overturns something asserted throughout this document since day one.
+
+```
+OLD CLAIM   "FORScan cannot write these. Its profile is a 2020 Fusion; the IPMA
+             changes are feature enables a Fusion never had."
+REALITY     FORScan refused ONE VALUE -- 0450 -- and 0450 was the only value ever
+             tried on this block. The refusal was value validation, not profile
+             validation. The block writes fine.
+```
+
+**Consequence: the €130 UCDS EXT licence may be unnecessary.** A writing tool already exists and is
+already in his hands. Do not buy the licence to get past mode 1; mode 1 is not where this stops.
+
+The `U0253` seen straight after carries `EVENT_TIME` = Fri Aug 21 19:52:03 2026 — the write itself
+resetting the module — and reads **"Previously Set DTC - Not Present at Time of Request"** with the
+MIL off. It is the write, not a fault. Module voltage 13.5 V, ECU internal 109 °F, 125,456 miles.
+
+### The checksum, solved
+
+Every candidate value in this document can now be generated rather than copied from another car:
+
+```
+checksum = (0x07 + 0x06 + section + block + sum(data_bytes)) & 0xFF
+```
+
+Section and block are the **literal hex of the printed label** — `706-02-10` contributes `0x02` and
+`0x10`, not decimal 2 and 10. Verified against all 58 blocks of both complete IPMA dumps with zero
+failures. Tooling and both dumps live in `bluepilot/asbuilt/`; run `asbuilt.py` to re-verify and diff.
+
+### `706-02-01` nibble 4 is the TSR data source — a 13th difference 4d never had
+
+His live read on 2026-08-21 is **`FD52 16DB 7FCF`**. Section 4d recorded **`FD56 16DB 7FD3`** on
+2026-08-12. Computing the checksum for nibble 4 = `6` reproduces 4d's value exactly, so **4d was not
+a transcription error — the car changed.**
+
+That is section 4b happening: he set *TSR data source -> Camera + APIM*, `NoNavDataAvailable` cleared,
+and it reverted at the next boot. 4d caught the car inside that window.
+
+| | nibble 4 | meaning |
+|---|---|---|
+| friend, TSR works | `6` | Camera + APIM — **and it holds** |
+| his, 2026-08-12 | `6` | just written, section 4b |
+| his, 2026-08-21 | `2` | Camera Only — reverted |
+
+Target value, checksum valid: **`706-02-01` -> `FD56 16DB 7FD3`**.
+
+### The open question, and the reading that answers it
+
+After a key cycle, re-read `706-01-01`:
+
+- **`0810 A9DB B964`** -> it persisted. Nibble 2 is writable AND holds, which is more than
+  *Camera + APIM* ever managed, and the remaining work is which nibble actually gates TSR.
+- **`0410 A9DB B960`** -> startup validation rejected it, exactly as in 4b, and the licence was never
+  the blocker.
+
+Restore value, exact: **`706-01-01` -> `0410 A9DB B960`**.
+
+Bisect candidates, all checksum-valid, from `bluepilot/asbuilt/asbuilt.py`:
+
+```
+0810 A9DB B964   nibble 2 only            <- WRITTEN 2026-08-21, accepted
+0410 A9DA A94F   nibbles 8-9 only
+0810 A9DA A953   full copy of the friend's block
+0400 A9DB B950   diagnostic: IACC not TSR
+```
+
+---
+
 ## 4b. THE ONLY THING THAT DEMONSTRABLY WORKED: "TSR data source = Camera + APIM"
 
 Filed as a dead end at first. It is the opposite -- it is the single piece of positive evidence from
@@ -353,8 +426,11 @@ expect a revert to undo it.
 
 ## 6. Tooling
 
-**FORScan** cannot write these. Its profile is a 2020 Fusion; the IPC and IPMA changes are feature
-enables a Fusion never had. The APIM one was allowed, which is why that single change worked.
+**FORScan** — **THIS PARAGRAPH WAS WRONG, see section 4e.** It used to read "cannot write these.
+Its profile is a 2020 Fusion; the IPC and IPMA changes are feature enables a Fusion never had."
+On 2026-08-21 FORScan wrote `706-01-01` to `0810 A9DB B964` and accepted it. It had refused exactly
+one value, `0450`, which was the only value ever tried on that block. Value validation, not profile
+validation. The APIM write was never the outlier it was assumed to be.
 
 **UCDS** is installed (`v3.0.001.023`), adapter connected via USB, SN `7E 4E 6A 9B`. **All three
 licences read "Not activated".**
