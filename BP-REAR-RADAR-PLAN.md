@@ -838,11 +838,10 @@ this part needs no transmit path at all.
 
 | Item | Price | Note |
 |---|---|---|
-| Teensy 4.0 | $24 | 4.1 is $30 and unnecessary; three CAN controllers either way, two used |
-| **Electroneering dual-CAN hat for Teensy 4.0** | $15 | **NAME THE PART, because the firmware is written against its silkscreen.** `rear_radar_feeder.ino` assigns CAN1 = the CAR (white/light blue) and CAN2 = the RADAR (yellow/green) to match the board's own labels, confirmed with the seller 2026-08-14. A different dual-CAN board means re-checking that mapping before flashing, not just re-wiring. **Cut CAN1's 120 ohm** -- bus 1 already has its two terminators and a third takes it to ~40 ohm, which can stop the front radar and ACC the car actually drives on. **Keep CAN2's**: the radar carries the other one, so that pair should read ~60. |
-| Wiring, fuse, inline connectors, DC-DC | ~$30 | |
+| **Automotive Teensy 4.0 with Dual CANbus Hat** (Electroneering) | price not recorded here | **ONE part, not a Teensy plus a hat.** This table listed Teensy 4.0 at $24 and a dual-CAN adapter at $15 as separate lines; he corrected it 2026-08-21 and gave the product name. The firmware already assumed it: `rear_radar_feeder.ino` documents wiring **by wire colour** -- red/black 12 V switched and ground, CAN1 white/light blue, CAN2 yellow/green, purple spare switched output. A bare hat has headers, not a loom. Channel assignment follows the unit's own silkscreen, **confirmed with the seller 2026-08-14**: CAN1 is the VEHICLE side, CAN2 the DEVICE side. **A different board is not a re-wire, it is a re-check of that mapping before flashing.** Termination points opposite ways: **cut CAN1's 120 ohm** (bus 1 has its two already; a third takes it to ~40 and can stop the front radar and ACC), **keep CAN2's** (the radar carries the other, so the pair reads ~60). |
+| Wiring, fuse, inline connectors | ~$30 | The unit ships its own pigtail, so this is what gets it from there to a switched 12 V source and out to the radar -- not a DC-DC, which the automotive packaging already handles. |
 | Bracket / radome | $0–40 | **`tools/rear_radar_mount.scad` is already written** -- parametric, implementing the chosen low-behind-the-valance layout. It is a FIRST PASS, not a part: every number carrying a `MEASURE:` comment is a placeholder. Filling those in is the whole job and needs three measurements off the car -- cover-to-beam depth, height above ground, and a caliper of the front MRR. |
-| **Phase 2 total** | **$70–110** | |
+| **Phase 2 total** | **re-price it** | The old $70-110 was the Teensy-plus-hat split plus a DC-DC that is not needed. Nothing in the tree records what the all-in-one costs, so this stays honest rather than carrying an invented number. |
 
 ### The bench adapter, settled 2026-08-09
 
