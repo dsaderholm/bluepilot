@@ -731,6 +731,11 @@ class SelfdriveD(CruiseHelper):
     icbm.baselineSource = self.icbm.baseline_source
     icbm.pinSuggestion = float(self.icbm_pin_suggestion)
     icbm.gapTarget = int(self.icbm.gap_target)
+    # FusionPilot: what the hold-clearing rule actually compares. vTarget above is post-baseline
+    # and equals vBaseline whenever a hold is active, so it cannot answer "did the rule see
+    # equality". These two can. See the capnp comment.
+    icbm.vTargetRaw = float(self.icbm.v_target_raw)
+    icbm.baselineDiverged = bool(self.icbm.baseline_diverged)
 
     self.pm.send('selfdriveStateSP', ss_sp_msg)
 

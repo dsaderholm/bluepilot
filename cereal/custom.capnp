@@ -58,6 +58,20 @@ struct IntelligentCruiseButtonManagement {
   # Honoured in opendbc's ford/gap_control.py, closed loop against AccTGap_D_Dsply in ACCDATA_3.
   gapTarget @8 :UInt8;
 
+  # FusionPilot: THE TWO VALUES THE HOLD-CLEARING RULE ACTUALLY COMPARES. Neither was published,
+  # and on 2026-08-21 that made a real on-road report ("set the speed back to SLA and the hold did
+  # not clear") undiagnosable from a route.
+  #
+  # `vTarget` above is the value AFTER apply_baseline, so while a hold is active it EQUALS
+  # vBaseline by construction -- a log reader comparing those two sees equality on every frame and
+  # learns nothing. The rule compares `v_target_raw`, the planner's own target before the baseline
+  # is applied, against the baseline; and it only acts when `baseline_diverged` says the baseline
+  # has actually been somewhere else first.
+  #
+  # Same shape as the three other "computed correctly and never rendered" bugs in this fork.
+  vTargetRaw @9 :Float32;
+  baselineDiverged @10 :Bool;
+
   enum IntelligentCruiseButtonManagementState {
     inactive @0;      # No button press or default state
     preActive @1;     # Pre-active state before transitioning to increasing or decreasing

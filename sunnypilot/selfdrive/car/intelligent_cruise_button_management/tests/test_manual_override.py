@@ -516,6 +516,52 @@ class TestReturningToTheLimitHandsItBack:
     assert icbm.override_state == OverrideState.auto
     assert icbm.v_baseline == 0
 
+  def test_it_still_clears_when_the_plan_source_OSCILLATES(self):
+    """THE ROAD DOES NOT HOLD THE PLAN SOURCE STILL, AND THE OTHER TESTS IN THIS CLASS DO.
+
+    Reported 2026-08-21: "setting my speed after having a hold back to SLA, the hold didn't clear",
+    with the badge still drawn under the target speed. Route 000003a2 shows why the existing tests
+    missed it -- while the set speed sat at the hold with a posted limit known, the winning plan
+    source alternated speedLimitAssist <-> cruise roughly TWICE A SECOND, for eight seconds
+    straight:
+
+        74.0  baseline 27  planSrc speedLimitAssist
+        74.4  baseline 27  planSrc cruise
+        74.5  baseline 27  planSrc speedLimitAssist
+        74.9  baseline 27  planSrc cruise          ... and so on
+
+    That is ordinary: lowering the set speed toward SLA's number makes the driver's own cruise
+    target the minimum, so `cruise` wins the plan every time the two cross. The clearing rule is
+    gated on `plan_source == speedLimitAssist`, and `settle()` pins the source, so every other test
+    here runs a road that does not exist.
+
+    Same shape as the fixture defects already recorded in this file: a fixture that holds one thing
+    constant hides exactly the bug that thing causes.
+    """
+    icbm = fresh()
+    set_baseline(icbm)
+    settle(icbm, LIMIT)
+    cluster = DRIVER
+    for _ in range(DRIVER - LIMIT):
+      icbm.run(make_cs(cluster, buttons=(DECEL_PRESS,)), CC, make_lp(LIMIT), False)
+      cluster -= 1
+      for f in range(12):
+        icbm.run(make_cs(cluster, buttons=(DECEL_RELEASE,) if f == 2 else ()), CC,
+                 make_lp(LIMIT), False)
+    assert cluster == LIMIT
+
+    # 400 frames of the road's own behaviour: the source flips every 40 frames (0.4 s), which is
+    # what route 000003a2 measured. There are ~200 speedLimitAssist frames in here, so a rule that
+    # needs the source to be SLA has every opportunity it could ask for.
+    for i in range(400):
+      src = PlanSource.speedLimitAssist if (i // 40) % 2 == 0 else PlanSource.cruise
+      icbm.run(make_cs(cluster), CC, make_lp(LIMIT, source=src), False)
+
+    assert icbm.v_baseline == 0, (
+      f"hold survived a return to SLA's number when the plan source oscillated "
+      f"(baseline={icbm.v_baseline}, diverged={icbm.baseline_diverged})")
+    assert icbm.override_state == OverrideState.auto
+
   def test_a_curve_matching_the_baseline_does_not_clear_it(self):
     icbm = fresh()
     set_baseline(icbm)
