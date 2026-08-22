@@ -2233,6 +2233,60 @@ correct and useless. Answering the question meant writing a second script agains
 8 now prints the `thermalStatus` histogram and says BAD when anything derated. **When a check
 deliberately refuses to render a verdict, ask whether the deciding field is one it already has.**
 
+**AND IT IS NOT NEW -- CORRECTING WHAT WAS SAID AN HOUR EARLIER.** The first write-up called this a
+regression. Run over the last EIGHT routes it is two of them, and the older one predates every
+change made that day:
+
+    000003a1   908 s   peak 105 C   fan 100%   OVERHEATED 633/1814   34.9%
+    0000039c  1091 s   peak  97 C   fan 100%   OVERHEATED 453/2183   20.8%
+    0000039f  1171 s   peak  83 C   fan  83%   ok throughout          <- the LONGEST drive
+    0000039a   950 s   peak  87 C   fan 100%   ok throughout
+    the other four                              ok throughout
+
+**Duration is not the driver** -- the longest drive of the eight is clean. Both bad ones ran the fan
+at 100%, but so did a clean one, so the fan pinning is a symptom and not the discriminator either.
+It has been happening for days and nothing reported it, because the check printed a temperature and
+declined to judge it while the field that judges it sat unread in the same message.
+
+**So "MEASURED, TWICE, AND CLOSED" was closed on the wrong field.** Both of those measurements were
+real and neither looked at `thermalStatus`.
+
+## 25 PASSING-ASSIST FIELDS ARE LOGGED INTO EVERY ROUTE AND READ BY NOTHING
+
+2026-08-21. An audit of every top-level `PassingAssist` field against every consumer -- both
+renderers, the car-side readers, the desire path, and all of `tools/` -- came out:
+
+    108 fields   71 on a screen or acted on   12 diagnostics only   25 READ BY NOTHING
+
+For those 25 the only three references in the repo are a comment, a comment, and the publish line.
+**This is the fork's oldest bug one level out**: not "computed and never rendered" but "recorded and
+never READ", which is worse in one way -- an unrendered value stops being written when someone
+deletes it, while these accumulate in every drive looking like evidence nobody wanted.
+
+`tools/bp_passing_unread.py` is the reader. First results, route 0000039f, 23,308 frames:
+
+**THE CONSTANT THAT "HAD NO SAFE VALUE UNTIL MEASURED" IS NOW MEASURED.** `accBrakingOnsetDRel`:
+
+    n=3435   min 14 m   p50 85 m   p90 120 m   MAX 125 m
+
+The close-in hold has to stay clear of 125 m: inside that, ACC is already braking, so waiting to
+"let ACC deal with it" is waiting forever. Note the p50 of 85 m against the 137 m recorded earlier
+from a single event -- **137 was the tail, not the typical case**, and sizing anything off it would
+have been far too conservative.
+
+**THE ONCOMING VETO IS ALMOST ENTIRELY MEMORY, NOT SIGHTINGS.** `oncomingSeenSeconds` 0.1 s against
+`oncomingRememberedSeconds` 6.7 s -- **99.3% remembered**. The 90 s window is doing essentially all
+the work on this drive, which is exactly what a false fire on a divided highway looks like from the
+inside. That is the first hard evidence about the I-15 report and it points at the window length
+rather than at the detector.
+
+Also first-read: 15 decisions, of which ACC was already braking on 3 and merely pre-charging on 3;
+`clearShare` p50 0.05, so nothing was stopping a pass on about 5% of the drive.
+
+**A LEVEL IS NOT AN EVENT, and the tool made that mistake in its first run** -- it counted
+`driverChangeStandDown` frames and reported 2,413 lane changes where there were 16. The docstring
+warns about denominators; the file broke its own rule. Count rising edges.
+
 ### LOW-SPEED CURVES: VISION IS STRUCTURALLY UNABLE TO HELP, AND THE MAP RARELY GETS A CHANCE
 
 *"Low speed curves, it isn't slowing down enough."* Attributed on route 00000393, 2026-08-19,
