@@ -8,7 +8,6 @@ from opendbc.car.structs import ControllerStateBP
 from openpilot.bluepilot.ui.lib.bp_shaders import draw_shader_circle_gradient
 from openpilot.selfdrive.ui.onroad.hud_renderer import UI_CONFIG, FONT_SIZES, COLORS
 from openpilot.selfdrive.ui.sunnypilot.onroad.hud_renderer import HudRendererSP
-from openpilot.selfdrive.ui.bp.onroad.icbm_hud_state import read_icbm_hud_state
 from openpilot.selfdrive.ui.bp.onroad.exp_button_bp import ExpButtonBP
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.text_measure import measure_text_cached
@@ -70,23 +69,31 @@ ACC_STATUS_COLORS = {
   # screen; there is no recovering it mid-drive, so the only useful response is to know.
   "ACC LOST": rl.Color(232, 58, 48, 240),
 }
-# BluePilot: both readouts used to be 34 px unbacked text under the MAX box, which the owner could
-# not pick out at a glance while driving. They are now drawn as filled shapes sized against the
-# MAX box next to them -- see scratchpad/hud_preview.py, which renders this corner offline at
-# device scale so placement can be judged without a drive.
-HOLD_FILL = rl.Color(30, 78, 176, 235)
-# BluePilot: while a curve, map point or hazard owns the target, a set-speed press cannot change
-# the hold -- it gives a momentary bump the suppressor reclaims within about a second. That is
-# deliberate, but it means the press does not do what a press normally does, so the badge goes
-# gray to say so. Without it the button silently has no lasting effect and looks broken.
-HOLD_LOCKED_FILL = rl.Color(84, 90, 98, 225)
-HOLD_LOCKED_EDGE = rl.Color(140, 148, 156, 235)
-HOLD_LOCKED_LABEL = rl.Color(178, 186, 194, 255)
-HOLD_EDGE = rl.Color(130, 185, 255, 255)
-HOLD_LABEL_COLOR = rl.Color(175, 210, 255, 255)
-HOLD_HEIGHT = 124
-HOLD_LABEL_SIZE = 32
-HOLD_VALUE_SIZE = 66
+# THE HOLD BADGE AND ITS PALETTE WERE DELETED ON 2026-08-22, along with the +/- arrow that hung off
+# its label and the pin dot in its corner. The box above already shows the hold as the big number
+# and tints while the hold owns it, so the badge was drawing a number that was already on screen.
+#
+# Where each piece went, so none of it has to be rediscovered:
+#   the number        the big number in the set-speed box (`max_box_state`, aim)
+#   "not yours to     the box stops tinting while `hold_locked` -- what the gray badge said
+#    change" state
+#   the +/- arrow     DROPPED, and NOT replaced -- the first version of this note claimed rank 1
+#                     covered "every moment the arrow would have been drawn", which is not true and
+#                     was corrected on review the same day. The arrow came from `sendButton.raw`
+#                     (ICBM is holding a button THIS FRAME); rank 1 fires on
+#                     `round(dash) != round(aim)` (the car is not at the target). They diverge both
+#                     ways: the dash sits a mile off the aim for seconds with no press in flight,
+#                     which is Ford's own increment lag, and a press can be in flight on a frame
+#                     where the two happen to agree.
+#
+#                     So what is genuinely lost is "openpilot is working on it right now" as
+#                     distinct from "openpilot and the car disagree and nothing is happening" --
+#                     the distinction behind the set-speed hunting report on route 00000361. It is
+#                     left lost rather than given a corner of the box, because the box has one
+#                     number worth reading and the arrow's home was the badge. If the hunting ever
+#                     comes back, this is the readout to rebuild first.
+#   the pin dot/ring  the same corner of the box, drawn by `HudRendererSP._draw_set_speed`
+#   the offered pin   the label slot, rank 3
 # Dark ink on the filled ACCEL/BRAKE pills; they are bright enough that white text greys out.
 ACC_INK = rl.Color(10, 14, 20, 255)
 # States with no magnitude to report: no number, no intensity bar. They are still filled -- the
@@ -166,15 +173,13 @@ TSR_PILL_FILL = rl.Color(0, 0, 0, 150)
 TSR_PILL_EDGE = rl.Color(196, 176, 70, 205)
 TSR_PILL_INK = rl.Color(226, 206, 110, 255)
 
-# BluePilot: a hold pinned to this place re-applies itself on every drive. Marked with a dot in the
-# badge's LEFT corner rather than a word: the badge is 172 px wide and already carries a label and a
-# two-digit number, and "PIN" competing with "HOLD" reads as two labels for one thing. Left because
-# the right corner belongs to the +/- arrow.
-# A HOLLOW dot is a suggestion, a filled one is a pin. Same mark, same corner, same tap -- the
-# difference is whether the car is already doing it or only offering to. Two symbols would have to
-# be learned; one symbol in two states reads immediately.
-PIN_DOT_RADIUS = 9
-PIN_DOT_COLOR = rl.Color(255, 214, 120, 255)
+# The pin dot moved to `selfdrive/ui/sunnypilot/onroad/hud_renderer.py` with the rest of the badge
+# on 2026-08-22 -- it is drawn on the set-speed box now, in the same corner, at the same size. The
+# rule it encodes is unchanged and worth keeping written down: A HOLLOW RING IS A SUGGESTION, A
+# FILLED DOT IS A PIN. Same mark, same corner, same tap; the difference is whether the car is
+# already doing it or only offering to. Two symbols would have to be learned, one symbol in two
+# states reads immediately.
+
 # BluePilot: blockedBy -> what a driver should read. The enum names are for the log; putting
 # "nothingSlower" or "noLaneAvailable" in front of someone at 70 mph is a failure of the display, not
 # a shorthand. Anything unmapped falls through to the raw name so a new state is visible rather
@@ -381,14 +386,13 @@ class HudRendererBP(HudRendererSP):
     # flickers through them is a pill he learns to ignore. `opStop` and `inert` are NOT debounced
     # through this: one is deliberate and the other is already 5 s old when it is published.
     self._acc_fallback_frames = 0
-    self._icbm_baseline = 0   # the number ON THE BADGE: the hold, or a pin being offered; 0 = none
-    self._icbm_arrow = ""     # "+" / "-" while ICBM is actively moving the set speed, else ""
-    self._icbm_hold_locked = False  # something else owns the target; a press cannot change the hold
     self._lamp_data_available = False  # the BCM/brake-system lamp signal is actually being decoded
     self._tsr_fault = ""      # why TSR is not producing a limit; "" when it is working or silent
-    self._icbm_pinned = False   # this hold came from a pin, so tapping the badge removes it
-    self._icbm_pin_suggested = False  # set the same hold here before; tapping accepts
-    self._hold_rect = None      # last drawn badge rect; the tap target for pinning
+    # FIVE `_icbm_*` FIELDS LIVED HERE AND ALL FIVE WERE READ ONLY BY THE HOLD BADGE. Deleted with
+    # it on 2026-08-22 rather than left assigned: four of them had already become write-only, two
+    # were not reset per frame, and the next person to draw a pin state would have reached for
+    # last frame's answer. The box resolves all of it now, once, in `max_box_state`.
+    self._hold_rect = None      # the set-speed box, while there is a hold or an offer to tap
     self._acc_status_failed = False   # latched on any error; keeps a display bug off the screen
     self.speed_right = 0
     self._gradient_rect = None  # BluePilot: Full-width rect for header gradient
@@ -501,7 +505,6 @@ class HudRendererBP(HudRendererSP):
       except Exception as e:
         self._acc_status_failed = True
         self._acc_state, self._acc_accel = "", 0.0
-        self._icbm_baseline, self._icbm_arrow = 0, ""
         bp_ui_log.state("HudRendererBP", "acc_status_error", repr(e))
 
     # BluePilot: same protection, SEPARATE latch. These are unrelated readouts and must fail
@@ -562,33 +565,14 @@ class HudRendererBP(HudRendererSP):
     openpilot is not the longitudinal controller.
     """
     self._acc_state, self._acc_accel = "", 0.0
-    self._icbm_baseline, self._icbm_arrow = 0, ""
-    # Reset with the rest. Today it cannot be read stale -- the badge only draws when
-    # _icbm_baseline is non-zero, and both are written together below -- but leaving one field of
-    # the group holding last frame's value is a trap for whoever next draws the lock state.
-    self._icbm_hold_locked = False
     sm = ui_state.sm
 
-    # BluePilot: the ICBM line is NOT gated on the brake-status toggle. Whether ICBM is holding
-    # the driver's own set speed or chasing Speed Limit Assist is basic state, not a debug
-    # readout -- and hiding it behind an unrelated toggle meant the driver spent days unable to
-    # see whether an override had taken at all. The ACC accel/coast/brake line below stays behind
-    # the toggle; that one really is diagnostic.
-    # Read through the shared reader, not inline: the comma 4 screen draws the same hold from its own
-    # renderer tree, and two copies of this would drift apart on the next enum change.
-    icbm_state = read_icbm_hud_state(sm)
-    self._icbm_arrow = icbm_state.arrow
-    # worth_showing, not has_hold -- see IcbmHudState. The hold still governs the car either way;
-    # this only decides whether a badge showing the same number as MAX is drawn.
-    if icbm_state.worth_showing:
-      # display_value, not baseline: with a standing pin suggestion and no hold this is the speed
-      # being OFFERED, and the badge is the only tap target that can accept it. Taking `baseline`
-      # here drew a badge reading 0. Everything downstream -- the tap gate, the stack visibility,
-      # the drawn number -- keys off this one field, so it has to be the number on screen.
-      self._icbm_baseline = icbm_state.display_value
-      self._icbm_hold_locked = icbm_state.hold_locked
-      self._icbm_pinned = icbm_state.pinned
-      self._icbm_pin_suggested = icbm_state.pin_suggested
+    # THE ICBM READ USED TO LIVE HERE and it is gone, 2026-08-22, with the badge it fed.
+    #
+    # `HudRendererSP._set_speed_aim` already calls `read_icbm_hud_state` once per frame to resolve
+    # the set-speed box, so doing it again here parsed the same two messages a second time for
+    # fields nothing draws any more. The one thing still wanted -- whether there is anything to tap
+    # -- comes off `self._box` in `_render`, which `_draw_set_speed` has just written.
 
     # BluePilot: TSR fault reason. Read before the brake-status gate below -- it has nothing to do
     # with brakes and must not disappear when that toggle is off.
@@ -1378,6 +1362,22 @@ class HudRendererBP(HudRendererSP):
     # HUD elements use the (possibly offset) rect for positioning
     if self.is_cruise_available:
       self._draw_set_speed(rect)
+      # THE PIN TAP TARGET IS THE SET-SPEED BOX ITSELF, 2026-08-22. The HOLD badge that used to own
+      # this rect is gone -- since `max_box_state` landed, the box already shows the hold as the big
+      # number and tints while the hold owns it, so the badge was a second drawing of a number
+      # already on screen. His call: *"we are just going to use the target speed"*.
+      #
+      # Set HERE rather than in `_draw_acc_status`, where the badge lived, because that method
+      # returns early in several states (lamps-only, nothing to report) and the tap must keep
+      # working in all of them. A hold governing the car with no way to pin or unpin it is the
+      # defect that killed pinned holds for two days in August.
+      # Straight off the box's own resolved state, which `_draw_set_speed` wrote one line ago.
+      # `hold_driving` covers a hold worth unpinning; `pin_offer` covers a place worth pinning with
+      # no hold yet -- which is exactly the pair the old `display_value` collapsed into one number.
+      tappable = bool(self._box.hold_driving or self._box.pin_offer) if self._box else False
+      self._hold_rect = self._set_speed_rect if tappable else None
+    else:
+      self._hold_rect = None   # no box on screen, no tap target
     # BluePilot: the ACC readouts describe what ACC is doing, so they follow cruise availability.
     # The brake lamps do not -- they are a fact about the car regardless of what is driving it, and
     # the owner asked for them visible whenever the setting is on. Drawn outside that gate, and
@@ -1423,7 +1423,10 @@ class HudRendererBP(HudRendererSP):
     #
     # Checking our own target first and returning is what makes it a real button rather than a
     # side effect of a tap that also does something else.
-    if (self._hold_rect is not None and self._icbm_baseline
+    # `_hold_rect` is None unless there is something to pin -- see `_render`. The second condition
+    # that used to be here read `_icbm_baseline`, which no longer exists and was saying the same
+    # thing twice.
+    if (self._hold_rect is not None
         and rl.check_collision_point_rec(mouse_pos, self._hold_rect)):
       try:
         self._bp_params.put_bool("IcbmPinHoldRequest", True)
@@ -1465,7 +1468,11 @@ class HudRendererBP(HudRendererSP):
     # is true whether or not cruise is engaged and has nothing to do with the brake-status toggle.
     if lamps_only and not self._tsr_fault and not (self._show_brake_status and self._lamp_data_available):
       return
-    if (not lamps_only and not self._acc_state and not self._icbm_baseline and not self._tsr_fault
+    # THE HOLD is NOT a reason to draw this stack any more. It was, while the HOLD badge
+    # lived here; the hold is now drawn by the set-speed box above and nothing in this column
+    # depends on it. Leaving it in the gate would reserve the stack for a readout that no longer
+    # exists, and push the ACC pill down for no reason.
+    if (not lamps_only and not self._acc_state and not self._tsr_fault
         and not (self._show_brake_status and self._lamp_data_available)):
       return
 
@@ -1475,10 +1482,6 @@ class HudRendererBP(HudRendererSP):
     if self._ahead_box_visible():
       y += AHEAD_BOX_HEIGHT + AHEAD_BOX_GAP
 
-    if self._icbm_baseline and not lamps_only:
-      y += self._draw_hold_badge(x, y, set_speed_width) + STACK_GAP
-    else:
-      self._hold_rect = None   # no badge on screen, no tap target
     if self._acc_state and not lamps_only:
       y += self._draw_acc_pill(x, y) + STACK_GAP
     # Shown whenever brake status is on, in both states -- an indicator that only appears when lit
@@ -1487,65 +1490,6 @@ class HudRendererBP(HudRendererSP):
     if self._show_brake_status and self._lamp_data_available:
       y += self._draw_brake_lamp_pill(x, y) + STACK_GAP
     self._draw_tsr_pill(x, y)
-
-  def _draw_hold_badge(self, x: float, y: float, width: float) -> int:
-    """BluePilot: the driver's own number, drawn as a sibling of the MAX box.
-
-    Same width, same label-over-number structure, so it reads as "the other set speed" rather than
-    as a caption.
-
-    Distinct from BOTH numbers the MAX box can show, which is worth being precise about because
-    all three are speeds and two of them often agree:
-
-      big number      carState.vCruiseCluster -- openpilot's OWN v_cruise. With ICBM
-                      (pcmCruiseSpeed False) VCruiseHelper maintains this from button presses
-                      using openpilot's increments, NOT the car's.
-      small number    carState.cruiseState.speedCluster -- the car's real dash set speed, shown
-                      in place of the word MAX by HudRendererSP._get_icbm_status whenever the two
-                      disagree, latched ~3 s.
-      this badge      the ICBM baseline -- the number ICBM returns the set speed to once a curve
-                      or hazard has passed. Persistent for as long as the override is held, where
-                      the small number is transient.
-
-    Geometry is safe against the small number: that one is drawn inside the box (y + 15) and this
-    starts below it (y + set_speed_height + 16).
-    """
-    locked = self._icbm_hold_locked
-    rect = rl.Rectangle(x, y, width, HOLD_HEIGHT)
-    rl.draw_rectangle_rounded(rect, 0.32, 10, HOLD_LOCKED_FILL if locked else HOLD_FILL)
-    rl.draw_rectangle_rounded_lines_ex(rect, 0.32, 10, 6,
-                                       HOLD_LOCKED_EDGE if locked else HOLD_EDGE)
-
-    center_x = x + width / 2
-    label_width = measure_text_cached(self._font_semi_bold, "HOLD", HOLD_LABEL_SIZE).x
-    # The label stays centerd on its own and the arrow hangs off its right, so the word does not
-    # shift position every time ICBM starts or stops adjusting.
-    rl.draw_text_ex(self._font_semi_bold, "HOLD",
-                    rl.Vector2(center_x - label_width / 2, y + 12), HOLD_LABEL_SIZE, 0,
-                    HOLD_LOCKED_LABEL if locked else HOLD_LABEL_COLOR)
-    if self._icbm_arrow:
-      self._draw_arrow(center_x + label_width / 2 + 20, y + 29, 24, self._icbm_arrow == "+")
-
-    value = str(self._icbm_baseline)
-    value_width = measure_text_cached(self._font_bold, value, HOLD_VALUE_SIZE).x
-    rl.draw_text_ex(self._font_bold, value, rl.Vector2(center_x - value_width / 2, y + 46),
-                    HOLD_VALUE_SIZE, 0, COLORS.WHITE)
-    # Remember where the badge landed: this is the tap target for pinning, and the geometry above
-    # is the only place that knows it.
-    self._hold_rect = rl.Rectangle(x, y, width, HOLD_HEIGHT)
-    # LEFT of the label, not right. The right corner is where the +/- arrow hangs off the label,
-    # and the two landed within a pixel of each other -- arrow centre x+151, dot centre x+152 --
-    # so a hold that was both pinned and being adjusted drew them on top of one another. Found by
-    # rendering every readout at once rather than one state at a time; the individual scenes each
-    # looked fine.
-    if self._icbm_pinned:
-      rl.draw_circle(int(x + 20), int(y + 20), PIN_DOT_RADIUS, PIN_DOT_COLOR)
-    elif self._icbm_pin_suggested:
-      # A ring, not draw_circle_lines -- that is a single hairline and it disappeared against the
-      # badge fill at a glance, which for a mark whose whole job is to be noticed is no mark at all.
-      rl.draw_ring(rl.Vector2(x + 20, y + 20), PIN_DOT_RADIUS - 3, PIN_DOT_RADIUS, 0, 360, 24,
-                   PIN_DOT_COLOR)
-    return HOLD_HEIGHT
 
   def _draw_tsr_pill(self, x: float, y: float) -> int:
     """BluePilot: the camera's own explanation for why there is no speed limit.
@@ -1564,20 +1508,6 @@ class HudRendererBP(HudRendererSP):
                     TSR_PILL_INK)
     return LAMP_PILL_HEIGHT
 
-  @staticmethod
-  def _draw_arrow(center_x: float, center_y: float, size: float, up: bool) -> None:
-    """Drawn rather than typed: the device loads bitmap .fnt fonts and an arrow glyph is not
-    guaranteed to be baked into them, whereas a triangle always renders."""
-    half = size / 2
-    if up:
-      a = rl.Vector2(center_x, center_y - half)
-      b = rl.Vector2(center_x - half, center_y + half)
-      c = rl.Vector2(center_x + half, center_y + half)
-    else:
-      a = rl.Vector2(center_x, center_y + half)
-      b = rl.Vector2(center_x + half, center_y - half)
-      c = rl.Vector2(center_x - half, center_y - half)
-    rl.draw_triangle(a, b, c, COLORS.WHITE)
 
   def _draw_brake_lamp_pill(self, x: float, y: float) -> int:
     """BluePilot: are the stop lamps lit, right now. See LAMP_* for why this is its own readout."""

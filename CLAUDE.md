@@ -641,6 +641,30 @@ mislabelled event rather than a missing one. The detector stays as belt-and-brac
 A hold is also cleared by returning the set speed to exactly SLA's target, or by the posted limit
 moving more than `IcbmBaselineResetDelta`. It is NOT cleared by curves or lead vehicles.
 
+**THE TAIL OF A RESUME PRESS DOES NOT CREATE A HOLD -- `RESUME_TAIL_FRAMES`, added 2026-08-22.**
+This is the one deliberate exception to the RES+ row of the table above, and it exists because two
+correct facts combine into a wrong outcome. He reported it as *"a hold got set without me doing plus
+and minus"*; route 000003aa, from ONE press of RES+:
+
+    809.83  enab=False  resumeCruise    <-- he presses RES+, and nothing else
+    809.85  enab=False  resumeCruise
+    809.86  enab=True   accelCruise     <-- SAME physical press, cruise engaged part-way
+    809.88  enab=True   accelCruise     -> HOLD CREATED at 32 mph on a 35 road
+
+RES+ derives its meaning per frame from the cruise state, which is the contract and is right. And
+this car's SCCM clears the button bit between frames -- see "Buttons cannot hold" -- so one physical
+press arrives as a BURST of press/release cycles. The instant cruise engages mid-burst the rest of
+that press reads as `+`.
+
+**KEYED ON PROXIMITY TO THE RESUME, not on having recently engaged.** The engage-edge version was
+tried first and broke 23 tests, correctly: a `+` pressed a moment after engaging is ordinary and
+must still work. The phantom arrived 0.02 s after the resume; the genuine presses on those same
+drives came 3.5 s and later.
+
+**Only CREATION is suppressed**, and the whole press block is skipped rather than just the capture
+inside it -- guarding the capture alone did nothing, because `override_state = manual` is set
+unconditionally below it and the press-settle path then took the baseline from the cluster anyway.
+
 Two things that decided the design:
 
 - **SET does not hold the current vehicle speed**, even though Ford's PCM briefly sets it there.
@@ -727,6 +751,9 @@ Both halves of the feature keyed on `v_baseline`, which the rule sets to zero:
 - **The badge is the ONLY tap target for pinning.** `_hold_rect` is set where the badge is drawn and
   cleared to None everywhere else -- *"no badge on screen, no tap target"*. No hold meant no badge
   meant the gesture did not exist. On precisely the roads pins are for.
+  (**On the big screen that target is the SET-SPEED BOX since 2026-08-22** -- the badge is deleted;
+  see the section below. The shape of the bug is unchanged and is why the new rect is set outside
+  the ACC stack. mici still has its badge and this paragraph is still literally true there.)
 
 The fix is three pieces, and the middle one is the one that is easy to miss:
 
@@ -737,6 +764,78 @@ The fix is three pieces, and the middle one is the one that is easy to miss:
    draws the offered speed -- taking `baseline` there rendered a badge reading `0`.
 3. `pinSuggestion` is read OUTSIDE the hold branch. It had been read inside it, so it was
    unreachable in the exact case it exists for.
+
+### A HOLD WALKED BACK TO SLA'S NUMBER COULD NEVER CLEAR. HE REPORTED IT TWICE.
+
+*"It looks like setting the hold back to SLA does not clear the hold."* Said on 2026-08-21 and
+again earlier, answered both times with a test that says it does. He was right and the test was
+measuring something else.
+
+**The rule is two halves** -- arm `baseline_diverged` while the hold DIFFERS from `v_target_raw`,
+then clear when it comes back -- **and both halves lived at the bottom of `update_manual_override`,
+which returns early on any frame a cruise button is pressed** (line ~1111). The only frames in which
+the hold actually differs are the ones where he is pressing it down toward SLA's number. So the arm
+never ran on a single one of them:
+
+    t+816.7   baseline 39   vTargetRaw 35   diverged False   <-- should have armed here
+    t+817.4   baseline 35   vTargetRaw 35   diverged False   <-- nothing left to observe
+    ...9 s at baseline == target, the hold never clears...
+    t+826.2   he switched cruise off, which is what actually ended it
+
+**Measured on route 000003a8, and the earlier diagnosis was wrong.** This session first reported it
+as "clears 9.4 s late, delayed by the press-settle stand-down". It does not clear at all -- what
+looked like a late clear was him pressing the main cruise button. Press-settle was a red herring:
+the press PATH returns long before the press-settle block is even reached.
+
+**Fixed by moving the ARM to `update_calculations`**, which runs every frame and which no early
+return in the override path can skip. Only the arm moved; clearing stays where it was, because
+clearing ACTS on the car and acting mid-press would undo the press he is making. Observing is free.
+
+**THE TEST THAT SAID OTHERWISE IS THE LESSON.** `test_the_hold_clears_when_the_source_oscillates`
+walks the speed down too -- but it RELEASES the button and runs 12 idle frames between presses,
+which hands the arm exactly the frame the real stalk never gives it. Fixtures more orderly than
+reality, for the fourth recorded time in this file. The new test holds the button on every frame
+and raises the hold while cruise is OFF, which is what the log shows him doing.
+
+### THE HOLD BADGE IS GONE, 2026-08-22. THE SET-SPEED BOX IS THE HOLD NOW.
+
+His instruction, and he was right that it was overdue: *"the hold badge is completely removed from
+the code since we are just going to use the target speed, right?"* It was not removed -- the
+`max_box_state` work on 2026-08-21 made the BIG NUMBER show the hold and tinted the box while the
+hold owned it, and left the badge drawing the very same number underneath. A hold rendered twice.
+
+**Everything the badge uniquely carried moved rather than being dropped.** That list is the whole
+risk of this change, because each item is a thing that quietly stops existing if it is forgotten:
+
+| the badge did | where it went |
+|---|---|
+| the hold's number | the big number in the box (`max_box_state.aim`) |
+| "not yours to change" (locked) | the box stops tinting -- `hold_locked` on `MaxBoxState` |
+| the pin dot / suggestion ring | the same corner, of the box, in `HudRendererSP._draw_set_speed` |
+| the speed being OFFERED | the label slot, **rank 3**, above MAX and below the dash number |
+| **the tap target for pinning** | `_hold_rect = self._set_speed_rect` |
+| the +/- arrow | **dropped.** Rank 1 already shows the dash number whenever the car is not at the aim -- which is every moment the arrow was drawn -- and it says how far off, not merely which way. |
+
+**THE TAP TARGET IS THE ONE THAT BITES.** `_hold_rect` used to be set inside `_draw_hold_badge`,
+so deleting the badge deletes pinning outright unless it is re-fed. That exact failure has already
+happened once here -- `IcbmPinnedHolds` sat `[]` for two days while observations piled up, because
+the badge carrying the rect was not drawn on the roads pins are for. It is now set in `_render`
+next to `_draw_set_speed` rather than inside the ACC stack, because that stack returns early in
+several states and the gesture has to survive all of them.
+`test_the_tap_target_is_the_set_speed_box` parses for the assignment and was verified to fail when
+fed the wrong rect.
+
+**THE COMMA 4 KEEPS ITS BADGE, deliberately.** `MiciHudRendererBP` extends mici's own renderer, not
+sunnypilot's, so it never had `max_box_state` -- on that screen the badge is the ONLY place the hold
+appears, and deleting it there would remove the readout rather than de-duplicate it. The two screens
+now draw the hold differently, which is allowed and always was (`icbm_hud_state`'s own docstring:
+the drawing is genuinely different on 536x240 and has to be written twice; deciding WHAT IS TRUE
+does not). If mici ever adopts the aim-in-the-box rule, that is when its badge goes.
+
+**The preview renders it** -- `preview_acc_status.py`, 14 scenes including pinned, offered, locked,
+and a hold with no limit. Its scenes are dicts now: the old tuples had one `hold` column standing
+for both the hold and the offered pin, which was fine while the badge showed whichever existed and
+is wrong now that they are different inputs producing different pictures.
 
 **The lesson is where it was found.** Three sessions of tests, mutation testing and code review did
 not surface it, because every one of them asked whether the code did what it said. Two param files
@@ -1072,6 +1171,22 @@ in this whole design, and the plan only contains a stop when the end-to-end mode
 DEC on is fine and is what he ran -- it selects `blended` on `has_slow_down`, which is the same
 signal the override triggers on -- but Experimental Mode is not optional.
 
+**THAT SENTENCE WENT STALE ON 2026-08-20 AND NOBODY NOTICED FOR TWO DAYS.** It was true while the
+trigger was `shouldStop`, which only reaches the plan under Experimental Mode. The 2026-08-20
+rewrite moved the trigger to `dec.has_slow_down()` -- and `DEC.update()` is called unconditionally
+in `longitudinal_planner.py:120`, with only `dec.active()` gated on the mode. So from that day the
+override COULD arm with Experimental Mode off, and what it would then transmit is `lng.accel` from
+an MPC that never planned a stop for a light: take authority from Ford, spend the camera's ~1.5 s
+of tolerance, provoke a cancel that costs him ACC for the drive, and not brake to a stop.
+
+**Now enforced rather than assumed** -- `experimental_mode` is an argument to
+`FordStopOverride.update`, gated at ARMING only (a stop underway finishes) and placed AFTER the
+curve/gap path, which brakes for leads and corners in either mode. Mutation-tested.
+
+**The lesson is the one this file keeps recording: a claim about behaviour that lives only in prose
+stops being true the moment the code moves.** The fix is not "check the note more often", it is to
+make the note executable -- which is what the argument and its two tests now are.
+
 Corrected in three places that carried the old claim: the passthrough toggle description, the
 SunnyLink entry, and this file.
 
@@ -1241,6 +1356,91 @@ of continuous contradiction, against the ~40 s that latched the camera on drive 
 from `MAX_ACTIVE_S` and `OVERRIDE_HZ` with a test pinning `OVERRIDE_HZ` against `ACC_CONTROL_STEP`,
 so the factor of two cannot come back.
 
+### IT FIRED. IT COST HIM FORD ACC TWICE, PERMANENTLY, AND THE ARMING FLOOR DID NOT HELP.
+
+Measured 2026-08-22 on the first three drives where the override actually ran. He reported it before
+any log was opened: *"The two times I permanently lost Ford ACC were for this stop and when it
+randomly braked on the most recent drive"*, and *"for both I pulled over and restarted the car to
+get Ford ACC back."* Both are override episodes and there are exactly two.
+
+    route  armed      ran     camera cancel   outcome
+    a9     26.1 mph   1.1 s   none            fine
+    a8     34.2 mph  12.6 s   +1.6 s          NEVER RELEASED (64 s, to the end of the route)
+    aa     39.6 mph   2.6 s   +1.6 s          NEVER RELEASED
+
+**Both latching arms were well above `ARM_MIN_SPEED`.** The 25 mph floor added on 2026-08-20 was
+supposed to be the fix for exactly this and it prevented nothing.
+
+**THE FLOOR WAS DERIVED FROM A COUNTING ERROR.** Its table filed arms at 32.9, 33.9 and 40.0 mph as
+"tolerated" when all three had provoked a cancel -- they were counted as tolerated because the cancel
+later RELEASED. Collapsing "the camera objected and recovered" into "the camera did not object"
+is what manufactured the clean 20-25 mph gap the floor was placed in. The two real latches land
+directly on those rows. **When a table's rows are the whole argument, check what got binned
+together** -- a category that merges the outcome you care about with the one you do not cannot
+separate them however clean the gap looks.
+
+**What the cancel is NOT, each ruled out by measurement rather than reasoning:**
+
+- **Not contradiction magnitude.** a9 SURVIVED with the largest deltas of the three (mean -1.27,
+  max -2.06 m/s^2). a8 latched with a mean of -0.14, and for its first twelve seconds the override
+  matched Ford's own `AccBrkTot_A_Rq` to within 0.01 m/s^2 -- openpilot and Ford were asking for the
+  same braking, frame after frame, and the camera cancelled anyway.
+- **Not arm speed**, per the table above.
+- **Not the low-speed part of the stop.** On a8 the cancel landed at 29.7 mph, 1.6 s after arming,
+  long before the car was near a standstill.
+- **Not coincidence.** The camera was quiet for at least 4 s before each arm.
+- **Not the lead check misfiring.** On a8 the override released to `fallback` at 13.6 mph when a
+  VISION lead appeared at 42 m (`radar=False`, modelProb 0.53-0.90) -- but that was 11 s AFTER the
+  cancel, so it is downstream of the failure, not its cause.
+
+So the working figure is that the camera tolerates **about 1.5 seconds** of not driving, and a stop
+needs five to eight. **Every override will therefore provoke a cancel. That half is inherent and
+there is no arming rule that avoids it.**
+
+**BUT THE PERMANENCE IS OURS, AND THAT IS THE HALF WORTH FIXING.** `passthrough_admissible` refuses
+any frame carrying `AccCancl_B_Rq`, so from the cancel onward Ford's command never reaches the car
+again -- which means the camera can never observe the car obeying it, which means it never gets a
+reason to release. A self-sustaining refusal, the same shape as drive A's 70 re-engagement cycles
+and pointing the other way.
+
+The evidence that it is only the BIT that is stuck, not the camera: on route a8 he re-engaged at
+t+886, and the camera was publishing a sane 46 kph `AccVeh_V_Trg` and ordinary brake values while
+still asserting cancel. It was ready to drive and we were throwing all of it away.
+
+**SO THE RECOVERY IS BUILT, 2026-08-22.** After 5 s of continuous cancel, IF the stop override ran
+this drive (which is what makes the cancel ours rather than the camera's own judgement) and
+openpilot is longActive, Ford's frame is forwarded again with `AccCancl_B_Rq` cleared --
+`create_acc_msg_passthrough(..., clear_cancel=True)`, gated by
+`passthrough_admissible(..., allow_cancel=True)`. Every other refusal still applies: `AccDeny_B_Rq`,
+`CmbbDeny_B_Actl`, the park brake and both panda bands are untouched, because "I will not let ACC
+run" is a different statement from "stop the ACC that is running".
+
+Bounded at 30 s, because **whether the camera releases is exactly the unknown** and pretending
+otherwise would make the drive unreadable. Two `cloudlog.error` lines are the readout: RECOVERY when
+it starts, RECOVERY WORKED with the elapsed time if the camera drops its cancel. Mutation-tested --
+both halves were broken on purpose and each failed exactly one test.
+
+**This is the same correction `AccStopStat_B_Rq` needed**, and it is the third time on this list: a
+bit went on the refusal list by association with drive A, and refusing it cost the feature more than
+the bit ever did. Check what a blanket refusal costs before keeping it.
+
+**DO NOT MOVE `ARM_MIN_SPEED` AGAIN.** That lever has been tried, on evidence that did not support
+it, and the cost of the retry was two drives. The next thing that would move this is finding what
+the camera actually counts -- consecutive frames, a response-to-command test, something in
+`ACCDATA_3` -- not another band.
+
+**DO NOT TELL HIM TO TURN THE OVERRIDE OFF.** That was the first recommendation out of this analysis
+and it was wrong -- he had to say so: *"Why would I turn that off if that's what we are building
+here?"* Coming to a complete stop IS the feature; switching it off is not a mitigation, it is
+abandoning the thing. The cancel was a bug with an unread cause, and reading the cause took one
+wire-level diff of our transmitted frame against the camera's. **Diff the wire before recommending a
+retreat.**
+
+**And one claim from the same analysis was withdrawn the same hour:** `cruiseState.standstill` going
+true at the stop was read as Ford's own hold engaging for the first time on this car. It is not
+evidence of that -- `ford/carstate.py:74` OR's `standstill` with actual wheel speed, so on a stopped
+car it means "stopped", not "Ford is holding it". The stopped-and-engaged question is still open.
+
 **Ships OFF, and the reason is about the car:** the camera's tolerance for sustained contradiction
 is unmeasured. Toggle is `StockAccStopOverride`, "Come To A Complete Stop".
 
@@ -1281,6 +1481,25 @@ on this car, because a standstill with cruise engaged has never existed here: th
 `resume_allowed` now holds a stop the OVERRIDE authored until he presses resume or the gas -- his own
 press never reaches this gate, so it is untouched. The no-lead branch used to mean only "the queue
 cleared, nothing to wait for"; it now has a second meaning and they needed separating.
+
+**AND IT IS HIS CHOICE NOW, not ours: `StockAccStopAutoResume`, added 2026-08-22 because he asked
+for it by name after having the behaviour explained.** Ships OFF at his request, and the reason
+belongs in the "reason about the car" category rather than caution about the code: the "go" signal
+is `shouldStop` going false, which means the MODEL stopped wanting to stop, **not that the light
+turned green.** openpilot does not read signal state at all. Turning it on is choosing to let the
+car decide an intersection is clear on the cheapest evidence there is, which is the exact thing the
+evidence rule elsewhere in this file forbids for a lane change -- so it is a toggle, with the reason
+written where he reads it, rather than a default either way.
+
+**Scope, and it is narrower than the title suggests:** only stops the OVERRIDE authored. Behind a
+lead Ford is holding the stop, `stop_override_stopped_us` was never set, and the ordinary
+queue-cleared resume is unchanged with the toggle in either position. Both flags are read through
+`getattr(..., False)`, and for the new one the safe fallback is the one that keeps the car STOPPED
+-- the opposite of this fork's usual "a missing attribute should not disable a feature" instinct,
+because here the feature being missing is what keeps the car where the driver last saw it.
+
+The UI gates it on the override being on, one level below the override's own gate on the
+passthrough. Ungated it would read as a general "pull away from stops" setting that does nothing.
 
 **AND THE SET SPEED IS PREPARED WHILE STOPPED, which is his spec:** *"Ideally while stopped at a
 stop sign or traffic light, the set speed is restored from 20mph, and when it is time to go it
@@ -1625,8 +1844,11 @@ ACC status stack is on it.
 **What the big screen has that mici does not**, in `_draw_acc_status`'s stacking order, which is
 already a priority order:
 
-  1. **HOLD badge** -- the driver's own set speed, and the tap target for pinning. The most important
-     one: it is the number ICBM returns to, and nothing else on screen shows it.
+  1. ~~**HOLD badge**~~ -- **DELETED FROM THE BIG SCREEN 2026-08-22.** mici still draws its own, and
+     that is now the DIVERGENCE rather than the shared thing this list assumed. The big screen puts
+     the hold in the set-speed box (`max_box_state`); mici's `_draw_set_speed` is mici's own and has
+     no such concept, so its badge is the only hold readout it has. **Porting the box rule to mici is
+     what would let its badge go** -- that is the work, not copying a badge that no longer exists.
   2. **ACC pill** -- what stock ACC is asking for.
   3. **Brake lamp pill** -- drawn in BOTH states deliberately; an indicator that only appears when lit
      cannot be told from one that is broken.

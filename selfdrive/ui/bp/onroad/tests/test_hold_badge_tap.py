@@ -60,3 +60,46 @@ def test_the_badge_branch_returns_so_the_tap_is_not_handled_twice():
   pin = _pin_request_index(fn)
   assert any(isinstance(n, ast.Return) for n in ast.walk(fn.body[pin])), (
     "the badge branch does not return, so the tap falls through to the sidebar as well")
+
+
+# --- 2026-08-22: the badge is gone and the box inherited its job ---------------------------------
+
+def _src() -> str:
+  return (pathlib.Path(__file__).resolve().parents[1] / "hud_renderer_bp.py").read_text(encoding="utf-8")
+
+
+def test_the_hold_badge_is_really_gone():
+  """His instruction: *"we are just going to use the target speed"*. The set-speed box already
+  shows the hold as the big number and tints while the hold owns it, so a badge drawing the same
+  number was a second readout of one value.
+
+  Asserted against the PARSED tree, not a grep, because every comment explaining the removal
+  contains the words -- the same reason `test_mapd_schema` parses rather than greps."""
+  tree = ast.parse(_src())
+  names = {n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+  assert "_draw_hold_badge" not in names, (
+    "the HOLD badge is back. If that is deliberate, the box now shows the same number -- decide "
+    "which one owns it rather than shipping both")
+
+
+def test_the_tap_target_is_the_set_speed_box():
+  """THE ONLY WAY TO PIN OR UNPIN A HOLD. `_hold_rect` was set inside `_draw_hold_badge`; with the
+  badge deleted it has to come from the box, or the gesture silently stops existing.
+
+  That exact failure has happened before -- `IcbmPinnedHolds` sat empty for two days while hold
+  observations accumulated, because the badge that carried the rect was not being drawn on the
+  roads pins are for. A green suite said nothing then either."""
+  tree = ast.parse(_src())
+  froms = set()
+  for node in ast.walk(tree):
+    if not isinstance(node, ast.Assign):
+      continue
+    if not any(isinstance(t, ast.Attribute) and t.attr == "_hold_rect" for t in node.targets):
+      continue
+    for sub in ast.walk(node.value):
+      if isinstance(sub, ast.Attribute):
+        froms.add(sub.attr)
+  assert froms, "_hold_rect is never assigned, so nothing is tappable and pinning is dead"
+  assert "_set_speed_rect" in froms, (
+    f"_hold_rect is not fed from the set-speed box (saw {sorted(froms)}) -- the tap target is "
+    "either stale geometry or nothing at all")

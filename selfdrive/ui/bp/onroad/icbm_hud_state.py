@@ -39,9 +39,17 @@ class IcbmHudState:
   pin_suggested: bool = False   # this place is a candidate for pinning
   pin_suggestion: int = 0       # the speed being offered, for when there is no hold to show
 
-  # Is Speed Limit Assist actually producing a limit right now? NOT whether it is switched on --
-  # SLA stays "active" on a road with no limit data, which is a documented trap in this fork.
-  sla_has_limit: bool = False
+  # `sla_has_limit` LIVED HERE AND IS GONE, 2026-08-22. It answered "is SLA producing a limit right
+  # now", and `worth_showing` was the only thing that ever asked -- until 2026-08-20, when the limit
+  # test was removed from that rule because it was hiding real holds on the roads holds are for.
+  #
+  # From that day it was computed on every frame of every render, on two screens, and read by
+  # nothing. It was also the ONLY reason this reader touched `longitudinalPlanSP` at all, so
+  # deleting it takes a whole second message out of the HUD path.
+  #
+  # Deleted rather than parked, per the rule about additions that stopped earning their place: a
+  # field nobody reads still reads as load-bearing to whoever finds it next. If a future rule wants
+  # the question again it is four lines to ask it, and it should ask with its own reason attached.
 
   @property
   def has_hold(self) -> bool:
@@ -128,12 +136,8 @@ def read_icbm_hud_state(sm) -> IcbmHudState:
   """
   state = IcbmHudState()
   try:
-    try:
-      sl = sm['longitudinalPlanSP'].speedLimit
-      state.sla_has_limit = bool(sl.resolver.speedLimitValid and sl.resolver.speedLimit > 0)
-    except Exception:  # noqa: BLE001 -- no SLA data reads as "no limit", which hides the badge
-      state.sla_has_limit = False
-
+    # ONE MESSAGE. The `longitudinalPlanSP` read that used to open this function went with
+    # `sla_has_limit` on 2026-08-22 -- see the note on the dataclass.
     icbm = sm['selfdriveStateSP'].intelligentCruiseButtonManagement
     state.arrow = _SEND_BUTTON_ARROW.get(icbm.sendButton.raw, "")
     # OUTSIDE the hold branch below, deliberately. A suggestion is offered precisely when there is
@@ -171,9 +175,21 @@ class MaxBoxState:
   label: str = "MAX"
   label_is_number: bool = False
   hold_driving: bool = False
+  # The corner mark on the box, which is all that is left of the HOLD badge after 2026-08-22.
+  # `pinned` says this hold came from a pin and tapping removes it; `pin_offer` says there is no
+  # hold and tapping would CREATE one at the offered speed.
+  pinned: bool = False
+  pin_offer: bool = False
+  # Something else owns the target, so a press cannot move the hold. The badge grayed itself out to
+  # say this; the box says it by de-tinting. Kept rather than dropped because "the car is not at
+  # your number" (which rank 1 already shows) is NOT the same statement as "your number is not
+  # currently yours to change".
+  hold_locked: bool = False
 
 
-def max_box_state(hold: float, sla_fallback: float | None, set_speed: float, dash: float) -> MaxBoxState:
+def max_box_state(hold: float, sla_fallback: float | None, set_speed: float, dash: float,
+                  pin_suggestion: float = 0.0, pinned: bool = False,
+                  hold_locked: bool = False) -> MaxBoxState:
   """Resolve the big number and the label slot.
 
   THE LABEL SLOT CAN ONLY SAY ONE THING, so this is a ranking of what he needs to know:
@@ -184,17 +200,25 @@ def max_box_state(hold: float, sla_fallback: float | None, set_speed: float, das
        hold would give back, at full size. It already exists on the speed-limit sign, but only as
        the offset, in a corner: *"the offset is such a small number in the top right, that it's hard
        to see."* Shown exactly when it is actionable and never when it is not.
-    3. the word MAX.
+    3. the PIN BEING OFFERED, when there is no hold. Added 2026-08-22 -- the HOLD badge used to
+       carry this number and there is no badge any more.
+    4. the word HOLD, when a hold is driving and there is no fallback to offer. The badge used to
+       be what named the number; with it gone, "MAX" over his own held speed was actively wrong.
+    5. the word MAX.
 
-  With a hold and NO limit there is no fallback to offer, so it falls through to MAX with his own
-  number under it -- the common case on the roads where holds matter most.
+  With a hold and NO limit there is no fallback to offer, so it falls through to the LABEL "HOLD"
+  with his own number under it -- the common case on the roads where holds matter most.
 
   A PIN SUGGESTION IS NOT A HOLD and must never reach `hold`: it is an offer made where no hold
-  exists, and letting it move the big number would display a speed the car is not driving to.
-  A PINNED hold, by contrast, IS a hold -- it drives the car exactly like a pressed one, and the
-  badge below distinguishes them.
+  exists, and letting it move the big number would display a speed the car is not driving to. It
+  reaches the LABEL instead, which is the slot for numbers that are not the aim.
+
+  A PINNED hold, by contrast, IS a hold -- it drives the car exactly like a pressed one. The badge
+  used to be what told them apart; now it is `pinned`, drawn as a dot in the box's corner.
   """
   hold_driving = hold > 0
+  offer = (not hold_driving) and pin_suggestion > 0
+  pin_dot = hold_driving and pinned
   if hold_driving:
     aim = hold
   elif sla_fallback is not None and sla_fallback > 0:
@@ -202,8 +226,36 @@ def max_box_state(hold: float, sla_fallback: float | None, set_speed: float, das
   else:
     aim = set_speed
 
+  locked = hold_driving and hold_locked
   if aim > 0 and round(dash) != round(aim):
-    return MaxBoxState(aim, str(round(dash)), True, hold_driving)
+    return MaxBoxState(aim, str(round(dash)), True, hold_driving,
+                       pinned=pin_dot, pin_offer=offer, hold_locked=locked)
   if hold_driving and sla_fallback is not None and sla_fallback > 0:
-    return MaxBoxState(aim, str(round(sla_fallback)), True, True)
-  return MaxBoxState(aim, "MAX", False, hold_driving)
+    return MaxBoxState(aim, str(round(sla_fallback)), True, True,
+                       pinned=pin_dot, pin_offer=offer, hold_locked=locked)
+  # RANK 3, added 2026-08-22 when the HOLD badge was deleted: the PIN BEING OFFERED.
+  #
+  # The badge used to carry this number (`display_value` fell back to `pin_suggestion` when there
+  # was no hold), and deleting it left the offer with a tap target and no way to say what speed it
+  # was for. It cannot become the big number -- that is what the car is being driven to, and an
+  # offer is not -- so the label slot is the only place it can go.
+  #
+  # Unambiguous against rank 2 because the two are mutually exclusive by construction: the fallback
+  # is shown only while a hold IS driving, the offer only when none is. Below both of them because
+  # a pin is never urgent and the dash number always is.
+  if offer:
+    return MaxBoxState(aim, str(round(pin_suggestion)), True, False, pin_offer=True)
+  # RANK 4: THE WORD "HOLD", added 2026-08-22 on review, and it costs nothing to reach here.
+  #
+  # Deleting the badge took the only thing on screen that NAMED the number. Rank 2 covers the case
+  # where a hold and a limit coexist -- the fallback number is itself the evidence a hold is on --
+  # but a hold with NO limit fell through to the generic "MAX", which is not merely uninformative,
+  # it is wrong: the number below it is his hold, not a maximum, and the pale-blue tint was the
+  # only thing saying so on a sunlit screen.
+  #
+  # He hit this exact confusion once already, which is the whole reason `worth_showing` exists:
+  # "two numbers on screen, no idea which one was his". A word costs no space the label slot was
+  # using for anything else, and adds no second number -- which is what he actually asked to be
+  # rid of.
+  return MaxBoxState(aim, "HOLD" if hold_driving else "MAX", False, hold_driving,
+                     pinned=pin_dot, pin_offer=False, hold_locked=locked)

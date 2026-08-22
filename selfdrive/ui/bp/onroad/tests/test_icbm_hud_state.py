@@ -140,7 +140,9 @@ def test_missing_speed_limit_data_does_not_raise():
   """The point of this one was always that a HUD must not raise; the visibility half moved."""
   s = read_icbm_hud_state(_SM2(_Icbm(baseline=72.0), None))
   assert s.has_hold and s.worth_showing
-  assert not s.sla_has_limit, "absent SLA data must still read as no limit"
+  # The `sla_has_limit` assertion that used to close this test went with the field on 2026-08-22.
+  # What this test is actually about -- a HUD must not raise on a missing message -- is unchanged,
+  # and the reader no longer opens `longitudinalPlanSP` at all, so the shape it guarded is gone too.
 
 
 class TestAPinCanStillBeCreatedWhereThereIsNoLimit:
@@ -183,17 +185,17 @@ def test_a_hold_outranks_a_suggestion_on_the_badge():
   Nothing is hidden now, so there is no leak to plug -- but the badge must still read the HOLD when
   both exist, or a tap target would offer to pin a number the car is not holding.
   """
-  held = IcbmHudState(baseline=70, sla_has_limit=False, pinned=False, pin_suggested=False)
+  held = IcbmHudState(baseline=70, pinned=False, pin_suggested=False)
   assert held.worth_showing
   assert held.display_value == 70
 
-  both = IcbmHudState(baseline=70, sla_has_limit=False, pinned=False,
+  both = IcbmHudState(baseline=70, pinned=False,
                       pin_suggested=True, pin_suggestion=65)
   assert both.worth_showing
   assert both.display_value == 70, "the suggestion overwrote the hold the car is actually holding"
 
   # The case the suggestion exception is actually for: an offer with no hold behind it.
-  offered = IcbmHudState(baseline=0, sla_has_limit=False, pin_suggested=True, pin_suggestion=65)
+  offered = IcbmHudState(baseline=0, pin_suggested=True, pin_suggestion=65)
   assert offered.worth_showing
   assert offered.display_value == 65
 
@@ -205,6 +207,65 @@ class TestTheBigNumberIsWhatTheCarIsDrivenTo:
   offset be a different number?"* -- yes, with the fallback in the label slot rather than as a
   fourth number.
   """
+
+  def test_the_offered_pin_takes_the_label_when_there_is_no_hold(self):
+    """RANK 3, added 2026-08-22 when the HOLD badge was deleted.
+
+    The badge used to carry this number: `display_value` fell back to `pin_suggestion` when there
+    was no hold, and tapping the badge was the only way to accept the offer. Deleting the badge
+    left the offer with a mark in the box corner and no way to say WHAT SPEED it was for.
+
+    It cannot become the big number -- that is what the car is being driven to, and an offer is
+    not -- so the label slot is the only place left."""
+    box = max_box_state(hold=0.0, sla_fallback=None, set_speed=55.0, dash=55.0,
+                        pin_suggestion=45.0)
+    assert box.aim == 55.0, "an OFFER must never move the number the car is being driven to"
+    assert box.label == "45"
+    assert box.label_is_number
+    assert box.pin_offer, "nothing would draw the ring, so the offer is unacceptable"
+    assert not box.hold_driving
+
+  def test_the_dash_still_outranks_an_offer(self):
+    """A pin is never urgent; "the car is not at your number" always is."""
+    box = max_box_state(hold=0.0, sla_fallback=None, set_speed=55.0, dash=38.0,
+                        pin_suggestion=45.0)
+    assert box.label == "38"
+    assert box.pin_offer, "the ring must survive even when the label is showing something else"
+
+  def test_a_hold_suppresses_the_offer_entirely(self):
+    """`pin_offer` and `hold_driving` are mutually exclusive by construction -- rank 2 and rank 3
+    can never both be live, which is what keeps the label unambiguous."""
+    box = max_box_state(hold=70.0, sla_fallback=55.0, set_speed=55.0, dash=70.0,
+                        pin_suggestion=45.0)
+    assert not box.pin_offer
+    assert box.label == "55", "the offer displaced the fallback, which is the actionable number"
+
+  def test_a_pinned_hold_is_marked_and_a_pressed_one_is_not(self):
+    """The badge used to be what told a pinned hold from a pressed one. Now it is this flag, drawn
+    as a filled dot in the corner the badge's dot used to occupy."""
+    assert max_box_state(hold=45.0, sla_fallback=None, set_speed=45.0, dash=45.0,
+                         pinned=True).pinned
+    assert not max_box_state(hold=45.0, sla_fallback=None, set_speed=45.0, dash=45.0,
+                             pinned=False).pinned
+    # A pin flag with no hold behind it is not a pinned hold and must not draw the filled dot --
+    # that would claim the car is holding a speed it is not.
+    assert not max_box_state(hold=0.0, sla_fallback=None, set_speed=45.0, dash=45.0,
+                             pinned=True).pinned
+
+  def test_a_locked_hold_does_not_claim_the_number_is_his(self):
+    """`hold_locked` means something else owns the target, so a press cannot move the hold. The
+    badge said this by going gray; the box says it by not tinting.
+
+    NOT the same statement as "the car is not at your number", which rank 1 already makes -- a hold
+    can be locked while the car sits exactly on it."""
+    locked = max_box_state(hold=70.0, sla_fallback=None, set_speed=70.0, dash=70.0,
+                           hold_locked=True)
+    assert locked.hold_driving, "the hold still governs the car; only the tint is withheld"
+    assert locked.hold_locked
+    assert not max_box_state(hold=70.0, sla_fallback=None, set_speed=70.0, dash=70.0).hold_locked
+    # With no hold there is nothing to lock, so the flag must not survive on its own.
+    assert not max_box_state(hold=0.0, sla_fallback=55.0, set_speed=55.0, dash=55.0,
+                             hold_locked=True).hold_locked
 
   def test_sla_drives_the_number_when_there_is_no_hold(self):
     """His words: *"I like having that fall back if I cancel my hold."* Unchanged from today."""
@@ -220,13 +281,18 @@ class TestTheBigNumberIsWhatTheCarIsDrivenTo:
     assert box.label == "45", "the fallback he would get back by cancelling is not offered"
     assert box.label_is_number
 
-  def test_a_hold_with_no_limit_falls_through_to_MAX(self):
-    """The common case on the roads holds are for: no limit, so no fallback exists to show."""
+  def test_a_hold_with_no_limit_is_labelled_HOLD(self):
+    """The common case on the roads holds are for: no limit, so no fallback exists to show.
+
+    SAID "MAX" UNTIL 2026-08-22 and that was wrong once the badge was deleted -- the number under it
+    is his held speed, not a maximum, and with no badge nothing else on screen named it. Rank 2
+    already covers the case where a limit exists, because the fallback number is itself evidence a
+    hold is on; this is the case that had no evidence left."""
     box = max_box_state(hold=80.0, sla_fallback=None, set_speed=52.0, dash=80.0)
     assert box.aim == 80.0
     assert box.hold_driving
-    assert box.label == "MAX"
-    assert not box.label_is_number
+    assert box.label == "HOLD"
+    assert not box.label_is_number, "HOLD is a word, and must render at the word's size"
 
   def test_being_slowed_outranks_the_fallback(self):
     """The label slot can say one thing. "Something is pulling you down right now" beats "here is
@@ -254,5 +320,10 @@ class TestTheBigNumberIsWhatTheCarIsDrivenTo:
   def test_the_little_number_never_fires_on_a_matching_aim(self):
     """It means "the car is not at your number". Equal values must show the word, or it would appear
     on every press from the ordinary drift between openpilot's count and Ford's."""
+    # ASSERTS `label_is_number`, NOT the literal word. Comparing against "MAX" was a proxy for "the
+    # slot is not showing the dash" that happened to hold while MAX was the only word this slot
+    # could contain; rank 4 added "HOLD" and broke it, on a rule that had not changed at all. The
+    # thing this test is about is whether the DASH NUMBER leaked in.
     for dash in (80.0, 80.4, 79.6):
-      assert max_box_state(80.0, None, 52.0, dash).label == "MAX", f"fired at dash={dash}"
+      box = max_box_state(80.0, None, 52.0, dash)
+      assert not box.label_is_number, f"the little number fired at dash={dash}"

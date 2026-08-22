@@ -55,6 +55,15 @@ STOP_OVERRIDE_DESC = tr_noop(
   "back to you, so the approach has to be one where you leave your foot off the brake. "
   "Experimental: how the camera reacts to being overridden for several seconds has not been measured yet, so watch the first few stops.")
 
+STOP_AUTO_RESUME_DESC = tr_noop(
+  "After Come To A Complete Stop has held the car at a stop sign or red light, pull away again "
+  "without you pressing anything. Off by default, and the reason is worth reading: openpilot does "
+  "not read traffic signals. What it actually notices is its own driving model no longer planning "
+  "to stop, which is not the same thing as the light having turned green. "
+  "This only applies to stops openpilot itself brought the car to. When you are stopped behind "
+  "another car, Ford is holding the stop and pulling away already works normally whatever this is "
+  "set to. Your own resume press and the accelerator always work either way.")
+
 ICMB_UNAVAILABLE = tr_noop("Intelligent Cruise Button Management is currently unavailable on this platform.")
 ICMB_UNAVAILABLE_LONG_AVAILABLE = tr_noop("Disable the sunnypilot Longitudinal Control (alpha) toggle to allow Intelligent Cruise Button Management.")
 ICMB_UNAVAILABLE_LONG_UNAVAILABLE = tr_noop("sunnypilot Longitudinal Control is the default longitudinal control for this platform.")
@@ -257,6 +266,11 @@ class CruiseLayout(Widget):
       description=recommended(tr(STOP_OVERRIDE_DESC), "StockAccStopOverride"),
       param="StockAccStopOverride")
 
+    self.stock_acc_stop_auto_resume = toggle_item_sp(
+      title=tr("Pull Away From Stops Automatically"),
+      description=recommended(tr(STOP_AUTO_RESUME_DESC), "StockAccStopAutoResume"),
+      param="StockAccStopAutoResume")
+
     self.stock_acc_passthrough = toggle_item_sp(
       title=tr("Use Ford's Own ACC Commands"),
       description=recommended(tr(PASSTHROUGH_DESC), "StockAccPassthrough"),
@@ -410,6 +424,7 @@ class CruiseLayout(Widget):
       self.icbm_gap_control,
       self.stock_acc_passthrough,
       self.stock_acc_stop_override,
+      self.stock_acc_stop_auto_resume,
       self.ford_synthesize_apim_gps,
 
       SectionHeader(tr("Curves")),
@@ -525,6 +540,7 @@ class CruiseLayout(Widget):
       self.icbm_gap_control,
       self.stock_acc_passthrough,
       self.stock_acc_stop_override,
+      self.stock_acc_stop_auto_resume,
       self.ford_synthesize_apim_gps,
     )
 
@@ -587,6 +603,20 @@ class CruiseLayout(Widget):
         self.stock_acc_stop_override.set_description(prefix + "\n\n" + tr(STOP_OVERRIDE_DESC))
       else:
         self.stock_acc_stop_override.set_description(tr(STOP_OVERRIDE_DESC))
+
+      # AUTO-RESUME IS MEANINGLESS WITHOUT THE OVERRIDE, because the only stop it releases is one
+      # the override authored -- the gate it opens is keyed on `stop_override_stopped_us`. Same
+      # dependent-toggle reasoning as the override needing the passthrough, one level further down,
+      # and left ungated it would read as a general "pull away from stops" setting that does
+      # nothing.
+      override_on = ui_state.params.get_bool("StockAccStopOverride")
+      self.stock_acc_stop_auto_resume.action_item.set_enabled(
+        has_long and passthrough_on and override_on and ui_state.is_offroad())
+      if has_long and passthrough_on and not override_on:
+        prefix = "<b>" + tr("Turn on Come To A Complete Stop first.") + "</b>"
+        self.stock_acc_stop_auto_resume.set_description(prefix + "\n\n" + tr(STOP_AUTO_RESUME_DESC))
+      else:
+        self.stock_acc_stop_auto_resume.set_description(tr(STOP_AUTO_RESUME_DESC))
       if not has_long:
         prefix = "<b>" + tr("Turn on openpilot Longitudinal Control first.") + "</b>"
         self.stock_acc_passthrough.set_description(prefix + "\n\n" + tr(PASSTHROUGH_DESC))

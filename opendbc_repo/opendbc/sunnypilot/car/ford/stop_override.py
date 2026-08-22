@@ -182,6 +182,41 @@ ENTER_SPEED = 45.0 * MPH_TO_MS
 # 25 sits in that gap: above every arm that has ever provoked the camera, below every arm it has
 # ever tolerated. It also reads as a rule rather than a coincidence -- 5 mph of separation is enough
 # that Ford is still comfortably inside its envelope rather than at the edge of handing off.
+# *** SUPERSEDED ON THE ROAD, 2026-08-22. THE TABLE ABOVE DOES NOT PREDICT WHAT THE CAMERA DOES. ***
+#
+# Three REAL override episodes, the first ever driven with this arming rule shipped:
+#
+#     route  armed      ran     camera cancel   outcome
+#     a9     26.1 mph   1.1 s   none            fine
+#     a8     34.2 mph  12.6 s   +1.6 s          NEVER RELEASED -- he pulled over and restarted
+#     aa     39.6 mph   2.6 s   +1.6 s          NEVER RELEASED -- he pulled over and restarted
+#
+# Both arms that latched were WELL ABOVE ARM_MIN_SPEED. The 25 mph floor did not protect anything,
+# and the owner lost Ford ACC for the remainder of both drives, recoverable only by an ignition
+# cycle. He reported exactly two permanent losses and these are exactly those two.
+#
+# WHY THE TABLE ABOVE LOOKED SO CLEAN, and it is a counting error rather than bad luck: three of
+# its "tolerated" rows -- 32.9, 33.9 and 40.0 mph -- DID provoke a cancel. They were filed as
+# tolerated because the cancel later released. That collapses "the camera objected and recovered"
+# into "the camera did not object", which is the only distinction that matters here, and it is what
+# manufactured the 20-25 mph gap the floor was placed in. 34.2 and 39.6 land on top of those rows.
+#
+# WHAT IS ACTUALLY ESTABLISHED, stated narrowly because the mechanism is NOT known:
+#   * the cancel arrives 1.6 s after the override takes authority, in both latching episodes
+#   * it is not contradiction MAGNITUDE. a9 survived with the largest deltas of the three
+#     (mean -1.27, max -2.06); a8 latched with mean -0.14, and for its first 12 s the override
+#     matched Ford's own brake request to within 0.01 m/s^2
+#   * it is not arm SPEED, per the table above
+#   * the camera was quiet for at least 4 s before each arm, so the arm is not merely coincident
+#
+# A stop needs 5-8 s and the camera tolerates something closer to 1.5, so EVERY override provokes a
+# cancel and no arming rule avoids that. Do NOT move ARM_MIN_SPEED again hoping to find a safe band
+# -- that lever has been tried, on evidence that turned out not to support it.
+#
+# What was actually broken is the RECOVERY, not the arming: `passthrough_admissible` refused every
+# frame carrying the cancel, so Ford's command never reached the car again and the camera never got
+# to see the car obey it. Fixed 2026-08-22 -- see the cancel-recovery block in `carcontroller.py`
+# and `create_acc_msg_passthrough(..., clear_cancel=True)`. The feature stays on.
 ARM_MIN_SPEED = 25.0 * MPH_TO_MS
 
 # Stopped. NOT a hand-back any more -- see the creep note in `update`: Ford does not hold a stop
@@ -548,7 +583,8 @@ class FordStopOverride:
     return True
 
   def update(self, long_active: bool, v_ego: float, has_slow_down: bool,
-             lead_distance: float, stop_endpoint_m: float = 0.0, slowdown_gap: float = 0.0) -> bool:
+             lead_distance: float, stop_endpoint_m: float = 0.0, slowdown_gap: float = 0.0,
+             experimental_mode: bool = True) -> bool:
     """Args:
       long_active:     openpilot longitudinal is actually active this frame.
       v_ego:           m/s.
@@ -586,6 +622,28 @@ class FordStopOverride:
     slowdown = self._update_slowdown(v_ego, lead_close, slowdown_gap)
     if slowdown is not None:
       return slowdown
+
+    # THE STOP PATH NEEDS EXPERIMENTAL MODE. A MISMATCH GUARD, not a preference, added 2026-08-22.
+    #
+    # The override ARMS off the model -- `has_slow_down`, which `DEC.update()` computes on every
+    # frame in the planner regardless of any toggle -- but the accel it actually puts on the wire is
+    # the MPC's `lng.accel`. Without Experimental Mode `should_stop` is the MPC's alone: it stops
+    # for leads and cruise targets and NEVER for a stop sign or a red light. So the two halves would
+    # be reading different sources, and the result is the worst available outcome -- take authority
+    # from Ford, spend the camera's ~1.5 s of tolerance, provoke a cancel that costs him ACC, and
+    # then not brake to a stop, because openpilot's plan never contained one.
+    #
+    # An older note in CLAUDE.md said the override "cannot arm without Experimental Mode". That was
+    # true when the trigger was `shouldStop` and stopped being true when it became `has_slow_down`
+    # on 2026-08-20; nothing enforced it in between. This is that claim made real.
+    #
+    # ONLY THE STOP PATH. The slowdown path above closes a gap to a LEAD, which the MPC brakes for
+    # in either mode -- it runs before this line for exactly that reason.
+    #
+    # ARMING ONLY, so a stop already underway finishes rather than dropping the brakes mid-approach.
+    if not experimental_mode and not self.active:
+      self.last_result = "experimental mode off -- openpilot's plan has no stop in it to send"
+      return False
 
     # The reason going away is the only thing that re-arms it. Deliberately NOT keyed on the car
     # having stopped: a stop that gets abandoned half way must not be able to fire again on the

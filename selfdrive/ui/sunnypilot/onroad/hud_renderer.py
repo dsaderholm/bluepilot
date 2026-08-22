@@ -16,7 +16,7 @@ from openpilot.selfdrive.ui.sunnypilot.onroad.smart_cruise_control import SmartC
 from openpilot.selfdrive.ui.sunnypilot.onroad.turn_signal import TurnSignalController
 from openpilot.selfdrive.ui.sunnypilot.onroad.circular_alerts import CircularAlertsRenderer
 from openpilot.selfdrive.ui.sunnypilot.onroad.speed_renderer import SpeedRenderer
-from openpilot.selfdrive.ui.bp.onroad.icbm_hud_state import max_box_state
+from openpilot.selfdrive.ui.bp.onroad.icbm_hud_state import max_box_state, read_icbm_hud_state
 from openpilot.selfdrive.ui.ui_state import ui_state, UIStatus
 from openpilot.selfdrive.ui.onroad.hud_renderer import HudRenderer, UI_CONFIG, FONT_SIZES, COLORS, CRUISE_DISABLED_CHAR
 from openpilot.system.ui.lib.application import gui_app
@@ -26,8 +26,12 @@ from openpilot.system.ui.lib.text_measure import measure_text_cached
 SLA_ACTIVE_COLOR = rl.Color(0x91, 0x9b, 0x95, 0xff)
 
 # FusionPilot: the MAX box while the driver's own HOLD is the number being driven to. Matches
-# HOLD_LABEL_COLOR in hud_renderer_bp so the box and the badge below it read as one statement.
+# what the deleted HOLD badge used for its label, so a hold reads the same as it always has.
 HOLD_DRIVING_COLOR = rl.Color(175, 210, 255, 0xff)
+# FusionPilot: the pin mark, moved onto the box when the HOLD badge was deleted on 2026-08-22.
+# Same values the badge used, so a pinned hold looks the same as it always has.
+PIN_DOT_RADIUS = 9
+PIN_DOT_COLOR = rl.Color(255, 214, 120, 255)
 
 
 class HudRendererSP(HudRenderer):
@@ -43,6 +47,9 @@ class HudRendererSP(HudRenderer):
     self.speed_renderer = SpeedRenderer()
     self._torque_bar = TorqueBar(scale=3.0, always=True)
     self._box = max_box_state(0.0, None, 0.0, 0.0)
+    # Set every frame by `_draw_set_speed`; None until the box has been drawn once, and while
+    # cruise is unavailable it is never drawn at all -- so the tap gate must not assume it exists.
+    self._set_speed_rect = None
 
     self.pcm_cruise_speed: bool = True
     self.show_icbm_status: bool = False
@@ -83,6 +90,10 @@ class HudRendererSP(HudRenderer):
     Never raises: a HUD that throws takes the on-road screen with it, so every read is guarded and
     the fallback is today's behaviour.
     """
+    # THROUGH THE SHARED READER, not inline. The pin state used to be read only by the HOLD badge
+    # in hud_renderer_bp; with the badge gone (2026-08-22) the box carries the mark, and a second
+    # copy of the enum positions here is exactly the drift `icbm_hud_state` exists to prevent.
+    icbm_state = read_icbm_hud_state(ui_state.sm)
     try:
       icbm = ui_state.sm['selfdriveStateSP'].intelligentCruiseButtonManagement
       hold = float(icbm.vBaseline)
@@ -100,7 +111,10 @@ class HudRendererSP(HudRenderer):
     except Exception:  # noqa: BLE001
       sla = None
 
-    return max_box_state(hold, sla, self.set_speed, self.speed_cluster)
+    return max_box_state(hold, sla, self.set_speed, self.speed_cluster,
+                         pin_suggestion=float(icbm_state.pin_suggestion),
+                         pinned=icbm_state.pinned,
+                         hold_locked=icbm_state.hold_locked)
 
   def _get_icbm_status(self):
     # Compared against the AIM, not against `vCruiseCluster`. The little number means "the car is
@@ -132,6 +146,10 @@ class HudRendererSP(HudRenderer):
     set_speed_rect = rl.Rectangle(x, y, set_speed_width, UI_CONFIG.set_speed_height)
     rl.draw_rectangle_rounded(set_speed_rect, 0.35, 10, COLORS.BLACK_TRANSLUCENT)
     rl.draw_rectangle_rounded_lines_ex(set_speed_rect, 0.35, 10, 6, COLORS.BORDER_TRANSLUCENT)
+    # THE TAP TARGET FOR PINNING, published for `HudRendererBP._handle_mouse_release`. Recorded
+    # where the geometry actually is rather than recomputed there: the badge that used to own this
+    # rect was deleted on 2026-08-22 and two copies of the same four numbers is how they drift.
+    self._set_speed_rect = set_speed_rect
 
     max_color = COLORS.GREY
     set_speed_color = COLORS.DARK_GREY
@@ -164,11 +182,18 @@ class HudRendererSP(HudRenderer):
     # his common case on the roads where holds matter most.
     max_str_size = 60 if box.label_is_number else 40
     max_str_y = 15 if box.label_is_number else 27
-    max_text = box.label if box.label_is_number else tr("MAX")
+    # `tr(box.label)`, not `tr("MAX")`. The literal was fine while MAX was the only non-number this
+    # slot could hold; rank 4 now puts "HOLD" here and hardcoding the fallback would have thrown it
+    # away silently -- the value computed correctly and never rendered, for the fifth time.
+    max_text = box.label if box.label_is_number else tr(box.label)
 
     # Tinted while the hold owns the number, so whose number it is reads at a glance without
     # anything being spelled out. Only when a hold is actually driving -- SLA keeps its own colours.
-    if box.hold_driving and self.is_cruise_set:
+    #
+    # NOT while the hold is LOCKED. Something else owns the target then, so the hold is not the
+    # thing being honoured and claiming the number is his would be a lie. The badge said this by
+    # going gray; the box says it by simply not tinting.
+    if box.hold_driving and self.is_cruise_set and not box.hold_locked:
       set_speed_color = HOLD_DRIVING_COLOR
       if not self.show_icbm_status:
         max_color = HOLD_DRIVING_COLOR
@@ -192,6 +217,20 @@ class HudRendererSP(HudRenderer):
       0,
       set_speed_color,
     )
+
+    # THE PIN MARK, in the corner the HOLD badge used to put it in. A filled dot means this hold is
+    # pinned to this place and tapping removes it; a ring means there is no hold and tapping would
+    # CREATE one at the speed now shown in the label slot.
+    #
+    # A ring rather than `draw_circle_lines`, which is a single hairline and vanished at a glance
+    # against the badge fill -- for a mark whose whole job is to be noticed that is no mark at all.
+    # Top-LEFT, because the label is centered and the right corner is where the ICBM arrow used to
+    # hang; the two once landed within a pixel of each other.
+    if box.pinned:
+      rl.draw_circle(int(x + 20), int(y + 20), PIN_DOT_RADIUS, PIN_DOT_COLOR)
+    elif box.pin_offer:
+      rl.draw_ring(rl.Vector2(x + 20, y + 20), PIN_DOT_RADIUS - 3, PIN_DOT_RADIUS, 0, 360, 24,
+                   PIN_DOT_COLOR)
 
   def _draw_current_speed(self, rect: rl.Rectangle) -> None:
     self.speed_renderer.render(rect)

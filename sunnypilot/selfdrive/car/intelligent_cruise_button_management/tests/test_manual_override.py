@@ -562,6 +562,55 @@ class TestReturningToTheLimitHandsItBack:
       f"(baseline={icbm.v_baseline}, diverged={icbm.baseline_diverged})")
     assert icbm.override_state == OverrideState.auto
 
+  def test_a_hold_walked_back_without_ever_leaving_the_stand_down(self):
+    """THE ONE THAT REACHED THE ROAD TWICE, measured on route 000003a8 on 2026-08-22.
+
+    He reported it plainly -- *"setting the hold back to SLA does not clear the hold"* -- and the
+    test above says it does, because the test lets go of the button long enough for ICBM to LOOK.
+
+    The clearing rule is two halves: arm `baseline_diverged` while the hold differs from
+    `v_target_raw`, then clear when it comes back. The only frames where it DIFFERS are the ones
+    where he is mid-press -- and `press_settle_frames > 0` used to `return` before the arm ran. Each
+    press re-arms that stand-down, so a continuous walk from the hold down to SLA's number never
+    gives the arm a single frame. By the time it expired the baseline had already arrived, there was
+    nothing left to diverge from, and the latch stayed False for the rest of the drive:
+
+        t+816.7   baseline 39   vTargetRaw 35   diverged False   <-- should have armed
+        t+817.4   baseline 35   vTargetRaw 35   diverged False   <-- nothing left to see
+        t+826.2   he switched cruise off, which is what actually ended it
+
+    So this walks the hold down with NO gap between presses -- the button is held on every frame
+    until the cluster arrives -- which is what his stalk actually does and what the fixture above
+    never reproduces. It fails on the old code with the hold still standing."""
+    icbm = fresh()
+
+    # THE HOLD IS RAISED WHILE CRUISE IS OFF, which is the half that makes this unreachable. The
+    # arm is gated on `cruise_enabled` -- correctly, because holds must not be judged while ICBM is
+    # doing nothing -- so none of these frames can observe the divergence either.
+    cluster = LIMIT
+    icbm.run(make_cs(cluster, buttons=(ACCEL_PRESS,), enabled=False), CC, make_lp(LIMIT), False)
+    while cluster < DRIVER:
+      cluster += 1
+      icbm.run(make_cs(cluster, buttons=(ACCEL_PRESS,), enabled=False), CC, make_lp(LIMIT), False)
+    icbm.run(make_cs(cluster, buttons=(ACCEL_RELEASE,), enabled=False), CC, make_lp(LIMIT), False)
+
+    # Engaged, and straight into the walk back down with the button held on every frame -- each
+    # press re-arms the stand-down, so there is never an idle engaged frame in between. This is
+    # what his stalk does; the fixture above releases and waits, which is what hid it.
+    while cluster > LIMIT:
+      icbm.run(make_cs(cluster, buttons=(DECEL_PRESS,)), CC, make_lp(LIMIT), False)
+      cluster -= 1
+    icbm.run(make_cs(cluster, buttons=(DECEL_RELEASE,)), CC, make_lp(LIMIT), False)
+
+    # Then ordinary driving at SLA's number. Long enough to clear PRESS_SETTLE_MAX_FRAMES twice
+    # over, so a failure here is the rule never firing rather than it merely being slow.
+    settle(icbm, LIMIT, cluster=LIMIT, frames=1400)
+
+    assert icbm.v_baseline == 0, (
+      f"the hold survived being walked back to SLA's own number with no gap between presses "
+      f"(baseline={icbm.v_baseline}, diverged={icbm.baseline_diverged}) -- he reported this twice")
+    assert icbm.override_state == OverrideState.auto
+
   def test_a_curve_matching_the_baseline_does_not_clear_it(self):
     icbm = fresh()
     set_baseline(icbm)
@@ -1732,6 +1781,61 @@ class TestALiveHoldOutranksAPinnedOne:
     in_zone(icbm, 65, 300, enabled=True)    # enter a different one
     assert icbm.v_baseline == 65, "a pinned hold blocked the next pin"
     assert icbm.baseline_source == BaselineSource.pinned
+
+
+class TestResumingIsNotAskingForAHold:
+  """*"There was also one instance where a hold got set without me doing plus and minus."*
+
+  Measured on route 000003aa, 2026-08-22, from ONE press of RES+ to resume cruise:
+
+      809.83  enab=False  resumeCruise    <-- he presses RES+, and nothing else
+      809.85  enab=False  resumeCruise
+      809.86  enab=True   accelCruise     <-- SAME physical press, cruise engaged part-way
+      809.88  enab=True   accelCruise     -> HOLD CREATED at 32 mph on a 35 road
+
+  Two facts combine. RES+ is one button whose MEANING is derived per frame from the cruise state --
+  `resumeCruise` while off, `accelCruise` while on. And this car's SCCM clears the button bit
+  between frames (see "Buttons cannot hold"), so one physical hold of RES+ arrives as a BURST of
+  press/release cycles. The instant cruise engages mid-burst, the remaining cycles read as `+`, and
+  the first one captures a brand-new hold at whatever speed the car happens to be doing.
+
+  He pressed RES. He got a hold at 32. Nothing about that is a request for a hold.
+  """
+
+  def test_the_tail_of_a_resume_press_does_not_create_a_hold(self):
+    icbm = fresh()
+    # The resume itself, while cruise is off. Ford engages on the same press.
+    icbm.run(make_cs(32, enabled=False, buttons=(RESUME_PRESS,)), CC, make_lp(LIMIT), False)
+    icbm.run(make_cs(32, enabled=False, buttons=(RESUME_PRESS,)), CC, make_lp(LIMIT), False)
+    # Cruise comes on and the rest of that same press is re-read as `+`.
+    for _ in range(6):
+      icbm.run(make_cs(32, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT), False)
+    icbm.run(make_cs(32, buttons=(ACCEL_RELEASE,)), CC, make_lp(LIMIT), False)
+    settle(icbm, LIMIT, cluster=32, frames=200)
+
+    assert icbm.v_baseline == 0, (
+      f"resuming created a hold at {icbm.v_baseline} -- he pressed RES, not plus")
+    assert icbm.override_state == OverrideState.auto
+
+  def test_a_deliberate_plus_after_resuming_still_creates_one(self):
+    """The guard is keyed on PROXIMITY TO THE RESUME, not on having resumed at all. A `+` pressed a
+    moment later is an ordinary gesture and must still work -- on the same drives the two genuine
+    presses came 3.5 s and later, against the phantom's 0.02 s."""
+    icbm = fresh()
+    icbm.run(make_cs(32, enabled=False, buttons=(RESUME_PRESS,)), CC, make_lp(LIMIT), False)
+    settle(icbm, LIMIT, cluster=32, frames=200)   # well past RESUME_TAIL_FRAMES
+
+    cluster = 32
+    icbm.run(make_cs(cluster, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT), False)
+    for _ in range(4):
+      cluster += 1
+      icbm.run(make_cs(cluster, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT), False)
+    icbm.run(make_cs(cluster, buttons=(ACCEL_RELEASE,)), CC, make_lp(LIMIT), False)
+    settle(icbm, LIMIT, cluster=cluster, frames=200)
+
+    assert icbm.v_baseline == cluster, (
+      f"a deliberate press well after the resume was swallowed (baseline={icbm.v_baseline})")
+    assert icbm.override_state == OverrideState.manual
 
 
 class TestAStandstillReEngageIsNotASet:

@@ -545,6 +545,14 @@ sections:
       - {$ref: "#/macros/longitudinal"}
       enablement:
       - {$ref: "#/macros/longitudinal"}
+    - key: StockAccStopAutoResume
+      widget: toggle
+      title: "Pull Away From Stops Automatically"
+      description: "After Come To A Complete Stop has held the car at a stop sign or red light, pull away again without you pressing anything. Off by default, and the reason is worth reading: openpilot does not read traffic signals. What it actually notices is its own driving model no longer planning to stop, which is not the same thing as the light having turned green. This only applies to stops openpilot itself brought the car to. When you are stopped behind another car, Ford is holding the stop and pulling away already works normally whatever this is set to. Your own resume press and the accelerator always work either way."
+      visibility:
+      - {$ref: "#/macros/longitudinal"}
+      enablement:
+      - {$ref: "#/macros/longitudinal"}
     # NOT gated, deliberately. The device shows this unconditionally -- it feeds the camera GPS and
     # has nothing to do with who authors longitudinal control, so it works with ICBM, under the
     # passthrough, and with neither. SunnyLink must never gate more tightly than the screen in the

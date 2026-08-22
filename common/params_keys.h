@@ -421,6 +421,21 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // after ~40 s of it; drive B saw 1.3 s total and no reaction. A stop is 5-8 s, between
     // the two, so the first one is an experiment and is his to start.
     {"StockAccStopOverride", {PERSISTENT | BACKUP, BOOL, "0"}},
+    // Pull away from a stop the override authored, without the driver touching anything.
+    //
+    // Ships OFF, and the reason is about the CAR, not caution about the code. The "go" signal is
+    // `shouldStop` going false -- which means the MODEL stopped wanting to stop, NOT that the light
+    // turned green. openpilot does not read signal state. So with this on, the car decides an
+    // intersection is clear on the cheapest evidence available, which is the one thing the
+    // evidence rule in this fork exists to forbid.
+    //
+    // It is also a state this car has never been in: Ford cannot hold a stop without a lead, so
+    // until the override existed there was no standstill to resume FROM. Nothing about it is
+    // measured. Asked for by name on 2026-08-22 and shipped off at his request.
+    //
+    // Only affects stops the OVERRIDE authored. Behind a lead, Ford holds the stop and openpilot's
+    // ordinary queue-cleared resume is unchanged either way.
+    {"StockAccStopAutoResume", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"DeviceBootMode", {PERSISTENT | BACKUP, INT, "0"}},
     {"DevUIInfo", {PERSISTENT | BACKUP, INT, "0"}},
     {"EnableCopyparty", {PERSISTENT | BACKUP, BOOL}},

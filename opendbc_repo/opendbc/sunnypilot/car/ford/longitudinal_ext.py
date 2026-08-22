@@ -125,7 +125,13 @@ class LongitudinalExt:
       # maneuver must never be cheaper than evidence that refuses one, and the model alone is the
       # cheapest evidence there is. So a stop WE authored is held until he presses resume or the
       # gas -- his own press goes through untouched, because it never reaches this gate.
-      if getattr(self, "stop_override_stopped_us", False):
+      #
+      # `StockAccStopAutoResume` opts back INTO upstream's behavior, off by default. Read through
+      # getattr with a False fallback for the same reason as the flag above: a missing attribute
+      # must leave the stop HELD, never released. The conservative direction for a defaulted read
+      # is whichever one keeps the car where the driver last saw it.
+      if getattr(self, "stop_override_stopped_us", False) and \
+         not getattr(self, "stop_auto_resume_enabled", False):
         self.resume_gate_blocking = True
         return False
       self.resume_gate_blocking = False

@@ -12,7 +12,10 @@ car's own `0x462`: **40.725463, -111.829903**, which is 2011 2100 S in Salt Lake
 View shows a **SPEED LIMIT 30** on a pole at exactly that spot. Full detail in **section 4j**.
 
 **So the question is no longer "is the camera broken". It is "why is it bad at this".** Across every
-route pulled to date -- 50 segments -- there is exactly **one** detection event.
+route pulled to date -- **87 segments** -- there is exactly **one** detection event, and it needed
+night, a retroreflective sign under headlights, a head-on approach and a crawl to 7 mph to happen.
+
+**A deliberate repeat of that exact sign, at the same speed, in daylight, read nothing** (4n).
 
 **Four claims that led this file and are now WRONG. Do not carry them forward:**
 
@@ -40,8 +43,13 @@ drive and `0x463`/`0x464` **zero** times, which is the `U0253` "Missing Message"
 Its Nav Repeater settings are already correct (4h). This is real, it is not what stops sign reads,
 and it should not be conflated with TSR again.
 
-**THE NEXT WRITE is in section 4k**: `706-01-01` -> `0810 A9DA B963`, one nibble, restore
-`0810 A9DB B964`. It may fix nothing, and 4k says why.
+**THE NEXT WRITE FROM 4k HAS BEEN DONE, AND IT DID NOT WORK.** See 4n: it engaged the fused mode,
+moved `TsrVl1StatMsgTxt` from `LimitReliable` to `LimitOutdated`, and produced zero detections in 37
+segments. **Restore `706-01-01` -> `0810 A9DB B964`.**
+
+**THE ONE EXPERIMENT LEFT THAT COSTS NOTHING**: restore the nibble, then drive the 4j loop AT NIGHT
+again. Night and the nibble both changed between the drive that read a sign and the drives that did
+not, so neither is isolated. If the 30 comes back, night was the factor.
 
 **DO NOT chase a US-market as-built** -- retracted in 4l, and the reason matters.
 
@@ -69,12 +77,12 @@ what was measured on this car.
 
 | | state | as of |
 |---|---|---|
-| **IPMA `706-01-01`** | `0810 A9DB B964` -- nibble 2 written `4`->`8`, **persisted** | 2026-08-21 |
+| **IPMA `706-01-01`** | `0810 A9DA B963` -- nibble 2 `4`->`8` then nibble 8 `B`->`A`. **RESTORE TO `0810 A9DB B964`** -- the second write only regressed the status (4n) | 2026-08-22 |
 | **IPMA `706-02-01`** | `FD56 16DB 7FD3` -- nibble 4 = `6`, TSR data source Camera + APIM, **persisted** | 2026-08-21 |
-| **IPMA region `706-04-01`** | `FFFC 26C3 847A`, untouched. `FF` is NORMAL here -- a working car reads `FFFC` too | 4k |
+| **IPMA region `706-04-01`** | `FFFC 27C3 847B`, **never written**. `FF` is NORMAL here -- a working car reads `FFFC` too | 4k |
 | **APIM** | TSR enabled at `7D0-09-02`. Nav Repeater format/conformance already correct. Sends 1 of 3 GPS messages | 4h |
 | **IPC** | untouched, and it **physically lacks** `720-10-01`/`720-10-02`. Governs the DASH only -- he does not want TSR on the cluster | 4f |
-| **camera output** | **one** detection in 50 segments. `NoNavDataAvailable` on every frame | 4j |
+| **camera output** | **one** detection in 87 segments. Reaches `Available_FusionMode` and still reads nothing | 4j, 4n |
 | **openpilot** | already parses `Traffic_RecognitnData` and feeds `SpeedLimitSource.car`. The consumer side is DONE -- the moment the camera emits a limit, openpilot uses it | |
 
 **The whole configuration originally came from a Brazilian car off the internet, and there is no
@@ -982,6 +990,26 @@ It is worth doing anyway because it is ONE nibble, on a named field, toward the 
 on this platform runs, with a clean restore and a measured baseline to compare against. **Drive the
 same roads past the same signs and count reads against one-in-747.**
 
+### CORRECTION: `706-04-01` WAS MISREAD, AND IT WAS NEARLY WRITTEN UP AS A SECOND CHANGE
+
+This file recorded his `706-04-01` as `FFFC 26C3 847A` from 2026-08-21 onward. **The car reads
+`FFFC 27C3 847B`, and he confirms he has never written that block.**
+
+Both values are checksum-valid, so the checksum cannot arbitrate between them. But `7 -> 6` and
+`B -> A` are each "one less" -- the shape of a transcription slip off a screenshot, not of a module
+rewriting itself. **Treat `FFFC 27C3 847B` as the true value throughout.**
+
+**Why it matters beyond tidiness.** On 2026-08-22 he wrote the nibble-8 change from 4k, sent a fresh
+screenshot, and the difference against the misrecorded value read as a SECOND concurrent write. It
+was reported to him that way -- "that's two changes, the drive can't attribute" -- and he corrected
+it: *"I only made one change... I only changed 706-01-01."* He was right. One change is in place and
+the next drive CAN attribute.
+
+**The lesson is the one this file keeps re-learning**: a value transcribed by eye from an image is
+not a measurement, and a self-consistent checksum does not make it one -- an off-by-one in two
+digits preserved validity perfectly. Re-read the block off the car before reasoning from a
+difference.
+
 ### AND THE REGION READING FROM 4g WAS WRONG
 
 Section 4g called `FF` in `706-04-01` an unset region, from a community value table where `0A` is
@@ -1120,6 +1148,66 @@ investigation stops here rather than why it should continue.
 
 ---
 
+## 4n. THE NIBBLE-8 WRITE: TOOK EFFECT, CHANGED THE STATUS FOR THE WORSE, READ NOTHING
+
+**2026-08-22.** `706-01-01` written to `0810 A9DA B963` -- nibble 8 `B` -> `A`, "Reading + GPS"
+(section 4k). One change only; the `706-04-01` difference reported at the time was a misread, see
+the correction above. Three daylight drives followed, one of them a deliberate repeat of the route
+from 4j **past the same sign at the same speed.**
+
+```
+000003a7   2026-08-21  NIGHT      747 frames  peak 32.2 mph   7 frames, 1 sign
+000003a8   2026-08-22  daylight   913 frames  peak 36.6 mph   0
+000003a9   2026-08-22  daylight   265 frames  peak 35.1 mph   0
+000003aa   2026-08-22  daylight   953 frames  peak 74.5 mph   0
+```
+
+**Zero detections in 37 segments**, including the controlled repeat.
+
+### THE WRITE REACHED THE CAMERA, AND ITS ONLY EFFECT WAS A REGRESSION
+
+The broadcast changed -- byte 2 went `20` -> `30`, and exactly one signal moved:
+
+```
+TsrVl1StatMsgTxt_D_Rq    before  2  LimitReiable
+                         after   3  LimitOutdated
+```
+
+So `A` = "Reading + **GPS**" genuinely engaged the fused mode, and because the GPS half never
+arrives -- `0x463`/`0x464` still zero on all three drives -- the camera now rates its (nonexistent)
+limit as OUTDATED rather than reliable. **That is the risk written into 4k before the write, and it
+is what happened.**
+
+**RESTORE `706-01-01` -> `0810 A9DB B964`.** The change bought a status regression and nothing else.
+
+### THE CONFOUND, STATED PLAINLY
+
+**Two variables moved between the drive that read a sign and the drives that did not**: night ->
+daylight, AND the nibble. This does not isolate either. The experiment that separates them is to
+restore the nibble and drive the same loop AT NIGHT. If the 30 comes back, night was the factor and
+the nibble was neutral-to-harmful.
+
+Worth weighing before assuming the nibble is the culprit: a retroreflective sign under headlights at
+7 mph is a far easier target than the same sign in daylight at 30, and 4j already measured that the
+one detection needed about the most favourable conditions a public road offers.
+
+### AND FUSION MODE IS NOW CONCLUSIVELY NOT THE ANSWER
+
+Both 2026-08-22 drives reached `Available_FusionMode` with `NoInformationAllOK` -- the camera's
+fully healthy state, nothing wrong, nav data flowing -- for ~30 frames each, **and read nothing**.
+Route `000003a1` showed the same on 2026-08-21 (section 4f). Three independent drives now.
+
+**Fused mode is reachable on this car and it is not what produces sign reads.** Do not re-open it.
+
+### A SCORER DEFECT WORTH KNOWING
+
+`tsr_score.py` reported "2 with a limit" on route `000003a9`. Both were BOOT frames -- `VLim1 = 0`,
+with `TsrStatMsgTxt` reading `Null` and `NoDataExists`. Zero is not a limit, it is an uninitialised
+frame. Fixed: a detection now requires `VLim1` outside `(0, 255)`. **A tool that counts the
+uninitialised state as a success will eventually report a fix that did not happen.**
+
+---
+
 ## 4b. THE ONLY THING THAT DEMONSTRABLY WORKED: "TSR data source = Camera + APIM"
 
 Filed as a dead end at first. It is the opposite -- it is the single piece of positive evidence from
@@ -1204,7 +1292,7 @@ block       yours            friend           differing nibbles (1-based, checks
 706-02-07   0000 0004 001A   0000 0084 009A   7
 706-03-01   C000 5200 80A3   8000 0000 8011   1, 5, 6
 706-03-04   0080 0000 0094   0089 0000 009D   4
-706-04-01   FFFC 26C3 847A   1EFC 26C3 485D   1, 2, 9, 10
+706-04-01   FFFC 27C3 847B   1EFC 26C3 485D   1, 2, 6, 9, 10   (his was MISREAD as ...26C3 847A)
 706-05-01   53AA 7400 0084   566A B800 008B   2, 3, 5, 6
 ```
 
@@ -1547,7 +1635,7 @@ One message to the friend, whose car runs the same strategy and calibration with
 
 - **His `706-04-01`.** Section 4d recorded 12 differing blocks but this one was never interpreted,
   and 4k shows the first byte is not what a search result claimed. His value is `1EFC 26C3 485D`
-  against this car's `FFFC 26C3 847A` -- that difference is unexplained and it is in the block a
+  against this car's `FFFC 27C3 847B` -- that difference is unexplained and it is in the block a
   working Fiesta also differs on.
 - **Whether his APIM sends `0x463` / `0x464`.** Needs a comma or a bus tool, so it may not be
   answerable, but it separates "this APIM is broken" from "no CD391 APIM sends these".

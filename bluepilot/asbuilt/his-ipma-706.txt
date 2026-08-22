@@ -1,19 +1,27 @@
 # HIS IPMA (706) as-built -- COMPLETE dump, all 29 blocks.
-# Source: FORScan "IPMA Module configuration (AS BUILT format)".
-# Module: KT4T-19H406-CE, strategy KT4T-14F397-AE.
+# Source: FORScan "IPMA Module configuration (AS BUILT format)", read 2026-08-22.
+# Module: KT4T-19H406-CE, strategy KT4T-14F397-AE. A Cx camera: per Ford's part scheme Bx adds
+# AHB / TSR / tiredness alert and Cx adds autonomous braking on top. It HAS read a US sign (4j).
 #
-# STATE: 2026-08-21, AFTER two writes, both CONFIRMED PERSISTENT across an ignition cycle.
-#   706-01-01  0410 A9DB B960 -> 0810 A9DB B964   (nibble 2, 4->8)
-#   706-02-01  FD52 16DB 7FCF -> FD56 16DB 7FD3   (nibble 4, 2->6 = TSR data source Camera + APIM)
+# WRITES IN PLACE, all checksum-verified, all accepted and persisted by the module:
+#   706-01-01  0410 A9DB B960 -> 0810 A9DB B964   nibble 2, 4->8   2026-08-21
+#              0810 A9DB B964 -> 0810 A9DA B963   nibble 8, B->A   2026-08-22
+#                                                 TSR mode "Reading + GPS", section 4k
+#   706-02-01  FD52 16DB 7FCF -> FD56 16DB 7FD3   nibble 4, 2->6   2026-08-21
+#                                                 TSR data source Camera + APIM
 #
-# The second write had reverted at boot every previous attempt (section 4b). It holds now that
-# nibble 2 of 706-01-01 is 8 -- the two fields are validated together.
-#
-# PRE-CHANGE RESTORE VALUES:
-#   706-01-01 -> 0410 A9DB B960
+# RESTORE VALUES:
+#   706-01-01 -> 0810 A9DB B964   (or 0410 A9DB B960 for the pre-2026-08-21 state)
 #   706-02-01 -> FD52 16DB 7FCF
+#
+# CORRECTION, 2026-08-22. This file previously recorded 706-04-01 as FFFC 26C3 847A. The car reads
+# FFFC 27C3 847B and the owner confirms he has never written that block. BOTH values are
+# checksum-valid, so the checksum cannot arbitrate -- and 7->6 with B->A is each "one less", the
+# shape of a transcription slip off a screenshot rather than a real change. Treat FFFC 27C3 847B as
+# the true value and the earlier one as my misreading. It was briefly written up as a second
+# concurrent change, which would have made the next drive unattributable; it is not one.
 
-706-01-01  0810 A9DB B964
+706-01-01  0810 A9DA B963
 706-01-02  301A 6535 6458
 706-01-03  4000 0000 0051
 706-01-04  0000 0000 0012
@@ -38,7 +46,7 @@
 706-03-08  0080 0000 0098
 706-03-09  0000 0000 0019
 706-03-10  0000 0000 0020
-706-04-01  FFFC 26C3 847A
+706-04-01  FFFC 27C3 847B
 706-04-02  0000 0000 0013
 706-05-01  53AA 7400 0084
 706-05-02  0000 0014
