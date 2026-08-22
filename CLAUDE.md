@@ -3639,3 +3639,59 @@ together can never catch a producer that writes only one.**
 `str(source) == 'radar'` and would have rendered "rear: blind spot only" on a car with a working
 radar. A wrong invariant propagates to every new consumer until someone writes it down, which is
 what the module header now does: *a source must be set wherever availability is claimed*.
+
+## THE REAR DIGEST REPORTS THE SOONEST TARGET, NOT THE NEAREST
+
+Changed 2026-08-21 on a measurement. `bp_rear_digest_sim.reduce_to_sides` -- the reference
+`rear_radar_feeder.ino` mirrors -- picked `min(d_rel)` under a docstring arguing "the target that
+matters is the one arriving first". That is a TIME-TO-CONTACT argument for a different target:
+
+    80 m back at 15 m/s   ->  TTC  5.3 s   REFUSES the pass (UNSAFE_TTC_S is 8.0)
+    20 m back at  2 m/s   ->  TTC 10.0 s   allows it
+
+**The feeder reduces many targets to one, so whatever it drops is invisible downstream** --
+`targetCount` is the only tell that anything else was there. That makes the reduction the single
+place in the rear chain where evidence is DESTROYED rather than weighed.
+
+Measured with `tools/bp_digest_pick_rule.py` on route 000003a1, 30,257 radar scans:
+
+    side-scans with 2+ closing targets      33,287
+    nearest and soonest DISAGREE             5,573   16.7%
+    ...and the disagreement CROSSES 8 s      1,298    3.9%
+    worst: nearest reported 12.0 s while a discarded target sat at 0.4 s
+
+**SAFE TO CHANGE WITHOUT A ROAD TEST because it is MONOTONICALLY CONSERVATIVE**: `min(TTC)` is by
+construction <= every other target's TTC, so the new rule refuses everywhere the old one refused
+and sometimes more. It cannot open a lane the old rule closed. One divide per detection.
+
+Front radar as a proxy, stated in the tool -- there is no rear radar, so read 3.9% as "multi-target
+scenes on his roads separate the two rules this often", not as a rear-radar rate.
+
+**And the test that kept passing is the lesson.** `test_the_nearest_closing_target_wins` gives all
+three of its targets the SAME closing speed, where nearest and soonest are the same target -- so it
+held under either rule and the suite stayed quiet. A fixture that cannot distinguish two candidate
+rules is not evidence for either.
+
+## THE REAR RADAR CAN BE READ FROM THE LAPTOP: `tools/bp_radar_bench.py`
+
+Written 2026-08-21, and it is the tool `bp_rear_digest_sim.py` had named as its input source since
+the day it was written, against a file that did not exist. Run it with `../.venv-bp312/Scripts/
+python.exe` -- python-can and pyserial are there, and the device has neither and needs neither.
+
+    --list                     finds the adapter by VID:PID (the RH-02 is 16D0:117E, slcan)
+    --live                     strongest return per cycle, for the angle questions
+    --record cap.json          a capture bp_rear_digest_sim.py replays
+
+**FIRST LIGHT, same day, 15 s off the real sensor:** 2172 frames/s, 33.4 Hz, 36x reduction, 0
+closing targets. Every number the 2026-08-14 bench produced by hand, reproduced from a file that
+replays. **The MRR free-runs -- all four scan modes rotating with nothing transmitted** -- so the
+ESR gateway-frame handshake that `BP-REAR-RADAR-PLAN.md` sections 3 and 4 are built around is
+doubly dead.
+
+**A BENCH CAPTURE INDOORS CANNOT CALIBRATE THE ANGLE, and it looks like it can.** That capture had
+2 of 64 slots firing, both pinned at 2.55-2.59 m, azimuth in two clusters 17 degrees apart -- one
+per scan mode. 2.57 m is under 6% of the short-range mode's 42-45 m reach, so it is near field, and
+one object reading 17 degrees apart by scan mode is what unreliable angle estimation looks like.
+**`AZIMUTH_OFFSET_RAD` and the azimuth SIGN need a reflector at 10-20 m outdoors with clear space**,
+placed unambiguously on one side. Getting the sign wrong swaps left and right: the veto guards the
+lane you are not entering, and every gate downstream looks healthy doing it.
