@@ -588,6 +588,30 @@ mislabelled event rather than a missing one. The detector stays as belt-and-brac
 A hold is also cleared by returning the set speed to exactly SLA's target, or by the posted limit
 moving more than `IcbmBaselineResetDelta`. It is NOT cleared by curves or lead vehicles.
 
+**THE TAIL OF A RESUME PRESS DOES NOT CREATE A HOLD -- `RESUME_TAIL_FRAMES`, added 2026-08-22.**
+This is the one deliberate exception to the RES+ row of the table above, and it exists because two
+correct facts combine into a wrong outcome. He reported it as *"a hold got set without me doing plus
+and minus"*; route 000003aa, from ONE press of RES+:
+
+    809.83  enab=False  resumeCruise    <-- he presses RES+, and nothing else
+    809.85  enab=False  resumeCruise
+    809.86  enab=True   accelCruise     <-- SAME physical press, cruise engaged part-way
+    809.88  enab=True   accelCruise     -> HOLD CREATED at 32 mph on a 35 road
+
+RES+ derives its meaning per frame from the cruise state, which is the contract and is right. And
+this car's SCCM clears the button bit between frames -- see "Buttons cannot hold" -- so one physical
+press arrives as a BURST of press/release cycles. The instant cruise engages mid-burst the rest of
+that press reads as `+`.
+
+**KEYED ON PROXIMITY TO THE RESUME, not on having recently engaged.** The engage-edge version was
+tried first and broke 23 tests, correctly: a `+` pressed a moment after engaging is ordinary and
+must still work. The phantom arrived 0.02 s after the resume; the genuine presses on those same
+drives came 3.5 s and later.
+
+**Only CREATION is suppressed**, and the whole press block is skipped rather than just the capture
+inside it -- guarding the capture alone did nothing, because `override_state = manual` is set
+unconditionally below it and the press-settle path then took the baseline from the cluster anyway.
+
 Two things that decided the design:
 
 - **SET does not hold the current vehicle speed**, even though Ford's PCM briefly sets it there.
