@@ -269,14 +269,28 @@ and it reverted at the next boot. 4d caught the car inside that window.
 
 Target value, checksum valid: **`706-02-01` -> `FD56 16DB 7FD3`**.
 
-### The open question, and the reading that answers it
+### IT PERSISTED ACROSS AN IGNITION CYCLE
 
-After a key cycle, re-read `706-01-01`:
+**Confirmed 2026-08-21.** `706-01-01` = `0810 A9DB B964` survived ignition off and on.
 
-- **`0810 A9DB B964`** -> it persisted. Nibble 2 is writable AND holds, which is more than
-  *Camera + APIM* ever managed, and the remaining work is which nibble actually gates TSR.
-- **`0410 A9DB B960`** -> startup validation rejected it, exactly as in 4b, and the licence was never
-  the blocker.
+**This is the first change in the entire investigation that has ever held.** *Camera + APIM* landed
+and reverted; `0450` was never sent; the IPC SLIF change was refused. Nibble 2 wrote, was accepted,
+and stayed. Mode 2 passed.
+
+**And it suggests why 4b failed.** Section 4b guessed the revert was "the module accepting into
+working memory and then failing its own configuration validation at startup". If nibble 2 of
+`706-01-01` is part of what that validation checks, then *Camera + APIM* reverted **because
+`706-01-01` was still `4`** — the module rejecting a data-source setting inconsistent with its own
+feature configuration.
+
+That is directly testable on the block that failed before: write **`706-02-01` -> `FD56 16DB 7FD3`**,
+key cycle, re-read. **If it holds now where it reverted in August, the two fields are interlocked and
+that was the whole problem.**
+
+**What is NOT yet proven.** A value persisting is not TSR working. The measurement is
+`TsrVLim1MsgTxt` in `Traffic_RecognitnData` (`0x3CD`): **255 is the no-data sentinel** and it has been
+255 on every frame ever captured on this car. Anything else means the camera is genuinely reading a
+sign. That needs a drive past a posted limit; it cannot be settled in the driveway.
 
 Restore value, exact: **`706-01-01` -> `0410 A9DB B960`**.
 
