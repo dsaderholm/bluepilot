@@ -469,6 +469,118 @@ Bisect candidates, all checksum-valid, from `bluepilot/asbuilt/asbuilt.py`:
 
 ---
 
+## 4f. FUSION MODE IS THE ANSWER, AND `U0253` IS WHAT BLOCKS IT
+
+**2026-08-21, late. This supersedes the Camera Only advice given earlier the same day, which was
+wrong.**
+
+### Two independent reports: Fusion mode is what produces sign reads
+
+From the FORScan forum, `Focus MK4 - Activation Traffic Sign Recognition (TSR) Impossible` (t=13385):
+
+> **`adiandy`**: "I also changed to **FUSION rather than Camera only**, and now I get the Speed sign
+> as soon as i move the car."
+
+> **`sanglt`**, vehicle listed as **Ford Mondeo MK5** -- *this platform, CD391*: "I try to active TSR
+> on Mondeo MK5 too. So far I can get these thing works: **IPMA: TSR in Fusion mode**; IPC: TSR menu
+> + icon show"
+
+**A CD391 car has TSR working and it runs Fusion mode.** Line 30 of this document says sign reading
+does not need nav, and that reasoning produced the instruction to revert `706-02-01` to Camera Only.
+It was wrong. The working car sits at nibble 4 = `6`, and so do these reports.
+
+### And it explains the 1765 frames
+
+The post-write drive ran at nibble 4 = `6` (Camera + APIM) the whole way, yet `0x3CD` reported
+`Available_CameraOnly` with `NoNavDataAvailable` on **every single frame**. The camera never entered
+Fusion mode. It could not: Fusion mode needs the APIM feeding it nav data.
+
+```
+U0253  Lost Communication With Accessory Protocol Interface Module
+       Module: Image Processing Module A
+       status -2C  DTC Maturing - Intermittent at Time of Request   (2026-08-21 20:07)
+```
+
+**The camera has been saying all along that it cannot reach the APIM.** Section 6d already measured
+the other half: the APIM sends position only, and `0x463` / `0x464` are absent. Nothing in five
+months of as-built work touches that.
+
+**THE BLOCKER IS THE APIM LINK, NOT THE CAMERA AND NOT ITS AS-BUILT.**
+
+### The confirmed-working Focus MK4 recipe, for reference
+
+```
+1 - IPMA   "Traffic Sign Recognition Mode: SLOIF"
+2 - IPC    "Traffic Sign Recognition"  Disabled > Enabled
+3 - ASBUILT enable menus:
+    IPC 720-03-01  x7xx xxxx xx   TSR IOD
+    IPC 720-04-01  xxxx xxCx xx   TSR overspeed chime
+    IPC 720-09-01  xxxx xxxx 0x   TSR SLIF deactivation
+    IPC 720-10-01  x0xx xxxx xx   TSR NCAP deactivation
+    IPC 720-03-02  xx8x xx        "Traffic Sign Recognition"
+SLIF  = speed limit information function
+SLOIF = speed limit and other information (overtaking signs)
+```
+
+### HIS IPC PHYSICALLY LACKS TWO OF THOSE BLOCKS
+
+Diffing his IPC against the Euro Mondeo CD391 (same `LS7T-14C026` strategy family):
+
+```
+720-10-01   HIS --ABSENT--       EURO 0401 0000 003D    <- named in the Focus fix
+720-10-02   HIS --ABSENT--       EURO 4000 0079
+720-09-01   HIS 2000 0000 0051   EURO 2000 1504 016B    <- zeros where the euro car has data
+```
+
+18 blocks on his IPC, 20 on the Euro. **A missing block is not a wrong value -- the record does not
+exist and no checksum gets past it.** This is structural confirmation of what BartBK said on
+2026-08-09: *"The US IPC does not support TSR. You have to replace it to have TSR on the IPC."*
+
+**But that governs the DASH, not the bus.** openpilot never reads the cluster; it reads `0x3CD`. If
+the camera enters Fusion mode it broadcasts there regardless of what the IPC can render. **Do not buy
+a cluster to fix an openpilot feature.**
+
+If the dash display is ever wanted for its own sake, the donor is a **UK-market** CD391 Mondeo IPC --
+mph and TSR -- not a continental km/h one.
+
+### The as-built checksum, generalised
+
+```
+checksum = (0x0H + 0xLL of the address) + section + block + sum(data_bytes)  &  0xFF
+```
+
+The address contributes as **bytes**: `706` -> `0x07 + 0x06`, `720` -> `0x07 + 0x20`,
+`726` -> `0x07 + 0x26`, `7D0` -> `0x07 + 0xD0`. The earlier 706-only formula summed three nibbles and
+worked only because `0x06 == 6`. **Verified against all 201 blocks of four modules with zero
+failures.** Any candidate value for any module can now be generated rather than copied off another
+car.
+
+### UCDS CANNOT DECODE THIS CAR'S CCC. THE STEP THAT SAID IT COULD WAS NEVER VERIFIED.
+
+The `AsBuilt Editor (CCC)` model list contains, in full: GALAXY/S-Max CD340, Mondeo IV CD345, C-MAX,
+Focus III, Kuga II, Escape C520, Fiesta, B-MAX, Transit and its variants, EcoSport, Ranger, Territory.
+**No Edge. No Mondeo V. No CD391 at all**, and nothing newer than roughly 2017.
+
+Selecting a model and proceeding returns:
+
+```
+Unable to find JU5T-14B476-BAR part number of BCMii module in base! Check model of car selected!
+```
+
+That is his BdyCM. The data is not in UCDS. **"Select `EDGE/S-MAX 2015-`, open AsBuilt Editor (CCC)"
+was step 2 of section 7 from 2026-08-12 onward and was never possible.** Three sections were built on
+a step nobody had checked existed. Delete it on sight.
+
+### Standing caution on the two demo sessions
+
+`WF0EXXWPCELA25401` and `WF0EXXWPCELR15787` are CD391 with a **byte-identical BdyCM** to his
+(`JU5T-14F141-BAC` / `JU5T-14B476-BAR` / `JU5T-14C184-AAN`), so block layouts are directly
+comparable. **But there is NO evidence either car has TSR.** They may be UCDS reference files rather
+than real configured vehicles. That assumption was leaned on three times on 2026-08-21 and must be
+verified before any value is copied from them.
+
+---
+
 ## 4b. THE ONLY THING THAT DEMONSTRABLY WORKED: "TSR data source = Camera + APIM"
 
 Filed as a dead end at first. It is the opposite -- it is the single piece of positive evidence from
