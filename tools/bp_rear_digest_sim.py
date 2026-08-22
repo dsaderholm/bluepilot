@@ -106,24 +106,35 @@ def decode_detections(db, addr_to_index, frames, azimuth_offset_rad: float = 0.0
 def reduce_to_sides(dets) -> tuple[SideDigest, SideDigest]:
   """Detections -> nearest CLOSING target per side. This is the entire feeder algorithm.
 
-  NEAREST, not strongest and not fastest. Amplitude is decoded but deliberately unused: a big slow
-  lorry is not more urgent than a small fast car.
+  SOONEST -- smallest time to contact. Not nearest, not strongest, not fastest. Amplitude is
+  decoded but deliberately unused: a big slow lorry is not more urgent than a small fast car.
 
-  OPEN, 2026-08-21: "the target that matters is the one arriving first" is a TTC argument, and this
-  picks the nearest, which is not the same target. Worked example, both closing, both on the left:
+  THIS WAS min(d_rel) UNTIL 2026-08-21 AND IT WAS MEASURABLY WRONG. The docstring already argued
+  "the target that matters is the one arriving first", which is a TTC argument, while the code
+  picked the nearest -- a different target:
 
-      80 m back at 15 m/s   ->  TTC  5.3 s   would REFUSE the pass (UNSAFE_TTC_S is 8.0)
-      20 m back at  2 m/s   ->  TTC 10.0 s   would allow it
+      80 m back at 15 m/s   ->  TTC  5.3 s   REFUSES the pass (UNSAFE_TTC_S is 8.0)
+      20 m back at  2 m/s   ->  TTC 10.0 s   allows it
 
-  min(d_rel) reports the second and discards the first, so the digest hands openpilot a clear
-  answer while the target that would have refused is thrown away at the feeder -- where nothing
-  downstream can see that it existed. target_count says two, which is the only tell.
+  Nearest reports the second and discards the first AT THE FEEDER, where nothing downstream can see
+  it existed -- the digest carries one target per side and target_count is the only tell. That
+  makes this the one place in the whole rear chain where evidence is destroyed rather than weighed.
 
-  NOT CHANGED HERE. The firmware is bench-tested and this file is what it mirrors, so switching the
-  key is a reflash and a re-run of the bench list, not an edit. It is also possible the case is rare
-  enough not to be worth it -- a slow car close behind while a fast one closes from distance. But
-  the reduction is the one place in this whole chain where evidence is destroyed rather than
-  weighed, so the rule deserves to be chosen deliberately rather than inherited.
+  MEASURED before changing, with tools/bp_digest_pick_rule.py on route 000003a1 (30,257 radar
+  scans, front MRR as a proxy since no rear radar exists yet):
+
+      side-scans with 2+ closing targets      33,287
+      nearest and soonest DISAGREE             5,573    16.7%
+      ...and the disagreement CROSSES 8 s      1,298     3.9%
+      worst: nearest reported 12.0 s while a discarded target sat at 0.4 s
+
+  3.9% of multi-target scenes would have been reported CLEAR with a car inside the veto window.
+  The worst case is not marginal. Changed here and mirrored in rear_radar_feeder.ino; the change
+  costs one divide per detection and nothing else.
+
+  The proxy caveat is real -- forward closing targets are traffic we are overtaking and oncoming
+  cars, rear ones are faster followers -- so treat 3.9% as "multi-target scenes on his roads
+  separate the two rules this often", not as a rear-radar rate. It does not change the direction.
   """
   left, right = SideDigest(), SideDigest()
   for side, keep in ((left, lambda d: d.y_rel > OWN_LANE_HALF_WIDTH_M),
@@ -131,7 +142,8 @@ def reduce_to_sides(dets) -> tuple[SideDigest, SideDigest]:
     closing = [d for d in dets if keep(d) and d.v_rel >= MIN_CLOSING_MS]
     side.target_count = min(31, len(closing))
     if closing:
-      n = min(closing, key=lambda d: d.d_rel)
+      # v_rel >= MIN_CLOSING_MS is already guaranteed by the filter above, so the divide is safe.
+      n = min(closing, key=lambda d: d.d_rel / d.v_rel)
       side.detected = True
       side.d_rel, side.y_rel, side.v_rel = n.d_rel, n.y_rel, n.v_rel
   return left, right

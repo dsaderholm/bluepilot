@@ -23,8 +23,9 @@ def det(d_rel, y_rel, v_rel, amplitude=-20.0):
 class TestWhichTargetIsReported:
 
   def test_the_nearest_closing_target_wins(self):
-    """Nearest, because the consumer computes TTC and the one arriving first is the one that
-    matters."""
+    """At EQUAL closing speed the nearest is also the soonest, so this holds under either rule --
+    which is exactly why it went on passing while the rule itself was wrong. See
+    test_a_faster_target_DOES_outrank_a_nearer_one for the case that separates them."""
     left, _ = reduce_to_sides([det(90.0, 3.7, 8.0), det(40.0, 3.7, 8.0), det(70.0, 3.7, 8.0)])
     assert left.detected and left.d_rel == 40.0
 
@@ -35,9 +36,22 @@ class TestWhichTargetIsReported:
                                det(80.0, 3.7, 6.0, amplitude=+10.0)])
     assert left.d_rel == 30.0
 
-  def test_a_faster_target_does_not_outrank_a_nearer_one(self):
+  def test_a_faster_target_DOES_outrank_a_nearer_one(self):
+    """REVERSED 2026-08-21, on a measurement rather than an argument. This asserted the opposite
+    and its premise was wrong: 95 m closing at 30 m/s arrives in 3.2 s and refuses a lane change,
+    while 25 m at 2 m/s takes 12.5 s and allows one. Reporting the nearer car handed openpilot a
+    clear answer about a side with something arriving in three seconds.
+
+    tools/bp_digest_pick_rule.py measured it on route 000003a1: of 33,287 multi-target side-scans,
+    3.9% crossed the 8 s veto window this way, worst case 12.0 s reported against a discarded
+    target at 0.4 s.
+
+    AND THE CHANGE IS MONOTONICALLY CONSERVATIVE, which is what makes it safe to make without a
+    road test: min(TTC) <= the TTC of any other target by construction, so the new rule blocks
+    everywhere the old one blocked and sometimes more. It can never open a lane the old rule
+    refused."""
     left, _ = reduce_to_sides([det(25.0, 3.7, 2.0), det(95.0, 3.7, 30.0)])
-    assert left.d_rel == 25.0
+    assert left.d_rel == 95.0
 
   def test_the_count_reports_everything_that_was_considered(self):
     """detected with a count of zero is impossible and would mean a feeder bug -- the DBC comment
@@ -88,3 +102,38 @@ class TestWhichSideATargetIsOn:
     left, right = reduce_to_sides([det(20.0, 3.7, 12.0), det(25.0, 4.0, 14.0)])
     assert left.target_count == 2
     assert not right.detected and right.d_rel == 0.0
+
+
+class TestItPicksTheSoonestNotTheNearest:
+  """The feeder reduces many targets to one, so whichever it drops is invisible downstream. Picking
+  min(d_rel) reported a side CLEAR while a car inside the veto window was thrown away -- measured
+  at 3.9% of multi-target side-scans on route 000003a1, worst case 12.0 s reported against a
+  discarded target at 0.4 s. See reduce_to_sides' docstring for the full measurement."""
+
+  @staticmethod
+  def _det(d_rel, v_rel, y_rel):
+    return Detection(d_rel=d_rel, y_rel=y_rel, v_rel=v_rel, amplitude=0.0)
+
+  def test_the_arriving_car_wins_over_the_closer_one(self):
+    # 80 m at 15 m/s arrives in 5.3 s and refuses the pass; 20 m at 2 m/s takes 10 s and allows it.
+    far_fast = self._det(80.0, 15.0, 3.0)
+    near_slow = self._det(20.0, 2.0, 3.0)
+    left, _ = reduce_to_sides([near_slow, far_fast])
+    assert left.detected
+    assert left.d_rel == 80.0, "reported the nearer car and discarded the one arriving first"
+    assert left.target_count == 2, "the tell that a target was dropped must survive"
+
+  def test_order_does_not_decide_it(self):
+    a = reduce_to_sides([self._det(80.0, 15.0, 3.0), self._det(20.0, 2.0, 3.0)])[0]
+    b = reduce_to_sides([self._det(20.0, 2.0, 3.0), self._det(80.0, 15.0, 3.0)])[0]
+    assert a.d_rel == b.d_rel == 80.0
+
+  def test_nearest_still_wins_when_it_is_also_soonest(self):
+    left, _ = reduce_to_sides([self._det(30.0, 10.0, 3.0), self._det(90.0, 10.0, 3.0)])
+    assert left.d_rel == 30.0
+
+  def test_the_two_sides_are_reduced_independently(self):
+    left, right = reduce_to_sides([self._det(80.0, 15.0, 3.0), self._det(20.0, 2.0, 3.0),
+                                   self._det(50.0, 5.0, -3.0)])
+    assert left.d_rel == 80.0
+    assert right.d_rel == 50.0

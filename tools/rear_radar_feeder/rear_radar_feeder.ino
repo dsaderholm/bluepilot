@@ -135,7 +135,12 @@ static void reduceCycle() {
     else if (d.yRel < -OWN_LANE_HALF_WIDTH_M) s = &r;
     else continue;  // dead astern is our own lane, not a lane we would move into
     if (s->count < 31) s->count++;
-    if (!s->detected || d.dRel < s->dRel) {
+    // SOONEST, not nearest. Changed 2026-08-21 on a measurement -- see bp_rear_digest_sim.py, which
+    // this mirrors. Picking min(dRel) hid the arriving car on 3.9% of multi-target side-scans, and
+    // the worst case reported 12.0 s while discarding a target at 0.4 s. vRel is already known
+    // >= MIN_CLOSING_MS here, so the divide is safe.
+    const float t = d.dRel / d.vRel;
+    if (!s->detected || t < s->dRel / s->vRel) {
       s->detected = true;
       s->dRel = d.dRel;
       s->yRel = d.yRel;
