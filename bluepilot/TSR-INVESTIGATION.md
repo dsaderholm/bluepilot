@@ -808,6 +808,38 @@ So the conclusion does not depend on the far end of the approach at all. A produ
 visible AND resolvable from 200 m+, and "recognised at N metres" becomes a number nobody has to
 argue about.
 
+### THE CAMERA IS A MOBILEYE, AND THE PIXEL ARITHMETIC CLOSES THE ARGUMENT
+
+**The IPMA is a Mobileye unit.** Ford has a global agreement with Mobileye for the EyeQ family, and
+a teardown of a 2018 F-150 IPMA (`JL3T-19H406-AD`) found a **Mobileye EyeQ3** fabricated by ST
+Micro. This car's `KT4T-19H406-CE` is the same part series one generation on, so EyeQ3 or EyeQ4.
+
+Taking the EyeQ3-era Mobileye mono camera -- 1280 px wide, 38-52 degrees horizontal FOV, typical for
+that generation though not confirmed for this exact part -- a 24-inch US `SPEED LIMIT` sign subtends:
+
+```
+ dist     38 deg lens   52 deg lens    camera reported
+ 104 m        11 px         8 px       255 NoLimit
+  78 m        15 px        11 px       255 NoLimit
+  54 m        22 px        16 px       255 NoLimit
+  42 m        28 px        20 px       255 NoLimit
+  31 m        38 px        28 px       255 NoLimit
+  20 m        59 px        43 px       255 NoLimit
+  10 m       118 px        86 px       255 NoLimit
+```
+
+Numerals need roughly 20-30 px of sign width to classify. **Even on the wider lens that is satisfied
+from about 31 m in.** So at 10 metres the sign occupied 86-118 px of width -- unmissable, filling a
+substantial fraction of the frame -- and the camera reported no limit.
+
+**THIS IS NOT AN OPTICS, RESOLUTION OR DISTANCE PROBLEM.** The sign was present, lit, resolved and
+enormous. The classifier did not match it.
+
+And it quantifies the gap: an EyeQ3 doing TSR normally commits around 20-30 px, which on this lens is
+**40-50 metres**. This one needed zero. That is not a degraded system -- it is a system matching
+against the wrong thing, which is exactly what a Vienna-Convention circular-plate template does
+against a US rectangle no matter how many pixels it is given.
+
 **A working TSR recognises a sign 30-50 m out. This one has an effective range of about zero.** That
 is the entire explanation for the hit rate:
 
