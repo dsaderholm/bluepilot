@@ -3672,6 +3672,21 @@ three of its targets the SAME closing speed, where nearest and soonest are the s
 held under either rule and the suite stayed quiet. A fixture that cannot distinguish two candidate
 rules is not evidence for either.
 
+**CONFIRMED ACROSS FIVE DRIVES, 2026-08-21** -- because 3.9% was one route, and two other one-route
+numbers had to be walked back the same day:
+
+    route       2+ closing   DISAGREE          CROSSES 8 s        worst crossing
+    000003a1        33,287    5,573  16.7%     1,298   3.9%       12.0 s vs 0.4 s
+    0000039a        35,986    6,624  18.4%     2,043   5.7%       12.1 s vs 0.7 s   (5 targets)
+    0000039c        46,412   13,195  28.4%     2,498   5.4%       31.8 s vs 0.7 s  (16 targets)
+    0000039f        57,971   15,523  26.8%     4,417   7.6%        8.5 s vs 0.4 s
+    000003a0        32,268    5,376  16.7%     1,456   4.5%       16.8 s vs 0.3 s  (17 targets)
+
+**Crossings are 3.9-7.6% on every drive, never zero, and the worst cases are not marginal** -- 31.8
+seconds reported while a discarded target sat at 0.7 s, on a side carrying sixteen closing targets.
+The single-drive number was if anything the LOW end. Unlike the other two one-drive figures that
+day, this one held.
+
 ## THE REAR RADAR CAN BE READ FROM THE LAPTOP: `tools/bp_radar_bench.py`
 
 Written 2026-08-21, and it is the tool `bp_rear_digest_sim.py` had named as its input source since
