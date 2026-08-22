@@ -788,10 +788,21 @@ The mistake was looking at road illumination instead of the retroreflector.
 So the finding stands and is better supported than before: **the sign was visible from at least
 104 m and the camera reported nothing at 104, 78, 54, 42, 31, 20 or 10 m.**
 
-**The one fair caveat is RESOLVABILITY, not visibility.** At 104 m that sign is a handful of pixels
--- enough to see something is there, not enough to read the digits. A production TSR typically
-commits at 30-50 m. **But this camera failed at 31 m and at 10 m as well**, which is well inside
-where the numerals are readable, so the conclusion does not depend on the far end of the approach.
+**The one fair caveat is RESOLVABILITY, not visibility, and the footage bounds that too.** At 104 m
+the sign is a handful of pixels -- enough to see something is there, not enough to read digits. But
+**at 31 m it is an unambiguous white rectangle on the pole, clearly resolved in a heavily compressed
+526x330 qcam frame, at night.** The IPMA is purpose-built for this and far higher resolution than
+the comma's qcam. It reported `255 NoLimit` at that exact moment.
+
+```
+ 104 m   visible as a retroreflective point         camera: 255
+  31 m   clearly resolved as a white rectangle      camera: 255
+  10 m   unmissable                                 camera: 255
+   0 m                                              camera: 30
+```
+
+So the conclusion does not depend on the far end of the approach at all. A production TSR commits at
+30-50 m; this one failed at 31 m, at 20 m and at 10 m.
 
 **Daylight is still the better measurement**, because it removes the argument entirely: a sign is
 visible AND resolvable from 200 m+, and "recognised at N metres" becomes a number nobody has to
