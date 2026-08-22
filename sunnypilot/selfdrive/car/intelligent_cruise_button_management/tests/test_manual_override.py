@@ -1783,6 +1783,61 @@ class TestALiveHoldOutranksAPinnedOne:
     assert icbm.baseline_source == BaselineSource.pinned
 
 
+class TestResumingIsNotAskingForAHold:
+  """*"There was also one instance where a hold got set without me doing plus and minus."*
+
+  Measured on route 000003aa, 2026-08-22, from ONE press of RES+ to resume cruise:
+
+      809.83  enab=False  resumeCruise    <-- he presses RES+, and nothing else
+      809.85  enab=False  resumeCruise
+      809.86  enab=True   accelCruise     <-- SAME physical press, cruise engaged part-way
+      809.88  enab=True   accelCruise     -> HOLD CREATED at 32 mph on a 35 road
+
+  Two facts combine. RES+ is one button whose MEANING is derived per frame from the cruise state --
+  `resumeCruise` while off, `accelCruise` while on. And this car's SCCM clears the button bit
+  between frames (see "Buttons cannot hold"), so one physical hold of RES+ arrives as a BURST of
+  press/release cycles. The instant cruise engages mid-burst, the remaining cycles read as `+`, and
+  the first one captures a brand-new hold at whatever speed the car happens to be doing.
+
+  He pressed RES. He got a hold at 32. Nothing about that is a request for a hold.
+  """
+
+  def test_the_tail_of_a_resume_press_does_not_create_a_hold(self):
+    icbm = fresh()
+    # The resume itself, while cruise is off. Ford engages on the same press.
+    icbm.run(make_cs(32, enabled=False, buttons=(RESUME_PRESS,)), CC, make_lp(LIMIT), False)
+    icbm.run(make_cs(32, enabled=False, buttons=(RESUME_PRESS,)), CC, make_lp(LIMIT), False)
+    # Cruise comes on and the rest of that same press is re-read as `+`.
+    for _ in range(6):
+      icbm.run(make_cs(32, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT), False)
+    icbm.run(make_cs(32, buttons=(ACCEL_RELEASE,)), CC, make_lp(LIMIT), False)
+    settle(icbm, LIMIT, cluster=32, frames=200)
+
+    assert icbm.v_baseline == 0, (
+      f"resuming created a hold at {icbm.v_baseline} -- he pressed RES, not plus")
+    assert icbm.override_state == OverrideState.auto
+
+  def test_a_deliberate_plus_after_resuming_still_creates_one(self):
+    """The guard is keyed on PROXIMITY TO THE RESUME, not on having resumed at all. A `+` pressed a
+    moment later is an ordinary gesture and must still work -- on the same drives the two genuine
+    presses came 3.5 s and later, against the phantom's 0.02 s."""
+    icbm = fresh()
+    icbm.run(make_cs(32, enabled=False, buttons=(RESUME_PRESS,)), CC, make_lp(LIMIT), False)
+    settle(icbm, LIMIT, cluster=32, frames=200)   # well past RESUME_TAIL_FRAMES
+
+    cluster = 32
+    icbm.run(make_cs(cluster, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT), False)
+    for _ in range(4):
+      cluster += 1
+      icbm.run(make_cs(cluster, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT), False)
+    icbm.run(make_cs(cluster, buttons=(ACCEL_RELEASE,)), CC, make_lp(LIMIT), False)
+    settle(icbm, LIMIT, cluster=cluster, frames=200)
+
+    assert icbm.v_baseline == cluster, (
+      f"a deliberate press well after the resume was swallowed (baseline={icbm.v_baseline})")
+    assert icbm.override_state == OverrideState.manual
+
+
 class TestAStandstillReEngageIsNotASet:
   """Measured, route 0000033c t+471-482 on 2026-08-11: "when I resumed, my hold went away."
 

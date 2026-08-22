@@ -130,6 +130,13 @@ DEFAULT_BASELINE_RESET_DELTA = 10  # display units (mph/kph)
 # was the fourth failed attempt at this: on a car whose cluster takes longer than that to report a
 # press, the baseline was still equal to SLA's target when the window closed, and everything
 # downstream then treated the override as never having happened.
+# How long after cruise engages a `+` is still assumed to be the tail of the RESUME press that
+# engaged it, rather than a request for a hold. 0.5 s at the 100 Hz control rate.
+#
+# MEASURED, not padded: on route 000003aa the phantom `accelCruise` arrived 0.02 s after engagement
+# -- the same physical press, re-read once cruise came on -- while the two genuine `+` presses on
+# the same drives came 3.5 s and later. Anything in between has never been observed.
+RESUME_TAIL_FRAMES = 30
 PRESS_SETTLE_STABLE_FRAMES = 40   # cluster unchanged this long => the driver has finished
 PRESS_SETTLE_MAX_FRAMES = 600     # 6 s hard cap, so a stuck cluster cannot suspend ICBM forever
 # BluePilot: last-resort fallback -- adopt set-speed movement ICBM did not command, whatever button
@@ -325,6 +332,9 @@ class IntelligentCruiseButtonManagement:
     self.cycle_decision_pending = False  # waiting for the set speed to say whether it was RESUME
     self.v_cluster_at_cycle = 0      # set speed when cruise was re-engaged; the resume jump moves it
     self.press_settle_frames = 0     # >0 while ICBM stands down after a driver press
+    # Starts AT the bound, not 0: before cruise has ever engaged there is no resume press for a
+    # `+` to be the tail of, so nothing should be suppressed.
+    self.frames_since_resume_press = RESUME_TAIL_FRAMES
     self.cluster_stable_frames = 0   # how long the set speed has been unchanged
     self.cruise_cycle_frames = 0     # >0 while a resume's set-speed jump is still settling
     self.v_cluster_at_press = 0      # set speed when the driver's press was seen
@@ -1014,6 +1024,14 @@ class IntelligentCruiseButtonManagement:
     self.cruise_enabled = cruise_enabled
     cruise_cycled = cruise_enabled and not self.cruise_enabled_prev
     self.cruise_enabled_prev = cruise_enabled
+    # Distance from the last RESUME press, for the resume-tail guard below. Keyed on the resume
+    # itself rather than on the engage edge: a `+` pressed deliberately a moment after engaging is
+    # ordinary and must still create a hold, but a `+` arriving milliseconds after a `resumeCruise`
+    # is the same physical press being re-read.
+    if any(b.type.raw == ButtonType.resumeCruise and b.pressed for b in CS.buttonEvents):
+      self.frames_since_resume_press = 0
+    else:
+      self.frames_since_resume_press = min(self.frames_since_resume_press + 1, RESUME_TAIL_FRAMES)
 
     # Remember a RESUME press across the engage transition -- see RESUME_BUTTONS.
     if any(b.type.raw in RESUME_BUTTONS and b.pressed for b in CS.buttonEvents):
@@ -1090,8 +1108,37 @@ class IntelligentCruiseButtonManagement:
     # made while disengaged reports as setCruise, which would otherwise create a HOLD at whatever
     # speed the car resumed to. That would break the only way the driver has to hand the speed back
     # to Speed Limit Assist: CNCL, then RES+. You cannot hold a speed that cruise is not driving.
-    if cruise_enabled and any(b.type.raw in MANUAL_OVERRIDE_BUTTONS and b.pressed
-                              for b in CS.buttonEvents):
+    # THE TAIL OF A RESUME PRESS IS NOT A REQUEST FOR A HOLD. Reported from the road as *"a hold
+    # got set without me doing plus and minus"* and measured on route 000003aa, 2026-08-22:
+    #
+    #     809.83  enab=False  resumeCruise    <-- he presses RES+ to resume, nothing else
+    #     809.85  enab=False  resumeCruise
+    #     809.86  enab=True   accelCruise     <-- SAME physical press; cruise engaged mid-way
+    #     809.88  enab=True   accelCruise     -> HOLD CREATED at 32 mph on a 35 road
+    #
+    # RES+ is one button whose MEANING is derived per frame from the cruise state: `resumeCruise`
+    # while off, `accelCruise` while on. And this car's SCCM clears the button bit between frames,
+    # so a single physical hold of RES+ arrives as a burst of press/release cycles rather than one
+    # event. The moment cruise engages part-way through that burst, the remaining cycles read as
+    # `accelCruise` -- and the press path below turns the first one into a brand-new hold at
+    # whatever speed the car happens to be doing.
+    #
+    # 0.5 s SEPARATES THE TWO CASES CLEANLY, measured rather than picked: the phantom arrived 0.02 s
+    # after engagement, while the two genuine + presses on the same drives came 3.5 s and later.
+    # Only hold CREATION is suppressed -- raising an existing hold is untouched, because that is a
+    # press against a hold he already has and cannot be the tail of a resume.
+    # THE WHOLE PRESS BLOCK IS SKIPPED, not just the capture inside it. Guarding only the capture
+    # was tried first and did nothing: `override_state = OverrideState.manual` is set unconditionally
+    # a few lines below it, and the press-settle path then assigns `v_baseline` from the cluster --
+    # so the hold appeared anyway, at the same 32 mph, with the capture never having run.
+    #
+    # Only CREATION is suppressed. With a hold already up, `override_state` is manual and the tail
+    # falls through to the ordinary raise path, which is right: raising a hold he already has is not
+    # inventing one, and RES+ keeping an existing hold is the documented contract.
+    resume_tail_creates = (self.frames_since_resume_press < RESUME_TAIL_FRAMES
+                           and self.override_state != OverrideState.manual)
+    if cruise_enabled and not resume_tail_creates and any(
+        b.type.raw in MANUAL_OVERRIDE_BUTTONS and b.pressed for b in CS.buttonEvents):
       if self.override_state != OverrideState.manual:
         self.v_target_overridden = self.v_target_raw
         # Seeded from whether a posted limit exists at all, not flat False.
