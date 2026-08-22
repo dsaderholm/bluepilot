@@ -581,6 +581,108 @@ verified before any value is copied from them.
 
 ---
 
+## 4g. THE ENTIRE IPMA CONFIGURATION IS A BRAZILIAN FILE OFF THE INTERNET
+
+**Learned from the owner 2026-08-21, and it is the most load-bearing fact in this document.** It
+appears nowhere else in it, and every conclusion above was drawn without it.
+
+He wrote a complete IPMA as-built taken from a Brazilian car, a long time ago, and **he does not have
+the original**. The Edge camera's own factory configuration is gone.
+
+**THEREFORE SECTION 4's "RESTORE POINT -- as-built as of before any changes" IS THE BRAZILIAN
+CONFIGURATION.** There is no US baseline anywhere in this investigation. Every revert performed here,
+including two on 2026-08-21, restored the car to Brazil.
+
+**Why it matters more than any nibble.** Brazil follows the Vienna Convention: speed limit signs are
+**circular, red-ringed, in km/h**. US signs are **rectangular, white, in mph**. A camera configured
+for Brazilian signs drives past every sign in Utah and correctly reports nothing -- while still
+reporting TSR `Available`, still reporting `Mph` for its DISPLAY units, and never emitting
+`CountryNotSupported`, because as far as it is concerned it is working perfectly in Brazil.
+
+That explains the whole measured picture better than anything else in this file.
+
+**The clean fix is a correct US-market as-built for this module.** Ford publishes factory as-built by
+VIN at motorcraftservice.com. What is needed is a **US 2019-2020 Edge with Co-Pilot360** carrying the
+same IPMA part (`KT4T-19H406-CE`). He does NOT know the donor module's VIN -- it was bought used --
+so the source is a US Edge owner's published `706` blocks, which these forums trade routinely.
+
+### THE REGION FIELD IS ALREADY EXPLAINED, AND IT STAYS CLOSED
+
+`706-04-01`'s first byte is the region/units field. Community values:
+
+```
+01 = region undefined / KPH        08 = North America / sign type undefined
+02 = region undefined / MPH        09 = North America / KPH
+                                   0A = NORTH AMERICA / MPH
+```
+
+His reads **`FF`**. That is not a defined region -- and it is exactly consistent with CLAUDE.md's
+record that he set the region back to **UNSPECIFIED** after it threw DTCs. His memory and the byte
+agree.
+
+**DO NOT PROPOSE CHANGING IT.** He reminded me of this on 2026-08-21 while I was mid-research:
+*"Remember when I tried to change the region in the regular config and not the as built it broke
+everything."* It is explored, the answer was no, and CLAUDE.md already says so.
+
+Recorded only because the `FF` would otherwise look like an unexplained anomaly to the next session
+and get picked up as a fresh lead. It is not fresh.
+
+## 4h. THE NAV REPEATER IS ALREADY CORRECT. THE ABSENCE IS BEHAVIOURAL.
+
+The strongest-looking lead of 2026-08-21, checked and closed the same hour.
+
+`roylion15` -- the FORScan forum's authority on this, whom every TSR thread defers to -- on what
+makes an APIM feed the camera at all:
+
+> "need two settings activation in APIM to **send nav data to IPC /IPMA** ... (in direct config with
+> forscan). **nav repeater conformance, set current**. **nav repeater format, set motorola**"
+
+"Nav Repeater" is literally the APIM function that repeats navigation data onto the bus for the IPC
+and IPMA -- the exact thing measured missing. And it is Direct Config, not as-built, so nothing in
+this investigation had ever looked at it.
+
+**HIS CAR IS ALREADY SET CORRECTLY:**
+
+```
+Navigation Repeater format        Motorolla                 <- as recommended
+Navigation Repeater conformance   Current                   <- as recommended
+Navigation                        Enabled common interface
+Non-Metric Units for NAV          Miles/Feet                <- correctly US
+```
+
+**So the APIM is configured to repeat navigation data and sends one of three GPS messages anyway.**
+That is the finding: the defect is not configuration, it is runtime behaviour.
+
+**Which leaves Android Auto as the leading explanation, unopposed.** Ford's own documentation: the
+built-in GPS *"can only be used if CarPlay or Android Auto are disabled, or the phone is connected
+via Bluetooth"*, and once a phone is set up for Android Auto, *"SYNC 3 will always defer to it when
+that phone is plugged in -- mapping and navigation are deferred too."* He always projects. A deferred
+nav stack has nothing to repeat, while `0x462` keeps flowing because raw position is wanted by
+modules that do not care about navigation.
+
+**THE TEST IS FREE AND NEEDS NO SOFTWARE:** one drive with the phone off USB (Bluetooth is fine --
+it is projection that defers, not pairing), first half with no destination and second half actively
+navigating in SYNC, past posted limits. Raw CAN is in the route log on any branch. Three outcomes,
+all useful: the messages appear (Android Auto was it), they appear only once routed (same answer,
+and unusable day to day), or still nothing (the APIM is configured to repeat and does not, which
+points at the gateway and is genuinely new).
+
+## 4i. TWO ERRORS ON 2026-08-21, BOTH FROM REASONING PAST THE RECORD
+
+**1. I talked him into reverting `706-02-01` to Camera Only.** Line 30 of this document says sign
+reading does not need nav, so Camera Only looked like the mode that targets optical recognition. But
+the friend's working car sits at nibble 4 = `6`, and two forum reports name **Fusion mode** as the
+state in which signs are actually read. Section 4f has the detail. The advice was wrong and was
+reversed the same day.
+
+**2. I reconstructed a change to `706-02-01` that the record already contradicted.** Section 4d
+recorded `FD56` on 2026-08-12 and the live read was `FD52` on 2026-08-21, and I concluded the `6` was
+a transient from 4b that had reverted. **Section 4's restore point ALSO reads `FD56`** -- so `6` was
+the value "before any changes", and the movement was `6` -> `2`, the opposite direction. Checking
+section 4 against 4d before reasoning from the difference would have caught it in one grep.
+
+---
+
 ## 4b. THE ONLY THING THAT DEMONSTRABLY WORKED: "TSR data source = Camera + APIM"
 
 Filed as a dead end at first. It is the opposite -- it is the single piece of positive evidence from
