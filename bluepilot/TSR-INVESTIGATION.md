@@ -483,12 +483,9 @@ already parse.
    forwarding. Reading the friend's car for the same three addresses would settle which, and costs
    him one route.
 
-1. **Ask the friend for two lines** — free, and decides whether anything else is worth doing:
-   - his `706-01-01` (is his 3rd character a `5`?)
-   - his `720-09-01` (is SLIF enabled?)
-
-   If his look like a working target, the config is known and only the tool is missing. If they look
-   like his own, TSR is coming from somewhere we have not identified.
+1. ~~**Ask the friend for his `706-01-01`.**~~ **DONE 2026-08-12, section 4d.** `0810 A9DA A953`.
+   Nibble 3 is `1` on BOTH cars, so the reference map's "TSR enable" position is wrong and the answer
+   is not a single documented bit. **His `720-09-01` (IPC SLIF) is still unasked** and still free.
 
 2. **UCDS free tests**, no licence needed if reading is ungated:
    - select `EDGE/S-MAX 2015-`, open `AsBuilt Editor (CCC)` and `Direct Config`
@@ -498,11 +495,15 @@ already parse.
 3. **Recover the UCDS licences** — Setup → re-activate; try a VPN if the server is geoblocked; check
    whether an older UCDS build still shows them activated.
 
-4. **Untried, if a writing tool becomes available**, in this order:
-   - IPC `720-09-01` → SLIF enabled (the dependency the camera is most likely checking)
-   - IPC `720-03-01` → TSR IOD enabled
-   - IPMA `706-01-01` → `0450` (TSR SLIF, IACC stays enabled)
-   - IPMA `706-02-01` → `4D56` (TSRMode CameraOnlyOn) — never attempted
+4. **Untried, if a writing tool becomes available.** THE TARGET LIST CHANGED on 2026-08-12 and this
+   step listed dead values until 2026-08-21:
+   - **IPMA `706-01-01` → `0810 A9DA A953`** — the friend's ACTUAL value on a same-strategy,
+     same-calibration camera where TSR works. This is the experiment. Differences from his own are
+     nibble 2 (`4`→`8`) and nibbles 8-9 (`B`→`A`). Section 4's restore point in hand, and expect the
+     radar calibration to be disturbed and to come back on revert (section 5).
+   - IPC `720-09-01` → SLIF enabled, only if the above does not hold across a boot.
+   - ~~IPMA `706-01-01` → `0450`~~ **DEAD.** Nibble 3 is `1` on the working car too.
+   - ~~IPMA `706-02-01` → `4D56`~~ **DEAD.** `FD` on the working car too.
 
 5. **A diagnostic write worth doing once**, to learn whether the nibble is writable at all:
    `706-01-01` → `0400` (changes IACC, not TSR). If `0` writes and `5` does not, the field is
@@ -516,6 +517,12 @@ Not the cluster icon — he has said repeatedly he does not want it. **Speed Lim
 camera speed limit source.** On the 2026-08-11 drive the set speed froze because the road had no map
 speed limit data and nothing else was asking. A working TSR would give SLA a second source on exactly
 those roads.
+
+**And the payoff is larger than this section assumed.** It was written while the notes said the
+camera read signs about 10% of the time, which made TSR look like a partial improvement. Measured
+2026-08-21, `TsrVLim1MsgTxt` is the no-data sentinel on every frame — the camera contributes
+NOTHING today. Enabling it is the difference between no camera source and a camera source, not
+between a poor one and a good one.
 
 See `tools/bp_tsr_check.py` for the on-device measurement side, and `CLAUDE.md` for the standing
 rules — in particular that the region change has been tried twice and is not to be proposed again.
