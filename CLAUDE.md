@@ -975,7 +975,9 @@ So every symptom he reported -- the cycling, the chime, the park brake at the st
 for a little bit" -- traces to `AccPrpl_A_Pred` not being pinned. Pinning it takes that same window
 from 51.7% refused to 0.5%.
 
-**CLOSED 2026-08-19: THE BRICK HAS NOT RECURRED IN SIX CONSECUTIVE DRIVES.** He said the DTCs he had
+**RECURRED 2026-08-21 on route 000003a0 -- inert 602 frames, the camera latched cancel and openpilot drove the rest. The six-drive streak below stands as history, not as a closure.**
+
+**WAS CLOSED 2026-08-19: THE BRICK HAD NOT RECURRED IN SIX CONSECUTIVE DRIVES.** He said the DTCs he had
 offered probably no longer mattered, and the logs agree -- every route after 0000038d:
 
     0000038e  22 segs   inert 0   accFaulted 0   ford 99.9% of engaged
@@ -2178,7 +2180,7 @@ triple. PAIRWISE, AND AGAINST ENGAGEMENT, is what showed it. A funnel of margina
 exclusion -- nor can it tell a contradiction from a state that merely never arose, which is exactly
 the distinction the first write-up got wrong.
 
-### THE FAN IS NOT A FAULT. MEASURED, TWICE, AND CLOSED.
+### THE FAN IS NOT A FAULT -- BUT THE THROTTLING IS. REOPENED 2026-08-21.
 
 *"I still feel like my fans are running pretty hard."* Route 00000393, 2026-08-19:
 
@@ -2197,6 +2199,32 @@ process that three separate measurements now say is not there.
 **And the earlier `intakeTempC` idea was worthless** -- it reads 0.0 on this hardware, so the
 "ambient proxy" added to `bp_drive_checkup` that morning proves nothing. The temperature TRACE over
 the drive, beside cpu and mem, is what actually answers the question; a single peak never could.
+
+**REOPENED 2026-08-21, and the entry above is now only half true.** Route 000003a1, a 15-minute
+drive:
+
+    peak CPU temp   106.7 C        fan 100%
+    thermalStatus   ok 1181  OVERHEATED 633     <- 34.9% of the drive
+    first non-ok    t+9.9 s
+
+`thermalStatus` was `ok` on all 3,084 frames the day this was closed. It is not now. **At
+`overheated` openpilot derates itself**, so this is the cooling LOSING rather than working hard,
+and it is a different question from the fan being loud.
+
+**It began 10 seconds in, so the device started the drive hot** -- parked in August is the obvious
+candidate, and 000003a0 the same day peaked at 80 C with `thermalStatus` ok throughout, so it is
+not every drive. Not caused by diagnostics either: the device read 46 C at idle right after, with
+every analysis job finished.
+
+**AND THE CHECKUP COULD NOT ANSWER IT, WHICH IS THE PROCESS FINDING.** `bp_drive_checkup` was
+reading `deviceState` the whole time -- `maxTempC`, `intakeTempC`, `fanSpeedPercentDesired` -- and
+never read `thermalStatus`, the one field that separates a working fan from a throttling device.
+It printed a temperature and a paragraph explaining that a temperature is not a verdict, which was
+correct and useless. Answering the question meant writing a second script against the same message.
+
+**This fork's oldest bug, from the outside this time:** a value available and not rendered. Section
+8 now prints the `thermalStatus` histogram and says BAD when anything derated. **When a check
+deliberately refuses to render a verdict, ask whether the deciding field is one it already has.**
 
 ### LOW-SPEED CURVES: VISION IS STRUCTURALLY UNABLE TO HELP, AND THE MAP RARELY GETS A CHANCE
 

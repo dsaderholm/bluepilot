@@ -142,6 +142,7 @@ class Checkup:
     self.max_temp: float | None = None
     self.max_ambient: float | None = None  # intakeTempC -- fan intake air, the ambient proxy
     self.max_fan: float | None = None
+    self.thermal_status: Counter = Counter()
 
     # 9. SCC
     self.scc_map_active = 0
@@ -385,10 +386,31 @@ def render(c: Checkup, capped: bool) -> None:
   else:
     fan = "?" if c.max_fan is None else "{:.0f}%".format(c.max_fan)
     amb = "?" if c.max_ambient is None else "{:.0f} C".format(c.max_ambient)
-    print("8. Thermal             .    peak {:.0f} C, intake air {}, fan peak {}".format(
-      c.max_temp, amb, fan))
-    print("   NOT a verdict. This device idles at 75 C parked with the engine off in August, so a")
-    print("   peak near 80 proves nothing on its own -- check `ps` for a process actually spinning.")
+    total = sum(c.thermal_status.values())
+    hot = total - c.thermal_status.get("ok", 0)
+    # THE VERDICT COMES FROM thermalStatus, NOT FROM THE PEAK. This printed a temperature and
+    # explicitly refused to judge it, which was right -- 95 C with thermalStatus ok all drive is
+    # a working fan. But the tool was reading deviceState the whole time and never looked at the
+    # one field that separates that from a device throttling itself, so answering the question
+    # meant writing a second script. Same shape as every other value this fork computed and did
+    # not render.
+    # NOT named `verdict` -- that is a module-level FUNCTION this same render() calls nine times
+    # above, and assigning the name here makes Python treat it as local for the whole function,
+    # so section 1 dies with UnboundLocalError before section 8 is ever reached.
+    therm = "OK " if total and not hot else ("BAD" if hot else " ? ")
+    print("8. Thermal             {}  peak {:.0f} C, intake air {}, fan peak {}".format(
+      therm, c.max_temp, amb, fan))
+    if total:
+      states = "  ".join("{}={}".format(k, v) for k, v in sorted(c.thermal_status.items()))
+      print("   thermalStatus: " + states)
+    if hot:
+      print("   THROTTLED on {} of {} frames ({:.1f}%) -- openpilot derates itself here, and this".format(
+        hot, total, 100.0 * hot / total))
+      print("   is NOT the same as a loud fan. A fan at 100% with thermalStatus ok all drive is the")
+      print("   cooling working; this is it losing.")
+    else:
+      print("   Peak alone is NOT a verdict -- this device idles at 75 C parked in August. The")
+      print("   thermalStatus line above is what decides it, and it says nothing derated.")
 
   # 9 -----------------------------------------------------------------------------------
   if c.scc_map_active == 0 and c.scc_vision_active == 0:
@@ -481,6 +503,10 @@ def main() -> int:
               f = float(f)
               if c.max_fan is None or f > c.max_fan:
                 c.max_fan = f
+            # THE FIELD THAT ACTUALLY DECIDES IT, and this tool read every temperature around it
+            # while never reading this one. str() rather than int(): a live capnp enum raises on
+            # int() on the device.
+            c.thermal_status[str(getattr(d, "thermalStatus", "?"))] += 1
           elif w == "managerState":
             for pr in m.managerState.processes:
               if pr.shouldBeRunning and not pr.running:
