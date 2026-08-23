@@ -197,10 +197,32 @@ class UIStateSP:
       if not CP.enableBsm:
         self.params.remove("AutoLaneChangeBsmDelay")
     else:
-      # No CarParams: clear all car-dependent params as safety default
-      self.params.remove("EnforceTorqueControl")
-      self.params.remove("NeuralNetworkLateralControl")
-      self.params.remove("AlphaLongitudinalEnabled")
+      # NOTHING IS CLEARED HERE ANY MORE. FusionPilot, 2026-08-23.
+      #
+      # This branch is reached whenever CarParams has not been READ yet -- every UI start before
+      # `CarParamsPersistent` loads -- and "we do not know yet" is not the same as "the car does not
+      # support it". Destroying a PERSISTENT setting on missing evidence is the exact defect this
+      # fork already fixed twice: the fifth ICBM gate deleted `IntelligentCruiseButtonManagement` on
+      # essentially every boot for the same reason, and cost two drives before it was found.
+      #
+      # The chain it opens is worse than the immediate loss, because it is silent and two boots
+      # long: delete `AlphaLongitudinalEnabled` here, and on the NEXT boot CarParams loads with op
+      # long reading off, `has_long` is False, and the block below then deletes `ExperimentalMode`
+      # and `DynamicExperimentalControl` as well. Guarding the second removal on `CP is not None`
+      # -- which was done -- only delays that by one boot; it does not break the chain, because the
+      # cause is here.
+      #
+      # NOT the reason his Experimental Mode was off on 2026-08-23: `AlphaLongitudinalEnabled` was
+      # last written 2026-08-17 and had not been touched since, so this never fired. It is a latent
+      # bug found while chasing that, and it is fixed on its own merits -- an ignition cycle with an
+      # unlucky load order silently disabling openpilot longitudinal is not a thing to carry into a
+      # 2,000 mile trip.
+      #
+      # The safety argument for clearing them does not survive contact with the alternative: these
+      # are read at CAR INIT from CarParams, which by then is loaded. A stale param cannot enable
+      # something the car does not support, because the car is what decides. Report unavailable for
+      # display; never destroy the stored setting.
+      pass
 
     # No longitudinal control: no experimental mode or DEC
     #

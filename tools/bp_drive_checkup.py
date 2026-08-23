@@ -32,6 +32,11 @@ WHAT IT CHECKS, and which complaint each one answers:
   9. SCC AT CORNERS        Did either curve controller ask for anything, and what.
  10. STOP OVERRIDE         Did it arm, and did `hasSlowDown` ever go true -- the signal that only
                            started being published two days ago.
+ 14. EXPERIMENTAL MODE     "I didn't notice that experimental mode was off! No wonder it didn't come
+                           to stops at traffic lights today." It is a PRECONDITION of the stop
+                           override, the on-road `e` button flips it on one tap, and a whole test
+                           drive went to it. Read off the wire, per frame, so a mid-drive tap shows
+                           as a share rather than hiding behind the param's current value.
 
 NO DATA IS NOT ZERO, AND THIS PRINTS THEM DIFFERENTLY. A tool that shows `--` for both "the feature
 did nothing" and "the message was never on the bus" hides the only distinction that matters; two
@@ -173,6 +178,10 @@ class Checkup:
     self.dec_frames = 0
     self.standstill_frames = 0
 
+    # 14. experimental mode
+    self.exp_mode_frames = 0
+    self.ss_frames = 0
+
   # -- ingest -------------------------------------------------------------------------------
 
   def note_time(self, t: float) -> None:
@@ -273,6 +282,24 @@ class Checkup:
 
   def acc_faulted(self) -> None:
     self.acc_faults += 1
+
+  def selfdrive_state(self, ss) -> None:
+    """Was Experimental Mode on. It is a PRECONDITION of the stop override, not a preference.
+
+    `FordStopOverride.update` takes `experimental_mode` and refuses to ARM without it, because the
+    plan only carries a stop for a light when the end-to-end model is driving it. So a drive spent
+    testing the override with the mode off produces no stops and no evidence -- which is exactly
+    what happened on 2026-08-23, and nothing on the screen or in this tool said why.
+
+    Counted per frame rather than read from the param, for the reason check 1 exists: the param is
+    what the device holds NOW, and he turned it back on before this was ever run. The wire is what
+    the drive actually had."""
+    self.ss_frames += 1
+    try:
+      if ss.experimentalMode:
+        self.exp_mode_frames += 1
+    except Exception:
+      pass
 
   def segment_gap(self) -> None:
     """A segment could not be read, so the baseline either side of it is not continuous.
@@ -540,6 +567,23 @@ def render(c: Checkup, capped: bool) -> None:
       len(c.hold_deaths), len(off)),
     "no hold ended this drive"))
 
+  # 14 ------------------------------------------------------------------------------------
+  # Experimental Mode is a PRECONDITION of the stop override, and on 2026-08-23 a whole test drive
+  # was spent with it off -- no stops, no evidence, and nothing anywhere saying why. He had not
+  # knowingly turned it off; the on-road `e` button toggles it on a single tap with no
+  # confirmation, and both its gates pass on this car.
+  #
+  # Printed as a SHARE rather than a yes/no because a mid-drive tap is the thing most worth
+  # catching: 100% and 0% are both self-explanatory, and anything between them means it moved
+  # while he was driving, which no param mtime can show.
+  print("14. Experimental Mode  " + verdict(
+    None if not c.ss_frames else c.exp_mode_frames == c.ss_frames,
+    "ON for the whole drive -- the stop override was free to arm",
+    "on for {} of {} frames. The stop override CANNOT ARM without it, so any part of this drive "
+    "below that share proves nothing about the override.".format(
+      pct(c.exp_mode_frames, c.ss_frames), c.ss_frames),
+    "no selfdriveState on the bus"))
+
 
 def main() -> int:
   ap = argparse.ArgumentParser()
@@ -591,6 +635,8 @@ def main() -> int:
             c.buttons(m.carState, t)
           elif w == "selfdriveStateSP":
             c.icbm_hold(m.selfdriveStateSP.intelligentCruiseButtonManagement, t)
+          elif w == "selfdriveState":
+            c.selfdrive_state(m.selfdriveState)
           elif w == "longitudinalPlanSP":
             c.plan_sp(m.longitudinalPlanSP)
           elif w == "controllerStateBP":

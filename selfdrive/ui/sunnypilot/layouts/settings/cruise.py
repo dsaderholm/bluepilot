@@ -598,8 +598,26 @@ class CruiseLayout(Widget):
       passthrough_on = ui_state.params.get_bool("StockAccPassthrough")
       self.stock_acc_stop_override.action_item.set_enabled(
         has_long and passthrough_on and ui_state.is_offroad())
+      # AND THE THIRD DEPENDENCY IS EXPERIMENTAL MODE, which cost a whole test drive on 2026-08-23.
+      # `FordStopOverride.update` refuses to ARM without it, because the plan only carries a stop
+      # for a sign or a light when the end-to-end model is driving it. STOP_OVERRIDE_DESC has said
+      # so since it was written -- but it says it in the middle of a six-line paragraph, which is
+      # not where somebody checking why nothing happened is going to find it.
+      #
+      # NOT DISABLED, unlike the passthrough above, and the difference is deliberate: Experimental
+      # Mode is toggled from the ROAD screen and legitimately changes from drive to drive, so it is
+      # a state to report rather than a misconfiguration to prevent. The override is still a valid
+      # thing to have switched on while the mode happens to be off.
+      #
+      # This does not catch the case that actually bit -- the on-road `e` button flips the mode on
+      # ONE TAP with no confirmation, mid-drive, and he is not in this screen when that happens.
+      # Check 14 in `bp_drive_checkup.py` is what reads that after the fact.
       if has_long and not passthrough_on:
         prefix = "<b>" + tr("Turn on Use Ford's Own ACC Commands first.") + "</b>"
+        self.stock_acc_stop_override.set_description(prefix + "\n\n" + tr(STOP_OVERRIDE_DESC))
+      elif has_long and not ui_state.params.get_bool("ExperimentalMode"):
+        prefix = "<b>" + tr("Experimental Mode is off, so this cannot fire. Turn it on with the "
+                            "button on the driving screen.") + "</b>"
         self.stock_acc_stop_override.set_description(prefix + "\n\n" + tr(STOP_OVERRIDE_DESC))
       else:
         self.stock_acc_stop_override.set_description(tr(STOP_OVERRIDE_DESC))

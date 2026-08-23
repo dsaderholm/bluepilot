@@ -1135,6 +1135,67 @@ make the note executable -- which is what the argument and its two tests now are
 Corrected in three places that carried the old claim: the passthrough toggle description, the
 SunnyLink entry, and this file.
 
+### AND A WHOLE TEST DRIVE WENT TO IT. THE `e` BUTTON FLIPS IT MID-DRIVE ON ONE TAP.
+
+2026-08-23. *"I didn't notice that experimental mode was off! No wonder it didn't come to stops at
+traffic lights today. I don't remember turning it off!"* He was right that he did not knowingly turn
+it off. Measured across the last eight routes, first segment against last:
+
+    000003ad   0.0%  ->    0.0%      <- the test drive. 0 of 56,371 frames.
+    000003ac   0.0%  ->    0.0%
+    000003ab  100.0% ->    0.0%      <- IT FLIPPED HERE, MID-DRIVE
+    000003aa  100.0% ->  100.0%
+    000003a9 .. a5   100% throughout
+
+**One tap on the on-road `e` button, during route `ab`.** `exp_button.py`'s `_handle_mouse_release`
+is a bare `put_bool("ExperimentalMode", not current)` -- no confirmation, no dialog -- and both its
+gates pass on this car (`ExperimentalModeConfirmed` 1, `has_longitudinal_control` 1). Route `ab` is
+the drive straight after `aa`, which is one of the two that latched the camera's cancel and lost him
+Ford ACC, so he was plausibly reaching for the screen.
+
+**Check 14 in `bp_drive_checkup.py` reads it off the wire per frame, deliberately not from the
+param.** The param says what the device holds NOW -- he turned it back on at 16:33 before any of
+this ran -- and a share rather than a yes/no is what makes a MID-DRIVE flip visible at all. A param
+mtime cannot show one.
+
+**And the settings toggle now says so live**, as a third instance of the dependent-toggle prefix
+already used for the passthrough and auto-resume. It is NOT disabled, unlike those two: the mode is
+toggled from the road screen and legitimately varies drive to drive, so it is a state to report, not
+a misconfiguration to prevent. It also does not catch the tap, because he is not in that screen when
+it happens -- check 14 is what does, after the fact.
+
+**THE THEORY THIS REPLACED WAS WRONG AND THE MTIME IS WHAT KILLED IT.** The first explanation built
+here was the delete-chain below -- and `AlphaLongitudinalEnabled` was last written 2026-08-17 and had
+not been touched since, so it never fired. Same lesson as the `SpeedLimitPolicy` entry further up:
+**check the param's mtime against the route times before attributing anything to code.**
+
+### `_enforce_constraints` DESTROYS SETTINGS WHEN CarParams HAS NOT LOADED. FIXED 2026-08-23.
+
+Latent, found while chasing the above, and fixed on its own merits. `ui_state._enforce_constraints`'s
+`else` branch -- reached whenever `self.CP is None`, which is every UI start before
+`CarParamsPersistent` loads -- called `params.remove("AlphaLongitudinalEnabled")`.
+
+**It is a two-boot chain and every step of it is silent:**
+
+    boot 1   CP is None    -> AlphaLongitudinalEnabled REMOVED
+             the key has NO DEFAULT (params_keys.h:40), so it reads False forever after
+    boot 2   CP loads, alphaLongitudinalAvailable is forced True on every Ford, so
+             has_long = get_bool("AlphaLongitudinalEnabled") = False
+             -> `if CP is not None and not has_long` REMOVES ExperimentalMode AND
+                DynamicExperimentalControl
+             -> selfdrived.py:135 removes ExperimentalMode again for the same reason
+
+So one unlucky boot costs op long, the passthrough, the stop override and Experimental Mode, and
+nothing anywhere says why. **Guarding the second removal on `CP is not None` -- which had already
+been done -- only delays it by one boot; the cause is the first.** The `else` branch now clears
+nothing at all.
+
+**The safety argument for clearing them does not survive the alternative:** these are read at CAR
+INIT from CarParams, which by then is loaded, and a stale param cannot enable something the car does
+not support because the car is what decides. This is the fourth instance in this file of the same
+rule -- *"not known yet" is not "not supported", and removing a PERSISTENT param is not a way to say
+it* -- after the fifth ICBM gate, the settings screen, and `interfaces.py`.
+
 Two UI changes so the state is not reachable by accident: **the passthrough toggle is disabled when
 op long is off** (it authors nothing in that state, so switching it on would silently do nothing),
 and its description now carries the whole answer including the two toggles that do not matter.
