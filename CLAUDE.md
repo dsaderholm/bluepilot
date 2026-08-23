@@ -4338,7 +4338,82 @@ so nobody spends a drive on them:
   std 0.5 to std 8+, and the gap never goes negative. So a future replacement for the std cutoff may
   legitimately read the edge's POSITION; what it must not do is read its std as a confidence.
 
-## ROUTE INTENT: mapd's PREDICTION IS 96-100% RIGHT AND ARRIVES ONE SECOND EARLY
+## MEASURED: `width` IS DEAD, `beyond` AND `paint` ARE THE DISCRIMINATORS, `std` MEASURES NOTHING
+
+2026-08-22, `bp_left_gate_reach.py` over four drives (0000039f, 000003a8, 000003aa, 000003ab),
+19,737 moving motorway frames. This is the separation test the entry above queued, and it closes the
+candidate list.
+
+**THE CANDIDATE THE LAST SESSION WAS SENT TO BUILD IS DEAD, AND FOR AN INTERESTING REASON.** Frames
+labelled by whether a lane exists to our left, each CAMERA term reported per class:
+
+    motorway            p10      p50      p90        n
+    width  lane exists  3.30     3.49     3.66     6736
+    width     leftmost  3.17     3.45     3.67     5441      <- IDENTICAL. no information.
+    farLeftY   exists   4.74     5.06     5.50     6736
+    farLeftY leftmost   4.49     5.07     5.91     5441      <- IDENTICAL. no information.
+    beyond     exists   2.21     3.52     5.25     6736
+    beyond   leftmost  -1.76     0.11     4.67     5441      <- SEPARATES, hugely
+    paint      exists   0.44     0.73     0.92     6736
+    paint    leftmost   0.00     0.02     0.12     5441      <- SEPARATES, hugely
+    farLeftStd exists   0.15     0.21     0.35     6736
+    farLeftStd leftmost 0.26     0.40     0.77     5441      <- separates ~2x, right direction
+
+**The model publishes a phantom far-left line at a full lane's width even when we are in the
+leftmost lane.** 3.45 m out, 5.07 m absolute, indistinguishable from a real adjacent lane. That is
+why the positional test cannot work and it is not a threshold problem -- there is no value of
+`MIN_LANE_WIDTH_M` that separates 3.45 from 3.49.
+
+**`width` IS NOT USELESS, IT IS ANSWERING A DIFFERENT QUESTION.** Per route it passes 98-99% on
+motorway and 0-50% on secondary/tertiary/residential. So it separates a MULTI-LANE ROAD from a
+TWO-LANE ROAD, which is real work, and does not separate the leftmost lane from a middle one. Both
+statements are true and only the second one is what the gate needs on a freeway.
+
+**AND THE CIRCULARITY WAS CHECKED RATHER THAN ASSUMED.** `anchor_verdict` labels the leftmost class
+from `noLaneLeft` first, and `noLaneLeft` IS the far-left lane line being absent -- so the `paint`
+row looked tautological. `--map-only-labels` drops it and keeps the map's pinned index alone. **The
+leftmost class came back byte-identical: same 5441 frames, same percentiles on every term.** Every
+`noLaneLeft` frame was also map-pinned leftmost, so the two witnesses agree completely and the paint
+separation is real. Note the negative rows were never at risk either way: a circular label can only
+INFLATE a separation, never hide one.
+
+**SO THE GATE ALREADY CONTAINS TWO WORKING DISCRIMINATORS AND ONE TERM THAT MEASURES DISTANCE.**
+
+    paint   left_line_prob >= 0.5              separates. WORKING.
+    beyond  left_edge_beyond >= 0.8            separates. WORKING.
+    width   3.0 <= left_lane_width <= 4.5      inert on motorway (98-99%), works on narrow roads
+    std     left_edge_std <= 1.2               tracks DISTANCE. Measures nothing about lane existence.
+
+Per route on motorway, which is what makes the std term's behaviour obvious:
+
+    route      frames   OPEN   edge  paint  width  beyond
+    0000039f     9054    30%    67%    52%    99%     66%
+    000003aa     5155     0%    14%    70%    99%     86%
+    000003ab     5528    27%    32%    84%    98%    100%
+
+`edge` swings 14-67% between drives while paint and beyond stay in a sensible band. That swing is the
+distance cutoff catching how wide the road happened to be.
+
+**THE PROPOSED CHANGE, NOT MADE:** drop `left_std <= MAX_ROAD_EDGE_STD` from `left_edge_ok` and let
+`left_edge_beyond` carry the edge. It takes motorway reachability from **22% to 65%** -- the ceiling
+the sweep already measured -- and it does NOT remove the road edge from the gate, because `beyond` is
+computed from the edge POSITION, which `bp_left_edge_truth.py` measured as steady at every std band
+(frame jump flat at 0.13-0.14 m from std 0.5 to 8+).
+
+**IT IS NOT MADE HERE FOR TWO REASONS, AND THE SECOND IS THE REAL ONE.**
+
+1. A previous session wrote **DO NOT LOOSEN IT ON THIS EVIDENCE** into this file. The evidence has
+   genuinely changed -- that instruction was written against a coverage sweep, and this is a
+   discrimination measurement that says WHY the term is wrong -- but reversing a written safety
+   instruction on a lane-change gate is his call to hear about, not one to take quietly.
+2. **THE CONSTRUCTION ZONE.** In a coned work zone the left edge is unreliable, so a high std was
+   refusing there INCIDENTALLY. Dropping it removes an accidental defense on the one hazard this
+   fork has already recorded as a missing sense. There is an argument that `beyond` still protects
+   -- cones pulling the edge inward shrink it -- but that is reasoning, not measurement, and the
+   Lagoon and work-zone events still have no when-and-where to check it against.
+
+**What would settle 2:** the located construction-zone event. It has been asked for twice and is
+still the highest-value thing he could supply for passing assist.
 
 2026-08-22, `tools/bp_route_intent_score.py`, four drives, 63,000 mapdOut frames. This is
 `bluepilot/ROUTE-INTENT.md` step 2, which said to score the guess already running before building
