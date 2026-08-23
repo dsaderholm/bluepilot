@@ -736,6 +736,10 @@ class SelfdriveD(CruiseHelper):
     # equality". These two can. See the capnp comment.
     icbm.vTargetRaw = float(self.icbm.v_target_raw)
     icbm.baselineDiverged = bool(self.icbm.baseline_diverged)
+    # And the two the rule compares SINCE 2026-08-22, without which a stuck hold cannot be
+    # explained from a route -- which is exactly what happened on 2026-08-23.
+    icbm.vSlaTarget = float(self.icbm.v_sla_target)
+    icbm.speedLimitLive = bool(self.icbm.speed_limit_live)
 
     self.pm.send('selfdriveStateSP', ss_sp_msg)
 
