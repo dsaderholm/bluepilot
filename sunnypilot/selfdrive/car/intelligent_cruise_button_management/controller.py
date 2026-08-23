@@ -341,6 +341,9 @@ class IntelligentCruiseButtonManagement:
     self.press_suppressed = False    # the press happened while a curve/lead owned the target
     self.baseline_diverged = False   # has the baseline ever actually differed from SLA?
     self.speed_limit_known = False   # did the resolver have a posted limit this frame?
+    # SLA's own target with his offset applied -- the speed the car would drive to with no hold.
+    # What "I matched the SLA speed" means, and what the clearing rule compares against.
+    self.v_sla_target = 0
     # BluePilot: is Speed Limit Assist in ASSIST mode -- actually allowed to move the set speed --
     # as opposed to off, informational or warning? It is the discriminator for whether a hold may
     # exist at all; see `enforce_hold_policy`.
@@ -510,8 +513,13 @@ class IntelligentCruiseButtonManagement:
     try:
       resolver = LP_SP.speedLimit.resolver
       self.speed_limit_known = bool(resolver.speedLimitValid or resolver.speedLimitLastValid)
+      # SLA'S OWN NUMBER, offset included -- the speed it would drive to if the hold went away.
+      # Added 2026-08-22, and it is the value the hold should have been compared against all along.
+      self.v_sla_target = (round(float(resolver.speedLimitFinalLast) * speed_conv)
+                           if self.speed_limit_known else 0)
     except (AttributeError, KeyError):
       self.speed_limit_known = False
+      self.v_sla_target = 0
     # Is there a mapped corner ahead with a deadline on it? NOT "is SCC-Map the source this frame",
     # which is a different and much less stable question: when the map and vision targets are close
     # the plan source alternates between them frame by frame. Measured on the 2026-08-07 exit, the
@@ -1357,10 +1365,33 @@ class IntelligentCruiseButtonManagement:
     # `baseline_diverged` is still maintained above (see `update_calculations`) because the
     # reset-delta rule below and the no-limit seeding still read it. Only THIS branch stopped
     # asking.
-    if self.plan_source == LongitudinalPlanSource.speedLimitAssist:
-      if self.v_baseline != self.v_target_raw:
+    # COMPARED AGAINST SLA'S OWN NUMBER, NOT THE WINNING PLAN'S. Third and final version of this
+    # rule, 2026-08-22, after he asked the same question three times and was right every time.
+    #
+    # `v_target_raw` is whatever source is WINNING the plan this frame. So the old rule had to be
+    # gated on `plan_source == speedLimitAssist`, and could therefore only run on the frames SLA
+    # happened to win. Any curve, any lead, any drop to `cruise` and the check simply did not
+    # execute -- he photographed exactly that, a hold of 35 against a posted 30 + 5 offset with
+    # `BRAKE 0.1` on screen, meaning something else owned the target at that instant.
+    #
+    # `v_sla_target` is SLA's own number with his offset applied -- the speed the car would drive to
+    # if the hold went away. That is the thing "I matched SLA" means, and it is meaningful whether
+    # or not SLA is currently winning. With it, the source gate is not needed and is gone.
+    #
+    # The two earlier versions each fixed a real case and neither was enough:
+    #   * the latch never armed during a press, so a hold WALKED BACK never cleared (route a8)
+    #   * a hold BORN equal never armed it either, so it sat 164.7 s (route ac)
+    #   * and both were still gated on SLA winning, which is this one.
+    #
+    # A PINNED HOLD IS EXEMPT, which is his whole sentence and not a footnote to it: *"if I set my
+    # hold that I had back to the SLA speed, I want that hold gone UNLESS IT'S PINNED."* A pin is a
+    # deliberate statement about a PLACE -- he chose this speed here, on an earlier drive, and
+    # matching the posted limit today does not retract that. Clearing it would delete the pin's
+    # effect every time the limit happened to agree with it, on exactly the roads pins are for.
+    if self.speed_limit_known and self.v_sla_target > 0:
+      if self.v_baseline != self.v_sla_target:
         self.baseline_diverged = True
-      else:
+      elif self.baseline_source != BaselineSource.pinned:
         self.clear_baseline()
         return
 
