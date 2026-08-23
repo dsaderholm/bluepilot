@@ -1,5 +1,5 @@
 ---
-description: Put the current branch on the comma and reboot it, verifying by content
+description: Put the current branch on the comma and reboot it, verified by content. Use whenever he asks whether the car is current or wants it updated -- "is my comma updated?", "update my comma", "push it to the car", "did you update my Comma?" -- and after any push he is waiting on.
 ---
 
 Update the car to the tip of the branch it tracks, and reboot it. Do all of it — do not print a

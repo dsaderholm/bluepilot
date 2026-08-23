@@ -1,5 +1,5 @@
 ---
-description: Get the latest ICBM commits, merge them into this branch, test, push, and update the car
+description: Take new commits from the ICBM branch into this one, test, push and update the car. Use whenever he asks about ICBM commits at all -- "any new ICBM commits?", "get the latest ICBM commits", "check ICBM", "merge ICBM" -- and whenever a session starts with an ICBM merge outstanding.
 ---
 
 Take the newest commits from `icbm-manual-override-and-tuning` into the current branch, then put

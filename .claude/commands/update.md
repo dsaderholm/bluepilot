@@ -1,5 +1,5 @@
 ---
-description: Merge the newest BluePilot release into the fork, end to end
+description: Merge the newest BluePilot release into the fork, end to end. Use whenever he asks for a newer BluePilot -- "update BluePilot", "get the latest version", "there's a new BluePilot" -- which is the whole request; handle it start to finish.
 ---
 
 He has asked for "the latest BluePilot". That is the whole request — handle it start to finish.
