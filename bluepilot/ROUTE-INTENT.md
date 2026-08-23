@@ -206,6 +206,17 @@ Config, recorded so a future round does not re-collect it:
     debug logs       submitted 2026-08-22
     thread           thread::gmI37q7JcPaPnyjfsPIBMSs::
 
+**THE STRONGEST ARGUMENT WAS NOT IN THE EMAIL HE SENT, and it belongs on the photo follow-up.**
+Noticed 2026-08-22, after the reply had gone. **The notification proves Waze HAS the data.** It
+renders a maneuver glyph and a live, counting-down distance on the same drive where the cluster
+shows a compass -- so Waze is computing Steps and per-step distance internally and simply not
+handing them to Android Auto. That makes it a PUBLISHING failure rather than a routing or data one,
+which is materially harder for triage to deflect than any symptom description.
+
+He already promised them a cluster screenshot, so it costs no extra round: **two photos, same drive,
+seconds apart** -- the phone showing the notification's maneuver and distance, and the cluster
+showing the compass. That pair is the entire bug in one image.
+
 **So the evidence now closes off four explanations rather than one:** not the phone (two of them),
 not the car or head unit (Maps populates the same cluster), not the industry regression (wrong by
 years), and not the Car App API Level 6 cluster feature (that needs SYNC 4/4A and is not what he is
