@@ -365,3 +365,50 @@ def test_the_dash_shows_fords_gap_when_ford_owns_it():
 
   assert draw(True) == 4, "the dash drew openpilot's personality while Ford was deciding the gap"
   assert draw(False) == 2, "without the passthrough openpilot IS the follow controller; show its own"
+
+
+def test_the_accel_ceiling_is_clamped_not_refused():
+  """HIS "THE SPEED WENT UP AND DOWN", 2026-08-23, and it is the launch bug on a second field.
+
+  Straight off his swaglog, every line one refused frame handed to openpilot --
+
+      AccBrkTot_A_Rq  1.996  2.019  2.043  2.066  2.090  2.105  2.125  2.140
+
+  `_PANDA_ACCEL_MAX` is 1.9999, so with the margin anything from 1.995 up was thrown away. Despite
+  the name this is Ford's TOTAL acceleration request, positive while accelerating, and Ford sits on
+  that ceiling pulling away exactly as it sits on the gas ceiling.
+
+  The fix is the same asymmetry as the gas clamp: DOWN is conservative, so the top is clamped; UP
+  would ask for less braking, so the bottom stays a refusal.
+  """
+  packer = _Packer()
+  for accel in (1.996, 2.043, 2.140, 3.0):
+    packer.calls.clear()
+    create_acc_msg_passthrough(packer, _CAN, _stock(AccBrkTot_A_Rq=accel, AccPrpl_A_Rq=0.5))
+    sent = packer.calls[0][2]
+    assert sent["AccBrkTot_A_Rq"] == 1.9999 - 0.005, f"{accel} was not clamped to panda's ceiling"
+    assert sent["AccPrpl_A_Rq"] == 0.5, "clamping the accel must not disturb the gas command"
+  # And the frame is now ADMISSIBLE at those values -- refusing them is what cost the pull-aways.
+  for accel in (1.996, 2.043, 2.140):
+    assert not passthrough_admissible(_stock(AccBrkTot_A_Rq=accel), True), \
+      f"{accel} must be clamped by the builder, not refused"
+
+
+def test_the_accel_floor_is_still_a_refusal():
+  """The braking side must NOT be clamped. Raising -3.6 to -3.494 asks for LESS braking than Ford
+  wanted, and a silent softening of a brake command is indistinguishable from working until the
+  moment it matters. This is the half the 'carried verbatim' note was always right about."""
+  assert passthrough_admissible(_stock(AccBrkTot_A_Rq=-3.6), True), \
+    "below panda's floor must fall back, never be clamped up"
+  packer = _Packer()
+  create_acc_msg_passthrough(packer, _CAN, _stock(AccBrkTot_A_Rq=-2.70))
+  assert packer.calls[0][2]["AccBrkTot_A_Rq"] == -2.70, "the measured worst case must go out intact"
+
+
+def test_ordinary_accel_requests_are_left_alone():
+  """It must bind only at the ceiling, or every frame is being rewritten to the limit."""
+  packer = _Packer()
+  for accel in (-2.70, -1.1, 0.0, 1.0, 1.9):
+    packer.calls.clear()
+    create_acc_msg_passthrough(packer, _CAN, _stock(AccBrkTot_A_Rq=accel))
+    assert packer.calls[0][2]["AccBrkTot_A_Rq"] == accel, f"{accel} was rewritten and should not have been"

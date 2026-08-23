@@ -243,6 +243,30 @@ def create_acc_msg_passthrough(packer, CAN: CanBus, stock_values: dict, clear_ca
   if gas > (_PANDA_GAS_MAX - _PANDA_MARGIN) and abs(gas - _PANDA_GAS_INACTIVE) >= 0.005:
     values["AccPrpl_A_Rq"] = _PANDA_GAS_MAX - _PANDA_MARGIN
 
+  # AND `AccBrkTot_A_Rq` HAS THE SAME CEILING AND WAS NEVER CLAMPED. FusionPilot, 2026-08-23.
+  #
+  # Straight off his swaglog, every one of these a refused frame and a hand to openpilot:
+  #
+  #     AccBrkTot_A_Rq  1.996  2.019  2.043  2.066  2.090  2.105  2.125  2.140
+  #
+  # `_PANDA_ACCEL_MAX` is 1.9999, so with the margin anything from 1.995 up was thrown away --
+  # and despite the name this field is Ford's TOTAL acceleration request, positive when it is
+  # accelerating. Ford sits on that ceiling pulling away exactly as it sits on the gas ceiling.
+  #
+  # THE SAME ASYMMETRY DECIDES IT, and it is why this is a clamp and not a wider band. Clamping
+  # DOWN from 2.14 to 1.995 asks for LESS acceleration than Ford wanted -- conservative. Clamping
+  # UP from -3.6 to -3.494 would ask for less BRAKING than Ford wanted, which is not, so the
+  # bottom stays a refusal and still falls back.
+  #
+  # The note further down this file saying `AccBrkTot_A_Rq` is "carried verbatim, where a silent
+  # softening would be indistinguishable from working until it mattered" was written about the
+  # BRAKING side and is still right about it. It was read as covering the whole field, which is
+  # how a ceiling Ford touches on every launch went a week without being looked at -- the same
+  # week the identical bug on `AccPrpl_A_Rq` was found, measured and fixed.
+  accel = float(values["AccBrkTot_A_Rq"])
+  if accel > (_PANDA_ACCEL_MAX - _PANDA_MARGIN):
+    values["AccBrkTot_A_Rq"] = _PANDA_ACCEL_MAX - _PANDA_MARGIN
+
   return packer.make_can_msg("ACCDATA", CAN.main, values)
 
 
@@ -361,9 +385,13 @@ def passthrough_admissible(stock_values: dict, long_active: bool, allow_cancel: 
     if stock_values.get(name):
       return "camera asserted %s -- unpoliced actuation, see drive A" % name
 
+  # THE BOTTOM ONLY. The top is clamped in `create_acc_msg_passthrough` -- see the asymmetry
+  # argument there. Refusing the top threw away Ford's whole frame on every pull-away, which is
+  # the "it switched to op long and went ridiculously slow" report a second time, on a second
+  # field, after the first was fixed.
   accel = float(stock_values.get("AccBrkTot_A_Rq", 0.0))
-  if not (_PANDA_ACCEL_MIN + _PANDA_MARGIN) <= accel <= (_PANDA_ACCEL_MAX - _PANDA_MARGIN):
-    return "AccBrkTot_A_Rq %.3f outside panda's band" % accel
+  if accel < (_PANDA_ACCEL_MIN + _PANDA_MARGIN):
+    return "AccBrkTot_A_Rq %.3f below panda's band" % accel
 
   # AccPrpl_A_Pred is NOT checked here: create_acc_msg_passthrough pins it to the inactive value,
   # so Ford's number never reaches the wire and cannot make panda drop the frame.
