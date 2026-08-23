@@ -3325,18 +3325,30 @@ is terrible.**
 
 **AND THE REAL SIGNAL IS THAT IT ONLY EVER READS 30.** Three reads, three 30s, across drives
 covering interstate, arterial and city -- never a 25, 35, 45, 65 or 70. That is a much narrower
-failure than "bad at reading signs", and it is the thing an as-built change has to move. Two
-readings worth separating, and neither has been tested:
+failure than "bad at reading signs", and it is the thing an as-built change has to move.
 
-  - the camera's recognizer is configured for a sign SET that mostly is not what Utah posts, and 30
-    happens to fall inside it, or
-  - one particular 30 sign on a road he drives often is simply the only one it ever gets a square,
-    close, well-lit look at.
+**IT IS NOT ONE MAGIC SIGN -- the three reads are three different places**, which was the
+alternative and is now ruled out:
 
-The second is testable from the data already on the device -- the three reads have positions
-available from `0x462`, and if they are the same intersection it is that sign, not the sign set.
-**Do that before concluding anything about the config**, because the two mean opposite things about
-whether nibble 8 is worth changing.
+    000003a7   40.725463, -111.829903   (2011 2100 S, verified against Street View)
+    000003ac   40.747404, -111.853911
+    000003ad   40.752015, -111.855317
+
+`ad` and `ac` are ~530 m apart; both are ~3.5 km from `a7`. Three distinct signs, all Salt Lake
+City surface streets, all 30. (The first coordinate is the 2026-08-21 `0x462` measurement recorded
+above; the other two came from `bp_tsr_baseline.py`, whose run was cut short by the laptop losing
+hostname resolution before it reached `a7` -- rerun it to have all three from one source.)
+
+**SO THE HYPOTHESIS THAT FITS IS RANGE, NOT SIGN SET, and it lines up with the open "TSR detection
+range ~0 m" item.** Every read is a slow urban street where the sign is close to the lane and the
+car is going 30; nothing is ever read on the interstate, where signs are far off the shoulder and
+pass quickly. A recognizer that only resolves a sign it is nearly beside would produce exactly this
+-- reads only where the car is slow and the sign is near, which in this city is 30 mph roads, which
+is why every value is 30.
+
+**That is a prediction, and it is testable from data already on the device before any config
+change:** print `vEgo` at each read. If all three are slow, range is the constraint and nibble 8 is
+unlikely to be the lever. If one is a fast road, the sign-set reading survives.
 
 **Hold duration varies wildly and is unexplained: 544, 5,171 and 12,424 frames.** A long hold is
 only correct while the limit still applies, so the 12,424-frame one is worth a look -- it is minutes

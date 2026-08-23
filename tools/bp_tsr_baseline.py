@@ -35,6 +35,7 @@ def scan(route, segs):
   # he drives often being the only one it ever gets a square look at. Same location three times
   # says the second, and the two mean opposite things about whether an as-built change helps.
   fix = None
+  speed = None
   places = []
   for s in segs:
     p = os.path.join(REALDATA, s, "rlog")
@@ -59,6 +60,15 @@ def scan(route, segs):
         except Exception:
           pass
         continue
+      if w == "carState":
+        # Speed at the read. Every read so far is a slow urban street, which is what a detection
+        # range near zero would produce -- it can only resolve a sign it is nearly beside, and the
+        # roads where that happens are the slow ones. A read on a fast road refutes that.
+        try:
+          speed = float(m.carState.vEgo) * 2.23694
+        except Exception:
+          pass
+        continue
       if w != "carStateBP":
         continue
       try:
@@ -72,7 +82,7 @@ def scan(route, segs):
         if not reading:
           events += 1
           seen_read = True
-          places.append((v, fix))
+          places.append((v, fix, speed))
       elif reading and seen_read:
         returns += 1
       reading = now
@@ -96,9 +106,10 @@ def main():
     vs = ", ".join("{} x{}".format(v, c) for v, c in sorted(values.items())) or "none"
     print("{}  {:>2} seg  {:>6} frames  {:>2} read(s)  {:>2} return(s) to sentinel  [{}]".format(
       r, len(segs), frames, events, returns, vs))
-    for v, fix in places:
+    for v, fix, spd in places:
       where = "{:.6f}, {:.6f}".format(*fix) if fix else "no GPS fix yet on this route"
-      print("      read {} at  {}".format(v, where))
+      how_fast = "{:.0f} mph".format(spd) if spd is not None else "speed unknown"
+      print("      read {} at  {}   doing {}".format(v, where, how_fast))
     sys.stdout.flush()
 
 
