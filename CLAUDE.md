@@ -88,6 +88,31 @@ touch the car while it is onroad. That constraint has not changed and never will
 **Then verify by CONTENT, not by hash** -- see the rebase section below for why a matching hash has
 lied here before. `grep -c` for a string the new commit introduced and one it removed.
 
+## THE SLASH COMMANDS ARE FOR ME TO RUN, NOT FOR HIM
+
+Added 2026-08-22, and he corrected the assumption behind them within the hour: *"For me it's cool
+that you're making these, but I won't run them. You will."*
+
+So they are not a keystroke saving for him. **They exist so the procedure runs the same way every
+time instead of being rebuilt out of this file's prose on each occasion** -- which is how a step
+learned the hard way gets skipped. `.claude/commands/` in this repo, so they reach every worktree by
+rebase like everything else here.
+
+**HE WILL ASK IN WORDS. THE MAPPING IS MINE TO MAKE, AND IT IS THE FRAGILE PART:**
+
+| What he says | Run |
+|---|---|
+| "any new ICBM commits?", "get the latest ICBM commits", "check ICBM" | `/icbm` |
+| "is my comma updated?", "update my comma", "push it to the car" | `/deploy` |
+| "update BluePilot", "get the latest version", "there's a new BluePilot" | `/update` |
+
+Invoke the command rather than reconstructing the steps. If the command does not exist in the
+session yet -- they are only picked up at session start, so one created mid-session is not callable
+-- follow the file's contents directly and say that is what happened.
+
+**When a step in one of these is learned the hard way, it goes in the COMMAND, not only here.** A
+rule in this file is read; a rule in the command is executed.
+
 ## START HERE if the owner asks to update
 
 They will open a fresh session and say something like *"update BluePilot"*, *"get the latest
