@@ -263,6 +263,31 @@ it.
 from before the overhaul, the mirror of the documented Maps-v25 trick. Nobody has checked it on Waze.
 Sideloading an older build of the app he navigates with is his call.
 
+**FORD WAS EARLY ON THIS, NOT LATE. Researched 2026-08-22, and it changes how to read the silence.**
+
+    AA turn-by-turn in a Ford cluster   requires SYNC 3.4; native from SYNC 4
+    his car                             renders it from Google Maps, so he is on 3.4+
+    CarPlay                             does NOT get it -- AA and factory nav only
+    Google's OWN cluster integration    demoed May 2021 on the BMW iX, two years later, and
+                                        covered as a feature few cars would ever get
+
+So Ford built this on the older `updateTrip()` metadata path BEFORE Google had a general solution,
+and while most manufacturers had nothing. **His 2020 car was ahead of the curve on exactly this
+feature**, which is the opposite of the assumption a reader would bring to a six-year-old head unit.
+
+**THAT IS WHY WAZE CAN BREAK IT AND NOT NOTICE.** A feature a minority of OEMs implement, on a path
+Google has since superseded, is one that regresses silently -- the population who would report it is
+tiny and it is probably in nobody's test matrix. Worth stating to support directly: sparse reports
+are not evidence of no bug here.
+
+**AND IT MEANS FORD WILL NOT FIX IT.** If he is on the last SYNC 3 build -- he believes he is, exact
+build unconfirmed -- there are no more head-unit updates coming, so every lever is on Waze's side.
+Another reason nothing may be sequenced behind this.
+
+**One confound it closes:** SYNC updates and the Waze overhaul both happened in the same era, so
+"what changed" had two candidates. Maps rendering today rules SYNC out -- the cluster path
+demonstrably still works.
+
 **THE END-DRIVE BUTTON REFRAMES THE WHOLE DIAGNOSIS. 2026-08-22, from him plus the androidx source.**
 
 He can end the drive from the IPC with Google Maps, and is **pretty sure he cannot with Waze**
