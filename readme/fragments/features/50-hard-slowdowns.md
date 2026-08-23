@@ -30,17 +30,29 @@ large occur on under 1% of engaged driving: one or two takeovers per drive, and 
 the four. A posted speed limit never qualifies, however large the drop: nothing is arriving, and the
 buttons walking the number down is the right answer.
 
-**It will not take the command below 25 mph**, and that floor is the difference between a feature
-and a bricked drive. Every measured takeover that began under Ford's own 20 mph floor made the
-forward camera assert cancel, and one of them latched it for the remaining nine minutes of the drive
-— after which Ford ACC was gone until the car was restarted. Every takeover that began above the
-floor was tolerated, including one that ran 35 seconds to a complete standstill. Once it has the
-command, carrying the car below 25 and down to a stop is fine; it is the *taking* that the camera
-objects to.
+**It will not take the command below 25 mph** — but that floor turned out to protect far less than
+it was designed to. It came from replayed drives: every takeover beginning under Ford's own 20 mph
+floor made the forward camera assert cancel, while those above appeared tolerated. The first three
+takeovers actually *driven* contradicted the second half. Two armed at 34 and 40 mph, comfortably
+above the floor, and each drew a cancel about 1.6 seconds later that never released — stock ACC gone
+for the rest of both drives, recoverable only by restarting the car.
 
-Handing back is measured in both shapes. When the corner ends the gap closes and Ford is still
-engaged and simply carries on. When the corner ends in a stop, it holds the standstill rather than
-releasing into a creep, and Ford's own cruise status follows into its stop-and-go state on the way
-down — so resuming afterwards is an ordinary Ford resume, and the car pulls away under stock ACC.
-The moment the radar acquires a lead it hands back on that frame, because Ford's stop-and-go is
-years of calibration this has no business replacing.
+What separates those two from the one takeover that was tolerated is not known. It is not the arming
+speed, and it is not the size of the disagreement: the tolerated one disagreed with Ford the most,
+while one of the latching pair matched Ford's own braking request to within 0.01 m/s² for its first
+twelve seconds.
+
+**Losing the cancel is recoverable now without stopping.** Refusing to forward a cancelled frame is
+what made the latch permanent — the camera's commands stopped reaching the car, so it could never see
+the car obey it again. Five seconds after a cancel this feature provoked, Ford's frame is forwarded
+again with that bit cleared, for up to thirty seconds. Whether the camera relents is the open
+question, and it is why this ships off.
+
+Handing back has two shapes. When the corner ends the gap closes, Ford is still engaged, and it
+simply carries on. When it ends in a stop, the override holds the standstill rather than releasing
+into a creep, and does not pull away on its own — resuming is the driver's, unless **Pull Away From
+Stops Automatically** is switched on. (An earlier version of this claimed Ford's own stop-and-go
+state was entered on the way down. That was withdrawn: the signal it rested on is OR'd with wheel
+speed, so a stopped car reports it regardless and it proves nothing.) The moment the radar acquires a
+lead the override hands back on that frame, because Ford's stop-and-go is years of calibration this
+has no business replacing.
