@@ -67,7 +67,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 REALDATA = "/data/media/0/realdata"
 
 
-def anchor_verdict(pa, lanes_to_our_left) -> str:
+def anchor_verdict(pa, lanes_to_our_left, map_only: bool = False) -> str:
   """What the LANE ANCHOR says about a lane to our left. GROUND TRUTH ONLY, never a gate input.
 
   It rests on mapdOut `lanes`, and map data MAY REFUSE, MUST NEVER OPEN -- so this can label a
@@ -80,11 +80,21 @@ def anchor_verdict(pa, lanes_to_our_left) -> str:
   costs nothing and cannot drift; note it returns None on an out-of-range index, which an open-coded
   comparison would have scored as a definite answer.
   """
-  if bool(pa.noLaneLeft):
-    return "leftmost"
+  # CIRCULARITY, and it invalidates one row of the table if ignored. `noLaneLeft` IS the far-left
+  # LANE LINE being absent, so labelling the leftmost class with it and then measuring that same
+  # line's probability is tautological -- it would report a huge separation for a term that is
+  # merely being asked whether it equals itself. `laneBoundLo/Hi` come from the lane lines too.
+  # `map_only` drops both and keeps the anchor's pinned index alone, which rests on the map's lane
+  # count. Not perfectly independent -- the anchor uses the lines to bound and the edge to
+  # corroborate -- but it no longer contains the answer to its own question.
+  if not map_only:
+    if bool(pa.noLaneLeft):
+      return "leftmost"
   left = lanes_to_our_left(int(pa.laneIndex), int(pa.lanesTotal))
   if left is not None:
     return "lane exists" if left > 0 else "leftmost"
+  if map_only:
+    return "unknown"
   # A RANGE rather than a pinned index. Even its top leaving a lane above is still a definite yes;
   # on a 4 or 5 lane road the lines can only ever narrow, never pin, so this is the common case
   # there rather than a fallback.
@@ -106,6 +116,9 @@ def main() -> int:
   ap = argparse.ArgumentParser()
   ap.add_argument("route", nargs="+", help="one or more route prefixes; the separation table pools them")
   ap.add_argument("--segments", type=int, default=0)
+  ap.add_argument("--map-only-labels", action="store_true",
+                  help="label classes from the map lane count alone -- drops noLaneLeft and the "
+                       "line-derived bounds, which make the far-left PROBABILITY row circular")
   args = ap.parse_args()
 
   from openpilot.tools.lib.logreader import LogReader
@@ -248,7 +261,7 @@ def main() -> int:
       # EVERY moving frame, not just the sole-refuser subset -- the question is whether the term
       # discriminates at all, and restricting to frames the edge already refused would answer a
       # narrower question with a biased sample.
-      v = anchor_verdict(pa, lanes_to_our_left)
+      v = anchor_verdict(pa, lanes_to_our_left, args.map_only_labels)
       sep[cur_hwy][f"{v} width"].append(float(pa.leftLaneWidth))
       sep[cur_hwy][f"{v} beyond"].append(float(pa.leftEdgeBeyond))
       sep[cur_hwy][f"{v} prob"].append(float(pa.leftLineProb))
