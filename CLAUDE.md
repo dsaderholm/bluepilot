@@ -1450,6 +1450,125 @@ car it means "stopped", not "Ford is holding it". The stopped-and-engaged questi
 **Ships OFF, and the reason is about the car:** the camera's tolerance for sustained contradiction
 is unmeasured. Toggle is `StockAccStopOverride`, "Come To A Complete Stop".
 
+### 2026-08-23: IT COST HIM FORD ACC AGAIN, AND THE RECOVERY NEVER RAN
+
+Four drives, `ae` `af` `b0` `b1`. `INERT` logged four times; **`RECOVERY` logged ZERO**. Route `b0`
+he never engaged at all; `b1` was clean (Ford authored 99.7% of engaged frames).
+
+    route  override   authority
+    ae     368 fr     ford 22.6%  inert 22.3% (6012 fr, 60 s)  opStop 1.4%
+    af     1776 fr    ford 28.7%  inert 23.2% (2738 fr, 27 s)  opStop 15.1%
+
+**THREE OF THE FOUR RECOVERY GATES ARE RULED OUT BY MEASUREMENT**, which is worth keeping because
+each cost a wrong theory first:
+
+- **Attribution.** `tools/bp_cancel_attribution.py` times the last `opStop` frame against the first
+  `inert` frame. Both drives: **4.99 s**, and `inert` is exactly 5 s of cancel — so the cancel run
+  opened the frame the override handed back, `frames_since_override` was 1, and `cancel_is_ours`
+  should be True.
+- **`CC.longActive`.** `inert` is unreachable without it, by the authority chain's own ordering.
+- **The panda bands.** `tools/bp_recovery_blocked.py` replays the real band rule over all 8,750
+  camera frames of both inert windows: **0 refused**, old rule and new. The `AccBrkTot_A_Rq` theory
+  below was mine, was wrong, and is retracted — the bug is real and it is not this.
+
+**AND NOT ONE OF THE FOUR IS PUBLISHED OR LOGGED**, so the drive cannot say which declined. Third
+time in one day, after the hold rule and the TSR baseline. `RECOVERY DECLINED` now logs all four
+once per cancel run, at the frame recovery would have started. **That is the next drive's readout.**
+
+**A REAL HOLE WAS FOUND WHILE DRIVING THE MECHANISM OFFLINE, and it is fixed but is NOT the
+diagnosis.** Attribution is decided once, on the frame a cancel RUN opens. The counter is only
+touched inside `if not override`, so a run already open when the override begins survives it: the
+override ends, the counter is still non-zero, the `== 0` test never fires, and `cancel_is_ours`
+keeps its pre-override value of False. Recovery is then blocked for the whole drive by a decision
+made before the thing it is attributing. Now zeroed on the override edge.
+
+**THE FIRST REPRODUCTION WAS INVALID AND READ AS A FINDING.** It held the cancel without ever
+firing the override, so `frames_since_override` sat at its `1 << 30` sentinel, `cancel_is_ours` was
+correctly False, and recovery correctly declined — which looked exactly like "recovery is broken".
+Fixtures more orderly than reality, and this time the fixture was *missing the thing the rule is
+about*. Both tests now fire the override first.
+
+### `AccBrkTot_A_Rq` HAS THE SAME CEILING AS `AccPrpl_A_Rq` AND WAS NEVER CLAMPED
+
+Straight off his swaglog, every line a refused frame handed to openpilot:
+
+    passthrough: AccBrkTot_A_Rq 1.996 / 2.019 / 2.043 / 2.066 / 2.090 / 2.105 / 2.125 / 2.140
+
+`_PANDA_ACCEL_MAX` is 1.9999, so with the margin anything from 1.995 up was thrown away — and
+despite the name this field is Ford's TOTAL acceleration request, **positive while accelerating**.
+Ford sits on that ceiling pulling away exactly as it sits on the gas ceiling.
+
+**This is the 2026-08-19 launch bug on the other field of the same message, and it sat for four
+days.** The note saying `AccBrkTot_A_Rq` is "carried verbatim, where a silent softening would be
+indistinguishable from working until it mattered" was written about the BRAKING side and is still
+right about it — it was read as covering the whole field. Fixed by the same asymmetry: the top is
+clamped (asking for LESS acceleration is conservative), the bottom stays a refusal.
+
+**The lesson: when a field is fixed by clamping one end, check its NEIGHBOURS in the same message
+for the same shape.** Three fields here have now needed three different answers, and the fourth was
+found only because he reported the symptom a second time.
+
+### ICBM MUST STAND DOWN WHILE OPENPILOT IS AUTHORING. HIS DIAGNOSIS, AND IT MEASURES OUT.
+
+*"Technically, when OP long is being used, ICBM doesn't, right? Or at least when OP long is driving,
+we shouldn't affect its speed with ICBM?"* Route `ae`, by authority state:
+
+    authority   frames   ICBM pressing   dash travel   buttons
+    ford          6076    41    0.7%         14.0 mph  increase=41
+    inert         6012   378    6.3%         84.0 mph  decrease=210, increase=168
+
+**378 button frames and 84 mph of dash travel, hunting, while a latched camera meant openpilot
+authored every ACCDATA frame.** The set speed is not in that control loop at all, so ICBM was moving
+a number that governed nothing — in full view on the dash. That is his "the speed went up and down".
+
+**`_op_long_drives()` structurally cannot catch it.** It decides whether ICBM runs ONCE, at car
+init, and under the passthrough it correctly answers "Ford drives, so ICBM stays". **Authority is a
+per-frame fact and it changed hours into the drive.** Anything else keyed on that init-time decision
+has the same blind spot — check for others before trusting one.
+
+Suppressed for `inert` and `openpilot` only. `fallback` is a scattered per-frame refusal Ford
+resumes from next frame, and suppressing there would stutter the buttons every time a band clipped;
+`opStop` is left alone because the override raising the set speed while stopped is deliberate.
+
+### THE HOLD STUCK FOR 87 SECONDS WITH EVERY CONDITION SATISFIED. STILL OPEN.
+
+Route `ae`, `tools/bp_hold_clear_audit.py`, which reconstructs the rule's own inputs:
+
+    t+155.7  hold 27  sla 27  live True  source press   *** SHOULD HAVE CLEARED ***
+    t+158.4  hold 27  sla 27  live True  source press   *** SHOULD HAVE CLEARED ***
+    t+245.6  hold  0                                    CLEARED
+
+All four of the rule's own conditions pass and it does not fire for 87 s. So the block is one of the
+early returns ABOVE it in `update_manual_override` — the press path, the press-settle stand-down,
+`v_target_valid`, or `cruise_enabled`. The audit now prints cruise state and `vTargetRaw`; **run it
+on `ae` again to close this.** Do not guess at the rule itself: the rule is provably not what
+declined.
+
+**AND THE AUDIT'S FIRST VERSION HID THE ZERO** — it skipped `baseline <= 0`, so it could not tell
+"stuck" from "cleared one frame later", the single question it existed to answer. Written by the
+session that keeps quoting the rule against exactly that.
+
+### PUBLISHING A DIAGNOSTIC IS NOT A ONE-TIME ACT
+
+The capnp comment above `vTargetRaw` says those fields exist because "neither was published, and
+that made a real on-road report undiagnosable from a route". On 2026-08-22 the rule stopped
+comparing them and started comparing SLA's own number gated on the limit being live — **and neither
+of those was published either.** So the same report, from the same driver, was undiagnosable again,
+one struct field away from where the lesson is written.
+
+**A diagnostic is a property of the RULE, not of the module. When a comparison is rewritten,
+re-check that its new terms reach the wire.** `vSlaTarget` and `speedLimitLive` now do.
+
+### SHELL QUOTING BIT TWICE MORE
+
+Both cost a wrong result rather than an error, which is why they are here beside the heredoc rule:
+
+- **Backticks inside a double-quoted shell string are command substitution.** A commit message lost
+  two phrases that way; bash printed `inert: command not found` and the commit went through anyway.
+  Use `git commit -F -` with a single-quoted heredoc delimiter.
+- **Nested single quotes in `ssh "bash -lc '...'"`** silently truncate the remote command. Put the
+  loop in a `$cmd` here-string with no inner single quotes, or write a script file and run that.
+
 **AND IT REQUIRED FIXING THE 20 MPH FLOOR RELEASE, which he had reported from the road as its own
 complaint:** *"occasionally the traffic light thing will set my speed back up after it has gotten
 down to 20."* Not occasional. `unconfirmed_lead.py` released the model stop at `ACC_FLOOR_MS`, and
