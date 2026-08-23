@@ -1530,7 +1530,7 @@ Suppressed for `inert` and `openpilot` only. `fallback` is a scattered per-frame
 resumes from next frame, and suppressing there would stutter the buttons every time a band clipped;
 `opStop` is left alone because the override raising the set speed while stopped is deliberate.
 
-### THE HOLD STUCK FOR 87 SECONDS WITH EVERY CONDITION SATISFIED. STILL OPEN.
+### THE HOLD STUCK FOR 87 SECONDS WITH EVERY CONDITION SATISFIED. **SOLVED: A BUTTON TIMER.**
 
 Route `ae`, `tools/bp_hold_clear_audit.py`, which reconstructs the rule's own inputs:
 
@@ -1538,11 +1538,33 @@ Route `ae`, `tools/bp_hold_clear_audit.py`, which reconstructs the rule's own in
     t+158.4  hold 27  sla 27  live True  source press   *** SHOULD HAVE CLEARED ***
     t+245.6  hold  0                                    CLEARED
 
-All four of the rule's own conditions pass and it does not fire for 87 s. So the block is one of the
-early returns ABOVE it in `update_manual_override` — the press path, the press-settle stand-down,
-`v_target_valid`, or `cruise_enabled`. The audit now prints cruise state and `vTargetRaw`; **run it
-on `ae` again to close this.** Do not guess at the rule itself: the rule is provably not what
-declined.
+All four of the rule's own conditions pass and it does not fire for 87 s -- with cruise ENABLED and
+`vTargetRaw` 27, so neither `cruise_enabled` nor `v_target_valid` is the block either.
+
+**THE CAUSE IS `update_manual_button_timers` IN `cruise_ext.py`.** It only zeroes a timer on a
+RELEASE event. This car's SCCM clears the button bit between frames, so one physical press arrives
+as a burst of PRESS events -- and the release is not reliably among them:
+
+    route 000003ae, t+140..260:  88 events pressed=True, ONE pressed=False
+    last press t+154.48          next event of any kind t+269.62
+
+So the `accelCruise` timer sat above zero for 115 s. ICBM re-arms its press-settle stand-down every
+frame any manual-override timer is non-zero, so `update_manual_override` returned before the
+clearing rule on every one of those frames. **The rule was never reached, which is why three rounds
+of fixing the rule did not help.**
+
+Fixed with a 2 s cap. The timer is ALREADY "frames since the last press event" -- every press resets
+it to 1 -- so a cap cannot cut a real press short: while a button is genuinely held the bursts keep
+arriving and keep resetting it. Longest gap WITHIN a held press on that route was 0.72 s.
+
+**Deliberately NOT a change to the press-settle re-arm**, which is correct and was itself added for
+a real report -- a cap expiring mid-hold froze the baseline and walked the set speed back down while
+the button was still held. The defect is the INPUT it trusts.
+
+**AND THE 2026-08-22 TEST PASSED BECAUSE IT SENT A RELEASE.** It holds the button on every frame,
+which was the fix for the round before -- then ends with `DECEL_RELEASE`, zeroing the timer. It
+exercised everything except what his stalk actually does. **When a fixture ends with a tidy-up event
+the real hardware may not send, that ending is the next bug.**
 
 **AND THE AUDIT'S FIRST VERSION HID THE ZERO** — it skipped `baseline <= 0`, so it could not tell
 "stuck" from "cleared one frame later", the single question it existed to answer. Written by the
