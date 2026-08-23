@@ -759,3 +759,137 @@ def test_a_missing_attribute_disables_the_feature_not_the_car(carcontroller_part
 
   addrs = _addrs(_run(cc, CC, CC_SP, CS))   # must not raise
   assert _NAV2_ADDR not in addrs
+
+
+def test_recovery_takes_authority_after_an_override_provoked_cancel(carcontroller_parts):
+  """FusionPilot, 2026-08-23. THE SEQUENCE THAT COST HIM FORD ACC, driven end to end.
+
+  Routes ae and af: the override fired, the camera latched, INERT logged four times, and RECOVERY
+  logged ZERO. Attribution was ruled out from the routes by a measured 4.99 s gap between the last
+  opStop frame and the first inert one; `CC.longActive` because `inert` is unreachable without it;
+  and the panda bands by replaying them over all 8,750 camera frames of both inert windows, which
+  refused none. So the mechanism itself is what needs driving.
+
+  THE FIRST VERSION OF THIS TEST WAS INVALID AND LOOKED LIKE A FINDING. It held the cancel without
+  ever firing the override, so `frames_since_override` sat at its 1 << 30 "never happened"
+  sentinel, `cancel_is_ours` was correctly False, and recovery correctly declined -- which read as
+  "recovery is broken". Fixtures more orderly than reality, again: the real sequence has an
+  override in it and that is the whole point of the attribution rule.
+  """
+  CarController, dbc_names, CP, CP_SP, structs = carcontroller_parts
+  from opendbc.car.ford.interface import CarInterface
+  from opendbc.car.ford.values import CAR
+  CP_long = CarInterface.get_non_essential_params(CAR.FORD_FUSION_MK5)
+  CP_long.openpilotLongitudinalControl = True
+
+  cc = CarController(dbc_names, CP_long, CP_SP)
+  cc.stock_acc_passthrough = True
+  cc.stop_override_enabled = True
+
+  out = structs.CarState()
+  out.vEgo = 20.0
+  out.vEgoRaw = 20.0
+  out.cruiseState.enabled = True
+  out.cruiseState.available = True
+  CS = FakeCarState(out)
+  CS.acc_cam_valid = True
+  CS.acc_stock_values["AccBrkTot_A_Rq"] = -1.10
+
+  CC, CC_SP = _car_control(structs, enabled=True,
+                           send_button=structs.IntelligentCruiseButtonManagement.SendButtonState.none,
+                           gap_target=0, long_active=True)
+
+  frame = 0
+  authorities = []
+
+  # 1. The override has the car, and the camera gives up on it partway through -- which is what it
+  #    does about 1.6 s in on every real episode.
+  cc.stop_override.update = lambda **kw: True
+  for i in range(200):
+    if i == 100:
+      CS.acc_stock_values["AccCancl_B_Rq"] = 1
+    cc.update(CC, CC_SP, CS, frame * 10_000_000)
+    authorities.append(str(cc.acc_authority).split(".")[-1])
+    frame += 1
+
+  # 2. The override hands back. The camera is still asserting, and because a cancelling frame is
+  #    inadmissible it can never watch the car obey it again -- that is the deadlock recovery is for.
+  cc.stop_override.update = lambda **kw: False
+  for _ in range(1200):
+    cc.update(CC, CC_SP, CS, frame * 10_000_000)
+    authorities.append(str(cc.acc_authority).split(".")[-1])
+    frame += 1
+
+  assert "opStop" in authorities, "the override never took authority, so this proves nothing"
+  assert "inert" in authorities, "the cancel never latched, so this proves nothing"
+  assert "recovery" in authorities, (
+    "the camera latched behind our own override and recovery never took authority -- this is the "
+    "sequence that cost him Ford ACC on routes ae and af, twice in one day")
+
+
+def test_a_cancel_that_predates_the_override_does_not_poison_attribution(carcontroller_parts):
+  """FusionPilot, 2026-08-23. The hole in the attribution rule, driven.
+
+  Attribution is decided once, on the frame a cancel RUN opens. The counter is only touched inside
+  `if not override`, so a run already open when the override begins survives it untouched -- the
+  override ends, the counter is still non-zero, the `== 0` test never fires, and `cancel_is_ours`
+  keeps the value it had BEFORE the override, which is False. Recovery is then blocked for the
+  rest of the drive by a decision made before the thing it is meant to attribute.
+
+  Here the camera is already cancelling when the override starts, which is the ordinary case on an
+  approach where ACC is marginal. Without the edge reset this fails.
+  """
+  CarController, dbc_names, CP, CP_SP, structs = carcontroller_parts
+  from opendbc.car.ford.interface import CarInterface
+  from opendbc.car.ford.values import CAR
+  CP_long = CarInterface.get_non_essential_params(CAR.FORD_FUSION_MK5)
+  CP_long.openpilotLongitudinalControl = True
+
+  cc = CarController(dbc_names, CP_long, CP_SP)
+  cc.stock_acc_passthrough = True
+  cc.stop_override_enabled = True
+
+  out = structs.CarState()
+  out.vEgo = 20.0
+  out.vEgoRaw = 20.0
+  out.cruiseState.enabled = True
+  out.cruiseState.available = True
+  CS = FakeCarState(out)
+  CS.acc_cam_valid = True
+  CS.acc_stock_values["AccBrkTot_A_Rq"] = -1.10
+  CS.acc_stock_values["AccCancl_B_Rq"] = 1      # ALREADY cancelling before anything else happens
+
+  CC, CC_SP = _car_control(structs, enabled=True,
+                           send_button=structs.IntelligentCruiseButtonManagement.SendButtonState.none,
+                           gap_target=0, long_active=True)
+
+  frame = 0
+  authorities = []
+
+  # 1. Cancel with no override anywhere near it -- attribution correctly says "not ours".
+  cc.stop_override.update = lambda **kw: False
+  for _ in range(400):
+    cc.update(CC, CC_SP, CS, frame * 10_000_000)
+    authorities.append(str(cc.acc_authority).split(".")[-1])
+    frame += 1
+  assert not cc.cancel_is_ours, "a cancel with no override before it must not be attributed to us"
+
+  # 2. Now the override runs, straight through the still-asserted cancel.
+  cc.stop_override.update = lambda **kw: True
+  for _ in range(200):
+    cc.update(CC, CC_SP, CS, frame * 10_000_000)
+    authorities.append(str(cc.acc_authority).split(".")[-1])
+    frame += 1
+
+  # 3. It hands back, and the camera is still asserting -- now it IS ours.
+  cc.stop_override.update = lambda **kw: False
+  for _ in range(1200):
+    cc.update(CC, CC_SP, CS, frame * 10_000_000)
+    authorities.append(str(cc.acc_authority).split(".")[-1])
+    frame += 1
+
+  assert "opStop" in authorities, "the override never took authority, so this proves nothing"
+  assert cc.cancel_is_ours, (
+    "the cancel run that predated the override decided attribution and was never re-opened, so "
+    "recovery is blocked for the rest of the drive")
+  assert "recovery" in authorities, "recovery never took authority after its own override"

@@ -147,6 +147,7 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
     # still treated as ours. Starts effectively infinite so nothing is attributable before the
     # override has ever run.
     self.frames_since_override = 1 << 30
+    self.override_last_frame = False
     self.cancel_is_ours = False
     self.cancel_recovery_frames = 0
     self.cancel_recovery_said = False
@@ -512,6 +513,27 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
       # Counted rather than timed because everything else in this block is in frames, and held at 0
       # for the whole standstill hold -- the override is still `active` there, so a 45 s hold does
       # not age out its own cancel.
+      # A CANCEL RUN THAT SPANS THE OVERRIDE MUST NOT DECIDE ATTRIBUTION. FusionPilot, 2026-08-23.
+      #
+      # Attribution is decided once, on the frame a cancel RUN opens -- `passthrough_cancel_frames
+      # == 0`. The counter is only touched inside `if not override`, so a run that was already open
+      # when the override began survives it untouched: the override ends, the counter is still
+      # non-zero, the `== 0` test never fires, and `cancel_is_ours` keeps whatever it was set to
+      # BEFORE the override -- which is False, because no override had run yet. Recovery is then
+      # blocked for the rest of the drive by a decision made before the thing it is attributing.
+      #
+      # Zeroing it on the override edge makes the first cancel frame after we hand back open a new
+      # run, which is the only run that means anything: the camera cancelling while WE are
+      # authoring is expected and says nothing, and the question recovery asks is whether it is
+      # still cancelling once Ford has the car back.
+      #
+      # NOT PROVEN TO BE WHAT BIT HIM on routes ae/af -- the 4.99 s gap measured there is what a
+      # fresh run looks like, so attribution ought to have passed and something else declined.
+      # `RECOVERY DECLINED` below is what will say which. This is fixed because it is wrong on its
+      # own terms, not because it is the diagnosis.
+      if override and not self.override_last_frame:
+        self.passthrough_cancel_frames = 0
+      self.override_last_frame = override
       self.frames_since_override = 0 if override else self.frames_since_override + 1
       if not override and self.stock_acc_passthrough and getattr(CS, "acc_cam_valid", False) and getattr(CS, "acc_stock_values", None):
         reason = fordcan_ext.passthrough_admissible(CS.acc_stock_values, CC.longActive)
@@ -568,6 +590,28 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
           # authored is still unresumed, and it is cleared by the car moving above 1.5 mph. So the
           # recovery resumes being possible the moment he drives away, which is when Ford having
           # the car is what he wants.
+          # AND SAY WHY WHEN IT DOES NOT ACT. FusionPilot, 2026-08-23.
+          #
+          # Routes ae and af: the override fired, the camera latched, INERT logged four times,
+          # and RECOVERY logged ZERO. Three of the gates were then ruled out from the routes --
+          # attribution by a measured 4.99 s gap between the last opStop frame and the first
+          # inert one, `CC.longActive` because `inert` is unreachable without it, and the panda
+          # bands by replaying them over all 8,750 camera frames of the two inert windows, which
+          # refused none. That left two gates and NO WAY TO TELL WHICH, because not one of them
+          # is published or logged.
+          #
+          # Third time today that a rule could not be explained from a drive. Fixing the rule is
+          # guesswork until the drive can say which term declined, so this says it -- once per
+          # cancel run, naming the gate, at the moment the recovery would otherwise have started.
+          elif (self.passthrough_cancel_frames == _CANCEL_INERT_FRAMES + 1
+                and not (self.cancel_is_ours and CC.longActive
+                         and not self.stop_override_stopped_us
+                         and self.cancel_recovery_frames < _CANCEL_RECOVERY_MAX_FRAMES)):
+            cloudlog.error("stock ACC passthrough RECOVERY DECLINED: cancel_is_ours=%s "
+                           "longActive=%s stop_override_stopped_us=%s recovery_frames=%d/%d",
+                           self.cancel_is_ours, CC.longActive, self.stop_override_stopped_us,
+                           self.cancel_recovery_frames, _CANCEL_RECOVERY_MAX_FRAMES)
+
           elif (self.cancel_is_ours and CC.longActive
                 and self.passthrough_cancel_frames > _CANCEL_INERT_FRAMES
                 and not self.stop_override_stopped_us
