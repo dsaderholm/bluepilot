@@ -89,7 +89,13 @@ def main():
         diverged = bool(icbm.baselineDiverged)
       except Exception:
         continue
+      # NEVER HIDE THE ZERO. The first version of this skipped `baseline <= 0` and so could not
+      # tell 'the hold stuck' from 'the hold cleared one frame later' -- the single question it
+      # was written to answer. That is this fork's oldest recorded bug shape, committed here by
+      # the person who wrote the rule against it.
       if baseline <= 0:
+        if prev_key is not None:
+          rows.append((t - t0, 0, sla_target, live, last_valid, source, diverged, "CLEARED"))
         prev_key = None
         continue
 
