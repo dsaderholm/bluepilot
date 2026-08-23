@@ -1348,20 +1348,32 @@ class TestOncomingMustBeMovingLikeTraffic:
     assert not adj.left.oncoming
     assert not adj.oncoming_any_side
 
-  def test_the_day_drive_reading_is_NOT_rejected_and_that_is_deliberate(self):
-    """-15.6 at 30 m/s ego clears the floor by a hair -- half of 30 is exactly 15.0.
+  def test_the_day_drive_reading_IS_rejected_now_and_the_old_test_named_the_condition(self):
+    """REVERSED 2026-08-23, on exactly the evidence the previous version asked for.
 
-    Recorded rather than tuned away. Raising the fraction to catch this one measurement would be
-    fitting a constant to two points, and the asymmetry forbids it: a missed oncoming car means
-    suggesting a pass into head-on traffic, while a false veto costs a pass and nothing else. So
-    the floor stays generous and this reading still vetoes.
+    It read: *"If day-drive oncoming keeps showing up at half road speed on divided highways, THAT
+    is the evidence to raise the fraction on -- several drives, not one number."* It then admitted
+    -15.6 at 30 m/s, because half of 30 is 15.0 and refusing on one measurement would have been
+    fitting a constant to two points.
 
-    If day-drive oncoming keeps showing up at half road speed on divided highways, THAT is the
-    evidence to raise the fraction on -- several drives, not one number.
+    THE CONDITION IS MET. `bp_oncoming_adjacent.py` scored every recorded rising edge across ELEVEN
+    drives -- 30 of them, 10 on roads the map calls one-way, where opposing traffic in the adjacent
+    lane is impossible. Raising the fraction to 0.7 kills 3 of those 10 and loses NOT ONE real
+    two-way edge the old value was not already losing. Every other candidate traded gains for
+    losses roughly proportionally; this is the only free move in the sweep.
+
+    AND THE ASYMMETRY THAT FORBADE IT IS RESPECTED, which is why this is not simply a reversal of
+    judgement. The old argument was that a missed oncoming car means suggesting a pass into head-on
+    traffic while a false veto costs only a pass -- so the floor must stay generous. That still
+    holds; the sweep says this change costs nothing at all on the missed side. It was measured, not
+    reasoned around.
+
+    -15.6 at 30 m/s is not a car travelling the other way: a real one reads about -27, which the
+    test below still admits. It is the freeway clutter the scaled floor exists to reject.
     """
     adj = AdjacentLane()
     upd(adj, FakeSM([self.at(-15.6, 30.0)]), 30.0, MAX_D)
-    assert adj.left.oncoming
+    assert not adj.left.oncoming
 
   def test_real_oncoming_at_highway_speed_still_classifies_the_road(self):
     """THE CASE THE FEATURE EXISTS FOR must survive the fix. A car doing 60 the other way reads
@@ -1390,5 +1402,5 @@ class TestOncomingMustBeMovingLikeTraffic:
       min_oncoming_ms, MIN_ONCOMING_MS)
     assert min_oncoming_ms(0.0) == MIN_ONCOMING_MS
     assert min_oncoming_ms(4.0) == MIN_ONCOMING_MS, "the noise floor is the lower bound"
-    assert min_oncoming_ms(30.0) == 15.0
+    assert min_oncoming_ms(30.0) == 21.0, "0.7 * 30 -- raised from 0.5 on the eleven-drive sweep"
     assert min_oncoming_ms(-5.0) == MIN_ONCOMING_MS, "reverse must not invert the floor"

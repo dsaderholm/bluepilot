@@ -3847,9 +3847,23 @@ work zone is not in OSM either -- `highway=construction` is for rebuilt roads, n
 - **The context around it.** Work zones usually carry a speed limit drop, sometimes a map lane-count
   change, often an unusual `roadEdgeStds`. Any of those could gate it.
 
-**What is needed to find it: roughly WHEN and WHERE.** Two 21-minute drives is a large haystack and
-`bp_why_it_suggested.py` reports per-suggestion state once pointed at a window. Same ask as the
-unlocated Lagoon event, and this one matters more.
+**~~What is needed to find it: roughly WHEN and WHERE.~~ STOP ASKING. THE DATA IS GONE.** Corrected
+2026-08-23, after the ask had been put to him a third time: *"I have no fucking idea when the
+construction zone thing happened and that was weeks ago. Do we really need that?"*
+
+**No -- and it was never obtainable.** The event was on routes 0000038e / 0000038f, 2026-08-19. The
+oldest route still on the device is **00000393**. They rotated off days ago, so even a perfect
+answer from him would have pointed at deleted segments. Nobody checked that before asking.
+
+**AND IT IS NOW CAPTURED PASSIVELY, so the ask is not merely dead but unnecessary.** `leftNarrowingM`
+is published on every frame and `leftNarrowingShare` / `leftNarrowingMax` / `leftNarrowingBroken`
+land in every drive summary. A future work zone records itself; he does not have to notice it,
+remember it, or report it. **The right move is to wait for a drive, not to interrogate him about an
+old one.**
+
+**THE GENERAL LESSON, and it cost three rounds of his patience:** before asking him to recall
+something, check whether the data that recall would point at still exists. A question he cannot
+answer is bad; a question that could not have helped if he had is worse.
 
 **Until then the honest position is that this is a MISSING SENSE, not a tuning problem**, and it is
 a reason not to let the maneuver act unsupervised in a work zone.
@@ -4148,6 +4162,28 @@ it says the change it was leaning toward is not available.
 
 **The one FREE move is the FRACTION, not the flat floor:** 0.50 -> 0.70 kills 3 of 10 false edges
 and loses NO real edge the live rule was not already losing. Cheap, real, and small.
+
+**DONE, 2026-08-23. `ONCOMING_SPEED_FRACTION` is 0.7.** The flat floor is untouched -- raising it
+costs real edges immediately and it is what the 25 mph arterial case depends on.
+
+**A TEST HAD ALREADY WRITTEN DOWN THE CONDITION FOR MAKING THIS CHANGE, AND IT WAS MET.**
+`test_the_day_drive_reading_is_NOT_rejected_and_that_is_deliberate` admitted -15.6 m/s at 30 m/s ego
+and said in its own docstring: *"If day-drive oncoming keeps showing up at half road speed on divided
+highways, THAT is the evidence to raise the fraction on -- several drives, not one number."* Eleven
+drives and thirty edges is that evidence, so the test is now
+`test_the_day_drive_reading_IS_rejected_now_and_the_old_test_named_the_condition`.
+
+**The asymmetry that originally forbade it is respected rather than overruled**, which is the part
+that makes this a measurement and not a change of mind. The old argument was that a missed oncoming
+car means suggesting a pass into head-on traffic while a false veto only costs a pass, so the floor
+must stay generous. Still true -- and the sweep says this change costs NOTHING on the missed side,
+losing no real edge the old value was not already losing. The two cases that must not break both
+still pass: a 25 mph oncoming car on a 30 mph arterial is still seen, and a real highway oncoming
+car at -27 m/s still vetoes.
+
+**A TEST WHOSE DOCSTRING NAMES ITS OWN REVERSAL CONDITION IS THE PATTERN TO COPY.** It turned what
+would have been an argument into a lookup: the constant was not defended on taste, it was defended
+until a specific, stated bar was cleared.
 
 **AND THE OBVIOUS DISCRIMINATOR IS FORBIDDEN, which is worth stating before someone reaches for it.**
 `oneWay` from the map separates these perfectly by construction -- it is what labels them. But
