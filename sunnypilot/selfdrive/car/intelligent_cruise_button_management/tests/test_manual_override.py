@@ -65,7 +65,7 @@ def make_cs(cluster, v_ego=None, buttons=(), enabled=True, gas_pressed=False, br
 def make_lp(target, lead_state=UnconfirmedLeadState.inactive, lead_target=0.0,
             source=PlanSource.speedLimitAssist, limit_known=True,
             curve_active=False, curve_target=0.0, map_active=False, sla_assist=True,
-            sla_target=None):
+            sla_target=None, limit_live=None):
   """limit_known defaults TRUE because that is the ordinary road: OSM has a limit for most places.
 
   It was absent entirely at first, which made LP_SP.speedLimit raise and every test run as though no
@@ -91,7 +91,13 @@ def make_lp(target, lead_state=UnconfirmedLeadState.inactive, lead_target=0.0,
             # clearing rule read SLA's target as 0 and never fired -- the same fixture-thinner-than-
             # the-real-message failure as smartCruiseControl below, in the same file, again.
             # It is SLA's own number WITH the offset, which is what the hold is compared against.
-            speedLimit=NS(resolver=NS(speedLimitValid=limit_known,
+            # THE TWO VALIDITY FLAGS ARE SEPARATE INPUTS and were tied to one kwarg until
+            # 2026-08-22. `speedLimitValid` is a LIVE limit; `speedLimitLastValid` is a REMEMBERED
+            # one, which is what every road that leaves OSM coverage looks like. Tying them made the
+            # state that can wrongly destroy a hold -- remembered but not live -- inexpressible, so
+            # the bug could only be argued about and not tested.
+            speedLimit=NS(resolver=NS(speedLimitValid=(limit_known if limit_live is None
+                                                       else limit_live),
                                       speedLimitLastValid=limit_known,
                                       speedLimitFinalLast=(target if sla_target is None
                                                            else sla_target) * MPH),
@@ -134,11 +140,12 @@ def set_baseline(icbm, to=DRIVER):
 
 
 def settle(icbm, target, cluster=DRIVER, frames=150, source=PlanSource.speedLimitAssist,
-           sla_target=None):
+           sla_target=None, limit_live=None):
   """Default runs past PRESS_SETTLE_FRAMES: ICBM stands down for 0.6 s after a driver press, so
   a shorter settle would assert on the stand-down rather than on steady-state behavior."""
   for _ in range(frames):
-    icbm.run(make_cs(cluster), CC, make_lp(target, source=source, sla_target=sla_target), False)
+    icbm.run(make_cs(cluster), CC,
+             make_lp(target, source=source, sla_target=sla_target, limit_live=limit_live), False)
 
 
 def cycle_with_set(icbm, road_speed=48, off_frames=200, source=PlanSource.speedLimitAssist):
@@ -668,6 +675,30 @@ class TestReturningToTheLimitHandsItBack:
       f"the hold survived because a curve owned the plan (baseline={icbm.v_baseline}) -- that is "
       "the gate he photographed, and SLA's number does not stop being SLA's number")
 
+  def test_a_REMEMBERED_limit_does_not_clear_a_hold(self):
+    """CAUGHT IN REVIEW on 2026-08-22, hours after the source gate came out, and it was a real
+    regression rather than a hypothetical.
+
+    Removing `plan_source == speedLimitAssist` lost a side effect nobody had named: that gate meant
+    SLA was actively WINNING, which implies a LIVE limit. The replacement was `speed_limit_known`,
+    which is `speedLimitValid OR speedLimitLastValid` -- so a limit REMEMBERED from a road already
+    left could destroy a hold pressed on the next one.
+
+    That is not exotic. It is every road that leaves OSM coverage: SLA keeps `speedLimitFinalLast`
+    at the old number, he presses + to hold exactly that on the new road, and it vanishes. On the
+    roads CLAUDE.md says holds matter most.
+
+    The clearing rule reads `speed_limit_live` now. `speed_limit_known` still exists and is still
+    what the no-limit seeding wants."""
+    icbm = fresh()
+    set_baseline(icbm, to=LIMIT)          # a hold that equals the REMEMBERED number
+    # Live limit gone, memory of it intact -- exactly leaving a mapped zone.
+    settle(icbm, LIMIT, cluster=LIMIT, frames=800, limit_live=False)
+
+    assert icbm.v_baseline == LIMIT, (
+      "a hold was destroyed by a limit belonging to a road he had already left")
+    assert icbm.override_state == OverrideState.manual
+
   def test_a_pinned_hold_at_SLAs_number_survives(self):
     """His sentence has a carve-out and it is not a footnote: *"if I set my hold that I had back to
     the SLA speed, I want that hold gone UNLESS IT'S PINNED."*
@@ -868,7 +899,7 @@ class TestMappingAgnosticFallback:
   far longer than any command of its own could take to land, a human moved it -- adopt it."""
 
   def _drive(self, moves, source=PlanSource.speedLimitAssist, target=LIMIT, frames=1400,
-             sla_target=None):
+             sla_target=None, limit_live=None):
     """moves: {frame: delta} applied to the set speed with NO button event at all.
 
     Moves start well past frame 250: engaging cruise opens a settle window during which
@@ -879,7 +910,8 @@ class TestMappingAgnosticFallback:
     cluster = LIMIT
     for f in range(frames):
       cluster += moves.get(f, 0)
-      icbm.run(make_cs(cluster), CC, make_lp(target, source=source, sla_target=sla_target), False)
+      icbm.run(make_cs(cluster), CC,
+             make_lp(target, source=source, sla_target=sla_target, limit_live=limit_live), False)
       if f % 5 == 0:
         if icbm.cruise_button == SendButtonState.decrease:
           cluster -= 1

@@ -127,6 +127,12 @@ class LateralCurvExt:
     # Subscribed rather than selected via `get_gps_location_service(params)`, which is what
     # selfdrived does: this runs inside the car process where a Params read is not free, and a
     # service that never publishes costs nothing to carry. Whichever one updates wins below.
+    #
+    # THE TWO RUN AT DIFFERENT RATES and it is worth knowing before reading anything into a drive:
+    # cereal/services.py has `gpsLocationExternal` at 10 Hz and `gpsLocation` at 1 Hz. His 3X
+    # publishes only the second, so `self.gps` refreshes once a second and the 1 Hz APIM send can
+    # carry a fix already a full second old -- roughly 15 m at 35 mph. Fine for a camera that wants
+    # coarse position; not fine to quote as a precise one.
     self.sm = messaging.SubMaster(['modelV2', 'liveParameters', 'selfdriveState', 'radarState', 'liveDelay',
                                    'longitudinalPlanSP', 'gpsLocation', 'gpsLocationExternal'])
     self.VM = VehicleModel(CP)
