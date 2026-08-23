@@ -893,3 +893,70 @@ def test_a_cancel_that_predates_the_override_does_not_poison_attribution(carcont
     "the cancel run that predated the override decided attribution and was never re-opened, so "
     "recovery is blocked for the rest of the drive")
   assert "recovery" in authorities, "recovery never took authority after its own override"
+
+
+def test_icbm_stops_pressing_once_openpilot_is_authoring(carcontroller_parts):
+  """His report, 2026-08-23: "the speed went up and down" after Ford ACC failed.
+
+  Route 000003ae, over the 60 s the passthrough spent inert:
+
+      inert  6012 frames   378 ICBM button frames   84 mph of dash travel
+                           decrease=210, increase=168
+
+  A latched camera means openpilot authors every ACCDATA frame, so the set speed the buttons move
+  is not in the control loop at all -- ICBM was hunting a number that governed nothing, in full
+  view on the dash. _op_long_drives() cannot catch it: it decides once, at car init, and under the
+  passthrough it correctly says Ford drives.
+
+  Both halves are asserted. Suppressing everywhere would be just as wrong as suppressing nowhere.
+  """
+  from opendbc.car.ford.interface import CarInterface
+  from opendbc.car.ford.values import CAR
+
+  CarController, dbc_names, CP, CP_SP, structs = carcontroller_parts
+  CP_long = CarInterface.get_non_essential_params(CAR.FORD_FUSION_MK5)
+  CP_long.openpilotLongitudinalControl = True
+
+  cc = CarController(dbc_names, CP_long, CP_SP)
+  cc.stock_acc_passthrough = True
+
+  out = structs.CarState()
+  out.vEgo = 20.0
+  out.vEgoRaw = 20.0
+  out.cruiseState.enabled = True
+  out.cruiseState.available = True
+  CS = FakeCarState(out)
+  CS.acc_cam_valid = True
+  CS.acc_stock_values["AccBrkTot_A_Rq"] = -1.10
+
+  CC, CC_SP = _car_control(structs, enabled=True,
+                           send_button=structs.IntelligentCruiseButtonManagement.SendButtonState.increase,
+                           gap_target=0, long_active=True)
+
+  frame = 0
+
+  def run(n):
+    nonlocal frame
+    sent = 0
+    for _ in range(n):
+      _, can_sends = cc.update(CC, CC_SP, CS, frame * 10_000_000)
+      sent += sum(1 for addr, _d, _b in can_sends if addr == 0x083)
+      frame += 1
+    return sent
+
+  # 1. Ford is authoring. The set speed is the control input, so the buttons MUST go out.
+  while_ford = run(400)
+  assert cc.acc_authority == structs.ControllerStateBP.AccAuthority.ford, (
+    "the passthrough was not forwarding, so this half proves nothing")
+  assert while_ford > 0, "ICBM stopped pressing while Ford was authoring -- that breaks the feature"
+
+  # 2. The camera latches. Five seconds later the passthrough is inert and openpilot has the car.
+  CS.acc_stock_values["AccCancl_B_Rq"] = 1
+  # 250 cancel counts at one per ACC_CONTROL_STEP is 500 update() calls, not 250.
+  run(700)
+  assert cc.acc_authority == structs.ControllerStateBP.AccAuthority.inert, (
+    "the cancel never latched, so this half proves nothing")
+  while_inert = run(600)
+  assert while_inert == 0, (
+    "ICBM sent {} button frames while openpilot was authoring -- it is moving a set speed that "
+    "governs nothing, which is what he saw as the speed going up and down".format(while_inert))

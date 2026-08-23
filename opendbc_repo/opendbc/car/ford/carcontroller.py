@@ -148,6 +148,7 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
     # override has ever run.
     self.frames_since_override = 1 << 30
     self.override_last_frame = False
+    self.icbm_blind_said = False
     self.cancel_is_ours = False
     self.cancel_recovery_frames = 0
     self.cancel_recovery_said = False
@@ -252,10 +253,45 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
       can_sends.append(fordcan.create_button_msg(self.packer, self.CAN.camera, CS.buttons_stock_values, tja_toggle=True))
 
     # BluePilot: Intelligent Cruise Button Management (ICBM)
-    icbm_can_sends, self.last_button_frame = IntelligentCruiseButtonManagementInterface.update(
-      self, CC_SP, CS, self.packer, self.CAN, self.frame, self.last_button_frame
-    )
-    can_sends.extend(icbm_can_sends)
+    #
+    # FusionPilot 2026-08-23: NOT WHILE OPENPILOT IS AUTHORING THE ACC COMMAND. His question, and
+    # he had the right instinct -- "when OP long is driving, we shouldn't affect its speed with
+    # ICBM?" Measured on route 000003ae, over the 60 s the passthrough spent `inert`:
+    #
+    #     inert  6012 frames   378 ICBM button frames   84 mph of dash travel
+    #                          decrease=210, increase=168
+    #
+    # That is his "the speed went up and down". ICBM was hunting a set speed that governed NOTHING,
+    # because a latched camera means openpilot authors every ACCDATA frame, and the number the
+    # buttons move is not in that loop at all.
+    #
+    # `_op_long_drives()` cannot catch this: it decides whether ICBM runs ONCE, at car init, and
+    # under the passthrough it correctly answers "Ford drives, so ICBM stays". Authority is a
+    # per-frame fact and it changed hours into the drive.
+    #
+    # ONLY `inert` AND `openpilot`, deliberately. `fallback` is a scattered per-frame refusal that
+    # Ford resumes from on the next frame -- suppressing there would make the buttons stutter every
+    # time a band clipped. `inert` is five straight seconds of cancel, which means the passthrough
+    # is finished for this drive. `opStop` is NOT suppressed either: the override raising the set
+    # speed while stopped is deliberate, so Ford does not lurch back to 20 when it resumes.
+    #
+    # Suppressing TRANSMISSION rather than telling ICBM to stand down, because ICBM lives in
+    # selfdrived across a capnp boundary and the carcontroller is where authority is known. It
+    # keeps wanting; nothing actuates. It already tolerates a press that never moves the cluster
+    # -- that is what PRESS_SETTLE_MAX_FRAMES is for.
+    _blind = (self.acc_authority in (structs.ControllerStateBP.AccAuthority.inert,
+                                     structs.ControllerStateBP.AccAuthority.openpilot))
+    if _blind:
+      if not self.icbm_blind_said:
+        self.icbm_blind_said = True
+        cloudlog.warning("ICBM buttons suppressed: openpilot is authoring ACCDATA, so the set "
+                         "speed drives nothing")
+    else:
+      self.icbm_blind_said = False
+      icbm_can_sends, self.last_button_frame = IntelligentCruiseButtonManagementInterface.update(
+        self, CC_SP, CS, self.packer, self.CAN, self.frame, self.last_button_frame
+      )
+      can_sends.extend(icbm_can_sends)
 
     ### lateral control ###
     # BluePilot: keep stock lateral path in carcontroller, and run BP 4-signal lateral
