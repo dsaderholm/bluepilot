@@ -43,6 +43,11 @@ SET_W, SET_H = 172, 204    # UI_CONFIG.set_speed_width_imperial / set_speed_heig
 #   hold    the driver's own held speed, 0 for none
 #   offer   a pin being suggested here. Mutually exclusive with `hold` by construction.
 SCENES = [
+  # HIS PHOTO, 2026-08-22. Hold 35, posted 30, offset +5 -- so the fallback is also 35 and rank 2
+  # used to draw "35" over "35" in blue with no word on it. He could not tell whether the hold was
+  # still up, which is the one question this box exists to answer.
+  dict(cap="hold equals the SLA fallback -- says HOLD, not 35 over 35",
+       dash=35, limit=30, fallback=35, hold=35, acc="COAST", mag=0.0, lamps=False),
   dict(cap="settled, holding 70 in a 55 -- lamps dark",
        dash=70, limit=55, hold=70, acc="COAST", mag=0.0, lamps=False),
   dict(cap="curve: ACC braking hard enough to light the lamps",
@@ -200,7 +205,12 @@ def main(outdir):
     tsr = scene.get("tsr", "")
     # THE REAL RULE DECIDES WHAT THE BOX SAYS. Re-deriving the ranking here is how a preview starts
     # agreeing with itself instead of with the car.
-    box = max_box_state(hold, limit or None, dash, dash,
+    # THE SIGN AND THE FALLBACK ARE DIFFERENT NUMBERS and every scene here conflated them until
+    # 2026-08-22. The sign shows the POSTED limit; the fallback SLA would hand back is that plus his
+    # offset, which is +5. His screen had posted 30 and a fallback of 35, and passing 30 for both is
+    # why the preview could not reproduce what he was looking at.
+    fallback = scene.get("fallback", limit)
+    box = max_box_state(hold, fallback or None, dash, dash,
                         pin_suggestion=scene.get("offer", 0),
                         pinned=scene.get("pinned", False),
                         hold_locked=scene.get("locked", False))

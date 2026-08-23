@@ -230,7 +230,16 @@ def max_box_state(hold: float, sla_fallback: float | None, set_speed: float, das
   if aim > 0 and round(dash) != round(aim):
     return MaxBoxState(aim, str(round(dash)), True, hold_driving,
                        pinned=pin_dot, pin_offer=offer, hold_locked=locked)
-  if hold_driving and sla_fallback is not None and sla_fallback > 0:
+  # A FALLBACK EQUAL TO THE AIM IS NOT WORTH SAYING, and saying it is actively harmful. Reported
+  # from the car 2026-08-22 with a photo: hold 35, posted 30, offset +5 -- so the fallback WAS 35,
+  # and the box drew "35" over "35" in blue with no word anywhere on it. His question was the right
+  # one: *"I'm not sure if that means the hold is still there or not."*
+  #
+  # Rank 2 exists to answer "what would I get back if I cancelled". When the answer is the number
+  # already filling the box it answers nothing, and it costs the slot that rank 4 would have used to
+  # say HOLD -- which is the one thing he actually wanted to know. Fall through instead.
+  if (hold_driving and sla_fallback is not None and sla_fallback > 0
+      and round(sla_fallback) != round(aim)):
     return MaxBoxState(aim, str(round(sla_fallback)), True, True,
                        pinned=pin_dot, pin_offer=offer, hold_locked=locked)
   # RANK 3, added 2026-08-22 when the HOLD badge was deleted: the PIN BEING OFFERED.
