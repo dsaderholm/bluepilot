@@ -263,6 +263,63 @@ it.
 from before the overhaul, the mirror of the documented Maps-v25 trick. Nobody has checked it on Waze.
 Sideloading an older build of the app he navigates with is his call.
 
+**THE END-DRIVE BUTTON REFRAMES THE WHOLE DIAGNOSIS. 2026-08-22, from him plus the androidx source.**
+
+He can end the drive from the IPC with Google Maps, and is **pretty sure he cannot with Waze**
+(believed, NOT yet tested -- see the caveats below).
+
+**How the IPC ends a drive**, researched rather than assumed:
+
+    IPC button -> SYNC/APIM -> Android Auto host -> NavigationManagerCallback.onStopNavigation()
+
+Two constraints from `androidx/car/app/navigation/NavigationManager.java`, both quotable:
+
+    setNavigationManagerCallback()  REQUIRED before navigationStarted(), which otherwise throws
+                                    IllegalStateException("No callback has been set")
+    updateTrip()                    "should only be invoked once the navigation app has called
+                                    navigationStarted(), or else THE UPDATES WILL BE DROPPED BY
+                                    THE HOST"
+
+**THAT SECOND QUOTE IS THE FINDING, and it collapses two symptoms into one cause.** If Waze never
+calls `navigationStarted()`:
+
+    every updateTrip() it makes is silently discarded by the host   ->  cluster shows the COMPASS
+    the host has no session for Waze to stop                        ->  END-DRIVE DOES NOTHING
+
+One root cause, both symptoms. That is a far better explanation than the two independent ones this
+section previously carried.
+
+**AND IT DEMOTES THE STANDING HYPOTHESIS.** Above, the compass is called "the signature of
+`updateTrip` not being called, or called without Steps". A third possibility now looks more likely:
+**`updateTrip` may be called correctly, with full Steps, and thrown away because the session was
+never started.** That fits the notification evidence exactly -- Waze demonstrably computes maneuvers
+and distances, and the notification path does not go through Android Auto at all, so correct data
+and a discarded `updateTrip` are entirely consistent.
+
+**IT ALSO UNDERCUTS AN ASSUMPTION NOBODY HAD MARKED.** "The compass means a navigation session is
+ACTIVE but carries no Trip" was read as evidence that a session exists. Under the no-session
+hypothesis the compass is just what the cluster draws when Android Auto is connected and it has no
+turn to render -- which is equally consistent and assumes less. **The compass is probably not
+evidence of a session at all.**
+
+**TWO CAVEATS, both load-bearing:**
+
+- **He said "pretty sure", not "tested".** One deliberate press with Waze navigating settles it, and
+  it is the single highest-value measurement on this whole topic.
+- **That Ford's end-drive is implemented via `onStopNavigation()` is the obvious mechanism and is
+  NOT proven for Ford specifically.** It is the only path the Car App Library offers a host, which
+  is strong, but it is inference.
+
+**IT SHARPENS THE LOGCAT CAPTURE FROM FISHING TO A SPECIFIC STRING.** If Waze fails to register a
+callback, `navigationStarted()` throws `IllegalStateException: No callback has been set` -- a
+concrete thing to grep for. And the absence of any `navigationStarted` call at all is the other
+signature. That turns the phone-side capture from "diff two logs and hope" into a yes/no.
+
+**FOR THE SUPPORT THREAD:** this belongs in the photo follow-up he already owes them, not in a new
+email. "Ending the drive from my instrument cluster works with Google Maps and does nothing with
+Waze" is a second, independent symptom pointing at the navigation session rather than at the trip
+data -- and it is the kind of detail that tells an integration engineer which function to look at.
+
 ### 2b. If "which branch" is the only missing input, it need not come through the car at all
 
 Worth stating because it follows directly from the correction above: the blocker is transport, so a
