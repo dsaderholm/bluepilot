@@ -288,6 +288,48 @@ Another reason nothing may be sequenced behind this.
 "what changed" had two candidates. Maps rendering today rules SYNC out -- the cluster path
 demonstrably still works.
 
+**MEASURED ON THE ROAD 2026-08-23, AND IT REFUTES THE HYPOTHESIS BELOW. Read this first.**
+
+He drove it deliberately. Observed, not inferred:
+
+    WAZE          "Calculating Route" on the IPC for UNDER A SECOND, then compass + speedometer
+                  could NOT end the route from the IPC
+    GOOGLE MAPS   worked fully, and rendered a U-TURN glyph on the cluster
+
+**"CALCULATING ROUTE" KILLS THE "WAZE NEVER STARTS A SESSION" EXPLANATION.** The cluster only draws
+that when it has been told a route is being computed, so something DOES reach the host: almost
+certainly `navigationStarted()` IS called and a first `updateTrip()` DOES land. The section below
+was written before this drive and its conclusion is wrong; it is kept because the reasoning was
+sound on the evidence available and would be re-derived otherwise.
+
+**WHAT IT IS INSTEAD, and the API has a field with exactly this shape.** `Trip` carries
+**`isLoading`**, and the builder refuses Steps while it is set -- *"Step information may not be set
+while loading."* So "Calculating Route" is that flag, and the failure is precisely the transition
+out of it: **Waze publishes the loading Trip and never publishes the populated one that replaces
+it.**
+
+**AND THE DEAD END-DRIVE BUTTON PICKS BETWEEN TWO VERSIONS OF THAT:**
+
+    H1  Waze ENDS the navigation session right after the loading state.
+        -> compass returns because the session is gone
+        -> nothing left for the IPC to cancel        ONE fault, explains both symptoms
+    H2  the session persists, Waze never sends a populated Trip, AND its onStopNavigation
+        is broken                                    TWO independent faults
+
+**H1 is the better explanation of the same evidence** and should be the one stated to Waze. H2 is
+not ruled out.
+
+**A THIRD CANDIDATE WORTH NAMING, because it is concrete and logcat would show it:** `Trip.Builder`
+enforces strict parity -- steps and stepTravelEstimates must match in count and order, and it throws
+otherwise. A mismatch would make `build()` throw while assembling the real Trip, leaving the loading
+state as the last thing successfully published. Speculative, but it is a specific exception to grep
+for alongside `IllegalStateException: No callback has been set`.
+
+**AND THE MAPS CONTROL GAVE US SOMETHING FOR THE CAN SIDE.** The cluster rendered a U-TURN, which is
+not a trivial glyph -- so the maneuver vocabulary crossing that bus is real and has range. Combined
+with "Calculating Route", the cluster's known nav states are now at least: calculating, a maneuver
+glyph with distance, and a compass fallback. That is the start of the protocol catalogue.
+
 **THE END-DRIVE BUTTON REFRAMES THE WHOLE DIAGNOSIS. 2026-08-22, from him plus the androidx source.**
 
 He can end the drive from the IPC with Google Maps, and is **pretty sure he cannot with Waze**
