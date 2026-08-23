@@ -1023,6 +1023,45 @@ gate collapses all 47 types into one bit -- does this commit the car to leaving 
 distance. A crude arrow and a distance satisfy it completely. **Route intent is the consumer least
 harmed by Ford being lossy**, which is a good reason for it to be the first consumer built.
 
+**THE LINK IS BIDIRECTIONAL. From him, 2026-08-22: he can END THE DRIVE from the IPC, and it works
+with Google Maps.**
+
+Worth more than it sounds, in three ways.
+
+**It is a COMMAND going the other way.** Not APIM -> IPC pushing a display, but IPC -> APIM sending
+something the phone acts on. A cluster that can cancel a route is in a real session with the APIM.
+
+**Which raises confidence that the bus carries STRUCTURED data rather than pixels.** If Ford were
+shipping a pre-rendered image to the cluster there would be no reason for a cancel command to exist
+in that protocol. Inference, not measurement -- but it is the right direction, and it is the first
+evidence either way.
+
+**And it hands the CAN hunt a MARKER HE CAN TRIGGER.** This is the practical part. A distance
+counting down is a slow, subtle thing to find in a byte diff. Navigation going active -> inactive at
+a moment he noted is sharp, repeatable, and on demand. **One drive with navigation started and ended
+three or four times at known clock times beats two whole drives compared against each other**, and
+it produces both halves at once: the nav-state bit, and whatever the IPC transmits to request the
+cancel.
+
+**Possibly without driving at all.** If the APIM publishes nav state while stationary, the whole
+channel could be found in the driveway. Unknown -- nav data may be gated on motion -- but it costs
+one attempt to find out and it is the cheapest version of this experiment.
+
+**AND IT IS A FREE DISCRIMINATOR FOR THE WAZE BUG.** Can he end the drive from the IPC while WAZE is
+navigating?
+
+    yes  ->  the AA navigation session IS established and the IPC/APIM link is live, so the failure
+             is narrowly in Trip/Step CONTENT -- exactly the updateTrip hypothesis
+    no   ->  the session itself is not registering, which is a DIFFERENT bug and a different report
+
+Either answer is worth having and it costs one press.
+
+**AND HE WAS SURPRISED THE CLUSTER COULD DO IT AT ALL, which is itself worth noting.** An
+undiscovered capability means the IPC's navigation integration is deeper than its UI advertises --
+so **the cluster's own nav menu is a CATALOGUE of the protocol**. Every nav thing it can display or
+command is, by construction, something crossing the bus. Walking that menu once and writing down
+what is in it is free, needs no hardware, and bounds the search before any decoding starts.
+
 **AND THE FLOOR IS FREE TO MEASURE:** whatever the IPC DRAWS had to cross the bus. One glance at
 the cluster with Maps navigating -- does it show an arrow only, or arrow plus distance, or arrow
 plus distance plus street name -- bounds what a canbox could expose, before any canbox exists.

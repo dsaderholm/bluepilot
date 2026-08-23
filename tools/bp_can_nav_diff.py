@@ -45,6 +45,26 @@ returned the identical 383 (address, bus) pairs -- so a cap hides no ADDRESS -- 
 bytes went from [2,3,6,7] to [1,2,3,5,6,7]. Byte variance is the thing this tool actually keys on,
 and it is precisely what a cap understates.
 
+A BETTER EXPERIMENT THAN TWO DRIVES, and it came from him on 2026-08-22: HE CAN END THE DRIVE FROM
+THE IPC, and it works with Google Maps.
+
+That means navigation state is something he can TOGGLE ON DEMAND, which is a far sharper signal than
+a between-drives comparison. A distance counting down is slow and subtle in a byte diff; nav going
+active -> inactive at a clock time he wrote down is not.
+
+    ONE drive. Navigate with Google Maps. End the drive from the IPC, restart it, three or four
+    times, noting the clock time of each transition. Then look for bytes that toggle in step.
+
+It also yields a second thing the two-drive diff cannot: whatever the IPC TRANSMITS to request the
+cancel, which is the reverse direction of the same protocol.
+
+MAYBE WITHOUT DRIVING AT ALL. If the APIM publishes nav state while stationary, this works in the
+driveway. Unknown -- nav data may be gated on motion -- but it is one attempt and it is the cheapest
+version of the whole experiment.
+
+The two-drive method below still works and its control side is already recorded, so it remains the
+fallback if toggling turns out to change nothing while parked.
+
 HOW TO PRODUCE THE TWO DRIVES. Google Maps, not Waze: he confirmed Maps still renders turns on his
 IPC while Waze does not, so Maps is the source that is definitely publishing today. Navigate
 somewhere real for a few minutes, then a second drive over similar roads with no route active.
