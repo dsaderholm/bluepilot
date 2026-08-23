@@ -4415,6 +4415,49 @@ computed from the edge POSITION, which `bp_left_edge_truth.py` measured as stead
 **What would settle 2:** the located construction-zone event. It has been asked for twice and is
 still the highest-value thing he could supply for passing assist.
 
+### AND IT WAS SETTLED, FOR MOTORWAY, WITHOUT THE EVENT. 2026-08-22.
+
+`tools/bp_left_taper.py`, 8 drives, 86,000 moving frames. The blocker above assumed a high edge std
+was refusing in coned zones, so dropping it would remove a work-zone defense. **On motorway that
+defense never existed.**
+
+Taper is the gap between ego's own left lane line and the left road edge, near minus far -- the
+mirror of `_road_widening`, which already does this on the RIGHT to spot an off-ramp. Three
+populations, the middle one being exactly what dropping the std cutoff would newly open:
+
+    class          OPEN TODAY p99 / max      WOULD ADMIT p99 / max
+    motorway          0.51 / 1.44               0.71 / 1.38        <- INDISTINGUISHABLE
+    primary           0.62 / 0.88               4.58 / 9.44        <- long tail the open set lacks
+    secondary         0.67 / 0.83          p90 5.99 / 10.40        <- 23% of it past 1.0 m
+    tertiary          0.28 / 0.43               3.25 / 3.48
+
+**On motorway the frames the std cutoff refuses look exactly like the frames it lets through**, so
+there it was refusing on DISTANCE and nothing else -- which is what the separation test said and
+this confirms from an independent direction. Below motorway it was catching narrowing road, for the
+wrong reason, and that IS worth keeping deliberately.
+
+**`MAX_LEFT_NARROWING_M = 1.5` is where nothing currently open is refused.** The largest narrowing
+on any frame the gate opens today, across all 86,000, is 1.44 m. So the refusal costs nothing that
+works -- the cheap direction, which is the direction a refusal is allowed to be cheap in.
+
+**IT GATES NOTHING YET, AND THAT IS THE POINT.** It is published (`leftNarrowingM`), summarised
+(`leftNarrowingShare`, `leftNarrowingMax`) and printed by `bp_passing_report`, with a test pinning
+that `left_geometry_ok` is unchanged. This fork's own rule, from the SCC-Map source swap: *changing
+the source and the judgement in one step would produce a drive that cannot say which half moved.*
+So the std removal is now a separately-attributable one-liner, once narrowing has been watched.
+
+**TWO DIFFERENCES FROM THE RIGHT-SIDE SIBLING, both deliberate and both tested.** The SIGN is
+inverted -- `_road_widening` throws narrowing away with `max(0.0, far - near)` and is right to, since
+on the right a narrowing road is a lane ending the availability test already handles. And it does
+NOT inherit the `roadEdgeStds` guard, because a work zone is exactly where that std explodes and the
+guard would blind the measurement to its own subject.
+
+**WHAT IS STILL NOT ANSWERED, stated so a null does not get read as a finding:** on motorway the
+taper never exceeds 1.44 m in this data, so the new term would fire nowhere there. That is either
+"these 8 drives contained no motorway work zone" or "cones do not move the modelled edge on a
+freeway", and **the data cannot tell those apart.** The located event is still what separates them,
+and it is now scoreable against fixed numbers rather than needing the analysis rebuilt.
+
 2026-08-22, `tools/bp_route_intent_score.py`, four drives, 63,000 mapdOut frames. This is
 `bluepilot/ROUTE-INTENT.md` step 2, which said to score the guess already running before building
 anything, and it closes the cheap option.
