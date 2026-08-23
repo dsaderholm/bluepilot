@@ -295,6 +295,23 @@ He drove it deliberately. Observed, not inferred:
     WAZE          "Calculating Route" on the IPC for UNDER A SECOND, then compass + speedometer
                   could NOT end the route from the IPC
     GOOGLE MAPS   worked fully, and rendered a U-TURN glyph on the cluster
+    OSMAND+       worked fully as well
+
+**OSMAND+ IS THE STRONGEST CONTROL OF THE THREE, and it is worth more than the Maps one.** Google
+Maps working can be argued away -- Google's own app, plausibly special-cased by Ford or taking a
+privileged path. **OsmAnd+ is a small open-source third party using the plain public Car App
+Library**, with no relationship to Ford and no leverage with Google. It populates his cluster
+correctly.
+
+So the AA cluster path on this car works for an ORDINARY THIRD-PARTY APP. That kills three
+explanations at once: "Ford only really supports Maps", "the cluster path is privileged", and
+"SYNC 3.4's cluster support is Maps-specific". Three apps, two work -- including the least
+resourced one -- and the one that fails is the app Google owns.
+
+**A FREE OBSERVATION THAT WOULD LOCALISE IT FURTHER, for the next drive:** do Maps and OsmAnd+ also
+flash "Calculating Route" before the turn arrow? If they do, the cluster state machine is
+calculating -> populated and Waze stalls at step one. If they jump straight to a maneuver, then Waze
+ENTERING that state at all may itself be the anomaly.
 
 **"CALCULATING ROUTE" KILLS THE "WAZE NEVER STARTS A SESSION" EXPLANATION.** The cluster only draws
 that when it has been told a route is being computed, so something DOES reach the host: almost
