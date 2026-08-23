@@ -28,6 +28,7 @@ from openpilot.common.realtime import DT_MDL
 from openpilot.sunnypilot.selfdrive.controls.lib.passing_maneuver import CHANGE_DURATION_S
 from openpilot.sunnypilot.selfdrive.controls.lib.passing_assist import (
   PassingAssistDetector, MIN_LANE_WIDTH_M, DEFAULT_MIN_SPEED_MPH, MAX_WIDENING_M, MAX_LEFT_NARROWING_M,
+  MAX_PLAUSIBLE_NARROWING_M,
   SUGGESTION_HOLD_S, HOLD_THROUGH,
   DEFAULT_PERSISTENCE_S, DRIVE_HISTORY_MAX, CHIME_MIN_INTERVAL_S,
   TIMELINE_MAX, GAP_WHILE_PASSING, GAP_GIVE_UP_S, WANTED_RISE_S, WANTED_FALL_S,
@@ -4466,6 +4467,34 @@ class TestLeftNarrowing:
               **{k: v for k, v in IN_LEFT_LANE.items() if k != 'edge_stds'})
     assert det.left_narrowing_m > MAX_LEFT_NARROWING_M
     assert det.left_narrowing
+
+
+  def test_a_narrowing_wider_than_a_road_is_the_edge_BREAKING(self):
+    """The defect his first non-freeway drive found, hours after this shipped.
+
+    The drive summary reported a 99.95 m narrowing -- a hundred metres of closing-in over a 75 m
+    lookahead, which is not a road. `bp_left_taper.py` on the SAME route said 25.94 m worst and
+    0.0% past the threshold, and two witnesses disagreeing by a factor of ten is what surfaced it.
+
+    An implausible frame reports FALSE, not TRUE: the term will one day refuse, and a broken
+    measurement is not evidence of a hazard any more than it is of safety.
+    """
+    det = run(PassingAssistDetector(), 1, left_edge_narrow=40.0, **IN_LEFT_LANE)
+    assert det.left_narrowing_m > MAX_PLAUSIBLE_NARROWING_M
+    assert not det.left_narrowing
+
+  def test_the_stats_ignore_frames_too_slow_to_mean_anything(self):
+    """The other half of the same defect, and it is the denominator rule again.
+
+    The counters ran on EVERY frame while the tool that validated the threshold had a 10 m/s floor
+    from the day it was written. A stopped car's modelled road edge is not a road edge, and on a
+    non-freeway drive with stops those frames are a large share of the total.
+    """
+    slow = run(PassingAssistDetector(), 5, v_lead=2.0, v_ego=2.0, left_edge_narrow=2.0,
+               **IN_LEFT_LANE)
+    assert slow._narrow_frames == 0, "stopped frames were counted"
+    fast = run(PassingAssistDetector(), 5, left_edge_narrow=2.0, **IN_LEFT_LANE)
+    assert fast._narrow_frames > 0, "moving frames were not counted"
 
   def test_it_does_not_gate_the_left_side_yet(self):
     """Published and watched, not acted on. Delete this test when that changes, deliberately."""

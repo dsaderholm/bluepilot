@@ -135,6 +135,24 @@ MAX_WIDENING_M = 2.5
 # the judgement in one step produces a drive that cannot say which half moved.
 MAX_LEFT_NARROWING_M = 1.5
 
+# BELOW THIS THE MEASUREMENT IS MEANINGLESS, and leaving it out is what made the first drive that
+# recorded this report a 99.95 m narrowing -- a hundred metres of closing-in over a 75 m lookahead,
+# which is not a road, it is a stopped car's modelled edge. `bp_left_taper.py` carried this floor
+# from the day it was written and the detector did not, so the tool and the car disagreed about the
+# same route by a factor of ten. Same value as the tool, named once so the two cannot drift.
+NARROWING_MIN_SPEED_MS = 10.0
+
+# A NARROWING WIDER THAN A ROAD IS THE EDGE ESTIMATE BREAKING, not the road closing in. Real tapers
+# measured over nine drives top out near 10 m even on the worst secondary road; 25 m and 100 m are
+# a different phenomenon and must not be counted as a taper.
+#
+# An implausible frame reports narrowing FALSE -- "I did not see a taper" -- rather than TRUE. That
+# is honest rather than lax: the term will one day REFUSE, and a broken measurement is not evidence
+# of a hazard any more than it is evidence of safety. It cannot open anything on its own either,
+# since the other three terms still have to pass. The frames are counted and reported instead of
+# being silently dropped, so "the edge broke a lot today" stays visible.
+MAX_PLAUSIBLE_NARROWING_M = 10.0
+
 # --- geometry gates ---
 # Confidence that a painted line exists BEYOND ego's own lane line. Matches the 0.5 that ldw.py
 # uses for "lane visible"; raised slightly because acting on it is a stronger claim than warning.
@@ -932,6 +950,7 @@ class PassingAssistDetector:
     self._narrow_frames = 0
     self._narrow_hits = 0
     self._narrow_max = 0.0
+    self._narrow_broken = 0
     self.right_lane_age_s = 0.0
 
     self.left_blindspot = False
@@ -1272,7 +1291,8 @@ class PassingAssistDetector:
     # Only SHRINKAGE counts. A road opening out to the left is a wider carriageway or a median
     # ending, neither of which is a reason to refuse, and folding it in would let the two cancel.
     self.left_narrowing_m = max(0.0, near - far)
-    self.left_narrowing = self.left_narrowing_m > MAX_LEFT_NARROWING_M
+    self.left_narrowing = (MAX_LEFT_NARROWING_M < self.left_narrowing_m
+                           <= MAX_PLAUSIBLE_NARROWING_M)
 
   def _geometry(self, model) -> None:
     """Evaluate whether a lane exists either side, recording both evidence channels separately.
@@ -1307,9 +1327,14 @@ class PassingAssistDetector:
     self._road_widening(model, right_std)
     # NOT passed a std, unlike its sibling -- see the method docstring.
     self._left_narrowing(model)
-    self._narrow_frames += 1
-    self._narrow_hits += self.left_narrowing
-    self._narrow_max = max(self._narrow_max, self.left_narrowing_m)
+    # MOVING FRAMES ONLY, on the same floor the tool uses. See NARROWING_MIN_SPEED_MS.
+    if self.last_v_ego >= NARROWING_MIN_SPEED_MS:
+      self._narrow_frames += 1
+      self._narrow_hits += self.left_narrowing
+      if self.left_narrowing_m > MAX_PLAUSIBLE_NARROWING_M:
+        self._narrow_broken += 1
+      else:
+        self._narrow_max = max(self._narrow_max, self.left_narrowing_m)
 
     # Both channels must agree before a side is called available. Requiring agreement is the
     # conservative reading and keeps phase 2 honest if this ever stops being log-only.
@@ -2023,6 +2048,11 @@ class PassingAssistDetector:
         "leftNarrowingShare": (round(self._narrow_hits / self._narrow_frames, 4)
                                if self._narrow_frames else 0.0),
         "leftNarrowingMax": round(self._narrow_max, 2),
+        # How often the edge estimate produced something that is not a road. Reported rather than
+        # dropped: a high share here means the taper measurement had little to work with, which is
+        # a different statement from "no taper was seen" and must not read as one.
+        "leftNarrowingBroken": (round(self._narrow_broken / self._narrow_frames, 4)
+                                if self._narrow_frames else 0.0),
         "geoRefusedBy": int(self.geo_refusal[0]),
         "geoRefusedValue": round(self.geo_refusal[1], 3),
         "geoRefusedShare": round(self.geo_refusal[2], 3),

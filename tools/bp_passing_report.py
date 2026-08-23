@@ -140,8 +140,10 @@ def history() -> int:
     # construction-zone event is still unlocated and this is the instrument for it.
     ns = d.get("leftNarrowingShare")
     if ns is not None:
-      print(f"    left road edge closing in: {ns * 100:.2f}% of frames past "
-            f"1.5 m   worst {d.get('leftNarrowingMax', 0.0):.2f} m")
+      broken = d.get("leftNarrowingBroken", 0.0)
+      print(f"    left road edge closing in: {ns * 100:.2f}% of moving frames past "
+            f"1.5 m   worst {d.get('leftNarrowingMax', 0.0):.2f} m"
+            + (f"   [edge estimate broke on {broken * 100:.1f}%]" if broken else ""))
 
     # IS THERE A LANE THERE AT ALL -- the one question no camera term can answer, because "no lane
     # line" and "a line the camera missed" refuse identically. The radar is the independent witness:
