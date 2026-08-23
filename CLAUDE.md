@@ -3985,6 +3985,31 @@ came to list two parts for a board that is one.
 
    His words: *"I wish you had written all that down."*
 
+7. **A FACT ABOUT HIM OR HIS HARDWARE GOES IN MEMORY, NOT IN A FEATURE DOCUMENT.** Rule 2 says put
+   it where it will be USED, and that is not enough on its own -- it silently assumes the next
+   reader is already working on the same feature. **It failed on exactly that, 2026-08-22, one day
+   after rule 6 was added to the same section.**
+
+   He had told earlier sessions that Waze broke on his cluster at Waze's own Android Auto UI
+   overhaul YEARS ago, and that it failed on his previous phone too. Both facts rule out entire
+   explanations. Neither was anywhere in the tree -- grepped, and the only occurrences were the
+   lines written that afternoon. So he was asked for them again, through a questions dialog, and
+   said flatly: *"I've told you all of this before in other sessions."*
+
+   Writing it into `ROUTE-INTENT.md` fixes nothing by itself, because that file is opened only by a
+   session already working on route intent. **A session helping with the Waze bug from a cold start
+   would never see it.** The same holds for his car's configuration, his phone, his accounts, an
+   open support thread, or anything he has already tried and ruled out.
+
+   The test: **would a session that has not read this feature's document need this fact?** If yes it
+   is memory, and the feature document gets the detail plus a pointer. Code facts stay in the tree;
+   facts about HIM travel with him.
+
+   And it is the same defect twice in one topic: rule 6 was written because the Waze BETA reasoning
+   survived only as a bare URL. Recording the conclusion was not sufficient -- it also has to be
+   recorded somewhere findable without already knowing to look.
+
+
 ## `oncomingAdjacent` FIRES ON ONE-WAY ROADS, AND ONLY BELOW 43 MPH. 2026-08-21.
 
 **THE 28.9% BELOW IS WITHDRAWN AS A RATE, BY THE SAME MISTAKE THIS FILE RECORDS FOUR TIMES.**
