@@ -157,6 +157,10 @@ class Checkup:
     self._prev_raw = 0.0
     self._last_btn = ("none", -99.0)
     self._enabled = False
+    # `_enabled` is meaningless until a carState has actually been read, and messages are NOT
+    # ordered by type -- a hold event in the opening frames would otherwise be attributed to
+    # cruise-off regardless of the truth, in the very check built to tell those apart.
+    self._cs_seen = False
 
     # 9. SCC
     self.scc_map_active = 0
@@ -271,6 +275,20 @@ class Checkup:
   def acc_faulted(self) -> None:
     self.acc_faults += 1
 
+  def segment_gap(self) -> None:
+    """A segment could not be read, so the baseline either side of it is not continuous.
+
+    Without this the reader carries `_prev_baseline` across the hole: a hold that ENDED inside the
+    missing segment is never recorded as a death, and one that STARTED there is reported as a birth
+    at the next segment's first frame, with whatever button happened to be last seen attached to it.
+    Checks 12 and 13 are the ones verifying today's fixes, so a fabricated birth reads as a phantom
+    hold that never happened."""
+    self._prev_baseline = 0.0
+    self._prev_raw = 0.0
+    self._last_btn = ("none", -99.0)
+    self.resume_t = None
+    self._cs_seen = False
+
   def buttons(self, cs, t: float) -> None:
     """Remember the last press, and specifically the last RESUME. Both feed check 10."""
     try:
@@ -279,6 +297,7 @@ class Checkup:
       # was not -- he had switched cruise off. Without this the check reports a false success on
       # the very drive that proved the bug.
       self._enabled = bool(cs.cruiseState.enabled)
+      self._cs_seen = True
     except Exception:
       pass
     try:
@@ -302,6 +321,8 @@ class Checkup:
     that number and then vanishing is the clear working; vanishing from somewhere else is cruise
     being switched off, which is what the old measurement mistook for a late clear.
     """
+    if not self._cs_seen:
+      return          # cannot say whether cruise was engaged, so do not pretend
     try:
       base = float(icbm.vBaseline)
       raw = float(getattr(icbm, "vTargetRaw", 0.0))
@@ -570,10 +591,12 @@ def main() -> int:
       if not os.path.exists(p):
         p += ".zst"
       if not os.path.exists(p):
+        c.segment_gap()
         continue
       try:
         lr = LogReader(p)
       except Exception:
+        c.segment_gap()
         continue
 
       for m in lr:
