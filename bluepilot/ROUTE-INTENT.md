@@ -293,7 +293,9 @@ demonstrably still works.
 He drove it deliberately. Observed, not inferred:
 
     WAZE          "Calculating Route" on the IPC for UNDER A SECOND, then compass + speedometer
-                  could NOT end the route from the IPC
+                  the CANCEL-ROUTE OPTION IS NOT REACHABLE AT ALL -- he cannot even open the IPC
+                  submenu it lives in. Corrected 2026-08-23; an earlier draft said "the button
+                  does nothing", which is a weaker and different claim.
     GOOGLE MAPS   worked fully, and rendered a U-TURN glyph on the cluster
     OSMAND+       worked fully as well
 
@@ -324,6 +326,18 @@ sound on the evidence available and would be re-derived otherwise.
 while loading."* So "Calculating Route" is that flag, and the failure is precisely the transition
 out of it: **Waze publishes the loading Trip and never publishes the populated one that replaces
 it.**
+
+**THE MISSING SUBMENU IS BETTER EVIDENCE THAN A DEAD BUTTON, and the distinction decides between
+the two hypotheses below.** A button that does nothing is a cluster that HAS a route and will not
+cancel it. A submenu that cannot be opened is a cluster that **does not believe a route exists** --
+so the nav state it is tracking went active for under a second and then back to inactive.
+
+That is a state TRANSITION, not a stuck command, and it is what H1 predicts.
+
+**AND IT IS THE TOGGLE MARKER THE CAN HUNT WANTED, for free.** Whatever byte carries "a route is
+active" went 0 -> 1 -> 0 within a second of him starting Waze navigation. Starting a Waze route is
+therefore a cheap, repeatable, precisely-timed edge to look for -- and unlike the Maps case it does
+not even require driving anywhere.
 
 **AND THE DEAD END-DRIVE BUTTON PICKS BETWEEN TWO VERSIONS OF THAT:**
 
