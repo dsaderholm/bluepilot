@@ -656,6 +656,50 @@ class TestReturningToTheLimitHandsItBack:
       f"(baseline={icbm.v_baseline}, diverged={icbm.baseline_diverged}) -- he reported this twice")
     assert icbm.override_state == OverrideState.auto
 
+  def test_a_hold_walked_back_with_no_release_event_still_clears(self):
+    """THE THIRD TIME HE REPORTED IT, 2026-08-23, with a photo: HOLD 27, SPEED LIMIT 25, offset 2.
+
+    The test above walks the hold back with the button held on every frame -- and then sends a
+    RELEASE. That release is what makes it pass, and this car does not reliably send one.
+    Route 000003ae, t+140..260:
+
+        88 button events with pressed=True, ONE with pressed=False
+
+    `update_manual_button_timers` only zeroes a timer on a release, so after the last press at
+    t+154.48 the accelCruise timer stayed non-zero with no event of any kind until t+269. ICBM
+    re-arms its press-settle stand-down every frame any manual-override timer is non-zero, so
+    `update_manual_override` returned before its clearing rule on every one of those frames.
+
+    Measured consequence, from `tools/bp_hold_clear_audit.py` on that route -- every one of the
+    rule own four conditions passing while it sat for 87 seconds:
+
+        t+158.4  hold 27  sla 27  live True  cruise True  source press   SHOULD HAVE CLEARED
+        t+245.6  hold  0                                                 CLEARED
+
+    So this is the same walk-back with the release simply left out, which is what his stalk does.
+    """
+    icbm = fresh()
+
+    cluster = LIMIT
+    icbm.run(make_cs(cluster, buttons=(ACCEL_PRESS,), enabled=False), CC, make_lp(LIMIT), False)
+    while cluster < DRIVER:
+      cluster += 1
+      icbm.run(make_cs(cluster, buttons=(ACCEL_PRESS,), enabled=False), CC, make_lp(LIMIT), False)
+
+    # Walk back down engaged, button held every frame, and NO RELEASE AT THE END -- the whole point.
+    while cluster > LIMIT:
+      icbm.run(make_cs(cluster, buttons=(DECEL_PRESS,)), CC, make_lp(LIMIT), False)
+      cluster -= 1
+
+    # Then ordinary driving at SLA number, with no button events at all. On the car this stretch
+    # lasted 87 seconds and the hold never cleared.
+    settle(icbm, LIMIT, cluster=LIMIT, frames=1400)
+
+    assert icbm.v_baseline == 0, (
+      "the hold survived a walk back to SLA own number when no release event followed the press "
+      "(baseline={}, diverged={}) -- he has now reported this three times".format(
+        icbm.v_baseline, icbm.baseline_diverged))
+    assert icbm.override_state == OverrideState.auto
   def test_it_clears_even_while_a_curve_owns_the_plan(self):
     """THE ONE THAT WAS STILL BROKEN AFTER TWO FIXES, and he photographed it.
 

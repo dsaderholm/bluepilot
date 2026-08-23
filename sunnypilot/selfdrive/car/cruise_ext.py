@@ -9,6 +9,7 @@ import numpy as np
 from cereal import car, custom
 from opendbc.car import structs
 from openpilot.common.constants import CV
+from openpilot.common.realtime import DT_CTRL
 from openpilot.common.params import Params
 from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management.helpers import get_minimum_set_speed
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.speed_limit_assist import ACTIVE_STATES as SLA_ACTIVE_STATES
@@ -21,6 +22,30 @@ CRUISE_BUTTON_TIMER = {ButtonType.decelCruise: 0, ButtonType.accelCruise: 0,
                        ButtonType.setCruise: 0, ButtonType.resumeCruise: 0,
                        ButtonType.cancel: 0, ButtonType.mainCruise: 0}
 
+# FusionPilot: A BUTTON TIMER THAT NEVER RETURNS TO ZERO FROZE A HOLD FOR 87 SECONDS. 2026-08-23.
+#
+# The loop below only zeroes a timer on a RELEASE event. On this car the SCCM clears the button bit
+# between frames, so one physical press arrives as a burst of PRESS events at the frame rate -- and
+# the release is not reliably among them. Route 000003ae, t+140..260:
+#
+#     88 events with pressed=True, ONE with pressed=False
+#
+# The last press was at t+154.48 and no event of any kind followed until t+269. So the timer sat
+# above zero for the whole intervening 115 s, and ICBM's press-settle stand-down re-arms itself
+# every frame any manual-override timer is non-zero -- which made `update_manual_override` return
+# before its hold-clearing rule on every one of those frames. His report: the hold sat on SLA's own
+# number from t+158.4 to t+245.6 and would not clear, for the third time.
+#
+# THE TIMER IS ALREADY "FRAMES SINCE THE LAST PRESS EVENT", because every press event resets it to
+# 1 below. So a cap is all that is needed and it cannot cut a real press short: while a button is
+# genuinely held the bursts keep arriving and keep resetting it. The longest gap WITHIN a held
+# press on that route was 0.72 s, so 2 s is about three times the observed worst case.
+#
+# This is deliberately not a fix to the press-settle re-arm. That re-arm is correct and was itself
+# added to fix a real report -- a cap expiring mid-hold froze the baseline and walked the set speed
+# back down while the button was still pressed. The defect is the input it trusts, not the rule.
+BUTTON_STALE_S = 2.0
+
 V_CRUISE_MIN = 8
 V_CRUISE_MAX = 145
 V_CRUISE_UNSET = 255
@@ -28,9 +53,13 @@ V_CRUISE_UNSET = 255
 
 def update_manual_button_timers(CS: car.CarState, button_timers: dict[car.CarState.ButtonEvent.Type, int]) -> None:
   # increment timer for buttons still pressed
+  stale = int(BUTTON_STALE_S / DT_CTRL)
   for k in button_timers:
     if button_timers[k] > 0:
       button_timers[k] += 1
+      # FusionPilot: and give up on a press whose release never arrived. See BUTTON_STALE_S.
+      if button_timers[k] > stale:
+        button_timers[k] = 0
 
   for b in CS.buttonEvents:
     if b.type.raw in button_timers:
