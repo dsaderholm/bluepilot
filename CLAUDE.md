@@ -3302,27 +3302,46 @@ Route `ad` is 2026-08-23 -- days after the "one verified read ever" line above w
 was never re-checked. **The camera reads more than this file says.** Both figures came from the
 first two routes looked at, so the real rate is unmeasured, not one-in-fifty.
 
-**THE OPEN QUESTION MOVED, and it is a different question than the one being chased.** Both reads
-are the SAME VALUE and both are held for hundreds to thousands of frames with no second edge and no
-return to the sentinel. Two readings fit and they need opposite fixes:
+**THE FULL BASELINE, `tools/bp_tsr_baseline.py`, 7 routes / 90 segments / 512,376 frames.** This is
+the BEFORE for the as-built change -- run the same command after it and compare:
 
-  - the camera read a 30 sign and correctly held it for a genuinely 30 mph road, or
-  - it read once and LATCHED, and `Traffic_RecognitnData` stopped updating -- in which case the
-    parser is serving a stale value that reads exactly like a confident one.
-
-The second is the same shape as the v1 mapd `/dev/shm` staleness recorded further up, and as the 80
-mph "sign" that turned out not to be a sign. **Do not judge an as-built change until this is
-settled**, because "it reads a sign" and "it holds one number all drive" score identically on the
-event count and mean opposite things.
-
-`tools/bp_tsr_baseline.py` counts edges, values AND **returns to the sentinel** across N routes,
-which is the discriminator: a camera that reads and re-reads goes back to 255 between signs, and a
-latched one never does. It has not run yet -- the laptop lost hostname resolution mid-session.
-**Run it BEFORE the as-built change, so there is a before to compare against:**
+    000003ad  10 seg   56,375   1 read   1 return   [30 x5171]
+    000003ac  11 seg   60,465   1 read   1 return   [30 x12424]
+    000003ab  19 seg  109,633   0        0          [none]
+    000003aa  16 seg   95,019   0        0          [none]
+    000003a9   5 seg   25,910   0        0          [none]
+    000003a8  16 seg   90,928   0        0          [none]
+    000003a7  13 seg   73,846   1 read   1 return   [30 x544]
 
 ```bash
 ssh comma@comma-34b959b "bash -lc 'cd /data/openpilot && /usr/local/venv/bin/python tools/bp_tsr_baseline.py 8'"
 ```
+
+**IT IS NOT LATCHED, AND THAT WAS THE OPEN QUESTION.** Every read returns to the sentinel -- reads
+1, returns 1, on all three. `Traffic_RecognitnData` keeps updating and the parser is not serving a
+stale value, so this is NOT the shape of the v1 mapd `/dev/shm` staleness or of the 80 mph "sign".
+The camera reads a sign, holds it, and correctly gives it up. **The mechanism is healthy; the recall
+is terrible.**
+
+**AND THE REAL SIGNAL IS THAT IT ONLY EVER READS 30.** Three reads, three 30s, across drives
+covering interstate, arterial and city -- never a 25, 35, 45, 65 or 70. That is a much narrower
+failure than "bad at reading signs", and it is the thing an as-built change has to move. Two
+readings worth separating, and neither has been tested:
+
+  - the camera's recognizer is configured for a sign SET that mostly is not what Utah posts, and 30
+    happens to fall inside it, or
+  - one particular 30 sign on a road he drives often is simply the only one it ever gets a square,
+    close, well-lit look at.
+
+The second is testable from the data already on the device -- the three reads have positions
+available from `0x462`, and if they are the same intersection it is that sign, not the sign set.
+**Do that before concluding anything about the config**, because the two mean opposite things about
+whether nibble 8 is worth changing.
+
+**Hold duration varies wildly and is unexplained: 544, 5,171 and 12,424 frames.** A long hold is
+only correct while the limit still applies, so the 12,424-frame one is worth a look -- it is minutes
+of a 30 being served. It reaches nothing today (`SpeedLimitPolicy` is `map_data_only`, which
+excludes the car source entirely) but it would the moment that policy changed.
 
 Re-measured on routes 0000039f and 000003a1, decoding `Traffic_RecognitnData` (0x3CD) off bus 2:
 
