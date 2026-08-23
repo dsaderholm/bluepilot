@@ -30,6 +30,12 @@ def scan(route, segs):
   frames = 0
   reading = False
   seen_read = False
+  # WHERE each read happened. Three reads on record are all the value 30, and that has two very
+  # different explanations -- a recognizer configured for the wrong sign set, or ONE sign on a road
+  # he drives often being the only one it ever gets a square look at. Same location three times
+  # says the second, and the two mean opposite things about whether an as-built change helps.
+  fix = None
+  places = []
   for s in segs:
     p = os.path.join(REALDATA, s, "rlog")
     if not os.path.exists(p):
@@ -42,8 +48,20 @@ def scan(route, segs):
       continue
     for m in lr:
       try:
-        if m.which() != "carStateBP":
-          continue
+        w = m.which()
+      except Exception:
+        continue
+      if w in ("gpsLocation", "gpsLocationExternal"):
+        try:
+          g = getattr(m, w)
+          if g.latitude or g.longitude:
+            fix = (float(g.latitude), float(g.longitude))
+        except Exception:
+          pass
+        continue
+      if w != "carStateBP":
+        continue
+      try:
         v = int(m.carStateBP.trafficSignData.vLimit1)
       except Exception:
         continue
@@ -54,10 +72,11 @@ def scan(route, segs):
         if not reading:
           events += 1
           seen_read = True
+          places.append((v, fix))
       elif reading and seen_read:
         returns += 1
       reading = now
-  return events, returns, values, frames
+  return events, returns, values, frames, places
 
 
 def main():
@@ -73,10 +92,13 @@ def main():
   n = int(sys.argv[1]) if len(sys.argv) > 1 else 5
   for r in sorted(routes, key=when, reverse=True)[:n]:
     segs = sorted(routes[r], key=seg_index)
-    events, returns, values, frames = scan(r, segs)
+    events, returns, values, frames, places = scan(r, segs)
     vs = ", ".join("{} x{}".format(v, c) for v, c in sorted(values.items())) or "none"
     print("{}  {:>2} seg  {:>6} frames  {:>2} read(s)  {:>2} return(s) to sentinel  [{}]".format(
       r, len(segs), frames, events, returns, vs))
+    for v, fix in places:
+      where = "{:.6f}, {:.6f}".format(*fix) if fix else "no GPS fix yet on this route"
+      print("      read {} at  {}".format(v, where))
     sys.stdout.flush()
 
 
