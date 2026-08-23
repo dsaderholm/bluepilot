@@ -3291,6 +3291,39 @@ whole byte rather than a packed field. He confirmed the location: *"Bingo. Liter
 **So the question is no longer whether the camera works. It is why it is BAD at it: one detection
 across 50 segments of driving.**
 
+**AND "ONE DETECTION" IS ALSO WRONG, 2026-08-23. IT READS ON DRIVES NOBODY HAD CHECKED.** Measured
+with `bp_drive_checkup` check 15, which counts rising edges of `trafficSignData.vLimit1` out of the
+0/255 sentinel:
+
+    000003a7   1 read   30 mph at t+404.6     544 frames at 30, of 73,846
+    000003ad   1 read   30 mph at t+481.9   5,171 frames at 30, of 56,375
+
+Route `ad` is 2026-08-23 -- days after the "one verified read ever" line above was written, and it
+was never re-checked. **The camera reads more than this file says.** Both figures came from the
+first two routes looked at, so the real rate is unmeasured, not one-in-fifty.
+
+**THE OPEN QUESTION MOVED, and it is a different question than the one being chased.** Both reads
+are the SAME VALUE and both are held for hundreds to thousands of frames with no second edge and no
+return to the sentinel. Two readings fit and they need opposite fixes:
+
+  - the camera read a 30 sign and correctly held it for a genuinely 30 mph road, or
+  - it read once and LATCHED, and `Traffic_RecognitnData` stopped updating -- in which case the
+    parser is serving a stale value that reads exactly like a confident one.
+
+The second is the same shape as the v1 mapd `/dev/shm` staleness recorded further up, and as the 80
+mph "sign" that turned out not to be a sign. **Do not judge an as-built change until this is
+settled**, because "it reads a sign" and "it holds one number all drive" score identically on the
+event count and mean opposite things.
+
+`tools/bp_tsr_baseline.py` counts edges, values AND **returns to the sentinel** across N routes,
+which is the discriminator: a camera that reads and re-reads goes back to 255 between signs, and a
+latched one never does. It has not run yet -- the laptop lost hostname resolution mid-session.
+**Run it BEFORE the as-built change, so there is a before to compare against:**
+
+```bash
+ssh comma@comma-34b959b "bash -lc 'cd /data/openpilot && /usr/local/venv/bin/python tools/bp_tsr_baseline.py 8'"
+```
+
 Re-measured on routes 0000039f and 000003a1, decoding `Traffic_RecognitnData` (0x3CD) off bus 2:
 
     000003a1   909 frames, TWO distinct payloads
