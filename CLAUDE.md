@@ -3346,9 +3346,28 @@ pass quickly. A recognizer that only resolves a sign it is nearly beside would p
 -- reads only where the car is slow and the sign is near, which in this city is 30 mph roads, which
 is why every value is 30.
 
-**That is a prediction, and it is testable from data already on the device before any config
-change:** print `vEgo` at each read. If all three are slow, range is the constraint and nibble 8 is
-unlikely to be the lever. If one is a fast road, the sign-set reading survives.
+**MEASURED, AND THE PREDICTION HELD -- every read is slow:**
+
+    000003ad   40.752015, -111.855317   doing 31 mph
+    000003ac   40.747404, -111.853911   doing 34 mph
+    000003a7   40.725446, -111.829907   doing 16 mph
+
+**Not one read above 34 mph, across 512,376 frames of drives that include interstate.** The `a7`
+position also lands within ~2 m of the 2026-08-21 `0x462` measurement, which is an independent
+confirmation of both that reading and this tool.
+
+**BUT IT IS CONFOUNDED AND MUST NOT BE WRITTEN UP AS PROVEN.** In this city a 30 mph road IS a slow
+road, so "only reads when slow" and "only reads the value 30" are the same three samples and cannot
+be separated by them. What would separate them, and neither has been observed yet:
+
+  - a **25 mph** read (slow, not 30) kills "only 30" and leaves range standing
+  - a read on a **45+ mph** road kills "only slow" and leaves the sign set standing
+
+What the data does support is narrower and still useful: whatever the cause, it has never once
+produced a limit for a highway, which is exactly where Speed Limit Assist has no map coverage and
+wanted a second source. **So do not expect the as-built change to be judged by "does TSR work" --
+judge it by whether any read appears above 35 mph, or at any value other than 30.** Both are
+one-line reads of `bp_tsr_baseline.py` output.
 
 **Hold duration varies wildly and is unexplained: 544, 5,171 and 12,424 frames.** A long hold is
 only correct while the limit still applies, so the 12,424-frame one is worth a look -- it is minutes
