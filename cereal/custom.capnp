@@ -1783,6 +1783,15 @@ struct RouteIntentBP @0xfc6241ed8877b611 {
     roundabout @14;
     destination @15;  # arriving
     unknown @16;      # an instruction exists and this source could not classify it
+    # ADDED 2026-08-22 after checking this vocabulary against the real one. Android Auto's
+    # `Maneuver` (androidx.car.app.navigation.model) declares 47 types, and three of its families
+    # had no home here: KEEP_LEFT/KEEP_RIGHT, and the eight ON_RAMP_* variants. All three fell to
+    # `unknown`, which REFUSES and was therefore safe -- but a log reading `unknown` where the car
+    # was plainly told "keep left" is a log that cannot be scored. Vocabulary is free; a name that
+    # exists costs nothing and a name that is missing costs a measurement.
+    keepLeft @17;     # AA TYPE_KEEP_LEFT -- a lane commitment without a junction
+    keepRight @18;    # AA TYPE_KEEP_RIGHT
+    onRamp @19;       # AA TYPE_ON_RAMP_* -- joining a motorway, the mirror of exitLeft/exitRight
   }
 
   # WHICH KIND of transport spoke, so a drive log cannot read a scripted bench route as a real one.

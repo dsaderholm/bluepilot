@@ -897,3 +897,171 @@ point of it.
    measured lead time -- and note that the one source ever measured on this car, mapd's own fork
    prediction, was 96-100% accurate with a lead of 1.0 s against an 8 s budget. Accuracy was never
    the binding number.
+
+---
+
+## 11. WHAT EACH TRANSPORT ACTUALLY CARRIES. Researched 2026-08-22.
+
+Three candidate sources, and until now only one of them had ever been described. This section is
+the field-by-field comparison, so a transport author is choosing rather than discovering.
+
+### 11a. `updateTrip()` -- VERIFIED from the androidx source, not recalled
+
+Read from `androidx/car/app/navigation/model/*.java` on android.googlesource.com. This is what an
+Android Auto navigation app hands the head unit, and therefore the ceiling on what SYNC could
+possibly forward:
+
+    Trip
+      destinations[]              paired 1:1 with destinationTravelEstimates[]
+      steps[]                     paired 1:1 with stepTravelEstimates[]
+        Step
+          maneuver                Maneuver: 47 TYPE_* constants (see 11b)
+                                    + roundaboutExitNumber, roundaboutExitAngle, icon
+          lanes[] + lanesImage    lane guidance
+          cue                     the verbal instruction; "a fallback when Maneuver is not set"
+          road                    the street being turned ONTO
+          
+      currentRoad                 the street currently on
+      isLoading
+
+    TravelEstimate
+      remainingDistance           a Distance object, carries its own units
+      remainingTimeSeconds        long; REMAINING_TIME_UNKNOWN = -1
+      arrivalTimeAtDestination    with time zone
+      remainingTime/DistanceColor, tripText, tripIcon
+
+**THREE THINGS IN THERE MATTER MORE THAN THE REST.**
+
+**`Step.road` is documented as CLUSTER-TARGETED**, in Google's own words: *"This value is primarily
+used for vehicle cluster and heads-up displays and may not appear in the navigation template."* So
+the cluster path is not an afterthought of this API -- there is a field that exists mainly to feed
+it. That is a good sign for how much Ford has to work with.
+
+**`stepTravelEstimates[0]` IS DISTANCE AND TIME TO THE NEXT MANEUVER**, which is exactly what the
+gate needs, and it gives BOTH. `RouteIntentBP` carries distance and converts it to time at the
+current speed; a source with `remainingTimeSeconds` could supply the time directly and skip the
+conversion. Not changing the schema for it today -- an unread field is this fork's oldest bug -- but
+recorded, because the day a source has it, `LOOKAHEAD_S` stops needing a speed at all.
+
+**`Trip.steps` is a LIST and the API expects only the first to matter**: *"display may only show
+information about the first step."* So the single-next-instruction shape of `RouteIntentBP` is not
+an impoverished version of what the car gets -- it is what the car gets.
+
+### 11b. THE 47 MANEUVER TYPES, AND THE THREE WE DID NOT HAVE
+
+Full list, verified: UNKNOWN, DEPART, NAME_CHANGE, KEEP_LEFT/RIGHT, TURN_SLIGHT_L/R,
+TURN_NORMAL_L/R, TURN_SHARP_L/R, U_TURN_L/R, ON_RAMP_{SLIGHT,NORMAL,SHARP,U_TURN}_{L,R} (8),
+OFF_RAMP_{SLIGHT,NORMAL}_{L,R} (4), FORK_L/R, MERGE_L/R/SIDE_UNSPECIFIED, ROUNDABOUT_* (8),
+STRAIGHT, FERRY_{BOAT,TRAIN}{,_L,_R} (6), DESTINATION{,_STRAIGHT,_LEFT,_RIGHT} (4).
+
+Mapped onto ours:
+
+    AA type family                    ->  RouteIntentBP.Maneuver
+    UNKNOWN                               unknown
+    DEPART, NAME_CHANGE, STRAIGHT         continueAhead
+    KEEP_LEFT / KEEP_RIGHT                keepLeft / keepRight      <- ADDED, see below
+    TURN_SLIGHT_*                         slightLeft / slightRight
+    TURN_NORMAL_*                         turnLeft / turnRight
+    TURN_SHARP_*                          sharpLeft / sharpRight
+    U_TURN_*                              uTurn
+    ON_RAMP_* (8)                         onRamp                    <- ADDED
+    OFF_RAMP_* (4)                        exitLeft / exitRight
+    FORK_*                                forkLeft / forkRight
+    MERGE_*                               merge
+    ROUNDABOUT_* (8)                      roundabout
+    DESTINATION_* (4)                     destination
+    FERRY_* (6)                           unknown  -- refuses, which is right for a ferry
+
+**`keepLeft`, `keepRight` and `onRamp` were added because of this check.** All three previously fell
+to `unknown`, which REFUSES, so nothing was unsafe -- but a log reading `unknown` where the car was
+plainly told "keep left" is a log nobody can score. Vocabulary is free. The parametrised test walks
+the schema, so all three were covered the moment they existed.
+
+The roundabout exit NUMBER and ANGLE are deliberately not carried. The gate does not steer and does
+not need to know which exit; it needs to know a roundabout is coming.
+
+### 11c. WHAT FORD PUTS ON CAN -- MEASURED, AND IT IS ALMOST NOTHING
+
+`ford_lincoln_base_pt.dbc`, the whole file: **331 messages, 2,150 signals.** Everything
+navigation-related in it:
+
+    APIM_Data_FD1 (0x32B)  DistToStopover_L_Actl   16 bit, 0.1 km, 0..6553.4 km
+                           StopoverType_D_Stat     3 bit
+    Steering_Data          SteWhlSwtchNav_B_Stat   a BUTTON, not data
+
+**That is the entire inventory. No maneuver. No road name. No ETA. No lane guidance.**
+
+**AND THE ONE DISTANCE FIELD IS THE WRONG QUANTITY.** A "stopover" is a route WAYPOINT, so
+`DistToStopover_L_Actl` is distance to the next waypoint or destination -- NOT distance to the next
+maneuver, which is what the gate needs. Reading it as turn distance would be wrong on every route
+that has no waypoints, which is most of them.
+
+**But the DBC is community reverse-engineered, and the structural argument beats it.** His IPC
+renders Google Maps turn arrows TODAY. The IPC is a separate module from the APIM, so that
+instruction MUST cross a bus. It is therefore in a message this DBC does not describe. That gap is
+exactly what `tools/bp_can_nav_diff.py` exists to close, and the control side of that diff is
+already recorded (see 10g).
+
+**HOW LOSSY TO EXPECT, since he asked** -- *"I'm hoping Ford integrates most of this into the IPC
+display or the CAN signal sent from sync"*: expect the cluster's vocabulary to be **much smaller
+than the API's**. A Ford IPC turn arrow is a handful of glyphs, not 47 enumerants, and SYNC will
+have collapsed the API's types down to whatever it can draw.
+
+**That is fine, and it is worth saying plainly, because it sounds like bad news and is not.** The
+gate collapses all 47 types into one bit -- does this commit the car to leaving this road -- plus a
+distance. A crude arrow and a distance satisfy it completely. **Route intent is the consumer least
+harmed by Ford being lossy**, which is a good reason for it to be the first consumer built.
+
+**AND THE FLOOR IS FREE TO MEASURE:** whatever the IPC DRAWS had to cross the bus. One glance at
+the cluster with Maps navigating -- does it show an arrow only, or arrow plus distance, or arrow
+plus distance plus street name -- bounds what a canbox could expose, before any canbox exists.
+
+### 11d. THE WAZE NOTIFICATION -- THE WEAKEST OF THE THREE, AND IN A SPECIFIC WAY
+
+The only primary evidence is his own screenshot (9b): a **maneuver icon** and a **distance**
+("60 ft"), updating live.
+
+**Nobody has published its structure.** Searched 2026-08-22: what exists on GitHub is Waze *alert*
+and traffic scraping through a reverse-engineered non-public URL -- a different thing entirely, and
+fragile. No navigation-instruction parser exists, which is consistent with CarrotPilot bridging
+AMAP, Tencent and Google Maps and pointedly skipping Waze.
+
+Field by field against the other two:
+
+    what the gate could use      updateTrip()            Ford CAN            Waze notification
+    maneuver type                47 enumerated types     unknown, undecoded  an ICON, not text
+    distance to maneuver         Distance, with units    wrong quantity      text, parseable
+    time to maneuver             remainingTimeSeconds    unknown             no
+    road turning ONTO            Step.road               unknown             no
+    current road                 Trip.currentRoad        unknown             no
+    lane guidance                lanes[] + lanesImage    unknown             no
+    destination + ETA            destinationTravelEst.   StopoverType?       no
+
+**THE ASYMMETRY IS THE FINDING, AND IT IS BACKWARDS FROM WHAT YOU WOULD WANT.** The notification
+gives the DISTANCE cleanly, as text -- and the MANEUVER as a bitmap. So the field that is trivial
+to parse is the one the gate treats as a bound, and the field that decides whether the gate fires at
+all has to be recovered by hashing icons against a known set, and re-done at every Waze redesign.
+
+**WHICH CREATES A FAILURE MODE THE EXISTING RULE DOES NOT COVER, and a bridge author must handle
+it.** The rule in `source.py` is: an instruction you cannot classify is `unknown`, not the nearest
+label and not silence -- and `unknown` refuses, which is the safe direction for ONE strange glyph.
+But if a redesign breaks the icon set WHOLESALE, every instruction becomes `unknown`, every one
+refuses, and passing assist goes quiet for the entire route on every drive.
+
+**So a bridge must tell "this one glyph is new" from "I cannot read any glyph."** The second is a
+HEALTH failure, not a classification result: it should stop publishing and let the consumer age it
+out, which returns the feature to today's behaviour. The first stays `unknown` and refuses. That
+distinction belongs in the bridge, because the consumer cannot see it -- from `routeIntentBP` a
+broken parser and a genuinely strange junction look identical.
+
+### 11e. WHAT TO MEASURE, cheapest first
+
+1. **The cluster, with Google Maps navigating.** One glance. Bounds what crosses the bus, needs no
+   hardware, and he has already offered.
+2. **The Waze notification, PARKED.** Dump it with any notification-inspector app, or
+   `adb shell dumpsys notification --noredact`, with a route set in the driveway. **No driving
+   required**, five minutes, and it is the cheapest unknown on this whole list -- it decides whether
+   the fallback transport is viable at all, and nobody has ever looked.
+3. **`bp_can_nav_diff.py` on a Maps-navigating drive.** One drive; the control is already recorded.
+4. Everything else waits on the canbox.
+
