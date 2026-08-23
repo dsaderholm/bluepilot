@@ -60,6 +60,8 @@ SCENES = [
        dash=52, limit=55, hold=70, acc="ENG BRAKE", mag=0.9, lamps=False),
   dict(cap="no hold, ACC accelerating -- the box is SLA's number",
        dash=55, limit=55, hold=0, acc="ACCEL", mag=0.6, lamps=False),
+  dict(cap="TSR READ A SIGN -- thicker edge, the number the camera saw",
+       dash=32, limit=30, hold=0, acc="COAST", mag=0.0, lamps=False, tsr_limit="TSR 30"),
   dict(cap="TSR not working -- the camera's own reason",
        dash=70, limit=55, hold=70, acc="COAST", mag=0.0, lamps=False, tsr="TSR REGION N/A"),
   dict(cap="hold pinned to this place -- dot in the corner, tap the box to unpin",
@@ -203,6 +205,7 @@ def main(outdir):
     dash, limit, hold = scene["dash"], scene["limit"], scene["hold"]
     acc, mag, lamps = scene["acc"], scene["mag"], scene["lamps"]
     tsr = scene.get("tsr", "")
+    tsr_limit = scene.get("tsr_limit", "")
     # THE REAL RULE DECIDES WHAT THE BOX SAYS. Re-deriving the ranking here is how a preview starts
     # agreeing with itself instead of with the car.
     # THE SIGN AND THE FALLBACK ARE DIFFERENT NUMBERS and every scene here conflated them until
@@ -218,7 +221,7 @@ def main(outdir):
       _font_bold=fonts["bold"], _font_semi_bold=fonts["semi"],
       _acc_state=acc, _acc_accel=mag,
       _brakes_on=lamps, _show_brake_status=True, _lamp_data_available=True,
-      _tsr_fault=tsr,
+      _tsr_fault=tsr, _tsr_limit=tsr_limit,
     )
     rl.begin_texture_mode(tex)
     # Mid-gray stands in for road: bright enough to catch anything relying on a dark backdrop.
