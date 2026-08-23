@@ -180,6 +180,78 @@ it is not.
 **Either way it does not unblock anything here.** Worth wanting for his cluster; worth zero as a
 feature dependency. **Do not sequence any work behind it.**
 
+**THE ANDROID AUTO REGRESSION IS RULED OUT ON TIMING. From him, 2026-08-22, and it settles what
+this section spends most of its length weighing.**
+
+Asked when it broke, his answer was *"when Waze did their massive Android Auto UI overhaul a few
+years ago."*
+
+**The recent AA cluster/HUD regression is from the last several months. A fault that predates it by
+YEARS cannot be it.** Everything above about "the regression hits apps unevenly and could be sparing
+Maps on this head unit" was the strongest surviving competing explanation, and it is now dead on
+dates alone rather than on the Maps discriminator. The section's own verdict -- *"still NOT
+conclusive"* -- was correct when written and is no longer the state of the evidence.
+
+**AND IT FAILED ON TWO PHONES, which he volunteered.** Motorola Edge+ 2020, then Motorola Edge+
+2023. Same behaviour across a complete phone replacement, so it is not a corrupted install, a bad OS
+image, a device-specific USB stack, or anything about his handset.
+
+Config, recorded so a future round does not re-collect it:
+
+    phone            Motorola Edge+ 2023   (previously Edge+ 2020, same failure)
+    Android Auto     17.3.662854-release
+    Waze             current Play Store release, verified 2026-08-22
+    car              2020 Ford Fusion Titanium AWD, SYNC 3, wired AA
+    frequency        every drive, without exception
+    debug logs       submitted 2026-08-22
+    thread           thread::gmI37q7JcPaPnyjfsPIBMSs::
+
+**So the evidence now closes off four explanations rather than one:** not the phone (two of them),
+not the car or head unit (Maps populates the same cluster), not the industry regression (wrong by
+years), and not the Car App API Level 6 cluster feature (that needs SYNC 4/4A and is not what he is
+asking for). What is left is the app.
+
+**THE `updateTrip()` DIAGNOSIS IS STILL AN INFERENCE, and it should not harden into a fact here.**
+"The compass is what a Ford IPC renders when a session is active but carries no valid Trip metadata"
+is reasoned from the symptom and has never been measured. That is the same shape as the beta-program
+premise this section already records as refuted -- a plausible mechanism asserted about a specific
+system nobody had tested. **The measurement that would settle it is phone-side, not car-side:**
+Android wireless debugging (the USB port is taken by wired AA on SYNC 3) plus `adb logcat` across
+one Waze drive and one Maps drive, diffed around the navigation session. Offered 2026-08-22, not
+taken up, and honestly caveated: a release build may not surface a third-party app's Car App Library
+activity at all, in which case an empty capture means the instrument is blind rather than Waze
+innocent.
+
+**THE ROUND WAS SPENT, and here is what it consisted of**, since he asked for help after the "do not
+spend a third" verdict. That is his call and it overrides the verdict; what it must not become is a
+fourth. The reply was DRAFTED rather than researched further, which is the whole point of the bound.
+The reusable part is the argument, not the draft:
+
+1. **Name the symptom as the mechanism.** "The IPC shows the Android Auto COMPASS" is a statement
+   about Trip metadata. "Waze doesn't show on my cluster" is a triage ticket. Same fact, different
+   reader.
+2. **Lead with what the evidence ELIMINATES**, not with the complaint. Two phones, the Maps A/B, and
+   the years-ago timeline each close a door, and a report that closes four doors survives triage.
+3. **Pre-empt the Car App API Level 6 close.** Waze's own help page advertises cluster rendering, so
+   the likeliest outcome is "your car needs SYNC 4/4A". Saying up front that he is asking about
+   `updateTrip()` on SYNC 3 -- which Maps still renders -- is what stops that closing the thread.
+4. **Name their release landmark rather than a date.** "When you overhauled the Android Auto UI" is
+   something they can look up and he cannot be wrong about; a guessed date sends them to the wrong
+   build and costs a round.
+5. **Reply on the EXISTING thread.** A third ticket splits the evidence, which is how the first two
+   rounds produced the same template twice.
+
+**And his framing needed one correction, which is the part that matters to the build.** He wrote
+"once I get the canbox and Waze patched", treating both as prerequisites. **Only the canbox is** --
+9e already says so and the misreading recurs. The canbox delivers route intent from whichever app is
+publishing, and Maps works. Waze is the PREFERRED source, because it reroutes around traffic; it is
+not a dependency. He confirmed the preference and it is a good one, but nothing is sequenced behind
+it.
+
+**One untested workaround was offered and deliberately not pushed:** rolling Waze back to a build
+from before the overhaul, the mirror of the documented Maps-v25 trick. Nobody has checked it on Waze.
+Sideloading an older build of the app he navigates with is his call.
+
 ### 2b. If "which branch" is the only missing input, it need not come through the car at all
 
 Worth stating because it follows directly from the correction above: the blocker is transport, so a
