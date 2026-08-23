@@ -28,11 +28,25 @@ one measured approach to a stopped vehicle the override held the command for nin
 requesting a tenth of the deceleration Ford was already asking for. Ford's own request is now a
 floor, so taking over can only ever add braking.
 
-**It will not take the command below 25 mph.** Every measured takeover that began under Ford's own
-20 mph floor made the forward camera assert cancel, and one latched it for the rest of the drive,
-after which stock ACC was unavailable until the car was restarted. Above the floor the camera
-tolerated every takeover measured, including one that ran 35 seconds to a full standstill. The cost
-of that rule is real: a light you are already crawling towards at 20 mph is yours.
+**It will not take the command below 25 mph, and that floor is NOT the protection it was thought to
+be.** The rule came from replayed drives in which every takeover starting under Ford's own 20 mph
+floor made the forward camera assert cancel, while those above it appeared tolerated. The first
+three takeovers that were actually *driven* contradicted the second half of that: two of them armed
+at 34 and 40 mph — well above the floor — and both provoked a cancel about 1.6 seconds later that
+never released. Stock ACC was gone for the remainder of both drives and came back only after the car
+was restarted.
+
+So the honest position is that **taking the command away from the camera provokes a cancel at any
+speed measured so far**, and the floor prevents only the worst version of it. What separates the one
+tolerated takeover from the two that latched is not yet known; it is not the arming speed, and it is
+not the size of the disagreement — the tolerated one had the largest.
+
+**Losing the cancel is now recoverable without stopping the car.** Refusing to forward a cancelled
+frame is what made the latch permanent: the camera's commands stopped reaching the car, so it could
+never observe the car obeying it again and never had a reason to relent. After five seconds of a
+cancel that this feature provoked, Ford's frame is forwarded again with that one bit cleared, for up
+to thirty seconds, so the camera gets the evidence it was being denied. Whether it actually relents
+is the open question and the reason both toggles still ship off.
 
 **Both ship off**, and the on-screen ACC readout turns violet and reads `OP STOP` whenever openpilot
 has taken the command, so it is visible rather than inferred.

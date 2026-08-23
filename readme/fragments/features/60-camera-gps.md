@@ -51,4 +51,21 @@ Ford's signals want dilution of precision, which is satellite geometry the comma
 The conversion is a documented estimate and is the only part of the mapping that is not a direct
 measurement.
 
+**And for its entire life until 2026-08-22 it transmitted nothing at all.** Three drives were
+measured on every bus: `0x462` arrived from the car 905 times and was forwarded 894, while `0x463`
+and `0x464` appeared **zero** times — not from the car, and not from openpilot either. The car
+process subscribed to the wrong GPS service: `gpsLocationExternal`, which is the receiver on a comma
+two, on hardware that publishes `gpsLocation`. The fix is one line and it is in; the feature has
+still never been driven in a state where it could do anything.
+
+That failure is worth stating rather than quietly correcting, because it also sharpens the point at
+the top. The one sign this camera has ever read came with `U0253` asserted, `no navigation data` on
+every frame, **and** this synthesizer silent — so that read had no GPS assistance from any source
+whatsoever. Nav data and sign recognition are independent, and this is the second measurement
+saying so.
+
+One rate difference, since it is not obvious: `gpsLocation` publishes at 1 Hz against
+`gpsLocationExternal`'s 10, so on this hardware the transmitted fix can be a full second old —
+roughly 15 m at 35 mph. Fine for a camera that wants coarse position; not a precise one.
+
 Setting is **Send GPS To The Camera**, and it ships on.
