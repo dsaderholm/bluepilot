@@ -119,6 +119,22 @@ WIDEN_NEAR_IDX, WIDEN_FAR_IDX = 4, 20
 # point, small enough that ordinary shoulder variation does not. Starting value -- fit from logs.
 MAX_WIDENING_M = 2.5
 
+# THE LEFT ROAD EDGE CLOSING IN, metres, over the same near/far span MAX_WIDENING_M uses. Positive
+# is narrowing, which is the OPPOSITE sign to the right-side test and deliberate: `_road_widening`
+# keeps `max(0.0, far - near)` because on the right a narrowing road is a lane ending that the
+# availability test already handles. On the left it is the coned-work-zone signature -- the one
+# hazard on record here that no signal in the system carries.
+#
+# 1.5 IS WHERE NOTHING CURRENTLY OPEN IS REFUSED. Measured over 8 drives and 86k moving frames,
+# the largest narrowing on ANY frame the gate opens today is 1.44 m on motorway, and below 1.25 m
+# on every other road class. So a refusal here costs nothing that is working, which is the cheap
+# direction -- evidence that REFUSES is allowed to be cheap; evidence that opens is not.
+#
+# IT GATES NOTHING YET. Published and watched first, because the same measurement says the edge-std
+# term it would replace is doing no narrowing work on motorway at all, and changing the source and
+# the judgement in one step produces a drive that cannot say which half moved.
+MAX_LEFT_NARROWING_M = 1.5
+
 # --- geometry gates ---
 # Confidence that a painted line exists BEYOND ego's own lane line. Matches the 0.5 that ldw.py
 # uses for "lane visible"; raised slightly because acting on it is a stronger claim than warning.
@@ -908,6 +924,14 @@ class PassingAssistDetector:
     self.right_geometry_ok = False
     self.right_widening_m = 0.0
     self.right_widening = False
+    self.left_narrowing_m = 0.0
+    self.left_narrowing = False
+    # ITS OWN DENOMINATOR. `_geo_frames` counts REFUSED frames, so a share taken against it would
+    # be "of the frames we refused" while reading as "of the drive" -- the denominator error this
+    # file records five times. These count every frame the geometry ran.
+    self._narrow_frames = 0
+    self._narrow_hits = 0
+    self._narrow_max = 0.0
     self.right_lane_age_s = 0.0
 
     self.left_blindspot = False
@@ -1214,6 +1238,42 @@ class PassingAssistDetector:
     self.right_widening_m = max(0.0, far - near)
     self.right_widening = self.right_widening_m > MAX_WIDENING_M
 
+  def _left_narrowing(self, model) -> None:
+    """Does the road CLOSE IN on our left between here and ~75 m ahead?
+
+    The mirror of `_road_widening`, with two deliberate differences, and both matter.
+
+    THE SIGN IS INVERTED. That function keeps only growth, because a narrowing road on the right is
+    a lane ending which the availability test already handles. On the left, narrowing is the thing
+    worth seeing: a coned taper is what a work zone looks like from the camera, and passing assist
+    has already tried to move into one.
+
+    IT DOES NOT GATE ON `roadEdgeStds`, and `_road_widening` does. A work zone is precisely where
+    that std explodes, so inheriting the guard would blind this to its own subject.
+    `bp_left_edge_truth.py` licenses dropping it: the edge POSITION is steady at every std band,
+    frame-to-frame jump flat at 0.13-0.14 m from std 0.5 to 8+. It is the std that means nothing
+    here, not the position.
+
+    y runs negative to the left, so the edge is the more negative and `line - edge` is the positive
+    gap. Reported even when nothing acts on it, which today is always.
+    """
+    self.left_narrowing_m = 0.0
+    self.left_narrowing = False
+    try:
+      line = model.laneLines[LL_LEFT].y
+      edge = model.roadEdges[RE_LEFT].y
+      if len(line) <= WIDEN_FAR_IDX or len(edge) <= WIDEN_FAR_IDX:
+        return
+      near = float(line[WIDEN_NEAR_IDX]) - float(edge[WIDEN_NEAR_IDX])
+      far = float(line[WIDEN_FAR_IDX]) - float(edge[WIDEN_FAR_IDX])
+    except (IndexError, AttributeError, TypeError):
+      return
+
+    # Only SHRINKAGE counts. A road opening out to the left is a wider carriageway or a median
+    # ending, neither of which is a reason to refuse, and folding it in would let the two cancel.
+    self.left_narrowing_m = max(0.0, near - far)
+    self.left_narrowing = self.left_narrowing_m > MAX_LEFT_NARROWING_M
+
   def _geometry(self, model) -> None:
     """Evaluate whether a lane exists either side, recording both evidence channels separately.
 
@@ -1245,6 +1305,11 @@ class PassingAssistDetector:
     self.left_edge_std, self.right_edge_std = left_std, right_std
 
     self._road_widening(model, right_std)
+    # NOT passed a std, unlike its sibling -- see the method docstring.
+    self._left_narrowing(model)
+    self._narrow_frames += 1
+    self._narrow_hits += self.left_narrowing
+    self._narrow_max = max(self._narrow_max, self.left_narrowing_m)
 
     # Both channels must agree before a side is called available. Requiring agreement is the
     # conservative reading and keeps phase 2 honest if this ever stops being log-only.
@@ -1951,6 +2016,13 @@ class PassingAssistDetector:
         # apart -- the whole question being whether the edge is unusable everywhere or only where
         # painted medians live.
         "edgeFailBySpeed": [round(bad / n, 3) if n else -1.0 for n, bad in self._edge_by_speed],
+        # See _left_narrowing. The left road edge closing in ahead -- published and watched
+        # before it gates anything. A share near zero on motorway is the expected reading and is
+        # what would say the edge-std term it may replace was never doing narrowing work there;
+        # it is NOT proof no work zone can be seen, since these drives may contain none.
+        "leftNarrowingShare": (round(self._narrow_hits / self._narrow_frames, 4)
+                               if self._narrow_frames else 0.0),
+        "leftNarrowingMax": round(self._narrow_max, 2),
         "geoRefusedBy": int(self.geo_refusal[0]),
         "geoRefusedValue": round(self.geo_refusal[1], 3),
         "geoRefusedShare": round(self.geo_refusal[2], 3),
@@ -3614,6 +3686,7 @@ class PassingAssistDetector:
     passingAssist.geoLoosenTo = float(pa.geo_refusal_loosen_to)
     passingAssist.rightEdgeBeyond = float(pa.right_edge_beyond)
     passingAssist.leftEdgeStd = float(min(pa.left_edge_std, 1e3))
+    passingAssist.leftNarrowingM = float(pa.left_narrowing_m)
     passingAssist.rightEdgeStd = float(min(pa.right_edge_std, 1e3))
     passingAssist.leftGeometryOk = pa.left_geometry_ok
     passingAssist.rightGeometryOk = pa.right_geometry_ok

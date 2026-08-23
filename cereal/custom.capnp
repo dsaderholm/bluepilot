@@ -977,6 +977,19 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     driverPassesAgreedLate @106 :UInt16;
     driverPassLateDelay @107 :Float32;
 
+    # THE LEFT ROAD EDGE CLOSING IN AHEAD, metres, over the same near/far span the RIGHT side uses
+    # to spot an off-ramp. Positive means narrowing. The right-side test throws this sign away --
+    # `max(0.0, far - near)` -- because there a narrowing road is a lane ending the availability
+    # test already handles; on the left it is the coned-work-zone signature, which is the one
+    # hazard recorded here that no signal in the system carries.
+    #
+    # MEASURED BEFORE IT GATES ANYTHING, 8 drives, 86k moving frames. On motorway the frames the
+    # gate already opens and the frames a looser edge term would admit have the SAME distribution
+    # (p99 0.51 vs 0.71, max 1.44 vs 1.38); on primary/secondary/tertiary the would-admit set has
+    # a long tail the open set does not (secondary p90 5.99 against a max of 0.83). So it is
+    # published and watched first, and gates nothing yet.
+    leftNarrowingM @108 :Float32;
+
   }
 
   struct DynamicExperimentalControl {

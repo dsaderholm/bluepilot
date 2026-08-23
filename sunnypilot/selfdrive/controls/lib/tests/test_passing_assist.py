@@ -27,7 +27,7 @@ from openpilot.common.constants import CV
 from openpilot.common.realtime import DT_MDL
 from openpilot.sunnypilot.selfdrive.controls.lib.passing_maneuver import CHANGE_DURATION_S
 from openpilot.sunnypilot.selfdrive.controls.lib.passing_assist import (
-  PassingAssistDetector, MIN_LANE_WIDTH_M, DEFAULT_MIN_SPEED_MPH, MAX_WIDENING_M,
+  PassingAssistDetector, MIN_LANE_WIDTH_M, DEFAULT_MIN_SPEED_MPH, MAX_WIDENING_M, MAX_LEFT_NARROWING_M,
   SUGGESTION_HOLD_S, HOLD_THROUGH,
   DEFAULT_PERSISTENCE_S, DRIVE_HISTORY_MAX, CHIME_MIN_INTERVAL_S,
   TIMELINE_MAX, GAP_WHILE_PASSING, GAP_GIVE_UP_S, WANTED_RISE_S, WANTED_FALL_S,
@@ -108,7 +108,7 @@ def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., lead_y=0.0, status=Tr
             # edge at 2.4 is barely past ego's own line, so the default road is one lane plus a
             # shoulder, which is the road this gets driven on.
             ll=(-5.5, -1.85, 1.85, 5.5), probs=(0.9, 0.99, 0.99, 0.2),
-            edges=(-7.0, 2.4), edge_stds=(0.1, 0.1), right_edge_widen=0.0,
+            edges=(-7.0, 2.4), edge_stds=(0.1, 0.1), right_edge_widen=0.0, left_edge_narrow=0.0,
             tsr_avail=True, ovtk_msg=1, ovtk_status=2,
             blinker=False, blinker_right=False, brake=False, steering=False, road_name="I 15", curve=0.0,
             acc_braking=False, acc_precharge=False, acc_propulsion=0.0,
@@ -137,7 +137,10 @@ def make_sm(*, v_lead=SLOW_LEAD_MS, v_ego=None, d_rel=40., lead_y=0.0, status=Tr
     'radarState': NS(leadOne=NS(status=status, dRel=d_rel, yRel=lead_y, vRel=v_rel, vLead=v_lead,
                               aLeadK=lead_accel, radar=lead_radar, modelProb=0.9)),
     'modelV2': NS(laneLines=[xyz(v) for v in ll], laneLineProbs=list(probs),
-                  roadEdges=[xyz(edges[0]), xyz(edges[1], widen=right_edge_widen)],
+                  # LEFT edge y is negative, so a POSITIVE `widen` walks it toward the car with
+                  # distance -- the road closing in ahead, which is the coned-taper shape.
+                  roadEdges=[xyz(edges[0], widen=left_edge_narrow),
+                             xyz(edges[1], widen=right_edge_widen)],
                   roadEdgeStds=list(edge_stds), position=path(curve)),
     'carStateBP': NS(lkaButtonPressed=lka,
                      brakeLightStatus=NS(accDataAvailable=acc_avail, accDecelRequest=acc_braking,
@@ -4411,3 +4414,62 @@ class TestBlisMayVetoButNotAuthorize:
   def test_no_source_never_authorizes(self):
     d = self._det(Source.none)
     assert not d.may_actuate(Side.left)
+
+
+class TestLeftNarrowing:
+  """The left road edge closing in ahead -- the coned-work-zone shape.
+
+  It gates NOTHING today and these tests pin that as much as the arithmetic. The measurement that
+  produced MAX_LEFT_NARROWING_M says the edge-std term it may replace does no narrowing work on
+  motorway at all, and this fork's own rule is not to move the source and the judgement together.
+  """
+
+  def test_a_parallel_road_is_not_narrowing(self):
+    det = run(PassingAssistDetector(), 1, **IN_LEFT_LANE)
+    assert det.left_narrowing_m < 0.5
+    assert not det.left_narrowing
+
+  def test_a_taper_ahead_is_detected(self):
+    det = run(PassingAssistDetector(), 1, left_edge_narrow=2.0, **IN_LEFT_LANE)
+    assert det.left_narrowing_m > MAX_LEFT_NARROWING_M
+    assert det.left_narrowing
+
+  def test_a_gentle_taper_stays_under_the_threshold(self):
+    """1.0 m of walk-in is ~0.96 m of narrowing -- real, and below the bar on purpose.
+
+    The bar is where NOTHING the gate currently opens gets refused: the largest narrowing measured
+    on an open frame over 8 drives was 1.44 m. A term that fires here would be taxing passes that
+    already work.
+    """
+    det = run(PassingAssistDetector(), 1, left_edge_narrow=1.0, **IN_LEFT_LANE)
+    assert 0.5 < det.left_narrowing_m < MAX_LEFT_NARROWING_M
+    assert not det.left_narrowing
+
+  def test_a_road_OPENING_out_reports_zero_rather_than_a_negative(self):
+    """Widening left is a wider carriageway or a median ending -- not a reason to refuse.
+
+    Clamped rather than signed so it cannot cancel against a taper further along the same edge.
+    """
+    det = run(PassingAssistDetector(), 1, left_edge_narrow=-3.0, **IN_LEFT_LANE)
+    assert det.left_narrowing_m == 0.0
+    assert not det.left_narrowing
+
+  def test_an_UNTRUSTED_left_edge_is_still_measured(self):
+    """The one place this deliberately parts company with its right-side sibling.
+
+    `_road_widening` returns early when the edge std is past MAX_ROAD_EDGE_STD. A work zone is
+    exactly where that std explodes, so inheriting the guard would blind this to its own subject --
+    and bp_left_edge_truth.py measured the edge POSITION as steady at every std band, frame jump
+    flat at 0.13-0.14 m from std 0.5 to 8+.
+    """
+    det = run(PassingAssistDetector(), 1, left_edge_narrow=2.0, edge_stds=(9.0, 0.1),
+              **{k: v for k, v in IN_LEFT_LANE.items() if k != 'edge_stds'})
+    assert det.left_narrowing_m > MAX_LEFT_NARROWING_M
+    assert det.left_narrowing
+
+  def test_it_does_not_gate_the_left_side_yet(self):
+    """Published and watched, not acted on. Delete this test when that changes, deliberately."""
+    base = run(PassingAssistDetector(), 1, **IN_LEFT_LANE).left_geometry_ok
+    tapered = run(PassingAssistDetector(), 1, left_edge_narrow=2.0, **IN_LEFT_LANE)
+    assert tapered.left_narrowing
+    assert tapered.left_geometry_ok == base
