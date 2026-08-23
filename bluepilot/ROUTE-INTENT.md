@@ -797,10 +797,26 @@ point of it.
 
 ### 10g. WHAT IS STILL OWED, and the first item is a drive
 
-1. **The Google Maps diff drive.** `tools/bp_can_nav_diff.py` is written and unit-tested; the drive
-   is not done. Navigate somewhere real with **Google Maps** (not Waze -- Maps demonstrably still
-   renders turns on his IPC), then a second drive over similar roads with no route. Expect nothing
-   to appear, which locates the data on MS-CAN and means route intent arrives WITH the canbox.
+1. **The Google Maps diff drive -- and it is now ONE drive, not two.** `tools/bp_can_nav_diff.py`
+   was run on the device 2026-08-22 against route **000003ac** (11 segments, 2,919,073 frames, 383
+   (address, bus) pairs on buses 0/1/2). Every APIM address is ABSENT except position:
+
+       0x32B ABSENT   0x463 ABSENT   0x464 ABSENT   0x225/0x3F1/0x211/0x215/0x227 ABSENT
+       0x462 present -- bus 0: 603 frames, bus 2: 8
+
+   **So the control side is measured** and any of those appearing on a navigating drive is
+   unambiguous. Navigate somewhere real with **Google Maps** (not Waze -- Maps demonstrably still
+   renders turns on his IPC) and diff against 000003ac. Expect nothing to appear, which locates the
+   data on MS-CAN and means route intent arrives WITH the canbox.
+
+   **The one thing that would invalidate that shortcut:** 000003ac is a control only if he was NOT
+   navigating during it, which only he can say. Absence in a log is evidence about the log's
+   conditions first -- ask before relying on it.
+
+   **And do not cap `--segments`.** Measured on the same route: 3 segments and 11 return the
+   identical 383 (address, bus) pairs, so a cap hides no ADDRESS -- but 0x462's varying bytes go
+   from [2,3,6,7] to [1,2,3,5,6,7]. Byte variance is what the diff keys on, and it is exactly what
+   a cap understates. That caveat was written from argument and is now measured.
 2. **A transport.** Nothing here is sequenced behind any particular one.
 3. **Fit the 20 s** against how often it goes quiet, and whether a pass offered inside the window
    was one he would have made.

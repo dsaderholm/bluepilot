@@ -26,6 +26,25 @@ checked address by address and every APIM message except position (0x462) was ab
 openpilot logs. If this comes back empty it says the data is on a bus the panda is not wired to,
 which is exactly what the canbox is for -- the same canbox BLIS is waiting on.
 
+THE CONTROL SIDE IS ALREADY MEASURED, SO THIS NEEDS ONE DRIVE AND NOT TWO. Run on the device
+2026-08-22 against route 000003ac -- 11 segments, 2,919,073 frames, 383 (address, bus) pairs across
+buses 0, 1 and 2:
+
+    0x32B  APIM_Data_FD1     ABSENT
+    0x462  APIMGPS_Nav_1     bus 0: 603 frames   bus 2: 8
+    0x463 / 0x464            ABSENT     (the U0253 finding, again, on a fresh route)
+    0x225 0x3F1 0x211 0x215 0x227      ABSENT
+
+Position and nothing else. So any of those addresses appearing on a navigating drive is unambiguous
+and needs no second route to compare against -- PROVIDED 000003ac was genuinely a no-route drive,
+which only the owner can say. If he was navigating on it, it is not a control and the pair has to be
+recorded deliberately.
+
+AND DO NOT CAP THE SEGMENTS, measured rather than argued. The same route at 3 segments and at 11
+returned the identical 383 (address, bus) pairs -- so a cap hides no ADDRESS -- but 0x462's varying
+bytes went from [2,3,6,7] to [1,2,3,5,6,7]. Byte variance is the thing this tool actually keys on,
+and it is precisely what a cap understates.
+
 HOW TO PRODUCE THE TWO DRIVES. Google Maps, not Waze: he confirmed Maps still renders turns on his
 IPC while Waze does not, so Maps is the source that is definitely publishing today. Navigate
 somewhere real for a few minutes, then a second drive over similar roads with no route active.
