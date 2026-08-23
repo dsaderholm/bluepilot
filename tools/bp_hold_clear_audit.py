@@ -49,6 +49,12 @@ def main():
   live = False
   last_valid = False
   sla_target = 0
+  # THE EARLY RETURNS ABOVE THE RULE. Route 000003ae showed all four rule conditions passing while
+  # the hold sat for 87 s, so whatever declined it is one of the returns higher up
+  # `update_manual_override` -- the press path, the press-settle stand-down, `v_target_valid`, or
+  # `cruise_enabled`. Only the last two are visible from a route; print them rather than guess.
+  enabled = False
+  raw = 0.0
   t0 = None
   rows = []
   prev_key = None
@@ -71,6 +77,13 @@ def main():
       t = m.logMonoTime / 1e9
       if t0 is None or t < t0:
         t0 = t
+      if w == "carState":
+        try:
+          cs = m.carState.cruiseState
+          enabled = bool(cs.available and cs.enabled)
+        except Exception:
+          pass
+        continue
       if w == "longitudinalPlanSP":
         try:
           r = m.longitudinalPlanSP.speedLimit.resolver
@@ -87,6 +100,7 @@ def main():
         baseline = round(float(icbm.vBaseline))
         source = str(icbm.baselineSource)
         diverged = bool(icbm.baselineDiverged)
+        raw = round(float(icbm.vTargetRaw))
       except Exception:
         continue
       # NEVER HIDE THE ZERO. The first version of this skipped `baseline <= 0` and so could not
@@ -108,22 +122,24 @@ def main():
         why = "differs by {:+d} -- arming, correct".format(baseline - sla_target)
       elif source == "pinned":
         why = "PINNED -- exempt, correct"
+      elif not enabled:
+        why = "CRUISE OFF -- frozen by design, the rule returns above this"
       else:
         why = "*** SHOULD HAVE CLEARED ***"
 
-      key = (baseline, sla_target, live, source, why)
+      key = (baseline, sla_target, live, source, why, enabled)
       if key != prev_key:
-        rows.append((t - t0, baseline, sla_target, live, last_valid, source, diverged, why))
+        rows.append((t - t0, baseline, sla_target, live, enabled, source, raw, why))
         prev_key = key
 
   if not rows:
     print("no hold on this route")
     return
 
-  print("     t+     hold  sla  live  lastv  source          div  why")
-  for t, b, s, lv, la, src, dv, why in rows:
-    print("  {:7.1f}  {:>4} {:>4}  {:>5} {:>6}  {:<14} {:>4}  {}".format(
-      t, b, s, str(lv), str(la), src.split(".")[-1][:14], str(dv), why))
+  print("     t+     hold  sla  live  cruise  source          raw  why")
+  for t, b, s, lv, en, src, rw, why in rows:
+    print("  {:7.1f}  {:>4} {:>4}  {:>5} {:>7}  {:<14} {:>4}  {}".format(
+      t, b, s, str(lv), str(en), src.split(".")[-1][:14], rw, why))
 
   bad = [r for r in rows if "SHOULD HAVE" in r[7]]
   print()
