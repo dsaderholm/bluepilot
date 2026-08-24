@@ -153,14 +153,18 @@ def main() -> int:
     sys.exit("no routes")
 
   if args.sweep:
-    print(f"{'route':<12} {'IsaVLim 0x3D9 b0':<28} {'TsrVLim1 0x3CD b3':<24} verdict")
+    # flush=True on every line, because a sweep over twelve routes takes minutes and is meant to be
+    # run detached. Python buffers stdout when it is redirected to a file, so without this the whole
+    # table appears only at the end and a run in progress is indistinguishable from a run that hung.
+    print(f"{'route':<12} {'IsaVLim 0x3D9 b0':<28} {'TsrVLim1 0x3CD b3':<24} verdict", flush=True)
     hits = 0
     for r in all_routes[:args.sweep]:
       n_isa, n_tsr, isa, _u, _ia, _rg, tsr = scan(r, args.realdata, args.segments)
       real = live(isa) or live(tsr)
       hits += bool(real)
       verdict = f"REAL: {real}" if real else ("no data" if n_isa else "no frames")
-      print(f"{r.split('--')[0]:<12} {summarise(isa, n_isa):<28} {summarise(tsr, n_tsr):<24} {verdict}")
+      print(f"{r.split('--')[0]:<12} {summarise(isa, n_isa):<28} {summarise(tsr, n_tsr):<24} {verdict}",
+            flush=True)
     print(f"\n{hits} of {min(args.sweep, len(all_routes))} routes carried a non-sentinel value.")
     print("A RATE IS NOT A VERDICT: whether those values match the roads actually driven is the")
     print("open question, and it needs correlating against mapdOut.highwayClass and position.")

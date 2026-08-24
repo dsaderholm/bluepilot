@@ -1286,6 +1286,16 @@ those fields, no app can fill them, and there is nothing for Google to fix.** Th
 thread titled "not passing all navigation info to Ford Sync 3" is about something else or about
 other cars.
 
+**AND THE CLUSTER MIRRORS FAITHFULLY, INCLUDING MIRRORING AN ABSENCE.** From a second pair of his
+screenshots, both Google Maps: the head unit showed `toward Parkway Ave` with NO distance on the
+card, and the cluster showed `toward Parkway` with `0 ft`. So a zero in the step-distance line is
+not the cluster failing -- it is the app having sent no distance for that step, rendered honestly.
+
+**That is a good property for route intent**: what a canbox would read off MS-CAN is what the app
+published, with no Ford embellishment in between. It also means a transport reading that bus will
+see genuine "maneuver known, distance unknown" states -- which is exactly the case
+`RouteIntentBP.distanceKnown` exists for, and which the consumer already treats as no claim.
+
 **AND ADDING A WAYPOINT KILLED THE STOPOVER GUESS TOO.** The row stayed at zero with a stop in the
 route, so it is not `DistToStopover_L_Actl` either. What those two fields ARE is now unknown and
 does not matter -- they are unreachable from outside the car whatever they are.
