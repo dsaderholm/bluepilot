@@ -160,6 +160,7 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
     self.override_since_camera_clean = False
     self.cancel_recovery_frames = 0
     self.cancel_recovery_said = False
+    self.recovery_declined_said = False
     # FusionPilot: the stop override -- the last few mph the set speed cannot ask for. Same
     # placement reasoning as icbm_gap above; and same latch-off-on-exception discipline, because an
     # exception here reaches card and stops the car.
@@ -686,10 +687,18 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
           # Third time today that a rule could not be explained from a drive. Fixing the rule is
           # guesswork until the drive can say which term declined, so this says it -- once per
           # cancel run, naming the gate, at the moment the recovery would otherwise have started.
-          elif (self.passthrough_cancel_frames == _CANCEL_INERT_FRAMES + 1
+          elif (self.passthrough_cancel_frames > _CANCEL_INERT_FRAMES
+                and not self.recovery_declined_said
                 and not (self.cancel_is_ours and CC.longActive
                          and not self.stop_override_stopped_us
                          and self.cancel_recovery_frames < _CANCEL_RECOVERY_MAX_FRAMES)):
+            # ONCE PER RUN, ON A LEVEL, NOT ON ONE EXACT FRAME. The first version fired only at
+            # `== _CANCEL_INERT_FRAMES + 1`, so any run whose reason changed on that single frame
+            # logged nothing at all. On his 2026-08-24 drives INERT fired FIVE times and DECLINED
+            # only TWICE -- three episodes said nothing, and the instrument built to answer this
+            # question missed most of it. Caught only because he asked whether I had looked
+            # thoroughly.
+            self.recovery_declined_said = True
             cloudlog.error("stock ACC passthrough RECOVERY DECLINED: cancel_is_ours=%s "
                            "longActive=%s stop_override_stopped_us=%s recovery_frames=%d/%d",
                            self.cancel_is_ours, CC.longActive, self.stop_override_stopped_us,
@@ -704,8 +713,19 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
             # card, and stops the car -- the 2026-08-15 failure, in a block that runs 50 times a
             # second. Failing closed means no recovery, which costs him a hand-back and nothing else.
             try:
-              if not fordcan_ext.passthrough_admissible(CS.acc_stock_values, CC.longActive,
-                                                        allow_cancel=True):
+              # AND SAY WHY IF THE FRAME ITSELF IS REFUSED. This was the last silent path, found
+              # 2026-08-24 when he asked whether I had looked thoroughly. Route 000003b5 episode 1:
+              # attribution PASSED (gap 4.99 s), the bands were clean over all 7,032 camera frames
+              # of the window, and recovery STILL never ran and logged NOTHING -- because a refusal
+              # here produced no line at all. `bp_recovery_blocked.py` cannot see this either: the
+              # unpoliced bits and CmbbDeny are not logged, and it says so.
+              _why = fordcan_ext.passthrough_admissible(CS.acc_stock_values, CC.longActive,
+                                                        allow_cancel=True)
+              if _why and not self.recovery_declined_said:
+                self.recovery_declined_said = True
+                cloudlog.error("stock ACC passthrough RECOVERY BLOCKED BY THE FRAME: every gate "
+                               "passed but Ford's own frame is still inadmissible -- %s", _why)
+              if not _why:
                 self.cancel_recovery_frames += 1
                 use_passthrough = True
                 clear_cancel = True
@@ -744,6 +764,8 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
           # The cancel RUN still breaks on any other refusal -- it only ever meant "consecutive
           # frames of cancel", and this branch is every reason that is not one.
           self.passthrough_cancel_frames = 0
+          # A new run gets a fresh chance to say why it declined.
+          self.recovery_declined_said = False
 
       # WHO IS AUTHORING, decided here where the decision actually happens. Order matters: `inert`
       # outranks `fallback` because they look identical frame-to-frame and only the duration tells
