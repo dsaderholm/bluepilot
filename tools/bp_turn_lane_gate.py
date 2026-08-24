@@ -92,6 +92,9 @@ def main() -> int:
   # keyed by (road kind, same-direction traffic seen left)
   tally = defaultdict(Counter)
   hwy_seen = Counter()
+  no_map = 0
+  map_frames = 0
+  plan_frames = 0
   cur = {"oneway": None, "hwy": "?", "speed": 0.0}
 
   for seg in all_segs:
@@ -108,6 +111,7 @@ def main() -> int:
     for m in lr:
       w = m.which()
       if w == "mapdOut":
+        map_frames += 1
         try:
           cur["oneway"] = bool(m.mapdOut.oneWay)
           cur["hwy"] = str(m.mapdOut.highwayClass) or "?"
@@ -119,11 +123,24 @@ def main() -> int:
         continue
       if w != "longitudinalPlanSP":
         continue
+      plan_frames += 1
       try:
         p_a = m.longitudinalPlanSP.passingAssist
       except Exception:  # noqa: BLE001
         continue
-      if cur["speed"] < 10.0 or cur["oneway"] is None:
+      # THE LABEL GOES STALE AND THE TOOL MUST SAY SO. `oneway` is held from the last mapdOut,
+      # which is right -- mapdOut and longitudinalPlanSP are different rates, so demanding both on
+      # one frame would discard nearly everything. What is NOT right is holding it forever: drive
+      # off mapped coverage and every later frame keeps the last value, so a divided highway
+      # entered from a two-way road scores in the TWO-WAY rows.
+      #
+      # This tool produced the 70.4% that closed the edge-std removal, so its row assignment is
+      # load-bearing. Rather than invent a staleness window, the coverage is COUNTED and printed:
+      # a run on a route with thin map data now says so instead of looking identical to a clean one.
+      if cur["speed"] < 10.0:
+        continue
+      if cur["oneway"] is None:
+        no_map += 1
         continue
 
       # THE FRAMES THE QUESTION LIVES IN: paint and width both pass, which is what the docstring
@@ -161,6 +178,15 @@ def main() -> int:
     sys.exit("no moving frames with map data and paint+width passing on these routes")
 
   print(f"routes {args.route}")
+  # HOW MUCH THE MAP ACTUALLY SPOKE. Every row below is labelled TWO-WAY or one-way from the last
+  # mapdOut, held indefinitely -- so if the map was thin, the labels are guesses carried a long way
+  # and the rows are worth less than they look. Printed unconditionally rather than as a warning,
+  # because a number nobody rendered is this fork's oldest bug.
+  print(f"  mapdOut frames {map_frames}   plan frames {plan_frames}   "
+        f"moving frames before ANY map fix: {no_map}")
+  if map_frames < plan_frames // 4:
+    print("  ** THIN MAP COVERAGE. The two-way / one-way split below is carried from sparse")
+    print("     mapdOut and should not be read as a clean separation. **")
   print("  frames where PAINT and WIDTH both pass -- the terms a center turn lane satisfies\n")
   print(f"  {'road':<9} {'same-dir left':<14} {'frames':>8} {'STD ONLY':>10} {'beyond only':>12} "
         f"{'both':>8} {'neither':>9}")

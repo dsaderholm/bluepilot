@@ -1257,7 +1257,7 @@ class PassingAssistDetector:
     self.right_widening_m = max(0.0, far - near)
     self.right_widening = self.right_widening_m > MAX_WIDENING_M
 
-  def _left_narrowing(self, model) -> None:
+  def _left_narrowing(self, model) -> bool:
     """Does the road CLOSE IN on our left between here and ~75 m ahead?
 
     The mirror of `_road_widening`, with two deliberate differences, and both matter.
@@ -1275,6 +1275,13 @@ class PassingAssistDetector:
 
     y runs negative to the left, so the edge is the more negative and `line - edge` is the positive
     gap. Reported even when nothing acts on it, which today is always.
+
+    RETURNS WHETHER IT COULD MEASURE AT ALL, and the caller needs it. Without a left lane line or a
+    road edge this leaves 0.0/False, which is indistinguishable from a measured straight road -- so
+    counting those frames in the share's denominator reports "the road was not narrowing" when the
+    truth is "we could not tell". That matters most exactly where it is most wrong: a work zone is
+    where left-line detection is worst, so the unmeasurable frames are not randomly scattered, they
+    cluster on the very roads this term exists for.
     """
     self.left_narrowing_m = 0.0
     self.left_narrowing = False
@@ -1282,17 +1289,18 @@ class PassingAssistDetector:
       line = model.laneLines[LL_LEFT].y
       edge = model.roadEdges[RE_LEFT].y
       if len(line) <= WIDEN_FAR_IDX or len(edge) <= WIDEN_FAR_IDX:
-        return
+        return False
       near = float(line[WIDEN_NEAR_IDX]) - float(edge[WIDEN_NEAR_IDX])
       far = float(line[WIDEN_FAR_IDX]) - float(edge[WIDEN_FAR_IDX])
     except (IndexError, AttributeError, TypeError):
-      return
+      return False
 
     # Only SHRINKAGE counts. A road opening out to the left is a wider carriageway or a median
     # ending, neither of which is a reason to refuse, and folding it in would let the two cancel.
     self.left_narrowing_m = max(0.0, near - far)
     self.left_narrowing = (MAX_LEFT_NARROWING_M < self.left_narrowing_m
                            <= MAX_PLAUSIBLE_NARROWING_M)
+    return True
 
   def _geometry(self, model) -> None:
     """Evaluate whether a lane exists either side, recording both evidence channels separately.
@@ -1326,9 +1334,11 @@ class PassingAssistDetector:
 
     self._road_widening(model, right_std)
     # NOT passed a std, unlike its sibling -- see the method docstring.
-    self._left_narrowing(model)
-    # MOVING FRAMES ONLY, on the same floor the tool uses. See NARROWING_MIN_SPEED_MS.
-    if self.last_v_ego >= NARROWING_MIN_SPEED_MS:
+    measured = self._left_narrowing(model)
+    # MOVING FRAMES ONLY, on the same floor the tool uses -- AND ONLY FRAMES IT COULD MEASURE.
+    # See NARROWING_MIN_SPEED_MS, and the return note in _left_narrowing for why `measured` has to
+    # gate the denominator rather than just the numerator.
+    if measured and self.last_v_ego >= NARROWING_MIN_SPEED_MS:
       self._narrow_frames += 1
       self._narrow_hits += self.left_narrowing
       if self.left_narrowing_m > MAX_PLAUSIBLE_NARROWING_M:

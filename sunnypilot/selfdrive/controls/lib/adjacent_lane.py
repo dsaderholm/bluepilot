@@ -168,9 +168,12 @@ MIN_ONCOMING_MS = 5.0
 #
 # So the floor scales with how fast the ROAD is, using our own speed as the proxy for it. Oncoming
 # traffic travels at roughly road speed whatever we happen to be doing; clutter misread through an
-# angle error scales with ours. Half is deliberately generous -- it still admits a 25 mph oncoming
-# car while we do 30, which is the arterial case the 5 m/s floor exists for, and rejects -8.4 at
-# freeway speed where a real oncoming vehicle would read past -25.
+# angle error scales with ours. The fraction is deliberately generous -- it still admits a slow
+# oncoming car on an arterial, which is the case the 5 m/s floor exists for, and rejects -8.4 at
+# freeway speed where a real oncoming vehicle would read past -25. The exact admission threshold is
+# stated once, against the live value, in the block directly above the constant -- NOT here, because
+# this paragraph said "Half ... admits a 25 mph oncoming car" for a fraction that is no longer half,
+# and a comment that restates a number is a comment that goes stale when the number moves.
 # RAISED 0.5 -> 0.7, 2026-08-23, and this is the ONE move the floor sweep found to be free.
 #
 # `bp_oncoming_adjacent.py` scored every candidate floor against all 30 recorded rising edges across
