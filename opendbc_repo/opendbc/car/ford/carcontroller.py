@@ -149,6 +149,8 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
     self.frames_since_override = 1 << 30
     self.override_last_frame = False
     self.cancel_is_ours = False
+    # True while the override has run and the camera has NOT been seen healthy since.
+    self.override_since_camera_clean = False
     self.cancel_recovery_frames = 0
     self.cancel_recovery_said = False
     # FusionPilot: the stop override -- the last few mph the set speed cannot ask for. Same
@@ -554,10 +556,18 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
       if override and not self.override_last_frame:
         self.passthrough_cancel_frames = 0
       self.override_last_frame = override
+      # SET WHILE WE HAVE THE CAR. Cleared below the instant the camera's own frame is admissible
+      # again -- see the attribution note further down for why both halves are load-bearing.
+      if override:
+        self.override_since_camera_clean = True
       self.frames_since_override = 0 if override else self.frames_since_override + 1
       if not override and self.stock_acc_passthrough and getattr(CS, "acc_cam_valid", False) and getattr(CS, "acc_stock_values", None):
         reason = fordcan_ext.passthrough_admissible(CS.acc_stock_values, CC.longActive)
         use_passthrough = not reason
+        if use_passthrough:
+          # THE CAMERA IS HEALTHY, so whatever the override did has been forgiven. A cancel after
+          # this point is the camera's own business and must not be masked as ours.
+          self.override_since_camera_clean = False
         if reason != self.passthrough_reason_last:
           self.passthrough_reason_last = reason
           cloudlog.warning("stock ACC passthrough: %s", reason or "forwarding Ford's command")
@@ -573,7 +583,30 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
           # override lets go is the frame this run starts on -- anything that starts later than
           # ATTRIBUTION_FRAMES after it belongs to the camera, not to us.
           if self.passthrough_cancel_frames == 0:
-            self.cancel_is_ours = self.frames_since_override <= _CANCEL_ATTRIBUTION_FRAMES
+            # ATTRIBUTION IS NOW "HAS THE CAMERA BEEN HEALTHY SINCE THE OVERRIDE", not "did this
+            # run open within 3 s of it". FusionPilot, 2026-08-24, and it is not a theory -- the
+            # instrumentation added the day before printed the answer on his drive:
+            #
+            #   RECOVERY DECLINED: cancel_is_ours=False longActive=True
+            #                      stop_override_stopped_us=False recovery_frames=0/1500
+            #
+            # Attribution was the gate, on a drive where the opStop-to-inert gap measured 4.99 s
+            # and I concluded FROM THAT TIMING that attribution had passed. It had not. An interval
+            # measured either side of an event does not tell you what a counter inside it did, and
+            # that inference went out as a finding twice.
+            #
+            # The 3 s window is too brittle to keep: any frame whose refusal reason is not cancel
+            # resets the run, so one band clip after the override restarts the clock and the next
+            # run opens too late to be attributed -- blocking recovery for the rest of the drive.
+            #
+            # A PERMANENT `override_ran` BOOL WAS ALREADY TRIED AND REJECTED -- see the note above
+            # this block: it latched for a whole drive, so a cancel the camera raised for its own
+            # reasons forty minutes later was still masked as ours. The flag below is that idea
+            # with the missing half: it CLEARS the moment the camera is seen healthy again, which
+            # is the evidence that whatever we did has been forgiven. It cannot span a healthy
+            # period, so it cannot mask a later independent cancel.
+            self.cancel_is_ours = (self.frames_since_override <= _CANCEL_ATTRIBUTION_FRAMES
+                                   or self.override_since_camera_clean)
           self.passthrough_cancel_frames += 1
           if self.passthrough_cancel_frames == _CANCEL_INERT_FRAMES:
             cloudlog.error("stock ACC passthrough INERT: camera has asked to cancel for 5 s "
