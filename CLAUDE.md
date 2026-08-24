@@ -4839,6 +4839,30 @@ taper never exceeds 1.44 m in this data, so the new term would fire nowhere ther
 freeway", and **the data cannot tell those apart.** The located event is still what separates them,
 and it is now scoreable against fixed numbers rather than needing the analysis rebuilt.
 
+### THE FIX IS VERIFIED ON HIS DRIVES, AND THE 689 IS THE PROOF
+
+Routes 000003ae/af/b0/b1, 2026-08-23 21:14 onward -- the first four drives to run the corrected
+code. Published `leftNarrowingM`, read straight from the logs:
+
+    moving frames                          5070
+    p50 0.00   p90 0.36   p99 0.97   max   9.75
+    past the 1.5 m threshold                 16    0.32%     (was 11.65% on drive 31)
+    implausible >10 m while MOVING           15    0.30%     -> counted as leftNarrowingBroken
+    implausible >10 m while STOPPED         689              -> excluded by the speed floor
+
+**The 689 is the whole defect, sitting in one number.** Those frames were what produced the 99.95 m
+reading, and they were never a road narrowing -- they are a parked car's modelled edge. With the
+floor in, the detector's distribution now matches `bp_left_taper.py` on the same routes (tool: p90
+0.35, p99 0.83) instead of disagreeing with it by a factor of ten.
+
+**BUT THESE DRIVES DO NOT ADVANCE THE GATE QUESTION, and that must not be read as if they did.**
+They are 97.6% `tertiary` with the gate open on 1.7% of frames and only 36 in the would-admit set,
+none above 1.0 m of taper. So they verify the INSTRUMENT and exercise no real taper. A null here is
+a statement about four slow local drives, nothing more.
+
+**The std removal is therefore still justified on the MOTORWAY argument alone** -- would-admit and
+open-today being indistinguishable there -- and not by anything these four drives show.
+
 2026-08-22, `tools/bp_route_intent_score.py`, four drives, 63,000 mapdOut frames. This is
 `bluepilot/ROUTE-INTENT.md` step 2, which said to score the guess already running before building
 anything, and it closes the cheap option.
