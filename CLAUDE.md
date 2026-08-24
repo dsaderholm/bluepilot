@@ -3705,6 +3705,71 @@ twice.** An interval measured either side of an event does not tell you what a c
 did. **When a rule cannot be explained from a drive, add the log line rather than a third
 inference.**
 
+## 2026-08-24: WHAT THE INSTRUMENTATION ANSWERED, AND TWO MEASUREMENT TRAPS
+
+### THE CANCEL RECOVERY WAS BLOCKED BY ATTRIBUTION. IT PRINTED THE ANSWER.
+
+    RECOVERY DECLINED: cancel_is_ours=False longActive=True
+                       stop_override_stopped_us=False recovery_frames=0/1500
+
+**On the same drives I had measured the opStop-to-inert gap at 4.99 s and concluded FROM THAT TIMING
+that attribution passed -- and published it as a finding twice.** An interval measured either side
+of an event does not tell you what a counter inside it did. One log line settled in a single drive
+what two rounds of inference got wrong.
+
+Route `b5` had THREE inert episodes, not the one I had been reasoning about:
+
+    ep 1  override  8.99 s -> inert 70.3 s   gap  4.99 s  attribution PASSED
+    ep 2  override  2.29 s -> inert 31.3 s   gap 20.93 s  attribution REFUSED
+    ep 3  override 11.91 s -> inert 45.6 s   gap 18.17 s  attribution REFUSED
+
+Two refusals, two DECLINED lines, matching exactly -- which is what makes the fix evidence rather
+than a guess. The 3 s window is too brittle because ANY non-cancel refusal resets the run, so one
+band clip restarts the clock and the next run opens too late to be attributed.
+
+**`override_since_camera_clean` replaces it**: set while the override has the car, CLEARED the
+moment the camera's own frame is admissible again. The permanent `override_ran` bool was tried and
+rejected years-ago-in-fork-time for latching a whole drive; this is that idea with the missing half,
+so it cannot span a healthy period and cannot mask a later independent cancel.
+
+**AND THE NARROWER VERSION IS WRONG -- it was written, tried, and reverted the same hour.** Clearing
+on "the camera is not asserting cancel" instead of "the frame is admissible" fails because between
+the override and the cancel run he is DISENGAGED, where `passthrough_admissible` returns "openpilot
+longitudinal inactive" -- not a cancel. The narrow rule clears the flag there and re-blocks exactly
+the episodes it was meant to rescue. `test_a_late_cancel_run_after_our_override_is_still_ours` is
+what caught it. **Do not narrow it again.**
+
+**EPISODE 1 IS STILL UNEXPLAINED.** Attribution passed, the bands were clean across all 7,032 camera
+frames of the window, every gate satisfied -- and recovery never ran and logged NOTHING, because a
+refusal from `passthrough_admissible(allow_cancel=True)` INSIDE the recovery body was silent. That
+path now logs `RECOVERY BLOCKED BY THE FRAME`. Likely one of the unpoliced bits; the next drive
+names it.
+
+### `cluster_moved_since_press` IS A PAIR WITH `v_cluster_at_press`. RESET THEM TOGETHER.
+
+The latch means "the cluster has moved since THIS anchor". The press path reset both; the inferred
+fallback and the pinned-hold path each re-anchored WITHOUT clearing it, so a stand-down armed by
+either began with `moved` already True and `settled` could fire on the first stable frame -- ending
+the stand-down mid-gesture, which is verbatim the failure it exists to prevent.
+
+Found in code review hours after shipping the latch, in the hold path he had reported four times.
+`test_the_moved_latch_resets_when_the_anchor_moves` asserts the INVARIANT per function rather than a
+symptom, because the symptom needs an exact interleaving and the invariant does not.
+
+### TWO MEASUREMENT TRAPS, BOTH SELF-INFLICTED THE SAME NIGHT
+
+**`vTarget` IS POST-BASELINE. MEASURING ITS TRAVEL MEASURES HIS THUMB.** While a hold is active it
+EQUALS the hold by construction. A tool reading it reported "27x jitter" under `ford` authority that
+was him pressing buttons while `vTargetRaw` sat steady at 22 and both curve controllers were
+inactive. The capnp comment above `vTargetRaw` states this in as many words. **Any question about
+what the PLAN is doing reads `vTargetRaw`; `vTarget` only answers what ICBM is aiming at.**
+
+**A TEST THAT COUNTS ASSIGNMENTS MUST COUNT THE RIGHT VALUE.** The latch invariant test was vacuous
+twice: first a line-proximity heuristic that flagged two correct sites because a comment sat between
+anchor and reset, then a per-function tally that counted the latch's own `= True` as a reset, so
+deleting a real one still passed. **Mutation testing is the only reason either was caught** -- both
+were green against the bug they were written for.
+
 ## Working with the owner
 
 - **READ THE MODULE BEFORE EXTENDING IT.** These files carry long design docstrings recording what
@@ -5309,3 +5374,47 @@ passing assist, right? Just like passing assist builds off ICBM?"* Yes.
 The radar detector is a sibling because it needs nothing passing assist owns. Route intent is the
 opposite -- it exists to feed passing assist's gates and consumes the lane anchor, `_geometry`, the
 maneuver state machine and the panel. Branching it off ICBM would leave it without all of them.
+## 2026-08-24: THE "SET SPEED CHANGED" SPAM WAS A SHAKING TARGET, NOT A HUNTING CONTROLLER
+
+His report was *"it keeps telling me set speed changed and the max speed is flashing fast"*, and the
+press count on route `000003ae` looked like the documented tap-vs-hold hunt. It was not.
+
+**Measured, from his rlogs:**
+
+| route | `vTargetRaw` changes | rate | driver button events in the window |
+|---|---|---|---|
+| `000003ae` | 363 over 129 s | **2.82 / s** | **none** — all 378 presses were ICBM |
+| `000003b5` | 401 over 574 s | 0.70 / s | the holds there were HIS thumb |
+
+On `ae` the plan target flipped 27 -> 30 -> 27 with a ~0.1 s high leg inside a ~0.5 s cycle, for the
+whole `inert` window, while the baseline, `vTarget` and the dash all sat still at 27. ICBM was not
+failing to settle on a reachable number; it was tracking a number that would not sit still.
+
+**Two traps this walked into, both worth not repeating:**
+
+1. **`ae` cannot answer WHY the target shook.** `vSlaTarget` and `speedLimitLive` were added AFTER
+   those drives -- they read 0 on all 27,139 frames of `ae` and are populated on 61,967 of `b5`.
+   Re-querying `ae` for the source is wasted work. `b5` and later routes can answer it.
+2. **My first conclusion — "the jitter was his thumb" — was right for `b5` and wrong for `ae`.**
+   One route's answer is not the other's. Check the driver button events per route, every time.
+
+**The fix, and the design rule it produced.** The first version made every step UP wait out a
+settle window. It broke five tests in `test_manual_override`, including the two defending the
+owner's own rule that *behind a car the set speed may go anywhere, because that car is probably
+driving correctly*; an earlier placement (above the `v_target_raw` capture) also DESTROYED a driver
+hold in `test_icbm_own_recovery_is_never_adopted`. Both were caught by running the FULL suite, not
+the new file. The shipped filter is aimed at the one shape that was actually measured -- a bounce
+back up to a level just left -- and:
+
+- a FALL is adopted on the frame it arrives, always, with no exception, ever;
+- a rise to a level the target has NOT just left is adopted immediately;
+- only a bounce back inside `REVERSAL_MEMORY_S` has to be asked for continuously for `SETTLE_S`.
+
+It sits BELOW the `v_target_raw` capture on purpose. Holds, overrides and the divergence latch all
+compare against `v_target_raw`, which is still exactly what the planner published. The stated reason
+for putting it above -- that a shaking raw value could arm the override -- was arithmetic I never
+did: `DEFAULT_BASELINE_RESET_DELTA` is 10 mph and the shake was 3.
+
+**Generalisation, and it has now cost twice in two days: a filter that makes the car SLOWER to speed
+up is cheap, and a filter that makes it slower to slow down is never acceptable. Put the delay only
+on the permissive direction, and prove the placement against the whole suite before believing it.**

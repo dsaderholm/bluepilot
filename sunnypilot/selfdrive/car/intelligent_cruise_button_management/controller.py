@@ -5,7 +5,7 @@ This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 """
 from cereal import car, custom
-from opendbc.car import structs, apply_hysteresis
+from opendbc.car import structs
 from openpilot.common.constants import CV
 from openpilot.common.params import Params
 from openpilot.common.realtime import DT_CTRL
@@ -29,8 +29,50 @@ BaselineSource = custom.IntelligentCruiseButtonManagement.BaselineSource
 UNCONFIRMED_LEAD_COMMANDING = (UnconfirmedLeadState.active, UnconfirmedLeadState.restoring)
 
 ALLOWED_SPEED_THRESHOLD = 1.8  # m/s, ~4 MPH
-HYST_GAP = 0.0  # currently disabled; TODO-SP: might need to be brand-specific
 INACTIVE_TIMER = 0.4
+
+# BluePilot: A FALL NEVER WAITS. A BOUNCE STRAIGHT BACK HAS TO HOLD.
+#
+# Route 000003ae, 2026-08-23: the planner's target flipped between 27 and 30 mph 2.82 times a
+# SECOND for the whole inert window, and ICBM did exactly what it is built to do -- 168 increase
+# frames and 210 decrease frames, with ZERO driver button events in the window. That is the
+# measured shape of "it keeps telling me set speed changed and the max speed is flashing fast".
+# It is NOT the tap-vs-hold oscillation documented further down (there the target is still and the
+# CLUSTER crosses it); here the target itself is shaking and the cluster is chasing it honestly.
+#
+# The upstream lever for this was `apply_hysteresis(..., HYST_GAP)`, left at 0.0 with a TODO. It
+# could not have fixed this anyway: it is a MAGNITUDE deadband, and any gap wide enough to swallow
+# a 3 mph flip is wide enough to sit out a real speed-limit change.
+#
+# WHAT IS FILTERED IS REVERSALS, NOT RISES. An earlier version of this made every step up wait, and
+# that broke five tests defending real rules -- including the owner's own "behind a car, set the
+# speed to anything, because that car is probably driving correctly". Metering honest climbs to
+# fix a noise complaint is a bad trade. So the filter only ever engages on the one shape that was
+# actually measured: the target coming back UP to a level it left moments ago.
+#
+#   FALL         adopted on the very first frame, no delay ever, and it records the level it left.
+#                Aiming lower is the conservative action, and the exit-ramp incident of 2026-08-23
+#                came from a set speed that could not fall -- nothing here may re-create that.
+#   RISE to new  adopted immediately. A limit going up, a curve releasing, a lead pulling away.
+#   BOUNCE back  to within SETTLE_EPS of a level left inside REVERSAL_MEMORY_S: must be asked for
+#                continuously for SETTLE_S. A 0.1 s blip inside a 0.5 s cycle never qualifies, so
+#                the oscillation collapses onto its low leg and stays there.
+#
+# The memory is refreshed every time a bounce is refused, so a shake that goes on for a minute
+# never ages out mid-shake; once the target genuinely settles it expires REVERSAL_MEMORY_S later
+# and the next climb is instant again.
+#
+# Deliberately NO force-adopt timeout. If the target genuinely oscillates forever the low leg is
+# the right answer, and a timeout would re-introduce exactly the reversals this removes.
+#
+# Scope: this filters ONLY the target the button logic aims at. Holds, overrides and the divergence
+# latch all compare against `v_target_raw`, which stays exactly as the planner published it -- see
+# the note at the call site for what happened when that was not true.
+SETTLE_S = 0.4
+SETTLE_FRAMES = int(SETTLE_S / DT_CTRL)
+SETTLE_EPS = 1  # display units; a rise of one is a ramp crossing an integer, not a step
+REVERSAL_MEMORY_S = 2.0
+REVERSAL_MEMORY_FRAMES = int(REVERSAL_MEMORY_S / DT_CTRL)
 
 # BluePilot: buttons that count as the driver taking the set speed back from ICBM.
 # gapAdjustCruise/lkas/mainCruise deliberately excluded -- they don't change the set speed.
@@ -311,6 +353,10 @@ class IntelligentCruiseButtonManagement:
     self.is_ready = False
     self.is_ready_prev = False
     self.v_target_ms_last = 0.0
+    self.v_target_up_frames = 0     # consecutive frames the planner has asked for a STEP up
+    self.v_target_settled = 0       # the settled set-speed target, in display units
+    self.v_target_fell_from = 0     # the level a recent fall left behind
+    self.v_target_fell_frames = 0   # how long that level stays worth remembering
     self.is_metric = False
 
     # BluePilot: a COPY. Upstream binds the module-level dict directly, which makes these timers
@@ -451,11 +497,61 @@ class IntelligentCruiseButtonManagement:
   def v_cruise_equal(self) -> bool:
     return self.v_target == self.v_cruise_cluster
 
+  def settle_target(self, v_target: int) -> int:
+    """Take a fall at once; make a BOUNCE BACK to a level just left prove it is not a blip.
+
+    Display units, not m/s: this is the number the button logic aims at, and the oscillation it
+    exists to absorb was measured in whole mph on the dash.
+
+    See the SETTLE_S note at the top of this file for why the filter is time rather than magnitude,
+    why it is aimed at reversals rather than at rises, and why there is no timeout that would
+    eventually adopt a value that never settles.
+    """
+    if self.v_target_fell_frames > 0:
+      self.v_target_fell_frames -= 1
+    else:
+      self.v_target_fell_from = 0
+
+    def adopt(v):
+      self.v_target_up_frames = 0
+      self.v_target_settled = v
+      return v
+
+    if self.v_target_settled <= 0:
+      # Nothing adopted yet -- the first frame is not a move, it is the starting point.
+      return adopt(v_target)
+
+    if v_target < self.v_target_settled:
+      # A FALL, taken on this frame, always. Aiming lower is the conservative action and the
+      # exit-ramp incident of 2026-08-23 came from a set speed that could not fall. Remember the
+      # level being left, so an immediate bounce back to it is recognisable as one.
+      self.v_target_fell_from = max(self.v_target_settled, self.v_target_fell_from)
+      self.v_target_fell_frames = REVERSAL_MEMORY_FRAMES
+      return adopt(v_target)
+
+    if v_target <= self.v_target_settled + SETTLE_EPS:
+      # Level, or a ramp crossing one mph. No delay.
+      return adopt(v_target)
+
+    if self.v_target_fell_frames <= 0 or v_target > self.v_target_fell_from + SETTLE_EPS:
+      # A rise to somewhere NEW. Nothing here meters an honest climb: a speed limit going up, a
+      # curve releasing, a lead pulling away. The owner's rule that behind a car the set speed may
+      # go anywhere it likes stays exactly as it was.
+      return adopt(v_target)
+
+    # A BOUNCE: back up to a level we left moments ago. This is the shape measured on route
+    # 000003ae and nothing else looks like it. Make it hold.
+    self.v_target_fell_frames = REVERSAL_MEMORY_FRAMES   # keep the memory alive while it repeats
+    self.v_target_up_frames += 1
+    if self.v_target_up_frames >= SETTLE_FRAMES:
+      return adopt(v_target)
+
+    return self.v_target_settled
+
   def update_calculations(self, CS: car.CarState, LP_SP: custom.LongitudinalPlanSP) -> None:
     speed_conv = CV.MS_TO_KPH if self.is_metric else CV.MS_TO_MPH
-    ms_conv = CV.KPH_TO_MS if self.is_metric else CV.MPH_TO_MS
 
-    self.v_target_ms_last = apply_hysteresis(LP_SP.vTarget, self.v_target_ms_last, HYST_GAP * ms_conv)
+    self.v_target_ms_last = LP_SP.vTarget
 
     self.v_target = round(self.v_target_ms_last * speed_conv)
     self.v_cruise_min = get_minimum_set_speed(self.is_metric)
@@ -495,6 +591,16 @@ class IntelligentCruiseButtonManagement:
     # Comparing post-limiter values is exactly how the original re-arm bug worked.
     self.v_target_raw = self.v_target
     self.plan_source = LP_SP.longitudinalPlanSource
+
+    # BluePilot: and only NOW is the shake filtered -- see the SETTLE_S note at the top. This sits
+    # BELOW the `v_target_raw` capture deliberately. An earlier version of this filter sat above it,
+    # on the theory that a shaking raw value could arm and disarm the override at
+    # `baseline_reset_delta`. That theory was wrong twice over: the reset delta is 10 mph and the
+    # measured shake was 3, so it could never have armed anything -- and filtering there put every
+    # hold and override decision on a delayed value, which DESTROYED a driver hold outright in
+    # `test_icbm_own_recovery_is_never_adopted`. The oscillation costs button presses, so the fix
+    # belongs on the number that drives button presses and nowhere else.
+    self.v_target = self.settle_target(self.v_target)
 
     # THE DIVERGENCE ARM THAT LIVED HERE IS GONE, 2026-08-22, in the same review that found the
     # stale-limit bug below. It was added this morning to fix a hold walked back to SLA's number,
