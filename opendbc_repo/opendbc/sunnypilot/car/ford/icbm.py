@@ -42,8 +42,7 @@ class IntelligentCruiseButtonManagementInterface(IntelligentCruiseButtonManageme
   happened on 2026-08-15 and left the car undrivable.
   """
 
-  def update(self, CC_SP, CS, packer, CAN, frame, last_button_frame,
-             suppress_set_speed: bool = False) -> tuple[list[CanData], int]:
+  def update(self, CC_SP, CS, packer, CAN, frame, last_button_frame) -> tuple[list[CanData], int]:
     """
     Update ICBM state and generate button press messages.
 
@@ -71,30 +70,20 @@ class IntelligentCruiseButtonManagementInterface(IntelligentCruiseButtonManageme
     # The gap machine has to keep being ticked and its lease has to keep being asserted, or the
     # resumed remainder lands as a second press. Suppressing the set speed leaves `preempted`
     # False, which is exactly right: nothing is preempting the gap this frame.
-    # RISING IS PREPARING; FALLING IS CHASING. FusionPilot, 2026-08-23, from the road.
+    # NO SUPPRESSION HERE. An ICBM stand-down while openpilot authors ACCDATA was added and fully
+    # REVERTED on 2026-08-23 -- it froze the set speed wherever the camera latch caught it, and the
+    # follow-up that suppressed only DOWNWARD presses was worse still, because down is the direction
+    # an exit ramp needs. He reported being stuck at 25, 27 and 35 against SLA targets of 35, 35 and
+    # 40, and then took an exit at 5.20 m/s^2 lateral.
     #
-    # `suppress_set_speed` blocked BOTH directions, which froze the set speed wherever it happened
-    # to be when the camera latched. He hit it within the hour: "At one point we were stuck at 25
-    # even though SLA wanted 35." The set speed had been walked down for a slowdown, Ford ACC went
-    # unavailable, ICBM stopped pressing, and it sat 10 mph under the limit.
+    # The parameter and its branch survived that revert with no caller, which left the dangerous
+    # rule sitting here under a comment that read as though it were the reviewed design. Removed.
     #
-    # He had already called this exact failure before it happened: "ICBM shouldn't be trying to
-    # change its speed, but preparing for if we recover Ford ACC once we are done with e2e."
-    # FREEZE IS NOT PREPARE.
-    #
-    # So while openpilot is authoring, only DOWNWARD presses are suppressed. Downward is ICBM
-    # chasing a curve or a stop that e2e is already executing -- pointless, and the hunting he saw
-    # on route 000003ae. Upward is the set speed climbing back toward the number that should govern
-    # when Ford has the car again, which is the handback being prepared. ICBM will not climb past
-    # its own target, so this cannot run away.
-    #
-    # Direction rather than a value, deliberately: the aim lives in ICBM's units in selfdrived and
-    # the carcontroller has no is_metric, so comparing against it here would need a unit the
-    # boundary does not carry. "Which way" needs no units.
-    if suppress_set_speed and self.ICBM.sendButton == SendButtonState.decrease:
-      preempted = False
-    else:
-      preempted = self.ICBM.sendButton != SendButtonState.none
+    # THE CORRECT RULE IS HIS AND IS NOT IMPLEMENTED: move the set speed toward the DRIVER'S AIM
+    # and stop there -- neither "always" nor "never" nor either direction. It needs the aim, which
+    # lives in ICBM's units in selfdrived, and the carcontroller has no is_metric to compare
+    # against it. Do not reach for a direction test again as a shortcut to it.
+    preempted = self.ICBM.sendButton != SendButtonState.none
     if preempted:
       button_signal = BUTTON_SIGNALS[self.ICBM.sendButton]
 

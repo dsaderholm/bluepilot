@@ -148,7 +148,13 @@ PRESS_SETTLE_MAX_FRAMES = 600     # 6 s hard cap, so a stuck cluster cannot susp
 # because the only thing it gates here is the press-settle stand-down, and every second of it is a
 # second a dismissed hold keeps governing the car. The engage gate in cruise_ext keeps the long
 # default -- see the note on `stale_s` there.
-ICBM_BUTTON_STALE_S = 2.0
+#
+# 3.0 s, not 2.0. These timers also feed `is_ready` through `button_pressed`, so expiring one
+# while a button is GENUINELY held makes ICBM ready mid-press and it starts driving the set speed
+# while the driver is still pressing -- the exact on-road report the press-settle re-arm exists
+# for. The longest gap measured WITHIN a held press is 0.72 s; 2.0 s was only 2.8x that, from one
+# window of one route. 3.0 s is 4.2x and still nothing like the 16 s the broken path took.
+ICBM_BUTTON_STALE_S = 3.0
 # BluePilot: last-resort fallback -- adopt set-speed movement ICBM did not command, whatever button
 # produced it. The press path above is primary; this exists because it depends on the driver's
 # button arriving as one of MANUAL_OVERRIDE_BUTTONS, and on a car with flashed SCCM firmware that
@@ -1231,6 +1237,12 @@ class IntelligentCruiseButtonManagement:
         # while a hold created against a known limit still has to leave and come back.
         self.baseline_diverged = not self.speed_limit_known
         self.v_cluster_at_press = self.v_cruise_cluster_prev
+        # RESET WITH THE ANCHOR. `cluster_moved_since_press` means "the cluster has moved since
+        # THIS anchor", so re-anchoring without clearing it leaves the new stand-down starting with
+        # `moved` already True -- and `settled` can then fire on the first stable frame, ending the
+        # stand-down mid-gesture. That is the documented failure the stand-down exists to prevent:
+        # the baseline froze and ICBM walked the set speed back down while the button was held.
+        self.cluster_moved_since_press = False
       self.override_state = OverrideState.manual
       # Same rule as the press path: under a curve or a lead, something other than the driver owns
       # the target, so movement there must not redefine the hold. Without this the press path's
@@ -1497,6 +1509,7 @@ class IntelligentCruiseButtonManagement:
     self.v_baseline = self.pinned_hold
     self.baseline_source = BaselineSource.pinned
     self.v_cluster_at_press = self.v_cruise_cluster
+    self.cluster_moved_since_press = False   # resets with the anchor -- see the note in the fallback
     return True
 
   def enforce_hold_policy(self) -> None:
