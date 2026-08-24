@@ -4591,6 +4591,31 @@ labelled live, exploring nothing. **A sweep that hardcodes the value it exists t
 being a sweep as soon as its recommendation is adopted.** Candidates are now a deduped set that
 straddles whatever is live. Found by reading the output; no test would have caught it.
 
+##### AND FIXING IT OVERTURNED THE READING ABOVE: THE FRACTION IS INERT ON THESE DRIVES
+
+With the sweep actually sweeping, 0.50 / 0.70 / 0.85 produce **identical rows at every flat floor**.
+Nothing separates them, which means no edge's `|v_abs|` fell between `0.5 * v_ego` and `0.7 * v_ego`.
+The flat 5.0 m/s floor bound all four; the fraction never got a vote.
+
+    5.0   0.50 / 0.70 / 0.85     0 of 0 false killed     0 of 4 real lost
+    7.0   0.50 / 0.70 / 0.85     0 of 0                  1 of 4
+    11.0  0.50 / 0.70 / 0.85     0 of 0                  2 of 4
+
+**So "4 edges, 0 impossible" is not weak evidence for the change -- it is NO evidence about it.**
+The entry above called it a small sample, which was true and not the point: the constant that
+changed was switched off for the whole of this data. `max(5.0, f * v)` only distinguishes f at all
+above 7.1 m/s, and it takes an edge landing inside the narrow band between the two to score
+differently.
+
+That is the SAME shape as the finding that produced the speed-scaled floor in the first place --
+*"below 22 mph the scaled term is under the flat floor, so the floor IS 5 m/s"*. The mechanism was
+already written down here, and I still read a null from the inert regime as a result.
+
+**What would actually test 0.7: rising edges above roughly 16 mph.** Freeway and fast arterial, which
+is where the false edges lived anyway -- every one of the original ten was at or below 43 mph, and
+the flat floor covers the bottom of that range. Until such edges appear, the change is unmeasured on
+the road rather than unproven.
+
 **AND THE OBVIOUS DISCRIMINATOR IS FORBIDDEN, which is worth stating before someone reaches for it.**
 `oneWay` from the map separates these perfectly by construction -- it is what labels them. But
 suppressing an oncoming sighting because the map says one-way is **the map REMOVING a refusal**,
