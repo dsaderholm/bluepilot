@@ -4819,6 +4819,42 @@ in fact traffic across a median.
 ground truth, and the measurement inherits whatever the label was actually asserting rather than
 what it was read as meaning. `oneWay` labels a carriageway; it was read as labelling a road.
 
+###### AND THE FLOOR LEVER IS DEAD TWICE OVER: THE LAST FALSE EDGE IS TOO FAST, NOT TOO SLOW
+
+Four drives pooled (000003b7 through 000003ba), 41 segments, eight rising edges:
+
+    two-way road -- plausible                                     4
+    one-way, MOVING LIKE REAL TRAFFIC -- likely across a median    3
+    one-way, IMPLAUSIBLY FAST -- radar artifact                    1
+
+**Exactly one genuine false positive in eight**, and the floor sweep reads `0/0 killed` at every
+combination -- every change only LOSES real edges. There is nothing left for a floor to win, which
+retires that lever on current evidence.
+
+**And the one bad edge is ABOVE every floor, not below it.** `primary, oneWay=True, ego 1 mph,
+target |v_abs| 95 mph`. A floor rejects what sits under it; this sits far over. So the speed floor is
+structurally incapable of catching the only false edge left -- a second, independent reason the
+lever is finished.
+
+**THE REAL GAP: `min_oncoming_ms` HAS NO UPPER BOUND AT ALL.** It is `max(MIN_ONCOMING_MS, fraction *
+v_ego)` and nothing anywhere caps the other end, so an arbitrarily large reading counts as oncoming
+traffic and buys a 90 s veto.
+
+**DO NOT COPY THE TOOL'S 85 MPH INTO THE CAR.** `oncomingVAbs` is the target's GROUND speed, not a
+closing speed, and he drives I-15 where the posted limit is 80 -- so real opposing traffic on a
+divided highway legitimately reads near 80-85. A ceiling there would start refusing genuine oncoming
+vehicles on his fastest roads, which is the one failure this whole detector exists to prevent. 85 is
+sound as a DIAGNOSTIC split and would be dangerous as a gate; a car-side ceiling has to sit well
+above real traffic, and what "well above" means on his roads is not yet measured.
+
+**And note which direction a ceiling moves things:** suppressing a sighting REMOVES a veto, so it
+OPENS a maneuver and carries the higher bar. One bad edge in eight is not that bar.
+
+**The narrowing term, meanwhile, finally has something to refuse.** On `primary` across these three
+drives the would-admit set has a real tail -- p99 7.91, max 9.99 -- and a 1.5 m gate refuses 8.6% of
+it while touching 0.0% of what the gate opens today. That is the first road class where the taper
+check does visible work at zero measured cost.
+
 **AND THE OBVIOUS DISCRIMINATOR IS FORBIDDEN, which is worth stating before someone reaches for it.**
 `oneWay` from the map separates these perfectly by construction -- it is what labels them. But
 suppressing an oncoming sighting because the map says one-way is **the map REMOVING a refusal**,
