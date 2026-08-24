@@ -4,13 +4,14 @@ He reported it again on 2026-08-23, with a photo: HOLD 27, SPEED LIMIT 25, offse
 SLA's target WAS 27 and the hold WAS 27 and it did not clear. The fix from 2026-08-22 is on the
 car; it ran and did not fire, which is more informative than it being absent.
 
-THE RULE COMPARES TWO VALUES THAT ARE NOT PUBLISHED. `v_sla_target` and `speed_limit_live` are
-computed in `update_calculations` and never reach the wire, so a route cannot say which term
-failed -- the exact defect the capnp comment above `vTargetRaw` describes, reintroduced when the
-rule changed to compare different values. Publishing them is the real fix; this tool exists because
-the drives that need explaining were recorded before that lands.
+THE RULE COMPARES TWO VALUES THAT ARE NOW PUBLISHED. `v_sla_target` and `speed_limit_live` reach
+the wire as `vSlaTarget` and `speedLimitLive` (2026-08-23), and this tool reads them in preference
+to anything it can work out for itself: they are the terms the rule actually gated on, in the frame
+that gated on them. The output states which source it used.
 
-Both terms are reconstructable from `longitudinalPlanSP.speedLimit.resolver`, which IS logged:
+For drives recorded BEFORE that landed the fields are absent -- 0 on all 27,139 frames of 000003ae
+against 61,967 of 000003b5 -- and both terms are reconstructable from
+`longitudinalPlanSP.speedLimit.resolver`, which was always logged:
 
     speed_limit_live = resolver.speedLimitValid
     v_sla_target     = round(resolver.speedLimitFinalLast * MS_TO_MPH)   when live, else 0
@@ -32,7 +33,7 @@ import sys
 MS_TO_MPH = 2.23694
 REALDATA = os.environ.get("REALDATA", "/data/media/0/realdata")
 sys.path.insert(0, "/data/openpilot")
-from openpilot.tools.lib.logreader import LogReader  # noqa: E402
+from openpilot.tools.lib.logreader import LogReader
 
 
 def seg_index(name):
@@ -58,6 +59,14 @@ def main():
   t0 = None
   rows = []
   prev_key = None
+  # PREFER WHAT THE CONTROLLER USED over what this tool can re-derive. `vSlaTarget` and
+  # `speedLimitLive` are published precisely because they are the two terms the clearing rule gates
+  # on, evaluated inside the frame that ran the rule. Re-deriving them from the resolver here is a
+  # second implementation of the same arithmetic, and a tool whose reconstruction drifts reports on
+  # a rule the car never evaluated. The resolver path is kept only for routes recorded before those
+  # fields existed -- on 000003ae they are absent on all 27,139 frames, on 000003b5 present on
+  # 61,967 -- and which one was used is stated in the output rather than left to be assumed.
+  published_seen = 0
 
   for s in segs:
     p = os.path.join(REALDATA, s, "rlog")
@@ -103,6 +112,15 @@ def main():
         raw = round(float(icbm.vTargetRaw))
       except Exception:
         continue
+
+      try:
+        pub_target = round(float(icbm.vSlaTarget))
+        pub_live = bool(icbm.speedLimitLive)
+      except Exception:
+        pub_target, pub_live = 0, False
+      if pub_target > 0:
+        published_seen += 1
+        sla_target, live = pub_target, pub_live
       # NEVER HIDE THE ZERO. The first version of this skipped `baseline <= 0` and so could not
       # tell 'the hold stuck' from 'the hold cleared one frame later' -- the single question it
       # was written to answer. That is this fork's oldest recorded bug shape, committed here by
@@ -119,7 +137,7 @@ def main():
       elif sla_target <= 0:
         why = "SLA TARGET 0"
       elif baseline != sla_target:
-        why = "differs by {:+d} -- arming, correct".format(baseline - sla_target)
+        why = f"differs by {baseline - sla_target:+d} -- arming, correct"
       elif source == "pinned":
         why = "PINNED -- exempt, correct"
       elif not enabled:
@@ -136,6 +154,13 @@ def main():
     print("no hold on this route")
     return
 
+  if published_seen:
+    print(f"source of `sla`/`live`: PUBLISHED by the controller ({published_seen} frames)")
+  else:
+    print("source of `sla`/`live`: RE-DERIVED from the resolver -- this route predates the")
+    print("                        published fields, so these are this tool's arithmetic, not the")
+    print("                        controller's. Treat a 'SHOULD HAVE CLEARED' here with suspicion.")
+  print()
   print("     t+     hold  sla  live  cruise  source          raw  why")
   for t, b, s, lv, en, src, rw, why in rows:
     print("  {:7.1f}  {:>4} {:>4}  {:>5} {:>7}  {:<14} {:>4}  {}".format(
@@ -143,7 +168,7 @@ def main():
 
   bad = [r for r in rows if "SHOULD HAVE" in r[7]]
   print()
-  print("{} state change(s); {} where the rule should have cleared and did not".format(len(rows), len(bad)))
+  print(f"{len(rows)} state change(s); {len(bad)} where the rule should have cleared and did not")
   if not bad:
     # The interesting answer is usually this one: the rule behaved, and the REASON it never got to
     # act is the thing to fix.
@@ -151,7 +176,7 @@ def main():
     c = Counter(r[7].split(" --")[0].split(" (")[0] for r in rows)
     print("reasons it declined, by frequency:")
     for k, v in c.most_common():
-      print("   {:<26} {}".format(k, v))
+      print(f"   {k:<26} {v}")
 
 
 if __name__ == "__main__":

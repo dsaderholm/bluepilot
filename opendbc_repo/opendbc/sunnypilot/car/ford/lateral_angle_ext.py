@@ -215,7 +215,6 @@ class LateralAngleExt:
     self._ensure_lateral_curv_initialized(CP)
 
     v_ego = float(CS.out.vEgoRaw)
-    d_ref = pscm_d_ref_m(v_ego)
 
     curvature_rate = 0.0
     path_offset = 0.0
@@ -349,7 +348,6 @@ class LateralAngleExt:
 
     self.precision_type = 1
     precision = 1
-    LP = self.lp
     desired_curvature = float(actuators.curvature)
 
     # Variable lookup time: t_base tracks planner pre-compensation; extra tapers on high speed and large curves.
