@@ -141,6 +141,34 @@ def create_acc_msg(packer, CAN: CanBus, long_active: bool, gas: float, accel: fl
 
   Frequency is 50Hz.
   """
+  # FusionPilot: CLAMP TO PANDA'S BAND, BECAUSE PANDA DROPS WHAT IT WILL NOT PASS.
+  #
+  # `stop_override.py` opens by saying this function "already clamps to panda's bands". It did not.
+  # The clamp lived in `create_acc_msg_passthrough` -- a different function -- and only on the top.
+  #
+  # THE TWO NUMBERS DISAGREE BY 0.0009 m/s^2 AND THAT IS THE WHOLE BUG:
+  #
+  #     CarControllerParams.ACCEL_MIN  = -3.5      openpilot clips its request to this
+  #     _PANDA_ACCEL_MIN               = -3.4991   panda refuses anything below this
+  #
+  # So every frame that reached the clip -- which is every hardest-braking frame -- was handed to
+  # panda 0.0009 below its floor and REJECTED. A rejected frame is not a softer command, it is no
+  # command at all, and ACCDATA carries a rolling counter that a gap breaks.
+  #
+  # MEASURED on route 000003b8, 2026-08-24, the drive where the stop override took a red light for
+  # the first time: during its 2.8 s of authority, 220 frames went out (all clamped at -3.499) and
+  # 15 were REJECTED at -3.503 .. -3.542. Ford ACC faulted 2.8 s in -- `accFaulted`, the disengage
+  # he heard -- and never recovered; the next route came up "Cruise Fault: Restart the car".
+  # Rejections under every other authority carried legal values and are a different question.
+  #
+  # Clamping loses 0.006 m/s^2 of braking at the extreme. Not clamping loses the entire frame.
+  accel = min(max(float(accel), _PANDA_ACCEL_MIN + _PANDA_MARGIN), _PANDA_ACCEL_MAX - _PANDA_MARGIN)
+  # Same treatment for the gas request, which has the same shape of band and the same raw write.
+  # `_PANDA_GAS_INACTIVE` (-5.0) is the deliberate "not requesting" sentinel and is left alone --
+  # it sits far outside the band on purpose and panda exempts it.
+  if abs(float(gas) - _PANDA_GAS_INACTIVE) >= 0.005:
+    gas = min(max(float(gas), _PANDA_GAS_MIN + _PANDA_MARGIN), _PANDA_GAS_MAX - _PANDA_MARGIN)
+
   values = {
     "AccBrkTot_A_Rq": accel,                          # Brake total accel request: [-20|11.9449] m/s^2
     "Cmbb_B_Enbl": 1 if long_active else 0,           # Enabled: 0=No, 1=Yes
