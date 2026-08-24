@@ -88,6 +88,37 @@ METERS_TO_FEET = 3.280839895
 MS_TO_MPH = 2.23693629
 
 
+def _best_accuracy(gps) -> float:
+  """The best horizontal-accuracy figure this receiver actually reports, in metres.
+
+  FusionPilot, 2026-08-24. THE COMMA'S OWN GPS DOES NOT POPULATE `horizontalAccuracy`.
+
+  Measured across all 894 gpsLocation samples of route 000003ba, with `hasFix` true on every one:
+
+      horizontalAccuracy   0.0 on 894/894      <- never reported
+      satelliteCount       0   on 894/894      <- never reported
+      flags                0   on 894/894
+      verticalAccuracy     1.06 .. 1.37 m      <- reported, and a good fix
+
+  `_dop_from_accuracy(0.0)` returns DOP_UNKNOWN, so every synthesized message told the camera
+  "here is a position, and I have no idea how good it is". With `FordSynthesizeApimGps` ON for that
+  whole drive the camera still reported `NoNavDataAvailable` on 96% of frames and stayed in
+  `Available_CameraOnly` -- it accepted 4%, so the messages are reaching it and being read.
+
+  Vertical accuracy is normally WORSE than horizontal for the same fix, so using it in place of a
+  missing horizontal figure is the conservative substitution: it reports a slightly poorer fix than
+  the truth rather than a better one. It is also a real measurement rather than a guess, which is
+  the whole difference between this and inventing a number.
+  """
+  h = float(getattr(gps, "horizontalAccuracy", 0.0) or 0.0)
+  if math.isfinite(h) and h > 0.0:
+    return h
+  v = float(getattr(gps, "verticalAccuracy", 0.0) or 0.0)
+  if math.isfinite(v) and v > 0.0:
+    return v
+  return 0.0
+
+
 def _dop_from_accuracy(accuracy_m: float) -> float:
   """Approximate a dilution-of-precision figure from a reported accuracy in metres.
 
@@ -148,7 +179,7 @@ def nav2_signals(gps, now_utc: datetime.datetime | None = None) -> dict:
 
   return {
     **time_sigs,
-    "GPS_Pdop": _dop_from_accuracy(float(getattr(gps, "horizontalAccuracy", 0.0))) if has_fix else DOP_UNKNOWN,
+    "GPS_Pdop": _dop_from_accuracy(_best_accuracy(gps)) if has_fix else DOP_UNKNOWN,
     "GPS_Compass_direction": _compass_from_bearing(float(getattr(gps, "bearingDeg", 0.0))) if has_fix else 0,
     "GPS_Actual_vs_Infer_pos": 0 if has_fix else 1,  # 0 = Actual_Postition (sic, per DBC)
     "Gps_B_Falt": 0 if has_fix else 1,
@@ -186,7 +217,8 @@ def nav3_signals(gps) -> dict:
   heading = (bearing % 360.0) if math.isfinite(bearing) else HEADING_UNKNOWN
 
   v_acc = float(getattr(gps, "verticalAccuracy", 0.0))
-  h_acc = float(getattr(gps, "horizontalAccuracy", 0.0))
+  h_acc = _best_accuracy(gps)
+  sats = int(getattr(gps, "satelliteCount", 0) or 0)
 
   # A vertical accuracy of zero means the receiver did not report one, not that the
   # fix is perfect -- fall back to 2D rather than claiming a 3D fix we cannot support.
@@ -196,7 +228,11 @@ def nav3_signals(gps) -> dict:
     "GPS_Vdop": _dop_from_accuracy(v_acc) if is_3d else DOP_UNKNOWN,
     "GPS_Hdop": _dop_from_accuracy(h_acc),
     "GPS_Speed": speed_mph,
-    "GPS_Sat_num_in_view": min(int(getattr(gps, "satelliteCount", 0) or 0), SATS_MAX_VALID),
+    # ZERO SATELLITES WITH A VALID FIX IS A CONTRADICTION, and this receiver reports exactly that:
+    # `satelliteCount` was 0 on all 894 samples of route 000003ba while `hasFix` was true on every
+    # one. A literal 0 asserts something impossible; SATS_UNKNOWN (30) is the DBC's own code for
+    # "not reported", which is what is actually true.
+    "GPS_Sat_num_in_view": (min(sats, SATS_MAX_VALID) if sats > 0 else SATS_UNKNOWN),
     "GPS_MSL_altitude": alt_ft,
     "GPS_Heading": heading,
     "GPS_dimension": DIM_3D if is_3d else DIM_2D,
