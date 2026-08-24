@@ -68,6 +68,7 @@ def main():
   cancel = 0
   accel = 0.0
   msg = warn = stat = 0
+  align = blocked = 0
   prev_cancel = 0
   authority = "?"
   edges = []
@@ -116,8 +117,14 @@ def main():
           msg = be(d, 31, 4)
           warn = be(d, 39, 2)
           stat = be(d, 41, 2)
+          # THE TWO THAT WOULD EXPLAIN 'ACC_Unavailable'. CadsAlignIncplt_B_Actl is the camera's
+          # own view of the radar alignment -- and an IPMA as-built write is documented in
+          # TSR-INVESTIGATION.md as causing B1433 'Forward Looking Sensor Alignment / Missing
+          # Calibration'. He was writing IPMA as-built on 2026-08-21/22; these drives are the 23rd.
+          align = be(d, 11, 1)
+          blocked = be(d, 22, 1)
       if not rows or t - rows[-1][0] >= 0.20:
-        rows.append((t, cancel, msg, warn, stat, accel, authority))
+        rows.append((t, cancel, msg, warn, stat, accel, authority, align, blocked))
 
   if not rows:
     print("no camera CAN on this route -- bus 2 not logged?")
@@ -156,6 +163,16 @@ def main():
                         for k, v in _C2(r[3] for r in sub).most_common()[:2])
       print("  {:<10} {:>5}   {}   |   {}".format(auth, n, msgs, warns))
     print()
+
+  # THE RADAR'S OWN HEALTH, which is the first thing that would make ACC unavailable.
+  n = len(rows)
+  n_align = sum(r[7] for r in rows)
+  n_block = sum(r[8] for r in rows)
+  print("RADAR HEALTH as the camera reports it, over {} samples:".format(n))
+  print("  CadsAlignIncplt_B_Actl  {} ({:.1f}%)   <- B1433 territory; an IPMA as-built write causes it".format(
+    n_align, 100.0 * n_align / n))
+  print("  CadsRadrBlck_B_Actl     {} ({:.1f}%)".format(n_block, 100.0 * n_block / n))
+  print()
 
   print("what the camera DISPLAYED over the whole route:")
   from collections import Counter
