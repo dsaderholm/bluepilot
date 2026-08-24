@@ -4047,3 +4047,39 @@ far: the camera not seeing our frame, the magnitude of the disagreement, radar h
 cancel-and-re-engage, dropped TX frames, waiting for the camera to relent, disengaging, and MAIN.
 The remaining direction is PREVENTION -- what the camera detects during an override that makes it
 cancel an ACTIVE session -- and nothing measured yet distinguishes that.
+
+## 2026-08-24: A LEAD IS WHAT DECIDES WHETHER AN OVERRIDE SURVIVES
+
+Nine override episodes across six routes, classified by whether the radar had a lead during them:
+
+    CANCELLED   3b5 t+379.1   9.0 s    lead present   0%
+                3b8 t+581.9   2.9 s    lead present   0%
+                3ba t+420.6   2.8 s    lead present   4%
+    CLEAN       3b7 t+666.1   0.7 s    lead present  61%
+                3b7 t+670.6   1.4 s    lead present 100%
+                3b8 t+227.5   1.8 s    lead present 100%
+                3ba t+603.4   0.8 s    lead present 100%
+                3b5 t+463.4   2.3 s    lead present   0%
+                3b5 t+517.9  11.9 s    lead present   0%
+
+**Every override with a lead survived (4/4). Every cancel was leadless (3/3).** Leadless is not
+certain death -- two survived, one of them for 11.9 s -- but a lead has never once failed to protect.
+
+**IT IS NOT DURATION AND IT IS NOT MAGNITUDE, and both were believed at various points today.**
+11.9 s leadless survived while 2.9 s leadless cancelled. And the accel channel is ruled out
+entirely by a matched pair: 3b8 t+227.5 (clean) and 3ba t+420.6 (cancelled) have near-identical
+integrated disagreement (1.066 vs 1.039 m/s), peak gap (1.68 vs 1.81) and peak command (-1.95 vs
+-1.94). The only material difference between those two frames is the lead: 60-80 m versus none.
+
+**WHY IT MAKES SENSE.** Ford ACC is a lead-following system. With a target ahead, hard braking is
+explicable. With nothing there, the car decelerates for a reason the camera cannot account for.
+
+**AND HERE IS THE PROBLEM WITH THE FEATURE.** The stop override exists to stop for red lights and
+stop signs -- which is precisely the leadless case. Its primary purpose is the one condition the
+camera does not tolerate. Behind a car, where it costs nothing, Ford would usually have stopped
+anyway. That is a design fact, not a bug to fix, and it should be stated to him plainly rather than
+worked around quietly.
+
+Also ruled out today, each by measurement, so nobody re-derives them: instantaneous disagreement
+(the camera had CONVERGED onto our command 3.2 s before cancelling on 3b5), accumulated
+disagreement, dropped TX frames, waiting for the camera to relent, disengaging, and a MAIN press.
