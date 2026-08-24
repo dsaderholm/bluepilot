@@ -740,6 +740,59 @@ class TestReturningToTheLimitHandsItBack:
     assert icbm.v_baseline == 0, (
       "the hold survived being raised from SLA number and walked straight back to it "
       "(baseline={}) -- he has now reported this four times".format(icbm.v_baseline))
+  def test_the_moved_latch_resets_when_the_anchor_moves(self):
+    """FusionPilot, 2026-08-24, found in code review of the same evening's work.
+
+    `cluster_moved_since_press` means "the cluster has moved since THIS anchor", so it is a PAIR
+    with `v_cluster_at_press`. The press path resets both. The inferred fallback and the pinned-hold
+    path each re-anchored WITHOUT resetting the latch, so a stand-down armed by either began with
+    `moved` already True from an earlier press -- and `settled` can then fire on the first stable
+    frame, ending the stand-down mid-gesture.
+
+    That is the failure the stand-down exists to prevent, in this file's own words: the baseline
+    froze and ICBM walked the set speed back down one increment at a time while the button was
+    still pressed.
+
+    Asserts the INVARIANT rather than a symptom -- every site that assigns the anchor must clear
+    the latch -- because the symptom needs an exact interleaving to reproduce and the invariant
+    does not.
+    """
+    import ast
+    import inspect
+    from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management import controller
+
+    tree = ast.parse(inspect.getsource(controller))
+
+    # PER FUNCTION, not per line. Proximity was tried first and flagged two correct sites, because
+    # a six-line comment sat between the anchor and its reset -- a heuristic that fails on the very
+    # comment explaining the invariant is the wrong heuristic.
+    offenders = []
+    for fn in ast.walk(tree):
+      if not isinstance(fn, ast.FunctionDef):
+        continue
+      anchors, resets = [], []
+      for node in ast.walk(fn):
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+          continue
+        t = node.targets[0]
+        if not isinstance(t, ast.Attribute):
+          continue
+        if t.attr == "v_cluster_at_press":
+          anchors.append(node.lineno)
+        elif t.attr == "cluster_moved_since_press":
+          # ONLY `= False` COUNTS. The latch is also SET to True where the movement is detected,
+          # and counting that as a reset made the first version of this vacuous -- 2 anchors
+          # against 3 "resets", so deleting a real one still left the tally passing. Mutation
+          # testing is what showed it; the test was green against the bug twice.
+          if isinstance(node.value, ast.Constant) and node.value.value is False:
+            resets.append(node.lineno)
+      if anchors and len(resets) < len(anchors):
+        offenders.append("{} re-anchors v_cluster_at_press {} time(s) but clears the latch {}".format(
+          fn.name, len(anchors), len(resets)))
+
+    assert any(isinstance(n, ast.FunctionDef) for n in ast.walk(tree)), "parsed nothing"
+    assert not offenders, (
+      "every site that re-anchors v_cluster_at_press must also clear cluster_moved_since_press -- " + "; ".join(offenders) + ". The latch means 'moved since THIS anchor', so a stale True ends the next stand-down early and the baseline freezes mid-press.")
   def test_it_clears_even_while_a_curve_owns_the_plan(self):
     """THE ONE THAT WAS STILL BROKEN AFTER TWO FIXES, and he photographed it.
 

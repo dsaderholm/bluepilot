@@ -161,6 +161,7 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
     self.cancel_recovery_frames = 0
     self.cancel_recovery_said = False
     self.recovery_declined_said = False
+    self.recovery_frame_blocked_said = False
     # FusionPilot: the stop override -- the last few mph the set speed cannot ask for. Same
     # placement reasoning as icbm_gap above; and same latch-off-on-exception discipline, because an
     # exception here reaches card and stops the car.
@@ -598,6 +599,19 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
         if use_passthrough:
           # THE CAMERA IS HEALTHY, so whatever the override did has been forgiven. A cancel after
           # this point is the camera's own business and must not be masked as ours.
+          #
+          # FULL ADMISSIBILITY, AND NOT THE NARROWER "the camera is not asserting cancel". That
+          # narrower rule was written, tried, and reverted in the same review on 2026-08-24, and
+          # `test_a_late_cancel_run_after_our_override_is_still_ours` is what caught it: between the
+          # override and the cancel run on his real drives he is DISENGAGED, where
+          # `passthrough_admissible` returns "openpilot longitudinal inactive" -- not a cancel. The
+          # narrower rule clears the flag right there, so attribution fails again on exactly the two
+          # of three episodes it was built to rescue.
+          #
+          # The cost of keeping the wider rule is over-attribution while the camera is being refused
+          # for OUR reasons, which is real -- 83% of frames on drive A. It is bounded by the 30 s
+          # recovery cap and by the recovery clearing one bit and nothing else. Under-attribution
+          # costs the whole feature, which is what it has cost so far.
           self.override_since_camera_clean = False
         if reason != self.passthrough_reason_last:
           self.passthrough_reason_last = reason
@@ -721,8 +735,12 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
               # unpoliced bits and CmbbDeny are not logged, and it says so.
               _why = fordcan_ext.passthrough_admissible(CS.acc_stock_values, CC.longActive,
                                                         allow_cancel=True)
-              if _why and not self.recovery_declined_said:
-                self.recovery_declined_said = True
+              if _why and not self.recovery_frame_blocked_said:
+                # ITS OWN FLAG. Sharing `recovery_declined_said` with the gate log meant whichever
+                # fired first silenced the other for the rest of the run -- and a gate that clears
+                # later (stop_override_stopped_us goes false the moment the car moves) is exactly
+                # when this second reason becomes reachable.
+                self.recovery_frame_blocked_said = True
                 cloudlog.error("stock ACC passthrough RECOVERY BLOCKED BY THE FRAME: every gate "
                                "passed but Ford's own frame is still inadmissible -- %s", _why)
               if not _why:
@@ -764,8 +782,9 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
           # The cancel RUN still breaks on any other refusal -- it only ever meant "consecutive
           # frames of cancel", and this branch is every reason that is not one.
           self.passthrough_cancel_frames = 0
-          # A new run gets a fresh chance to say why it declined.
+          # A new run gets a fresh chance to say why it declined, for both reasons independently.
           self.recovery_declined_said = False
+          self.recovery_frame_blocked_said = False
 
       # WHO IS AUTHORING, decided here where the decision actually happens. Order matters: `inert`
       # outranks `fallback` because they look identical frame-to-frame and only the duration tells
