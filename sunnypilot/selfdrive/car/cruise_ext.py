@@ -61,9 +61,16 @@ V_CRUISE_MAX = 145
 V_CRUISE_UNSET = 255
 
 
-def update_manual_button_timers(CS: car.CarState, button_timers: dict[car.CarState.ButtonEvent.Type, int]) -> None:
+def update_manual_button_timers(CS: car.CarState, button_timers: dict[car.CarState.ButtonEvent.Type, int],
+                                stale_s: float = BUTTON_STALE_S) -> None:
   # increment timer for buttons still pressed
-  stale = int(BUTTON_STALE_S / DT_CTRL)
+  #
+  # FusionPilot: `stale_s` is a PARAMETER because the two callers want different answers. The engage
+  # gate in `VCruiseHelperSP` holds openpilot off until buttons are released, and being wrong there
+  # engages the car mid-press -- so it keeps the long, conservative default. ICBM's copy only feeds
+  # its press-settle stand-down, where being slow is what he reports as "the hold will not clear",
+  # and 10 s of that is 10 s of a hold he has already dismissed still governing the car.
+  stale = int(stale_s / DT_CTRL)
   for k in button_timers:
     if button_timers[k] > 0:
       button_timers[k] += 1

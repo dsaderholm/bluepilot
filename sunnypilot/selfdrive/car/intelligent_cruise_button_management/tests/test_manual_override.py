@@ -700,6 +700,46 @@ class TestReturningToTheLimitHandsItBack:
       "(baseline={}, diverged={}) -- he has now reported this three times".format(
         icbm.v_baseline, icbm.baseline_diverged))
     assert icbm.override_state == OverrideState.auto
+  def test_a_hold_raised_from_SLA_and_returned_clears_promptly(self):
+    """HIS FOURTH REPORT, 2026-08-23, from the seat: "SLA wants 20+2 and I set a hold up and then
+    back to 22 and it did not clear."
+
+    THE ROUND TRIP IS THE WHOLE BUG. `moved` compared the live cluster against the value at the
+    FIRST press of the sequence. He starts AT SLA number, presses up to make a hold, presses back
+    down to SLA number -- first press 22, last frame 22, so `moved` was False, `settled` never
+    fired, and the stand-down ran its full 600-frame cap with the clearing rule unreachable behind
+    it. That is why it is always this gesture.
+
+    Compounded by a 10 s stale window on the button timer, added the same afternoon while fixing a
+    different bug: 10 s before `held` goes false, then up to 6 s of stand-down. Up to SIXTEEN
+    seconds. It did clear eventually; nobody would ever wait.
+
+    So this asserts PROMPTLY, not merely eventually -- the delay was the complaint.
+    """
+    icbm = fresh()
+    settle(icbm, LIMIT, cluster=LIMIT, frames=200)
+    assert icbm.v_baseline == 0, "started with a hold, so this proves nothing"
+
+    # Up from SLA number to make a hold, button held every frame, no release event -- his stalk.
+    cluster = LIMIT
+    while cluster < LIMIT + 4:
+      icbm.run(make_cs(cluster, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT), False)
+      cluster += 1
+    for _ in range(30):
+      icbm.run(make_cs(cluster), CC, make_lp(LIMIT), False)
+    assert icbm.v_baseline > 0, "no hold was created, so the walk back proves nothing"
+
+    # And straight back down to exactly SLA number. Ends where it began: the round trip.
+    while cluster > LIMIT:
+      icbm.run(make_cs(cluster, buttons=(DECEL_PRESS,)), CC, make_lp(LIMIT), False)
+      cluster -= 1
+
+    # PROMPTLY. 400 frames is 4 s -- comfortably past the 2 s ICBM stale window plus the stable
+    # count, and comfortably SHORT of the 16 s the broken path took.
+    settle(icbm, LIMIT, cluster=LIMIT, frames=400)
+    assert icbm.v_baseline == 0, (
+      "the hold survived being raised from SLA number and walked straight back to it "
+      "(baseline={}) -- he has now reported this four times".format(icbm.v_baseline))
   def test_it_clears_even_while_a_curve_owns_the_plan(self):
     """THE ONE THAT WAS STILL BROKEN AFTER TWO FIXES, and he photographed it.
 
