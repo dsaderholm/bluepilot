@@ -140,13 +140,19 @@ class ManagerProcess(ABC):
 
 
 class NativeProcess(ManagerProcess):
-  def __init__(self, name, cwd, cmdline, should_run, enabled=True, sigkill=False):
+  # FusionPilot: `restart_if_crash` added to match PythonProcess, which has had it all along.
+  # Without it `ensure_running`'s restart branch is unreachable for every native process, and
+  # `start()` returns early whenever `self.proc is not None` -- dead or alive -- so a crashed native
+  # process stays dead until the next boot. That is exactly what `mapd_v2` does; see its entry in
+  # process_config.py for what it cost.
+  def __init__(self, name, cwd, cmdline, should_run, enabled=True, sigkill=False, restart_if_crash=False):
     self.name = name
     self.cwd = cwd
     self.cmdline = cmdline
     self.should_run = should_run
     self.enabled = enabled
     self.sigkill = sigkill
+    self.restart_if_crash = restart_if_crash
     self.launcher = nativelauncher
 
   def prepare(self) -> None:
