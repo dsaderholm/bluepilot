@@ -47,6 +47,20 @@ REALDATA = "/data/media/0/realdata"
 # a verdict in a diagnostic and gates nothing on the car.
 REAL_TRAFFIC_MPH = 20.0
 
+# ...AND AN UPPER BOUND, because the band above had none and route 000003ba walked straight through
+# the gap: `primary oneWay=True, ego 1 mph, target |v_abs| 95 mph`. Ninety-five miles an hour of
+# opposing motion while the car is essentially stopped, on an arterial. That is not a vehicle across
+# a median; it is a radar artifact, and the first version of this split called it real traffic
+# purely because it cleared 20.
+#
+# Same mistake as the narrowing measurement made a day earlier -- a plausibility band with a floor
+# and no ceiling -- which is why the fix is the same shape. A quantity that has a physical range
+# needs BOTH ends stated, and it is the end nobody thought about that admits the garbage.
+#
+# 85 is above anything opposing traffic reaches on the roads this car drives, and well clear of the
+# 39 and 29 mph sightings that motivated the median category in the first place.
+REAL_TRAFFIC_MAX_MPH = 85.0
+
 
 def main() -> int:
   ap = argparse.ArgumentParser()
@@ -134,8 +148,9 @@ def main() -> int:
           # a false positive the floor should kill would ask the floor to reject genuine oncoming
           # traffic -- the one thing it must never do. Only the slow, clutter-shaped edges are
           # scored as gains here.
+          _v = abs(float(a.oncomingVAbs)) * 2.23694
           impossible = (ow is not None and (ow or hwy in ("motorway", "motorwayLink"))
-                        and abs(float(a.oncomingVAbs)) * 2.23694 < REAL_TRAFFIC_MPH)
+                        and not (REAL_TRAFFIC_MPH <= _v <= REAL_TRAFFIC_MAX_MPH))
           events.append({"side": name, "v_ego": cur["speed"],
                          "v_abs": float(a.oncomingVAbs), "hwy": hwy, "oneway": ow,
                          "impossible": impossible, "known": ow is not None})
@@ -159,7 +174,9 @@ def main() -> int:
             # wants a floor, an across-the-median sighting wants lateral binning or a median width,
             # and pooling them is how a floor sweep gets asked to solve a problem it cannot reach.
             vabs_mph = abs(float(a.oncomingVAbs)) * 2.23694
-            if vabs_mph >= REAL_TRAFFIC_MPH:
+            if vabs_mph > REAL_TRAFFIC_MAX_MPH:
+              verdict["one-way, IMPLAUSIBLY FAST -- radar artifact, impossible"] += 1
+            elif vabs_mph >= REAL_TRAFFIC_MPH:
               verdict["one-way, but MOVING LIKE REAL TRAFFIC -- likely across a median"] += 1
             else:
               verdict["ON A ONE-WAY ROAD, slow -- clutter, impossible"] += 1
