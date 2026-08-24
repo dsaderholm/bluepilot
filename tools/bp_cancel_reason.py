@@ -69,6 +69,7 @@ def main():
   accel = 0.0
   msg = warn = stat = 0
   prev_cancel = 0
+  authority = "?"
   edges = []
 
   for s in segs:
@@ -83,11 +84,20 @@ def main():
       continue
     for m in lr:
       try:
-        if m.which() != "can":
-          continue
+        w = m.which()
       except Exception:
         continue
       t = m.logMonoTime / 1e9
+      # AUTHORITY IN THE SAME PASS, SAME TIME BASE. Comparing this tool's t+ against another's is
+      # how two tools reported the same window 6.5 s apart earlier today.
+      if w == "controllerStateBP":
+        try:
+          authority = str(m.controllerStateBP.accAuthority).split(".")[-1]
+        except Exception:
+          pass
+        continue
+      if w != "can":
+        continue
       if t0 is None or t < t0:
         t0 = t
       for c in m.can:
@@ -107,7 +117,7 @@ def main():
           warn = be(d, 39, 2)
           stat = be(d, 41, 2)
       if not rows or t - rows[-1][0] >= 0.20:
-        rows.append((t, cancel, msg, warn, stat, accel))
+        rows.append((t, cancel, msg, warn, stat, accel, authority))
 
   if not rows:
     print("no camera CAN on this route -- bus 2 not logged?")
@@ -115,9 +125,41 @@ def main():
 
   rel = lambda x: x - t0  # noqa: E731
 
+  # WHAT IT SAID WHILE WE HAD THE CAR. This is the question -- a camera that displays
+  # ACC_Overridden during the override is telling us it thinks the driver is braking, which is a
+  # handback problem; one that says ACC_Unavailable thinks it cannot run at all.
+  during = [r for r in rows if r[6] == "opStop"]
+  if during:
+    from collections import Counter as _C
+    print("WHILE THE OVERRIDE HAD THE CAR ({} samples):".format(len(during)))
+    print("  AccMsgTxt_D2_Rq   {}".format(", ".join(
+      "{}={}".format(MSG_TXT.get(k, k), v) for k, v in _C(r[2] for r in during).most_common())))
+    print("  AccWarn_D_Dsply   {}".format(", ".join(
+      "{}={}".format(WARN.get(k, k), v) for k, v in _C(r[3] for r in during).most_common())))
+    print("  AccStopStat       {}".format(", ".join(
+      "{}={}".format(STOP_STAT.get(k, k), v) for k, v in _C(r[4] for r in during).most_common())))
+    print()
+  else:
+    print("the override never had the car on this route")
+    print()
+
+  # And where the non-default messages actually fall, by authority.
+  from collections import Counter as _C2
+  interesting = [r for r in rows if r[2] not in (0,) or r[3] != 0]
+  if interesting:
+    print("frames where the camera said ANYTHING, by authority:")
+    for auth, n in _C2(r[6] for r in interesting).most_common():
+      sub = [r for r in interesting if r[6] == auth]
+      msgs = ", ".join("{}={}".format(MSG_TXT.get(k, k), v)
+                       for k, v in _C2(r[2] for r in sub).most_common()[:3])
+      warns = ", ".join("{}={}".format(WARN.get(k, k), v)
+                        for k, v in _C2(r[3] for r in sub).most_common()[:2])
+      print("  {:<10} {:>5}   {}   |   {}".format(auth, n, msgs, warns))
+    print()
+
   print("what the camera DISPLAYED over the whole route:")
   from collections import Counter
-  c_msg = Counter(MSG_TXT.get(r[2], r[2]) for r in rows)
+  c_msg = Counter(MSG_TXT.get(r[2], r[2]) for r in rows)  # noqa
   c_warn = Counter(WARN.get(r[3], r[3]) for r in rows)
   c_stat = Counter(STOP_STAT.get(r[4], r[4]) for r in rows)
   for name, c in (("AccMsgTxt_D2_Rq", c_msg), ("AccWarn_D_Dsply", c_warn),
@@ -133,13 +175,13 @@ def main():
   print("{} cancel edge(s). What it was saying in the 6 s BEFORE each:".format(len(edges)))
   for e in edges[:6]:
     print("  --- cancel at t+{:.1f}".format(rel(e)))
-    print("       t+      cancel  accel   AccMsgTxt              warn                 stopStat")
+    print("       t+      cancel  accel   AccMsgTxt              warn                 stopStat    authority")
     for r in rows:
       if not (e - 6.0 <= r[0] <= e + 1.5):
         continue
-      print("    {:8.1f}  {:>6}  {:>6.2f}   {:<21} {:<20} {}".format(
+      print("    {:8.1f}  {:>6}  {:>6.2f}   {:<21} {:<20} {:<11} {}".format(
         rel(r[0]), r[1], r[5], MSG_TXT.get(r[2], r[2]), WARN.get(r[3], r[3]),
-        STOP_STAT.get(r[4], r[4])))
+        STOP_STAT.get(r[4], r[4]), r[6]))
 
 
 if __name__ == "__main__":
