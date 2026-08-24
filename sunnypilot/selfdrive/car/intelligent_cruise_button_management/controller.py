@@ -144,6 +144,11 @@ RESUME_TAIL_S = 0.3
 RESUME_TAIL_FRAMES = int(RESUME_TAIL_S / DT_CTRL)
 PRESS_SETTLE_STABLE_FRAMES = 40   # cluster unchanged this long => the driver has finished
 PRESS_SETTLE_MAX_FRAMES = 600     # 6 s hard cap, so a stuck cluster cannot suspend ICBM forever
+# FusionPilot: how long after the LAST press event ICBM still believes a button is held. Short,
+# because the only thing it gates here is the press-settle stand-down, and every second of it is a
+# second a dismissed hold keeps governing the car. The engage gate in cruise_ext keeps the long
+# default -- see the note on `stale_s` there.
+ICBM_BUTTON_STALE_S = 2.0
 # BluePilot: last-resort fallback -- adopt set-speed movement ICBM did not command, whatever button
 # produced it. The press path above is primary; this exists because it depends on the driver's
 # button arriving as one of MANUAL_OVERRIDE_BUTTONS, and on a car with flashed SCCM firmware that
@@ -337,6 +342,7 @@ class IntelligentCruiseButtonManagement:
     self.cycle_decision_pending = False  # waiting for the set speed to say whether it was RESUME
     self.v_cluster_at_cycle = 0      # set speed when cruise was re-engaged; the resume jump moves it
     self.press_settle_frames = 0     # >0 while ICBM stands down after a driver press
+    self.cluster_moved_since_press = False  # has the cluster moved at all since this press began
     # Starts AT the bound, not 0: before cruise has ever engaged there is no resume press for a
     # `+` to be the tail of, so nothing should be suppressed.
     self.frames_since_resume_press = RESUME_TAIL_FRAMES
@@ -998,7 +1004,7 @@ class IntelligentCruiseButtonManagement:
     return send_button
 
   def update_readiness(self, CS: car.CarState, CC: car.CarControl) -> None:
-    update_manual_button_timers(CS, self.cruise_button_timers)
+    update_manual_button_timers(CS, self.cruise_button_timers, stale_s=ICBM_BUTTON_STALE_S)
 
     # BluePilot: gasPressedOverride is the ONLY event carrying ET.OVERRIDE_LONGITUDINAL, so on this
     # car cruiseControl.override means precisely "the driver is on the throttle" -- nothing else.
@@ -1197,6 +1203,7 @@ class IntelligentCruiseButtonManagement:
       # could never become true while the driver kept pressing.
       if self.press_settle_frames == 0:
         self.v_cluster_at_press = self.v_cruise_cluster
+        self.cluster_moved_since_press = False
       self.press_settle_frames = PRESS_SETTLE_MAX_FRAMES
       self.cluster_stable_frames = 0
       return
@@ -1303,7 +1310,19 @@ class IntelligentCruiseButtonManagement:
       # ends on the pre-press value, and the press is undone -- the same shape of bug as the fixed
       # timer it replaced. A press that never moves the cluster (already at Ford's ceiling) is
       # released by PRESS_SETTLE_MAX_FRAMES instead.
-      moved = self.v_cruise_cluster != self.v_cluster_at_press
+      # LATCHED, because a ROUND TRIP IS NOT "NEVER MOVED". FusionPilot, 2026-08-23.
+      #
+      # Comparing the live cluster against the value at the FIRST press means a sequence that ends
+      # where it began reads as motionless -- and "walk the hold back to SLA's number" is exactly
+      # that sequence. He starts at SLA's number, presses up to make a hold, presses back down to
+      # SLA's number: first press 22, last frame 22, `moved` False. So `settled` never fires, the
+      # stand-down runs its full 6 s cap, and the clearing rule below it is unreachable until then.
+      #
+      # That is why it is ALWAYS this gesture he reports. Fourth time: "SLA wants 20+2 and I set a
+      # hold up and then back to 22 and it didn't clear."
+      if self.v_cruise_cluster != self.v_cluster_at_press:
+        self.cluster_moved_since_press = True
+      moved = self.cluster_moved_since_press
       held = any(self.cruise_button_timers[k] > 0 for k in self.cruise_button_timers)
       settled = moved and not held and self.cluster_stable_frames >= PRESS_SETTLE_STABLE_FRAMES
       if settled:
