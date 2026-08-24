@@ -960,3 +960,73 @@ def test_icbm_stops_pressing_once_openpilot_is_authoring(carcontroller_parts):
   assert while_inert == 0, (
     "ICBM sent {} button frames while openpilot was authoring -- it is moving a set speed that "
     "governs nothing, which is what he saw as the speed going up and down".format(while_inert))
+
+
+def test_the_follow_gap_survives_the_icbm_suppression(carcontroller_parts):
+  """FusionPilot, 2026-08-23. Found by reviewing the suppression an hour after writing it.
+
+  The first version of the inert/openpilot suppression RETURNED without calling
+  IntelligentCruiseButtonManagementInterface.update at all. That method does two jobs: the ICBM
+  set-speed press, and _update_gap, which drives the follow-gap machine and asserts its lease.
+
+  icbm.py records the same mistake being made and fixed once already -- "An earlier version skipped
+  the call entirely, on the theory that pausing kept the press shape intact. It does the opposite:
+  nothing holds the bit asserted while we stand down ... and the resumed remainder lands as a
+  SECOND press -- two toggle steps for one intended". A 60 s inert window is a long time for that.
+
+  ASSERTED ON THE CALL, not on a press reaching the wire. The gap controller presses early in a
+  lease and then waits on a readback this fixture never changes, so by the time the 5 s cancel
+  latch arrives it has already settled and there is nothing left to send -- three earlier versions
+  of this test failed against perfectly correct code for exactly that reason. What the regression
+  destroys is the CALL, so count it.
+  """
+  from opendbc.car.ford.interface import CarInterface
+  from opendbc.car.ford.values import CAR
+  from opendbc.sunnypilot.car.ford.gap_control import GAP_MIN
+  from opendbc.sunnypilot.car.ford.icbm import IntelligentCruiseButtonManagementInterface as ICBMI
+
+  CarController, dbc_names, CP, CP_SP, structs = carcontroller_parts
+  CP_long = CarInterface.get_non_essential_params(CAR.FORD_FUSION_MK5)
+  CP_long.openpilotLongitudinalControl = True
+
+  cc = CarController(dbc_names, CP_long, CP_SP)
+  cc.stock_acc_passthrough = True
+
+  out = structs.CarState()
+  out.vEgo = 20.0
+  out.vEgoRaw = 20.0
+  out.cruiseState.enabled = True
+  out.cruiseState.available = True
+  CS = FakeCarState(out)
+  CS.acc_cam_valid = True
+  CS.acc_stock_values["AccBrkTot_A_Rq"] = -1.10
+  CS.acc_tja_status_stock_values["AccTGap_D_Dsply"] = 3
+  CS.acc_stock_values["AccCancl_B_Rq"] = 1     # latched from the first frame
+
+  CC, CC_SP = _car_control(structs, enabled=True,
+                           send_button=structs.IntelligentCruiseButtonManagement.SendButtonState.increase,
+                           gap_target=GAP_MIN, long_active=True)
+
+  calls = {"n": 0}
+  real = ICBMI._update_gap
+
+  def counting(self, *a, **kw):
+    calls["n"] += 1
+    return real(self, *a, **kw)
+
+  ICBMI._update_gap = counting
+  try:
+    saw_inert = False
+    at_latch = None
+    for frame in range(1400):
+      cc.update(CC, CC_SP, CS, frame * 10_000_000)
+      if cc.acc_authority == structs.ControllerStateBP.AccAuthority.inert and not saw_inert:
+        saw_inert = True
+        at_latch = calls["n"]
+  finally:
+    ICBMI._update_gap = real
+
+  assert saw_inert, "the cancel never latched, so this proves nothing"
+  assert calls["n"] > at_latch, (
+    "_update_gap stopped being called once ICBM was suppressed -- skipping the whole update call "
+    "takes the follow-gap machine with it, which is the bug icbm.py already documents")

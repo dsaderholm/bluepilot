@@ -281,17 +281,22 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
     # -- that is what PRESS_SETTLE_MAX_FRAMES is for.
     _blind = (self.acc_authority in (structs.ControllerStateBP.AccAuthority.inert,
                                      structs.ControllerStateBP.AccAuthority.openpilot))
-    if _blind:
-      if not self.icbm_blind_said:
-        self.icbm_blind_said = True
-        cloudlog.warning("ICBM buttons suppressed: openpilot is authoring ACCDATA, so the set "
-                         "speed drives nothing")
-    else:
+    #
+    # SUPPRESSED, NOT SKIPPED. The first version of this returned without calling `update` at all,
+    # which also skips `_update_gap` -- and that method's own comment records the same mistake being
+    # made and fixed once already: a gap lease that stops being asserted does not pause, it lands
+    # its remainder as a SECOND press. So the flag goes in and the follow-gap keeps running.
+    if _blind and not self.icbm_blind_said:
+      self.icbm_blind_said = True
+      cloudlog.warning("ICBM set-speed buttons suppressed: openpilot is authoring ACCDATA, so the "
+                       "set speed drives nothing. The follow-gap is unaffected.")
+    elif not _blind:
       self.icbm_blind_said = False
-      icbm_can_sends, self.last_button_frame = IntelligentCruiseButtonManagementInterface.update(
-        self, CC_SP, CS, self.packer, self.CAN, self.frame, self.last_button_frame
-      )
-      can_sends.extend(icbm_can_sends)
+    icbm_can_sends, self.last_button_frame = IntelligentCruiseButtonManagementInterface.update(
+      self, CC_SP, CS, self.packer, self.CAN, self.frame, self.last_button_frame,
+      suppress_set_speed=_blind
+    )
+    can_sends.extend(icbm_can_sends)
 
     ### lateral control ###
     # BluePilot: keep stock lateral path in carcontroller, and run BP 4-signal lateral

@@ -37,14 +37,24 @@ CRUISE_BUTTON_TIMER = {ButtonType.decelCruise: 0, ButtonType.accelCruise: 0,
 # number from t+158.4 to t+245.6 and would not clear, for the third time.
 #
 # THE TIMER IS ALREADY "FRAMES SINCE THE LAST PRESS EVENT", because every press event resets it to
-# 1 below. So a cap is all that is needed and it cannot cut a real press short: while a button is
-# genuinely held the bursts keep arriving and keep resetting it. The longest gap WITHIN a held
-# press on that route was 0.72 s, so 2 s is about three times the observed worst case.
+# 1 below. So a cap is all that is needed, and on THIS car it cannot cut a real press short: the
+# bursts keep arriving while a button is held and keep resetting it, with a longest observed gap
+# WITHIN a held press of 0.72 s.
+#
+# TEN SECONDS, NOT TWO, AND THE MARGIN IS THE WHOLE POINT. This function is SHARED -- ICBM's
+# controller and `VCruiseHelperSP.enable_button_timers` both run it, and the latter uses it to hold
+# engagement off until buttons are released. A car whose stalk sends ONE press event and one release
+# gets no resets at all, so any cap expires mid-hold there, and the failure that produces is already
+# written down: a cap expiring mid-hold froze the baseline and ICBM walked the set speed back down
+# one increment at a time while the button was still pressed, reported exactly that way.
+#
+# 2 s was chosen first and is only ~3x the single measured worst-case gap, from one window of one
+# route. 10 s is 14x it, still an order of magnitude below the 115 s stick this exists to fix, and
+# longer than any plausible physical press -- a 10 s hold on this car moves the set speed ~50 mph.
 #
 # This is deliberately not a fix to the press-settle re-arm. That re-arm is correct and was itself
-# added to fix a real report -- a cap expiring mid-hold froze the baseline and walked the set speed
-# back down while the button was still pressed. The defect is the input it trusts, not the rule.
-BUTTON_STALE_S = 2.0
+# added to fix the mid-hold report above. The defect is the input it trusts, not the rule.
+BUTTON_STALE_S = 10.0
 
 V_CRUISE_MIN = 8
 V_CRUISE_MAX = 145
