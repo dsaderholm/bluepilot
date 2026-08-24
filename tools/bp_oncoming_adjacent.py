@@ -41,6 +41,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 
 REALDATA = "/data/media/0/realdata"
 
+# Above this, an apparent opposing speed is a VEHICLE, not angle-error clutter. Deliberately well
+# clear of the 5 m/s (11 mph) noise floor and of anything the speed-scaled floor reaches at the
+# arterial speeds where the false edges live. Nothing here depends on the exact value -- it splits
+# a verdict in a diagnostic and gates nothing on the car.
+REAL_TRAFFIC_MPH = 20.0
+
 
 def main() -> int:
   ap = argparse.ArgumentParser()
@@ -123,15 +129,40 @@ def main() -> int:
         if now and not prev[name]:
           edges[name] += 1
           ow, hwy = cur["oneway"], cur["hwy"]
-          impossible = ow is not None and (ow or hwy in ("motorway", "motorwayLink"))
+          # THE SWEEP'S TARGET SET, narrowed to match the verdict split above. A one-way edge that
+          # is MOVING LIKE TRAFFIC is most likely a real vehicle across a median, so counting it as
+          # a false positive the floor should kill would ask the floor to reject genuine oncoming
+          # traffic -- the one thing it must never do. Only the slow, clutter-shaped edges are
+          # scored as gains here.
+          impossible = (ow is not None and (ow or hwy in ("motorway", "motorwayLink"))
+                        and abs(float(a.oncomingVAbs)) * 2.23694 < REAL_TRAFFIC_MPH)
           events.append({"side": name, "v_ego": cur["speed"],
                          "v_abs": float(a.oncomingVAbs), "hwy": hwy, "oneway": ow,
                          "impossible": impossible, "known": ow is not None})
           if ow is None:
             verdict["no map data"] += 1
           elif ow or hwy in ("motorway", "motorwayLink"):
-            # PROVABLY WRONG: opposing traffic cannot be in the adjacent lane of a one-way road.
-            verdict["ON A ONE-WAY ROAD -- impossible"] += 1
+            # "ONE-WAY THEREFORE IMPOSSIBLE" IS TOO STRONG, AND ROUTE 000003b7 SHOWED IT.
+            #
+            # `oneWay=True` says THIS carriageway runs one way. It does not say no opposing traffic
+            # is nearby -- a divided highway is one-way on BOTH carriageways and they sit next to
+            # each other, and a `motorwayLink` ramp at an interchange usually has its opposite
+            # number a few metres away. Across a narrow median, a real oncoming vehicle is exactly
+            # what the radar should see.
+            #
+            # Two edges on 000003b7 came in at 39 mph and 29 mph of apparent opposing speed against
+            # floors of 20 and 21. Nothing moving that fast is angle-error clutter, so calling them
+            # "provably wrong" was wrong: the likely truth is a real vehicle on the other side of a
+            # median, correctly detected and wrongly called ADJACENT.
+            #
+            # Split rather than merged, because the two need opposite fixes -- clutter near zero
+            # wants a floor, an across-the-median sighting wants lateral binning or a median width,
+            # and pooling them is how a floor sweep gets asked to solve a problem it cannot reach.
+            vabs_mph = abs(float(a.oncomingVAbs)) * 2.23694
+            if vabs_mph >= REAL_TRAFFIC_MPH:
+              verdict["one-way, but MOVING LIKE REAL TRAFFIC -- likely across a median"] += 1
+            else:
+              verdict["ON A ONE-WAY ROAD, slow -- clutter, impossible"] += 1
             if len(examples[name]) < 5:
               # THE TARGET'S OWN SPEED, and it was the missing number. The example line printed the
               # EGO speed, which is only half of what the floor compares -- `min_oncoming_ms` tests

@@ -4761,6 +4761,44 @@ is where the false edges lived anyway -- every one of the original ten was at or
 the flat floor covers the bottom of that range. Until such edges appear, the change is unmeasured on
 the road rather than unproven.
 
+##### THOSE EDGES ARRIVED, AND THEY BROKE THE METHOD RATHER THAN THE CONSTANT
+
+Route 000003b7, 2026-08-24, a genuine freeway drive. Three rising edges, two on roads the map calls
+one-way -- and once the tool was made to print the number the floor actually compares:
+
+    secondary     oneWay=True   ego 29 mph   target |v_abs| 39 mph   floor was 20 mph
+    motorwayLink  oneWay=True   ego 30 mph   target |v_abs| 29 mph   floor was 21 mph
+
+**No floor in the sweep touches them** -- 0 of 2 killed at every combination up to flat 11.0 with
+fraction 0.85. And 39 mph of apparent opposing motion is not angle-error clutter. It is a vehicle.
+
+**SO "ONE-WAY THEREFORE IMPOSSIBLE" IS WRONG, AND THAT ASSUMPTION IS WHAT THE 33% FALSE RATE WAS
+BUILT ON.** `oneWay=True` says THIS carriageway runs one way. It does not say no opposing traffic is
+nearby:
+
+- a **divided highway is one-way on BOTH carriageways**, and they sit next to each other
+- a **`motorwayLink` ramp** at an interchange usually has its opposite number a few metres away
+
+Across a narrow median a real oncoming vehicle is exactly what the radar should see. The flag is
+then not wrong about the traffic -- it is wrong about it being ADJACENT, which is a lateral-binning
+problem, not a speed-floor one.
+
+**The tool now splits the verdict** into slow clutter on a one-way road (genuinely impossible) and
+"moving like real traffic, likely across a median", and the floor sweep scores only the first as a
+gain. Pooling them asks a floor to reject genuine oncoming traffic, which is the one thing it must
+never do.
+
+**WHAT THIS COSTS, STATED PLAINLY:** the 33% figure -- 10 of 30 edges "impossible" -- is now an
+upper bound, not a rate. Some unknown share of those ten were fast, and the fast ones are probably
+real. The 0.50 -> 0.70 change was made on that pooled number. It is not thereby wrong: it was scored
+as free, losing no real two-way edge, and that part does not depend on the classification. But the
+GAIN it was credited with is overstated by however many of the three "false" edges it killed were
+in fact traffic across a median.
+
+**The general shape, and this file has it twice now:** a label that is cheap to compute gets used as
+ground truth, and the measurement inherits whatever the label was actually asserting rather than
+what it was read as meaning. `oneWay` labels a carriageway; it was read as labelling a road.
+
 **AND THE OBVIOUS DISCRIMINATOR IS FORBIDDEN, which is worth stating before someone reaches for it.**
 `oneWay` from the map separates these perfectly by construction -- it is what labels them. But
 suppressing an oncoming sighting because the map says one-way is **the map REMOVING a refusal**,
