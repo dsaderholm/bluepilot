@@ -5579,3 +5579,72 @@ which is a resolver change nobody has made yet.
 97 seconds later, because ICBM had already PRESSED the dash up to 90. A bad limit is converted into
 button presses, and those do not come back when the limit does. Rejecting a bad read matters far
 more than un-latching one.
+
+## 2026-08-24: WHAT MAKES A CAMERA CANCEL STICK -- AND TWO WRONG ANSWERS I PUBLISHED FIRST
+
+Twenty cancel runs across routes 3b4, 3b5, 3b6, 3b7, 3b8, 3ba, classified by whether cruise was
+ENGAGED at the moment `AccCancl_B_Rq` went high:
+
+    raised while DISENGAGED   16 runs   all cleared in seconds (or were route-end artifacts)
+    raised while ENGAGED       4 runs   3 never cleared; the 4th took 365 seconds
+
+**A cancel raised while cruise is OFF is not a cancellation.** It is the camera's idle state
+flickering, and it clears on its own. The only real cancels are the ones raised while engaged, and
+those essentially never relent. Any future count of "cancel runs" that does not split on this is
+counting mostly non-events -- which is exactly how both wrong answers below happened.
+
+**WRONG ANSWER 1: "the camera relents almost every time."** Published off the raw run counts
+(7 of 8 clearing on 3b5). All of those were cruise-off runs. Genuine cancels do not relent.
+
+**WRONG ANSWER 2: "a MAIN press recovers a stuck cancel."** Three measured clears within 0.7 s of a
+MAIN press -- 3b7 t+82.6, 3b8 t+177.1, 3ba t+373.1 -- and it reached the ALERT TEXT before being
+re-checked. All three were cruise-off runs that would have cleared anyway. Against a real cancel
+MAIN failed five times for five: 3b5 t+596.4, 3b8 t+587.3, t+588.4, 3ba t+469.7, t+470.9.
+
+**AND THE MECHANISM IS NOT DISENGAGEMENT.** The obvious next theory -- the camera holds the cancel
+while engaged and releases when you drop out -- is false: **0 of 15 clears were preceded by cruise
+going off within 5 s**, and cruise DID go off during all three of the stuck runs without releasing
+them. Being engaged at the moment of assertion is what makes it latch; disengaging afterwards does
+not undo it.
+
+**WHAT THIS LEAVES.** There is no known recovery from a real cancel. Ruled out by measurement so
+far: the camera not seeing our frame, the magnitude of the disagreement, radar health,
+cancel-and-re-engage, dropped TX frames, waiting for the camera to relent, disengaging, and MAIN.
+The remaining direction is PREVENTION -- what the camera detects during an override that makes it
+cancel an ACTIVE session -- and nothing measured yet distinguishes that.
+
+## 2026-08-24: A LEAD IS WHAT DECIDES WHETHER AN OVERRIDE SURVIVES
+
+Nine override episodes across six routes, classified by whether the radar had a lead during them:
+
+    CANCELLED   3b5 t+379.1   9.0 s    lead present   0%
+                3b8 t+581.9   2.9 s    lead present   0%
+                3ba t+420.6   2.8 s    lead present   4%
+    CLEAN       3b7 t+666.1   0.7 s    lead present  61%
+                3b7 t+670.6   1.4 s    lead present 100%
+                3b8 t+227.5   1.8 s    lead present 100%
+                3ba t+603.4   0.8 s    lead present 100%
+                3b5 t+463.4   2.3 s    lead present   0%
+                3b5 t+517.9  11.9 s    lead present   0%
+
+**Every override with a lead survived (4/4). Every cancel was leadless (3/3).** Leadless is not
+certain death -- two survived, one of them for 11.9 s -- but a lead has never once failed to protect.
+
+**IT IS NOT DURATION AND IT IS NOT MAGNITUDE, and both were believed at various points today.**
+11.9 s leadless survived while 2.9 s leadless cancelled. And the accel channel is ruled out
+entirely by a matched pair: 3b8 t+227.5 (clean) and 3ba t+420.6 (cancelled) have near-identical
+integrated disagreement (1.066 vs 1.039 m/s), peak gap (1.68 vs 1.81) and peak command (-1.95 vs
+-1.94). The only material difference between those two frames is the lead: 60-80 m versus none.
+
+**WHY IT MAKES SENSE.** Ford ACC is a lead-following system. With a target ahead, hard braking is
+explicable. With nothing there, the car decelerates for a reason the camera cannot account for.
+
+**AND HERE IS THE PROBLEM WITH THE FEATURE.** The stop override exists to stop for red lights and
+stop signs -- which is precisely the leadless case. Its primary purpose is the one condition the
+camera does not tolerate. Behind a car, where it costs nothing, Ford would usually have stopped
+anyway. That is a design fact, not a bug to fix, and it should be stated to him plainly rather than
+worked around quietly.
+
+Also ruled out today, each by measurement, so nobody re-derives them: instantaneous disagreement
+(the camera had CONVERGED onto our command 3.2 s before cancelling on 3b5), accumulated
+disagreement, dropped TX frames, waiting for the camera to relent, disengaging, and a MAIN press.

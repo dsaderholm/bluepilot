@@ -10,8 +10,9 @@ do, and it is the entire reason the passthrough exists.
 
 **IT AUTHORS NOTHING NEW. It chooses which already-authored frame goes out.**
 
-That is the whole design and it is deliberate. `create_acc_msg` already exists, already clamps to
-panda's bands, already drives the split brake/precharge hysteresis, and already never touches the
+That is the whole design and it is deliberate. `create_acc_msg` already exists, clamps to panda's
+bands (it did NOT until 2026-08-24 -- that claim sat here untrue while 15 frames a stop were being
+dropped; see the note at the clamp), already drives the split brake/precharge hysteresis, and already never touches the
 unpoliced bits that applied the park brake on drive A. So the override is a DECISION -- "for these
 few seconds, send openpilot's command instead of Ford's" -- and not a second CAN authoring path
 that would have to re-learn all of that.
