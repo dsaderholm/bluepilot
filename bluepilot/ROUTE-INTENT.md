@@ -292,7 +292,10 @@ demonstrably still works.
 
 He drove it deliberately. Observed, not inferred:
 
-    WAZE          "Calculating Route" on the IPC for UNDER A SECOND, then compass + speedometer
+    WAZE          "Calculating Route" on the IPC for a FLASH -- he estimates ~10 ms -- and then
+                  nothing else, ever. Earlier drafts wrote "under a second", which understates it,
+                  and he has had to repeat the correction. NOTE: Maps and OsmAnd flash it for about
+                  the same time, so the DURATION is not a discriminator -- only what follows is.
                   the CANCEL-ROUTE OPTION IS NOT REACHABLE AT ALL -- he cannot even open the IPC
                   submenu it lives in. Corrected 2026-08-23; an earlier draft said "the button
                   does nothing", which is a weaker and different claim.
@@ -349,6 +352,16 @@ not even require driving anywhere.
 
 **H1 is the better explanation of the same evidence** and should be the one stated to Waze. H2 is
 not ruled out.
+
+**AND THE 10 MILLISECOND DURATION PUSHES HARDER TOWARD H1 THAN "UNDER A SECOND" DID.** A loading
+state that persists for a second reads like a route computation that starts and fails. A state that
+appears and vanishes in ten milliseconds is not a computation at all -- it is a publish immediately
+followed by a teardown. Waze is not trying and failing to produce a Trip; it announces one and
+withdraws in the same breath.
+
+**THIS ALSO SEPARATES IT CLEANLY FROM THE WORKING APPS**, which is the comparison that makes it
+legible: Maps and OsmAnd both flash "Calculating Route" too, then REPLACE it with a populated Trip.
+Same first step, and only Waze has no second one.
 
 **A THIRD CANDIDATE WORTH NAMING, because it is concrete and logcat would show it:** `Trip.Builder`
 enforces strict parity -- steps and stepTravelEstimates must match in count and order, and it throws

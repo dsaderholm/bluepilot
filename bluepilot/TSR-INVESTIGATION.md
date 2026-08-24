@@ -1748,7 +1748,13 @@ street is a fault wearing a plausible number. **The cross-check is correlating t
 keeps having to withdraw one-route numbers. The sweep was started twice on 2026-08-23 and neither
 run was retrieved -- the device dropped off the network mid-run both times.
 
-    cd /data/openpilot && PYTHONPATH=/data/openpilot /usr/local/venv/bin/python3         tools/bp_isa_speed_limit.py --sweep 12
+    cd /data/openpilot && PYTHONPATH=/data/openpilot /usr/local/venv/bin/python3         tools/bp_isa_speed_limit.py --sweep 12 > /data/media/0/isa_sweep.txt
+
+**DO NOT WRITE THE OUTPUT TO `/tmp` ON THIS DEVICE.** Three sweeps were lost that way on
+2026-08-23: `/tmp` is cleared on reboot, the car auto-updates and reboots roughly hourly, and a
+twelve-route sweep takes minutes. The third loss was the worst kind -- the job reported `finished`
+and the result file had already been deleted out from under it, which reads as "the tool produced
+nothing" rather than "the disk was wiped". Write to `/data/media/0/`, which survives.
 
 **AND THE FIRST ATTEMPT AT THAT SWEEP PRODUCED A CONFIDENT TABLE OF NONSENSE**, which is why the
 sweep now lives inside the tool. It was a shell loop grepping the per-route output, and the grep
