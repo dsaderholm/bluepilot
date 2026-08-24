@@ -850,9 +850,36 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
             floor = min(floor, float((CS.acc_stock_values or {}).get("AccBrkTot_A_Rq", 0.0)))
           send_accel = max(send_accel, floor)
 
+        # TELL THE PCM A STOP IS HAPPENING. FusionPilot, 2026-08-23, and it is the best candidate
+        # yet for why the camera declares ACC_Unavailable.
+        #
+        # `AccStopStat_B_Rq` is `stopping`, and `stopping` is `longControlState == stopping`, which
+        # was measured across 21,936 frames as a STOPPED-CAR state -- never true above 3 mph. So the
+        # override brakes the car from 20 to 0 while telling the PCM "not stopping" the whole way.
+        # Measured on route 000003af: `AccStopMde_D_Rq` reads NoStop on ALL 888 frames the override
+        # had the car.
+        #
+        # AND FORD'S OWN STOP LOOKS COMPLETELY DIFFERENT. Route 000003b1, same car, same evening,
+        # override never fired: `AccStopMde_D_Rq` reads **Hold on 498 frames** under `ford`. That is
+        # the first time this fork has ever seen Ford enter its own stop mode on this car, and it
+        # shows the handshake works here when Ford drives it.
+        #
+        # So the override was bringing the car to a standstill OUTSIDE Ford's stop protocol: the
+        # PCM never enters stop mode, and the camera -- which receives `CcStat_D_Actl` and
+        # `AccStopMde_D_Rq` directly, IPMA_ADAS is a listed receiver of both -- sees a car that has
+        # stopped while its own powertrain says no stop is in progress. `ACC_Unavailable` is a
+        # reasonable thing to conclude from that, and unlike every other theory tried today it
+        # explains why the state is LATCHED rather than transient.
+        #
+        # The override only ever runs when we are deliberately stopping, so asserting this is
+        # honest signalling rather than a trick -- it is the same bit Ford asserts for the same
+        # reason. Panda does not police it (see the unpoliced list in fordcan_ext).
+        #
+        # NOT PROVEN. It is a hypothesis with one strong correlation behind it, and the drive that
+        # tests it is the next stop the override takes.
         can_sends.append(fordcan_ext.create_acc_msg(
           self.packer, self.CAN, CC.longActive, lng.gas, send_accel, lng.accel_pred_send,
-          lng.stopping, send_brake, send_prchg, v_ego_kph=lng.target_speed
+          lng.stopping or override, send_brake, send_prchg, v_ego_kph=lng.target_speed
         ))
 
         self.accel = send_accel

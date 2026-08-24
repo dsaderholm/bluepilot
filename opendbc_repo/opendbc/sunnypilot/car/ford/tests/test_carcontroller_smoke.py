@@ -1030,3 +1030,65 @@ def test_the_follow_gap_survives_the_icbm_suppression(carcontroller_parts):
   assert calls["n"] > at_latch, (
     "_update_gap stopped being called once ICBM was suppressed -- skipping the whole update call "
     "takes the follow-gap machine with it, which is the bug icbm.py already documents")
+
+
+def test_the_override_tells_the_pcm_a_stop_is_happening(carcontroller_parts):
+  """FusionPilot, 2026-08-23. AccStopStat_B_Rq must be asserted while the override brakes.
+
+  `stopping` is longControlState == stopping, measured across 21,936 frames as a STOPPED-CAR state,
+  never true above 3 mph. So the override braked from 20 to 0 while telling the PCM no stop was in
+  progress -- AccStopMde_D_Rq read NoStop on all 888 frames it had the car on route 000003af.
+
+  Fords own stop looks nothing like that: route 000003b1, same car, same evening, override never
+  fired, AccStopMde_D_Rq read Hold on 498 frames under Ford authority.
+
+  The camera receives CcStat_D_Actl and AccStopMde_D_Rq directly -- IPMA_ADAS is a listed receiver
+  of both -- so it saw a car stop while its own powertrain said no stop was happening.
+  """
+  from opendbc.car.ford.interface import CarInterface
+  from opendbc.car.ford.values import CAR
+
+  CarController, dbc_names, CP, CP_SP, structs = carcontroller_parts
+  CP_long = CarInterface.get_non_essential_params(CAR.FORD_FUSION_MK5)
+  CP_long.openpilotLongitudinalControl = True
+
+  cc = CarController(dbc_names, CP_long, CP_SP)
+  cc.stock_acc_passthrough = True
+  cc.stop_override_enabled = True
+  cc.stop_override.update = lambda **kw: True
+
+  out = structs.CarState()
+  out.vEgo = 8.0            # ~18 mph, well above the 3 mph where `stopping` would be true
+  out.vEgoRaw = 8.0
+  out.cruiseState.enabled = True
+  out.cruiseState.available = True
+  CS = FakeCarState(out)
+  CS.acc_cam_valid = True
+  CS.acc_stock_values["AccBrkTot_A_Rq"] = -0.30
+
+  CC, CC_SP = _car_control(structs, enabled=True,
+                           send_button=structs.IntelligentCruiseButtonManagement.SendButtonState.none,
+                           gap_target=0, long_active=True)
+
+  sent = []
+  for frame in range(200):
+    _, can_sends = cc.update(CC, CC_SP, CS, frame * 10_000_000)
+    sent.extend(d for addr, d, _b in can_sends if addr == 390)
+
+  assert sent, "no ACCDATA was sent at all"
+  assert cc.acc_authority == structs.ControllerStateBP.AccAuthority.opStop, (
+    "the override never took authority, so this proves nothing")
+
+  # AccStopStat_B_Rq is bit 34 of ACCDATA, single bit, big-endian.
+  def stop_stat(d):
+    v = int.from_bytes(bytes(d), "big")
+    idx = (34 // 8) * 8 + (7 - (34 % 8))
+    return (v >> (64 - idx - 1)) & 1
+
+  asserted = sum(stop_stat(d) for d in sent)
+  assert asserted > 0, (
+    "the override braked the car without ever setting AccStopStat_B_Rq -- the PCM is being told no "
+    "stop is in progress while we bring the car to a standstill, which is the incoherence the "
+    "camera appears to be reacting to")
+  assert asserted == len(sent), (
+    "AccStopStat_B_Rq was set on only {} of {} override frames".format(asserted, len(sent)))
