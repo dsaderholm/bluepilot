@@ -44,7 +44,7 @@ def main():
   authority = "?"
   cluster = None
   target = None
-  windows = []       # list of dicts, one per inert run
+  by_auth = {}       # authority -> jitter accumulators
   cur = None
 
   for s in segs:
@@ -72,13 +72,6 @@ def main():
           a = str(m.controllerStateBP.accAuthority).split(".")[-1]
         except Exception:
           continue
-        if a == "inert" and authority != "inert":
-          cur = {"start": t, "dash": 0.0, "tgt": 0.0, "cross": 0, "n": 0,
-                 "tmin": None, "tmax": None, "side": None}
-        elif a != "inert" and authority == "inert" and cur is not None:
-          cur["end"] = t
-          windows.append(cur)
-          cur = None
         authority = a
         continue
 
@@ -87,8 +80,10 @@ def main():
           c = float(m.carState.cruiseState.speedCluster) * MS_TO_MPH
         except Exception:
           continue
-        if cur is not None and cluster is not None and c > 0 and cluster > 0:
-          cur["dash"] += abs(c - cluster)
+        b = by_auth.setdefault(authority, {"dash": 0.0, "tgt": 0.0, "cross": 0, "n": 0,
+                                           "tmin": None, "tmax": None, "side": None, "secs": 0.0})
+        if cluster is not None and c > 0 and cluster > 0:
+          b["dash"] += abs(c - cluster)
         cluster = c
         continue
 
@@ -99,7 +94,9 @@ def main():
         tg = float(icbm.vTarget)
       except Exception:
         continue
-      if cur is not None and tg > 0:
+      if tg > 0:
+        cur = by_auth.setdefault(authority, {"dash": 0.0, "tgt": 0.0, "cross": 0, "n": 0,
+                                            "tmin": None, "tmax": None, "side": None, "secs": 0.0})
         if target is not None and target > 0:
           cur["tgt"] += abs(tg - target)
         cur["tmin"] = tg if cur["tmin"] is None else min(cur["tmin"], tg)
@@ -115,35 +112,30 @@ def main():
         cur["n"] += 1
       target = tg
 
-  if cur is not None:
-    cur["end"] = cur["start"]
-    windows.append(cur)
-
-  if not windows:
-    print("never went inert on this route")
+  if not by_auth:
+    print("no ICBM target data on this route")
     return
 
-  rel = lambda x: x - t0  # noqa: E731
-  print("ICBM DURING EACH INERT WINDOW ON {}".format(route))
-  print("      window        secs   dash moved   target moved   target range   crossings")
-  for w in windows:
-    dur = w.get("end", w["start"]) - w["start"]
-    rng = "{:.0f}-{:.0f}".format(w["tmin"], w["tmax"]) if w["tmin"] is not None else "n/a"
-    print("  t+{:7.1f}      {:6.1f}   {:8.1f} mph   {:8.1f} mph   {:>12}   {:>7}".format(
-      rel(w["start"]), dur, w["dash"], w["tgt"], rng, w["cross"]))
+  print("TARGET JITTER BY AUTHORITY ON {}".format(route))
+  print("  authority   samples   dash moved   target moved   target range   crossings   jitter ratio")
+  for a in sorted(by_auth, key=lambda k: -by_auth[k]["n"]):
+    b = by_auth[a]
+    if not b["n"]:
+      continue
+    span = (b["tmax"] - b["tmin"]) if b["tmin"] is not None else 0.0
+    ratio = b["tgt"] / max(span, 1.0)
+    rng = "{:.0f}-{:.0f}".format(b["tmin"], b["tmax"]) if b["tmin"] is not None else "n/a"
+    print("  {:<10} {:>7}   {:8.1f} mph   {:8.1f} mph   {:>12}   {:>9}   {:>7.1f}x".format(
+      a, b["n"], b["dash"], b["tgt"], rng, b["cross"], ratio))
 
   print()
-  tot_dash = sum(w["dash"] for w in windows)
-  tot_tgt = sum(w["tgt"] for w in windows)
-  tot_cross = sum(w["cross"] for w in windows)
-  print("totals: dash {:.0f} mph, target {:.0f} mph, {} crossings".format(tot_dash, tot_tgt, tot_cross))
-  if tot_tgt > 0 and tot_dash / max(tot_tgt, 1e-6) < 1.5 and tot_cross < 10:
-    print("=> TRACKING. The dash moved about as far as the target did and rarely crossed it.")
-    print("   The presses are the price of a safe handback, not a defect. Fix the NOISE, not the")
-    print("   tracking -- taking the set speed off the plan target is what put him on an exit ramp.")
-  else:
-    print("=> HUNTING. The dash moved much further than the target, or crossed it repeatedly.")
-    print("   That is the documented tap-vs-hold set-speed hunt and it is a real defect.")
+  print("JITTER RATIO is target travel divided by the band it stayed inside. A target that moves")
+  print("from 30 to 25 and stops reads ~1x. One that shakes between 27 and 30 for a minute reads")
+  print("in the tens -- same band, enormously more travel, and every reversal is a button press.")
+  print()
+  print("`ford` is the row that matters most: there the set speed IS driving the car, so a jittering")
+  print("target is button wear and 'set speed changed' spam while Ford chases a number that never")
+  print("settles. `inert` jitter costs only noise, because nothing is listening.")
 
 
 if __name__ == "__main__":
