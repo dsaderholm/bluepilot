@@ -46,6 +46,7 @@ def main():
   segs = sorted([d for d in os.listdir(REALDATA) if d.startswith(route)], key=seg_index)
 
   t0 = None
+  holes = []
   runs = []          # (authority, t_start, t_end)
   cur = None
   start = None
@@ -55,22 +56,36 @@ def main():
     p = os.path.join(REALDATA, s, "rlog")
     if not os.path.exists(p):
       p += ".zst"
-    if not os.path.exists(p):
-      continue
-    try:
-      lr = LogReader(p)
-    except Exception:
+    # A HOLE MUST BREAK THE RUN. The gap between the last opStop frame and the first inert one is
+    # the number every conclusion here rests on; stitching an authority run across an unreadable
+    # segment inflates it silently by the length of the hole. `cur = None` closes the open run so
+    # the next segment starts a fresh one.
+    lr = None
+    if os.path.exists(p):
+      try:
+        lr = LogReader(p)
+      except Exception:
+        lr = None
+    if lr is None:
+      holes.append(s)
+      if cur is not None:
+        runs.append((cur, start, last))
+      cur = None
       continue
     for m in lr:
+      t = m.logMonoTime / 1e9
+      # ANCHOR ON EVERY MESSAGE, not just controllerStateBP. bp_recovery_blocked.py anchors on all
+      # of them, and anchoring differently made the two tools report the SAME inert window 6.5 s
+      # apart -- internally consistent, mutually useless. This file already has a section on t+
+      # values that only one tool can produce.
+      if t0 is None or t < t0:
+        t0 = t
       try:
         if m.which() != "controllerStateBP":
           continue
         a = str(m.controllerStateBP.accAuthority).split(".")[-1]
       except Exception:
         continue
-      t = m.logMonoTime / 1e9
-      if t0 is None or t < t0:
-        t0 = t
       if a != cur:
         if cur is not None:
           runs.append((cur, start, last))
@@ -84,6 +99,10 @@ def main():
     return
 
   rel = lambda x: x - t0  # noqa: E731
+  if holes:
+    print("WARNING: {} segment(s) unreadable, runs were broken there rather than stitched: {}".format(
+      len(holes), ", ".join(holes)))
+    print()
 
   # Only the transitions that matter, and their durations. A 2-frame blip is noise; the runs that
   # decide this are seconds long.

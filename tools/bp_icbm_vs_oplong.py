@@ -56,6 +56,10 @@ def main():
       lr = LogReader(p)
     except Exception:
       continue
+    # RESET AT EVERY SEGMENT. Carrying `cluster` across a boundary counts the discontinuity as real
+    # dash movement, and the error only ever INFLATES -- which is the direction that supports the
+    # conclusion this tool was written to reach.
+    cluster = None
     for m in lr:
       try:
         w = m.which()
