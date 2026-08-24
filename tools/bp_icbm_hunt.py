@@ -18,6 +18,15 @@ So this prints, over each `inert` window, how far ICBM's own TARGET travelled ag
 DASH travelled, and how many times the dash crossed the target. A dash that moves far while the
 target sits still, crossing it repeatedly, is hunting. Both moving together is tracking.
 
+ANSWERED 2026-08-24, and the answer was a THIRD category neither branch above describes: on
+000003ae the target itself was shaking -- 2.82 changes per second, 27 <-> 30, with the dash and the
+baseline both sitting still and ZERO driver button events in the window. Tracking (honestly) a
+target that will not settle. The controller-side filter for it is `settle_target` in
+controller.py; read the SETTLE_S note there before touching this.
+
+Run it per route and compare: 000003b5 measures 0.70/s over the same metric, so a single route's
+number means nothing on its own.
+
     python tools/bp_icbm_hunt.py 000003b5
 """
 import os

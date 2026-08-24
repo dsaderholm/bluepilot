@@ -3882,3 +3882,48 @@ diagnostics for the same question.
 radar; Fusion ABS, IPC, steering column). Platform `FORD_FUSION_MK5`, `flags 18` =
 `ALT_STEER_ANGLE | TSR`, **not** CAN FD — that combination is what exposed the duplicate-message
 bug, so keep it in mind when reasoning about flag-gated branches.
+
+## 2026-08-24: THE "SET SPEED CHANGED" SPAM WAS A SHAKING TARGET, NOT A HUNTING CONTROLLER
+
+His report was *"it keeps telling me set speed changed and the max speed is flashing fast"*, and the
+press count on route `000003ae` looked like the documented tap-vs-hold hunt. It was not.
+
+**Measured, from his rlogs:**
+
+| route | `vTargetRaw` changes | rate | driver button events in the window |
+|---|---|---|---|
+| `000003ae` | 363 over 129 s | **2.82 / s** | **none** — all 378 presses were ICBM |
+| `000003b5` | 401 over 574 s | 0.70 / s | the holds there were HIS thumb |
+
+On `ae` the plan target flipped 27 -> 30 -> 27 with a ~0.1 s high leg inside a ~0.5 s cycle, for the
+whole `inert` window, while the baseline, `vTarget` and the dash all sat still at 27. ICBM was not
+failing to settle on a reachable number; it was tracking a number that would not sit still.
+
+**Two traps this walked into, both worth not repeating:**
+
+1. **`ae` cannot answer WHY the target shook.** `vSlaTarget` and `speedLimitLive` were added AFTER
+   those drives -- they read 0 on all 27,139 frames of `ae` and are populated on 61,967 of `b5`.
+   Re-querying `ae` for the source is wasted work. `b5` and later routes can answer it.
+2. **My first conclusion — "the jitter was his thumb" — was right for `b5` and wrong for `ae`.**
+   One route's answer is not the other's. Check the driver button events per route, every time.
+
+**The fix, and the design rule it produced.** The first version made every step UP wait out a
+settle window. It broke five tests in `test_manual_override`, including the two defending the
+owner's own rule that *behind a car the set speed may go anywhere, because that car is probably
+driving correctly*; an earlier placement (above the `v_target_raw` capture) also DESTROYED a driver
+hold in `test_icbm_own_recovery_is_never_adopted`. Both were caught by running the FULL suite, not
+the new file. The shipped filter is aimed at the one shape that was actually measured -- a bounce
+back up to a level just left -- and:
+
+- a FALL is adopted on the frame it arrives, always, with no exception, ever;
+- a rise to a level the target has NOT just left is adopted immediately;
+- only a bounce back inside `REVERSAL_MEMORY_S` has to be asked for continuously for `SETTLE_S`.
+
+It sits BELOW the `v_target_raw` capture on purpose. Holds, overrides and the divergence latch all
+compare against `v_target_raw`, which is still exactly what the planner published. The stated reason
+for putting it above -- that a shaking raw value could arm the override -- was arithmetic I never
+did: `DEFAULT_BASELINE_RESET_DELTA` is 10 mph and the shake was 3.
+
+**Generalisation, and it has now cost twice in two days: a filter that makes the car SLOWER to speed
+up is cheap, and a filter that makes it slower to slow down is never acceptable. Put the delay only
+on the permissive direction, and prove the placement against the whole suite before believing it.**
