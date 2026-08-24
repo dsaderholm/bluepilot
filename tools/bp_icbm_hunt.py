@@ -1,4 +1,4 @@
-"""Was ICBM TRACKING a moving target, or OSCILLATING around a still one?
+"""Is the PLAN'S OWN target steady, or is ICBM being handed a shaking number?
 
 His report, 2026-08-23: "It keeps telling me set speed changed and the max speed is flashing fast",
 and the measured shape of it on route 000003ae -- 378 button frames and 84 mph of dash travel in
@@ -91,7 +91,12 @@ def main():
         continue
       try:
         icbm = m.selfdriveStateSP.intelligentCruiseButtonManagement
-        tg = float(icbm.vTarget)
+        # `vTargetRaw`, NOT `vTarget`. vTarget is POST-baseline, so while a hold is active it EQUALS
+        # the hold by construction -- measuring its travel measures the DRIVER'S THUMB, not
+        # controller noise. The capnp comment above vTargetRaw says exactly this, and the first
+        # version of this tool read vTarget anyway and reported 27x "jitter" that was him pressing
+        # buttons while the plan sat steady at 22.
+        tg = float(icbm.vTargetRaw)
       except Exception:
         continue
       if tg > 0:
