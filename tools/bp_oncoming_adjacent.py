@@ -44,18 +44,29 @@ REALDATA = "/data/media/0/realdata"
 
 def main() -> int:
   ap = argparse.ArgumentParser()
-  ap.add_argument("route")
+  ap.add_argument("route", nargs="+", help="one or more route prefixes; edges are POOLED")
   ap.add_argument("--segments", type=int, default=0)
   args = ap.parse_args()
 
   from openpilot.tools.lib.logreader import LogReader
 
-  segs = sorted((d for d in os.listdir(REALDATA) if d.startswith(args.route)),
-                key=lambda d: int(d.rsplit("--", 1)[-1]) if d.rsplit("--", 1)[-1].isdigit() else -1)
-  if args.segments:
-    segs = segs[:args.segments]
-  if not segs:
-    sys.exit(f"no segments matching {args.route}")
+  # POOLED ACROSS ROUTES, and for this tool that is not a convenience. Its whole output is a small
+  # count of rising edges, and single-drive readings from it have been published and withdrawn
+  # TWICE -- "seven of ten are impossible" became 33% once ten more drives were added. Pooling is
+  # the fix for the mistake this file's own docstring warns about.
+  all_segs = []
+  for route in args.route:
+    segs = sorted((d for d in os.listdir(REALDATA) if d.startswith(route)),
+                  key=lambda d: int(d.rsplit("--", 1)[-1]) if d.rsplit("--", 1)[-1].isdigit() else -1)
+    if args.segments:
+      segs = segs[:args.segments]
+    if not segs:
+      print(f"  (no segments matching {route})")
+      continue
+    all_segs += segs
+  if not all_segs:
+    sys.exit(f"no segments matching any of {args.route}")
+  segs = all_segs
 
   prev = {"left": False, "right": False}
   edges = {"left": 0, "right": 0}
