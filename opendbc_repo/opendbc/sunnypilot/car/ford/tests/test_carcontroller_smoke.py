@@ -40,7 +40,6 @@ from __future__ import annotations
 import os
 import re
 import sys
-import types
 
 import pytest
 
@@ -366,19 +365,38 @@ def test_the_gap_button_still_goes_out_under_the_passthrough(carcontroller_parts
                            send_button=structs.IntelligentCruiseButtonManagement.SendButtonState.none,
                            gap_target=GAP_MIN, long_active=True)
 
-  gap_signals = {"AccButtnGapIncPress", "AccButtnGapDecPress", "AccButtnGapTogglePress"}
+  # THE GAP BITS THEMSELVES, not merely that a Steering_Data_FD1 went out. An earlier version of
+  # this counted every frame at 0x083 and named the set of gap signals in a variable it then never
+  # used -- so it passed on the periodic all-zero frames the controller sends anyway, while
+  # asserting in its own message that "the gap request reached the wire". It could not have failed.
+  # ford_lincoln_base_pt.dbc, BO_ 131 Steering_Data_FD1: IncPress 11|1@0+, DecPress 12|1@0+,
+  # TogglePress 32|1@0+.
+  frames = 0
   pressed = 0
   for frame in range(SETTLE_FRAMES + 200):
     _, can_sends = cc.update(CC, CC_SP, CS, frame * 10_000_000)
     for addr, dat, _bus in can_sends:
-      if addr == 0x083:
+      if addr != 0x083:
+        continue
+      frames += 1
+      if any(_be_bit(bytes(dat), start) for start in (11, 12, 32)):
         pressed += 1
 
   assert not cc.icbm_gap_failed, "the gap path latched off under the passthrough"
   assert cc.icbm_gap.active, "no lease opened for a gap request the camera reported differently"
+  assert frames > 0, "no Steering_Data_FD1 went out at all"
   assert pressed > 0, (
-    "no Steering_Data_FD1 went out -- the gap request never reached the wire under the passthrough, "
-    "which is the configuration the three ICBM gates were fixed for")
+    f"{frames} Steering_Data_FD1 frames went out and not one had a gap bit set -- the gap request "
+    "never reached the wire under the passthrough, which is the configuration the three ICBM gates "
+    "were fixed for")
+
+
+def _be_bit(data: bytes, start: int) -> int:
+  """One big-endian (Motorola) bit out of a raw frame, by its DBC start bit."""
+  v = int.from_bytes(data, "big")
+  total = len(data) * 8
+  idx = (start // 8) * 8 + (7 - (start % 8))
+  return (v >> (total - idx - 1)) & 1
 
 
 def _decode_acc_brake(data: bytes) -> float:

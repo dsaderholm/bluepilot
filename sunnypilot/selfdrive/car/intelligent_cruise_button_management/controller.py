@@ -352,7 +352,6 @@ class IntelligentCruiseButtonManagement:
 
     self.is_ready = False
     self.is_ready_prev = False
-    self.v_target_ms_last = 0.0
     self.v_target_up_frames = 0     # consecutive frames the planner has asked for a STEP up
     self.v_target_settled = 0       # the settled set-speed target, in display units
     self.v_target_fell_from = 0     # the level a recent fall left behind
@@ -375,8 +374,10 @@ class IntelligentCruiseButtonManagement:
     self.v_baseline = 0            # the driver's chosen speed; 0 = no baseline, follow SLA
     self.v_target_raw = 0
     self.plan_source = LongitudinalPlanSource.cruise
-    self.scc_map_requesting = False   # a mapped corner is asking
-    self.deadline_requesting = False  # map OR vision: a target with a fixed place in the road
+    self.deadline_requesting = False  # SCC-MAP ONLY: a target with a fixed place in the road.
+                                      # Vision is deliberately NOT in here -- exempting it produced
+                                      # 80 -> 50 mph on gentle curves and was reverted the same day.
+                                      # See apply_target_drop_limit's docstring before widening it.
     self.curve_active = False        # SCC-Vision is tracking a bend right now
     self.curve_ceiling = 0           # highest target allowed for the rest of this bend
     self.v_curve_target = 0          # SCC-Vision's own ask, display units; releases the ceiling
@@ -497,6 +498,12 @@ class IntelligentCruiseButtonManagement:
   def v_cruise_equal(self) -> bool:
     return self.v_target == self.v_cruise_cluster
 
+  def _adopt_target(self, v_target: int) -> int:
+    """Take this target as the settled one and start any future bounce's case over."""
+    self.v_target_up_frames = 0
+    self.v_target_settled = v_target
+    return v_target
+
   def settle_target(self, v_target: int) -> int:
     """Take a fall at once; make a BOUNCE BACK to a level just left prove it is not a blip.
 
@@ -512,14 +519,9 @@ class IntelligentCruiseButtonManagement:
     else:
       self.v_target_fell_from = 0
 
-    def adopt(v):
-      self.v_target_up_frames = 0
-      self.v_target_settled = v
-      return v
-
     if self.v_target_settled <= 0:
       # Nothing adopted yet -- the first frame is not a move, it is the starting point.
-      return adopt(v_target)
+      return self._adopt_target(v_target)
 
     if v_target < self.v_target_settled:
       # A FALL, taken on this frame, always. Aiming lower is the conservative action and the
@@ -527,33 +529,38 @@ class IntelligentCruiseButtonManagement:
       # level being left, so an immediate bounce back to it is recognisable as one.
       self.v_target_fell_from = max(self.v_target_settled, self.v_target_fell_from)
       self.v_target_fell_frames = REVERSAL_MEMORY_FRAMES
-      return adopt(v_target)
+      return self._adopt_target(v_target)
 
     if v_target <= self.v_target_settled + SETTLE_EPS:
       # Level, or a ramp crossing one mph. No delay.
-      return adopt(v_target)
+      return self._adopt_target(v_target)
 
     if self.v_target_fell_frames <= 0 or v_target > self.v_target_fell_from + SETTLE_EPS:
       # A rise to somewhere NEW. Nothing here meters an honest climb: a speed limit going up, a
       # curve releasing, a lead pulling away. The owner's rule that behind a car the set speed may
       # go anywhere it likes stays exactly as it was.
-      return adopt(v_target)
+      return self._adopt_target(v_target)
 
     # A BOUNCE: back up to a level we left moments ago. This is the shape measured on route
     # 000003ae and nothing else looks like it. Make it hold.
     self.v_target_fell_frames = REVERSAL_MEMORY_FRAMES   # keep the memory alive while it repeats
     self.v_target_up_frames += 1
     if self.v_target_up_frames >= SETTLE_FRAMES:
-      return adopt(v_target)
+      return self._adopt_target(v_target)
 
     return self.v_target_settled
 
   def update_calculations(self, CS: car.CarState, LP_SP: custom.LongitudinalPlanSP) -> None:
     speed_conv = CV.MS_TO_KPH if self.is_metric else CV.MS_TO_MPH
 
-    self.v_target_ms_last = LP_SP.vTarget
+    # A LOCAL, not instance state. It was `self.v_target_ms_last`, the memory
+    # `apply_hysteresis(..., HYST_GAP)` needed across frames -- and that call was a no-op with the
+    # gap left at 0.0. Nothing carries across frames here any more, and leaving it on `self` invited
+    # someone to reintroduce a filter on the raw planner value, which is exactly the placement that
+    # destroyed a driver hold. The settle that replaced it runs further down, below v_target_raw.
+    v_target_ms = LP_SP.vTarget
 
-    self.v_target = round(self.v_target_ms_last * speed_conv)
+    self.v_target = round(v_target_ms * speed_conv)
     self.v_cruise_min = get_minimum_set_speed(self.is_metric)
     self.v_cruise_cluster = round(CS.cruiseState.speedCluster * speed_conv)
 
@@ -659,7 +666,6 @@ class IntelligentCruiseButtonManagement:
     # two seconds. Reasoning from a docstring instead of data, again.
     try:
       scc = LP_SP.smartCruiseControl
-      self.scc_map_requesting = bool(scc.map.active)
       # VISION IS METERED AGAIN as of 2026-08-08, reverting the same day's change. Removing the cap
       # for curves produced 80 -> 50 mph on two slight freeway curves, with traffic behind reacting.
       # The cap was doing load-bearing work nobody had identified: SCC-Vision's target on a gentle
@@ -679,7 +685,6 @@ class IntelligentCruiseButtonManagement:
       self.curve_exit_frames = (CURVE_EXIT_LINGER_FRAMES if self.curve_active
                                 else max(0, self.curve_exit_frames - 1))
     except (AttributeError, KeyError):
-      self.scc_map_requesting = False
       self.deadline_requesting = False
       # curve_active and its ceiling latched here before: neither was cleared, so one bad frame left
       # the ceiling pinned at whatever it held with nothing able to reset it.
@@ -691,7 +696,7 @@ class IntelligentCruiseButtonManagement:
     self.v_target = self.apply_baseline(self.v_target)
 
     v_ego_conv = round(CS.vEgo * speed_conv)
-    # Reads self.scc_map_requesting, set just above -- SCC-Map is exempt. See the docstring.
+    # Reads self.deadline_requesting, set just above -- SCC-Map is exempt. See the docstring.
     self.v_target = self.apply_target_drop_limit(v_ego_conv)
 
     # BluePilot: the radar-blind lead detector supersedes everything above, including the drop
@@ -1535,7 +1540,7 @@ class IntelligentCruiseButtonManagement:
     # rule would never fire.
     #
     # The concern does not hold, and the existing tests are what showed it. `v_target` is
-    # `round(v_target_ms_last * speed_conv)` -- ICBM aims at SLA's number ALREADY ROUNDED, by the
+    # `round(v_target_ms * speed_conv)` -- ICBM aims at SLA's number ALREADY ROUNDED, by the
     # same `round`, so the cluster lands on exactly the integer this compares against. The two
     # cannot straddle.
     #

@@ -5418,3 +5418,33 @@ did: `DEFAULT_BASELINE_RESET_DELTA` is 10 mph and the shake was 3.
 **Generalisation, and it has now cost twice in two days: a filter that makes the car SLOWER to speed
 up is cheap, and a filter that makes it slower to slow down is never acceptable. Put the delay only
 on the permissive direction, and prove the placement against the whole suite before believing it.**
+
+## THE FORD CAR CODE IS NOT LINTED BY THE REPO'S OWN CONFIG
+
+`pyproject.toml` `[tool.ruff] exclude` lists `opendbc` AND `opendbc_repo`. **Every file that actually
+runs the car -- carcontroller.py, carstate_ext.py, lateral_angle_ext.py, radar_interface.py, the
+Ford smoke tests -- is invisible to `ruff check .`.** A clean run of the repo lint says nothing
+about them.
+
+Checked explicitly on 2026-08-24 it found eight things, all real and all in code that runs:
+
+    ruff check --no-cache --isolated --select F,E9 opendbc_repo/opendbc/car/ford/                                                    opendbc_repo/opendbc/sunnypilot/car/ford/
+
+- `steer_alert` computed in `carcontroller.update` and never passed anywhere (HudExt derives its own)
+- `calc = 1` in `radar_interface`, `d_ref = pscm_d_ref_m(v_ego)` and `LP = self.lp` in
+  `lateral_angle_ext` -- discarded results, one of them a function call made every frame
+- two unused imports, and a **vacuous smoke test**: it named the three gap signals in a variable it
+  never used and instead counted every frame at 0x083, so it passed on the periodic all-zero frames
+  while asserting in its own message that "the gap request reached the wire"
+
+**Run that command as part of any review that touches Ford code.** `--isolated` is what bypasses
+the exclude; without it ruff silently checks nothing. And note the repo carries ~900 pre-existing
+style errors elsewhere, so lint is not enforced anywhere here -- `--select F,E9` is the filter that
+separates real findings (undefined names, unused results, syntax) from that noise.
+
+**The same audit on instance state, which lint does NOT do:** an AST pass for `self.X` attributes
+that are stored and never loaded found `scc_map_requesting` in the ICBM controller -- assigned the
+identical expression as `deadline_requesting` one line apart, read by nothing, with a comment three
+hundred lines away claiming the drop limiter reads it. The limiter reads `deadline_requesting`.
+Cross-check any hit repo-wide before believing it: most write-only attributes are read by another
+module, and a per-file scan cannot see that.

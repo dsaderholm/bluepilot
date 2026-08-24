@@ -14,7 +14,6 @@ from opendbc.can.parser import CANParser
 from opendbc.car.ford.values import CAR, FordFlags
 from opendbc.sunnypilot.car.ford.values_ext import BUTTONS
 from opendbc.sunnypilot.car.ford.blis_ext import update_blis
-from openpilot.common.swaglog import cloudlog
 
 
 # BluePilot: Traffic_RecognitnData (0x3CD) signal map, capnp field -> CAN signal. Logged whole so
