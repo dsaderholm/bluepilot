@@ -65,9 +65,24 @@ feeder microcontroller gets a *private* CAN bus for the ESR and emits a small di
 That is more work, but it is also strictly better — openpilot then parses two messages instead
 of sixty-four, and §5 collapses to almost nothing.
 
-**Cheapest de-risking experiment, before a bracket, a radome, an MCU or a hole in the bumper:**
+> ## ⛔ DO NOT BUY AN ESR. THIS PARAGRAPH IS SUPERSEDED — see section 8 for the real list.
+>
+> The experiment below was run on 2026-08-14 and it ANSWERED THE QUESTION: the **MRR free-runs**,
+> emitting all 64 detection addresses at ~2140 frames/s with **nothing transmitted to it**. There is
+> no handshake to establish and no gateway frames to send, so the ESR that sections 3 and 4 are
+> built around is doubly dead — and the rear part is a **second Delphi MRR**, the same part already
+> fitted to the front of this car.
+>
+> This was left as a live "buy" instruction for nine days after the bench disproved it. This repo
+> has already carried a wrong bill of materials once, for a week, while the vendor email that
+> corrected it sat unread — **a stale purchase instruction near the TOP of a long document is the
+> most expensive kind of staleness there is**, because a shopping list gets read top-down by
+> someone with a card out.
 
-> Buy the salvage ESR and its pigtail (~$100–200 — money you have to spend anyway). Put it on a
+**Cheapest de-risking experiment, before a bracket, a radome, an MCU or a hole in the bumper —
+DONE 2026-08-14, kept for the reasoning only:**
+
+> ~~Buy the salvage ESR and its pigtail (~$100–200 — money you have to spend anyway).~~ Put it on a
 > bench with a 12 V supply, a USB-CAN adapter at 500 kbit/s and a laptop. Log what it transmits
 > with nothing being sent to it. Then send the four gateway frames from §4 and see what changes.
 > The QUT characterisation paper ran an ESR exactly like this — statically, on a support, driven
