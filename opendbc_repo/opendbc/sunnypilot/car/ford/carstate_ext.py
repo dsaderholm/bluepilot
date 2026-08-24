@@ -95,6 +95,11 @@ def get_hev_engine_on_reason_text(reason_value):
 # and ICBM injects `CcAslButtnSetIncPress`; both must take the combo path below, which picks
 # resumeCruise or accelCruise from the cruise state. Measured 2026-08-20 -- see the BUTTONS comment
 # in values_ext for why the original single-signal mapping made his `+` button invisible.
+# FusionPilot: TsrVl1StatMsgTxt_D_Rq -- the camera's own grade of the limit it is reporting.
+# ford_lincoln_base_pt.dbc: 0 Null, 1 LimitChanged, 2 LimitReliable, 3 LimitOutdated.
+TSR_LIMIT_CHANGED = 1
+TSR_LIMIT_RELIABLE = 2
+
 RES_INC_SIGNALS = ("CcAslButtnSetIncPress", "CcAslButtnResIncPress")
 
 # BluePilot: which LOGICAL button each combo signal belongs to. A group is edge-detected once per
@@ -540,8 +545,33 @@ class CarStateExt:
     if not self.CP.flags & FordFlags.TSR:
       return 0
 
-    v_limit = cp_cam.vl["Traffic_RecognitnData"]["TsrVLim1MsgTxt_D_Rq"]
-    v_limit_unit = cp_cam.vl["Traffic_RecognitnData"]["TsrVlUnitMsgTxt_D_Rq"]
+    tsr = cp_cam.vl["Traffic_RecognitnData"]
+    v_limit = tsr["TsrVLim1MsgTxt_D_Rq"]
+    v_limit_unit = tsr["TsrVlUnitMsgTxt_D_Rq"]
+
+    # FusionPilot: THE CAMERA GRADES ITS OWN READ, AND WE USED TO IGNORE IT.
+    #
+    # Twelve TSR signals are subscribed at the top of this file and exactly two were read: the
+    # number and the unit. `TsrVl1StatMsgTxt_D_Rq` is the camera's own verdict on the value it is
+    # sending -- 2 LimitReliable, 3 LimitOutdated, 1 LimitChanged, 0 Null -- and a limit the camera
+    # has already marked OUTDATED has no business steering the set speed.
+    #
+    # Measured on 2026-08-24, decoding 0x3CD off his own routes:
+    #
+    #   000003b7   LimitOutdated on 100% of 721 frames, VLim1 255 throughout
+    #   000003b6   LimitOutdated 83%, LimitReliable 16%, and of the 165 frames carrying the value
+    #              80: 96 LimitReliable, 62 LimitOutdated, 7 LimitChanged
+    #
+    # SO BE CLEAR ABOUT WHAT THIS DOES NOT FIX. The phantom 80 on 000003b6 -- an I-80 route shield
+    # read as a speed limit near 2100 S, which walked his set speed to 90 for 13 minutes -- was
+    # graded LimitReliable on 58% of its frames. This gate would have shortened it, not stopped it.
+    # A confident wrong read needs a different answer (corroboration against the map source);
+    # nothing in this message distinguishes it.
+    #
+    # Rejecting `Null` too: it is the power-on state, not a reading.
+    v_limit_status = tsr["TsrVl1StatMsgTxt_D_Rq"]
+    if v_limit_status not in (TSR_LIMIT_RELIABLE, TSR_LIMIT_CHANGED):
+      return 0
 
     speed_factor = CV.MPH_TO_MS if v_limit_unit == 2 else CV.KPH_TO_MS if v_limit_unit == 1 else 0
     return v_limit * speed_factor if v_limit not in (0, 255) else 0
