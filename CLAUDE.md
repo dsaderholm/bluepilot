@@ -1627,6 +1627,43 @@ lumpier stop rather than a lost ACC.
 
 **Still read `RECOVERY DECLINED` from a drive first.** It costs nothing and it is one drive away.
 
+### THE THRESHOLD IS BETWEEN 1.1 AND 2.6 SECONDS. FIVE EPISODES, AND IT IS 4 FOR 4 FATAL.
+
+Four ignition cycles in eleven minutes on 2026-08-23 make this the cleanest experiment in the file:
+
+    21:14:36  ae   ford 60.8s -> opStop  3.67s -> inert 60.1s   DEAD, route ends
+    21:19:51  af   ford 33.8s -> opStop 17.75s -> inert 27.4s   DEAD
+                   then two re-engage attempts: fallback, fallback, never ford
+    21:21:57  b0   never engaged
+    21:25:41  b1   ford x8 windows over 403 s, NO override fired   PERFECT
+
+**Ford ACC works from every fresh ignition, dies the first time the override runs, and cannot be
+recovered without another ignition.** b1 is the control: 403 seconds, eight separate Ford windows,
+no override, no trouble at all.
+
+**EVERY OVERRIDE DURATION ON RECORD, against outcome:**
+
+    1.1 s   (a9)   SURVIVED
+    2.6 s   (aa)   latched
+    3.67 s  (ae)   latched
+    12.6 s  (a8)   latched
+    17.75 s (af)   latched
+
+**So the camera's tolerance is between 1.1 s and 2.6 s, and every override longer than that has
+killed ACC -- four for four.** The 1.5 s figure this file has carried as an estimate is now bracketed
+by measurement rather than inferred, and `ARM_MIN_SPEED` is confirmed irrelevant a second time: ae
+armed at a duration, not a speed.
+
+**THIS IS WHAT MAKES INTERLEAVING CONCRETE.** A stop needs 5-8 s and the camera tolerates under 2,
+so a single continuous override can never work. Bursts of ~1.0 s with Ford's own frame handed back
+between them stay inside the tolerance on each burst -- IF what the camera counts is consecutive
+contradiction rather than cumulative. That is precisely the unknown, and interleaving is the
+experiment that separates the two. The cost of being wrong is a lumpier stop; the cost of not trying
+is that the feature is dead as built.
+
+**Do not raise `ARM_MIN_SPEED` again, and do not shorten the override to 1 s and call it fixed** --
+a 1 s override cannot stop the car, which is the entire point of the feature.
+
 ### ICBM SHOULD PREPARE THE SET SPEED WHILE e2e DRIVES, NOT MERELY STOP TOUCHING IT
 
 His correction, 2026-08-23, and it is a better rule than the one that shipped that morning:
