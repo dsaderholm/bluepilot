@@ -4564,6 +4564,33 @@ car at -27 m/s still vetoes.
 would have been an argument into a lookup: the constant was not defended on taste, it was defended
 until a specific, stated bar was cleared.
 
+#### FIRST ROAD DATA AFTER THE CHANGE: 4 EDGES, 0 IMPOSSIBLE -- AND THAT IS NOT YET PROOF
+
+Five night drives, routes 000003b2-b6, 32 segments, all recorded after the 17:25 deploy:
+
+    oncomingAdjacent RISING EDGES:  left 3  right 1
+    two-way road -- plausible                 4
+    ON A ONE-WAY ROAD -- impossible           0
+
+Against 30 edges with 10 impossible (33%) over the eleven drives at 0.5.
+
+**DO NOT WRITE THIS UP AS "THE FIX WORKS".** Zero-of-four cannot distinguish a real improvement from
+an ordinary run of luck: at the OLD 33% rate, four draws come back clean about one time in five.
+This is consistent with the change and is not evidence for it. That is the fifth instance in this
+file of a small sample being available to quote as a rate, and the first one where the temptation is
+to confirm my own change rather than to discover something.
+
+**The stronger signal is the edge RATE, and it is also confounded.** 30 edges over 11 drives is
+2.7 per drive; 4 over 5 is 0.8. Raising the floor should do exactly that -- but these are NIGHT
+drives on different roads, so road mix and traffic explain some unknown share of it. What would
+settle it is more drives at 0.7, which arrive on their own.
+
+**AND THE SWEEP BROKE THE MOMENT ITS OWN ADVICE WAS TAKEN.** The candidate fractions were hardcoded
+`(ONCOMING_SPEED_FRACTION, 0.7)`, so once the constant became 0.7 every row printed twice, both
+labelled live, exploring nothing. **A sweep that hardcodes the value it exists to question stops
+being a sweep as soon as its recommendation is adopted.** Candidates are now a deduped set that
+straddles whatever is live. Found by reading the output; no test would have caught it.
+
 **AND THE OBVIOUS DISCRIMINATOR IS FORBIDDEN, which is worth stating before someone reaches for it.**
 `oneWay` from the map separates these perfectly by construction -- it is what labels them. But
 suppressing an oncoming sighting because the map says one-way is **the map REMOVING a refusal**,
