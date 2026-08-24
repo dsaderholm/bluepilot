@@ -98,17 +98,13 @@ def _inert_alert_lines():
   raise AssertionError("accPassthroughInert alert not found in events.py")
 
 
-def test_the_inert_alert_names_the_recovery():
+def test_the_inert_alert_names_no_recovery():
+  """It briefly suggested MAIN. Re-measured, MAIN cleared only cruise-OFF runs -- which clear by
+  themselves -- and failed all five times it was tried against a cancel raised while engaged."""
   lines = _inert_alert_lines()
   assert len(lines) == 2, lines
-  assert "MAIN" in lines[1], lines[1]
-
-
-def test_the_inert_alert_does_not_promise_the_recovery_works():
-  """Three clean cases out of eight is a lead. It failed after accFaulted, which needs a restart."""
-  second = _inert_alert_lines()[1].lower()
-  assert "may" in second, "the alert is promising a recovery that worked 3 times out of 8"
-  assert "will restore" not in second
+  assert "MAIN" not in lines[1], (
+    "the alert is naming a recovery that was measured not to work: " + lines[1])
 
 
 def test_it_still_says_what_actually_happened():

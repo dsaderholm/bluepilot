@@ -405,28 +405,27 @@ EVENTS_SP: dict[int, dict[str, Alert | AlertCallbackType]] = {
   # condition is noise, and he would learn to ignore it. Priority LOW and a single prompt rather
   # than a warning: nothing is unsafe, the car is being driven by a controller he does not prefer,
   # and the useful response is a decision at the next stop rather than a reaction now.
-  # FusionPilot: NAME THE RECOVERY, because he was restarting the car to get out of this.
+  # FusionPilot: NO RECOVERY IS NAMED HERE, because the one that looked like a recovery was not.
   #
-  # His words, 2026-08-24: "I still usually restart my car to regain cruise when it gets stuck
-  # cancelled". Measured across four routes, a MAIN cruise press cleared the camera's latched
-  # `AccCancl_B_Rq` in under a second three times out of eight:
+  # A MAIN press was measured clearing the camera's cancel three times in under a second and this
+  # alert briefly said so. Re-checked against every cancel run on six routes, all three of those
+  # clears were on runs asserted while cruise was OFF -- and a cancel raised while cruise is off is
+  # the camera's idle state flickering, not a cancellation. Those clear on their own in seconds.
   #
-  #     000003b7  MAIN t+82.6   -> cancel cleared t+83.3
-  #     000003b8  MAIN t+177.1  -> cancel cleared t+177.7, Ford held authority 59% of the rest
-  #     000003ba  MAIN t+373.1  -> cancel cleared t+373.7, then stock 72% / ford from t+375
+  # Against a REAL cancel -- one raised while engaged -- MAIN failed every time it was tried:
+  # 000003b5 t+596.4, 000003b8 t+587.3 and t+588.4, 000003ba t+469.7 and t+470.9. Five attempts,
+  # no clears.
   #
-  # It FAILED five times, and the two that matter are 000003b8 t+587.3 and t+588.4 -- both after
-  # `accFaulted`. A faulted ACC module does not come back from a button press, which is exactly the
-  # case that still needs the ignition cycle. So this says "may", not "will": three clean cases is
-  # a lead, not a proven recovery, and the alert must not promise what the car cannot keep -- see
-  # the withdrawn "Stay off the brake to let it stop" note in model_stop_alert for the last time
-  # that rule was learned here.
+  # And genuine cancels do not relent on their own either. Of the four raised while engaged across
+  # those routes, three never cleared before the route ended and the fourth took 365 seconds.
   #
-  # Pressing MAIN drops cruise entirely for the moment, so this is offered rather than automated.
+  # So the alert says what is true and nothing more. Naming a recovery that does not work would
+  # cost him the one thing this screen is for -- see the withdrawn "Stay off the brake to let it
+  # stop" note in model_stop_alert for the last time an alert promised what the car could not keep.
   EventNameSP.accPassthroughInert: {
     ET.PERMANENT: Alert(
       "Ford ACC unavailable",
-      "Camera cancelled. MAIN off/on may restore it.",
+      "Camera cancelled; openpilot is driving longitudinal",
       AlertStatus.userPrompt, AlertSize.mid,
       Priority.LOW, VisualAlert.none, AudibleAlertSP.promptSingleHigh, 6.),
   },
