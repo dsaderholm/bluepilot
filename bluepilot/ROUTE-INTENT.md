@@ -634,6 +634,13 @@ Everything above is about ROUTE INTENT: which branch, for the exit problem. He a
 question -- *"I am thinking of actual navigation, eventually"* -- meaning enter a destination and get
 turn-by-turn. Different feature, different answer, so it gets its own section.
 
+**SEE `bluepilot/NAVIGATION-PRIOR-ART.md` FIRST, added 2026-08-23.** It researches how comma, Tesla,
+GM, Ford and the openpilot forks actually do this, and it CORRECTS two claims made below and one in
+section 9c. In particular: `sunnypilot/navd/helpers.py` is not "one file of coordinate math" -- it
+still contains comma's Mapbox banner parser and polyline-progress code -- and comma removed
+navigate-on-openpilot because the MODEL could not execute the maneuvers, not because the data was
+bad, which is a failure mode our design cannot reach.
+
 **THERE IS NO NAVIGATION IN THIS FORK, AND NOTHING TO BUILD ON. Three layers, all empty:**
 
     comma        DELETED it. log.capnp carries navInstructionDEPRECATED @82,
@@ -737,7 +744,7 @@ inference, not a read.
 
 | fork / project | what it does | relevance |
 |---|---|---|
-| **FrogPilot** | **Primeless Navigation**: full turn-by-turn with the user's OWN Mapbox keys, no comma prime. Destination via a web console on `:8082` or iOS Shortcuts. **Navigate-on-openpilot feeds route info to the MODEL**, and it *"will keep left or right appropriately at forks and exits"*. | **The CONSUMER side is proven.** A fork already turns route intent into lane positioning, which is exactly what he wants passing assist to do. |
+| **FrogPilot** | **Primeless Navigation**: full turn-by-turn with the user's OWN Mapbox keys, no comma prime. Offline regions downloadable. **Navigate-on-openpilot varies lane POSITIONING** at forks and exits. | **PARTLY -- and this row overstated it until 2026-08-23.** FrogPilot's own wiki says lane CHANGE behaviour is unchanged and still driver-activated. It proves route intent can influence lateral POSITIONING; it does NOT prove a fork making an autonomous lane-change DECISION from route intent, which is what passing assist would be. See NAVIGATION-PRIOR-ART.md section 4. |
 | **CarrotPilot** (jixiexiaoge) | An Android **"Navigation Data Bridge"** for comma3. Ingests AMAP, Tencent and **Google Maps**, normalizes it and delivers it to the fork for NOO. Web console on port 7000. | **The TRANSPORT side is proven**, and it is precisely 9a's fallback shape: phone app scrapes a nav source, ships it to the device. Waze is not among its sources. |
 | **twilsonco/OpenPilotSiriShortcuts** | iOS Shortcuts that set the openpilot DESTINATION from Waze, Google Maps or Apple Maps via the share sheet. | Sets a destination; does NOT stream maneuvers. Wrong shape here -- he does not want to re-enter a destination, he wants the live instruction. |
 | **dragonpilot** | OSM speed limits, stop signs, road names. | Map data, not routing. Same layer this fork already has via mapd. |
