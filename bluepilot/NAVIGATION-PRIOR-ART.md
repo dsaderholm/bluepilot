@@ -194,3 +194,103 @@ bridge Waze, for the reason that has driven this whole investigation.
    transport. That path is much shorter than section 8 implies.
 6. **Do not quietly adopt everyone else's architecture.** Using our own router would solve the
    transport problem and lose the two properties he actually chose Waze for.
+
+---
+
+## 6. WHAT CARROTPILOT'S NAV BRIDGE ACTUALLY SENDS
+
+Read from `ajouatom/openpilot` (the canonical CarrotPilot) on 2026-08-23 -- schema and transport,
+primary source. This is the closest working prior art to a phone bridge, and it is worth more than
+the one-line summary in ROUTE-INTENT 9c.
+
+**There are TWO generations of schema in that tree**, which is itself informative -- they outgrew
+the first one.
+
+### 6a. `CarrotMan` -- the flat legacy struct
+
+One message, 29 flat fields: `xTurnInfo` (an Int32 turn code), `xDistToTurn`, `xTurnCountDown`,
+`xSpdType/Limit/Dist/CountDown` (speed-camera zones), `nRoadLimitSpeed`, `szPosRoadName`,
+`szTBTMainText`, `nGoPosDist`/`nGoPosTime` (to destination), `xPosLat/Lon/Angle/Speed` (the PHONE's
+own position), `naviPaths` (route geometry, as Text), and `desiredSpeed` + `desiredSource`.
+
+### 6b. `CarrotNaviState` -- the structured one, and it is well designed
+
+    schemaVersion, generation, sessionId, publishMonoTimeNanos, connected
+    vehicle          lat/lon, heading, speed, roadName, virtualGps
+    guidanceCurrent  } distanceM, timeSec, turnType, roadName, mainText,
+    guidanceNext     } near/mid/farDirection, pointValid + latitude/longitude
+    laneCurrent, laneAhead[]   count, currentLane, turnInfo[], available[]
+    speed            road limit, SDI zones, section-average enforcement, secondary SDI
+    trafficSignal    red/green/left/right/uturn, each with REMAINING SECONDS
+    crossroad        junction image
+    route            remaining/moved/total distance and time, polyline :List(Coordinate)
+    navigationStatus mode, guidanceActive, offRoute, routePresent
+
+**And EVERY sub-struct carries an `ItemMeta`:**
+
+    present @0 :Bool
+    sequence @1 :UInt64
+    sourceTimestampMillis @2 :UInt64     when the APP produced it
+    receivedMonoTimeNanos @3 :UInt64     when the DEVICE received it
+
+### 6c. THEY ARRIVED AT OUR FRESHNESS DESIGN INDEPENDENTLY, AND WENT FURTHER
+
+`receivedMonoTimeNanos` is exactly `RouteIntentBP.observedMonoTime`, and `present` is exactly
+`distanceKnown`. Two projects, no contact, same two conclusions: **stamp on the DEVICE at receipt,
+and let a field say it has no value rather than sending a zero.** That is the strongest possible
+corroboration of the two design choices in our schema that were argued from first principles.
+
+**Three ways theirs is better, and all three are cheap to steal if a transport ever needs them:**
+
+- **`ItemMeta` is PER ITEM, not per message.** Guidance can be fresh while lane data is stale. Our
+  single-instruction message does not need this, but a CAN transport delivering several fields at
+  different rates would.
+- **`sequence`** catches dropped and reordered frames. We have no equivalent.
+- **BOTH timestamps.** Source time AND receive time lets you measure the link's own latency rather
+  than just its staleness.
+
+### 6d. FOUR THINGS THEY CARRY THAT WE CANNOT REPRESENT AT ALL
+
+**`offRoute` IS THE ONE THAT MATTERS AND IT IS A REAL HOLE IN OUR SCHEMA.** It is the state where
+the instruction is perfectly FRESH and nonetheless wrong, because he has left the route the
+navigator was following. **Our freshness rule cannot catch it** -- the stamp is current, the
+maneuver is populated, and the whole thing refers to a route he abandoned. It would cause a spurious
+refusal until the app reroutes, which is benign and brief, but it is a state we have no way to
+express and would never think to ask about. Record it for whoever builds the transport; do not add
+the field until something reads it.
+
+**`guidanceNext`** -- a second maneuver. That is now THREE independent systems carrying more than
+one (comma's `allManeuvers`, Android Auto's `steps` list, this pair).
+
+**`Guidance.latitude/longitude` with `pointValid`** -- the COORDINATES of the maneuver point, not
+just a distance to it. Directly map-matchable against the tiles, with no name join at all.
+
+**`Route.polyline`** -- the full route geometry, and the THIRD independent system to carry it after
+comma's `NavRoute`. The convergence is the argument: everyone who builds this ends up shipping the
+route as coordinates, which is why section 2 recommends preferring geometry over `Step.road`.
+
+### 6e. WHERE WE DELIBERATELY DIVERGE, AND SHOULD STAY DIVERGED
+
+**CarrotPilot consumes an app-computed TARGET SPEED** -- `desiredSpeed` with `desiredSource`, plus
+`vTurnSpeed` (a recommended speed for the upcoming turn). **This fork refuses exactly that shape of
+input**, in writing, for mapd's `suggestedSpeed`: it cannot know about ICBM's button presses, about
+holds, or about the four SCC-Map defenses built from measured events here, and
+`test_mapd_schema.py` fails the build if any decision-making file reads it.
+
+So the divergence is deliberate and already argued. Take CarrotPilot's INGREDIENTS -- maneuver,
+distance, geometry -- and never its answer.
+
+**And their `trafficSignal` with per-phase remaining seconds is a reminder of how much a rich bridge
+CAN carry** (that is Korean nav apps publishing live signal countdown). It would be transformative
+for the stop override. It is also not available on any source this car will ever have, so it is
+noted and dropped.
+
+### 6f. THE TRANSPORT, which is the practical part
+
+    UDP broadcast :7705    the DEVICE advertises itself
+    TCP           :7706    the main channel
+    HTTP          :7713    aiohttp server for nav data
+
+**The device broadcasts and the phone discovers it, not the other way round.** That is the answer to
+a question our own phone-bridge sketch never asked -- how the phone finds the comma on a WiFi network
+whose addressing changes constantly. Worth copying if a bridge is ever built here.
