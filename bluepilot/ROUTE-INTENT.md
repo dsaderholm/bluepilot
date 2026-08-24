@@ -1270,6 +1270,36 @@ app, because nothing else exists to reach it with.
 `DistToStopover_L_Actl`, and a stopover is a route WAYPOINT. A Google Maps route with no waypoints
 has no stopover, so the field reads zero -- which is exactly what the cluster shows.
 
+**ANSWERED 2026-08-23, AND THE ANSWER IS FORD. GOOGLE MAPS IS INNOCENT.**
+
+Three results from him, each of which closes something:
+
+    Maps and OsmAnd ALSO flash "Calculating Route"    the pending observation, answered
+    OsmAnd does NOT fill the top row                  the decisive A/B, answered
+    added a STOP to a Maps route -- still zeroes      the stopover hypothesis, dead
+
+**THE TOP ROW IS FORD'S, NOT ANY APP'S.** OsmAnd's source provably calls
+`addDestination(destination, travelEstimate)` with `setRemainingTimeSeconds` -- verified in
+`TripHelper.java` before the drive, which is the whole reason this test could be decisive rather
+than ambiguous. OsmAnd sends the data; the row still reads `0 ft / 0:00min`. **So Ford never maps
+those fields, no app can fill them, and there is nothing for Google to fix.** The Maps Community
+thread titled "not passing all navigation info to Ford Sync 3" is about something else or about
+other cars.
+
+**AND ADDING A WAYPOINT KILLED THE STOPOVER GUESS TOO.** The row stayed at zero with a stop in the
+route, so it is not `DistToStopover_L_Actl` either. What those two fields ARE is now unknown and
+does not matter -- they are unreachable from outside the car whatever they are.
+
+**THE OTHER RESULT IS THE ONE THAT MATTERS FOR WAZE, AND IT CONFIRMS THE STRONGEST VERSION OF THE
+DIAGNOSIS.** Maps and OsmAnd both flash "Calculating Route" before the turn arrow appears. So the
+cluster's sequence is:
+
+    calculating (Trip.isLoading)  ->  populated Trip with Steps
+
+**Waze reaches step one and never reaches step two.** That was the branch predicted as "the
+strongest version of the current theory" and it is now the measured one -- Waze is not doing
+something anomalous by entering the loading state, it is doing the normal thing and then stopping.
+
 **HE ASKED THE SHARPER VERSION: are those wrong numbers a GOOGLE MAPS bug?** Three candidates, and
 the third is the stopover guess below, which has cooled:
 
