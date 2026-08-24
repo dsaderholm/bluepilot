@@ -1595,13 +1595,57 @@ IPMA as-built write causes — and he was writing as-built on the 21st and 22nd 
 **`AccStopStat_D_Dsply` is `NoDisplay` on 100% of every drive measured.** Ford's ACC never enters
 its own stop-and-hold on this car, which is the fourth independent confirmation of that.
 
-**WHAT THIS OPENS, and it is untried:** if the camera has declared itself unavailable rather than
-overridden, the way out is more likely a clean ACC disengage and re-engage than continued
-forwarding. Both are already reachable — `create_button_msg` injects cancel and resume, and
-openpilot already sends resume at standstill. The risk to check first is that cancelling Ford's ACC
-takes openpilot's engagement with it, since `cruiseState.enabled` comes from the PCM
-(`EngBrakeData.CcStat_D_Actl`). **Do not build it before reading `RECOVERY DECLINED` from a drive** —
-that says which gate blocked the recovery we already have, and it is one drive away.
+**AND CANCEL-AND-RE-ENGAGE IS ALREADY TESTED. IT DOES NOT WORK.** Proposed here as the obvious next
+step and closed immediately by him: *"I manually try to cancel and reengage after it fails."* He has
+been running that experiment by hand on every failure, which is why the fix has always been pulling
+over and restarting the ignition. ASK BEFORE DESIGNING AROUND SOMETHING HE DRIVES EVERY DAY.
+
+The log agrees, route `af`:
+
+     75.1 .. 102.4   inert      the camera latched
+    102.4 .. 104.4   stock      he disengages
+    104.4 .. 107.8   FALLBACK   re-engaged -- Ford's frame STILL refused
+    107.8 .. 109.8   stock      disengages again
+    109.8 .. 111.4   FALLBACK   re-engaged again -- still refused
+    111.4 .. 117.9   stock
+
+`fallback` means openpilot was longActive with the camera's frame inadmissible, so both
+re-engagements produced openpilot authoring and never `ford`. In exactly those frames the camera was
+still saying **`ACC_Unavailable`, 24 of 24 samples**.
+
+**So the state survives an ACC cycle and only a POWER cycle clears it.** A latched condition, not a
+transient the camera is waiting to be talked out of. That is the strongest evidence yet that the
+recovery's premise is wrong, and it rules out the whole family of "cycle ACC to clear it" fixes
+before any of them are built.
+
+**THE CONSEQUENCE, PLAINLY: every override risks Ford ACC for the REST OF THE DRIVE, unrecoverably.**
+Not "a cancel we recover from". That moves the work from RECOVERY to PREVENTION -- the override has
+to not provoke the state at all. The one prevention idea never tried is INTERLEAVING: hand Ford a
+frame back every N frames during the stop, so whatever the camera counts never runs to completion.
+It is testable, it directly separates "consecutive frames" from everything else, and it costs a
+lumpier stop rather than a lost ACC.
+
+**Still read `RECOVERY DECLINED` from a drive first.** It costs nothing and it is one drive away.
+
+### ICBM SHOULD PREPARE THE SET SPEED WHILE e2e DRIVES, NOT MERELY STOP TOUCHING IT
+
+His correction, 2026-08-23, and it is a better rule than the one that shipped that morning:
+
+  *"when e2e is being used ICBM shouldn't be trying to change its speed, but preparing for if we
+  recover Ford ACC once we are done with e2e"*
+
+The suppression built earlier that day FREEZES the set speed wherever it happened to be. On a stop
+approach that is wherever ICBM had walked it to -- often the 20 mph floor. If Ford's authority ever
+returns, it picks up from that, which is the lurch the floor-release rule already exists to avoid.
+
+**Freeze is not prepare.** The prepared value is the DRIVER'S aim -- the hold if there is one, else
+SLA's target -- never the transient curve or stop target e2e is already executing. That is the same
+idea as "the set speed is prepared while stopped" in the stop-override section, generalised from
+the standstill case to every window where openpilot is authoring.
+
+**The plumbing is the obstacle, not the idea.** `acc_authority` is decided in the carcontroller and
+ICBM runs in selfdrived, so the controller does not currently know that e2e has the car. Both values
+it would aim at are already published (`vBaseline`, and `vSlaTarget` as of this day).
 
 ### `AccBrkTot_A_Rq` HAS THE SAME CEILING AS `AccPrpl_A_Rq` AND WAS NEVER CLAMPED
 
