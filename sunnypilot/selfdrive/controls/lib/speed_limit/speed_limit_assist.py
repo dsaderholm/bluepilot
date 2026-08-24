@@ -87,6 +87,7 @@ class SpeedLimitAssist:
     self.speed_limit_prev = 0.
     self.speed_limit_final_last_conv = 0
     self.prev_speed_limit_final_last_conv = 0
+    self._gas_pressed = False
     self._distance = 0.
     self.state = SpeedLimitAssistState.disabled
     self._state_prev = SpeedLimitAssistState.disabled
@@ -171,6 +172,7 @@ class SpeedLimitAssist:
   def update_car_state(self, CS: car.CarState) -> None:
     now = time.monotonic()
     self._last_carstate_ts = now
+    self._gas_pressed = bool(CS.gasPressed)
 
     for b in CS.buttonEvents:
       if not b.pressed:
@@ -404,7 +406,24 @@ class SpeedLimitAssist:
       else:
         # ACTIVE
         if self.state == SpeedLimitAssistState.active:
-          if self.v_cruise_cluster_changed and not self.cluster_converging:
+          # BluePilot: THE GAS PEDAL IS NOT A SET-SPEED PRESS.
+          #
+          # `v_cruise_cluster_changed` is this state machine's proxy for "the driver took the set
+          # speed back", and on this car the set speed moves for reasons that are not the driver:
+          # `_update_v_cruise` floors it at `max(v_cruise_kph, vEgo)`, so overriding on the throttle
+          # drags it up to whatever speed the car reaches, one display unit at a time.
+          #
+          # MEASURED on route 000003b7, 2026-08-24: across 20 gas-override episodes SLA left and
+          # re-entered `active` 339 times with ZERO driver button events in them -- 96 flips in one
+          # 32 s pull where `vCruiseCluster` walked 75 -> 85 while the real dash sat at 75. Every
+          # re-entry announces "Set speed changed" with a chime and flips the set-speed number
+          # between green and white. He reported it exactly that way: *"it made the noise and said
+          # changing set speed when I overrode cruise with the gas"*.
+          #
+          # `cluster_converging` cannot cover this: the movement is AWAY from the target, which is
+          # precisely what that property is built to call a driver takeover. Nothing else here
+          # changes -- a real press while off the gas still stands SLA down on the same frame.
+          if self.v_cruise_cluster_changed and not self.cluster_converging and not self._gas_pressed:
             self.state = SpeedLimitAssistState.inactive
 
           elif self.speed_limit_changed and self.apply_confirm_speed_threshold:

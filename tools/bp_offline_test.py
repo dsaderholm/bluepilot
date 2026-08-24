@@ -100,6 +100,7 @@ DEFAULT_TARGETS = [
   "sunnypilot/mapd/tests/test_only_one_map_daemon_runs.py",
   "selfdrive/selfdrived/tests/test_passthrough_is_not_openpilot_driving.py",
   "sunnypilot/selfdrive/controls/lib/speed_limit/tests/test_sla_leaves_disabled_while_icbm_moves_the_cluster.py",
+  "sunnypilot/selfdrive/controls/lib/speed_limit/tests/test_sla_survives_a_gas_override.py",
   "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_synthesized_set_cruise.py",
   "sunnypilot/selfdrive/controls/lib/smart_cruise_control/tests/test_tile_curvature.py",
   # Named file, not the directory: test_mapd_version.py beside it hashes the installed mapd binary

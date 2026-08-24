@@ -2110,6 +2110,26 @@ python tools/bp_offline_test.py
 ```
 
 `test_sunnylink_settings_complete.py` fails when a fork setting has no SunnyLink entry, and names it.
+
+**Upstream hand-edits `settings_ui.json` and does not know `settings_ui_src/` exists** -- the
+generator is ours. So every upstream commit that touches settings arrives as a JSON-only change,
+git auto-merges it cleanly, and the *next* run of `compile_settings_ui.py` silently deletes it,
+because the YAML source never learned about it. Nothing catches this: the merge is conflict-free
+and the suite is green either way.
+
+**After any merge that touches `settings_ui.json`, regenerate and diff.** A non-empty diff is
+upstream's new entries about to be destroyed, not drift to accept:
+
+```bash
+python sunnypilot/sunnylink/tools/compile_settings_ui.py
+git diff -- sunnypilot/sunnylink/settings_ui.json     # MUST be empty
+```
+
+If it is not empty, `git checkout --` the JSON, port their entries into the right
+`settings_ui_src/pages/*.yaml`, regenerate, and confirm the diff is now empty -- that empty diff is
+the proof the port was faithful. This is how the bp-7.0 merge (2026-08-24) kept the unified theme
+selector: upstream replaced the `BPRadRacerTheme` toggle with `BPThemePack` / `BPThemeAutoSeasonal`
+in the JSON alone, and regeneration would have reverted the whole feature.
 It was verified to fail with an item removed -- do not trust it on green alone, that mistake has been
 made here before.
 
