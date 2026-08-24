@@ -1291,6 +1291,31 @@ cluster, different app, one navigation session:
     OsmAnd+ fills the row, Maps does not   ->  a Google Maps bug, proven
     OsmAnd+ also shows 0                   ->  Ford never maps the fields; Maps is innocent
 
+**AND READING OSMAND'S SOURCE FIRST MADE THAT TEST DECISIVE IN BOTH DIRECTIONS, which it was not
+before.** OsmAnd is open source, so whether it sends the field is a five-minute read rather than a
+drive. `OsmAnd/src/net/osmand/plus/auto/TripHelper.java`, verified 2026-08-23:
+
+    line  88   tripBuilder.setLoading(routeBeingCalculated)
+    line 171   tripBuilder.setCurrentRoad(streetName)
+    line 184   tripBuilder.addStep(step, stepTravelEstimate)        (and a NEXT step at 234)
+    line 281   builder.addDestination(dest.first, dest.second)      <- destination + its estimate
+    line 314   travelEstimateBuilder.setRemainingTimeSeconds(...)
+
+**OsmAnd DOES populate the destination travel estimate.** So a blank row under OsmAnd can only mean
+Ford, and a filled one can only mean Maps. Without this read, a blank row would have been ambiguous
+-- "maybe OsmAnd does not send it either" -- and the drive would have settled nothing.
+
+**A FREE CONFIRMATION FELL OUT OF THE SAME FILE:** `setLoading(routeBeingCalculated)` is exactly
+`Trip.isLoading`. So **`isLoading` IS what produces "Calculating Route" on his cluster** -- inferred
+in section 2a from the API docs and the symptom, and now sourced from a working implementation. That
+matters more than it looks, because the whole Waze diagnosis rests on reading his one-second
+"Calculating Route" as the loading Trip.
+
+**The general lesson, and it is cheap to reuse: one of the three working apps is OPEN SOURCE.**
+Any question of the form "does the car not show X, or does the app not send X" can be answered by
+reading OsmAnd rather than by driving. That makes it the standing control for this investigation in
+two ways, not one.
+
 That is a better test than the waypoint one below and should be run first. It also generalises: any
 cluster field can be attributed to app-versus-car by running the same A/B, which makes OsmAnd+ the
 standing control for this whole investigation rather than a one-off data point.
