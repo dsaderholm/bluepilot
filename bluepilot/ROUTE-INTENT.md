@@ -1270,7 +1270,33 @@ app, because nothing else exists to reach it with.
 `DistToStopover_L_Actl`, and a stopover is a route WAYPOINT. A Google Maps route with no waypoints
 has no stopover, so the field reads zero -- which is exactly what the cluster shows.
 
-**Test: add a stop to a Google Maps route and see whether that top row populates.** If it does, the
+**HE ASKED THE SHARPER VERSION: are those wrong numbers a GOOGLE MAPS bug?** Three candidates, and
+the third is the stopover guess below, which has cooled:
+
+    1  Maps does not send destinationTravelEstimates      -> a Maps bug
+    2  Ford never maps them into those cluster fields     -> Maps innocent, unfixable
+    3  they are the STOPOVER pair and the route had none  -> nobody is buggy, 0 is correct
+
+**Against 3, and it is worth stating because it was written here confidently an hour earlier:** the
+row shows a distance AND A TIME, and `APIM_Data_FD1` carries `DistToStopover_L_Actl` with no time
+counterpart. A distance-plus-time pair reads far more like "to destination" than "to waypoint".
+
+**For 1 there is precedent:** a Google Maps Community thread exists titled *"Google Maps not passing
+all navigation info to Ford Sync 3"* -- exactly this class of complaint. Its contents could not be
+read (the page is JS-rendered), so the title is the whole of the evidence.
+
+**THE DECISIVE TEST IS OSMAND+, AND HE ALREADY HAS IT WORKING ON THE CLUSTER.** Same car, same
+cluster, different app, one navigation session:
+
+    OsmAnd+ fills the row, Maps does not   ->  a Google Maps bug, proven
+    OsmAnd+ also shows 0                   ->  Ford never maps the fields; Maps is innocent
+
+That is a better test than the waypoint one below and should be run first. It also generalises: any
+cluster field can be attributed to app-versus-car by running the same A/B, which makes OsmAnd+ the
+standing control for this whole investigation rather than a one-off data point.
+
+**Secondary test, for hypothesis 3: add a stop to a Google Maps route and see whether that top row
+populates.** If it does, the
 row is the stopover pair, and it retro-confirms the DBC reading from the car's own display. It also
 confirms in the other direction why that signal is useless to the gate: distance to a waypoint is
 not distance to the next maneuver, which section 11c derived from the DBC alone.

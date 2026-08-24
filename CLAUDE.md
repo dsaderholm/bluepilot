@@ -3477,6 +3477,20 @@ what was measured on this car.
 
 The next write, and its limits, are in `bluepilot/TSR-INVESTIGATION.md` section 4k.
 
+**AND THE "CAMERA PUBLISHES NOTHING" MEASUREMENT COVERS ONLY ONE OF ITS TWO SPEED-LIMIT MESSAGES.**
+Found 2026-08-23. Everything in this fork -- this section, `TSR-INVESTIGATION.md`, `tsr_local.py`,
+`tsr_scan.py`, the carstate registration -- reads `Traffic_RecognitnData` (0x3CD) and nothing else.
+**`IPMA_Data2` (0x3D9 / 985) is transmitted by the SAME camera and carries `IsaVLim_D_Rq`,
+`IaccVLim_D_Rq` and their unit fields.** Grepped: `IsaVLim`, `IaccVLim` and `IPMA_Data2` appear
+nowhere in the tree.
+
+The 255-on-every-frame result is not wrong; it is about 0x3CD, and it has been quoted as though it
+settled whether the camera emits a speed limit AT ALL. **The honest prior is that ISA is derived
+from sign recognition and is equally dead** -- but it costs one decode of logs already on the device,
+a null result is a stronger statement than the current one, and nobody has spent it. First question
+is whether 0x3D9 is even on a bus we log; `bp_can_nav_diff.py --inventory` answers that in one run.
+See `TSR-INVESTIGATION.md` section 9.
+
 **Two places in one file disagreeing about one measured fact is how a line of investigation gets
 closed on the wrong evidence.** If a claim here is contradicted anywhere else in this file,
 re-measure before quoting either.

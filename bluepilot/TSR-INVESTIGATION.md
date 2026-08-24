@@ -1685,3 +1685,86 @@ between a poor one and a good one.
 
 See `tools/bp_tsr_check.py` for the on-device measurement side, and `CLAUDE.md` for the standing
 rules — in particular that the region change has been tried twice and is not to be proposed again.
+
+---
+
+## 9. THERE IS A SECOND CAMERA SPEED-LIMIT MESSAGE AND THIS INVESTIGATION HAS NEVER LOOKED AT IT
+
+Found 2026-08-23, from the route-intent branch, while chasing where the CLUSTER's speed limit comes
+from.
+
+**Everything above -- this whole document, `tsr_local.py`, `tsr_scan.py`, the carstate registration
+and the `bp_tsr_check.py` measurement -- reads `Traffic_RecognitnData` (0x3CD / 973) and nothing
+else.** Grepped: `IsaVLim`, `IaccVLim` and `IPMA_Data2` appear NOWHERE in this fork.
+
+**`IPMA_Data2` (0x3D9 / 985) is transmitted by IPMA_ADAS -- the same camera -- and carries:**
+
+    IsaVLim_D_Rq        byte 0,  8 bit   Intelligent Speed Assist speed limit
+    IsaVLimUnit_D_Rq             2 bit   its unit
+    IaccVLim_D_Rq       byte 2,  8 bit   Intelligent ACC speed limit
+    IaccVLimUnit_D_Rq            2 bit   its unit
+    TsrRegionTxt_D_Stat byte 5,  5 bit   region
+
+A DIFFERENT MESSAGE from the one the 255-on-every-frame measurement was taken on. That measurement
+is not wrong; it is simply about `Traffic_RecognitnData`, and it has been quoted throughout as though
+it settled whether the camera emits a speed limit AT ALL. It does not settle that.
+
+**THE PRIOR WRITTEN HERE WAS "IT IS PROBABLY EMPTY TOO". IT WAS MEASURED WITHIN THE HOUR AND IT IS
+WRONG.** Kept rather than deleted, because it was the reasonable expectation and would be
+re-derived: ISA is normally DERIVED from sign recognition, so if the camera reads no signs it should
+have nothing to publish.
+
+**Measured 2026-08-23, four routes, `IsaVLim_D_Rq` (0x3D9 byte 0) beside `TsrVLim1MsgTxt`
+(0x3CD byte 3):**
+
+    route       IsaVLim                     TsrVLim1MsgTxt
+    0000039f    254 no-data   99.6%         255 no-data   99.2%
+    000003a1    254 no-data  100.0%         255 no-data  100.0%
+    000003ac     30 on        25.6%         (control cut off, see sweep)
+    000003b6     80 on        34.8%          80 on        33.2%
+
+**TWO DIFFERENT ROUTES, TWO DIFFERENT PLAUSIBLE LIMITS. That is not a stuck default** -- a stuck
+value is the same number every time. 30 mph is an ordinary city street and 80 mph is a real Utah
+freeway limit, and each appears on a quarter to a third of that route's frames rather than
+constantly, which is what a camera reading signs intermittently looks like.
+
+**SO TWO STANDING CLAIMS IN CLAUDE.md ARE STALE, NOT WRONG.** "`TsrVLim1MsgTxt` is the no-data
+sentinel 255 on every frame of every recent drive" and "the camera contributes NOTHING today" were
+measured on 0000039f and 000003a1, and both hold there exactly. They do not hold on 000003ac or
+000003b6. **A measurement dated in this file is a measurement about the routes it was taken on**, and
+this is the second time in this document that a TSR claim has had to be re-scoped that way.
+
+**AND IT BEARS DIRECTLY ON THE "TSR 80 LEAK".** CLAUDE.md records a constant 80 mph arriving from the
+CAR source in the speed-limit resolver, and the 2026-08-21 correction ruled the camera out as its
+origin precisely because `TsrVLim1MsgTxt` read 255. **On 000003b6 it reads 80.** That correction was
+right about its own routes and cannot be quoted as a general fact any more; the leak's origin is
+open again, and the camera is back on the list.
+
+**WHAT IS NOT YET ESTABLISHED, and it is the part that decides whether SLA can use this:** whether
+those values match the roads actually driven. 80 on a Utah freeway is plausible; 80 on a residential
+street is a fault wearing a plausible number. **The cross-check is correlating the value against
+`mapdOut.highwayClass` and position on the same route**, which is real work and has not been done.
+A sweep across the last twelve routes was running when this was written; a rate quoted from four
+spot checks would be exactly the one-route number this fork keeps having to withdraw.
+
+**WHY IT IS WORTH THE MEASUREMENT ANYWAY:**
+
+- It costs nothing. Every CAN frame is already in every route on the device; this is a decode of
+  logs that exist, not a drive.
+- ISA and TSR may be fed differently. `IaccVLim` in particular is an ACC-facing limit, and ACC on
+  this car demonstrably works.
+- **A NULL RESULT IS ALSO WORTH HAVING.** "The camera emits no speed limit on either of its two
+  speed-limit messages" is a stronger and more quotable statement than the current one, which
+  silently covers only one of them.
+
+**FIRST QUESTION, BEFORE ANY DECODING: is 0x3D9 even on a bus openpilot logs?** Unknown as of
+2026-08-23 -- the device went off mDNS mid-check. `tools/bp_can_nav_diff.py --inventory <route>`
+answers it in one run, and it prints per-byte variance, so a constant-zero `IsaVLim` shows up as
+`bytes varying: []` without writing a decoder at all.
+
+**AND THE THING THAT PROMPTED IT IS SEPARATE AND ALSO UNRESOLVED.** He reports the CLUSTER shows a
+speed limit **when Waze is running and when nothing is navigating at all** -- so that number is not
+coming from Android Auto. Candidates: this camera message, or Ford's own embedded navigation map
+over MS-CAN. If it is the latter it is invisible until the canbox lands, and it would be a
+speed-limit source that needs no app running and no camera sign read. Either answer helps SLA; they
+are just answered by different measurements.
