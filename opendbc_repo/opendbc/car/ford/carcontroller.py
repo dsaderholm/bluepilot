@@ -155,7 +155,6 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
     # override has ever run.
     self.frames_since_override = 1 << 30
     self.override_last_frame = False
-    self.icbm_blind_said = False
     self.cancel_is_ours = False
     self.cancel_recovery_frames = 0
     self.cancel_recovery_said = False
@@ -284,50 +283,30 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
 
     # BluePilot: Intelligent Cruise Button Management (ICBM)
     #
-    # FusionPilot 2026-08-23: NOT WHILE OPENPILOT IS AUTHORING THE ACC COMMAND. His question, and
-    # he had the right instinct -- "when OP long is driving, we shouldn't affect its speed with
-    # ICBM?" Measured on route 000003ae, over the 60 s the passthrough spent `inert`:
+    # SUPPRESSION REVERTED, 2026-08-23, SAME DAY IT SHIPPED. He nearly went off an exit ramp.
     #
-    #     inert  6012 frames   378 ICBM button frames   84 mph of dash travel
-    #                          decrease=210, increase=168
+    # The idea was that ICBM pressing the set speed while openpilot authors ACCDATA is pointless,
+    # which is TRUE and was measured -- 378 presses and 84 mph of dash travel during one inert
+    # window. But suppressing it froze the set speed wherever the latch caught it, and he hit the
+    # benign face of that three times ("stuck at 25 even though SLA wanted 35") before hitting the
+    # dangerous one: frozen HIGH on the approach to an exit, with ICBM unable to bring it down.
     #
-    # That is his "the speed went up and down". ICBM was hunting a set speed that governed NOTHING,
-    # because a latched camera means openpilot authors every ACCDATA frame, and the number the
-    # buttons move is not in that loop at all.
+    # The follow-up made it WORSE. Blocking only DOWNWARD presses fixed being stuck low and left
+    # being stuck high completely unaddressed -- it blocks exactly the direction an exit needs.
+    # Two wrong rules in one evening, both shipped to a car being driven.
     #
-    # `_op_long_drives()` cannot catch this: it decides whether ICBM runs ONCE, at car init, and
-    # under the passthrough it correctly answers "Ford drives, so ICBM stays". Authority is a
-    # per-frame fact and it changed hours into the drive.
+    # WHY NOTHING NARROWER IS SAFE ENOUGH TO SHIP NOW: the correct rule is his -- move toward the
+    # DRIVER'S AIM and stop there, which is neither "always" nor "never" nor either direction. That
+    # needs the aim, which lives in ICBM's units in selfdrived, and the carcontroller has no
+    # is_metric to compare against it. Building that boundary correctly is not an on-road hotfix.
     #
-    # ONLY `inert` AND `openpilot`, deliberately. `fallback` is a scattered per-frame refusal that
-    # Ford resumes from on the next frame -- suppressing there would make the buttons stutter every
-    # time a band clipped. `inert` is five straight seconds of cancel, which means the passthrough
-    # is finished for this drive. `opStop` is NOT suppressed either: the override raising the set
-    # speed while stopped is deliberate, so Ford does not lurch back to 20 when it resumes.
-    #
-    # Suppressing TRANSMISSION rather than telling ICBM to stand down, because ICBM lives in
-    # selfdrived across a capnp boundary and the carcontroller is where authority is known. It
-    # keeps wanting; nothing actuates. It already tolerates a press that never moves the cluster
-    # -- that is what PRESS_SETTLE_MAX_FRAMES is for.
-    _blind = (self.acc_authority in (structs.ControllerStateBP.AccAuthority.inert,
-                                     structs.ControllerStateBP.AccAuthority.openpilot))
-    #
-    # SUPPRESSED, NOT SKIPPED. The first version of this returned without calling `update` at all,
-    # which also skips `_update_gap` -- and that method's own comment records the same mistake being
-    # made and fixed once already: a gap lease that stops being asserted does not pause, it lands
-    # its remainder as a SECOND press. So the flag goes in and the follow-gap keeps running.
-    if _blind and not self.icbm_blind_said:
-      self.icbm_blind_said = True
-      cloudlog.warning("ICBM set-speed buttons suppressed: openpilot is authoring ACCDATA, so the "
-                       "set speed drives nothing. The follow-gap is unaffected.")
-    elif not _blind:
-      self.icbm_blind_said = False
+    # So ICBM presses unconditionally again, exactly as it did before today. That costs the hunting
+    # on an inert drive, which is ANNOYING. The thing it buys back is the set speed always being
+    # able to come down, which is not.
     icbm_can_sends, self.last_button_frame = IntelligentCruiseButtonManagementInterface.update(
-      self, CC_SP, CS, self.packer, self.CAN, self.frame, self.last_button_frame,
-      suppress_set_speed=_blind
+      self, CC_SP, CS, self.packer, self.CAN, self.frame, self.last_button_frame
     )
     can_sends.extend(icbm_can_sends)
-
     ### lateral control ###
     # BluePilot: keep stock lateral path in carcontroller, and run BP 4-signal lateral
     # only when bypass is disabled.
