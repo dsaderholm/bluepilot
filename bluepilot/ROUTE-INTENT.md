@@ -1286,10 +1286,22 @@ those fields, no app can fill them, and there is nothing for Google to fix.** Th
 thread titled "not passing all navigation info to Ford Sync 3" is about something else or about
 other cars.
 
-**AND THE CLUSTER MIRRORS FAITHFULLY, INCLUDING MIRRORING AN ABSENCE.** From a second pair of his
-screenshots, both Google Maps: the head unit showed `toward Parkway Ave` with NO distance on the
-card, and the cluster showed `toward Parkway` with `0 ft`. So a zero in the step-distance line is
-not the cluster failing -- it is the app having sent no distance for that step, rendered honestly.
+**AND TWO APPS AGAINST THE SAME CLUSTER FIELDS MAKES IT AIRTIGHT.** Four screenshots, 2026-08-23,
+head unit and cluster paired by road name -- and he had to correct which app was which, so the
+labels here are HIS, not inferred from the UI:
+
+    app        step distance on the cluster            top row
+    OsmAnd     1200 ft   -- populated                  0 ft / 0:00min
+    Maps       0 ft      -- Maps sent none for that    0 ft / 0:00min
+               "toward Parkway Ave" step, which its
+               own card also showed without a distance
+
+**Neither app fills the top row, and one of them provably sends the data** -- so the top row is
+Ford's, not any app's, from two independent directions rather than one.
+
+**And the step distance mirrors each app faithfully, including mirroring an absence.** OsmAnd's
+1200 ft is exactly what `addStep(step, stepTravelEstimate)` puts in the Trip, and Maps' 0 ft is a
+step with no distance rendered honestly rather than the cluster failing.
 
 **That is a good property for route intent**: what a canbox would read off MS-CAN is what the app
 published, with no Ford embellishment in between. It also means a transport reading that bus will
