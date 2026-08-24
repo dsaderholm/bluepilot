@@ -1547,6 +1547,45 @@ lumpier stop rather than a lost ACC.
 
 **Still read `RECOVERY DECLINED` from a drive first.** It costs nothing and it is one drive away.
 
+### THE OVERRIDE STOPS THE CAR OUTSIDE FORD'S OWN STOP PROTOCOL. LEADING HYPOTHESIS, 2026-08-23.
+
+Found by asking what the PCM was doing rather than what the camera was thinking.
+
+    route af, during opStop     AccStopMde_D_Rq   NoStop on ALL 888 frames
+    route b1, under `ford`      AccStopMde_D_Rq   Hold on 498 frames
+
+**`AccStopStat_B_Rq` is fed from `stopping`, and `stopping` is `longControlState == stopping`, which
+this file already records as a STOPPED-CAR state that is never true above 3 mph.** So the override
+brakes the car from 20 to 0 while telling the PCM no stop is in progress, for the entire approach.
+
+**And b1 is the first time this fork has EVER seen Ford enter its own stop mode on this car** --
+same car, same evening, override never fired, `Hold` for 498 frames. That retires the standing claim
+that Ford never holds a stop here: the handshake works, when Ford is the one driving it.
+
+**The camera receives `CcStat_D_Actl` and `AccStopMde_D_Rq` directly** -- `IPMA_ADAS` is a listed
+receiver of both in the DBC. So it watched a car come to a standstill while its own powertrain
+reported no stop was happening. `ACC_Unavailable` is a reasonable conclusion from that, and unlike
+every other theory tried today **it explains why the state is LATCHED** rather than transient, and
+why an ACC cycle does not clear it while a power cycle does.
+
+Fixed by passing `lng.stopping or override`. The override only runs when we are deliberately
+stopping, so asserting the bit is honest signalling rather than a trick -- it is the same bit Ford
+asserts for the same reason, and panda does not police it.
+
+**NOT PROVEN. One strong correlation, and the drive that tests it is the next stop the override
+takes.**
+
+**TWO MORE THEORIES DIED THE SAME HOUR, both by measurement:**
+
+- **The camera does not see our frame.** `src 2` (camera, bus 2) and `src 128` (our bus-0 TX echo)
+  are separate and equal on every authority -- 1691/1691 under `ford`, 888/888 under `opStop` -- and
+  there is no second ACCDATA stream on bus 2. `safety_fwd_hook` would forward bus 0 to bus 2 and
+  nothing in the TX list blocks it for that destination, so this was worth checking and it is not
+  happening.
+- **It is not contradiction magnitude.** During `opStop` on af the camera was commanding
+  -2.12..0.40 m/s^2 and we were sending -2.12..0.31 -- **the same braking**. Second confirmation
+  after route a8, where the two matched to within 0.01.
+
 ### THE THRESHOLD IS BETWEEN 1.1 AND 2.6 SECONDS. FIVE EPISODES, AND IT IS 4 FOR 4 FATAL.
 
 Four ignition cycles in eleven minutes on 2026-08-23 make this the cleanest experiment in the file:
