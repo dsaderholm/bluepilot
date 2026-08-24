@@ -1217,6 +1217,41 @@ so **the cluster's own nav menu is a CATALOGUE of the protocol**. Every nav thin
 command is, by construction, something crossing the bus. Walking that menu once and writing down
 what is in it is free, needs no hardware, and bounds the search before any decoding starts.
 
+**THE FLOOR IS NOW MEASURED, from photographs, 2026-08-23.** He shot the SYNC 3 screen and the IPC
+in the same moment with Google Maps navigating. Everything below is READ OFF THE CLUSTER, so all of
+it necessarily crosses the bus:
+
+    maneuver glyph      a ROUNDABOUT -- a specific type, not a generic arrow      Step.maneuver
+    distance            "350 ft", matching the head unit exactly                  stepTravelEstimate
+    street turned onto  "S 1100 E"                                                Step.road
+    second string       "S 1100 E / S 11th E"                                     Step.cue, probably
+    speed limit         "25", matching the head unit
+    interaction         "Press OK to Repeat"  -- another IPC -> APIM command
+
+**TWO PREDICTIONS IN 11c WERE WRONG, BOTH IN THE GOOD DIRECTION, and they are left above rather than
+edited so the scoring is visible.** It said street name was "possible, and I'd bet against it being
+cheap" -- it is plainly rendered. And it predicted "a handful of glyphs, not 47 enumerants" -- a
+roundabout, plus the U-turn seen on the same drive, is not a crude four-arrow set. **Ford's
+translation is materially less lossy than predicted**, which is good news for every consumer, not
+just this one.
+
+`Step.road` rendering is the sharpest single confirmation: Google documents that field as
+*"primarily used for vehicle cluster and heads-up displays"*, and here is a Ford cluster displaying
+it. The design intent and the observed behaviour line up exactly.
+
+**AN ANOMALY WORTH KEEPING.** The top of the cluster reads `0 ft` and `0:00min` while the head unit
+says 1.9 mi and 6 min to arrival. So the cluster HAS fields for trip totals and Android Auto is not
+filling them -- either Maps sends no `destinationTravelEstimates`, or Ford does not map them. The
+STEP data lands and the DESTINATION data does not. Worth knowing before anyone plans on an ETA.
+
+**AND A BONUS CANDIDATE NOBODY HAD CONSIDERED: a phone-sourced SPEED LIMIT.** The cluster shows 25
+and so does Google Maps. If that number comes from Android Auto rather than Ford's own map database,
+a canbox would hand us a speed-limit source from the phone -- which matters well beyond route
+intent, since TSR is dead on this car and map coverage runs around 50% of moving frames. **Not
+established**: one photo cannot say which source it came from, and Ford's own nav could equally be
+supplying it. Check it when the hardware lands; it costs nothing to look and it would be a second
+SLA source.
+
 **AND THE FLOOR IS FREE TO MEASURE:** whatever the IPC DRAWS had to cross the bus. One glance at
 the cluster with Maps navigating -- does it show an arrow only, or arrow plus distance, or arrow
 plus distance plus street name -- bounds what a canbox could expose, before any canbox exists.
