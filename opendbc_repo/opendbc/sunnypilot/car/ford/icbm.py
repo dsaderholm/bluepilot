@@ -63,13 +63,6 @@ class IntelligentCruiseButtonManagementInterface(IntelligentCruiseButtonManageme
     self.frame = frame
     self.last_button_frame = last_button_frame
 
-    # FusionPilot: `suppress_set_speed` is asserted while openpilot is authoring ACCDATA -- the set
-    # speed governs nothing there, so pressing it just hunts a number on the dash. It is folded
-    # into `preempted` rather than short-circuiting the method for the reason the block below
-    # spells out at length: SKIPPING THE CALL ENTIRELY IS A BUG THAT HAS ALREADY BEEN MADE HERE.
-    # The gap machine has to keep being ticked and its lease has to keep being asserted, or the
-    # resumed remainder lands as a second press. Suppressing the set speed leaves `preempted`
-    # False, which is exactly right: nothing is preempting the gap this frame.
     # NO SUPPRESSION HERE. An ICBM stand-down while openpilot authors ACCDATA was added and fully
     # REVERTED on 2026-08-23 -- it froze the set speed wherever the camera latch caught it, and the
     # follow-up that suppressed only DOWNWARD presses was worse still, because down is the direction
