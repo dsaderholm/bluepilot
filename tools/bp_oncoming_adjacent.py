@@ -156,7 +156,14 @@ def main() -> int:
           f"{ONCOMING_SPEED_FRACTION:.2f} * v_ego)")
     print(f"  {'flat floor':>10} {'fraction':>9} {'FALSE killed':>13} {'real LOST':>10}")
     for flat in (5.0, 7.0, 9.0, 11.0):
-      for frac in (ONCOMING_SPEED_FRACTION, 0.7):
+      # DEDUPED, AND ALWAYS OFFERING AN ALTERNATIVE TO THE LIVE VALUE. This was
+      # `(ONCOMING_SPEED_FRACTION, 0.7)`, which was fine while the constant was 0.5 and became
+      # useless the moment it was RAISED to 0.7 on this tool's own evidence: every row printed
+      # twice, both marked live, and the sweep no longer explored anything.
+      #
+      # A sweep hardcoding the value it is meant to be questioning stops being a sweep as soon as
+      # its recommendation is taken. Candidates now straddle whatever is live.
+      for frac in sorted({ONCOMING_SPEED_FRACTION, 0.5, 0.7, 0.85}):
         killed = lost = 0
         for e in known:
           thresh = max(flat, frac * max(0.0, e["v_ego"]))
