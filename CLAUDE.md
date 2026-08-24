@@ -3977,3 +3977,40 @@ identical expression as `deadline_requesting` one line apart, read by nothing, w
 hundred lines away claiming the drop limiter reads it. The limiter reads `deadline_requesting`.
 Cross-check any hit repo-wide before believing it: most write-only attributes are read by another
 module, and a per-file scan cannot see that.
+
+
+## 2026-08-24: WHY TSR BARELY READS SIGNS -- THE CAMERA SAYS SO ITSELF
+
+`Traffic_RecognitnData` (0x3CD) carries twelve signals. `carstate_ext.update_traffic_signals` read
+TWO of them -- the number and the unit -- and the other ten were subscribed, parsed and discarded.
+Decoding them off routes 000003b6/b7 answered both halves of the TSR problem in one pass.
+
+**WHY SO FEW READS -- and it is not the camera being blind:**
+
+    TsrMsgTxt_D_Rq    NoNavDataAvailable      100% of b7, 95% of b6
+    TsrStatMsgTxt     Available_CameraOnly    100% of b7, 95% of b6
+                      Available_FusionMode      5% of b6
+
+Ford's TSR is a FUSION system. Without nav data it falls back to camera-only, which is the weak
+mode, and that is where this car lives. On the wire 0x462 arrives from the real APIM 584-715 times
+a drive while **0x463 and 0x464 are zero frames from any source**. `FordSynthesizeApimGps` exists to
+send exactly those two and is `0` on his device against a `"1"` code default -- a frozen default,
+see the defaults note. Toggle: "Send GPS To The Camera". NOT flipped; his settings are his.
+
+**WHY THE READS IT DOES GET ARE UNTRUSTWORTHY, and the trap in fixing it:**
+
+`TsrVl1StatMsgTxt_D_Rq` is the camera grading its own value -- LimitReliable / LimitChanged /
+LimitOutdated / Null. It is now gated on, so an OUTDATED limit no longer reaches the car.
+
+**But check the JOINT distribution before believing a gate fixes an episode.** The phantom 80 on
+b6 -- an I-80 route shield read near 2100 S that walked the set speed to 90 for 13 minutes -- broke
+down as 96 frames LimitReliable, 62 LimitOutdated, 7 LimitChanged. The marginals (16% reliable
+overall) suggested the gate would kill it. The joint says it would NOT: the camera was confident and
+wrong on 58% of those frames. A confident wrong read needs corroboration against the map source,
+which is a resolver change nobody has made yet.
+
+**AND THE DAMAGE OUTLIVES THE READ.** At t+389.8 the camera withdrew the 80 and the resolver went
+`valid=False, lastValid=False, source=none` correctly -- but the resolved 90 persisted to t+486.6,
+97 seconds later, because ICBM had already PRESSED the dash up to 90. A bad limit is converted into
+button presses, and those do not come back when the limit does. Rejecting a bad read matters far
+more than un-latching one.
