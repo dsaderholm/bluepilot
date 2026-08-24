@@ -71,7 +71,30 @@ class IntelligentCruiseButtonManagementInterface(IntelligentCruiseButtonManageme
     # The gap machine has to keep being ticked and its lease has to keep being asserted, or the
     # resumed remainder lands as a second press. Suppressing the set speed leaves `preempted`
     # False, which is exactly right: nothing is preempting the gap this frame.
-    preempted = (not suppress_set_speed) and self.ICBM.sendButton != SendButtonState.none
+    # RISING IS PREPARING; FALLING IS CHASING. FusionPilot, 2026-08-23, from the road.
+    #
+    # `suppress_set_speed` blocked BOTH directions, which froze the set speed wherever it happened
+    # to be when the camera latched. He hit it within the hour: "At one point we were stuck at 25
+    # even though SLA wanted 35." The set speed had been walked down for a slowdown, Ford ACC went
+    # unavailable, ICBM stopped pressing, and it sat 10 mph under the limit.
+    #
+    # He had already called this exact failure before it happened: "ICBM shouldn't be trying to
+    # change its speed, but preparing for if we recover Ford ACC once we are done with e2e."
+    # FREEZE IS NOT PREPARE.
+    #
+    # So while openpilot is authoring, only DOWNWARD presses are suppressed. Downward is ICBM
+    # chasing a curve or a stop that e2e is already executing -- pointless, and the hunting he saw
+    # on route 000003ae. Upward is the set speed climbing back toward the number that should govern
+    # when Ford has the car again, which is the handback being prepared. ICBM will not climb past
+    # its own target, so this cannot run away.
+    #
+    # Direction rather than a value, deliberately: the aim lives in ICBM's units in selfdrived and
+    # the carcontroller has no is_metric, so comparing against it here would need a unit the
+    # boundary does not carry. "Which way" needs no units.
+    if suppress_set_speed and self.ICBM.sendButton == SendButtonState.decrease:
+      preempted = False
+    else:
+      preempted = self.ICBM.sendButton != SendButtonState.none
     if preempted:
       button_signal = BUTTON_SIGNALS[self.ICBM.sendButton]
 

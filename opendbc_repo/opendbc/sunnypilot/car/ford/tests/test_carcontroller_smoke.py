@@ -895,7 +895,7 @@ def test_a_cancel_that_predates_the_override_does_not_poison_attribution(carcont
   assert "recovery" in authorities, "recovery never took authority after its own override"
 
 
-def test_icbm_stops_pressing_once_openpilot_is_authoring(carcontroller_parts):
+def test_icbm_stops_pressing_DOWN_once_openpilot_is_authoring(carcontroller_parts):
   """His report, 2026-08-23: "the speed went up and down" after Ford ACC failed.
 
   Route 000003ae, over the 60 s the passthrough spent inert:
@@ -908,7 +908,10 @@ def test_icbm_stops_pressing_once_openpilot_is_authoring(carcontroller_parts):
   view on the dash. _op_long_drives() cannot catch it: it decides once, at car init, and under the
   passthrough it correctly says Ford drives.
 
-  Both halves are asserted. Suppressing everywhere would be just as wrong as suppressing nowhere.
+  ONLY THE DOWNWARD PRESSES. Suppressing both directions froze the set speed wherever it stood, and
+  he hit that on the road within the hour: "At one point we were stuck at 25 even though SLA wanted
+  35", then again at 27. Downward is ICBM chasing something e2e is already executing; upward is the
+  set speed climbing back toward the number that should govern when Ford has the car again.
   """
   from opendbc.car.ford.interface import CarInterface
   from opendbc.car.ford.values import CAR
@@ -930,7 +933,7 @@ def test_icbm_stops_pressing_once_openpilot_is_authoring(carcontroller_parts):
   CS.acc_stock_values["AccBrkTot_A_Rq"] = -1.10
 
   CC, CC_SP = _car_control(structs, enabled=True,
-                           send_button=structs.IntelligentCruiseButtonManagement.SendButtonState.increase,
+                           send_button=structs.IntelligentCruiseButtonManagement.SendButtonState.decrease,
                            gap_target=0, long_active=True)
 
   frame = 0
@@ -956,10 +959,23 @@ def test_icbm_stops_pressing_once_openpilot_is_authoring(carcontroller_parts):
   run(700)
   assert cc.acc_authority == structs.ControllerStateBP.AccAuthority.inert, (
     "the cancel never latched, so this half proves nothing")
-  while_inert = run(600)
-  assert while_inert == 0, (
-    "ICBM sent {} button frames while openpilot was authoring -- it is moving a set speed that "
-    "governs nothing, which is what he saw as the speed going up and down".format(while_inert))
+  while_inert_down = run(600)
+  assert while_inert_down == 0, (
+    "ICBM sent {} DOWNWARD button frames while openpilot was authoring -- it is chasing a target "
+    "e2e is already executing, which is what he saw as the speed going up and down".format(
+      while_inert_down))
+
+  # 3. And UPWARD must still go out, or the set speed freezes wherever the latch caught it. That is
+  #    the failure he reported twice on the road: stuck at 25, then 27, while SLA wanted 35.
+  CC, CC_SP = _car_control(structs, enabled=True,
+                           send_button=structs.IntelligentCruiseButtonManagement.SendButtonState.increase,
+                           gap_target=0, long_active=True)
+  while_inert_up = run(400)
+  assert cc.acc_authority == structs.ControllerStateBP.AccAuthority.inert, (
+    "authority left inert, so the upward half proves nothing")
+  assert while_inert_up > 0, (
+    "ICBM could not raise the set speed while openpilot was authoring -- it freezes wherever the "
+    "camera latched, which left him 10 mph under the limit with no way back up")
 
 
 def test_the_follow_gap_survives_the_icbm_suppression(carcontroller_parts):
