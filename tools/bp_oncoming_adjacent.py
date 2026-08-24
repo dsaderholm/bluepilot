@@ -49,6 +49,11 @@ def main() -> int:
   args = ap.parse_args()
 
   from openpilot.tools.lib.logreader import LogReader
+  # IMPORTED HERE, NOT AT THE SWEEP. The live rule is also needed inside the frame loop now, to
+  # record what the floor WAS at each example edge -- and the sweep's own import sits ~100 lines
+  # further down, so using it in the loop against that import is a NameError the moment an
+  # impossible edge is found. Which is to say: only on the routes this tool exists for.
+  from openpilot.sunnypilot.selfdrive.controls.lib.adjacent_lane import min_oncoming_ms
 
   # POOLED ACROSS ROUTES, and for this tool that is not a convenience. Its whole output is a small
   # count of rising edges, and single-drive readings from it have been published and withdrawn
@@ -128,7 +133,16 @@ def main() -> int:
             # PROVABLY WRONG: opposing traffic cannot be in the adjacent lane of a one-way road.
             verdict["ON A ONE-WAY ROAD -- impossible"] += 1
             if len(examples[name]) < 5:
-              examples[name].append((hwy, ow, cur["speed"] * 2.23694))
+              # THE TARGET'S OWN SPEED, and it was the missing number. The example line printed the
+              # EGO speed, which is only half of what the floor compares -- `min_oncoming_ms` tests
+              # `|v_abs|` against `max(MIN_ONCOMING_MS, fraction * v_ego)`, so without v_abs the
+              # line cannot say whether an edge sits near the threshold or miles past it. On route
+              # 000003b7 two impossible edges survived every floor in the sweep and the examples
+              # could not say why; that is the difference between "raise the floor" and "the floor
+              # is the wrong lever entirely".
+              examples[name].append((hwy, ow, cur["speed"] * 2.23694,
+                                     abs(float(a.oncomingVAbs)) * 2.23694,
+                                     min_oncoming_ms(cur["speed"]) * 2.23694))
           else:
             verdict["two-way road -- plausible"] += 1
         prev[name] = now
@@ -141,8 +155,10 @@ def main() -> int:
   for k, n in verdict.most_common():
     print(f"    {k:34s} {n:5d}")
   for name in ("left", "right"):
-    for hwy, ow, mph in examples[name]:
-      print(f"    example {name}: highwayClass={hwy} oneWay={ow} at {mph:.0f} mph")
+    for hwy, ow, mph, vabs, floor in examples[name]:
+      print(f"    example {name}: highwayClass={hwy} oneWay={ow}   ego {mph:.0f} mph   "
+            f"target |v_abs| {vabs:.0f} mph   floor was {floor:.0f} mph"
+            f"{'   <- MILES past the floor' if vabs > floor * 1.5 else ''}")
   print()
 
   # ---- what a different floor would have cost ------------------------------------------------
