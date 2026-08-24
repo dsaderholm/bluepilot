@@ -1241,6 +1241,18 @@ it necessarily crosses the bus:
     speed limit         "25", matching the head unit
     interaction         "Press OK to Repeat"  -- another IPC -> APIM command
 
+**THE CONFIRMED GLYPH VOCABULARY, across two apps and several drives, all rendered CORRECTLY:**
+
+    straight / continue      Google Maps      "toward Parkway"
+    turn right               OsmAnd           "2000 East", 1200 ft
+    roundabout               Google Maps      with the distance and street
+    U-turn                   observed on the cluster, app not recorded
+
+His summary, 2026-08-23: *"so far the IPC has shown everything correctly from OSMand and Google
+maps, including going straight, doing u-turns, and roundabouts."* **Nothing has yet been found that
+the cluster gets wrong when an app sends it.** That is a stronger statement than "the vocabulary is
+rich" -- it is a zero-error rate so far across four maneuver families and two independent apps.
+
 **TWO PREDICTIONS IN 11c WERE WRONG, BOTH IN THE GOOD DIRECTION, and they are left above rather than
 edited so the scoring is visible.** It said street name was "possible, and I'd bet against it being
 cheap" -- it is plainly rendered. And it predicted "a handful of glyphs, not 47 enumerants" -- a
