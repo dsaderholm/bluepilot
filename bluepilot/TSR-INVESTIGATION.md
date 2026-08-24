@@ -1744,8 +1744,18 @@ open again, and the camera is back on the list.
 those values match the roads actually driven. 80 on a Utah freeway is plausible; 80 on a residential
 street is a fault wearing a plausible number. **The cross-check is correlating the value against
 `mapdOut.highwayClass` and position on the same route**, which is real work and has not been done.
-A sweep across the last twelve routes was running when this was written; a rate quoted from four
-spot checks would be exactly the one-route number this fork keeps having to withdraw.
+**OWED: the rate across the last twelve routes.** Four spot checks are not a rate, and this fork
+keeps having to withdraw one-route numbers. The sweep was started twice on 2026-08-23 and neither
+run was retrieved -- the device dropped off the network mid-run both times.
+
+    cd /data/openpilot && PYTHONPATH=/data/openpilot /usr/local/venv/bin/python3         tools/bp_isa_speed_limit.py --sweep 12
+
+**AND THE FIRST ATTEMPT AT THAT SWEEP PRODUCED A CONFIDENT TABLE OF NONSENSE**, which is why the
+sweep now lives inside the tool. It was a shell loop grepping the per-route output, and the grep
+dropped the `===` section headers -- so `IsaVLimUnit`'s constant 2 ran together with `IsaVLim` and
+was parsed as a speed limit, flagging 8 of 9 routes as carrying a "REAL LIMIT". Caught only by the
+values looking wrong. **A tool whose output has to be re-parsed by a fragile pipeline will
+eventually be re-parsed wrongly**; the aggregation belongs in the tool.
 
 **WHY IT IS WORTH THE MEASUREMENT ANYWAY:**
 
