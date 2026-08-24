@@ -5115,6 +5115,54 @@ a statement about four slow local drives, nothing more.
 **The std removal is therefore still justified on the MOTORWAY argument alone** -- would-admit and
 open-today being indistinguishable there -- and not by anything these four drives show.
 
+### THE STD REMOVAL WAS ATTEMPTED AND REVERTED. THE CENTER TURN LANE KILLS IT.
+
+2026-08-23, with his go-ahead, and the suite stopped it. **Do not attempt this again without first
+answering the question at the bottom of this entry.**
+
+The change was `left_edge_ok = beyond_ok and not left_narrowing`, dropping the std cutoff, with the
+taper term added as the deliberate replacement for what the cutoff was doing by accident. Eleven
+tests failed. Most were bookkeeping -- fixtures that used a high `edge_stds` as a convenient way to
+make geometry refuse -- but one group was not:
+
+    TestTrafficMayNotStandInForTheRoadEdge
+
+**Its own docstring describes the case, and it is the one road where this change is unsafe:**
+
+  *"A center turn lane is painted like a travel lane, sized like one, and has cars moving down it in
+  our direction. EVERY TERM THAT SURVIVED THE WAIVER PASSES ON IT. The waived terms were the only
+  ones that did not -- so the waiver was, on that road, the whole gate."*
+
+The waived terms are the two EDGE-derived ones. On the 2026-08-09 drive behind it, `leftEdgeStd` had
+a median of 2.12 and the edge was the ONLY objection on 2,865 frames. Remove the std cutoff and
+`beyond` is left holding that case alone, with nothing measured saying it can. **That road already
+cost three real incidents** -- *"It tried to change lanes into the center turn lane median thing 3
+times!"*
+
+**AND THE DOCSTRING NAMES THE EXACT MISTAKE I MADE, which is why this is worth writing down rather
+than just reverting:**
+
+  *"What the freeway measurement could not contain: a freeway has no turn lane. Generalising from it
+  to every road is the actual mistake, and it is not visible in the number."*
+
+Every measurement behind the removal -- the separation test, the taper populations, the 22% -> 65%
+reachability -- was taken on motorway and motorwayLink. All of it is still correct. **None of it can
+see a road that has no turn lane in it.** The 2026-08-09 waiver was justified by a freeway
+measurement in precisely the same shape and the road disproved it in two drives.
+
+**WHAT WOULD MAKE IT POSSIBLE, in order:**
+
+1. **Measure whether `beyond` alone refuses a center turn lane.** That is the whole question. It
+   needs frames from an arterial WITH a turn lane, labelled -- which no analysis here has had.
+2. **Not by scoping the removal to motorway.** `highwayClass` comes from the map, and using it to
+   REMOVE a refusal is the map opening a maneuver. Forbidden, however well it would work.
+3. **Not by trusting the taper term to cover it.** A center turn lane does not narrow; that is the
+   point of it. The taper check is orthogonal to this failure and cannot substitute.
+
+**What survives unchanged:** the narrowing term (shipped, still gating nothing), and the finding
+that on MOTORWAY the std cutoff discriminates nothing. Both remain true. What is retired is the
+belief that the motorway finding licenses removing the term globally.
+
 2026-08-22, `tools/bp_route_intent_score.py`, four drives, 63,000 mapdOut frames. This is
 `bluepilot/ROUTE-INTENT.md` step 2, which said to score the guess already running before building
 anything, and it closes the cheap option.
