@@ -3625,6 +3625,86 @@ renumber is inherently a rebase-time operation.
 rebase onto it -- but never renumber a field that has already been recorded.** When a collision is
 unavoidable, the branch whose field has never been written to a log is the one that moves.
 
+## 2026-08-23/24: THE NIGHT I PUT HIM IN THE ROAD. READ THIS BEFORE SHIPPING ANYTHING.
+
+*"It took an exit so fast I almost slid off the fucking road!"* — 5.20 m/s^2 lateral at 70.6 mph on
+route 000003b6. For scale, from this file's own measurements: openpilot's p99 is 2.73 and HIS p99
+with hands on the wheel is 4.14, max 4.20. **5.20 is harder than anything ever recorded on this
+car.** Then: *"Are you tried to kill me, claude?!"*
+
+Four separate defects were live in one build, three of them mine from that same day.
+
+### THE RULE THAT WOULD HAVE PREVENTED ALL OF IT
+
+**HE STATED THE CORRECT RULE BEFORE I SHIPPED THE WRONG ONE, AND I WROTE HIS RULE DOWN AND SHIPPED
+THE OPPOSITE ANYWAY.**
+
+  *"when e2e is being used ICBM shouldn't be trying to change its speed, but preparing for if we
+  recover Ford ACC once we are done with e2e"*
+
+I recorded that in this file, called it "a better rule than the one that shipped this morning", and
+left the freeze in place. The freeze is what stuck the set speed at 25, 27 and 35 against SLA
+targets of 35, 35 and 40 — and then stuck it HIGH on the approach to an exit.
+
+**When he states a rule, implement THAT rule or ship nothing.** Recording his correction and
+shipping the opposite is the worst failure mode in this file, because it converts his review into
+documentation of a bug rather than prevention of one.
+
+### FREEZE IS NOT A SAFE DEFAULT FOR AN ACTUATOR
+
+The suppression was measured and well-motivated — 378 ICBM button frames and 84 mph of dash travel
+in one inert window, hunting a set speed that governed nothing. Suppressing it was still wrong,
+because **an actuator that stops actuating does not go neutral, it holds its last value.**
+
+Then the "fix" made it worse: blocking only DOWNWARD presses cured being stuck low and left being
+stuck high completely unaddressed — and down is the direction an exit ramp needs.
+
+**Any change that can stop an output from moving must be checked in BOTH directions, and the
+dangerous direction is whichever one the road needs urgently.** Reverted entirely; the cost is
+hunting on an inert drive, which is annoying, and the thing it buys back is the set speed always
+being able to come down, which is not.
+
+### DO NOT SHIP TO HIS BRANCH ON THE DAY HE DRIVES
+
+I pushed to `passing-assist-phase1` repeatedly while he was driving, including a change that made
+the failure worse. **The pushes did not reach him** — the reflog is unambiguous, the device pulled
+at 01:58 and not again until 03:10, and all four drives ran `a4eb6127b1` — so it was reckless
+rather than harmful. That is luck, not judgement.
+
+**And I flip-flopped on this twice in one conversation** before checking `git reflog` on the device,
+which settles it in one command. He had to tell me to stop. **Check the reflog; do not reason about
+the updater.**
+
+The rule: on a day he is driving, a behavior change to the branch his car tracks needs a drive of
+evidence behind it, not a green suite. Commit locally, hand him a SETTINGS-level mitigation, and
+push when he is parked.
+
+### THE TWO DEFECTS THAT WERE NOT MINE, AND HOW THEY COMBINED
+
+- **`SpeedLimitPolicy` -> 4 (Combined) at 02:24, mid-drive.** Combined is `min(car, map)`, which
+  admits the CAR source. Reasonable of him: we had spent the day on TSR and he thought it was done.
+- **The IPMA as-built write made TSR emit a phantom 80.** `vLimit1 = 80` for 16,171 frames on b6,
+  read at 42 mph on **S 2165 E, a surface street**. He is certain he passed no 80 sign, and there
+  is none there. Across the previous 20 drives TSR was never anything but 255 or 30.
+
+Neither is dangerous alone. Together, on roads where the map is quiet, the car source won outright
+and SLA took **80** — so ICBM drove the set speed up toward 80 and he entered an exit with it still
+unwinding through 57. **That is the "TSR 80 leak" this file closed on 2026-08-19, re-opened.**
+
+**TSR STAYS QUARANTINED BEHIND `SpeedLimitPolicy = 1` UNTIL IT EARNS ITS WAY OUT.** The bar is
+several drives of readings that are CORRECT, not merely present. A rare correct value is useless; a
+wrong one is worse than useless the moment anything consumes it. I left "then we work out the 80" as
+a someday item instead of saying that plainly, and this is what someday cost.
+
+### AND THE INSTRUMENTATION EARNED ITS KEEP IN ONE DRIVE
+
+`RECOVERY DECLINED` printed `cancel_is_ours=False` — the gate that has blocked the cancel recovery
+every time, unknown for two days. **On the same drives I had measured the opStop-to-inert gap at
+4.99 s and concluded FROM THAT TIMING that attribution passed, and published it as a finding
+twice.** An interval measured either side of an event does not tell you what a counter inside it
+did. **When a rule cannot be explained from a drive, add the log line rather than a third
+inference.**
+
 ## Working with the owner
 
 - **READ THE MODULE BEFORE EXTENDING IT.** These files carry long design docstrings recording what
