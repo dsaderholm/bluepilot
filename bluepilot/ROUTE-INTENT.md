@@ -1457,6 +1457,39 @@ out, which returns the feature to today's behaviour. The first stays `unknown` a
 distinction belongs in the bridge, because the consumer cannot see it -- from `routeIntentBP` a
 broken parser and a genuinely strange junction look identical.
 
+### 11f. THE STREET NAME IS THE SLEEPER -- it is a JOIN KEY into the tiles we already have
+
+The gate needs two fields: a maneuver and a distance. The cluster demonstrably carries a third, and
+it is worth more than either.
+
+**`Step.road` -- the street being turned ONTO -- is a join key into the OSM tile store.**
+`bp_offline_tile.capnp` gives every `Way` a `name` and a `ref`, and those tiles are already on the
+device. So "turning onto 2000 East" does not merely mean "a maneuver is coming"; it IDENTIFIES the
+way he is about to enter, and that way already has geometry, curvature, lane count and a speed
+limit sitting in a file we can read today.
+
+**That is the exit-ramp problem solved rather than worked around.** The measured deficit is
+DETECTION TIME: SCC-Map gets the corner about 4 s out and the set speed needs about 8 s. Knowing
+WHICH ramp he is taking, before he is on it, turns a reactive slowdown into a planned one against
+the ~3.3 mph/s the buttons actually deliver.
+
+**AND THE SAFE DIRECTION IS AVAILABLE, which is what makes it buildable at all.** Using route intent
+to slow EARLIER for a ramp he is confirmed to be taking is the conservative direction -- a wrong
+"he is taking it" costs a premature slowdown on the mainline, which is annoying and not dangerous.
+Using it to SUPPRESS a slowdown ("he is not taking the ramp, ignore its corner speed") is the
+opening direction and is forbidden on the same evidence.
+
+**Two honest caveats before anyone builds it:**
+
+- **Text over CAN is multiplexed**, so the street name is likely the LAST field to decode even
+  though it is the most valuable. Expect maneuver and distance first by a wide margin.
+- **Name matching into tiles is fuzzy exactly where it matters.** At an interchange several ramps
+  share a name, which is the case the join has to be right about and the one it is worst at.
+
+**AND IT WOULD LAND ON A DIFFERENT BRANCH.** SCC-Map is ICBM-owned and route intent is a leaf, so a
+consumer built here would strand -- it would never flow anywhere. That is a conversation before it
+is a commit.
+
 ### 11e. WHAT TO MEASURE, cheapest first
 
 1. **The cluster, with Google Maps navigating.** One glance. Bounds what crosses the bus, needs no

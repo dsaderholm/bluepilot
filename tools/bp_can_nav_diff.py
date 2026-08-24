@@ -125,6 +125,18 @@ MAX_PAYLOADS = 256
 # measurement error and the reason denominators get stated here.
 MIN_CONTROL_FRAMES = 200
 
+# HOW MANY DISTINCT VALUES A BYTE MUST TAKE BEFORE IT IS A CANDIDATE.
+#
+# Added 2026-08-23 after this tool reported "SOMETHING CHANGED WITH A ROUTE ACTIVE" on ten addresses
+# whose differing byte took TWO OR THREE values. That is two ordinary drives differing, not a nav
+# channel -- and the verdict said otherwise in capital letters.
+#
+# The thing being hunted is a DISTANCE COUNTING DOWN toward a junction, which is the one behaviour
+# nothing else in a payload has. A distance takes dozens of values over a route. A status bit takes
+# two. Requiring breadth is what separates them, and without it the tool finds a "nav channel" on
+# any pair of drives.
+MIN_CANDIDATE_VALUES = 8
+
 
 def seg_index(name: str) -> int:
   tail = name.rsplit("--", 1)[-1]
@@ -201,6 +213,28 @@ def read_route(route: str, realdata: str, max_segments: int | None) -> Inventory
           continue
         inv.add(c.address, c.src, bytes(c.dat))
   return inv
+
+
+def woke_up(nav: Inventory, ctl: Inventory) -> list:
+  """(address, bus) pairs whose bytes moved in the NAV route and were pinned in the control.
+
+  A FUNCTION RATHER THAN A LOOP INSIDE main() BECAUSE THE TEST HAS TO CALL THIS ONE. The first
+  version of test_can_nav_diff.py reimplemented this logic in the test file, so when
+  MIN_CANDIDATE_VALUES was added the suite stayed green while the new threshold went completely
+  uncovered -- a test exercising its own copy of the code, which is the shape this fork records
+  under "a stub laxer than the real thing hides the bug it was built to catch".
+  """
+  out = []
+  for key in sorted(set(nav.count) & set(ctl.count)):
+    if ctl.count[key] < MIN_CONTROL_FRAMES:
+      continue
+    nav_var, ctl_var = set(nav.varying_bytes(key)), set(ctl.varying_bytes(key))
+    # Breadth, not just "it moved". See MIN_CANDIDATE_VALUES.
+    gained = sorted(b for b in nav_var - ctl_var
+                    if len(nav.bytes[key][b]) >= MIN_CANDIDATE_VALUES)
+    if gained:
+      out.append((key, gained))
+  return out
 
 
 def show_coverage(inv: Inventory, label: str) -> None:
@@ -282,14 +316,7 @@ def main() -> int:
   print("=== addresses present in BOTH that WOKE UP while navigating ===")
   print("# A byte pinned in the control drive and moving in the navigating one. This is the case")
   print("# address-level presence cannot see, and the one APIM_Data_FD1 would land in.")
-  woke = []
-  for key in sorted(nav_keys & ctl_keys):
-    if ctl.count[key] < MIN_CONTROL_FRAMES:
-      continue
-    nav_var, ctl_var = set(nav.varying_bytes(key)), set(ctl.varying_bytes(key))
-    gained = sorted(nav_var - ctl_var)
-    if gained:
-      woke.append((key, gained))
+  woke = woke_up(nav, ctl)
   if woke:
     for (addr, bus), gained in sorted(woke, key=lambda kv: -len(kv[1])):
       known = APIM_ADDRS.get(addr, "")
@@ -299,9 +326,9 @@ def main() -> int:
   else:
     print("  (none)")
   print()
-  print(f"# Only addresses with >= {MIN_CONTROL_FRAMES} control frames are compared. A byte seen")
-  print("# twice is constant by luck, and calling that a nav channel is a sample-size difference")
-  print("# read as a behaviour difference.")
+  print(f"# Only addresses with >= {MIN_CONTROL_FRAMES} control frames are compared, and a byte must")
+  print(f"# take >= {MIN_CANDIDATE_VALUES} distinct values to count. A byte seen twice is constant by luck, and a")
+  print("# byte with two or three values is a status flag, not a distance counting down.")
   print()
 
   print("=== the APIM's own traffic, named, present or not ===")
@@ -315,6 +342,10 @@ def main() -> int:
   print()
 
   print("=== what this says ===")
+  print("  FIRST, THE PREMISE: this is only a nav diff if the --nav route really was NAVIGATING.")
+  print("  The tool cannot know that. If it was picked for being the newest route, everything")
+  print("  below is two ordinary drives differing. Confirm with the driver before reading on.")
+  print()
   if new or woke:
     print("  SOMETHING CHANGED WITH A ROUTE ACTIVE, on a bus openpilot already reads. Decode it")
     print("  next: dump the differing bytes over time against carState to see whether the value")

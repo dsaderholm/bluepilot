@@ -1744,7 +1744,17 @@ open again, and the camera is back on the list.
 those values match the roads actually driven. 80 on a Utah freeway is plausible; 80 on a residential
 street is a fault wearing a plausible number. **The cross-check is correlating the value against
 `mapdOut.highwayClass` and position on the same route**, which is real work and has not been done.
-**OWED: the rate across the last twelve routes.** Four spot checks are not a rate, and this fork
+**MEASURED, AND THEN HANDED OFF. 3 of 12 routes carried a non-sentinel value** -- and on every
+route `IsaVLim` and `TsrVLim1MsgTxt` AGREE, in value and in rate, within a point. **So 0x3D9 is
+REDUNDANT with 0x3CD: the same number published twice, not a second source.** The "message nobody
+had examined" is real and adds nothing, which deflates the finding and is worth saying plainly.
+
+**AND THE 80 IS CONFIRMED BAD BY HIM, 2026-08-23** -- he is working TSR in a separate session and
+already knows that value is wrong. So the camera is not reading signs after all; it is emitting a
+bad number on both of its messages. **TSR IS THAT SESSION'S WORK, NOT THIS BRANCH'S.** Nothing more
+here.
+
+**~~OWED: the rate across the last twelve routes.~~ DONE, above.** Four spot checks are not a rate, and this fork
 keeps having to withdraw one-route numbers. The sweep was started twice on 2026-08-23 and neither
 run was retrieved -- the device dropped off the network mid-run both times.
 
