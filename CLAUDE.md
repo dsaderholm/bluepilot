@@ -1488,6 +1488,41 @@ correctly False, and recovery correctly declined — which looked exactly like "
 Fixtures more orderly than reality, and this time the fixture was *missing the thing the rule is
 about*. Both tests now fire the override first.
 
+### THE CAMERA SAYS `ACC_Unavailable`, NOT `ACC_Overridden`. ASKED IT DIRECTLY, 2026-08-23.
+
+`ACCDATA_3` carries the camera's own message text, and the DBC names every value. `tools/bp_cancel_reason.py`
+decodes it from raw bus-2 CAN alongside `accAuthority` in the same pass:
+
+    route   while the OVERRIDE had the car
+    ae      AccMsgTxt ACC_Unavailable=10, No_Text=8   AccWarn Cancel_Warning=4
+    af      AccMsgTxt ACC_Unavailable=19, No_Text=67  AccWarn Cancel_Warning=4
+    b1      override never fired; IACC_Unavailable only, ZERO ACC_Unavailable, ZERO Cancel_Warning
+
+**`ACC_Overridden` (value 4) appears ZERO times on any drive.** The camera does not believe a driver
+is braking over it. It declares ACC **UNAVAILABLE** and raises `Cancel_Warning`, and it does so
+while the override has the car.
+
+**That is a different problem from the one this file has been working from.** "It watches the car
+decelerate harder than it asked and gives up" predicts `ACC_Overridden`, which is a system waiting
+to be handed back. `ACC_Unavailable` is a self-assessment that it cannot run at all — and nothing
+about continuing to forward its own frames obviously argues it out of that. **The recovery design
+rests on the camera having a reason to release. Its own message text does not say it has one.**
+
+**AND THE RADAR IS FINE, so the obvious alternative is ruled out.** `CadsAlignIncplt_B_Actl` and
+`CadsRadrBlck_B_Actl` are **0.0% on all three drives, 4,071 samples**. The B1433 alignment fault an
+IPMA as-built write causes — and he was writing as-built on the 21st and 22nd — is NOT present.
+
+**`AccStopStat_D_Dsply` is `NoDisplay` on 100% of every drive measured.** Ford's ACC never enters
+its own stop-and-hold on this car, which is the fourth independent confirmation of that.
+
+**WHAT THIS OPENS, and it is untried:** if the camera has declared itself unavailable rather than
+overridden, the way out is more likely a clean ACC disengage and re-engage than continued
+forwarding. Both are already reachable — `create_button_msg` injects cancel and resume, and
+openpilot already sends resume at standstill. The risk to check first is that cancelling Ford's ACC
+takes openpilot's engagement with it, since `cruiseState.enabled` comes from the PCM
+(`EngBrakeData.CcStat_D_Actl`). **Do not build it before reading `RECOVERY DECLINED` from a drive** —
+that says which gate blocked the recovery we already have, and it is one drive away.
+
 ### `AccBrkTot_A_Rq` HAS THE SAME CEILING AS `AccPrpl_A_Rq` AND WAS NEVER CLAMPED
 
 Straight off his swaglog, every line a refused frame handed to openpilot:
