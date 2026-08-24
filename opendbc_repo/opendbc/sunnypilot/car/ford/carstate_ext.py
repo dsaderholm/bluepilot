@@ -96,7 +96,31 @@ def get_hev_engine_on_reason_text(reason_value):
 # and ICBM injects `CcAslButtnSetIncPress`; both must take the combo path below, which picks
 # resumeCruise or accelCruise from the cruise state. Measured 2026-08-20 -- see the BUTTONS comment
 # in values_ext for why the original single-signal mapping made his `+` button invisible.
+# FusionPilot: TsrVl1StatMsgTxt_D_Rq -- the camera's own grade of the limit it is reporting.
+# ford_lincoln_base_pt.dbc: 0 Null, 1 LimitChanged, 2 LimitReliable, 3 LimitOutdated.
+TSR_LIMIT_CHANGED = 1
+TSR_LIMIT_RELIABLE = 2
+
 RES_INC_SIGNALS = ("CcAslButtnSetIncPress", "CcAslButtnResIncPress")
+
+# BluePilot: which LOGICAL button each combo signal belongs to. A group is edge-detected once per
+# frame and owns its own state, so two signals of the same button cannot clear each other, and two
+# different buttons that can both emit `resumeCruise` cannot either.
+COMBO_GROUPS = {
+  "CcAslButtnSetIncPress": "RES_INC",
+  "CcAslButtnResIncPress": "RES_INC",
+  "CcAslButtnSetDecPress": "SET_DEC",
+  "CcAslButtnCnclResPress": "CNCL",
+}
+
+# {group: {cruise_enabled: event type}} -- 3 accelCruise, 10 resumeCruise, 4 decelCruise,
+# 9 setCruise, 5 cancel. RES+ resumes when cruise is off and increases when it is on; SET- sets
+# when off and decreases when on; CNCL cancels when on and resumes when off.
+COMBO_EVENTS = {
+  "RES_INC": {False: 10, True: 3},
+  "SET_DEC": {False: 9, True: 4},
+  "CNCL": {False: 10, True: 5},
+}
 
 
 class CarStateExt:
@@ -114,6 +138,7 @@ class CarStateExt:
     self.CP_SP = CP_SP
 
     self.button_events = []
+    self.combo_states: dict[str, bool] = {}
     self.button_states = {button.event_type: False for button in BUTTONS}
     # Track which event type was actually emitted for combo buttons (to handle releases correctly)
     self.last_emitted_event = {}  # signal_name -> event_type
@@ -126,6 +151,18 @@ class CarStateExt:
     # cleared -- one frame proves the car supplies them and the synthesizer must stay out of the
     # way for the rest of the drive. See opendbc/sunnypilot/car/ford/apim_gps.py.
     self.apim_gps_nav_seen = False
+
+  @staticmethod
+  def _signal_high(cp, button) -> bool:
+    """Is this button's CAN signal in a pressed state right now?
+
+    Guarded exactly like the read inside the dispatch loop: a signal missing from the frame is
+    absent, not low, and must not be read as a release.
+    """
+    try:
+      return cp.vl[button.can_addr][button.can_msg] in button.values
+    except (KeyError, AttributeError):
+      return False
 
   def update(self, ret: structs.CarState, ret_sp: structs.CarStateSP, can_parsers: dict[StrEnum, CANParser]):
     """
@@ -157,6 +194,31 @@ class CarStateExt:
     button_events = []
     cruise_enabled = ret.cruiseState.enabled
 
+    # FusionPilot: RES+ IS ONE BUTTON WITH TWO SIGNAL NAMES, AND IT HAS TO BE EDGE-DETECTED AS ONE.
+    #
+    # `RES_INC_SIGNALS` holds both `CcAslButtnSetIncPress` and `CcAslButtnResIncPress`, and the
+    # branch below stores its edge memory in `button_states[3]`/`[10]` -- shared by BOTH. They are
+    # different signals, so one is always low while the other is high, and the low one took the
+    # release path and cleared the memory the high one had just set. Next frame the high one looked
+    # like a fresh press. Press, release, press, release, at the full 100 Hz frame rate.
+    #
+    # MEASURED on route 000003b7, 2026-08-24, from raw CAN: ONE physical RES+ hold, `src 0` bit 29
+    # of 0x083 high from t+86.60 to t+87.32, produced ~70 `accelCruise` events. 452 over the drive.
+    # Downstream, each phantom press ran the v_cruise button path, so `vCruiseCluster` oscillated
+    # 22 <-> 25 while the real dash sat still at 22; Speed Limit Assist reads that movement as
+    # "the driver took over", so it fell out of `active` and re-entered 1238 times, announcing
+    # "Set speed changed" with a chime on each re-entry and flashing the set-speed number between
+    # green and white. One button press, six hundred announcements.
+    #
+    # The BUTTONS comment said carrying both signals "costs nothing here (it has zero driver-side
+    # edges on this car)". The premise is true -- SetInc never rises on bus 0 -- and the conclusion
+    # was wrong, because the damage came from it being CONSTANTLY LOW, not from it ever rising.
+    #
+    # So the state of RES+ is the OR of its signals, evaluated once per frame, and the branch runs
+    # once for the whole group instead of once per (signal, event type) row.
+    res_inc_state = any(self._signal_high(cp, b) for b in BUTTONS if b.can_msg in RES_INC_SIGNALS)
+    processed_signals: set[str] = set()
+
     # Detect cruise transition from disabled to enabled
     cruise_just_enabled = cruise_enabled and not self.cruise_enabled_prev
     main_cruise_just_pressed = False
@@ -171,152 +233,50 @@ class CarStateExt:
         continue
 
       # Handle combo buttons: emit only the appropriate event based on cruise state.
+
+      # THE THREE COMBO BUTTONS, each handled once per frame from its own edge memory.
       #
-      # `processed_signals` IS RE-CREATED EVERY ITERATION, so `not in processed_signals` below is
-      # always true and this set dedupes nothing across buttons. Kept and documented rather than
-      # deleted, because deleting it would read as "dedup was removed" when in fact there never was
-      # any: what actually prevents duplicate events is the `self.button_states` comparison inside
-      # each branch. Noted 2026-08-20 after mapping two signals to the RES+ branch doubled the
-      # traffic through here and the guard did not notice.
-      processed_signals = set()
+      # Each of these changes meaning with cruise state, so which EVENT it emits is decided at the
+      # moment of the press. What must not depend on cruise state is whether an edge happened --
+      # that is a property of the signal, and it now lives in `self.combo_states`, keyed by the
+      # BUTTON, not by the event type.
+      #
+      # It used to be keyed by event type, in `button_states`, and the groups overlapped: RES+ wrote
+      # slots 3 and 10, CNCL wrote 5 and 10. Whichever of them was low cleared slot 10 on the same
+      # frame the other set it, so a held button looked like a fresh press every 10 ms. Measured at
+      # ~70 events for one 0.72 s hold on route 000003b7 (RES+ vs SetInc, cruise on) and reproduced
+      # for RES+ vs CNCL with cruise off by `test_with_cruise_off_it_is_a_resume_and_still_one`.
+      group = COMBO_GROUPS.get(button.can_msg)
+      if group is not None:
+        # An early-out, NOT the correctness guard -- `combo_states` is. Running this branch twice
+        # for the same group in one frame is already a no-op, and a mutation that keys this set by
+        # signal name instead of group kills none of the tests, deliberately recorded here because
+        # the `processed_signals` that lived here before guarded nothing and read as though it did.
+        if group in processed_signals:
+          continue
+        processed_signals.add(group)
+        signal_state = res_inc_state if group == "RES_INC" else state
+        prev_state = self.combo_states.get(group, False)
 
-      # CcAslButtnSetIncPress is the "RES +" button: resumeCruise (10) when cruise is disabled,
-      # accelCruise (3) when enabled. It emitted setCruise (9) when disabled, which reported every
-      # resume as a set and discarded the driver's hold -- see the BUTTONS comment in values_ext.
-      if button.can_msg in RES_INC_SIGNALS and button.can_msg not in processed_signals:
-        processed_signals.add(button.can_msg)
-        signal_state = state
-        prev_accel_state = self.button_states.get(3, False)  # accelCruise
-        prev_set_state = self.button_states.get(10, False)  # resumeCruise
+        if signal_state and not prev_state:
+          event_type = COMBO_EVENTS[group][bool(cruise_enabled)]
+          event = structs.CarState.ButtonEvent.new_message()
+          event.type = event_type
+          event.pressed = True
+          button_events.append(event)
+          # Remember which event type was emitted, so the release matches the press even if cruise
+          # state changed in between -- releasing a different type would strand a button timer.
+          self.last_emitted_event[group] = event_type
+          self.combo_states[group] = True
 
-        if signal_state and (prev_accel_state != signal_state or prev_set_state != signal_state):
-          # Choose event type based on cruise state
-          if cruise_enabled:
-            event_type = 3  # accelCruise
-          else:
-            event_type = 10  # resumeCruise
-
-          # Emit the appropriate event
-          if self.button_states.get(event_type, False) != signal_state:
-            event = structs.CarState.ButtonEvent.new_message()
-            event.type = event_type
-            event.pressed = signal_state
-            button_events.append(event)
-            # Remember which event type we emitted for this signal
-            self.last_emitted_event[button.can_msg] = event_type
-
-          # Update state for both event types
-          self.button_states[3] = signal_state  # accelCruise
-          self.button_states[10] = signal_state  # resumeCruise
-        elif not signal_state and (prev_accel_state != signal_state or prev_set_state != signal_state):
-          # Button released - emit release ONLY for the event type that was actually emitted on press
-          last_emitted = self.last_emitted_event.get(button.can_msg)
+        elif not signal_state and prev_state:
+          last_emitted = self.last_emitted_event.pop(group, None)
           if last_emitted is not None:
-            # Always emit release if we previously emitted a press event for this button
-            # This ensures ICBM button timers are properly reset
             event = structs.CarState.ButtonEvent.new_message()
             event.type = last_emitted
             event.pressed = False
             button_events.append(event)
-          # Clear the tracking
-          self.last_emitted_event.pop(button.can_msg, None)
-          # Update state for both event types -- THE SAME TWO THE PRESS PATH SET.
-          #
-          # This cleared 3 and 9, while the press path above sets 3 and 10. So `resumeCruise` (10)
-          # was set on the first RES+ press with cruise off and NEVER CLEARED. On the second press
-          # the guard `self.button_states.get(event_type) != signal_state` compared True against
-          # True and emitted nothing -- so every resume after the first one silently did not exist.
-          #
-          # 9 is `setCruise`, which this button has not emitted since the 2026-08-04 correction in
-          # the BUTTONS comment; clearing it here is a leftover from the version that did.
-          self.button_states[3] = False   # accelCruise
-          self.button_states[10] = False  # resumeCruise
-        continue
-
-      # CcAslButtnSetDecPress: setCruise (9) when disabled, decelCruise (4) when enabled
-      if button.can_msg == "CcAslButtnSetDecPress" and button.can_msg not in processed_signals:
-        processed_signals.add(button.can_msg)
-        signal_state = state
-        prev_decel_state = self.button_states.get(4, False)  # decelCruise
-        prev_set_state = self.button_states.get(9, False)  # setCruise
-
-        if signal_state and (prev_decel_state != signal_state or prev_set_state != signal_state):
-          # Choose event type based on cruise state
-          if cruise_enabled:
-            event_type = 4  # decelCruise
-          else:
-            event_type = 9  # setCruise
-
-          # Emit the appropriate event
-          if self.button_states.get(event_type, False) != signal_state:
-            event = structs.CarState.ButtonEvent.new_message()
-            event.type = event_type
-            event.pressed = signal_state
-            button_events.append(event)
-            # Remember which event type we emitted for this signal
-            self.last_emitted_event[button.can_msg] = event_type
-
-          # Update state for both event types
-          self.button_states[4] = signal_state  # decelCruise
-          self.button_states[9] = signal_state  # setCruise
-        elif not signal_state and (prev_decel_state != signal_state or prev_set_state != signal_state):
-          # Button released - emit release ONLY for the event type that was actually emitted on press
-          last_emitted = self.last_emitted_event.get(button.can_msg)
-          if last_emitted is not None:
-            # Always emit release if we previously emitted a press event for this button
-            # This ensures ICBM button timers are properly reset
-            event = structs.CarState.ButtonEvent.new_message()
-            event.type = last_emitted
-            event.pressed = False
-            button_events.append(event)
-          # Clear the tracking
-          self.last_emitted_event.pop(button.can_msg, None)
-          # Update state for both event types
-          self.button_states[4] = False  # decelCruise
-          self.button_states[9] = False  # setCruise
-        continue
-
-      # CcAslButtnCnclResPress: cancel (5) when enabled, resumeCruise (10) when disabled
-      if button.can_msg == "CcAslButtnCnclResPress" and button.can_msg not in processed_signals:
-        processed_signals.add(button.can_msg)
-        signal_state = state
-        prev_cancel_state = self.button_states.get(5, False)  # cancel
-        prev_resume_state = self.button_states.get(10, False)  # resumeCruise
-
-        if signal_state and (prev_cancel_state != signal_state or prev_resume_state != signal_state):
-          # Choose event type based on cruise state at the moment of press
-          if cruise_enabled:
-            event_type = 5  # cancel
-          else:
-            event_type = 10  # resumeCruise
-
-          # Emit the appropriate event
-          if self.button_states.get(event_type, False) != signal_state:
-            event = structs.CarState.ButtonEvent.new_message()
-            event.type = event_type
-            event.pressed = signal_state
-            button_events.append(event)
-            # Remember which event type we emitted for this signal
-            self.last_emitted_event[button.can_msg] = event_type
-
-          # Update state for both event types
-          self.button_states[5] = signal_state  # cancel
-          self.button_states[10] = signal_state  # resumeCruise
-        elif not signal_state and (prev_cancel_state != signal_state or prev_resume_state != signal_state):
-          # Button released - emit release ONLY for the event type that was actually emitted on press
-          last_emitted = self.last_emitted_event.get(button.can_msg)
-          if last_emitted is not None:
-            # Always emit release if we previously emitted a press event for this button
-            # This ensures ICBM button timers are properly reset
-            event = structs.CarState.ButtonEvent.new_message()
-            event.type = last_emitted
-            event.pressed = False
-            button_events.append(event)
-          # Clear the tracking
-          self.last_emitted_event.pop(button.can_msg, None)
-          # Update state for both event types
-          self.button_states[5] = False  # cancel
-          self.button_states[10] = False  # resumeCruise
+          self.combo_states[group] = False
         continue
 
       # Regular buttons (non-combo): emit event on state transition
@@ -631,8 +591,33 @@ class CarStateExt:
     if not self.CP.flags & FordFlags.TSR:
       return 0
 
-    v_limit = cp_cam.vl["Traffic_RecognitnData"]["TsrVLim1MsgTxt_D_Rq"]
-    v_limit_unit = cp_cam.vl["Traffic_RecognitnData"]["TsrVlUnitMsgTxt_D_Rq"]
+    tsr = cp_cam.vl["Traffic_RecognitnData"]
+    v_limit = tsr["TsrVLim1MsgTxt_D_Rq"]
+    v_limit_unit = tsr["TsrVlUnitMsgTxt_D_Rq"]
+
+    # FusionPilot: THE CAMERA GRADES ITS OWN READ, AND WE USED TO IGNORE IT.
+    #
+    # Twelve TSR signals are subscribed at the top of this file and exactly two were read: the
+    # number and the unit. `TsrVl1StatMsgTxt_D_Rq` is the camera's own verdict on the value it is
+    # sending -- 2 LimitReliable, 3 LimitOutdated, 1 LimitChanged, 0 Null -- and a limit the camera
+    # has already marked OUTDATED has no business steering the set speed.
+    #
+    # Measured on 2026-08-24, decoding 0x3CD off his own routes:
+    #
+    #   000003b7   LimitOutdated on 100% of 721 frames, VLim1 255 throughout
+    #   000003b6   LimitOutdated 83%, LimitReliable 16%, and of the 165 frames carrying the value
+    #              80: 96 LimitReliable, 62 LimitOutdated, 7 LimitChanged
+    #
+    # SO BE CLEAR ABOUT WHAT THIS DOES NOT FIX. The phantom 80 on 000003b6 -- an I-80 route shield
+    # read as a speed limit near 2100 S, which walked his set speed to 90 for 13 minutes -- was
+    # graded LimitReliable on 58% of its frames. This gate would have shortened it, not stopped it.
+    # A confident wrong read needs a different answer (corroboration against the map source);
+    # nothing in this message distinguishes it.
+    #
+    # Rejecting `Null` too: it is the power-on state, not a reading.
+    v_limit_status = tsr["TsrVl1StatMsgTxt_D_Rq"]
+    if v_limit_status not in (TSR_LIMIT_RELIABLE, TSR_LIMIT_CHANGED):
+      return 0
 
     speed_factor = CV.MPH_TO_MS if v_limit_unit == 2 else CV.KPH_TO_MS if v_limit_unit == 1 else 0
     return v_limit * speed_factor if v_limit not in (0, 255) else 0

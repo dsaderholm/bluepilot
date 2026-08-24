@@ -2190,6 +2190,26 @@ python tools/bp_offline_test.py
 ```
 
 `test_sunnylink_settings_complete.py` fails when a fork setting has no SunnyLink entry, and names it.
+
+**Upstream hand-edits `settings_ui.json` and does not know `settings_ui_src/` exists** -- the
+generator is ours. So every upstream commit that touches settings arrives as a JSON-only change,
+git auto-merges it cleanly, and the *next* run of `compile_settings_ui.py` silently deletes it,
+because the YAML source never learned about it. Nothing catches this: the merge is conflict-free
+and the suite is green either way.
+
+**After any merge that touches `settings_ui.json`, regenerate and diff.** A non-empty diff is
+upstream's new entries about to be destroyed, not drift to accept:
+
+```bash
+python sunnypilot/sunnylink/tools/compile_settings_ui.py
+git diff -- sunnypilot/sunnylink/settings_ui.json     # MUST be empty
+```
+
+If it is not empty, `git checkout --` the JSON, port their entries into the right
+`settings_ui_src/pages/*.yaml`, regenerate, and confirm the diff is now empty -- that empty diff is
+the proof the port was faithful. This is how the bp-7.0 merge (2026-08-24) kept the unified theme
+selector: upstream replaced the `BPRadRacerTheme` toggle with `BPThemePack` / `BPThemeAutoSeasonal`
+in the JSON alone, and regeneration would have reverted the whole feature.
 It was verified to fail with an item removed -- do not trust it on green alone, that mistake has been
 made here before.
 
@@ -5486,3 +5506,40 @@ identical expression as `deadline_requesting` one line apart, read by nothing, w
 hundred lines away claiming the drop limiter reads it. The limiter reads `deadline_requesting`.
 Cross-check any hit repo-wide before believing it: most write-only attributes are read by another
 module, and a per-file scan cannot see that.
+
+
+## 2026-08-24: WHY TSR BARELY READS SIGNS -- THE CAMERA SAYS SO ITSELF
+
+`Traffic_RecognitnData` (0x3CD) carries twelve signals. `carstate_ext.update_traffic_signals` read
+TWO of them -- the number and the unit -- and the other ten were subscribed, parsed and discarded.
+Decoding them off routes 000003b6/b7 answered both halves of the TSR problem in one pass.
+
+**WHY SO FEW READS -- and it is not the camera being blind:**
+
+    TsrMsgTxt_D_Rq    NoNavDataAvailable      100% of b7, 95% of b6
+    TsrStatMsgTxt     Available_CameraOnly    100% of b7, 95% of b6
+                      Available_FusionMode      5% of b6
+
+Ford's TSR is a FUSION system. Without nav data it falls back to camera-only, which is the weak
+mode, and that is where this car lives. On the wire 0x462 arrives from the real APIM 584-715 times
+a drive while **0x463 and 0x464 are zero frames from any source**. `FordSynthesizeApimGps` exists to
+send exactly those two and is `0` on his device against a `"1"` code default -- a frozen default,
+see the defaults note. Toggle: "Send GPS To The Camera". NOT flipped; his settings are his.
+
+**WHY THE READS IT DOES GET ARE UNTRUSTWORTHY, and the trap in fixing it:**
+
+`TsrVl1StatMsgTxt_D_Rq` is the camera grading its own value -- LimitReliable / LimitChanged /
+LimitOutdated / Null. It is now gated on, so an OUTDATED limit no longer reaches the car.
+
+**But check the JOINT distribution before believing a gate fixes an episode.** The phantom 80 on
+b6 -- an I-80 route shield read near 2100 S that walked the set speed to 90 for 13 minutes -- broke
+down as 96 frames LimitReliable, 62 LimitOutdated, 7 LimitChanged. The marginals (16% reliable
+overall) suggested the gate would kill it. The joint says it would NOT: the camera was confident and
+wrong on 58% of those frames. A confident wrong read needs corroboration against the map source,
+which is a resolver change nobody has made yet.
+
+**AND THE DAMAGE OUTLIVES THE READ.** At t+389.8 the camera withdrew the 80 and the resolver went
+`valid=False, lastValid=False, source=none` correctly -- but the resolved 90 persisted to t+486.6,
+97 seconds later, because ICBM had already PRESSED the dash up to 90. A bad limit is converted into
+button presses, and those do not come back when the limit does. Rejecting a bad read matters far
+more than un-latching one.
