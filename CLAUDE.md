@@ -5150,10 +5150,49 @@ reachability -- was taken on motorway and motorwayLink. All of it is still corre
 see a road that has no turn lane in it.** The 2026-08-09 waiver was justified by a freeway
 measurement in precisely the same shape and the road disproved it in two drives.
 
-**WHAT WOULD MAKE IT POSSIBLE, in order:**
+#### MEASURED, SAME DAY: `beyond` CANNOT CARRY IT. THE REMOVAL IS DEAD.
 
-1. **Measure whether `beyond` alone refuses a center turn lane.** That is the whole question. It
-   needs frames from an arterial WITH a turn lane, labelled -- which no analysis here has had.
+`tools/bp_turn_lane_gate.py`, 12 routes. Restricted to moving frames where PAINT AND WIDTH BOTH
+PASS -- the terms the docstring says a center turn lane satisfies -- and split by whether the radar
+saw same-direction traffic in the candidate lane, which is what made a turn lane look like a travel
+lane in the first place:
+
+    road      same-dir left    frames   STD ONLY  beyond only     both   neither
+    TWO-WAY   True               4940      70.4%         0.0%     0.0%     29.6%
+    TWO-WAY   False              1473      21.9%         0.0%     0.0%     78.1%
+    one-way   True              33413      60.0%         0.2%     0.0%     39.8%
+    one-way   False              2131      25.9%         0.2%     0.0%     73.9%
+
+**On the exact trap condition -- top row -- the std cutoff is the ONLY refuser on 70.4% of frames,
+and `beyond` refuses 0.0% of them.** Removing the cutoff opens roughly 3,500 frames on two-way roads
+with traffic moving our way in the lane we would enter. That is the 2026-08-09 failure, reproduced
+in advance from data already on the device.
+
+**AND IT REFRAMES THE WHOLE CHANGE, which is the part worth keeping.** `beyond only` is 0.0-0.2%
+everywhere. Among frames that already pass paint and width, **the edge-std term is doing ALL of the
+remaining refusing.** So 22% -> 65% was never "recovering coverage a bad term was costing" -- it was
+removing the last gate standing. Both earlier findings survive and are compatible with this: `beyond`
+does separate lane-exists from leftmost (3.52 vs 0.11), and among paint+width-passing frames -- which
+are mostly lane-exists already -- it has almost nothing left to refuse.
+
+**DO NOT PROPOSE THIS AGAIN.** Not with a better threshold, not with the taper term, not scoped by
+road class. The question that blocked it has been asked and answered.
+
+**WHAT REMAINS TRUE:** on motorway the cutoff refuses frames whose taper distribution is
+indistinguishable from the ones it passes, and `roadEdgeStds` really does track distance rather than
+confidence. Those measurements were correct. What they never established -- and what this one shows
+-- is that anything else was ready to refuse in its place.
+
+**THE REUSABLE LESSON:** "term X measures the wrong thing" and "term X can be removed" are different
+claims, and only the second one needs to know what still refuses when it is gone. Three separate
+measurements answered the first and none of them touched the second.
+
+**~~WHAT WOULD MAKE IT POSSIBLE~~ -- superseded by the measurement above. Kept for the reasoning:**
+
+1. ~~**Measure whether `beyond` alone refuses a center turn lane.**~~ **DONE. It does not.** It
+   needed frames from an arterial with a turn lane -- two-way roads turned out to be a usable
+   superset, since OSM does not tag the trap and a clean result there would have been trustworthy.
+   It was not clean.
 2. **Not by scoping the removal to motorway.** `highwayClass` comes from the map, and using it to
    REMOVE a refusal is the map opening a maneuver. Forbidden, however well it would work.
 3. **Not by trusting the taper term to cover it.** A center turn lane does not narrow; that is the
