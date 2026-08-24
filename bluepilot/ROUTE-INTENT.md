@@ -1244,13 +1244,48 @@ says 1.9 mi and 6 min to arrival. So the cluster HAS fields for trip totals and 
 filling them -- either Maps sends no `destinationTravelEstimates`, or Ford does not map them. The
 STEP data lands and the DESTINATION data does not. Worth knowing before anyone plans on an ETA.
 
+**ONE EXPLANATION FOR THE ZEROS, THE DEAD REPEAT PROMPT, AND THE WORKING END-DRIVE. From two more
+of his observations, 2026-08-23: "Press OK to Repeat" NEVER works, even with Google Maps.**
+
+`NavigationManagerCallback` was read rather than recalled. It declares exactly two methods:
+
+    onStopNavigation()     the real one -- stop navigating
+    onAutoDriveEnabled()   a simulator hook, not a user action
+
+**There is NO repeat callback.** So the prompt has nothing to call.
+
+**FORD'S CLUSTER NAV UI IS A SUPERSET BUILT FOR FORD'S OWN EMBEDDED NAVIGATION, AND ANDROID AUTO
+FILLS A SUBSET OF IT.** That single statement explains all three:
+
+    "Press OK to Repeat"   no AA callback exists          -> dead, and NOT a fault in his car
+    "0 ft / 0:00min"       Ford fields AA does not fill   -> zeros
+    end-drive              onStopNavigation() exists      -> works
+
+**AND IT CORRECTS AN OVERCLAIM MADE HERE YESTERDAY.** The end-drive discovery was written up as
+proving the link is "bidirectional", with the implication that the reverse channel is rich. It is
+bidirectional by EXACTLY ONE COMMAND. Nothing else Ford's cluster offers can reach an Android Auto
+app, because nothing else exists to reach it with.
+
+**A SPECIFIC, TESTABLE GUESS ABOUT THE ZEROS.** The one nav signal Ford's DBC documents is
+`DistToStopover_L_Actl`, and a stopover is a route WAYPOINT. A Google Maps route with no waypoints
+has no stopover, so the field reads zero -- which is exactly what the cluster shows.
+
+**Test: add a stop to a Google Maps route and see whether that top row populates.** If it does, the
+row is the stopover pair, and it retro-confirms the DBC reading from the car's own display. It also
+confirms in the other direction why that signal is useless to the gate: distance to a waypoint is
+not distance to the next maneuver, which section 11c derived from the DBC alone.
+
 **AND A BONUS CANDIDATE NOBODY HAD CONSIDERED: a phone-sourced SPEED LIMIT.** The cluster shows 25
 and so does Google Maps. If that number comes from Android Auto rather than Ford's own map database,
 a canbox would hand us a speed-limit source from the phone -- which matters well beyond route
-intent, since TSR is dead on this car and map coverage runs around 50% of moving frames. **Not
-established**: one photo cannot say which source it came from, and Ford's own nav could equally be
-supplying it. Check it when the hardware lands; it costs nothing to look and it would be a second
-SLA source.
+intent, since TSR is dead on this car and map coverage runs around 50% of moving frames. **HE THINKS IT IS FORD'S OWN MAP DATABASE, not the phone** (2026-08-23), and if he is right that
+makes it MORE useful rather than less: a Ford-sourced limit is on the bus whether or not anything is
+navigating, and needs no app running.
+
+**Cheap test, and it decides which: does the cluster show a speed limit with NO navigation active at
+all?** Yes means Ford's own, always available. That would be a speed-limit source over MS-CAN
+independent of the phone -- worth real money on a car where TSR is dead and mapd coverage runs about
+50% of moving frames. Not established either way from one photo.
 
 **AND THE FLOOR IS FREE TO MEASURE:** whatever the IPC DRAWS had to cross the bus. One glance at
 the cluster with Maps navigating -- does it show an arrow only, or arrow plus distance, or arrow
