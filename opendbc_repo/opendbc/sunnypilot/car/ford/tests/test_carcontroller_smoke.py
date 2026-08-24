@@ -1078,3 +1078,105 @@ def test_the_override_tells_the_pcm_a_stop_is_happening(carcontroller_parts):
     "camera appears to be reacting to")
   assert asserted == len(sent), (
     "AccStopStat_B_Rq was set on only {} of {} override frames".format(asserted, len(sent)))
+
+
+def _passthrough_cc(carcontroller_parts):
+  """A CarController with op long and the passthrough on, engaged at 20 m/s."""
+  from opendbc.car.ford.interface import CarInterface
+  from opendbc.car.ford.values import CAR
+  CarController, dbc_names, CP, CP_SP, structs = carcontroller_parts
+  CP_long = CarInterface.get_non_essential_params(CAR.FORD_FUSION_MK5)
+  CP_long.openpilotLongitudinalControl = True
+  cc = CarController(dbc_names, CP_long, CP_SP)
+  cc.stock_acc_passthrough = True
+  cc.stop_override_enabled = True
+  out = structs.CarState()
+  out.vEgo = 20.0
+  out.vEgoRaw = 20.0
+  out.cruiseState.enabled = True
+  out.cruiseState.available = True
+  CS = FakeCarState(out)
+  CS.acc_cam_valid = True
+  CS.acc_stock_values["AccBrkTot_A_Rq"] = -1.10
+  CC, CC_SP = _car_control(structs, enabled=True,
+                           send_button=structs.IntelligentCruiseButtonManagement.SendButtonState.none,
+                           gap_target=0, long_active=True)
+  return cc, CS, CC, CC_SP, structs
+
+
+def test_a_late_cancel_run_after_our_override_is_still_ours(carcontroller_parts):
+  """THE GATE THAT ACTUALLY BLOCKED HIM, printed by the instrumentation on 2026-08-24:
+
+      RECOVERY DECLINED: cancel_is_ours=False longActive=True
+                         stop_override_stopped_us=False recovery_frames=0/1500
+
+  Attribution was decided on the frame a cancel RUN opened, within 3 s of the override. But ANY
+  refusal whose reason is not cancel resets the run -- so one band clip in the seconds after the
+  override restarts the clock, the next run opens too late, and recovery is blocked for the whole
+  drive. That is what this reproduces: override, then several seconds refused for a DIFFERENT
+  reason, then the cancel run finally opens.
+  """
+  cc, CS, CC, CC_SP, structs = _passthrough_cc(carcontroller_parts)
+  frame = 0
+
+  def run(n):
+    nonlocal frame
+    for _ in range(n):
+      cc.update(CC, CC_SP, CS, frame * 10_000_000)
+      frame += 1
+
+  cc.stop_override.update = lambda **kw: True
+  run(200)
+  assert cc.acc_authority == structs.ControllerStateBP.AccAuthority.opStop
+
+  # Hand back and refuse for a reason that is NOT cancel, with NO cancel asserted, for well over
+  # the 3 s window. Cancel must be absent here: `passthrough_admissible` tests the unpoliced bits
+  # BEFORE the bands, so asserting both would return "cancel" and open the run immediately -- which
+  # is how the first version of this test passed against the very code it was written to catch.
+  cc.stop_override.update = lambda **kw: False
+  CS.acc_stock_values["AccBrkTot_A_Rq"] = -19.0
+  run(600)
+
+  # NOW the camera starts cancelling, far more than 3 s after the override let go. The run opens
+  # here, and the timer-based rule can only say "not ours".
+  CS.acc_stock_values["AccBrkTot_A_Rq"] = -1.10
+  CS.acc_stock_values["AccCancl_B_Rq"] = 1
+  run(700)
+
+  assert cc.cancel_is_ours, (
+    "a cancel run that opened late after OUR override was not attributed to us -- that is the "
+    "RECOVERY DECLINED line from his 2026-08-24 drive")
+
+
+def test_a_cancel_after_the_camera_recovered_is_NOT_ours(carcontroller_parts):
+  """The other half, and the reason a permanent `override_ran` bool was rejected before: it latched
+  for a whole drive, so a cancel the camera raised forty minutes later for its own reasons was
+  still masked as ours.
+
+  The flag clears the moment the camera is seen HEALTHY, so it cannot span a healthy period.
+  """
+  cc, CS, CC, CC_SP, structs = _passthrough_cc(carcontroller_parts)
+  frame = 0
+
+  def run(n):
+    nonlocal frame
+    for _ in range(n):
+      cc.update(CC, CC_SP, CS, frame * 10_000_000)
+      frame += 1
+
+  cc.stop_override.update = lambda **kw: True
+  run(200)
+  cc.stop_override.update = lambda **kw: False
+
+  # The camera comes back clean and stays clean -- Ford authoring, everything forgiven.
+  run(600)
+  assert cc.acc_authority == structs.ControllerStateBP.AccAuthority.ford, (
+    "the camera never went healthy, so this proves nothing")
+  assert not cc.override_since_camera_clean, "a healthy camera must clear the attribution flag"
+
+  # Much later, the camera cancels for its own reasons. Not ours.
+  CS.acc_stock_values["AccCancl_B_Rq"] = 1
+  run(700)
+  assert not cc.cancel_is_ours, (
+    "a cancel raised long after the camera had recovered was attributed to our override -- that is "
+    "the bug the permanent override_ran bool had, and masking it hides a real camera fault")

@@ -242,7 +242,13 @@ procs += [
   # every other field -- is published on mapdOut and logged into the route, which is the point of the
   # migration. If its stdout is ever wanted, raise the log level through MapdSettings and run it by
   # hand rather than leaving it writing for every drive.
-  NativeProcess("mapd_v2", Paths.mapd_root(), ["bash", "-c", f"exec {MAPD_V2_PATH} > /dev/null 2>&1"], mapd_v2_ready),  # exec: see mapd above
+  # FusionPilot: RESTART IT IF IT DIES. Speed Limit Assist reads mapdOut in state 2, so a dead
+  # mapd_v2 is SLA silently losing its speed limit source mid-drive -- and until 2026-08-24
+  # nothing brought it back, because NativeProcess did not accept `restart_if_crash` at all.
+  # He hit it on route 000003b4: 441 "not running: mapd_v2" events in one drive, and the only
+  # cure was pulling over and rebooting. The notes said "only a reboot recovers" as though it
+  # were a property of the daemon; it was a missing keyword argument.
+  NativeProcess("mapd_v2", Paths.mapd_root(), ["bash", "-c", f"exec {MAPD_V2_PATH} > /dev/null 2>&1"], mapd_v2_ready, restart_if_crash=True),  # exec: see mapd above
   PythonProcess("mapd_manager", "sunnypilot.mapd.mapd_manager", always_run),
 
   # locationd
