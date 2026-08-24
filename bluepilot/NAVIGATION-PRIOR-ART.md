@@ -199,9 +199,18 @@ bridge Waze, for the reason that has driven this whole investigation.
 
 ## 6. WHAT CARROTPILOT'S NAV BRIDGE ACTUALLY SENDS
 
-Read from `ajouatom/openpilot` (the canonical CarrotPilot) on 2026-08-23 -- schema and transport,
-primary source. This is the closest working prior art to a phone bridge, and it is worth more than
-the one-line summary in ROUTE-INTENT 9c.
+Read from `ajouatom/openpilot` (the canonical CarrotPilot) on 2026-08-23 -- primary source.
+
+**THIS SECTION IS NOT A PROPOSAL TO BUILD A PHONE BRIDGE, and it was misread as one within minutes
+of being written.** He asked what CarrotPilot sends; this is the answer. **The plan is unchanged:
+MS-CAN via the canbox. No phone, no Android app.** He ruled that out at the start of this work and
+nothing here reopens it.
+
+**What it is actually worth is SCHEMA evidence, which is transport-agnostic.** CarrotPilot is the
+only working system whose nav message we can read line by line, and the questions it answers --
+how to express freshness, how to say "I have no value for this", whether to carry one maneuver or
+two -- apply identically to a message filled from CAN. Read 6c and 6d for that. 6f is the only
+phone-specific part and is recorded for completeness, not as a direction.
 
 **There are TWO generations of schema in that tree**, which is itself informative -- they outgrew
 the first one.
@@ -291,6 +300,9 @@ noted and dropped.
     TCP           :7706    the main channel
     HTTP          :7713    aiohttp server for nav data
 
-**The device broadcasts and the phone discovers it, not the other way round.** That is the answer to
-a question our own phone-bridge sketch never asked -- how the phone finds the comma on a WiFi network
-whose addressing changes constantly. Worth copying if a bridge is ever built here.
+**The device broadcasts and the phone discovers it, not the other way round** -- which answers a
+question our own fallback sketch never asked, given how often his network changes.
+
+**RECORDED, NOT RECOMMENDED.** The phone bridge is the fallback in ROUTE-INTENT 9a and it is not
+being built. This paragraph exists so that if the canbox path ever dies, the next session does not
+re-derive the discovery problem from scratch. It is not a reason to start.
