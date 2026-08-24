@@ -147,7 +147,16 @@ class RouteIntent:
     self.reset()
 
     try:
-      if not (sm.alive['routeIntentBP'] and sm.valid['routeIntentBP']):
+      # `valid` ONLY, and deliberately not `alive`. Read from SubMaster's own source 2026-08-23:
+      # a service declared at frequency 0 is treated as ON DEMAND -- `alive` is initialised True and
+      # is then recomputed only for `static_freq_services`, which excludes it. So `sm.alive` is
+      # ALWAYS True here and testing it is a guard that cannot fail while reading like a liveness
+      # check. This file already argues that liveness is the wrong question; the honest version is
+      # to not pretend to ask it.
+      #
+      # `valid` does work: SubMaster assigns it from the message's own `valid` field on arrival, so
+      # a producer that forgets to set it is correctly ignored. See fill_message in source.py.
+      if not sm.valid['routeIntentBP']:
         return
       msg = sm['routeIntentBP']
       maneuver = str(msg.maneuver)

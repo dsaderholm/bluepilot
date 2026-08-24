@@ -96,9 +96,23 @@ class TestItBelievesNothingWithoutAFreshStamp:
     assert not ri.available
     assert not ri.refuses_pass(30.0)
 
-  def test_a_dead_socket_is_not_an_instruction(self):
-    assert not read(alive=False).available
+  def test_an_invalid_message_is_not_an_instruction(self):
+    """`valid` is the real check. `alive` is NOT, and this test used to assert it was.
+
+    Read out of SubMaster's source 2026-08-23: a service declared at frequency 0 is ON DEMAND, so
+    `alive` is initialised True and then recomputed only for `static_freq_services`, which excludes
+    it. `sm.alive['routeIntentBP']` is therefore ALWAYS True on the car, and the consumer's old
+    check on it could never fail -- a guard that reads like liveness and provides none, which this
+    fork removes rather than keeps.
+
+    `valid` does work: SubMaster assigns it from the message's own field on arrival, so a producer
+    that forgets `msg.valid = True` is correctly ignored. That is the likeliest way a new transport
+    fails on its first run, which is why source.py's fill_message now says so in capitals.
+    """
     assert not read(valid=False).available
+    # And the honest statement about alive: a False here changes NOTHING, because the consumer no
+    # longer consults it. Asserting the real behaviour rather than the one that reads better.
+    assert read(alive=False).available
 
   def test_an_unstamped_message_is_refused(self):
     """Zero is capnp's default for observedMonoTime, so an unset field is what a source that forgot

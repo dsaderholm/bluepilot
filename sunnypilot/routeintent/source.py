@@ -98,6 +98,12 @@ def fill_message(msg, instruction: Instruction, source: str) -> None:
   Here rather than in each transport, so the four fields cannot drift apart across sources -- and
   so `observedMonoTime` is written from the instruction rather than from the clock at publish time,
   which is rule 1 made mechanical instead of remembered.
+
+  **YOU MUST ALSO SET `msg.valid = True` ON THE EVENT**, and this function cannot do it for you --
+  it is handed the sub-message, not the event. SubMaster assigns `sm.valid[...]` straight from that
+  field, and the consumer refuses anything not valid. So a transport that fills every field
+  perfectly and forgets one line publishes into silence, with no error anywhere. It is the most
+  likely way a new source fails on its first run.
   """
   msg.maneuver = instruction.maneuver
   msg.distance = float(instruction.distance_m)
