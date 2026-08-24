@@ -435,9 +435,53 @@ read them before asking for anything.
 706-01-01 nibble 2 | 706-02-01 nibble 4 | signs?
        4 (old)     |   2  Camera Only   | tested for months -- no
        4 (old)     |   6  Camera + APIM | never persisted before 2026-08-21
-       8 (new)     |   6  Camera + APIM | TESTED 2026-08-21 -- no
+       8 (new)     |   6  Camera + APIM | READS SIGNS -- see below. The 'no' was premature.
        8 (new)     |   2  Camera Only   | NEVER RUN
 ```
+
+**THE `8 / CAMERA + APIM` ROW SAID "TESTED 2026-08-21 -- no" AND THAT WAS WRONG. Corrected
+2026-08-23 by scanning 20 routes instead of the two that were to hand.**
+
+    00000398 .. 000003a5   13 drives, ~840k frames    ZERO reads
+    2026-08-21             `0810 A9DB B964` written (nibble 2: 4 -> 8), accepted
+    000003a7   2026-08-22 04:14                       READ 30
+    000003ac   2026-08-22 23:32                       READ 30
+    000003ad   2026-08-23 13:21                       READ 30
+
+The verdict was reached from routes `a1` and `a2`, recorded HOURS after the write. The first read
+came the next morning. **A negative from the drives that happen to be on the device is not a
+negative** -- reads are rare enough here (3 in 20 drives) that a single quiet drive proves nothing,
+and two quiet drives were used to close a row of this matrix.
+
+Honest weight: 13 quiet drives at the measured rate is ~15% likely by chance alone, so the count
+does not carry it. What does is the coincidence with the write.
+
+**AND THE REMAINING FAILURE IS NOT THE SENSOR, THE AIM, OR THE VISION PIPELINE.** From the owner,
+2026-08-23, and it closes a line of enquiry that was about to be opened:
+
+  *"The IPMA has been calibrated and auto high beams work great. Without calibration, LCA wouldn't
+  work, either."*
+
+Auto high beams require the camera to pick out oncoming headlights and tail lights; LCA requires
+correct calibrated geometry. Both work. So the camera is aimed, calibrated, and its vision stack is
+healthy, and `dataAvailable` is True on 391,355 of 391,355 frames measured -- it is up and
+publishing, and merely says "no limit" 95% of the time.
+
+**That NARROWS the fault rather than merely removing a candidate.** A camera whose optics, aim and
+perception all work, and which has resolved a US 30 sign three times, is not failing to SEE signs.
+It is failing to do something with a sign it has already seen -- which is the layer a REGION or
+sign-set configuration governs, and this car's region is `UNSPECIFIED`. That remains refused (it
+produced "hella DTCs" and is not to be proposed again), but it is unresolved rather than disproven,
+and it is now the best-fitting explanation on the list.
+
+**Also ruled out the same day, by field survey across 391,355 frames of 4 routes:**
+
+    dataAvailable   True on every frame        not a camera that thinks it is off
+    vLimitUnit      2 (mph) on every frame     not a units mismatch
+    vLimit1         255 x373,651  30 x17,595
+    vLimit2         constant 252, always       no reads are landing in the second slot
+
+So nothing is being under-counted by reading only `vLimit1`, and the decode is not the problem.
 
 ### THE €130 IS DEAD
 

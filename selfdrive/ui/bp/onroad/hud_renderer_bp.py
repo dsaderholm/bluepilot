@@ -388,6 +388,7 @@ class HudRendererBP(HudRendererSP):
     self._acc_fallback_frames = 0
     self._lamp_data_available = False  # the BCM/brake-system lamp signal is actually being decoded
     self._tsr_fault = ""      # why TSR is not producing a limit; "" when it is working or silent
+    self._tsr_limit = ""      # the limit the CAMERA read, when it has one
     # FIVE `_icbm_*` FIELDS LIVED HERE AND ALL FIVE WERE READ ONLY BY THE HOLD BADGE. Deleted with
     # it on 2026-08-22 rather than left assigned: four of them had already become write-only, two
     # were not reset per frame, and the next person to draw a pin state would have reached for
@@ -577,6 +578,7 @@ class HudRendererBP(HudRendererSP):
     # BluePilot: TSR fault reason. Read before the brake-status gate below -- it has nothing to do
     # with brakes and must not disappear when that toggle is off.
     self._tsr_fault = ""
+    self._tsr_limit = ""
     if sm.valid['carStateBP']:
       try:
         tsr = sm['carStateBP'].trafficSignData
@@ -584,6 +586,12 @@ class HudRendererBP(HudRendererSP):
         # values, so a working camera between signs prints nothing either.
         if tsr.dataAvailable and tsr.vLimit1 in (0, 255):
           self._tsr_fault = TSR_MSG_TEXT.get(tsr.tsrMsg) or TSR_STATUS_TEXT.get(tsr.tsrStatus) or ""
+        elif tsr.vLimit1 not in (0, 255):
+          # BluePilot: and say so when it DOES read one. Until 2026-08-23 nothing on this screen
+          # ever confirmed a sign was captured -- the pill drew only faults, so a working read and
+          # a dead camera looked identical from the seat. Three reads were sitting in the logs
+          # unnoticed for days because of it. The unit is the DBC's: 1 km/h, 2 mph.
+          self._tsr_limit = "TSR {}{}".format(int(tsr.vLimit1), "" if tsr.vLimitUnit == 2 else " KPH")
       except Exception:
         pass
 
@@ -1466,13 +1474,14 @@ class HudRendererBP(HudRendererSP):
       return
     # The TSR fault line is its own reason to draw. It reports a camera that is not working, which
     # is true whether or not cruise is engaged and has nothing to do with the brake-status toggle.
-    if lamps_only and not self._tsr_fault and not (self._show_brake_status and self._lamp_data_available):
+    if (lamps_only and not self._tsr_fault and not self._tsr_limit
+        and not (self._show_brake_status and self._lamp_data_available)):
       return
     # THE HOLD is NOT a reason to draw this stack any more. It was, while the HOLD badge
     # lived here; the hold is now drawn by the set-speed box above and nothing in this column
     # depends on it. Leaving it in the gate would reserve the stack for a readout that no longer
     # exists, and push the ACC pill down for no reason.
-    if (not lamps_only and not self._acc_state and not self._tsr_fault
+    if (not lamps_only and not self._acc_state and not self._tsr_fault and not self._tsr_limit
         and not (self._show_brake_status and self._lamp_data_available)):
       return
 
@@ -1497,13 +1506,16 @@ class HudRendererBP(HudRendererSP):
     Outlined rather than filled: this is information, not a warning, and it sits in the same column
     as two readouts that go solid red when they mean something urgent.
     """
-    if not self._tsr_fault:
+    label = self._tsr_limit or self._tsr_fault
+    if not label:
       return 0
     rect = rl.Rectangle(x, y, LAMP_PILL_WIDTH, LAMP_PILL_HEIGHT)
     rl.draw_rectangle_rounded(rect, 0.5, 10, TSR_PILL_FILL)
-    rl.draw_rectangle_rounded_lines_ex(rect, 0.5, 10, 3, TSR_PILL_EDGE)
-    width = measure_text_cached(self._font_semi_bold, self._tsr_fault, LAMP_LABEL_SIZE).x
-    rl.draw_text_ex(self._font_semi_bold, self._tsr_fault,
+    # Filled edge when a sign was actually READ, so a capture is distinguishable at a glance from
+    # the fault text that shares this pill.
+    rl.draw_rectangle_rounded_lines_ex(rect, 0.5, 10, 6 if self._tsr_limit else 3, TSR_PILL_EDGE)
+    width = measure_text_cached(self._font_semi_bold, label, LAMP_LABEL_SIZE).x
+    rl.draw_text_ex(self._font_semi_bold, label,
                     rl.Vector2(x + (LAMP_PILL_WIDTH - width) / 2, y + 12), LAMP_LABEL_SIZE, 0,
                     TSR_PILL_INK)
     return LAMP_PILL_HEIGHT

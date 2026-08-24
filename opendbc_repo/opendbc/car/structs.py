@@ -122,6 +122,10 @@ class IntelligentCruiseButtonManagement:
   # equals vBaseline whenever a hold is active, so it cannot answer "did the rule see equality".
   vTargetRaw: float = auto_field()
   baselineDiverged: bool = auto_field()
+  # FusionPilot: what the rule compares SINCE 2026-08-22. The two above are what it compared
+  # before, and were left published when it changed -- see the capnp comment.
+  vSlaTarget: float = auto_field()
+  speedLimitLive: bool = auto_field()
 
   class IntelligentCruiseButtonManagementState(StrEnum):
     inactive = auto()

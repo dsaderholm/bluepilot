@@ -42,7 +42,8 @@ class IntelligentCruiseButtonManagementInterface(IntelligentCruiseButtonManageme
   happened on 2026-08-15 and left the car undrivable.
   """
 
-  def update(self, CC_SP, CS, packer, CAN, frame, last_button_frame) -> tuple[list[CanData], int]:
+  def update(self, CC_SP, CS, packer, CAN, frame, last_button_frame,
+             suppress_set_speed: bool = False) -> tuple[list[CanData], int]:
     """
     Update ICBM state and generate button press messages.
 
@@ -63,7 +64,14 @@ class IntelligentCruiseButtonManagementInterface(IntelligentCruiseButtonManageme
     self.frame = frame
     self.last_button_frame = last_button_frame
 
-    preempted = self.ICBM.sendButton != SendButtonState.none
+    # FusionPilot: `suppress_set_speed` is asserted while openpilot is authoring ACCDATA -- the set
+    # speed governs nothing there, so pressing it just hunts a number on the dash. It is folded
+    # into `preempted` rather than short-circuiting the method for the reason the block below
+    # spells out at length: SKIPPING THE CALL ENTIRELY IS A BUG THAT HAS ALREADY BEEN MADE HERE.
+    # The gap machine has to keep being ticked and its lease has to keep being asserted, or the
+    # resumed remainder lands as a second press. Suppressing the set speed leaves `preempted`
+    # False, which is exactly right: nothing is preempting the gap this frame.
+    preempted = (not suppress_set_speed) and self.ICBM.sendButton != SendButtonState.none
     if preempted:
       button_signal = BUTTON_SIGNALS[self.ICBM.sendButton]
 

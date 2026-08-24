@@ -1530,6 +1530,182 @@ car it means "stopped", not "Ford is holding it". The stopped-and-engaged questi
 **Ships OFF, and the reason is about the car:** the camera's tolerance for sustained contradiction
 is unmeasured. Toggle is `StockAccStopOverride`, "Come To A Complete Stop".
 
+### 2026-08-23: IT COST HIM FORD ACC AGAIN, AND THE RECOVERY NEVER RAN
+
+Four drives, `ae` `af` `b0` `b1`. `INERT` logged four times; **`RECOVERY` logged ZERO**. Route `b0`
+he never engaged at all; `b1` was clean (Ford authored 99.7% of engaged frames).
+
+    route  override   authority
+    ae     368 fr     ford 22.6%  inert 22.3% (6012 fr, 60 s)  opStop 1.4%
+    af     1776 fr    ford 28.7%  inert 23.2% (2738 fr, 27 s)  opStop 15.1%
+
+**THREE OF THE FOUR RECOVERY GATES ARE RULED OUT BY MEASUREMENT**, which is worth keeping because
+each cost a wrong theory first:
+
+- **Attribution.** `tools/bp_cancel_attribution.py` times the last `opStop` frame against the first
+  `inert` frame. Both drives: **4.99 s**, and `inert` is exactly 5 s of cancel — so the cancel run
+  opened the frame the override handed back, `frames_since_override` was 1, and `cancel_is_ours`
+  should be True.
+- **`CC.longActive`.** `inert` is unreachable without it, by the authority chain's own ordering.
+- **The panda bands.** `tools/bp_recovery_blocked.py` replays the real band rule over all 8,750
+  camera frames of both inert windows: **0 refused**, old rule and new. The `AccBrkTot_A_Rq` theory
+  below was mine, was wrong, and is retracted — the bug is real and it is not this.
+
+**AND NOT ONE OF THE FOUR IS PUBLISHED OR LOGGED**, so the drive cannot say which declined. Third
+time in one day, after the hold rule and the TSR baseline. `RECOVERY DECLINED` now logs all four
+once per cancel run, at the frame recovery would have started. **That is the next drive's readout.**
+
+**A REAL HOLE WAS FOUND WHILE DRIVING THE MECHANISM OFFLINE, and it is fixed but is NOT the
+diagnosis.** Attribution is decided once, on the frame a cancel RUN opens. The counter is only
+touched inside `if not override`, so a run already open when the override begins survives it: the
+override ends, the counter is still non-zero, the `== 0` test never fires, and `cancel_is_ours`
+keeps its pre-override value of False. Recovery is then blocked for the whole drive by a decision
+made before the thing it is attributing. Now zeroed on the override edge.
+
+**THE FIRST REPRODUCTION WAS INVALID AND READ AS A FINDING.** It held the cancel without ever
+firing the override, so `frames_since_override` sat at its `1 << 30` sentinel, `cancel_is_ours` was
+correctly False, and recovery correctly declined — which looked exactly like "recovery is broken".
+Fixtures more orderly than reality, and this time the fixture was *missing the thing the rule is
+about*. Both tests now fire the override first.
+
+### THE CAMERA SAYS `ACC_Unavailable`, NOT `ACC_Overridden`. ASKED IT DIRECTLY, 2026-08-23.
+
+`ACCDATA_3` carries the camera's own message text, and the DBC names every value. `tools/bp_cancel_reason.py`
+decodes it from raw bus-2 CAN alongside `accAuthority` in the same pass:
+
+    route   while the OVERRIDE had the car
+    ae      AccMsgTxt ACC_Unavailable=10, No_Text=8   AccWarn Cancel_Warning=4
+    af      AccMsgTxt ACC_Unavailable=19, No_Text=67  AccWarn Cancel_Warning=4
+    b1      override never fired; IACC_Unavailable only, ZERO ACC_Unavailable, ZERO Cancel_Warning
+
+**`ACC_Overridden` (value 4) appears ZERO times on any drive.** The camera does not believe a driver
+is braking over it. It declares ACC **UNAVAILABLE** and raises `Cancel_Warning`, and it does so
+while the override has the car.
+
+**That is a different problem from the one this file has been working from.** "It watches the car
+decelerate harder than it asked and gives up" predicts `ACC_Overridden`, which is a system waiting
+to be handed back. `ACC_Unavailable` is a self-assessment that it cannot run at all — and nothing
+about continuing to forward its own frames obviously argues it out of that. **The recovery design
+rests on the camera having a reason to release. Its own message text does not say it has one.**
+
+**AND THE RADAR IS FINE, so the obvious alternative is ruled out.** `CadsAlignIncplt_B_Actl` and
+`CadsRadrBlck_B_Actl` are **0.0% on all three drives, 4,071 samples**. The B1433 alignment fault an
+IPMA as-built write causes — and he was writing as-built on the 21st and 22nd — is NOT present.
+
+**`AccStopStat_D_Dsply` is `NoDisplay` on 100% of every drive measured.** Ford's ACC never enters
+its own stop-and-hold on this car, which is the fourth independent confirmation of that.
+
+**WHAT THIS OPENS, and it is untried:** if the camera has declared itself unavailable rather than
+overridden, the way out is more likely a clean ACC disengage and re-engage than continued
+forwarding. Both are already reachable — `create_button_msg` injects cancel and resume, and
+openpilot already sends resume at standstill. The risk to check first is that cancelling Ford's ACC
+takes openpilot's engagement with it, since `cruiseState.enabled` comes from the PCM
+(`EngBrakeData.CcStat_D_Actl`). **Do not build it before reading `RECOVERY DECLINED` from a drive** —
+that says which gate blocked the recovery we already have, and it is one drive away.
+
+### `AccBrkTot_A_Rq` HAS THE SAME CEILING AS `AccPrpl_A_Rq` AND WAS NEVER CLAMPED
+
+Straight off his swaglog, every line a refused frame handed to openpilot:
+
+    passthrough: AccBrkTot_A_Rq 1.996 / 2.019 / 2.043 / 2.066 / 2.090 / 2.105 / 2.125 / 2.140
+
+`_PANDA_ACCEL_MAX` is 1.9999, so with the margin anything from 1.995 up was thrown away — and
+despite the name this field is Ford's TOTAL acceleration request, **positive while accelerating**.
+Ford sits on that ceiling pulling away exactly as it sits on the gas ceiling.
+
+**This is the 2026-08-19 launch bug on the other field of the same message, and it sat for four
+days.** The note saying `AccBrkTot_A_Rq` is "carried verbatim, where a silent softening would be
+indistinguishable from working until it mattered" was written about the BRAKING side and is still
+right about it — it was read as covering the whole field. Fixed by the same asymmetry: the top is
+clamped (asking for LESS acceleration is conservative), the bottom stays a refusal.
+
+**The lesson: when a field is fixed by clamping one end, check its NEIGHBOURS in the same message
+for the same shape.** Three fields here have now needed three different answers, and the fourth was
+found only because he reported the symptom a second time.
+
+### ICBM MUST STAND DOWN WHILE OPENPILOT IS AUTHORING. HIS DIAGNOSIS, AND IT MEASURES OUT.
+
+*"Technically, when OP long is being used, ICBM doesn't, right? Or at least when OP long is driving,
+we shouldn't affect its speed with ICBM?"* Route `ae`, by authority state:
+
+    authority   frames   ICBM pressing   dash travel   buttons
+    ford          6076    41    0.7%         14.0 mph  increase=41
+    inert         6012   378    6.3%         84.0 mph  decrease=210, increase=168
+
+**378 button frames and 84 mph of dash travel, hunting, while a latched camera meant openpilot
+authored every ACCDATA frame.** The set speed is not in that control loop at all, so ICBM was moving
+a number that governed nothing — in full view on the dash. That is his "the speed went up and down".
+
+**`_op_long_drives()` structurally cannot catch it.** It decides whether ICBM runs ONCE, at car
+init, and under the passthrough it correctly answers "Ford drives, so ICBM stays". **Authority is a
+per-frame fact and it changed hours into the drive.** Anything else keyed on that init-time decision
+has the same blind spot — check for others before trusting one.
+
+Suppressed for `inert` and `openpilot` only. `fallback` is a scattered per-frame refusal Ford
+resumes from next frame, and suppressing there would stutter the buttons every time a band clipped;
+`opStop` is left alone because the override raising the set speed while stopped is deliberate.
+
+### THE HOLD STUCK FOR 87 SECONDS WITH EVERY CONDITION SATISFIED. **SOLVED: A BUTTON TIMER.**
+
+Route `ae`, `tools/bp_hold_clear_audit.py`, which reconstructs the rule's own inputs:
+
+    t+155.7  hold 27  sla 27  live True  source press   *** SHOULD HAVE CLEARED ***
+    t+158.4  hold 27  sla 27  live True  source press   *** SHOULD HAVE CLEARED ***
+    t+245.6  hold  0                                    CLEARED
+
+All four of the rule's own conditions pass and it does not fire for 87 s -- with cruise ENABLED and
+`vTargetRaw` 27, so neither `cruise_enabled` nor `v_target_valid` is the block either.
+
+**THE CAUSE IS `update_manual_button_timers` IN `cruise_ext.py`.** It only zeroes a timer on a
+RELEASE event. This car's SCCM clears the button bit between frames, so one physical press arrives
+as a burst of PRESS events -- and the release is not reliably among them:
+
+    route 000003ae, t+140..260:  88 events pressed=True, ONE pressed=False
+    last press t+154.48          next event of any kind t+269.62
+
+So the `accelCruise` timer sat above zero for 115 s. ICBM re-arms its press-settle stand-down every
+frame any manual-override timer is non-zero, so `update_manual_override` returned before the
+clearing rule on every one of those frames. **The rule was never reached, which is why three rounds
+of fixing the rule did not help.**
+
+Fixed with a 2 s cap. The timer is ALREADY "frames since the last press event" -- every press resets
+it to 1 -- so a cap cannot cut a real press short: while a button is genuinely held the bursts keep
+arriving and keep resetting it. Longest gap WITHIN a held press on that route was 0.72 s.
+
+**Deliberately NOT a change to the press-settle re-arm**, which is correct and was itself added for
+a real report -- a cap expiring mid-hold froze the baseline and walked the set speed back down while
+the button was still held. The defect is the INPUT it trusts.
+
+**AND THE 2026-08-22 TEST PASSED BECAUSE IT SENT A RELEASE.** It holds the button on every frame,
+which was the fix for the round before -- then ends with `DECEL_RELEASE`, zeroing the timer. It
+exercised everything except what his stalk actually does. **When a fixture ends with a tidy-up event
+the real hardware may not send, that ending is the next bug.**
+
+**AND THE AUDIT'S FIRST VERSION HID THE ZERO** — it skipped `baseline <= 0`, so it could not tell
+"stuck" from "cleared one frame later", the single question it existed to answer. Written by the
+session that keeps quoting the rule against exactly that.
+
+### PUBLISHING A DIAGNOSTIC IS NOT A ONE-TIME ACT
+
+The capnp comment above `vTargetRaw` says those fields exist because "neither was published, and
+that made a real on-road report undiagnosable from a route". On 2026-08-22 the rule stopped
+comparing them and started comparing SLA's own number gated on the limit being live — **and neither
+of those was published either.** So the same report, from the same driver, was undiagnosable again,
+one struct field away from where the lesson is written.
+
+**A diagnostic is a property of the RULE, not of the module. When a comparison is rewritten,
+re-check that its new terms reach the wire.** `vSlaTarget` and `speedLimitLive` now do.
+
+### SHELL QUOTING BIT TWICE MORE
+
+Both cost a wrong result rather than an error, which is why they are here beside the heredoc rule:
+
+- **Backticks inside a double-quoted shell string are command substitution.** A commit message lost
+  two phrases that way; bash printed `inert: command not found` and the commit went through anyway.
+  Use `git commit -F -` with a single-quoted heredoc delimiter.
+- **Nested single quotes in `ssh "bash -lc '...'"`** silently truncate the remote command. Put the
+  loop in a `$cmd` here-string with no inner single quotes, or write a script file and run that.
+
 **AND IT REQUIRED FIXING THE 20 MPH FLOOR RELEASE, which he had reported from the road as its own
 complaint:** *"occasionally the traffic light thing will set my speed back up after it has gotten
 down to 20."* Not occasional. `unconfirmed_lead.py` released the model stop at `ACC_FLOOR_MS`, and
@@ -3513,6 +3689,89 @@ whole byte rather than a packed field. He confirmed the location: *"Bingo. Liter
 
 **So the question is no longer whether the camera works. It is why it is BAD at it: one detection
 across 50 segments of driving.**
+
+**AND "ONE DETECTION" IS ALSO WRONG, 2026-08-23. IT READS ON DRIVES NOBODY HAD CHECKED.** Measured
+with `bp_drive_checkup` check 15, which counts rising edges of `trafficSignData.vLimit1` out of the
+0/255 sentinel:
+
+    000003a7   1 read   30 mph at t+404.6     544 frames at 30, of 73,846
+    000003ad   1 read   30 mph at t+481.9   5,171 frames at 30, of 56,375
+
+Route `ad` is 2026-08-23 -- days after the "one verified read ever" line above was written, and it
+was never re-checked. **The camera reads more than this file says.** Both figures came from the
+first two routes looked at, so the real rate is unmeasured, not one-in-fifty.
+
+**THE FULL BASELINE, `tools/bp_tsr_baseline.py`, 7 routes / 90 segments / 512,376 frames.** This is
+the BEFORE for the as-built change -- run the same command after it and compare:
+
+    000003ad  10 seg   56,375   1 read   1 return   [30 x5171]
+    000003ac  11 seg   60,465   1 read   1 return   [30 x12424]
+    000003ab  19 seg  109,633   0        0          [none]
+    000003aa  16 seg   95,019   0        0          [none]
+    000003a9   5 seg   25,910   0        0          [none]
+    000003a8  16 seg   90,928   0        0          [none]
+    000003a7  13 seg   73,846   1 read   1 return   [30 x544]
+
+```bash
+ssh comma@comma-34b959b "bash -lc 'cd /data/openpilot && /usr/local/venv/bin/python tools/bp_tsr_baseline.py 8'"
+```
+
+**IT IS NOT LATCHED, AND THAT WAS THE OPEN QUESTION.** Every read returns to the sentinel -- reads
+1, returns 1, on all three. `Traffic_RecognitnData` keeps updating and the parser is not serving a
+stale value, so this is NOT the shape of the v1 mapd `/dev/shm` staleness or of the 80 mph "sign".
+The camera reads a sign, holds it, and correctly gives it up. **The mechanism is healthy; the recall
+is terrible.**
+
+**AND THE REAL SIGNAL IS THAT IT ONLY EVER READS 30.** Three reads, three 30s, across drives
+covering interstate, arterial and city -- never a 25, 35, 45, 65 or 70. That is a much narrower
+failure than "bad at reading signs", and it is the thing an as-built change has to move.
+
+**IT IS NOT ONE MAGIC SIGN -- the three reads are three different places**, which was the
+alternative and is now ruled out:
+
+    000003a7   40.725463, -111.829903   (2011 2100 S, verified against Street View)
+    000003ac   40.747404, -111.853911
+    000003ad   40.752015, -111.855317
+
+`ad` and `ac` are ~530 m apart; both are ~3.5 km from `a7`. Three distinct signs, all Salt Lake
+City surface streets, all 30. (The first coordinate is the 2026-08-21 `0x462` measurement recorded
+above; the other two came from `bp_tsr_baseline.py`, whose run was cut short by the laptop losing
+hostname resolution before it reached `a7` -- rerun it to have all three from one source.)
+
+**SO THE HYPOTHESIS THAT FITS IS RANGE, NOT SIGN SET, and it lines up with the open "TSR detection
+range ~0 m" item.** Every read is a slow urban street where the sign is close to the lane and the
+car is going 30; nothing is ever read on the interstate, where signs are far off the shoulder and
+pass quickly. A recognizer that only resolves a sign it is nearly beside would produce exactly this
+-- reads only where the car is slow and the sign is near, which in this city is 30 mph roads, which
+is why every value is 30.
+
+**MEASURED, AND THE PREDICTION HELD -- every read is slow:**
+
+    000003ad   40.752015, -111.855317   doing 31 mph
+    000003ac   40.747404, -111.853911   doing 34 mph
+    000003a7   40.725446, -111.829907   doing 16 mph
+
+**Not one read above 34 mph, across 512,376 frames of drives that include interstate.** The `a7`
+position also lands within ~2 m of the 2026-08-21 `0x462` measurement, which is an independent
+confirmation of both that reading and this tool.
+
+**BUT IT IS CONFOUNDED AND MUST NOT BE WRITTEN UP AS PROVEN.** In this city a 30 mph road IS a slow
+road, so "only reads when slow" and "only reads the value 30" are the same three samples and cannot
+be separated by them. What would separate them, and neither has been observed yet:
+
+  - a **25 mph** read (slow, not 30) kills "only 30" and leaves range standing
+  - a read on a **45+ mph** road kills "only slow" and leaves the sign set standing
+
+What the data does support is narrower and still useful: whatever the cause, it has never once
+produced a limit for a highway, which is exactly where Speed Limit Assist has no map coverage and
+wanted a second source. **So do not expect the as-built change to be judged by "does TSR work" --
+judge it by whether any read appears above 35 mph, or at any value other than 30.** Both are
+one-line reads of `bp_tsr_baseline.py` output.
+
+**Hold duration varies wildly and is unexplained: 544, 5,171 and 12,424 frames.** A long hold is
+only correct while the limit still applies, so the 12,424-frame one is worth a look -- it is minutes
+of a 30 being served. It reaches nothing today (`SpeedLimitPolicy` is `map_data_only`, which
+excludes the car source entirely) but it would the moment that policy changed.
 
 Re-measured on routes 0000039f and 000003a1, decoding `Traffic_RecognitnData` (0x3CD) off bus 2:
 

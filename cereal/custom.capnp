@@ -72,6 +72,21 @@ struct IntelligentCruiseButtonManagement {
   vTargetRaw @9 :Float32;
   baselineDiverged @10 :Bool;
 
+  # FusionPilot: AND THE RULE CHANGED, SO THESE TWO ARE THE ONES IT COMPARES NOW. 2026-08-23.
+  #
+  # The comment above is right about why `vTargetRaw` and `baselineDiverged` were added, and it
+  # went stale the same week: on 2026-08-22 the rule stopped comparing against the winning plan
+  # and started comparing against SLA's OWN number, gated on the limit being live. Neither of
+  # those reached the wire, so when he reported the hold sticking AGAIN on 2026-08-23 the route
+  # could not say which term declined -- the exact failure the paragraph above describes, one
+  # struct-field away from where it is written.
+  #
+  # THE LESSON IS THAT PUBLISHING A DIAGNOSTIC IS NOT A ONE-TIME ACT. It is a property of the
+  # rule, and it has to move when the rule moves. Anything added here for a comparison must be
+  # re-checked whenever that comparison is rewritten.
+  vSlaTarget @11 :Float32;      # SLA's own number with his offset, in cluster units. 0 = none
+  speedLimitLive @12 :Bool;     # speedLimitValid ALONE -- what the clearing rule gates on
+
   enum IntelligentCruiseButtonManagementState {
     inactive @0;      # No button press or default state
     preActive @1;     # Pre-active state before transitioning to increasing or decreasing
