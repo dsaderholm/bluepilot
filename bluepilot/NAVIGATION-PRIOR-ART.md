@@ -306,3 +306,59 @@ question our own fallback sketch never asked, given how often his network change
 **RECORDED, NOT RECOMMENDED.** The phone bridge is the fallback in ROUTE-INTENT 9a and it is not
 being built. This paragraph exists so that if the canbox path ever dies, the next session does not
 re-derive the discovery problem from scratch. It is not a reason to start.
+
+---
+
+## 7. WHAT "NAVIGATE ON OPENPILOT" WOULD ACTUALLY TAKE ON THIS CAR
+
+His, 2026-08-23: *"Eventually using all of this to navigate on OpenPilot would be pretty cool..."*
+Worth answering with the dependency chain rather than a yes, because the chain is short and one item
+appears in three places.
+
+**Take the narrow case that matters -- following a route off a freeway at his exit.** Four things
+have to work:
+
+    1  KNOW the exit is his          route intent            needs the CANBOX
+    2  MOVE to the exit lane         passing assist maneuver  needs the CANBOX (BLIS + rear radar)
+    3  SLOW for the ramp, 65 -> 38   ICBM set-speed descent   works TODAY, given lead time
+    4  SLOW below 20 mph             op long + passthrough + stop override -- the hard one
+
+**THREE OF THE FOUR ARE THE SAME PIECE OF HARDWARE.** The canbox is not merely route intent's
+blocker; it is the common blocker. That is worth knowing before anyone plans around any one of them
+separately.
+
+**Item 3 already works and is the one route intent directly fixes.** The measured exit failure is
+DETECTION TIME -- SCC-Map gets the corner about 4 s out and the set speed needs about 8 s at
+3.3 mph/s. Route intent supplies the missing seconds by knowing the ramp is his before it is in
+sight. Nothing new has to actuate.
+
+**Item 4 is the genuinely hard one and it has scar tissue.** ICBM floors at 20 mph -- Ford's floor,
+confirmed by him -- so the end of a ramp, where there is a stop sign or a 25 mph curve, is beyond
+what buttons can ask for. That is exactly what the stop override was built for, it requires op long
+plus the ACCDATA passthrough, and it has already cost him Ford ACC twice with a camera cancel that
+never released. Do not fold item 4 into an exit-taking feature casually.
+
+### 7a. AND HIS CAR MIGHT DO THIS BETTER THAN COMMA'S VERSION DID, which is the non-obvious part
+
+Section 1 records why comma withdrew navigate-on-openpilot: **the driving MODEL could not execute
+the maneuvers.** They fed route information into the model and asked it to drive the route.
+
+**This car would not do it that way.** The lane change would be passing assist's explicit maneuver
+state machine -- signal, gate, cross, settle, with named abort conditions -- and the slowing would
+be ICBM's set-speed descent. Both are written code with measured thresholds, not a learned policy
+being asked to generalise.
+
+That is this fork's own model-versus-code rule applied to the biggest feature it could be applied
+to: **taking an exit is POLICY and CAR FACTS, not perception.** Where to be on the road and whether
+the lane is clear are the model's job and it already does them. Deciding to leave the freeway,
+choosing when to move, and knowing the set speed falls at 3.3 mph/s are not things a model should be
+asked to learn.
+
+**So the failure that stopped comma is not the failure this car would hit.** Its risks are different
+and mostly enumerated already: the canbox, the 20 mph floor, and the camera's tolerance for
+contradiction. None of them is "the model cannot drive it".
+
+**None of which makes it near.** It is four dependencies deep and two of them are somebody else's
+hardware. The point of writing it down is the ORDERING: route intent first because it is the only
+one buildable today, item 3 as the first payoff because it needs no new actuation, and item 4 last
+and separately, on its own evidence.
