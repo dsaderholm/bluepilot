@@ -50,6 +50,12 @@ def speed_limit_adjust_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.
     Priority.LOW, VisualAlert.none, AudibleAlert.none, 4.)
 
 
+# FusionPilot: the accAuthority values in which OUR ACCDATA is what the car obeys. `stock` and
+# `ford` are the camera's own command being forwarded, so there Ford ACC really is the thing that
+# would have to stop.
+_OPENPILOT_DRIVING_AUTHORITIES = ("fallback", "inert", "opStop", "openpilot", "recovery")
+
+
 def unconfirmed_lead_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
   """BluePilot: a vision lead the radar has not confirmed, so stock ACC will not brake for it.
 
@@ -82,9 +88,37 @@ def unconfirmed_lead_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.Su
   # confused here". Two different causes need two different signatures, or the driver learns nothing
   # from either. This one names a VEHICLE and keeps the higher tone, because it is the one with
   # something solid in the road.
+  # FusionPilot: "Cruise will not stop for it" IS FALSE WHENEVER OPENPILOT IS THE THING DRIVING.
+  #
+  # `model_stop_alert` below carries a long note about this exact half-truth being caught and
+  # reworded. This alert was never given the same treatment, and it says the same untrue thing.
+  #
+  # MEASURED on route 000003ba, 2026-08-24: the alert appeared on 462 frames, and 278 of them --
+  # SIXTY PERCENT -- were under `fallback`, where the camera has cancelled and openpilot longitudinal
+  # is authoring the ACC command. openpilot WILL slow for a vision lead. He caught it from the seat:
+  # *"it kept saying vehicle ahead radar has not confirmed it even when Ford ACC canceled a long
+  # time ago and OP long took over"*.
+  #
+  # The FIRST line stays the same in both cases: a vision-only lead is worth knowing about either
+  # way, and the distance is the useful part. Only the promise about who stops changes.
+  #
+  # `ignore_alive` still populates `sm.alive`, so this is the same guarded read selfdrived uses for
+  # the inert announcement -- absent means "assume Ford is driving", which is the conservative
+  # wording rather than the reassuring one.
+  ours = False
+  try:
+    if sm.alive.get('controllerStateBP'):
+      ours = str(sm['controllerStateBP'].accAuthority) in _OPENPILOT_DRIVING_AUTHORITIES
+  except Exception:
+    ours = False
+
+  second = (f"Vision only at {dist} {unit}. openpilot is slowing for it."
+            if ours else
+            f"Vision only at {dist} {unit}. Cruise will not stop for it.")
+
   return Alert(
     "Vehicle ahead - radar has not confirmed it",
-    f"Vision only at {dist} {unit}. Cruise will not stop for it.",
+    second,
     AlertStatus.userPrompt, AlertSize.mid,
     Priority.HIGH, VisualAlert.none, AudibleAlertSP.promptSingleHigh, 2.)
 
