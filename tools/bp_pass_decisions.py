@@ -53,9 +53,10 @@ REALDATA = "/data/media/0/realdata"
 # test, so recency comes from overtakenSeconds with overtakenCount disambiguating its zero.
 OVERTAKE_RECENT_S = 15.0
 
-# Blocked reason 7. Named rather than hardcoded at the comparison site so a reader does not have to
-# go and count enum members to know what this tool is about.
-BLOCKED_NO_LANE = 7
+# The enum NAME, not its ordinal. Comparing by name survives anyone inserting a member above it in
+# custom.capnp, which comparing by number does not -- and capnp enums cannot be int()ed on the
+# device anyway.
+BLOCKED_NO_LANE = "noLaneAvailable"
 
 
 def main() -> int:
@@ -154,7 +155,11 @@ def main() -> int:
         blind = True
       last = {
         "hasLead": bool(p_a.hasLead),
-        "blockedBy": int(getattr(p_a.blockedBy, "raw", p_a.blockedBy)),
+        # BY NAME, NOT BY NUMBER. `int()` on a capnp enum raises TypeError on the device and cannot
+        # fail offline, because every fixture builds messages from SimpleNamespace with plain ints
+        # -- test_no_int_on_capnp_enums exists for exactly this and caught it here. The name is also
+        # what makes the histogram below readable without counting enum members.
+        "blockedBy": str(p_a.blockedBy),
         "agreed": str(p_a.suggestion) == "left",
         "rule": rule,
         "radar_blind": blind,
@@ -179,7 +184,7 @@ def main() -> int:
   print()
   print("  why PA was not suggesting, at the moment he signalled:")
   for code, c in blocked_hist.most_common(8):
-    print(f"    blockedBy {code:<3} {c:5d}")
+    print(f"    {code:<22} {c:5d}")
   print()
   print("  'refused on GEOMETRY' IS THE CEILING -- no lane-proof rule can recover a pass that was")
   print("  refused for oncoming, a blind spot, or patience. 'rule would fire' is the answer, and it")
