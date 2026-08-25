@@ -80,6 +80,11 @@ class Replay:
     self.frames = 0               # plan frames scored
     self.available = 0
     self.refused = 0
+    # The counterpart to `refused`, and the more consequential of the two: frames where the source
+    # would have asked the car to MOVE. A transport is judged on both -- a refusal costs a pass, an
+    # open costs a lane change -- and reporting only the refusals would score the safe half.
+    self.opened = 0
+    self.opened_sides: dict[str, int] = {}
     self.ages: list[float] = []
     self.maneuvers: dict[str, int] = {}
     self.sources: dict[str, int] = {}
@@ -129,6 +134,10 @@ class Replay:
 
     if self.ri.refuses_pass(v_ego):
       self.refused += 1
+    side = self.ri.committed_side(v_ego)
+    if side is not None:
+      self.opened += 1
+      self.opened_sides[side] = self.opened_sides.get(side, 0) + 1
 
   def _close_run(self, now_ns: int) -> None:
     if self._run_maneuver is not None and self._run_start is not None:
@@ -212,6 +221,15 @@ def main() -> int:
         f"   {pct(rep.available, rep.frames)}")
   print(f"  frames the gate would have refused {rep.refused:7,} of {rep.frames:,}"
         f"   {pct(rep.refused, rep.frames)}")
+  print(f"  frames it would have asked to MOVE  {rep.opened:7,} of {rep.frames:,}"
+        f"   {pct(rep.opened, rep.frames)}"
+        + ("   [" + ", ".join(f"{k} {v:,}" for k, v in sorted(rep.opened_sides.items())) + "]"
+           if rep.opened_sides else ""))
+  print()
+  print("  THE SECOND NUMBER IS THE CONSEQUENTIAL ONE. A refusal costs a pass; an open costs a lane")
+  print("  change. It should be much the SMALLER of the two -- only exits, forks and lane")
+  print("  commitments open, while anything unclassifiable refuses -- and if it is not, the source")
+  print("  is emitting committing maneuvers far more often than a real route contains them.")
   print()
 
   print("=== freshness, seconds behind ===")

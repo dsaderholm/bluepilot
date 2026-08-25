@@ -370,7 +370,8 @@ has no business replacing.
 
 ### Route intent
 
-**Nothing publishes this today, on any car, so it refuses nothing and changes nothing.** What it is
+**Nothing publishes this today, on any car, so it refuses nothing, moves nothing and changes
+nothing.** What it is
 meant to become is one fact reaching passing assist that no sensor on the car can supply: which way
 the driver is actually going. The map knows where every ramp is and cannot know which one is his,
 so the existing ramp test is reactive — it fires once the car is already on the ramp. A route is
@@ -382,13 +383,20 @@ instruction was last confirmed — and passing assist goes quiet when a committi
 roughly twenty seconds of driving. With no transport fitted the message never arrives, the gate
 never fires, and passing assist behaves exactly as it does without any of this.
 
-- **It may refuse a pass and may never open one**, and that is enforced rather than intended. Every
-  candidate source is somebody else's software arriving over a link this car does not control, so
-  the two failure directions are not symmetric: a source that wrongly says "exit ahead" costs a
-  pass, and a source that wrongly says nothing leaves the feature as it is. The version that reads
-  "his route goes left, so a left pass is fine" would let a stale instruction move the car. The
-  consumer exposes one predicate and no way to say yes; the module and its call site are parsed by
-  a test that fails if a permission-shaped path appears in either.
+- **It refuses far more than it permits, and the asymmetry is enforced rather than intended.**
+  Every candidate source is somebody else's software arriving over a link this car does not
+  control, so the two failure directions are not symmetric: a source that wrongly says "exit ahead"
+  costs a pass, and a source that wrongly says nothing leaves the feature as it is. Any instruction
+  it cannot classify refuses a pass; only six specific instructions — exits, forks and lane
+  commitments — may ask the car to move, and those six are checked to be a strict subset of the
+  ones that refuse. A test parses the module and the code that calls it, and fails if that stops
+  being true.
+- **The one thing it asks for is the exit lane**, and it asks rather than clears. When the route
+  leaves the road ahead and the car is not in the lane it leaves from, that becomes a reason to
+  move over — but the lane is still cleared by the same checks that clear an overtake: painted
+  geometry, blind spot, traffic closing from behind, oncoming, and the road not bending. Route
+  intent supplies the motive and nothing else, and it is kept out of the code that authorises or
+  reverses a commanded maneuver.
 - **The transport is deliberately unnamed.** Three could supply it — the car's own CAN, which the
   instrument cluster must already be receiving to draw turn-by-turn; a navigation app on the
   driver's phone relayed to the device; or a router running on the device with a destination

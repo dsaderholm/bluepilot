@@ -147,6 +147,26 @@ class TestItDoesNotInventCoverage:
     assert rep.available > 0
     assert rep.refused == 0, "refused a maneuver 5 km away"
 
+  def test_it_counts_what_would_have_MOVED_the_car_and_not_only_what_was_refused(self):
+    """Reporting only refusals scores the safe half of a transport.
+
+    A refusal costs a pass. An open costs a lane change. The first version of this tool counted
+    only the first, which would have let a source that constantly asked the car to move look
+    identical to one that never did.
+    """
+    rep = mod.Replay()
+    drive(rep, SEC * 100, 3.0, "exitRight", distance=50.0)
+    assert rep.opened > 0
+    assert rep.opened_sides == {"right": rep.opened}
+
+  def test_a_maneuver_that_refuses_but_may_not_open_is_counted_only_as_a_refusal(self):
+    # `unknown` is the case the two counters exist to separate: cautious enough to hold a pass,
+    # nowhere near enough to steer. If these ever move together, this is what breaks first.
+    rep = mod.Replay()
+    drive(rep, SEC * 100, 3.0, "unknown", distance=50.0)
+    assert rep.refused > 0
+    assert rep.opened == 0
+
   def test_a_close_maneuver_is_refused(self):
     rep = mod.Replay()
     drive(rep, SEC * 100, 3.0, "exitRight", distance=50.0, v_ego=30.0)
