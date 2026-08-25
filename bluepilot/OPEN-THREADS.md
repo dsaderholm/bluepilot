@@ -251,6 +251,50 @@ result file all vanished once during this work. Rebuild with the tar one-liner i
 
 ---
 
+## 6. A HOLD IS A MOOD, NOT A NUMBER FOR A PLACE. His reframe, 2026-08-25.
+
+  *"Holds for me are more what mood am I in? Am I in a hurry today? Do I want to be more relaxed
+  today?"*
+
+  *"I doubt I am going to use pinned holds at all. Those were for before I knew about how easy it
+  was to use OSM."*
+
+**THIS CONTRADICTS THE DEFINITION CLAUDE.md HAS CARRIED SINCE 2026-08-03**, which is *"a hold is a
+statement about what speed he wants AGAINST A POSTED LIMIT"* -- i.e. per-limit. And pins made it
+per-PLACE. He is saying it is neither: it is **per-DRIVE**, a disposition that should apply
+everywhere until he changes his mind.
+
+**AND THAT MISMATCH IS A LIVE BUG HE HAS BEEN ABSORBING.** `IcbmBaselineResetDelta` defaults to 10
+and discards the hold when the posted limit moves further than that. A 45 zone onto a 65 highway is
+20, so **a mood expressed as a hold evaporates at the first material zone change** and he has to
+re-press. That rule is correct for a per-limit hold and wrong for a per-drive one -- it is the
+"carrying a 55-zone baseline into a 35 zone" case, which only bites because the baseline is stored
+as an ABSOLUTE SPEED rather than as an offset.
+
+**HIS BASELINE HABIT IS ALREADY MODELLED, and it is the right shape:** `SpeedLimitOffsetType = 3`
+(bySpeed) with `SpeedLimitOffsetLow/Mid/High` = 2/5/10, from his own words on 2026-08-04 -- "2 over
+in a 20-25, 5 over from 30-60, 10 over at 65+". What is missing is a way to shift that for ONE
+DRIVE without going into settings.
+
+**THE SHAPE THAT FOLLOWS: capture the DELTA, not the number.** When he presses +/- while SLA is
+assisting, `v_baseline - v_sla_target` is his mood for this drive. On a limit change, re-apply the
+delta to the new limit instead of discarding the hold. "In a hurry" then survives the on-ramp,
+which is exactly where it matters and exactly where it dies today.
+
+Open questions that are his, not mine:
+  - does the delta persist across an ignition cycle, or reset each drive? (Mood is per-drive, so
+    probably reset -- but that is a guess about him, not a fact.)
+  - percentage or fixed? His own offset table is banded rather than proportional, which argues for
+    applying the delta as-is and letting the bands do the shaping.
+  - does SET still zero it, as it zeroes a hold today?
+
+**AND PINNED HOLDS ARE PROBABLY DEAD.** Not deleted yet -- he said "I doubt", not "remove it" -- but
+do not build on them, do not spend effort on the suggestion noise in the entry below, and ask before
+investing anywhere near them. The map supplies per-place speeds now, which is the job pins were
+invented for.
+
+---
+
 ## 6. Three warts in the new hold rules, none of them fixed
 
 Raised when he asked *"does this all make sense and is how most people would want to use it?"* --
