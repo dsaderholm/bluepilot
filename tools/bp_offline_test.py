@@ -100,6 +100,7 @@ DEFAULT_TARGETS = [
   "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_replay_his_drive.py",
   "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_tsr_reliability.py",
   "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_wide_propulsion_band.py",
+  "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_target_speed_is_ego.py",
   "sunnypilot/selfdrive/selfdrived/tests/test_unconfirmed_lead_alert_truth.py",
   "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_apim_gps_quality.py",
   "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_synthesized_set_cruise.py",

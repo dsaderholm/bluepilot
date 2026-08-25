@@ -90,23 +90,56 @@ depend on it.
 
 ---
 
-## Finding 2: the transmission. NOT MEASURED.
+## Finding 2: the transmission. HALF MEASURED, HALF REFUTED, ONE HALF FIXED.
 
-His symptom is specific: third gear on the freeway. Two candidates, both in fields that reach the
-powertrain:
+His symptom is specific: *"It tricks my transmission all the time, so I sometimes go into third gear
+on the freeway."* Two candidates were named, both in fields the powertrain receives. They have now
+been measured against Ford's own frames on the same drives, and they came out opposite ways.
 
-- **`AccPrpl_A_Rq` oscillating to the −5.0 sentinel.** `brake_actuate_target` is −0.14 and
-  `brake_actuate_release` is −0.06 — an **0.08 m/s² hysteresis band** that ordinary freeway noise
-  crosses constantly. Every crossing slams the propulsion request between a real value and −5.0, at
-  50 Hz, at a PCM that reads it.
-- **`AccVeh_V_Trg` is received by `TCM_DSL`** — the transmission. Upstream fills it with *current
-  speed* (the parameter is literally named `v_ego_kph`); this fork passes `lng.target_speed` into
-  that same parameter. Those are different numbers and the transmission is listening.
+### 2a. `AccVeh_V_Trg` carried a constant 145 kph. MEASURED, AND FIXED.
 
-Both are measurable from any op-long drive, because openpilot's own frames are on the wire beside
-Ford's.
+`TCM_DSL` -- the transmission -- is a listed receiver of that field, alongside the PCM and ECM.
+Upstream names the parameter that fills it `v_ego_kph`, which says what belongs in it.
+`carcontroller.py` passed `V_CRUISE_MAX`, so **every openpilot-authored frame told the transmission
+the car wanted 145 kph (90 mph)**, at any speed, forever.
 
----
+    route 000003bd, bus 0 ACCDATA        openpilot          Ford
+      most common value                   145.0 kph 44.0%    0.5 kph 19.3%
+      distinct values                     113                113
+      mean AccVeh_V_Trg - vEgo (3 routes) +32.8 kph          +4.3 kph
+
+**44.0% is exactly the share openpilot authored** -- the remaining frames on that bus are Ford's,
+forwarded. Ford's own value tracks the car; openpilot's did not vary at all. A transmission told the
+car wants to be 20 mph faster than it is has an obvious response, and it is a downshift.
+
+**Fixed:** `target_speed = CS.out.vEgo * 3.6`. Three tests parse the assignment, the conversion and
+the now-removed import.
+
+**IT IS UPSTREAM'S BUG, NOT THIS FORK'S.** `upstream/bp-7.0` carries the same line and it arrived in
+`d3434d4c2c` "sync long logic with bp-6.0-wip". So it plausibly affects every Ford running BluePilot
+op long, which is consistent with *"everyone in the community knows it"* -- fixed here anyway,
+because it changes what HIS car does, and it should be reported upstream.
+
+**NOT PROVEN to be the downshift cause.** It is one measured discrepancy in a field the transmission
+receives. The drive that tests it is the next op-long drive.
+
+### 2b. The `AccPrpl_A_Rq` sentinel square wave. REFUTED.
+
+The theory was that `brake_actuate_target` (-0.14) and `brake_actuate_release` (-0.06) form an
+0.08 m/s^2 hysteresis band that freeway noise crosses constantly, slamming the propulsion request to
+the -5.0 sentinel at 50 Hz. Measured across three routes:
+
+                  frames     sentinel   flips/min   propulsion range
+      openpilot   135,008     56.1%       14.0       -0.50 .. +2.00
+      Ford        136,027     60.5%        9.6       -1.59 .. +2.26
+
+**Similar rates, not a square wave.** Ford sits on the sentinel MORE often than openpilot does, and
+flips only 31% less. Whatever the mutual exclusion costs -- and Finding 1 says it costs coasting --
+it is not producing an oscillation Ford does not also produce. Do not re-open this one.
+
+**What the same table DOES show is Finding 1 again, from the other side:** openpilot's propulsion
+request stops dead at -0.50 while Ford's reaches -1.59. That is the clipped floor, visible in the
+raw distribution.
 
 ## How to do the fitting, and the two rules that keep it honest
 
@@ -146,7 +179,8 @@ the passthrough deletion precisely because it is independent of it.
    as text, so this check has to be run by hand every time that file changes.
 2. **Remove the mutual exclusion** and let `create_acc_msg` carry a propulsion request alongside the
    brake. This is the one that makes blending possible at all.
-3. **Measure the transmission fields** on an existing op-long drive before touching them.
+3. ~~**Measure the transmission fields**~~ **DONE.** `AccVeh_V_Trg` was a constant and is fixed;
+   the sentinel square wave is refuted. See Finding 2.
 4. Only then consider `brake_actuate_target`, and only after the ABS question above is settled.
 
 **Do not change more than one of these per drive.** He has one car, and the whole reason this branch

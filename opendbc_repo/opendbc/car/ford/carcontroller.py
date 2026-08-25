@@ -5,7 +5,7 @@ from opendbc.car import ACCELERATION_DUE_TO_GRAVITY, Bus, DT_CTRL, apply_hystere
 from opendbc.car.lateral import AVERAGE_ROAD_ROLL, ISO_LATERAL_ACCEL, apply_std_steer_angle_limits
 from opendbc.car.ford import fordcan
 from opendbc.car.ford.values import CarControllerParams, FordFlags, CAR
-from opendbc.car.interfaces import CarControllerBase, V_CRUISE_MAX
+from opendbc.car.interfaces import CarControllerBase
 from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
 
@@ -344,7 +344,27 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
           accel_due_to_pitch = 0
 
       stopping = CC.actuators.longControlState == LongCtrlState.stopping
-      target_speed = V_CRUISE_MAX
+      # FusionPilot: THE CAR'S OWN SPEED, not a constant. `AccVeh_V_Trg` is received by
+      # `TCM_DSL` -- the TRANSMISSION -- as well as the PCM and ECM, and upstream names the
+      # parameter it feeds `v_ego_kph`, which says what belongs in it.
+      #
+      # BluePilot passes `V_CRUISE_MAX` here, so openpilot told the transmission the car wanted
+      # 145 kph (90 mph) on EVERY authored frame. Measured on route 000003bd: 145.0 on 44.0% of
+      # bus-0 ACCDATA -- exactly the share openpilot authored -- while Ford's own value on the
+      # same drive tracked the car, averaging just +4.3 kph above vEgo across three routes against
+      # openpilot's +32.8.
+      #
+      # That is the strongest candidate for his report: *"It tricks my transmission all the time,
+      # so I sometimes go into third gear on the freeway."* A transmission told the car wants to be
+      # 20 mph faster than it is has an obvious response, and it is a downshift.
+      #
+      # UPSTREAM'S BUG, NOT THIS FORK'S -- `upstream/bp-7.0` does the same and it arrived in
+      # d3434d4c2c "sync long logic with bp-6.0-wip". Fixed here anyway because it changes what HIS
+      # car does, which is the scope test; report it upstream too.
+      #
+      # NOT PROVEN to be the downshift cause. It is one measured discrepancy in a field the
+      # transmission receives, and the drive that tests it is the next op-long drive.
+      target_speed = CS.out.vEgo * 3.6
       v_ego_mph = CS.out.vEgo * 2.23694
 
       # BluePilot: longitudinal follow control via LongitudinalExt
