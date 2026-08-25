@@ -140,8 +140,10 @@ the passthrough deletion precisely because it is independent of it.
 
 1. ~~**Re-gate the panda gas band on op long.**~~ **DONE.** `FordSafetyFlagsSP.WIDE_PROPULSION_BAND`,
    gated on `CP.openpilotLongitudinalControl`. Deliberately an ENVELOPE only — `create_acc_msg`
-   still clamps to −0.495, so nothing transmitted moves yet. **Its compile check is still owed:**
-   `ford.h` is not built by `bp_offline_test.py` and the laptop lost the device mid-task.
+   still clamps to −0.495, so nothing transmitted moves yet. **Compile-verified on the device**
+   (`gcc -fsyntax-only -Wall -Wextra`, exit 0, warning output byte-identical to the unmodified
+   header) — `bp_offline_test.py` never builds `ford.h`, and the new test only parses its `#define`s
+   as text, so this check has to be run by hand every time that file changes.
 2. **Remove the mutual exclusion** and let `create_acc_msg` carry a propulsion request alongside the
    brake. This is the one that makes blending possible at all.
 3. **Measure the transmission fields** on an existing op-long drive before touching them.
