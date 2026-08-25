@@ -362,3 +362,44 @@ contradiction. None of them is "the model cannot drive it".
 hardware. The point of writing it down is the ORDERING: route intent first because it is the only
 one buildable today, item 3 as the first payoff because it needs no new actuation, and item 4 last
 and separately, on its own evidence.
+
+---
+
+## 8. A WORKED EXAMPLE: HIS OWN 9.2 MILE ROUTE, BROKEN INTO REACHABLE AND NOT
+
+He shared a real Google Maps route on 2026-08-24 -- 2513 S 1500 E to 6515 S Lion Ln, 12 min,
+9.2 miles -- with *"imagine if we could get to the point where it could do this"*. It is a good
+route to reason with because it contains every element, and it separates cleanly.
+
+    0.8 mi   head to Parkway Ave, LEFT onto Parkway, RIGHT onto S 1300 E     NOT REACHABLE
+    0.3 mi   right to merge onto I-80 E                                       merge -- see below
+    7.8 mi   I-80 E -> I-215 S interchange -> EXIT 6                          THE TARGET
+    0.6 mi   6200 S / Big Cottonwood -> S 3000 E -> S Lion Ln                 NOT REACHABLE
+
+**THE FREEWAY SPINE IS 7.8 OF 9.2 MILES -- ABOUT 85% OF THE DISTANCE**, and 7 of the 12 minutes.
+That is the part this fork has been building toward, and stating the fraction is useful because
+"door to door" and "the useful majority" are very different targets and only one of them is on the
+table.
+
+**THE TWO ENDS ARE A CAPABILITY GAP, NOT A ROUTE-INTENT GAP.** They need turns at intersections from
+a stop -- judging cross traffic, committing to a 90 degree turn, choosing a gap. openpilot does not
+do that, this fork is not trying to, and no quantity of navigation data closes it. Say so plainly
+whenever this comes up, because a route-intent conversation naturally drifts toward door-to-door and
+the drift is not supported by anything.
+
+**WHAT THE MIDDLE ACTUALLY ASKS FOR, and it is three things:**
+
+    1  the canbox                      route intent at all
+    2  route intent                    "exit 6 is his", early enough to matter
+    3  A LANE-SELECTION DECISION       "be in the exit lane" -- NOT BUILT
+
+**Item 3 is the honest correction to the optimism.** Passing assist's maneuver machinery -- signal,
+gate, cross, settle, abort -- is written and tested and would carry the move. But the DECISION that
+drives it asks one question: *is there a slower car ahead worth passing.* "Get into the right-hand
+lane because we leave the freeway in 600 metres" is a different question using the same machinery.
+That is real work, not wiring, and nothing here should imply otherwise.
+
+**And exit 6 is exactly the case the whole design exists for.** Route intent says the ramp is his,
+SCC-Map commits to the ramp's corner speed with the ~8 s the set speed needs instead of the ~4 s it
+gets today, and the descent completes. That is the exit-ramp problem, measured on route 00000348,
+solved on a specific exit he actually drives.
