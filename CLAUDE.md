@@ -4897,6 +4897,66 @@ this feature, every conclusion drawn from fewer than about ten events has needed
 state the edge count beside any claim made from one.** The sweep is cheap to re-run and the edges
 accumulate on their own; there has never been a reason to act early, only a temptation to.
 
+## THE COVERAGE PROBLEM IS A CAMERA PROBLEM, AND RADAR TRAFFIC SEPARATES 6:1 ON IT
+
+2026-08-24. Asked the right question for the first time. The previous three attempts all asked *how
+do I loosen the geometry gate*; the question that matters is **what else on this car knows a lane
+exists**, and it came out of him pushing back on a gloomy forecast:
+
+  *"I wanted it to be better than me since radar can know if the car is slower faster than I can."*
+
+**He is right, and the forecast was mis-framed.** Radar IS better than him at that, instantly and
+exactly, and it was never the bottleneck. `blockedBy` reason 7 is `noLaneAvailable` -- "geometry says
+there is nowhere to go" -- and it is the top blocker on 53-87% of every drive. The limiting sense is
+**"is there a lane over there"**, which is the camera, and which is the one thing a human does
+effortlessly. Measured agreement with his own passes: **5 of 55 eligible, 9%.**
+
+    is that car slower, and by how much      radar beats him -- already working
+    is there a lane to move into             he beats it badly -- this is the 9%
+
+**`tools/bp_radar_lane_proof.py`, seven drives, frames where the LEFT GATE REFUSED:**
+
+    road        refused  radar blind  sameDir  TRAVELLING  oncoming  TRAV,no onc
+    one-way       38938        0.0%     93.8%      87.2%     22.3%        73.0%
+    TWO-WAY        6981        0.0%     78.1%      36.2%     86.5%        11.8%
+
+The candidate rule -- **a vehicle went PAST us on the left, and no opposing traffic has been seen
+there** -- fires on 73.0% of refused one-way frames and 11.8% of refused two-way frames. **And the
+guard doing the separating is `oncomingAdjacent`, a RADAR fact, not the map**, which is precisely
+what the 2026-08-09 revert note demanded before this could be re-proposed.
+
+**THE SPEED TEST IS WHAT THE REVERTED VERSION LACKED.** `sameDirectionRecent` alone is 78.1% on
+two-way roads -- useless. `overtakenVAbs > 0` requires a vehicle to have gone PAST us, which a car
+easing into a turn lane does not do, and that alone drops two-way from 78.1% to 36.2%. The oncoming
+guard takes it the rest of the way to 11.8%. **That gap is the turn-lane exposure the note asked
+for, and it is now measured rather than argued.**
+
+### THREE REASONS THIS IS NOT A GREEN LIGHT, AND THE THIRD IS THE ONE THAT BITES
+
+1. **11.8% IS NOT ZERO.** A center turn lane is exactly "two-way road, traffic going our way, nobody
+   coming right now", and on ~824 frames here that description held. The 2026-08-09 failure was
+   three lane changes. This rule alone would still permit some of them.
+
+2. **BOTH GUARD FIELDS ARE MEMORY-BASED.** `oncomingAdjacent` and `sameDirectionRecent` carry decay
+   windows, so "no oncoming" means "none seen recently". On a quiet two-way road that is the normal
+   state, which is the same shape as the 90 s memory window that made `oncomingAdjacent` read 28.9%
+   of frames when the sighting count was tiny.
+
+3. **73% OF REFUSED FRAMES IS NOT 73% MORE PASSES, AND READING IT THAT WAY WOULD BE THE DENOMINATOR
+   ERROR AGAIN.** Most refused frames are not pass opportunities at all -- no slow lead, wrong
+   speed, driver active. The number that matters is how many of the 50 passes he makes that the
+   feature currently misses would become available, and **that is not measured.** It is the next
+   thing to measure and it is strictly smaller than 73%.
+
+**What a safe version would need**, in order: the speed test (have it), the oncoming guard (have
+it), a two-way refusal that does not depend on the map being present, and a measurement in
+DECISIONS rather than frames. The map may legitimately refuse here -- `oneWay` false blocking the
+rule is the map refusing, which is allowed -- but leaning on it re-creates the dependency the revert
+note was written to avoid, and costs the roads where `tileLoaded` is false.
+
+**This is the best lead on the coverage ceiling that exists.** It is also the exact idea that put
+the car into a turn lane three times, so it gets built slowly or not at all.
+
 **AND THE OBVIOUS DISCRIMINATOR IS FORBIDDEN, which is worth stating before someone reaches for it.**
 `oneWay` from the map separates these perfectly by construction -- it is what labels them. But
 suppressing an oncoming sighting because the map says one-way is **the map REMOVING a refusal**,
