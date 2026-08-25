@@ -54,7 +54,6 @@ WANT = (3, 12)
 # that cannot run offline belongs out of it, not skipped inside it.
 DEFAULT_TARGETS = [
   # Named rather than by directory: sunnypilot/selfdrive/car/tests/ also holds device-only tests.
-  "sunnypilot/selfdrive/car/tests/test_icbm_survives_passthrough.py",
   "sunnypilot/selfdrive/car/intelligent_cruise_button_management/tests/",
   "opendbc_repo/opendbc/sunnypilot/car/ford/tests/",
   # (that directory glob already covers test_button_mapping.py)
@@ -68,7 +67,6 @@ DEFAULT_TARGETS = [
   # That is also how test_settings_recommend_defaults.py sat here unrun on the day it was written:
   # the suite total did not move and nothing said why. test_bp_tests_are_registered guards it now.
   "selfdrive/ui/tests/test_settings_fit.py",
-  "selfdrive/ui/tests/test_icbm_toggle_survives_passthrough.py",
   "selfdrive/ui/tests/test_settings_recommend_defaults.py",
   "selfdrive/ui/tests/test_readme_is_built.py",
   "selfdrive/ui/tests/test_sunnylink_settings_complete.py",
@@ -96,17 +94,13 @@ DEFAULT_TARGETS = [
   "selfdrive/car/tests/test_no_int_on_capnp_enums.py",
   "selfdrive/car/tests/test_dec_slow_down_published.py",
   "selfdrive/car/tests/test_capnp_accepts_published_types.py",
-  "selfdrive/ui/tests/test_every_icbm_gate_knows_about_the_passthrough.py",
   "sunnypilot/mapd/tests/test_only_one_map_daemon_runs.py",
-  "selfdrive/selfdrived/tests/test_passthrough_is_not_openpilot_driving.py",
   "sunnypilot/selfdrive/controls/lib/speed_limit/tests/test_sla_leaves_disabled_while_icbm_moves_the_cluster.py",
   "sunnypilot/selfdrive/controls/lib/speed_limit/tests/test_sla_survives_a_gas_override.py",
   "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_replay_his_drive.py",
   "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_tsr_reliability.py",
-  "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_accdata_stays_in_band.py",
   "sunnypilot/selfdrive/selfdrived/tests/test_unconfirmed_lead_alert_truth.py",
   "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_apim_gps_quality.py",
-  "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_override_says_why.py",
   "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_synthesized_set_cruise.py",
   "sunnypilot/selfdrive/controls/lib/smart_cruise_control/tests/test_tile_curvature.py",
   # Named file, not the directory: test_mapd_version.py beside it hashes the installed mapd binary

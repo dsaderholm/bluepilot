@@ -56,26 +56,17 @@ def _initialize_neural_network_lateral_control(CP: structs.CarParams, CP_SP: str
 
 
 def _op_long_drives(CP: structs.CarParams, params: Params) -> bool:
-  """FusionPilot: does openpilot longitudinal actually DRIVE the car, or is it only permission?
+  """FusionPilot: does openpilot longitudinal actually DRIVE the car?
 
-  Both ICBM gates below used `CP.openpilotLongitudinalControl` directly, encoding one assumption:
-  op long is on, therefore openpilot authors the longitudinal command, therefore cruise buttons are
-  meaningless. **Under the stock-ACC passthrough that is false.** Op long there is used purely as
-  PERMISSION -- it is what opens the relay and puts ACCDATA in panda's TX list -- while the numbers
-  on the wire stay Ford's own, the set speed still governs, and panda still permits button injection
-  (`Steering_Data_FD1` is in FORD_COMMON_TX_MSGS, which FORD_LONG_TX_MSGS inherits).
+  Both ICBM gates below used `CP.openpilotLongitudinalControl` directly, which is right again now
+  that the stock-ACC passthrough is gone: with op long on, openpilot authors the command and the
+  cruise buttons are meaningless.
 
-  So with the passthrough on, holds, Speed Limit Assist, both curve controllers, pinned holds and
-  the gap button all still mean something and must survive.
-
-  This also fixes something that bit on drive A independently of the passthrough: the second gate
-  does not merely ignore the ICBM param, it REMOVES it, and the key has no default -- so it comes
-  back off. He re-enabled ICBM mid-drive, op long deleted it again, and the device was still reading
-  `unset` afterwards.
+  The second gate does not merely ignore the ICBM param, it REMOVES it, and the key has no
+  default -- so it comes back off. He re-enabled ICBM mid-drive, op long deleted it again, and the
+  device was still reading `unset` afterwards. `params` is kept in the signature for that reason.
   """
-  if not CP.openpilotLongitudinalControl:
-    return False
-  return not params.get_bool("StockAccPassthrough")
+  return bool(CP.openpilotLongitudinalControl)
 
 
 def _initialize_intelligent_cruise_button_management(CP: structs.CarParams, CP_SP: structs.CarParamsSP, params: Params = None) -> None:
@@ -135,7 +126,6 @@ def initialize_params(params) -> list[dict[str, Any]]:
   # ford
   keys.extend([
     "FordPrefSteerAngleCurvature",
-    "StockAccPassthrough",
   ])
 
   # hyundai

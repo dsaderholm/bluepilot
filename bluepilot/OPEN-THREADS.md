@@ -8,102 +8,19 @@ Last swept: 2026-08-24.
 
 ---
 
-## 1. Passthrough stopping — the feature this branch exists for
+## 1. CLOSED: the stock ACC passthrough is deleted from this branch
 
-**State:** the stop override works and costs him Ford ACC for the rest of the drive, 4 times out
-of 5. The camera's tolerance is bracketed between **1.1 s and 2.6 s** of continuous override; a
-stop needs 5–8 s. So a single continuous override can never work.
+Its only benefit was the stop override, and that could not work for four independent reasons -- see
+the postmortem banner in `CLAUDE.md`. It was also strictly worse than leaving op long off, which
+gives Ford's driving through a closed relay with no cancel risk at all.
 
-**Ruled out by measurement** (do not re-derive): contradiction magnitude; accumulated
-disagreement; arm speed (`ARM_MIN_SPEED` twice); dropped TX frames; radar health;
-cancel-and-re-engage; disengaging; a MAIN press; waiting for the camera to relent; the camera
-seeing our frame.
+**The code is frozen on `passthrough-archive` at `25ae8a6413`.** That branch is dead: nothing
+rebases onto it and nothing is developed there. It exists so the implementation can be re-read and
+the measurements re-run.
 
-**Ruled out structurally, 2026-08-24 — `AccVeh_V_Trg` is NOT a way to make Ford brake itself.**
-The DBC receiver lists split ACCDATA cleanly:
+**The work that replaced it is on `decel-hierarchy` (`../bluepilot-decel`).**
 
-    braking     -> ABS_ESC    AccBrkTot_A_Rq, AccBrkPrchg/Decel/Pulse, AccStopStat_B_Rq
-    propulsion  -> PCM/ECM/TCM   AccPrpl_A_Rq, AccPrpl_A_Pred, AccVeh_V_Trg
-
-`AccVeh_V_Trg` is not sent to the brake controller at all, so lowering it can close the throttle
-and downshift but **cannot stop the car**. A stop requires authoring `AccBrkTot_A_Rq`, which is
-taking authority, which is what the camera cancels. No drive needed to close this.
-
-**MEASURED 2026-08-24, `tools/bp_override_pairs.py`, all ten episodes on 3b5/3b7/3b8/3ba:**
-
-    driver braked?   duration        outcome
-    no               0.14 - 1.84 s   clean       5 of 5
-    no               2.78 - 9.00 s   CANCELLED   3 of 3
-    YES              2.30, 11.92 s   clean       2 of 2
-
-**The two long "leadless survivors" were not survivors -- he rescued them with a brake tap.** That
-is the whole reason the threshold looked soft and the lead theory looked load-bearing. A brake
-press disengages cruise, so the camera's cancel then lands while cruise is OFF, and this file
-already records that a cruise-off cancel clears itself. Remove those two and the boundary is
-clean: **between 1.84 s and 2.78 s of override with no driver input.** A stop needs 5-8 s. A
-single continuous override therefore cannot work, and that is now measured rather than estimated.
-
-**THE PCM NEVER ENTERED ITS STOP MODE, on any of the ten.** We asserted `AccStopStat_B_Rq` on
-99.9% of override frames -- the 2026-08-23 fix is live and doing its job -- and `AccStopMde_D_Rq`
-read `NoStop` on 100% of frames throughout. **But that is NOT yet evidence the handshake fails**,
-because no episode ever reached a standstill (they ended at 8-37 mph). `Hold` may simply be
-correct-to-be-absent there. Unresolved, and it needs an override that actually completes a stop.
-
-**INTERLEAVING IS PROBABLY DEAD TOO, for a physical reason.** It rests on the camera counting
-consecutive contradicted FRAMES. But this file already establishes the camera CANNOT SEE OUR
-ACCDATA -- so whatever it counts, it counts by watching the car's own deceleration. Handing Ford
-back one frame in five does not change how the car is moving, so it cannot reset a counter that is
-fed by motion. To reset that, the car would have to genuinely stop decelerating, which un-does the
-stop. Do not build interleaving without first showing the camera counts frames rather than motion.
-
-**AND "END THE ACC SESSION CLEANLY, THEN STOP" IS DEAD TOO. Checked 2026-08-25, before building
-it.** It was proposed here the night before as the one design that fits every measurement, on the
-grounds that the camera only latches when it cancels a session it believes is ACTIVE. That part is
-probably still true. It does not matter, because openpilot cannot brake with the cruise off:
-
-    ford.h:547            pcm_cruise_check(cruise_engaged)   <- from CcStat_D_Actl, the PCM's own
-    longitudinal.h:3      get_longitudinal_allowed() = controls_allowed && !gas_pressed_prev
-    longitudinal.h:9      accel_valid = get_longitudinal_allowed() && within-band
-                          ...else the ONLY legal value is limits.inactive_accel
-
-**Openpilot's authority to brake this car is borrowed from Ford's cruise being engaged.**
-Disengaging to avoid the cancel removes exactly the permission the stop needs, and panda drops
-every braking frame. That is also why he takes those stops with his foot: there is no alternative
-available to him either.
-
-### SO EVERY AVENUE IS NOW CLOSED, AND THAT IS THE FINDING
-
-    continuous override      kills Ford ACC for the drive        measured, 3/3 beyond ~2 s
-    interleaving             camera watches MOTION, not frames   handing back 1-in-5 changes nothing
-    AccVeh_V_Trg             not sent to the brake controller    DBC receiver list
-    disengage, then stop     no panda longitudinal authority     controls_allowed is Ford's
-
-**Passthrough and automatic stopping look MUTUALLY EXCLUSIVE on this car.** Not "hard" -- the four
-mechanisms above are independent and each is sufficient on its own to kill the feature.
-
-**THE ONE CONFIGURATION NEVER TRIED IS PURE OP LONG WITH THE PASSTHROUGH OFF.** He has confirmed
-openpilot stops this car -- *"when I use OP long fully, it does come to a complete stop"* -- and in
-that mode cruise stays engaged (so `controls_allowed` holds) while the camera is out of the control
-loop entirely rather than being interrupted mid-command. Every cancel on record came from a drive
-with the passthrough ON. So the cancel may be a passthrough phenomenon rather than an op-long one,
-and nobody has separated the two.
-
-That is a real experiment and it is one drive: op long ON, `StockAccPassthrough` OFF, approach an
-empty light. But it buys stops by giving up the thing the passthrough exists for, and he has been
-plain that op long on this car is *"absolute trash"*, so it is HIS trade to make, not a default to
-move. Do not switch it for him.
-
-**Next step:** ask him whether he wants that drive, and do not build anything else here until the
-answer is known -- the four rows above say there is nothing left to build on the passthrough side.
-
-**INSTRUMENT CAVEATS on the table above, so nobody builds on the wrong column.** The ACCDATA_3
-message-text column reads identically on clean and cancelled episodes, so those bits are decoded
-wrong and were ignored. The lead percentages come out ~0% on all ten, which CONTRADICTS
-CLAUDE.md's "4/4 with a lead survived" on these same routes -- one of the two is wrong and this
-run does not settle which. The frame counts are message counts, so ratios mean something and
-absolute numbers do not.
-
----
+**This branch is ICBM, SCC and SLA only.** Do not add longitudinal-authoring work here.
 
 ## 2. `RECOVERY BLOCKED BY THE FRAME` — episode 1 is still unexplained
 
@@ -251,80 +168,11 @@ result file all vanished once during this work. Rebuild with the tar one-liner i
 
 ---
 
-## 5b. WHY OP LONG CANNOT COAST ON THIS CAR -- and it is two constants, not the planner
+## 2. Moved to `decel-hierarchy`: why op long cannot coast
 
-Found 2026-08-25, chasing his real goal (*"I want complete stops at stop signs and traffic lights
-and the ability to go under 20mph. But, I also love the behavior of Ford ACC for everything else."*)
-
-**HIS STANDING OBJECTION IS THAT OP LONG "CANNOT COAST"**, and this file has carried that as a
-property of openpilot's planner. It is not. It is `longitudinal_ext.py`:
-
-    op_brake_actuate = True when accel < -0.14 m/s^2      (brake_actuate_target)
-    if brake_actuate: gas = INACTIVE_GAS                   (mutual exclusion, line ~316)
-    gas clipped to CarControllerParams.MIN_GAS = -0.5      (line ~321)
-
-    FORD, measured over 99,520 frames of its own AccPrpl_A_Rq:
-    range -2.710 .. 2.300      p01 -1.030      2.86% of all frames below -0.5
-
-**So for every deceleration between 0.14 and 2.71 m/s^2 -- which is most ordinary slowing -- FORD
-ENGINE-BRAKES AND OPENPILOT USES THE PEDAL.** openpilot asks the powertrain for at most 0.5, grabs
-the friction brakes at 0.14, and the moment it does, mutual exclusion stops it asking the powertrain
-for anything at all.
-
-That is precisely "Ford can coast and op long cannot", and it is not a planner-quality problem. It
-is two numbers and one `if`.
-
-**THE SAFETY ENVELOPE ALREADY ALLOWS THE FIX.** `ed6c0b71` widened panda's `min_gas` to -2.8 behind
-`FordSafetyFlagsSP.PASSTHROUGH_LONG` -- the firmware will now carry Ford's real engine-braking
-range. Only openpilot's OWN clip and the brake-actuate threshold stand in the way, and both are
-ours.
-
-**WHY THIS MATTERS MORE THAN IT LOOKS.** His goal needs ACCDATA -- stops without a lead and speeds
-under Ford's 20 mph set-speed floor are both unreachable through buttons. ACCDATA is all-or-nothing
-by panda's `check_relay`, so **op long is the only path to it**. Passthrough was an attempt to dodge
-that and it failed for four independent reasons (thread 1). So either op long becomes tolerable on
-this car, or the goal is unreachable -- and the single most-cited reason it is intolerable turns out
-to be two constants nobody had checked.
-
-**NOT A RECOMMENDATION YET, and do not present it as one.** He has driven op long and hates it, and
-that is data rather than an opinion to argue with. What is honest to say: this is the first
-*specific, measurable* cause anyone has found, it has never been addressed, and it does not rule out
-there being planner problems on top of it.
-
-**HIS FRAMING, AND IT IS THE RIGHT ONE:** *"So we basically need to train OP long on Ford ACC?"*
-
-No ML required, because **the labelled data already exists**. Every drive carries Ford's own ACCDATA
-on bus 2 -- a recording of Ford's controller responding to real traffic, frame by frame, alongside
-the full vehicle state. Nothing needs collecting; this is a fitting problem over a handful of
-constants, not a training problem.
-
-**TWO RULES FOR DOING IT, and the first one is what keeps the fork worth having:**
-
-1. **FIT ONLY WHERE BOTH ARE DOING THE SAME JOB** -- steady cruise and lead-following. Ford does not
-   stop for lights, does not slow for mapped corners, and does not know about the radar-blind lead
-   path. Fitting openpilot to Ford across those frames would delete the reasons openpilot is here at
-   all. Exclude any frame whose `plan_source` is sccMap / sccVision / modelStop / unconfirmedLead.
-2. **SCORE BRAKE-ACTUATION DISAGREEMENT, NOT ACCEL ERROR.** What he feels is the pedal coming on
-   where Ford would have coasted -- brake lamps, a grabby feel -- not a small difference in
-   commanded m/s^2. Mean accel error would score a controller that brakes constantly but gently as
-   excellent.
-
-**STEP ONE IS ONE NUMBER, AND THE TOOL IS WRITTEN:** `tools/bp_ford_brake_curve.py`. For every frame
-where Ford's ACC was actually running it buckets Ford's commanded accel against whether Ford
-asserted its own brake bits (`AccBrkPrchg_B_Rq` / `AccBrkDecel_B_Rq`), and prints the crossover --
-the deceleration at which Ford starts using the pedal. Ours is `-0.14`. It also counts how often
-Ford's propulsion request sits below our `MIN_GAS` of `-0.5`, which is engine braking openpilot
-cannot ask for at all.
-
-**Read the histogram rather than the crossover alone.** A sharp step means a threshold is the right
-model and gives its value. A gradual ramp means Ford is BLENDING, and a single threshold is the
-wrong shape -- which is worth knowing before anyone tunes a constant.
-
-**NOT RUN YET: the laptop and the comma are on different networks** (laptop `10.10.51.199/22`, the
-device last seen on `10.0.1.x`), so it is written and staged but unmeasured. It needs no drive --
-any existing route answers it.
-
----
+The finding that replaced the passthrough -- openpilot asserts the friction brakes at -0.14 m/s^2
+and clips propulsion at -0.5, while Ford ramps engine braking to -0.66 and only hands over below
+-1.1, blending both across that band. Full detail and the measurement tools live on that branch now.
 
 ## 6. WHAT A HOLD IS, SETTLED 2026-08-25. Do not redesign it again.
 

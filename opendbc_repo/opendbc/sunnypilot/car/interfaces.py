@@ -149,20 +149,6 @@ def _initialize_ford(CP: structs.CarParams, CP_SP: structs.CarParamsSP, params_d
       if geometry_index is not None:
         CP_SP.safetyParam |= FordSafetyFlagsSP.STEER_ANGLE_CURVATURE | (geometry_index << FORD_PINION_GEOMETRY_SHIFT)
 
-    # FusionPilot: tell the safety firmware that the frames it is policing are FORD'S OWN,
-    # forwarded by the stock ACC passthrough, so it can use Ford's real propulsion floor
-    # (-2.8 m/s^2) instead of upstream's generic -0.5. See FordSafetyFlagsSP.PASSTHROUGH_LONG.
-    #
-    # Gated on op long because that is the only mode in which ACCDATA is in panda's TX list at
-    # all -- with it off the widened band is unreachable, so setting the bit would be noise.
-    #
-    # THE PYTHON SIDE MUST DERIVE ITS CLAMP FROM THIS SAME BIT, not from the param. If the two
-    # disagree in the permissive direction -- Python forwards -2.0 while panda still holds -0.5 --
-    # panda drops the WHOLE frame and a 50 Hz message vanishes and reappears, which is worse than
-    # either controller driving. `fordcan_ext.passthrough_gas_floor` reads CP_SP.safetyParam for
-    # exactly that reason, and falls back to the narrow floor on any doubt.
-    if CP.openpilotLongitudinalControl and int(params_dict.get("StockAccPassthrough", 0) or 0) == 1:
-      CP_SP.safetyParam |= FordSafetyFlagsSP.PASSTHROUGH_LONG
 
 
 def _initialize_toyota(CP: structs.CarParams, CP_SP: structs.CarParamsSP, params_dict: dict[str, str]) -> None:

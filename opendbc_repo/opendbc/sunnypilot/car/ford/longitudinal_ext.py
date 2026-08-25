@@ -112,28 +112,6 @@ class LongitudinalExt:
       return True
 
     if not lead.status:
-      # NO LEAD, and that now has two very different meanings. It used to mean only "open road ahead
-      # after a queue cleared", where there is genuinely nothing to wait for.
-      #
-      # The stop override created a second one: stopped at a STOP SIGN or a red light, on our own
-      # braking, with nothing in front. `controlsd` sets `cruiseControl.resume` from
-      # `standstill and not shouldStop`, so the moment openpilot's model judges the intersection
-      # clear this would press RESUME and the car would pull away with no input from the driver.
-      #
-      # That is not what "come to a complete stop" asked for, and deciding an intersection is clear
-      # is the side of the Level 2 line where the driver is responsible. Evidence that OPENS a
-      # maneuver must never be cheaper than evidence that refuses one, and the model alone is the
-      # cheapest evidence there is. So a stop WE authored is held until he presses resume or the
-      # gas -- his own press goes through untouched, because it never reaches this gate.
-      #
-      # `StockAccStopAutoResume` opts back INTO upstream's behavior, off by default. Read through
-      # getattr with a False fallback for the same reason as the flag above: a missing attribute
-      # must leave the stop HELD, never released. The conservative direction for a defaulted read
-      # is whichever one keeps the car where the driver last saw it.
-      if getattr(self, "stop_override_stopped_us", False) and \
-         not getattr(self, "stop_auto_resume_enabled", False):
-        self.resume_gate_blocking = True
-        return False
       self.resume_gate_blocking = False
       return True
 

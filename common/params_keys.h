@@ -245,38 +245,6 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // finds out for itself and declines if nothing moves, but until that has happened on the road
     // once, nothing should be pressing this button unasked.
     {"IcbmGapControl", {PERSISTENT | BACKUP, BOOL, "0"}},
-    // FusionPilot: under openpilot longitudinal control, forward the CAMERA's own ACCDATA instead
-    // of authoring our own. The car then behaves exactly as stock Ford ACC, because the commands
-    // ARE Ford's -- his position is "I trust how Ford ACC works", and this borrows that tuning
-    // rather than trying to reproduce it.
-    //
-    // NOT Icbm*: it is meaningless when ICBM is the actuator, since ICBM exists precisely because
-    // op long is off. It only has an effect with op long ON.
-    //
-    // OFF by default and it must stay that way until one drive has proven the camera keeps
-    // computing ACC with the relay open. That cannot be checked offline and no route on the device
-    // has ever had op long enabled.
-    {"StockAccPassthrough", {PERSISTENT | BACKUP, BOOL, "0"}},
-    // Ships OFF, and the reason is about the CAR rather than caution about the code: the
-    // camera's tolerance for sustained contradiction is unmeasured. Drive A latched cancel
-    // after ~40 s of it; drive B saw 1.3 s total and no reaction. A stop is 5-8 s, between
-    // the two, so the first one is an experiment and is his to start.
-    {"StockAccStopOverride", {PERSISTENT | BACKUP, BOOL, "0"}},
-    // Pull away from a stop the override authored, without the driver touching anything.
-    //
-    // Ships OFF, and the reason is about the CAR, not caution about the code. The "go" signal is
-    // `shouldStop` going false -- which means the MODEL stopped wanting to stop, NOT that the light
-    // turned green. openpilot does not read signal state. So with this on, the car decides an
-    // intersection is clear on the cheapest evidence available, which is the one thing the
-    // evidence rule in this fork exists to forbid.
-    //
-    // It is also a state this car has never been in: Ford cannot hold a stop without a lead, so
-    // until the override existed there was no standstill to resume FROM. Nothing about it is
-    // measured. Asked for by name on 2026-08-22 and shipped off at his request.
-    //
-    // Only affects stops the OVERRIDE authored. Behind a lead, Ford holds the stop and openpilot's
-    // ordinary queue-cleared resume is unchanged either way.
-    {"StockAccStopAutoResume", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"DeviceBootMode", {PERSISTENT | BACKUP, INT, "0"}},
     {"DevUIInfo", {PERSISTENT | BACKUP, INT, "0"}},
     {"EnableCopyparty", {PERSISTENT | BACKUP, BOOL}},

@@ -29,14 +29,6 @@ class PanelType(IntEnum):
 ICBM_DESC = tr_noop("When enabled, sunnypilot will attempt to manage the built-in cruise control buttons " +
                     "by emulating button presses for limited longitudinal control.")
 # FusionPilot: the whole answer to "what do I turn on", in the one place he will read it.
-PASSTHROUGH_DESC = tr_noop(
-  "Send the camera's own acceleration and braking instead of openpilot's. The car then drives "
-  "exactly like stock adaptive cruise, because the commands are Ford's -- openpilot only carries "
-  "them, and your holds, speed limits, curve slowing and gap button all keep working on top. "
-  "Needs openpilot Longitudinal Control on. Dynamic Experimental Control and Experimental Mode "
-  "change openpilot's own plan, which this replaces -- so on their own they make no difference "
-  "here. Come To A Complete Stop is the exception: that reads openpilot's plan, and it needs "
-  "Experimental Mode.")
 
 APIM_GPS_DESC = tr_noop(
   "Give the forward camera the GPS data your SYNC module never sends it. The camera expects three "
@@ -46,23 +38,7 @@ APIM_GPS_DESC = tr_noop(
   "sending them itself, and it only sends position, time and heading -- it cannot steer, "
   "accelerate or brake. Turn it off if the camera starts reporting speed limits that are wrong.")
 
-STOP_OVERRIDE_DESC = tr_noop(
-  "Bring the car to a complete stop for a stop sign or red light on an empty road. Ford's set "
-  "speed cannot go below 20 mph, so without this the car slows to 20 and no further unless its "
-  "own radar has a car ahead to follow down. For a few seconds at the end of the stop openpilot sends the braking instead of Ford, then hands straight back. It never takes over when a lead is "
-  "close -- Ford stops for those itself, better than we would. Needs Use Ford's Own ACC Commands on, AND Experimental Mode -- without it openpilot never plans a stop for a sign or a light, so this can never fire. "
-  "IT ONLY RUNS WHILE CRUISE IS STILL ENGAGED. Touching the brake disengages, which hands the stop "
-  "back to you, so the approach has to be one where you leave your foot off the brake. "
-  "Experimental: how the camera reacts to being overridden for several seconds has not been measured yet, so watch the first few stops.")
 
-STOP_AUTO_RESUME_DESC = tr_noop(
-  "After Come To A Complete Stop has held the car at a stop sign or red light, pull away again "
-  "without you pressing anything. Off by default, and the reason is worth reading: openpilot does "
-  "not read traffic signals. What it actually notices is its own driving model no longer planning "
-  "to stop, which is not the same thing as the light having turned green. "
-  "This only applies to stops openpilot itself brought the car to. When you are stopped behind "
-  "another car, Ford is holding the stop and pulling away already works normally whatever this is "
-  "set to. Your own resume press and the accelerator always work either way.")
 
 ICMB_UNAVAILABLE = tr_noop("Intelligent Cruise Button Management is currently unavailable on this platform.")
 ICMB_UNAVAILABLE_LONG_AVAILABLE = tr_noop("Disable the sunnypilot Longitudinal Control (alpha) toggle to allow Intelligent Cruise Button Management.")
@@ -261,20 +237,8 @@ class CruiseLayout(Widget):
                      "IcbmGapControl"),
       param="IcbmGapControl")
 
-    self.stock_acc_stop_override = toggle_item_sp(
-      title=tr("Come To A Complete Stop"),
-      description=recommended(tr(STOP_OVERRIDE_DESC), "StockAccStopOverride"),
-      param="StockAccStopOverride")
 
-    self.stock_acc_stop_auto_resume = toggle_item_sp(
-      title=tr("Pull Away From Stops Automatically"),
-      description=recommended(tr(STOP_AUTO_RESUME_DESC), "StockAccStopAutoResume"),
-      param="StockAccStopAutoResume")
 
-    self.stock_acc_passthrough = toggle_item_sp(
-      title=tr("Use Ford's Own ACC Commands"),
-      description=recommended(tr(PASSTHROUGH_DESC), "StockAccPassthrough"),
-      param="StockAccPassthrough")
 
     self.ford_synthesize_apim_gps = toggle_item_sp(
       title=tr("Send GPS To The Camera"),
@@ -422,9 +386,6 @@ class CruiseLayout(Widget):
       self.icbm_resume_min_gap,
       self.icbm_resume_min_lead_speed,
       self.icbm_gap_control,
-      self.stock_acc_passthrough,
-      self.stock_acc_stop_override,
-      self.stock_acc_stop_auto_resume,
       self.ford_synthesize_apim_gps,
 
       SectionHeader(tr("Curves")),
@@ -538,9 +499,6 @@ class CruiseLayout(Widget):
       self.icbm_resume_min_gap,
       self.icbm_resume_min_lead_speed,
       self.icbm_gap_control,
-      self.stock_acc_passthrough,
-      self.stock_acc_stop_override,
-      self.stock_acc_stop_auto_resume,
       self.ford_synthesize_apim_gps,
     )
 
@@ -561,9 +519,7 @@ class CruiseLayout(Widget):
       # device read `unset` afterwards. Fixing the two in interfaces.py was not enough and the
       # screen said so on 2026-08-18: "ICBM was grayed out".
       #
-      # Same third state as `_op_long_drives`: under the stock-ACC passthrough Ford still authors
-      # the command and the set speed still governs, so ICBM is meaningful and must stay reachable.
-      op_long_drives = has_long and not ui_state.params.get_bool("StockAccPassthrough")
+      op_long_drives = has_long
       if ui_state.CP_SP.intelligentCruiseButtonManagementAvailable and not op_long_drives:
         self.icbm_toggle.action_item.set_enabled(ui_state.is_offroad())
         self.icbm_toggle.set_description(tr(ICBM_DESC))
@@ -582,64 +538,6 @@ class CruiseLayout(Widget):
         if self.icbm_toggle.description != new_desc:
           self.icbm_toggle.set_description(new_desc)
           self.icbm_toggle.show_description(True)
-
-      # FusionPilot: THE PASSTHROUGH IS MEANINGLESS WITHOUT OPENPILOT LONGITUDINAL, so do not let
-      # him reach a state where it is on and doing nothing. It is the toggle that decides WHO
-      # authors ACCDATA, and with op long off openpilot never authors it at all.
-      #
-      # He asked for a simple answer to "what do I turn on": openpilot Longitudinal Control, then
-      # this. Not DEC, not Experimental Mode -- both only steer openpilot's own plan, which this
-      # discards. The description says so rather than leaving him to infer it from three toggles.
-      self.stock_acc_passthrough.action_item.set_enabled(has_long and ui_state.is_offroad())
-      # And the override needs the PASSTHROUGH, for the same reason: with it off openpilot already
-      # authors every frame, so the override selects a command that was going out anyway and changes
-      # nothing at all. Gating the passthrough on op long and leaving its dependent ungated was half
-      # a fix; caught in review.
-      passthrough_on = ui_state.params.get_bool("StockAccPassthrough")
-      self.stock_acc_stop_override.action_item.set_enabled(
-        has_long and passthrough_on and ui_state.is_offroad())
-      # AND THE THIRD DEPENDENCY IS EXPERIMENTAL MODE, which cost a whole test drive on 2026-08-23.
-      # `FordStopOverride.update` refuses to ARM without it, because the plan only carries a stop
-      # for a sign or a light when the end-to-end model is driving it. STOP_OVERRIDE_DESC has said
-      # so since it was written -- but it says it in the middle of a six-line paragraph, which is
-      # not where somebody checking why nothing happened is going to find it.
-      #
-      # NOT DISABLED, unlike the passthrough above, and the difference is deliberate: Experimental
-      # Mode is toggled from the ROAD screen and legitimately changes from drive to drive, so it is
-      # a state to report rather than a misconfiguration to prevent. The override is still a valid
-      # thing to have switched on while the mode happens to be off.
-      #
-      # This does not catch the case that actually bit -- the on-road `e` button flips the mode on
-      # ONE TAP with no confirmation, mid-drive, and he is not in this screen when that happens.
-      # Check 14 in `bp_drive_checkup.py` is what reads that after the fact.
-      if has_long and not passthrough_on:
-        prefix = "<b>" + tr("Turn on Use Ford's Own ACC Commands first.") + "</b>"
-        self.stock_acc_stop_override.set_description(prefix + "\n\n" + tr(STOP_OVERRIDE_DESC))
-      elif has_long and not ui_state.params.get_bool("ExperimentalMode"):
-        prefix = "<b>" + tr("Experimental Mode is off, so this cannot fire. Turn it on with the "
-                            "button on the driving screen.") + "</b>"
-        self.stock_acc_stop_override.set_description(prefix + "\n\n" + tr(STOP_OVERRIDE_DESC))
-      else:
-        self.stock_acc_stop_override.set_description(tr(STOP_OVERRIDE_DESC))
-
-      # AUTO-RESUME IS MEANINGLESS WITHOUT THE OVERRIDE, because the only stop it releases is one
-      # the override authored -- the gate it opens is keyed on `stop_override_stopped_us`. Same
-      # dependent-toggle reasoning as the override needing the passthrough, one level further down,
-      # and left ungated it would read as a general "pull away from stops" setting that does
-      # nothing.
-      override_on = ui_state.params.get_bool("StockAccStopOverride")
-      self.stock_acc_stop_auto_resume.action_item.set_enabled(
-        has_long and passthrough_on and override_on and ui_state.is_offroad())
-      if has_long and passthrough_on and not override_on:
-        prefix = "<b>" + tr("Turn on Come To A Complete Stop first.") + "</b>"
-        self.stock_acc_stop_auto_resume.set_description(prefix + "\n\n" + tr(STOP_AUTO_RESUME_DESC))
-      else:
-        self.stock_acc_stop_auto_resume.set_description(tr(STOP_AUTO_RESUME_DESC))
-      if not has_long:
-        prefix = "<b>" + tr("Turn on openpilot Longitudinal Control first.") + "</b>"
-        self.stock_acc_passthrough.set_description(prefix + "\n\n" + tr(PASSTHROUGH_DESC))
-      else:
-        self.stock_acc_passthrough.set_description(tr(PASSTHROUGH_DESC))
 
       if has_long or has_icbm:
         self.custom_acc_toggle.action_item.set_enabled(((has_long and not ui_state.CP.pcmCruise) or has_icbm) and ui_state.is_offroad())

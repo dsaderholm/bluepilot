@@ -895,6 +895,62 @@ ACC and we send ACCDATA for just the last few mph of a stop; the two cannot coex
 
 Do not propose a fake lead, a fake target, or a partial ACCDATA takeover.
 
+## THE STOCK ACC PASSTHROUGH IS DELETED, 2026-08-25. EVERYTHING BELOW IT IS A POSTMORTEM.
+
+**Every section from here until "Params, defaults, and his settings" describes a feature that IS NO
+LONGER ON THIS BRANCH.** The code, the params, the toggles, the capnp field and the panda flag were
+all removed here. Read what follows for the lessons and the measurements -- both are good -- but do
+not go looking for `create_acc_msg_passthrough`, `stop_override.py`, `accAuthority` or
+`StockAccPassthrough` in this tree.
+
+**THE CODE IS PRESERVED ON `passthrough-archive`, frozen at `25ae8a6413`** -- the last commit where
+it was whole and working. That branch is DEAD: nothing rebases onto it, nothing merges out of it,
+and it is not to be developed. It exists so the measurements can be re-run and the implementation
+re-read, which is why deleting it outright was the wrong call:
+
+    git show passthrough-archive:opendbc_repo/opendbc/sunnypilot/car/ford/stop_override.py
+
+**HIS DECISION, and he was right:** *"Without complete stops without a lead on passthrough,
+passthrough is useless. If we really can't figure something out, then we should entirely remove
+it."* Then: *"we still don't want passthrough itself on any branch."*
+
+**WHY IT COULD NOT WORK. Four independent reasons, each sufficient on its own:**
+
+    continuous override      kills Ford ACC for the drive      measured, 3/3 beyond ~2 s;
+                                                               under 1.84 s, 5/5 survived
+    interleaving             the camera watches MOTION, not    handing back 1-in-5 frames does not
+                             our frames                        change how the car is moving
+    AccVeh_V_Trg             not sent to the brake controller  DBC receiver list: braking goes to
+                                                               ABS_ESC, that field does not
+    disengage, then stop     no panda authority with cruise    ford.h pcm_cruise_check ->
+                             off                               controls_allowed -> longitudinal
+
+**AND IT WAS STRICTLY WORSE THAN LEAVING OP LONG OFF.** Passthrough's only benefit was the stop
+override. Everything else -- ICBM, SLA, both curve controllers, holds, the gap button -- works
+identically with op long off, and with op long off Ford drives the car directly through a closed
+relay: no forwarding, no clamping, no substituted frames, and no camera cancel possible.
+
+**TWO THINGS SURVIVED THE DELETION because they stand on their own:**
+
+- **The camera-ACCDATA readback** (`carstate_ext` -> `brakeLightStatus.accAccelRequest` /
+  `accPropulsionRequest` / `accDecelRequest`). Reads the camera's frames off bus 2, which happens
+  whether or not anything is forwarded. It feeds the brake-lamp pill AND it is the reference data
+  for what replaced this work.
+- **The panda-band clamps in `create_acc_msg`.** They apply to openpilot's OWN authored frame and
+  stop panda silently dropping ACCDATA when a value lands outside its band.
+
+**WHAT REPLACED IT: the `decel-hierarchy` branch (`../bluepilot-decel`).** Chasing why op long is
+bad on this car turned up something specific -- openpilot asserts the friction brakes at
+**-0.14 m/s^2** and clips its propulsion request at **-0.5**, while Ford ramps engine braking to
+**-0.66** and only hands over to the brakes below **-1.1**. Ford blends the two across that whole
+band; `if brake_actuate: gas = INACTIVE_GAS` makes that structurally impossible for openpilot. That
+is his "op long can't coast", and it is two constants and one `if` rather than a planner problem.
+
+**THIS BRANCH IS ICBM, SCC AND SLA ONLY.** That is what it was always for, and the passthrough
+should have been its own branch from the start. Do not add longitudinal-authoring work here.
+
+---
+
 ### BUT THERE IS ONE CANDIDATE SIDE DOOR: FORWARD THE CAMERA'S OWN ACCDATA, OVERRIDE ONLY THE STOP
 
 Raised 2026-08-17 after he pushed back on two flat "no" answers. **He was right to push.** An earlier

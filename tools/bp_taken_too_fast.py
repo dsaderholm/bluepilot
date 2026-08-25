@@ -77,7 +77,7 @@ def main():
         continue
       if w == "controllerStateBP":
         try:
-          authority = str(m.controllerStateBP.accAuthority).split(".")[-1]
+          authority = "n/a"
         except Exception:
           pass
         continue
