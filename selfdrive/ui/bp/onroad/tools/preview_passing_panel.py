@@ -103,6 +103,14 @@ SCENES = [
    "PASSING ASSIST OFF", "LKA button turns it back on", 0.0, False, GREY),
   ("keep right",
    "MOVE RIGHT  >>>", "no rear data", 0.0, True, BLUE),
+  # ROUTE INTENT. Amber rather than keep-right's blue and deliberately not the green of a pass:
+  # both are "move over, not overtake", but keep-right is a courtesy and this one has a gore point
+  # coming. Rendered because it is a NEW panel state and because the bug it replaced -- an exit
+  # suggestion rendering as "PASS RIGHT" in green -- was invisible until someone looked.
+  ("route intent: get into the exit lane",
+   "EXIT LANE  >>>", "your exit in 900ft  -  no rear data", 0.0, True, AMBER),
+  ("route intent: the exit is on the left",
+   "<<<  EXIT LANE", "no rear data", 0.0, True, AMBER),
   # The bar has moved off his setting and the line has to say so, or it reads as the old "nothing
   # slower ahead with a visibly slower car in front" bug wearing a new cause.
   ("held: at the posted limit, so a pass has to be worth more",

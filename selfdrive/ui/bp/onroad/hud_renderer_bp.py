@@ -1095,6 +1095,7 @@ class HudRendererBP(HudRendererSP):
 
     side = str(pa.maneuverSide).upper()
     keep_right = str(pa.maneuverReason) == 'keepRight'
+    exit_lane = str(pa.maneuverReason) == 'exitLane'
     self._pa_alert = True
     self._pa_color = rl.Color(190, 150, 235, 255)   # not the green of a real suggestion
 
@@ -1102,7 +1103,10 @@ class HudRendererBP(HudRendererSP):
       self._pa_main = f"WOULD SIGNAL {side}"
       # Keep-right and passing look identical on this line otherwise, and they mean opposite
       # things: one is going round something, the other is getting out of the way.
-      self._pa_sub = "moving back over" if keep_right else "waiting before moving"
+      # Three reasons, three different things being waited for. Falling through to the passing
+      # wording would say "waiting before moving" while the car was lining up for an exit.
+      self._pa_sub = ("getting into the exit lane" if exit_lane else
+                      "moving back over" if keep_right else "waiting before moving")
       self._pa_progress = min(1.0, pa.maneuverSeconds / max(self._pa_blinker_lead, 0.1))
     elif phase == 'changing':
       self._pa_main = f"WOULD BE CHANGING {side}"
@@ -1240,7 +1244,18 @@ class HudRendererBP(HudRendererSP):
       # Direction is carried by chevrons on the correct side, so the side registers before the
       # words are read. KEEP RIGHT and PASS RIGHT are both Side.right and mean opposite things,
       # which is why the reason is spelled out rather than inferred from the side.
-      if str(pa.reason) == 'keepRight':
+      # THE THIRD REASON ON Side.right, added with route intent. The comment above is not
+      # decoration -- without this branch an exit-lane suggestion fell through to the else and
+      # rendered as "PASS RIGHT" in green, telling him he was being offered an overtake when he
+      # was being told to get into his exit lane. Its own warning, ignored by the person who added
+      # the third reason.
+      #
+      # Amber rather than keep-right's blue: both are "move over, not overtake", but keep-right is
+      # a courtesy with no deadline and this one has a gore point coming.
+      if str(pa.reason) == 'exitLane':
+        self._pa_main = "EXIT LANE  >>>" if suggestion == 'right' else "<<<  EXIT LANE"
+        self._pa_color = rl.Color(235, 180, 90, 255)
+      elif str(pa.reason) == 'keepRight':
         self._pa_main = "MOVE RIGHT  >>>"
         self._pa_color = rl.Color(140, 190, 230, 255)
       elif suggestion == 'left':
