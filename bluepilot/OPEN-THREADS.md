@@ -251,6 +251,39 @@ result file all vanished once during this work. Rebuild with the tar one-liner i
 
 ---
 
+## 6. Three warts in the new hold rules, none of them fixed
+
+Raised when he asked *"does this all make sense and is how most people would want to use it?"* --
+these are consequences of the 2026-08-25 changes that nobody chose, not bugs. Watch for them before
+building anything on top.
+
+**1. PIN SUGGESTIONS WILL GET NOISIER, and this is the concrete one.** `SUGGEST_AFTER = 3`
+observations within `DEFAULT_RADIUS_M = 60` and `SUGGEST_SPEED_TOLERANCE = 3`. Previously, with SLA
+quiet, no hold existed -- so `_pinnable_speed()` returned 0 and NOTHING was observed on those roads.
+Now every set speed is a hold, so every place he engages gets observed. Three drives setting a
+similar speed near the same spot produces a suggestion, which on a daily commute means his driveway
+or the same on-ramp inside a week.
+
+It only ever draws a hollow dot he can tap, so it is not destructive -- but pins were learned from
+DELIBERATE CORRECTIONS AGAINST SLA and are now learned from ordinary engagements. Different
+character, same mechanism. **Check `IcbmPinnedHolds` and the observation store after a few drives**;
+if suggestions are appearing at places he does not care about, the fix is a gate on the observation
+(e.g. only observe a hold that differs from what SLA/cruise would have done anyway), not a bigger
+`SUGGEST_AFTER`.
+
+**2. SET's MEANING NOW DEPENDS ON STATE HE CANNOT SEE AT PRESS TIME.** With a live limit it hands
+the speed to SLA; without one it holds the speed he pressed at. SLA coverage flickers, so the same
+physical press does two different things on the same road. He sees the outcome in the box a moment
+later but cannot predict it. This is the most likely source of the next *"why did it do that"*, and
+there is currently no cue.
+
+**3. THE `press` VS `fallbackIdle` DISTINCTION IS INVISIBLE.** Two holds that look identical in the
+set-speed box behave differently on entering a pinned zone -- a pressed one defers the pin, an
+inferred one loses to it. Introduced 2026-08-25 with the narrowed gate. Nothing on screen says
+which kind he has.
+
+---
+
 ## Done recently, kept only until the next drive confirms them
 
 - **Panda gas floor** (`ed6c0b71`, 2026-08-24) — `min_gas` -0.5 -> -2.8 behind
