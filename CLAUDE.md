@@ -4855,6 +4855,48 @@ drives the would-admit set has a real tail -- p99 7.91, max 9.99 -- and a 1.5 m 
 it while touching 0.0% of what the gate opens today. That is the first road class where the taper
 check does visible work at zero measured cost.
 
+####### "DEAD TWICE OVER" WAS WRONG. IT WAS EIGHT EDGES, AND IT WAS ANOTHER SMALL SAMPLE.
+
+Three more drives, pooled to SEVEN (000003b7-bd), 85 segments, 16 rising edges:
+
+    two-way road -- plausible                                     8
+    one-way, MOVING LIKE REAL TRAFFIC -- likely across a median    3
+    ON A ONE-WAY ROAD, slow -- clutter, impossible                 3
+    one-way, IMPLAUSIBLY FAST -- radar artifact                    2
+
+**The eight-edge batch happened to contain ZERO slow-clutter edges, so the sweep read 0/0 and the
+lever looked finished. It is not.** Three of the next eight were exactly the clutter a floor exists
+to reject, and the pooled sweep has a free move in it:
+
+    flat  frac    FALSE killed   real LOST
+     5.0  0.70      0 of 5        0 of 11    <- live
+     7.0  0.70      1 of 5        0 of 11    <- FREE
+     9.0  0.70      3 of 5        2 of 11
+
+**Raising the FLAT floor 5.0 -> 7.0 kills one false edge and loses nothing** -- including nothing
+from the median-crossing set, which the scorer counts as real and protects, correctly. And it does
+not touch the case the flat floor exists for: a 25 mph oncoming car reads 11.2 m/s, still well clear
+of 7.0. Note this contradicts the earlier line that "raising the flat floor costs real edges
+immediately" -- that was measured under the wrong classification, when median crossings were being
+counted as false positives a higher floor could win.
+
+**NOT SHIPPED, and the reason is the entry title.** The gain is ONE edge in sixteen, and the change
+removes a veto, so it opens a maneuver and carries the higher bar. Acting on it now would be making
+the same mistake a third time in one file.
+
+**THE PATTERN IS NOW THE FINDING, and it deserves to outrank any of the individual numbers.** In
+this feature, every conclusion drawn from fewer than about ten events has needed revision:
+
+    28.9% memory-window share      withdrawn -- frames, not edges
+    "seven of ten impossible"      became 33% on ten more drives
+    33% false rate                 became an upper bound once oneWay was understood
+    "0 of 4, the fix works"        no evidence at all -- the constant was inert there
+    "dead twice over"              THIS -- eight edges, zero of them the relevant kind
+
+**So the rule for this detector specifically: do not act on a sweep with fewer than ~20 edges, and
+state the edge count beside any claim made from one.** The sweep is cheap to re-run and the edges
+accumulate on their own; there has never been a reason to act early, only a temptation to.
+
 **AND THE OBVIOUS DISCRIMINATOR IS FORBIDDEN, which is worth stating before someone reaches for it.**
 `oneWay` from the map separates these perfectly by construction -- it is what labels them. But
 suppressing an oncoming sighting because the map says one-way is **the map REMOVING a refusal**,
