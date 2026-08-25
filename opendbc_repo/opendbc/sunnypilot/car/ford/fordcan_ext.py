@@ -171,12 +171,24 @@ def create_acc_msg(packer, CAN: CanBus, long_active: bool, gas: float, accel: fl
   # it sits far outside the band on purpose and panda exempts it.
   if abs(float(gas) - _PANDA_GAS_INACTIVE) >= 0.005:
     gas = min(max(float(gas), _PANDA_GAS_MIN + _PANDA_MARGIN), _PANDA_GAS_MAX - _PANDA_MARGIN)
+  # AND `AccPrpl_A_Pred` GETS IT TOO, because panda's gas band polices BOTH fields
+  # (`longitudinal_gas_checks` is called on gas and gas_pred alike) and this one was going out RAW
+  # while its two siblings were clamped. Found in review, 2026-08-24, right after the panda floor
+  # was widened to -2.8: the widening quietly enlarged what this unclamped field could put on the
+  # wire, which is the one thing that change was documented as NOT doing.
+  #
+  # It is a no-op today and that is exactly why it is worth pinning: `accel_pred_send` is the
+  # constant `CarControllerParams.INACTIVE_GAS` in longitudinal_ext.py, so the safety of the
+  # openpilot-authored path rests on a value defined in a different file that nobody would think
+  # to check when changing this one. Same shape as every "a fixture held it constant" bug here.
+  if abs(float(accel_pred) - _PANDA_GAS_INACTIVE) >= 0.005:
+    accel_pred = min(max(float(accel_pred), _PANDA_GAS_MIN + _PANDA_MARGIN), _PANDA_GAS_MAX - _PANDA_MARGIN)
 
   values = {
     "AccBrkTot_A_Rq": accel,                          # Brake total accel request: [-20|11.9449] m/s^2
     "Cmbb_B_Enbl": 1 if long_active else 0,           # Enabled: 0=No, 1=Yes
     "AccPrpl_A_Rq": gas,                               # Acceleration request: [-5|5.23] m/s^2
-    "AccPrpl_A_Pred": accel_pred,                      # Predicted accel (from carcontroller, not hardcoded)
+    "AccPrpl_A_Pred": accel_pred,                      # Predicted accel; clamped above, see the note
     "AccResumEnbl_B_Rq": 1 if long_active else 0,
     "AccVeh_V_Trg": v_ego_kph,                         # Target speed: [0|255] km/h
     "AccBrkPrchg_B_Rq": 1 if precharge_actuate else 0, # Pre-charge brake request (independent hysteresis)
