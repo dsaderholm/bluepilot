@@ -102,6 +102,11 @@ RE_ARM_ON_CRUISE_CYCLE = True  # cancel (or any disengage) followed by re-engage
 # resumeCruise in that state -- and cruise_enabled only flips a few frames later, so the press has
 # to be remembered across the transition rather than read on the cycle frame.
 RESUME_BUTTONS = (ButtonType.resumeCruise,)
+# And the SYMMETRIC half, which never existed. SET- while cruise is off emits `setCruise`
+# (COMBO_EVENTS["SET_DEC"][False] == 9), and that is the one button meaning that hands the speed
+# back to Speed Limit Assist. MAIN-engages synthesize the same event deliberately, and mean the
+# same thing by it, so both sources are welcome here.
+SET_BUTTONS = (ButtonType.setCruise,)
 # Tapping. Within TAP_BAND mph of the target the button is pulsed rather than held, because a held
 # button moves this car 5 mph and a tap moves it 1 -- see the duty-cycle block in update_state_machine.
 # ON long enough for opendbc's ford/icbm.py to put one frame on the wire (it emits at most one per
@@ -111,6 +116,7 @@ TAP_ON_FRAMES = 8
 TAP_CYCLE_FRAMES = 60
 
 RESUME_PRESS_MEMORY_FRAMES = 150  # 1.5 s at 100 Hz, generous next to the engage delay
+SET_PRESS_MEMORY_FRAMES = 150     # same window, same reason -- the PCM reports enabled late
 # ...but the button event must not be DEPENDED on, so RESUME is also recognized from BEHAVIOR.
 #
 # Read the reasoning below carefully, because an earlier version of this comment got it backwards
@@ -390,6 +396,7 @@ class IntelligentCruiseButtonManagement:
     self.counter_move_accum = 0      # set-speed movement against ICBM's own command, display units
     self.cruise_button_prev = SendButtonState.none
     self.resume_press_frames = 0     # >0 while a RESUME press is recent enough to have re-engaged
+    self.set_press_frames = 0        # >0 while a SET press is recent enough to have engaged
     self.reanchor_overridden = False  # a resume kept the hold; re-measure the limit rule from here
     self.v_cluster_before_disengage = 0  # set speed when cruise last dropped; RESUME restores it
     self.cycle_decision_pending = False  # waiting for the set speed to say whether it was RESUME
@@ -1167,6 +1174,10 @@ class IntelligentCruiseButtonManagement:
     if any(b.type.raw in RESUME_BUTTONS and b.pressed for b in CS.buttonEvents):
       self.resume_press_frames = RESUME_PRESS_MEMORY_FRAMES
 
+    # Remember a SET press the same way -- see SET_BUTTONS.
+    if any(b.type.raw in SET_BUTTONS and b.pressed for b in CS.buttonEvents):
+      self.set_press_frames = SET_PRESS_MEMORY_FRAMES
+
     # Remember the set speed while engaged; at the moment cruise drops this is what RESUME will
     # restore, and comparing against it is how RESUME is told from SET without a button event.
     # Frozen while a decision is pending, because it IS the evidence for that decision. Updating
@@ -1187,6 +1198,26 @@ class IntelligentCruiseButtonManagement:
       if self.resume_press_frames > 0:
         self.reanchor_overridden = True
         self.cycle_decision_pending = False
+      elif self.set_press_frames > 0:
+        # THE BUTTON SAYS SET, SO DO NOT ASK THE SPEEDS. Reported from the road 2026-08-25:
+        # cruise off while accelerating onto the highway, SET pressed at ~75, and the ~22 mph hold
+        # from the surface street before survived instead of the speed going to SLA's 75.
+        #
+        # The comment above this block already says "the button event settles it when it arrives"
+        # -- but only the RESUME half was ever built. A SET fell through to the behavioural
+        # detector, which compares the DASH set speed against vEgo. That detector exists because
+        # the button used to be mislabelled (see values_ext.py: this wheel sends ResInc, and
+        # `CcAslButtnSetIncPress` reached openpilot as `setCruise` when off). It is not needed for
+        # SET any more, and it is strictly worse than the event: the dash carries the OLD set speed
+        # for some frames after the press, so both sides of `resumed` read 22 and the cycle scored
+        # as a resume.
+        #
+        # ORDER MATTERS AND RESUME WINS. Both flags can be live -- CNCL emits `resumeCruise` when
+        # off, so cancel-then-set inside 1.5 s sets both. On ambiguity keep the hold: discarding one
+        # is destructive and silent, keeping one the driver can always change. That is the same
+        # rule the detector below states for itself.
+        self.clear_baseline()
+        self.cycle_decision_pending = False
       else:
         # Only worth deferring when there is a hold at stake. Otherwise the very first engagement
         # of a drive leaves a decision pending that fires 2.5 s later and wipes a hold created in
@@ -1195,6 +1226,7 @@ class IntelligentCruiseButtonManagement:
       self.cruise_cycle_frames = CRUISE_CYCLE_SETTLE_FRAMES
       self.v_cluster_at_cycle = self.v_cruise_cluster
       self.resume_press_frames = 0
+      self.set_press_frames = 0
       return
 
     # Decide once the resume jump has landed. Deferring is the point: clearing on the cycle frame
@@ -1765,6 +1797,7 @@ class IntelligentCruiseButtonManagement:
     # unconditional: the resume jump settles on its own clock, held button or not
     self.cruise_cycle_frames = max(0, self.cruise_cycle_frames - 1)
     self.resume_press_frames = max(0, self.resume_press_frames - 1)
+    self.set_press_frames = max(0, self.set_press_frames - 1)
     self.cluster_stable_frames = (self.cluster_stable_frames + 1
                                   if self.v_cruise_cluster == self.v_cruise_cluster_prev else 0)
     # End the resume window early once the resume jump has landed AND settled, so the driver's

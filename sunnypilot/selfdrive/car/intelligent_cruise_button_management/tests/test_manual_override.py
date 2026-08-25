@@ -1291,6 +1291,100 @@ class TestResumeKeepsTheHoldAndSetGivesItBack:
     assert icbm.override_state == OverrideState.auto, "SET kept the hold"
     assert icbm.v_baseline == 0
 
+  @staticmethod
+  def _cycle_with_a_stuck_dash(icbm, button, hold=22, road=75):
+    """His 2026-08-25 case: the DASH never leaves the old hold across the whole cycle.
+
+    `cycle_with_set` walks the dash to the road speed, which is the case the behavioural detector
+    was built for and handles. On the road the dash is not that obliging -- Ford sets it to the
+    current speed but ICBM immediately starts pressing it back down toward the hold, so by the
+    time the decision fires it can be anywhere, including still on the old value. Modelled here as
+    the pessimal version: it never moves at all.
+    """
+    for _ in range(200):
+      icbm.run(make_cs(hold, v_ego=road, enabled=False), CC, make_lp(LIMIT), False)
+    icbm.run(make_cs(hold, v_ego=road, enabled=False, buttons=(button,)), CC, make_lp(LIMIT), False)
+    for _ in range(5):
+      icbm.run(make_cs(hold, v_ego=road, enabled=False), CC, make_lp(LIMIT), False)
+    for _ in range(300):
+      icbm.run(make_cs(hold, v_ego=road, enabled=True), CC, make_lp(LIMIT), False)
+
+  def test_SET_clears_the_hold_even_when_the_dash_never_moves(self):
+    """Reported from the road, 2026-08-25:
+
+      "I had cruise disengaged while I got up to highway speed. I pressed set, and it kept my hold
+       from the surface street before, which was something like 22 MPH. It did not go to the SLA
+       speed on that road, which should've been 75."
+
+    The contract says SET-while-off clears the hold and SLA takes the speed. It did not, because
+    the decision fell through to the behavioural detector: with the dash still on 22 and the
+    pre-disengage value also 22, `resumed` matched exactly and the cycle scored as a RESUME.
+
+    The button event was there the whole time -- `COMBO_EVENTS["SET_DEC"][False]` is `setCruise` --
+    and the block's own comment says the event settles it when it arrives. Only the RESUME half of
+    that had been built.
+    """
+    icbm = fresh()
+    set_baseline(icbm, to=22)
+    settle(icbm, LIMIT, cluster=22)
+    assert icbm.v_baseline == 22, "test did not manage to build the hold it is about"
+
+    self._cycle_with_a_stuck_dash(icbm, SET_PRESS)
+    assert icbm.v_baseline == 0, "SET kept the hold -- the surface-street 22 survived onto the highway"
+    assert icbm.override_state == OverrideState.auto, "SET did not hand the speed back to SLA"
+
+  def test_RESUME_still_keeps_the_hold_when_the_dash_never_moves(self):
+    """The other side of the same coin, and the regression the fix above could plausibly cause.
+
+    A stuck dash is exactly the shape that makes `resumed` match, so RESUME must go on working
+    through it -- and it must work because the BUTTON said resume, not because a speed comparison
+    happened to agree.
+    """
+    icbm = fresh()
+    set_baseline(icbm, to=22)
+    settle(icbm, LIMIT, cluster=22)
+
+    self._cycle_with_a_stuck_dash(icbm, RESUME_PRESS)
+    assert icbm.v_baseline == 22, "RESUME threw the hold away"
+    assert icbm.override_state == OverrideState.manual
+
+  def test_a_cancel_then_set_inside_the_window_KEEPS_the_hold(self):
+    """CNCL emits `resumeCruise` when cruise is off, so cancel-then-set within 1.5 s arms BOTH
+    memories. Ambiguity must keep the hold: discarding one is destructive and silent, keeping one
+    the driver can always change with another press. Same rule the detector states for itself."""
+    icbm = fresh()
+    set_baseline(icbm, to=22)
+    settle(icbm, LIMIT, cluster=22)
+
+    for _ in range(200):
+      icbm.run(make_cs(22, v_ego=75, enabled=False), CC, make_lp(LIMIT), False)
+    icbm.run(make_cs(22, v_ego=75, enabled=False, buttons=(RESUME_PRESS,)), CC, make_lp(LIMIT), False)
+    icbm.run(make_cs(22, v_ego=75, enabled=False, buttons=(SET_PRESS,)), CC, make_lp(LIMIT), False)
+    for _ in range(300):
+      icbm.run(make_cs(22, v_ego=75, enabled=True), CC, make_lp(LIMIT), False)
+
+    assert icbm.v_baseline == 22, "an ambiguous cycle discarded the hold"
+
+  def test_a_STALE_set_press_does_not_clear_a_later_hold(self):
+    """The mirror of the stale-RESUME test below, and the reason the memory decays.
+
+    Without the decay a single SET press early in a drive would arm the short-circuit forever, and
+    every cruise cycle after it would silently discard whatever hold he had built in the meantime.
+    A press from minutes ago is not evidence about this engagement.
+    """
+    icbm = fresh()
+    set_baseline(icbm, to=22)
+    settle(icbm, LIMIT, cluster=22)
+
+    icbm.run(make_cs(22, v_ego=75, enabled=False, buttons=(SET_PRESS,)), CC, make_lp(LIMIT), False)
+    for _ in range(400):                       # far longer than SET_PRESS_MEMORY_FRAMES
+      icbm.run(make_cs(22, v_ego=22, enabled=False), CC, make_lp(LIMIT), False)
+    # engage with the dash landing back on the previous set speed -- the RESUME signature
+    for _ in range(300):
+      icbm.run(make_cs(22, v_ego=22, enabled=True), CC, make_lp(LIMIT), False)
+
+    assert icbm.v_baseline == 22, "a stale SET press discarded a hold it knew nothing about"
+
   def test_a_stale_resume_press_is_overruled_by_behaviour(self):
     """The button event is no longer what decides -- it cannot be, since this car does not deliver
     it. A RESUME press from minutes ago followed by a set speed landing on the ROAD SPEED is a SET,
