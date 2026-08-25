@@ -5690,3 +5690,37 @@ worked around quietly.
 Also ruled out today, each by measurement, so nobody re-derives them: instantaneous disagreement
 (the camera had CONVERGED onto our command 3.2 s before cancelling on 3b5), accumulated
 disagreement, dropped TX frames, waiting for the camera to relent, disengaging, and a MAIN press.
+
+## 2026-08-24: WHY THE MODEL-STOP PATH ARMED TWELVE SECONDS LATE -- AND A FIX THAT WAS WRONG
+
+Route 000003bb, the approach he reported as "it started slowing at the right time then seemed to
+stop slowing" and which ended in emergency braking.
+
+**What was ruled out, all by measurement:**
+
+    ICBM rate limit      NO. The set speed went 45 -> 20 in 3.0 s (~8 mph/s).
+    Ford under-braking   NO. Ford COMMANDED -3.16 m/s^2, harder than openpilot's own -2.84 ask.
+                             Actual decel reached -4.88. The "Ford tops out near 1.6" belief was wrong.
+    an unconfirmed lead  NO. `hasLead: False`, `trigger: modelStop`, `dRel: 0`. It was a light or
+                             sign, and the screen said so correctly: "Stop sign or signal ahead /
+                             Slowing to 20 mph -- the stop is yours."
+
+**What actually happened:** the model had the stop at t+138.0 with 138 m to run at 39 mph. That
+needs 1.10 m/s^2 against an `IcbmModelStopMinDecel` threshold of 1.0, so the gate was satisfied
+IMMEDIATELY. The path did not arm until t+150 -- twelve seconds and most of the braking distance.
+
+The arming accumulator is the suspect: `_model_stop_s += DT_MDL` while `model_candidate` holds, and
+`= 0.0` on ANY false frame, against `MODEL_STOP_PERSISTENCE_S = 0.3`. Its own comment says it is
+"only here to reject a single-frame glitch", and one glitch destroys it instead. `dec.hasSlowDown`
+was alternating true/false frame to frame across t+138.6..141.5, and stop_override.py documents that
+same signal as chattering near the threshold by design.
+
+**AND THE OBVIOUS FIX IS WRONG. Do not re-derive it.** Tolerating a short gap before zeroing the
+accumulator took the suite from 60 passing to 11 failing in that file alone, including
+`test_a_stop_reachable_by_coasting_does_not_trigger`. The reason is structural: `model_candidate` is
+an AND of the chattering flag AND `a_required >= min_decel`, so a blanket gap tolerance cannot tell
+"the flag glitched" from "this stop does not need braking yet" -- and it arms on stops reachable by
+lifting off, which is the failure that gate exists to prevent.
+
+Any real fix has to debounce the FLAG term alone, before it is ANDed with the physics term. That is
+a change to what `model_candidate` is made of, not to how its result is accumulated.

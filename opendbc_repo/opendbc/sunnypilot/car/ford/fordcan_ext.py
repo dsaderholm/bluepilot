@@ -265,13 +265,32 @@ def create_acc_msg_passthrough(packer, CAN: CanBus, stock_values: dict, clear_ca
   # its stop status, everything -- and substitutes a different controller's idea of the moment.
   # Clamping keeps every other signal Ford authored and gives up 0.005 m/s^2 of propulsion.
   #
-  # THE TOP ONLY, and the asymmetry is the point: clamping DOWN from 2.07 to 1.995 asks for LESS
-  # acceleration than Ford wanted, which is the conservative direction. Clamping UP from -0.77 to
-  # -0.495 would ask for less ENGINE BRAKING than Ford wanted, which is not -- so the low side is
-  # still refused and still falls back. That case is 3.5% of fallbacks and none of the launches.
+  # BOTH ENDS, as of 2026-08-24. The low side used to be refused, on the reasoning that clamping UP
+  # from -0.77 to -0.495 asks for less ENGINE BRAKING than Ford wanted. That reasoning assumed the
+  # fallback controller would do at least as much braking. IT DOES NOT -- it does far more, in a
+  # lurch.
+  #
+  # MEASURED on route 000003bc, t+103.59..103.87, one of eleven such refusals on that drive:
+  #
+  #     FORD wanted brake  -0.11 .. -0.13 m/s^2 throughout
+  #     WE sent            -0.18, -0.25, ... -1.09, -1.16   then snapped back to -0.13
+  #
+  # 0.28 s of up to NINE TIMES Ford's braking, because openpilot's longitudinal controller has been
+  # watching the car ignore it while Ford drove and arrives already wound up (see the note on
+  # `_urgent_speed_gap`: it sits at its -3.5 floor for over 10% of engaged frames). Handing it the
+  # frame for a quarter second is a jolt, not a safer deceleration.
+  #
+  # So the trade is really: give up 0.125 m/s^2 of POWERTRAIN braking -- Ford's own brake command
+  # still goes out untouched on the same frame -- or take a 1 m/s^2 spike. Clamp.
+  #
+  # `AccBrkTot_A_Rq` IS STILL REFUSED AT THE BOTTOM and must stay that way: that field IS the brake,
+  # and asking for less of it than Ford wanted is the one direction no measurement excuses.
   gas = float(values["AccPrpl_A_Rq"])
-  if gas > (_PANDA_GAS_MAX - _PANDA_MARGIN) and abs(gas - _PANDA_GAS_INACTIVE) >= 0.005:
-    values["AccPrpl_A_Rq"] = _PANDA_GAS_MAX - _PANDA_MARGIN
+  if abs(gas - _PANDA_GAS_INACTIVE) >= 0.005:
+    if gas > (_PANDA_GAS_MAX - _PANDA_MARGIN):
+      values["AccPrpl_A_Rq"] = _PANDA_GAS_MAX - _PANDA_MARGIN
+    elif gas < (_PANDA_GAS_MIN + _PANDA_MARGIN):
+      values["AccPrpl_A_Rq"] = _PANDA_GAS_MIN + _PANDA_MARGIN
 
   # AND `AccBrkTot_A_Rq` HAS THE SAME CEILING AND WAS NEVER CLAMPED. FusionPilot, 2026-08-23.
   #
@@ -430,13 +449,11 @@ def passthrough_admissible(stock_values: dict, long_active: bool, allow_cancel: 
   # threw away the entire frame on every pull-away (624 of 994 fallback frames on route 00000393,
   # all under 15 mph). Clamping down asks for less acceleration than Ford wanted, which is safe.
   #
-  # The bottom is NOT clamped and so is still a refusal: raising -0.77 to -0.495 would ask for less
-  # ENGINE BRAKING than Ford wanted, and quietly under-decelerating is not a thing to do to a frame
-  # nobody is watching. Falling back to a controller we already ship is the honest answer there.
-  gas = float(stock_values.get("AccPrpl_A_Rq", 0.0))
-  if abs(gas - _PANDA_GAS_INACTIVE) >= 0.005 and gas < (_PANDA_GAS_MIN + _PANDA_MARGIN):
-    return "AccPrpl_A_Rq %.3f below panda's band" % gas
-
+  # THE BOTTOM IS NO LONGER A REFUSAL, as of 2026-08-24. `create_acc_msg_passthrough` clamps it, and
+  # the note there carries the measurement: the fallback this refusal handed the car to applied up
+  # to -1.16 m/s^2 while Ford was asking -0.13, for 0.28 s, eleven times on route 000003bc alone.
+  # "Falling back to a controller we already ship" was the honest answer only while nobody had
+  # checked what that controller does when it arrives wound up.
   return ""
 
 
