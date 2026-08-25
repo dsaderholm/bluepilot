@@ -18,7 +18,6 @@ from types import SimpleNamespace as NS
 
 import pytest
 
-from opendbc.car import structs
 from opendbc.car.ford.values import FordFlags
 from opendbc.sunnypilot.car.ford.carstate_ext import CarStateExt
 

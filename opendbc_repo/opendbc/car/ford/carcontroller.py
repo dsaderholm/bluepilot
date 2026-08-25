@@ -813,9 +813,13 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
         self.acc_authority = _AA.fallback
 
       if use_passthrough:
+        # FusionPilot: the gas floor is read per frame from CP_SP.safetyParam -- the exact int
+        # panda was given -- so the clamp can never be more permissive than the firmware. It is
+        # NOT cached in __init__: setup_interfaces sets that bit after this object is built.
         can_sends.append(fordcan_ext.create_acc_msg_passthrough(self.packer, self.CAN,
                                                                CS.acc_stock_values,
-                                                               clear_cancel=clear_cancel))
+                                                               clear_cancel=clear_cancel,
+                                                               gas_floor=fordcan_ext.passthrough_gas_floor(self.CP_SP)))
         # Record what actually went on the wire, not what we computed and discarded. Every offline
         # tool reads actuatorsOutput, and the whole point of the first passthrough drive is to
         # compare Ford's numbers against openpilot's -- logging ours would falsify that comparison.

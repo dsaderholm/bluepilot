@@ -19,6 +19,7 @@ from collections import namedtuple
 from opendbc.car import structs
 from opendbc.car.ford.fordcan import CanBus, calculate_lat_ctl2_checksum
 from opendbc.sunnypilot.car.ford import apim_gps
+from opendbc.sunnypilot.car.ford.values_ext import FordSafetyFlagsSP
 
 HUDControl = structs.CarControl.HUDControl
 
@@ -195,7 +196,8 @@ _ACCDATA_SIGNALS = (
 )
 
 
-def create_acc_msg_passthrough(packer, CAN: CanBus, stock_values: dict, clear_cancel: bool = False):
+def create_acc_msg_passthrough(packer, CAN: CanBus, stock_values: dict, clear_cancel: bool = False,
+                               gas_floor: float | None = None):
   """FusionPilot: re-send the CAMERA's own ACC command, unchanged.
 
   Under openpilot longitudinal control the relay is open, so the camera's ACCDATA never reaches the
@@ -285,12 +287,28 @@ def create_acc_msg_passthrough(packer, CAN: CanBus, stock_values: dict, clear_ca
   #
   # `AccBrkTot_A_Rq` IS STILL REFUSED AT THE BOTTOM and must stay that way: that field IS the brake,
   # and asking for less of it than Ford wanted is the one direction no measurement excuses.
+  #
+  # AND THE FLOOR IS NOW FORD'S OWN, NOT UPSTREAM'S. FusionPilot, 2026-08-24. The clamp above was
+  # the right call against a -0.5 floor, but the owner was right that it still costs real braking:
+  # 756 frames on one drive, median 0.415 and worst 1.095 m/s^2 of powertrain deceleration given
+  # up, in episodes up to 17.5 s. The -0.5 was never Ford's number -- it is a generic openpilot
+  # constant, and Ford commands below it on 2.86% of all frames in ordinary driving.
+  #
+  # So panda's floor widens to -2.8 while the passthrough is on (FordSafetyFlagsSP.PASSTHROUGH_LONG)
+  # and the clamp here follows it. The clamp does NOT go away: Ford's measured minimum is -2.710
+  # and the band has to end somewhere, so a frame past the new floor is still softened rather than
+  # thrown to a wound-up controller.
+  #
+  # `gas_floor` MUST come from the same flag bit panda was given -- see `passthrough_gas_floor`.
+  # Defaulting to the NARROW floor is the safe direction: clamping more than panda requires costs
+  # a little braking, while clamping less makes panda drop the whole frame at 50 Hz.
+  gas_min = _PANDA_GAS_MIN if gas_floor is None else gas_floor
   gas = float(values["AccPrpl_A_Rq"])
   if abs(gas - _PANDA_GAS_INACTIVE) >= 0.005:
     if gas > (_PANDA_GAS_MAX - _PANDA_MARGIN):
       values["AccPrpl_A_Rq"] = _PANDA_GAS_MAX - _PANDA_MARGIN
-    elif gas < (_PANDA_GAS_MIN + _PANDA_MARGIN):
-      values["AccPrpl_A_Rq"] = _PANDA_GAS_MIN + _PANDA_MARGIN
+    elif gas < (gas_min + _PANDA_MARGIN):
+      values["AccPrpl_A_Rq"] = gas_min + _PANDA_MARGIN
 
   # AND `AccBrkTot_A_Rq` HAS THE SAME CEILING AND WAS NEVER CLAMPED. FusionPilot, 2026-08-23.
   #
@@ -326,6 +344,10 @@ def create_acc_msg_passthrough(packer, CAN: CanBus, stock_values: dict, clear_ca
 _PANDA_ACCEL_MIN = -3.4991
 _PANDA_ACCEL_MAX = 1.9999
 _PANDA_GAS_MIN = -0.5
+# FusionPilot: the floor panda uses INSTEAD of the above while the stock ACC passthrough is
+# forwarding Ford's own frame. Must match FORD_MIN_GAS_PASSTHROUGH in safety/modes/ford.h
+# (raw 220 = (-2.8 + 5.0) * 100).
+_PANDA_GAS_MIN_PASSTHROUGH = -2.8
 _PANDA_GAS_MAX = 2.0
 _PANDA_GAS_INACTIVE = -5.0
 # Half a quantum of the coarsest field (AccPrpl_* at 0.01 m/s^2 per bit), which is all the guard a
@@ -333,6 +355,30 @@ _PANDA_GAS_INACTIVE = -5.0
 # boundary that panda would have accepted. Ten frames is nothing; the PRINCIPLE is not, because
 # refusing a frame panda would have carried is the whole mechanism behind the drive-A cascade.
 _PANDA_MARGIN = 0.005
+
+
+def passthrough_gas_floor(CP_SP) -> float:
+  """FusionPilot: the AccPrpl_A_Rq floor panda is actually enforcing, this drive.
+
+  READ FROM `CP_SP.safetyParam` RATHER THAN FROM THE PARAM, deliberately. That int is the exact
+  value delivered to the safety firmware as current_safety_param_sp (USB 0xdf), so this cannot
+  disagree with what panda decided -- and a disagreement in the permissive direction is the
+  expensive one: we forward -2.0, panda still holds -0.5, and it drops the WHOLE frame. A 50 Hz
+  message vanishing and reappearing is worse than either controller driving, which is the whole
+  reason `passthrough_admissible` exists.
+
+  Falls back to the narrow floor on anything unexpected. That direction only costs braking.
+
+  Note `CP_SP.safetyParam` is set by `_initialize_ford` during `setup_interfaces`, which card.py
+  runs AFTER the CarController is constructed -- so this must be called per frame, not cached in
+  __init__, or it reads a zero that has since been filled in.
+  """
+  try:
+    if int(getattr(CP_SP, "safetyParam", 0)) & FordSafetyFlagsSP.PASSTHROUGH_LONG:
+      return _PANDA_GAS_MIN_PASSTHROUGH
+  except (TypeError, ValueError):
+    pass
+  return _PANDA_GAS_MIN
 
 
 def passthrough_admissible(stock_values: dict, long_active: bool, allow_cancel: bool = False) -> str:
