@@ -5035,8 +5035,50 @@ dominated before optimising one of them.**
 
 **Do not "fix" this by relaxing the engagement precondition.** It is not a gate to loosen -- a
 feature that commands a lane change while openpilot is not driving is a different and much worse
-thing. What the number says is where the ceiling actually comes from, and that it is his habit
-rather than the code. Telling him is the whole intervention.
+thing.
+
+#### AND "IT IS HIS HABIT" WAS WRONG WITHIN THE HOUR. IT IS A VERDICT ON THE FEATURE.
+
+His answer, unprompted, on being told he passes with cruise off 40% of the time:
+
+  *"Today I was behind some very slow drivers that I wanted to get around fast, so cruise was off,
+   if you know what I mean."*
+
+**He disengages BECAUSE of what the system does, in exactly the situation the feature exists for.**
+The advice that followed the measurement -- "engage cruise on roads where you would expect to pass"
+-- is therefore backwards: it asks him to accept a worse pass so the feature can be scored on it.
+
+**AND THIS CONFIRMS THE ONE THING THAT WAS RECORDED AS UNMEASURED.** See the ACC-suppression
+section: passing assist actuates the blinker over CAN, stock Ford ACC brakes ~4x less often with the
+DRIVER's stalk blinker, and whether an injected blinker earns the same treatment has never been
+tested. That section's own conclusion:
+
+  *"the first half of a commanded pass is slower than the same pass made by hand. That is the cost,
+   it is fixed, and the only lever left is the follow gap itself."*
+
+It was written as a predicted cost. **He has now reported it as lived experience, and this fork
+treats his report of his own car as outranking inference.** The 8-of-20 `notEngaged` count is that
+cost, measured, without anyone having set out to measure it.
+
+**WHAT IT MEANS FOR THE FORECAST, and it is worse than the coverage story:** solving geometry and
+fitting the rear radar still leaves him turning cruise off for the passes he cares most about. A
+feature that is only used for the passes he does not mind being slow is not the feature he asked
+for. **The longitudinal behaviour during a pass is not a side issue -- on this evidence it is the
+gating one**, and it has had a fraction of the attention the geometry gate has.
+
+**Levers that exist, in order of how proven they are:**
+
+1. **The follow-gap button.** Built (`gap_control.py`), closed-loop, OFF by default under
+   `IcbmGapControl`. Never requested by passing assist and never exercised on the road.
+2. **The blinker-suppression question**, still unmeasured and answerable from logs already recorded:
+   compare `carState.leftBlinker` duty cycle during a COMMANDED blink against a stalk blink. Near
+   100% kills most of the hypothesis; near 50% quantifies what a fix must beat.
+3. **Nothing else.** Under ICBM the longitudinal authority is Ford's. Passing assist cannot make the
+   car accelerate; it can only ask for a gap and a set speed and let Ford choose the means.
+
+**The measurement that turns his sentence into a number** is how hard he accelerates through a
+manual pass against what Ford's ACC delivers in the same situation. That is `aEgo` during his
+cruise-off passes versus `aEgo` while ACC is driving, and it needs no new drive.
 
 **AND THE OBVIOUS DISCRIMINATOR IS FORBIDDEN, which is worth stating before someone reaches for it.**
 `oneWay` from the map separates these perfectly by construction -- it is what labels them. But
