@@ -1869,37 +1869,18 @@ over MS-CAN. If it is the latter it is invisible until the canbox lands, and it 
 speed-limit source that needs no app running and no camera sign read. Either answer helps SLA; they
 are just answered by different measurements.
 
-### 9a. CLOSED 2026-08-24 BY THE OTHER SESSION, AND IT RETRACTS THE INFERENCE ABOVE
+### 9a. RETRACTED 2026-08-24. TSR IS NOT THIS BRANCH'S WORK.
 
-The 80 is explained, and section 9's reasoning about it was wrong.
+**Section 9's inference was wrong and is withdrawn.** It argued that two routes carrying two
+different PLAUSIBLE limits meant the camera was reading signs. Two different route SHIELDS produce
+two plausible numbers just as well, so "plausible" was carrying weight it could not. The inference
+should have stopped at "not a stuck default".
 
-**IT WAS AN I-80 ROUTE SHIELD.** From commit `805166cd50`, decoded on his own routes: the phantom 80
-on 000003b6 was the camera reading an **I-80 interstate shield near 2100 S** as a speed limit, and
-it graded that read `LimitReliable` on 58% of its frames.
+**The 80 is explained in commit `805166cd50`. Read it there, not here** -- restating another
+session's findings in this section is how two places in one file come to disagree, which this
+document already records happening once.
 
-**SO THE ARGUMENT IN SECTION 9 DOES NOT HOLD.** It said:
+**And IsaVLim (0x3D9) is closed for this branch either way:** it carries the identical number to
+`TsrVLim1MsgTxt` on every route measured, so there was never a second source in it.
 
-> TWO DIFFERENT ROUTES, TWO DIFFERENT PLAUSIBLE LIMITS. That is not a stuck default -- a stuck value
-> is the same number every time.
-
-True as far as it goes, and it does not support the conclusion it was used for. **Two different
-route shields also produce two different plausible numbers.** "Plausible" was carrying the weight
-of "read from a speed limit sign", and a shield reading 80 on an interstate numbered 80 is the most
-plausible-looking wrong answer available. The inference should have been "not a stuck default",
-full stop -- everything after that was reaching.
-
-**AND THE 30 IS NOT VINDICATED BY THIS EITHER WAY.** It may be the genuine sign read this document
-already records at 2011 2100 S, or another shield. Section 9 does not establish which and neither
-does this note.
-
-**IsaVLim IS NOW DEFINITIVELY WORSE THAN THE SIGNAL WE ALREADY READ, not merely redundant.** The
-same commit found `TsrVl1StatMsgTxt_D_Rq` -- the camera's OWN verdict on the value it is sending
-(`LimitReliable` / `LimitChanged` / `LimitOutdated` / `Null`) -- parsed and thrown away, and now
-gated on. `IPMA_Data2` carries no equivalent grade. So the 0x3CD path has a confidence channel and
-the 0x3D9 path has none, on top of carrying the identical number.
-
-**Nothing further is owed here from the route-intent side.** The live thread is the other session's,
-and the bigger finding is theirs too: `TsrStatMsgTxt_D_Rq` reads `Available_CameraOnly` on
-essentially every frame with `NoNavDataAvailable` at the same rate, so **Ford's TSR is a FUSION
-system being run on the camera alone on this car** -- which is why it reads so few signs, and which
-points back at the APIM nav path rather than at anything in this repo.
+Nothing further is owed here from route intent.
