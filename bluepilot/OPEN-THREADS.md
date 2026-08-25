@@ -251,6 +251,54 @@ result file all vanished once during this work. Rebuild with the tar one-liner i
 
 ---
 
+## 5b. WHY OP LONG CANNOT COAST ON THIS CAR -- and it is two constants, not the planner
+
+Found 2026-08-25, chasing his real goal (*"I want complete stops at stop signs and traffic lights
+and the ability to go under 20mph. But, I also love the behavior of Ford ACC for everything else."*)
+
+**HIS STANDING OBJECTION IS THAT OP LONG "CANNOT COAST"**, and this file has carried that as a
+property of openpilot's planner. It is not. It is `longitudinal_ext.py`:
+
+    op_brake_actuate = True when accel < -0.14 m/s^2      (brake_actuate_target)
+    if brake_actuate: gas = INACTIVE_GAS                   (mutual exclusion, line ~316)
+    gas clipped to CarControllerParams.MIN_GAS = -0.5      (line ~321)
+
+    FORD, measured over 99,520 frames of its own AccPrpl_A_Rq:
+    range -2.710 .. 2.300      p01 -1.030      2.86% of all frames below -0.5
+
+**So for every deceleration between 0.14 and 2.71 m/s^2 -- which is most ordinary slowing -- FORD
+ENGINE-BRAKES AND OPENPILOT USES THE PEDAL.** openpilot asks the powertrain for at most 0.5, grabs
+the friction brakes at 0.14, and the moment it does, mutual exclusion stops it asking the powertrain
+for anything at all.
+
+That is precisely "Ford can coast and op long cannot", and it is not a planner-quality problem. It
+is two numbers and one `if`.
+
+**THE SAFETY ENVELOPE ALREADY ALLOWS THE FIX.** `ed6c0b71` widened panda's `min_gas` to -2.8 behind
+`FordSafetyFlagsSP.PASSTHROUGH_LONG` -- the firmware will now carry Ford's real engine-braking
+range. Only openpilot's OWN clip and the brake-actuate threshold stand in the way, and both are
+ours.
+
+**WHY THIS MATTERS MORE THAN IT LOOKS.** His goal needs ACCDATA -- stops without a lead and speeds
+under Ford's 20 mph set-speed floor are both unreachable through buttons. ACCDATA is all-or-nothing
+by panda's `check_relay`, so **op long is the only path to it**. Passthrough was an attempt to dodge
+that and it failed for four independent reasons (thread 1). So either op long becomes tolerable on
+this car, or the goal is unreachable -- and the single most-cited reason it is intolerable turns out
+to be two constants nobody had checked.
+
+**NOT A RECOMMENDATION YET, and do not present it as one.** He has driven op long and hates it, and
+that is data rather than an opinion to argue with. What is honest to say: this is the first
+*specific, measurable* cause anyone has found, it has never been addressed, and it does not rule out
+there being planner problems on top of it.
+
+**What would settle it:** raise `MIN_GAS` toward Ford's measured floor and move
+`brake_actuate_target` down to where Ford actually reaches for the pedal, then one drive. Measure
+Ford's own `AccBrkPrchg_B_Rq`/`AccBrkDecel_B_Rq` assertion rate off an existing route FIRST to pick
+the threshold from his car rather than from a guess -- `bp_accdata_bands.py` already reads that
+message.
+
+---
+
 ## 6. WHAT A HOLD IS, SETTLED 2026-08-25. Do not redesign it again.
 
   *"I just want to be able to override the speed when I want and it to not be remembered. Memory
