@@ -29,6 +29,7 @@ from types import SimpleNamespace as NS
 import pytest
 
 from cereal import custom
+from openpilot.common.realtime import DT_MDL
 from openpilot.sunnypilot.selfdrive.controls.lib.passing_assist import PassingAssistDetector
 from openpilot.sunnypilot.selfdrive.controls.lib.route_intent import (
   RouteIntent, LOOKAHEAD_S, LOOKAHEAD_MIN_M, MAX_INSTRUCTION_AGE_S, NO_CLAIM_MANEUVERS,
@@ -41,6 +42,7 @@ from openpilot.sunnypilot.selfdrive.controls.lib.tests.test_passing_assist impor
 Side = custom.LongitudinalPlanSP.PassingAssist.Side
 Blocked = custom.LongitudinalPlanSP.PassingAssist.Blocked
 Phase = custom.LongitudinalPlanSP.PassingAssist.Maneuver
+Reason = custom.LongitudinalPlanSP.PassingAssist.Reason
 MANEUVERS = [str(e) for e in custom.RouteIntentBP.Maneuver.schema.enumerants]
 
 REPO = next(d for d in pathlib.Path(__file__).resolve().parents
@@ -340,9 +342,16 @@ class TestItCanOnlyRefuse:
   CONSUMER = REPO / "sunnypilot" / "selfdrive" / "controls" / "lib" / "route_intent.py"
   DETECTOR = REPO / "sunnypilot" / "selfdrive" / "controls" / "lib" / "passing_assist.py"
 
-  # Everything RouteIntent is allowed to offer the outside world. `refuses_pass` is the only
-  # predicate; the rest is state a log reads. Widening this list is the review conversation.
-  PUBLIC_API = {"update", "reset", "refuses_pass"}
+  # Everything RouteIntent is allowed to offer the outside world.
+  #
+  # `committed_side` WAS ADDED 2026-08-24 AND IT OPENS A MANEUVER. That is a deliberate crossing of
+  # the rule the rest of this class enforces, made when he asked for the lane-selection decision,
+  # and it is widened HERE rather than silently so the change shows up in a diff. The reasoning is
+  # in route_intent.py's docstring for that method; the short version is that it supplies a MOTIVE
+  # and clears nothing -- the lane is still cleared by the same stack that clears a pass.
+  #
+  # Adding a THIRD predicate is the review conversation again. Two is not a precedent for three.
+  PUBLIC_API = {"update", "reset", "refuses_pass", "committed_side"}
 
   def _class(self, path, name):
     tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -362,9 +371,9 @@ class TestItCanOnlyRefuse:
     used = {n.attr for n in ast.walk(tree)
             if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Attribute)
             and n.value.attr == "route_intent"}
-    assert used == {"update", "refuses_pass"}, (
-      f"passing_assist reads {sorted(used)} off route_intent. Only update and refuses_pass may be "
-      "called: a diagnostic read is harmless until somebody branches on it.")
+    assert used == {"update", "refuses_pass", "committed_side"}, (
+      f"passing_assist reads {sorted(used)} off route_intent. Only these three may be called: a "
+      "diagnostic read is harmless until somebody branches on it.")
 
   def test_the_refusal_leads_nowhere_but_a_refusal(self):
     """The call site itself, not just the API.
@@ -383,8 +392,11 @@ class TestItCanOnlyRefuse:
     assert not site.orelse, "the route-intent gate grew an else branch"
     calls = [n for n in ast.walk(ast.Module(body=site.body, type_ignores=[]))
              if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)]
-    assert [c.func.attr for c in calls] == ["_reset_outputs"], (
-      "the route-intent gate's body does something other than refuse")
+    # EXACTLY these two, in this order. The refusal first, then the one question that may replace
+    # it -- "should we be getting into the exit lane instead". Any third call is a new behaviour
+    # sharing a branch that already has two, which is how a gate stops being reviewable.
+    assert [c.func.attr for c in calls] == ["_reset_outputs", "_exit_lane"], (
+      "the route-intent gate's body does something other than refuse or offer the exit lane")
     arg = calls[0].args[0]
     assert isinstance(arg, ast.Attribute) and arg.attr == "routeManeuver"
 
@@ -404,9 +416,21 @@ class TestItCanOnlyRefuse:
       for n in ast.walk(fn):
         if isinstance(n, ast.Attribute) and n.attr == "route_intent":
           reached.add(fn.name)
-    assert reached == {"__init__", "_decide"}, (
-      f"route_intent is now read in {sorted(reached)}. It may be constructed and it may be asked "
-      "to refuse a suggestion; it may not reach may_actuate, _must_abort or _run_maneuver.")
+    assert reached == {"__init__", "_decide", "_exit_lane"}, (
+      f"route_intent is now read in {sorted(reached)}. It may be constructed, asked to refuse a "
+      "suggestion, and asked which side his route commits to.")
+    # THE HALF OF THE GUARANTEE THAT DID NOT CHANGE, asserted by name rather than left to the set
+    # comparison above -- because the set will be edited again and these three must survive it.
+    #
+    # `_exit_lane` SUGGESTS. It does not actuate: may_actuate still gates every commanded move on a
+    # rear sensor, independently, and _must_abort still reverses a crossing on radar alone. Route
+    # intent supplying a motive must never become route intent commanding or cancelling a maneuver,
+    # which is exactly the line the BLIS bug crossed when a presence-only signal reached
+    # demands_abort.
+    for forbidden in ("may_actuate", "_must_abort", "_run_maneuver"):
+      assert forbidden not in reached, (
+        f"route_intent reached {forbidden}. It may motivate a suggestion; it may not authorise or "
+        "reverse a maneuver.")
 
 
 class TestTheServiceDeclaration:
@@ -483,6 +507,165 @@ class TestTheBenchScriptParser:
       except SystemExit:
         continue
       raise AssertionError(f"{bad!r} parsed instead of failing")
+
+
+# A road with a real lane to the RIGHT as well as the left, which the default fixture does not have
+# -- its right edge sits at 2.4 m, a shoulder, because that is the road he actually drives. An exit
+# approach needs somewhere to go.
+# The far-RIGHT line probability matters as much as the edge: the default fixture has it at 0.2,
+# below MIN_ADJACENT_LINE_PROB, so geometry reports no lane there however far away the road edge is.
+# Both witnesses are required and forgetting the second one makes every right-side test fail in a
+# way that looks like the decision is broken.
+THREE_LANE = dict(mapd_present=True, mapd_lanes=3, mapd_oneway=True,
+                  edges=(-7.0, 7.0), probs=(0.9, 0.99, 0.99, 0.9))
+
+
+def exit_det(frames=STUCK_FRAMES, **kw):
+  """Drive the real detector toward an exit.
+
+  `status=False` -- NO LEAD -- by default, and that is not cosmetic. `_exit_lane` is only reached
+  from three places: the noLead exit, the nothingSlower exit, and the route-intent refusal. With a
+  slow lead present AND no refusal firing (an unknown distance, say), the flow goes down the PASS
+  path and `_exit_lane` is never called at all -- so a test written that way passes without
+  exercising anything, which is exactly how the distance-known mutation survived. Approaching your
+  exit on an empty road is also the realistic case.
+  """
+  kw = {**THREE_LANE, "status": False, **kw}
+  det = PassingAssistDetector()
+  for _ in range(frames):
+    det.update(with_route(**kw), CRUISE_MS, True)
+  return det
+
+
+class TestTheExitLaneDecision:
+  """The one thing route intent OPENS. Gate-level, through the real detector, because a policy that
+  is right in isolation and wired to nothing is this fork's oldest bug."""
+
+  def test_it_suggests_moving_toward_his_exit(self):
+    det = exit_det(route_maneuver="exitRight", route_distance=100.0)
+    assert det.suggestion == Side.right
+    assert det.reason == Reason.exitLane
+
+  def test_no_route_means_no_exit_lane_suggestion(self):
+    det = exit_det(route_present=False)
+    assert det.reason != Reason.exitLane
+
+  def test_a_distant_exit_does_not_move_the_car_yet(self):
+    det = exit_det(route_maneuver="exitRight", route_distance=5000.0)
+    assert det.reason != Reason.exitLane
+
+  def test_a_stale_instruction_does_not_move_the_car(self):
+    det = exit_det(route_maneuver="exitRight", route_distance=100.0,
+                   route_age_s=MAX_INSTRUCTION_AGE_S + 1.0)
+    assert det.reason != Reason.exitLane
+
+  def test_an_unknown_distance_does_not_move_the_car(self):
+    # Permissive for refusing, forbidden for opening. Same instruction, opposite answers.
+    det = exit_det(route_maneuver="exitRight", route_distance_known=False)
+    assert det.reason != Reason.exitLane
+
+  def test_the_blind_spot_stops_it(self):
+    det = exit_det(route_maneuver="exitRight", route_distance=100.0, right_bs=True)
+    assert det.reason != Reason.exitLane
+
+  def test_it_refuses_when_the_anchor_does_not_KNOW_our_lane(self):
+    """lane_anchor.py's docstring demands this of any caller that permits a lane change:
+    `index is not None`, because a warning may be wrong and a maneuver may not.
+
+    With no map there is no lane count, so the anchor has no index -- and `in_leftmost_lane()`
+    would still answer from its line-based witness. Answering from that would be exactly the
+    misuse the docstring warns about.
+    """
+    det = exit_det(route_maneuver="exitRight", route_distance=100.0, mapd_present=False)
+    assert det.lane_anchor.index is None
+    assert det.reason != Reason.exitLane
+
+  def test_no_lane_on_that_side_stops_it(self):
+    """MUTATION-FOUND. Removing the geometry gate left the suite green, because nothing asked for
+    an exit on a side with no lane. The default fixture's right edge is a shoulder, which is the
+    road he actually drives -- so this is the common case, not an edge case."""
+    det = exit_det(route_maneuver="exitRight", route_distance=100.0,
+                   edges=(-7.0, 2.4), probs=(0.9, 0.99, 0.99, 0.2))
+    assert not det.right_geometry_ok
+    assert det.reason != Reason.exitLane
+
+  def test_it_outranks_keep_right_once_keep_right_is_ALSO_ready(self):
+    """MUTATION-FOUND, and the first version could not fail.
+
+    The guard in `_keep_right` only matters when keep-right would otherwise fire, and keep-right
+    needs the lane to have been there for `min_lane_age_s` -- longer than the short fixture runs.
+    So the guard was untested until this test ran long enough for both to be eligible at once.
+    """
+    det = exit_det(frames=int(45.0 / DT_MDL), route_maneuver="exitRight", route_distance=100.0)
+    assert det.right_lane_age_s >= det.min_lane_age_s, "fixture still too short to arm keep-right"
+    assert det.suggestion == Side.right
+    assert det.reason == Reason.exitLane, "keep_right relabelled an exit-lane suggestion"
+
+  def test_a_bend_stops_it_for_the_same_reason_it_stops_a_pass(self):
+    det = exit_det(route_maneuver="exitRight", route_distance=100.0, curvature=0.02)
+    assert det.reason != Reason.exitLane
+
+  @pytest.mark.parametrize("maneuver,side", [("exitRight", Side.right), ("exitLeft", Side.left),
+                                             ("forkRight", Side.right), ("forkLeft", Side.left)])
+  def test_it_moves_toward_the_side_the_route_commits_to(self, maneuver, side):
+    det = exit_det(route_maneuver=maneuver, route_distance=100.0)
+    assert det.reason == Reason.exitLane
+    assert det.suggestion == side
+
+  def test_it_is_reported_as_exitLane_and_never_as_keepRight(self):
+    """Both land on Side.right and they mean different things. Without the guard in _keep_right the
+    log would say "tidying up after an overtake" while the car was being told to take its exit."""
+    det = exit_det(route_maneuver="exitRight", route_distance=100.0)
+    assert det.suggestion == Side.right
+    assert det.reason == Reason.exitLane, "keep_right relabelled an exit-lane suggestion"
+
+
+class TestOpeningIsStrictlyNarrowerThanRefusing:
+  """The rule, as two sets rather than as prose.
+
+  `evidence that opens a maneuver must never be cheaper than evidence that refuses one` is the
+  fork's most-repeated principle and it has always been argued in comments. Since 2026-08-24 route
+  intent does both, so the principle is now checkable: every maneuver that may OPEN must also
+  REFUSE, and the opening set must be strictly smaller.
+  """
+
+  def test_every_opening_maneuver_also_refuses(self):
+    from openpilot.sunnypilot.selfdrive.controls.lib.route_intent import OPENING_MANEUVERS
+    for m in OPENING_MANEUVERS:
+      assert m not in NO_CLAIM_MANEUVERS, f"{m} opens a maneuver but does not refuse a pass"
+      assert read(maneuver=m, distance=100.0).refuses_pass(30.0)
+
+  def test_the_side_table_and_the_opening_set_cannot_drift(self):
+    """MUTATION-FOUND, in the useful way: deleting the OPENING_MANEUVERS check changed no behaviour,
+    because `_SIDE.get()` returns None for anything absent. The two are redundant on purpose --
+    defence in depth -- but redundancy that nothing checks is how they come to disagree, and then
+    the SET says one thing and the TABLE decides."""
+    from openpilot.sunnypilot.selfdrive.controls.lib.route_intent import OPENING_MANEUVERS, _SIDE
+    assert set(_SIDE) == OPENING_MANEUVERS
+    assert set(_SIDE.values()) == {"left", "right"}
+
+  def test_the_opening_set_is_strictly_smaller(self):
+    from openpilot.sunnypilot.selfdrive.controls.lib.route_intent import OPENING_MANEUVERS
+    refusing = {m for m in MANEUVERS if m not in NO_CLAIM_MANEUVERS}
+    assert OPENING_MANEUVERS < refusing, "opening is no longer strictly narrower than refusing"
+
+  def test_unknown_refuses_a_pass_and_may_NOT_move_the_car(self):
+    """The single clearest case, and the reason the two sets exist separately.
+
+    A source that cannot classify its own instruction has said enough to make us cautious and
+    nowhere near enough to make us move. If these two ever come from one set, this is the case that
+    breaks first and it breaks in the direction that steers.
+    """
+    ri = read(maneuver="unknown", distance=100.0)
+    assert ri.refuses_pass(30.0)
+    assert ri.committed_side(30.0) is None
+
+  @pytest.mark.parametrize("maneuver", ["turnLeft", "turnRight", "uTurn", "roundabout",
+                                        "merge", "destination", "onRamp"])
+  def test_maneuvers_off_the_freeway_spine_refuse_but_never_open(self, maneuver):
+    ri = read(maneuver=maneuver, distance=100.0)
+    assert ri.refuses_pass(30.0)
+    assert ri.committed_side(30.0) is None, f"{maneuver} would move the car"
 
 
 class TestTheStubSource:

@@ -77,6 +77,33 @@ Source = custom.RouteIntentBP.Source
 # rather than "in the set of committing maneuvers", and the set kept is the short one.
 NO_CLAIM_MANEUVERS = frozenset({"none", "continueAhead"})
 
+# THE MANEUVERS THAT MAY OPEN A LANE CHANGE, and this set is deliberately much SMALLER than the set
+# that refuses one. That asymmetry IS the fork's rule, made concrete in two frozensets rather than
+# argued in prose: everything not in NO_CLAIM_MANEUVERS refuses, and only these six may open.
+#
+# What is excluded and why:
+#
+#   unknown            refuses a pass, must never MOVE the car. A source that cannot classify its
+#                      own instruction has not earned a maneuver. This is the single clearest case
+#                      of the asymmetry and the reason it is written as two sets.
+#   turnLeft/Right     a surface-street turn. Getting into a turn lane is a different problem on a
+#                      road this feature is not scoped to, and the freeway spine is the scope.
+#   uTurn, roundabout,
+#   merge, destination not a "be in that lane" instruction, or not on a road we act on.
+#   onRamp             JOINING a motorway. The lane discipline there is a merge, which is its own
+#                      maneuver with its own gap logic, not a lane change toward a side.
+OPENING_MANEUVERS = frozenset({
+  "exitLeft", "exitRight",     # leaving the motorway
+  "forkLeft", "forkRight",     # the road splits and his route takes one branch
+  "keepLeft", "keepRight",     # a lane commitment without a junction
+})
+
+# Which way each of them commits.
+_SIDE = {
+  "exitLeft": "left", "forkLeft": "left", "keepLeft": "left",
+  "exitRight": "right", "forkRight": "right", "keepRight": "right",
+}
+
 # HOW LONG AN INSTRUCTION MAY GO UNCONFIRMED BEFORE IT MEANS NOTHING.
 #
 # At 31 m/s (70 mph) three seconds is 93 m the source has not corrected, against a refusal bound
@@ -186,6 +213,51 @@ class RouteIntent:
     self.distance_known = distance_known
     self.age_s = age
     self.available = True
+
+  def committed_side(self, v_ego: float) -> str | None:
+    """Which side his route commits to, if one is close enough to act on. "left", "right" or None.
+
+    **THIS IS THE ONE METHOD ON THIS CLASS THAT OPENS A MANEUVER RATHER THAN REFUSING ONE, and the
+    crossing was made deliberately on 2026-08-24 when he asked for the lane-selection decision.**
+    Everything else in this file argues that route intent may only refuse. That argument stands for
+    every other consumer; this is the exception, and it is worth stating exactly what makes it
+    survivable rather than pretending it is not an exception.
+
+    WHY IT IS NOT THE THING THE RULE FORBIDS. The rule is *evidence that opens a maneuver must never
+    be cheaper than evidence that refuses one*, and it is about SAFETY evidence -- you may not clear
+    a lane on a cheap signal. **This does not clear anything.** The lane is cleared by exactly the
+    same stack that clears a pass: geometry, blind spot, rear approach, oncoming, adjacent traffic,
+    curve. Route intent supplies only the MOTIVE, in the same position that "there is a slower car
+    ahead" occupies for a pass, and a motive is not evidence about whether the lane is empty.
+
+    WHAT A WRONG INSTRUCTION COSTS. One lane change to the side, into a lane every sensor gate has
+    already passed, on a road where that side is the slow lane. That is the failure, and it is a
+    bad suggestion rather than an unsafe one.
+
+    WHY IT IS STILL HELD TIGHTER THAN `refuses_pass`, in four ways:
+
+      the maneuver set is SMALLER   OPENING_MANEUVERS, six values, against "anything not in
+                                    NO_CLAIM_MANEUVERS". `unknown` refuses and may not open.
+      the distance must be REAL     same as refusing -- no bound, no move.
+      the freshness is the same     MAX_INSTRUCTION_AGE_S, unchanged.
+      the CALLER must know its lane The anchor's own docstring says a caller that permits a lane
+                                    change must require `index is not None`, because a warning may
+                                    be wrong and a maneuver may not. Enforced in passing_assist.
+
+    AND IT CANNOT MOVE THE CAR TODAY. Passing assist's actuation is gated on a rear sensor that is
+    not fitted, so this produces a SUGGESTION and nothing else -- and by the time the canbox makes
+    actuation possible it will also have brought a real transport, so this gets measured on drive
+    data before it ever acts. That sequencing is not luck; it is the reason it was safe to build now.
+    """
+    if not self.available or not self.distance_known:
+      return None
+    if self.maneuver not in OPENING_MANEUVERS:
+      return None
+    if self.distance_m < 0.0:
+      return None
+    if self.distance_m > max(LOOKAHEAD_MIN_M, float(v_ego) * LOOKAHEAD_S):
+      return None
+    return _SIDE.get(self.maneuver)
 
   def refuses_pass(self, v_ego: float) -> bool:
     """Is his next maneuver close enough that starting a pass now is the wrong move?

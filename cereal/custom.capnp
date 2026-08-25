@@ -634,6 +634,15 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       none @0;
       passing @1;    # a slower lead is holding us below the set speed
       keepRight @2;  # nothing is holding us back and a lane exists to the right
+      # HIS ROUTE LEAVES THE ROAD HERE and we are not in the lane it leaves from. Distinct from
+      # keepRight even though both land on Side.right, for the same reason keepRight is distinct
+      # from passing: without it a log cannot tell "tidying up after an overtake" from "getting
+      # into the exit lane", and those want opposite things when the road widens.
+      #
+      # THIS IS THE FIRST AND ONLY REASON DRIVEN BY ROUTE INTENT, and route intent OPENS it rather
+      # than refusing -- see route_intent.py's `committed_side`, which documents why that crossing
+      # was made deliberately and how it is bounded.
+      exitLane @3;
     }
 
     enum Side {

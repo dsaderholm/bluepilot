@@ -3324,6 +3324,7 @@ class PassingAssistDetector:
       self.lead_ttc = NO_TTC_S
       if self._lead_gap_s > LEAD_GAP_GRACE_S or self.approach_seconds == 0.0:
         self._reset_outputs(Blocked.noLead)
+        self._exit_lane()
         self._keep_right()
         return
       # Inside the window with a live confirmation: carry on. Absorbing a dropped return in the
@@ -3376,6 +3377,7 @@ class PassingAssistDetector:
 
     if not spotted:
       self._reset_outputs(Blocked.nothingSlower)
+      self._exit_lane()
       self._keep_right()
       return
 
@@ -3463,6 +3465,10 @@ class PassingAssistDetector:
     # somebody else's software, and it is why this may only ever refuse.
     if self.route_intent.refuses_pass(CS.vEgo):
       self._reset_outputs(Blocked.routeManeuver, keep_wanted=True)
+      # ...and the same instruction that refuses the pass is the one telling us to get over, so the
+      # refusal is the natural place to ask. _exit_lane may replace the refusal with a suggestion;
+      # if it declines, blockedBy stays routeManeuver and the frame reads exactly as before.
+      self._exit_lane()
       return
 
     # A LOWER LIMIT IS CLOSE. The map sees a limit change before the sign is readable, which is the
@@ -3629,6 +3635,82 @@ class PassingAssistDetector:
     self.trigger = pending_trigger
     self._settle_s = 0.0
 
+  def _exit_lane(self) -> None:
+    """FusionPilot (route-intent branch): get into the lane his route leaves from.
+
+    THE PROBLEM THIS SOLVES IS NAMED IN `_keep_right`'S OWN DOCSTRING: *"an exit-only or merge lane
+    is geometrically identical to a through lane, so 'move right' could mean 'take the exit'."*
+    Keep-right therefore REFUSES whenever the road widens, because widening might be an exit it
+    does not want. Route intent knows whether the exit is HIS, which is the one piece of
+    information that turns that refusal into a reason to move.
+
+    SO THIS IS NOT A NEW CAPABILITY BOLTED ON. It is the missing input to a limitation this file
+    already documented, and the maneuver it drives is the one passing assist already performs.
+
+    WHY IT IS A SEPARATE METHOD RATHER THAN A BRANCH INSIDE `_keep_right`. Half of keep-right's
+    gates exist to find a lane worth SETTLING in, and every one of them refuses at an exit by
+    design:
+
+        right_widening        the exit IS the widening. Inverted here.
+        right_lane_age_s      an exit lane is new by definition. Cannot be waited out.
+        adjacent slow traffic taking your exit beats keeping speed. Relaxed.
+        keep_right_delay_s    there is a deadline here. Not applicable.
+
+    Sharing the method would mean four inversions inside one function and a reader unable to tell
+    which behaviour they were looking at.
+
+    WHAT IS *NOT* RELAXED IS THE ENTIRE SAFETY STACK, and it is re-checked here rather than
+    inherited, because this fires from `noLead` and `nothingSlower` -- paths that return long
+    before the gates a pass goes through. A gate that is skipped rather than passed is the shape of
+    the BLIS bug this fork already recorded.
+    """
+    side = self.route_intent.committed_side(self.last_v_ego)
+    if side is None:
+      return
+
+    # THE ANCHOR MUST ACTUALLY KNOW WHICH LANE WE ARE IN. Demanded in lane_anchor.py's own
+    # docstring: "if a future caller ever uses this to permit a lane change, that caller must
+    # require `self.index is not None` as well -- a warning may be wrong, a maneuver may not."
+    # This is that caller. `in_leftmost_lane()` ORs two witnesses and is fine for a warning; it is
+    # not enough to move the car.
+    if self.lane_anchor.index is None:
+      return
+
+    # Never mid-sequence, and never straight after one. Same reason keep-right waits: this is the
+    # gate that stops a three-lane approach becoming a weave.
+    if self._settle_s < self.settle_time_s:
+      return
+
+    if side == "right":
+      geometry_ok = self.right_geometry_ok
+      blindspot = self.right_blindspot
+      rear_blocks = self.rear.right.blocks_lane_change
+      oncoming = self.oncoming_veto and self.adjacent.right.blocks_oncoming
+      target = Side.right
+    else:
+      geometry_ok = self.left_geometry_ok
+      blindspot = self.left_blindspot
+      rear_blocks = self.rear.left.blocks_lane_change
+      oncoming = self.oncoming_veto and self.adjacent.left.blocks_oncoming
+      target = Side.left
+
+    # Geometry doubles as "are we already there": once in the outermost lane the gap to the road
+    # edge collapses to the shoulder, so this stops on its own without a second lane-position test.
+    # Same self-limiting property keep-right relies on.
+    if not geometry_ok:
+      return
+    if blindspot or rear_blocks or oncoming:
+      return
+
+    # The road bending is as good a reason not to change lanes for an exit as for a pass, and the
+    # retrofit PSCM's authority limit does not care why we are moving.
+    if self.max_pass_lat_acc > 0.0 and self.lat_acc > self.max_pass_lat_acc:
+      return
+
+    self.suggestion = target
+    self.blocked_by = Blocked.none
+    self.reason = Reason.exitLane
+
   def _keep_right(self) -> None:
     """FusionPilot: "keep right except to pass", the mirror of the passing question.
 
@@ -3645,6 +3727,13 @@ class PassingAssistDetector:
     same modelV2 limitation that cannot tell an oncoming lane from a passing lane applies here,
     and phase 1 exists to measure how often it bites.
     """
+    # An exit-lane suggestion outranks keep-right and must not be relabelled by it. Both land on
+    # Side.right, so without this the reason on screen and in the log would read keepRight while
+    # the car was actually being told to take its exit -- the exact distinction Reason.exitLane was
+    # added to preserve.
+    if self.reason == Reason.exitLane:
+      return
+
     # Do not reverse a pass we just suggested. This is what stops a three-lane road with a slow
     # left lane turning into a weave.
     if self._settle_s < self.settle_time_s:

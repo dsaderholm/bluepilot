@@ -411,6 +411,21 @@ solved on a specific exit he actually drives.
 He asked, 2026-08-24, how other systems do the thing section 8 wrote off. The answer firms the
 scope boundary up considerably, because it turns a shrug into a reason.
 
+**FIRST, THE DISTINCTION THIS SECTION MUST NOT BLUR, because he checked: GOING STRAIGHT THROUGH AN
+INTERSECTION IS FINE AND ALREADY WORKS.** The car stays on the same road, nothing crosses its path
+that it has to judge a gap against, and it is therefore ordinary lane keeping -- which MADS does on
+every drive. Nothing in this section applies to it.
+
+    straight through   lane keeping. Works today. In scope.
+    TURNING            gap acceptance against cross traffic. The subject of this section.
+
+The one thing a straight-through intersection still asks for is STOPPING at a red or a stop sign,
+and that is not a perception problem either -- it is the 20 mph ICBM floor and the stop override,
+which are tracked separately in CLAUDE.md.
+
+**So "surface streets are unreachable" would be the wrong summary of section 8.** A surface street
+with no turns on it is drivable now. What is unreachable is the TURN.
+
 ### 9a. It is the hardest thing in the field, for everyone, and the reason is OCCLUSION
 
 An unprotected turn -- crossing or joining traffic that has right of way -- comes down to gap
