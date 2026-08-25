@@ -120,12 +120,72 @@ read, and the phantom 80 walked the set speed to 90 for 13 minutes.
 58% of its frames, so the gate would NOT have stopped it. Corroborating the car source against the
 map source is a resolver change nobody has made.
 
-**HE PULLED THE GPS LEVER -- `FordSynthesizeApimGps` reads `1` on the device as of 2026-08-24**,
-against the `0` this file and CLAUDE.md both recorded. Ford's TSR is a fusion system and this car
-was stuck in `Available_CameraOnly` because `0x463`/`0x464` never arrive. So the next drive is the
-first one that can show `Available_FusionMode`, and `tools/bp_tsr_baseline.py` is the readout.
-**Check `TsrStatMsgTxt` before reading anything into a read count** -- a change there is the whole
-point, and it would make every earlier baseline number incomparable.
+### THE GPS LEVER IS SPENT. IT WORKS, AND IT DOES NOT PRODUCE FUSION MODE.
+
+Measured 2026-08-24 with `tools/bp_tsr_fusion.py`, across the param write at 19:21:13 which
+routes `3b9` onward all start after. The synthesis unambiguously reaches the wire:
+
+    route   0x463/0x464 (ours)   TsrStatMsgTxt              TsrMsgTxt
+    3b8     0 / 0                Available_CameraOnly 100%  NoNavDataAvailable 100%
+    3b9     0 / 0                Available_FusionMode 100%  NoInformationAllOK 100%
+    3ba     893 / 893            Available_CameraOnly 96.2% + FusionMode 3.4%
+    3bb     1396 / 1396          Available_CameraOnly 100%  NoNavDataAvailable 100%
+    3bc     500 / 500            Available_CameraOnly 100%  NoNavDataAvailable 100%
+    3bd     595 / 595            Available_CameraOnly 100%  NoNavDataAvailable 100%
+
+**Read the 3b9 and 3bb rows together: the synthesized GPS is NEITHER NECESSARY NOR SUFFICIENT.**
+3b9 reached fusion mode with none of it on the wire; 3bb/3bc/3bd had 500-1400 frames of it and
+never left camera-only. That is a two-directional disproof, not a weak correlation.
+
+**AND FUSION MODE IS REACHABLE ON THIS CAR, which is new and is the useful half.** CLAUDE.md has
+said throughout that the camera is always `Available_CameraOnly` / `NoNavDataAvailable`. It is
+not: `3b9` ran `Available_FusionMode` + `NoInformationAllOK` -- the fully healthy state -- for
+every one of its 10 TSR frames.
+
+**NOT A POWER-ON TRANSIENT, checked rather than assumed.** `tools/bp_tsr_startup.py` prints the
+first frames of each route: `3bb` and `3bd` are `Available_CameraOnly` from t+0.18 and t+0.28,
+their very first TSR frame. So the camera does not boot optimistic and decay; on those drives it
+had already decided.
+
+**WHAT IT CORRELATES WITH IS THE CLOCK, NOT THE FEATURE.** Fusion mode appears at 19:33 (`3b9`,
+100%) and 19:34 (`3ba`, 3.4%, at the start), and is gone by 23:12 (`3bb`) and on every route
+after. Two one-minute ignition cycles a minute apart is the signature of somebody standing at the
+car -- and he wrote `FordSynthesizeApimGps` at 19:21, twelve minutes before.
+
+**THE NEXT STEP IS A QUESTION FOR HIM, NOT A MEASUREMENT:** what was he doing at the car around
+19:21-19:34 on 2026-08-24 -- FORScan, a DTC clear, an as-built write, an APIM power cycle? Fusion
+mode is the thing TSR has always needed and it was briefly present in that window. Whatever
+produced it is the actual lever, and no amount of log reading will name it.
+
+**Do not re-run the GPS experiment.** It is answered in both directions. The feature itself is
+fine and should stay on -- it fixes the real `U0253 Missing Message`, which CLAUDE.md is already
+explicit is a SEPARATE fault from sign reading.
+
+**And the read behaviour is unchanged:** 1 read across all six routes, `30` mph at 28 mph, which
+is the same "only 30, only slow" pattern the baseline records. `TsrVl1Stat` is `LimitOutdated` on
+91-100% of frames everywhere, so the reliability gate is doing real work.
+
+---
+
+## 5. Finish the Ford safety A/B for the widened gas floor
+
+The panda change was verified by COMPILING it on the device -- `gcc -Wall -Wextra`, exit 0, warning
+output byte-identical to the unmodified header -- which retires the "does it build" risk that
+`tools/bp_offline_test.py` structurally cannot see.
+
+**What is NOT finished is opendbc's own `test_ford.py`.** A full run against the modified header
+hit its 1800 s timeout partway and showed failures, and **those cannot be attributed without a
+baseline**: this fork modifies `ford.h` heavily (pinion geometry, MADS, the brake gate, the reset
+latch) against a test written for upstream's version, so a red result there is the expected state
+until proven otherwise. CLAUDE.md's own rule -- compare against the merge base before treating a
+finding as yours.
+
+`/tmp/ford_gas_ab.sh` on the laptop does the A/B narrowly (`-k "gas or longitudinal or accel"`,
+device header vs mine, both in a `/tmp` copy so the car's tree is never written). It was not run
+because the laptop ran out of socket resources late in the session.
+
+**Next step:** scp that script to the device and run it. A difference between the two columns is
+mine; anything red in both is pre-existing and belongs upstream, not here.
 
 ---
 
