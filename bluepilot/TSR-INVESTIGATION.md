@@ -1868,3 +1868,38 @@ coming from Android Auto. Candidates: this camera message, or Ford's own embedde
 over MS-CAN. If it is the latter it is invisible until the canbox lands, and it would be a
 speed-limit source that needs no app running and no camera sign read. Either answer helps SLA; they
 are just answered by different measurements.
+
+### 9a. CLOSED 2026-08-24 BY THE OTHER SESSION, AND IT RETRACTS THE INFERENCE ABOVE
+
+The 80 is explained, and section 9's reasoning about it was wrong.
+
+**IT WAS AN I-80 ROUTE SHIELD.** From commit `805166cd50`, decoded on his own routes: the phantom 80
+on 000003b6 was the camera reading an **I-80 interstate shield near 2100 S** as a speed limit, and
+it graded that read `LimitReliable` on 58% of its frames.
+
+**SO THE ARGUMENT IN SECTION 9 DOES NOT HOLD.** It said:
+
+> TWO DIFFERENT ROUTES, TWO DIFFERENT PLAUSIBLE LIMITS. That is not a stuck default -- a stuck value
+> is the same number every time.
+
+True as far as it goes, and it does not support the conclusion it was used for. **Two different
+route shields also produce two different plausible numbers.** "Plausible" was carrying the weight
+of "read from a speed limit sign", and a shield reading 80 on an interstate numbered 80 is the most
+plausible-looking wrong answer available. The inference should have been "not a stuck default",
+full stop -- everything after that was reaching.
+
+**AND THE 30 IS NOT VINDICATED BY THIS EITHER WAY.** It may be the genuine sign read this document
+already records at 2011 2100 S, or another shield. Section 9 does not establish which and neither
+does this note.
+
+**IsaVLim IS NOW DEFINITIVELY WORSE THAN THE SIGNAL WE ALREADY READ, not merely redundant.** The
+same commit found `TsrVl1StatMsgTxt_D_Rq` -- the camera's OWN verdict on the value it is sending
+(`LimitReliable` / `LimitChanged` / `LimitOutdated` / `Null`) -- parsed and thrown away, and now
+gated on. `IPMA_Data2` carries no equivalent grade. So the 0x3CD path has a confidence channel and
+the 0x3D9 path has none, on top of carrying the identical number.
+
+**Nothing further is owed here from the route-intent side.** The live thread is the other session's,
+and the bigger finding is theirs too: `TsrStatMsgTxt_D_Rq` reads `Available_CameraOnly` on
+essentially every frame with `NoNavDataAvailable` at the same rate, so **Ford's TSR is a FUSION
+system being run on the camera alone on this car** -- which is why it reads so few signs, and which
+points back at the APIM nav path rather than at anything in this repo.
