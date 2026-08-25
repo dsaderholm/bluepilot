@@ -161,16 +161,27 @@ output byte-identical to the unmodified header -- which retires the "does it bui
 **What is NOT finished is opendbc's own `test_ford.py`.** A full run against the modified header
 hit its 1800 s timeout partway and showed failures, and **those cannot be attributed without a
 baseline**: this fork modifies `ford.h` heavily (pinion geometry, MADS, the brake gate, the reset
-latch) against a test written for upstream's version, so a red result there is the expected state
-until proven otherwise. CLAUDE.md's own rule -- compare against the merge base before treating a
-finding as yours.
+latch) against a test written for upstream's version, so red there is the expected state until
+proven otherwise. CLAUDE.md's rule -- compare against the merge base before treating a finding as
+yours.
 
-`/tmp/ford_gas_ab.sh` on the laptop does the A/B narrowly (`-k "gas or longitudinal or accel"`,
-device header vs mine, both in a `/tmp` copy so the car's tree is never written). It was not run
-because the laptop ran out of socket resources late in the session.
+**AND THE FIRST A/B ATTEMPT WAS INVALID, which is the trap to avoid on the retry.** The script took
+its "baseline" from `/data/openpilot/.../ford.h` on the device -- and by then the passing-assist
+branch had rebased onto this one and the device had auto-pulled it, so the device's own header
+ALREADY CONTAINED the change. It printed `flag present: 3` for the baseline column. **Never take a
+baseline from the running device; take it from git.**
 
-**Next step:** scp that script to the device and run it. A difference between the two columns is
-mine; anything red in both is pre-existing and belongs upstream, not here.
+`tools/bp_ford_gas_ab.sh` now expects `/tmp/ford_base.h`, produced by:
+
+```bash
+git show ed6c0b71d7^:opendbc_repo/opendbc/safety/modes/ford.h > /tmp/ford_base.h
+```
+
+**Next step:** scp `ford_base.h` and `ford_new.h` to the device, run the script, and compare the two
+columns. A difference is mine; anything red in both is pre-existing and belongs upstream, not here.
+
+**Note `/tmp` on the device is tmpfs and a reboot clears it** -- the tree, both headers and the
+result file all vanished once during this work. Rebuild with the tar one-liner in the script.
 
 ---
 

@@ -15,7 +15,10 @@ run() {
     -k "$K" -q -p no:randomly 2>&1 | tail -6
 }
 
-cp /data/openpilot/opendbc_repo/opendbc/safety/modes/ford.h /tmp/oc2/opendbc/safety/modes/ford.h
+# NEVER take the baseline from the running device: by the time this was first run the
+# device had already auto-pulled the change and its own header contained it.
+#   git show ed6c0b71d7^:opendbc_repo/opendbc/safety/modes/ford.h > /tmp/ford_base.h
+cp /tmp/ford_base.h /tmp/oc2/opendbc/safety/modes/ford.h
 echo "flag present: $(grep -c ford_bp_passthrough_long /tmp/oc2/opendbc/safety/modes/ford.h)"
 run "BASELINE (device ford.h, no passthrough flag)"
 
