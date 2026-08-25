@@ -5,7 +5,7 @@ This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 """
 from cereal import car, custom
-from opendbc.car import structs, apply_hysteresis
+from opendbc.car import structs
 from openpilot.common.constants import CV
 from openpilot.common.params import Params
 from openpilot.common.realtime import DT_CTRL
@@ -29,8 +29,50 @@ BaselineSource = custom.IntelligentCruiseButtonManagement.BaselineSource
 UNCONFIRMED_LEAD_COMMANDING = (UnconfirmedLeadState.active, UnconfirmedLeadState.restoring)
 
 ALLOWED_SPEED_THRESHOLD = 1.8  # m/s, ~4 MPH
-HYST_GAP = 0.0  # currently disabled; TODO-SP: might need to be brand-specific
 INACTIVE_TIMER = 0.4
+
+# BluePilot: A FALL NEVER WAITS. A BOUNCE STRAIGHT BACK HAS TO HOLD.
+#
+# Route 000003ae, 2026-08-23: the planner's target flipped between 27 and 30 mph 2.82 times a
+# SECOND for the whole inert window, and ICBM did exactly what it is built to do -- 168 increase
+# frames and 210 decrease frames, with ZERO driver button events in the window. That is the
+# measured shape of "it keeps telling me set speed changed and the max speed is flashing fast".
+# It is NOT the tap-vs-hold oscillation documented further down (there the target is still and the
+# CLUSTER crosses it); here the target itself is shaking and the cluster is chasing it honestly.
+#
+# The upstream lever for this was `apply_hysteresis(..., HYST_GAP)`, left at 0.0 with a TODO. It
+# could not have fixed this anyway: it is a MAGNITUDE deadband, and any gap wide enough to swallow
+# a 3 mph flip is wide enough to sit out a real speed-limit change.
+#
+# WHAT IS FILTERED IS REVERSALS, NOT RISES. An earlier version of this made every step up wait, and
+# that broke five tests defending real rules -- including the owner's own "behind a car, set the
+# speed to anything, because that car is probably driving correctly". Metering honest climbs to
+# fix a noise complaint is a bad trade. So the filter only ever engages on the one shape that was
+# actually measured: the target coming back UP to a level it left moments ago.
+#
+#   FALL         adopted on the very first frame, no delay ever, and it records the level it left.
+#                Aiming lower is the conservative action, and the exit-ramp incident of 2026-08-23
+#                came from a set speed that could not fall -- nothing here may re-create that.
+#   RISE to new  adopted immediately. A limit going up, a curve releasing, a lead pulling away.
+#   BOUNCE back  to within SETTLE_EPS of a level left inside REVERSAL_MEMORY_S: must be asked for
+#                continuously for SETTLE_S. A 0.1 s blip inside a 0.5 s cycle never qualifies, so
+#                the oscillation collapses onto its low leg and stays there.
+#
+# The memory is refreshed every time a bounce is refused, so a shake that goes on for a minute
+# never ages out mid-shake; once the target genuinely settles it expires REVERSAL_MEMORY_S later
+# and the next climb is instant again.
+#
+# Deliberately NO force-adopt timeout. If the target genuinely oscillates forever the low leg is
+# the right answer, and a timeout would re-introduce exactly the reversals this removes.
+#
+# Scope: this filters ONLY the target the button logic aims at. Holds, overrides and the divergence
+# latch all compare against `v_target_raw`, which stays exactly as the planner published it -- see
+# the note at the call site for what happened when that was not true.
+SETTLE_S = 0.4
+SETTLE_FRAMES = int(SETTLE_S / DT_CTRL)
+SETTLE_EPS = 1  # display units; a rise of one is a ramp crossing an integer, not a step
+REVERSAL_MEMORY_S = 2.0
+REVERSAL_MEMORY_FRAMES = int(REVERSAL_MEMORY_S / DT_CTRL)
 
 # BluePilot: buttons that count as the driver taking the set speed back from ICBM.
 # gapAdjustCruise/lkas/mainCruise deliberately excluded -- they don't change the set speed.
@@ -130,15 +172,31 @@ DEFAULT_BASELINE_RESET_DELTA = 10  # display units (mph/kph)
 # was the fourth failed attempt at this: on a car whose cluster takes longer than that to report a
 # press, the baseline was still equal to SLA's target when the window closed, and everything
 # downstream then treated the override as never having happened.
-# How long after cruise engages a `+` is still assumed to be the tail of the RESUME press that
-# engaged it, rather than a request for a hold. 0.5 s at the 100 Hz control rate.
+# How long after a RESUME press a `+` is still assumed to be the tail of that same press, rather
+# than a request for a hold.
+#
+# STATED IN SECONDS WITH THE FRAME COUNT DERIVED. It was written as a bare 50, narrowed to 30, and
+# both comments went on saying "0.5 s" -- which is 50 frames, not 30. Caught in review the same day.
+# This file already carries the rule for that mistake: "DERIVED, never restate it."
 #
 # MEASURED, not padded: on route 000003aa the phantom `accelCruise` arrived 0.02 s after engagement
 # -- the same physical press, re-read once cruise came on -- while the two genuine `+` presses on
 # the same drives came 3.5 s and later. Anything in between has never been observed.
-RESUME_TAIL_FRAMES = 30
+RESUME_TAIL_S = 0.3
+RESUME_TAIL_FRAMES = int(RESUME_TAIL_S / DT_CTRL)
 PRESS_SETTLE_STABLE_FRAMES = 40   # cluster unchanged this long => the driver has finished
 PRESS_SETTLE_MAX_FRAMES = 600     # 6 s hard cap, so a stuck cluster cannot suspend ICBM forever
+# FusionPilot: how long after the LAST press event ICBM still believes a button is held. Short,
+# because the only thing it gates here is the press-settle stand-down, and every second of it is a
+# second a dismissed hold keeps governing the car. The engage gate in cruise_ext keeps the long
+# default -- see the note on `stale_s` there.
+#
+# 3.0 s, not 2.0. These timers also feed `is_ready` through `button_pressed`, so expiring one
+# while a button is GENUINELY held makes ICBM ready mid-press and it starts driving the set speed
+# while the driver is still pressing -- the exact on-road report the press-settle re-arm exists
+# for. The longest gap measured WITHIN a held press is 0.72 s; 2.0 s was only 2.8x that, from one
+# window of one route. 3.0 s is 4.2x and still nothing like the 16 s the broken path took.
+ICBM_BUTTON_STALE_S = 3.0
 # BluePilot: last-resort fallback -- adopt set-speed movement ICBM did not command, whatever button
 # produced it. The press path above is primary; this exists because it depends on the driver's
 # button arriving as one of MANUAL_OVERRIDE_BUTTONS, and on a car with flashed SCCM firmware that
@@ -294,7 +352,10 @@ class IntelligentCruiseButtonManagement:
 
     self.is_ready = False
     self.is_ready_prev = False
-    self.v_target_ms_last = 0.0
+    self.v_target_up_frames = 0     # consecutive frames the planner has asked for a STEP up
+    self.v_target_settled = 0       # the settled set-speed target, in display units
+    self.v_target_fell_from = 0     # the level a recent fall left behind
+    self.v_target_fell_frames = 0   # how long that level stays worth remembering
     self.is_metric = False
 
     # BluePilot: a COPY. Upstream binds the module-level dict directly, which makes these timers
@@ -313,8 +374,10 @@ class IntelligentCruiseButtonManagement:
     self.v_baseline = 0            # the driver's chosen speed; 0 = no baseline, follow SLA
     self.v_target_raw = 0
     self.plan_source = LongitudinalPlanSource.cruise
-    self.scc_map_requesting = False   # a mapped corner is asking
-    self.deadline_requesting = False  # map OR vision: a target with a fixed place in the road
+    self.deadline_requesting = False  # SCC-MAP ONLY: a target with a fixed place in the road.
+                                      # Vision is deliberately NOT in here -- exempting it produced
+                                      # 80 -> 50 mph on gentle curves and was reverted the same day.
+                                      # See apply_target_drop_limit's docstring before widening it.
     self.curve_active = False        # SCC-Vision is tracking a bend right now
     self.curve_ceiling = 0           # highest target allowed for the rest of this bend
     self.v_curve_target = 0          # SCC-Vision's own ask, display units; releases the ceiling
@@ -332,6 +395,7 @@ class IntelligentCruiseButtonManagement:
     self.cycle_decision_pending = False  # waiting for the set speed to say whether it was RESUME
     self.v_cluster_at_cycle = 0      # set speed when cruise was re-engaged; the resume jump moves it
     self.press_settle_frames = 0     # >0 while ICBM stands down after a driver press
+    self.cluster_moved_since_press = False  # has the cluster moved at all since this press began
     # Starts AT the bound, not 0: before cruise has ever engaged there is no resume press for a
     # `+` to be the tail of, so nothing should be suppressed.
     self.frames_since_resume_press = RESUME_TAIL_FRAMES
@@ -340,7 +404,11 @@ class IntelligentCruiseButtonManagement:
     self.v_cluster_at_press = 0      # set speed when the driver's press was seen
     self.press_suppressed = False    # the press happened while a curve/lead owned the target
     self.baseline_diverged = False   # has the baseline ever actually differed from SLA?
-    self.speed_limit_known = False   # did the resolver have a posted limit this frame?
+    self.speed_limit_known = False   # did the resolver have a posted limit this frame, live OR remembered?
+    self.speed_limit_live = False    # is it LIVE -- speedLimitValid alone. What the clearing rule uses.
+    # SLA's own target with his offset applied -- the speed the car would drive to with no hold.
+    # What "I matched the SLA speed" means, and what the clearing rule compares against.
+    self.v_sla_target = 0
     # BluePilot: is Speed Limit Assist in ASSIST mode -- actually allowed to move the set speed --
     # as opposed to off, informational or warning? It is the discriminator for whether a hold may
     # exist at all; see `enforce_hold_policy`.
@@ -430,13 +498,69 @@ class IntelligentCruiseButtonManagement:
   def v_cruise_equal(self) -> bool:
     return self.v_target == self.v_cruise_cluster
 
+  def _adopt_target(self, v_target: int) -> int:
+    """Take this target as the settled one and start any future bounce's case over."""
+    self.v_target_up_frames = 0
+    self.v_target_settled = v_target
+    return v_target
+
+  def settle_target(self, v_target: int) -> int:
+    """Take a fall at once; make a BOUNCE BACK to a level just left prove it is not a blip.
+
+    Display units, not m/s: this is the number the button logic aims at, and the oscillation it
+    exists to absorb was measured in whole mph on the dash.
+
+    See the SETTLE_S note at the top of this file for why the filter is time rather than magnitude,
+    why it is aimed at reversals rather than at rises, and why there is no timeout that would
+    eventually adopt a value that never settles.
+    """
+    if self.v_target_fell_frames > 0:
+      self.v_target_fell_frames -= 1
+    else:
+      self.v_target_fell_from = 0
+
+    if self.v_target_settled <= 0:
+      # Nothing adopted yet -- the first frame is not a move, it is the starting point.
+      return self._adopt_target(v_target)
+
+    if v_target < self.v_target_settled:
+      # A FALL, taken on this frame, always. Aiming lower is the conservative action and the
+      # exit-ramp incident of 2026-08-23 came from a set speed that could not fall. Remember the
+      # level being left, so an immediate bounce back to it is recognisable as one.
+      self.v_target_fell_from = max(self.v_target_settled, self.v_target_fell_from)
+      self.v_target_fell_frames = REVERSAL_MEMORY_FRAMES
+      return self._adopt_target(v_target)
+
+    if v_target <= self.v_target_settled + SETTLE_EPS:
+      # Level, or a ramp crossing one mph. No delay.
+      return self._adopt_target(v_target)
+
+    if self.v_target_fell_frames <= 0 or v_target > self.v_target_fell_from + SETTLE_EPS:
+      # A rise to somewhere NEW. Nothing here meters an honest climb: a speed limit going up, a
+      # curve releasing, a lead pulling away. The owner's rule that behind a car the set speed may
+      # go anywhere it likes stays exactly as it was.
+      return self._adopt_target(v_target)
+
+    # A BOUNCE: back up to a level we left moments ago. This is the shape measured on route
+    # 000003ae and nothing else looks like it. Make it hold.
+    self.v_target_fell_frames = REVERSAL_MEMORY_FRAMES   # keep the memory alive while it repeats
+    self.v_target_up_frames += 1
+    if self.v_target_up_frames >= SETTLE_FRAMES:
+      return self._adopt_target(v_target)
+
+    return self.v_target_settled
+
   def update_calculations(self, CS: car.CarState, LP_SP: custom.LongitudinalPlanSP) -> None:
     speed_conv = CV.MS_TO_KPH if self.is_metric else CV.MS_TO_MPH
-    ms_conv = CV.KPH_TO_MS if self.is_metric else CV.MPH_TO_MS
 
-    self.v_target_ms_last = apply_hysteresis(LP_SP.vTarget, self.v_target_ms_last, HYST_GAP * ms_conv)
+    # A LOCAL, not instance state. It was `self.v_target_ms_last`, the memory
+    # `apply_hysteresis(..., HYST_GAP)` needed across frames -- and that call was a no-op with the
+    # gap left at 0.0. Nothing carries across frames here any more, and leaving it on `self` invited
+    # someone to reintroduce a filter on the raw planner value, which is exactly the placement that
+    # destroyed a driver hold. The settle that replaced it runs further down, below v_target_raw.
+    v_target_ms = LP_SP.vTarget
 
-    self.v_target = round(self.v_target_ms_last * speed_conv)
+    self.v_target = round(v_target_ms * speed_conv)
     self.v_cruise_min = get_minimum_set_speed(self.is_metric)
     self.v_cruise_cluster = round(CS.cruiseState.speedCluster * speed_conv)
 
@@ -475,43 +599,51 @@ class IntelligentCruiseButtonManagement:
     self.v_target_raw = self.v_target
     self.plan_source = LP_SP.longitudinalPlanSource
 
-    # ARM THE DIVERGENCE LATCH HERE, WHERE NOTHING CAN SKIP IT. Fixed 2026-08-22, measured on route
-    # 000003a8, and reported from the road twice before that: *"setting the hold back to SLA does
-    # not clear the hold."* He was right and the tests said otherwise.
+    # BluePilot: and only NOW is the shake filtered -- see the SETTLE_S note at the top. This sits
+    # BELOW the `v_target_raw` capture deliberately. An earlier version of this filter sat above it,
+    # on the theory that a shaking raw value could arm and disarm the override at
+    # `baseline_reset_delta`. That theory was wrong twice over: the reset delta is 10 mph and the
+    # measured shake was 3, so it could never have armed anything -- and filtering there put every
+    # hold and override decision on a delayed value, which DESTROYED a driver hold outright in
+    # `test_icbm_own_recovery_is_never_adopted`. The oscillation costs button presses, so the fix
+    # belongs on the number that drives button presses and nowhere else.
+    self.v_target = self.settle_target(self.v_target)
+
+    # THE DIVERGENCE ARM THAT LIVED HERE IS GONE, 2026-08-22, in the same review that found the
+    # stale-limit bug below. It was added this morning to fix a hold walked back to SLA's number,
+    # by observing divergence on frames the press path skipped -- and by the afternoon the clearing
+    # rule had stopped gating on the flag at all, which made the arm inert the moment it landed.
     #
-    # The clearing rule in `update_manual_override` is two halves -- arm while the hold DIFFERS from
-    # `v_target_raw`, then clear when it comes back. It lived entirely at the bottom of that method,
-    # and the method returns early on any frame a cruise button is pressed. So the only frames in
-    # which the hold actually differs, which are the ones where he is pressing it down toward SLA's
-    # number, were exactly the frames that never reached the arm:
-    #
-    #     t+816.7   baseline 39   vTargetRaw 35   diverged False   <-- should have armed here
-    #     t+817.4   baseline 35   vTargetRaw 35   diverged False   <-- nothing left to observe
-    #     ...9 s at baseline == target, hold never clears...
-    #     t+826.2   he switched cruise off, which is what actually ended it
-    #
-    # A hold walked back to SLA's own number could therefore NEVER clear. The existing test passed
-    # because its fixture releases the button and waits between presses, which hands the arm a frame
-    # the real stalk never gives it. Fixtures more orderly than reality, again.
-    #
-    # ONLY THE ARM MOVES. Clearing stays where it was: it acts on the car, and acting mid-press
-    # would undo the press he is in the middle of making. Observing is free.
-    #
-    # Gated exactly as the arm always was -- engaged, SLA owning the target, a real limit behind it.
-    # Under `cruise` there is no posted limit for `v_target_raw` to represent and a difference means
-    # nothing; while disengaged ICBM is not driving and holds are not judged.
-    if (self.v_target_valid and self.v_baseline > 0 and
-        CS.cruiseState.available and CS.cruiseState.enabled and
-        self.plan_source == LongitudinalPlanSource.speedLimitAssist and
-        self.v_baseline != self.v_target_raw):
-      self.baseline_diverged = True
+    # `baseline_diverged` survives ONLY as a published diagnostic (`selfdrived.py` ->
+    # `icbm.baselineDiverged`), and it earned that: reading it off a route is how the whole
+    # clearing investigation was settled. It is maintained by the clearing rule itself, against the
+    # number that rule actually uses. Nothing reads it to decide anything, and no new code should.
+
     # Did SLA have a posted limit at all this frame? Not the same as "is SLA the active source" --
     # a limit can exist while a curve owns the target. See where baseline_diverged is seeded.
     try:
       resolver = LP_SP.speedLimit.resolver
       self.speed_limit_known = bool(resolver.speedLimitValid or resolver.speedLimitLastValid)
+      # LIVE, NOT REMEMBERED -- `speedLimitValid` ALONE, and the distinction is the whole finding.
+      #
+      # `speed_limit_known` deliberately includes `speedLimitLastValid`, which means "there WAS a
+      # limit recently". That is right for the seeding it was written for. It is wrong for the
+      # clearing rule: leaving a 35 zone onto an unmapped road keeps `speedLimitFinalLast` at 35,
+      # so a hold he then presses to 35 on the NEW road would be destroyed by a number belonging to
+      # a road he has already left -- on exactly the roads holds matter most.
+      #
+      # Caught in review 2026-08-22, hours after the source gate was removed. The gate that was
+      # removed (`plan_source == speedLimitAssist`) implied a LIVE limit as a side effect, so
+      # replacing it with `speed_limit_known` widened the rule without anyone deciding to.
+      self.speed_limit_live = bool(resolver.speedLimitValid)
+      # SLA'S OWN NUMBER, offset included -- the speed it would drive to if the hold went away.
+      # Added 2026-08-22, and it is the value the hold should have been compared against all along.
+      self.v_sla_target = (round(float(resolver.speedLimitFinalLast) * speed_conv)
+                           if self.speed_limit_live else 0)
     except (AttributeError, KeyError):
       self.speed_limit_known = False
+      self.speed_limit_live = False
+      self.v_sla_target = 0
     # Is there a mapped corner ahead with a deadline on it? NOT "is SCC-Map the source this frame",
     # which is a different and much less stable question: when the map and vision targets are close
     # the plan source alternates between them frame by frame. Measured on the 2026-08-07 exit, the
@@ -534,7 +666,6 @@ class IntelligentCruiseButtonManagement:
     # two seconds. Reasoning from a docstring instead of data, again.
     try:
       scc = LP_SP.smartCruiseControl
-      self.scc_map_requesting = bool(scc.map.active)
       # VISION IS METERED AGAIN as of 2026-08-08, reverting the same day's change. Removing the cap
       # for curves produced 80 -> 50 mph on two slight freeway curves, with traffic behind reacting.
       # The cap was doing load-bearing work nobody had identified: SCC-Vision's target on a gentle
@@ -554,7 +685,6 @@ class IntelligentCruiseButtonManagement:
       self.curve_exit_frames = (CURVE_EXIT_LINGER_FRAMES if self.curve_active
                                 else max(0, self.curve_exit_frames - 1))
     except (AttributeError, KeyError):
-      self.scc_map_requesting = False
       self.deadline_requesting = False
       # curve_active and its ceiling latched here before: neither was cleared, so one bad frame left
       # the ceiling pinned at whatever it held with nothing able to reset it.
@@ -566,7 +696,7 @@ class IntelligentCruiseButtonManagement:
     self.v_target = self.apply_baseline(self.v_target)
 
     v_ego_conv = round(CS.vEgo * speed_conv)
-    # Reads self.scc_map_requesting, set just above -- SCC-Map is exempt. See the docstring.
+    # Reads self.deadline_requesting, set just above -- SCC-Map is exempt. See the docstring.
     self.v_target = self.apply_target_drop_limit(v_ego_conv)
 
     # BluePilot: the radar-blind lead detector supersedes everything above, including the drop
@@ -991,7 +1121,7 @@ class IntelligentCruiseButtonManagement:
     return send_button
 
   def update_readiness(self, CS: car.CarState, CC: car.CarControl) -> None:
-    update_manual_button_timers(CS, self.cruise_button_timers)
+    update_manual_button_timers(CS, self.cruise_button_timers, stale_s=ICBM_BUTTON_STALE_S)
 
     # BluePilot: gasPressedOverride is the ONLY event carrying ET.OVERRIDE_LONGITUDINAL, so on this
     # car cruiseControl.override means precisely "the driver is on the throttle" -- nothing else.
@@ -1123,8 +1253,8 @@ class IntelligentCruiseButtonManagement:
     # `accelCruise` -- and the press path below turns the first one into a brand-new hold at
     # whatever speed the car happens to be doing.
     #
-    # 0.5 s SEPARATES THE TWO CASES CLEANLY, measured rather than picked: the phantom arrived 0.02 s
-    # after engagement, while the two genuine + presses on the same drives came 3.5 s and later.
+    # RESUME_TAIL_S SEPARATES THE TWO CASES CLEANLY, measured rather than picked: the phantom
+    # arrived 0.02 s after engagement, while the two genuine + presses came 3.5 s and later.
     # Only hold CREATION is suppressed -- raising an existing hold is untouched, because that is a
     # press against a hold he already has and cannot be the tail of a resume.
     # THE WHOLE PRESS BLOCK IS SKIPPED, not just the capture inside it. Guarding only the capture
@@ -1135,10 +1265,16 @@ class IntelligentCruiseButtonManagement:
     # Only CREATION is suppressed. With a hold already up, `override_state` is manual and the tail
     # falls through to the ordinary raise path, which is right: raising a hold he already has is not
     # inventing one, and RES+ keeping an existing hold is the documented contract.
+    # ONLY `accelCruise` CAN BE A RESUME TAIL. RES+ is the button whose meaning flips with the
+    # cruise state; SET- is a different physical button and cannot be re-read as a `+`. Gating the
+    # whole of MANUAL_OVERRIDE_BUTTONS swallowed a deliberate SET- pressed just after resuming, for
+    # a defect that button cannot produce. Narrowed in review, 2026-08-22.
+    tail_buttons = [b for b in CS.buttonEvents
+                    if b.type.raw in MANUAL_OVERRIDE_BUTTONS and b.pressed]
     resume_tail_creates = (self.frames_since_resume_press < RESUME_TAIL_FRAMES
-                           and self.override_state != OverrideState.manual)
-    if cruise_enabled and not resume_tail_creates and any(
-        b.type.raw in MANUAL_OVERRIDE_BUTTONS and b.pressed for b in CS.buttonEvents):
+                           and self.override_state != OverrideState.manual
+                           and all(b.type.raw == ButtonType.accelCruise for b in tail_buttons))
+    if cruise_enabled and not resume_tail_creates and tail_buttons:
       if self.override_state != OverrideState.manual:
         self.v_target_overridden = self.v_target_raw
         # Seeded from whether a posted limit exists at all, not flat False.
@@ -1184,6 +1320,7 @@ class IntelligentCruiseButtonManagement:
       # could never become true while the driver kept pressing.
       if self.press_settle_frames == 0:
         self.v_cluster_at_press = self.v_cruise_cluster
+        self.cluster_moved_since_press = False
       self.press_settle_frames = PRESS_SETTLE_MAX_FRAMES
       self.cluster_stable_frames = 0
       return
@@ -1211,6 +1348,12 @@ class IntelligentCruiseButtonManagement:
         # while a hold created against a known limit still has to leave and come back.
         self.baseline_diverged = not self.speed_limit_known
         self.v_cluster_at_press = self.v_cruise_cluster_prev
+        # RESET WITH THE ANCHOR. `cluster_moved_since_press` means "the cluster has moved since
+        # THIS anchor", so re-anchoring without clearing it leaves the new stand-down starting with
+        # `moved` already True -- and `settled` can then fire on the first stable frame, ending the
+        # stand-down mid-gesture. That is the documented failure the stand-down exists to prevent:
+        # the baseline froze and ICBM walked the set speed back down while the button was held.
+        self.cluster_moved_since_press = False
       self.override_state = OverrideState.manual
       # Same rule as the press path: under a curve or a lead, something other than the driver owns
       # the target, so movement there must not redefine the hold. Without this the press path's
@@ -1290,7 +1433,19 @@ class IntelligentCruiseButtonManagement:
       # ends on the pre-press value, and the press is undone -- the same shape of bug as the fixed
       # timer it replaced. A press that never moves the cluster (already at Ford's ceiling) is
       # released by PRESS_SETTLE_MAX_FRAMES instead.
-      moved = self.v_cruise_cluster != self.v_cluster_at_press
+      # LATCHED, because a ROUND TRIP IS NOT "NEVER MOVED". FusionPilot, 2026-08-23.
+      #
+      # Comparing the live cluster against the value at the FIRST press means a sequence that ends
+      # where it began reads as motionless -- and "walk the hold back to SLA's number" is exactly
+      # that sequence. He starts at SLA's number, presses up to make a hold, presses back down to
+      # SLA's number: first press 22, last frame 22, `moved` False. So `settled` never fires, the
+      # stand-down runs its full 6 s cap, and the clearing rule below it is unreachable until then.
+      #
+      # That is why it is ALWAYS this gesture he reports. Fourth time: "SLA wants 20+2 and I set a
+      # hold up and then back to 22 and it didn't clear."
+      if self.v_cruise_cluster != self.v_cluster_at_press:
+        self.cluster_moved_since_press = True
+      moved = self.cluster_moved_since_press
       held = any(self.cruise_button_timers[k] > 0 for k in self.cruise_button_timers)
       settled = moved and not held and self.cluster_stable_frames >= PRESS_SETTLE_STABLE_FRAMES
       if settled:
@@ -1327,19 +1482,75 @@ class IntelligentCruiseButtonManagement:
     # the second way out of a hold, alongside cancel + re-engage, and the only one that does not
     # require disengaging cruise.
     #
-    # Gated on baseline_diverged, which is the whole reason that flag exists. A hold is created at
-    # the set speed the driver pressed from, and on the very first frame that speed can still equal
-    # SLA's target -- clearing on bare equality would delete the hold before the driver's press had
-    # moved anything, which is the "minus is unpredictable" failure this rule was withdrawn for the
-    # first time around. Requiring the baseline to have actually been somewhere else first makes
-    # the gesture unambiguous: you have to leave SLA's number and come back to it.
+    # NOT GATED ON `baseline_diverged` ANY MORE. The paragraph that used to sit here explained
+    # that flag as load-bearing -- "requiring the baseline to have actually been somewhere else
+    # first" -- and it went on saying so for hours after the gate was removed, directly above the
+    # code that removed it. Deleted rather than annotated: two places in one file disagreeing about
+    # one fact is how a line of investigation gets closed on the wrong evidence.
     #
-    # Source-gated like the reset-delta rule below. Under `cruise` there is no posted limit for
-    # v_target_raw to represent, and equality there is coincidence rather than intent.
-    if self.plan_source == LongitudinalPlanSource.speedLimitAssist:
-      if self.v_baseline != self.v_target_raw:
+    # What that gate genuinely protected -- not deleting a fresh hold on its first frame -- is done
+    # by the press path and the press-settle stand-down, both of which return before this line.
+    # A LEVEL RULE, NOT AN EDGE ONE, since 2026-08-22. His words, twice: *"if I set the speed back
+    # to the SLA speed, there shouldn't be a hold"* and *"I don't want a hold if I +/- back to SLA
+    # speed."* That is a statement about the CURRENT state, and the code was asking a question about
+    # history instead.
+    #
+    # `baseline_diverged` used to gate this: the hold had to have DIFFERED from SLA at some point
+    # before equality would clear it. Measured on route 000003ac -- a hold born at 35 with
+    # `v_target_raw` already 35 sat there for 164.7 SECONDS with the source speedLimitAssist the
+    # whole time, because it had never differed and the latch could never arm. It survived until
+    # something else killed it. He photographed exactly this and asked, correctly, whether the hold
+    # was still there.
+    #
+    # THE LATCH'S ONE REAL JOB IS ALREADY DONE ELSEWHERE. Its comment says it exists "to stop a
+    # fresh hold being deleted on its first frame" -- but this rule is unreachable during a press:
+    # the press path returns near the top of this method, and the press-settle stand-down returns
+    # above it. By the time execution arrives here the press has finished and the driver has
+    # deliberately landed on SLA's number. There is nothing left to protect.
+    #
+    # `baseline_diverged` is maintained here PURELY as a published diagnostic -- nothing reads it to
+    # decide anything any more. An earlier version of this note claimed the reset-delta rule and the
+    # no-limit seeding still read it; they do not, and that claim was already false when written.
+    # COMPARED AGAINST SLA'S OWN NUMBER, NOT THE WINNING PLAN'S. Third and final version of this
+    # rule, 2026-08-22, after he asked the same question three times and was right every time.
+    #
+    # `v_target_raw` is whatever source is WINNING the plan this frame. So the old rule had to be
+    # gated on `plan_source == speedLimitAssist`, and could therefore only run on the frames SLA
+    # happened to win. Any curve, any lead, any drop to `cruise` and the check simply did not
+    # execute -- he photographed exactly that, a hold of 35 against a posted 30 + 5 offset with
+    # `BRAKE 0.1` on screen, meaning something else owned the target at that instant.
+    #
+    # `v_sla_target` is SLA's own number with his offset applied -- the speed the car would drive to
+    # if the hold went away. That is the thing "I matched SLA" means, and it is meaningful whether
+    # or not SLA is currently winning. With it, the source gate is not needed and is gone.
+    #
+    # The two earlier versions each fixed a real case and neither was enough:
+    #   * the latch never armed during a press, so a hold WALKED BACK never cleared (route a8)
+    #   * a hold BORN equal never armed it either, so it sat 164.7 s (route ac)
+    #   * and both were still gated on SLA winning, which is this one.
+    #
+    # A PINNED HOLD IS EXEMPT, which is his whole sentence and not a footnote to it: *"if I set my
+    # hold that I had back to the SLA speed, I want that hold gone UNLESS IT'S PINNED."* A pin is a
+    # deliberate statement about a PLACE -- he chose this speed here, on an earlier drive, and
+    # matching the posted limit today does not retract that. Clearing it would delete the pin's
+    # effect every time the limit happened to agree with it, on exactly the roads pins are for.
+    # EXACT EQUALITY, and a ±1 tolerance was TRIED AND REVERTED on 2026-08-22. Review raised that
+    # `v_sla_target` rounds a continuous m/s value while `v_baseline` comes off a dash that moves in
+    # whole units, so with a percentage offset the two might never land on the same integer and the
+    # rule would never fire.
+    #
+    # The concern does not hold, and the existing tests are what showed it. `v_target` is
+    # `round(v_target_ms * speed_conv)` -- ICBM aims at SLA's number ALREADY ROUNDED, by the
+    # same `round`, so the cluster lands on exactly the integer this compares against. The two
+    # cannot straddle.
+    #
+    # And the tolerance was actively harmful: it deleted a hold one increment above the limit, which
+    # is an ordinary thing to want and which `TestPressSurvivesAnyClusterLag` asserts. A tolerance
+    # wide enough to absorb rounding is wide enough to swallow the smallest hold he can express.
+    if self.speed_limit_live and self.v_sla_target > 0:
+      if self.v_baseline != self.v_sla_target:
         self.baseline_diverged = True
-      elif self.baseline_diverged:
+      elif self.baseline_source != BaselineSource.pinned:
         self.clear_baseline()
         return
 
@@ -1409,6 +1620,7 @@ class IntelligentCruiseButtonManagement:
     self.v_baseline = self.pinned_hold
     self.baseline_source = BaselineSource.pinned
     self.v_cluster_at_press = self.v_cruise_cluster
+    self.cluster_moved_since_press = False   # resets with the anchor -- see the note in the fallback
     return True
 
   def enforce_hold_policy(self) -> None:

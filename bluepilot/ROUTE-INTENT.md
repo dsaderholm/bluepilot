@@ -911,12 +911,80 @@ side** -- if the new work needs a change in passing assist's own code, that chan
 reaches the child by the normal update, exactly as "a fix belongs to the branch that owns the code"
 already requires.
 
+**TWO CONSTRAINTS HE STATED 2026-08-22 THAT DECIDE THE ORDER:**
+
+  *"I prefer waze, obviously."*   and   *"I also don't have the canbox yet."*
+
+**No canbox means the MS-CAN transport cannot be tested end to end today**, only its negative half.
+**The broken IPC path means Waze is not publishing to the cluster** regardless of hardware. So of
+the three transports, exactly one is live right now:
+
+    Waze IPC via MS-CAN      needs the canbox AND Waze's bug fixed      TWO blockers, neither his
+    Mapbox / FrogPilot       works today, but is not Waze and costs a destination entry per drive
+    WAZE NOTIFICATION        works today, no hardware, no vendor cooperation    <- the only one
+
+**AND IT IS NOT A COMPROMISE ON HIS PREFERENCE, which is the point that reorders everything.** The
+notification is WAZE -- his own app, his own route, with the traffic and rerouting that made him
+prefer it. It is the same source over a different wire. So the fallback in 9a delivers his first
+choice of DATA while the IPC path waits on two things he does not control.
+
+**BUT THE CANBOX ROUTE IS THE PREFERRED DESTINATION, and he asked directly: "we prefer the canbox
+route, right?" Yes.** The paragraph above argued the notification should therefore be built FIRST,
+and that does not follow -- being the only live transport makes it the FALLBACK that is available,
+not the one to build toward.
+
+**Why MS-CAN wins on every axis that lasts:**
+
+    no phone in the loop         nothing to keep running, charged, connected or foregrounded
+    structured CAN               decode once against a DBC; a notification is a rendered glyph
+                                 and a string, and reading a maneuver out of it is INFERENCE
+    stable                       Waze can restyle a notification in any release; a CAN signal
+                                 does not move
+    no second link               the notification path needs phone -> WiFi -> comma, which is
+                                 another thing to fail silently mid-drive
+    no companion app             which would be ours to write, ship and maintain forever
+    works for ANY nav app        whatever is driving the cluster feeds it
+
+**AND THE WAZE BUG IS NOT ACTUALLY A BLOCKER FOR IT, which is the part that settles the ordering.**
+Google Maps renders turn-by-turn on his IPC today. So:
+
+    canbox + Google Maps     works as soon as the hardware is in -- no vendor cooperation at all
+    canbox + Waze            works the day Waze fixes the IPC bug, with no code change
+
+**So the canbox route degrades gracefully to Maps and upgrades to Waze for free.** It is not waiting
+on Waze; only his PREFERENCE of source is.
+
+**REVISED ORDERING:**
+
+    1. the transport-agnostic interface and the REFUSAL gate, against a stub    build now
+    2. MS-CAN via canbox                                                        the target
+    3. Waze notification bridge                                                 ONLY if the canbox
+                                                                                slips badly
+
+Point 3 is a real cost -- an Android app to write and maintain -- and it buys time rather than
+capability. **Do not start it while the canbox is weeks away.** It is in this document so the option
+is understood, not because it is scheduled.
+
 **WHAT THE NEW SESSION SHOULD DO FIRST, in order:**
 
 1. **The Google Maps diff drive.** No hardware, no code. Drive with Maps NAVIGATING, then diff the
    logged buses against a no-route drive. Anything that appears or starts varying is the channel.
    This decides whether the canbox is needed at all, and it is one drive. **TOOLED, 2026-08-22:
-   `tools/bp_can_nav_diff.py`. The drive is still owed.**
+   `tools/bp_can_nav_diff.py`, which supersedes the older suggestion of starting from
+   `bp_offline_map.py` and the APIM probe. The drive is still owed.**
+
+   **AND WITH NO CANBOX FITTED, "NOTHING APPEARED" IS THE EXPECTED RESULT AND IS NOT A DEAD END.**
+   It says the instruction is on a bus the comma cannot currently see, which is what the canbox
+   exists to fix -- it does NOT say the instruction is absent. This file already records the same
+   trap twice (mapd v2 offroad, and a route older than the boot): **absence in a log is evidence
+   about the log's conditions first.** The drive is still worth doing, because the OTHER outcome --
+   something appearing on bus 0/1/2 today -- would make the whole canbox dependency unnecessary,
+   and that is worth one drive to rule in or out.
+
+   **PARTLY ANSWERED ALREADY, 2026-08-23:** the diff was run on 000003b6 against the recorded
+   control and every APIM nav address was absent on BOTH routes. That is the expected answer, but
+   the NAV route was chosen for being newest rather than confirmed navigating, so it is not the
+   deliberate experiment -- see section 11.
 2. **Only then choose a transport.** MS-CAN via canbox (9e), Waze notification (9b), or Mapbox
    routing (9c) -- and the interface must make them interchangeable, because two of the three depend
    on other people. **The interface exists as of 2026-08-22; see section 10.**

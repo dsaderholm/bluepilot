@@ -9,6 +9,7 @@ import numpy as np
 from cereal import car, custom
 from opendbc.car import structs
 from openpilot.common.constants import CV
+from openpilot.common.realtime import DT_CTRL
 from openpilot.common.params import Params
 from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management.helpers import get_minimum_set_speed
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.speed_limit_assist import ACTIVE_STATES as SLA_ACTIVE_STATES
@@ -21,16 +22,61 @@ CRUISE_BUTTON_TIMER = {ButtonType.decelCruise: 0, ButtonType.accelCruise: 0,
                        ButtonType.setCruise: 0, ButtonType.resumeCruise: 0,
                        ButtonType.cancel: 0, ButtonType.mainCruise: 0}
 
+# FusionPilot: A BUTTON TIMER THAT NEVER RETURNS TO ZERO FROZE A HOLD FOR 87 SECONDS. 2026-08-23.
+#
+# The loop below only zeroes a timer on a RELEASE event. On this car the SCCM clears the button bit
+# between frames, so one physical press arrives as a burst of PRESS events at the frame rate -- and
+# the release is not reliably among them. Route 000003ae, t+140..260:
+#
+#     88 events with pressed=True, ONE with pressed=False
+#
+# The last press was at t+154.48 and no event of any kind followed until t+269. So the timer sat
+# above zero for the whole intervening 115 s, and ICBM's press-settle stand-down re-arms itself
+# every frame any manual-override timer is non-zero -- which made `update_manual_override` return
+# before its hold-clearing rule on every one of those frames. His report: the hold sat on SLA's own
+# number from t+158.4 to t+245.6 and would not clear, for the third time.
+#
+# THE TIMER IS ALREADY "FRAMES SINCE THE LAST PRESS EVENT", because every press event resets it to
+# 1 below. So a cap is all that is needed, and on THIS car it cannot cut a real press short: the
+# bursts keep arriving while a button is held and keep resetting it, with a longest observed gap
+# WITHIN a held press of 0.72 s.
+#
+# TEN SECONDS, NOT TWO, AND THE MARGIN IS THE WHOLE POINT. This function is SHARED -- ICBM's
+# controller and `VCruiseHelperSP.enable_button_timers` both run it, and the latter uses it to hold
+# engagement off until buttons are released. A car whose stalk sends ONE press event and one release
+# gets no resets at all, so any cap expires mid-hold there, and the failure that produces is already
+# written down: a cap expiring mid-hold froze the baseline and ICBM walked the set speed back down
+# one increment at a time while the button was still pressed, reported exactly that way.
+#
+# 2 s was chosen first and is only ~3x the single measured worst-case gap, from one window of one
+# route. 10 s is 14x it, still an order of magnitude below the 115 s stick this exists to fix, and
+# longer than any plausible physical press -- a 10 s hold on this car moves the set speed ~50 mph.
+#
+# This is deliberately not a fix to the press-settle re-arm. That re-arm is correct and was itself
+# added to fix the mid-hold report above. The defect is the input it trusts, not the rule.
+BUTTON_STALE_S = 10.0
+
 V_CRUISE_MIN = 8
 V_CRUISE_MAX = 145
 V_CRUISE_UNSET = 255
 
 
-def update_manual_button_timers(CS: car.CarState, button_timers: dict[car.CarState.ButtonEvent.Type, int]) -> None:
+def update_manual_button_timers(CS: car.CarState, button_timers: dict[car.CarState.ButtonEvent.Type, int],
+                                stale_s: float = BUTTON_STALE_S) -> None:
   # increment timer for buttons still pressed
+  #
+  # FusionPilot: `stale_s` is a PARAMETER because the two callers want different answers. The engage
+  # gate in `VCruiseHelperSP` holds openpilot off until buttons are released, and being wrong there
+  # engages the car mid-press -- so it keeps the long, conservative default. ICBM's copy only feeds
+  # its press-settle stand-down, where being slow is what he reports as "the hold will not clear",
+  # and 10 s of that is 10 s of a hold he has already dismissed still governing the car.
+  stale = int(stale_s / DT_CTRL)
   for k in button_timers:
     if button_timers[k] > 0:
       button_timers[k] += 1
+      # FusionPilot: and give up on a press whose release never arrived. See BUTTON_STALE_S.
+      if button_timers[k] > stale:
+        button_timers[k] = 0
 
   for b in CS.buttonEvents:
     if b.type.raw in button_timers:

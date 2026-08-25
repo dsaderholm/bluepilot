@@ -32,6 +32,15 @@ WHAT IT CHECKS, and which complaint each one answers:
   9. SCC AT CORNERS        Did either curve controller ask for anything, and what.
  10. STOP OVERRIDE         Did it arm, and did `hasSlowDown` ever go true -- the signal that only
                            started being published two days ago.
+ 15. TSR SIGN READS        The before/after for an IPMA as-built change. The camera has produced
+                           exactly ONE verified read in ~50 segments, so a config change is only
+                           worth anything if this moves. Counts SIGNS (rising edges), not frames --
+                           that one read was seven frames and rounds to zero as a percentage.
+ 14. EXPERIMENTAL MODE     "I didn't notice that experimental mode was off! No wonder it didn't come
+                           to stops at traffic lights today." It is a PRECONDITION of the stop
+                           override, the on-road `e` button flips it on one tap, and a whole test
+                           drive went to it. Read off the wire, per frame, so a mid-drive tap shows
+                           as a share rather than hiding behind the param's current value.
 
 NO DATA IS NOT ZERO, AND THIS PRINTS THEM DIFFERENTLY. A tool that shows `--` for both "the feature
 did nothing" and "the message was never on the bus" hides the only distinction that matters; two
@@ -157,6 +166,10 @@ class Checkup:
     self._prev_raw = 0.0
     self._last_btn = ("none", -99.0)
     self._enabled = False
+    # `_enabled` is meaningless until a carState has actually been read, and messages are NOT
+    # ordered by type -- a hold event in the opening frames would otherwise be attributed to
+    # cruise-off regardless of the truth, in the very check built to tell those apart.
+    self._cs_seen = False
 
     # 9. SCC
     self.scc_map_active = 0
@@ -169,6 +182,17 @@ class Checkup:
     self.has_slow_down_frames = 0
     self.dec_frames = 0
     self.standstill_frames = 0
+
+    # 14. experimental mode
+    self.exp_mode_frames = 0
+    self.ss_frames = 0
+
+    # 15. TSR sign reads
+    self.tsr_frames = 0
+    self.tsr_read_frames = 0
+    self.tsr_values: Counter[int] = Counter()
+    self.tsr_events: list[dict] = []
+    self._tsr_reading = False
 
   # -- ingest -------------------------------------------------------------------------------
 
@@ -271,6 +295,73 @@ class Checkup:
   def acc_faulted(self) -> None:
     self.acc_faults += 1
 
+  def car_state_bp(self, cbp, t: float) -> None:
+    """Did the camera read a speed limit sign, and when.
+
+    This is the before/after for an IPMA as-built change. TSR has produced exactly ONE verified
+    read across ~50 segments of driving -- route 000003a7 segment 6, seven consecutive frames,
+    255 -> 30 at a real SPEED LIMIT 30 in Salt Lake City -- so the open question is not whether the
+    camera works but why it is so bad at it. A config change is only worth anything if this number
+    moves, and without it that has to be re-derived by hand every time.
+
+    `0` and `255` are the sentinels, taken from `_get_speed_limit`'s own test rather than restated,
+    so this agrees with what Speed Limit Assist would actually have consumed.
+
+    EVENTS, NOT FRAMES, is the headline: the one confirmed read was seven frames, and a per-frame
+    percentage of a 900-frame drive rounds that to zero. A run is one sign."""
+    try:
+      tsd = cbp.trafficSignData
+      v = int(tsd.vLimit1)
+    except Exception:
+      return
+    self.tsr_frames += 1
+    reading = v not in (0, 255)
+    if reading:
+      self.tsr_read_frames += 1
+      self.tsr_values[v] += 1
+      if not self._tsr_reading:
+        # Rising edge -- a new sign. Cap the list; a drive that finally reads well should not
+        # print a thousand lines, and the count below is the real answer anyway.
+        if len(self.tsr_events) < 12:
+          try:
+            unit = int(tsd.vLimitUnit)
+          except Exception:
+            unit = 0
+          self.tsr_events.append({"t": self.rel(t), "v": v, "unit": unit})
+    self._tsr_reading = reading
+
+  def selfdrive_state(self, ss) -> None:
+    """Was Experimental Mode on. It is a PRECONDITION of the stop override, not a preference.
+
+    `FordStopOverride.update` takes `experimental_mode` and refuses to ARM without it, because the
+    plan only carries a stop for a light when the end-to-end model is driving it. So a drive spent
+    testing the override with the mode off produces no stops and no evidence -- which is exactly
+    what happened on 2026-08-23, and nothing on the screen or in this tool said why.
+
+    Counted per frame rather than read from the param, for the reason check 1 exists: the param is
+    what the device holds NOW, and he turned it back on before this was ever run. The wire is what
+    the drive actually had."""
+    self.ss_frames += 1
+    try:
+      if ss.experimentalMode:
+        self.exp_mode_frames += 1
+    except Exception:
+      pass
+
+  def segment_gap(self) -> None:
+    """A segment could not be read, so the baseline either side of it is not continuous.
+
+    Without this the reader carries `_prev_baseline` across the hole: a hold that ENDED inside the
+    missing segment is never recorded as a death, and one that STARTED there is reported as a birth
+    at the next segment's first frame, with whatever button happened to be last seen attached to it.
+    Checks 12 and 13 are the ones verifying today's fixes, so a fabricated birth reads as a phantom
+    hold that never happened."""
+    self._prev_baseline = 0.0
+    self._prev_raw = 0.0
+    self._last_btn = ("none", -99.0)
+    self.resume_t = None
+    self._cs_seen = False
+
   def buttons(self, cs, t: float) -> None:
     """Remember the last press, and specifically the last RESUME. Both feed check 10."""
     try:
@@ -279,6 +370,7 @@ class Checkup:
       # was not -- he had switched cruise off. Without this the check reports a false success on
       # the very drive that proved the bug.
       self._enabled = bool(cs.cruiseState.enabled)
+      self._cs_seen = True
     except Exception:
       pass
     try:
@@ -302,6 +394,8 @@ class Checkup:
     that number and then vanishing is the clear working; vanishing from somewhere else is cruise
     being switched off, which is what the old measurement mistook for a late clear.
     """
+    if not self._cs_seen:
+      return          # cannot say whether cruise was engaged, so do not pretend
     try:
       base = float(icbm.vBaseline)
       raw = float(getattr(icbm, "vTargetRaw", 0.0))
@@ -541,6 +635,40 @@ def render(c: Checkup, capped: bool) -> None:
       len(c.hold_deaths), len(off)),
     "no hold ended this drive"))
 
+  # 14 ------------------------------------------------------------------------------------
+  # Experimental Mode is a PRECONDITION of the stop override, and on 2026-08-23 a whole test drive
+  # was spent with it off -- no stops, no evidence, and nothing anywhere saying why. He had not
+  # knowingly turned it off; the on-road `e` button toggles it on a single tap with no
+  # confirmation, and both its gates pass on this car.
+  #
+  # Printed as a SHARE rather than a yes/no because a mid-drive tap is the thing most worth
+  # catching: 100% and 0% are both self-explanatory, and anything between them means it moved
+  # while he was driving, which no param mtime can show.
+  print("14. Experimental Mode  " + verdict(
+    None if not c.ss_frames else c.exp_mode_frames == c.ss_frames,
+    "ON for the whole drive -- the stop override was free to arm",
+    "on for {} of {} frames. The stop override CANNOT ARM without it, so any part of this drive "
+    "below that share proves nothing about the override.".format(
+      pct(c.exp_mode_frames, c.ss_frames), c.ss_frames),
+    "no selfdriveState on the bus"))
+
+  # 15 ------------------------------------------------------------------------------------
+  # The before/after for an IPMA as-built change. One verified read in ~50 segments is the
+  # baseline this has to beat, so what matters is the EVENT COUNT, not a frame share.
+  print("15. TSR sign reads     " + verdict(
+    None if not c.tsr_frames else bool(c.tsr_events),
+    "{} sign(s) read across {} frames -- the camera is recognizing signs".format(
+      len(c.tsr_events), c.tsr_frames),
+    "NOT ONE sign in {} frames. TsrVLim1MsgTxt was the no-data sentinel the whole drive, which is "
+    "the same result as every drive before the as-built change.".format(c.tsr_frames),
+    "no carStateBP on the bus -- TSR needs the flag set on this platform"))
+  for e in c.tsr_events:
+    unit = {1: "km/h", 2: "mph"}.get(e["unit"], "unit " + str(e["unit"]))
+    print("   t+{:<7.1f} read {} {}".format(e["t"], e["v"], unit))
+  if c.tsr_values:
+    print("   values seen: " + ", ".join(
+      "{} x{}".format(v, n) for v, n in sorted(c.tsr_values.items())))
+
 
 def main() -> int:
   ap = argparse.ArgumentParser()
@@ -570,10 +698,12 @@ def main() -> int:
       if not os.path.exists(p):
         p += ".zst"
       if not os.path.exists(p):
+        c.segment_gap()
         continue
       try:
         lr = LogReader(p)
       except Exception:
+        c.segment_gap()
         continue
 
       for m in lr:
@@ -590,6 +720,10 @@ def main() -> int:
             c.buttons(m.carState, t)
           elif w == "selfdriveStateSP":
             c.icbm_hold(m.selfdriveStateSP.intelligentCruiseButtonManagement, t)
+          elif w == "selfdriveState":
+            c.selfdrive_state(m.selfdriveState)
+          elif w == "carStateBP":
+            c.car_state_bp(m.carStateBP, t)
           elif w == "longitudinalPlanSP":
             c.plan_sp(m.longitudinalPlanSP)
           elif w == "controllerStateBP":

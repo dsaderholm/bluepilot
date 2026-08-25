@@ -72,6 +72,21 @@ struct IntelligentCruiseButtonManagement {
   vTargetRaw @9 :Float32;
   baselineDiverged @10 :Bool;
 
+  # FusionPilot: AND THE RULE CHANGED, SO THESE TWO ARE THE ONES IT COMPARES NOW. 2026-08-23.
+  #
+  # The comment above is right about why `vTargetRaw` and `baselineDiverged` were added, and it
+  # went stale the same week: on 2026-08-22 the rule stopped comparing against the winning plan
+  # and started comparing against SLA's OWN number, gated on the limit being live. Neither of
+  # those reached the wire, so when he reported the hold sticking AGAIN on 2026-08-23 the route
+  # could not say which term declined -- the exact failure the paragraph above describes, one
+  # struct-field away from where it is written.
+  #
+  # THE LESSON IS THAT PUBLISHING A DIAGNOSTIC IS NOT A ONE-TIME ACT. It is a property of the
+  # rule, and it has to move when the rule moves. Anything added here for a comparison must be
+  # re-checked whenever that comparison is rewritten.
+  vSlaTarget @11 :Float32;      # SLA's own number with his offset, in cluster units. 0 = none
+  speedLimitLive @12 :Bool;     # speedLimitValid ALONE -- what the clearing rule gates on
+
   enum IntelligentCruiseButtonManagementState {
     inactive @0;      # No button press or default state
     preActive @1;     # Pre-active state before transitioning to increasing or decreasing
@@ -986,6 +1001,19 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     # AGREE_WINDOW_S should be read off rather than guessed at twice.
     driverPassesAgreedLate @106 :UInt16;
     driverPassLateDelay @107 :Float32;
+
+    # THE LEFT ROAD EDGE CLOSING IN AHEAD, metres, over the same near/far span the RIGHT side uses
+    # to spot an off-ramp. Positive means narrowing. The right-side test throws this sign away --
+    # `max(0.0, far - near)` -- because there a narrowing road is a lane ending the availability
+    # test already handles; on the left it is the coned-work-zone signature, which is the one
+    # hazard recorded here that no signal in the system carries.
+    #
+    # MEASURED BEFORE IT GATES ANYTHING, 8 drives, 86k moving frames. On motorway the frames the
+    # gate already opens and the frames a looser edge term would admit have the SAME distribution
+    # (p99 0.51 vs 0.71, max 1.44 vs 1.38); on primary/secondary/tertiary the would-admit set has
+    # a long tail the open set does not (secondary p90 5.99 against a max of 0.83). So it is
+    # published and watched first, and gates nothing yet.
+    leftNarrowingM @108 :Float32;
 
   }
 

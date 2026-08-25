@@ -120,6 +120,40 @@ WIDEN_NEAR_IDX, WIDEN_FAR_IDX = 4, 20
 # point, small enough that ordinary shoulder variation does not. Starting value -- fit from logs.
 MAX_WIDENING_M = 2.5
 
+# THE LEFT ROAD EDGE CLOSING IN, metres, over the same near/far span MAX_WIDENING_M uses. Positive
+# is narrowing, which is the OPPOSITE sign to the right-side test and deliberate: `_road_widening`
+# keeps `max(0.0, far - near)` because on the right a narrowing road is a lane ending that the
+# availability test already handles. On the left it is the coned-work-zone signature -- the one
+# hazard on record here that no signal in the system carries.
+#
+# 1.5 IS WHERE NOTHING CURRENTLY OPEN IS REFUSED. Measured over 8 drives and 86k moving frames,
+# the largest narrowing on ANY frame the gate opens today is 1.44 m on motorway, and below 1.25 m
+# on every other road class. So a refusal here costs nothing that is working, which is the cheap
+# direction -- evidence that REFUSES is allowed to be cheap; evidence that opens is not.
+#
+# IT GATES NOTHING YET. Published and watched first, because the same measurement says the edge-std
+# term it would replace is doing no narrowing work on motorway at all, and changing the source and
+# the judgement in one step produces a drive that cannot say which half moved.
+MAX_LEFT_NARROWING_M = 1.5
+
+# BELOW THIS THE MEASUREMENT IS MEANINGLESS, and leaving it out is what made the first drive that
+# recorded this report a 99.95 m narrowing -- a hundred metres of closing-in over a 75 m lookahead,
+# which is not a road, it is a stopped car's modelled edge. `bp_left_taper.py` carried this floor
+# from the day it was written and the detector did not, so the tool and the car disagreed about the
+# same route by a factor of ten. Same value as the tool, named once so the two cannot drift.
+NARROWING_MIN_SPEED_MS = 10.0
+
+# A NARROWING WIDER THAN A ROAD IS THE EDGE ESTIMATE BREAKING, not the road closing in. Real tapers
+# measured over nine drives top out near 10 m even on the worst secondary road; 25 m and 100 m are
+# a different phenomenon and must not be counted as a taper.
+#
+# An implausible frame reports narrowing FALSE -- "I did not see a taper" -- rather than TRUE. That
+# is honest rather than lax: the term will one day REFUSE, and a broken measurement is not evidence
+# of a hazard any more than it is evidence of safety. It cannot open anything on its own either,
+# since the other three terms still have to pass. The frames are counted and reported instead of
+# being silently dropped, so "the edge broke a lot today" stays visible.
+MAX_PLAUSIBLE_NARROWING_M = 10.0
+
 # --- geometry gates ---
 # Confidence that a painted line exists BEYOND ego's own lane line. Matches the 0.5 that ldw.py
 # uses for "lane visible"; raised slightly because acting on it is a stronger claim than warning.
@@ -909,6 +943,15 @@ class PassingAssistDetector:
     self.right_geometry_ok = False
     self.right_widening_m = 0.0
     self.right_widening = False
+    self.left_narrowing_m = 0.0
+    self.left_narrowing = False
+    # ITS OWN DENOMINATOR. `_geo_frames` counts REFUSED frames, so a share taken against it would
+    # be "of the frames we refused" while reading as "of the drive" -- the denominator error this
+    # file records five times. These count every frame the geometry ran.
+    self._narrow_frames = 0
+    self._narrow_hits = 0
+    self._narrow_max = 0.0
+    self._narrow_broken = 0
     self.right_lane_age_s = 0.0
 
     self.left_blindspot = False
@@ -1219,6 +1262,51 @@ class PassingAssistDetector:
     self.right_widening_m = max(0.0, far - near)
     self.right_widening = self.right_widening_m > MAX_WIDENING_M
 
+  def _left_narrowing(self, model) -> bool:
+    """Does the road CLOSE IN on our left between here and ~75 m ahead?
+
+    The mirror of `_road_widening`, with two deliberate differences, and both matter.
+
+    THE SIGN IS INVERTED. That function keeps only growth, because a narrowing road on the right is
+    a lane ending which the availability test already handles. On the left, narrowing is the thing
+    worth seeing: a coned taper is what a work zone looks like from the camera, and passing assist
+    has already tried to move into one.
+
+    IT DOES NOT GATE ON `roadEdgeStds`, and `_road_widening` does. A work zone is precisely where
+    that std explodes, so inheriting the guard would blind this to its own subject.
+    `bp_left_edge_truth.py` licenses dropping it: the edge POSITION is steady at every std band,
+    frame-to-frame jump flat at 0.13-0.14 m from std 0.5 to 8+. It is the std that means nothing
+    here, not the position.
+
+    y runs negative to the left, so the edge is the more negative and `line - edge` is the positive
+    gap. Reported even when nothing acts on it, which today is always.
+
+    RETURNS WHETHER IT COULD MEASURE AT ALL, and the caller needs it. Without a left lane line or a
+    road edge this leaves 0.0/False, which is indistinguishable from a measured straight road -- so
+    counting those frames in the share's denominator reports "the road was not narrowing" when the
+    truth is "we could not tell". That matters most exactly where it is most wrong: a work zone is
+    where left-line detection is worst, so the unmeasurable frames are not randomly scattered, they
+    cluster on the very roads this term exists for.
+    """
+    self.left_narrowing_m = 0.0
+    self.left_narrowing = False
+    try:
+      line = model.laneLines[LL_LEFT].y
+      edge = model.roadEdges[RE_LEFT].y
+      if len(line) <= WIDEN_FAR_IDX or len(edge) <= WIDEN_FAR_IDX:
+        return False
+      near = float(line[WIDEN_NEAR_IDX]) - float(edge[WIDEN_NEAR_IDX])
+      far = float(line[WIDEN_FAR_IDX]) - float(edge[WIDEN_FAR_IDX])
+    except (IndexError, AttributeError, TypeError):
+      return False
+
+    # Only SHRINKAGE counts. A road opening out to the left is a wider carriageway or a median
+    # ending, neither of which is a reason to refuse, and folding it in would let the two cancel.
+    self.left_narrowing_m = max(0.0, near - far)
+    self.left_narrowing = (MAX_LEFT_NARROWING_M < self.left_narrowing_m
+                           <= MAX_PLAUSIBLE_NARROWING_M)
+    return True
+
   def _geometry(self, model) -> None:
     """Evaluate whether a lane exists either side, recording both evidence channels separately.
 
@@ -1250,6 +1338,18 @@ class PassingAssistDetector:
     self.left_edge_std, self.right_edge_std = left_std, right_std
 
     self._road_widening(model, right_std)
+    # NOT passed a std, unlike its sibling -- see the method docstring.
+    measured = self._left_narrowing(model)
+    # MOVING FRAMES ONLY, on the same floor the tool uses -- AND ONLY FRAMES IT COULD MEASURE.
+    # See NARROWING_MIN_SPEED_MS, and the return note in _left_narrowing for why `measured` has to
+    # gate the denominator rather than just the numerator.
+    if measured and self.last_v_ego >= NARROWING_MIN_SPEED_MS:
+      self._narrow_frames += 1
+      self._narrow_hits += self.left_narrowing
+      if self.left_narrowing_m > MAX_PLAUSIBLE_NARROWING_M:
+        self._narrow_broken += 1
+      else:
+        self._narrow_max = max(self._narrow_max, self.left_narrowing_m)
 
     # Both channels must agree before a side is called available. Requiring agreement is the
     # conservative reading and keeps phase 2 honest if this ever stops being log-only.
@@ -1956,6 +2056,18 @@ class PassingAssistDetector:
         # apart -- the whole question being whether the edge is unusable everywhere or only where
         # painted medians live.
         "edgeFailBySpeed": [round(bad / n, 3) if n else -1.0 for n, bad in self._edge_by_speed],
+        # See _left_narrowing. The left road edge closing in ahead -- published and watched
+        # before it gates anything. A share near zero on motorway is the expected reading and is
+        # what would say the edge-std term it may replace was never doing narrowing work there;
+        # it is NOT proof no work zone can be seen, since these drives may contain none.
+        "leftNarrowingShare": (round(self._narrow_hits / self._narrow_frames, 4)
+                               if self._narrow_frames else 0.0),
+        "leftNarrowingMax": round(self._narrow_max, 2),
+        # How often the edge estimate produced something that is not a road. Reported rather than
+        # dropped: a high share here means the taper measurement had little to work with, which is
+        # a different statement from "no taper was seen" and must not read as one.
+        "leftNarrowingBroken": (round(self._narrow_broken / self._narrow_frames, 4)
+                                if self._narrow_frames else 0.0),
         "geoRefusedBy": int(self.geo_refusal[0]),
         "geoRefusedValue": round(self.geo_refusal[1], 3),
         "geoRefusedShare": round(self.geo_refusal[2], 3),
@@ -3643,6 +3755,7 @@ class PassingAssistDetector:
     passingAssist.geoLoosenTo = float(pa.geo_refusal_loosen_to)
     passingAssist.rightEdgeBeyond = float(pa.right_edge_beyond)
     passingAssist.leftEdgeStd = float(min(pa.left_edge_std, 1e3))
+    passingAssist.leftNarrowingM = float(pa.left_narrowing_m)
     passingAssist.rightEdgeStd = float(min(pa.right_edge_std, 1e3))
     passingAssist.leftGeometryOk = pa.left_geometry_ok
     passingAssist.rightGeometryOk = pa.right_geometry_ok

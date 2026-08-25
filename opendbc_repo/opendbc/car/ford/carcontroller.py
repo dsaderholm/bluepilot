@@ -154,9 +154,14 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
     # still treated as ours. Starts effectively infinite so nothing is attributable before the
     # override has ever run.
     self.frames_since_override = 1 << 30
+    self.override_last_frame = False
     self.cancel_is_ours = False
+    # True while the override has run and the camera has NOT been seen healthy since.
+    self.override_since_camera_clean = False
     self.cancel_recovery_frames = 0
     self.cancel_recovery_said = False
+    self.recovery_declined_said = False
+    self.recovery_frame_blocked_said = False
     # FusionPilot: the stop override -- the last few mph the set speed cannot ask for. Same
     # placement reasoning as icbm_gap above; and same latch-off-on-exception discipline, because an
     # exception here reaches card and stops the car.
@@ -236,7 +241,6 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
     actuators = CC.actuators
     hud_control = CC.hudControl
     main_on = CS.out.cruiseState.available
-    steer_alert = hud_control.visualAlert in (VisualAlert.steerRequired, VisualAlert.ldw)
     fcw_alert = hud_control.visualAlert == VisualAlert.fcw
 
     # BluePilot: compute DM state (TJA message, warning, hands level)
@@ -281,11 +285,31 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
       can_sends.append(fordcan.create_button_msg(self.packer, self.CAN.camera, CS.buttons_stock_values, tja_toggle=True))
 
     # BluePilot: Intelligent Cruise Button Management (ICBM)
+    #
+    # SUPPRESSION REVERTED, 2026-08-23, SAME DAY IT SHIPPED. He nearly went off an exit ramp.
+    #
+    # The idea was that ICBM pressing the set speed while openpilot authors ACCDATA is pointless,
+    # which is TRUE and was measured -- 378 presses and 84 mph of dash travel during one inert
+    # window. But suppressing it froze the set speed wherever the latch caught it, and he hit the
+    # benign face of that three times ("stuck at 25 even though SLA wanted 35") before hitting the
+    # dangerous one: frozen HIGH on the approach to an exit, with ICBM unable to bring it down.
+    #
+    # The follow-up made it WORSE. Blocking only DOWNWARD presses fixed being stuck low and left
+    # being stuck high completely unaddressed -- it blocks exactly the direction an exit needs.
+    # Two wrong rules in one evening, both shipped to a car being driven.
+    #
+    # WHY NOTHING NARROWER IS SAFE ENOUGH TO SHIP NOW: the correct rule is his -- move toward the
+    # DRIVER'S AIM and stop there, which is neither "always" nor "never" nor either direction. That
+    # needs the aim, which lives in ICBM's units in selfdrived, and the carcontroller has no
+    # is_metric to compare against it. Building that boundary correctly is not an on-road hotfix.
+    #
+    # So ICBM presses unconditionally again, exactly as it did before today. That costs the hunting
+    # on an inert drive, which is ANNOYING. The thing it buys back is the set speed always being
+    # able to come down, which is not.
     icbm_can_sends, self.last_button_frame = IntelligentCruiseButtonManagementInterface.update(
       self, CC_SP, CS, self.packer, self.CAN, self.frame, self.last_button_frame
     )
     can_sends.extend(icbm_can_sends)
-
     ### lateral control ###
     # BluePilot: keep stock lateral path in carcontroller, and run BP 4-signal lateral
     # only when bypass is disabled.
@@ -542,10 +566,52 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
       # Counted rather than timed because everything else in this block is in frames, and held at 0
       # for the whole standstill hold -- the override is still `active` there, so a 45 s hold does
       # not age out its own cancel.
+      # A CANCEL RUN THAT SPANS THE OVERRIDE MUST NOT DECIDE ATTRIBUTION. FusionPilot, 2026-08-23.
+      #
+      # Attribution is decided once, on the frame a cancel RUN opens -- `passthrough_cancel_frames
+      # == 0`. The counter is only touched inside `if not override`, so a run that was already open
+      # when the override began survives it untouched: the override ends, the counter is still
+      # non-zero, the `== 0` test never fires, and `cancel_is_ours` keeps whatever it was set to
+      # BEFORE the override -- which is False, because no override had run yet. Recovery is then
+      # blocked for the rest of the drive by a decision made before the thing it is attributing.
+      #
+      # Zeroing it on the override edge makes the first cancel frame after we hand back open a new
+      # run, which is the only run that means anything: the camera cancelling while WE are
+      # authoring is expected and says nothing, and the question recovery asks is whether it is
+      # still cancelling once Ford has the car back.
+      #
+      # NOT PROVEN TO BE WHAT BIT HIM on routes ae/af -- the 4.99 s gap measured there is what a
+      # fresh run looks like, so attribution ought to have passed and something else declined.
+      # `RECOVERY DECLINED` below is what will say which. This is fixed because it is wrong on its
+      # own terms, not because it is the diagnosis.
+      if override and not self.override_last_frame:
+        self.passthrough_cancel_frames = 0
+      self.override_last_frame = override
+      # SET WHILE WE HAVE THE CAR. Cleared below the instant the camera's own frame is admissible
+      # again -- see the attribution note further down for why both halves are load-bearing.
+      if override:
+        self.override_since_camera_clean = True
       self.frames_since_override = 0 if override else self.frames_since_override + 1
       if not override and self.stock_acc_passthrough and getattr(CS, "acc_cam_valid", False) and getattr(CS, "acc_stock_values", None):
         reason = fordcan_ext.passthrough_admissible(CS.acc_stock_values, CC.longActive)
         use_passthrough = not reason
+        if use_passthrough:
+          # THE CAMERA IS HEALTHY, so whatever the override did has been forgiven. A cancel after
+          # this point is the camera's own business and must not be masked as ours.
+          #
+          # FULL ADMISSIBILITY, AND NOT THE NARROWER "the camera is not asserting cancel". That
+          # narrower rule was written, tried, and reverted in the same review on 2026-08-24, and
+          # `test_a_late_cancel_run_after_our_override_is_still_ours` is what caught it: between the
+          # override and the cancel run on his real drives he is DISENGAGED, where
+          # `passthrough_admissible` returns "openpilot longitudinal inactive" -- not a cancel. The
+          # narrower rule clears the flag right there, so attribution fails again on exactly the two
+          # of three episodes it was built to rescue.
+          #
+          # The cost of keeping the wider rule is over-attribution while the camera is being refused
+          # for OUR reasons, which is real -- 83% of frames on drive A. It is bounded by the 30 s
+          # recovery cap and by the recovery clearing one bit and nothing else. Under-attribution
+          # costs the whole feature, which is what it has cost so far.
+          self.override_since_camera_clean = False
         if reason != self.passthrough_reason_last:
           self.passthrough_reason_last = reason
           cloudlog.warning("stock ACC passthrough: %s", reason or "forwarding Ford's command")
@@ -561,7 +627,30 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
           # override lets go is the frame this run starts on -- anything that starts later than
           # ATTRIBUTION_FRAMES after it belongs to the camera, not to us.
           if self.passthrough_cancel_frames == 0:
-            self.cancel_is_ours = self.frames_since_override <= _CANCEL_ATTRIBUTION_FRAMES
+            # ATTRIBUTION IS NOW "HAS THE CAMERA BEEN HEALTHY SINCE THE OVERRIDE", not "did this
+            # run open within 3 s of it". FusionPilot, 2026-08-24, and it is not a theory -- the
+            # instrumentation added the day before printed the answer on his drive:
+            #
+            #   RECOVERY DECLINED: cancel_is_ours=False longActive=True
+            #                      stop_override_stopped_us=False recovery_frames=0/1500
+            #
+            # Attribution was the gate, on a drive where the opStop-to-inert gap measured 4.99 s
+            # and I concluded FROM THAT TIMING that attribution had passed. It had not. An interval
+            # measured either side of an event does not tell you what a counter inside it did, and
+            # that inference went out as a finding twice.
+            #
+            # The 3 s window is too brittle to keep: any frame whose refusal reason is not cancel
+            # resets the run, so one band clip after the override restarts the clock and the next
+            # run opens too late to be attributed -- blocking recovery for the rest of the drive.
+            #
+            # A PERMANENT `override_ran` BOOL WAS ALREADY TRIED AND REJECTED -- see the note above
+            # this block: it latched for a whole drive, so a cancel the camera raised for its own
+            # reasons forty minutes later was still masked as ours. The flag below is that idea
+            # with the missing half: it CLEARS the moment the camera is seen healthy again, which
+            # is the evidence that whatever we did has been forgiven. It cannot span a healthy
+            # period, so it cannot mask a later independent cancel.
+            self.cancel_is_ours = (self.frames_since_override <= _CANCEL_ATTRIBUTION_FRAMES
+                                   or self.override_since_camera_clean)
           self.passthrough_cancel_frames += 1
           if self.passthrough_cancel_frames == _CANCEL_INERT_FRAMES:
             cloudlog.error("stock ACC passthrough INERT: camera has asked to cancel for 5 s "
@@ -598,6 +687,36 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
           # authored is still unresumed, and it is cleared by the car moving above 1.5 mph. So the
           # recovery resumes being possible the moment he drives away, which is when Ford having
           # the car is what he wants.
+          # AND SAY WHY WHEN IT DOES NOT ACT. FusionPilot, 2026-08-23.
+          #
+          # Routes ae and af: the override fired, the camera latched, INERT logged four times,
+          # and RECOVERY logged ZERO. Three of the gates were then ruled out from the routes --
+          # attribution by a measured 4.99 s gap between the last opStop frame and the first
+          # inert one, `CC.longActive` because `inert` is unreachable without it, and the panda
+          # bands by replaying them over all 8,750 camera frames of the two inert windows, which
+          # refused none. That left two gates and NO WAY TO TELL WHICH, because not one of them
+          # is published or logged.
+          #
+          # Third time today that a rule could not be explained from a drive. Fixing the rule is
+          # guesswork until the drive can say which term declined, so this says it -- once per
+          # cancel run, naming the gate, at the moment the recovery would otherwise have started.
+          elif (self.passthrough_cancel_frames > _CANCEL_INERT_FRAMES
+                and not self.recovery_declined_said
+                and not (self.cancel_is_ours and CC.longActive
+                         and not self.stop_override_stopped_us
+                         and self.cancel_recovery_frames < _CANCEL_RECOVERY_MAX_FRAMES)):
+            # ONCE PER RUN, ON A LEVEL, NOT ON ONE EXACT FRAME. The first version fired only at
+            # `== _CANCEL_INERT_FRAMES + 1`, so any run whose reason changed on that single frame
+            # logged nothing at all. On his 2026-08-24 drives INERT fired FIVE times and DECLINED
+            # only TWICE -- three episodes said nothing, and the instrument built to answer this
+            # question missed most of it. Caught only because he asked whether I had looked
+            # thoroughly.
+            self.recovery_declined_said = True
+            cloudlog.error("stock ACC passthrough RECOVERY DECLINED: cancel_is_ours=%s "
+                           "longActive=%s stop_override_stopped_us=%s recovery_frames=%d/%d",
+                           self.cancel_is_ours, CC.longActive, self.stop_override_stopped_us,
+                           self.cancel_recovery_frames, _CANCEL_RECOVERY_MAX_FRAMES)
+
           elif (self.cancel_is_ours and CC.longActive
                 and self.passthrough_cancel_frames > _CANCEL_INERT_FRAMES
                 and not self.stop_override_stopped_us
@@ -607,8 +726,23 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
             # card, and stops the car -- the 2026-08-15 failure, in a block that runs 50 times a
             # second. Failing closed means no recovery, which costs him a hand-back and nothing else.
             try:
-              if not fordcan_ext.passthrough_admissible(CS.acc_stock_values, CC.longActive,
-                                                        allow_cancel=True):
+              # AND SAY WHY IF THE FRAME ITSELF IS REFUSED. This was the last silent path, found
+              # 2026-08-24 when he asked whether I had looked thoroughly. Route 000003b5 episode 1:
+              # attribution PASSED (gap 4.99 s), the bands were clean over all 7,032 camera frames
+              # of the window, and recovery STILL never ran and logged NOTHING -- because a refusal
+              # here produced no line at all. `bp_recovery_blocked.py` cannot see this either: the
+              # unpoliced bits and CmbbDeny are not logged, and it says so.
+              _why = fordcan_ext.passthrough_admissible(CS.acc_stock_values, CC.longActive,
+                                                        allow_cancel=True)
+              if _why and not self.recovery_frame_blocked_said:
+                # ITS OWN FLAG. Sharing `recovery_declined_said` with the gate log meant whichever
+                # fired first silenced the other for the rest of the run -- and a gate that clears
+                # later (stop_override_stopped_us goes false the moment the car moves) is exactly
+                # when this second reason becomes reachable.
+                self.recovery_frame_blocked_said = True
+                cloudlog.error("stock ACC passthrough RECOVERY BLOCKED BY THE FRAME: every gate "
+                               "passed but Ford's own frame is still inadmissible -- %s", _why)
+              if not _why:
                 self.cancel_recovery_frames += 1
                 use_passthrough = True
                 clear_cancel = True
@@ -647,6 +781,9 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
           # The cancel RUN still breaks on any other refusal -- it only ever meant "consecutive
           # frames of cancel", and this branch is every reason that is not one.
           self.passthrough_cancel_frames = 0
+          # A new run gets a fresh chance to say why it declined, for both reasons independently.
+          self.recovery_declined_said = False
+          self.recovery_frame_blocked_said = False
 
       # WHO IS AUTHORING, decided here where the decision actually happens. Order matters: `inert`
       # outranks `fallback` because they look identical frame-to-frame and only the duration tells
@@ -765,9 +902,36 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
             floor = min(floor, float((CS.acc_stock_values or {}).get("AccBrkTot_A_Rq", 0.0)))
           send_accel = max(send_accel, floor)
 
+        # TELL THE PCM A STOP IS HAPPENING. FusionPilot, 2026-08-23, and it is the best candidate
+        # yet for why the camera declares ACC_Unavailable.
+        #
+        # `AccStopStat_B_Rq` is `stopping`, and `stopping` is `longControlState == stopping`, which
+        # was measured across 21,936 frames as a STOPPED-CAR state -- never true above 3 mph. So the
+        # override brakes the car from 20 to 0 while telling the PCM "not stopping" the whole way.
+        # Measured on route 000003af: `AccStopMde_D_Rq` reads NoStop on ALL 888 frames the override
+        # had the car.
+        #
+        # AND FORD'S OWN STOP LOOKS COMPLETELY DIFFERENT. Route 000003b1, same car, same evening,
+        # override never fired: `AccStopMde_D_Rq` reads **Hold on 498 frames** under `ford`. That is
+        # the first time this fork has ever seen Ford enter its own stop mode on this car, and it
+        # shows the handshake works here when Ford drives it.
+        #
+        # So the override was bringing the car to a standstill OUTSIDE Ford's stop protocol: the
+        # PCM never enters stop mode, and the camera -- which receives `CcStat_D_Actl` and
+        # `AccStopMde_D_Rq` directly, IPMA_ADAS is a listed receiver of both -- sees a car that has
+        # stopped while its own powertrain says no stop is in progress. `ACC_Unavailable` is a
+        # reasonable thing to conclude from that, and unlike every other theory tried today it
+        # explains why the state is LATCHED rather than transient.
+        #
+        # The override only ever runs when we are deliberately stopping, so asserting this is
+        # honest signalling rather than a trick -- it is the same bit Ford asserts for the same
+        # reason. Panda does not police it (see the unpoliced list in fordcan_ext).
+        #
+        # NOT PROVEN. It is a hypothesis with one strong correlation behind it, and the drive that
+        # tests it is the next stop the override takes.
         can_sends.append(fordcan_ext.create_acc_msg(
           self.packer, self.CAN, CC.longActive, lng.gas, send_accel, lng.accel_pred_send,
-          lng.stopping, send_brake, send_prchg, v_ego_kph=lng.target_speed
+          lng.stopping or override, send_brake, send_prchg, v_ego_kph=lng.target_speed
         ))
 
         self.accel = send_accel

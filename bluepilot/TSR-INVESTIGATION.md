@@ -435,9 +435,53 @@ read them before asking for anything.
 706-01-01 nibble 2 | 706-02-01 nibble 4 | signs?
        4 (old)     |   2  Camera Only   | tested for months -- no
        4 (old)     |   6  Camera + APIM | never persisted before 2026-08-21
-       8 (new)     |   6  Camera + APIM | TESTED 2026-08-21 -- no
+       8 (new)     |   6  Camera + APIM | READS SIGNS -- see below. The 'no' was premature.
        8 (new)     |   2  Camera Only   | NEVER RUN
 ```
+
+**THE `8 / CAMERA + APIM` ROW SAID "TESTED 2026-08-21 -- no" AND THAT WAS WRONG. Corrected
+2026-08-23 by scanning 20 routes instead of the two that were to hand.**
+
+    00000398 .. 000003a5   13 drives, ~840k frames    ZERO reads
+    2026-08-21             `0810 A9DB B964` written (nibble 2: 4 -> 8), accepted
+    000003a7   2026-08-22 04:14                       READ 30
+    000003ac   2026-08-22 23:32                       READ 30
+    000003ad   2026-08-23 13:21                       READ 30
+
+The verdict was reached from routes `a1` and `a2`, recorded HOURS after the write. The first read
+came the next morning. **A negative from the drives that happen to be on the device is not a
+negative** -- reads are rare enough here (3 in 20 drives) that a single quiet drive proves nothing,
+and two quiet drives were used to close a row of this matrix.
+
+Honest weight: 13 quiet drives at the measured rate is ~15% likely by chance alone, so the count
+does not carry it. What does is the coincidence with the write.
+
+**AND THE REMAINING FAILURE IS NOT THE SENSOR, THE AIM, OR THE VISION PIPELINE.** From the owner,
+2026-08-23, and it closes a line of enquiry that was about to be opened:
+
+  *"The IPMA has been calibrated and auto high beams work great. Without calibration, LCA wouldn't
+  work, either."*
+
+Auto high beams require the camera to pick out oncoming headlights and tail lights; LCA requires
+correct calibrated geometry. Both work. So the camera is aimed, calibrated, and its vision stack is
+healthy, and `dataAvailable` is True on 391,355 of 391,355 frames measured -- it is up and
+publishing, and merely says "no limit" 95% of the time.
+
+**That NARROWS the fault rather than merely removing a candidate.** A camera whose optics, aim and
+perception all work, and which has resolved a US 30 sign three times, is not failing to SEE signs.
+It is failing to do something with a sign it has already seen -- which is the layer a REGION or
+sign-set configuration governs, and this car's region is `UNSPECIFIED`. That remains refused (it
+produced "hella DTCs" and is not to be proposed again), but it is unresolved rather than disproven,
+and it is now the best-fitting explanation on the list.
+
+**Also ruled out the same day, by field survey across 391,355 frames of 4 routes:**
+
+    dataAvailable   True on every frame        not a camera that thinks it is off
+    vLimitUnit      2 (mph) on every frame     not a units mismatch
+    vLimit1         255 x373,651  30 x17,595
+    vLimit2         constant 252, always       no reads are landing in the second slot
+
+So nothing is being under-counted by reading only `vLimit1`, and the decode is not the problem.
 
 ### THE €130 IS DEAD
 
@@ -1649,10 +1693,40 @@ Measured: `0x462` arrives 3494 times a drive, `0x463` and `0x464` **zero**, and 
 It is a real fault and it is **not** what stops sign reads. Conflating the two cost most of
 2026-08-21. Open question: APIM or gateway. The gateway may not be written to.
 
-**openpilot can synthesize both messages from the comma's own GPS** -- built and tested
-2026-08-21, ships on, stands down the moment the car sends the real ones. It is on
-`icbm-manual-override-and-tuning` and has never been driven. It is not a TSR fix and must not be
-described as one.
+**openpilot can synthesize both messages from the comma's own GPS** -- built 2026-08-21, ships on,
+stands down the moment the car sends the real ones. It is not a TSR fix and must not be described
+as one.
+
+**AND IT HAD NEVER TRANSMITTED A SINGLE FRAME UNTIL 2026-08-22.** The line above used to end "and
+has never been driven", which was wrong and hid the defect: it HAD been driven, three times, and
+sent nothing. Measured across routes a8/a9/aa on every bus --
+
+    0x462  src 0    905    the APIM's position message, arriving fine
+    0x462  src 130  894    us forwarding it to the camera
+    0x463  ---        0
+    0x464  ---        0
+
+`LateralCurvExt` owned the SubMaster and subscribed to `gpsLocationExternal` alone -- the ublox on
+a comma two / panda. A 3X takes its fix from the qcom modem and publishes `gpsLocation`; his routes
+carry 322 frames of it and none of the other. So `self.gps` stayed None for the life of every drive
+and the carcontroller's `if gps is not None` never passed. `selfdrived` gets this right through
+`get_gps_location_service(params)`; the car process hardcoded the wrong one. Both are subscribed
+now, and a static test parses the `SubMaster(...)` call so it cannot regress silently.
+
+**THIS STRENGTHENS THE SEPARATION RATHER THAN WEAKENING IT.** The one sign this camera has ever read
+came with `U0253` asserted, `NoNavDataAvailable` on every frame -- and now it is known the synthesis
+was silent then too. That read had no nav data from ANY source. Nav data and sign reads are
+independent, which is what section 4j says and this confirms from a second direction.
+
+**WHAT IT DOES UNLOCK: nibble 8 = `A` becomes testable for the first time.** The 2026-08-22 write to
+`A` ("Reading + GPS") downgraded the camera to `LimitOutdated` precisely because the GPS half never
+arrived (4n). `A` WITH GPS actually flowing is the friend's configuration and has never existed on
+this car.
+
+**AND IT IS A VARIABLE IN ANY TSR EXPERIMENT NOW, because it enables itself.** The param defaults to
+`1`, so the feature starts transmitting on the next drive after the code lands -- no toggle, nothing
+to remember. Before the confound-separating night drive he was told to switch "Send GPS To The
+Camera" OFF, so that night stays the only change. Turn it back on afterwards.
 
 ### 4. CLOSED. Do not re-open any of these.
 

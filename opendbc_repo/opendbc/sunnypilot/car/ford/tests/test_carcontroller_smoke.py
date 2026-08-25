@@ -40,7 +40,6 @@ from __future__ import annotations
 import os
 import re
 import sys
-import types
 
 import pytest
 
@@ -366,19 +365,38 @@ def test_the_gap_button_still_goes_out_under_the_passthrough(carcontroller_parts
                            send_button=structs.IntelligentCruiseButtonManagement.SendButtonState.none,
                            gap_target=GAP_MIN, long_active=True)
 
-  gap_signals = {"AccButtnGapIncPress", "AccButtnGapDecPress", "AccButtnGapTogglePress"}
+  # THE GAP BITS THEMSELVES, not merely that a Steering_Data_FD1 went out. An earlier version of
+  # this counted every frame at 0x083 and named the set of gap signals in a variable it then never
+  # used -- so it passed on the periodic all-zero frames the controller sends anyway, while
+  # asserting in its own message that "the gap request reached the wire". It could not have failed.
+  # ford_lincoln_base_pt.dbc, BO_ 131 Steering_Data_FD1: IncPress 11|1@0+, DecPress 12|1@0+,
+  # TogglePress 32|1@0+.
+  frames = 0
   pressed = 0
   for frame in range(SETTLE_FRAMES + 200):
     _, can_sends = cc.update(CC, CC_SP, CS, frame * 10_000_000)
     for addr, dat, _bus in can_sends:
-      if addr == 0x083:
+      if addr != 0x083:
+        continue
+      frames += 1
+      if any(_be_bit(bytes(dat), start) for start in (11, 12, 32)):
         pressed += 1
 
   assert not cc.icbm_gap_failed, "the gap path latched off under the passthrough"
   assert cc.icbm_gap.active, "no lease opened for a gap request the camera reported differently"
+  assert frames > 0, "no Steering_Data_FD1 went out at all"
   assert pressed > 0, (
-    "no Steering_Data_FD1 went out -- the gap request never reached the wire under the passthrough, "
-    "which is the configuration the three ICBM gates were fixed for")
+    f"{frames} Steering_Data_FD1 frames went out and not one had a gap bit set -- the gap request "
+    "never reached the wire under the passthrough, which is the configuration the three ICBM gates "
+    "were fixed for")
+
+
+def _be_bit(data: bytes, start: int) -> int:
+  """One big-endian (Motorola) bit out of a raw frame, by its DBC start bit."""
+  v = int.from_bytes(data, "big")
+  total = len(data) * 8
+  idx = (start // 8) * 8 + (7 - (start % 8))
+  return (v >> (total - idx - 1)) & 1
 
 
 def _decode_acc_brake(data: bytes) -> float:
@@ -759,3 +777,424 @@ def test_a_missing_attribute_disables_the_feature_not_the_car(carcontroller_part
 
   addrs = _addrs(_run(cc, CC, CC_SP, CS))   # must not raise
   assert _NAV2_ADDR not in addrs
+
+
+def test_recovery_takes_authority_after_an_override_provoked_cancel(carcontroller_parts):
+  """FusionPilot, 2026-08-23. THE SEQUENCE THAT COST HIM FORD ACC, driven end to end.
+
+  Routes ae and af: the override fired, the camera latched, INERT logged four times, and RECOVERY
+  logged ZERO. Attribution was ruled out from the routes by a measured 4.99 s gap between the last
+  opStop frame and the first inert one; `CC.longActive` because `inert` is unreachable without it;
+  and the panda bands by replaying them over all 8,750 camera frames of both inert windows, which
+  refused none. So the mechanism itself is what needs driving.
+
+  THE FIRST VERSION OF THIS TEST WAS INVALID AND LOOKED LIKE A FINDING. It held the cancel without
+  ever firing the override, so `frames_since_override` sat at its 1 << 30 "never happened"
+  sentinel, `cancel_is_ours` was correctly False, and recovery correctly declined -- which read as
+  "recovery is broken". Fixtures more orderly than reality, again: the real sequence has an
+  override in it and that is the whole point of the attribution rule.
+  """
+  CarController, dbc_names, CP, CP_SP, structs = carcontroller_parts
+  from opendbc.car.ford.interface import CarInterface
+  from opendbc.car.ford.values import CAR
+  CP_long = CarInterface.get_non_essential_params(CAR.FORD_FUSION_MK5)
+  CP_long.openpilotLongitudinalControl = True
+
+  cc = CarController(dbc_names, CP_long, CP_SP)
+  cc.stock_acc_passthrough = True
+  cc.stop_override_enabled = True
+
+  out = structs.CarState()
+  out.vEgo = 20.0
+  out.vEgoRaw = 20.0
+  out.cruiseState.enabled = True
+  out.cruiseState.available = True
+  CS = FakeCarState(out)
+  CS.acc_cam_valid = True
+  CS.acc_stock_values["AccBrkTot_A_Rq"] = -1.10
+
+  CC, CC_SP = _car_control(structs, enabled=True,
+                           send_button=structs.IntelligentCruiseButtonManagement.SendButtonState.none,
+                           gap_target=0, long_active=True)
+
+  frame = 0
+  authorities = []
+
+  # 1. The override has the car, and the camera gives up on it partway through -- which is what it
+  #    does about 1.6 s in on every real episode.
+  cc.stop_override.update = lambda **kw: True
+  for i in range(200):
+    if i == 100:
+      CS.acc_stock_values["AccCancl_B_Rq"] = 1
+    cc.update(CC, CC_SP, CS, frame * 10_000_000)
+    authorities.append(str(cc.acc_authority).split(".")[-1])
+    frame += 1
+
+  # 2. The override hands back. The camera is still asserting, and because a cancelling frame is
+  #    inadmissible it can never watch the car obey it again -- that is the deadlock recovery is for.
+  cc.stop_override.update = lambda **kw: False
+  for _ in range(1200):
+    cc.update(CC, CC_SP, CS, frame * 10_000_000)
+    authorities.append(str(cc.acc_authority).split(".")[-1])
+    frame += 1
+
+  assert "opStop" in authorities, "the override never took authority, so this proves nothing"
+  assert "inert" in authorities, "the cancel never latched, so this proves nothing"
+  assert "recovery" in authorities, (
+    "the camera latched behind our own override and recovery never took authority -- this is the "
+    "sequence that cost him Ford ACC on routes ae and af, twice in one day")
+
+
+def test_a_cancel_that_predates_the_override_does_not_poison_attribution(carcontroller_parts):
+  """FusionPilot, 2026-08-23. The hole in the attribution rule, driven.
+
+  Attribution is decided once, on the frame a cancel RUN opens. The counter is only touched inside
+  `if not override`, so a run already open when the override begins survives it untouched -- the
+  override ends, the counter is still non-zero, the `== 0` test never fires, and `cancel_is_ours`
+  keeps the value it had BEFORE the override, which is False. Recovery is then blocked for the
+  rest of the drive by a decision made before the thing it is meant to attribute.
+
+  Here the camera is already cancelling when the override starts, which is the ordinary case on an
+  approach where ACC is marginal. Without the edge reset this fails.
+  """
+  CarController, dbc_names, CP, CP_SP, structs = carcontroller_parts
+  from opendbc.car.ford.interface import CarInterface
+  from opendbc.car.ford.values import CAR
+  CP_long = CarInterface.get_non_essential_params(CAR.FORD_FUSION_MK5)
+  CP_long.openpilotLongitudinalControl = True
+
+  cc = CarController(dbc_names, CP_long, CP_SP)
+  cc.stock_acc_passthrough = True
+  cc.stop_override_enabled = True
+
+  out = structs.CarState()
+  out.vEgo = 20.0
+  out.vEgoRaw = 20.0
+  out.cruiseState.enabled = True
+  out.cruiseState.available = True
+  CS = FakeCarState(out)
+  CS.acc_cam_valid = True
+  CS.acc_stock_values["AccBrkTot_A_Rq"] = -1.10
+  CS.acc_stock_values["AccCancl_B_Rq"] = 1      # ALREADY cancelling before anything else happens
+
+  CC, CC_SP = _car_control(structs, enabled=True,
+                           send_button=structs.IntelligentCruiseButtonManagement.SendButtonState.none,
+                           gap_target=0, long_active=True)
+
+  frame = 0
+  authorities = []
+
+  # 1. Cancel with no override anywhere near it -- attribution correctly says "not ours".
+  cc.stop_override.update = lambda **kw: False
+  for _ in range(400):
+    cc.update(CC, CC_SP, CS, frame * 10_000_000)
+    authorities.append(str(cc.acc_authority).split(".")[-1])
+    frame += 1
+  assert not cc.cancel_is_ours, "a cancel with no override before it must not be attributed to us"
+
+  # 2. Now the override runs, straight through the still-asserted cancel.
+  cc.stop_override.update = lambda **kw: True
+  for _ in range(200):
+    cc.update(CC, CC_SP, CS, frame * 10_000_000)
+    authorities.append(str(cc.acc_authority).split(".")[-1])
+    frame += 1
+
+  # 3. It hands back, and the camera is still asserting -- now it IS ours.
+  cc.stop_override.update = lambda **kw: False
+  for _ in range(1200):
+    cc.update(CC, CC_SP, CS, frame * 10_000_000)
+    authorities.append(str(cc.acc_authority).split(".")[-1])
+    frame += 1
+
+  assert "opStop" in authorities, "the override never took authority, so this proves nothing"
+  assert cc.cancel_is_ours, (
+    "the cancel run that predated the override decided attribution and was never re-opened, so "
+    "recovery is blocked for the rest of the drive")
+  assert "recovery" in authorities, "recovery never took authority after its own override"
+
+
+def test_icbm_keeps_pressing_even_when_openpilot_is_authoring(carcontroller_parts):
+  """REVERTED 2026-08-23, the same evening it shipped. He nearly went off an exit ramp.
+
+  The suppression was measured and well-motivated: 378 ICBM button frames and 84 mph of dash travel
+  during one 60 s inert window on route 000003ae, hunting a set speed that governed nothing.
+
+  But suppressing froze the set speed wherever the camera latch caught it. He hit the benign face
+  three times -- "stuck at 25 even though SLA wanted 35" -- and then the dangerous one: frozen HIGH
+  approaching an exit, with ICBM unable to bring it down. The follow-up that blocked only DOWNWARD
+  presses made that strictly worse, because down is the direction an exit needs.
+
+  The correct rule is his: move toward the DRIVER'S AIM and stop there. That is neither "always"
+  nor "never" nor either direction, and it needs the aim across a capnp boundary the carcontroller
+  cannot convert units for. Until that exists, ICBM presses unconditionally. The cost is hunting on
+  an inert drive. The thing it buys back is the set speed always being able to come DOWN.
+  """
+  from opendbc.car.ford.interface import CarInterface
+  from opendbc.car.ford.values import CAR
+
+  CarController, dbc_names, CP, CP_SP, structs = carcontroller_parts
+  CP_long = CarInterface.get_non_essential_params(CAR.FORD_FUSION_MK5)
+  CP_long.openpilotLongitudinalControl = True
+
+  cc = CarController(dbc_names, CP_long, CP_SP)
+  cc.stock_acc_passthrough = True
+
+  out = structs.CarState()
+  out.vEgo = 20.0
+  out.vEgoRaw = 20.0
+  out.cruiseState.enabled = True
+  out.cruiseState.available = True
+  CS = FakeCarState(out)
+  CS.acc_cam_valid = True
+  CS.acc_stock_values["AccBrkTot_A_Rq"] = -1.10
+  CS.acc_stock_values["AccCancl_B_Rq"] = 1      # latch the camera from the first frame
+
+  CC, CC_SP = _car_control(structs, enabled=True,
+                           send_button=structs.IntelligentCruiseButtonManagement.SendButtonState.decrease,
+                           gap_target=0, long_active=True)
+
+  saw_inert = False
+  presses_while_inert = 0
+  for frame in range(1400):
+    _, can_sends = cc.update(CC, CC_SP, CS, frame * 10_000_000)
+    if cc.acc_authority == structs.ControllerStateBP.AccAuthority.inert:
+      saw_inert = True
+      presses_while_inert += sum(1 for addr, _d, _b in can_sends if addr == 0x083)
+
+  assert saw_inert, "the cancel never latched, so this proves nothing"
+  assert presses_while_inert > 0, (
+    "ICBM could not press the set speed DOWN while openpilot was authoring -- that is the exit "
+    "ramp he nearly went off, and no measured hunting is worth buying it back")
+
+def test_the_follow_gap_survives_the_icbm_suppression(carcontroller_parts):
+  """FusionPilot, 2026-08-23. Found by reviewing the suppression an hour after writing it.
+
+  The first version of the inert/openpilot suppression RETURNED without calling
+  IntelligentCruiseButtonManagementInterface.update at all. That method does two jobs: the ICBM
+  set-speed press, and _update_gap, which drives the follow-gap machine and asserts its lease.
+
+  icbm.py records the same mistake being made and fixed once already -- "An earlier version skipped
+  the call entirely, on the theory that pausing kept the press shape intact. It does the opposite:
+  nothing holds the bit asserted while we stand down ... and the resumed remainder lands as a
+  SECOND press -- two toggle steps for one intended". A 60 s inert window is a long time for that.
+
+  ASSERTED ON THE CALL, not on a press reaching the wire. The gap controller presses early in a
+  lease and then waits on a readback this fixture never changes, so by the time the 5 s cancel
+  latch arrives it has already settled and there is nothing left to send -- three earlier versions
+  of this test failed against perfectly correct code for exactly that reason. What the regression
+  destroys is the CALL, so count it.
+  """
+  from opendbc.car.ford.interface import CarInterface
+  from opendbc.car.ford.values import CAR
+  from opendbc.sunnypilot.car.ford.gap_control import GAP_MIN
+  from opendbc.sunnypilot.car.ford.icbm import IntelligentCruiseButtonManagementInterface as ICBMI
+
+  CarController, dbc_names, CP, CP_SP, structs = carcontroller_parts
+  CP_long = CarInterface.get_non_essential_params(CAR.FORD_FUSION_MK5)
+  CP_long.openpilotLongitudinalControl = True
+
+  cc = CarController(dbc_names, CP_long, CP_SP)
+  cc.stock_acc_passthrough = True
+
+  out = structs.CarState()
+  out.vEgo = 20.0
+  out.vEgoRaw = 20.0
+  out.cruiseState.enabled = True
+  out.cruiseState.available = True
+  CS = FakeCarState(out)
+  CS.acc_cam_valid = True
+  CS.acc_stock_values["AccBrkTot_A_Rq"] = -1.10
+  CS.acc_tja_status_stock_values["AccTGap_D_Dsply"] = 3
+  CS.acc_stock_values["AccCancl_B_Rq"] = 1     # latched from the first frame
+
+  CC, CC_SP = _car_control(structs, enabled=True,
+                           send_button=structs.IntelligentCruiseButtonManagement.SendButtonState.increase,
+                           gap_target=GAP_MIN, long_active=True)
+
+  calls = {"n": 0}
+  real = ICBMI._update_gap
+
+  def counting(self, *a, **kw):
+    calls["n"] += 1
+    return real(self, *a, **kw)
+
+  ICBMI._update_gap = counting
+  try:
+    saw_inert = False
+    at_latch = None
+    for frame in range(1400):
+      cc.update(CC, CC_SP, CS, frame * 10_000_000)
+      if cc.acc_authority == structs.ControllerStateBP.AccAuthority.inert and not saw_inert:
+        saw_inert = True
+        at_latch = calls["n"]
+  finally:
+    ICBMI._update_gap = real
+
+  assert saw_inert, "the cancel never latched, so this proves nothing"
+  assert calls["n"] > at_latch, (
+    "_update_gap stopped being called once ICBM was suppressed -- skipping the whole update call "
+    "takes the follow-gap machine with it, which is the bug icbm.py already documents")
+
+
+def test_the_override_tells_the_pcm_a_stop_is_happening(carcontroller_parts):
+  """FusionPilot, 2026-08-23. AccStopStat_B_Rq must be asserted while the override brakes.
+
+  `stopping` is longControlState == stopping, measured across 21,936 frames as a STOPPED-CAR state,
+  never true above 3 mph. So the override braked from 20 to 0 while telling the PCM no stop was in
+  progress -- AccStopMde_D_Rq read NoStop on all 888 frames it had the car on route 000003af.
+
+  Fords own stop looks nothing like that: route 000003b1, same car, same evening, override never
+  fired, AccStopMde_D_Rq read Hold on 498 frames under Ford authority.
+
+  The camera receives CcStat_D_Actl and AccStopMde_D_Rq directly -- IPMA_ADAS is a listed receiver
+  of both -- so it saw a car stop while its own powertrain said no stop was happening.
+  """
+  from opendbc.car.ford.interface import CarInterface
+  from opendbc.car.ford.values import CAR
+
+  CarController, dbc_names, CP, CP_SP, structs = carcontroller_parts
+  CP_long = CarInterface.get_non_essential_params(CAR.FORD_FUSION_MK5)
+  CP_long.openpilotLongitudinalControl = True
+
+  cc = CarController(dbc_names, CP_long, CP_SP)
+  cc.stock_acc_passthrough = True
+  cc.stop_override_enabled = True
+  cc.stop_override.update = lambda **kw: True
+
+  out = structs.CarState()
+  out.vEgo = 8.0            # ~18 mph, well above the 3 mph where `stopping` would be true
+  out.vEgoRaw = 8.0
+  out.cruiseState.enabled = True
+  out.cruiseState.available = True
+  CS = FakeCarState(out)
+  CS.acc_cam_valid = True
+  CS.acc_stock_values["AccBrkTot_A_Rq"] = -0.30
+
+  CC, CC_SP = _car_control(structs, enabled=True,
+                           send_button=structs.IntelligentCruiseButtonManagement.SendButtonState.none,
+                           gap_target=0, long_active=True)
+
+  sent = []
+  for frame in range(200):
+    _, can_sends = cc.update(CC, CC_SP, CS, frame * 10_000_000)
+    sent.extend(d for addr, d, _b in can_sends if addr == 390)
+
+  assert sent, "no ACCDATA was sent at all"
+  assert cc.acc_authority == structs.ControllerStateBP.AccAuthority.opStop, (
+    "the override never took authority, so this proves nothing")
+
+  # AccStopStat_B_Rq is bit 34 of ACCDATA, single bit, big-endian.
+  def stop_stat(d):
+    v = int.from_bytes(bytes(d), "big")
+    idx = (34 // 8) * 8 + (7 - (34 % 8))
+    return (v >> (64 - idx - 1)) & 1
+
+  asserted = sum(stop_stat(d) for d in sent)
+  assert asserted > 0, (
+    "the override braked the car without ever setting AccStopStat_B_Rq -- the PCM is being told no "
+    "stop is in progress while we bring the car to a standstill, which is the incoherence the "
+    "camera appears to be reacting to")
+  assert asserted == len(sent), (
+    "AccStopStat_B_Rq was set on only {} of {} override frames".format(asserted, len(sent)))
+
+
+def _passthrough_cc(carcontroller_parts):
+  """A CarController with op long and the passthrough on, engaged at 20 m/s."""
+  from opendbc.car.ford.interface import CarInterface
+  from opendbc.car.ford.values import CAR
+  CarController, dbc_names, CP, CP_SP, structs = carcontroller_parts
+  CP_long = CarInterface.get_non_essential_params(CAR.FORD_FUSION_MK5)
+  CP_long.openpilotLongitudinalControl = True
+  cc = CarController(dbc_names, CP_long, CP_SP)
+  cc.stock_acc_passthrough = True
+  cc.stop_override_enabled = True
+  out = structs.CarState()
+  out.vEgo = 20.0
+  out.vEgoRaw = 20.0
+  out.cruiseState.enabled = True
+  out.cruiseState.available = True
+  CS = FakeCarState(out)
+  CS.acc_cam_valid = True
+  CS.acc_stock_values["AccBrkTot_A_Rq"] = -1.10
+  CC, CC_SP = _car_control(structs, enabled=True,
+                           send_button=structs.IntelligentCruiseButtonManagement.SendButtonState.none,
+                           gap_target=0, long_active=True)
+  return cc, CS, CC, CC_SP, structs
+
+
+def test_a_late_cancel_run_after_our_override_is_still_ours(carcontroller_parts):
+  """THE GATE THAT ACTUALLY BLOCKED HIM, printed by the instrumentation on 2026-08-24:
+
+      RECOVERY DECLINED: cancel_is_ours=False longActive=True
+                         stop_override_stopped_us=False recovery_frames=0/1500
+
+  Attribution was decided on the frame a cancel RUN opened, within 3 s of the override. But ANY
+  refusal whose reason is not cancel resets the run -- so one band clip in the seconds after the
+  override restarts the clock, the next run opens too late, and recovery is blocked for the whole
+  drive. That is what this reproduces: override, then several seconds refused for a DIFFERENT
+  reason, then the cancel run finally opens.
+  """
+  cc, CS, CC, CC_SP, structs = _passthrough_cc(carcontroller_parts)
+  frame = 0
+
+  def run(n):
+    nonlocal frame
+    for _ in range(n):
+      cc.update(CC, CC_SP, CS, frame * 10_000_000)
+      frame += 1
+
+  cc.stop_override.update = lambda **kw: True
+  run(200)
+  assert cc.acc_authority == structs.ControllerStateBP.AccAuthority.opStop
+
+  # Hand back and refuse for a reason that is NOT cancel, with NO cancel asserted, for well over
+  # the 3 s window. Cancel must be absent here: `passthrough_admissible` tests the unpoliced bits
+  # BEFORE the bands, so asserting both would return "cancel" and open the run immediately -- which
+  # is how the first version of this test passed against the very code it was written to catch.
+  cc.stop_override.update = lambda **kw: False
+  CS.acc_stock_values["AccBrkTot_A_Rq"] = -19.0
+  run(600)
+
+  # NOW the camera starts cancelling, far more than 3 s after the override let go. The run opens
+  # here, and the timer-based rule can only say "not ours".
+  CS.acc_stock_values["AccBrkTot_A_Rq"] = -1.10
+  CS.acc_stock_values["AccCancl_B_Rq"] = 1
+  run(700)
+
+  assert cc.cancel_is_ours, (
+    "a cancel run that opened late after OUR override was not attributed to us -- that is the "
+    "RECOVERY DECLINED line from his 2026-08-24 drive")
+
+
+def test_a_cancel_after_the_camera_recovered_is_NOT_ours(carcontroller_parts):
+  """The other half, and the reason a permanent `override_ran` bool was rejected before: it latched
+  for a whole drive, so a cancel the camera raised forty minutes later for its own reasons was
+  still masked as ours.
+
+  The flag clears the moment the camera is seen HEALTHY, so it cannot span a healthy period.
+  """
+  cc, CS, CC, CC_SP, structs = _passthrough_cc(carcontroller_parts)
+  frame = 0
+
+  def run(n):
+    nonlocal frame
+    for _ in range(n):
+      cc.update(CC, CC_SP, CS, frame * 10_000_000)
+      frame += 1
+
+  cc.stop_override.update = lambda **kw: True
+  run(200)
+  cc.stop_override.update = lambda **kw: False
+
+  # The camera comes back clean and stays clean -- Ford authoring, everything forgiven.
+  run(600)
+  assert cc.acc_authority == structs.ControllerStateBP.AccAuthority.ford, (
+    "the camera never went healthy, so this proves nothing")
+  assert not cc.override_since_camera_clean, "a healthy camera must clear the attribution flag"
+
+  # Much later, the camera cancels for its own reasons. Not ours.
+  CS.acc_stock_values["AccCancl_B_Rq"] = 1
+  run(700)
+  assert not cc.cancel_is_ours, (
+    "a cancel raised long after the camera had recovered was attributed to our override -- that is "
+    "the bug the permanent override_ran bool had, and masking it hides a real camera fault")

@@ -281,6 +281,25 @@ class TestTheBigNumberIsWhatTheCarIsDrivenTo:
     assert box.label == "45", "the fallback he would get back by cancelling is not offered"
     assert box.label_is_number
 
+  def test_a_fallback_equal_to_the_hold_is_not_shown_twice(self):
+    """FROM A PHOTO OF HIS SCREEN, 2026-08-22: hold 35, posted 30, offset +5.
+
+    The fallback was therefore 35 -- the same number as the aim -- and the box drew "35" over "35"
+    in blue with no word on it anywhere. He could not tell whether the hold was still there, which
+    is the single question the box exists to answer, and he was right to ask.
+
+    Rank 2 answers "what would cancelling give me back". When that is the number already filling
+    the box it answers nothing, and it consumes the slot rank 4 would have used to say HOLD."""
+    box = max_box_state(hold=35.0, sla_fallback=35.0, set_speed=35.0, dash=35.0)
+    assert box.hold_driving, "the hold is still up; that part was never in doubt"
+    assert box.label == "HOLD", f"drew {box.label!r} over 35 -- two identical numbers, no label"
+    assert not box.label_is_number
+
+  def test_a_fallback_that_differs_is_still_shown(self):
+    """The rule is only about the degenerate case. A fallback worth having is still offered."""
+    box = max_box_state(hold=70.0, sla_fallback=45.0, set_speed=45.0, dash=70.0)
+    assert box.label == "45" and box.label_is_number
+
   def test_a_hold_with_no_limit_is_labelled_HOLD(self):
     """The common case on the roads holds are for: no limit, so no fallback exists to show.
 

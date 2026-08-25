@@ -124,8 +124,22 @@ class LateralCurvExt:
     # third consumer needs no change here -- but REMOVING one does not free the subscription.
     # FusionPilot: gpsLocationExternal feeds the synthesized APIM GPS messages (apim_gps.py). It is
     # the comma's own receiver, which is the only source of the GPS telemetry the IPMA is missing.
+    # BOTH GPS SERVICES. `gpsLocationExternal` is the ublox on a comma two / panda; everything
+    # since takes its fix from the qcom modem and publishes `gpsLocation`. Subscribing only to the
+    # external one is why the synthesized APIM GPS never transmitted a single frame on his 3X --
+    # `self.gps` stayed None for the life of every drive and the send block could not fire.
+    #
+    # Subscribed rather than selected via `get_gps_location_service(params)`, which is what
+    # selfdrived does: this runs inside the car process where a Params read is not free, and a
+    # service that never publishes costs nothing to carry. Whichever one updates wins below.
+    #
+    # THE TWO RUN AT DIFFERENT RATES and it is worth knowing before reading anything into a drive:
+    # cereal/services.py has `gpsLocationExternal` at 10 Hz and `gpsLocation` at 1 Hz. His 3X
+    # publishes only the second, so `self.gps` refreshes once a second and the 1 Hz APIM send can
+    # carry a fix already a full second old -- roughly 15 m at 35 mph. Fine for a camera that wants
+    # coarse position; not fine to quote as a precise one.
     self.sm = messaging.SubMaster(['modelV2', 'liveParameters', 'selfdriveState', 'radarState', 'liveDelay',
-                                   'longitudinalPlanSP', 'gpsLocationExternal'])
+                                   'longitudinalPlanSP', 'gpsLocation', 'gpsLocationExternal'])
     self.VM = VehicleModel(CP)
     self.model = None
     self.lp = None
@@ -289,8 +303,14 @@ class LateralCurvExt:
       self.lp = self.sm['liveParameters']
     if self.sm.updated['selfdriveState']:
       self.ss = self.sm['selfdriveState']
+    # Either service, whichever this hardware actually publishes. Checked in this order so a car
+    # that has both prefers the ublox, which is the better fix; on his 3X only the second ever
+    # fires. NOT `or`-ed into one expression -- `updated` must be read for both every frame or the
+    # unread one's flag goes stale.
     if self.sm.updated['gpsLocationExternal']:
       self.gps = self.sm['gpsLocationExternal']
+    elif self.sm.updated['gpsLocation']:
+      self.gps = self.sm['gpsLocation']
 
     if self.lp is not None:
       x = max(self.lp.stiffnessFactor, 0.1)

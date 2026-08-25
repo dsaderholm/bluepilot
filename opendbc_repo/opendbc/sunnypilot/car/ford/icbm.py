@@ -63,6 +63,19 @@ class IntelligentCruiseButtonManagementInterface(IntelligentCruiseButtonManageme
     self.frame = frame
     self.last_button_frame = last_button_frame
 
+    # NO SUPPRESSION HERE. An ICBM stand-down while openpilot authors ACCDATA was added and fully
+    # REVERTED on 2026-08-23 -- it froze the set speed wherever the camera latch caught it, and the
+    # follow-up that suppressed only DOWNWARD presses was worse still, because down is the direction
+    # an exit ramp needs. He reported being stuck at 25, 27 and 35 against SLA targets of 35, 35 and
+    # 40, and then took an exit at 5.20 m/s^2 lateral.
+    #
+    # The parameter and its branch survived that revert with no caller, which left the dangerous
+    # rule sitting here under a comment that read as though it were the reviewed design. Removed.
+    #
+    # THE CORRECT RULE IS HIS AND IS NOT IMPLEMENTED: move the set speed toward the DRIVER'S AIM
+    # and stop there -- neither "always" nor "never" nor either direction. It needs the aim, which
+    # lives in ICBM's units in selfdrived, and the carcontroller has no is_metric to compare
+    # against it. Do not reach for a direction test again as a shortcut to it.
     preempted = self.ICBM.sendButton != SendButtonState.none
     if preempted:
       button_signal = BUTTON_SIGNALS[self.ICBM.sendButton]

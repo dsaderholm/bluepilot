@@ -1,0 +1,40 @@
+# CONVERGE THE IPMA TO THE DONOR'S WORKING CONFIG -- the 12 blocks that differ.
+#
+# WHY THIS AND NOT MORE NIBBLE-HUNTING. His IPMA is a WHOLESALE COPY of a Brazilian
+# config found online, plus two hand-edits toward this donor. Nobody has ever confirmed
+# the Brazilian's camera reads signs -- asked directly on 2026-08-22, the answer was
+# "try frogpilot". The donor's car DOES read signs, on the same strategy and
+# calibration (KT4T-14F397-AE / -14F398-AE). So this replaces an unverified wholesale
+# copy with a verified one, which is a stronger experiment than mutating single nibbles
+# of a hybrid nobody has driven.
+#
+# IT IS REVERSIBLE NOW, WHICH IT WAS NOT IN AUGUST. `his-ipma-706.txt` holds all 29
+# blocks of the current state, checksum-verified. Restore from there if anything breaks.
+#
+# THE RISK THAT IS REAL: the module ASSEMBLIES differ -- his KT4T-19H406-CE against the
+# donor's LV4T-19H406-CF. Strategy and calibration match, but some of these blocks may
+# encode assembly or variant specifics rather than features, and nobody here can tell
+# which. 706-03-* in particular look structurally unlike the rest. If the car misbehaves,
+# restore rather than reasoning about which block did it.
+#
+# ALSO EXPECTED: writing IPMA as-built invalidates the RADAR calibration (B1433, MIL on).
+# Documented 2026-08-11 -- reverting the IPMA clears it with no alignment drive.
+#
+# DO NOT DO THIS BEFORE THE NIGHT DRIVE. That drive is separating night from the nibble-8
+# write and needs one variable. This is the experiment AFTER it.
+
+block        CURRENT          WRITE THIS      
+706-01-01    0810 A9DA B963   0810 A9DA A953  
+706-01-02    301A 6535 6458   101A A535 6478  
+706-02-01    FD56 16DB 7FD3   FD56 16DB 5FB3  
+706-02-02    FFC1 55AA E1B1   FFC3 55AA E1B3  
+706-02-03    0842 1000 006C   F840 0800 0052  
+706-02-04    0000 0000 0013   0008 0000 001B  
+706-02-05    0000 0000 0014   0800 0000 0824  
+706-02-07    0000 0004 001A   0000 0084 009A  
+706-03-01    C000 5200 80A3   8000 0000 8011  
+706-03-04    0080 0000 0094   0089 0000 009D  
+706-04-01    FFFC 27C3 847B   1EFC 26C3 485D  
+706-05-01    53AA 7400 0084   566A B800 008B  
+
+# Blocks NOT listed here already match the donor and must be left alone.

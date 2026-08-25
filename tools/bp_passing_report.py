@@ -127,6 +127,23 @@ def history() -> int:
       shown = ", ".join(f"{nm} {v * 100:.0f}%" if v >= 0 else f"{nm} -"
                         for nm, v in zip(names, bands, strict=False))
       print(f"    road edge refused, by mph: {shown}")
+      print("      (that share is OF REFUSED FRAMES, not of the drive -- it says the edge was among"
+            " the reasons, not how often the gate shut)")
+
+    # THE LEFT ROAD EDGE CLOSING IN AHEAD. Published 2026-08-22 and gating nothing yet, so this is
+    # the only place it is visible -- and a diagnostic that lands in a JSON dump nobody prints is
+    # this fork's oldest bug wearing a new hat.
+    #
+    # WHAT TO LOOK FOR: near-zero on motorway is the EXPECTED reading and is what says the edge-std
+    # term this may replace was never doing narrowing work there. A non-zero share, or a max well
+    # past 1.5 m, on a drive through roadworks is the thing that has never been captured -- the
+    # construction-zone event is still unlocated and this is the instrument for it.
+    ns = d.get("leftNarrowingShare")
+    if ns is not None:
+      broken = d.get("leftNarrowingBroken", 0.0)
+      print(f"    left road edge closing in: {ns * 100:.2f}% of moving frames past "
+            f"1.5 m   worst {d.get('leftNarrowingMax', 0.0):.2f} m"
+            + (f"   [edge estimate broke on {broken * 100:.1f}%]" if broken else ""))
 
     # IS THERE A LANE THERE AT ALL -- the one question no camera term can answer, because "no lane
     # line" and "a line the camera missed" refuse identically. The radar is the independent witness:

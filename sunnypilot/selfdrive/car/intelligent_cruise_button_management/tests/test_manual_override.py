@@ -64,7 +64,8 @@ def make_cs(cluster, v_ego=None, buttons=(), enabled=True, gas_pressed=False, br
 
 def make_lp(target, lead_state=UnconfirmedLeadState.inactive, lead_target=0.0,
             source=PlanSource.speedLimitAssist, limit_known=True,
-            curve_active=False, curve_target=0.0, map_active=False, sla_assist=True):
+            curve_active=False, curve_target=0.0, map_active=False, sla_assist=True,
+            sla_target=None, limit_live=None):
   """limit_known defaults TRUE because that is the ordinary road: OSM has a limit for most places.
 
   It was absent entirely at first, which made LP_SP.speedLimit raise and every test run as though no
@@ -86,8 +87,20 @@ def make_lp(target, lead_state=UnconfirmedLeadState.inactive, lead_target=0.0,
   # what the except produced, so nothing that passed before changes meaning.
   return NS(vTarget=target * MPH,
             longitudinalPlanSource=source,
-            speedLimit=NS(resolver=NS(speedLimitValid=limit_known,
-                                      speedLimitLastValid=limit_known),
+            # speedLimitFinalLast WAS ABSENT and the controller's try/except swallowed it, so the
+            # clearing rule read SLA's target as 0 and never fired -- the same fixture-thinner-than-
+            # the-real-message failure as smartCruiseControl below, in the same file, again.
+            # It is SLA's own number WITH the offset, which is what the hold is compared against.
+            # THE TWO VALIDITY FLAGS ARE SEPARATE INPUTS and were tied to one kwarg until
+            # 2026-08-22. `speedLimitValid` is a LIVE limit; `speedLimitLastValid` is a REMEMBERED
+            # one, which is what every road that leaves OSM coverage looks like. Tying them made the
+            # state that can wrongly destroy a hold -- remembered but not live -- inexpressible, so
+            # the bug could only be argued about and not tested.
+            speedLimit=NS(resolver=NS(speedLimitValid=(limit_known if limit_live is None
+                                                       else limit_live),
+                                      speedLimitLastValid=limit_known,
+                                      speedLimitFinalLast=(target if sla_target is None
+                                                           else sla_target) * MPH),
                           assist=NS(enabled=sla_assist)),
             smartCruiseControl=NS(map=NS(active=map_active, vTarget=target * MPH),
                                   vision=NS(active=curve_active, vTarget=curve_target * MPH)),
@@ -126,11 +139,13 @@ def set_baseline(icbm, to=DRIVER):
   icbm.run(make_cs(to, buttons=(ACCEL_RELEASE,)), CC, make_lp(LIMIT), False)
 
 
-def settle(icbm, target, cluster=DRIVER, frames=150, source=PlanSource.speedLimitAssist):
+def settle(icbm, target, cluster=DRIVER, frames=150, source=PlanSource.speedLimitAssist,
+           sla_target=None, limit_live=None):
   """Default runs past PRESS_SETTLE_FRAMES: ICBM stands down for 0.6 s after a driver press, so
   a shorter settle would assert on the stand-down rather than on steady-state behavior."""
   for _ in range(frames):
-    icbm.run(make_cs(cluster), CC, make_lp(target, source=source), False)
+    icbm.run(make_cs(cluster), CC,
+             make_lp(target, source=source, sla_target=sla_target, limit_live=limit_live), False)
 
 
 def cycle_with_set(icbm, road_speed=48, off_frames=200, source=PlanSource.speedLimitAssist):
@@ -562,6 +577,36 @@ class TestReturningToTheLimitHandsItBack:
       f"(baseline={icbm.v_baseline}, diverged={icbm.baseline_diverged})")
     assert icbm.override_state == OverrideState.auto
 
+  def test_a_hold_that_never_differed_from_SLA_still_clears(self):
+    """THE SECOND INSTANCE, measured on route 000003ac and photographed by him.
+
+    The clearing rule used to require `baseline_diverged` -- the hold had to have DIFFERED from
+    SLA at some point before equality would clear it. A hold born already equal to SLA's number
+    therefore had an unreachable exit:
+
+        t+299.7  hold born at 35   vTargetRaw already 35   <-- equal from the first frame
+                 ... 164.7 SECONDS, plan source speedLimitAssist throughout ...
+        t+464.4  cleared by something else entirely
+
+    He said it twice and both times it was a statement about the CURRENT state, not about history:
+    *"if I set the speed back to the SLA speed, there shouldn't be a hold"*, and *"I don't want a
+    hold if I +/- back to SLA speed."*
+
+    The latch's stated job -- not deleting a fresh hold on its first frame -- is done by the press
+    path and the press-settle stand-down, both of which return before this rule is reached."""
+    icbm = fresh()
+    set_baseline(icbm, to=LIMIT)          # a press that lands on SLA's own number
+    # 800 FRAMES, not 400. This press never MOVES the cluster -- it is already at LIMIT -- so the
+    # stand-down cannot end on `settled` (which requires movement) and only expires on
+    # PRESS_SETTLE_MAX_FRAMES, 600. A shorter settle leaves the rule unreached and the test fails
+    # identically with the fix in place and reverted, which is exactly what it did first time.
+    settle(icbm, LIMIT, cluster=LIMIT, frames=800)
+
+    assert icbm.v_baseline == 0, (
+      f"a hold sitting on SLA's number survived (baseline={icbm.v_baseline}, "
+      f"diverged={icbm.baseline_diverged}) -- it never differed, so it could never clear")
+    assert icbm.override_state == OverrideState.auto
+
   def test_a_hold_walked_back_without_ever_leaving_the_stand_down(self):
     """THE ONE THAT REACHED THE ROAD TWICE, measured on route 000003a8 on 2026-08-22.
 
@@ -611,10 +656,209 @@ class TestReturningToTheLimitHandsItBack:
       f"(baseline={icbm.v_baseline}, diverged={icbm.baseline_diverged}) -- he reported this twice")
     assert icbm.override_state == OverrideState.auto
 
+  def test_a_hold_walked_back_with_no_release_event_still_clears(self):
+    """THE THIRD TIME HE REPORTED IT, 2026-08-23, with a photo: HOLD 27, SPEED LIMIT 25, offset 2.
+
+    The test above walks the hold back with the button held on every frame -- and then sends a
+    RELEASE. That release is what makes it pass, and this car does not reliably send one.
+    Route 000003ae, t+140..260:
+
+        88 button events with pressed=True, ONE with pressed=False
+
+    `update_manual_button_timers` only zeroes a timer on a release, so after the last press at
+    t+154.48 the accelCruise timer stayed non-zero with no event of any kind until t+269. ICBM
+    re-arms its press-settle stand-down every frame any manual-override timer is non-zero, so
+    `update_manual_override` returned before its clearing rule on every one of those frames.
+
+    Measured consequence, from `tools/bp_hold_clear_audit.py` on that route -- every one of the
+    rule own four conditions passing while it sat for 87 seconds:
+
+        t+158.4  hold 27  sla 27  live True  cruise True  source press   SHOULD HAVE CLEARED
+        t+245.6  hold  0                                                 CLEARED
+
+    So this is the same walk-back with the release simply left out, which is what his stalk does.
+    """
+    icbm = fresh()
+
+    cluster = LIMIT
+    icbm.run(make_cs(cluster, buttons=(ACCEL_PRESS,), enabled=False), CC, make_lp(LIMIT), False)
+    while cluster < DRIVER:
+      cluster += 1
+      icbm.run(make_cs(cluster, buttons=(ACCEL_PRESS,), enabled=False), CC, make_lp(LIMIT), False)
+
+    # Walk back down engaged, button held every frame, and NO RELEASE AT THE END -- the whole point.
+    while cluster > LIMIT:
+      icbm.run(make_cs(cluster, buttons=(DECEL_PRESS,)), CC, make_lp(LIMIT), False)
+      cluster -= 1
+
+    # Then ordinary driving at SLA number, with no button events at all. On the car this stretch
+    # lasted 87 seconds and the hold never cleared.
+    settle(icbm, LIMIT, cluster=LIMIT, frames=1400)
+
+    assert icbm.v_baseline == 0, (
+      "the hold survived a walk back to SLA own number when no release event followed the press "
+      "(baseline={}, diverged={}) -- he has now reported this three times".format(
+        icbm.v_baseline, icbm.baseline_diverged))
+    assert icbm.override_state == OverrideState.auto
+  def test_a_hold_raised_from_SLA_and_returned_clears_promptly(self):
+    """HIS FOURTH REPORT, 2026-08-23, from the seat: "SLA wants 20+2 and I set a hold up and then
+    back to 22 and it did not clear."
+
+    THE ROUND TRIP IS THE WHOLE BUG. `moved` compared the live cluster against the value at the
+    FIRST press of the sequence. He starts AT SLA number, presses up to make a hold, presses back
+    down to SLA number -- first press 22, last frame 22, so `moved` was False, `settled` never
+    fired, and the stand-down ran its full 600-frame cap with the clearing rule unreachable behind
+    it. That is why it is always this gesture.
+
+    Compounded by a 10 s stale window on the button timer, added the same afternoon while fixing a
+    different bug: 10 s before `held` goes false, then up to 6 s of stand-down. Up to SIXTEEN
+    seconds. It did clear eventually; nobody would ever wait.
+
+    So this asserts PROMPTLY, not merely eventually -- the delay was the complaint.
+    """
+    icbm = fresh()
+    settle(icbm, LIMIT, cluster=LIMIT, frames=200)
+    assert icbm.v_baseline == 0, "started with a hold, so this proves nothing"
+
+    # Up from SLA number to make a hold, button held every frame, no release event -- his stalk.
+    cluster = LIMIT
+    while cluster < LIMIT + 4:
+      icbm.run(make_cs(cluster, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT), False)
+      cluster += 1
+    for _ in range(30):
+      icbm.run(make_cs(cluster), CC, make_lp(LIMIT), False)
+    assert icbm.v_baseline > 0, "no hold was created, so the walk back proves nothing"
+
+    # And straight back down to exactly SLA number. Ends where it began: the round trip.
+    while cluster > LIMIT:
+      icbm.run(make_cs(cluster, buttons=(DECEL_PRESS,)), CC, make_lp(LIMIT), False)
+      cluster -= 1
+
+    # PROMPTLY. 400 frames is 4 s -- comfortably past the 2 s ICBM stale window plus the stable
+    # count, and comfortably SHORT of the 16 s the broken path took.
+    settle(icbm, LIMIT, cluster=LIMIT, frames=400)
+    assert icbm.v_baseline == 0, (
+      "the hold survived being raised from SLA number and walked straight back to it "
+      "(baseline={}) -- he has now reported this four times".format(icbm.v_baseline))
+  def test_the_moved_latch_resets_when_the_anchor_moves(self):
+    """FusionPilot, 2026-08-24, found in code review of the same evening's work.
+
+    `cluster_moved_since_press` means "the cluster has moved since THIS anchor", so it is a PAIR
+    with `v_cluster_at_press`. The press path resets both. The inferred fallback and the pinned-hold
+    path each re-anchored WITHOUT resetting the latch, so a stand-down armed by either began with
+    `moved` already True from an earlier press -- and `settled` can then fire on the first stable
+    frame, ending the stand-down mid-gesture.
+
+    That is the failure the stand-down exists to prevent, in this file's own words: the baseline
+    froze and ICBM walked the set speed back down one increment at a time while the button was
+    still pressed.
+
+    Asserts the INVARIANT rather than a symptom -- every site that assigns the anchor must clear
+    the latch -- because the symptom needs an exact interleaving to reproduce and the invariant
+    does not.
+    """
+    import ast
+    import inspect
+    from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management import controller
+
+    tree = ast.parse(inspect.getsource(controller))
+
+    # PER FUNCTION, not per line. Proximity was tried first and flagged two correct sites, because
+    # a six-line comment sat between the anchor and its reset -- a heuristic that fails on the very
+    # comment explaining the invariant is the wrong heuristic.
+    offenders = []
+    for fn in ast.walk(tree):
+      if not isinstance(fn, ast.FunctionDef):
+        continue
+      anchors, resets = [], []
+      for node in ast.walk(fn):
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+          continue
+        t = node.targets[0]
+        if not isinstance(t, ast.Attribute):
+          continue
+        if t.attr == "v_cluster_at_press":
+          anchors.append(node.lineno)
+        elif t.attr == "cluster_moved_since_press":
+          # ONLY `= False` COUNTS. The latch is also SET to True where the movement is detected,
+          # and counting that as a reset made the first version of this vacuous -- 2 anchors
+          # against 3 "resets", so deleting a real one still left the tally passing. Mutation
+          # testing is what showed it; the test was green against the bug twice.
+          if isinstance(node.value, ast.Constant) and node.value.value is False:
+            resets.append(node.lineno)
+      if anchors and len(resets) < len(anchors):
+        offenders.append("{} re-anchors v_cluster_at_press {} time(s) but clears the latch {}".format(
+          fn.name, len(anchors), len(resets)))
+
+    assert any(isinstance(n, ast.FunctionDef) for n in ast.walk(tree)), "parsed nothing"
+    assert not offenders, (
+      "every site that re-anchors v_cluster_at_press must also clear cluster_moved_since_press -- " + "; ".join(offenders) + ". The latch means 'moved since THIS anchor', so a stale True ends the next stand-down early and the baseline freezes mid-press.")
+  def test_it_clears_even_while_a_curve_owns_the_plan(self):
+    """THE ONE THAT WAS STILL BROKEN AFTER TWO FIXES, and he photographed it.
+
+    The hold was 35, posted 30 with his +5 offset, and the screen read `HOLD 35` with `BRAKE 0.1`
+    beside it -- something was braking, so a curve or a lead owned the plan and `plan_source` was
+    not `speedLimitAssist`. The rule was gated on that, so it never executed at all.
+
+    It compares against SLA's OWN number now, which is meaningful whoever is winning."""
+    icbm = fresh()
+    set_baseline(icbm, to=LIMIT)          # a hold sitting on SLA's own number
+    # A CURVE owns the target for the whole settle -- asking 40, well under SLA's 55, exactly as it
+    # was when he took the photo. `plan_source` is never speedLimitAssist on a single frame here.
+    # 800 frames because this press never moves the cluster, so the stand-down only expires on its
+    # 600-frame cap.
+    settle(icbm, 40, cluster=LIMIT, source=PlanSource.sccVision, sla_target=LIMIT, frames=800)
+    assert icbm.v_baseline == 0, (
+      f"the hold survived because a curve owned the plan (baseline={icbm.v_baseline}) -- that is "
+      "the gate he photographed, and SLA's number does not stop being SLA's number")
+
+  def test_a_REMEMBERED_limit_does_not_clear_a_hold(self):
+    """CAUGHT IN REVIEW on 2026-08-22, hours after the source gate came out, and it was a real
+    regression rather than a hypothetical.
+
+    Removing `plan_source == speedLimitAssist` lost a side effect nobody had named: that gate meant
+    SLA was actively WINNING, which implies a LIVE limit. The replacement was `speed_limit_known`,
+    which is `speedLimitValid OR speedLimitLastValid` -- so a limit REMEMBERED from a road already
+    left could destroy a hold pressed on the next one.
+
+    That is not exotic. It is every road that leaves OSM coverage: SLA keeps `speedLimitFinalLast`
+    at the old number, he presses + to hold exactly that on the new road, and it vanishes. On the
+    roads CLAUDE.md says holds matter most.
+
+    The clearing rule reads `speed_limit_live` now. `speed_limit_known` still exists and is still
+    what the no-limit seeding wants."""
+    icbm = fresh()
+    set_baseline(icbm, to=LIMIT)          # a hold that equals the REMEMBERED number
+    # Live limit gone, memory of it intact -- exactly leaving a mapped zone.
+    settle(icbm, LIMIT, cluster=LIMIT, frames=800, limit_live=False)
+
+    assert icbm.v_baseline == LIMIT, (
+      "a hold was destroyed by a limit belonging to a road he had already left")
+    assert icbm.override_state == OverrideState.manual
+
+  def test_a_pinned_hold_at_SLAs_number_survives(self):
+    """His sentence has a carve-out and it is not a footnote: *"if I set my hold that I had back to
+    the SLA speed, I want that hold gone UNLESS IT'S PINNED."*
+
+    A pin is a statement about a PLACE, made on an earlier drive. The posted limit agreeing with it
+    today does not retract it -- and clearing it would delete the pin's effect on exactly the roads
+    pins exist for."""
+    icbm = fresh()
+    set_baseline(icbm, to=LIMIT)
+    icbm.baseline_source = BaselineSource.pinned
+    settle(icbm, LIMIT, cluster=LIMIT, frames=800)
+    assert icbm.v_baseline == LIMIT, "a PINNED hold was cleared for agreeing with the limit"
+    assert icbm.override_state == OverrideState.manual
+
   def test_a_curve_matching_the_baseline_does_not_clear_it(self):
+    """`sla_target=LIMIT` is the whole point of this test now. A curve asking for the same number
+    the driver is holding is a COINCIDENCE -- SLA still wants 55 and the hold is still 70 against
+    it. Before 2026-08-22 the rule compared against the winning plan's target, so this had to be
+    prevented with a source gate; it now compares against SLA's own number, where a curve simply
+    does not enter into it."""
     icbm = fresh()
     set_baseline(icbm)
-    settle(icbm, DRIVER, source=PlanSource.sccVision)
+    settle(icbm, DRIVER, source=PlanSource.sccVision, sla_target=LIMIT)
     assert icbm.override_state == OverrideState.manual
 
 
@@ -791,7 +1035,8 @@ class TestMappingAgnosticFallback:
   with flashed SCCM firmware that is an assumption. If the set speed moves and ICBM has been silent
   far longer than any command of its own could take to land, a human moved it -- adopt it."""
 
-  def _drive(self, moves, source=PlanSource.speedLimitAssist, target=LIMIT, frames=1400):
+  def _drive(self, moves, source=PlanSource.speedLimitAssist, target=LIMIT, frames=1400,
+             sla_target=None, limit_live=None):
     """moves: {frame: delta} applied to the set speed with NO button event at all.
 
     Moves start well past frame 250: engaging cruise opens a settle window during which
@@ -802,7 +1047,8 @@ class TestMappingAgnosticFallback:
     cluster = LIMIT
     for f in range(frames):
       cluster += moves.get(f, 0)
-      icbm.run(make_cs(cluster), CC, make_lp(target, source=source), False)
+      icbm.run(make_cs(cluster), CC,
+             make_lp(target, source=source, sla_target=sla_target, limit_live=limit_live), False)
       if f % 5 == 0:
         if icbm.cruise_button == SendButtonState.decrease:
           cluster -= 1
@@ -929,11 +1175,20 @@ class TestReturningToTheLimitClearsTheHold:
     icbm.run(make_cs(LIMIT), CC, make_lp(LIMIT), False)
     assert icbm.override_state == OverrideState.manual, "hold deleted on the frame it was created"
 
-  def test_clearing_is_source_gated(self):
-    """Under `cruise` there is no posted limit, so equality is coincidence rather than intent."""
+  def test_only_SLAs_own_number_clears_it(self):
+    """RENAMED from `test_clearing_is_source_gated` on 2026-08-22, because the gate is gone and the
+    property it protected is not.
+
+    The old rule compared the hold against whatever source was WINNING the plan, so it needed a
+    source gate to stop a curve or a cruise target coincidentally matching and deleting the hold.
+    That gate is what made the rule unreachable in the field: it only ran on frames SLA happened to
+    win, and he photographed a hold that could not clear while `BRAKE 0.1` was on screen.
+
+    Comparing against SLA's OWN number removes the need for the gate entirely -- a cruise target of
+    70 is simply not SLA's 55, so it cannot clear anything."""
     icbm = fresh()
     set_baseline(icbm, DRIVER)
-    settle(icbm, DRIVER, cluster=DRIVER, source=PlanSource.cruise)
+    settle(icbm, DRIVER, cluster=DRIVER, source=PlanSource.cruise, sla_target=LIMIT)
     assert icbm.override_state == OverrideState.manual
 
 

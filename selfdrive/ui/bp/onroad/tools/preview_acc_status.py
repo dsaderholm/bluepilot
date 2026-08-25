@@ -43,6 +43,11 @@ SET_W, SET_H = 172, 204    # UI_CONFIG.set_speed_width_imperial / set_speed_heig
 #   hold    the driver's own held speed, 0 for none
 #   offer   a pin being suggested here. Mutually exclusive with `hold` by construction.
 SCENES = [
+  # HIS PHOTO, 2026-08-22. Hold 35, posted 30, offset +5 -- so the fallback is also 35 and rank 2
+  # used to draw "35" over "35" in blue with no word on it. He could not tell whether the hold was
+  # still up, which is the one question this box exists to answer.
+  dict(cap="hold equals the SLA fallback -- says HOLD, not 35 over 35",
+       dash=35, limit=30, fallback=35, hold=35, acc="COAST", mag=0.0, lamps=False),
   dict(cap="settled, holding 70 in a 55 -- lamps dark",
        dash=70, limit=55, hold=70, acc="COAST", mag=0.0, lamps=False),
   dict(cap="curve: ACC braking hard enough to light the lamps",
@@ -55,6 +60,8 @@ SCENES = [
        dash=52, limit=55, hold=70, acc="ENG BRAKE", mag=0.9, lamps=False),
   dict(cap="no hold, ACC accelerating -- the box is SLA's number",
        dash=55, limit=55, hold=0, acc="ACCEL", mag=0.6, lamps=False),
+  dict(cap="TSR READ A SIGN -- thicker edge, the number the camera saw",
+       dash=32, limit=30, hold=0, acc="COAST", mag=0.0, lamps=False, tsr_limit="TSR 30"),
   dict(cap="TSR not working -- the camera's own reason",
        dash=70, limit=55, hold=70, acc="COAST", mag=0.0, lamps=False, tsr="TSR REGION N/A"),
   dict(cap="hold pinned to this place -- dot in the corner, tap the box to unpin",
@@ -198,9 +205,15 @@ def main(outdir):
     dash, limit, hold = scene["dash"], scene["limit"], scene["hold"]
     acc, mag, lamps = scene["acc"], scene["mag"], scene["lamps"]
     tsr = scene.get("tsr", "")
+    tsr_limit = scene.get("tsr_limit", "")
     # THE REAL RULE DECIDES WHAT THE BOX SAYS. Re-deriving the ranking here is how a preview starts
     # agreeing with itself instead of with the car.
-    box = max_box_state(hold, limit or None, dash, dash,
+    # THE SIGN AND THE FALLBACK ARE DIFFERENT NUMBERS and every scene here conflated them until
+    # 2026-08-22. The sign shows the POSTED limit; the fallback SLA would hand back is that plus his
+    # offset, which is +5. His screen had posted 30 and a fallback of 35, and passing 30 for both is
+    # why the preview could not reproduce what he was looking at.
+    fallback = scene.get("fallback", limit)
+    box = max_box_state(hold, fallback or None, dash, dash,
                         pin_suggestion=scene.get("offer", 0),
                         pinned=scene.get("pinned", False),
                         hold_locked=scene.get("locked", False))
@@ -208,7 +221,7 @@ def main(outdir):
       _font_bold=fonts["bold"], _font_semi_bold=fonts["semi"],
       _acc_state=acc, _acc_accel=mag,
       _brakes_on=lamps, _show_brake_status=True, _lamp_data_available=True,
-      _tsr_fault=tsr,
+      _tsr_fault=tsr, _tsr_limit=tsr_limit,
     )
     rl.begin_texture_mode(tex)
     # Mid-gray stands in for road: bright enough to catch anything relying on a dark backdrop.

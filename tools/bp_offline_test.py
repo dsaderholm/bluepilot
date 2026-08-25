@@ -146,6 +146,13 @@ DEFAULT_TARGETS = [
   "sunnypilot/mapd/tests/test_only_one_map_daemon_runs.py",
   "selfdrive/selfdrived/tests/test_passthrough_is_not_openpilot_driving.py",
   "sunnypilot/selfdrive/controls/lib/speed_limit/tests/test_sla_leaves_disabled_while_icbm_moves_the_cluster.py",
+  "sunnypilot/selfdrive/controls/lib/speed_limit/tests/test_sla_survives_a_gas_override.py",
+  "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_replay_his_drive.py",
+  "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_tsr_reliability.py",
+  "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_accdata_stays_in_band.py",
+  "sunnypilot/selfdrive/selfdrived/tests/test_unconfirmed_lead_alert_truth.py",
+  "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_apim_gps_quality.py",
+  "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_override_says_why.py",
   "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_synthesized_set_cruise.py",
   "sunnypilot/selfdrive/controls/lib/smart_cruise_control/tests/test_tile_curvature.py",
   # Named file, not the directory: test_mapd_version.py beside it hashes the installed mapd binary
@@ -153,6 +160,7 @@ DEFAULT_TARGETS = [
   # rather than ours -- capnp reads by position, so drift decodes as different fields with no error.
   "sunnypilot/mapd/tests/test_mapd_schema.py",
   "sunnypilot/mapd/tests/test_mapd_v2_map_data.py",
+  "sunnypilot/mapd/tests/test_mapd_v2_restarts.py",
   "sunnypilot/mapd/tests/test_mapd_v2_binary.py",
   "sunnypilot/mapd/tests/test_mapd_settings.py",
   # The value behind every +/- control. The widget needs pyray and cannot collect here, which
