@@ -572,7 +572,14 @@ driver's number afterwards rather than to the speed limit.
 | Key on the wheel | Cruise engaged | Cruise off |
 |---|---|---|
 | `RES +` (`CcAslButtnSetIncPress`) | `accelCruise` — creates or raises a HOLD | `resumeCruise` — engages and **keeps** the hold |
-| `SET −` (`CcAslButtnSetDecPress`) | `decelCruise` — creates or lowers a HOLD | `setCruise` — engages, **clears** the hold, SLA takes the speed |
+| `SET −` (`CcAslButtnSetDecPress`) | `decelCruise` — creates or lowers a HOLD | `setCruise` — engages; **with an SLA number it CLEARS the hold** and SLA takes the speed, **with no SLA number it HOLDS the speed at the press** (stock ACC) |
+
+**THE SET-WHEN-OFF ROW IS CONDITIONAL AS OF 2026-08-25, and both halves came from one road
+report.** Clearing is right only when there is something to hand the speed BACK to. With SLA
+quiet, clearing left the car aiming at the planner's cruise target instead of at what he had
+just asked for -- and the clearing half was itself broken, deferring to a set-speed comparison
+that read his SET as a RESUME because the dash still carried the old number. The button event
+now decides; `set_press_frames` mirrors `resume_press_frames`, and RESUME wins if both are armed.
 | `CNCL` (`CcAslButtnCnclResPress`) | `cancel` | also reports `resumeCruise`; harmless, resume is reachable from either |
 
 The wheel is **CNCL / RES+ / SET−**, with CNCL as its own dedicated button — confirmed from a photo

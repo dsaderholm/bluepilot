@@ -1333,6 +1333,76 @@ class TestResumeKeepsTheHoldAndSetGivesItBack:
     assert icbm.v_baseline == 0, "SET kept the hold -- the surface-street 22 survived onto the highway"
     assert icbm.override_state == OverrideState.auto, "SET did not hand the speed back to SLA"
 
+  def test_SET_with_NO_SLA_NUMBER_holds_the_speed_he_pressed_at(self):
+    """The other half of the 2026-08-25 report:
+
+      "the set button does not create a new hold from the current speed at when it was pressed
+       without an SLA number"
+
+    Clearing the hold is right when SLA HAS a number -- that is him handing the speed back. With no
+    number there is nothing to hand it to, so clearing would leave the car aiming at the planner's
+    cruise target instead of at what he just asked for. Stock ACC holds the speed you pressed at,
+    and that is what he asked for: *"function identically to how stock Ford ACC functions, just
+    with the added benefit of holds being remembered."*
+    """
+    icbm = fresh()
+    set_baseline(icbm, to=22)
+    settle(icbm, LIMIT, cluster=22)
+    assert icbm.v_baseline == 22
+
+    def no_sla():
+      return make_lp(0, limit_known=False, limit_live=False, sla_target=0, source=PlanSource.cruise)
+
+    for _ in range(200):
+      icbm.run(make_cs(22, v_ego=75, enabled=False), CC, no_sla(), False)
+    icbm.run(make_cs(22, v_ego=75, enabled=False, buttons=(SET_PRESS,)), CC, no_sla(), False)
+    for _ in range(5):
+      icbm.run(make_cs(22, v_ego=75, enabled=False), CC, no_sla(), False)
+    for _ in range(300):
+      icbm.run(make_cs(22, v_ego=75, enabled=True), CC, no_sla(), False)
+
+    assert icbm.v_baseline == 75, (
+      f"SET with no SLA number left {icbm.v_baseline} -- the surface-street 22 or nothing at all")
+    assert icbm.baseline_source == BaselineSource.press, "not labelled as his deliberate press"
+    assert icbm.override_state == OverrideState.manual
+
+  def test_the_SET_hold_is_the_speed_at_the_PRESS_not_at_the_verdict(self):
+    """He keeps accelerating between the press and the moment cruise reports engaged, and the
+    verdict can land up to SET_PRESS_MEMORY_FRAMES later. His words are specific: *"a new hold from
+    the current speed AT WHEN IT WAS PRESSED"*."""
+    icbm = fresh()
+
+    def no_sla():
+      return make_lp(0, limit_known=False, limit_live=False, sla_target=0, source=PlanSource.cruise)
+
+    for _ in range(200):
+      icbm.run(make_cs(22, v_ego=60, enabled=False), CC, no_sla(), False)
+    icbm.run(make_cs(22, v_ego=60, enabled=False, buttons=(SET_PRESS,)), CC, no_sla(), False)
+    # still accelerating hard while the PCM catches up
+    for v in range(61, 80):
+      icbm.run(make_cs(22, v_ego=v, enabled=False), CC, no_sla(), False)
+    for _ in range(300):
+      icbm.run(make_cs(22, v_ego=80, enabled=True), CC, no_sla(), False)
+
+    assert icbm.v_baseline == 60, f"held {icbm.v_baseline}, i.e. a later speed than the press"
+
+  def test_SET_below_the_floor_still_holds_the_minimum(self):
+    """Ford cannot set below 20 mph, so neither can this. `v_cruise_min` is the same floor the
+    behavioural detector uses for its own SET signature."""
+    icbm = fresh()
+
+    def no_sla():
+      return make_lp(0, limit_known=False, limit_live=False, sla_target=0, source=PlanSource.cruise)
+
+    for _ in range(200):
+      icbm.run(make_cs(22, v_ego=8, enabled=False), CC, no_sla(), False)
+    icbm.run(make_cs(22, v_ego=8, enabled=False, buttons=(SET_PRESS,)), CC, no_sla(), False)
+    for _ in range(300):
+      icbm.run(make_cs(22, v_ego=8, enabled=True), CC, no_sla(), False)
+
+    assert icbm.v_baseline == icbm.v_cruise_min, (
+      f"held {icbm.v_baseline} against a floor of {icbm.v_cruise_min}")
+
   def test_RESUME_still_keeps_the_hold_when_the_dash_never_moves(self):
     """The other side of the same coin, and the regression the fix above could plausibly cause.
 

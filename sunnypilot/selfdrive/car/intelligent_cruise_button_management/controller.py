@@ -397,6 +397,7 @@ class IntelligentCruiseButtonManagement:
     self.cruise_button_prev = SendButtonState.none
     self.resume_press_frames = 0     # >0 while a RESUME press is recent enough to have re-engaged
     self.set_press_frames = 0        # >0 while a SET press is recent enough to have engaged
+    self.v_ego_at_set_press = 0      # road speed when that SET was pressed -- the stock-ACC hold
     self.reanchor_overridden = False  # a resume kept the hold; re-measure the limit rule from here
     self.v_cluster_before_disengage = 0  # set speed when cruise last dropped; RESUME restores it
     self.cycle_decision_pending = False  # waiting for the set speed to say whether it was RESUME
@@ -1171,6 +1172,13 @@ class IntelligentCruiseButtonManagement:
     # Remember a SET press the same way -- see SET_BUTTONS.
     if any(b.type.raw in SET_BUTTONS and b.pressed for b in CS.buttonEvents):
       self.set_press_frames = SET_PRESS_MEMORY_FRAMES
+      # AND THE SPEED AT THE PRESS, which is the number a stock SET holds. Captured here rather
+      # than read at the verdict because the verdict lands up to 1.5 s later, by which time he has
+      # kept accelerating -- *"a new hold from the current speed AT WHEN IT WAS PRESSED"*. The dash
+      # is no use for this either: it carries the old set speed for some frames after the press and
+      # ICBM may already be walking it toward the previous hold.
+      self.v_ego_at_set_press = max(round(CS.vEgo * (CV.MS_TO_KPH if self.is_metric else CV.MS_TO_MPH)),
+                                    self.v_cruise_min)
 
     # Remember the set speed while engaged; at the moment cruise drops this is what RESUME will
     # restore, and comparing against it is how RESUME is told from SET without a button event.
@@ -1211,6 +1219,27 @@ class IntelligentCruiseButtonManagement:
         # is destructive and silent, keeping one the driver can always change. That is the same
         # rule the detector below states for itself.
         self.clear_baseline()
+        # ...AND WITH NO SLA NUMBER, SET ESTABLISHES ONE INSTEAD OF LEAVING NOTHING. His spec,
+        # 2026-08-25: *"Without SLA, then everything should be a hold, and function identically to
+        # how stock Ford ACC functions, just with the added benefit of holds being remembered."*
+        #
+        # Clearing is the whole point when SLA HAS a number -- that is the driver handing the speed
+        # back, and it is the half he reported broken. With no number there is nothing to hand it
+        # to, and clearing would leave the car aiming at the planner's cruise target rather than at
+        # what he just asked for. That is the other half of the same report: *"the set button does
+        # not create a new hold from the current speed at when it was pressed without an SLA
+        # number"*.
+        #
+        # Labelled `press` deliberately, not a fallback: he pressed SET here, so a pinned hold
+        # should stand aside for it exactly as it does for a `+`. See `apply_pinned_hold`'s gate.
+        if not (self.speed_limit_live and self.v_sla_target > 0):
+          self.override_state = OverrideState.manual
+          self.v_baseline = self.v_ego_at_set_press
+          self.baseline_source = BaselineSource.press
+          self.v_target_overridden = self.v_target_raw
+          self.baseline_diverged = False
+          self.v_cluster_at_press = self.v_cruise_cluster
+          self.cluster_moved_since_press = False
         self.cycle_decision_pending = False
       else:
         # Only worth deferring when there is a hold at stake. Otherwise the very first engagement
