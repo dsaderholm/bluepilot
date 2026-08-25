@@ -81,6 +81,10 @@ DEFAULT_TARGETS = [
   # and because the tool's EXPECTED answer is "nothing appeared" -- so a broken one produces the
   # expected output and a test that never runs would not say otherwise.
   "selfdrive/ui/tests/test_can_nav_diff.py",
+  # The instrument the first route-intent transport drive gets read with. Registered before any
+  # transport exists, because a tool that scores LEAD TIME wrongly would keep a too-late source
+  # alive -- which is exactly how mapd's 1.0 s prediction nearly survived on its 96% accuracy.
+  "selfdrive/ui/tests/test_route_intent_report.py",
   "selfdrive/ui/tests/test_mapd_restarts.py",
   "selfdrive/ui/tests/test_osm_tag_census.py",
   "selfdrive/ui/tests/test_left_edge_profile.py",

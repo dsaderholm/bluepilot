@@ -1055,6 +1055,14 @@ point of it.
 
 ### 10g. WHAT IS STILL OWED, and the first item is a drive
 
+0. **THE INSTRUMENT IS READY: `tools/bp_route_intent_report.py`.** Built 2026-08-23, before any
+   transport, because the first transport drive has to be readable the day it happens. It REPLAYS
+   the real `RouteIntent` against the logged `routeIntentBP` and reports coverage, freshness against
+   `MAX_INSTRUCTION_AGE_S`, what the source said, and **LEAD TIME per committing maneuver** -- which
+   is the number that decides a source, not accuracy. It says "no routeIntentBP on this route"
+   plainly today rather than printing a table of zeros, because a table of zeros makes "inert" and
+   "broken" look identical.
+
 1. **The Google Maps diff drive -- and it is now ONE drive, not two.** `tools/bp_can_nav_diff.py`
    was run on the device 2026-08-22 against route **000003ac** (11 segments, 2,919,073 frames, 383
    (address, bus) pairs on buses 0/1/2). Every APIM address is ABSENT except position:
