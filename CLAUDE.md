@@ -5080,6 +5080,52 @@ gating one**, and it has had a fraction of the attention the geometry gate has.
 manual pass against what Ford's ACC delivers in the same situation. That is `aEgo` during his
 cruise-off passes versus `aEgo` while ACC is driving, and it needs no new drive.
 
+##### MEASURED: FORD *CAN* NEARLY MATCH HIM. IT JUST HAS NO REASON TO.
+
+`tools/bp_pass_accel.py`, eight drives, 13 cruise-off left-stalk passes:
+
+    aEgo, m/s^2                    n      p50    p90    p99    MAX
+    HIS pass, cruise off        8213     0.47   1.17   2.16   3.82
+    FORD ACC, below set speed  62570     0.25   0.79   1.39   3.09
+
+**The capability gap is small and the behaviour gap is large.** Ford reaches 3.09 against his 3.82 --
+81%, and his own figure is a floor rather than a limit. But typically he uses **1.9x** what ACC does
+(0.47 vs 0.25) and 1.48x at p90.
+
+So the slow pass is not a ceiling on what the car can do. **It is that ACC has no reason to hurry**,
+because the only things governing it are the set speed and the follow gap. That is good news: it
+makes the problem a request problem rather than a hardware one.
+
+##### AND HIS SECOND REASON IS THE SAME LEVER FROM THE OTHER SIDE
+
+  *"I also wanted to get closer to some of these slow people hogging the left lane."*
+
+Two independent reasons for switching cruise off, both naming the follow gap:
+
+    wanted to get around them FAST      ACC accelerates ~half as hard as he does
+    wanted to get CLOSER first          ACC holds a gap he considers too large
+
+**BLINKER-ACC-SUPPRESSION already concluded that the follow gap is the only lever left, and the gap
+controller is BUILT** -- `opendbc/sunnypilot/car/ford/gap_control.py`, closed-loop against
+`ACCDATA_3`, driver input outranks it, asserted-not-timed so silence restores. It is behind
+`IcbmGapControl`, **defaults OFF, and has never had a requester**: `longitudinalPlanSP.accGapRequest`
+is plumbed and nothing has ever set it.
+
+**So the piece that would change his behaviour is the one piece that was finished and never wired
+up.** Its own note says the first real passing-assist request is the experiment that proves whether
+the camera honours an injected gap press at all.
+
+**Two things to be careful of before building it, and neither is a reason not to:**
+
+- **The gap button ACTUATES.** Unlike everything else passing assist does today, a gap request
+  presses a real button on his wheel and changes how the car follows. This is not another gate that
+  commands nothing, so it does not get shipped on a measurement and a hunch.
+- **It only helps while ACC is driving.** His complaint is about driving manually. The bet is that a
+  closer gap and a harder pass make cruise worth leaving on -- which is exactly the loop that has to
+  be closed for any of this to matter, and it is untested.
+
+`IcbmGapControl` is his toggle, and it is off. Naming it is the whole intervention for now.
+
 **AND THE OBVIOUS DISCRIMINATOR IS FORBIDDEN, which is worth stating before someone reaches for it.**
 `oneWay` from the map separates these perfectly by construction -- it is what labels them. But
 suppressing an oncoming sighting because the map says one-way is **the map REMOVING a refusal**,
