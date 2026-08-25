@@ -27,8 +27,8 @@ Each is a symptom with a suspected mechanism. None of them is vague.
 
 | what he reports | suspected mechanism | status |
 |---|---|---|
-| *"I've never seen it coast"* | brakes asserted at −0.14 m/s²; propulsion clipped at −0.5 | **measured**, below |
-| *"it tricks my transmission... third gear on the freeway"* | `AccPrpl_A_Rq` slams to the −5.0 sentinel whenever `brake_actuate` toggles, across an 0.08 m/s² hysteresis band | unmeasured |
+| *"I've never seen it coast"* | brakes asserted at −0.14 m/s²; propulsion clipped at −0.5 | **measured and FIXED** |
+| *"it tricks my transmission... third gear on the freeway"* | two candidates | one **FIXED**, one **REFUTED** — Finding 2 |
 | *"OpenPilot's ACC is ass... everyone in the community knows it"* | these constants live in `opendbc/car/ford/`, shared by every Ford | consistent, unproven |
 
 **The community-wide part matters.** `brake_actuate_target` and `CarControllerParams.MIN_GAS` are
@@ -177,11 +177,32 @@ the passthrough deletion precisely because it is independent of it.
    (`gcc -fsyntax-only -Wall -Wextra`, exit 0, warning output byte-identical to the unmodified
    header) — `bp_offline_test.py` never builds `ford.h`, and the new test only parses its `#define`s
    as text, so this check has to be run by hand every time that file changes.
-2. **Remove the mutual exclusion** and let `create_acc_msg` carry a propulsion request alongside the
-   brake. This is the one that makes blending possible at all.
+2. ~~**Remove the mutual exclusion**~~ **DONE.** `ford_propulsion_request()` follows Ford's measured
+   curve and hands over below −1.1, gated on `FordPropulsionBlend` (ON). This is the one that
+   changes how the car drives. **It also exposed that step 1 was not purely an envelope after all**
+   — `fordcan_ext._PANDA_GAS_MIN` still held −0.5, so the blend's −0.66 went out as −0.490 until a
+   wire-level test decoded a real frame and said so.
 3. ~~**Measure the transmission fields**~~ **DONE.** `AccVeh_V_Trg` was a constant and is fixed;
    the sentinel square wave is refuted. See Finding 2.
 4. Only then consider `brake_actuate_target`, and only after the ABS question above is settled.
+
+---
+
+## The flashing order, because two behaviour changes are now committed
+
+Steps 2 and 3 both change what goes on the wire, and *"do not change more than one of these per
+drive"* is about what he FLASHES, not about what is committed — this branch is not the one his 3X
+tracks, so nothing here has reached the car.
+
+    flash 949f7b4e20   AccVeh_V_Trg only     does the third-gear symptom stop?
+    then   4a412d2119  the blend             does it coast? does it slow MORE than asked?
+
+Taking both at once is still readable if he only cares about the second question, because the
+transmission fix cannot make the car coast. It is not readable the other way round.
+
+**And each has its own off switch**, which is what makes a single drive able to answer either:
+`FordPropulsionBlend` for the blend, and for `AccVeh_V_Trg` nothing — that one is a plain bug fix
+with no plausible reason to want the old value back.
 
 **Do not change more than one of these per drive.** He has one car, and the whole reason this branch
 exists is that a previous feature was tuned against theories instead of measurements.
