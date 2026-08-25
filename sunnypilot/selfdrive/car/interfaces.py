@@ -135,6 +135,7 @@ def initialize_params(params) -> list[dict[str, Any]]:
   # ford
   keys.extend([
     "FordPrefSteerAngleCurvature",
+    "StockAccPassthrough",
   ])
 
   # hyundai

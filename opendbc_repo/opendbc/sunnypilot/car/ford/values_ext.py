@@ -98,6 +98,31 @@ class FordSafetyFlagsSP:
   """
   STEER_ANGLE_CURVATURE = 1
 
+  # FusionPilot: the stock ACC passthrough is running, so the frames panda is policing were
+  # AUTHORED BY FORD'S CAMERA rather than by openpilot. Bit 5 -- bits 1-4 are the pinion
+  # geometry index above.
+  #
+  # It widens ONE band in the safety firmware: `AccPrpl_A_Rq`'s floor, from -0.5 to -2.8 m/s^2.
+  # That -0.5 is a generic openpilot number and it is simply wrong for this car. Measured across
+  # 7 drives, 99,520 frames of Ford's own propulsion request:
+  #
+  #     Ford's range  -2.710 .. 2.300      p01 -1.030   p50 0.280   p99 1.850
+  #     BELOW -0.5    2,851 frames (2.86%)
+  #
+  # Ford commands past that floor in ordinary driving, and every one of those frames was being
+  # refused -- which cost powertrain braking the owner could feel: 756 frames on one drive,
+  # median 0.415 and worst 1.095 m/s^2 of deceleration given up, in episodes up to 17.5 s.
+  #
+  # WHAT IT DOES NOT WIDEN, because these are the ones that matter:
+  #   - `AccBrkTot_A_Rq` (min_accel, -3.4991). That field IS the friction brake. Untouched.
+  #   - openpilot's OWN authored gas. `create_acc_msg` still clamps to [-0.495, 1.995] in Python.
+  #     Panda is the outer envelope; the Python clamp is what keeps openpilot conservative.
+  #
+  # So the widened band only ever admits values Ford itself authored, and the worst case it
+  # allows is more ENGINE braking -- which saturates far below 2.8 m/s^2 off-throttle and cannot
+  # reach the friction brakes at all.
+  PASSTHROUGH_LONG = 32
+
 
 # Geometry-table index for the steering-angle curvature measurement, packed into
 # CP_SP.safetyParam bits 1-4 when STEER_ANGLE_CURVATURE is set. Must match the
