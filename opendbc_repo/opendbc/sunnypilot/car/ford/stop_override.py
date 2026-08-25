@@ -545,7 +545,7 @@ class FordStopOverride:
         # second, because the release fires on the counter EXPIRING, not on it starting.
         self.no_ask_frames = 0
         self.slowdown_handed_off = True
-        self.last_result = "holding a stop the slowdown path brought us to"
+        self.last_result = "the slowdown reached a standstill; holding it"
         return True
       if slowdown_gap < SLOWDOWN_RELEASE_GAP and v_ego >= ARM_MIN_SPEED:
         self._end_slowdown("the gap is small enough for the buttons again")
@@ -705,7 +705,9 @@ class FordStopOverride:
         if 0.0 < lead_distance < LEAD_DISQUALIFIES_M:
           self._end("a lead arrived while holding; Ford's stop-and-go owns this")
           return False
-        self.last_result = "holding a stop the slowdown path brought us to"
+        # Distinct from the handoff message above on purpose: two paths that print the same string
+        # cannot be told apart in a log, which is the entire reason these strings exist.
+        self.last_result = "still holding the slowdown's stop while the model is not asking"
         return True
       if self.active:
         self._end("model stopped asking")
@@ -820,16 +822,39 @@ class FordStopOverride:
       # No endpoint is no evidence -- and a gap in the plan must not preserve a part-built case.
       self.closing_window.clear()
 
+    # DELIBERATELY RECORDS NOTHING. `spent` is the state AFTER an override ended, so whatever
+    # `_end` wrote is the answer to "why did it end" -- writing here overwrites it one frame later
+    # and destroys exactly what the reasons below exist to capture. Caught by
+    # test_a_lead_disqualifies_it_because_ford_stops_for_those_itself and
+    # test_the_time_bound_ends_it_even_if_the_reason_persists, both of which read `last_result`
+    # after the end.
     if self.spent:
       return False
 
     # ---- arming, and every clause is a REASON rather than a comparison with Ford ----------------
+    #
+    # FusionPilot 2026-08-24: EVERY REFUSAL NOW RECORDS ITSELF. These eight returned bare False and
+    # left `last_result` holding whatever the last ARM had written, so the carcontroller's
+    # transition log printed the reason the override STARTED as the reason it ended:
+    #
+    #     6  stop override ON:  stopping for something the radar cannot see
+    #     3  stop override off: stopping for something the radar cannot see   <- meaningless
+    #     2  stop override off: model stopped asking
+    #     1  stop override off: stopped
+    #
+    # Three of six episodes could not say why they ended, and "why does the override hand the car
+    # back while it is still moving" is the question standing between this feature and working --
+    # every episode measured so far released between 8 and 37 mph. An instrument that cannot answer
+    # the one question it exists for is the same failure as the RECOVERY DECLINED gap on 2026-08-23.
     if v_ego > ENTER_SPEED:
-      return False          # the set speed can still express this; ICBM is strictly better
+      self.last_result = "too fast to arm; the set speed can still express this"
+      return False
     if v_ego < ARM_MIN_SPEED:
-      return False          # below Ford's floor, seizing authority latches the camera -- see below
+      self.last_result = "below the arming speed; seizing authority here latches the camera"
+      return False
     if lead_close:
-      return False          # Ford's radar has it, and Ford's stop-and-go is better than ours
+      self.last_result = "a lead is close; Ford's stop-and-go owns this"
+      return False
 
     # `op_stopping` NO LONGER ARMS THIS, and the reason is measured. 2026-08-20, three drives and
     # 21,936 frames where `longitudinalPlan.shouldStop` was true:
@@ -863,18 +888,21 @@ class FordStopOverride:
     # publisher's `isfinite` guard lives in a DIFFERENT REPO from this consumer, so this file has no
     # structural claim on it.
     if not (stop_endpoint_m > 0.0):
+      self.last_result = "the model has no stop point (or it is NaN)"
       return False
 
     # DOES THE STOP POINT BEHAVE LIKE A REAL PLACE? Over the window, a fixed point ahead must give
     # up at least CLOSING_FRACTION of the road actually covered. The window itself is maintained
     # above, before the gates, so that a refusal cannot freeze it.
     if len(self.closing_window) < CLOSING_CONFIRM_FRAMES:
-      return False          # not enough history yet to tell a place from a phantom
+      self.last_result = "not enough history yet to tell a place from a phantom"
+      return False
     oldest_endpoint = self.closing_window[0][0]
     # Skip the oldest sample's own increment: it is the road covered BEFORE that reading was taken.
     travelled = sum(step for _, step in list(self.closing_window)[1:])
     if oldest_endpoint - stop_endpoint_m < CLOSING_FRACTION * travelled:
-      return False          # not closing like a place in the world -- see CLOSING_FRACTION
+      self.last_result = "the stop point is not closing like a place in the world"
+      return False
     # NO FLOOR. `STOP_MIN_RANGE_M = 10.0` was added on the reasoning that the computed range gets
     # too tight to be useful at a crawl. It does the opposite: the model's trajectory horizon is
     # roughly 10*v, so below about 2.2 mph the horizon is ITSELF under 10 m and the gate armed with
@@ -899,7 +927,8 @@ class FordStopOverride:
     # against 128 m, 32.5 mph/97 m against 145 m. All three still arm.
     reachable_range = v_ego * MAX_ACTIVE_S / 2.0
     if stop_endpoint_m > min(brake_range, reachable_range):
-      return False          # too far for the set speed to hand over, or too far to finish in time
+      self.last_result = "the stop is too far to hand over, or too far to finish inside the bound"
+      return False
 
     self.active = True
     self.frames = 0
