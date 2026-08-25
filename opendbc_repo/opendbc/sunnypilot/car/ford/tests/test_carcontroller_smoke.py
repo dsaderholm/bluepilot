@@ -288,12 +288,17 @@ def test_the_acc_passthrough_never_raises_and_falls_back_when_the_camera_is_stal
     sent.extend(m for m in can_sends if m[0] == 390)
 
   assert sent, "no ACCDATA was sent at all"
-  from opendbc.sunnypilot.car.ford.fordcan_ext import create_acc_msg_passthrough
+  from opendbc.sunnypilot.car.ford.fordcan_ext import create_acc_msg_passthrough, passthrough_gas_floor
 
   class _P:
     def __init__(self, real): self.real = real
     def make_can_msg(self, *a): return self.real.make_can_msg(*a)
-  expected = create_acc_msg_passthrough(_P(cc.packer), cc.CAN, CS.acc_stock_values)[1]
+  # MIRROR THE CARCONTROLLER'S CALL EXACTLY, gas floor included. Without it this agreed only
+  # because the fixture's AccPrpl_A_Rq happens to be 0 and is in band under either floor -- so a
+  # future fixture with real engine braking in it would fail here for a reason that has nothing to
+  # do with what this test is about.
+  expected = create_acc_msg_passthrough(_P(cc.packer), cc.CAN, CS.acc_stock_values,
+                                        gas_floor=passthrough_gas_floor(cc.CP_SP))[1]
   forwarded = any(m[1] == expected for m in sent)
 
   if passthrough and cam_valid:
