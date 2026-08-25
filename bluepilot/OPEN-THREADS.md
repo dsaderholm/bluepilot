@@ -149,25 +149,44 @@ routes `3b9` onward all start after. The synthesis unambiguously reaches the wir
 3b9 reached fusion mode with none of it on the wire; 3bb/3bc/3bd had 500-1400 frames of it and
 never left camera-only. That is a two-directional disproof, not a weak correlation.
 
-**AND FUSION MODE IS REACHABLE ON THIS CAR, which is new and is the useful half.** CLAUDE.md has
-said throughout that the camera is always `Available_CameraOnly` / `NoNavDataAvailable`. It is
-not: `3b9` ran `Available_FusionMode` + `NoInformationAllOK` -- the fully healthy state -- for
-every one of its 10 TSR frames.
+**THE "FUSION MODE IS REACHABLE" HALF WAS NOT NEW AND WAS NOT A FINDING. Retracted 2026-08-25.**
+`TSR-INVESTIGATION.md` section 4n had already recorded it from THREE independent drives -- both
+2026-08-22 drives and route `000003a1` -- reaching `Available_FusionMode` with `NoInformationAllOK`
+and reading nothing, and it ends with "Fused mode is reachable on this car and it is not what
+produces sign reads. **Do not re-open it.**"
 
-**NOT A POWER-ON TRANSIENT, checked rather than assumed.** `tools/bp_tsr_startup.py` prints the
-first frames of each route: `3bb` and `3bd` are `Available_CameraOnly` from t+0.18 and t+0.28,
-their very first TSR frame. So the camera does not boot optimistic and decay; on those drives it
-had already decided.
+It was re-opened anyway, written up as new, and reported to him as an open question. He answered it
+from memory in one line. **This is the failure CLAUDE.md names first under "Working with the owner":
+read the module before extending it, and grep for the concept before treating it as unexplored.**
+The whole 7:21-7:34 PM window was likewise already answered -- 4n prescribes the exact write he made:
 
-**WHAT IT CORRELATES WITH IS THE CLOCK, NOT THE FEATURE.** Fusion mode appears at 19:33 (`3b9`,
-100%) and 19:34 (`3ba`, 3.4%, at the start), and is gone by 23:12 (`3bb`) and on every route
-after. Two one-minute ignition cycles a minute apart is the signature of somebody standing at the
-car -- and he wrote `FordSynthesizeApimGps` at 19:21, twelve minutes before.
+    706-01-01  ->  0810 A9DB B964      restore nibble 8: A -> B
 
-**THE NEXT STEP IS A QUESTION FOR HIM, NOT A MEASUREMENT:** what was he doing at the car around
-19:21-19:34 on 2026-08-24 -- FORScan, a DTC clear, an as-built write, an APIM power cycle? Fusion
-mode is the thing TSR has always needed and it was briefly present in that window. Whatever
-produced it is the actual lever, and no amount of log reading will name it.
+**WHAT THE MEASUREMENT DOES ADD, and it is worth keeping:**
+
+1. **The restore reached the camera.** Every route from the 2026-08-22 write onward read
+   `TsrVl1StatMsgTxt = LimitOutdated` on 100% of frames -- the regression 4n documented. Route
+   `3bd` (3:09 AM, 2026-08-25, after the restore) is the first to carry `LimitReliable` again, at
+   7.2%, on the one route that read a sign. The status regression is reversed on the wire.
+2. **The GPS synthesis now transmits in volume and sustains it** -- 500-1400 frames of
+   `0x463`/`0x464` per drive across four drives. Section 7 step 3 records that it had never
+   transmitted a single frame until 2026-08-22; that is no longer the open question it was.
+3. **And it changes nothing about TSR**, which is what 4n and section 7 step 3 both already say.
+
+**THE READ RATE IS UNCHANGED AND STILL TERRIBLE.** Post-restore: `3b9`, `3ba`, `3bb`, `3bc` zero,
+`3bd` one read (30 mph at 28 mph). Against a pre-restore baseline of 3 reads in 7 routes. The
+restore undid a regression; it did not buy detections.
+
+**NIGHT IS NOT SUFFICIENT EITHER, which narrows 4n's open confound.** 4n says the experiment that
+separates night-vs-nibble is to restore the nibble and drive the same loop AT NIGHT. Three of the
+post-restore drives WERE at night -- `3bb` 11:12 PM, `3bc` 1:20 AM, `3bd` 3:09 AM -- and two of them
+read nothing. So night alone does not bring the reads back, though none of these was the deliberate
+4j loop, so it is not the controlled repeat 4n asked for.
+
+**Next step is 4n's, unchanged and now un-blocked: drive the 4j loop deliberately, at night, with
+the nibble restored.** `bluepilot/asbuilt/tsr_drive.py` scores it. Several detections means night
+was the factor; zero means neither variable was, and the detection-range defect in 4j stands as the
+whole explanation.
 
 **Do not re-run the GPS experiment.** It is answered in both directions. The feature itself is
 fine and should stay on -- it fixes the real `U0253 Missing Message`, which CLAUDE.md is already

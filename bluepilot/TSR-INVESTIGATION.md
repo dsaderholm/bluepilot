@@ -1243,6 +1243,26 @@ Route `000003a1` showed the same on 2026-08-21 (section 4f). Three independent d
 
 **Fused mode is reachable on this car and it is not what produces sign reads.** Do not re-open it.
 
+**AND IT WAS RE-OPENED ANYWAY ON 2026-08-24, by a session that had not read this section.** The
+synthesized APIM GPS was measured against fusion mode across six routes, fusion mode was written up
+as a NEW capability, and the owner was asked what he had done at the car in the window -- which this
+section already prescribes: the `706-01-01` restore. He answered it in one line and added *"I'm
+surprised you don't know."*
+
+**Two things survive from that work and the rest is retracted:**
+
+- **The restore reached the camera.** Every route from the 2026-08-22 write onward reads
+  `TsrVl1StatMsgTxt = LimitOutdated` on 100% of frames. Route `000003bd` (2026-08-25, 3:09 AM,
+  after the restore) is the first to carry `LimitReliable` again -- 7.2%, on the one route that read
+  a sign. **The status regression this section documented is reversed on the wire.**
+- **Night alone does not bring the reads back**, which narrows the confound below. Three
+  post-restore drives were at night (`3bb` 11:12 PM, `3bc` 1:20 AM, `3bd` 3:09 AM) and two read
+  nothing. None was the deliberate 4j loop, so the controlled repeat is still owed.
+
+The synthesized GPS is confirmed transmitting in volume (500-1400 frames of `0x463`/`0x464` per
+drive, four drives) and confirmed to change nothing here -- which is what section 7 step 3 says, and
+is a third instance of the same conflation this file has already warned about twice.
+
 ### A SCORER DEFECT WORTH KNOWING
 
 `tsr_score.py` reported "2 with a limit" on route `000003a9`. Both were BOOT frames -- `VLim1 = 0`,
