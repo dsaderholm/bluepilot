@@ -650,7 +650,14 @@ driver's number afterwards rather than to the speed limit.
 | Key on the wheel | Cruise engaged | Cruise off |
 |---|---|---|
 | `RES +` (`CcAslButtnSetIncPress`) | `accelCruise` — creates or raises a HOLD | `resumeCruise` — engages and **keeps** the hold |
-| `SET −` (`CcAslButtnSetDecPress`) | `decelCruise` — creates or lowers a HOLD | `setCruise` — engages, **clears** the hold, SLA takes the speed |
+| `SET −` (`CcAslButtnSetDecPress`) | `decelCruise` — creates or lowers a HOLD | `setCruise` — engages; **with an SLA number it CLEARS the hold** and SLA takes the speed, **with no SLA number it HOLDS the speed at the press** (stock ACC) |
+
+**THE SET-WHEN-OFF ROW IS CONDITIONAL AS OF 2026-08-25, and both halves came from one road
+report.** Clearing is right only when there is something to hand the speed BACK to. With SLA
+quiet, clearing left the car aiming at the planner's cruise target instead of at what he had
+just asked for -- and the clearing half was itself broken, deferring to a set-speed comparison
+that read his SET as a RESUME because the dash still carried the old number. The button event
+now decides; `set_press_frames` mirrors `resume_press_frames`, and RESUME wins if both are armed.
 | `CNCL` (`CcAslButtnCnclResPress`) | `cancel` | also reports `resumeCruise`; harmless, resume is reachable from either |
 
 The wheel is **CNCL / RES+ / SET−**, with CNCL as its own dedicated button — confirmed from a photo
@@ -699,7 +706,51 @@ Two things that decided the design:
 - **Tap moves the set speed 1 mph, press-and-hold moves it 5 mph** — the car's behavior, not
   openpilot's. Model set-speed movement as 5 mph jumps with stationary gaps, never a 1 mph ramp.
 
-## NO POSTED LIMIT MEANS NO HOLD. THE MAX SPEED IS THE WHOLE INTERFACE THERE.
+## WITHOUT SLA, EVERYTHING IS A HOLD. (This section's old rule is RETIRED -- 2026-08-25.)
+
+His spec, and it replaces three earlier versions of the same rule:
+
+  *"Without SLA, then everything should be a hold, and function identically to how stock Ford ACC
+  functions, just with the added benefit of holds being remembered."*
+
+**HE IS THE ONE WHO SPOTTED WHY THE OLD RULE EXPIRED**, and the history confirms it exactly:
+
+  *"no posted limit means no hold was probably an old rule back before we had the max and hold
+  speeds combined."*
+
+    2026-08-15  enforce_hold_policy lands      "+/- just moves the max speed"
+    2026-08-21  max_box_state lands            "the big number is what the car is being driven to"
+    2026-08-22  the HOLD badge is deleted      the box IS the hold
+
+For those six days a hold really was a SECOND number on screen in its own badge, so "do the max
+speed, not the little number" was a meaningful instruction. Once the badge went, "just the max
+speed" and "everything is a hold" describe the SAME SCREEN -- and all the rule still did was throw
+away persistence across a cruise cycle and the trace pinned holds learn from.
+
+**THE FUNCTION IS CALLED `enforce_hold_policy`, NOT `enforce_no_limit_no_hold`.** This file used
+the second name for days after the code stopped using it. It is now an inert hook that returns
+immediately, kept only so a future policy has an obvious home;
+`test_the_policy_hook_is_now_inert` fails if anything is smuggled back into it.
+
+**AND THE PIN GATE HAD TO NARROW IN THE SAME CHANGE, or pins die.** `apply_pinned_hold` deferred to
+ANY live hold. With a baseline now usually present, that meant a pin could never fire on the roads
+pins are FOR -- the 2026-08-16 failure ("no limit means no hold" killing pinned holds outright)
+arriving from the other direction, and mutation testing is what caught that it was untested.
+
+The gate now defers only to `BaselineSource.press`:
+
+    press                     he pressed +/- here. A decision. The pin stands aside.
+    fallbackIdle / Counter    the set speed drifted and a hold was INFERRED. Carried in from the
+                              last road, not about this place. The pin wins.
+    pinned                    one remembered number superseding another. The pin wins, as before.
+
+Route 00000379 is why those are genuinely different: a hold was up for 36.5% of that drive reading
+`fallbackIdle` while he pressed SET five times and nothing else. Route 0000033c is still honoured --
+his 75 there came from a real `+`, so it reads `press` and the pin still defers.
+
+**What follows is the SUPERSEDED rule, kept because its reports and measurements are still true.**
+
+## (SUPERSEDED) NO POSTED LIMIT MEANS NO HOLD. THE MAX SPEED IS THE WHOLE INTERFACE THERE.
 
 Asked for on 2026-08-15, twice, after two long highway drives:
 
@@ -3859,6 +3910,29 @@ reference. So it stands, and the rule is to not do it again.
 
 Same reasoning applies to any upstream tracker -- commaai, sunnypilot, opendbc. A commit here should
 never be able to speak in someone else's thread.
+## THE DEVICE RUNS IN UTC. HE DOES NOT. CONVERT BEFORE REASONING ABOUT A TIME.
+
+2026-08-25, and it inverted a TSR conclusion inside an hour. `date` on the comma reports UTC, and
+so does every `stat` mtime, every route directory time and every `%y` in a diagnostic. **Utah is
+UTC-6 in August (MDT), UTC-7 in winter (MST).**
+
+Reported to him were "you flipped the GPS toggle at 7:21 PM" and "three night drives at 11:12 PM,
+1:20 AM and 3:09 AM". The real local times are **1:21 PM**, and **5:12 PM, 7:20 PM, 9:09 PM** --
+two of those three are broad daylight. The conclusion drawn from them ("night alone does not bring
+TSR reads back") was the reverse of what the data says: both reads on record are after dark.
+
+He spotted it in four words: *"Your timezones or something are wrong."*
+
+**Where this bites hardest is TSR**, where the open question is literally light level, and where
+`TSR-INVESTIGATION.md` records every timestamp in UTC. It also bites any statement about what he
+was doing at the car, and any correlation with sunset, rush hour or his working day.
+
+```bash
+ssh comma@comma-34b959b "bash /tmp/bp_times.sh"     # tools/bp_times.sh -- routes + params, both zones
+TZ=America/Denver date -d @<epoch>                   # the one-off conversion
+```
+
+Never quote a device time to him without converting it, and never reason about daylight from one.
 
 ## Language and units — US
 

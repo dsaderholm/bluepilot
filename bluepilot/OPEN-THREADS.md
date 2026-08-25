@@ -149,25 +149,64 @@ routes `3b9` onward all start after. The synthesis unambiguously reaches the wir
 3b9 reached fusion mode with none of it on the wire; 3bb/3bc/3bd had 500-1400 frames of it and
 never left camera-only. That is a two-directional disproof, not a weak correlation.
 
-**AND FUSION MODE IS REACHABLE ON THIS CAR, which is new and is the useful half.** CLAUDE.md has
-said throughout that the camera is always `Available_CameraOnly` / `NoNavDataAvailable`. It is
-not: `3b9` ran `Available_FusionMode` + `NoInformationAllOK` -- the fully healthy state -- for
-every one of its 10 TSR frames.
+**THE "FUSION MODE IS REACHABLE" HALF WAS NOT NEW AND WAS NOT A FINDING. Retracted 2026-08-25.**
+`TSR-INVESTIGATION.md` section 4n had already recorded it from THREE independent drives -- both
+2026-08-22 drives and route `000003a1` -- reaching `Available_FusionMode` with `NoInformationAllOK`
+and reading nothing, and it ends with "Fused mode is reachable on this car and it is not what
+produces sign reads. **Do not re-open it.**"
 
-**NOT A POWER-ON TRANSIENT, checked rather than assumed.** `tools/bp_tsr_startup.py` prints the
-first frames of each route: `3bb` and `3bd` are `Available_CameraOnly` from t+0.18 and t+0.28,
-their very first TSR frame. So the camera does not boot optimistic and decay; on those drives it
-had already decided.
+It was re-opened anyway, written up as new, and reported to him as an open question. He answered it
+from memory in one line. **This is the failure CLAUDE.md names first under "Working with the owner":
+read the module before extending it, and grep for the concept before treating it as unexplored.**
+The whole 7:21-7:34 PM window was likewise already answered -- 4n prescribes the exact write he made:
 
-**WHAT IT CORRELATES WITH IS THE CLOCK, NOT THE FEATURE.** Fusion mode appears at 19:33 (`3b9`,
-100%) and 19:34 (`3ba`, 3.4%, at the start), and is gone by 23:12 (`3bb`) and on every route
-after. Two one-minute ignition cycles a minute apart is the signature of somebody standing at the
-car -- and he wrote `FordSynthesizeApimGps` at 19:21, twelve minutes before.
+    706-01-01  ->  0810 A9DB B964      restore nibble 8: A -> B
 
-**THE NEXT STEP IS A QUESTION FOR HIM, NOT A MEASUREMENT:** what was he doing at the car around
-19:21-19:34 on 2026-08-24 -- FORScan, a DTC clear, an as-built write, an APIM power cycle? Fusion
-mode is the thing TSR has always needed and it was briefly present in that window. Whatever
-produced it is the actual lever, and no amount of log reading will name it.
+**WHAT THE MEASUREMENT DOES ADD, and it is worth keeping:**
+
+1. **The restore reached the camera.** Every route from the 2026-08-22 write onward read
+   `TsrVl1StatMsgTxt = LimitOutdated` on 100% of frames -- the regression 4n documented. Route
+   `3bd` (Mon 2026-08-24, 9:09 PM local / 03:09 UTC, after the restore) is the first to carry `LimitReliable` again, at
+   7.2%, on the one route that read a sign. The status regression is reversed on the wire.
+2. **The GPS synthesis now transmits in volume and sustains it** -- 500-1400 frames of
+   `0x463`/`0x464` per drive across four drives. Section 7 step 3 records that it had never
+   transmitted a single frame until 2026-08-22; that is no longer the open question it was.
+3. **And it changes nothing about TSR**, which is what 4n and section 7 step 3 both already say.
+
+**THE READ RATE IS UNCHANGED AND STILL TERRIBLE.** Post-restore: `3b9`, `3ba`, `3bb`, `3bc` zero,
+`3bd` one read (30 mph at 28 mph). Against a pre-restore baseline of 3 reads in 7 routes. The
+restore undid a regression; it did not buy detections.
+
+**AND NIGHT LOOKS MORE LIKE THE FACTOR, NOT LESS. Corrected 2026-08-25 -- THE DEVICE RUNS IN UTC.**
+An earlier version of this entry called `3bb`/`3bc`/`3bd` night drives at "11:12 PM, 1:20 AM,
+3:09 AM" and concluded night was not sufficient. Those are UTC. Utah is UTC-6 in August, so they
+are **5:12 PM, 7:20 PM and 9:09 PM** -- two of them in broad daylight. Every timestamp in this
+investigation is UTC and sunset in Salt Lake City in late August is around 8 PM, so **converting is
+not cosmetic here: light level is the variable under test.**
+
+    route   local (Utah)        light    reads
+    3a7     Fri 08-21 10:14 PM  dark     1     <- the 4j verified read
+    3b7     Mon 08-24 09:00 AM  day      0
+    3b8     Mon 08-24 01:22 PM  day      0
+    3b9     Mon 08-24 01:33 PM  day      0
+    3ba     Mon 08-24 01:34 PM  day      0
+    3bb     Mon 08-24 05:12 PM  day      0
+    3bc     Mon 08-24 07:20 PM  day      0
+    3bd     Mon 08-24 09:09 PM  dark     1
+
+**Both reads on record are after dark and every daylight drive read nothing.** That is the same
+direction 4n's confound points, now with a second night read behind it rather than one.
+
+It is still not the controlled repeat: none of these was the deliberate 4j loop, the roads differ,
+and `3b5` (Sun 8:21 PM, right at dusk) read nothing. So this is corroboration, not proof.
+
+**Next step is 4n's, unchanged: drive the 4j loop deliberately, AFTER DARK, with the nibble
+restored.** `bluepilot/asbuilt/tsr_drive.py` scores it. Several detections means night was the
+factor all along; zero means neither variable was, and the detection-range defect in 4j stands as
+the whole explanation.
+
+**And the as-built restore was at 1:21 PM Monday, not 7:21 PM** -- same six-hour error, and it is
+what made the FusionMode window at 1:33/1:34 PM look like an evening trip to the car.
 
 **Do not re-run the GPS experiment.** It is answered in both directions. The feature itself is
 fine and should stay on -- it fixes the real `U0253 Missing Message`, which CLAUDE.md is already
@@ -209,6 +248,159 @@ columns. A difference is mine; anything red in both is pre-existing and belongs 
 
 **Note `/tmp` on the device is tmpfs and a reboot clears it** -- the tree, both headers and the
 result file all vanished once during this work. Rebuild with the tar one-liner in the script.
+
+---
+
+## 5b. WHY OP LONG CANNOT COAST ON THIS CAR -- and it is two constants, not the planner
+
+Found 2026-08-25, chasing his real goal (*"I want complete stops at stop signs and traffic lights
+and the ability to go under 20mph. But, I also love the behavior of Ford ACC for everything else."*)
+
+**HIS STANDING OBJECTION IS THAT OP LONG "CANNOT COAST"**, and this file has carried that as a
+property of openpilot's planner. It is not. It is `longitudinal_ext.py`:
+
+    op_brake_actuate = True when accel < -0.14 m/s^2      (brake_actuate_target)
+    if brake_actuate: gas = INACTIVE_GAS                   (mutual exclusion, line ~316)
+    gas clipped to CarControllerParams.MIN_GAS = -0.5      (line ~321)
+
+    FORD, measured over 99,520 frames of its own AccPrpl_A_Rq:
+    range -2.710 .. 2.300      p01 -1.030      2.86% of all frames below -0.5
+
+**So for every deceleration between 0.14 and 2.71 m/s^2 -- which is most ordinary slowing -- FORD
+ENGINE-BRAKES AND OPENPILOT USES THE PEDAL.** openpilot asks the powertrain for at most 0.5, grabs
+the friction brakes at 0.14, and the moment it does, mutual exclusion stops it asking the powertrain
+for anything at all.
+
+That is precisely "Ford can coast and op long cannot", and it is not a planner-quality problem. It
+is two numbers and one `if`.
+
+**THE SAFETY ENVELOPE ALREADY ALLOWS THE FIX.** `ed6c0b71` widened panda's `min_gas` to -2.8 behind
+`FordSafetyFlagsSP.PASSTHROUGH_LONG` -- the firmware will now carry Ford's real engine-braking
+range. Only openpilot's OWN clip and the brake-actuate threshold stand in the way, and both are
+ours.
+
+**WHY THIS MATTERS MORE THAN IT LOOKS.** His goal needs ACCDATA -- stops without a lead and speeds
+under Ford's 20 mph set-speed floor are both unreachable through buttons. ACCDATA is all-or-nothing
+by panda's `check_relay`, so **op long is the only path to it**. Passthrough was an attempt to dodge
+that and it failed for four independent reasons (thread 1). So either op long becomes tolerable on
+this car, or the goal is unreachable -- and the single most-cited reason it is intolerable turns out
+to be two constants nobody had checked.
+
+**NOT A RECOMMENDATION YET, and do not present it as one.** He has driven op long and hates it, and
+that is data rather than an opinion to argue with. What is honest to say: this is the first
+*specific, measurable* cause anyone has found, it has never been addressed, and it does not rule out
+there being planner problems on top of it.
+
+**HIS FRAMING, AND IT IS THE RIGHT ONE:** *"So we basically need to train OP long on Ford ACC?"*
+
+No ML required, because **the labelled data already exists**. Every drive carries Ford's own ACCDATA
+on bus 2 -- a recording of Ford's controller responding to real traffic, frame by frame, alongside
+the full vehicle state. Nothing needs collecting; this is a fitting problem over a handful of
+constants, not a training problem.
+
+**TWO RULES FOR DOING IT, and the first one is what keeps the fork worth having:**
+
+1. **FIT ONLY WHERE BOTH ARE DOING THE SAME JOB** -- steady cruise and lead-following. Ford does not
+   stop for lights, does not slow for mapped corners, and does not know about the radar-blind lead
+   path. Fitting openpilot to Ford across those frames would delete the reasons openpilot is here at
+   all. Exclude any frame whose `plan_source` is sccMap / sccVision / modelStop / unconfirmedLead.
+2. **SCORE BRAKE-ACTUATION DISAGREEMENT, NOT ACCEL ERROR.** What he feels is the pedal coming on
+   where Ford would have coasted -- brake lamps, a grabby feel -- not a small difference in
+   commanded m/s^2. Mean accel error would score a controller that brakes constantly but gently as
+   excellent.
+
+**STEP ONE IS ONE NUMBER, AND THE TOOL IS WRITTEN:** `tools/bp_ford_brake_curve.py`. For every frame
+where Ford's ACC was actually running it buckets Ford's commanded accel against whether Ford
+asserted its own brake bits (`AccBrkPrchg_B_Rq` / `AccBrkDecel_B_Rq`), and prints the crossover --
+the deceleration at which Ford starts using the pedal. Ours is `-0.14`. It also counts how often
+Ford's propulsion request sits below our `MIN_GAS` of `-0.5`, which is engine braking openpilot
+cannot ask for at all.
+
+**Read the histogram rather than the crossover alone.** A sharp step means a threshold is the right
+model and gives its value. A gradual ramp means Ford is BLENDING, and a single threshold is the
+wrong shape -- which is worth knowing before anyone tunes a constant.
+
+**NOT RUN YET: the laptop and the comma are on different networks** (laptop `10.10.51.199/22`, the
+device last seen on `10.0.1.x`), so it is written and staged but unmeasured. It needs no drive --
+any existing route answers it.
+
+---
+
+## 6. WHAT A HOLD IS, SETTLED 2026-08-25. Do not redesign it again.
+
+  *"I just want to be able to override the speed when I want and it to not be remembered. Memory
+  will be me editing OSM."*
+
+  *"If the speed limit changes from my hold a lot, going back to SLA would be nice, which I think we
+  do now."*
+
+  *"Like I don't want to go 10 over in my neighborhood because I was going 10 over on the freeway."*
+
+**That is the whole specification.** A hold is a TRANSIENT override for right now. It is not a
+statement about a place, not a mood carried across a drive, and not anything that persists. When
+the road should be a different speed, he fixes OSM -- the map is the memory, not the car.
+
+**IT ALREADY BEHAVES THIS WAY and he is right that it does.** `IcbmBaselineResetDelta` defaults to
+10 and `update_manual_override` clears the baseline when the SLA target moves further than that
+from the one he overrode, gated on `plan_source == speedLimitAssist`. Covered by
+`test_drive_scenario.py` step 6, "new zone, 55 -> 35". Nothing to build.
+
+**His own example run through it:** freeway 65 with his `+10` high-band offset means SLA wanted 75,
+so `v_target_overridden` is 75. In the neighborhood SLA wants `25 + 2` = 27. `abs(27 - 75)` is 48,
+far past the delta of 10, so the hold clears and the 10-over does NOT follow him home. The threshold
+has ~4x margin on exactly the transition he is worried about.
+
+**TWO DESIGNS WERE PROPOSED AT HIM AND BOTH ARE DEAD. Do not revive either:**
+
+- **"A hold is a MOOD"** -- capture `v_baseline - v_sla_target` and RE-APPLY the delta on a zone
+  change instead of discarding it. Written up here on the strength of *"what mood am I in? am I in a
+  hurry today?"*, and it is the exact opposite of what he wants: he wants the big zone change to
+  hand the speed BACK to SLA. His answer was *"I don't know, man."*
+- **Pinned holds** -- *"I doubt I am going to use pinned holds at all. Those were for before I knew
+  about how easy it was to use OSM."* The map does per-place speeds now, which was the entire job
+  pins were invented for.
+
+**THE LESSON, because it cost several rounds:** he described a behaviour and it was answered with a
+taxonomy. He does not want a richer concept of a hold; he wants the simple one to work. Check
+whether the current code already does the thing before proposing a model for it.
+
+**PINNED HOLDS ARE NOW DEAD WEIGHT.** Not deleted -- he has never said "remove it" -- but do not
+build on them, do not tune their suggestion behaviour, and ask before spending anything near them.
+`observe_hold` is now gated on `IcbmPinnedHoldsEnabled` so switching them off actually stops the car
+writing anything down, which is what he asked for.
+
+---
+
+## 6. Three warts in the new hold rules, none of them fixed
+
+Raised when he asked *"does this all make sense and is how most people would want to use it?"* --
+these are consequences of the 2026-08-25 changes that nobody chose, not bugs. Watch for them before
+building anything on top.
+
+**1. PIN SUGGESTIONS WILL GET NOISIER, and this is the concrete one.** `SUGGEST_AFTER = 3`
+observations within `DEFAULT_RADIUS_M = 60` and `SUGGEST_SPEED_TOLERANCE = 3`. Previously, with SLA
+quiet, no hold existed -- so `_pinnable_speed()` returned 0 and NOTHING was observed on those roads.
+Now every set speed is a hold, so every place he engages gets observed. Three drives setting a
+similar speed near the same spot produces a suggestion, which on a daily commute means his driveway
+or the same on-ramp inside a week.
+
+It only ever draws a hollow dot he can tap, so it is not destructive -- but pins were learned from
+DELIBERATE CORRECTIONS AGAINST SLA and are now learned from ordinary engagements. Different
+character, same mechanism. **Check `IcbmPinnedHolds` and the observation store after a few drives**;
+if suggestions are appearing at places he does not care about, the fix is a gate on the observation
+(e.g. only observe a hold that differs from what SLA/cruise would have done anyway), not a bigger
+`SUGGEST_AFTER`.
+
+**2. SET's MEANING NOW DEPENDS ON STATE HE CANNOT SEE AT PRESS TIME.** With a live limit it hands
+the speed to SLA; without one it holds the speed he pressed at. SLA coverage flickers, so the same
+physical press does two different things on the same road. He sees the outcome in the box a moment
+later but cannot predict it. This is the most likely source of the next *"why did it do that"*, and
+there is currently no cue.
+
+**3. THE `press` VS `fallbackIdle` DISTINCTION IS INVISIBLE.** Two holds that look identical in the
+set-speed box behave differently on entering a pinned zone -- a pressed one defers the pin, an
+inferred one loses to it. Introduced 2026-08-25 with the narrowed gate. Nothing on screen says
+which kind he has.
 
 ---
 

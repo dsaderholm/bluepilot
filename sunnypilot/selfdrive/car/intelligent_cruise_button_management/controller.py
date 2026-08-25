@@ -102,6 +102,11 @@ RE_ARM_ON_CRUISE_CYCLE = True  # cancel (or any disengage) followed by re-engage
 # resumeCruise in that state -- and cruise_enabled only flips a few frames later, so the press has
 # to be remembered across the transition rather than read on the cycle frame.
 RESUME_BUTTONS = (ButtonType.resumeCruise,)
+# And the SYMMETRIC half, which never existed. SET- while cruise is off emits `setCruise`
+# (COMBO_EVENTS["SET_DEC"][False] == 9), and that is the one button meaning that hands the speed
+# back to Speed Limit Assist. MAIN-engages synthesize the same event deliberately, and mean the
+# same thing by it, so both sources are welcome here.
+SET_BUTTONS = (ButtonType.setCruise,)
 # Tapping. Within TAP_BAND mph of the target the button is pulsed rather than held, because a held
 # button moves this car 5 mph and a tap moves it 1 -- see the duty-cycle block in update_state_machine.
 # ON long enough for opendbc's ford/icbm.py to put one frame on the wire (it emits at most one per
@@ -111,6 +116,7 @@ TAP_ON_FRAMES = 8
 TAP_CYCLE_FRAMES = 60
 
 RESUME_PRESS_MEMORY_FRAMES = 150  # 1.5 s at 100 Hz, generous next to the engage delay
+SET_PRESS_MEMORY_FRAMES = 150     # same window, same reason -- the PCM reports enabled late
 # ...but the button event must not be DEPENDED on, so RESUME is also recognized from BEHAVIOR.
 #
 # Read the reasoning below carefully, because an earlier version of this comment got it backwards
@@ -390,6 +396,8 @@ class IntelligentCruiseButtonManagement:
     self.counter_move_accum = 0      # set-speed movement against ICBM's own command, display units
     self.cruise_button_prev = SendButtonState.none
     self.resume_press_frames = 0     # >0 while a RESUME press is recent enough to have re-engaged
+    self.set_press_frames = 0        # >0 while a SET press is recent enough to have engaged
+    self.v_ego_at_set_press = 0      # road speed when that SET was pressed -- the stock-ACC hold
     self.reanchor_overridden = False  # a resume kept the hold; re-measure the limit rule from here
     self.v_cluster_before_disengage = 0  # set speed when cruise last dropped; RESUME restores it
     self.cycle_decision_pending = False  # waiting for the set speed to say whether it was RESUME
@@ -411,7 +419,6 @@ class IntelligentCruiseButtonManagement:
     self.v_sla_target = 0
     # BluePilot: is Speed Limit Assist in ASSIST mode -- actually allowed to move the set speed --
     # as opposed to off, informational or warning? It is the discriminator for whether a hold may
-    # exist at all; see `enforce_hold_policy`.
     #
     # READ FROM THE PARAM, NOT FROM SLA'S MESSAGE, and that distinction is the whole bug of
     # 2026-08-20. This was `LP_SP.speedLimit.assist.enabled`, on the stated belief that it was
@@ -476,11 +483,6 @@ class IntelligentCruiseButtonManagement:
     self.gap_control_enabled = False
     self.gap_target = 0
 
-    # BluePilot: the speed enforce_hold_policy most recently took away. It WAS a deliberate
-    # hold a frame earlier -- captured by a real press -- so it is exactly the number pinned holds
-    # should learn from and offer to pin. Without it, clearing the baseline on no-limit roads also
-    # silently killed both halves of pinned holds on precisely the roads they exist for.
-    self.no_limit_hold_speed = 0
 
   def update_params(self) -> None:
     if self.frame % int(PARAMS_UPDATE_PERIOD / DT_CTRL) == 0:
@@ -1167,6 +1169,17 @@ class IntelligentCruiseButtonManagement:
     if any(b.type.raw in RESUME_BUTTONS and b.pressed for b in CS.buttonEvents):
       self.resume_press_frames = RESUME_PRESS_MEMORY_FRAMES
 
+    # Remember a SET press the same way -- see SET_BUTTONS.
+    if any(b.type.raw in SET_BUTTONS and b.pressed for b in CS.buttonEvents):
+      self.set_press_frames = SET_PRESS_MEMORY_FRAMES
+      # AND THE SPEED AT THE PRESS, which is the number a stock SET holds. Captured here rather
+      # than read at the verdict because the verdict lands up to 1.5 s later, by which time he has
+      # kept accelerating -- *"a new hold from the current speed AT WHEN IT WAS PRESSED"*. The dash
+      # is no use for this either: it carries the old set speed for some frames after the press and
+      # ICBM may already be walking it toward the previous hold.
+      self.v_ego_at_set_press = max(round(CS.vEgo * (CV.MS_TO_KPH if self.is_metric else CV.MS_TO_MPH)),
+                                    self.v_cruise_min)
+
     # Remember the set speed while engaged; at the moment cruise drops this is what RESUME will
     # restore, and comparing against it is how RESUME is told from SET without a button event.
     # Frozen while a decision is pending, because it IS the evidence for that decision. Updating
@@ -1187,6 +1200,47 @@ class IntelligentCruiseButtonManagement:
       if self.resume_press_frames > 0:
         self.reanchor_overridden = True
         self.cycle_decision_pending = False
+      elif self.set_press_frames > 0:
+        # THE BUTTON SAYS SET, SO DO NOT ASK THE SPEEDS. Reported from the road 2026-08-25:
+        # cruise off while accelerating onto the highway, SET pressed at ~75, and the ~22 mph hold
+        # from the surface street before survived instead of the speed going to SLA's 75.
+        #
+        # The comment above this block already says "the button event settles it when it arrives"
+        # -- but only the RESUME half was ever built. A SET fell through to the behavioural
+        # detector, which compares the DASH set speed against vEgo. That detector exists because
+        # the button used to be mislabelled (see values_ext.py: this wheel sends ResInc, and
+        # `CcAslButtnSetIncPress` reached openpilot as `setCruise` when off). It is not needed for
+        # SET any more, and it is strictly worse than the event: the dash carries the OLD set speed
+        # for some frames after the press, so both sides of `resumed` read 22 and the cycle scored
+        # as a resume.
+        #
+        # ORDER MATTERS AND RESUME WINS. Both flags can be live -- CNCL emits `resumeCruise` when
+        # off, so cancel-then-set inside 1.5 s sets both. On ambiguity keep the hold: discarding one
+        # is destructive and silent, keeping one the driver can always change. That is the same
+        # rule the detector below states for itself.
+        self.clear_baseline()
+        # ...AND WITH NO SLA NUMBER, SET ESTABLISHES ONE INSTEAD OF LEAVING NOTHING. His spec,
+        # 2026-08-25: *"Without SLA, then everything should be a hold, and function identically to
+        # how stock Ford ACC functions, just with the added benefit of holds being remembered."*
+        #
+        # Clearing is the whole point when SLA HAS a number -- that is the driver handing the speed
+        # back, and it is the half he reported broken. With no number there is nothing to hand it
+        # to, and clearing would leave the car aiming at the planner's cruise target rather than at
+        # what he just asked for. That is the other half of the same report: *"the set button does
+        # not create a new hold from the current speed at when it was pressed without an SLA
+        # number"*.
+        #
+        # Labelled `press` deliberately, not a fallback: he pressed SET here, so a pinned hold
+        # should stand aside for it exactly as it does for a `+`. See `apply_pinned_hold`'s gate.
+        if not (self.speed_limit_live and self.v_sla_target > 0):
+          self.override_state = OverrideState.manual
+          self.v_baseline = self.v_ego_at_set_press
+          self.baseline_source = BaselineSource.press
+          self.v_target_overridden = self.v_target_raw
+          self.baseline_diverged = False
+          self.v_cluster_at_press = self.v_cruise_cluster
+          self.cluster_moved_since_press = False
+        self.cycle_decision_pending = False
       else:
         # Only worth deferring when there is a hold at stake. Otherwise the very first engagement
         # of a drive leaves a decision pending that fires 2.5 s later and wipes a hold created in
@@ -1195,6 +1249,7 @@ class IntelligentCruiseButtonManagement:
       self.cruise_cycle_frames = CRUISE_CYCLE_SETTLE_FRAMES
       self.v_cluster_at_cycle = self.v_cruise_cluster
       self.resume_press_frames = 0
+      self.set_press_frames = 0
       return
 
     # Decide once the resume jump has landed. Deferring is the point: clearing on the cycle frame
@@ -1610,7 +1665,27 @@ class IntelligentCruiseButtonManagement:
     #
     # The edge is consumed above whether or not it applies, so a blocked pin does not retry every
     # frame inside the radius. Leaving and re-entering still re-arms it.
-    if self.v_baseline > 0 and self.baseline_source != BaselineSource.pinned:
+    # ...AND "LIVE" MEANS CHOSEN, NOT MERELY PRESENT. Narrowed 2026-08-25, when retiring
+    # `enforce_hold_policy` made a hold exist in every SLA mode: with the old gate a pin could then
+    # never fire on the roads pins are FOR, because there was always some baseline sitting there.
+    # That is the 2026-08-16 failure ("no limit means no hold" killing pinned holds outright)
+    # arriving from the other direction.
+    #
+    # `baseline_source` already separates the two, and route 00000379 is the evidence that they are
+    # genuinely different things: a hold was up for 36.5% of that drive reading `fallbackIdle` --
+    # the path that INFERS a press from set-speed movement -- while he pressed SET five times and
+    # nothing else. Nearly every hold on it was inferred rather than chosen.
+    #
+    #   press                      he pressed +/- at a number. A decision. A pin defers to it.
+    #   fallbackIdle / Counter     the set speed moved and we inferred a hold. Carried in from the
+    #                              last road, not a statement about this place. The pin wins.
+    #   pinned                     one remembered number superseding another. The pin wins, as before.
+    #
+    # Route 0000033c is still honoured, which is the point of using the source rather than "has he
+    # pressed since entering the radius": his 75 there came from a real `+`, so it reads `press`
+    # and the pin still stands aside. His words for the alternative -- *"my hold dropped by 5 mph,
+    # which was strange"* -- remain the thing this gate exists to prevent.
+    if self.v_baseline > 0 and self.baseline_source == BaselineSource.press:
       return False
 
     if self.override_state != OverrideState.manual:
@@ -1624,64 +1699,40 @@ class IntelligentCruiseButtonManagement:
     return True
 
   def enforce_hold_policy(self) -> None:
-    """BluePilot: A HOLD EXISTS ONLY WHEN SPEED LIMIT ASSIST IS IN ASSIST MODE.
+    """BluePilot: WITHOUT SPEED LIMIT ASSIST, EVERYTHING IS A HOLD. Rewritten 2026-08-25.
 
-    RESTATED 2026-08-19 and the discriminator MOVED, because the first version keyed on the wrong
-    thing. His spec, in his words:
+    His spec, and it is simpler than the three versions before it:
 
-      *"have it do max speed when SLA is off or on at an informational level, and do max speed and
-      hold to be together and the same when SLA is on assist mode"*
+      *"Without SLA, then everything should be a hold, and function identically to how stock Ford
+       ACC functions, just with the added benefit of holds being remembered."*
 
-    The 2026-08-15 version keyed on WHETHER A POSTED LIMIT WAS KNOWN THIS FRAME. That was a
-    misreading of the original request, which said *"there's no point in having the max speed be
-    stuck where I hit set when there is no SLA"* -- "no SLA" meaning the FEATURE is not assisting,
-    not "the map went quiet for a mile". Those two come apart exactly where he kept seeing it: on a
-    road with coverage gaps, in assist mode, the hold was being destroyed and rebuilt at every gap.
-    Reported 2026-08-19: *"it's still affecting the little ICBM speed above, which seems to
-    eventually reset back to the speed I pressed the set button at, which is dumb."*
+    THIS USED TO DESTROY THE BASELINE whenever SLA was not in assist mode, and he is the one who
+    spotted why that expired:
 
-    So:
+      *"no posted limit means no hold was probably an old rule back before we had the max and hold
+       speeds combined."*
 
-      SLA off / information / warning   NO HOLD, ever. `+/-` moves the MAX and nothing else, exactly
-                                        as it behaves with ICBM switched off. There is no second
-                                        number to learn and nothing to reset to.
-      SLA assist                        The hold lives, whether or not a limit is known right now.
-                                        It equals the max speed by construction -- `v_baseline =
-                                        v_cruise_cluster` at every capture site -- so "together and
-                                        the same" is what the existing capture already produces.
+    Confirmed from the history. The policy landed 2026-08-15 ("+/- just moves the max speed");
+    `max_box_state` landed 2026-08-21 ("the big number is what the car is being driven to"); the
+    HOLD badge was deleted 2026-08-22. For those six days a hold really was a SECOND number on the
+    screen with its own badge, so "do the max speed, not the little number" was a meaningful
+    instruction. Since the badge went, the big number IS the hold -- so his 2026-08-19 wording,
+    *"max speed and hold to be together and the same"*, now describes every mode rather than just
+    assist mode, and the distinction this rule enforced changes nothing he can SEE.
 
-    Keeping the hold alive through a coverage gap is the whole point: it is what lets a place with
-    no posted limit be PINNED and remembered, which he has called the common case. Under the old
-    rule the baseline was zeroed the moment the map went quiet, so the pin had nothing to observe
-    on precisely the roads pins are for.
+    What it still did was throw away the two things he wants kept: the number persisting across a
+    cruise cycle, and the pinned-holds path having a trace to learn from.
 
-    With no baseline, `apply_baseline` is the identity, ICBM aims at the planner's cruise target,
-    and the max speed behaves exactly as it does with ICBM switched off -- while curves, leads and
-    the hazard path all keep working, because none of them ever depended on a baseline existing.
+    WHAT IS LEFT IS STOCK ACC PLUS MEMORY. With SLA off or informational, `plan_source` is never
+    `speedLimitAssist`, so `apply_baseline` returns the baseline for the cruise component and caps
+    curves and leads with it -- the car is driven to his number and still slows for corners and
+    traffic. The addition is that the number is recorded, so `observe_hold` can suggest a pin.
 
-    PINNED HOLDS SURVIVE either way. A pin is an explicit gesture at an explicit place, and it is
-    the reason this is not simply a guard at the three capture sites: `apply_pinned_hold` runs
-    inside `update_manual_override` too, and a blanket rule there would silently delete the feature.
+    NOTHING REPLACES IT, deliberately: a hold is whatever the driver last asked for, in every SLA
+    mode. `apply_pinned_hold`'s gate was narrowed in the same change to keep pins working now that
+    a baseline is usually present -- see the note there.
     """
-    if not self.cruise_enabled:
-      self.no_limit_hold_speed = 0
-    if self.sla_assist_enabled:
-      # CLEAR IT, do not just decline to update it. A limit means v_baseline survives on its own, so
-      # a remembered no-limit hold has no job here -- and leaving it set makes `_pinnable_speed()`
-      # unable to return 0 for the rest of the drive, which wedges `_last_observed_hold` at a value
-      # from a different road. A genuine hold equal to that stale number is then never observed,
-      # which is the exact failure this whole change existed to fix.
-      self.no_limit_hold_speed = 0
-      return
-    if self.v_baseline <= 0:
-      return
-    if self.baseline_source == BaselineSource.pinned:
-      return
-    # Remember it before it goes. Pinned holds learn from holds the DRIVER creates, and on a road
-    # with no posted limit this is the only trace one ever leaves -- selfdrived's observe/suggest/pin
-    # path keys on v_baseline, which is about to be zero for the rest of the drive.
-    self.no_limit_hold_speed = self.v_baseline
-    self.clear_baseline()
+    return
 
   def clear_baseline(self) -> None:
     self.override_state = OverrideState.auto
@@ -1765,6 +1816,7 @@ class IntelligentCruiseButtonManagement:
     # unconditional: the resume jump settles on its own clock, held button or not
     self.cruise_cycle_frames = max(0, self.cruise_cycle_frames - 1)
     self.resume_press_frames = max(0, self.resume_press_frames - 1)
+    self.set_press_frames = max(0, self.set_press_frames - 1)
     self.cluster_stable_frames = (self.cluster_stable_frames + 1
                                   if self.v_cruise_cluster == self.v_cruise_cluster_prev else 0)
     # End the resume window early once the resume jump has landed AND settled, so the driver's
