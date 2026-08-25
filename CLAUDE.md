@@ -4995,6 +4995,49 @@ asserting another, with the misreading flattering the result. Both times the fix
 schema comment rather than trust the identifier. **Every field this feature leans on should have its
 capnp comment read once, deliberately, before a number built on it is published.**
 
+### IN DECISIONS IT IS ONE PASS IN TWENTY -- AND THE BIGGEST GAP IS NOT SOFTWARE AT ALL
+
+`tools/bp_pass_decisions.py`, eight drives, **20 passes** -- exactly the threshold this file set two
+hours earlier for when a number here may be acted on. A pass is the detector's own definition:
+rising edge of his left stalk, sampled the frame BEFORE it goes up, moving, lead ahead.
+
+    passes he made                     20
+    PA already agreed                   1     5%
+    refused for another reason         16    80%
+    refused on GEOMETRY                 3    15%
+      ...lane-proof rule would fire     1     5%
+
+**THE ENTIRE LANE-PROOF LEAD IS WORTH ONE PASS IN TWENTY.** And it is stable: 1 of 3 geometry misses
+at n=16, still 1 of 3 at n=20. The frame-level numbers -- 73%, then 21% -- were never wrong, they
+were in a unit that does not convert. Most refused frames are not pass opportunities.
+
+**WHY PA WAS SILENT AT THE MOMENT HE SIGNALLED, AND THIS IS THE REAL FINDING:**
+
+    notEngaged            8      <- openpilot longitudinal was not engaged
+    driverChangedLanes    3
+    tooSlow               3
+    noLaneAvailable       3      <- geometry, the thing three sessions have been spent on
+    nothingSlower         2
+    none                  1
+
+**He passes with cruise off 40% of the time -- nearly three times as often as geometry blocks him.**
+`OFF_BY_DESIGN` correctly excludes those from the agreement denominator, which is why they have been
+invisible: the score says "of the passes it could have had an opinion about", and that phrasing hid
+that the set is less than half his passing.
+
+Strip the off-by-design reasons and **9 of 20 passes were eligible**; geometry is 3 of those 9. So
+geometry IS the top addressable blocker, and the addressable set is under half his driving.
+
+**WHAT THIS MEANS FOR EFFORT, and it reverses the priority three sessions ran on:** the geometry gate
+is the hardest problem here and worth at most 1 pass in 20. Whether he is ENGAGED when he passes is
+worth up to 8 in 20, costs no code, and has never been looked at. **Nobody measured which blocker
+dominated before optimising one of them.**
+
+**Do not "fix" this by relaxing the engagement precondition.** It is not a gate to loosen -- a
+feature that commands a lane change while openpilot is not driving is a different and much worse
+thing. What the number says is where the ceiling actually comes from, and that it is his habit
+rather than the code. Telling him is the whole intervention.
+
 **AND THE OBVIOUS DISCRIMINATOR IS FORBIDDEN, which is worth stating before someone reaches for it.**
 `oneWay` from the map separates these perfectly by construction -- it is what labels them. But
 suppressing an oncoming sighting because the map says one-way is **the map REMOVING a refusal**,
