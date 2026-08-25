@@ -29,17 +29,52 @@ The DBC receiver lists split ACCDATA cleanly:
 and downshift but **cannot stop the car**. A stop requires authoring `AccBrkTot_A_Rq`, which is
 taking authority, which is what the camera cancels. No drive needed to close this.
 
-**Next step:** `tools/bp_override_pairs.py` (written 2026-08-24) dumps every `opStop` episode with
-a wide feature set. Route `3b5` carries the experiment: **two leadless episodes, 9.0 s CANCELLED
-and 11.9 s SURVIVED, on the same drive.** Whatever differs there is the mechanism. The leading
-candidate is the PCM stop protocol — `AccStopMde_D_Rq` is received by `IPMA_ADAS`, so the camera
-watches it, and the 2026-08-23 fix (`lng.stopping or override` feeding `AccStopStat_B_Rq`) has
-never been validated on a drive.
+**MEASURED 2026-08-24, `tools/bp_override_pairs.py`, all ten episodes on 3b5/3b7/3b8/3ba:**
 
-**The untried lever if that comes up empty:** INTERLEAVING — bursts under ~1.0 s with Ford's own
-frame handed back between them, which separates "consecutive contradiction" from "cumulative".
-Its known cost is a lumpier stop, because a leadless Ford asks for *positive* accel on the frames
-it gets back.
+    driver braked?   duration        outcome
+    no               0.14 - 1.84 s   clean       5 of 5
+    no               2.78 - 9.00 s   CANCELLED   3 of 3
+    YES              2.30, 11.92 s   clean       2 of 2
+
+**The two long "leadless survivors" were not survivors -- he rescued them with a brake tap.** That
+is the whole reason the threshold looked soft and the lead theory looked load-bearing. A brake
+press disengages cruise, so the camera's cancel then lands while cruise is OFF, and this file
+already records that a cruise-off cancel clears itself. Remove those two and the boundary is
+clean: **between 1.84 s and 2.78 s of override with no driver input.** A stop needs 5-8 s. A
+single continuous override therefore cannot work, and that is now measured rather than estimated.
+
+**THE PCM NEVER ENTERED ITS STOP MODE, on any of the ten.** We asserted `AccStopStat_B_Rq` on
+99.9% of override frames -- the 2026-08-23 fix is live and doing its job -- and `AccStopMde_D_Rq`
+read `NoStop` on 100% of frames throughout. **But that is NOT yet evidence the handshake fails**,
+because no episode ever reached a standstill (they ended at 8-37 mph). `Hold` may simply be
+correct-to-be-absent there. Unresolved, and it needs an override that actually completes a stop.
+
+**INTERLEAVING IS PROBABLY DEAD TOO, for a physical reason.** It rests on the camera counting
+consecutive contradicted FRAMES. But this file already establishes the camera CANNOT SEE OUR
+ACCDATA -- so whatever it counts, it counts by watching the car's own deceleration. Handing Ford
+back one frame in five does not change how the car is moving, so it cannot reset a counter that is
+fed by motion. To reset that, the car would have to genuinely stop decelerating, which un-does the
+stop. Do not build interleaving without first showing the camera counts frames rather than motion.
+
+**THE PROPOSAL THAT FITS EVERY MEASUREMENT: end the ACC session cleanly, then stop.** The camera
+latches only when it cancels a session it believes is ACTIVE and misbehaving. So rather than
+contradict a live session, drop out of Ford ACC deliberately at the arming moment, author the
+stop, hold, and resume afterwards.
+
+The evidence that this is tolerated is the strongest kind available -- **it is what he already
+does.** He disengages before every stop he takes himself, measured twice, across thousands of
+stops, and the camera has never once latched from it. The cost is honest and small: Ford ACC is
+absent for the ~6 s of the stop, instead of absent for the rest of the drive.
+
+**Next step:** confirm from a route that a clean openpilot-initiated disengage is followed by
+`ford` authority returning on re-engagement with no cancel run. Then build it.
+
+**INSTRUMENT CAVEATS on the table above, so nobody builds on the wrong column.** The ACCDATA_3
+message-text column reads identically on clean and cancelled episodes, so those bits are decoded
+wrong and were ignored. The lead percentages come out ~0% on all ten, which CONTRADICTS
+CLAUDE.md's "4/4 with a lead survived" on these same routes -- one of the two is wrong and this
+run does not settle which. The frame counts are message counts, so ratios mean something and
+absolute numbers do not.
 
 ---
 
@@ -85,18 +120,12 @@ read, and the phantom 80 walked the set speed to 90 for 13 minutes.
 58% of its frames, so the gate would NOT have stopped it. Corroborating the car source against the
 map source is a resolver change nobody has made.
 
-**Unpulled lever, and it is HIS to pull:** `FordSynthesizeApimGps` is `0` on the device against a
-`"1"` shipped default. Ford's TSR is a fusion system and this car runs `Available_CameraOnly`
-because `0x463`/`0x464` never arrive. Toggle is **"Send GPS To The Camera"**. Not flipped — his
-settings are his.
-
----
-
-## 5. Confirm `SpeedLimitPolicy` is still `1`
-
-It silently reverted `1 -> 4` between routes `b5` and `b6`, and combined with the phantom 80 that
-is the chain that put him into an exit at 57 mph unwinding from 90. Read the param, and read its
-mtime against the route times before attributing anything.
+**HE PULLED THE GPS LEVER -- `FordSynthesizeApimGps` reads `1` on the device as of 2026-08-24**,
+against the `0` this file and CLAUDE.md both recorded. Ford's TSR is a fusion system and this car
+was stuck in `Available_CameraOnly` because `0x463`/`0x464` never arrive. So the next drive is the
+first one that can show `Available_FusionMode`, and `tools/bp_tsr_baseline.py` is the readout.
+**Check `TsrStatMsgTxt` before reading anything into a read count** -- a change there is the whole
+point, and it would make every earlier baseline number incomparable.
 
 ---
 
