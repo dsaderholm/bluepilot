@@ -403,3 +403,66 @@ That is real work, not wiring, and nothing here should imply otherwise.
 SCC-Map commits to the ramp's corner speed with the ~8 s the set speed needs instead of the ~4 s it
 gets today, and the descent completes. That is the exit-ramp problem, measured on route 00000348,
 solved on a specific exit he actually drives.
+
+---
+
+## 9. INTERSECTION TURNS FROM A STOP: NOT "NOT YET". NOT SENSABLE ON THIS CAR.
+
+He asked, 2026-08-24, how other systems do the thing section 8 wrote off. The answer firms the
+scope boundary up considerably, because it turns a shrug into a reason.
+
+### 9a. It is the hardest thing in the field, for everyone, and the reason is OCCLUSION
+
+An unprotected turn -- crossing or joining traffic that has right of way -- comes down to gap
+acceptance under uncertainty, and the research framing is blunt: **the worst case is a through-moving
+vehicle that is just beyond the field of view at the moment the decision is made.** You cannot
+choose a gap you cannot see, and the gap you cannot see is the one that hurts.
+
+The two failure modes are opposite and both are reported in the field:
+
+    too eager   Tesla FSD creeping forward at the wrong moment, and owners reporting it cannot
+                make safe unprotected turns onto high-speed roads. Cited range around 80 m, which
+                is not enough against 55 mph cross traffic.
+    too timid   Waymo stopping dead in an intersection and blocking it.
+
+**And even Tesla's answer is a hardware answer.** They mount B-pillar cameras and repeaters
+specifically to look down the cross street, and owners still complain about occlusion, because a
+fixed camera cannot duck, lean and peek around an obstruction the way a driver does. Creep exists
+precisely to buy visibility that the sensors cannot get from the stop line.
+
+### 9b. THIS CAR HAS NO LATERAL PERCEPTION AT ALL
+
+That is the whole answer, and it is not about software maturity.
+
+    IPMA camera        forward, behind the windshield
+    Delphi MRR radar   forward
+    comma device       forward -- wide and narrow road cameras
+    rear radar         BEHIND, and not fitted yet
+    side / corner      NOTHING
+
+**An unprotected turn needs to see roughly 90 degrees left and right, down the cross road, past the
+A-pillar, to a distance that covers cross traffic at speed.** Nothing on this car looks there. The
+wide road camera has real horizontal reach but it is mounted behind the windshield looking forward,
+so the extreme edges of its field are exactly where resolution is worst and where the pillar and
+door frame occlude -- and 90 degrees is past the edge, not at it.
+
+**So this is a SENSOR gap, not a model gap.** No amount of navigation data, no model update and no
+amount of work in this repo closes it. Closing it means side-facing cameras or corner radar, which
+is hardware nobody sells as a bolt-on for this stack.
+
+### 9c. AND THAT IS EXACTLY WHY THE FREEWAY SPINE IS THE RIGHT TARGET
+
+Worth stating, because it makes the scope look chosen rather than merely convenient.
+
+**On a freeway, everything that matters is ahead or behind, in the same direction of travel.**
+
+    ahead    forward camera + forward radar        fitted, and heavily used already
+    behind   rear radar                            arriving with the canbox
+    beside   adjacent-lane tracks from the front radar, plus BLIS with the canbox
+
+**The freeway spine IS the domain this sensor set covers.** The fork did not pick it and then
+discover the sensors happened to suit; the sensors define the domain and everything here has
+converged on it -- passing assist, the rear digest, the oncoming veto, route intent.
+
+Intersections are the domain where the sensor set is blind, and that is the honest line between
+what to build and what to leave alone. **Do not revisit intersection turns as a software problem.**
