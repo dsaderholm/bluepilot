@@ -4957,6 +4957,44 @@ note was written to avoid, and costs the roads where `tileLoaded` is false.
 **This is the best lead on the coverage ceiling that exists.** It is also the exact idea that put
 the car into a turn lane three times, so it gets built slowly or not at all.
 
+### CORRECTION, SAME HOUR: THE SPEED TEST WAS A LATCH. 73% WAS REALLY 21%.
+
+Found reviewing my own tool, by checking what the field asserts instead of trusting its name.
+
+`overtakenVAbs > 0` reads as "a vehicle went past us". It is not. custom.capnp calls it **"ground
+speed of the LAST one"**, it is LATCHED, and `adjacent_lane` deliberately carries it across resets
+in the `held` tuple so a sensor dropout cannot erase it -- with a comment saying exactly why. On a
+freeway it becomes true in the first minute of a drive and stays true. **The column was measuring
+"somebody overtook us at some point", which is nearly a constant on divided roads.**
+
+Corrected to `overtakenCount > 0 AND overtakenSeconds <= 15 s`. The count is needed because
+`overtakenSeconds` means both "seconds since the last one" AND "0 = never seen", so zero alone
+cannot separate "just happened" from "never happened" -- a trap in the field itself.
+
+    road        refused  sameDir  ever ovtk  ovtk<15s  oncoming  RECENT,no onc
+    one-way       38938    93.8%      87.2%     24.4%     22.3%          21.0%
+    TWO-WAY        6981    78.1%      36.2%      5.4%     86.5%           2.5%
+
+**THE HEADLINE WAS INFLATED 3.5x: 73.0% -> 21.0%.** And the correction cuts BOTH ways, which is why
+it is worth having rather than merely embarrassing:
+
+    recovery on one-way    73.0% -> 21.0%    much weaker
+    turn-lane exposure     11.8% ->  2.5%    much safer
+    separation ratio         6:1  ->  8.4:1  the recency test genuinely discriminates
+
+So the rule is a smaller win and a considerably safer one. 21% of refused frames on divided roads,
+against a gate that opens 22% today, is roughly a +75% relative improvement in reachability -- not
+the tripling the first number implied, and still the largest available.
+
+**THE DENOMINATOR CAVEAT SURVIVES UNCHANGED AND IS STILL THE BINDING ONE.** 21% of refused FRAMES is
+not 21% more passes. Most refused frames are not pass opportunities at all. The number that decides
+whether this is worth building is in DECISIONS, and it is still unmeasured.
+
+**AND THE LESSON IS THE ONE FROM `oneWay`, TWELVE HOURS LATER:** a field asserting one thing, read as
+asserting another, with the misreading flattering the result. Both times the fix was to open the
+schema comment rather than trust the identifier. **Every field this feature leans on should have its
+capnp comment read once, deliberately, before a number built on it is published.**
+
 **AND THE OBVIOUS DISCRIMINATOR IS FORBIDDEN, which is worth stating before someone reaches for it.**
 `oneWay` from the map separates these perfectly by construction -- it is what labels them. But
 suppressing an oncoming sighting because the map says one-way is **the map REMOVING a refusal**,
