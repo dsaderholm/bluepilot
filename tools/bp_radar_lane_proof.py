@@ -26,13 +26,26 @@ WHAT IT MEASURES, restricted to frames where the LEFT GEOMETRY GATE REFUSED -- t
 at stake -- and split by whether the map calls the road two-way, which is where turn lanes live:
 
     sameDirRecent     radar saw same-direction traffic left. The 2026-08-09 evidence, unfiltered.
-    ...and TRAVELLING  the same with the speed test. `overtakenVAbs` is set only by a vehicle that
-                       went PAST us, which a car crawling into a turn lane does not do.
-    oncomingAdjacent   opposing traffic seen left. On a two-way road this is the tell that the lane
-                       is theirs, and it is the guard the reverted version did not have.
+    ever ovtk         a vehicle has overtaken us on that side AT ANY POINT this drive.
+    ovtk<Ns           ...and it happened within OVERTAKE_RECENT_S. THIS is the speed test: a car
+                      easing into a turn lane does not go PAST us, and one that went past a minute
+                      ago was on a different piece of road.
+    oncomingAdjacent  opposing traffic seen left. On a two-way road this is the tell that the lane
+                      is theirs, and it is the guard the reverted version did not have.
 
-**THE GAP BETWEEN THE FIRST TWO ROWS IS THE TURN-LANE EXPOSURE**, which is the number the revert
-note asked for. The third row is what a safe version would additionally require.
+**THE `ever` AND `<Ns` COLUMNS EXIST BECAUSE THE FIRST VERSION OF THIS TOOL CONFLATED THEM**, and
+the result was wrong in the flattering direction. It tested `overtakenVAbs > 0`, which reads like
+"a vehicle went past us" and is not: custom.capnp calls it "ground speed of the LAST one", it is
+LATCHED, and `adjacent_lane` deliberately carries it across resets so a dropout cannot erase it. On
+a freeway it becomes true in the first minute and stays true for the drive. That produced a 6:1
+separation partly built on freeways simply having more overtakes than arterials.
+
+`overtakenSeconds` is the recency, and `overtakenCount` disambiguates its zero -- the field means
+both "seconds since the last one" and "0 = never seen", so 0 alone cannot separate "just happened"
+from "never happened".
+
+**THE GAP BETWEEN sameDir AND ovtk<Ns IS THE TURN-LANE EXPOSURE**, which is the number the revert
+note asked for. The oncoming column is what a safe version would additionally require.
 
 HOW TO READ IT:
 
@@ -63,6 +76,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 
 REALDATA = "/data/media/0/realdata"
 
+# HOW RECENT AN OVERTAKE HAS TO BE to count as evidence the lane has moving traffic in it NOW.
+# A vehicle that went past a minute ago was on a different piece of road, and the whole failure this
+# rule has to avoid is treating a stale fact as a present one. Reported at several windows below
+# rather than defended as a single value -- if the answer depends heavily on the window, that is
+# itself the finding.
+OVERTAKE_RECENT_S = 15.0
+
 
 def pct(n, d):
   return f"{100.0 * n / d:5.1f}%" if d else "    --"
@@ -85,7 +105,8 @@ def main() -> int:
     if f not in pa:
       sys.exit(f"passingAssist has no field {f!r}")
   adj = set(custom.LongitudinalPlanSP.PassingAssist.AdjacentLane.schema.fieldnames)
-  for f in ("available", "sameDirectionRecent", "oncomingAdjacent", "overtakenVAbs"):
+  for f in ("available", "sameDirectionRecent", "oncomingAdjacent",
+            "overtakenSeconds", "overtakenCount"):
     if f not in adj:
       sys.exit(f"adjacentLeft has no field {f!r} -- this tool would silently report zeros")
 
@@ -154,10 +175,24 @@ def main() -> int:
           continue
         same = bool(a.sameDirectionRecent)
         onc = bool(a.oncomingAdjacent)
-        # OVERTAKEN IS THE SPEED TEST. It is set only by a vehicle that went PAST us, which a car
-        # easing into a turn lane does not do -- that is exactly the discrimination the reverted
-        # version lacked.
-        travelling = float(a.overtakenVAbs) > 0.0
+        # THE SPEED TEST HAS TO BE RECENT, AND THE FIRST VERSION OF THIS TOOL GOT IT WRONG.
+        #
+        # It used `overtakenVAbs > 0.0`, which reads as "a vehicle went past us". It is not:
+        # custom.capnp calls it "ground speed of the LAST one", it is LATCHED, and adjacent_lane
+        # carries it across resets in the `held` tuple precisely so a sensor dropout cannot erase
+        # it. So on a freeway it goes true within the first minute of the drive and stays true --
+        # the column was measuring "somebody overtook us at some point", which is nearly a constant.
+        #
+        # That inflated the one-way row and produced a 6:1 separation that was partly an artifact of
+        # freeways having more overtakes than arterials, rather than of the lane being proven.
+        #
+        # `overtakenSeconds` is the recency, and `overtakenCount` disambiguates its zero -- the
+        # field is "seconds since the last one" AND "0 = never seen", so 0 alone cannot tell
+        # "just happened" from "never happened".
+        n_over = int(a.overtakenCount)
+        secs = float(a.overtakenSeconds)
+        travelling = n_over > 0 and secs <= OVERTAKE_RECENT_S
+        c["ever overtaken"] += n_over > 0
         c["sameDir"] += same
         c["travelling"] += travelling
         c["oncoming"] += onc
@@ -173,16 +208,21 @@ def main() -> int:
 
   print(f"routes {args.route}")
   print("  frames where the LEFT GEOMETRY GATE REFUSED -- the coverage actually at stake\n")
-  print(f"  {'road':<9} {'refused':>9} {'radar blind':>12} {'sameDir':>9} {'TRAVELLING':>11} "
-        f"{'oncoming':>9} {'sameDir,no onc':>15} {'TRAV,no onc':>12}")
+  print(f"  {'road':<9} {'refused':>9} {'sameDir':>9} {'ever ovtk':>10} "
+        f"{'ovtk<' + str(int(OVERTAKE_RECENT_S)) + 's':>10} {'oncoming':>9} {'RECENT,no onc':>14}")
   for kind in ("one-way", "TWO-WAY"):
     c = tally.get(kind)
     if not c:
       continue
     n = c["refused"]
-    print(f"  {kind:<9} {n:9d} {pct(c['radar blind'], n):>12} {pct(c['sameDir'], n):>9} "
-          f"{pct(c['travelling'], n):>11} {pct(c['oncoming'], n):>9} "
-          f"{pct(c['sameDir, no oncoming'], n):>15} {pct(c['TRAVELLING, no oncoming'], n):>12}")
+    print(f"  {kind:<9} {n:9d} {pct(c['sameDir'], n):>9} {pct(c['ever overtaken'], n):>10} "
+          f"{pct(c['travelling'], n):>10} {pct(c['oncoming'], n):>9} "
+          f"{pct(c['TRAVELLING, no oncoming'], n):>14}")
+  print()
+  print("  'ever ovtk' vs 'ovtk<Ns' IS THE CORRECTION. The first version of this tool used the")
+  print("  LATCHED overtakenVAbs, which is the 'ever' column -- true for the rest of the drive")
+  print("  after one overtake, and therefore nearly a constant on a freeway. Compare the two")
+  print("  columns: the gap is how much of the original separation was that artifact.")
   print()
   print("  road classes seen:")
   for (kind, hwy), n in sorted(hwy_seen.items(), key=lambda kv: -kv[1])[:8]:
