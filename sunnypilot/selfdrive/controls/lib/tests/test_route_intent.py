@@ -409,6 +409,82 @@ class TestItCanOnlyRefuse:
       "to refuse a suggestion; it may not reach may_actuate, _must_abort or _run_maneuver.")
 
 
+class TestTheServiceDeclaration:
+  """The consumer's freshness design rests on how routeIntentBP is DECLARED, not just on its code.
+
+  services.py gives it frequency 0, which makes SubMaster treat it as on-demand: `alive` is pinned
+  True and never recomputed. That is why route_intent.py consults `valid` alone and says so. If
+  someone later "tidies" the declaration by giving it a real frequency, `alive` starts being
+  computed from a rate that belongs to whichever transport happens to be fitted -- and the reasoning
+  in that file silently stops matching the system. Pin it here with the reason attached.
+  """
+
+  def test_it_is_declared_at_frequency_zero_and_logged(self):
+    from cereal.services import SERVICE_LIST
+    svc = SERVICE_LIST['routeIntentBP']
+    assert svc.frequency == 0.0, (
+      "routeIntentBP must stay at frequency 0. The publish rate is a property of whichever "
+      "transport is fitted, so a declared rate makes sm.alive report on the TRANSPORT and be "
+      "mistaken for a statement about the INSTRUCTION. Freshness comes from observedMonoTime.")
+    assert svc.should_log, "an unlogged transport cannot be scored on its first drive"
+
+  def test_the_consumer_does_not_consult_alive(self):
+    """Structural, because the reason is subtle and a future reader would 'restore' the check.
+
+    At frequency 0, SubMaster pins `alive` True for the life of the process, so testing it is a
+    guard that cannot fail. This fork removes those rather than keeping them -- see the reverted
+    pinned-holds guard that sat nested where it could never fire.
+    """
+    # PARSED, not grepped. The first version of this test searched the text and matched the
+    # docstring, which EXPLAINS why alive is not consulted -- so it failed on prose describing the
+    # very property it was checking. Same lesson as test_mapd_schema.py: every explanation of why
+    # we refuse a thing contains the thing's name.
+    tree = ast.parse((REPO / "sunnypilot" / "selfdrive" / "controls" / "lib"
+                      / "route_intent.py").read_text(encoding="utf-8"))
+    upd = next(n for n in ast.walk(tree)
+               if isinstance(n, ast.FunctionDef) and n.name == "update")
+    reads = {n.attr for n in ast.walk(upd) if isinstance(n, ast.Attribute)}
+    assert "alive" not in reads, (
+      "route_intent consults sm.alive again. At frequency 0 that is always True -- see "
+      "TestTheServiceDeclaration.")
+    assert "valid" in reads, "the valid check disappeared; that one does work"
+
+
+class TestTheBenchScriptParser:
+  """`bp_route_intent_stub.py` is how the gate gets exercised with no transport. A parsing bug there
+  produces a confusing bench session rather than an error, which is the worst kind."""
+
+  @staticmethod
+  def _parse(text):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+      "bp_route_intent_stub", REPO / "tools" / "bp_route_intent_stub.py")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m.parse_script(text)
+
+  def test_three_fields_is_a_known_distance(self):
+    assert self._parse("8,exitRight,700") == [(8.0, "exitRight", 700.0)]
+
+  def test_two_fields_means_the_distance_is_UNKNOWN_not_zero(self):
+    # The distinction the whole schema turns on. A parser that read this as 0.0 would make the
+    # bench exercise "the maneuver is upon us" while the operator thought they were testing
+    # "distance unknown" -- opposite branches of the consumer.
+    assert self._parse("0,continueAhead") == [(0.0, "continueAhead", None)]
+
+  def test_entries_are_sorted_by_time_not_by_input_order(self):
+    out = self._parse("20,turnLeft,50 5,exitRight,900")
+    assert [t for t, _, _ in out] == [5.0, 20.0]
+
+  def test_a_malformed_entry_is_an_error_rather_than_a_guess(self):
+    for bad in ("8", "8,exitRight,700,extra"):
+      try:
+        self._parse(bad)
+      except SystemExit:
+        continue
+      raise AssertionError(f"{bad!r} parsed instead of failing")
+
+
 class TestTheStubSource:
   """The bench source. It exists so the whole chain is exercisable before any transport lands --
   which is the answer to `IcbmModelStopEnabled`, a feature that shipped unreachable and was

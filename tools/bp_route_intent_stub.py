@@ -73,7 +73,10 @@ def parse_script(text: str):
     else:
       raise SystemExit(f"bad script entry {chunk!r}: want seconds,maneuver[,metres]")
     out.append((float(at), maneuver, distance))
-  return out
+  # SORTED, because StubSource sorts too and main() PRINTS this list as the plan. Unsorted, the
+  # operator reads one running order off the screen and the bench plays another -- a confusing
+  # session rather than an error, which is the worst way for a diagnostic to be wrong.
+  return sorted(out, key=lambda e: e[0])
 
 
 def main() -> int:
