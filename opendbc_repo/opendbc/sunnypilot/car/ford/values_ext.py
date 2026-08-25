@@ -98,6 +98,33 @@ class FordSafetyFlagsSP:
   """
   STEER_ANGLE_CURVATURE = 1
 
+  # FusionPilot: openpilot longitudinal is driving, so it may request FORD'S OWN propulsion range
+  # rather than upstream's generic one. Bit 5 -- bits 1-4 are the pinion geometry index above.
+  #
+  # It widens ONE band in the safety firmware: `AccPrpl_A_Rq`'s floor, from -0.5 to -2.8 m/s^2.
+  # That -0.5 is a generic openpilot constant and it is simply wrong for this car. Measured across
+  # 7 drives, 99,520 frames of Ford's own propulsion request:
+  #
+  #     Ford's range  -2.710 .. 2.300      p01 -1.030   p50 0.280   p99 1.850
+  #     BELOW -0.5    2,851 frames (2.86%)
+  #
+  # -2.8 covers Ford's measured extreme with a little headroom. It is deliberately NOT the number
+  # openpilot is expected to use: `bp_ford_decel_hierarchy.py` shows Ford's WORKING range in the
+  # deceleration band tops out near -0.66, and the control-side clamp in `create_acc_msg` is where
+  # that judgement belongs. Panda is the outer envelope; the Python clamp is the conservatism.
+  #
+  # WHAT IT DOES NOT WIDEN, and these are the ones that matter:
+  #   - `AccBrkTot_A_Rq` (min_accel, -3.4991). That field IS the friction brake. Untouched.
+  #   - `AccPrpl_A_Pred`. Pinned to the -5.0 escape and outside the band by construction.
+  #
+  # The worst case the wider band admits is more ENGINE braking, which saturates far below
+  # 2.8 m/s^2 off-throttle and cannot reach the friction brakes at all.
+  #
+  # GATED ON OP LONG, not on any feature toggle. It was originally keyed on `StockAccPassthrough`,
+  # where the point was carrying FORD's forwarded frames; that feature is gone (see
+  # passthrough-archive) and the point now is letting OPENPILOT ask for what Ford asks for.
+  WIDE_PROPULSION_BAND = 32
+
 
 
 # Geometry-table index for the steering-angle curvature measurement, packed into

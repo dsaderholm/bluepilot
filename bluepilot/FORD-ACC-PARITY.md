@@ -138,10 +138,10 @@ the passthrough deletion precisely because it is independent of it.
 
 ## Next steps, in order
 
-1. **Re-gate the panda gas band on op long.** `ed6c0b71` on `passthrough-archive` widened
-   `min_gas` from −0.5 to −2.8 behind a flag keyed on the passthrough param. The firmware side is
-   already written and compile-verified; it needs the gate changed, and the band re-derived from
-   Ford's real −0.66 rather than the −2.8 that was chosen to carry Ford's *forwarded* frames.
+1. ~~**Re-gate the panda gas band on op long.**~~ **DONE.** `FordSafetyFlagsSP.WIDE_PROPULSION_BAND`,
+   gated on `CP.openpilotLongitudinalControl`. Deliberately an ENVELOPE only — `create_acc_msg`
+   still clamps to −0.495, so nothing transmitted moves yet. **Its compile check is still owed:**
+   `ford.h` is not built by `bp_offline_test.py` and the laptop lost the device mid-task.
 2. **Remove the mutual exclusion** and let `create_acc_msg` carry a propulsion request alongside the
    brake. This is the one that makes blending possible at all.
 3. **Measure the transmission fields** on an existing op-long drive before touching them.

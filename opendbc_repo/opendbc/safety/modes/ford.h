@@ -275,6 +275,18 @@ static const AngleSteeringParams ford_pinion_geometry[FORD_PINION_GEOMETRY_COUNT
 // in ford_init from current_safety_param_sp. Default off = stock yaw-sourced angle_meas.
 static bool ford_bp_pinion_curvature = false;
 
+// FusionPilot: openpilot longitudinal is driving, so it may ask the powertrain for Ford's own
+// range of deceleration rather than upstream's generic -0.5. Set once in ford_init from bit 5 of
+// current_safety_param_sp. Default off = stock openpilot gas band.
+static bool ford_bp_wide_propulsion = false;
+
+// AccPrpl_A_Rq floor. Raw units: (m/s^2 + 5.0) * 100.
+//   450 = -0.5 m/s^2  -- upstream openpilot's generic value
+//   220 = -2.8 m/s^2  -- covers Ford's own measured minimum of -2.710 with headroom
+// See FordSafetyFlagsSP.WIDE_PROPULSION_BAND in values_ext.py for the measurement this rests on.
+#define FORD_MIN_GAS_STOCK 450
+#define FORD_MIN_GAS_WIDE 220
+
 static const AngleSteeringParams *ford_bp_pinion_params = &ford_pinion_geometry[0];
 
 
@@ -591,7 +603,9 @@ static bool ford_tx_hook(const CANPacket_t *msg) {
     // gas cmd limits
     // Signal: AccPrpl_A_Rq & AccPrpl_A_Pred
     .max_gas = 700,          //  2.0 m/s^2
-    .min_gas = 450,          // -0.5 m/s^2
+    // FusionPilot: widened to -2.8 m/s^2 while openpilot longitudinal is driving. NOTE
+    // .min_accel above -- the friction brake -- is deliberately NOT widened.
+    .min_gas = ford_bp_wide_propulsion ? FORD_MIN_GAS_WIDE : FORD_MIN_GAS_STOCK,
     .inactive_gas = 0,       // -5.0 m/s^2
   };
 
@@ -1042,6 +1056,9 @@ static safety_config ford_init(uint16_t param) {
     pinion_enabled = false;
   }
   ford_bp_pinion_curvature = pinion_enabled;
+
+  const uint16_t FORD_PARAM_SP_WIDE_PROPULSION = 32;
+  ford_bp_wide_propulsion = GET_FLAG(current_safety_param_sp, FORD_PARAM_SP_WIDE_PROPULSION);
 
   ford_bp_pinion_params = pinion_enabled ? &ford_pinion_geometry[pinion_geometry_index] : &ford_pinion_geometry[0];
 

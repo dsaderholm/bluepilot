@@ -149,6 +149,19 @@ def _initialize_ford(CP: structs.CarParams, CP_SP: structs.CarParamsSP, params_d
       if geometry_index is not None:
         CP_SP.safetyParam |= FordSafetyFlagsSP.STEER_ANGLE_CURVATURE | (geometry_index << FORD_PINION_GEOMETRY_SHIFT)
 
+    # FusionPilot: with openpilot longitudinal driving, let the safety firmware carry Ford's own
+    # propulsion range instead of upstream's generic -0.5 floor. See
+    # FordSafetyFlagsSP.WIDE_PROPULSION_BAND for the measurement.
+    #
+    # Op long is the whole gate: it is the only mode in which openpilot authors ACCDATA at all, so
+    # with it off the widened band is unreachable and setting the bit would be noise.
+    #
+    # THIS IS AN ENVELOPE, NOT A BEHAVIOUR CHANGE. `create_acc_msg` still clamps its own request to
+    # -0.495, so nothing openpilot sends today moves. Widening the control side is a separate step
+    # and belongs with removing the brake/gas mutual exclusion -- see bluepilot/FORD-ACC-PARITY.md.
+    if CP.openpilotLongitudinalControl:
+      CP_SP.safetyParam |= FordSafetyFlagsSP.WIDE_PROPULSION_BAND
+
 
 
 def _initialize_toyota(CP: structs.CarParams, CP_SP: structs.CarParamsSP, params_dict: dict[str, str]) -> None:
