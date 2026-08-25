@@ -125,6 +125,9 @@ def main() -> int:
 
   tally = defaultdict(Counter)
   hwy_seen = Counter()
+  map_frames = 0
+  plan_frames = 0
+  no_map = 0
   cur = {"oneway": None, "hwy": "?", "speed": 0.0}
 
   for seg in all_segs:
@@ -141,6 +144,7 @@ def main() -> int:
     for m in lr:
       w = m.which()
       if w == "mapdOut":
+        map_frames += 1
         try:
           cur["oneway"] = bool(m.mapdOut.oneWay)
           cur["hwy"] = str(m.mapdOut.highwayClass) or "?"
@@ -156,7 +160,16 @@ def main() -> int:
         p_a = m.longitudinalPlanSP.passingAssist
       except Exception:  # noqa: BLE001
         continue
-      if cur["speed"] < 10.0 or cur["oneway"] is None:
+      plan_frames += 1
+      # SAME STALENESS CAVEAT AS bp_turn_lane_gate, AND THE SAME ANSWER. `oneway` is held from the
+      # last mapdOut, which is right -- the two messages run at different rates -- but holding it
+      # SILENTLY is not. Coverage is counted and printed, so a run on a thin route says so rather
+      # than looking identical to a clean one. This tool was written by copying that pattern and
+      # not its fix; the review caught it.
+      if cur["speed"] < 10.0:
+        continue
+      if cur["oneway"] is None:
+        no_map += 1
         continue
       # ONLY FRAMES THE GEOMETRY GATE REFUSED. This is the coverage at stake -- frames it already
       # opens need no extra evidence, and including them would dilute every share below with the
@@ -207,6 +220,11 @@ def main() -> int:
     sys.exit("no moving frames with map data where the left gate refused")
 
   print(f"routes {args.route}")
+  print(f"  mapdOut frames {map_frames}   plan frames {plan_frames}   "
+        f"moving frames before ANY map fix: {no_map}")
+  if map_frames < plan_frames // 4:
+    print("  ** THIN MAP COVERAGE. The one-way / two-way split below is carried from sparse")
+    print("     mapdOut and should not be read as a clean separation. **")
   print("  frames where the LEFT GEOMETRY GATE REFUSED -- the coverage actually at stake\n")
   print(f"  {'road':<9} {'refused':>9} {'sameDir':>9} {'ever ovtk':>10} "
         f"{'ovtk<' + str(int(OVERTAKE_RECENT_S)) + 's':>10} {'oncoming':>9} {'RECENT,no onc':>14}")

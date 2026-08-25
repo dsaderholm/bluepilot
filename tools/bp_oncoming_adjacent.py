@@ -238,7 +238,14 @@ def main() -> int:
             else:
               lost += 1
         star = "  <- live" if (flat == MIN_ONCOMING_MS and frac == ONCOMING_SPEED_FRACTION) else ""
-        n_imp = sum(1 for e in known if e["impossible"])
+        # REACHABLE false edges only. An implausibly-fast artifact sits ABOVE every candidate floor
+        # and no floor can ever kill it, so counting it in the denominator makes the lever look
+        # weaker than it is -- the same denominator error this file warns about, in the
+        # under-selling direction. Pooled over seven drives the split is 3 slow and 2 fast, so the
+        # honest gain at flat 7.0 is 1 of 3, not 1 of 5.
+        n_imp = sum(1 for e in known
+                    if e["impossible"]
+                    and abs(e["v_abs"]) * 2.23694 <= REAL_TRAFFIC_MAX_MPH)
         n_ok = len(known) - n_imp
         print(f"  {flat:10.1f} {frac:9.2f} {killed:8d}/{n_imp:<4d} {lost:6d}/{n_ok:<4d}{star}")
     print("  FALSE killed is the gain; real LOST is what it costs -- edges on two-way roads that")
