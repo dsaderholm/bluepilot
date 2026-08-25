@@ -179,7 +179,7 @@ def create_acc_msg(packer, CAN: CanBus, long_active: bool, gas: float, accel: fl
   # openpilot-authored path rests on a value defined in a different file that nobody would think
   # to check when changing this one. Same shape as every "a fixture held it constant" bug here.
   if abs(float(accel_pred) - _PANDA_GAS_INACTIVE) >= 0.005:
-    accel_pred = min(max(float(accel_pred), _PANDA_GAS_MIN + _PANDA_MARGIN), _PANDA_GAS_MAX - _PANDA_MARGIN)
+    accel_pred = min(max(float(accel_pred), _PANDA_GAS_MIN_STOCK + _PANDA_MARGIN), _PANDA_GAS_MAX - _PANDA_MARGIN)
 
   values = {
     "AccBrkTot_A_Rq": accel,                          # Brake total accel request: [-20|11.9449] m/s^2
@@ -207,11 +207,30 @@ _ACCDATA_SIGNALS = (
 
 # FusionPilot: panda's ACCDATA bands, from opendbc/safety/modes/ford.h's FORD_LONG_LIMITS, in the
 # engineering units the DBC scales to. THE BRAKE CAP IS NOT THE TIGHT ONE -- that was the review's
-# correction. The gas band is [-0.5, 2.0] with a single legal escape value of exactly -5.0, and it
-# is checked against BOTH AccPrpl_A_Rq and AccPrpl_A_Pred.
+# correction. The gas band has a single legal escape value of exactly -5.0, and it is checked
+# against BOTH AccPrpl_A_Rq and AccPrpl_A_Pred.
 _PANDA_ACCEL_MIN = -3.4991
 _PANDA_ACCEL_MAX = 1.9999
-_PANDA_GAS_MIN = -0.5
+#
+# THE GAS FLOOR HAS TWO VALUES AND THIS FILE HELD ONLY THE NARROW ONE. Found on the wire,
+# 2026-08-25, by a smoke test that decoded `AccPrpl_A_Rq` out of a real CarController's own frame:
+# the propulsion blend asked for Ford's measured -0.66 and **-0.490 went out**. Panda had been
+# widened to -2.8 days earlier (`FordSafetyFlagsSP.WIDE_PROPULSION_BAND`) and this constant was not,
+# so the clamp meant to keep frames INSIDE panda's band was instead softening a request panda would
+# have carried -- silently, in the conservative direction, which is the direction nothing complains
+# about. The commit that widened panda said in as many words that "create_acc_msg still clamps its
+# own request to -0.495, so nothing openpilot transmits moves today", and then that sentence stopped
+# being a description of an envelope and became a bug the moment something wanted the room.
+#
+# This clamp's ONE job is to match panda so a frame is never DROPPED. It is not where conservatism
+# belongs; that is `FORD_BLEND_PROPULSION_FLOOR` in longitudinal_ext.py, which is -0.7.
+#
+# `AccPrpl_A_Pred` keeps the STOCK floor deliberately. It is pinned to the -5.0 sentinel and so is
+# exempt from clamping entirely today -- but if anything ever starts authoring it, the narrow band
+# is the right one to meet, because nothing has measured what Ford puts there.
+_PANDA_GAS_MIN_STOCK = -0.5
+_PANDA_GAS_MIN_WIDE = -2.8      # must equal FORD_MIN_GAS_WIDE in safety/modes/ford.h, decoded
+_PANDA_GAS_MIN = _PANDA_GAS_MIN_WIDE
 _PANDA_GAS_MAX = 2.0
 _PANDA_GAS_INACTIVE = -5.0
 # Half a quantum of the coarsest field (AccPrpl_* at 0.01 m/s^2 per bit), which is all the guard a

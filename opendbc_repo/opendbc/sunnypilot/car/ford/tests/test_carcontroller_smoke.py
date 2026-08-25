@@ -599,3 +599,117 @@ def _passthrough_cc(carcontroller_parts):
                            gap_target=0, long_active=True)
   return cc, CS, CC, CC_SP, structs
 
+
+
+# ---------------------------------------------------------------------------------------------
+# FusionPilot: the propulsion blend, asserted ON THE WIRE.
+#
+# `test_propulsion_blend.py` checks the curve. This checks that a REAL CarController, built with
+# the real DBC and his real CarParams and driven under op long, actually puts a propulsion request
+# on the bus while the brake bit is set -- which is the claim, and which pure-logic tests cannot
+# reach. Same reasoning as the 2026-08-15 crash: the wiring between two objects is the category
+# that takes the car off the road.
+# ---------------------------------------------------------------------------------------------
+
+_ACCDATA = 390
+_INACTIVE_GAS = -5.0
+
+
+def _decode_acc_prpl(data: bytes) -> float:
+  """AccPrpl_A_Rq: start bit 49, 10 bits, 0.01, -5, big-endian."""
+  v = int.from_bytes(data, "big")
+  total = len(data) * 8
+  idx = (49 // 8) * 8 + (7 - (49 % 8))
+  return ((v >> (total - idx - 10)) & ((1 << 10) - 1)) * 0.01 - 5.0
+
+
+def _blend_case(carcontroller_parts, *, accel, blend):
+  from opendbc.car.ford.interface import CarInterface
+  from opendbc.car.ford.values import CAR
+
+  CarController, dbc_names, CP, CP_SP, structs = carcontroller_parts
+  CP_long = CarInterface.get_non_essential_params(CAR.FORD_FUSION_MK5)
+  CP_long.openpilotLongitudinalControl = True
+
+  cc = CarController(dbc_names, CP_long, CP_SP)
+
+  out = structs.CarState()
+  out.vEgo = 20.0
+  out.vEgoRaw = 20.0
+  out.cruiseState.enabled = True
+  out.cruiseState.available = True
+  CS = FakeCarState(out)
+
+  CC, CC_SP = _car_control(structs, enabled=True,
+                           send_button=structs.IntelligentCruiseButtonManagement.SendButtonState.none,
+                           gap_target=0, long_active=True, accel=accel)
+
+  # The TOGGLE, not the attribute. `update()` calls `update_long_params` on every frame, so an
+  # attribute set here is overwritten before the blend reads it -- which made the toggle-off case
+  # silently run with the blend ON. Same shape as every "the fixture was more orderly than the
+  # thing it stands in for" bug in this tree.
+  cc.params.put_bool("FordPropulsionBlend", blend)
+
+  prpl, brake = [], []
+  for frame in range(400):
+    _, can_sends = cc.update(CC, CC_SP, CS, frame * 10_000_000)
+    for m in can_sends:
+      if m[0] == _ACCDATA:
+        raw = bytes(m[1])
+        prpl.append(_decode_acc_prpl(raw))
+        brake.append(_be_bit(raw, 55))       # AccBrkDecel_B_Rq
+  assert prpl, "no ACCDATA went out at all"
+
+  # ONLY THE SETTLED TAIL. `carcontroller.update` rate-limits accel at 0.07 m/s^2 per ACC step from
+  # zero, so the opening frames are a ramp through every value between 0 and the target -- and the
+  # blend correctly follows it down. Asserting across the ramp measures the rate limiter, not the
+  # curve; the first draft of this test did exactly that and failed on its own harness.
+  return prpl[-20:], brake[-20:]
+
+
+@pytest.mark.parametrize("accel,expected", [(-0.30, -0.17), (-0.50, -0.34), (-0.80, -0.66)])
+def test_the_wire_carries_ford_s_propulsion_request_while_braking(carcontroller_parts, accel, expected):
+  """THE WHOLE POINT. Brake bit set AND a real propulsion request in the same frame.
+
+  Before this change the second half was the -5.0 sentinel on every one of these frames, which is
+  what "openpilot never coasts" is made of.
+  """
+  prpl, brake = _blend_case(carcontroller_parts, accel=accel, blend=True)
+  assert any(brake), f"the brake bit never set at {accel} m/s^2 -- this case tests nothing"
+  blended = [p for p, b in zip(prpl, brake, strict=True) if b]
+  assert blended, "no braking frames to look at"
+  worst = max(abs(p - expected) for p in blended)
+  assert worst < 0.02, (
+    f"at {accel} m/s^2 the wire carried {blended[-1]:.3f} where Ford's own frames carried "
+    f"{expected:.2f}; sentinel is {_INACTIVE_GAS}")
+
+
+def test_below_the_handover_the_wire_carries_the_sentinel(carcontroller_parts):
+  """Ford stops asking the powertrain for anything below -1.1 and gives the car to the brakes.
+  Copying the blend and not the handover would leave engine braking asserted through a hard stop."""
+  prpl, brake = _blend_case(carcontroller_parts, accel=-2.5, blend=True)
+  assert all(abs(p - _INACTIVE_GAS) < 1e-6 for p in prpl), (
+    f"hard braking put a real propulsion request on the wire: {sorted(set(prpl))[:5]}")
+
+
+def test_the_toggle_off_puts_the_old_sentinel_back_on_the_wire(carcontroller_parts):
+  """A revert has to be a real revert, measured where it matters rather than in the source."""
+  prpl, brake = _blend_case(carcontroller_parts, accel=-0.50, blend=False)
+  assert any(brake), "the brake bit never set -- this case tests nothing"
+  blended = [p for p, b in zip(prpl, brake, strict=True) if b]
+  assert all(abs(p - _INACTIVE_GAS) < 1e-6 for p in blended), (
+    f"with the blend off the wire still carried {sorted(set(blended))[:5]} while braking")
+
+
+def test_a_blended_request_is_never_dropped_by_panda(carcontroller_parts):
+  """Panda DROPS a frame outside its band -- it does not soften it -- so a 50 Hz message would
+  vanish and reappear. `fordcan_ext.create_acc_msg` clamps to the band before packing; this asserts
+  the clamp never had to move a blended value, which is the same claim as
+  `test_the_floor_never_binds` made where the bytes actually are."""
+  for accel, expected in ((-0.30, -0.17), (-0.50, -0.34), (-0.80, -0.66)):
+    prpl, brake = _blend_case(carcontroller_parts, accel=accel, blend=True)
+    for p, b in zip(prpl, brake, strict=True):
+      if b:
+        assert abs(p - expected) < 0.02, (
+          f"the wire carried {p:.3f} at {accel} where the curve says {expected:.2f} -- a clamp "
+          "moved it, which means panda's band and the blend floor have drifted apart")

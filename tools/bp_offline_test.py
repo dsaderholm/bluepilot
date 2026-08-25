@@ -101,6 +101,7 @@ DEFAULT_TARGETS = [
   "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_tsr_reliability.py",
   "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_wide_propulsion_band.py",
   "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_target_speed_is_ego.py",
+  "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_propulsion_blend.py",
   "sunnypilot/selfdrive/selfdrived/tests/test_unconfirmed_lead_alert_truth.py",
   "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_apim_gps_quality.py",
   "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_synthesized_set_cruise.py",
@@ -179,28 +180,54 @@ def install_stubs() -> None:
 
   class Params:
     """Reads defaults straight out of params_keys.h, so a test that references an undeclared
-    key fails here the same way it would on the device."""
+    key fails here the same way it would on the device.
+
+    WRITES ARE HONOURED, since 2026-08-25. They used to be no-ops, which meant NO test on this fork
+    could exercise a param at anything other than its shipped default through a real object -- and
+    a test that tried read as though it had worked, because `put_bool` returned quietly and
+    `get_bool` went on serving the default. A smoke test for a toggle's OFF state therefore ran
+    with the toggle ON and passed. That is this tree's recurring "a stub laxer than the thing it
+    stands in for hides exactly the bug it was built to catch", with the laxness in the WRITE.
+
+    The store is CLASS-LEVEL because the device's is process-wide: two `Params()` objects there see
+    each other's writes, and an instance-level dict would quietly not. The consequence is the
+    device's too -- a written value STAYS written for the rest of the run. A test that cares about
+    a param should set it explicitly rather than assume the default is still there.
+    """
+    _writes: dict = {}
+
     def __init__(self, *a, **k):
       pass
 
-    def get(self, key, *a, **k):
+    def _raw(self, key):
       if key not in known:
         raise KeyError(f"UnknownKeyName: {key}")
+      return self._writes.get(key, defaults.get(key))
+
+    def get(self, key, *a, **k):
+      raw = self._raw(key)
       if key in text_keys:
-        return defaults.get(key)          # None when unset, exactly like the device
-      raw = defaults.get(key, "0")
+        return raw                        # None when unset, exactly like the device
+      raw = "0" if raw is None else raw
       return float(raw) if "." in raw else int(raw)
 
     def get_bool(self, key, *a, **k):
+      return self._raw(key) == "1"
+
+    def put(self, key, value, *a, **k):
       if key not in known:
         raise KeyError(f"UnknownKeyName: {key}")
-      return defaults.get(key, "0") == "1"
+      self._writes[key] = value if isinstance(value, str) else str(value)
 
-    def put(self, *a, **k):
-      pass
+    def put_bool(self, key, value, *a, **k):
+      if key not in known:
+        raise KeyError(f"UnknownKeyName: {key}")
+      self._writes[key] = "1" if value else "0"
 
-    def put_bool(self, *a, **k):
-      pass
+    def remove(self, key, *a, **k):
+      if key not in known:
+        raise KeyError(f"UnknownKeyName: {key}")
+      self._writes[key] = None
 
   pp = types.ModuleType("openpilot.common.params")
   pp.Params = Params

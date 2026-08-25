@@ -583,6 +583,11 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // which is the U0253 the camera raises and why it never leaves NoNavDataAvailable. Stands down
     // by itself the moment the car sends the real ones. Read at car init.
     {"FordSynthesizeApimGps", {PERSISTENT | BACKUP, BOOL, "1"}},
+    // FusionPilot: send a real propulsion request alongside the brake, following Ford's own
+    // measured curve, instead of jumping to the -5.0 "not requesting" sentinel the moment the
+    // brake engages. ON: this is the fix for "openpilot never coasts", and it is the behaviour
+    // stock Ford ACC already has. Off restores upstream's mutual exclusion exactly.
+    {"FordPropulsionBlend", {PERSISTENT | BACKUP, BOOL, "1"}},
     {"FordPrefShowRadarLeadOverlay", {PERSISTENT | BACKUP, BOOL, "1"}},
     {"FordPrefRadarOverlaySize", {PERSISTENT | BACKUP, INT, "1"}},
     {"FordPrefHybridBatteryStatus", {PERSISTENT | BACKUP, BOOL, "0"}},

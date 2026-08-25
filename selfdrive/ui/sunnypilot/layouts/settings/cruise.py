@@ -30,6 +30,9 @@ ICBM_DESC = tr_noop("When enabled, sunnypilot will attempt to manage the built-i
                     "by emulating button presses for limited longitudinal control.")
 # FusionPilot: the whole answer to "what do I turn on", in the one place he will read it.
 
+PROPULSION_BLEND_DESC = tr_noop(
+  "Let openpilot use the engine to slow down, the way stock Ford ACC does, instead of going straight to the brakes. Ford asks the powertrain for up to 0.66 m/s² of engine braking and blends it with the brakes; openpilot stopped asking for anything the instant it touched the brake, which is why it never coasts. Below about 1.1 m/s² the brakes take over alone, exactly as they do for Ford. Turn it off if the car slows more than you asked it to.")
+
 APIM_GPS_DESC = tr_noop(
   "Give the forward camera the GPS data your SYNC module never sends it. The camera expects three "
   "GPS messages from SYNC and only ever receives one, which is the U0253 fault it reports and the "
@@ -245,6 +248,11 @@ class CruiseLayout(Widget):
       description=recommended(tr(APIM_GPS_DESC), "FordSynthesizeApimGps"),
       param="FordSynthesizeApimGps")
 
+    self.ford_propulsion_blend = toggle_item_sp(
+      title=tr("Blend Engine Braking With The Brakes"),
+      description=recommended(tr(PROPULSION_BLEND_DESC), "FordPropulsionBlend"),
+      param="FordPropulsionBlend")
+
     self.icbm_resume_min_gap = option_item_sp(
       title=tr("Resume Minimum Gap"),
       description=recommended(tr("How far the car ahead must have pulled away before resuming counts as safe."), "IcbmResumeMinGap", lambda v: f"{v} m"),
@@ -387,6 +395,7 @@ class CruiseLayout(Widget):
       self.icbm_resume_min_lead_speed,
       self.icbm_gap_control,
       self.ford_synthesize_apim_gps,
+      self.ford_propulsion_blend,
 
       SectionHeader(tr("Curves")),
       self.scc_v_toggle,
@@ -500,6 +509,7 @@ class CruiseLayout(Widget):
       self.icbm_resume_min_lead_speed,
       self.icbm_gap_control,
       self.ford_synthesize_apim_gps,
+      self.ford_propulsion_blend,
     )
 
   def _update_state(self):
@@ -554,8 +564,18 @@ class CruiseLayout(Widget):
         self.scc_v_toggle.action_item.set_enabled(False)
         self.scc_m_toggle.action_item.set_enabled(False)
 
+      # FusionPilot: op long ALONE, which is why it sits outside the has_long-or-has_icbm block
+      # above rather than in either arm of it. This decides what openpilot's OWN ACCDATA carries,
+      # and openpilot only authors ACCDATA under op long -- with it off the setting reaches nothing.
+      #
+      # Enabled/disabled only. The param is NEVER removed: removing a PERSISTENT param on missing
+      # evidence is the bug that cost him op long, the passthrough and Experimental Mode for two
+      # boots on 2026-08-23, and the fifth ICBM gate before that.
+      self.ford_propulsion_blend.action_item.set_enabled(has_long)
+
     else:
       has_icbm = has_long = False
+      self.ford_propulsion_blend.action_item.set_enabled(False)
       self.icbm_toggle.action_item.set_enabled(False)
       self.icbm_toggle.set_description(tr(ONROAD_ONLY_DESCRIPTION))
 

@@ -1446,6 +1446,26 @@
                   "description": "Give the forward camera the GPS data your SYNC module never sends it. The camera expects three GPS messages from SYNC and only ever receives one, which is the U0253 fault it reports and the reason it sits on \"no navigation data\" and never reads speed limit signs. This sends the other two, built from the comma's own GPS. It stops automatically if your car ever starts sending them itself, and it only sends position, time and heading -- it cannot steer, accelerate or brake. Turn it off if the camera starts reporting speed limits that are wrong."
                 },
                 {
+                  "key": "FordPropulsionBlend",
+                  "widget": "toggle",
+                  "title": "Blend Engine Braking With The Brakes",
+                  "description": "Let openpilot use the engine to slow down, the way stock Ford ACC does, instead of going straight to the brakes. Ford asks the powertrain for up to 0.66 m/s\u00c2\u00b2 of engine braking and blends it with the brakes; openpilot stopped asking for anything the instant it touched the brake, which is why it never coasts. Below about 1.1 m/s\u00c2\u00b2 the brakes take over alone, exactly as they do for Ford. Turn it off if the car slows more than you asked it to.",
+                  "visibility": [
+                    {
+                      "type": "capability",
+                      "field": "has_longitudinal_control",
+                      "equals": true
+                    }
+                  ],
+                  "enablement": [
+                    {
+                      "type": "capability",
+                      "field": "has_longitudinal_control",
+                      "equals": true
+                    }
+                  ]
+                },
+                {
                   "key": "IcbmGapControl",
                   "widget": "toggle",
                   "title": "Let openpilot Change The Follow Gap",

@@ -6,15 +6,16 @@ across 7 drives / 99,520 frames of the camera's own `AccPrpl_A_Rq`:
     Ford's range   -2.710 .. 2.300      p01 -1.030   p50 0.280   p99 1.850
     below -0.5     2,851 frames (2.86%)
 
-THIS IS AN ENVELOPE CHANGE ONLY. `create_acc_msg` still clamps its own request to -0.495, so
-nothing openpilot transmits moves today. Widening the control side belongs with removing the
-brake/gas mutual exclusion -- see bluepilot/FORD-ACC-PARITY.md. What these tests protect is that
-panda and the Python side cannot drift apart, and that the FRICTION BRAKE band is not touched.
+IT WAS AN ENVELOPE CHANGE ONLY UNTIL 2026-08-25, and that sentence is how it went wrong: the
+Python clamp in `create_acc_msg` still held -0.5 when the propulsion blend started asking for
+Ford's -0.66, so **-0.490 went out on the wire** -- silently, in the conservative direction. What
+these tests protect is that panda and the Python side cannot drift apart, in EITHER value, and
+that the FRICTION BRAKE band is not touched.
 """
 import pathlib
 import re
 
-from opendbc.sunnypilot.car.ford.fordcan_ext import _PANDA_GAS_MIN
+from opendbc.sunnypilot.car.ford.fordcan_ext import _PANDA_GAS_MIN_STOCK, _PANDA_GAS_MIN_WIDE
 from opendbc.sunnypilot.car.ford.values_ext import (
   FORD_PINION_GEOMETRY_INDEX, FORD_PINION_GEOMETRY_SHIFT, FordSafetyFlagsSP,
 )
@@ -33,7 +34,12 @@ def test_the_c_constants_match_their_documented_m_s2():
   wide = int(re.search(r"#define FORD_MIN_GAS_WIDE (\d+)", src).group(1))
   stock = int(re.search(r"#define FORD_MIN_GAS_STOCK (\d+)", src).group(1))
   assert wide / 100.0 - 5.0 == _WIDE_MS2
-  assert stock / 100.0 - 5.0 == _PANDA_GAS_MIN
+  assert stock / 100.0 - 5.0 == _PANDA_GAS_MIN_STOCK
+  # BOTH sides of the pair, since 2026-08-25. This used to pin only the stock number against the
+  # single `_PANDA_GAS_MIN` the Python side had -- and when panda was widened and that constant was
+  # not, the test still passed while -0.490 went out on the wire in place of Ford's -0.66. A test
+  # that pins one end of a pair cannot notice the two ends parting.
+  assert wide / 100.0 - 5.0 == _PANDA_GAS_MIN_WIDE
 
 
 def test_the_c_flag_bit_and_the_python_flag_bit_are_the_same_bit():
