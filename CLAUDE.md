@@ -939,7 +939,7 @@ relay: no forwarding, no clamping, no substituted frames, and no camera cancel p
 - **The panda-band clamps in `create_acc_msg`.** They apply to openpilot's OWN authored frame and
   stop panda silently dropping ACCDATA when a value lands outside its band.
 
-**WHAT REPLACED IT: the `decel-hierarchy` branch (`../bluepilot-decel`).** Chasing why op long is
+**WHAT REPLACED IT: the `ford-acc-parity` branch (`../bluepilot-ford`).** Chasing why op long is
 bad on this car turned up something specific -- openpilot asserts the friction brakes at
 **-0.14 m/s^2** and clips its propulsion request at **-0.5**, while Ford ramps engine braking to
 **-0.66** and only hands over to the brakes below **-1.1**. Ford blends the two across that whole

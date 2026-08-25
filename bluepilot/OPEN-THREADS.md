@@ -18,7 +18,7 @@ gives Ford's driving through a closed relay with no cancel risk at all.
 rebases onto it and nothing is developed there. It exists so the implementation can be re-read and
 the measurements re-run.
 
-**The work that replaced it is on `decel-hierarchy` (`../bluepilot-decel`).**
+**The work that replaced it is on `ford-acc-parity` (`../bluepilot-ford`).**
 
 **This branch is ICBM, SCC and SLA only.** Do not add longitudinal-authoring work here.
 
@@ -168,7 +168,7 @@ result file all vanished once during this work. Rebuild with the tar one-liner i
 
 ---
 
-## 2. Moved to `decel-hierarchy`: why op long cannot coast
+## 2. Moved to `ford-acc-parity`: making op long behave like Ford ACC
 
 The finding that replaced the passthrough -- openpilot asserts the friction brakes at -0.14 m/s^2
 and clips propulsion at -0.5, while Ford ramps engine braking to -0.66 and only hands over below
