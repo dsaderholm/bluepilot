@@ -3637,6 +3637,30 @@ were green against the bug they were written for.
 - **Changes made on one branch reach the others because he rebases every time.** So CLAUDE.md is the
   channel that actually travels between sessions; per-directory memory is not.
 
+## THE DEVICE RUNS IN UTC. HE DOES NOT. CONVERT BEFORE REASONING ABOUT A TIME.
+
+2026-08-25, and it inverted a TSR conclusion inside an hour. `date` on the comma reports UTC, and
+so does every `stat` mtime, every route directory time and every `%y` in a diagnostic. **Utah is
+UTC-6 in August (MDT), UTC-7 in winter (MST).**
+
+Reported to him were "you flipped the GPS toggle at 7:21 PM" and "three night drives at 11:12 PM,
+1:20 AM and 3:09 AM". The real local times are **1:21 PM**, and **5:12 PM, 7:20 PM, 9:09 PM** --
+two of those three are broad daylight. The conclusion drawn from them ("night alone does not bring
+TSR reads back") was the reverse of what the data says: both reads on record are after dark.
+
+He spotted it in four words: *"Your timezones or something are wrong."*
+
+**Where this bites hardest is TSR**, where the open question is literally light level, and where
+`TSR-INVESTIGATION.md` records every timestamp in UTC. It also bites any statement about what he
+was doing at the car, and any correlation with sunset, rush hour or his working day.
+
+```bash
+ssh comma@comma-34b959b "bash /tmp/bp_times.sh"     # tools/bp_times.sh -- routes + params, both zones
+TZ=America/Denver date -d @<epoch>                   # the one-off conversion
+```
+
+Never quote a device time to him without converting it, and never reason about daylight from one.
+
 ## Language and units — US
 
 The owner is in the United States (Utah). Everything written here is **US English**: comments,

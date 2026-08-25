@@ -166,7 +166,7 @@ The whole 7:21-7:34 PM window was likewise already answered -- 4n prescribes the
 
 1. **The restore reached the camera.** Every route from the 2026-08-22 write onward read
    `TsrVl1StatMsgTxt = LimitOutdated` on 100% of frames -- the regression 4n documented. Route
-   `3bd` (3:09 AM, 2026-08-25, after the restore) is the first to carry `LimitReliable` again, at
+   `3bd` (Mon 2026-08-24, 9:09 PM local / 03:09 UTC, after the restore) is the first to carry `LimitReliable` again, at
    7.2%, on the one route that read a sign. The status regression is reversed on the wire.
 2. **The GPS synthesis now transmits in volume and sustains it** -- 500-1400 frames of
    `0x463`/`0x464` per drive across four drives. Section 7 step 3 records that it had never
@@ -177,16 +177,36 @@ The whole 7:21-7:34 PM window was likewise already answered -- 4n prescribes the
 `3bd` one read (30 mph at 28 mph). Against a pre-restore baseline of 3 reads in 7 routes. The
 restore undid a regression; it did not buy detections.
 
-**NIGHT IS NOT SUFFICIENT EITHER, which narrows 4n's open confound.** 4n says the experiment that
-separates night-vs-nibble is to restore the nibble and drive the same loop AT NIGHT. Three of the
-post-restore drives WERE at night -- `3bb` 11:12 PM, `3bc` 1:20 AM, `3bd` 3:09 AM -- and two of them
-read nothing. So night alone does not bring the reads back, though none of these was the deliberate
-4j loop, so it is not the controlled repeat 4n asked for.
+**AND NIGHT LOOKS MORE LIKE THE FACTOR, NOT LESS. Corrected 2026-08-25 -- THE DEVICE RUNS IN UTC.**
+An earlier version of this entry called `3bb`/`3bc`/`3bd` night drives at "11:12 PM, 1:20 AM,
+3:09 AM" and concluded night was not sufficient. Those are UTC. Utah is UTC-6 in August, so they
+are **5:12 PM, 7:20 PM and 9:09 PM** -- two of them in broad daylight. Every timestamp in this
+investigation is UTC and sunset in Salt Lake City in late August is around 8 PM, so **converting is
+not cosmetic here: light level is the variable under test.**
 
-**Next step is 4n's, unchanged and now un-blocked: drive the 4j loop deliberately, at night, with
-the nibble restored.** `bluepilot/asbuilt/tsr_drive.py` scores it. Several detections means night
-was the factor; zero means neither variable was, and the detection-range defect in 4j stands as the
-whole explanation.
+    route   local (Utah)        light    reads
+    3a7     Fri 08-21 10:14 PM  dark     1     <- the 4j verified read
+    3b7     Mon 08-24 09:00 AM  day      0
+    3b8     Mon 08-24 01:22 PM  day      0
+    3b9     Mon 08-24 01:33 PM  day      0
+    3ba     Mon 08-24 01:34 PM  day      0
+    3bb     Mon 08-24 05:12 PM  day      0
+    3bc     Mon 08-24 07:20 PM  day      0
+    3bd     Mon 08-24 09:09 PM  dark     1
+
+**Both reads on record are after dark and every daylight drive read nothing.** That is the same
+direction 4n's confound points, now with a second night read behind it rather than one.
+
+It is still not the controlled repeat: none of these was the deliberate 4j loop, the roads differ,
+and `3b5` (Sun 8:21 PM, right at dusk) read nothing. So this is corroboration, not proof.
+
+**Next step is 4n's, unchanged: drive the 4j loop deliberately, AFTER DARK, with the nibble
+restored.** `bluepilot/asbuilt/tsr_drive.py` scores it. Several detections means night was the
+factor all along; zero means neither variable was, and the detection-range defect in 4j stands as
+the whole explanation.
+
+**And the as-built restore was at 1:21 PM Monday, not 7:21 PM** -- same six-hour error, and it is
+what made the FusionMode window at 1:33/1:34 PM look like an evening trip to the car.
 
 **Do not re-run the GPS experiment.** It is answered in both directions. The feature itself is
 fine and should stay on -- it fixes the real `U0253 Missing Message`, which CLAUDE.md is already

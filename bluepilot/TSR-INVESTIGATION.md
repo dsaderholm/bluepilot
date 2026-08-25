@@ -1252,12 +1252,25 @@ surprised you don't know."*
 **Two things survive from that work and the rest is retracted:**
 
 - **The restore reached the camera.** Every route from the 2026-08-22 write onward reads
-  `TsrVl1StatMsgTxt = LimitOutdated` on 100% of frames. Route `000003bd` (2026-08-25, 3:09 AM,
-  after the restore) is the first to carry `LimitReliable` again -- 7.2%, on the one route that read
+  `TsrVl1StatMsgTxt = LimitOutdated` on 100% of frames. Route `000003bd` (Mon 2026-08-24, 9:09 PM local /
+  03:09 UTC, after the restore) is the first to carry `LimitReliable` again -- 7.2%, on the one route that read
   a sign. **The status regression this section documented is reversed on the wire.**
-- **Night alone does not bring the reads back**, which narrows the confound below. Three
-  post-restore drives were at night (`3bb` 11:12 PM, `3bc` 1:20 AM, `3bd` 3:09 AM) and two read
-  nothing. None was the deliberate 4j loop, so the controlled repeat is still owed.
+- **THE DEVICE RUNS IN UTC, AND THAT MATTERS HERE MORE THAN ANYWHERE.** The first version of this
+  note called `3bb`/`3bc`/`3bd` night drives at "11:12 PM, 1:20 AM, 3:09 AM" and concluded night was
+  not sufficient. Those are UTC; Utah is UTC-6 in August, making them **5:12 PM, 7:20 PM and
+  9:09 PM**. Two were in daylight. **Every timestamp in this file is UTC and the whole confound in
+  this section is about light, so convert before reasoning about it.**
+
+      3a7  Fri 08-21 10:14 PM  dark  1 read      3bb  Mon 08-24 05:12 PM  day  0
+      3b7  Mon 08-24 09:00 AM  day   0           3bc  Mon 08-24 07:20 PM  day  0
+      3b8  Mon 08-24 01:22 PM  day   0           3bd  Mon 08-24 09:09 PM  dark 1 read
+      3b9  Mon 08-24 01:33 PM  day   0
+      3ba  Mon 08-24 01:34 PM  day   0
+
+  **Both reads on record are after dark; every daylight drive read nothing.** That points the same
+  way this section's confound does, with a second night read behind it now instead of one. Still not
+  the controlled repeat -- different roads, and `3b5` (Sun 8:21 PM, dusk) read nothing -- so it is
+  corroboration, not proof. The deliberate 4j loop after dark is still owed.
 
 The synthesized GPS is confirmed transmitting in volume (500-1400 frames of `0x463`/`0x464` per
 drive, four drives) and confirmed to change nothing here -- which is what section 7 step 3 says, and
