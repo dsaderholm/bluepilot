@@ -251,47 +251,48 @@ result file all vanished once during this work. Rebuild with the tar one-liner i
 
 ---
 
-## 6. A HOLD IS A MOOD, NOT A NUMBER FOR A PLACE. His reframe, 2026-08-25.
+## 6. WHAT A HOLD IS, SETTLED 2026-08-25. Do not redesign it again.
 
-  *"Holds for me are more what mood am I in? Am I in a hurry today? Do I want to be more relaxed
-  today?"*
+  *"I just want to be able to override the speed when I want and it to not be remembered. Memory
+  will be me editing OSM."*
 
-  *"I doubt I am going to use pinned holds at all. Those were for before I knew about how easy it
-  was to use OSM."*
+  *"If the speed limit changes from my hold a lot, going back to SLA would be nice, which I think we
+  do now."*
 
-**THIS CONTRADICTS THE DEFINITION CLAUDE.md HAS CARRIED SINCE 2026-08-03**, which is *"a hold is a
-statement about what speed he wants AGAINST A POSTED LIMIT"* -- i.e. per-limit. And pins made it
-per-PLACE. He is saying it is neither: it is **per-DRIVE**, a disposition that should apply
-everywhere until he changes his mind.
+  *"Like I don't want to go 10 over in my neighborhood because I was going 10 over on the freeway."*
 
-**AND THAT MISMATCH IS A LIVE BUG HE HAS BEEN ABSORBING.** `IcbmBaselineResetDelta` defaults to 10
-and discards the hold when the posted limit moves further than that. A 45 zone onto a 65 highway is
-20, so **a mood expressed as a hold evaporates at the first material zone change** and he has to
-re-press. That rule is correct for a per-limit hold and wrong for a per-drive one -- it is the
-"carrying a 55-zone baseline into a 35 zone" case, which only bites because the baseline is stored
-as an ABSOLUTE SPEED rather than as an offset.
+**That is the whole specification.** A hold is a TRANSIENT override for right now. It is not a
+statement about a place, not a mood carried across a drive, and not anything that persists. When
+the road should be a different speed, he fixes OSM -- the map is the memory, not the car.
 
-**HIS BASELINE HABIT IS ALREADY MODELLED, and it is the right shape:** `SpeedLimitOffsetType = 3`
-(bySpeed) with `SpeedLimitOffsetLow/Mid/High` = 2/5/10, from his own words on 2026-08-04 -- "2 over
-in a 20-25, 5 over from 30-60, 10 over at 65+". What is missing is a way to shift that for ONE
-DRIVE without going into settings.
+**IT ALREADY BEHAVES THIS WAY and he is right that it does.** `IcbmBaselineResetDelta` defaults to
+10 and `update_manual_override` clears the baseline when the SLA target moves further than that
+from the one he overrode, gated on `plan_source == speedLimitAssist`. Covered by
+`test_drive_scenario.py` step 6, "new zone, 55 -> 35". Nothing to build.
 
-**THE SHAPE THAT FOLLOWS: capture the DELTA, not the number.** When he presses +/- while SLA is
-assisting, `v_baseline - v_sla_target` is his mood for this drive. On a limit change, re-apply the
-delta to the new limit instead of discarding the hold. "In a hurry" then survives the on-ramp,
-which is exactly where it matters and exactly where it dies today.
+**His own example run through it:** freeway 65 with his `+10` high-band offset means SLA wanted 75,
+so `v_target_overridden` is 75. In the neighborhood SLA wants `25 + 2` = 27. `abs(27 - 75)` is 48,
+far past the delta of 10, so the hold clears and the 10-over does NOT follow him home. The threshold
+has ~4x margin on exactly the transition he is worried about.
 
-Open questions that are his, not mine:
-  - does the delta persist across an ignition cycle, or reset each drive? (Mood is per-drive, so
-    probably reset -- but that is a guess about him, not a fact.)
-  - percentage or fixed? His own offset table is banded rather than proportional, which argues for
-    applying the delta as-is and letting the bands do the shaping.
-  - does SET still zero it, as it zeroes a hold today?
+**TWO DESIGNS WERE PROPOSED AT HIM AND BOTH ARE DEAD. Do not revive either:**
 
-**AND PINNED HOLDS ARE PROBABLY DEAD.** Not deleted yet -- he said "I doubt", not "remove it" -- but
-do not build on them, do not spend effort on the suggestion noise in the entry below, and ask before
-investing anywhere near them. The map supplies per-place speeds now, which is the job pins were
-invented for.
+- **"A hold is a MOOD"** -- capture `v_baseline - v_sla_target` and RE-APPLY the delta on a zone
+  change instead of discarding it. Written up here on the strength of *"what mood am I in? am I in a
+  hurry today?"*, and it is the exact opposite of what he wants: he wants the big zone change to
+  hand the speed BACK to SLA. His answer was *"I don't know, man."*
+- **Pinned holds** -- *"I doubt I am going to use pinned holds at all. Those were for before I knew
+  about how easy it was to use OSM."* The map does per-place speeds now, which was the entire job
+  pins were invented for.
+
+**THE LESSON, because it cost several rounds:** he described a behaviour and it was answered with a
+taxonomy. He does not want a richer concept of a hold; he wants the simple one to work. Check
+whether the current code already does the thing before proposing a model for it.
+
+**PINNED HOLDS ARE NOW DEAD WEIGHT.** Not deleted -- he has never said "remove it" -- but do not
+build on them, do not tune their suggestion behaviour, and ask before spending anything near them.
+`observe_hold` is now gated on `IcbmPinnedHoldsEnabled` so switching them off actually stops the car
+writing anything down, which is what he asked for.
 
 ---
 

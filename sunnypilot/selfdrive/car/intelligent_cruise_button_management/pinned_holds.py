@@ -259,7 +259,18 @@ class PinnedHolds:
 
     Called once per hold, on creation -- not per frame, and never for a hold a pin created, which
     would count the suggestion as evidence for itself.
+
+    GATED ON `enabled`, ADDED 2026-08-25. `suggestion` and `toggle` both checked it and this did
+    not, so switching pinned holds OFF stopped them being OFFERED while the store went on growing.
+    That is the wrong meaning for the toggle: he said *"I just want to be able to override the speed
+    when I want and it to not be remembered. Memory will be me editing OSM."* Off must mean nothing
+    is written down.
+
+    It matters more since the same day's hold rewrite, which made every set speed a hold when SLA is
+    quiet -- so the store went from recording deliberate corrections to recording every engagement.
     """
+    if not self.enabled:
+      return 0
     if speed <= 0 or (abs(lat) < 1e-6 and abs(lon) < 1e-6):
       return 0
     if self.match(lat, lon):
