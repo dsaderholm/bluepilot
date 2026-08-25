@@ -621,7 +621,51 @@ Two things that decided the design:
 - **Tap moves the set speed 1 mph, press-and-hold moves it 5 mph** — the car's behavior, not
   openpilot's. Model set-speed movement as 5 mph jumps with stationary gaps, never a 1 mph ramp.
 
-## NO POSTED LIMIT MEANS NO HOLD. THE MAX SPEED IS THE WHOLE INTERFACE THERE.
+## WITHOUT SLA, EVERYTHING IS A HOLD. (This section's old rule is RETIRED -- 2026-08-25.)
+
+His spec, and it replaces three earlier versions of the same rule:
+
+  *"Without SLA, then everything should be a hold, and function identically to how stock Ford ACC
+  functions, just with the added benefit of holds being remembered."*
+
+**HE IS THE ONE WHO SPOTTED WHY THE OLD RULE EXPIRED**, and the history confirms it exactly:
+
+  *"no posted limit means no hold was probably an old rule back before we had the max and hold
+  speeds combined."*
+
+    2026-08-15  enforce_hold_policy lands      "+/- just moves the max speed"
+    2026-08-21  max_box_state lands            "the big number is what the car is being driven to"
+    2026-08-22  the HOLD badge is deleted      the box IS the hold
+
+For those six days a hold really was a SECOND number on screen in its own badge, so "do the max
+speed, not the little number" was a meaningful instruction. Once the badge went, "just the max
+speed" and "everything is a hold" describe the SAME SCREEN -- and all the rule still did was throw
+away persistence across a cruise cycle and the trace pinned holds learn from.
+
+**THE FUNCTION IS CALLED `enforce_hold_policy`, NOT `enforce_no_limit_no_hold`.** This file used
+the second name for days after the code stopped using it. It is now an inert hook that returns
+immediately, kept only so a future policy has an obvious home;
+`test_the_policy_hook_is_now_inert` fails if anything is smuggled back into it.
+
+**AND THE PIN GATE HAD TO NARROW IN THE SAME CHANGE, or pins die.** `apply_pinned_hold` deferred to
+ANY live hold. With a baseline now usually present, that meant a pin could never fire on the roads
+pins are FOR -- the 2026-08-16 failure ("no limit means no hold" killing pinned holds outright)
+arriving from the other direction, and mutation testing is what caught that it was untested.
+
+The gate now defers only to `BaselineSource.press`:
+
+    press                     he pressed +/- here. A decision. The pin stands aside.
+    fallbackIdle / Counter    the set speed drifted and a hold was INFERRED. Carried in from the
+                              last road, not about this place. The pin wins.
+    pinned                    one remembered number superseding another. The pin wins, as before.
+
+Route 00000379 is why those are genuinely different: a hold was up for 36.5% of that drive reading
+`fallbackIdle` while he pressed SET five times and nothing else. Route 0000033c is still honoured --
+his 75 there came from a real `+`, so it reads `press` and the pin still defers.
+
+**What follows is the SUPERSEDED rule, kept because its reports and measurements are still true.**
+
+## (SUPERSEDED) NO POSTED LIMIT MEANS NO HOLD. THE MAX SPEED IS THE WHOLE INTERFACE THERE.
 
 Asked for on 2026-08-15, twice, after two long highway drives:
 

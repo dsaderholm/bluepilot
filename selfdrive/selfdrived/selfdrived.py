@@ -572,12 +572,8 @@ class SelfdriveD(CruiseHelper):
     Caught on 2026-08-17 from his own device rather than from the code -- `IcbmHoldObservations` was
     6 KB and growing while `IcbmPinnedHolds` was `[]` and five days stale.
 
-    `no_limit_hold_speed` is that baseline as it stood one frame before being cleared, so this is
-    still the DELIBERATE press it always was, not the current cluster speed. Observing the cluster
-    instead would record every number he passes through and drown the signal that makes a suggestion
-    mean something.
     """
-    return int(self.icbm.v_baseline) or int(self.icbm.no_limit_hold_speed)
+    return int(self.icbm.v_baseline)
 
   def update_pinned_holds(self) -> int:
     """BluePilot: pinned speed for where the car is now, in display units, or 0.

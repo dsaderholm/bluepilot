@@ -418,7 +418,6 @@ class IntelligentCruiseButtonManagement:
     self.v_sla_target = 0
     # BluePilot: is Speed Limit Assist in ASSIST mode -- actually allowed to move the set speed --
     # as opposed to off, informational or warning? It is the discriminator for whether a hold may
-    # exist at all; see `enforce_hold_policy`.
     #
     # READ FROM THE PARAM, NOT FROM SLA'S MESSAGE, and that distinction is the whole bug of
     # 2026-08-20. This was `LP_SP.speedLimit.assist.enabled`, on the stated belief that it was
@@ -483,11 +482,6 @@ class IntelligentCruiseButtonManagement:
     self.gap_control_enabled = False
     self.gap_target = 0
 
-    # BluePilot: the speed enforce_hold_policy most recently took away. It WAS a deliberate
-    # hold a frame earlier -- captured by a real press -- so it is exactly the number pinned holds
-    # should learn from and offer to pin. Without it, clearing the baseline on no-limit roads also
-    # silently killed both halves of pinned holds on precisely the roads they exist for.
-    self.no_limit_hold_speed = 0
 
   def update_params(self) -> None:
     if self.frame % int(PARAMS_UPDATE_PERIOD / DT_CTRL) == 0:
@@ -1642,7 +1636,27 @@ class IntelligentCruiseButtonManagement:
     #
     # The edge is consumed above whether or not it applies, so a blocked pin does not retry every
     # frame inside the radius. Leaving and re-entering still re-arms it.
-    if self.v_baseline > 0 and self.baseline_source != BaselineSource.pinned:
+    # ...AND "LIVE" MEANS CHOSEN, NOT MERELY PRESENT. Narrowed 2026-08-25, when retiring
+    # `enforce_hold_policy` made a hold exist in every SLA mode: with the old gate a pin could then
+    # never fire on the roads pins are FOR, because there was always some baseline sitting there.
+    # That is the 2026-08-16 failure ("no limit means no hold" killing pinned holds outright)
+    # arriving from the other direction.
+    #
+    # `baseline_source` already separates the two, and route 00000379 is the evidence that they are
+    # genuinely different things: a hold was up for 36.5% of that drive reading `fallbackIdle` --
+    # the path that INFERS a press from set-speed movement -- while he pressed SET five times and
+    # nothing else. Nearly every hold on it was inferred rather than chosen.
+    #
+    #   press                      he pressed +/- at a number. A decision. A pin defers to it.
+    #   fallbackIdle / Counter     the set speed moved and we inferred a hold. Carried in from the
+    #                              last road, not a statement about this place. The pin wins.
+    #   pinned                     one remembered number superseding another. The pin wins, as before.
+    #
+    # Route 0000033c is still honoured, which is the point of using the source rather than "has he
+    # pressed since entering the radius": his 75 there came from a real `+`, so it reads `press`
+    # and the pin still stands aside. His words for the alternative -- *"my hold dropped by 5 mph,
+    # which was strange"* -- remain the thing this gate exists to prevent.
+    if self.v_baseline > 0 and self.baseline_source == BaselineSource.press:
       return False
 
     if self.override_state != OverrideState.manual:
@@ -1656,64 +1670,40 @@ class IntelligentCruiseButtonManagement:
     return True
 
   def enforce_hold_policy(self) -> None:
-    """BluePilot: A HOLD EXISTS ONLY WHEN SPEED LIMIT ASSIST IS IN ASSIST MODE.
+    """BluePilot: WITHOUT SPEED LIMIT ASSIST, EVERYTHING IS A HOLD. Rewritten 2026-08-25.
 
-    RESTATED 2026-08-19 and the discriminator MOVED, because the first version keyed on the wrong
-    thing. His spec, in his words:
+    His spec, and it is simpler than the three versions before it:
 
-      *"have it do max speed when SLA is off or on at an informational level, and do max speed and
-      hold to be together and the same when SLA is on assist mode"*
+      *"Without SLA, then everything should be a hold, and function identically to how stock Ford
+       ACC functions, just with the added benefit of holds being remembered."*
 
-    The 2026-08-15 version keyed on WHETHER A POSTED LIMIT WAS KNOWN THIS FRAME. That was a
-    misreading of the original request, which said *"there's no point in having the max speed be
-    stuck where I hit set when there is no SLA"* -- "no SLA" meaning the FEATURE is not assisting,
-    not "the map went quiet for a mile". Those two come apart exactly where he kept seeing it: on a
-    road with coverage gaps, in assist mode, the hold was being destroyed and rebuilt at every gap.
-    Reported 2026-08-19: *"it's still affecting the little ICBM speed above, which seems to
-    eventually reset back to the speed I pressed the set button at, which is dumb."*
+    THIS USED TO DESTROY THE BASELINE whenever SLA was not in assist mode, and he is the one who
+    spotted why that expired:
 
-    So:
+      *"no posted limit means no hold was probably an old rule back before we had the max and hold
+       speeds combined."*
 
-      SLA off / information / warning   NO HOLD, ever. `+/-` moves the MAX and nothing else, exactly
-                                        as it behaves with ICBM switched off. There is no second
-                                        number to learn and nothing to reset to.
-      SLA assist                        The hold lives, whether or not a limit is known right now.
-                                        It equals the max speed by construction -- `v_baseline =
-                                        v_cruise_cluster` at every capture site -- so "together and
-                                        the same" is what the existing capture already produces.
+    Confirmed from the history. The policy landed 2026-08-15 ("+/- just moves the max speed");
+    `max_box_state` landed 2026-08-21 ("the big number is what the car is being driven to"); the
+    HOLD badge was deleted 2026-08-22. For those six days a hold really was a SECOND number on the
+    screen with its own badge, so "do the max speed, not the little number" was a meaningful
+    instruction. Since the badge went, the big number IS the hold -- so his 2026-08-19 wording,
+    *"max speed and hold to be together and the same"*, now describes every mode rather than just
+    assist mode, and the distinction this rule enforced changes nothing he can SEE.
 
-    Keeping the hold alive through a coverage gap is the whole point: it is what lets a place with
-    no posted limit be PINNED and remembered, which he has called the common case. Under the old
-    rule the baseline was zeroed the moment the map went quiet, so the pin had nothing to observe
-    on precisely the roads pins are for.
+    What it still did was throw away the two things he wants kept: the number persisting across a
+    cruise cycle, and the pinned-holds path having a trace to learn from.
 
-    With no baseline, `apply_baseline` is the identity, ICBM aims at the planner's cruise target,
-    and the max speed behaves exactly as it does with ICBM switched off -- while curves, leads and
-    the hazard path all keep working, because none of them ever depended on a baseline existing.
+    WHAT IS LEFT IS STOCK ACC PLUS MEMORY. With SLA off or informational, `plan_source` is never
+    `speedLimitAssist`, so `apply_baseline` returns the baseline for the cruise component and caps
+    curves and leads with it -- the car is driven to his number and still slows for corners and
+    traffic. The addition is that the number is recorded, so `observe_hold` can suggest a pin.
 
-    PINNED HOLDS SURVIVE either way. A pin is an explicit gesture at an explicit place, and it is
-    the reason this is not simply a guard at the three capture sites: `apply_pinned_hold` runs
-    inside `update_manual_override` too, and a blanket rule there would silently delete the feature.
+    NOTHING REPLACES IT, deliberately: a hold is whatever the driver last asked for, in every SLA
+    mode. `apply_pinned_hold`'s gate was narrowed in the same change to keep pins working now that
+    a baseline is usually present -- see the note there.
     """
-    if not self.cruise_enabled:
-      self.no_limit_hold_speed = 0
-    if self.sla_assist_enabled:
-      # CLEAR IT, do not just decline to update it. A limit means v_baseline survives on its own, so
-      # a remembered no-limit hold has no job here -- and leaving it set makes `_pinnable_speed()`
-      # unable to return 0 for the rest of the drive, which wedges `_last_observed_hold` at a value
-      # from a different road. A genuine hold equal to that stale number is then never observed,
-      # which is the exact failure this whole change existed to fix.
-      self.no_limit_hold_speed = 0
-      return
-    if self.v_baseline <= 0:
-      return
-    if self.baseline_source == BaselineSource.pinned:
-      return
-    # Remember it before it goes. Pinned holds learn from holds the DRIVER creates, and on a road
-    # with no posted limit this is the only trace one ever leaves -- selfdrived's observe/suggest/pin
-    # path keys on v_baseline, which is about to be zero for the rest of the drive.
-    self.no_limit_hold_speed = self.v_baseline
-    self.clear_baseline()
+    return
 
   def clear_baseline(self) -> None:
     self.override_state = OverrideState.auto
