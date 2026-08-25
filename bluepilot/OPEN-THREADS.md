@@ -88,21 +88,6 @@ Likely one of the unpoliced bits (`AccDeny_B_Rq`, park brake, `CmbbDeny_B_Actl`)
 
 ---
 
-## 3. The model-stop path arms ~12 s late
-
-Route `3bb`: the gate was satisfied immediately at t+138.0 and did not arm until t+150, which is
-most of the braking distance. Cause is the arming accumulator zeroing on any single false frame
-while `dec.hasSlowDown` chatters across its threshold by design.
-
-**The obvious fix is wrong and was reverted** — a blanket gap tolerance took that file from 60
-passing to 11 failing, because `model_candidate` is an AND of the chattering flag and a physics
-term, so tolerating gaps arms on stops reachable by coasting.
-
-**Next step:** debounce the FLAG term alone, *before* it is ANDed with `a_required >= min_decel`.
-That is a change to what `model_candidate` is made of, not to how its result is accumulated.
-
----
-
 ## 4. TSR stays quarantined behind `SpeedLimitPolicy = 1`
 
 The camera does read signs, but on the whole recorded baseline it has **only ever returned 30 mph,

@@ -192,6 +192,45 @@ LEAD_LOST_S = 0.5          # candidate gone this long -> released
 # the ~155 m available. This is only here to reject a single-frame glitch.
 MODEL_STOP_PERSISTENCE_S = 0.3
 MODEL_STOP_RELEASE_S = 0.5
+# How long `model_slow_down` is HELD TRUE after it drops, for arming purposes only.
+#
+# THE PERSISTENCE ABOVE COULD NEVER BE REACHED, and this is why. Route 000003bb: the model had the
+# stop at t+138.0 with 138 m to run at 39 mph, which needs 1.10 m/s^2 against a 1.0 threshold -- so
+# the gate was satisfied on the first frame. The path did not arm until t+150. Twelve seconds, and
+# most of the braking distance; it ended in emergency braking and he reported it as "it started
+# slowing at the right time then seemed to stop slowing".
+#
+# `dec.hasSlowDown` is a threshold crossing on a filtered signal and chatters true/false frame to
+# frame while it sits near that threshold -- stop_override.py documents the same behaviour on the
+# same signal. `_model_stop_s` zeroes on ANY false frame, so 0.3 s of persistence never accrued.
+#
+# DEBOUNCE THE FLAG, NOT THE ACCUMULATED RESULT. The obvious fix -- tolerating a short gap before
+# zeroing `_model_stop_s` -- was tried on 2026-08-24 and reverted: it took that test file from 60
+# passing to 11 failing, including `test_a_stop_reachable_by_coasting_does_not_trigger`. The reason
+# is structural. `model_candidate` is an AND of the chattering FLAG and a PHYSICS term, so a gap
+# tolerance on the AND cannot tell "the flag glitched" from "this stop does not need braking yet",
+# and it arms on stops reachable by lifting off -- the exact thing that gate exists to prevent.
+#
+# Holding only the flag keeps every other term evaluated fresh on every frame. `a_required` is
+# recomputed from live speed and distance, so a stop that stops needing braking still disqualifies
+# itself immediately.
+#
+# IT MUST STAY BELOW MODEL_STOP_PERSISTENCE_S, and that is the whole sizing argument. A single
+# true frame holds the flag for exactly this long, so the accumulator can reach at most this much
+# before the hold expires -- and if that could reach the persistence threshold, ONE GLITCH FRAME
+# would arm the path, destroying the only thing persistence is there for. The first version of this
+# fix used 0.5 s against a 0.3 s persistence and did exactly that.
+#
+# 0.25 s bridges five consecutive false frames at DT_MDL 0.05, against a chatter measured as
+# alternating frame to frame, and still leaves a 0.05 s margin under the threshold.
+#
+# HELD AS AN INTEGER FRAME COUNT, NOT A FLOAT ACCUMULATOR, and that is not tidiness. The first
+# version decayed a float and tested it `> 0.`, so `0.25 - 5*0.05` left a residue of 1.4e-17 --
+# which is greater than zero. That bought a SIXTH accumulating frame, the accumulator reached 0.30,
+# and a single glitch frame armed the path after all. The margin was real and floating point ate
+# it. Frames are exact and the invariant is then arithmetic rather than approximate.
+MODEL_STOP_FLAG_HOLD_S = 0.25
+MODEL_STOP_FLAG_HOLD_FRAMES = int(round(MODEL_STOP_FLAG_HOLD_S / DT_MDL))
 # Horizon used to turn the model's desired acceleration into a set-speed target. Matches SCC-V's
 # _NO_OVERSHOOT_TIME_HORIZON so the two produce comparably paced requests.
 MODEL_STOP_HORIZON_S = 4.0
@@ -239,6 +278,7 @@ class UnconfirmedLeadDetector:
     self._lost_s = 0.0
     self._sweep_start_d_rel = 0.0
     self._model_stop_s = 0.0
+    self._model_flag_frames = 0
     self._model_stop_floor = float('inf')
     self._model_clear_s = 0.0
 
@@ -387,6 +427,7 @@ class UnconfirmedLeadDetector:
     self._reset_evidence()
     self._lost_s = 0.0
     self._model_stop_s = 0.0
+    self._model_flag_frames = 0
     self._model_clear_s = 0.0
     self._model_stop_floor = float('inf')
     self.trigger = Trigger.none
@@ -680,7 +721,14 @@ class UnconfirmedLeadDetector:
       a_required = float('inf')
       if math.isfinite(self.model_stop_distance) and self.model_stop_distance > MIN_STOP_DISTANCE_M:
         a_required = v_ego * v_ego / (2. * self.model_stop_distance)
-      model_candidate = (self.model_slow_down and not lead.status and
+      # Debounce the CHATTERING FLAG here, before the AND -- see MODEL_STOP_FLAG_HOLD_S. Every
+      # other term below stays frame-fresh, which is what keeps the coasting gate honest.
+      if self.model_slow_down:
+        self._model_flag_frames = MODEL_STOP_FLAG_HOLD_FRAMES
+      else:
+        self._model_flag_frames = max(0, self._model_flag_frames - 1)
+
+      model_candidate = (self._model_flag_frames > 0 and not lead.status and
                          a_required >= self.model_stop_min_decel and
                          v_ego >= MIN_V_EGO_MS and not CS.brakePressed)
       if model_candidate:

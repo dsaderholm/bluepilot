@@ -636,6 +636,83 @@ class TestModelStopWaitsUntilBrakingIsActuallyNeeded:
     assert det.state == State.active and det.trigger == Trigger.modelStop, (
       "did not act at 110 m, where coasting no longer arrives in time")
 
+  def test_a_CHATTERING_slow_down_flag_still_arms(self):
+    """Route 000003bb, and the reason he got emergency braking at a light.
+
+    The model had the stop at t+138.0 with 138 m to run at 39 mph -- 1.10 m/s^2 against a 1.0
+    threshold, so the gate passed on the first frame. It did not arm until t+150. Twelve seconds,
+    and most of the braking distance.
+
+    `dec.hasSlowDown` is a threshold crossing on a filtered signal and chatters true/false frame to
+    frame while it sits near that threshold. `_model_stop_s` zeroed on any false frame, so 0.3 s of
+    persistence never accrued and the path could not arm at all.
+    """
+    det, ev = model_stop_detector(), FakeEvents()
+    det.model_stop_min_decel = 1.0
+    run(det, ev, 60, status=False, v_ego=17.4, stop_dist=138.,
+        slow_down=lambda i: i % 2 == 0)
+    assert det.state == State.active and det.trigger == Trigger.modelStop, (
+      "a chattering slow-down flag never armed -- this is the 12 s delay that ended in "
+      "emergency braking")
+
+  def test_the_coasting_gate_SURVIVES_the_chatter(self):
+    """The guard the first attempt at this fix broke.
+
+    Tolerating a gap before zeroing `_model_stop_s` was tried and reverted: it took this file from
+    60 passing to 11 failing, because `model_candidate` ANDs the chattering flag with a PHYSICS
+    term and a gap tolerance on the result cannot tell "the flag glitched" from "this stop does not
+    need braking yet". Debouncing the flag alone keeps `a_required` frame-fresh, so this still
+    refuses.
+    """
+    det, ev = model_stop_detector(), FakeEvents()
+    det.model_stop_min_decel = 1.0
+    run(det, ev, 60, status=False, v_ego=15.2, stop_dist=193.,
+        slow_down=lambda i: i % 2 == 0)
+    assert det.state != State.active, (
+      "armed 193 m out at 34 mph, which needs 0.60 m/s^2 -- the debounce leaked into the "
+      "physics gate")
+
+  def test_a_SINGLE_glitch_frame_still_cannot_arm(self):
+    """The hold must stay below the persistence, or one true frame arms the path 0.3 s later and
+    the only thing MODEL_STOP_PERSISTENCE_S exists for is gone. The first version of this fix used
+    0.5 s against a 0.3 s persistence and did exactly that."""
+    det, ev = model_stop_detector(), FakeEvents()
+    det.model_stop_min_decel = 1.0
+    run(det, ev, 60, status=False, v_ego=17.4, stop_dist=138.,
+        slow_down=lambda i: i == 0)
+    # ASSERT ON ev.fired, NOT ON THE FINAL STATE. Arming is transient here: with the flag false for
+    # the remaining 59 frames the path would arm and then release, so `state` is back to something
+    # harmless by the end and a final-state assertion passes whether or not it ever fired. That is
+    # exactly how this test was vacuous when first written -- it went green against a mutant that
+    # let a single glitch arm. The alert fires at the trigger, so it records the event itself.
+    assert not ev.fired, "a one-frame glitch armed the model-stop path"
+
+  def test_the_flag_hold_is_cleared_when_the_path_releases(self):
+    """`_model_flag_frames` is part of the arming state and has to be reset with the rest of it.
+
+    Left populated, the NEXT approach starts with up to five frames of held flag already banked and
+    arms that much earlier than its own evidence justifies. Asserted directly on `_release` rather
+    than through a two-episode drive, because the invariant is "these reset together" and that is
+    what a future edit would break -- the same shape as the `cluster_moved_since_press` pairing.
+    """
+    det = model_stop_detector()
+    det._model_flag_frames = 5
+    det._model_stop_s = 0.2
+    det._release()
+    assert det._model_flag_frames == 0, "the held flag survived a release"
+    assert det._model_stop_s == 0.0, "the accumulator survived a release"
+
+  def test_the_hold_is_shorter_than_the_persistence(self):
+    """Stated as an invariant rather than left to the two numbers happening to be right, because
+    the failure it prevents is silent: raising the hold past the persistence re-enables
+    single-frame arming without breaking anything that looks related."""
+    from openpilot.sunnypilot.selfdrive.controls.lib.unconfirmed_lead import (
+      MODEL_STOP_FLAG_HOLD_S, MODEL_STOP_PERSISTENCE_S,
+    )
+    assert MODEL_STOP_FLAG_HOLD_S < MODEL_STOP_PERSISTENCE_S, (
+      f"hold {MODEL_STOP_FLAG_HOLD_S} >= persistence {MODEL_STOP_PERSISTENCE_S}: a single glitch "
+      f"frame can now arm the model-stop path")
+
   def test_an_unreadable_endpoint_keeps_the_old_behavior(self):
     """inf endpoint means no trajectory reading, not 'a very distant stop'. Treating it as failing
     the gate would silently disable the whole path on any frame the distance is missing."""
