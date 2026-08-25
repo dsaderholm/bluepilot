@@ -291,11 +291,38 @@ that is data rather than an opinion to argue with. What is honest to say: this i
 *specific, measurable* cause anyone has found, it has never been addressed, and it does not rule out
 there being planner problems on top of it.
 
-**What would settle it:** raise `MIN_GAS` toward Ford's measured floor and move
-`brake_actuate_target` down to where Ford actually reaches for the pedal, then one drive. Measure
-Ford's own `AccBrkPrchg_B_Rq`/`AccBrkDecel_B_Rq` assertion rate off an existing route FIRST to pick
-the threshold from his car rather than from a guess -- `bp_accdata_bands.py` already reads that
-message.
+**HIS FRAMING, AND IT IS THE RIGHT ONE:** *"So we basically need to train OP long on Ford ACC?"*
+
+No ML required, because **the labelled data already exists**. Every drive carries Ford's own ACCDATA
+on bus 2 -- a recording of Ford's controller responding to real traffic, frame by frame, alongside
+the full vehicle state. Nothing needs collecting; this is a fitting problem over a handful of
+constants, not a training problem.
+
+**TWO RULES FOR DOING IT, and the first one is what keeps the fork worth having:**
+
+1. **FIT ONLY WHERE BOTH ARE DOING THE SAME JOB** -- steady cruise and lead-following. Ford does not
+   stop for lights, does not slow for mapped corners, and does not know about the radar-blind lead
+   path. Fitting openpilot to Ford across those frames would delete the reasons openpilot is here at
+   all. Exclude any frame whose `plan_source` is sccMap / sccVision / modelStop / unconfirmedLead.
+2. **SCORE BRAKE-ACTUATION DISAGREEMENT, NOT ACCEL ERROR.** What he feels is the pedal coming on
+   where Ford would have coasted -- brake lamps, a grabby feel -- not a small difference in
+   commanded m/s^2. Mean accel error would score a controller that brakes constantly but gently as
+   excellent.
+
+**STEP ONE IS ONE NUMBER, AND THE TOOL IS WRITTEN:** `tools/bp_ford_brake_curve.py`. For every frame
+where Ford's ACC was actually running it buckets Ford's commanded accel against whether Ford
+asserted its own brake bits (`AccBrkPrchg_B_Rq` / `AccBrkDecel_B_Rq`), and prints the crossover --
+the deceleration at which Ford starts using the pedal. Ours is `-0.14`. It also counts how often
+Ford's propulsion request sits below our `MIN_GAS` of `-0.5`, which is engine braking openpilot
+cannot ask for at all.
+
+**Read the histogram rather than the crossover alone.** A sharp step means a threshold is the right
+model and gives its value. A gradual ramp means Ford is BLENDING, and a single threshold is the
+wrong shape -- which is worth knowing before anyone tunes a constant.
+
+**NOT RUN YET: the laptop and the comma are on different networks** (laptop `10.10.51.199/22`, the
+device last seen on `10.0.1.x`), so it is written and staged but unmeasured. It needs no drive --
+any existing route answers it.
 
 ---
 
