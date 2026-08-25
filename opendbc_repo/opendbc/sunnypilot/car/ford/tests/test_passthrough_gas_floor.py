@@ -21,7 +21,7 @@ import pathlib
 import re
 
 from opendbc.sunnypilot.car.ford.fordcan_ext import (
-  _PANDA_GAS_INACTIVE, _PANDA_MARGIN, _PANDA_GAS_MIN, _PANDA_GAS_MIN_PASSTHROUGH,
+  _PANDA_GAS_INACTIVE, _PANDA_GAS_MAX, _PANDA_MARGIN, _PANDA_GAS_MIN, _PANDA_GAS_MIN_PASSTHROUGH,
   create_acc_msg, create_acc_msg_passthrough, passthrough_gas_floor,
 )
 from opendbc.sunnypilot.car.ford.values_ext import FordSafetyFlagsSP
@@ -105,6 +105,25 @@ def test_the_flag_bit_does_not_collide_with_the_pinion_geometry_index():
   assert FordSafetyFlagsSP.PASSTHROUGH_LONG & FordSafetyFlagsSP.STEER_ANGLE_CURVATURE == 0
 
 
+def test_the_geometry_table_cannot_GROW_into_the_passthrough_bit():
+  """Bit 5 is the first bit above the 4-bit pinion geometry field, and nothing else guards it.
+
+  `_initialize_ford` packs the index as `geometry_index << 1`, so a table that ever reaches 16
+  entries writes 32 -- which IS `PASSTHROUGH_LONG`. That would widen panda's gas band on a car
+  that is not running the passthrough at all, from an edit that looks like adding a Ford platform
+  and has nothing to do with this feature. There are 12 entries today, so 3 platforms of headroom.
+  """
+  from opendbc.sunnypilot.car.ford.values_ext import (
+    FORD_PINION_GEOMETRY_INDEX, FORD_PINION_GEOMETRY_SHIFT,
+  )
+
+  worst = max(FORD_PINION_GEOMETRY_INDEX.values()) << FORD_PINION_GEOMETRY_SHIFT
+  assert worst & FordSafetyFlagsSP.PASSTHROUGH_LONG == 0, (
+    f"the geometry index now reaches {worst:#x}, which overlaps PASSTHROUGH_LONG "
+    f"({FordSafetyFlagsSP.PASSTHROUGH_LONG:#x}) -- move the flag to a higher bit in BOTH "
+    f"values_ext.py and safety/modes/ford.h")
+
+
 def test_the_floor_is_read_from_the_flag_panda_was_actually_given():
   assert passthrough_gas_floor(_CP_SP(FordSafetyFlagsSP.PASSTHROUGH_LONG)) == _WIDE
   assert passthrough_gas_floor(_CP_SP(0)) == _PANDA_GAS_MIN
@@ -176,3 +195,26 @@ def test_OPENPILOTS_OWN_command_stays_conservative_whatever_panda_now_allows():
                    brake_actuate=False, precharge_actuate=False, v_ego_kph=50.0)
     sent = packer.calls[0][2]["AccPrpl_A_Rq"]
     assert sent == _PANDA_GAS_MIN + _PANDA_MARGIN, f"openpilot authored {sent}; it must stay at its own floor"
+
+
+def test_OPENPILOTS_OWN_PREDICTED_accel_also_stays_inside_the_stock_band():
+  """The sibling field of the one above, and the one the review caught going out raw.
+
+  Panda checks `min_gas` against BOTH `AccPrpl_A_Rq` and `AccPrpl_A_Pred`, so widening the floor
+  enlarged what this field could carry. It is the -5.0 sentinel in practice, which is precisely
+  why it needs a test rather than a reader's trust in a constant three files away.
+  """
+  for pred in (-0.51, -1.03, -2.710, 2.5):
+    packer = _Packer()
+    create_acc_msg(packer, _CAN, True, gas=0.0, accel=-0.5, accel_pred=pred, stopping=False,
+                   brake_actuate=False, precharge_actuate=False, v_ego_kph=50.0)
+    sent = packer.calls[0][2]["AccPrpl_A_Pred"]
+    assert _PANDA_GAS_MIN <= sent <= _PANDA_GAS_MAX, f"authored {sent}, outside the stock band"
+
+
+def test_the_inactive_sentinel_survives_the_pred_clamp():
+  """-5.0 means "no prediction". Dragging it into the band would invent a propulsion hint."""
+  packer = _Packer()
+  create_acc_msg(packer, _CAN, True, gas=0.0, accel=-0.5, accel_pred=_PANDA_GAS_INACTIVE,
+                 stopping=False, brake_actuate=False, precharge_actuate=False, v_ego_kph=50.0)
+  assert packer.calls[0][2]["AccPrpl_A_Pred"] == _PANDA_GAS_INACTIVE

@@ -99,7 +99,10 @@ def run(route):
             elif c.src in (0, 128):
               ours = f
           elif c.address == ACCDATA_3 and c.src == 2 and len(c.dat) == 8:
-            msgtxt = be(c.dat, 26, 4)
+            # AccMsgTxt_D2_Rq is 31|4 in the DBC. This read 26|4 on the first run and every
+            # episode came back "ACC_Cancelled" -- a column that looked authoritative and
+            # was decoding four unrelated bits. bp_cancel_reason.py had it right all along.
+            msgtxt = be(c.dat, 31, 4)
           elif c.address == ENGBRAKE and c.src == 0 and len(c.dat) == 8:
             stopmde = be(c.dat, 39, 2)
 
@@ -122,6 +125,11 @@ def run(route):
                "gapmax": 0.0, "standstill": 0, "brake_p": 0, "gas_p": 0, "vmin": 99,
                "prchg": 0, "decel": 0, "resum": 0, "camcancel": 0}
       if is_ov and cur is not None:
+        # COUNT carState ONLY. Incrementing on every message made a 9.00 s episode report 17,358
+        # "frames" -- 1,929 Hz -- and every per-episode tally was really "messages while in this
+        # state". Ratios survived that; the absolute numbers did not, and they printed as frames.
+        if w != "carState":
+          continue
         cur["n"] += 1
         cur["vmin"] = min(cur["vmin"], v_ego)
         if lead_d is not None and lead_d < 60: cur["lead"] += 1
