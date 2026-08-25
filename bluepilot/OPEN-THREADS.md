@@ -56,18 +56,45 @@ back one frame in five does not change how the car is moving, so it cannot reset
 fed by motion. To reset that, the car would have to genuinely stop decelerating, which un-does the
 stop. Do not build interleaving without first showing the camera counts frames rather than motion.
 
-**THE PROPOSAL THAT FITS EVERY MEASUREMENT: end the ACC session cleanly, then stop.** The camera
-latches only when it cancels a session it believes is ACTIVE and misbehaving. So rather than
-contradict a live session, drop out of Ford ACC deliberately at the arming moment, author the
-stop, hold, and resume afterwards.
+**AND "END THE ACC SESSION CLEANLY, THEN STOP" IS DEAD TOO. Checked 2026-08-25, before building
+it.** It was proposed here the night before as the one design that fits every measurement, on the
+grounds that the camera only latches when it cancels a session it believes is ACTIVE. That part is
+probably still true. It does not matter, because openpilot cannot brake with the cruise off:
 
-The evidence that this is tolerated is the strongest kind available -- **it is what he already
-does.** He disengages before every stop he takes himself, measured twice, across thousands of
-stops, and the camera has never once latched from it. The cost is honest and small: Ford ACC is
-absent for the ~6 s of the stop, instead of absent for the rest of the drive.
+    ford.h:547            pcm_cruise_check(cruise_engaged)   <- from CcStat_D_Actl, the PCM's own
+    longitudinal.h:3      get_longitudinal_allowed() = controls_allowed && !gas_pressed_prev
+    longitudinal.h:9      accel_valid = get_longitudinal_allowed() && within-band
+                          ...else the ONLY legal value is limits.inactive_accel
 
-**Next step:** confirm from a route that a clean openpilot-initiated disengage is followed by
-`ford` authority returning on re-engagement with no cancel run. Then build it.
+**Openpilot's authority to brake this car is borrowed from Ford's cruise being engaged.**
+Disengaging to avoid the cancel removes exactly the permission the stop needs, and panda drops
+every braking frame. That is also why he takes those stops with his foot: there is no alternative
+available to him either.
+
+### SO EVERY AVENUE IS NOW CLOSED, AND THAT IS THE FINDING
+
+    continuous override      kills Ford ACC for the drive        measured, 3/3 beyond ~2 s
+    interleaving             camera watches MOTION, not frames   handing back 1-in-5 changes nothing
+    AccVeh_V_Trg             not sent to the brake controller    DBC receiver list
+    disengage, then stop     no panda longitudinal authority     controls_allowed is Ford's
+
+**Passthrough and automatic stopping look MUTUALLY EXCLUSIVE on this car.** Not "hard" -- the four
+mechanisms above are independent and each is sufficient on its own to kill the feature.
+
+**THE ONE CONFIGURATION NEVER TRIED IS PURE OP LONG WITH THE PASSTHROUGH OFF.** He has confirmed
+openpilot stops this car -- *"when I use OP long fully, it does come to a complete stop"* -- and in
+that mode cruise stays engaged (so `controls_allowed` holds) while the camera is out of the control
+loop entirely rather than being interrupted mid-command. Every cancel on record came from a drive
+with the passthrough ON. So the cancel may be a passthrough phenomenon rather than an op-long one,
+and nobody has separated the two.
+
+That is a real experiment and it is one drive: op long ON, `StockAccPassthrough` OFF, approach an
+empty light. But it buys stops by giving up the thing the passthrough exists for, and he has been
+plain that op long on this car is *"absolute trash"*, so it is HIS trade to make, not a default to
+move. Do not switch it for him.
+
+**Next step:** ask him whether he wants that drive, and do not build anything else here until the
+answer is known -- the four rows above say there is nothing left to build on the passthrough side.
 
 **INSTRUMENT CAVEATS on the table above, so nobody builds on the wrong column.** The ACCDATA_3
 message-text column reads identically on clean and cancelled episodes, so those bits are decoded
