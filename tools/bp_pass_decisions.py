@@ -139,7 +139,7 @@ def main() -> int:
                 deficits.append(last["deficit"])
                 if last["blockedBy"] == "nothingSlower":
                   deficits_nothing_slower.append(
-                    (last["deficit"], last["need"], last["patience"]))
+                    (last["deficit"], last["need"], last["patience"], last["confirm"]))
             if last["agreed"]:
               out["PA already agreed"] += 1
             elif last["blockedBy"] == BLOCKED_NO_LANE:
@@ -202,6 +202,12 @@ def main() -> int:
         # threshold is this times patienceScale, computed here rather than assumed from the name.
         "need": float(p_a.minDeficitActive),
         "patience": float(p_a.patienceScale),
+        # HOW LONG THE LEAD HAS BEEN CONTINUOUSLY CONFIRMED. `nothingSlower` covers TWO causes --
+        # "no vehicle slow enough" and "slow enough but not yet confirmed" -- and passing_assist
+        # line 2984 says so: before the confirmation completes, blocked_by reads nothingSlower.
+        # Without this the tool reported a pass with a 14 mph deficit against a 5.2 threshold as a
+        # threshold miss, which read as a contradiction and is really a TIMING one.
+        "confirm": float(p_a.confirmSeconds),
       }
 
   n = out["passes"]
@@ -232,15 +238,21 @@ def main() -> int:
       ns = sorted(deficits_nothing_slower)   # tuples: (deficit, needed, patience)
       print(f"    ...the {len(ns)} passes PA called 'nothingSlower', "
             f"as deficit vs what was NEEDED:")
-      for dfc, need, pat in ns:
+      for dfc, need, pat, conf in ns:
         eff = need * pat
-        print(f"      deficit {dfc:5.1f}   setting {need:5.1f}   patience x{pat:.2f}   "
-              f"EFFECTIVE {eff:5.1f}   short by {eff - dfc:5.1f}")
+        # A NEGATIVE shortfall means the lead WAS slow enough, so the label is about CONFIRMATION,
+        # not the threshold -- a different setting entirely and not one MinDeficit can fix.
+        why = "NOT CONFIRMED YET" if dfc >= eff else "below threshold"
+        print(f"      deficit {dfc:5.1f}   effective {eff:5.1f}   confirmed {conf:4.1f}s   -> {why}")
       print()
       print("      WHAT A SETTING WOULD HAVE CAUGHT (effective = setting x the patience in force):")
+      thresh_misses = [t for t in ns if t[0] < t[1] * t[2]]
+      if not thresh_misses:
+        print("      NONE of these were threshold misses -- every one had a big enough deficit and")
+        print("      was waiting on CONFIRMATION. MinDeficit cannot fix any of them.")
       for cand in (6.0, 5.0, 4.0, 3.0):
-        got = sum(1 for dfc, _, pat in ns if dfc >= cand * pat)
-        got_nopat = sum(1 for dfc, _, _ in ns if dfc >= cand)
+        got = sum(1 for dfc, _, pat, _ in ns if dfc >= cand * pat)
+        got_nopat = sum(1 for dfc, _, _, _ in ns if dfc >= cand)
         print(f"        MinDeficit {cand:.0f}:  {got} of {len(ns)} with patience as it was,   "
               f"{got_nopat} of {len(ns)} with patience off (set to 10)")
     print("    PassingAssistMinDeficit is HIS setting, in mph. A pass he makes below it is a pass")
