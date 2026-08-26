@@ -29,7 +29,55 @@ Each is a symptom with a suspected mechanism. None of them is vague.
 |---|---|---|
 | *"I've never seen it coast"* | brakes asserted at −0.14 m/s²; propulsion clipped at −0.5 | **measured and FIXED** |
 | *"it tricks my transmission... third gear on the freeway"* | two candidates | one **FIXED**, one **REFUTED** — Finding 2 |
+| *"when it resumes from stop it stays in first gear for a really long time"* | **added 2026-08-25.** Same field, harder case — a transmission told the car wants 90 mph *from rest* | unmeasured |
+
+**EVERY TRANSMISSION COMPLAINT IS FROM WHEN HE TESTED FULL OP LONG, MONTHS AGO. He had to say so
+twice.** *"The first gear stuff is with OP long! We're talking about OP long here, not Ford ACC!"*
+then *"I'm telling you about my complaints from months ago when I tested it! I love Ford ACC!"*
+
+This session read `openpilotLongitudinalControl = False` on the recent routes and, instead of going
+to find the op-long drives, started measuring FORD ACC launches -- the wrong regime entirely, on
+data that cannot speak to the complaint. **He drives stock Ford ACC + ICBM today and is happy with
+it. Nothing he reports about the transmission is about that configuration.**
+
+The practical consequence, and the third correction in the same exchange. `carParams` says
+`openpilotLongitudinalControl = True` on every route from `3a8` to `3bf`, and that was reported to
+him as "every route on disk ran with op long on". **He corrected it again: *"No, I haven't driven
+with it at all recently."* He is right and the flag is misleading.**
+
+Those routes are the PASSTHROUGH era. Op long there was PERMISSION ONLY -- it opened the relay and
+put ACCDATA in panda's TX list -- **while Ford authored the numbers**. This file's own postmortem
+says exactly that: *"Op long is used purely as PERMISSION... while the numbers stay Ford's."* So
+`openpilotLongitudinalControl` being True is not the same claim as "openpilot drove", and reading it
+that way is the init-time-flag blind spot recorded for `_op_long_drives()`, arriving a second time.
+
+**SO THERE IS NO DRIVE ON DISK WHERE OPENPILOT ACTUALLY CONTROLLED LONGITUDINAL.** The only frames
+where it authored anything are the `fallback` / `inert` / `opStop` windows, which are a degraded
+passthrough rather than op long driving the car.
+
+### WHICH MAKES THIS BRANCH CHICKEN-AND-EGG, AND THAT IS WORTH STATING PLAINLY
+
+He will not drive op long because it is bad. The evidence that it is fixed can only come from him
+driving op long. **So no fix here can be justified by symptom correlation, and none should be.**
+
+Every fix on this branch therefore has to stand on its own, by comparison against FORD'S OWN FRAMES
+on the same bus -- which is exactly what the two landed changes do:
+
+  - `AccVeh_V_Trg` carried a constant 145 kph where Ford's tracked the car (+4.3 kph vs +32.8).
+    That is wrong by inspection against the manufacturer's own behaviour, whatever symptom it does
+    or does not explain.
+  - the mutual exclusion made Ford's measured blend structurally impossible.
+
+**Do not write "this fixes his third-gear complaint" anywhere.** It is a candidate. The drive that
+would confirm it is a drive he has no reason to take yet, and pretending otherwise is how a
+plausible story becomes a stated fact -- which this file has recorded happening three times already.
 | *"OpenPilot's ACC is ass... everyone in the community knows it"* | these constants live in `opendbc/car/ford/`, shared by every Ford | consistent, unproven |
+
+**AND "EVERYONE IN THE COMMUNITY KNOWS IT" MEANS OP LONG IS BAD ON FORD, GENERALLY.** It was
+stretched here into "the community knows about the `AccVeh_V_Trg` constant", and he corrected it:
+*"I doubt everyone in the community knows that, lol."* Nobody has remarked on that field as far as
+anything here shows. Quote what he actually said; a general complaint is not corroboration for a
+specific mechanism.
 
 **The community-wide part matters.** `brake_actuate_target` and `CarControllerParams.MIN_GAS` are
 not specific to his retrofit. If every Ford behaves this way, a shared constant is exactly the shape
@@ -117,7 +165,7 @@ the now-removed import.
 
 **IT IS UPSTREAM'S BUG, NOT THIS FORK'S.** `upstream/bp-7.0` carries the same line and it arrived in
 `d3434d4c2c` "sync long logic with bp-6.0-wip". So it plausibly affects every Ford running BluePilot
-op long, which is consistent with *"everyone in the community knows it"* -- fixed here anyway,
+op long -- fixed here anyway,
 because it changes what HIS car does, and it should be reported upstream.
 
 **NOT PROVEN to be the downshift cause.** It is one measured discrepancy in a field the transmission
