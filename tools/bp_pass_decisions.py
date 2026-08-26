@@ -195,11 +195,12 @@ def main() -> int:
         # physical range needs BOTH ends stated, every time, and it is always the end nobody thought
         # about that admits the garbage.
         "deficit": (float(p_a.speedDeficit) * 2.23694) if bool(p_a.hasLead) else None,
-        # THE EFFECTIVE THRESHOLD, which is NOT his setting. min_deficit_active = min_deficit *
-        # patience_scale, and patience runs to 1.8x by default when he is at the posted limit. So
-        # the number his pass was actually judged against is this one, and reporting his raw
-        # setting instead would send him to change the wrong dial by the wrong amount.
-        "need": float(p_a.minDeficitActive) * 2.23694,
+        # ALREADY IN MPH -- custom.capnp says so, and multiplying it again reported his 8 mph
+        # setting as 17.9. Nor is it the "active" value its name suggests: it publishes the SETTING,
+        # deliberately, because the summary uses it to recommend which number he should change and
+        # scaling it would recommend one derived from a momentary road condition. The effective
+        # threshold is this times patienceScale, computed here rather than assumed from the name.
+        "need": float(p_a.minDeficitActive),
         "patience": float(p_a.patienceScale),
       }
 
@@ -232,9 +233,16 @@ def main() -> int:
       print(f"    ...the {len(ns)} passes PA called 'nothingSlower', "
             f"as deficit vs what was NEEDED:")
       for dfc, need, pat in ns:
-        gap = need - dfc
-        print(f"      deficit {dfc:5.1f}   needed {need:5.1f}   "
-              f"patience x{pat:.2f}   short by {gap:5.1f}")
+        eff = need * pat
+        print(f"      deficit {dfc:5.1f}   setting {need:5.1f}   patience x{pat:.2f}   "
+              f"EFFECTIVE {eff:5.1f}   short by {eff - dfc:5.1f}")
+      print()
+      print("      WHAT A SETTING WOULD HAVE CAUGHT (effective = setting x the patience in force):")
+      for cand in (6.0, 5.0, 4.0, 3.0):
+        got = sum(1 for dfc, _, pat in ns if dfc >= cand * pat)
+        got_nopat = sum(1 for dfc, _, _ in ns if dfc >= cand)
+        print(f"        MinDeficit {cand:.0f}:  {got} of {len(ns)} with patience as it was,   "
+              f"{got_nopat} of {len(ns)} with patience off (set to 10)")
     print("    PassingAssistMinDeficit is HIS setting, in mph. A pass he makes below it is a pass")
     print("    the feature was running for, saw, and declined -- which is a calibration question")
     print("    rather than a sensing one, and the only blocker here he can move without code.")
