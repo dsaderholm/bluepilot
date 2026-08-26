@@ -6349,3 +6349,66 @@ lifting off, which is the failure that gate exists to prevent.
 
 Any real fix has to debounce the FLAG term alone, before it is ANDed with the physics term. That is
 a change to what `model_candidate` is made of, not to how its result is accumulated.
+
+## 2026-08-26: FOUR BACK-OUTS, AND THE TERM THAT DECIDES THEM WAS NEVER ON THE WIRE
+
+`maneuverAborts` is the number the whole dry run exists to produce -- custom.capnp calls it *"a
+blinker shown to traffic behind for a maneuver that did not happen... anything else names an
+unstable gate that no amount of reading the code would have found."* Routes 000003c1-c9,
+`tools/bp_abort_why.py`, 159,000 maneuver frames:
+
+    to        side   held  why it left        refused by         lead
+    waiting   left   1.1s  reason went away   noLaneAvailable    51 mph slower at 35 m
+    waiting   left   0.6s  reason went away   none               51 mph slower at 61 m
+    waiting   left   1.2s  reason went away   none               21 mph slower at 56 m
+    idle      left   0.6s  reason went away   notEngaged         29 mph slower at 44 m
+
+**NONE REACHED `changing`.** That is the committed phase -- 469 frames of it on these drives -- and
+every back-out happened in `signaling`, under 1.3 s, with the lead still sitting there. So nothing
+would have moved the car even once this actuates; what it costs is a blinker.
+
+**AND `notEngaged` IS THE 40% FINDING ARRIVING FROM A NEW DIRECTION.** One of the four is him
+switching cruise off mid-sequence, on a lead 29 mph slower at 44 m -- exactly *"I was behind some
+very slow drivers that I wanted to get around fast, so cruise was off"*. It is not a gate defect.
+
+### THE TOOL READ THE WRONG FRAME, THEN THE WRONG FIELD, AND BOTH ARE THE SAME MISTAKE
+
+**FIRST: it read blockedBy from the frame BEFORE the transition**, reasoning that the maneuver is
+torn down by the next one. Backwards -- blockedBy is the DETECTOR's verdict, recomputed every frame
+whatever the maneuver is doing.
+
+**SECOND, AND THIS IS THE ONE:** `blocked_by = Blocked.none` means **A SUGGESTION IS BEING MADE**
+(passing_assist.py:3610, :3706). So throughout `signaling` it reads `none` by construction, and on
+a back-out it is the one value that CANNOT name a cause. It printed `none` on two of four, and
+"nothing was blocking yet it backed out" read like a finding.
+
+**THIRD: `suggestion` is not `wanted` either.** passing_maneuver leaves `signaling` on
+`wanted == Side.none or wanted != self.side`, and `wanted` is `wanted_side`:
+
+    wanted      a slow car is spotted and a lane exists that side. GEOMETRY ALONE. Lights the blinker.
+    suggestion  the same, AND every safety gate passes, AND the confirmation has completed.
+
+**`wanted_side` HAD NEVER BEEN PUBLISHED.** Now `wantedSide @109`. Third instance in this fork of a
+decision logged without its input, after `hasSlowDown` and the SCC-Map veto terms, and the rule was
+already written down: *when a rule cannot be explained from a drive, add the log line rather than a
+third inference.* It took two inferences to remember it.
+
+**The test drives `wanted` and `suggestion` APART rather than checking something was assigned.** A
+suggestion-fed field is non-none on most of the same frames and reads entirely plausibly in a log,
+while being silent on exactly the frames the aborts live on. Mutation-tested against that
+substitution; two of its three cases fail on it.
+
+**And the tool refuses to guess on old routes.** Every route recorded before this reads `wantedSide`
+as `none` on every frame, which is indistinguishable from the real "it evaporated" answer -- so it
+prints `wantedSide NOT LOGGED` instead of a wrong attribution. **A field added to explain a defect
+makes every earlier route look like the defect's worst case.**
+
+### WHAT THE NEXT DRIVE ANSWERS, AND WHY IT MATTERS MORE LATER THAN NOW
+
+`wanted_side` is DEBOUNCED (`WANTED_RISE_S` / `WANTED_FALL_S`), and that debounce was bought by
+**126 aborts in 37 minutes**. So a back-out that lands on `wanted went to none` means the hold is
+still not long enough -- measurable now instead of arguable. Four in nine drives against 126 in 37
+minutes is the debounce having done nearly all of its job.
+
+**Not a trip risk and not urgent.** It commands nothing today. It is the READINESS metric for when
+the rear radar lands, and 4-across-nine-drives is worth understanding rather than averaging away.
