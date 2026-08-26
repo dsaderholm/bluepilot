@@ -45,6 +45,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 
 REALDATA = "/data/media/0/realdata"
 
+# Mirrored from passing_maneuver so the two abort paths can be told apart. A sequence that held this
+# long left because a gate stayed unhappy; anything shorter left because the SUGGESTION dropped, and
+# those want the blockedBy from different frames.
+SIGNAL_WINDOW_S = 5.0
+
 # The phases a maneuver may be in when it backs out. `changing` is COMMITTED -- per custom.capnp the
 # gates can no longer call it off there, only the driver -- so an abort out of `changing` is a much
 # louder finding than one out of `signaling`.
@@ -119,10 +124,22 @@ def main() -> int:
       phases_seen[phase] += 1
       if prev is not None and prev["phase"] in FORWARD and phase != prev["phase"]:
         if phase not in FORWARD[prev["phase"]]:
-          # Backed out. The reason is read from the PREVIOUS frame -- by this one the maneuver has
-          # already been torn down and blockedBy describes the idle state, not the refusal.
-          events.append({**prev, "went_to": phase})
-          by_reason[prev["blocked"]] += 1
+          # BOTH FRAMES, and the first version got this backwards. It read only the PREVIOUS
+          # frame on the reasoning that the maneuver is torn down by the next one -- but blockedBy
+          # is the DETECTOR's verdict, recomputed every frame whatever the maneuver is doing. While
+          # signaling it reads `none` because a suggestion is live, so the before-frame can only
+          # ever say "nothing was wrong", which is exactly what it said on 3 of 4 events.
+          #
+          # passing_maneuver has two ways out of `signaling`, and they want different frames:
+          #   the window expired      a gate stayed unhappy for SIGNAL_WINDOW_S -- BEFORE is right
+          #   the reason went away    `wanted` became none this frame -- AFTER is the answer
+          # Held time separates them, so both are printed and the path is named.
+          window = prev["secs"] >= SIGNAL_WINDOW_S - 0.2
+          reason = prev["blocked"] if window else cur["blocked"]
+          events.append({**prev, "went_to": phase, "after": cur["blocked"],
+                         "path": "window expired" if window else "reason went away",
+                         "reason": reason})
+          by_reason[reason] += 1
       prev = cur
 
   print(f"routes {args.route}")
@@ -134,11 +151,10 @@ def main() -> int:
     return 0
 
   print(f"  {len(events)} BACK-OUT(S) -- a blinker shown for a maneuver that did not happen\n")
-  print(f"  {'from':<11} {'to':<11} {'side':<7} {'held':>6}  {'refused by':<20} {'lead'}")
+  print(f"  {'to':<10} {'held':>6}  {'why it left':<16} {'refused by':<20} {'lead'}")
   for e in events:
     lead = (f"{e['deficit']:.0f} mph slower at {e['d_rel']:.0f} m" if e["lead"] else "LEAD GONE")
-    print(f"  {e['phase']:<11} {e['went_to']:<11} {e['side']:<7} {e['secs']:5.1f}s  "
-          f"{e['blocked']:<20} {lead}")
+    print(f"  {e['went_to']:<10} {e['secs']:5.1f}s  {e['path']:<16} {e['reason']:<20} {lead}")
   print()
   print("  by gate:")
   for k, v in by_reason.most_common():
