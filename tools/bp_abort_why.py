@@ -70,7 +70,8 @@ def main() -> int:
 
   from cereal import custom
   f = set(custom.LongitudinalPlanSP.PassingAssist.schema.fieldnames)
-  for name in ("maneuver", "maneuverSeconds", "maneuverSide", "blockedBy", "maneuverAborts"):
+  for name in ("maneuver", "maneuverSeconds", "maneuverSide", "blockedBy", "maneuverAborts",
+               "suggestion", "reason"):
     if name not in f:
       sys.exit(f"passingAssist has no field {name!r} -- this tool would silently report zeros")
 
@@ -114,6 +115,14 @@ def main() -> int:
           "secs": float(pa.maneuverSeconds),
           "side": str(pa.maneuverSide),
           "blocked": str(pa.blockedBy),
+          # The DETECTOR's own output, which is what `wanted` is built from. blockedBy `none`
+          # means a suggestion IS being made, so on a back-out it cannot name the cause -- but the
+          # suggestion's SIDE can, because passing_maneuver leaves `signaling` on
+          # `wanted != self.side` just as readily as on `wanted == none`. Those are different
+          # defects: the first is one gate flipping the answer over, the second is the reason
+          # evaporating. Without this column they are indistinguishable and both print as "none".
+          "sugg": str(pa.suggestion),
+          "why": str(pa.reason),
           "deficit": float(pa.speedDeficit) * 2.23694,
           "d_rel": float(pa.leadDRel),
           "lead": bool(pa.hasLead),
@@ -136,9 +145,12 @@ def main() -> int:
           # Held time separates them, so both are printed and the path is named.
           window = prev["secs"] >= SIGNAL_WINDOW_S - 0.2
           reason = prev["blocked"] if window else cur["blocked"]
+          flipped = (cur["sugg"] not in ("none", prev["side"]))
           events.append({**prev, "went_to": phase, "after": cur["blocked"],
-                         "path": "window expired" if window else "reason went away",
-                         "reason": reason})
+                         "path": "window expired" if window
+                                 else f"FLIPPED to {cur['sugg']}" if flipped
+                                 else "reason went away",
+                         "reason": (f"{cur['why']} on the {cur['sugg']}" if flipped else reason)})
           by_reason[reason] += 1
       prev = cur
 
@@ -151,10 +163,11 @@ def main() -> int:
     return 0
 
   print(f"  {len(events)} BACK-OUT(S) -- a blinker shown for a maneuver that did not happen\n")
-  print(f"  {'to':<10} {'held':>6}  {'why it left':<16} {'refused by':<20} {'lead'}")
+  print(f"  {'to':<10} {'side':<6} {'held':>6}  {'why it left':<20} {'refused by':<22} {'lead'}")
   for e in events:
     lead = (f"{e['deficit']:.0f} mph slower at {e['d_rel']:.0f} m" if e["lead"] else "LEAD GONE")
-    print(f"  {e['went_to']:<10} {e['secs']:5.1f}s  {e['path']:<16} {e['reason']:<20} {lead}")
+    print(f"  {e['went_to']:<10} {e['side']:<6} {e['secs']:5.1f}s  {e['path']:<20} "
+          f"{e['reason']:<22} {lead}")
   print()
   print("  by gate:")
   for k, v in by_reason.most_common():
