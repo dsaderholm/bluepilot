@@ -326,6 +326,20 @@ def main() -> int:
   if cur_ep is not None:
     floor_eps.append(cur_ep)
 
+  # EVERY BIG ICBM STEP, NAMED. The histogram above answers "how often" and he did not ask that --
+  # he said he SAW it, which is a claim about individual events. A ratio that reads 869-of-875 is a
+  # way of dismissing eleven real ones. List them.
+  big = [(ts, d, tgt, dash, in_band) for ts, d, _dt, by_icbm, in_band, tgt, dash in steps
+         if by_icbm and abs(d) >= 3]
+  print(f"=== ICBM STEPS OF 3 MPH OR MORE: {len(big)} ===")
+  if big:
+    print(f"  {'time':>9} {'step':>5} {'dash':>6} {'icbmTgt':>8}  band")
+    for ts, d, tgt, dash, in_band in big:
+      print(f"  t+{ts:7.1f} {d:+5.0f} {dash:6.0f} {tgt:8.1f}  {'in' if in_band else 'out'}")
+  else:
+    print("  none -- every ICBM step was 1 or 2 mph")
+  print()
+
   print(f"=== TARGET AT FORD'S {FLOOR_MPH:.0f} MPH FLOOR: {len(floor_eps)} episode(s) ===")
   print("Who drove the target down, and what the driver could have seen while it happened.\n")
   print(f"  {'at':>8} {'dur':>6}  {'from':>5} {'min':>4}  {'plan source (while at the floor)':<34}"

@@ -357,6 +357,30 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       aTarget @2 :Float32;
       enabled @3 :Bool;
       active @4 :Bool;
+
+      # FusionPilot: THE VETOES' OWN INPUTS. Added 2026-08-25 because a real road report --
+      # *"it decided to drop down to 20 for no reason with no warning"* -- could be attributed to
+      # SCC-Map but NOT explained, and the four defenses are the thing that should have stopped it.
+      #
+      # Measured on routes 000003c0/c2: five of seven floor episodes demanded a corner 8-23x
+      # tighter than the road the car then drove (R_map 16-32 m against R_drove 126-753 m). Reading
+      # the CODE says defense 2 -- "the camera sees no curve at all" -- is reachable at low speed
+      # and should have caught them, gated only by a 4 s horizon; and that defense 4, which exists
+      # precisely because a corner can be acted on beyond the model's reach, is highway-only.
+      #
+      # THAT IS AN INFERENCE AND IT IS THE THIRD ONE IN THIS FILE'S HISTORY OF EXACTLY THIS
+      # MISTAKE. `targetDistance` and `modelLatAcc` are the two numbers those gates compare, and
+      # neither has ever been on the wire, so no drive can say which gate declined. The rule this
+      # repo already wrote down after the cancel-recovery episode is: when a rule cannot be
+      # explained from a drive, add the log line rather than a third inference.
+      #
+      # `modelVetoed` is the existing internal flag; the other three are its arguments. Publishing
+      # a decision without its inputs is what made this undiagnosable in the first place.
+      targetDistance @5 :Float32;   # metres to the corner. inf on the wire is meaningless, so 0
+                                    # means "no corner", never "the corner is here".
+      modelLatAcc @6 :Float32;      # the camera's own predicted lateral accel, the veto's evidence
+      modelVetoed @7 :Bool;         # either camera veto fired
+      cameraNotSeen @8 :Bool;       # suppressed because the corner is beyond the model's horizon
     }
 
     enum VisionState {

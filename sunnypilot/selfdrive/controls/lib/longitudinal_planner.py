@@ -171,6 +171,18 @@ class LongitudinalPlannerSP:
     sccMap.aTarget = float(self.scc.map.output_a_target)
     sccMap.enabled = self.scc.map.is_enabled
     sccMap.active = self.scc.map.is_active
+    # FusionPilot: the vetoes' own inputs. See the comment on the capnp struct -- a decision without
+    # its arguments is what made "it dropped to 20 for no reason" undiagnosable from four drives.
+    #
+    # `target_distance` is inf whenever the map has nothing to say, and capnp clamps inf to a
+    # meaningless value, so it goes out as 0.0. **0 means NO CORNER, never "the corner is here"** --
+    # the same inversion `slowDownEndpoint` had to guard against, and the reading that would make
+    # this field dangerous instead of merely absent.
+    td = float(self.scc.map.target_distance)
+    sccMap.targetDistance = td if math.isfinite(td) else 0.0
+    sccMap.modelLatAcc = float(self.scc.map.model_lat_acc)
+    sccMap.modelVetoed = bool(self.scc.map.model_vetoed)
+    sccMap.cameraNotSeen = bool(self.scc.map.camera_not_seen)
 
     # Speed Limit
     speedLimit = longitudinalPlanSP.speedLimit
