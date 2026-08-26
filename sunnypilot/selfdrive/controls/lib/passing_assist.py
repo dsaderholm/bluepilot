@@ -951,6 +951,7 @@ class PassingAssistDetector:
     self._narrow_hits = 0
     self._narrow_max = 0.0
     self._narrow_broken = 0
+    self._narrow_worst_broken = 0.0
     self.right_lane_age_s = 0.0
 
     self.left_blindspot = False
@@ -1343,6 +1344,14 @@ class PassingAssistDetector:
       self._narrow_hits += self.left_narrowing
       if self.left_narrowing_m > MAX_PLAUSIBLE_NARROWING_M:
         self._narrow_broken += 1
+        # THE LARGEST IMPLAUSIBLE ONE, kept separately. Without it `leftNarrowingMax` is a CENSORED
+        # maximum: it only ever sees values under the ceiling, so on four consecutive drives it
+        # reported 9.44, 9.85, 9.99 and 9.81 -- all pressed against a 10.0 bound, which is the
+        # signature of a clipped distribution rather than a real worst case. Read as a true maximum
+        # it says "the edge never did anything mad", when what it says is "nothing mad survived the
+        # filter". Same family as every other reporting fault this week: a number that looks like a
+        # measurement and is really the shape of its own guard.
+        self._narrow_worst_broken = max(self._narrow_worst_broken, self.left_narrowing_m)
       else:
         self._narrow_max = max(self._narrow_max, self.left_narrowing_m)
 
@@ -2057,7 +2066,10 @@ class PassingAssistDetector:
         # it is NOT proof no work zone can be seen, since these drives may contain none.
         "leftNarrowingShare": (round(self._narrow_hits / self._narrow_frames, 4)
                                if self._narrow_frames else 0.0),
+        # CENSORED BY CONSTRUCTION -- see _narrow_worst_broken. This is the largest PLAUSIBLE
+        # narrowing, not the largest reading, and the two differ whenever the edge misbehaved.
         "leftNarrowingMax": round(self._narrow_max, 2),
+        "leftNarrowingWorstBroken": round(self._narrow_worst_broken, 2),
         # How often the edge estimate produced something that is not a road. Reported rather than
         # dropped: a high share here means the taper measurement had little to work with, which is
         # a different statement from "no taper was seen" and must not read as one.
