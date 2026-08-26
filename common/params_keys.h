@@ -387,7 +387,21 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // drive, then 2 once bp_mapd_compare shows "only v1" near zero.
     //
     // Transitional by design. It exists to make the cutover reversible and is deleted with v1.
-    {"MapdV2", {PERSISTENT | BACKUP, INT, "0"}},
+    // FusionPilot: 2 = ON. Raised from 0 on 2026-08-26, and the reason it shipped 0 was WRONG.
+    //
+    // That reason was "a second map daemon on their device, a fifth of a core and 200 MB, for a
+    // migration that is ours". `mapd_ready` returns `MapdV2 != 2`, so v1 stops the moment v2 is the
+    // source: state 0 is v1 alone, state 2 is v2 alone, and ONLY state 1 (observe) runs both.
+    // There is exactly one daemon either way. Confirmed on the device -- `ps` shows only mapd_v2.
+    //
+    // State 1 IS the expensive one and the heat is measured: route 389 ran a mean 87.1 C with the
+    // fan at 97% against 79.3 C / 73% on route 388, which had no v2. Do not ship 1.
+    //
+    // The cutover gate was met on his own drive (route 00000383): of 494 frames where both had
+    // spoken, only 1.6% had a limit from v1 alone -- and every one of those was a frame where v2
+    // said `fail`, which this fork refuses anyway. v2 read HIGHER in 108 of 121 disagreements, so
+    // this is not a slower car.
+    {"MapdV2", {PERSISTENT | BACKUP, INT, "2"}},
     {"MapSpeedLimit", {CLEAR_ON_ONROAD_TRANSITION, FLOAT, "0.0"}},
     {"NextMapSpeedLimit", {CLEAR_ON_ONROAD_TRANSITION, JSON}},
     {"Offroad_OSMUpdateRequired", {CLEAR_ON_MANAGER_START, JSON}},
@@ -433,7 +447,9 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // against their shipped defaults, which is the only check that would ever have caught it.
     // `combined` (4) has the identical hole: min() over one non-zero source IS that source.
     {"SpeedLimitPolicy", {PERSISTENT | BACKUP, INT, "1"}},
-    {"SpeedLimitValueOffset", {PERSISTENT | BACKUP, INT, "0"}},
+    // FusionPilot: 5, matching what he drives. 0 means "exactly the posted limit", which is not
+    // how anyone drives in the US and is not what this fork's owner has ever had set.
+    {"SpeedLimitValueOffset", {PERSISTENT | BACKUP, INT, "5"}},
     // BluePilot: bidirectional Speed Limit Assist. When set, SLA follows the limit in both
     // directions instead of only lowering, and never requests above SpeedLimitMaxSetSpeed.
     // BluePilot: one offset per speed band (SpeedLimitOffsetType = bySpeed). Defaults are the
@@ -483,7 +499,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // NOT derived from this car's angle gains, and that is settled rather than assumed. Two
     // earlier attempts got it wrong in opposite directions, so the reasoning is recorded here.
     //
-    // The owner runs FordLowSpeedFactor_ang = 0.92 / FordHighSpeedFactor_ang = 0.87. Per
+    // The owner runs FordLowSpeedFactor_ang = 0.912 / FordHighSpeedFactor_ang = 0.828. Per
     // BluePilot's own writeup of angle control, that gain is a CALIBRATION: path_angle is derived
     // as curvature * v_ego * gain, which is pure geometry, and the gain exists only because the
     // PSCM continuously compensates for yaw, sway and roll against a factory model of the vehicle
@@ -608,9 +624,9 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // Below 1.0 means the wheel turns LESS for the same commanded geometry. At a correctly
     // calibrated gain the car tracks the path it was asked to. It does NOT mean the car
     // under-turns and needs to arrive slower -- see the SCC sensitivity comment above.
-    {"FordLowSpeedFactor_ang", {PERSISTENT | BACKUP, FLOAT, "0.92"}},
-    {"FordHighSpeedFactor_ang", {PERSISTENT | BACKUP, FLOAT, "0.87"}},
-    {"FordHighSpeedDampening_ang", {PERSISTENT | BACKUP, FLOAT, "1.0"}},
+    {"FordLowSpeedFactor_ang", {PERSISTENT | BACKUP, FLOAT, "0.912"}},
+    {"FordHighSpeedFactor_ang", {PERSISTENT | BACKUP, FLOAT, "0.828"}},
+    {"FordHighSpeedDampening_ang", {PERSISTENT | BACKUP, FLOAT, "0.85"}},
     {"BPLateralSchemeParamsMigratedV1", {PERSISTENT | BACKUP, STRING, "0"}},
 
     {"disable_BP_lat_UI", {PERSISTENT | BACKUP, BOOL, "0"}},
