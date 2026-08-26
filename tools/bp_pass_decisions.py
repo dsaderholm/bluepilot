@@ -92,6 +92,12 @@ def main() -> int:
 
   out = Counter()
   blocked_hist = Counter()
+  # THE DEFICIT HE ACTUALLY PASSES AT. `nothingSlower` means the feature was running, saw the lead,
+  # and judged it fast enough not to bother -- and he passed anyway. That is not a sensing failure,
+  # it is a THRESHOLD, and PassingAssistMinDeficit is his to set. The number he needs is what
+  # deficit his own passes happen at, which nothing has ever reported.
+  deficits = []
+  deficits_nothing_slower = []
   speed = 0.0
   blinker = False
   prev_blinker = False
@@ -120,6 +126,10 @@ def main() -> int:
           if last["hasLead"]:
             out["passes"] += 1
             blocked_hist[last["blockedBy"]] += 1
+            if last["deficit"] is not None:
+              deficits.append(last["deficit"])
+              if last["blockedBy"] == "nothingSlower":
+                deficits_nothing_slower.append(last["deficit"])
             if last["agreed"]:
               out["PA already agreed"] += 1
             elif last["blockedBy"] == BLOCKED_NO_LANE:
@@ -163,6 +173,8 @@ def main() -> int:
         "agreed": str(p_a.suggestion) == "left",
         "rule": rule,
         "radar_blind": blind,
+        # mph, and only when a lead is actually there -- a deficit against no lead is not a number.
+        "deficit": (float(p_a.speedDeficit) * 2.23694) if bool(p_a.hasLead) else None,
       }
 
   n = out["passes"]
@@ -182,6 +194,21 @@ def main() -> int:
     print(f"  OF THE GEOMETRY MISSES, the rule would fire on {fire} of {geo} "
           f"({100.0 * fire / geo:.0f}%)")
   print()
+  if deficits:
+    d = sorted(deficits)
+    def dq(f):
+      return d[min(len(d) - 1, int(f * len(d)))]
+    print(f"  SPEED DEFICIT AT THE MOMENT HE SIGNALLED, mph   n={len(d)}")
+    print(f"    p10 {dq(.1):5.1f}   p25 {dq(.25):5.1f}   median {dq(.5):5.1f}   "
+          f"p75 {dq(.75):5.1f}   max {d[-1]:5.1f}")
+    if deficits_nothing_slower:
+      ns = sorted(deficits_nothing_slower)
+      print(f"    ...on the {len(ns)} passes PA called 'nothingSlower': "
+            + ", ".join(f"{x:.1f}" for x in ns))
+    print("    PassingAssistMinDeficit is HIS setting, in mph. A pass he makes below it is a pass")
+    print("    the feature was running for, saw, and declined -- which is a calibration question")
+    print("    rather than a sensing one, and the only blocker here he can move without code.")
+    print()
   print("  why PA was not suggesting, at the moment he signalled:")
   for code, c in blocked_hist.most_common(8):
     print(f"    {code:<22} {c:5d}")
