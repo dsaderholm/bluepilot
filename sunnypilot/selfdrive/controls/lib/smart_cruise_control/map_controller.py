@@ -395,8 +395,38 @@ class SmartCruiseControlMap:
     """
     # _MAP_FACTOR_V_BP[1] is the same 45 mph line that separates ramps from highway bends for the
     # corner-speed factors. One definition, used by both, so they cannot drift apart.
+    #
+    # A LOW CORNER SPEED IS ONLY A RAMP IF WE ARE ARRIVING AT HIGHWAY SPEED. Added 2026-08-26.
+    #
+    # The conservative 4 s horizon exists for one reason, stated in `_camera_has_not_seen_it`: on an
+    # exit the model predicts the path it expects to drive -- straight down the highway -- so a
+    # ramp's curvature may never enter its plan, and camera silence there is BLINDNESS rather than
+    # evidence. That argument is about approaching a ramp AT SPEED. It says nothing about a 12 mph
+    # corner claimed on a surface street the car is already crawling along, and applying it there
+    # made the veto unreachable on exactly the frames that needed it.
+    #
+    # MEASURED, routes 000003c8 and 000003c9, 2026-08-26 -- four phantom corners and one real one:
+    #
+    #     t+1074  v_ego 21 mph   target 13   R_map  19 m   R_drove 422 m   22.3x too tight
+    #     t+1085  v_ego 33 mph   target 13   R_map  19 m   R_drove 422 m   22.3x
+    #     t+ 289  v_ego 29 mph   target 12   R_map  16 m   R_drove 306 m   19.0x
+    #     t+ 300  v_ego 25 mph   target 14   R_map  22 m   R_drove 442 m   20.1x
+    #     t+ 785  v_ego 71 mph   target 21   R_map  49 m   R_drove 122 m   map agrees  <- REAL
+    #
+    # The phantoms arrive at 21-33 mph; the one genuine corner at 71. `v_ego` separates them
+    # cleanly, and it is the same quantity the ramp argument is really about.
+    #
+    # Worked, t+289: braking 29 -> 12 mph at 0.8 m/s^2 is 87 m, against a 4 s horizon of 52 m. The
+    # gate returned False and the map walked the target to 12 unchallenged. At the model's real
+    # 10 s reach the horizon is 130 m, the corner is inside it, and the camera gets ASKED.
+    #
+    # THIS MAKES THE VETO REACHABLE; IT DOES NOT GUARANTEE IT FIRES. Whether it does depends on
+    # `model_lat_acc` against MODEL_DISAGREE_LAT_ACC (0.4), and the lateral acceleration these
+    # corners actually produced was 0.44-0.86 -- close enough to the threshold that some may still
+    # pass. Publishing `modelLatAcc` is what would settle it and is deliberately NOT bundled here.
+    ramp_approach = self.v_target < _MAP_FACTOR_V_BP[1] and self.v_ego >= _MAP_FACTOR_V_BP[1]
     ramp_like = self.v_target < _MAP_FACTOR_V_BP[1]
-    horizon = self.v_ego * (MODEL_HORIZON_S if ramp_like else MODEL_HORIZON_HIGH_SPEED_S)
+    horizon = self.v_ego * (MODEL_HORIZON_S if ramp_approach else MODEL_HORIZON_HIGH_SPEED_S)
     if target_distance_m > horizon or horizon <= 0:
       return False
 

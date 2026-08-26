@@ -191,3 +191,88 @@ class TestAHighwayCornerTheCameraCannotSeeYet:
     assert not inside._camera_has_not_seen_it(340.0)
     outside = self._scc(self.CORNER_50)
     assert outside._camera_has_not_seen_it(467.0)
+
+
+# ---------------------------------------------------------------------------------------------
+# FusionPilot 2026-08-26: A LOW CORNER SPEED IS ONLY A RAMP IF WE ARRIVE AT HIGHWAY SPEED.
+#
+# Four phantom corners and one real one, measured on routes 000003c8 and 000003c9. The radius is
+# the map's own claim inverted against the radius the car then actually drove:
+#
+#     t+1074  v_ego 21 mph  target 13  R_map 19 m  R_drove 422 m   22.3x too tight
+#     t+1085  v_ego 33 mph  target 13  R_map 19 m  R_drove 422 m   22.3x
+#     t+ 289  v_ego 29 mph  target 12  R_map 16 m  R_drove 306 m   19.0x
+#     t+ 300  v_ego 25 mph  target 14  R_map 22 m  R_drove 442 m   20.1x
+#     t+ 785  v_ego 71 mph  target 21  R_map 49 m  R_drove 122 m   map agrees   <- REAL
+#
+# Each phantom held the target at 12-14 mph for 6-7 seconds on a road with no corner in it, and the
+# recovery afterwards is what he reported as "dropping and increasing by 5 mph at a time" -- ICBM
+# holds the button out-of-band, so the dash moves 5 at a time coming back.
+#
+# The veto could not fire on any of them, and not by a narrow margin. Worked, t+289: braking
+# 29 -> 12 mph at 0.8 m/s^2 is 87 m, against a ramp horizon of 29 mph x 4 s = 52 m. The distance
+# gate returned False before the camera was consulted at all.
+# ---------------------------------------------------------------------------------------------
+
+SLOW_EGO = 13.0        # ~29 mph, the measured onset of the c9 phantom
+RAMP_EGO = 31.3        # ~70 mph, a genuine exit approach
+LOW_TARGET = 5.4       # ~12 mph, what the map demanded
+HIGH_TARGET = 24.0     # ~54 mph, a highway bend
+
+
+def _c(model_lat_acc: float, v_ego: float, v_target: float) -> SmartCruiseControlMap:
+  scc = SmartCruiseControlMap()
+  scc.v_ego = v_ego
+  scc.model_lat_acc = model_lat_acc
+  scc.v_target = v_target
+  return scc
+
+
+class TestASlowCornerOnASlowRoadIsNotARamp:
+  def test_the_camera_is_now_asked_at_all(self):
+    """87 m is the real braking distance for his t+289 event. Under the ramp horizon (52 m) the gate
+    refused to look; under the model's real reach (130 m) it looks and sees a straight road."""
+    assert _c(STRAIGHT, SLOW_EGO, LOW_TARGET)._model_disagrees(87.0)
+
+  def test_and_it_still_defers_to_a_camera_that_sees_the_bend(self):
+    """The veto removes the MAP's contribution only when the camera contradicts it. A camera that
+    agrees must never be overruled -- that would be vetoing real corners."""
+    assert not _c(CURVING, SLOW_EGO, LOW_TARGET)._model_disagrees(87.0)
+
+
+class TestTheRampExemptionSurvives:
+  """*"RAMPS ARE DELIBERATELY EXEMPT AND MUST STAY THAT WAY."* On an exit the model predicts the
+  path it expects to drive -- straight down the highway -- so a ramp's curvature may never enter its
+  plan. Vetoing there would delay the one case that already has too little room, which is his oldest
+  standing complaint. This is the half of the change that must NOT have moved."""
+
+  def test_a_low_corner_approached_at_highway_speed_keeps_the_short_horizon(self):
+    """313 m is inside the 10 s reach and far outside the 4 s ramp horizon (125 m). If the exemption
+    had been dropped, the camera's silence here would veto a real ramp."""
+    assert not _c(STRAIGHT, RAMP_EGO, LOW_TARGET)._model_disagrees(RAMP_EGO * MODEL_HORIZON_S * 1.5)
+
+  def test_the_ramp_horizon_still_applies_close_in(self):
+    """A phantom curve right in front of the car is still caught on a ramp approach -- the exemption
+    bounds the veto's REACH, it does not switch it off."""
+    assert _c(STRAIGHT, RAMP_EGO, LOW_TARGET)._model_disagrees(RAMP_EGO * MODEL_HORIZON_S * 0.5)
+
+
+class TestTheHighwayCaseIsUntouched:
+  def test_a_highway_bend_still_gets_the_full_reach(self):
+    d = RAMP_EGO * MODEL_HORIZON_HIGH_SPEED_S * 0.8
+    assert _c(STRAIGHT, RAMP_EGO, HIGH_TARGET)._model_disagrees(d)
+
+  def test_beyond_the_full_reach_nothing_is_vetoed_at_any_speed(self):
+    """Past the model's own plan there is no opinion to have, and silence must not read as a no."""
+    for v_ego, v_target in ((SLOW_EGO, LOW_TARGET), (RAMP_EGO, HIGH_TARGET)):
+      d = v_ego * MODEL_HORIZON_HIGH_SPEED_S * 1.2
+      assert not _c(STRAIGHT, v_ego, v_target)._model_disagrees(d)
+
+
+def test_the_gate_uses_the_one_shared_45_mph_definition():
+  """Both halves key on _MAP_FACTOR_V_BP[1], the same constant the corner-speed factors use, so the
+  four defenses cannot drift apart. A duplicated literal here is how that starts."""
+  import inspect
+  src = inspect.getsource(SmartCruiseControlMap._model_disagrees)
+  assert src.count("_MAP_FACTOR_V_BP[1]") >= 2, "the ramp test duplicated the 45 mph line"
+  assert "self.v_ego >= _MAP_FACTOR_V_BP[1]" in src, "the ramp test no longer looks at v_ego"
