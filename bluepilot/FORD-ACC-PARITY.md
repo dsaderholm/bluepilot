@@ -189,6 +189,58 @@ it is not producing an oscillation Ford does not also produce. Do not re-open th
 request stops dead at -0.50 while Ford's reaches -1.59. That is the clipped floor, visible in the
 raw distribution.
 
+## Finding 3: the envelope, BOTH ENDS. MEASURED 2026-08-25.
+
+**His correction, and it is the reason this section exists:** *"Remember about acceleration, too,
+it's not just deceleration."* Every measurement here had been about slowing down, and parity is
+symmetric -- Ford asks for more than openpilot is permitted at BOTH ends.
+
+`tools/bp_ford_brake_curve.py`, 104,326 frames of Ford ACC actually running across 4 routes:
+
+    Ford commanded    frames    Ford used the brakes
+        +0.1          11357            31.9%      <- see the caveat below
+         0.0          30587             2.3%
+        -0.1          11782             8.6%
+        -0.2           5320            16.1%
+        -0.5           1660            33.8%
+        -0.6           1101            42.5%
+        -1.1            766            54.0%      <- 50% crossover
+        -3.1            121            74.4%
+
+    openpilot reaches for the pedal at   -0.14 m/s^2
+    FORD crosses 50% brake usage at      -1.10 m/s^2
+    -> openpilot brakes 0.96 m/s^2 EARLIER than Ford
+
+**AND THE SHAPE IS A RAMP, NOT A STEP -- which is the more useful half.** Ford is not switching the
+brakes on at a threshold; it is mixing them in progressively from about -0.1 all the way to -1.1 and
+beyond. **So `brake_actuate_target` is the wrong SHAPE of control, not merely the wrong number**, and
+moving it to -1.10 would trade one wrong model for another. The tool's own docstring said to check
+this before tuning anything, and it was right to.
+
+**CAVEAT, stated because it is the same contamination that retracted an earlier run:** the +0.1 and
++0.2 rows show elevated brake usage (31.9%, 12.4%), which cannot be Ford braking to accelerate.
+Those are almost certainly release transitions, but they are not explained, and the rows above zero
+should not be quoted. The monotone trend from -0.1 to -3.4 is what carries the finding.
+
+### THE PANDA ENVELOPE CLIPS FORD AT BOTH ENDS
+
+`tools/bp_accdata_bands.py`, 113,142 camera ACCDATA frames:
+
+    hardest brake Ford asked for   -4.63 m/s^2     panda stops openpilot at -3.4991
+    Ford's propulsion request      +2.1  m/s^2     panda stops openpilot at  2.0
+    AccPrpl_A_Rq below our MIN_GAS (-0.5)          3.97% of frames
+
+**So openpilot cannot ask for Ford's hardest braking OR Ford's strongest acceleration.** The
+acceleration end is the one he flagged and it is not a rounding matter: `_PANDA_GAS_MAX` is exactly
+2.0 with a 0.005 margin, and Ford's ordinary pull-away sits ON that number -- which is already
+recorded here as the reason the passthrough abandoned Ford on essentially every launch.
+
+**NOT CHANGED TONIGHT, deliberately.** Widening `ACCEL_MAX` and `ACCEL_MIN` means widening panda to
+match, which is the same two-sided edit as the propulsion floor, and this branch already carries two
+unflashed behaviour changes. **One variable per drive**, and there is no drive to spend yet -- see
+the chicken-and-egg note above. What this section buys is that when someone does spend one, the
+numbers are measured rather than guessed.
+
 ## How to do the fitting, and the two rules that keep it honest
 
 No ML is required. **The labelled data already exists**: every drive carries Ford's ACCDATA on bus 2,
@@ -232,7 +284,13 @@ the passthrough deletion precisely because it is independent of it.
    wire-level test decoded a real frame and said so.
 3. ~~**Measure the transmission fields**~~ **DONE.** `AccVeh_V_Trg` was a constant and is fixed;
    the sentinel square wave is refuted. See Finding 2.
-4. Only then consider `brake_actuate_target`, and only after the ABS question above is settled.
+4. ~~Only then consider `brake_actuate_target`~~ **MEASURED, AND IT CHANGED THE QUESTION.** Ford's
+   50% crossover is -1.10 against openpilot's -0.14, but Ford's brake usage is a RAMP from -0.1 to
+   past -1.1, so a single threshold is the wrong shape however it is set. See Finding 3. The ABS
+   question is still unsettled and still blocks moving it.
+5. **The envelope, both ends.** `ACCEL_MAX` 2.0 against Ford's +2.1, and `ACCEL_MIN` -3.5 against
+   Ford's -4.63. Both need panda widened to match, the same two-sided edit as the propulsion floor.
+   His own reminder: *"Remember about acceleration, too, it's not just deceleration."*
 
 ---
 
