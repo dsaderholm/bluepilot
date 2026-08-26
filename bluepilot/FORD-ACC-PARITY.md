@@ -30,6 +30,7 @@ Each is a symptom with a suspected mechanism. None of them is vague.
 | *"I've never seen it coast"* | brakes asserted at −0.14 m/s²; propulsion clipped at −0.5 | **measured and FIXED** |
 | *"it tricks my transmission... third gear on the freeway"* | two candidates | one **FIXED**, one **REFUTED** — Finding 2 |
 | *"when it resumes from stop it stays in first gear for a really long time"* | **added 2026-08-25.** Same field, harder case — a transmission told the car wants 90 mph *from rest* | unmeasured |
+| *"OpenPilot's ACC is ass... everyone in the community knows it"* | these constants live in `opendbc/car/ford/`, shared by every Ford | consistent, unproven |
 
 **EVERY TRANSMISSION COMPLAINT IS FROM WHEN HE TESTED FULL OP LONG, MONTHS AGO. He had to say so
 twice.** *"The first gear stuff is with OP long! We're talking about OP long here, not Ford ACC!"*
@@ -71,7 +72,6 @@ on the same bus -- which is exactly what the two landed changes do:
 **Do not write "this fixes his third-gear complaint" anywhere.** It is a candidate. The drive that
 would confirm it is a drive he has no reason to take yet, and pretending otherwise is how a
 plausible story becomes a stated fact -- which this file has recorded happening three times already.
-| *"OpenPilot's ACC is ass... everyone in the community knows it"* | these constants live in `opendbc/car/ford/`, shared by every Ford | consistent, unproven |
 
 **AND "EVERYONE IN THE COMMUNITY KNOWS IT" MEANS OP LONG IS BAD ON FORD, GENERALLY.** It was
 stretched here into "the community knows about the `AccVeh_V_Trg` constant", and he corrected it:
