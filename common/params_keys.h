@@ -390,7 +390,25 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // car drives every posted limit exactly, which is not how anyone drives and not what was asked
     // for. The bands themselves are the owner's stated habit -- see SpeedLimitOffsetLow.
     {"SpeedLimitOffsetType", {PERSISTENT | BACKUP, INT, "3"}},
-    {"SpeedLimitPolicy", {PERSISTENT | BACKUP, INT, "3"}},
+    // FusionPilot: 1 = MAP DATA ONLY, and it is the only value that excludes the CAMERA source.
+    //
+    // Upstream ships 3 (`map_data_priority`), which is `[map, car]` taking the first NON-ZERO --
+    // so it consults the map and FALLS THROUGH TO THE CAMERA wherever the map is quiet. On this
+    // car that is the TSR phantom-80 leak, and it has bitten twice: once on 2026-08-19 (the camera
+    // source serving a constant 80 for 700 frames) and again on 2026-08-24, when an I-80 route
+    // SHIELD was read as a speed limit near 2100 S and walked the set speed to 90 for thirteen
+    // minutes, ending in an exit taken at 5.20 m/s^2 lateral.
+    //
+    // The standing decision is in CLAUDE.md and it is not satisfied yet: **TSR stays quarantined
+    // behind SpeedLimitPolicy = 1 until it earns its way out** -- several drives of readings that
+    // are CORRECT, not merely present. As of 2026-08-26 the camera has produced about five reads in
+    // a million frames, every one the value 30, never once on a highway, plus interstate shields.
+    //
+    // He runs 1 and has since 2026-08-24. This default said 3 the whole time, so a FRESH FLASH
+    // would have silently re-opened the quarantine -- found on 2026-08-26 by diffing his settings
+    // against their shipped defaults, which is the only check that would ever have caught it.
+    // `combined` (4) has the identical hole: min() over one non-zero source IS that source.
+    {"SpeedLimitPolicy", {PERSISTENT | BACKUP, INT, "1"}},
     {"SpeedLimitValueOffset", {PERSISTENT | BACKUP, INT, "0"}},
     // BluePilot: bidirectional Speed Limit Assist. When set, SLA follows the limit in both
     // directions instead of only lowering, and never requests above SpeedLimitMaxSetSpeed.
