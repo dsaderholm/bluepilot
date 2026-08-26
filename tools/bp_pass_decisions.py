@@ -138,7 +138,8 @@ def main() -> int:
               else:
                 deficits.append(last["deficit"])
                 if last["blockedBy"] == "nothingSlower":
-                  deficits_nothing_slower.append(last["deficit"])
+                  deficits_nothing_slower.append(
+                    (last["deficit"], last["need"], last["patience"]))
             if last["agreed"]:
               out["PA already agreed"] += 1
             elif last["blockedBy"] == BLOCKED_NO_LANE:
@@ -194,6 +195,12 @@ def main() -> int:
         # physical range needs BOTH ends stated, every time, and it is always the end nobody thought
         # about that admits the garbage.
         "deficit": (float(p_a.speedDeficit) * 2.23694) if bool(p_a.hasLead) else None,
+        # THE EFFECTIVE THRESHOLD, which is NOT his setting. min_deficit_active = min_deficit *
+        # patience_scale, and patience runs to 1.8x by default when he is at the posted limit. So
+        # the number his pass was actually judged against is this one, and reporting his raw
+        # setting instead would send him to change the wrong dial by the wrong amount.
+        "need": float(p_a.minDeficitActive) * 2.23694,
+        "patience": float(p_a.patienceScale),
       }
 
   n = out["passes"]
@@ -221,9 +228,13 @@ def main() -> int:
     print(f"    p10 {dq(.1):5.1f}   p25 {dq(.25):5.1f}   median {dq(.5):5.1f}   "
           f"p75 {dq(.75):5.1f}   max {d[-1]:5.1f}")
     if deficits_nothing_slower:
-      ns = sorted(deficits_nothing_slower)
-      print(f"    ...on the {len(ns)} passes PA called 'nothingSlower': "
-            + ", ".join(f"{x:.1f}" for x in ns))
+      ns = sorted(deficits_nothing_slower)   # tuples: (deficit, needed, patience)
+      print(f"    ...the {len(ns)} passes PA called 'nothingSlower', "
+            f"as deficit vs what was NEEDED:")
+      for dfc, need, pat in ns:
+        gap = need - dfc
+        print(f"      deficit {dfc:5.1f}   needed {need:5.1f}   "
+              f"patience x{pat:.2f}   short by {gap:5.1f}")
     print("    PassingAssistMinDeficit is HIS setting, in mph. A pass he makes below it is a pass")
     print("    the feature was running for, saw, and declined -- which is a calibration question")
     print("    rather than a sensing one, and the only blocker here he can move without code.")
