@@ -625,7 +625,37 @@ deleted with it, or kept for the wrong reason.
 The line to apply: **would this still make sense if openpilot were driving the car directly?** If
 yes, it is not an ICBM feature, whatever module it currently lives in.
 
-**Known violations, deliberately left alone for now.** `IcbmPinnedHolds*` and
+### HOLDS BELONG TO SLA, NOT ICBM. HE HAS NOW ASKED FOR THIS TWICE, AND IT IS CROSS-BRANCH.
+
+2026-08-26, unprompted and with feeling: *"The next thing we definitely need to do across the board
+on all branches is move holds and pinned holds to SLA. It is not just for ICBM! I wish you had never
+done that."*
+
+He said the same thing on 2026-08-18 -- *"holds shouldn't even be a part of ICBM, they are a part of
+SLA"* -- and it was written down as a "known violation, deliberately left alone", which is a
+description of a decision nobody made. **It is a task, and it is his, and it is not merely naming.**
+
+**WHY IT IS NOT COSMETIC.** A hold is "against THIS posted limit I want a different number". That is
+a statement about speed policy and it has nothing to do with how the speed is achieved -- so it is
+actuator-independent by construction and must survive ICBM being deleted. Filed under `Icbm*` it
+gets deleted with the scaffolding, or kept for the wrong reason. Under op long today the button
+layer goes away and holds go with it, which is the bug this migration removes.
+
+**HE EXPLICITLY DEFERRED IT: *"But don't do that now."*** Do not start it opportunistically. When it
+is started:
+
+- it is `icbm-manual-override-and-tuning` work, because that branch owns the code and the others
+  rebase onto it -- doing it anywhere else strands it
+- `IcbmPinnedHolds`, `IcbmHoldObservations` and `IcbmBaselineResetDelta` are PERSISTENT keys, so
+  renaming discards his stored values. Use the `_BP_LATERAL_SCHEME_PARAM_RENAMES` machinery in
+  `params_migration.py` that exists for exactly this
+- the capnp fields (`vBaseline`, `baselineSource`, `pinSuggestion`) have WIRE HISTORY in every
+  recorded route -- renumbering them makes every drive on disk decode as garbage. Rename the field,
+  never the ordinal
+- the settings labels, the SunnyLink YAML and the HUD reader all name it too; the audit
+  (`bp_sunnylink_settings_audit.py`) needs the new prefix or it silently reports 100% reachable
+
+**Known violations, deliberately left alone UNTIL THEN.** `IcbmPinnedHolds*` and
 `IcbmBaselineResetDelta` are the HOLD concept, which is a planner idea that happens to live in the
 button layer — "aim at my number instead of the posted limit, and keep everything else working
 against it" needs no buttons at all. They are misnamed. Renaming a `PERSISTENT` key discards its
@@ -3966,6 +3996,72 @@ reference. So it stands, and the rule is to not do it again.
 
 Same reasoning applies to any upstream tracker -- commaai, sunnypilot, opendbc. A commit here should
 never be able to speak in someone else's thread.
+## 2026-08-26: THE SET SPEED WENT TO 80 AT A STOP. A `possible` WAY MATCH DID IT.
+
+*"On my second most recent drive today at one point at the beginning my speed went to 80 while it
+was at a stop and then went back down to 35."*
+
+Route 000003c4, t+74, stopped at 1 mph on 1300 East -- secondary, 30 mph posted:
+
+    t+72-73   waySelectionType fail       unknown      no limit
+    t+74      waySelectionType POSSIBLE   MOTORWAY     "Dwight D. Eisenhower H"   70 mph
+    t+75      waySelectionType fail       unknown      gone
+    t+78      waySelectionType possible   secondary    "1300 East"                30
+    t+79+     waySelectionType current    secondary    "1300 East"                30
+
+**ONE SAMPLE matched him to I-80 while he sat still on a surface street.** The resolver took the 70,
+`vTargetRaw` and MAX went to 80, his 35 hold CLEARED, and ICBM pressed `increase` -- dash 35 -> 48 in
+three seconds -- before the map corrected itself and it walked back to 35.
+
+**IT WAS NOT PINNED HOLDS, AND HE REASONABLY SUSPECTED THEM** because he had turned them off that
+morning at 07:38 and the drive began at 07:37. Ruled out by reading `match()`: it returns 0 when
+`self.pins` is empty, and `IcbmPinnedHolds` has been `[]` since 2026-08-11. **A pin has never once
+been created on this car.** It was not TSR either -- `SpeedLimitPolicy = 1` excludes the camera.
+
+### THE FIX: `possible` JOINS `fail` AS AN UNTRUSTED MATCH
+
+`MapdV2MapData` already refused `fail`. `possible` is mapd saying it is not sure which way this is,
+and the real road never settles there -- 1300 East went `possible` -> `current` four seconds later
+and stayed. Measured across c4 and c5, 25,556 mapdOut frames:
+
+    current    21,660   81.7% carry a limit    <- untouched
+    fail        2,311    0.0%                  <- already refused
+    predicted   1,080   79.2%                  <- untouched
+    possible      309   46.3%                  <- REFUSED NOW
+    extended      196   58.2%                  <- untouched
+
+**143 limit-carrying frames of 17,952 -- 0.8% of coverage.** `predicted` and `extended` are
+deliberately NOT refused: they are mapd projecting along a way it HAS matched, and refusing on
+suspicion costs coverage for nothing.
+
+**AN EXISTING TEST BLESSED `possible` AND HAD TO BE REVERSED.**
+`test_every_confident_selection_still_passes_through` read "the gate must catch `fail` and nothing
+else -- `extended` and `possible` are still matches", written before any drive said otherwise. One
+did. A test changed to permit new behaviour must say why, or the next reader cannot tell a fix from
+a regression.
+
+**AND THE DAMAGE OUTLIVES THE LIMIT, which is the general lesson and the third instance.** The map
+was wrong for half a second; the SET SPEED was wrong for ten, because ICBM had already converted the
+limit into button presses and those do not come back. Same shape as the TSR phantom 80 on 000003b6.
+**Rejecting a bad read matters far more than un-latching one.**
+
+### AND HIS RESUME REPORT IS NOT OURS
+
+*"On the most recent drive, auto resume after the lead vehicle departed didn't work, leaving my
+cruise cancelled."* Route 000003c5:
+
+    t+173   0 mph   standstill True    lead 4 m, lead speed 0     engaged
+            ...20 s stopped, lead stationary...
+    t+193   0 mph   resume     True    lead 4 m, lead speed 2     <- lead moves, WE PRESS RESUME
+    t+194   0 mph   standstill False   lead 5 m, lead speed 5
+    t+194           engaged    FALSE                              <- Ford drops cruise
+
+**The resume gate did NOT withhold it** -- that was the first suspicion and it is wrong. The lead was
+stationary the whole time and openpilot asserted resume in the same second it moved. Ford declined
+after a 20-second standstill. Consistent with his own read: *"I've seen this happen before, without
+passthrough, and it is rare. It might not be fixable."* The open question is whether there is a
+STANDSTILL DURATION threshold; short stops resume fine on these same drives.
+
 ## THE DEVICE RUNS IN UTC. HE DOES NOT. CONVERT BEFORE REASONING ABOUT A TIME.
 
 2026-08-25, and it inverted a TSR conclusion inside an hour. `date` on the comma reports UTC, and

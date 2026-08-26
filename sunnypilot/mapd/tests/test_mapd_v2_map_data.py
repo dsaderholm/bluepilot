@@ -146,10 +146,68 @@ class TestALostRoadPublishesNoLimit:
     assert m.get_next_speed_limit_and_distance() == (0.0, 0.0)
 
   def test_every_confident_selection_still_passes_through(self):
-    """The gate must catch `fail` and nothing else -- `extended` and `possible` are still matches."""
-    for kind in ("current", "predicted", "possible", "extended"):
+    """`possible` WAS ON THIS LIST AND WAS REMOVED 2026-08-26, from a road report.
+
+    This test used to read "the gate must catch `fail` and nothing else -- `extended` and `possible`
+    are still matches", written before any drive had shown otherwise. One did.
+    """
+    for kind in ("current", "predicted", "extended"):
       m = make(True, speedLimit=29.058, waySelectionType=kind)
       assert m.get_current_speed_limit() == 29.058, f"{kind} was gated as though it had failed"
+
+
+class TestAPossibleMatchIsNotAMatch:
+  """*"at one point at the beginning my speed went to 80 while it was at a stop and then went back
+  down to 35."* -- 2026-08-26.
+
+  Route 000003c4, t+74, stopped at 1 mph on 1300 East, a secondary road with a 30 mph limit:
+
+      t+72-73   waySelectionType fail       unknown      no limit
+      t+74      waySelectionType POSSIBLE   MOTORWAY     "Dwight D. Eisenhower H"   70 mph
+      t+75      waySelectionType fail       unknown      gone
+      t+79+     waySelectionType current    secondary    "1300 East"                30 mph
+
+  ONE SAMPLE matching I-80 was enough. The resolver took the 70, it cleared his 35 hold, and ICBM
+  pressed the set speed from 35 toward 80 over three seconds before the map corrected itself.
+
+  **A bad limit becomes BUTTON PRESSES, and those do not come back when the limit does** -- the same
+  damage the TSR phantom 80 did on route 000003b6, and the reason rejecting a bad read matters more
+  than un-latching one.
+
+  WHAT THE REFUSAL COSTS, measured across routes c4 and c5, 25,556 mapdOut frames:
+
+      current    21,660 frames   81.7% carry a limit    <- untouched
+      fail        2,311           0.0%                  <- already refused
+      predicted   1,080          79.2%                  <- untouched
+      possible      309          46.3%                  <- REFUSED NOW
+      extended      196          58.2%                  <- untouched
+
+  143 limit-carrying frames out of 17,952 -- **0.8% of coverage** -- for a state that supplies a
+  limit less than half the time it occurs and that the real road never settles in.
+  """
+
+  def test_a_possible_match_yields_no_current_limit(self):
+    m = make(True, speedLimit=31.29, waySelectionType="possible")   # 31.29 m/s = 70 mph, his event
+    assert m.get_current_speed_limit() == 0.0
+
+  def test_a_possible_match_yields_no_next_limit_either(self):
+    """The next limit is matched against the SAME way, so it is exactly as suspect -- refusing the
+    current one and passing the next through leaves the ease-down adopting it."""
+    m = make(True, nextSpeedLimit=31.29, nextSpeedLimitDistance=412.0, waySelectionType="possible")
+    assert m.get_next_speed_limit_and_distance() == (0.0, 0.0)
+
+  def test_the_refusal_keys_on_the_MATCH_not_on_the_number(self):
+    """A rule that rejected 70 by value would break I-15, where he drives 80. The same 70 on a
+    settled match must still pass."""
+    m = make(True, speedLimit=31.29, waySelectionType="current")
+    assert m.get_current_speed_limit() == pytest.approx(31.29)
+
+  def test_the_untrusted_set_is_exactly_fail_and_possible(self):
+    """Pinned as a set so widening it is a deliberate edit with its own evidence. `predicted` and
+    `extended` are mapd projecting along a way it HAS matched and neither has been measured doing
+    harm; refusing on suspicion costs coverage for nothing."""
+    from openpilot.sunnypilot.mapd.live_map_data.mapd_v2_map_data import _UNTRUSTED_WAY_MATCH
+    assert set(_UNTRUSTED_WAY_MATCH) == {"fail", "possible"}
 
 
 class TestALowerNextLimitOnAMotorwayIsARamp:
