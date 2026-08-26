@@ -4135,16 +4135,34 @@ NOT." records mapd v1 smoothing a real 240 m corner into a 5,000 m straight -- 2
 now on `MapdV2 = 2`, so SCC-Map reads the v2 curvature profile (`mapd_v2_path.py`), and it errs the
 other way. **A fix aimed at one of these makes the other worse; they are different sources.**
 
-### AND THE FOUR DEFENSES CANNOT REACH THIS. THEY ARE ALL HIGHWAY-ONLY.
+### WHY NO DEFENSE STOPPED IT -- AND THE FIRST VERSION OF THIS SECTION WAS WRONG
 
-`_MAP_FACTOR_V_BP[1]` is 45 mph and is the single definition of "highway corner" for defenses 2, 3
-and 4. Every episode above asked for **12-17 mph**, which is classified ramp-like, where the camera
-vetoes are deliberately OFF -- and the reason they are off is sound and is written down: on an exit
-the model predicts straight down the highway, so camera silence is blindness rather than evidence.
+**IT SAID "THEY ARE ALL HIGHWAY-ONLY" AND THAT IS FALSE. Corrected within the hour, by reading
+`_model_disagrees` instead of remembering it.** Defense 2 -- *the camera sees no curve at all* --
+runs at EVERY speed. `ramp_like` selects the HORIZON (4 s against 10 s), not whether the veto
+applies. Only defense 3 is highway-only by condition, and defense 4 by its `v_target >=
+_MAP_FACTOR_V_BP[1]` gate.
 
-**So the low-speed band has no cross-check of any kind, and that is where the map is now wrong.**
-That is the gap to close, and it is NOT a factor change: `SmartCruiseControlMapFactor` scales a
-corner speed that is already derived from a radius off by a factor of twenty.
+So the code-level reading is narrower and different: defense 2 is reachable at low speed and is
+gated by `target_distance > v_ego * 4`, while SCC-Map publishes its target at the moment braking
+must BEGIN -- which for 40 -> 12 mph is on the order of 180 m against a 71 m horizon. **That would
+make defense 2 unreachable for exactly these corners, and defense 4, which exists precisely because
+a corner can be acted on beyond the model's reach, is highway-only.**
+
+**THAT IS AN INFERENCE AND IT IS NOT MEASURED. DO NOT ACT ON IT.** `target_distance` and
+`model_lat_acc` are the two numbers those gates compare and NEITHER HAS EVER BEEN ON THE WIRE, so no
+drive can say which gate declined. This is the third instance here of publishing a decision without
+its inputs, and the rule already written down is: when a rule cannot be explained from a drive, add
+the log line rather than a third inference. `targetDistance`, `modelLatAcc`, `modelVetoed` and
+`cameraNotSeen` are published as of 2026-08-25. **The next drive names the gate; until then this
+paragraph is a hypothesis.**
+
+**AND THE TWO VETOES WERE MERGED BEHIND AN `or`**, whose own comment says they are "deliberately not
+merged... folding them into one predicate makes the log unreadable". `or` short-circuits, so
+`_camera_has_not_seen_it` was never even EVALUATED when `_model_disagrees` was true. Separated.
+
+Whatever the gate turns out to be, **the fix is NOT a factor change**: `SmartCruiseControlMapFactor`
+scales a corner speed that is already derived from a radius off by a factor of twenty.
 
 **Do not fix this by tuning the vision factors** -- "LOW-SPEED CURVES" already rules that out by
 measurement, and vision was right on every episode here (its own rows are excluded from the radius
@@ -4218,8 +4236,26 @@ Decoding them off routes 000003b6/b7 answered both halves of the TSR problem in 
 Ford's TSR is a FUSION system. Without nav data it falls back to camera-only, which is the weak
 mode, and that is where this car lives. On the wire 0x462 arrives from the real APIM 584-715 times
 a drive while **0x463 and 0x464 are zero frames from any source**. `FordSynthesizeApimGps` exists to
-send exactly those two and is `0` on his device against a `"1"` code default -- a frozen default,
-see the defaults note. Toggle: "Send GPS To The Camera". NOT flipped; his settings are his.
+send exactly those two.
+
+**HE TURNED IT ON HIMSELF AT 13:21 MDT ON 2026-08-24, and this paragraph said `0` for a day after
+that.** On 2026-08-25 that stale line was quoted back to him as current state -- "it is off on your
+device, that is the untried lever" -- and he caught it: *"I thought I turned Send GPS To The Camera
+on?"* He had. Read live:
+
+    FordSynthesizeApimGps = 1   written 2026-08-24 13:21 MDT
+    routes c1 / c2 / c3         2026-08-25 2:15 PM / 4:09 PM / 8:14 PM -- ALL after it
+
+**NEVER QUOTE A PARAM VALUE OUT OF THIS FILE. READ IT OFF THE DEVICE WITH ITS MTIME.** That rule is
+already written here twice -- once for `SpeedLimitPolicy` and once for `AlphaLongitudinalEnabled` --
+and this is the third time it has been broken, this time by trusting a note that was 24 hours old.
+
+**So fusion mode is NOT an untried lever any more; it has been on for two days.** With it on, c1 and
+c2 produced ZERO reads across 266,000 frames and c3 produced two, both the value 30, at 33 and
+34 mph. `tools/bp_tsr_fusion.py` is the before/after and asks the two questions in the order that
+matters: did 0x463/0x464 actually reach the wire, and did `TsrStatMsgTxt` move off
+`Available_CameraOnly`. **The second is meaningless without the first**, and a stale device build
+makes it a null test that reads exactly like "the feature did not help".
 
 **WHY THE READS IT DOES GET ARE UNTRUSTWORTHY, and the trap in fixing it:**
 
@@ -4238,6 +4274,47 @@ which is a resolver change nobody has made yet.
 97 seconds later, because ICBM had already PRESSED the dash up to 90. A bad limit is converted into
 button presses, and those do not come back when the limit does. Rejecting a bad read matters far
 more than un-latching one.
+
+### 2026-08-25: HIS ONE-LINE DIAGNOSIS. IT READS 30 MPH SIGNS AND INTERSTATE SHIELDS.
+
+  *"Bro, it loves reading 30 mph signs and interstate signs."*
+
+That is a far sharper claim than "TSR is unreliable", and it explains the only read that has ever
+hurt him. **The 80 is not a hallucination and not a speed limit sign -- it is the I-80 ROUTE SHIELD**,
+a badge with a large `80` on it, posted all over Salt Lake City on surface streets that feed the
+freeway. The camera resolves the number correctly and misclassifies what KIND of sign it is on.
+
+**AND IT REAPPEARED THE SAME DAY, on route 000003c3 (2026-08-25, 8:14 PM):**
+
+    000003c3   14 seg   81,670 frames   2 reads   [30 x29504, 80 x3436]
+       read 30 at 40.747585, -111.853906   doing 33 mph
+       read 30 at 40.729188, -111.853962   doing 34 mph
+
+The 80 ran for **3,436 frames** and was NOT counted as a read, because it came out of the 30 rather
+than out of the sentinel -- so any edge-counting baseline undercounts exactly the value that is
+dangerous. It reached nothing only because `SpeedLimitPolicy = 1` excludes the camera source.
+
+**WHY THIS CANNOT BE FIXED BY VALUE.** 80 is a legal US limit and Utah posts it on I-15 and I-80, so
+no plausibility filter can reject it. What separates a shield from a sign is WHERE it is read: a
+surface street the map calls residential at 30. That is the corroboration-against-the-map resolver
+change named above as "nobody has made yet", and his observation is what makes it specifiable --
+**refuse a camera limit that grossly exceeds the mapped limit for the road we are on**, which is the
+map REFUSING, never opening, and so is allowed by the map-is-evidence rule.
+
+`tools/bp_tsr_shields.py` prints every camera-limit run with its position, the car's speed, and the
+MAP's limit and road name at the same moment, and flags runs whose value is an interstate route
+number on a road the map calls far slower. **Confirm each against Street View at the printed
+coordinate before believing it** -- that is how the 2026-08-21 read of 30 was verified and it is the
+only check that has ever settled one of these.
+
+**AND HE MAY SIMPLY BE RIGHT THAT IT IS BROKEN.** *"I'm also leaning towards it's broken entirely
+because how has it only detected these."* Across roughly a million frames now measured, TSR has
+produced about five reads, every one the value 30, every one on a slow surface street, and never
+once on a highway -- which is the only place Speed Limit Assist actually wanted a second source.
+"The mechanism is healthy, the recall is terrible" is a distinction that buys him nothing. The
+decision criterion is already written above and has not moved: **any read above 35 mph, or any value
+other than 30.** If several more drives produce neither, retire TSR rather than keep paying it
+attention.
 
 ## 2026-08-24: WHAT MAKES A CAMERA CANCEL STICK -- AND TWO WRONG ANSWERS I PUBLISHED FIRST
 
