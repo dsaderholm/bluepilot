@@ -2438,10 +2438,37 @@ He has reported this repeatedly. Measured on route 00000348, 2026-08-11, and the
 
 Two hard numbers bound it:
 
-- **The set speed falls at about 3.3 mph/s and cannot go faster.** 71 -> 38 took ten seconds. ICBM
-  already HOLDS the button rather than tapping (the state machine asserts `decrease` continuously),
-  so that is the car's own repeat rate for a held button, roughly 5 mph every 1.5 s. It is not a
-  parameter and nothing in this fork can raise it.
+- ~~**The set speed falls at about 3.3 mph/s and cannot go faster.**~~ **WRONG, AND IT IS QUOTED
+  ALL OVER THIS FILE. Corrected 2026-08-26, from his question: *"So were you wrong about how fast
+  ICBM could change the speed? So it could slow down more for exits, right?"***
+
+  Measured across today's drives, fastest SUSTAINED travel over a 3-second window with cruise
+  engaged:
+
+      000003c9   UP +8.0 mph/s      DOWN -6.7 mph/s
+      000003c8   UP +3.7            DOWN -20.1  (a cruise-state jump, not presses -- discount)
+      000003c6   UP +3.7            DOWN -1.3
+
+  **-6.7 mph/s, twice the figure this file has carried as a hard ceiling.** The two numbers
+  reconcile: 3.3 came from ONE descent on route 00000348 (71 -> 38 in ten seconds) and that was
+  measuring the DROP LIMITER, which paces the target down on purpose so Ford coasts instead of
+  braking. It was never the buttons' rate.
+
+  **And "it is not a parameter" was wrong too: `IcbmMaxTargetDrop` is one, and it reads 12.**
+
+  WHAT THIS RE-OPENS. "THE EXIT THAT NEVER SLOWS ENOUGH" is built on the 3.3 figure -- *"a 65 -> 38
+  exit needs about eight seconds of set-speed travel. It got four."* At 6.7 mph/s that 27 mph takes
+  **four seconds**, which is exactly what it got. The arithmetic that closed the exit problem as
+  "detection time, and no lever here can touch it" may be wrong at its root.
+
+  **DO NOT ACT ON THAT YET.** Today's drives contain no exit ramp, so the descent rate measured is
+  from ordinary slowing, and whether the limiter binds during a real ramp is unmeasured. What is
+  established is only that 3.3 is not a ceiling and that a lever exists. Re-measure on a route with
+  an actual exit before touching `IcbmMaxTargetDrop`.
+
+  **The general lesson, for the fourth time in this file: a number produced by ONE event, quoted
+  afterwards as a property of the car.** The circular-convergence entry and the `t+NNNN` inflation
+  entry are the same failure. He caught this one by asking whether the earlier claim was wrong.
 - **The map asked four seconds before peak cornering.** A 65 -> 38 exit needs about eight seconds of
   set-speed travel. It got four.
 
