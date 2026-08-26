@@ -547,7 +547,37 @@ deleted with it, or kept for the wrong reason.
 The line to apply: **would this still make sense if openpilot were driving the car directly?** If
 yes, it is not an ICBM feature, whatever module it currently lives in.
 
-**Known violations, deliberately left alone for now.** `IcbmPinnedHolds*` and
+### HOLDS BELONG TO SLA, NOT ICBM. HE HAS NOW ASKED FOR THIS TWICE, AND IT IS CROSS-BRANCH.
+
+2026-08-26, unprompted and with feeling: *"The next thing we definitely need to do across the board
+on all branches is move holds and pinned holds to SLA. It is not just for ICBM! I wish you had never
+done that."*
+
+He said the same thing on 2026-08-18 -- *"holds shouldn't even be a part of ICBM, they are a part of
+SLA"* -- and it was written down as a "known violation, deliberately left alone", which is a
+description of a decision nobody made. **It is a task, and it is his, and it is not merely naming.**
+
+**WHY IT IS NOT COSMETIC.** A hold is "against THIS posted limit I want a different number". That is
+a statement about speed policy and it has nothing to do with how the speed is achieved -- so it is
+actuator-independent by construction and must survive ICBM being deleted. Filed under `Icbm*` it
+gets deleted with the scaffolding, or kept for the wrong reason. Under op long today the button
+layer goes away and holds go with it, which is the bug this migration removes.
+
+**HE EXPLICITLY DEFERRED IT: *"But don't do that now."*** Do not start it opportunistically. When it
+is started:
+
+- it is `icbm-manual-override-and-tuning` work, because that branch owns the code and the others
+  rebase onto it -- doing it anywhere else strands it
+- `IcbmPinnedHolds`, `IcbmHoldObservations` and `IcbmBaselineResetDelta` are PERSISTENT keys, so
+  renaming discards his stored values. Use the `_BP_LATERAL_SCHEME_PARAM_RENAMES` machinery in
+  `params_migration.py` that exists for exactly this
+- the capnp fields (`vBaseline`, `baselineSource`, `pinSuggestion`) have WIRE HISTORY in every
+  recorded route -- renumbering them makes every drive on disk decode as garbage. Rename the field,
+  never the ordinal
+- the settings labels, the SunnyLink YAML and the HUD reader all name it too; the audit
+  (`bp_sunnylink_settings_audit.py`) needs the new prefix or it silently reports 100% reachable
+
+**Known violations, deliberately left alone UNTIL THEN.** `IcbmPinnedHolds*` and
 `IcbmBaselineResetDelta` are the HOLD concept, which is a planner idea that happens to live in the
 button layer — "aim at my number instead of the posted limit, and keep everything else working
 against it" needs no buttons at all. They are misnamed. Renaming a `PERSISTENT` key discards its
