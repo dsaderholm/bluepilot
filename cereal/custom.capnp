@@ -1005,6 +1005,23 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     # published and watched first, and gates nothing yet.
     leftNarrowingM @108 :Float32;
 
+    # FusionPilot: the side the blinker is lit for, which is a DIFFERENT question from `suggestion`
+    # and is the one passing_maneuver actually reads. `wanted` means "a slow car is spotted and a
+    # lane exists that side"; `suggestion` additionally means every safety gate passed and the
+    # confirmation completed. The maneuver leaves `signaling` on `wanted == none or wanted !=
+    # self.side`, so this field is what a back-out comes down to.
+    #
+    # PUBLISHED 2026-08-26 BECAUSE FOUR BACK-OUTS COULD NOT BE EXPLAINED WITHOUT IT. blockedBy reads
+    # `none` while signaling -- that is what "a suggestion is being made" looks like -- so on two of
+    # the four the only recorded reason was the one value that cannot name a cause. Reading
+    # `suggestion` instead ruled out a side flip and left nothing. The deciding term had never been
+    # on the wire, which is the third time in this fork a decision was logged without its input.
+    #
+    # It is DEBOUNCED (WANTED_RISE_S / WANTED_FALL_S), and that debounce was itself bought by 126
+    # aborts in 37 minutes -- so a back-out attributable here means the hold is still not long
+    # enough, and it is measurable now instead of inferred.
+    wantedSide @109 :Side;
+
   }
 
   struct DynamicExperimentalControl {

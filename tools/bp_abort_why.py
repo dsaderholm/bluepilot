@@ -71,7 +71,7 @@ def main() -> int:
   from cereal import custom
   f = set(custom.LongitudinalPlanSP.PassingAssist.schema.fieldnames)
   for name in ("maneuver", "maneuverSeconds", "maneuverSide", "blockedBy", "maneuverAborts",
-               "suggestion", "reason"):
+               "suggestion", "reason", "wantedSide"):
     if name not in f:
       sys.exit(f"passingAssist has no field {name!r} -- this tool would silently report zeros")
 
@@ -122,6 +122,12 @@ def main() -> int:
           # defects: the first is one gate flipping the answer over, the second is the reason
           # evaporating. Without this column they are indistinguishable and both print as "none".
           "sugg": str(pa.suggestion),
+          # THE DECIDING TERM. passing_maneuver leaves `signaling` on `wanted == none or
+          # wanted != side`, and `wanted` is wantedSide -- NOT `suggestion`, which additionally
+          # requires every safety gate and a completed confirmation. Published 2026-08-26 for
+          # exactly this; on routes recorded before that it reads `none` on every frame, which
+          # would look like "the reason evaporated" on every event. Hence the guard below.
+          "want": str(pa.wantedSide),
           "why": str(pa.reason),
           "deficit": float(pa.speedDeficit) * 2.23694,
           "d_rel": float(pa.leadDRel),
@@ -145,12 +151,20 @@ def main() -> int:
           # Held time separates them, so both are printed and the path is named.
           window = prev["secs"] >= SIGNAL_WINDOW_S - 0.2
           reason = prev["blocked"] if window else cur["blocked"]
-          flipped = (cur["sugg"] not in ("none", prev["side"]))
+          # A route older than the wantedSide field reads `none` forever, which is
+          # indistinguishable from the real "it evaporated" answer. Say so rather than print it.
+          stale = prev["want"] == "none" and cur["want"] == "none"
+          flipped = cur["want"] not in ("none", prev["side"])
+          dropped = cur["want"] == "none"
           events.append({**prev, "went_to": phase, "after": cur["blocked"],
                          "path": "window expired" if window
-                                 else f"FLIPPED to {cur['sugg']}" if flipped
-                                 else "reason went away",
-                         "reason": (f"{cur['why']} on the {cur['sugg']}" if flipped else reason)})
+                                 else "wantedSide NOT LOGGED" if stale
+                                 else f"wanted FLIPPED to {cur['want']}" if flipped
+                                 else "wanted went to none" if dropped
+                                 else "gate refused",
+                         "reason": ("re-run on a route recorded after 2026-08-26" if stale
+                                    else f"{cur['why']} on the {cur['want']}" if flipped
+                                    else reason)})
           by_reason[reason] += 1
       prev = cur
 

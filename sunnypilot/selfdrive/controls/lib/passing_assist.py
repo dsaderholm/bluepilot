@@ -3717,6 +3717,10 @@ class PassingAssistDetector:
     """
     pa = self
     passingAssist.suggestion = pa.suggestion
+    # See custom.capnp. NOT the same question as `suggestion`, and it is the one passing_maneuver
+    # reads -- a back-out out of `signaling` is `wanted == none or wanted != side`, so without this
+    # the deciding term is absent from every route and blockedBy `none` is all a drive can report.
+    passingAssist.wantedSide = pa.wanted_side
     passingAssist.blockedBy = pa.blocked_by
     # One timer now. The field keeps its name so older logs stay comparable.
     passingAssist.confirmSeconds = float(pa.approach_seconds)

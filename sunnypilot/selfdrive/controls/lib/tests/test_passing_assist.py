@@ -4502,3 +4502,45 @@ class TestLeftNarrowing:
     tapered = run(PassingAssistDetector(), 1, left_edge_narrow=2.0, **IN_LEFT_LANE)
     assert tapered.left_narrowing
     assert tapered.left_geometry_ok == base
+
+
+class TestWantedSideReachesTheWire:
+  """`wantedSide` must carry `wanted_side` and nothing that merely correlates with it.
+
+  Four back-outs on routes 000003c1-c9 could not be explained from a route, because the term
+  passing_maneuver actually leaves `signaling` on -- `wanted == none or wanted != side` -- had never
+  been published. blockedBy reads `none` throughout `signaling` (that is what "a suggestion is being
+  made" looks like), so the only recorded reason was the one value that cannot name a cause.
+
+  The trap this guards is a field fed from `suggestion` instead. It would be non-none on most of the
+  same frames and would read entirely plausibly in a log, while being silent on exactly the frames
+  the aborts live on -- `wanted` is geometry alone, `suggestion` additionally requires every safety
+  gate and the completed confirmation. So the test drives them APART and asserts on the difference,
+  rather than checking that something was assigned.
+  """
+
+  @staticmethod
+  def _publish(wanted, suggestion):
+    # A REAL detector, so publish() runs against real state and every other field it touches is
+    # whatever the constructor made it. Only the two under test are forced.
+    det = PassingAssistDetector()
+    det.wanted_side, det.suggestion = wanted, suggestion
+    msg = custom.LongitudinalPlanSP.new_message()
+    det.publish(msg.passingAssist)
+    return msg.passingAssist
+
+  def test_it_is_published_at_all(self):
+    assert "wantedSide" in custom.LongitudinalPlanSP.PassingAssist.schema.fieldnames
+
+  def test_it_carries_wanted_and_not_suggestion(self):
+    # The discriminating case, and the only one that matters: the blinker is lit LEFT while the
+    # detector is suggesting nothing, which is every frame of `signaling` before confirmation
+    # completes. A suggestion-fed field reads `none` here and loses the abort.
+    msg = self._publish(Side.left, Side.none)
+    assert str(msg.wantedSide) == "left"
+    assert str(msg.suggestion) == "none"
+
+  def test_the_two_are_not_the_same_field(self):
+    msg = self._publish(Side.right, Side.left)
+    assert str(msg.wantedSide) == "right"
+    assert str(msg.suggestion) == "left"
