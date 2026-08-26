@@ -151,7 +151,7 @@ def _initialize_ford(CP: structs.CarParams, CP_SP: structs.CarParamsSP, params_d
 
     # FusionPilot: with openpilot longitudinal driving, let the safety firmware carry Ford's own
     # propulsion range instead of upstream's generic -0.5 floor. See
-    # FordSafetyFlagsSP.WIDE_PROPULSION_BAND for the measurement.
+    # FordSafetyFlagsSP.FORD_MEASURED_ENVELOPE for the measurements.
     #
     # Op long is the whole gate: it is the only mode in which openpilot authors ACCDATA at all, so
     # with it off the widened band is unreachable and setting the bit would be noise.
@@ -160,7 +160,7 @@ def _initialize_ford(CP: structs.CarParams, CP_SP: structs.CarParamsSP, params_d
     # -0.495, so nothing openpilot sends today moves. Widening the control side is a separate step
     # and belongs with removing the brake/gas mutual exclusion -- see bluepilot/FORD-ACC-PARITY.md.
     if CP.openpilotLongitudinalControl:
-      CP_SP.safetyParam |= FordSafetyFlagsSP.WIDE_PROPULSION_BAND
+      CP_SP.safetyParam |= FordSafetyFlagsSP.FORD_MEASURED_ENVELOPE
 
 
 

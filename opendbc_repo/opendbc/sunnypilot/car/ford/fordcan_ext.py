@@ -210,12 +210,20 @@ _ACCDATA_SIGNALS = (
 # correction. The gas band has a single legal escape value of exactly -5.0, and it is checked
 # against BOTH AccPrpl_A_Rq and AccPrpl_A_Pred.
 _PANDA_ACCEL_MIN = -3.4991
-_PANDA_ACCEL_MAX = 1.9999
+#
+# AND THE CEILING HAS TWO VALUES TOO, since 2026-08-26 -- the same trap as the gas floor below, one
+# field over. Ford's ordinary pull-away sits ON 2.0, so panda's stock ceiling refused essentially
+# every launch; measured across 114,079 frames of Ford actually driving, `AccBrkTot_A_Rq` reaches
+# p99.9 +2.06 and max +3.24. Widening panda without widening THIS would clamp openpilot's own
+# request straight back down and change nothing on the wire.
+_PANDA_ACCEL_MAX_STOCK = 1.9999
+_PANDA_ACCEL_MAX_WIDE = 3.4975     # must equal FORD_MAX_ACCEL_WIDE in safety/modes/ford.h, decoded
+_PANDA_ACCEL_MAX = _PANDA_ACCEL_MAX_WIDE
 #
 # THE GAS FLOOR HAS TWO VALUES AND THIS FILE HELD ONLY THE NARROW ONE. Found on the wire,
 # 2026-08-25, by a smoke test that decoded `AccPrpl_A_Rq` out of a real CarController's own frame:
 # the propulsion blend asked for Ford's measured -0.66 and **-0.490 went out**. Panda had been
-# widened to -2.8 days earlier (`FordSafetyFlagsSP.WIDE_PROPULSION_BAND`) and this constant was not,
+# widened to -2.8 days earlier (`FordSafetyFlagsSP.FORD_MEASURED_ENVELOPE`) and this constant was not,
 # so the clamp meant to keep frames INSIDE panda's band was instead softening a request panda would
 # have carried -- silently, in the conservative direction, which is the direction nothing complains
 # about. The commit that widened panda said in as many words that "create_acc_msg still clamps its
@@ -231,7 +239,9 @@ _PANDA_ACCEL_MAX = 1.9999
 _PANDA_GAS_MIN_STOCK = -0.5
 _PANDA_GAS_MIN_WIDE = -2.8      # must equal FORD_MIN_GAS_WIDE in safety/modes/ford.h, decoded
 _PANDA_GAS_MIN = _PANDA_GAS_MIN_WIDE
-_PANDA_GAS_MAX = 2.0
+_PANDA_GAS_MAX_STOCK = 2.0
+_PANDA_GAS_MAX_WIDE = 2.5          # must equal FORD_MAX_GAS_WIDE in safety/modes/ford.h, decoded
+_PANDA_GAS_MAX = _PANDA_GAS_MAX_WIDE
 _PANDA_GAS_INACTIVE = -5.0
 # Half a quantum of the coarsest field (AccPrpl_* at 0.01 m/s^2 per bit), which is all the guard a
 # DBC round-trip can need. It was 0.02 and that refused ten frames sitting exactly on the -0.5

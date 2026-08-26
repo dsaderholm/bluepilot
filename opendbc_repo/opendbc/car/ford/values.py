@@ -34,8 +34,17 @@ class CarControllerParams:
   ANGLE_LIMITS: AngleSteeringLimits = FORD_STOCK_ANGLE_LIMITS
   CURVATURE_ERROR = 0.002  # ~6 degrees at 10 m/s, ~10 degrees at 35 m/s
 
-  ACCEL_MAX = 2.0               # m/s^2 max acceleration
-  ACCEL_MIN = -3.5              # m/s^2 max deceleration
+  # FusionPilot: 2.0 is upstream's generic ceiling and FORD'S ORDINARY PULL-AWAY SITS ON IT --
+  # measured p99.9 +2.16, max +2.25 for AccPrpl_A_Rq across 114,079 frames of Ford actually
+  # driving. So openpilot could not ask for the acceleration this car's own ACC uses every time it
+  # leaves a light, which is his "it went ridiculously slow". 2.3 covers the distribution; panda's
+  # matching ceiling is FORD_MAX_GAS_WIDE.
+  ACCEL_MAX = 2.3               # m/s^2, Ford's own measured p99.9 with a little room
+  # AND -3.5 WAS A BUG AGAINST PANDA, NOT A CONSERVATISM. panda refuses below -3.4991, so every
+  # frame that reached this clip was handed over 0.0009 BELOW the floor and DROPPED -- 15 rejected
+  # frames on route 000003b8, ACC faulted 2.8 s later, next ignition came up "Cruise Fault: Restart
+  # the car". Ford's own worst while driving is -3.34, so nothing is given up by sitting inside.
+  ACCEL_MIN = -3.49             # m/s^2, INSIDE panda's -3.4991 rather than 0.0009 outside it
   MIN_GAS = -0.5
   INACTIVE_GAS = -5.0
 

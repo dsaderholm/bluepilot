@@ -99,7 +99,7 @@ DEFAULT_TARGETS = [
   "sunnypilot/selfdrive/controls/lib/speed_limit/tests/test_sla_survives_a_gas_override.py",
   "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_replay_his_drive.py",
   "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_tsr_reliability.py",
-  "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_wide_propulsion_band.py",
+  "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_ford_measured_envelope.py",
   "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_target_speed_is_ego.py",
   "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_propulsion_blend.py",
   "sunnypilot/selfdrive/selfdrived/tests/test_unconfirmed_lead_alert_truth.py",

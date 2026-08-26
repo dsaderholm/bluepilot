@@ -235,11 +235,49 @@ acceleration end is the one he flagged and it is not a rounding matter: `_PANDA_
 2.0 with a 0.005 margin, and Ford's ordinary pull-away sits ON that number -- which is already
 recorded here as the reason the passthrough abandoned Ford on essentially every launch.
 
-**NOT CHANGED TONIGHT, deliberately.** Widening `ACCEL_MAX` and `ACCEL_MIN` means widening panda to
-match, which is the same two-sided edit as the propulsion floor, and this branch already carries two
-unflashed behaviour changes. **One variable per drive**, and there is no drive to spend yet -- see
-the chicken-and-egg note above. What this section buys is that when someone does spend one, the
-numbers are measured rather than guessed.
+### DONE 2026-08-26 -- AND HIS ONE QUESTION REVERSED HALF OF IT
+
+He authorized it plainly: *"I trust Ford, a very large car company, over Comma AI, so if we have to
+change some of the code to get OpenPilot better, I don't care."* Then, mid-implementation, he asked
+the question that saved a safety limit: **"How many drives have you measured?"**
+
+Four. Capped at ten segments each. And checking that turned up a flat contradiction inside this
+fork's own notes -- 6 routes / 189,418 frames said Ford's hardest brake was **-2.70**, while
+`bp_accdata_bands.py` on 4 capped routes said **-4.63**.
+
+`tools/bp_ford_brake_extremes.py` settled it. Same decode, different FILTER -- restricted to frames
+where Ford's ACC is genuinely driving (engaged, moving, foot off the brake, cancel clear), 4 routes,
+**81 segments, no cap**:
+
+                              min    p00.1     p99   p99.9     max
+    ALL frames (unfiltered) -4.80    -3.87    1.94    3.07    4.11
+    ONLY WHILE DRIVING      -3.34    -3.01    1.70    2.06    3.24
+    AccPrpl_A_Rq, driving   -3.50  (p01 -0.66)        2.16    2.25
+
+**THE -4.63 LIVES ENTIRELY IN FRAMES WHERE ACC WAS NOT RUNNING.** Ford's real worst braking is
+-3.34, which sits INSIDE panda's existing -3.4991 with room to spare. The friction-brake floor was
+one commit from being widened for nothing, and the denominator error this file records three times
+is what would have done it. **The brake end is not widened and must not be.**
+
+**The ACCELERATION end is real and is widened**, gated on op long as `FordSafetyFlagsSP.FORD_MEASURED_ENVELOPE`
+(renamed from `WIDE_PROPULSION_BAND`, which named one bound and now gates three):
+
+    AccBrkTot ceiling   1.9999 -> 3.4975    Ford measured p99.9 +2.06, max +3.24
+    AccPrpl ceiling     2.0    -> 2.5       Ford measured p99.9 +2.16, max +2.25
+    ACCEL_MAX           2.0    -> 2.3       Ford's pull-away sits ON 2.0; this is "ridiculously slow"
+    ACCEL_MIN          -3.5    -> -3.49     A BUG FIX, not a widening -- see below
+
+**`ACCEL_MIN = -3.5` WAS OUTSIDE PANDA'S -3.4991.** Every frame reaching that clip was handed over
+0.0009 below the floor and DROPPED: 15 rejected frames on route 000003b8, ACC faulted 2.8 s later,
+next ignition came up "Cruise Fault: Restart the car". Ford's own worst is -3.34, so sitting inside
+costs nothing. **A controller clamp outside the safety band is not conservative; it deletes a 50 Hz
+message.**
+
+**Eleven mutations caught, and two SURVIVED the first pass** -- setting `_PANDA_ACCEL_MAX` back to
+the stock value passed the whole suite, because the tests pinned the WIDE constants against ford.h
+and never asserted which one the clamp reaches for. That is the 2026-08-25 bug in a third costume.
+**A pair needs three assertions: each end defined right, AND the live one bound to the end you
+meant.**
 
 ## How to do the fitting, and the two rules that keep it honest
 

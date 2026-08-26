@@ -123,7 +123,7 @@ class FordSafetyFlagsSP:
   # GATED ON OP LONG, not on any feature toggle. It was originally keyed on `StockAccPassthrough`,
   # where the point was carrying FORD's forwarded frames; that feature is gone (see
   # passthrough-archive) and the point now is letting OPENPILOT ask for what Ford asks for.
-  WIDE_PROPULSION_BAND = 32
+  FORD_MEASURED_ENVELOPE = 32
 
 
 

@@ -275,17 +275,53 @@ static const AngleSteeringParams ford_pinion_geometry[FORD_PINION_GEOMETRY_COUNT
 // in ford_init from current_safety_param_sp. Default off = stock yaw-sourced angle_meas.
 static bool ford_bp_pinion_curvature = false;
 
-// FusionPilot: openpilot longitudinal is driving, so it may ask the powertrain for Ford's own
-// range of deceleration rather than upstream's generic -0.5. Set once in ford_init from bit 5 of
-// current_safety_param_sp. Default off = stock openpilot gas band.
-static bool ford_bp_wide_propulsion = false;
+// FusionPilot: openpilot longitudinal is driving, so it may ask for FORD'S OWN measured range
+// rather than upstream's generic bounds. Set once in ford_init from bit 5 of
+// current_safety_param_sp. Default off = stock openpilot bands, unchanged for anybody else.
+//
+// RENAMED from `ford_bp_wide_propulsion` on 2026-08-26: it gated one bound when written and gates
+// three now. This file records what a name outliving its meaning costs -- `enforce_hold_policy`
+// was called by a dead name in prose for days.
+static bool ford_bp_ford_envelope = false;
 
-// AccPrpl_A_Rq floor. Raw units: (m/s^2 + 5.0) * 100.
+// FusionPilot: FORD'S OWN MEASURED ENVELOPE.
+//
+// His standing position, restated 2026-08-26: *"I trust Ford, a very large car company, over Comma
+// AI, so if we have to change some of the code to get OpenPilot better, I don't care."* That is not
+// a licence to invent numbers -- it is the reason to use FORD'S, measured on his car, in place of
+// upstream openpilot's generic ones.
+//
+// `tools/bp_ford_brake_extremes.py`, routes c0-c3, 81 segments, NO segment cap, restricted to
+// frames where Ford ACC is genuinely driving (engaged, moving, foot off the brake, cancel clear):
+//
+//     114,079 frames of Ford actually driving, out of 238,365 camera ACCDATA frames
+//
+//                        min    p00.1     p99   p99.9     max
+//     AccBrkTot_A_Rq   -3.34    -3.01    1.70    2.06    3.24
+//     AccPrpl_A_Rq     -3.50    (p01 -0.66)      2.16    2.25
+//
+// ONLY THE ACCELERATION END IS WIDENED, AND THAT IS THE OPPOSITE OF WHAT WAS ABOUT TO SHIP.
+// An unfiltered run of `bp_accdata_bands.py` reported Ford braking to -4.63 and this file was one
+// commit away from widening the friction-brake floor to match. He asked "how many drives have you
+// measured?", the answer was four capped at ten segments, and checking it found the -4.63 lives
+// entirely in frames where ACC WAS NOT RUNNING -- unfiltered min -4.80 against -3.34 while driving.
+// Ford's real worst braking sits INSIDE panda's existing -3.4991 with 0.16 m/s^2 to spare.
+//
+// AccBrkTot_A_Rq raw units: (m/s^2 + 20) / 0.0039.
+#define FORD_MAX_ACCEL_STOCK 5641   //  1.9999 m/s^2  -- upstream openpilot's generic value
+#define FORD_MAX_ACCEL_WIDE  6025   //  3.4975 m/s^2  -- covers Ford's measured max of 3.24
+//
+// AccPrpl_A_* raw units: (m/s^2 + 5.0) * 100.
 //   450 = -0.5 m/s^2  -- upstream openpilot's generic value
-//   220 = -2.8 m/s^2  -- covers Ford's own measured minimum of -2.710 with headroom
-// See FordSafetyFlagsSP.WIDE_PROPULSION_BAND in values_ext.py for the measurement this rests on.
+//   220 = -2.8 m/s^2  -- covers Ford's WORKING range; its p01 is -0.66 and the -3.50 extreme is a
+//                        lone outlier, so this is widened to the distribution, not to the max
+//   700 =  2.0        -- upstream's ceiling, which Ford's ordinary pull-away sits ON
+//   750 =  2.5        -- covers Ford's measured 2.25 max and 2.16 p99.9
+// See FordSafetyFlagsSP.FORD_MEASURED_ENVELOPE in values_ext.py.
 #define FORD_MIN_GAS_STOCK 450
 #define FORD_MIN_GAS_WIDE 220
+#define FORD_MAX_GAS_STOCK 700
+#define FORD_MAX_GAS_WIDE  750
 
 static const AngleSteeringParams *ford_bp_pinion_params = &ford_pinion_geometry[0];
 
@@ -596,16 +632,19 @@ static bool ford_tx_hook(const CANPacket_t *msg) {
   const LongitudinalLimits FORD_LONG_LIMITS = {
     // acceleration cmd limits (used for brakes)
     // Signal: AccBrkTot_A_Rq
-    .max_accel = 5641,       //  1.9999 m/s^s
+    .max_accel = ford_bp_ford_envelope ? FORD_MAX_ACCEL_WIDE : FORD_MAX_ACCEL_STOCK,
+    // THE FRICTION BRAKE IS DELIBERATELY NOT WIDENED, and that survived a direct attempt to widen
+    // it. Ford's measured worst while actually driving is -3.34, INSIDE this. The -4.63 that
+    // nearly justified widening was frames where ACC was not running. See the constants above.
     .min_accel = 4231,       // -3.4991 m/s^2
     .inactive_accel = 5128,  // -0.0008 m/s^2
 
     // gas cmd limits
     // Signal: AccPrpl_A_Rq & AccPrpl_A_Pred
-    .max_gas = 700,          //  2.0 m/s^2
+    .max_gas = ford_bp_ford_envelope ? FORD_MAX_GAS_WIDE : FORD_MAX_GAS_STOCK,
     // FusionPilot: widened to -2.8 m/s^2 while openpilot longitudinal is driving. NOTE
     // .min_accel above -- the friction brake -- is deliberately NOT widened.
-    .min_gas = ford_bp_wide_propulsion ? FORD_MIN_GAS_WIDE : FORD_MIN_GAS_STOCK,
+    .min_gas = ford_bp_ford_envelope ? FORD_MIN_GAS_WIDE : FORD_MIN_GAS_STOCK,
     .inactive_gas = 0,       // -5.0 m/s^2
   };
 
@@ -1057,8 +1096,8 @@ static safety_config ford_init(uint16_t param) {
   }
   ford_bp_pinion_curvature = pinion_enabled;
 
-  const uint16_t FORD_PARAM_SP_WIDE_PROPULSION = 32;
-  ford_bp_wide_propulsion = GET_FLAG(current_safety_param_sp, FORD_PARAM_SP_WIDE_PROPULSION);
+  const uint16_t FORD_PARAM_SP_FORD_ENVELOPE = 32;
+  ford_bp_ford_envelope = GET_FLAG(current_safety_param_sp, FORD_PARAM_SP_FORD_ENVELOPE);
 
   ford_bp_pinion_params = pinion_enabled ? &ford_pinion_geometry[pinion_geometry_index] : &ford_pinion_geometry[0];
 
