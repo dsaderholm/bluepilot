@@ -1404,3 +1404,51 @@ class TestOncomingMustBeMovingLikeTraffic:
     assert min_oncoming_ms(4.0) == MIN_ONCOMING_MS, "the noise floor is the lower bound"
     assert min_oncoming_ms(30.0) == 21.0, "0.7 * 30 -- raised from 0.5 on the eleven-drive sweep"
     assert min_oncoming_ms(-5.0) == MIN_ONCOMING_MS, "reverse must not invert the floor"
+
+
+class TestOncomingNeedsEgoToBeMoving:
+  """He watched a 95 mph oncoming label land on the stationary car in front of him at a stop.
+
+  Reported 2026-08-26: *"I saw a few of those oncoming vehicle speed things when I was at a stop on
+  the stopped vehicle in front of me."* -- and the logs had already recorded it twice without anyone
+  recognising what it was: rising edges at ego 1 mph reading 95 mph, and ego 2 mph reading 93 mph.
+
+  `ground_speed` is `v_ego + v_rel / cos(theta)`. At a standstill the ego term is ZERO, so what is
+  left is a raw range rate over a cosine with nothing anchoring it to the road -- and the floor it
+  is tested against is at its weakest there too, since the speed-scaled half of `min_oncoming_ms` is
+  `0.7 * v_ego`. Noisiest input, weakest test, and nothing required ego to be moving.
+
+  He called it distracting rather than dangerous and he is right: `PassingAssistMinSpeed` is 30 mph,
+  so no pass can be suggested anywhere near this speed. The guard cannot open a maneuver. What it
+  buys beyond the screen is the 90 s memory -- one bad sighting at a red light otherwise vetoes for
+  a minute and a half after pulling away.
+  """
+
+  # A REAL ONCOMING CAR AT ROAD SPEED, and the number is checked rather than picked. At 25 m/s ego
+  # with a target doing the same, the radar sees v_rel = -(25 + 25). Anything smaller fails the
+  # SPEED-SCALED floor at road speed while still clearing the flat one at a standstill -- the first
+  # draft used -40 and passed the standstill case while failing the moving one, which is the fixture
+  # proving the guard rather than the guard proving itself.
+  ONCOMING_V_REL = -50.0
+
+  @staticmethod
+  def a_car_coming_the_other_way():
+    """One return that clears the oncoming floor at road speed AND at a standstill."""
+    return track(40.0, 3.7, v_rel=TestOncomingNeedsEgoToBeMoving.ONCOMING_V_REL)
+
+  def test_a_stopped_car_ahead_is_not_oncoming_traffic(self):
+    adj = AdjacentLane()
+    upd(adj, FakeSM([self.a_car_coming_the_other_way()]), 0.5, MAX_D)
+    assert not adj.left.oncoming, "a reading taken at a standstill was believed"
+    assert not adj.oncoming_any_side
+
+  def test_the_same_return_IS_oncoming_once_moving(self):
+    """The guard must not cost the case he is looking forward to -- a two-lane country road."""
+    adj = AdjacentLane()
+    upd(adj, FakeSM([self.a_car_coming_the_other_way()]), 25.0, MAX_D)
+    assert adj.left.oncoming, "the guard swallowed genuine oncoming traffic at road speed"
+
+  def test_the_threshold_sits_below_anything_he_would_call_driving(self):
+    from openpilot.sunnypilot.selfdrive.controls.lib.adjacent_lane import ONCOMING_MIN_EGO_MS
+    assert ONCOMING_MIN_EGO_MS * 2.23694 < 12.0, "high enough to bite a slow country road"
+    assert ONCOMING_MIN_EGO_MS > 1.0, "low enough that the standstill artifacts survive it"

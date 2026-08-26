@@ -140,6 +140,34 @@ ADJACENT_MAX_M = 5.5
 # return lands within a m/s or two of zero.
 MIN_MOVING_MS = 5.0
 
+# BELOW THIS, EGO IS NOT MOVING ENOUGH FOR AN ONCOMING READING TO MEAN ANYTHING. ~9 mph.
+#
+# Reported from the road, 2026-08-26: *"I saw a few of those oncoming vehicle speed things when I
+# was at a stop on the stopped vehicle in front of me."* The logs had already recorded it without
+# anyone recognising it -- rising edges at **ego 1 mph reading 95 mph** and **ego 2 mph reading
+# 93 mph**, both filed under "implausibly fast, radar artifact".
+#
+# THE MECHANISM IS IN THE ARITHMETIC. `ground_speed` is `v_ego + v_rel / cos(theta)`. At a standstill
+# the ego term is ZERO, so the result collapses to a raw range-rate divided by a cosine -- there is
+# nothing left anchoring it to the road. A stationary car ahead whose range-rate wanders reads as
+# traffic coming the other way, and `min_oncoming_ms` is at its weakest there too: the speed-scaled
+# half is `0.7 * v_ego`, which at a standstill is nothing, leaving only the flat 5 m/s floor.
+# Noisiest input, weakest test, and no requirement to be moving at all.
+#
+# WHAT IT COSTS, and why it is safe. `PassingAssistMinSpeed` is 30 mph, so nothing can be suggested
+# anywhere near this speed -- the guard CANNOT open a maneuver. Its only forward effect is keeping
+# garbage out of the 90 s oncoming memory, where a single bad sighting at a red light otherwise
+# vetoes for a minute and a half after pulling away.
+#
+# The real cost is a little less two-way evidence while crawling, since an oncoming sighting is also
+# how a two-way road proves itself. That recovers within seconds of moving -- opposing traffic keeps
+# arriving -- and 90 seconds of a false veto is the larger harm.
+#
+# 9 mph is chosen to sit above the crawl regime and far below anything he would call driving. The
+# case he is looking forward to -- watching closing speeds on a two-lane country road -- happens at
+# 45 to 65, nowhere near this.
+ONCOMING_MIN_EGO_MS = 4.0
+
 # Absolute ground speed below which a track is coming TOWARDS us. Same magnitude as MIN_MOVING_MS
 # and the same reasoning: this is a noise floor around zero, and anything outside it in the negative
 # direction is moving the other way down the road.
@@ -1042,7 +1070,10 @@ class AdjacentLane:
       # NOT v_ego + p.vRel -- see ground_speed(). That form reads a close barrier as a moving car.
       v_abs = ground_speed(v_ego, p.dRel, p.yRel, p.vRel)
 
-      if v_abs < -min_oncoming_ms(v_ego):
+      # SEE ONCOMING_MIN_EGO_MS. Crawling or stopped, `v_abs` is a range rate over a cosine with no
+      # ego term anchoring it, and the floor it is tested against is at its weakest. Every reading
+      # here has been an artifact; he watched one land on the stationary car in front of him.
+      if v_abs < -min_oncoming_ms(v_ego) and v_ego >= ONCOMING_MIN_EGO_MS:
         # Travelling the other way, FAST ENOUGH to be traffic rather than an angle error on
         # something stationary -- see min_oncoming_ms. Seen across the FULL width of our road, not just the next lane
         # -- on anything with a center turn lane the opposing traffic is two lanes out, and bounding
