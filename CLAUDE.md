@@ -3851,6 +3851,14 @@ were green against the bug they were written for.
   credible for being longer, and burying the one thing he has to do inside six paragraphs means he
   has to go looking for it.
 - **23 controls on the settings screen is not a usability problem.** Do not consolidate unless asked.
+- **DISK SPACE IS NOT A FINDING. STOP REPORTING IT.** *"Dude, you tell me this all the time. Of
+  course it won't get filled up."* -- 2026-08-26, after it was raised twice in one afternoon and
+  then "corrected" into a third framing that was still about disk. `deleter.py` removes oldest
+  routes to hold 5 GB free and has never failed to. A `df` reading is not evidence of anything, and
+  neither is "you only have N hours of logs" -- retention is total space over the write rate, which
+  is a constant of the device, not news. Same shape as the athenad websocket churn: **a check that
+  fires every drive forever is how a real finding gets scrolled past.** Do not open with it, do not
+  close with it, do not derive an urgency from it.
 - **Report test results only when the result is news.** No sign-off with a suite total every message.
 - **Changes made on one branch reach the others because he rebases every time.** So CLAUDE.md is the
   channel that actually travels between sessions; per-directory memory is not.
