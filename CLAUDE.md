@@ -4079,6 +4079,99 @@ did: `DEFAULT_BASELINE_RESET_DELTA` is 10 mph and the shake was 3.
 up is cheap, and a filter that makes it slower to slow down is never acceptable. Put the delay only
 on the permissive direction, and prove the placement against the whole suite before believing it.**
 
+## 2026-08-25: SCC-MAP IS INVENTING HAIRPINS AT STATE 2, AND NOTHING CAN VETO IT THERE
+
+Two road reports from one drive, and they turned out to be unrelated:
+
+  *"It seemed to be emulating pressing and holding because I was dropping and increasing by 5 miles
+  per hour at a time."*
+  *"It also decided to drop down to 20 for no reason with no warning. I kept overriding with my gas
+  pedal."*
+
+`tools/bp_icbm_steps.py`, routes 000003c0 / c1 / c2 / c3.
+
+### THE 5 MPH STEPS ARE HIS OWN THUMB. ICBM TAPS CORRECTLY.
+
+    who                    n     1mph    5mph    med gap
+    ICBM in-band         244      230       3      0.14-0.50s
+    ICBM out-of-band     631      617       8      0.10-0.30s
+    driver / other        46       16      10      0.56-8.5s
+
+**869 of ICBM's 875 dash steps were 1 mph.** Every meaningful 5 mph step is in the DRIVER column,
+which is this car's own press-and-hold behaviour with `CustomAccIncrementsEnabled = 0`. So the tap
+duty cycle works on the road, and `TAP_ON_FRAMES` / `TAP_CYCLE_FRAMES` -- recorded for weeks in "THE
+SET SPEED HUNT" as an unverified guess that "cannot be checked offline" -- are now VERIFIED on the
+road. Do not re-tune them off this report.
+
+**AND IT SETTLES A CONTRADICTION THIS FILE WAS CARRYING.** "THE SET SPEED HUNT" says ICBM holds the
+button and the car moves 5 mph per hold; the `buttons-cannot-hold` note says the SCCM clears the bit
+between frames so ICBM can only tap at 1 mph. **Both give 3.3 mph/s, which is why no tool measuring
+RATE ever caught the disagreement.** They differ only in the STEP the driver sees, and the step is
+1 mph. The second note is right about what reaches the dash.
+
+### THE DROP TO 20 IS SCC-MAP, AND THE RADIUS IS THE PROOF
+
+Comparing the map's corner SPEED against the car's speed proves nothing -- the controller exists to
+slow the car before the bend, and it publishes the target at the moment braking must BEGIN. The
+invariant that survives both is the GEOMETRY:
+
+    SCC-Map:  v_target = factor * sqrt(a_lat / k)   ->   R_map   = v_target^2 / (a_lat * factor^2)
+    the car:                                             R_drove = v^2 / a_lat measured at the peak
+
+    route  t+       target   R_map    R_drove    verdict
+    c0     150      17 mph    32 m     753 m     23.2x too tight
+    c2     486      12 mph    16 m     320 m     19.8x too tight
+    c0     469      17 mph    32 m     282 m      8.7x too tight
+    c0    1178      12 mph    16 m     126 m      7.8x too tight
+    c1     409      13 mph    19 m      28 m     map agrees   <- a REAL hairpin
+    c1     414      13 mph    19 m      28 m     map agrees
+
+**Five of seven SCC-Map floor episodes demanded a corner 8-23x tighter than the road.** A 16 m radius
+is a parking-lot turn. `stop?` was 0-4% on every one of them, so no stop sign or light was involved
+and the screen had nothing to say -- which is exactly *"no reason with no warning"*.
+
+**THIS IS THE OPPOSITE OF THE I-80 FINDING AND BOTH ARE TRUE.** "THE TILES SEE THE CORNER. MAPD DOES
+NOT." records mapd v1 smoothing a real 240 m corner into a 5,000 m straight -- 21x too LOOSE. He is
+now on `MapdV2 = 2`, so SCC-Map reads the v2 curvature profile (`mapd_v2_path.py`), and it errs the
+other way. **A fix aimed at one of these makes the other worse; they are different sources.**
+
+### AND THE FOUR DEFENSES CANNOT REACH THIS. THEY ARE ALL HIGHWAY-ONLY.
+
+`_MAP_FACTOR_V_BP[1]` is 45 mph and is the single definition of "highway corner" for defenses 2, 3
+and 4. Every episode above asked for **12-17 mph**, which is classified ramp-like, where the camera
+vetoes are deliberately OFF -- and the reason they are off is sound and is written down: on an exit
+the model predicts straight down the highway, so camera silence is blindness rather than evidence.
+
+**So the low-speed band has no cross-check of any kind, and that is where the map is now wrong.**
+That is the gap to close, and it is NOT a factor change: `SmartCruiseControlMapFactor` scales a
+corner speed that is already derived from a radius off by a factor of twenty.
+
+**Do not fix this by tuning the vision factors** -- "LOW-SPEED CURVES" already rules that out by
+measurement, and vision was right on every episode here (its own rows are excluded from the radius
+column, see below).
+
+### WHAT THE TOOL GOT WRONG FIRST, BECAUSE EACH IS A TRAP WORTH KEEPING
+
+- **It counted float chatter as steps.** `speedCluster` sitting on a rounding boundary flips between
+  two integers on adjacent frames. First run: median gap 0.10 s = 10 mph/s, three times this car's
+  documented ceiling, which is the tell. Debounced at 0.08 s.
+- **It applied SCC-MAP's formula to SCC-VISION rows.** Vision's target is
+  `v_ego * sqrt(a_lat_reg_max / max_pred_lat_acc)` -- proportional to CURRENT SPEED, a completely
+  different derivation -- so inverting it with the map's formula produces an authoritative-looking
+  number that means nothing. All six vision rows read "map agrees", which is the most dangerous way
+  for a wrong column to be wrong. The radius check is now `sccMap`-dominant only.
+- **Its first floor-episode pass never closed an episode**, so episode 2 was episode 1 plus a second,
+  and it printed 100 Hz context around frames that were not at the floor at all.
+- **The harness set `cc.propulsion_blend` directly** in a sibling test, which `update()` overwrites
+  from Params every frame -- so the toggle-OFF case ran with the toggle ON and passed.
+
+### THE ONROAD GUARD IS IN THE TOOL, NOT IN A NOTE
+
+An rlog scan on this device cost him engagement mid-drive once, and the lesson was written down as
+"copy the logs off and decode locally". A note cannot stop the next scan. `bp_icbm_steps.py` reads
+`/data/params/d/IsOnroad` before EVERY segment and stops with a loud partial-results banner, because
+a drive can start at any point in a run that takes minutes.
+
 ## THE FORD CAR CODE IS NOT LINTED BY THE REPO'S OWN CONFIG
 
 `pyproject.toml` `[tool.ruff] exclude` lists `opendbc` AND `opendbc_repo`. **Every file that actually
