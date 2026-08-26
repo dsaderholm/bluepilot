@@ -2486,6 +2486,60 @@ The remaining lever is how far ahead `MapTargetVelocities` is populated, which i
 this fork. Do not re-derive this from scratch; measure with `tools/bp_missed_curves.py` and compare
 the map's fire time against the 3.3 mph/s budget before proposing anything.
 
+## 2026-08-26: SCC-MAP PUBLISHED THE CORNER SPEED TWO SECONDS AFTER PEAK CORNERING
+
+**HE ASKED THE QUESTION THAT REOPENED THIS, and the first answer was wrong.** A 6.50 m/s^2 lateral
+event on route 000003c9 was reported to him as "it was you, hands on the wheel, not a bug". He
+pushed: *"Yeah, sure, maybe I was steering, but was cruise on and I took over steering because it
+couldn't handle it?"*
+
+He was right, and this file already contains the pattern he was invoking: *"hands-on% climbs the
+same curve -- 6% low, 90%+ above 3.0 -- so he TAKES OVER exactly where the PSCM starts losing the
+line."* **"He was steering" and "it could not handle it" are the same observation, not alternatives.**
+
+    t+762-779   nothing asking     dash 80 (SLA)   car ACCELERATING 66 -> 73 mph
+    t+780       sccVision asks 63                  dash starts down from 80
+    t+783       dash 65            latAcc 0.65     hands off
+    t+784       dash 57            latAcc 2.34     HE TAKES THE WHEEL at 68 mph
+    t+785       dash 56            latAcc 4.31
+    t+786       dash 54  sccMap ASKS 28            latAcc 4.75  <- peak, and the map arrives NOW
+    t+790       dash 28                            corner over, car at 50
+
+**The controller that knew the corner needed 28 mph published it two seconds AFTER peak lateral
+acceleration and six seconds after the corner began.** SCC-Vision fired first, ~6 s out, asking 63
+against a car doing 73 -- and the car was still ACCELERATING into the bend at that moment, because
+SLA had the set speed at 80 and nothing was objecting.
+
+**THIS IS "THE EXIT THAT NEVER SLOWS ENOUGH", WORSE THAN THE WRITE-UP.** That section measures the
+map firing four seconds BEFORE peak cornering on route 00000348. Here it fired two seconds after.
+
+**AND THE 3.3 mph/s ARITHMETIC THAT CLOSED THAT SECTION IS ALSO WRONG** -- see the corrected entry
+in "Facts that have been got wrong before". The dash came down 80 -> 57 in four seconds here, about
+5.75 mph/s, so the set speed was NOT the binding constraint on this event. **Detection time was.**
+
+### WHAT NOT TO DO
+
+- **Do not conclude "he cornered hard" from `steeringPressed` alone.** It is the same split that
+  corrected the 3.21 m/s^2 figure, and used carelessly it converts a controller failure into a
+  driver anecdote. Ask what the controllers were asking for and WHEN.
+- **The steering-angle derivation reads ~35% high at highway speed.** 6.50 from the bicycle model
+  was 4.75 on `currentLateralAccel` at the same frames. Print both, on the same frame; that rule is
+  already in this file and the first read of this event ignored it.
+- **The 2026-08-26 ramp-approach fix does NOT help here** and was never meant to. This corner was
+  entered at 73 mph, so `ramp_approach` is true and the conservative horizon still applies --
+  correctly. That fix is for phantom corners on surface roads, a different failure.
+
+### THE ONE LEVER, AND ITS COST
+
+`SmartCruiseControlMapDecel` is a TRIGGER DISTANCE (see "Facts that have been got wrong before"),
+currently 8. A gentler value lengthens the required distance and makes SCC-Map publish EARLIER.
+
+**But it makes the phantom corners fire earlier and hold longer too**, and there are four of those
+on the same two drives (see the ramp-approach entry). Moving it trades a real, measured late
+detection against a real, measured false one. **Measure both before touching it** -- and note the
+phantom fix and this lever push in opposite directions, so changing them together produces a drive
+that cannot say which moved.
+
 ## WE ARE PINNED TO THE LAST RELEASE OF A DEAD MAPD, AND UPSTREAM IS NOT COMING
 
 Established 2026-08-16 from the repos, because "mapd is upstream of this fork" was being used as a
