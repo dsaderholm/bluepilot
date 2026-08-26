@@ -33,6 +33,11 @@ from openpilot.sunnypilot.mapd.live_map_data.base_map_data import BaseMapData
 from openpilot.sunnypilot.navd.helpers import Coordinate
 
 
+# FusionPilot: way-match states whose speed limit is NOT trusted. See `way_match_untrusted`.
+# A tuple rather than two comparisons so adding a state is one edit and the test can enumerate it.
+_UNTRUSTED_WAY_MATCH = ("fail", "possible")
+
+
 class MapdV2MapData(BaseMapData):
   def __init__(self):
     super().__init__(extra_services=['mapdOut'])
@@ -103,17 +108,52 @@ class MapdV2MapData(BaseMapData):
       cloudlog.warning(f"mapd v2: waySelectionType={way_selection}")
 
   @property
-  def way_match_failed(self) -> bool:
-    """mapd's matcher could not decide which way the car is on.
+  def way_match_untrusted(self) -> bool:
+    """mapd is not confident which way the car is on, so its limit is not "the limit here".
 
-    A limit published on such a frame is not "the limit here" -- it is a limit for a road mapd is
-    not confident we are on, arriving labelled exactly like a matched one. v1 has no way to express
-    this state at all, which is part of why it is worth migrating.
+    A limit published on such a frame is a limit for a road mapd is not sure we are on, arriving
+    labelled exactly like a matched one. v1 has no way to express this state at all, which is part
+    of why it is worth migrating.
+
+    `possible` WAS ADDED 2026-08-26, FROM A ROAD REPORT: *"at one point at the beginning my speed
+    went to 80 while it was at a stop and then went back down to 35."*
+
+    Route 000003c4, t+74, stopped at 1 mph on 1300 East -- a secondary road with a 30 mph limit:
+
+        t+72-73   waySelectionType fail       unknown      no limit
+        t+74      waySelectionType POSSIBLE   MOTORWAY     "Dwight D. Eisenhower H"   70 mph
+        t+75      waySelectionType fail       unknown      gone
+        t+78      waySelectionType possible   secondary    "1300 East"                30 mph
+        t+79+     waySelectionType current    secondary    "1300 East"                30 mph
+
+    ONE SAMPLE matching I-80 was enough. The resolver took the 70, it cleared his 35 hold, and ICBM
+    pressed the set speed from 35 toward 80 over three seconds before the map corrected itself.
+    **A bad limit is converted into BUTTON PRESSES, and those do not come back when the limit does**
+    -- the same thing the TSR phantom 80 did on route 000003b6.
+
+    WHAT IT COSTS, measured rather than assumed, across routes c4 and c5 (25,556 mapdOut frames):
+
+        current    21,660 frames   81.7% carry a limit    <- the normal case, untouched
+        fail        2,311           0.0%                  <- already refused
+        predicted   1,080          79.2%                  <- untouched
+        possible      309          46.3%                  <- REFUSED NOW
+        extended      196          58.2%                  <- untouched
+
+    143 limit-carrying frames out of 17,952. **0.8% of coverage**, for a state that supplies a limit
+    less than half the time it occurs and that the real road never settles in -- 1300 East resolved
+    to `current` four seconds later and stayed there.
+
+    `predicted` and `extended` are deliberately NOT refused. They are mapd projecting along a way it
+    HAS matched, they carry a limit ~80% and ~58% of the time, and nothing has measured them doing
+    harm. Refusing on suspicion is how a confidence policy starts costing coverage for nothing.
+
+    This is the map-is-evidence rule as written: **a limit is an instruction to change speed, so
+    refusing one costs coverage while honoring a wrong one costs safety.**
     """
-    return str(self.sm['mapdOut'].waySelectionType) == "fail"
+    return str(self.sm['mapdOut'].waySelectionType) in _UNTRUSTED_WAY_MATCH
 
   def get_current_speed_limit(self) -> float:
-    if not self.mapd_alive or self.way_match_failed:
+    if not self.mapd_alive or self.way_match_untrusted:
       return 0.0
     return float(self.sm['mapdOut'].speedLimit)
 
@@ -129,7 +169,7 @@ class MapdV2MapData(BaseMapData):
     why OsmMapData carries that arithmetic. mapd knows where it is along the way and we do not, so
     its number is better than one we derive from a position that is a frame or two stale.
     """
-    if not self.mapd_alive or self.way_match_failed:
+    if not self.mapd_alive or self.way_match_untrusted:
       return 0.0, 0.0
     mapd = self.sm['mapdOut']
     nxt = float(mapd.nextSpeedLimit)

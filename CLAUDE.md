@@ -3774,6 +3774,72 @@ were green against the bug they were written for.
 - **Changes made on one branch reach the others because he rebases every time.** So CLAUDE.md is the
   channel that actually travels between sessions; per-directory memory is not.
 
+## 2026-08-26: THE SET SPEED WENT TO 80 AT A STOP. A `possible` WAY MATCH DID IT.
+
+*"On my second most recent drive today at one point at the beginning my speed went to 80 while it
+was at a stop and then went back down to 35."*
+
+Route 000003c4, t+74, stopped at 1 mph on 1300 East -- secondary, 30 mph posted:
+
+    t+72-73   waySelectionType fail       unknown      no limit
+    t+74      waySelectionType POSSIBLE   MOTORWAY     "Dwight D. Eisenhower H"   70 mph
+    t+75      waySelectionType fail       unknown      gone
+    t+78      waySelectionType possible   secondary    "1300 East"                30
+    t+79+     waySelectionType current    secondary    "1300 East"                30
+
+**ONE SAMPLE matched him to I-80 while he sat still on a surface street.** The resolver took the 70,
+`vTargetRaw` and MAX went to 80, his 35 hold CLEARED, and ICBM pressed `increase` -- dash 35 -> 48 in
+three seconds -- before the map corrected itself and it walked back to 35.
+
+**IT WAS NOT PINNED HOLDS, AND HE REASONABLY SUSPECTED THEM** because he had turned them off that
+morning at 07:38 and the drive began at 07:37. Ruled out by reading `match()`: it returns 0 when
+`self.pins` is empty, and `IcbmPinnedHolds` has been `[]` since 2026-08-11. **A pin has never once
+been created on this car.** It was not TSR either -- `SpeedLimitPolicy = 1` excludes the camera.
+
+### THE FIX: `possible` JOINS `fail` AS AN UNTRUSTED MATCH
+
+`MapdV2MapData` already refused `fail`. `possible` is mapd saying it is not sure which way this is,
+and the real road never settles there -- 1300 East went `possible` -> `current` four seconds later
+and stayed. Measured across c4 and c5, 25,556 mapdOut frames:
+
+    current    21,660   81.7% carry a limit    <- untouched
+    fail        2,311    0.0%                  <- already refused
+    predicted   1,080   79.2%                  <- untouched
+    possible      309   46.3%                  <- REFUSED NOW
+    extended      196   58.2%                  <- untouched
+
+**143 limit-carrying frames of 17,952 -- 0.8% of coverage.** `predicted` and `extended` are
+deliberately NOT refused: they are mapd projecting along a way it HAS matched, and refusing on
+suspicion costs coverage for nothing.
+
+**AN EXISTING TEST BLESSED `possible` AND HAD TO BE REVERSED.**
+`test_every_confident_selection_still_passes_through` read "the gate must catch `fail` and nothing
+else -- `extended` and `possible` are still matches", written before any drive said otherwise. One
+did. A test changed to permit new behaviour must say why, or the next reader cannot tell a fix from
+a regression.
+
+**AND THE DAMAGE OUTLIVES THE LIMIT, which is the general lesson and the third instance.** The map
+was wrong for half a second; the SET SPEED was wrong for ten, because ICBM had already converted the
+limit into button presses and those do not come back. Same shape as the TSR phantom 80 on 000003b6.
+**Rejecting a bad read matters far more than un-latching one.**
+
+### AND HIS RESUME REPORT IS NOT OURS
+
+*"On the most recent drive, auto resume after the lead vehicle departed didn't work, leaving my
+cruise cancelled."* Route 000003c5:
+
+    t+173   0 mph   standstill True    lead 4 m, lead speed 0     engaged
+            ...20 s stopped, lead stationary...
+    t+193   0 mph   resume     True    lead 4 m, lead speed 2     <- lead moves, WE PRESS RESUME
+    t+194   0 mph   standstill False   lead 5 m, lead speed 5
+    t+194           engaged    FALSE                              <- Ford drops cruise
+
+**The resume gate did NOT withhold it** -- that was the first suspicion and it is wrong. The lead was
+stationary the whole time and openpilot asserted resume in the same second it moved. Ford declined
+after a 20-second standstill. Consistent with his own read: *"I've seen this happen before, without
+passthrough, and it is rare. It might not be fixable."* The open question is whether there is a
+STANDSTILL DURATION threshold; short stops resume fine on these same drives.
+
 ## THE DEVICE RUNS IN UTC. HE DOES NOT. CONVERT BEFORE REASONING ABOUT A TIME.
 
 2026-08-25, and it inverted a TSR conclusion inside an hour. `date` on the comma reports UTC, and
