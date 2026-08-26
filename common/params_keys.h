@@ -227,7 +227,31 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // BluePilot: places the driver has set the same hold more than once. Feeds the suggestion to
     // pin it -- see SUGGEST_AFTER in pinned_holds.py. Suggestions never act on their own.
     {"IcbmHoldObservations", {PERSISTENT | BACKUP, JSON}},
-    {"IcbmPinnedHoldsEnabled", {PERSISTENT | BACKUP, BOOL, "1"}},
+    // FusionPilot: OFF, and this is a REJECTED CONCEPT rather than a feature that ships disabled.
+    //
+    // "Every feature this fork builds ships ON" is the standing rule and it does not apply here,
+    // because he does not want the idea:
+    //
+    //   *"I doubt I am going to use pinned holds at all. Those were for before I knew about how
+    //    easy it was to use OSM."*
+    //   *"I just want to be able to override the speed when I want and it to not be remembered.
+    //    Memory will be me editing OSM."*
+    //   *"Remember, I don't like the concept of pinned holds."*  -- 2026-08-26, a third time
+    //
+    // He turned it off himself at 07:38 on 2026-08-26 and the default said 1 until this change.
+    //
+    // AND IT HAS NEVER WORKED. `IcbmPinnedHolds` has read `[]` since 2026-08-11 -- a pin has never
+    // once been successfully created on this car -- so it cannot be defended as something another
+    // owner might enjoy either. Nobody has ever had it.
+    //
+    // THE END STATE IS DELETION, not this. His own rule: when a reason expires, delete rather than
+    // park at neutral, because a knob that changes nothing still reads as load-bearing. Deferred
+    // only because he leaves on a 2,000 mile drive tomorrow and this branch rebases onto his.
+    //
+    // WHEN IT IS DELETED, `pinSuggestion` IN custom.capnp MUST NOT BE RENUMBERED. It has WIRE
+    // HISTORY -- it is in every route recorded on the device -- and capnp reads by POSITION, so
+    // moving it makes every stored drive decode as garbage. Retire the field, keep the ordinal.
+    {"IcbmPinnedHoldsEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},
     // Metres. Big enough that GPS scatter cannot step over it, small enough that a surface-street
     // pin does not fire on the freeway above it. A pin only has to hit ONCE -- it sets a normal
     // hold, which then persists on its own -- so this covers fix error, not the length of the zone.
