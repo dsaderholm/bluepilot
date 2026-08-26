@@ -58,6 +58,12 @@ OVERTAKE_RECENT_S = 15.0
 # device anyway.
 BLOCKED_NO_LANE = "noLaneAvailable"
 
+# Above this, the deficit is a BAD LEAD READ rather than a slow car. speedDeficit is set speed minus
+# lead speed, so a lead being held at ~0 reports the whole set speed as the deficit. Nobody passes
+# something 40 mph slower on the roads this car drives without it being stopped traffic, and a
+# stopped-traffic lane change is not the calibration question this number exists to answer.
+MAX_PLAUSIBLE_DEFICIT_MPH = 40.0
+
 
 def main() -> int:
   ap = argparse.ArgumentParser()
@@ -127,9 +133,12 @@ def main() -> int:
             out["passes"] += 1
             blocked_hist[last["blockedBy"]] += 1
             if last["deficit"] is not None:
-              deficits.append(last["deficit"])
-              if last["blockedBy"] == "nothingSlower":
-                deficits_nothing_slower.append(last["deficit"])
+              if last["deficit"] > MAX_PLAUSIBLE_DEFICIT_MPH:
+                out["  ...bad lead read (deficit implausible)"] += 1
+              else:
+                deficits.append(last["deficit"])
+                if last["blockedBy"] == "nothingSlower":
+                  deficits_nothing_slower.append(last["deficit"])
             if last["agreed"]:
               out["PA already agreed"] += 1
             elif last["blockedBy"] == BLOCKED_NO_LANE:
@@ -174,6 +183,16 @@ def main() -> int:
         "rule": rule,
         "radar_blind": blind,
         # mph, and only when a lead is actually there -- a deficit against no lead is not a number.
+        #
+        # AND BOUNDED ABOVE, which the first version was not. `speedDeficit` is set speed minus LEAD
+        # speed, so a lead the radar is holding with a speed of ~0 produces a deficit equal to the
+        # whole set speed: the first run reported a median of 34 mph and a max of 106, which is not
+        # a passing decision, it is a bad lead read. Unbounded p75 and median are then meaningless.
+        #
+        # THIRD TIME TODAY for this exact shape -- the narrowing measurement reported 99.95 m and
+        # the oncoming flag 95 mph, both from bands with a floor and no ceiling. A quantity with a
+        # physical range needs BOTH ends stated, every time, and it is always the end nobody thought
+        # about that admits the garbage.
         "deficit": (float(p_a.speedDeficit) * 2.23694) if bool(p_a.hasLead) else None,
       }
 
