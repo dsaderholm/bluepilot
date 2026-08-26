@@ -137,9 +137,6 @@ class SelfdriveD(CruiseHelper):
     # FusionPilot: read ONCE. update_events runs every control frame and Params.get_bool reads the
     # store each call, so testing this inline was 100 filesystem reads a second for a value the
     # carcontroller itself reads once at init -- swapping it mid-drive is meaningless by design.
-    self.stock_acc_passthrough = self.params.get_bool("StockAccPassthrough")
-    # Announce the inert passthrough once per occurrence; see where it is raised.
-    self.acc_passthrough_inert_announced = False
 
     self.CS_prev = car.CarState.new_message()
     self.AM = AlertManager()
@@ -487,7 +484,7 @@ class SelfdriveD(CruiseHelper):
     # authors the command, openpilot only carries it -- so without this the model FCW loses its
     # suppression and chimes while Ford brakes normally for a lead. Found by auditing every
     # consumer of that flag on 2026-08-18, before it fired on a road.
-    stock_is_the_brake = not self.CP.openpilotLongitudinalControl or self.stock_acc_passthrough
+    stock_is_the_brake = not self.CP.openpilotLongitudinalControl
     stock_long_is_braking = self.enabled and stock_is_the_brake and CS.aEgo < -1.25
     model_fcw = self.sm['modelV2'].meta.hardBrakePredicted and not CS.brakePressed and not stock_long_is_braking
     planner_fcw = self.sm['longitudinalPlan'].fcw and self.enabled
@@ -512,40 +509,7 @@ class SelfdriveD(CruiseHelper):
       self.events.remove(EventName.canBusMissing)
 
     CruiseHelper.update(self, CS, self.events_sp, self.experimental_mode)
-
-    # FusionPilot: SAY IT ONCE WHEN THE PASSTHROUGH DIES.
-    #
-    # Route 0000038d: the camera asserted cancel and deny on 8,988 of 8,990 engaged frames from
-    # t+30.8, so Ford's command could not be carried for the rest of the drive and openpilot
-    # longitudinal drove instead. He found that out from the seat and described it as the feature
-    # being bricked for the whole drive. The `ACC LOST` pill said so, but only to someone looking.
-    #
-    # Fired ONCE per drive on the transition. It does not recover within a drive, and a repeating
-    # alert for a permanent condition is one he would learn to ignore -- which is worse than
-    # silence, because then it would not reach him the day it matters.
-    if self.sm.alive['controllerStateBP']:
-      inert = str(self.sm['controllerStateBP'].accAuthority) == "inert"
-      if inert and not self.acc_passthrough_inert_announced:
-        self.acc_passthrough_inert_announced = True
-        self.events_sp.add(EventNameSP.accPassthroughInert)
-      elif not inert:
-        # The camera clearing cancel restores the passthrough by itself -- `passthrough_cancel_frames`
-        # resets on any other reason -- so re-arm rather than latching for the ignition cycle.
-        self.acc_passthrough_inert_announced = False
-
-    # decrement personality on distance button press
-    #
-    # FusionPilot: NOT under the stock-ACC passthrough. `openpilotLongitudinalControl` is upstream's
-    # way of asking "is openpilot's own plan driving", and with the passthrough on the answer is no
-    # -- Ford authors the command and openpilot's personality steers a plan that is discarded. So
-    # the gap button was cycling an aggressiveness setting that changes nothing, while the thing it
-    # is supposed to reach is Ford's own follow distance.
-    #
-    # He reported it twice: "the gap button changed openpilot's aggressiveness" on drive A, and
-    # again on 2026-08-18 -- "when I adjusted my gap, it said personality on the screen". Same flag,
-    # same wrong question, same file as the FCW suppression fixed earlier today; `stock_is_the_brake`
-    # below is the same test spelled out for the same reason.
-    if self.CP.openpilotLongitudinalControl and not self.stock_acc_passthrough:
+    if self.CP.openpilotLongitudinalControl:
       if any(not be.pressed and be.type == ButtonType.gapAdjustCruise for be in CS.buttonEvents):
         if not self.experimental_mode_switched:
           self.personality = (self.personality - 1) % 3

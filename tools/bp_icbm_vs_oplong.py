@@ -9,7 +9,6 @@ passthrough it deliberately answers "Ford drives, so ICBM stays" -- which is rig
 authoring. It has no way to notice that the passthrough later went `inert` and openpilot has been
 authoring every frame since.
 
-So the question is whether that gap shows up in the drive: while `accAuthority` was `inert`, was
 ICBM still emitting button presses, and did the dash set speed keep moving?
 
 Prints per authority state: frames, how many carried an ICBM button, and how far the dash set speed
@@ -67,7 +66,7 @@ def main():
         continue
       if w == "controllerStateBP":
         try:
-          authority = str(m.controllerStateBP.accAuthority).split(".")[-1]
+          authority = "n/a"
         except Exception:
           pass
         continue

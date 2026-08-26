@@ -254,7 +254,7 @@ class UIStateSP:
     # That is why re-enabling ICBM never stuck and why the device read `unset` afterwards: the
     # settings page would light the toggle, this would delete it a frame later, and `has_icbm` going
     # false greyed out every child setting underneath.
-    op_long_drives = has_long and not self.params.get_bool("StockAccPassthrough")
+    op_long_drives = has_long
     if self.CP_SP is not None:
       if not self.CP_SP.intelligentCruiseButtonManagementAvailable or op_long_drives:
         self.params.remove("IntelligentCruiseButtonManagement")

@@ -178,6 +178,7 @@ class SmartCruiseControlMap:
     self.target_accel = TARGET_ACCEL
     self.model_lat_acc = 0.0
     self.model_vetoed = False   # logged so a missing slowdown can be explained rather than guessed
+    self.camera_not_seen = False  # the second veto, kept apart from the first so a drive can tell
     self.target_distance = float('inf')
     self.map_factor = 1.0
     self.map_high_speed_factor = 1.0
@@ -483,8 +484,16 @@ class SmartCruiseControlMap:
     # Two separate claims, deliberately not merged: the camera looked and saw something gentler, or
     # the camera has not been able to look yet. Both suppress the map here; only the first is the
     # model disagreeing, and folding them into one predicate makes the log unreadable.
-    self.model_vetoed = bool(self.is_active and (self._model_disagrees(self.target_distance)
-                                                 or self._camera_has_not_seen_it(self.target_distance)))
+    #
+    # FusionPilot: EVALUATED SEPARATELY AND KEPT SEPARATELY, 2026-08-25. The comment above says the
+    # two claims are "deliberately not merged" and then merged them into one bool with `or`, which
+    # short-circuits -- so a drive could never say which one fired, and on 2026-08-25 that left a
+    # real report ("dropped to 20 for no reason") attributable to SCC-Map but not explainable.
+    # Both are published now. Note `or` also meant `_camera_has_not_seen_it` was never evaluated
+    # whenever `_model_disagrees` was true, so it could not even be logged from inside itself.
+    disagrees = bool(self.is_active and self._model_disagrees(self.target_distance))
+    self.camera_not_seen = bool(self.is_active and self._camera_has_not_seen_it(self.target_distance))
+    self.model_vetoed = disagrees or self.camera_not_seen
     if self.model_vetoed:
       self.is_active = False
 

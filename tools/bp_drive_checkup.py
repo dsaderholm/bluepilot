@@ -287,10 +287,7 @@ class Checkup:
         pass
 
   def controller_bp(self, cbp) -> None:
-    try:
-      self.authority[str(cbp.accAuthority)] += 1
-    except Exception:
-      pass
+    pass
 
   def acc_faulted(self) -> None:
     self.acc_faults += 1

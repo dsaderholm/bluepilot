@@ -1049,6 +1049,30 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       aTarget @2 :Float32;
       enabled @3 :Bool;
       active @4 :Bool;
+
+      # FusionPilot: THE VETOES' OWN INPUTS. Added 2026-08-25 because a real road report --
+      # *"it decided to drop down to 20 for no reason with no warning"* -- could be attributed to
+      # SCC-Map but NOT explained, and the four defenses are the thing that should have stopped it.
+      #
+      # Measured on routes 000003c0/c2: five of seven floor episodes demanded a corner 8-23x
+      # tighter than the road the car then drove (R_map 16-32 m against R_drove 126-753 m). Reading
+      # the CODE says defense 2 -- "the camera sees no curve at all" -- is reachable at low speed
+      # and should have caught them, gated only by a 4 s horizon; and that defense 4, which exists
+      # precisely because a corner can be acted on beyond the model's reach, is highway-only.
+      #
+      # THAT IS AN INFERENCE AND IT IS THE THIRD ONE IN THIS FILE'S HISTORY OF EXACTLY THIS
+      # MISTAKE. `targetDistance` and `modelLatAcc` are the two numbers those gates compare, and
+      # neither has ever been on the wire, so no drive can say which gate declined. The rule this
+      # repo already wrote down after the cancel-recovery episode is: when a rule cannot be
+      # explained from a drive, add the log line rather than a third inference.
+      #
+      # `modelVetoed` is the existing internal flag; the other three are its arguments. Publishing
+      # a decision without its inputs is what made this undiagnosable in the first place.
+      targetDistance @5 :Float32;   # metres to the corner. inf on the wire is meaningless, so 0
+                                    # means "no corner", never "the corner is here".
+      modelLatAcc @6 :Float32;      # the camera's own predicted lateral accel, the veto's evidence
+      modelVetoed @7 :Bool;         # either camera veto fired
+      cameraNotSeen @8 :Bool;       # suppressed because the corner is beyond the model's horizon
     }
 
     enum VisionState {
@@ -1406,51 +1430,6 @@ struct ControllerStateBP @0xcd96dafb67a082d0 {
   # BluePilot: lateral mode the car controller actually ran this frame (not the param).
   # Only published by Ford BP, so other cars show nothing.
   activeLateralMode @54 :LateralMode;
-
-  # FusionPilot: WHO IS AUTHORING ACCDATA, stated by the code that decides it.
-  #
-  # The HUD used to infer this by comparing `carOutput.actuatorsOutput.accel` against the camera's
-  # `accAccelRequest`. That comparison is honest but it cannot tell WHY they differ, and the two
-  # reasons could not be further apart: `opStop` is the stop override doing exactly its job for a
-  # few seconds, and `inert` is the camera having latched cancel with openpilot longitudinal
-  # driving for the rest of the drive. Same divergence on the wire, opposite meanings to the
-  # driver. Drive A latched at t+229 and was still latched 262 s later with nothing on screen
-  # saying so.
-  accAuthority @55 :AccAuthority;
-
-  enum AccAuthority {
-    # Not applicable: openpilot longitudinal is off, so the camera's command reaches the car
-    # directly through the relay and nothing here authors anything.
-    stock @0;
-    # Forwarding Ford's own command. The intended state under the passthrough, and the one the
-    # whole feature exists to be in.
-    ford @1;
-    # The stop override. Deliberate, bounded, seconds long.
-    opStop @2;
-    # This frame's Ford command could not be carried -- outside panda's bands, or longitudinal
-    # inactive -- so openpilot's own authored command went instead. Normally scattered frames:
-    # 8.9% of drive B, none of them consecutive for long.
-    fallback @3;
-    # The camera has asked to cancel for 5 s straight. The passthrough is dead for the rest of the
-    # drive and openpilot longitudinal is driving. THIS is the one that needs to be on screen.
-    inert @4;
-    # openpilot longitudinal with the passthrough switched off. Not a fault -- it is plain alpha
-    # long, which is a thing he can choose -- but it is not Ford driving either.
-    openpilot @5;
-    # Forwarding Ford's command with `AccCancl_B_Rq` CLEARED, to give a camera that cancelled
-    # because of our own stop override a way to observe the car obeying it again.
-    #
-    # Its own enumerant rather than `ford`, added 2026-08-22 on review. The numbers on the wire are
-    # Ford's, so it reads as ordinary forwarding -- but an actuation bit is being suppressed, which
-    # is a materially different state, and every offline tool in this fork scores drives by this
-    # field. Counting these as clean Ford authorship is exactly the denominator mistake recorded
-    # three times over in CLAUDE.md, and a replayed route could not otherwise say how many frames
-    # were masked.
-    #
-    # APPENDED, never inserted: capnp enumerants are positions, and every existing route on the
-    # device decodes @0..@5 by number.
-    recovery @6;
-  }
 
   enum LateralMode {
     openpilot @0;  # BP lateral bypassed (disable_BP_lat_UI)

@@ -140,7 +140,7 @@ def main() -> int:
           lead_m = float(ld.dRel) if bool(ld.status) else 0.0
 
         elif w == "controllerStateBP":
-          a = str(m.controllerStateBP.accAuthority)
+          a = "n/a"
           if a != last_auth:
             if cur_auth is not None:
               cur_auth[2] = rt
