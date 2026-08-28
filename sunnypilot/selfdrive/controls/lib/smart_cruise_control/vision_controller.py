@@ -4,6 +4,8 @@ Copyright (c) 2021-, Haibin Wen, sunnypilot, and a number of other contributors.
 This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 """
+from collections import deque
+
 import numpy as np
 
 import cereal.messaging as messaging
@@ -15,6 +17,11 @@ from openpilot.sunnypilot import PARAMS_UPDATE_PERIOD
 from openpilot.sunnypilot.selfdrive.controls.lib.smart_cruise_control import MIN_V
 
 VisionState = custom.LongitudinalPlanSP.SmartCruiseControl.VisionState
+
+# FusionPilot: how long `v_target` holds its minimum. 1.0 s removed 92% of the measured
+# reversals for at most 0.95 s of lag adopting a genuine rise; see _update_calculations.
+_V_TARGET_HOLD_S = 1.0
+_V_TARGET_HOLD_FRAMES = max(int(round(_V_TARGET_HOLD_S / DT_MDL)), 1)
 
 ACTIVE_STATES = (VisionState.entering, VisionState.turning, VisionState.leaving)
 ENABLED_STATES = (VisionState.enabled, VisionState.overriding, *ACTIVE_STATES)
@@ -96,6 +103,8 @@ class SmartCruiseControlVision:
     self.state = VisionState.disabled
     self.current_lat_acc = 0.
     self.max_pred_lat_acc = 0.
+    # FusionPilot: the min-hold window for v_target. Bounded by maxlen, so it cannot grow.
+    self._v_target_hist: deque[float] = deque(maxlen=_V_TARGET_HOLD_FRAMES)
 
     # BluePilot: curve aggressiveness feel factors, blended by speed into self.sensitivity.
     # sensitivity governs HOW MUCH it slows.
@@ -154,6 +163,41 @@ class SmartCruiseControlVision:
 
       # Get the target velocity for the maximum curve
       self.v_target = (self.a_lat_reg_max / max_curve) ** 0.5
+
+      # FusionPilot 2026-08-27: HOLD THE MINIMUM FOR A SECOND. `max_pred_lat_acc` is a 97th
+      # percentile over the model plan recomputed every frame, so on a twisty road `v_target`
+      # jitters hard -- and ICBM faithfully converts every wobble into a button press.
+      #
+      # MEASURED, SLC -> Yosemite, 22,344 target frames across the mountain routes. The plan target
+      # reversed direction 8,110 times, and the source is this controller almost alone:
+      #
+      #     TOTAL reversals -- sccVision 8319 | sccMap 38
+      #
+      # ICBM asked `increase` on 15,779 frames and `decrease` on 12,381, and 17 bursts hit 8+
+      # reversals inside 20 s -- one of them 50 dash steps in 20 s. His report was "other strange
+      # behavior", and the hunt analysis says ICBM was NOT oscillating on its own: it was tracking
+      # a number that would not sit still.
+      #
+      # Replayed over those same recorded frames:
+      #
+      #     window   reversals   removed   worst lag adopting a genuine RISE
+      #     none          8110         -   -
+      #     0.5 s         1125       86%   0.45 s
+      #     1.0 s          641       92%   0.95 s      <- shipped
+      #     2.0 s          383       95%   1.95 s
+      #
+      # A MINIMUM CANNOT DELAY A FALL. Every drop is adopted on the frame it arrives, at every
+      # window, by construction -- so this is the cheap direction of the rule this fork keeps
+      # relearning: "a filter that makes the car SLOWER TO SPEED UP is cheap, and a filter that
+      # makes it slower to SLOW DOWN is never acceptable." The only cost is holding a corner's
+      # speed up to a second longer than necessary on the way out.
+      #
+      # DELIBERATELY NOT the `active` flag and NOT the factors. `_update_state_machine` keys on
+      # `max_pred_lat_acc`, never on `v_target`, so this cannot change when vision engages -- and
+      # CLAUDE.md rules out the factors by measurement, since they scale a target that is already
+      # above current speed at low speed.
+      self._v_target_hist.append(self.v_target)
+      self.v_target = min(self._v_target_hist)
 
   def _update_state_machine(self) -> tuple[bool, bool]:
     # ENABLED, ENTERING, TURNING, LEAVING, OVERRIDING
@@ -252,6 +296,10 @@ class SmartCruiseControlVision:
     self._update_calculations(sm)
 
     self.is_enabled, self.is_active = self._update_state_machine()
+    # FusionPilot: drop the min-hold history when the controller is not running, so a low
+    # target from the last corner cannot be carried into the next engagement.
+    if self.state == VisionState.disabled:
+      self._v_target_hist.clear()
     self.a_target = self._update_solution()
 
     self.output_v_target = self.get_v_target_from_control()
