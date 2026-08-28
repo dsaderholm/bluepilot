@@ -62,6 +62,12 @@ _PSCM_DREF_SPEEDS_MS = (0.0, 4.17, 27.78, 41.67, 50.0, 55.56)
 _PSCM_DREF_M = (0.5, 0.95, 1.4, 2.075, 2.75, 3.875)
 
 # Default blend ratio validated on F-150 fleet data (0.5s lookup time).
+# FusionPilot: the gain blend's speed breakpoints, NAMED so tests reference them instead of
+# pinning literals. BluePilot PR #192 widened this from [13.5, 26.82] (30-60 mph) to
+# [11.18, 31.29] (25-70 mph), and a test that had hardcoded 26.82 as "the top of the blend"
+# silently became wrong -- it was asserting an endpoint that is now mid-interpolation.
+_GAIN_BLEND_V_BP = [11.18, 31.29]
+
 _FORD_PATH_ANGLE_BLEND_RATIO_DEFAULT = 0.50
 
 # Variable lookup time (VLT): curvature_lookup_time adapts to speed and curvature magnitude.
@@ -457,13 +463,39 @@ class LateralAngleExt:
 
 
     # Speed-interpolated gain: at low speed both curves use 1.0; at high speed the params take effect.
+    # FusionPilot 2026-08-28: taken from BluePilot PR #192 (bp-gain-interpolation), UNMODIFIED.
+    # His report -- "it oversteers and then corrects itself on more gradual turns and ping pongs" --
+    # and his friend has the same thing on a different car with different settings, which is what
+    # ruled out tuning entirely. The PR describes the identical failure in the author's own words:
+    #
+    #   "Reduce oscillations through curves, particularly around 1000m-1600m radius... Extend
+    #    interpolation from .0007-.001 (1600m-1000m) to .0005-high_gain_boundary (2000m-variable).
+    #    This makes the interpolation happen over a much larger interval, preventing the fast swings
+    #    from low to high gain. Initial fast swing made car lurch on entering a curve, and if curve
+    #    continued near previous interp range, oscillations would continue."
+    #
+    # His worst measured episodes sit exactly in that band -- radius 894 m, 1282 m and 1327 m, with
+    # 8 direction reversals and 23-26 deg of steering swing at 55-58 mph, where 3-4 deg is what the
+    # curve needs. 301 such episodes across two routes, peaking at 45-60 mph.
+    #
+    # NOTE: an earlier pass here "ruled out" the gain band on aggregate reversal rates (1.05/s
+    # inside vs 0.96/s outside). That kill was INVALID -- the same metric was later shown to be
+    # measuring 0.10-0.30 deg of background dither, which is nothing anyone can feel. Rates over
+    # 300 miles average episodic events into invisibility. The episode data supports the band.
+    #
+    # Speed range widened 30-60 mph to 25-70 mph as well, both interps, per the PR.
     self.low_gain_calc = interp(
-      v_ego, [13.5, 26.82], [1.0, (self.path_angle_gain_lowC_highV * self.user_dampening_factor)]
+      v_ego, _GAIN_BLEND_V_BP, [1.00, (self.path_angle_gain_lowC_highV * self.user_dampening_factor)]
     )
-    self.high_gain_calc = interp(v_ego, [13.5, 26.82], [(1.30 * self.low_speed_curv_factor), (self.path_angle_gain_highC_highV * self.high_speed_curv_factor)])
+    self.high_gain_calc = interp(
+      v_ego, _GAIN_BLEND_V_BP, [(1.30 * self.low_speed_curv_factor), (self.path_angle_gain_highC_highV * self.high_speed_curv_factor)]
+    )
+
+    # Speed-interpolated curve-radius: at low speed, dont need full gain until a much tighter curve
+    high_gain_boundary = interp(v_ego, _GAIN_BLEND_V_BP, [0.02, 0.0045])
 
     # As the curve gets bigger, we will need a little boost to the signal to to not understeer
-    self.curvature_factor = interp(abs(kappa_cmd), [0.0007, 0.001], [self.low_gain_calc, self.high_gain_calc])
+    self.curvature_factor = interp(abs(kappa_cmd), [0.0005, high_gain_boundary], [self.low_gain_calc, self.high_gain_calc])
 
     path_angle_calc = kappa_cmd * v_ego * self.curvature_factor
     path_angle = path_angle_calc
