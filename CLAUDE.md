@@ -5050,8 +5050,45 @@ more tractable question, and it points at the actuation chain -- the command sca
 (`FordHighSpeedFactor_ang` is 0.828 at this speed, deliberately reducing the command) and the PSCM's
 own response -- rather than at any oscillation mechanism.
 
-**HIS SETTINGS ARE STILL NOT TO BE QUESTIONED.** The 0.828 is named here because it is in the
-measured chain, not as a recommendation. Establish the ratio across speeds and factors first.
+### AND HIS FRIEND'S CAR SETTLES IT: THIS IS NOT TUNING, ON ANY CAR
+
+*"Remember, my friend gets the same behavior and he has tried changing all his settings."* Plus, on
+his own: *"Who knows if my settings are right!? I don't know!"* -- so the earlier instruction not to
+question them is lifted, and it no longer matters, because a SECOND CAR WITH DIFFERENT SETTINGS HAS
+THE SAME SYMPTOM. That single fact rules out his settings, his fingerprint, his steerRatio and his
+retrofit PSCM in one stroke, and it explains why two independent tuning sweeps both failed.
+
+**MEASURED, and the factor is exonerated on his car too.** Delivered vs commanded curvature,
+steady-state only (desired stable for 0.5 s, so this is what the car SETTLES at rather than how
+fast it gets there), 13,022 qualifying frames:
+
+    speed        median delivery   where the gain blend sits
+    30-40 mph        0.890              16% toward the high-speed factor
+    40-50 mph        0.875              50%
+    50-60 mph        0.652              83%     <- worst
+    60-70 mph        0.807             100%
+    70-80 mph        0.930             100%
+
+**If the gain factor were the cause the ratio would fall as the blend completes and STAY low.** It
+does not -- it dips hard at 50-60 and recovers to 0.93 by 70-80, while the blend is saturated across
+both. Not the factor. `FordHighSpeedFactor_ang` is cleared by measurement, not by deference.
+
+**AND 50-60 MPH IS ALSO WHERE THE EPISODES PEAK** -- 112 of 301, from the independent episode
+finder. Worst delivery and most ping-pong in the same band, found two different ways.
+
+**WHAT IS ESTABLISHED:** the car delivers a median ~87% of commanded curvature with enormous spread
+(p25 0.39-0.73), worst at 50-60 mph, on two different cars with different settings. **It is in the
+shared angle-control code.**
+
+**WHAT IS NOT:** which part. The `path_angle = kappa * v_ego * curvature_factor` geometry against
+the PSCM's own `1/2 * kappa * d_ref` remains the standing suspect (see candidate 4 above, and
+`pscm_d_ref_m()` is still dead code) -- but the arithmetic there predicts the command is ~15x the
+PSCM's implied geometry, which would over-steer rather than under-deliver. **That contradiction is
+unresolved and is the next thing to chase.** Do not patch the formula until it is.
+
+**WORTH ASKING HIM:** what car the friend drives. If it is not a retrofit, hardware is out entirely;
+if it is not a Ford, the bug is above the Ford layer and the search moves to openpilot's own lateral
+planner.
 
 **ALSO NOTED, and not yet chased:** `FordPathAngleBlendRatio` (default 0.50) blends PREDICTED
 curvature into the command, `pred * b + desired * (1-b)`. He raised blending himself. A high blend
