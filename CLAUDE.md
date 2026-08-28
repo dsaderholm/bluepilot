@@ -4747,3 +4747,71 @@ dude, you're really driving me mad."*
 
 **And a commit hash was quoted to a peer session without ever being read** -- invented, then
 corrected. `git rev-parse` is one command. Same family as the "check content, not hash" rule.
+
+## LATERAL: IT OVERSTEERS AND PING-PONGS ON GRADUAL TURNS. HIS REPORT, 2026-08-27.
+
+  *"we have a weird thing where it oversteers and then corrects itself on more gradual turns and
+  ping pongs while doing it"* ... *"It was driving me absolutely crazy today, too."*
+
+**HE WANTS THIS ON ITS OWN BRANCH.** Do not start it opportunistically in an ICBM session, and do
+not touch it alongside longitudinal work -- a lateral change landing next to a curve-speed change
+produces a drive that cannot say which one moved.
+
+**IT IS NOT NEW, AND THAT IS EVIDENCE.** He corrected an earlier version of this note that implied
+it started on the Yosemite trip: *"No, it's been like this for a bit."* So it predates every
+longitudinal change in this file, which independently rules out anything recent as the cause and
+agrees with the code reading below -- the mechanism is upstream's and has presumably always been
+there. It also means MANY routes contain it, not just the trip, so the sample is large and the
+first pass needs no device and no drive.
+
+### RULED OUT ALREADY -- DO NOT RE-DERIVE THESE
+
+- **His settings.** He said flatly: *"my settings are right. Don't question that."* They are
+  `FordLowSpeedFactor_ang` 0.912, `FordHighSpeedFactor_ang` 0.828, `FordHighSpeedDampening_ang`
+  0.85 against upstream's 1.0/1.0/1.0. Not the suspect, and not to be re-litigated.
+- **The fingerprint.** `FORD_FUSION_MK5` IS ours -- the whole platform config is a `+` against
+  upstream, including `steerRatio=17.07`, `wheelbase=2.85` and the `ALT_STEER_ANGLE` flag. But
+  **`steerRatio`, `wheelbase` and `VehicleModel` appear NOWHERE in `lateral_angle_ext.py`.** The
+  angle path returns `LateralResult(apply_curvature=0.0, ..., path_angle=path_angle)` -- it commands
+  a PATH ANGLE, and steerRatio is not in that chain. It shapes only the curvature FEEDBACK.
+  Checked rather than assumed, and he agreed to leave it alone.
+- **Our code.** `lateral_angle_ext.py` is upstream bp-7.0's; our entire diff is TWO DELETED DEAD
+  LINES (`d_ref` and `LP`, both F841). Verified `d_ref` was assigned and never read in upstream
+  either, so the deletion changed nothing.
+
+### THE MECHANISM THAT FITS, AND IT IS UPSTREAM'S
+
+```python
+low_gain_calc  = interp(v_ego, [13.5, 26.82], [1.0, path_angle_gain_lowC_highV * user_dampening_factor])
+high_gain_calc = interp(v_ego, [13.5, 26.82], [1.30 * low_speed_curv_factor, path_angle_gain_highC_highV * high_speed_curv_factor])
+curvature_factor = interp(abs(kappa_cmd), [0.0007, 0.001], [low_gain_calc, high_gain_calc])
+path_angle = kappa_cmd * v_ego * curvature_factor
+```
+
+**The gain schedule switches across a razor-thin curvature band, and that band lands exactly on
+gradual turns.** `κ = 0.0007` is a **1429 m** radius; `κ = 0.001` is **1000 m**. So the controller
+blends between two different gains over 400 m of radius, out in the gentle-curve regime.
+
+On a sharp corner `kappa_cmd` is pinned above 0.001 and the gain is constant. On a GRADUAL turn it
+sits inside or near the transition, so ordinary curvature noise swings the gain -- which MULTIPLIES
+the command -- and the commanded angle moves more than the road did. Oversteer, correct, ring. That
+predicts the symptom **specifically on gradual turns and nowhere else**, which is how he described
+it unprompted.
+
+**THIS IS A HYPOTHESIS FROM READING THE CODE. IT IS NOT MEASURED.** Do not tune anything off it.
+
+### THE FIRST MEASUREMENT, WHICH NEEDS NEITHER THE CAR NOR A DRIVE
+
+From the trip rlogs already on the laptop:
+
+1. During ping-pong episodes, does `kappa_cmd` sit in or near `[0.0007, 0.001]`? If it is pinned
+   above 0.001 the whole time, this mechanism is wrong and the band is innocent.
+2. Is `curvature_factor` oscillating there? It is not published -- **`bp_path_angle_gain_*` and
+   `bp_path_angle_final` are**, so check what actually reaches the wire before adding a field.
+3. Characterise the ringing itself: sign changes of (commanded − actual) steering angle on curves
+   of 300-1500 m radius, hands OFF, `latActive`, split by speed across the **13.5-26.82 m/s**
+   (30-60 mph) gain blend. If it rings on only one side of that blend, the blend is implicated.
+
+**Do not conclude "he cornered hard" from `steeringPressed`** -- same split that corrected the
+3.21 m/s^2 figure. And print the steering-derived lateral acceleration beside `currentLateralAccel`
+ON THE SAME FRAME; the bicycle model reads ~35-47% high at highway speed.
