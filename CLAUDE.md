@@ -5090,6 +5090,50 @@ unresolved and is the next thing to chase.** Do not patch the formula until it i
 if it is not a Ford, the bug is above the Ford layer and the search moves to openpilot's own lateral
 planner.
 
+### THE UNDER-DELIVERY IS REAL -- CONFIRMED AGAINST THE GYRO, AND steerRatio IS CLEARED
+
+`controlsState.curvature` is NOT measured; it is the steering angle through the vehicle model, which
+uses our DERIVED `steerRatio = 17.07`. So a ~15% steerRatio error would manufacture the entire
+under-delivery finding. `livePose.angularVelocityDevice.z / v` owes nothing to steerRatio:
+
+    vehicle-model / desired   0.840
+    IMU yaw-rate  / desired   0.899      <- ground truth
+    IMU / vehicle-model       1.044      <- they agree within 4.4%
+
+**steerRatio is fine, and the car genuinely delivers only ~90% of commanded curvature** -- 79% at
+50-60 mph by the gyro. Cleared by measurement, not by deference.
+
+### 50-60 MPH NOW APPEARS THREE INDEPENDENT TIMES, AND THERE IS A CONSTANT SITTING IN IT
+
+    episode finder     112 of 301 episodes peak at 45-60 mph
+    delivery ratio     worst at 50-60 (0.652 vehicle, 0.790 IMU)
+    IMU confirmation   same band, same dip
+
+    _VLT_V_LOW_MS   = 25 mph    full extra lookahead
+    _VLT_V_HIGH_MS  = 55 mph    NO extra lookahead at or above
+
+**The pre-steering lookahead tapers to exactly zero at 55 mph**, dead centre of the band. Below it
+the controller looks ahead up to `_VLT_T_EXTRA_MAX` 0.10 s; at 55 it stops. That is independent of
+the gain schedule, which is why no gain explained the dip.
+
+**NOT ACTED ON, and the reason matters:** delivery RECOVERS to 0.92 by 70-80 mph, which "no
+lookahead above 55" does not predict -- it predicts staying bad. The recovery may be confounded
+(70-80 mph is interstate, where curves are gentler and lookahead matters less). **Separate the
+confound before touching `_VLT_V_HIGH_MS`:** compare delivery at matched CURVATURE across the 55 mph
+line, not pooled by speed.
+
+### WHAT PR #192 DOES AND DOES NOT DO, MEASURED ON HIS OWN 847k FRAMES
+
+    whole drive   gain swing -74%   COMMAND swing  -2%
+    in its band   gain swing -91%   COMMAND swing -11%
+
+It calms the command where it acts and **does not address the under-delivery at all**. Two separate
+problems; this is a partial fix for one of them.
+
+**AND THE HARD LIMIT ON ALL OF THIS:** offline replay shows what the COMMAND does and can never show
+what the car does back. `actual curvature` is the PSCM physically responding and no model of it
+exists here. Whether desired comes to match actual is a DRIVE question.
+
 **ALSO NOTED, and not yet chased:** `FordPathAngleBlendRatio` (default 0.50) blends PREDICTED
 curvature into the command, `pred * b + desired * (1-b)`. He raised blending himself. A high blend
 follows the model's prediction rather than the lag-adjusted target, and prediction and reality
