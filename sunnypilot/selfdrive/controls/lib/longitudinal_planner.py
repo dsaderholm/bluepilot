@@ -194,6 +194,7 @@ class LongitudinalPlannerSP:
     sccMap.modelLatAcc = float(self.scc.map.model_lat_acc)
     sccMap.modelVetoed = bool(self.scc.map.model_vetoed)
     sccMap.cameraNotSeen = bool(self.scc.map.camera_not_seen)
+    sccMap.vetoedVTarget = float(self.scc.map.vetoed_v_target)
 
     # Speed Limit
     speedLimit = longitudinalPlanSP.speedLimit

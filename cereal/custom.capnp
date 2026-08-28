@@ -381,6 +381,21 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       modelLatAcc @6 :Float32;      # the camera's own predicted lateral accel, the veto's evidence
       modelVetoed @7 :Bool;         # either camera veto fired
       cameraNotSeen @8 :Bool;       # suppressed because the corner is beyond the model's horizon
+
+      # FusionPilot 2026-08-27: WHAT THE VETO COST. `vTarget` above is the OUTPUT, and
+      # `get_v_target_from_control()` returns V_CRUISE_UNSET once a veto clears `is_active` -- so on
+      # exactly the frames where a suppression happened, the speed the map WANTED is thrown away
+      # before it reaches the wire.
+      #
+      # That made the veto's cost unmeasurable from any recorded route, which is not a small gap:
+      # after the SLC -> Yosemite trip the question "did the fix suppress a corner that turned out
+      # to be real" could be answered for the corners that got THROUGH and not for the ones that did
+      # not, and a detector built on `active` could only ever return zero for the suppressed ones.
+      #
+      # This is the same lesson as `targetDistance`/`modelLatAcc` one field above, arriving a second
+      # time: PUBLISHING A DECISION WITHOUT ITS INPUTS -- or here, without its CONSEQUENCE -- leaves
+      # a real road report undiagnosable. 0 means no suppressed target this frame.
+      vetoedVTarget @9 :Float32;
     }
 
     enum VisionState {
