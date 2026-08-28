@@ -24,6 +24,12 @@ DecState = custom.LongitudinalPlanSP.DynamicExperimentalControl.DynamicExperimen
 LongitudinalPlanSource = custom.LongitudinalPlanSP.LongitudinalPlanSource
 
 
+# The services upstream's longitudinal_planner.publish() passes to all_checks for
+# longitudinalPlan.valid. Duplicated here ONLY to explain that rule, so the two must not drift --
+# test_planner_checks_mirror_the_plan parses both and fails if they do. Bit order is this order.
+PLAN_VALID_SERVICES = ('carState', 'controlsState', 'selfdriveState', 'radarState')
+
+
 class LongitudinalPlannerSP:
   def __init__(self, CP: structs.CarParams, CP_SP: structs.CarParamsSP, mpc):
     self.events_sp = EventsSP()
@@ -156,6 +162,27 @@ class LongitudinalPlannerSP:
     plan_sp_send.valid = sm.all_checks(service_list=['carState', 'controlsState'])
 
     longitudinalPlanSP = plan_sp_send.longitudinalPlanSP
+
+    # See custom.capnp PlannerChecks. A commIssue is ET.SOFT_DISABLE, so an invalid longitudinal
+    # plan DISENGAGES -- and nothing recorded WHICH of all_checks' three tests failed, or for which
+    # service. Recomputed rather than intercepted because upstream's publish() throws the breakdown
+    # away the moment it ANDs it into one bool.
+    checks = longitudinalPlanSP.plannerChecks
+    not_alive = freq_bad = not_valid = 0
+    for bit, svc in enumerate(PLAN_VALID_SERVICES):
+      if not sm.alive[svc]:
+        not_alive |= 1 << bit
+      # Mirrors all_freq_ok's own filter: a service excluded from the average-frequency test can
+      # never fail it, and reporting it as failing would send the next drive after a phantom.
+      if sm._check_avg_freq(svc) and not sm.freq_ok[svc]:
+        freq_bad |= 1 << bit
+      if not sm.valid[svc]:
+        not_valid |= 1 << bit
+    checks.notAlive = not_alive
+    checks.freqBad = freq_bad
+    checks.notValid = not_valid
+    checks.planValid = sm.all_checks(service_list=list(PLAN_VALID_SERVICES))
+
     longitudinalPlanSP.longitudinalPlanSource = self.source
     longitudinalPlanSP.vTarget = float(self.output_v_target)
     longitudinalPlanSP.aTarget = float(self.output_a_target)

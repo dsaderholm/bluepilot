@@ -283,6 +283,36 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
   # nothing to be compatible with yet.
   accGapRequest @10 :UInt8;
 
+  # FusionPilot: WHY the longitudinal plan was marked invalid, which is the question a commIssue
+  # cannot answer today. Added 2026-08-28 after a Salt Lake City -> Yosemite drive raised
+  # `commIssue` repeatedly on the curvy sections. That event is ET.SOFT_DISABLE, so it DISENGAGES:
+  # it is not a banner. plannerd published at a clean 20.0 Hz throughout and marked its own outputs
+  # INVALID -- 162 of 162 frames in one segment -- and nothing recorded which check tripped.
+  #
+  # `longitudinalPlan.valid` is `sm.all_checks(['carState','controlsState','selfdriveState',
+  # 'radarState'])`, and all_checks is three separate tests -- alive, freq_ok, valid. Those fail for
+  # completely different reasons: alive means a service stopped, freq_ok means it is arriving at the
+  # wrong RATE (radarState's tolerance is 16-24 Hz, far tighter than the 100 Hz services' 40-120),
+  # and valid means the publisher itself declared the data bad. One segment was fully explained by
+  # the third -- radarState.valid was False on 738 of 1176 frames with 27 radar events beside it --
+  # and two others had every service alive, valid and on-rate at publish time, so only plannerd's
+  # OWN receive timing can say what happened. That cannot be reconstructed off-device.
+  #
+  # Bit order for all three masks: 0=carState 1=controlsState 2=selfdriveState 3=radarState.
+  plannerChecks @11 :PlannerChecks;
+
+  struct PlannerChecks {
+    # Mirrors the service list in selfdrive/controls/lib/longitudinal_planner.py's publish().
+    # test_planner_checks_mirror_the_plan asserts the two lists are identical, because a
+    # diagnostic naming a different set of services than the rule it explains is worse than none.
+    notAlive @0 :UInt8;
+    freqBad @1 :UInt8;
+    notValid @2 :UInt8;
+    # The same boolean upstream assigns to longitudinalPlan.valid, carried here so a drive can be
+    # scored without joining two messages.
+    planValid @3 :Bool;
+  }
+
   # BluePilot: vision-detected lead with no radar corroboration. Carried on its own channel rather
   # than folded into vTarget so it bypasses ICBM's target-drop rate limiter -- that limiter exists
   # to keep Ford's ACC coasting for routine speed-limit and curve changes, which is the opposite of

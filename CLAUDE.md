@@ -6501,3 +6501,84 @@ minutes is the debounce having done nearly all of its job.
 
 **Not a trip risk and not urgent.** It commands nothing today. It is the READINESS metric for when
 the rear radar lands, and 4-across-nine-drives is worth understanding rather than averaging away.
+
+## 2026-08-28: `commIssue` SOFT-DISABLED HIM FOR 1,000 MILES. THREE CAUSES RULED OUT BY MEASUREMENT.
+
+*"I just drove from Salt Lake City to Yosemite and got this a lot... my Comma screen FPS went low
+and the passing assist overlay would flash. I tried turning passing assist off, but that didn't
+help. The fans were also really loud when it was quite cool in the car."*
+
+**THIS IS NOT A BANNER. `EventName.commIssue` is `ET.SOFT_DISABLE`** (events.py:680) with
+`ET.NO_ENTRY` beside it, so it DISENGAGED him and then blocked re-engagement. Any future report of
+it should be treated at that severity from the first sentence.
+
+12 segments pulled off routes 000003dc and 000003de and decoded on the laptop.
+
+### WHAT IT IS NOT -- and each of these was the leading theory at some point that day
+
+    THERMAL     thermalStatus `ok` on 1273 of 1273 samples. Peak 89.6 C, fan pinned 91-100%.
+                The fans are loud because a windshield-mounted device in August is hot and the
+                cooling is WORKING. Nothing derated. (Contrast 2026-08-21, where 34.9% OVERHEATED
+                was real -- so this had to be measured, not assumed either way.)
+    CPU         54.2% p50 in the bad segments against 51.5% in the clean ones, and `mapd_v2` is
+                **0.5%**. No process shows a meaningful delta.
+    PASSING ASSIST  `if not self.enabled: ... return` sits above all the work, so switching it off
+                genuinely stops the compute -- which is exactly why switching it off changed
+                nothing. It also appears in no `valid` chain anywhere.
+
+**THE "TOP PROCESSES BY CPU" TABLE THAT STARTED THE CPU THEORY WAS MEANINGLESS.** `procLog`'s
+`cpuUser`/`cpuSystem` are CUMULATIVE tick counters, so ranking them ranks LONG-LIVED processes, not
+busy ones -- `selfdrive.ui.ui` and `mapd_v2` topped it while using almost nothing. **Difference
+consecutive samples or the table is an age chart.**
+
+### WHAT IT IS: plannerd PUBLISHES ON TIME AND MARKS ITS OWN OUTPUT INVALID
+
+    segment   longitudinalPlan       plannerd output rate     mapdOut     mapd path pts
+    3dc-55    162 INVALID / 162      20.2 Hz, p99 gap 67ms      1.6 Hz          652
+    3de-00    600 INVALID / 1128     20.0 Hz, p99 gap 62ms      8.7 Hz          652
+    3de-10    336 INVALID / 1200     20.0 Hz, p99 gap 64ms      6.5 Hz          537
+    3dc-08    0   INVALID / 1200     20.0 Hz                    ~6 Hz           295
+    3de-34    0   INVALID /  511     20.0 Hz                   19.3 Hz            0
+
+The rate is never the problem. `longitudinalPlan.valid` is
+`sm.all_checks(['carState','controlsState','selfdriveState','radarState'])`, selfdrived sees the
+invalid message, and raises commIssue.
+
+**ONE SEGMENT IS FULLY ATTRIBUTED AND IT IS THE RADAR.** On 3dc-00 `radarState.valid` was False on
+**738 of 1176** frames, with 27 radar events beside it, against 718 invalid plan frames. That is the
+publisher declaring its own data bad -- nothing to do with maps or curves.
+
+**THE OTHER TWO ARE NOT.** On 3de-10 all four services were alive, valid, and on-rate at publish
+time, and a replay of the REAL `FrequencyTracker` over publish timestamps reproduces nothing. Only
+plannerd's OWN receive timing can explain those, and that is not reconstructable off-device --
+`SubMaster` records `recv_time` inside plannerd's loop, not when the message was published.
+
+### `all_checks` IS THREE DIFFERENT TESTS AND THE LOG RECORDED WHICH ONE FAILED: NONE OF THEM
+
+    alive     (now - recv_time) < 10/frequency. For radarState that is 500 ms; the worst gap
+              measured was 89 ms, so alive never tripped on published timing.
+    freq_ok   a rolling average against a per-service band. **radarState's is 16-24 Hz -- +/-20%,
+              far tighter than the 100 Hz services' 40-120 Hz** -- and it is the narrowest gate on
+              the whole longitudinal plan. Note it can fail from ABOVE: a stalled loop draining a
+              backlog reads as too FAST.
+    valid     the publisher's own flag. This is what 3dc-00 was.
+
+`plannerChecks @11` now publishes all three as bitmasks over the four services, plus the resulting
+bool. **Fourth instance in this fork of a decision logged without its input**, after `hasSlowDown`,
+the SCC-Map veto terms and `wantedSide` two days ago. The rule is written down and was not followed
+again: *when a rule cannot be explained from a drive, add the log line rather than a third
+inference.* Three inferences were made here first -- thermal, CPU, and mapd -- and all three were
+wrong.
+
+`test_planner_checks_mirror_the_plan` parses upstream's `service_list` and ours and fails if they
+drift, because a diagnostic naming a different set of services than the rule it explains would be
+believed. Mutation-tested by dropping one service.
+
+### THE CORRELATION THAT IS REAL AND UNEXPLAINED
+
+commIssue tracks mapd path size and `mapdOut` lateness monotonically across all 12 segments --
+Tioga Road publishes a **652-point** path against ~50 on open highway, and `mapdOut` collapses from
+20 Hz to 1.6 Hz there. But `mapdOut` is in NO valid chain, and mapd_v2's CPU is 0.5%, so the
+mechanism is not established. **Do not act on this correlation.** `MapdV2` is his setting and
+dropping it to 0 or 1 is the cheap experiment that would separate "the map path is causing this"
+from "curvy mountain roads are causing this and the map path is another symptom of them".
