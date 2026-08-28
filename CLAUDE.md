@@ -4994,6 +4994,65 @@ numbers, and **separating them needs a step input no ordinary drive contains.**
   "it almost seems like a latency thing" -- were both closer than mine, even though the latency one
   turned out to be correctly compensated. The delay is real; the compensation is not the bug.
 
+### AND THEN EVERY AGGREGATE ABOVE TURNED OUT TO BE MEASURING NOISE
+
+He pushed back on being asked to drive a test pattern -- *"I just feel like I've driven 300+ miles
+today, how is that not enough information"* -- and he was right twice over. The conditions were
+already in the logs (an interstate trip is full of straights and gentle curves at every speed), and
+filtering for them exposed that **the whole night's metric was the wrong size**:
+
+    condition       des/s   cmd/s  resp/s     cmd p2p      steer p2p
+    STRAIGHT         1.20    0.67    0.99   0.0015 rad      0.30 deg
+    gentle 30-45     0.47    0.31    0.18   0.0010 rad      0.10 deg
+    gentle 45-60     0.57    0.37    0.29   0.0010 rad      0.10 deg
+
+**0.10-0.30 DEGREES of steering.** Nobody feels a third of a degree at the wheel. Every reversal
+rate computed above -- 1.2 Hz, the lag-shift comparison, the wire diff -- was characterising
+background dither, not his symptom. Rates over 300 miles average episodic events into invisibility,
+which is exactly what happened. **Ask how BIG before concluding from how OFTEN.**
+
+### THE REAL EVENTS, FOUND BY LOOKING FOR EPISODES INSTEAD OF RATES
+
+`tools/bp_lateral_episodes.py`: windows of >= 2 deg swing with >= 3 reversals in 2 s, hands OFF,
+latActive. **301 episodes on two routes**, 20-45 deg of swing, peaking at 45-60 mph:
+
+    by speed   15:13   30:69   45:112   60:72   75:35
+
+and the unmistakable ones are on GENTLE radii, which is his report exactly (*"It's on larger curves
+too, yes"*):
+
+    000003de  t+1751.7   25.7 deg   8 reversals   55 mph   radius 1327 m
+    000003db  t+134.8    23.1 deg   8 reversals   58 mph   radius  894 m
+
+A 1327 m curve at 55 mph needs ~3-4 deg of steering and got 25.7 with eight reversals.
+
+### WHAT A CLEAN HANDS-OFF EPISODE ACTUALLY SHOWS: THE CAR UNDER-DELIVERS
+
+Route 000003db, t+134, 57 mph, hands off, curve tightening 333 m -> 269 m:
+
+    t+134.01   desired 0.00300   actual 0.00235   err 0.00065
+    t+134.29   desired 0.00372   actual 0.00267   err 0.00104
+
+**One-signed and GROWING. Actual curvature is ~72% of commanded and the gap widens as the curve
+tightens.** That is not ringing -- it is the car failing to deliver the commanded curve on entry.
+Under-steer first, then whatever catches up produces the swing that reads as oversteer.
+
+**AND THE FIRST DUMP OF THIS WAS CONTAMINATED**: `bp_lateral_dump.py` does not filter
+`steeringPressed` the way the episode finder does, so the first window pulled was 100% hands-ON --
+his own steering, read as the controller's. Same split that corrected the 3.21 m/s^2 figure. **Any
+lateral window must be checked for hands before a single number is read off it.**
+
+### WHERE THIS LEAVES IT
+
+The question is no longer "why does it oscillate" but **"why does the car deliver only ~72% of the
+commanded curvature on entry, and what closes that gap afterwards"**. That is a different and much
+more tractable question, and it points at the actuation chain -- the command scaling
+(`FordHighSpeedFactor_ang` is 0.828 at this speed, deliberately reducing the command) and the PSCM's
+own response -- rather than at any oscillation mechanism.
+
+**HIS SETTINGS ARE STILL NOT TO BE QUESTIONED.** The 0.828 is named here because it is in the
+measured chain, not as a recommendation. Establish the ratio across speeds and factors first.
+
 **ALSO NOTED, and not yet chased:** `FordPathAngleBlendRatio` (default 0.50) blends PREDICTED
 curvature into the command, `pred * b + desired * (1-b)`. He raised blending himself. A high blend
 follows the model's prediction rather than the lag-adjusted target, and prediction and reality
