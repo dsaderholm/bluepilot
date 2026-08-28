@@ -6582,3 +6582,42 @@ Tioga Road publishes a **652-point** path against ~50 on open highway, and `mapd
 mechanism is not established. **Do not act on this correlation.** `MapdV2` is his setting and
 dropping it to 0 or 1 is the cheap experiment that would separate "the map path is causing this"
 from "curvy mountain roads are causing this and the map path is another symptom of them".
+
+## 2026-08-28: THE COMMA CAN COME UP WITH NO IPv4 ADDRESS AT ALL. `-4` IS THEN THE THING THAT FAILS.
+
+Found by the ICBM session at Rush Creek Lodge and verified here independently. After a reboot on his
+Windows hotspot the device was unreachable from two sessions at once, and every instinct in this file
+pointed the wrong way.
+
+**The device's own view, which is what settles it:**
+
+    inet  127.0.0.1/8 scope host lo              <- the ONLY IPv4 address it has
+    inet6 fe80::20a:f5ff:fee4:4abc/64 scope link
+
+**It had no IPv4 lease on any interface.** So it was never down, `192.168.137.242` was dead because
+nothing held that address any more, and full port-22 sweeps of `192.168.137.0/24` and both halves of
+the lodge `/23` found nothing because there was nothing in v4 to find. ARP was empty for the same
+reason.
+
+    ssh -6 comma@fe80::20a:f5ff:fee4:4abc%11
+
+**The `%11` is mandatory** -- a link-local address is only meaningful with a scope id, and on Windows
+that is the interface INDEX of the adapter the device is on (here "Local Area Connection* 2", the
+ICS/hotspot adapter). `ipconfig` or `Get-NetAdapter | Format-Table Name, ifIndex` gives it. It is
+per-machine and per-adapter, so it is not a constant to memorise -- the ADDRESS is stable (it is
+derived from the MAC), the scope id is not.
+
+**THIS INVERTS THE STANDING "force `-4`" HABIT, in exactly the case where the device looks dead.**
+That habit is still right on a normal network -- it exists because mDNS resolving to a v6 address the
+laptop cannot route produces a long hang. But when the device HAS no v4 address, `-4` is the thing
+that guarantees failure. **A timeout on `-4` while mDNS resolves fine is the signature: try `-6` with
+a scope id before concluding the device is down or hunting for it on a subnet.**
+
+**AND `/tmp` ON THE DEVICE IS tmpfs.** A reboot wipes it. A finished analysis parked in `/tmp` was
+destroyed by a reboot from the other session, which had no way to know it was there. **Write
+long-running job output to `/data`, and say so before rebooting a device another session is using**
+-- two sessions share this car and neither can see the other's jobs.
+
+**The DNS half, same network:** on that hotspot the device has SSH but cannot resolve `github.com`,
+so `git fetch` dies while ssh works perfectly. That is the bundle case already documented above, and
+it is a SECOND independent failure mode of the same network -- do not let fixing one hide the other.
