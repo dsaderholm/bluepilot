@@ -34,6 +34,10 @@ def main():
   # once MapdV2 is on. Subscribed unconditionally: with v2 off nothing publishes it and the socket
   # stays quiet at the cost of one dict entry, whereas a conditional list would make the SubMaster's
   # contents depend on a param read once at process start.
+  # BluePilot: `selfdriveStateSP` carries ICBM's baseline -- the driver's own hold. Speed Limit
+  # Assist needs it to know whether a limit change will actually reach the set speed, because a
+  # hold outranks the posted limit and announcing a change that cannot happen is a lie on screen.
+  # NOTE: this list is edited by more than one branch. Resolve any conflict here as a UNION.
   sm = messaging.SubMaster(['carControl', 'carState', 'controlsState', 'liveParameters', 'radarState', 'modelV2', 'selfdriveState',
                             # BluePilot: carStateBP carries the raw TSR and BLIS signals the
                             # passing-assist observer records. Not in any all_checks() list, so a

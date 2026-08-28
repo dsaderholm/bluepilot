@@ -108,8 +108,19 @@ class LongitudinalPlannerSP:
 
     # Speed Limit Assist
     has_speed_limit = self.resolver.speed_limit_valid or self.resolver.speed_limit_last_valid
+    # BluePilot: the driver's hold, in CLUSTER units, or 0 when there is none. Only the
+    # announcement uses it -- SLA's target is unchanged, because a hold governs what ICBM AIMS at
+    # and not what the posted limit IS. Read defensively: on a build where selfdriveStateSP is not
+    # up yet this reads 0, which restores the previous announce-always behaviour rather than
+    # silencing the alert.
+    v_baseline_conv = 0.0
+    try:
+      v_baseline_conv = float(sm['selfdriveStateSP'].intelligentCruiseButtonManagement.vBaseline)
+    except Exception:
+      pass
     self.sla.update(long_enabled, long_override, v_ego, a_ego, v_cruise_cluster, self.resolver.speed_limit,
-                    self.resolver.speed_limit_final_last, has_speed_limit, self.resolver.distance, self.events_sp)
+                    self.resolver.speed_limit_final_last, has_speed_limit, self.resolver.distance, self.events_sp,
+                    v_baseline_conv)
 
     targets = {
       LongitudinalPlanSource.sccVision: (self.scc.vision.output_v_target, self.scc.vision.output_a_target),
