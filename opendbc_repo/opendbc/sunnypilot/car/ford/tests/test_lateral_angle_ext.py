@@ -211,7 +211,12 @@ class TestAngleParams(unittest.TestCase):
 
   def test_high_speed_dampening_multiplies_low_curvature_high_speed_gain(self):
     self.ext.update_angle_params(_FakeParams({"FordHighSpeedDampening_ang": b"1.12"}))
-    cs = _CS(vEgoRaw=26.82, vEgo=26.82)
+    # Drive at the TOP of the blend, read from the constant rather than hardcoded. This test
+    # pinned 26.82 and broke when BluePilot PR #192 widened the blend to 25-70 mph -- it was
+    # asserting an endpoint that had become mid-interpolation.
+    from opendbc.sunnypilot.car.ford.lateral_angle_ext import _GAIN_BLEND_V_BP
+    v_top = _GAIN_BLEND_V_BP[-1]
+    cs = _CS(vEgoRaw=v_top, vEgo=v_top)
     self.ext.update_angle_strategy(_CC(), cs, _Actuators(), self.ext.CP)
     self.assertAlmostEqual(
       self.ext.low_gain_calc,

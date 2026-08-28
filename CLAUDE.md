@@ -6764,3 +6764,411 @@ dude, you're really driving me mad."*
 
 **And a commit hash was quoted to a peer session without ever being read** -- invented, then
 corrected. `git rev-parse` is one command. Same family as the "check content, not hash" rule.
+
+## LATERAL: IT OVERSTEERS AND PING-PONGS ON GRADUAL TURNS. HIS REPORT, 2026-08-27.
+
+  *"we have a weird thing where it oversteers and then corrects itself on more gradual turns and
+  ping pongs while doing it"* ... *"It was driving me absolutely crazy today, too."*
+
+**HE WANTS THIS ON ITS OWN BRANCH.** Do not start it opportunistically in an ICBM session, and do
+not touch it alongside longitudinal work -- a lateral change landing next to a curve-speed change
+produces a drive that cannot say which one moved.
+
+**IT IS NOT NEW, AND THAT IS EVIDENCE.** He corrected an earlier version of this note that implied
+it started on the Yosemite trip: *"No, it's been like this for a bit."* So it predates every
+longitudinal change in this file, which independently rules out anything recent as the cause and
+agrees with the code reading below -- the mechanism is upstream's and has presumably always been
+there. It also means MANY routes contain it, not just the trip, so the sample is large and the
+first pass needs no device and no drive.
+
+### RULED OUT ALREADY -- DO NOT RE-DERIVE THESE
+
+- **His settings.** He said flatly: *"my settings are right. Don't question that."* They are
+  `FordLowSpeedFactor_ang` 0.912, `FordHighSpeedFactor_ang` 0.828, `FordHighSpeedDampening_ang`
+  0.85 against upstream's 1.0/1.0/1.0. Not the suspect, and not to be re-litigated.
+- **The fingerprint.** `FORD_FUSION_MK5` IS ours -- the whole platform config is a `+` against
+  upstream, including `steerRatio=17.07`, `wheelbase=2.85` and the `ALT_STEER_ANGLE` flag. But
+  **`steerRatio`, `wheelbase` and `VehicleModel` appear NOWHERE in `lateral_angle_ext.py`.** The
+  angle path returns `LateralResult(apply_curvature=0.0, ..., path_angle=path_angle)` -- it commands
+  a PATH ANGLE, and steerRatio is not in that chain. It shapes only the curvature FEEDBACK.
+  Checked rather than assumed, and he agreed to leave it alone.
+- **Our code.** `lateral_angle_ext.py` is upstream bp-7.0's; our entire diff is TWO DELETED DEAD
+  LINES (`d_ref` and `LP`, both F841). Verified `d_ref` was assigned and never read in upstream
+  either, so the deletion changed nothing.
+
+### THE MECHANISM THAT FITS, AND IT IS UPSTREAM'S
+
+```python
+low_gain_calc  = interp(v_ego, [13.5, 26.82], [1.0, path_angle_gain_lowC_highV * user_dampening_factor])
+high_gain_calc = interp(v_ego, [13.5, 26.82], [1.30 * low_speed_curv_factor, path_angle_gain_highC_highV * high_speed_curv_factor])
+curvature_factor = interp(abs(kappa_cmd), [0.0007, 0.001], [low_gain_calc, high_gain_calc])
+path_angle = kappa_cmd * v_ego * curvature_factor
+```
+
+**The gain schedule switches across a razor-thin curvature band, and that band lands exactly on
+gradual turns.** `κ = 0.0007` is a **1429 m** radius; `κ = 0.001` is **1000 m**. So the controller
+blends between two different gains over 400 m of radius, out in the gentle-curve regime.
+
+On a sharp corner `kappa_cmd` is pinned above 0.001 and the gain is constant. On a GRADUAL turn it
+sits inside or near the transition, so ordinary curvature noise swings the gain -- which MULTIPLIES
+the command -- and the commanded angle moves more than the road did. Oversteer, correct, ring. That
+predicts the symptom **specifically on gradual turns and nowhere else**, which is how he described
+it unprompted.
+
+**THIS IS A HYPOTHESIS FROM READING THE CODE. IT IS NOT MEASURED.** Do not tune anything off it.
+
+### HIS OWN READ: *"It almost seems like a latency thing, too."* AND IT HAS TWO CANDIDATES
+
+Take this seriously -- under-compensated lag in a closed loop IS oversteer-correct-ring, and it
+bites hardest where the correction is small relative to the lag, which is gradual turns.
+
+**AND IT CORRECTS SOMETHING SAID ABOVE.** "Our code is not in the lateral path" was based on
+reading `lateral_angle_ext.py` ALONE. `interfaces_ext.py` was never checked, and it holds:
+
+    ret.steerActuatorDelay = 0.22  # upstream: 0.2
+
+**That is OURS, and it is the lag-compensation constant.** So the ruled-out list above is right
+about the fingerprint and about `lateral_angle_ext.py`, and was WRONG to generalise to "nothing of
+ours". Check every file in a path before clearing the path.
+
+**The two measurable candidates, neither needing the car:**
+
+1. **THE LOOKAHEAD IS CLIPPED BELOW WHAT WE DECLARE THE DELAY TO BE.**
+
+       _t_base = float(clip(self.sm['liveDelay'].lateralDelay, 0.1, 0.15)) + _DT_MDL
+
+   The lookahead floor is capped at **0.15 s** while `steerActuatorDelay` says the actuator takes
+   **0.22 s**. If `liveDelay` learns anything above 0.15 the clip truncates it silently and the
+   controller under-compensates. `liveDelay.lateralDelay` is published -- read its distribution on
+   his routes first. If it sits at or above the 0.15 rail, that clip is binding on every frame and
+   the two numbers are describing different cars.
+
+2. **THE SOFT ROC CLIP.** `bp_angle_rate_limited` is published per frame and says whether the
+   path_angle rate limiter actually bit. A command that is rate-limited lags the desired one, the
+   error grows, then it catches up and overshoots -- latency-shaped ringing from a limiter rather
+   than from a gain. Cross-tab it against the ping-pong episodes before touching either.
+
+**Do not change `steerActuatorDelay` or the 0.15 clip on this reasoning.** Two numbers disagreeing
+is a reason to measure, and one of them is ours, which makes it likelier we introduced the
+disagreement than that upstream did.
+
+### CANDIDATE 4, AND THE STRONGEST: THE COMMAND AND THE PSCM DISAGREE ABOUT "HOW FAR AHEAD"
+
+Found by reading the whole command path instead of stopping at the first plausible mechanism. **This
+is a READING-level finding. It is NOT measured. Do not tune on it.**
+
+The module's own docstring says the geometry is
+
+    path_angle = 1/2 * kappa * d_ref          # d_ref = the PSCM's short lookahead
+
+and the file contains `pscm_d_ref_m()`, a 6-point speed table for exactly that:
+
+    speed m/s   0.0   4.17   27.78   41.67   50.0   55.56
+    d_ref m     0.5   0.95    1.4     2.075   2.75   3.875
+
+**`pscm_d_ref_m()` IS NEVER CALLED.** It is dead code -- and the one line that referenced it was an
+assigned-never-read `d_ref` that this fork deleted as an F841. What actually ships is
+
+    path_angle_calc = kappa_cmd * v_ego * self.curvature_factor
+
+`v_ego * curvature_factor` has units of DISTANCE, so `curvature_factor` (0.85-1.30) is an effective
+lookahead TIME and the command is built on a lookahead of ~13 m at 30 mph and ~23 m at 60 mph.
+
+**THE PROBLEM IS NOT THE MAGNITUDE, IT IS THE SPEED SCALING -- and that is why no gain fixes it.**
+
+    30 -> 60 mph      PSCM's own d_ref grows   1.128 -> 1.381 m   = 1.22x
+                      the shipped command      13.5 -> 22.8 m     = 1.69x
+
+The three tuning factors can absorb the constant offset at ONE speed. They cannot absorb a
+different rate of growth, because they are constants blended over the same 30-60 mph band the
+mismatch lives in. So a value tuned until 45 mph feels right makes 70 mph wrong, and vice versa.
+
+**HIS EVIDENCE FOR THIS, AND IT IS THE STRONGEST KIND:** *"I did try changing my models about half
+way to California today. I also did change the angle parameters. Nothing really made steering
+perfect."* He has already swept the tuning space. A driver who has tried the knobs and found no
+setting that works is describing a SHAPE error, not a magnitude error, and that is exactly what a
+speed-scaling mismatch is.
+
+**WHY IT FITS "GRADUAL TURNS" SPECIFICALLY.** On a sharp corner the command is large, the PSCM is
+near its authority limit, and the error is a small fraction of the input. On a gentle curve the
+command is small, so a proportional geometry error is a LARGE fraction of it -- the controller
+commands past, the error inverts, it comes back. That is his ping-pong.
+
+### THE FOUR CANDIDATES, RANKED, AND WHAT SEPARATES THEM
+
+1. **Lookahead geometry mismatch (this one).** Predicts: tracking error grows with SPEED in a way
+   the gain blend cannot flatten, and ringing exists at all curvatures rather than only inside
+   [0.0007, 0.001]. **Distinguishing test: does the error/ringing scale with v_ego?**
+2. **Under-compensated lag.** Predicts: `liveDelay.lateralDelay` sits at or above the 0.15 s clip.
+   **One number settles it and it is published.**
+3. **The gain band.** Predicts: ringing concentrates INSIDE the 1000-1429 m radius band and is
+   quiet outside it.
+4. **The rate limiter.** Predicts: ringing is dense in `angleRateLimited` frames.
+
+`tools/bp_lateral_ringing.py` measures 2, 3 and 4 directly and 1 by the speed split. **They are
+mutually distinguishable, which is the point of measuring rather than arguing.**
+
+### MEASURED 2026-08-27: IT IS HIS LATENCY READ. CANDIDATES 1, 3 AND 4 ARE DEAD.
+
+Routes 000003db and 000003de, 44,960 qualifying frames, hands off, latActive, gradual curves:
+
+    liveDelay.lateralDelay   min 0.381  p50 0.381  p90 0.382  p99 0.382  max 0.382
+    AT OR ABOVE THE 0.15 s CLIP:  309,273 of 309,273 samples  = 100.0%
+
+**The car learns a 0.38 s lateral delay and the controller compensates for 0.15 s of it.** Three
+numbers exist for one physical quantity -- 0.38 learned, 0.22 declared as `steerActuatorDelay`,
+0.15 actually used -- and the smallest wins.
+
+    gain band     1.05 revs/s INSIDE [0.0007, 0.001] vs 0.96 OUTSIDE   -> no effect. DEAD.
+    rate limiter  angleRateLimited never fired on either route          -> DEAD.
+    speed scaling revs/s 1.19 / 1.03 / 0.77 / 1.18 by speed bin         -> not monotonic. DEAD.
+
+The gain band was MY hypothesis and it is wrong. His was right.
+
+**AND HIS MID-TRIP TUNING IS VISIBLE AND DID NOTHING**, which is the confirmation:
+
+    000003db   low 0.912  high 0.818   0.69 revs/s
+    000003de   low 0.92   high 0.83    0.74 revs/s
+
+Different gains, same ringing. *"Nothing really made steering perfect"* -- because gains were
+never the variable.
+
+### BUT DO NOT RAISE THE CLIP. THE COMMENT ABOVE IT IS A BUG REPORT.
+
+    # liveDelay can calibrate up to ~420ms on some runs, which inflates VLT to 0.6s and pushes the
+    # model lookahead 5m into the curve. At that depth the model sees full peak curvature,
+    # kappa_entering stays True, and the exit-biased blend is permanently disabled -- causing the
+    # car to command max path_angle through the entire apex.
+
+Somebody already hit the failure raising it causes, and **the measured 0.381 s is exactly the
+"~420 ms" they were defending against.** Raising the clip trades the ping-pong for max steering
+through every apex, which is far worse.
+
+**THE ACTUAL DEFECT IS THAT ONE NUMBER IS DOING TWO JOBS.** `lateralDelay` is used both to
+compensate ACTUATOR LAG and to choose HOW FAR DOWN THE MODEL PATH TO SAMPLE. 0.15 s is correct for
+the sampling depth and badly wrong as lag compensation. A single clip cannot serve both, so it
+serves the one whose failure was noticed first.
+
+**THE FIX IS TO SEPARATE THEM**, not to move the clip: keep the sampling depth capped where it is,
+and compensate the real delay somewhere that does not move the model lookahead. That is a design
+change, and it is the whole job of this branch.
+
+**NOT ATTEMPTED TONIGHT, deliberately.** Writing it at 1 am and handing it to him before a long
+drive is the 5.20 pattern with a different controller. The measurement is the deliverable; the
+redesign needs a rested day and a deliberate test drive.
+
+### AND THEN THE LAG STORY FELL OVER TOO. THE COMPENSATION IS ALREADY CORRECT.
+
+Chased one layer further the same night, and the "we under-compensate the delay" conclusion above
+is WRONG. Three checks killed it:
+
+1. **The 0.381 s is genuinely learned, not a seed.** `lagd` publishes `self.initial_lag` whenever
+   status != estimated, and `initial_lag = CP.steerActuatorDelay + 0.2` = 0.42 here. Measured:
+   `status = estimated` on 8,250/8,250 samples, `validBlocks = 50` (the maximum), `estimateStd`
+   0.0067, value 0.3806-0.3819. Converged, tight, and not 0.42.
+
+2. **His car already compensates with that value.** `get_lat_delay()` returns `LagdValueCache` when
+   `LagdToggle` is set. Read off the device: **LagdToggle = 1, LagdValueCache = 0.38063**. So
+   `modeld` and `controlsd` are using 0.3806 -- the learned number. `steerActuatorDelay = 0.22` only
+   seeds `initial_lag`; it is not the compensation.
+
+3. **MY RINGING METRIC WAS COMPARING TWO DIFFERENT INSTANTS.** `controlsState.desiredCurvature` is
+   LAG-ADJUSTED -- its own comment says so -- so it is the curvature wanted ~0.38 s from now.
+   Comparing it against `curvature` on the SAME frame is the "print both on the same frame" trap
+   arriving as a TIME offset instead of a units one. Shifted by 38 frames at 100 Hz:
+
+       NAIVE  (same frame)      1.85 revs/s   mean |err| 0.000321
+       SHIFTED (like-for-like)  2.37 revs/s   mean |err| 0.000231
+
+   The magnitude drops 28% -- so part of what was measured WAS the lookahead -- but the reversals
+   RISE. **The oscillation is real**, about 1.2 Hz, which is the natural frequency of a loop
+   carrying 0.38 s of delay. So the delay is real, correctly compensated, and the loop still rings.
+
+### WHERE IT ACTUALLY SITS: DECODE THE WIRE. AND THE ADDRESS WAS WRONG FIRST.
+
+`bp_path_angle_final` is never published to capnp, so the command is only visible on CAN. First
+attempt decoded `LateralMotionControl2` (982) and found **zero frames**; a histogram of `sendcan`
+showed 970/979/394/984 and no 982. **His car sends `LateralMotionControl` (979), and the start bit
+differs too -- 31, not 28.** Checked rather than assumed, after assuming wrong once.
+
+    planner desiredCurvature   2.37 reversals/s     the noisiest
+    command on the wire        1.17 reversals/s     smoothed by rate limit + 0.0005 rad quantisation
+    car's response             1.60 reversals/s     ROUGHER than the command
+
+**READ THAT AS A CHAIN, NOT A CULPRIT.** The first version of the tool printed "THE PSCM IS THE
+OSCILLATOR" off a threshold, on 1.17 vs 1.60 -- a 27% difference it called "far smoother". That
+verdict is removed. Both a wobbly desired signal AND an amplifying PSCM are consistent with these
+numbers, and **separating them needs a step input no ordinary drive contains.**
+
+### SO THE STATE OF IT, HONESTLY
+
+- his settings, the fingerprint, our two deleted lines, the gain band, the rate limiter, the speed
+  scaling and the lag compensation are **all cleared by measurement**
+- the ringing is **real**, ~1.2 Hz, and survives every correction applied to the metric
+- the planner's desired curvature is the noisiest signal in the chain and the PSCM amplifies what
+  it is given -- **neither is separated yet, and neither is tuned by anything in this repo**
+- three of my own hypotheses died in one night. His two calls -- "it's been like this a while" and
+  "it almost seems like a latency thing" -- were both closer than mine, even though the latency one
+  turned out to be correctly compensated. The delay is real; the compensation is not the bug.
+
+### AND THEN EVERY AGGREGATE ABOVE TURNED OUT TO BE MEASURING NOISE
+
+He pushed back on being asked to drive a test pattern -- *"I just feel like I've driven 300+ miles
+today, how is that not enough information"* -- and he was right twice over. The conditions were
+already in the logs (an interstate trip is full of straights and gentle curves at every speed), and
+filtering for them exposed that **the whole night's metric was the wrong size**:
+
+    condition       des/s   cmd/s  resp/s     cmd p2p      steer p2p
+    STRAIGHT         1.20    0.67    0.99   0.0015 rad      0.30 deg
+    gentle 30-45     0.47    0.31    0.18   0.0010 rad      0.10 deg
+    gentle 45-60     0.57    0.37    0.29   0.0010 rad      0.10 deg
+
+**0.10-0.30 DEGREES of steering.** Nobody feels a third of a degree at the wheel. Every reversal
+rate computed above -- 1.2 Hz, the lag-shift comparison, the wire diff -- was characterising
+background dither, not his symptom. Rates over 300 miles average episodic events into invisibility,
+which is exactly what happened. **Ask how BIG before concluding from how OFTEN.**
+
+### THE REAL EVENTS, FOUND BY LOOKING FOR EPISODES INSTEAD OF RATES
+
+`tools/bp_lateral_episodes.py`: windows of >= 2 deg swing with >= 3 reversals in 2 s, hands OFF,
+latActive. **301 episodes on two routes**, 20-45 deg of swing, peaking at 45-60 mph:
+
+    by speed   15:13   30:69   45:112   60:72   75:35
+
+and the unmistakable ones are on GENTLE radii, which is his report exactly (*"It's on larger curves
+too, yes"*):
+
+    000003de  t+1751.7   25.7 deg   8 reversals   55 mph   radius 1327 m
+    000003db  t+134.8    23.1 deg   8 reversals   58 mph   radius  894 m
+
+A 1327 m curve at 55 mph needs ~3-4 deg of steering and got 25.7 with eight reversals.
+
+### WHAT A CLEAN HANDS-OFF EPISODE ACTUALLY SHOWS: THE CAR UNDER-DELIVERS
+
+Route 000003db, t+134, 57 mph, hands off, curve tightening 333 m -> 269 m:
+
+    t+134.01   desired 0.00300   actual 0.00235   err 0.00065
+    t+134.29   desired 0.00372   actual 0.00267   err 0.00104
+
+**One-signed and GROWING. Actual curvature is ~72% of commanded and the gap widens as the curve
+tightens.** That is not ringing -- it is the car failing to deliver the commanded curve on entry.
+Under-steer first, then whatever catches up produces the swing that reads as oversteer.
+
+**AND THE FIRST DUMP OF THIS WAS CONTAMINATED**: `bp_lateral_dump.py` does not filter
+`steeringPressed` the way the episode finder does, so the first window pulled was 100% hands-ON --
+his own steering, read as the controller's. Same split that corrected the 3.21 m/s^2 figure. **Any
+lateral window must be checked for hands before a single number is read off it.**
+
+### WHERE THIS LEAVES IT
+
+The question is no longer "why does it oscillate" but **"why does the car deliver only ~72% of the
+commanded curvature on entry, and what closes that gap afterwards"**. That is a different and much
+more tractable question, and it points at the actuation chain -- the command scaling
+(`FordHighSpeedFactor_ang` is 0.828 at this speed, deliberately reducing the command) and the PSCM's
+own response -- rather than at any oscillation mechanism.
+
+### AND HIS FRIEND'S CAR SETTLES IT: THIS IS NOT TUNING, ON ANY CAR
+
+*"Remember, my friend gets the same behavior and he has tried changing all his settings."* Plus, on
+his own: *"Who knows if my settings are right!? I don't know!"* -- so the earlier instruction not to
+question them is lifted, and it no longer matters, because a SECOND CAR WITH DIFFERENT SETTINGS HAS
+THE SAME SYMPTOM. That single fact rules out his settings, his fingerprint, his steerRatio and his
+retrofit PSCM in one stroke, and it explains why two independent tuning sweeps both failed.
+
+**MEASURED, and the factor is exonerated on his car too.** Delivered vs commanded curvature,
+steady-state only (desired stable for 0.5 s, so this is what the car SETTLES at rather than how
+fast it gets there), 13,022 qualifying frames:
+
+    speed        median delivery   where the gain blend sits
+    30-40 mph        0.890              16% toward the high-speed factor
+    40-50 mph        0.875              50%
+    50-60 mph        0.652              83%     <- worst
+    60-70 mph        0.807             100%
+    70-80 mph        0.930             100%
+
+**If the gain factor were the cause the ratio would fall as the blend completes and STAY low.** It
+does not -- it dips hard at 50-60 and recovers to 0.93 by 70-80, while the blend is saturated across
+both. Not the factor. `FordHighSpeedFactor_ang` is cleared by measurement, not by deference.
+
+**AND 50-60 MPH IS ALSO WHERE THE EPISODES PEAK** -- 112 of 301, from the independent episode
+finder. Worst delivery and most ping-pong in the same band, found two different ways.
+
+**WHAT IS ESTABLISHED:** the car delivers a median ~87% of commanded curvature with enormous spread
+(p25 0.39-0.73), worst at 50-60 mph, on two different cars with different settings. **It is in the
+shared angle-control code.**
+
+**WHAT IS NOT:** which part. The `path_angle = kappa * v_ego * curvature_factor` geometry against
+the PSCM's own `1/2 * kappa * d_ref` remains the standing suspect (see candidate 4 above, and
+`pscm_d_ref_m()` is still dead code) -- but the arithmetic there predicts the command is ~15x the
+PSCM's implied geometry, which would over-steer rather than under-deliver. **That contradiction is
+unresolved and is the next thing to chase.** Do not patch the formula until it is.
+
+**WORTH ASKING HIM:** what car the friend drives. If it is not a retrofit, hardware is out entirely;
+if it is not a Ford, the bug is above the Ford layer and the search moves to openpilot's own lateral
+planner.
+
+### THE UNDER-DELIVERY IS REAL -- CONFIRMED AGAINST THE GYRO, AND steerRatio IS CLEARED
+
+`controlsState.curvature` is NOT measured; it is the steering angle through the vehicle model, which
+uses our DERIVED `steerRatio = 17.07`. So a ~15% steerRatio error would manufacture the entire
+under-delivery finding. `livePose.angularVelocityDevice.z / v` owes nothing to steerRatio:
+
+    vehicle-model / desired   0.840
+    IMU yaw-rate  / desired   0.899      <- ground truth
+    IMU / vehicle-model       1.044      <- they agree within 4.4%
+
+**steerRatio is fine, and the car genuinely delivers only ~90% of commanded curvature** -- 79% at
+50-60 mph by the gyro. Cleared by measurement, not by deference.
+
+### 50-60 MPH NOW APPEARS THREE INDEPENDENT TIMES, AND THERE IS A CONSTANT SITTING IN IT
+
+    episode finder     112 of 301 episodes peak at 45-60 mph
+    delivery ratio     worst at 50-60 (0.652 vehicle, 0.790 IMU)
+    IMU confirmation   same band, same dip
+
+    _VLT_V_LOW_MS   = 25 mph    full extra lookahead
+    _VLT_V_HIGH_MS  = 55 mph    NO extra lookahead at or above
+
+**The pre-steering lookahead tapers to exactly zero at 55 mph**, dead centre of the band. Below it
+the controller looks ahead up to `_VLT_T_EXTRA_MAX` 0.10 s; at 55 it stops. That is independent of
+the gain schedule, which is why no gain explained the dip.
+
+**NOT ACTED ON, and the reason matters:** delivery RECOVERS to 0.92 by 70-80 mph, which "no
+lookahead above 55" does not predict -- it predicts staying bad. The recovery may be confounded
+(70-80 mph is interstate, where curves are gentler and lookahead matters less). **Separate the
+confound before touching `_VLT_V_HIGH_MS`:** compare delivery at matched CURVATURE across the 55 mph
+line, not pooled by speed.
+
+### WHAT PR #192 DOES AND DOES NOT DO, MEASURED ON HIS OWN 847k FRAMES
+
+    whole drive   gain swing -74%   COMMAND swing  -2%
+    in its band   gain swing -91%   COMMAND swing -11%
+
+It calms the command where it acts and **does not address the under-delivery at all**. Two separate
+problems; this is a partial fix for one of them.
+
+**AND THE HARD LIMIT ON ALL OF THIS:** offline replay shows what the COMMAND does and can never show
+what the car does back. `actual curvature` is the PSCM physically responding and no model of it
+exists here. Whether desired comes to match actual is a DRIVE question.
+
+**ALSO NOTED, and not yet chased:** `FordPathAngleBlendRatio` (default 0.50) blends PREDICTED
+curvature into the command, `pred * b + desired * (1-b)`. He raised blending himself. A high blend
+follows the model's prediction rather than the lag-adjusted target, and prediction and reality
+diverge most on gentle curves. It is a fifth candidate and it is a PARAM, so it is his to move --
+name it, do not change it.
+
+### THE FIRST MEASUREMENT, WHICH NEEDS NEITHER THE CAR NOR A DRIVE
+
+From the trip rlogs already on the laptop:
+
+1. During ping-pong episodes, does `kappa_cmd` sit in or near `[0.0007, 0.001]`? If it is pinned
+   above 0.001 the whole time, this mechanism is wrong and the band is innocent.
+2. Is `curvature_factor` oscillating there? It is not published -- **`bp_path_angle_gain_*` and
+   `bp_path_angle_final` are**, so check what actually reaches the wire before adding a field.
+3. Characterise the ringing itself: sign changes of (commanded − actual) steering angle on curves
+   of 300-1500 m radius, hands OFF, `latActive`, split by speed across the **13.5-26.82 m/s**
+   (30-60 mph) gain blend. If it rings on only one side of that blend, the blend is implicated.
+
+**Do not conclude "he cornered hard" from `steeringPressed`** -- same split that corrected the
+3.21 m/s^2 figure. And print the steering-derived lateral acceleration beside `currentLateralAccel`
+ON THE SAME FRAME; the bicycle model reads ~35-47% high at highway speed.
