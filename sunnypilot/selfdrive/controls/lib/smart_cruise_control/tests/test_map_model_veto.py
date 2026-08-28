@@ -234,10 +234,29 @@ class TestASlowCornerOnASlowRoadIsNotARamp:
     refused to look; under the model's real reach (130 m) it looks and sees a straight road."""
     assert _c(STRAIGHT, SLOW_EGO, LOW_TARGET)._model_disagrees(87.0)
 
-  def test_and_it_still_defers_to_a_camera_that_sees_the_bend(self):
-    """The veto removes the MAP's contribution only when the camera contradicts it. A camera that
-    agrees must never be overruled -- that would be vetoing real corners."""
-    assert not _c(CURVING, SLOW_EGO, LOW_TARGET)._model_disagrees(87.0)
+  def test_and_it_still_defers_to_a_camera_THAT_AGREES(self):
+    """The veto removes the MAP's contribution only when the camera CONTRADICTS it.
+
+    THIS TEST WAS WRONG WHEN FIRST WRITTEN AND THE CODE CAUGHT IT. It used `CURVING` (1.2 m/s^2)
+    to mean "the camera sees the bend" -- but 1.2 at 13 m/s implies a road safely takeable at about
+    37 mph, so a map demanding 12 mph there is a THREEFOLD disagreement and the relative veto is
+    right to fire. `CURVING` clears the "is there a curve at all" test; it does not agree with a
+    12 mph corner.
+
+    For the camera to genuinely agree it has to predict what a 12 mph corner PRODUCES at 29 mph:
+
+        v_target <= implied_ok_v * 0.75,  implied_ok_v = v_ego * sqrt(2.0 / lat)
+        -> lat >= 6.52 m/s^2,  which is a 26 m radius -- which is what a 12 mph corner is
+
+    So AGREEING is 7.0, not 1.2. A test that asserts deference has to hand the camera a reading
+    consistent with the map's own claim, or it is asserting that the veto never fires."""
+    AGREEING = 7.0
+    assert not _c(AGREEING, SLOW_EGO, LOW_TARGET)._model_disagrees(87.0)
+
+  def test_a_MILD_bend_under_a_severe_map_claim_still_vetoes(self):
+    """The other half, and the one that catches route 000003c9 t+289: the camera saw 0.46-0.68 --
+    real curvature, clearing defense 2 -- while the map demanded a corner twenty times tighter."""
+    assert _c(0.68, SLOW_EGO, LOW_TARGET)._model_disagrees(87.0)
 
 
 class TestTheRampExemptionSurvives:

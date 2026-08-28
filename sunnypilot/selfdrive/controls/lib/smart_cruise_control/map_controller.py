@@ -425,7 +425,6 @@ class SmartCruiseControlMap:
     # corners actually produced was 0.44-0.86 -- close enough to the threshold that some may still
     # pass. Publishing `modelLatAcc` is what would settle it and is deliberately NOT bundled here.
     ramp_approach = self.v_target < _MAP_FACTOR_V_BP[1] and self.v_ego >= _MAP_FACTOR_V_BP[1]
-    ramp_like = self.v_target < _MAP_FACTOR_V_BP[1]
     horizon = self.v_ego * (MODEL_HORIZON_S if ramp_approach else MODEL_HORIZON_HIGH_SPEED_S)
     if target_distance_m > horizon or horizon <= 0:
       return False
@@ -441,7 +440,22 @@ class SmartCruiseControlMap:
     #    Vetoing here is not "ignore the corner": it removes only the MAP's contribution, and
     #    SCC-Vision goes on running as the near-field expert. So a highway bend the map overstated
     #    degrades to camera-based curve control, which is the thing that handles bends you can see.
-    if ramp_like or self.v_ego <= 0:
+    #    EXTENDED TO SLOW ROADS 2026-08-26, the same correction the horizon gate needed. `ramp_like`
+    #    means "a low corner speed", which is a RAMP only if we are ARRIVING at highway speed --
+    #    see the block above. On a surface street the camera has the bend in frame and its opinion
+    #    is evidence, not blindness.
+    #
+    #    THIS IS THE PIECE THAT CATCHES THE FOURTH PHANTOM. Route 000003c9 t+289: the camera saw
+    #    0.46-0.68 m/s^2, which CLEARS the "no curve at all" test above (0.4) -- so defense 2
+    #    correctly declines, because there genuinely was some curvature. But at v_ego 13.3 m/s that
+    #    reading implies a road safely takeable at 38-46 mph, while the map was demanding 28. A
+    #    factor of 20 in radius, and the camera is the one looking at it.
+    #
+    #        model_lat_acc 0.46 -> implied_ok_v 27.7 m/s, veto below 20.8 m/s (46 mph)
+    #        model_lat_acc 0.68 -> implied_ok_v 22.8 m/s, veto below 17.1 m/s (38 mph)
+    #
+    #    The map asked 12.4 m/s. It fires on the most conservative reading, not just the best one.
+    if ramp_approach or self.v_ego <= 0:
       return False
     implied_ok_v = self.v_ego * math.sqrt(_A_LAT_REG_MAX_REF / max(self.model_lat_acc, 1e-3))
     return self.v_target < implied_ok_v * MODEL_IMPLIED_SPEED_FRACTION
