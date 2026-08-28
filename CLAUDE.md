@@ -4891,6 +4891,55 @@ commands past, the error inverts, it comes back. That is his ping-pong.
 `tools/bp_lateral_ringing.py` measures 2, 3 and 4 directly and 1 by the speed split. **They are
 mutually distinguishable, which is the point of measuring rather than arguing.**
 
+### MEASURED 2026-08-27: IT IS HIS LATENCY READ. CANDIDATES 1, 3 AND 4 ARE DEAD.
+
+Routes 000003db and 000003de, 44,960 qualifying frames, hands off, latActive, gradual curves:
+
+    liveDelay.lateralDelay   min 0.381  p50 0.381  p90 0.382  p99 0.382  max 0.382
+    AT OR ABOVE THE 0.15 s CLIP:  309,273 of 309,273 samples  = 100.0%
+
+**The car learns a 0.38 s lateral delay and the controller compensates for 0.15 s of it.** Three
+numbers exist for one physical quantity -- 0.38 learned, 0.22 declared as `steerActuatorDelay`,
+0.15 actually used -- and the smallest wins.
+
+    gain band     1.05 revs/s INSIDE [0.0007, 0.001] vs 0.96 OUTSIDE   -> no effect. DEAD.
+    rate limiter  angleRateLimited never fired on either route          -> DEAD.
+    speed scaling revs/s 1.19 / 1.03 / 0.77 / 1.18 by speed bin         -> not monotonic. DEAD.
+
+The gain band was MY hypothesis and it is wrong. His was right.
+
+**AND HIS MID-TRIP TUNING IS VISIBLE AND DID NOTHING**, which is the confirmation:
+
+    000003db   low 0.912  high 0.818   0.69 revs/s
+    000003de   low 0.92   high 0.83    0.74 revs/s
+
+Different gains, same ringing. *"Nothing really made steering perfect"* -- because gains were
+never the variable.
+
+### BUT DO NOT RAISE THE CLIP. THE COMMENT ABOVE IT IS A BUG REPORT.
+
+    # liveDelay can calibrate up to ~420ms on some runs, which inflates VLT to 0.6s and pushes the
+    # model lookahead 5m into the curve. At that depth the model sees full peak curvature,
+    # kappa_entering stays True, and the exit-biased blend is permanently disabled -- causing the
+    # car to command max path_angle through the entire apex.
+
+Somebody already hit the failure raising it causes, and **the measured 0.381 s is exactly the
+"~420 ms" they were defending against.** Raising the clip trades the ping-pong for max steering
+through every apex, which is far worse.
+
+**THE ACTUAL DEFECT IS THAT ONE NUMBER IS DOING TWO JOBS.** `lateralDelay` is used both to
+compensate ACTUATOR LAG and to choose HOW FAR DOWN THE MODEL PATH TO SAMPLE. 0.15 s is correct for
+the sampling depth and badly wrong as lag compensation. A single clip cannot serve both, so it
+serves the one whose failure was noticed first.
+
+**THE FIX IS TO SEPARATE THEM**, not to move the clip: keep the sampling depth capped where it is,
+and compensate the real delay somewhere that does not move the model lookahead. That is a design
+change, and it is the whole job of this branch.
+
+**NOT ATTEMPTED TONIGHT, deliberately.** Writing it at 1 am and handing it to him before a long
+drive is the 5.20 pattern with a different controller. The measurement is the deliverable; the
+redesign needs a rested day and a deliberate test drive.
+
 **ALSO NOTED, and not yet chased:** `FordPathAngleBlendRatio` (default 0.50) blends PREDICTED
 curvature into the command, `pred * b + desired * (1-b)`. He raised blending himself. A high blend
 follows the model's prediction rather than the lag-adjusted target, and prediction and reality

@@ -1,0 +1,43 @@
+=== PER ROUTE, WITH THE CONFIGURATION IT RAN === 
+  he changed the angle params AND the model partway through this trip, so a pooled
+  number across all of it would average different cars. This is the split.
+
+  route       frames   revs/s     low    high   damp    RL%   delay  model
+  000003db     13227     0.69   0.912   0.818 0.8099999999999998     0%   0.382  ?
+  000003de     47099     0.74    0.92    0.83 0.8099999999999998     0%   0.381  ?
+
+=== LATERAL RINGING ON GRADUAL TURNS (radius 300-3000 m, hands OFF, latActive) ===
+
+  speed           frames   runs     revs/s    mean |err|   worst |err|   in band
+    0-30  mph      1339     12       1.19   0.000705      0.002601      19%
+   30-45  mph     17403    141       1.03   0.000488      0.002977      17%
+   45-60  mph     21161    152       0.77   0.000391      0.003366      15%
+   60-95  mph      6771     51       1.18   0.000250      0.001312      28%
+
+  revs/s = sign changes of (desiredCurvature - curvature) per second. A controller that
+  merely LAGS holds one sign; one that RINGS crosses zero over and over.
+
+=== 1. THE GAIN BAND: does ringing concentrate inside [0.0007, 0.001] 1/m? ===
+  INSIDE the band       7872 frames     1.05 revs/s
+  outside the band     37088 frames     0.96 revs/s
+  (band = radius 1000 m to 1429 m)
+
+=== 2. HIS LATENCY READ: is liveDelay.lateralDelay railing at the 0.15 s clip? ===
+  samples 309273   min 0.381  p50 0.381  p90 0.382  p99 0.382  max 0.382
+  AT OR ABOVE THE 0.15 s CLIP: 309273  (100.0%)
+  declared steerActuatorDelay = 0.22 s
+  >>> the clip is BINDING on the median frame: the lookahead is truncated below the
+  >>> delay the car is learning, and the controller is permanently behind.
+
+=== 3. THE RATE LIMITER: is ringing denser while the soft-ROC clip is biting? ===
+  not limited       44960 frames     0.97 revs/s
+
+=== WORST RUNS (for a frame-level dump) ===
+  000003db   31 sign changes  mean |err| 0.000129 1/m  79 mph  72% in band
+  000003de   10 sign changes  mean |err| 0.000153 1/m  54 mph  10% in band
+  000003de   10 sign changes  mean |err| 0.000127 1/m  32 mph  0% in band
+  000003de    8 sign changes  mean |err| 0.000073 1/m  46 mph  19% in band
+  000003de    8 sign changes  mean |err| 0.000163 1/m  37 mph  13% in band
+  000003de    8 sign changes  mean |err| 0.000070 1/m  39 mph  0% in band
+
+[exited with code 0]
