@@ -4800,6 +4800,41 @@ it unprompted.
 
 **THIS IS A HYPOTHESIS FROM READING THE CODE. IT IS NOT MEASURED.** Do not tune anything off it.
 
+### HIS OWN READ: *"It almost seems like a latency thing, too."* AND IT HAS TWO CANDIDATES
+
+Take this seriously -- under-compensated lag in a closed loop IS oversteer-correct-ring, and it
+bites hardest where the correction is small relative to the lag, which is gradual turns.
+
+**AND IT CORRECTS SOMETHING SAID ABOVE.** "Our code is not in the lateral path" was based on
+reading `lateral_angle_ext.py` ALONE. `interfaces_ext.py` was never checked, and it holds:
+
+    ret.steerActuatorDelay = 0.22  # upstream: 0.2
+
+**That is OURS, and it is the lag-compensation constant.** So the ruled-out list above is right
+about the fingerprint and about `lateral_angle_ext.py`, and was WRONG to generalise to "nothing of
+ours". Check every file in a path before clearing the path.
+
+**The two measurable candidates, neither needing the car:**
+
+1. **THE LOOKAHEAD IS CLIPPED BELOW WHAT WE DECLARE THE DELAY TO BE.**
+
+       _t_base = float(clip(self.sm['liveDelay'].lateralDelay, 0.1, 0.15)) + _DT_MDL
+
+   The lookahead floor is capped at **0.15 s** while `steerActuatorDelay` says the actuator takes
+   **0.22 s**. If `liveDelay` learns anything above 0.15 the clip truncates it silently and the
+   controller under-compensates. `liveDelay.lateralDelay` is published -- read its distribution on
+   his routes first. If it sits at or above the 0.15 rail, that clip is binding on every frame and
+   the two numbers are describing different cars.
+
+2. **THE SOFT ROC CLIP.** `bp_angle_rate_limited` is published per frame and says whether the
+   path_angle rate limiter actually bit. A command that is rate-limited lags the desired one, the
+   error grows, then it catches up and overshoots -- latency-shaped ringing from a limiter rather
+   than from a gain. Cross-tab it against the ping-pong episodes before touching either.
+
+**Do not change `steerActuatorDelay` or the 0.15 clip on this reasoning.** Two numbers disagreeing
+is a reason to measure, and one of them is ours, which makes it likelier we introduced the
+disagreement than that upstream did.
+
 ### THE FIRST MEASUREMENT, WHICH NEEDS NEITHER THE CAR NOR A DRIVE
 
 From the trip rlogs already on the laptop:
