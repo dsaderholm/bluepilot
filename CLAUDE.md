@@ -4940,6 +4940,60 @@ change, and it is the whole job of this branch.
 drive is the 5.20 pattern with a different controller. The measurement is the deliverable; the
 redesign needs a rested day and a deliberate test drive.
 
+### AND THEN THE LAG STORY FELL OVER TOO. THE COMPENSATION IS ALREADY CORRECT.
+
+Chased one layer further the same night, and the "we under-compensate the delay" conclusion above
+is WRONG. Three checks killed it:
+
+1. **The 0.381 s is genuinely learned, not a seed.** `lagd` publishes `self.initial_lag` whenever
+   status != estimated, and `initial_lag = CP.steerActuatorDelay + 0.2` = 0.42 here. Measured:
+   `status = estimated` on 8,250/8,250 samples, `validBlocks = 50` (the maximum), `estimateStd`
+   0.0067, value 0.3806-0.3819. Converged, tight, and not 0.42.
+
+2. **His car already compensates with that value.** `get_lat_delay()` returns `LagdValueCache` when
+   `LagdToggle` is set. Read off the device: **LagdToggle = 1, LagdValueCache = 0.38063**. So
+   `modeld` and `controlsd` are using 0.3806 -- the learned number. `steerActuatorDelay = 0.22` only
+   seeds `initial_lag`; it is not the compensation.
+
+3. **MY RINGING METRIC WAS COMPARING TWO DIFFERENT INSTANTS.** `controlsState.desiredCurvature` is
+   LAG-ADJUSTED -- its own comment says so -- so it is the curvature wanted ~0.38 s from now.
+   Comparing it against `curvature` on the SAME frame is the "print both on the same frame" trap
+   arriving as a TIME offset instead of a units one. Shifted by 38 frames at 100 Hz:
+
+       NAIVE  (same frame)      1.85 revs/s   mean |err| 0.000321
+       SHIFTED (like-for-like)  2.37 revs/s   mean |err| 0.000231
+
+   The magnitude drops 28% -- so part of what was measured WAS the lookahead -- but the reversals
+   RISE. **The oscillation is real**, about 1.2 Hz, which is the natural frequency of a loop
+   carrying 0.38 s of delay. So the delay is real, correctly compensated, and the loop still rings.
+
+### WHERE IT ACTUALLY SITS: DECODE THE WIRE. AND THE ADDRESS WAS WRONG FIRST.
+
+`bp_path_angle_final` is never published to capnp, so the command is only visible on CAN. First
+attempt decoded `LateralMotionControl2` (982) and found **zero frames**; a histogram of `sendcan`
+showed 970/979/394/984 and no 982. **His car sends `LateralMotionControl` (979), and the start bit
+differs too -- 31, not 28.** Checked rather than assumed, after assuming wrong once.
+
+    planner desiredCurvature   2.37 reversals/s     the noisiest
+    command on the wire        1.17 reversals/s     smoothed by rate limit + 0.0005 rad quantisation
+    car's response             1.60 reversals/s     ROUGHER than the command
+
+**READ THAT AS A CHAIN, NOT A CULPRIT.** The first version of the tool printed "THE PSCM IS THE
+OSCILLATOR" off a threshold, on 1.17 vs 1.60 -- a 27% difference it called "far smoother". That
+verdict is removed. Both a wobbly desired signal AND an amplifying PSCM are consistent with these
+numbers, and **separating them needs a step input no ordinary drive contains.**
+
+### SO THE STATE OF IT, HONESTLY
+
+- his settings, the fingerprint, our two deleted lines, the gain band, the rate limiter, the speed
+  scaling and the lag compensation are **all cleared by measurement**
+- the ringing is **real**, ~1.2 Hz, and survives every correction applied to the metric
+- the planner's desired curvature is the noisiest signal in the chain and the PSCM amplifies what
+  it is given -- **neither is separated yet, and neither is tuned by anything in this repo**
+- three of my own hypotheses died in one night. His two calls -- "it's been like this a while" and
+  "it almost seems like a latency thing" -- were both closer than mine, even though the latency one
+  turned out to be correctly compensated. The delay is real; the compensation is not the bug.
+
 **ALSO NOTED, and not yet chased:** `FordPathAngleBlendRatio` (default 0.50) blends PREDICTED
 curvature into the command, `pred * b + desired * (1-b)`. He raised blending himself. A high blend
 follows the model's prediction rather than the lag-adjusted target, and prediction and reality
