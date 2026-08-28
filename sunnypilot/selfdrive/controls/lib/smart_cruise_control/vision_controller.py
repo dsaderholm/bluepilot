@@ -18,9 +18,10 @@ from openpilot.sunnypilot.selfdrive.controls.lib.smart_cruise_control import MIN
 
 VisionState = custom.LongitudinalPlanSP.SmartCruiseControl.VisionState
 
-# FusionPilot: how long `v_target` holds its minimum. 1.0 s removed 92% of the measured
-# reversals for at most 0.95 s of lag adopting a genuine rise; see _update_calculations.
-_V_TARGET_HOLD_S = 1.0
+# FusionPilot: how long `v_target` holds its minimum. 0.5 s removes 86% of the measured
+# reversals while cutting the target 2.86 mph on average; 1.0 s buys 6 more points of
+# reversal removal for 52% more suppression, which is a bad trade. See _update_calculations.
+_V_TARGET_HOLD_S = 0.5
 _V_TARGET_HOLD_FRAMES = max(int(round(_V_TARGET_HOLD_S / DT_MDL)), 1)
 
 ACTIVE_STATES = (VisionState.entering, VisionState.turning, VisionState.leaving)
@@ -180,11 +181,20 @@ class SmartCruiseControlVision:
       #
       # Replayed over those same recorded frames:
       #
-      #     window   reversals   removed   worst lag adopting a genuine RISE
-      #     none          8110         -   -
-      #     0.5 s         1125       86%   0.45 s
-      #     1.0 s          641       92%   0.95 s      <- shipped
-      #     2.0 s          383       95%   1.95 s
+      #     window   reversals   removed   rise lag   mean cut   p99 cut   worst cut
+      #     none          8110         -   -          -          -         -
+      #     0.25 s           -         -   0.20 s     1.74 mph   11.88     41.02
+      #     0.5 s         1125       86%   0.45 s     2.86 mph   17.82     41.92   <- shipped
+      #     1.0 s          641       92%   0.95 s     4.34 mph   24.58     49.62
+      #     2.0 s          383       95%   1.95 s     6.33 mph   29.68     58.52
+      #
+      # 1.0 s SHIPPED FIRST AND WAS WRONG, chosen on reversal count alone. The right-hand columns
+      # are how hard the filter pulls the target DOWN, and they were not measured until after it
+      # was pushed: going 0.5 -> 1.0 s buys six points of reversal removal for 52% more
+      # suppression. The worst case is ~41 mph even at 0.25 s, so that tail belongs to the jitter
+      # itself and not to the window -- the window scales the mean and the p99, which is what a
+      # driver feels. **Pick the smallest window that removes the hunting**, because every extra
+      # millisecond is a spurious LOW frame governing for longer.
       #
       # A MINIMUM CANNOT DELAY A FALL. Every drop is adopted on the frame it arrives, at every
       # window, by construction -- so this is the cheap direction of the rule this fork keeps

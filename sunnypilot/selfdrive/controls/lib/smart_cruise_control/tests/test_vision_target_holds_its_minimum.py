@@ -10,8 +10,11 @@ ICBM asked `increase` on 15,779 frames and `decrease` on 12,381, with 17 bursts 
 inside 20 s. The hunt analysis says ICBM was NOT oscillating on its own; it was faithfully tracking
 a number that would not sit still.
 
-The filter is a MINIMUM over a 1 s window, which by construction adopts every FALL on the frame it
-arrives and delays only RISES -- the one direction this fork permits.
+The filter is a MINIMUM over a 0.5 s window, which by construction adopts every FALL on the frame
+it arrives and delays only RISES -- the one direction this fork permits. The window is deliberately
+the SMALLEST that removes the hunting (86% of reversals): every extra millisecond is a spurious LOW
+frame governing for longer, and going to 1.0 s buys six more points of reversal removal for 52%
+more suppression of the target.
 
 These tests drive the REAL `_update_calculations`, not a reimplementation of the filter, so a change
 to where the hold is applied is caught rather than mirrored.
@@ -72,7 +75,7 @@ def _step(v, max_pred: float) -> float:
 def test_the_window_is_derived_from_the_model_rate():
   """A hardcoded frame count silently becomes the wrong duration if DT_MDL moves."""
   assert _V_TARGET_HOLD_FRAMES == max(int(round(_V_TARGET_HOLD_S / DT_MDL)), 1)
-  assert _V_TARGET_HOLD_S == 1.0
+  assert _V_TARGET_HOLD_S == 0.5
 
 
 def test_a_fall_is_adopted_on_the_frame_it_arrives():
@@ -105,7 +108,7 @@ def test_a_sustained_rise_is_adopted_after_the_window():
 
 def test_the_delay_never_exceeds_the_window():
   """Worst-case lag adopting a genuine rise is the window itself, which is what the replay
-  measured at 0.95 s. Anything longer would be a different trade than the one chosen."""
+  measured at 0.45 s. Anything longer would be a different trade than the one chosen."""
   v = _vision()
   _step(v, 8.0)
   for i in range(_V_TARGET_HOLD_FRAMES * 3):
