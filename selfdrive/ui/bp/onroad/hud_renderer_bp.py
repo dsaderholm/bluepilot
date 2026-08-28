@@ -12,6 +12,10 @@ from openpilot.selfdrive.ui.bp.onroad.exp_button_bp import ExpButtonBP
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.common.swaglog import cloudlog
+
+# Frames, not seconds: this renderer has no dt and the UI runs at a fixed rate, so counting frames
+# is the honest unit here. ~1 s at 20 fps, matching adjacent_lane_renderer.INVALID_HOLD_S.
+PA_INVALID_HOLD_FRAMES = 20
 from openpilot.selfdrive.ui.bp.lib.ui_debug_logger import bp_ui_log
 
 LateralMode = ControllerStateBP.LateralMode
@@ -1115,8 +1119,19 @@ class HudRendererBP(HudRendererSP):
     if self._render_lane_display_test(sm):
       return
 
-    if not sm.valid.get('longitudinalPlanSP', False):
+    # See adjacent_lane_renderer.INVALID_HOLD_S for the whole reasoning. `alive` is the publisher
+    # being gone and blanks the panel at once; `valid` is plannerd flagging the message because
+    # some OTHER service it subscribes to failed a check, while it carries on publishing this data
+    # at 20 Hz. Blanking on the second made the panel strobe next to a perfectly healthy readout.
+    if not sm.alive.get('longitudinalPlanSP', False):
+      self._pa_invalid_s = 0.0
       return
+    if not sm.valid.get('longitudinalPlanSP', False):
+      self._pa_invalid_s = getattr(self, '_pa_invalid_s', 0) + 1
+      if self._pa_invalid_s >= PA_INVALID_HOLD_FRAMES:
+        return
+    else:
+      self._pa_invalid_s = 0.0
 
     try:
       pa = sm['longitudinalPlanSP'].passingAssist

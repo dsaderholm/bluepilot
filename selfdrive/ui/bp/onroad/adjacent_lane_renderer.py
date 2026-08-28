@@ -40,6 +40,13 @@ import pyray as rl
 from openpilot.common.constants import CV
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.selfdrive.ui.bp.onroad.marker_hold import MarkerHold, ONCOMING_HOLD_S
+
+
+# How long the overlay keeps drawing while longitudinalPlanSP is flagged invalid but its publisher
+# is still alive. Sized against DROPOUT_HOLD_S (0.8 s), which is what an ordinary radar dropout
+# already gets: a comms flag should not be treated more harshly than losing the track itself.
+# Beyond this the flag is not flickering, it is stuck, and a frozen overlay would misrepresent it.
+INVALID_HOLD_S = 1.0
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.text_measure import measure_text_cached
@@ -83,12 +90,38 @@ class AdjacentLaneRenderer:
     # Last drawn values, so a held marker keeps showing the vehicle it belonged to rather than
     # freezing on whatever the filters happened to contain.
     self._last = [None, None]
+    # See the valid/alive split in draw(). Seconds the message has been flagged invalid while its
+    # publisher is still alive.
+    self._invalid_s = 0.0
 
   def draw(self, sm, model_renderer, rect: rl.Rectangle) -> None:
     """Called from the model renderer, which owns the projection and the path geometry."""
-    if not sm.valid.get('longitudinalPlanSP', False):
+    # NOT ALIVE IS THE CASE MarkerHold'S OWN RULE IS ABOUT: the publisher is gone, so whatever is
+    # in the message belongs to the past and holding a car on screen from a dead source is the one
+    # failure this must not have. Clear at once, exactly as before.
+    if not sm.alive.get('longitudinalPlanSP', False):
       self._clear()
+      self._invalid_s = 0.0
       return
+
+    # INVALID IS A DIFFERENT THING AND WAS BEING TREATED AS THE SAME ONE. `valid` is
+    # sm.all_checks() inside plannerd -- it goes False when some OTHER service plannerd subscribes
+    # to fails a liveness or frequency check, and says nothing about this data. plannerd carries on
+    # publishing passing assist at 20 Hz throughout, so the contents are current.
+    #
+    # Blanking on it made this overlay strobe at the flag's rate. He drove 1,000 miles with it, and
+    # it read as passing assist malfunctioning when passing assist was the only thing on screen
+    # honest enough to notice: nothing else is gated on that flag, so nothing else flinched.
+    #
+    # So a brief invalid run draws on, and a sustained one still clears -- if the flag is stuck,
+    # something really is wrong and a frozen overlay would be a lie.
+    if not sm.valid.get('longitudinalPlanSP', False):
+      self._invalid_s += 1 / gui_app.target_fps
+      if self._invalid_s >= INVALID_HOLD_S:
+        self._clear()
+        return
+    else:
+      self._invalid_s = 0.0
 
     try:
       pa = sm['longitudinalPlanSP'].passingAssist
@@ -135,6 +168,7 @@ class AdjacentLaneRenderer:
       self._draw_marker(point, v_abs, d_text, self._holds[i].blocking, alpha, rect)
 
   def _clear(self) -> None:
+    self._invalid_s = 0.0
     for h in self._holds:
       h.reset()
     self._last = [None, None]
