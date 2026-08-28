@@ -485,6 +485,41 @@ class SmartCruiseControlMap:
     # this check inverts that gate, so it has to establish there IS a corner first.
     if not math.isfinite(target_distance_m) or not math.isfinite(self.v_target):
       return False
+
+    # FusionPilot 2026-08-27: A MODEL THAT IS PREDICTING A CURVE IS NOT A CAMERA THAT HAS NOT
+    # LOOKED. This gate claims BLINDNESS, and it was deciding that from DISTANCE ALONE -- so it
+    # kept firing on a corner the model was already describing in detail.
+    #
+    # Measured, SLC -> Yosemite route 000003d1, t+1988. Every vetoed frame in that window was
+    # cameraNotSeen (100%), and the model's own prediction was climbing through it:
+    #
+    #     t+1987.5   84.5 mph   straight    VETOED   maxPred 2.48
+    #     t+1988.5   84.5 mph   angle 4.5   VETOED   maxPred 3.60   <- the camera plainly sees it
+    #     t+1989.0   83.5 mph   angle 9.9   VETOED   latAcc 2.40
+    #     t+1989.5   82.5 mph               acts     latAcc 3.00    <- ~2 s late
+    #     t+1990.5   80.6 mph               HANDS ON latAcc 3.35
+    #     t+1991.0   79.2 mph   angle 21.9           latAcc 5.53
+    #
+    # Peak 5.91 m/s^2. For scale: openpilot alone has never exceeded 3.19 on this car, his own
+    # hands-on max is 4.20, and the exit that nearly put him off the road was 5.20.
+    #
+    # THE RULE THIS BROKE IS ALREADY WRITTEN DOWN: "a filter that makes the car SLOWER TO SPEED UP
+    # is cheap, and a filter that makes it slower to SLOW DOWN is never acceptable." This gate is
+    # the second kind, so it needs the narrowest possible reason to fire and "far away" is not it.
+    #
+    # `MODEL_DISAGREE_LAT_ACC` is already this file's definition of "the camera sees no curve at
+    # all", so reuse it rather than inventing a second threshold: at or above it the camera has
+    # looked and found something, and whether that something is as tight as the map claims is
+    # defenses 2 and 3's question, which are the right tools and are still asked. Below it the
+    # camera is genuinely silent and the original blindness argument stands untouched.
+    #
+    # ONE-DIRECTIONAL BY CONSTRUCTION: this can only ever REMOVE a suppression, so it can make the
+    # car slow earlier and can never make it slow later. That is why it is safe to land on
+    # measured evidence from one event -- the failure mode it could introduce is an earlier
+    # slowdown, not a later one.
+    if self.model_lat_acc >= MODEL_DISAGREE_LAT_ACC:
+      return False
+
     if self.v_target >= _MAP_FACTOR_V_BP[1]:
       horizon = self.v_ego * MODEL_HORIZON_HIGH_SPEED_S
       return horizon > 0 and target_distance_m > horizon
