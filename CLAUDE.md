@@ -4835,6 +4835,68 @@ ours". Check every file in a path before clearing the path.
 is a reason to measure, and one of them is ours, which makes it likelier we introduced the
 disagreement than that upstream did.
 
+### CANDIDATE 4, AND THE STRONGEST: THE COMMAND AND THE PSCM DISAGREE ABOUT "HOW FAR AHEAD"
+
+Found by reading the whole command path instead of stopping at the first plausible mechanism. **This
+is a READING-level finding. It is NOT measured. Do not tune on it.**
+
+The module's own docstring says the geometry is
+
+    path_angle = 1/2 * kappa * d_ref          # d_ref = the PSCM's short lookahead
+
+and the file contains `pscm_d_ref_m()`, a 6-point speed table for exactly that:
+
+    speed m/s   0.0   4.17   27.78   41.67   50.0   55.56
+    d_ref m     0.5   0.95    1.4     2.075   2.75   3.875
+
+**`pscm_d_ref_m()` IS NEVER CALLED.** It is dead code -- and the one line that referenced it was an
+assigned-never-read `d_ref` that this fork deleted as an F841. What actually ships is
+
+    path_angle_calc = kappa_cmd * v_ego * self.curvature_factor
+
+`v_ego * curvature_factor` has units of DISTANCE, so `curvature_factor` (0.85-1.30) is an effective
+lookahead TIME and the command is built on a lookahead of ~13 m at 30 mph and ~23 m at 60 mph.
+
+**THE PROBLEM IS NOT THE MAGNITUDE, IT IS THE SPEED SCALING -- and that is why no gain fixes it.**
+
+    30 -> 60 mph      PSCM's own d_ref grows   1.128 -> 1.381 m   = 1.22x
+                      the shipped command      13.5 -> 22.8 m     = 1.69x
+
+The three tuning factors can absorb the constant offset at ONE speed. They cannot absorb a
+different rate of growth, because they are constants blended over the same 30-60 mph band the
+mismatch lives in. So a value tuned until 45 mph feels right makes 70 mph wrong, and vice versa.
+
+**HIS EVIDENCE FOR THIS, AND IT IS THE STRONGEST KIND:** *"I did try changing my models about half
+way to California today. I also did change the angle parameters. Nothing really made steering
+perfect."* He has already swept the tuning space. A driver who has tried the knobs and found no
+setting that works is describing a SHAPE error, not a magnitude error, and that is exactly what a
+speed-scaling mismatch is.
+
+**WHY IT FITS "GRADUAL TURNS" SPECIFICALLY.** On a sharp corner the command is large, the PSCM is
+near its authority limit, and the error is a small fraction of the input. On a gentle curve the
+command is small, so a proportional geometry error is a LARGE fraction of it -- the controller
+commands past, the error inverts, it comes back. That is his ping-pong.
+
+### THE FOUR CANDIDATES, RANKED, AND WHAT SEPARATES THEM
+
+1. **Lookahead geometry mismatch (this one).** Predicts: tracking error grows with SPEED in a way
+   the gain blend cannot flatten, and ringing exists at all curvatures rather than only inside
+   [0.0007, 0.001]. **Distinguishing test: does the error/ringing scale with v_ego?**
+2. **Under-compensated lag.** Predicts: `liveDelay.lateralDelay` sits at or above the 0.15 s clip.
+   **One number settles it and it is published.**
+3. **The gain band.** Predicts: ringing concentrates INSIDE the 1000-1429 m radius band and is
+   quiet outside it.
+4. **The rate limiter.** Predicts: ringing is dense in `angleRateLimited` frames.
+
+`tools/bp_lateral_ringing.py` measures 2, 3 and 4 directly and 1 by the speed split. **They are
+mutually distinguishable, which is the point of measuring rather than arguing.**
+
+**ALSO NOTED, and not yet chased:** `FordPathAngleBlendRatio` (default 0.50) blends PREDICTED
+curvature into the command, `pred * b + desired * (1-b)`. He raised blending himself. A high blend
+follows the model's prediction rather than the lag-adjusted target, and prediction and reality
+diverge most on gentle curves. It is a fifth candidate and it is a PARAM, so it is his to move --
+name it, do not change it.
+
 ### THE FIRST MEASUREMENT, WHICH NEEDS NEITHER THE CAR NOR A DRIVE
 
 From the trip rlogs already on the laptop:

@@ -167,7 +167,10 @@ def scan(paths):
 
 def main():
   d = sys.argv[1]
+  only = set(sys.argv[2:])          # optional: limit to these route prefixes
   files = sorted(glob.glob(os.path.join(d, "*.rlog.zst")))
+  if only:
+    files = [f for f in files if os.path.basename(f).split("--")[0] in only]
   by_route = collections.OrderedDict()
   for f in files:
     by_route.setdefault(os.path.basename(f).split("--")[0], []).append(f)
