@@ -178,6 +178,7 @@ class SmartCruiseControlMap:
     self.target_accel = TARGET_ACCEL
     self.model_lat_acc = 0.0
     self.model_vetoed = False   # logged so a missing slowdown can be explained rather than guessed
+    self.vetoed_v_target = 0.0    # what the veto cost, in m/s. 0 = nothing suppressed.
     self.camera_not_seen = False  # the second veto, kept apart from the first so a drive can tell
     self.target_distance = float('inf')
     self.map_factor = 1.0
@@ -559,6 +560,12 @@ class SmartCruiseControlMap:
     disagrees = bool(self.is_active and self._model_disagrees(self.target_distance))
     self.camera_not_seen = bool(self.is_active and self._camera_has_not_seen_it(self.target_distance))
     self.model_vetoed = disagrees or self.camera_not_seen
+    # FusionPilot: capture the speed the map WANTED before the veto throws it away.
+    # get_v_target_from_control() returns V_CRUISE_UNSET once is_active is cleared, so without this
+    # the cost of a suppression is unrecoverable from any recorded route -- which is exactly what
+    # made "did it suppress a REAL corner" unanswerable after the Yosemite trip. 0 = nothing
+    # suppressed this frame; never "suppressed a target of zero".
+    self.vetoed_v_target = max(self.v_target, MIN_V) if self.model_vetoed else 0.0
     if self.model_vetoed:
       self.is_active = False
 
