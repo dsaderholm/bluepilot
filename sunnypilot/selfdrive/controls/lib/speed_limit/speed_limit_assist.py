@@ -493,12 +493,30 @@ class SpeedLimitAssist:
 
     return enabled, active
 
-  def update_events(self, events_sp: EventsSP) -> None:
+  def update_events(self, events_sp: EventsSP, v_baseline_conv: float = 0.0) -> None:
     # BluePilot: announce every automatic set-speed change, raise or lower, so a bad limit is
     # seen rather than only felt. Fires on the target changing, which is when the assist commits.
+    #
+    # FusionPilot: A HOLD OUTRANKS THE POSTED LIMIT, SO DO NOT ANNOUNCE A CHANGE THAT CANNOT
+    # HAPPEN. 2026-08-27, from his report: "it said setting speed to speed limit when it was
+    # actually setting it to a hold... even though it was already set to a hold and the speed
+    # limit must've updated."
+    #
+    # The alert text is `f"{direction} set speed to {target} {unit} speed limit"` where `target`
+    # is SLA's own number. Under ICBM the car is driven to `apply_baseline(...)` -- the hold --
+    # so with a hold in force the announcement names a speed the set speed will never reach, and
+    # it fires again on every map limit change while nothing on the car moves. That is exactly
+    # the "computed correctly and rendered wrongly" shape this fork keeps hitting, except here
+    # the value is right and the SENTENCE is wrong.
+    #
+    # Gated on the hold DIFFERING from the new limit: a hold that equals the limit is about to be
+    # cleared by the clearing rule, and the set speed genuinely does end up at the limit, so that
+    # announcement is true and is kept.
     if (self.auto_follow and self.is_active and
         self.speed_limit_final_last_conv != self.prev_speed_limit_final_last_conv):
-      events_sp.add(EventNameSP.speedLimitAutoSet)
+      hold_wins = v_baseline_conv > 0 and round(v_baseline_conv) != round(self.speed_limit_final_last_conv)
+      if not hold_wins:
+        events_sp.add(EventNameSP.speedLimitAutoSet)
 
     if self.state == SpeedLimitAssistState.preActive:
       events_sp.add(EventNameSP.speedLimitPreActive)
@@ -519,7 +537,8 @@ class SpeedLimitAssist:
           self.update_active_event(events_sp)
 
   def update(self, long_enabled: bool, long_override: bool, v_ego: float, a_ego: float, v_cruise_cluster: float, speed_limit: float,
-             speed_limit_final_last: float, has_speed_limit: bool, distance: float, events_sp: EventsSP) -> None:
+             speed_limit_final_last: float, has_speed_limit: bool, distance: float, events_sp: EventsSP,
+             v_baseline_conv: float = 0.0) -> None:
     self.long_enabled = long_enabled
     self.v_ego = v_ego
     self.a_ego = a_ego
@@ -543,7 +562,7 @@ class SpeedLimitAssist:
     else:
       self.is_enabled, self.is_active = self.update_state_machine_non_pcm_long()
 
-    self.update_events(events_sp)
+    self.update_events(events_sp, v_baseline_conv)
 
     # Update change tracking variables
     self.speed_limit_prev = self._speed_limit

@@ -98,6 +98,7 @@ DEFAULT_TARGETS = [
   "sunnypilot/mapd/tests/test_only_one_map_daemon_runs.py",
   "sunnypilot/selfdrive/controls/lib/speed_limit/tests/test_sla_leaves_disabled_while_icbm_moves_the_cluster.py",
   "sunnypilot/selfdrive/controls/lib/speed_limit/tests/test_sla_survives_a_gas_override.py",
+  "sunnypilot/selfdrive/controls/lib/speed_limit/tests/test_the_announcement_defers_to_a_hold.py",
   "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_replay_his_drive.py",
   "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_tsr_reliability.py",
   "sunnypilot/selfdrive/selfdrived/tests/test_unconfirmed_lead_alert_truth.py",
