@@ -4603,3 +4603,147 @@ lifting off, which is the failure that gate exists to prevent.
 
 Any real fix has to debounce the FLAG term alone, before it is ANDed with the physics term. That is
 a change to what `model_candidate` is made of, not to how its result is accumulated.
+
+## 2026-08-27: THE SLC -> YOSEMITE TRIP. 17 ROUTES, 338 SEGMENTS, DECODED ON THE LAPTOP.
+
+The first validation drive for the ramp-approach horizon fix, which was on the car the whole way.
+**Decoded off-device**, and that is now the only acceptable way to do this -- see the guard section
+below, which is a rule this session broke and had to be stopped on.
+
+### THE HEADLINE: DEFENSE 4 SUPPRESSED A REAL CORNER AT 84 MPH
+
+Route 000003d1, t+1988. 100% of the vetoed frames were `cameraNotSeen`:
+
+    t+1987.5   84.5 mph   straight    VETOED   maxPred 2.48
+    t+1988.5   84.5 mph   angle 4.5   VETOED   maxPred 3.60   <- the camera plainly sees it
+    t+1989.0   83.5 mph   angle 9.9   VETOED   latAcc 2.40
+    t+1989.5   82.5 mph               acts     latAcc 3.00    <- ~2 s late
+    t+1990.5   80.6 mph               HANDS ON latAcc 3.35
+    t+1991.0   79.2 mph   angle 21.9           latAcc 5.53    peak 5.91 over the event
+
+**5.91 m/s^2 is worse than the 5.20 that nearly put him off the road on 000003b6.**
+
+`_camera_has_not_seen_it` decided "the camera cannot see it" from DISTANCE ALONE, so it fired while
+the model was describing the corner in detail. **Fixed**: at or above `MODEL_DISAGREE_LAT_ACC` the
+camera has looked and found something, so the blindness claim is false and defenses 2 and 3 -- which
+are the right tools for "is it as tight as the map says" -- get asked instead. One-directional by
+construction: it can only ever REMOVE a suppression, which is why it landed on a single event.
+Mutation-tested, 4 mutants, 0 survivors.
+
+**STILL UNFIXED, and it is the other half of the same event:** SCC-Map published the corner speed
+about two seconds LATE. That is "THE EXIT THAT NEVER SLOWS ENOUGH" again, and the veto fix does not
+touch it.
+
+### THE VETO IS NOT INERT, AND THE COST COLUMN IS UNMEASURABLE
+
+    map WANTED to act (active + veto)   2163
+      ...got through                    1776   82.1%
+      ...VETOED                          387   17.9%
+         of which cameraNotSeen          117
+
+**`modelVetoed` frames are DISJOINT from `active` frames** -- the veto sets `is_active = False` --
+so the denominator is `active + veto`. Scoring the veto against `active` alone gave 21.79% and is
+the fourth instance of the denominator error in this file.
+
+**AND "0 REAL CORNERS SUPPRESSED" WAS A VACUOUS NUMBER I NEARLY PUBLISHED AS A SAFETY RESULT.** The
+episode detector only opens an episode while the map is `active`, and a suppressed corner has
+`active = False` by construction -- so that column could never have been anything but zero. Same
+shape as the structurally-unreachable defenses this file already records.
+
+**The underlying data has the same hole:** `get_v_target_from_control()` returns `V_CRUISE_UNSET`
+once `is_active` is cleared, so **the speed the map wanted is discarded before it is logged**. What
+the veto COST cannot be recovered from any recorded route. Publishing the suppressed target is the
+one-field change that would fix that, and it is not done.
+
+### HIS THREE ROAD REPORTS, ALL ATTRIBUTED
+
+**"It wasn't moving me up to SLA sometimes."** 43 sustained windows where the dash sat >= 2 mph
+below SLA for >= 5 s. **29 were his own holds** (`press`, manual) and **14 were curve controllers
+actively slowing** -- zero unexplained. The mechanism is the GAS PEDAL:
+
+    965.4   dash 37   vEgo 31   gas TRUE    <- he presses the gas on a climb
+    965.6   dash 31   vEgo 31   gas TRUE    <- Ford drops the set speed to CURRENT SPEED
+
+then ICBM walks it back at ~1.3 mph/s. On a grade where he overrides repeatedly the dash sits below
+SLA most of the time, and nothing is broken. **The first version of that tool called all 14 curve
+windows "unexplained" because it never asked what the curve controllers were requesting** -- the
+attribute-the-source rule, failing again in a tool written by the session that quotes it.
+
+**"It said setting speed to speed limit when it was actually setting it to a hold."** Real, and
+fixed. `speed_limit_auto_set_alert` renders SLA's number while ICBM drives the car to the HOLD, so
+a map limit change announced a speed the set speed would never reach, and re-fired on every limit
+change while nothing moved. `plannerd` now subscribes `selfdriveStateSP`, the planner passes
+`vBaseline` down, and `update_events` defers when a hold DIFFERS from the new limit. A hold EQUAL to
+it is about to be cleared and that announcement is true, so it is kept.
+
+**The hunting.** 17 reversal bursts, almost all on the mountain routes `3dc`/`3de`, up to 50 dash
+steps in 20 s. **All 14 analysed bursts were the PLAN TARGET shaking; zero were ICBM oscillating on
+its own** -- `vTargetRaw` changing up to 11.8 times/s across a 20+ mph range with SCC-Vision active.
+ICBM asked `increase` 15,779 frames and `decrease` 12,381. **The buttons are faithful; the number
+they are told to chase is not.** Not fixed.
+
+### WHAT IS HEALTHY, MEASURED RATHER THAN ASSUMED
+
+- **Holds: 217 created, 100% `press`.** Not one inferred `fallbackIdle` or `counter` hold in 2,000
+  miles. The route 00000379 failure (36.5% of a drive governed by an inferred hold) is gone.
+- **The tap band works: 95.8% of ICBM's 1,228 dash steps were 1 mph.** 40 were 5 mph -- but the
+  attribution calls a step "ICBM" whenever ICBM was pressing at that moment, so a press of his
+  landing inside an ICBM window is misfiled. That number is not a finding yet.
+- **Pins: 0 suggestions offered, 0 pinned holds.** And he closed the concept on 2026-08-27: *"I
+  turned pins off and never want them."* Not a preference that might change -- stop treating the
+  2026-08-25 "suggestions will get noisier" wart as a thing to solve.
+- **Resume tail: 2 events**, both inside 0.3 s. The guard had something real to suppress.
+
+### DECODE OFF-DEVICE. AN `IsOnroad` GUARD INSIDE THE SCAN IS NOT ENOUGH.
+
+This session launched a 12-minute rlog scan ON THE DEVICE while he was parked and about to leave,
+with a guard that re-checked `IsOnroad` before every segment and a docstring citing the incident it
+was protecting against. **The passing-assist session stopped it at 97.7% CPU.**
+
+The guard checks BETWEEN segments and one segment decode is many seconds of solid CPU, so it
+silently downgrades "never compute on a driving comma" to "never START a segment on one". The
+uncovered window -- he turns the key, openpilot starts, the job still holds a core -- is exactly the
+window that cost him engagement the first time. **A guard whose granularity is coarser than the harm
+it prevents is worse than none, because it stops anyone looking harder.** Having written the guard
+myself is what made me stop checking it.
+
+Off-device is cheap and is now the rule:
+
+```bash
+scp -6 "comma@[fe80::20a:f5ff:fee4:4abc%11]:/data/media/0/realdata/<seg>/rlog.zst" .
+```
+
+338 segments, 3.6 GB, 10.7 minutes at ~5-7 MB/s, zero failures. **`openpilot.tools.lib.logreader`
+will NOT import off-device** (it pulls `fcntl` through the hardware layer) -- load `cereal/log.capnp`
+directly and iterate `Event.read_multiple_bytes(raw, traversal_limit_in_words=2**32)`.
+
+### AND THE DEVICE HAD NO IPv4 ADDRESS AT ALL
+
+Full port-22 sweeps of the hotspot `/24` and both halves of the lodge `/23` found nothing, ARP was
+empty, and only the laptop answered ping -- while the comma was up and tethered exactly where he
+said it was. Its only IPv4 address was `127.0.0.1` on `lo`.
+
+    ssh -6 comma@fe80::20a:f5ff:fee4:4abc%11
+
+mDNS resolves to the link-local v6 address ONLY, which gives a distinctive signature: **the name
+resolves and `-4` times out.** That is this case, not a dead car. `%11` is the WINDOWS INTERFACE
+INDEX of the hotspot adapter, not part of the address. `scp` needs brackets. **This inverts the
+"force `-4`" rule elsewhere in this file** -- `-4` is right on a normal network and is the thing that
+guarantees failure here.
+
+**On that hotspot the device has SSH but NO DNS** (`getent hosts github.com` fails, `git ls-remote`
+dies), so the auto-updater is inert and a push cannot reach the car. Code moves only by hand-carried
+bundle. `UpdateFailedCount` reading 0 means it has not tried since the network changed.
+
+**And `/tmp` is tmpfs (150 MB)** -- a detached job's output does not survive a reboot. Write to
+`/data`.
+
+### ONE MORE PROCESS FAILURE WORTH RECORDING: A TIMEOUT IS NOT A DEAD CAR
+
+One SSH timeout was reported to him as "the car's off the network now, he's moved". It answered on
+the first retry. This file already says the laptop's resolver is the usual culprit, and the rule was
+still broken -- **retry before narrating a cause.** He put it plainly: *"It's never off the network,
+dude, you're really driving me mad."*
+
+**And a commit hash was quoted to a peer session without ever being read** -- invented, then
+corrected. `git rev-parse` is one command. Same family as the "check content, not hash" rule.
