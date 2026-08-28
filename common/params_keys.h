@@ -235,7 +235,31 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // BluePilot: places the driver has set the same hold more than once. Feeds the suggestion to
     // pin it -- see SUGGEST_AFTER in pinned_holds.py. Suggestions never act on their own.
     {"IcbmHoldObservations", {PERSISTENT | BACKUP, JSON}},
-    {"IcbmPinnedHoldsEnabled", {PERSISTENT | BACKUP, BOOL, "1"}},
+    // FusionPilot: OFF, and this is a REJECTED CONCEPT rather than a feature that ships disabled.
+    //
+    // "Every feature this fork builds ships ON" is the standing rule and it does not apply here,
+    // because he does not want the idea:
+    //
+    //   *"I doubt I am going to use pinned holds at all. Those were for before I knew about how
+    //    easy it was to use OSM."*
+    //   *"I just want to be able to override the speed when I want and it to not be remembered.
+    //    Memory will be me editing OSM."*
+    //   *"Remember, I don't like the concept of pinned holds."*  -- 2026-08-26, a third time
+    //
+    // He turned it off himself at 07:38 on 2026-08-26 and the default said 1 until this change.
+    //
+    // AND IT HAS NEVER WORKED. `IcbmPinnedHolds` has read `[]` since 2026-08-11 -- a pin has never
+    // once been successfully created on this car -- so it cannot be defended as something another
+    // owner might enjoy either. Nobody has ever had it.
+    //
+    // THE END STATE IS DELETION, not this. His own rule: when a reason expires, delete rather than
+    // park at neutral, because a knob that changes nothing still reads as load-bearing. Deferred
+    // only because he leaves on a 2,000 mile drive tomorrow and this branch rebases onto his.
+    //
+    // WHEN IT IS DELETED, `pinSuggestion` IN custom.capnp MUST NOT BE RENUMBERED. It has WIRE
+    // HISTORY -- it is in every route recorded on the device -- and capnp reads by POSITION, so
+    // moving it makes every stored drive decode as garbage. Retire the field, keep the ordinal.
+    {"IcbmPinnedHoldsEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},
     // Metres. Big enough that GPS scatter cannot step over it, small enough that a surface-street
     // pin does not fire on the freeway above it. A pin only has to hit ONCE -- it sets a normal
     // hold, which then persists on its own -- so this covers fix error, not the length of the zone.
@@ -522,7 +546,21 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // drive, then 2 once bp_mapd_compare shows "only v1" near zero.
     //
     // Transitional by design. It exists to make the cutover reversible and is deleted with v1.
-    {"MapdV2", {PERSISTENT | BACKUP, INT, "0"}},
+    // FusionPilot: 2 = ON. Raised from 0 on 2026-08-26, and the reason it shipped 0 was WRONG.
+    //
+    // That reason was "a second map daemon on their device, a fifth of a core and 200 MB, for a
+    // migration that is ours". `mapd_ready` returns `MapdV2 != 2`, so v1 stops the moment v2 is the
+    // source: state 0 is v1 alone, state 2 is v2 alone, and ONLY state 1 (observe) runs both.
+    // There is exactly one daemon either way. Confirmed on the device -- `ps` shows only mapd_v2.
+    //
+    // State 1 IS the expensive one and the heat is measured: route 389 ran a mean 87.1 C with the
+    // fan at 97% against 79.3 C / 73% on route 388, which had no v2. Do not ship 1.
+    //
+    // The cutover gate was met on his own drive (route 00000383): of 494 frames where both had
+    // spoken, only 1.6% had a limit from v1 alone -- and every one of those was a frame where v2
+    // said `fail`, which this fork refuses anyway. v2 read HIGHER in 108 of 121 disagreements, so
+    // this is not a slower car.
+    {"MapdV2", {PERSISTENT | BACKUP, INT, "2"}},
     {"MapSpeedLimit", {CLEAR_ON_ONROAD_TRANSITION, FLOAT, "0.0"}},
     {"NextMapSpeedLimit", {CLEAR_ON_ONROAD_TRANSITION, JSON}},
     {"Offroad_OSMUpdateRequired", {CLEAR_ON_MANAGER_START, JSON}},
@@ -549,8 +587,28 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // car drives every posted limit exactly, which is not how anyone drives and not what was asked
     // for. The bands themselves are the owner's stated habit -- see SpeedLimitOffsetLow.
     {"SpeedLimitOffsetType", {PERSISTENT | BACKUP, INT, "3"}},
-    {"SpeedLimitPolicy", {PERSISTENT | BACKUP, INT, "3"}},
-    {"SpeedLimitValueOffset", {PERSISTENT | BACKUP, INT, "0"}},
+    // FusionPilot: 1 = MAP DATA ONLY, and it is the only value that excludes the CAMERA source.
+    //
+    // Upstream ships 3 (`map_data_priority`), which is `[map, car]` taking the first NON-ZERO --
+    // so it consults the map and FALLS THROUGH TO THE CAMERA wherever the map is quiet. On this
+    // car that is the TSR phantom-80 leak, and it has bitten twice: once on 2026-08-19 (the camera
+    // source serving a constant 80 for 700 frames) and again on 2026-08-24, when an I-80 route
+    // SHIELD was read as a speed limit near 2100 S and walked the set speed to 90 for thirteen
+    // minutes, ending in an exit taken at 5.20 m/s^2 lateral.
+    //
+    // The standing decision is in CLAUDE.md and it is not satisfied yet: **TSR stays quarantined
+    // behind SpeedLimitPolicy = 1 until it earns its way out** -- several drives of readings that
+    // are CORRECT, not merely present. As of 2026-08-26 the camera has produced about five reads in
+    // a million frames, every one the value 30, never once on a highway, plus interstate shields.
+    //
+    // He runs 1 and has since 2026-08-24. This default said 3 the whole time, so a FRESH FLASH
+    // would have silently re-opened the quarantine -- found on 2026-08-26 by diffing his settings
+    // against their shipped defaults, which is the only check that would ever have caught it.
+    // `combined` (4) has the identical hole: min() over one non-zero source IS that source.
+    {"SpeedLimitPolicy", {PERSISTENT | BACKUP, INT, "1"}},
+    // FusionPilot: 5, matching what he drives. 0 means "exactly the posted limit", which is not
+    // how anyone drives in the US and is not what this fork's owner has ever had set.
+    {"SpeedLimitValueOffset", {PERSISTENT | BACKUP, INT, "5"}},
     // BluePilot: bidirectional Speed Limit Assist. When set, SLA follows the limit in both
     // directions instead of only lowering, and never requests above SpeedLimitMaxSetSpeed.
     // BluePilot: one offset per speed band (SpeedLimitOffsetType = bySpeed). Defaults are the
@@ -600,7 +658,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // NOT derived from this car's angle gains, and that is settled rather than assumed. Two
     // earlier attempts got it wrong in opposite directions, so the reasoning is recorded here.
     //
-    // The owner runs FordLowSpeedFactor_ang = 0.92 / FordHighSpeedFactor_ang = 0.87. Per
+    // The owner runs FordLowSpeedFactor_ang = 0.912 / FordHighSpeedFactor_ang = 0.828. Per
     // BluePilot's own writeup of angle control, that gain is a CALIBRATION: path_angle is derived
     // as curvature * v_ego * gain, which is pure geometry, and the gain exists only because the
     // PSCM continuously compensates for yaw, sway and roll against a factory model of the vehicle
@@ -725,9 +783,9 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // Below 1.0 means the wheel turns LESS for the same commanded geometry. At a correctly
     // calibrated gain the car tracks the path it was asked to. It does NOT mean the car
     // under-turns and needs to arrive slower -- see the SCC sensitivity comment above.
-    {"FordLowSpeedFactor_ang", {PERSISTENT | BACKUP, FLOAT, "0.92"}},
-    {"FordHighSpeedFactor_ang", {PERSISTENT | BACKUP, FLOAT, "0.87"}},
-    {"FordHighSpeedDampening_ang", {PERSISTENT | BACKUP, FLOAT, "1.0"}},
+    {"FordLowSpeedFactor_ang", {PERSISTENT | BACKUP, FLOAT, "0.912"}},
+    {"FordHighSpeedFactor_ang", {PERSISTENT | BACKUP, FLOAT, "0.828"}},
+    {"FordHighSpeedDampening_ang", {PERSISTENT | BACKUP, FLOAT, "0.85"}},
     {"BPLateralSchemeParamsMigratedV1", {PERSISTENT | BACKUP, STRING, "0"}},
     // STRING, not BOOL -- see the note in params_migration: a BOOL marker made put("1") raise, so
     // the marker never stuck and the migration re-ran (and re-clobbered) on every boot.
