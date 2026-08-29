@@ -7172,3 +7172,126 @@ From the trip rlogs already on the laptop:
 **Do not conclude "he cornered hard" from `steeringPressed`** -- same split that corrected the
 3.21 m/s^2 figure. And print the steering-derived lateral acceleration beside `currentLateralAccel`
 ON THE SAME FRAME; the bicycle model reads ~35-47% high at highway speed.
+
+## 2026-08-28: THE BLEND AVERAGES THE ROAD IN TWO DIFFERENT PLACES. THAT IS THE PING-PONG.
+
+*"Yes, fix that. But also steering wasn't that great... It still did the turn to far and then
+over-correct."* Routes 000003eb and 000003ec, his FINAL settings, decoded off-device.
+
+### FIRST: THE 55 MPH CONSTANT IS EXONERATED. DO NOT "FIX" IT.
+
+He authorised that fix and the evidence refused it, which is worth recording as a result rather
+than as a thing left undone. Pooled by speed, delivery dips hard at 50-60 mph, exactly where
+`_VLT_V_HIGH_MS` tapers the extra lookahead to zero. At MATCHED CURVATURE the dip is gone
+(`tools/bp_lateral_matched.py`, hands off, steady state):
+
+    radius          35-45 mph   45-55 mph   55-65 mph   65-80 mph      step at the line
+    2000-1000 m       0.288       0.599       0.920       0.884        +0.292  BETTER above
+    1000- 500 m       0.885       0.857       0.901       0.932        +0.045  no step
+     500- 286 m       0.997       0.854       0.878       1.054        -0.041  no step
+
+**No band is delivered worse above 55 mph.** The pooled dip is road type -- 50-60 mph is canyon and
+arterial, 60-80 is interstate -- which is precisely the confound the standing note in this file
+warned about, and the reason it said to match on curvature before touching the constant. The IMU
+rows agree with the vehicle model throughout (0.70/0.70/0.90/0.90), so this is not a steerRatio
+artifact either. The taper's stated justification -- "PSCM responds faster at high speed" -- remains
+an assumption nobody has measured, but it is not costing him anything.
+
+### THE MECHANISM, AND IT EXPLAINS BOTH HALVES OF WHAT HE FEELS
+
+`actuators.curvature` is already lag-compensated by modeld:
+
+    lat_action_t = get_lat_delay(...) + DT_MDL + DT_MDL/2 = 0.393 + 0.075 = 0.468 s on his car
+
+`lateral_angle_ext` then blended in a model sample of its OWN, taken at
+`clip(liveDelay, 0.1, 0.15) + DT_MDL` = **0.20 s at highway speed**, at a hardcoded b = 0.50:
+
+    requested = predicted(0.20 s) * 0.50 + desired(0.468 s) * 0.50
+
+**Those are not two estimates of one quantity. They are the road in two different places.**
+Averaging them drags the aim point back to ~0.33 s while the PSCM still takes 0.468 s to arrive.
+
+Measured, hands off (`tools/bp_lateral_horizon.py`):
+
+    horizon gap                     0.215 s at 25-45 mph rising to 0.268 s at 65-80 mph
+    road TIGHTENING ahead  n=6989   command 5.9% SHORT   p90 16.6%   -> turns in late, then overshoots
+    road OPENING OUT       n=3033   command 3.5% LONG                -> slow unwind
+
+and because it is a HORIZON error it concentrates exactly where the road is changing:
+
+    curvature change rate      median loss    p90
+    < 0.0005 (straight)           0.9%        5.8%
+    0.0005-0.002                  7.0%       17.5%
+    0.002-0.005                   9.6%       28.1%
+
+**A gain cannot fix this, which is the whole reason two tuning sweeps failed.** A gain scales the
+stale component along with the correct one. That is why he went from 0.912/0.828 all the way up to
+**1.197/1.163** and changed the feel without touching the symptom, and why his friend's car does it
+on entirely different settings: the constants are upstream's and identical on both.
+
+### THE FIX: SEPARATE THE TWO JOBS. THE CLIP STAYS.
+
+This file already prescribed it -- *"keep the sampling depth capped where it is, and compensate the
+real delay somewhere that does not move the model lookahead"* -- and the place that does not move
+the model lookahead is the BLEND, because `desired` was never the thing that was wrong.
+
+    _t_base         DECISION depth, feeds _kappa_entering.  STILL clip(delay, 0.1, 0.15) + DT_MDL.
+    _t_blend_base   SAMPLING depth for the blend.           clip(delay, 0.1, 0.45) + DT_MDL*1.5.
+
+**The documented apex failure runs through `_kappa_entering`, and `_kappa_entering` does not read
+the new value.** That is what makes this safe to do at all: raising the base wholesale is the bug
+the 0.15 clip exists for (kappa_entering latches True, the exit-biased blend is disabled, the car
+commands max path_angle through the whole apex), and the entry decision is untouched here.
+
+Mutation-tested, and both halves matter: restoring the old base kills 5 tests, deleting the apex
+clip kills exactly the guard test written for it. `test_lateral_blend_horizon.py`.
+
+### AND THE EXIT-BIASED BLEND HAS NEVER RUN. IT IS THE BAND-AID FOR THE OTHER HALF.
+
+`_desired_falling` asks for `abs(desired) < abs(last) - 0.010` between consecutive angle-path calls.
+Measured over the interval that comparison actually spans -- **0.05 s, because `update_angle_strategy`
+runs inside `STEER_STEP = 5`** -- across 239,038 intervals:
+
+    would fire            129   0.054%
+    threshold             0.0100 1/m
+    p99 fall observed     0.0019 1/m        <- the threshold is 5.4x it
+
+With `_pscm_lim` silent in angle mode and `_dbc_sat` needing ~26 degrees of path angle, **`b_blend`
+is 0.50 on essentially every frame** and a mechanism the code describes as dropping model weight to
+~15% on exits does not run on the curve exits it was written for. Its comment records being scaled
+x5 (0.002 -> 0.010) to preserve a 0.2 (1/m)/s trigger rate; that rate came from another branch and
+is 5.4x anything this car's planner does.
+
+**Deliberately NOT changed in the same commit.** The horizon fix removes the over-command on exit at
+its root -- which is the slow unwind the exit bias was compensating for -- so enabling the band-aid
+in the same breath would produce a drive that cannot say which one moved. Re-measure the exit side
+after this drive before touching the threshold.
+
+**And a first pass at this measured 100 Hz frame-to-frame falls against a 20 Hz threshold and made
+the trigger look five times deader than it is.** Same family as comparing a lag-adjusted signal
+against a same-frame one: right numbers, wrong interval. Check what interval a comparison spans
+before scoring it.
+
+### TWO COMMENTS THAT NAMED PARAMS THAT DO NOT EXIST
+
+`FordPathAngleBlendRatio` and `FordVLTExtraMax` are named in `lateral_angle_ext` comments, in this
+file, and in two diagnostic tools' watch lists. **Neither is in `params_keys.h` and nothing reads
+either one.** Both are hardcoded constants. The note in this file calling the blend ratio "a PARAM,
+so it is his to move -- name it, do not change it" was wrong on the facts, and it is the reason the
+blend went unexamined for a week: it was filed as his setting when it was our constant. Comments
+drift from defaults; this is the same rule one layer out.
+
+### WHAT THE REVERSAL SPLIT SAYS, AND WHY IT IS NOT A CULPRIT
+
+`tools/bp_lateral_blame.py` attributes every tracking-error sign reversal to whichever side moved
+more than twice as far across it. 708 qualifying reversals, hands off:
+
+    command reversed   222   31.4%
+    car reversed       250   35.3%
+    coupled            236   33.3%
+
+and flat across every speed band. **Neither side leads.** That is what a loop looks like, and it is
+why "is the planner jittering" and "is the PSCM overshooting" were both the wrong question -- each
+was live as a hypothesis and the data refuses both. The 2x dominance threshold is deliberately
+blunt, because a verdict rendered off a 27% difference is what produced the withdrawn "THE PSCM IS
+THE OSCILLATOR".

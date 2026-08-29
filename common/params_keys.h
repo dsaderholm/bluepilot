@@ -791,6 +791,12 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // the marker never stuck and the migration re-ran (and re-clobbered) on every boot.
     {"BPPassingAssistRenameMigrated", {PERSISTENT | BACKUP, STRING, "0"}},
 
+    // BluePilot: angle-mode lane centering trim (advanced lane positioning) -- see
+    // opendbc/sunnypilot/car/ford/lane_center_trim.py.
+    {"enable_lane_positioning_ang", {PERSISTENT | BACKUP, BOOL, "0"}},
+    {"custom_path_offset_ang", {PERSISTENT | BACKUP, FLOAT, "0.0"}},
+    {"lane_centering_strength_ang", {PERSISTENT | BACKUP, FLOAT, "0.25"}},
+
     {"disable_BP_lat_UI", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"disable_BP_long_UI", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"disable_downhill_comp_UI", {PERSISTENT | BACKUP, BOOL, "0"}},
