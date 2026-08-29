@@ -83,16 +83,35 @@ _GAIN_BLEND_V_BP = [11.18, 31.29]
 _FORD_PATH_ANGLE_BLEND_RATIO_DEFAULT = 0.50
 
 # Variable lookup time (VLT): curvature_lookup_time adapts to speed and curvature magnitude.
-# t_lookup = t_base + t_extra_max × speed_factor(v) × kappa_factor(|κ|)
-# t_base = liveDelay.lateralDelay + DT_MDL — always matches the planner's pre-compensation floor.
-# Extra lookahead collapses toward zero at high speed (PSCM responds faster)
-# and at large curvature (prevents blend importing a "start unwinding" signal too early).
+# t_lookup = t_blend_base + t_extra_max × speed_factor(v) × kappa_factor(|κ|)
+# t_blend_base = liveDelay.lateralDelay + DT_MDL + DT_MDL/2 — matches modeld's `lat_action_t`, i.e.
+# the horizon `actuators.curvature` is ALREADY aimed at. The old base used the 0.15 s decision clip
+# and therefore did NOT match it, which is the mismatch fixed below; the comment claiming it always
+# matched the planner's pre-compensation floor had been wrong for as long as the clip existed.
+# Extra lookahead collapses toward zero at high speed and at large curvature (prevents the blend
+# importing a "start unwinding" signal too early).
+#   NOTE on the speed taper: its stated reason is "PSCM responds faster at high speed", which is an
+#   assumption nobody measured. Delivery pooled by speed dips hard at 50-60 mph, right where the
+#   taper completes, and that looked like confirmation -- but at MATCHED CURVATURE the dip is gone
+#   (tools/bp_lateral_matched.py: no band is delivered worse above 55 mph, and 2000-1000 m is 0.29
+#   BETTER). The pooled dip is road type. _VLT_V_HIGH_MS is not implicated; leave it alone.
 _DT_MDL = 0.05                       # model loop period (matches common/realtime.py)
 _VLT_T_EXTRA_MAX = 0.10              # max extra lookahead above t_base
 _VLT_V_LOW_MS   = 25.0 * 0.44704    # 25 mph — full extra lookahead at or below this speed
 _VLT_V_HIGH_MS  = 55.0 * 0.44704    # 55 mph — no extra lookahead at or above this speed
 _VLT_KAPPA_FULL  = 0.005             # 1/m — full extra lookahead below this curvature (200m+ radius)
 _VLT_KAPPA_TAPER = 0.020             # 1/m — no extra lookahead above this curvature (50m radius)
+
+# FusionPilot: modeld's own extra compensation beyond lateralDelay, so the blend can be sampled at
+# the SAME horizon the planner's command is aimed at. Mirrors modeld.py exactly:
+#     lat_action_t = lat_delay + frame_delay + action_delay,  frame_delay = DT_MDL,
+#                                                             action_delay = DT_MDL / 2
+# Kept as a named constant rather than a literal so a change in modeld is a one-line change here.
+_MODELD_ACTION_DELAY_S = _DT_MDL + _DT_MDL / 2.0
+# Ceiling on the delay the BLEND horizon will honor. Not the 0.15 s decision clip below -- this one
+# only bounds how deep the model is sampled if liveDelay ever runs away, and 0.45 s + DT_MDL*1.5
+# still lands inside the range modeld itself uses on this car (measured 0.393 s).
+_VLT_BLEND_DELAY_MAX = 0.45
 
 # Rate cap on path_angle magnitude DECREASE during PSCM LimitReached (rad/call = 0.40 rad/s).
 # Both model and planner naturally drop path_angle ~0.36 rad/s at a sharp 90° apex, while the PSCM is
@@ -145,9 +164,12 @@ def pscm_d_ref_m(v_ego_ms: float) -> float:
 
 class LateralAngleExt:
   def __init__(self, CP=None, CP_SP=None):
-    # Predicted-curvature blend for path_angle: pred * b + desired * (1-b); b from ``FordPathAngleBlendRatio``
+    # Predicted-curvature blend for path_angle: pred * b + desired * (1-b).
+    # NOT a param, despite what this comment said for months: there is no ``FordPathAngleBlendRatio``
+    # in params_keys.h and nothing reads one. It is a hardcoded 0.50 on every drive, and a note in
+    # CLAUDE.md calling it "his to move" was wrong for the same reason. Checked 2026-08-28.
     self.path_angle_blend_ratio = _FORD_PATH_ANGLE_BLEND_RATIO_DEFAULT
-    # Max extra VLT above t_base; from ``FordVLTExtraMax`` param
+    # Max extra VLT above the blend base. Also not a param -- ``FordVLTExtraMax`` does not exist.
     self.vlt_extra_max = _VLT_T_EXTRA_MAX
     # Telemetry: final path_angle (rad) after limits (see bp_card_publisher)
     self.bp_path_angle_final = 0.0
@@ -403,7 +425,8 @@ class LateralAngleExt:
     # curvature, kappa_entering stays True, and the exit-biased blend is permanently disabled — causing the car
     # to command max path_angle through the entire apex. 0.15s gives t_base ≤ 0.20s and VLT ≤ 0.33s, restoring
     # the 2.8m lookahead that kept kappa_entering False at the apex in successful earlier runs.
-    _t_base = float(clip(self.sm['liveDelay'].lateralDelay, 0.1, 0.15)) + _DT_MDL
+    _lateral_delay = float(self.sm['liveDelay'].lateralDelay)
+    _t_base = float(clip(_lateral_delay, 0.1, 0.15)) + _DT_MDL
     _speed_factor = float(interp(v_ego, [_VLT_V_LOW_MS, _VLT_V_HIGH_MS], [1.0, 0.0]))
     # Direction-aware kappa factor: on curve ENTRY (model shows more curvature at t_base than planner now),
     # keep full lookahead so pre-steering begins early. On exit/apex, taper by magnitude to prevent unwind.
@@ -416,7 +439,35 @@ class LateralAngleExt:
       _kappa_factor = 1.0  # curve deepening ahead: full extra lookahead for gradual entry
     else:
       _kappa_factor = float(interp(abs(desired_curvature), [_VLT_KAPPA_FULL, _VLT_KAPPA_TAPER], [1.0, 0.0]))
-    curvature_lookup_time = _t_base + self.vlt_extra_max * _speed_factor * _kappa_factor
+    # FusionPilot: the BLEND is sampled from its own base, and this is the whole fix.
+    #
+    # `desired_curvature` is `actuators.curvature`, which modeld already aimed `lat_action_t` ahead
+    # (LagdValueCache + DT_MDL + DT_MDL/2 = 0.468 s on this car). The line below used to sample the
+    # model at `_t_base`, which the 0.15 s clip pins to 0.20 s at highway speed -- so `requested`
+    # averaged the path at 0.20 s with the path at 0.468 s and called the result "the curvature to
+    # command now". Those are not two estimates of one quantity; they are the road in two different
+    # places, and averaging them drags the aim point back to ~0.33 s while the PSCM still takes the
+    # full 0.468 s to arrive.
+    #
+    # Measured on 000003eb/000003ec, hands off (tools/bp_lateral_horizon.py), the cost has the two
+    # faces the geometry predicts, and they are his two complaints:
+    #     road TIGHTENING ahead   command 5.9% SHORT (p90 16.6%)  -> turns in late, then overshoots
+    #     road OPENING OUT        command 3.5% LONG               -> slow unwind
+    # and it is a horizon error, so it concentrates where the road is actually changing: 0.9% on
+    # straights, 9.6% (p90 28.1%) where curvature is moving. Raising a gain cannot fix it, because
+    # a gain scales the stale component along with the correct one -- which is why his sweep from
+    # 0.912/0.828 up to 1.197/1.163 changed the feel and not the symptom, and why his friend's car
+    # has it too on entirely different settings.
+    #
+    # The two jobs `lateralDelay` was doing are now separated, which is the part to preserve:
+    #   _t_base                 DECISION depth -- feeds _kappa_entering above. STILL CLIPPED at
+    #                           0.15 s, because letting it run to the real delay is precisely the
+    #                           documented apex bug (kappa_entering latches True, the exit-biased
+    #                           blend is disabled, max path_angle through the apex). Untouched.
+    #   _t_blend_base           SAMPLING depth for the blend -- matches the planner's compensation.
+    # The apex failure runs through _kappa_entering, and _kappa_entering does not read this value.
+    _t_blend_base = float(clip(_lateral_delay, 0.1, _VLT_BLEND_DELAY_MAX)) + _MODELD_ACTION_DELAY_S
+    curvature_lookup_time = _t_blend_base + self.vlt_extra_max * _speed_factor * _kappa_factor
     self.bp_curvature_lookup_time = curvature_lookup_time
 
     predicted_curvature = 0.0
