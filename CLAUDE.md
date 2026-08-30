@@ -5797,3 +5797,49 @@ is: nothing to set, nothing to wait for, expect no change. The open lead remains
 ~50%-of-curve oscillation, and the untried idea is the curve-hold filter -- damp only while the road
 has been steadily bent, release instantly on a real change. Any future candidate gets converted to
 degrees at the wheel BEFORE it is described to him.
+### WHICH CURVES IT ACTUALLY STRUGGLES ON -- MEASURED, AFTER HE HAD TO ASK FOR IT
+
+*"You should know what curves it struggles on because you have all the logs."* He was right, and
+asking him was the wrong move. He also named the real process failure: *"I keep saying one thing and
+then it throws you completely off your conclusion."* True -- several reversals this session were
+re-reasoning from his last sentence rather than from data already on disk.
+
+`tools/bp_lateral_by_radius.py`, route 000003ed, hands off, per MINUTE OF EXPOSURE:
+
+    radius                    minutes    eps   per min   med swing   x nominal
+    under 200 m                   0.3      3      9.25      29.3 deg      1.6x
+    200-500 m                     2.5     38     15.50       4.0 deg      0.6x
+    500-1000 m                   13.2    259     19.69       3.3 deg      0.9x
+    1000-2000 m                  18.7    332     17.78       2.5 deg      1.3x
+    over 2000 m                 122.8   1521     12.39       2.2 deg      7.6x
+
+**The worst rate is 500-2000 m -- fast sweepers through large highway curves.** His instinct
+("really it is tighter ones") beat my framing, which had drifted to 1271-2500 m.
+
+**'x nominal' is what stops the table being read wrong**, and a count alone cannot say it:
+
+- under 200 m looks dramatic at 29 deg but is 1.6x what the curve REQUIRES -- real cornering, and
+  0.3 minutes of a 3.3-hour drive
+- over 2000 m has a wild 7.6x but a 2.2 deg absolute swing on near-straight road: that is the dither
+  band this file already established as barely perceptible
+- 500-2000 m is the only place both are true at once -- highest rate AND swings at or above what the
+  road asks for
+
+**So the target band is 500-2000 m.** Anything proposed for this symptom should be evaluated there,
+not at the extremes.
+
+### AND `FordHighSpeedDampening_ang` IS THE LARGEST LEVER FOUND ALL SESSION
+
+It multiplies the LOW-CURVATURE high-speed gain only (`low_gain_calc = interp(v, BP, [1.00,
+GAIN_LOWC * user_dampening_factor])`), so it acts on exactly the open end of the target band. He runs
+**0.69** against a 1.0 default. At 75 mph with his 0.957/0.829, raising it to 1.0 is:
+
+    2500 m  +45% command     1271 m  +41%     800 m  +34%     500 m  +25%
+
+For scale, the ba20937aac cherry-pick moves the wheel 0.36 deg at its absolute worst. This is tens
+of percent of the command. **It is his setting, it is reversible from the seat, and it is the first
+thing to try** -- 0.85 before 1.0, so the direction is felt before the magnitude.
+
+The honest risk, and it must be said with it: gain scales whatever it is given, and the plan
+oscillation is still there, so this may trade "weak and late" for "busier". He has described the
+current setting as weak, so he is on the wrong side of that trade today.
