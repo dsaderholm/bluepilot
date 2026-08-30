@@ -5426,3 +5426,94 @@ Worse on both, and worst where he drives -- 60-75 mph went 0.18 -> 0.33. **Tell 
 1.197/1.143 with dampening 0.81 back**, and note it is a recommendation he applies, not a default
 to push. Route mix is the usual caveat, but both routes are highway-dominated (3ed 156 min above
 60 mph, 3ef 61 min), so this is better matched than most comparisons here.
+
+### THE CURVE PING-PONG IS IN THE MODEL'S PLAN. NOTHING HE CAN SET REACHES IT.
+
+*"It was just ping ponging so much on curves."* And, correcting me: *"But gains that high would make
+it go too far, right? I started the drive with that and backed out."*
+
+**HE WAS RIGHT AND I HAD RECOMMENDED THE OPPOSITE.** All 199 segments of 000003ed ran 1.197/1.143
+with zero changes, so he drove 3.3 hours on those gains, felt it ping-pong on curves, and lowered
+them afterwards. I had just told him to put them back, off a metric that ranked them better.
+
+**WHY THE METRIC WAS WRONG: A 2 SECOND WINDOW CANNOT SEE A 4.7 SECOND CYCLE.**
+`bp_lateral_episodes.py` and `bp_lateral_rate.py` use `WIN_S = 2.0`. The limit cycle found on this
+same drive has a ~4.7 s period. Those tools measure fast wobble and are structurally blind to the
+thing he reports, so ranking two settings with them was meaningless -- the same shape as the
+episode detector that could only ever return zero for suppressed corners. **When the driver and the
+instrument disagree, check the instrument's window against the phenomenon's period before believing
+the instrument.**
+
+`tools/bp_lateral_curve_cycle.py` uses 6 s windows, requires the road to be genuinely bent for the
+whole window (|desired| above 6e-4 and never changing sign), hands off, >= 45 mph, and measures how
+far `desired` swings about the curve's own mean and how often it re-crosses it. **It qualifies on
+DESIRED, not on steering angle: angle scales with gain, so testing on angle marks any high-gain
+setting worse by construction.**
+
+**AND EVERYTHING HE CAN SET IS EXONERATED:**
+
+    build / setting                          curve osc/min   median swing
+    Yosemite 3d1  no lane centering, no fix       3.43            45%
+    Yosemite 3dc  no lane centering, no fix       5.78            54%
+    today 3ed     LC 0.55, blend fix, gains hi    3.91            48%
+    today 3ef     LC 0.55, blend fix, gains lo    3.91            52%
+
+**3.91 against 3.91 across his entire gain change.** Gains scale the command AFTER the plan is
+made, so they cannot touch an oscillation that is in the plan -- which is also why no tuning sweep
+has ever fixed this and why his friend gets it on different settings.
+
+**AND IT KILLS THE LANE-CENTERING HYPOTHESIS I RAISED ONE ENTRY AGO.** The Yosemite rows predate
+the bp-dev cherry-pick, so that build has no lane centering code in it at all, and it oscillates at
+the same rate and the same amplitude. Do not re-raise the trim as the cause; the phenomenon is older
+than the feature. (Yesterday's 3e2-3ea cannot referee it either way -- surface roads, 0.4 min of
+qualifying curve-holding across all of them, and zero for the lane-centering-off group.)
+
+**WHAT IS ACTUALLY LEFT.** `controlsState.desiredCurvature` is `modelV2.action.desiredCurvature`
+through `clip_curvature`. It swings a MEDIAN 48-54% of the curve's own value while holding a steady
+bend, on every build measured. On a 500 m curve the plan wanders between roughly 330 m and 1000 m
+of equivalent steering. That is upstream of every gain, trim, limiter and blend this fork owns.
+
+The one lever that could plausibly reach it is the MODEL ITSELF -- `ModelManagerSelectedBundle` is
+unset on his device, i.e. the default bundle, and he has said he tried other models on the
+California trip and *"nothing really made steering perfect"*. Scoring bundles with
+`bp_lateral_curve_cycle.py` is the first measurement that could tell them apart on this specific
+failure, and it needs one drive per bundle on roads with sustained curves.
+
+**DO NOT propose another gain, dampening, blend-ratio or lane-centering change for this symptom.**
+Four separate settings and one code fix have now been measured against it and none of them move it.
+
+### AND HIS TIMELINE FACT IS THE DIAGNOSIS: ANGLE MODE HAS NO CLOSED LOOP ON CURVATURE.
+
+*"Its been like this since path angle steering was added."* That is the sentence that explains the
+whole thing, and it survives the objection that the oscillation lives in `desiredCurvature`, which
+is computed upstream of the Ford angle code. **The loop closes through the ROAD**: the angle path
+steers, the car moves, the camera sees a different view, the model re-plans. So the model's own
+output is downstream of how well angle mode tracks.
+
+    curvature mode   sends apply_curvature. The PSCM closes ITS OWN loop on curvature and keeps
+                     correcting until the car is at the commanded value. Delivery ~1.0 by design.
+    angle mode       sends path_angle = kappa_cmd * v_ego * curvature_factor. An OPEN-LOOP
+                     feedforward conversion. There is no feedback term anywhere in the path.
+
+And the conversion is measurably wrong in one direction: delivery is **0.87-0.93 everywhere, never
+centred on 1.0**, confirmed against the gyro so it is not a steerRatio artifact. A persistent bias
+inside a loop closed by something else is exactly what forces that something else to hunt: the
+model sees the car drifting wide, asks for more curvature, the car still falls short, the model
+asks harder, the correction lands 0.47 s late, the model backs off hard. Period ~4.7 s.
+
+Weak but correctly-signed support on 000003ed: windows with delivery below 0.80 swing a median
+**71%** against 46-50% for 0.80-1.00 (n=15 in the worst bin, so it is a hint, not a proof).
+
+**THE FIX DIRECTION, AND IT IS NOT GOING BACK TO CURVATURE** (which he has refused twice and does
+not need to): give angle mode the loop curvature mode gets free. A SLOW, CLAMPED feedback term on
+(desired - actual) curvature, added to `kappa_cmd` upstream of the existing limiters the way
+`lane_center_trim` already is, so the steady-state shortfall goes to zero and the model has nothing
+left to chase.
+
+**Do not rush it.** An integrator in a path carrying 0.47 s of delay oscillates worse than no
+integrator if its gain is too high, and shipping a lateral change on one evening's reasoning is the
+5.20 m/s^2 pattern. It needs: a rate limit, a magnitude clamp, freezing while `steeringPressed` or
+during lane changes, and a bench check that it cannot wind up when the PSCM is saturated.
+
+`tools/bp_lateral_curve_cycle.py` is the instrument for judging it -- curve oscillation per minute
+of curve holding, which is the only metric so far that tracks what he reports.
