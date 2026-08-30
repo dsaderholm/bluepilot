@@ -5757,3 +5757,43 @@ the target equalled the seed, and the weight had nowhere to move -- a test that 
 the thing it was named for. A STRAIGHTAWAY (`desired` 0.0005, below the 0.00125 gate) selects
 `b*0.35` on the very first call with no history needed, which is the cheapest scenario where target
 differs from seed.
+### AND ba20937aac IS SUB-PERCEPTUAL ON HIS CAR. HE SAW IT IN ONE GLANCE AT THE CHART.
+
+Replayed both the old and new blend logic over recorded frames (`tools/bp_lateral_blend_replay.py`)
+and plotted the two commands against each other. His response: *"Those lines are the same."* They
+are. Converting the difference to steering angle, which is the only unit he can judge:
+
+    window            command diff (1/km)              as STEERING ANGLE
+    gentle 1773 m     med 0.011  p90 0.046  max 0.130  med 0.031  p90 0.128  max 0.362 deg
+    tight  447 m      med 0.000  p90 0.009  max 0.026  med 0.000  p90 0.025  max 0.072 deg
+
+    his ping-pong episodes                    7 - 15 deg of swing
+    dither already measured as imperceptible  0.10 - 0.30 deg
+
+**The whole cherry-pick moves the wheel by 0.03 deg typically and 0.36 deg at its worst -- inside
+the noise floor this file already proved he cannot feel.** It is a correct upstream bug fix and it
+will not change anything he perceives. Do not tell him the merge is worth waiting for, and do not
+let a later session quote "180 of 240 frames differ" as evidence it did something.
+
+**THIS IS THE "ASK HOW BIG BEFORE CONCLUDING FROM HOW OFTEN" RULE, VIOLATED IN THE FILE THAT
+RECORDS IT.** The first pass reported frames-differing and a mechanism and a direction, and never
+once computed a magnitude. The same failure produced the retracted 1.2 Hz ringing analysis, where
+every aggregate turned out to be characterising 0.10-0.30 deg of dither. **Convert to the unit the
+driver judges in -- degrees at the wheel -- before reporting that a change does anything.**
+
+**Also corrected in the same breath:** the earlier note that the fix is "inert on gentle curves" was
+wrong in the other direction. It DOES act there, through the `_on_straightaway` branch (`abs(des) <
+0.00125`, an 800 m radius), which drops the weight to b*0.35 -- so the 1000 m floor on
+`_kappa_entering` / `_desired_falling` is not the whole story. The action is real; the magnitude is
+what makes it irrelevant.
+
+**And the framing "trusts the wobbling model less and the planner more" was imprecise.** BOTH blend
+inputs are the model's: `desired` is `action.desiredCurvature` after `clip_curvature`, and
+`predicted` is a raw interpolation of `orientationRate.z`. The change leans on the more PROCESSED
+model signal, not away from the model.
+
+**So the lateral problem is exactly where it was**, and the honest position for his 600-mile drive
+is: nothing to set, nothing to wait for, expect no change. The open lead remains the plan's own
+~50%-of-curve oscillation, and the untried idea is the curve-hold filter -- damp only while the road
+has been steadily bent, release instantly on a real change. Any future candidate gets converted to
+degrees at the wheel BEFORE it is described to him.
