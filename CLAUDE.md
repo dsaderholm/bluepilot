@@ -5558,3 +5558,79 @@ the opposite of the phenomenon (after the SCC veto that could only return zero, 
 marginals that hid an exclusion). **Check a top-ranked event against raw data before believing a
 rate.** `tools/bp_lateral_wirewin.py` decodes path_angle for one narrow window and is the cheap way
 to do it.
+## 2026-08-29: THE LAG IS THE CAR, THE PLAN DOES NOT REACT TO IT, AND WE OVER-COMPENSATE.
+
+He asked for both open questions measured before any fix: *"Go measure both of these. I need this
+fixed, I am driving 600 more miles soon."*
+
+**Q1 -- THE LAG IS THE PSCM, NOT OUR CADENCE.** `tools/bp_lateral_loop.py` shifts the commanded
+path_angle ON THE WIRE (0x3D3 off sendcan) against the steering angle, so the interval contains only
+the PSCM and the mechanics -- everything upstream is already baked into path_angle by then.
+
+    levels fit, turning frames, hands off     0.310 s   (peak r 0.979, but the curve is FLAT:
+                                                         0.966 at zero shift, 0.965 at 0.80 s)
+    DERIVATIVES, transients only              0.230 s   (r 0.083 -> 0.178 -> 0.048, a clean peak)
+
+Our command cadence is `STEER_STEP = 5` -> 20 Hz, i.e. ~0.075 s of quantisation plus zero-order
+hold. **Going to 100 Hz buys back under a fifth of the delay.** Use the derivative figure; the
+levels fit is soft because both signals have nearly the same shape at every shift.
+
+**Q2 -- THE PLAN DOES NOT REACT TO THE CAR BEING LATE.** Correlating the tracking error e(t) with
+d(desired)/dt at t+lag peaks at **r = +0.09** (strongest at 0.80 s; it is -0.20 at zero lag, which
+is the algebraic relation, not a response). **Reducing the lag will not quiet the plan.** The
+oscillation originates in the model and the lag only amplifies it into what he feels.
+
+**AND THAT KILLS THE "ANGLE MODE HAS NO CLOSED LOOP" FIX DIRECTION FROM THE ENTRY ABOVE.** If the
+plan were hunting a persistent under-delivery, error would lead plan change. It does not.
+
+### AND THE ACTUAL FINDING: WE AIM ROUGHLY TWICE AS FAR AHEAD AS THE CAR NEEDS
+
+    modeld compensates   lat_action_t = LagdValueCache + DT_MDL + DT_MDL/2 = 0.468 s
+    the PSCM responds in                                                     0.230 s
+    over-compensation                                                       +0.238 s
+
+The wire agrees: at t+4793.8 on 000003ed, `desired` was 2.53 1/km while `actual` was **4.07** -- the
+car doing MORE curvature than the plan currently wanted, which is what aiming too far ahead
+produces. It reaches the future curvature early, overshoots, and then the plan falls away.
+
+**`FordBlendHorizonScale` ships at 1.0 (no change) with a settings control.** It scales
+`_t_blend_base` as a fraction of `lat_action_t`; ~0.55 lines the sample up with the measured
+response. It is a road question and he has 600 miles to answer it with.
+
+### THREE THINGS RULED OUT ON THE WAY, EACH BY MEASUREMENT
+
+- **`clip_curvature` is not distorting the plan.** Its ISO jerk limit is `MAX_LATERAL_JERK / v^2`
+  = 0.0045 1/m/s at 75 mph. Observed |d(desired)/dt| reaches it on 1.7% of frames with NO pinning
+  signature (0.12% in the 99-100% band). And its returned `curvature_limited` flag does **not**
+  include the rate limit at all -- only the lateral-accel and max-curvature clamps -- so the jerk
+  limiter is silent and must be measured by its signature, never read off a flag.
+- **Averaging the model's PATH does not help.** Point sample at `lat_action_t` vs the mean over
+  +-0.45 s around it: frame-to-frame wobble 0.0000375 -> 0.0000341, **-9.1%**. The whole path moves
+  together each frame; the model is re-planning the road, not jittering one point. So no smoothing
+  WITHIN a frame can fix it.
+- **A first pass reported `clip_curvature` modifying 26.66% of frames.** That was pairing noise --
+  modelV2 is 20 Hz and controlsState 100 Hz, and pairing one action with the next controlsState
+  frame manufactures differences during transients. The median difference is exactly 0.
+
+### AND THE SUNNYLINK AUDIT WAS BLIND TO AN ENTIRE SETTINGS SCREEN
+
+Adding `FordBlendHorizonScale` surfaced it. `bp_sunnylink_settings_audit.py` reported **35/35
+reachable, 0 missing** while the new control was not in `settings_ui.json` at all. Two causes,
+stacked, and the second is the serious one:
+
+- `OUR_PREFIXES` had `FordSynthesize` and `FordPref` but not the lateral family. Widened to `Ford`.
+- **`ITEM_CALLS` listed only sunnypilot's four `*_item_sp` constructors.** `UI_DIRS` has always
+  included `selfdrive/ui/bp/layouts/settings`, but that screen builds controls with
+  `float_control_item` / `int_control_item` / `toggle_item` -- so the audit walked the file,
+  recognized nothing, and reported compliance. **A scanner that reads the right files and
+  understands none of their calls is indistinguishable from a clean audit.**
+
+That is why `FordLowSpeedFactor_ang`, `FordHighSpeedFactor_ang`, `FordHighSpeedDampening_ang` and
+the lane-centering trio were in `settings_ui.json` only because somebody hand-edited the JSON --
+and **regenerating from the YAML source would have silently deleted three of them**, which is the
+exact failure the COMMA 4 section warns about. Verified by regenerating with my YAML change stashed:
+60 lines deleted. All three are now ported into `settings_ui_src/pages/vehicle.yaml`, the generator
+is idempotent, and the audit reads **39/39**.
+
+**Check the audit by adding a setting and watching it FAIL first.** It has now been green through
+two different structural blind spots.

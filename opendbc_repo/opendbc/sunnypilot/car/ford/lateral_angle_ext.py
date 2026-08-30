@@ -171,6 +171,10 @@ class LateralAngleExt:
     self.path_angle_blend_ratio = _FORD_PATH_ANGLE_BLEND_RATIO_DEFAULT
     # Max extra VLT above the blend base. Also not a param -- ``FordVLTExtraMax`` does not exist.
     self.vlt_extra_max = _VLT_T_EXTRA_MAX
+    # FusionPilot: fraction of modeld's own lat_action_t that the blend samples the model at.
+    # 1.0 is the shipped behavior (sample where the planner aimed). See the block in
+    # update_angle_strategy for the measurement that makes a lower value worth trying.
+    self.blend_horizon_scale = 1.0
     # Telemetry: final path_angle (rad) after limits (see bp_card_publisher)
     self.bp_path_angle_final = 0.0
     # High-speed gain factors: set per-platform via carFingerprint in update_angle_params.
@@ -238,6 +242,7 @@ class LateralAngleExt:
         ("low_speed_curv_factor", "FordLowSpeedFactor_ang", 0.5, 1.5),
         ("high_speed_curv_factor", "FordHighSpeedFactor_ang", 0.5, 1.5),
         ("user_dampening_factor", "FordHighSpeedDampening_ang", 0.25, 1.25),
+        ("blend_horizon_scale", "FordBlendHorizonScale", 0.4, 1.2),
       ):
         try:
           raw = params.get(key, return_default=True)
@@ -466,7 +471,19 @@ class LateralAngleExt:
     #                           blend is disabled, max path_angle through the apex). Untouched.
     #   _t_blend_base           SAMPLING depth for the blend -- matches the planner's compensation.
     # The apex failure runs through _kappa_entering, and _kappa_entering does not read this value.
-    _t_blend_base = float(clip(_lateral_delay, 0.1, _VLT_BLEND_DELAY_MAX)) + _MODELD_ACTION_DELAY_S
+    #
+    # MEASURED 2026-08-29, and it is why `blend_horizon_scale` exists. Decoding the commanded
+    # path_angle off the wire (0x3D3) and correlating its DERIVATIVE against the steering angle's,
+    # on transients only, puts the PSCM's actual response at **0.23 s** -- a clean peak, r rising
+    # 0.083 -> 0.178 across 0-0.25 s and falling to 0.048 by 0.80 s. A levels fit says 0.31 s. Both
+    # sit far below the 0.468 s modeld compensates, so the command aims roughly TWICE as far ahead
+    # as the car actually needs, reaches the future curvature early, and overshoots -- which is
+    # exactly what the wire shows at t+4793.8 on 000003ed: desired 2.53 while actual was 4.07.
+    # Scaling this base down lines the sample up with the measured response. Ships at 1.0 (no
+    # change) because only a drive can say whether it helps; ~0.55 is the value the measurement
+    # points at.
+    _t_blend_base = (float(clip(_lateral_delay, 0.1, _VLT_BLEND_DELAY_MAX)) + _MODELD_ACTION_DELAY_S) \
+        * float(clip(self.blend_horizon_scale, 0.4, 1.2))
     curvature_lookup_time = _t_blend_base + self.vlt_extra_max * _speed_factor * _kappa_factor
     self.bp_curvature_lookup_time = curvature_lookup_time
 

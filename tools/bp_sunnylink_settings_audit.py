@@ -49,8 +49,15 @@ SETTINGS_UI_JSON = ROOT / "sunnypilot/sunnylink/settings_ui.json"
 # here is not a fork setting as far as this tool is concerned, so it is not counted OR checked. The
 # comma 4 rule is "every setting must be reachable"; a guard that cannot see a whole settings family
 # reads as compliance. If you introduce a name family, put it here in the same commit.
+# 2026-08-29: "FordSynthesize" and "FordPref" were narrower than the family they were meant to
+# cover, and the failure this docstring predicts happened again -- `FordBlendHorizonScale` was added
+# with an on-device control and this audit reported "35/35 reachable, 0 missing" while it was
+# unreachable from SunnyLink. So did `FordLowSpeedFactor_ang`, `FordHighSpeedFactor_ang` and
+# `FordHighSpeedDampening_ang`, which happened to be in settings_ui.json only because somebody
+# hand-edited the JSON -- and regenerating from the YAML source would have silently deleted them.
+# Widened to bare "Ford", which subsumes both of the old entries and every lateral tuning key.
 OUR_PREFIXES = ("Icbm", "SmartCruiseControl", "SpeedLimit", "PassingAssist", "RadarDetector",
-                "Mapd", "StockAcc", "FordSynthesize", "FordPref")
+                "Mapd", "StockAcc", "Ford")
 
 # NOT a gap in the list above, and not to be "fixed" by adding it. `BPSentryEnabled` is the fork's
 # crash-reporting KILL SWITCH -- upstream inits Sentry unconditionally and this fork returns early
@@ -66,11 +73,25 @@ DELIBERATELY_NOT_REMOTE = ("BPSentryEnabled",)
 # option_item_sp(...) declares `value_change_step: int = 1`; an omitted step means 1.
 DEFAULT_OPTION_STEP = 1
 
+# 2026-08-29: the four `*_item_sp` names are sunnypilot's own constructors, and `UI_DIRS` has
+# always included `selfdrive/ui/bp/layouts/settings` -- but the BluePilot screen builds its
+# controls with `float_control_item` / `int_control_item` / `toggle_item`, none of which were
+# listed here. So that whole screen was walked and recognized nothing, and every setting on it was
+# invisible: not counted, not checked, and reported as compliance. That is exactly the failure the
+# OUR_PREFIXES comment below describes, one level deeper -- a scanner that reads the right files
+# and understands none of their calls looks identical to a clean audit.
+#
+# It is why `FordLowSpeedFactor_ang`, `FordHighSpeedFactor_ang`, `FordHighSpeedDampening_ang` and
+# the lane-centering trio reached settings_ui.json only because somebody hand-edited the JSON --
+# which the generator then silently deleted on the next regeneration.
 ITEM_CALLS = {
   "toggle_item_sp": "toggle",
   "option_item_sp": "option",
   "multiple_button_item_sp": "multiple_button",
   "simple_button_item_sp": "button",
+  "toggle_item": "toggle",
+  "float_control_item": "option",
+  "int_control_item": "option",
 }
 
 
