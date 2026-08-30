@@ -5353,3 +5353,76 @@ Three separate things, each of which looks exactly like "the car is offline":
   the comma's link dies mid-transfer. A single-connection 3 GB stream died twice at ~1.2 GB.
   **Pull in small batches that resume from what is already on disk** -- 12 segments per batch
   survived it; one big stream did not.
+
+### LATENCY IS NOT WHAT IS LEFT. THE PLAN ITSELF REVERSES.
+
+*"Nothing it did wrong today felt small... make sure you look at everything related to latency."*
+Both halves answered on 000003ed, `tools/bp_lateral_lag_residual.py`.
+
+**THE COMPENSATION IS CLOSED.** Shifting `curvature` against `desiredCurvature` and scoring only
+turning, hands-off frames:
+
+    learned lateralDelay          0.392 s
+    modeld aims (lat_action_t)    0.467 s
+    best-fit shift, all turning   NO minimum -- error rises monotonically 0.00248 -> 0.00290
+                                  across 0 to 0.9 s, so no shift improves the fit
+    best-fit inside >= 8 deg      0.500 s, residual +0.033 s
+
+33 ms, and even that is suspect: the wobble is ~1.2 Hz (0.83 s period) so a 0.5 s shift sits near
+antiphase and can manufacture a minimum. **There is no uncompensated lag left to find.** Do not
+spend another evening on `steerActuatorDelay`, the 0.15 clip, or LagdValueCache.
+
+**AND HIS "NOTHING FELT SMALL" RETIRES THE >= 2 DEG METRIC.** The 12-17 episodes/minute of >= 2 deg
+wobble is not what he feels; every conclusion about the remaining problem must be drawn from the
+>= 8 deg population, which runs 0.32/minute on 000003ed.
+
+**WHAT THE BIG ONES ACTUALLY ARE: the DESIRED curvature reverses sign.** t+9115.7, 83 mph, on a
+steady ~500-600 m bend:
+
+    9114.0   desired -0.00188   R  532 m   left
+    9115.6   desired -0.00003   R  huge    straight
+    9116.2   desired +0.00077   R 1298 m   RIGHT -- opposite lock
+    9117.8   desired -0.00199   R  502 m   back to left
+
+`actual` tracks it, lagging but faithful. **The car is not overshooting a clean command; it is
+correctly executing an S-curve the road does not have.** That is `controlsState.desiredCurvature`,
+which is `modelV2.action.desiredCurvature` through `clip_curvature` -- UPSTREAM of every Ford-side
+gain, trim and limiter. Period ~4.7 s, far slower than the 1.2 Hz dither, so it is a slow limit
+cycle: the model commands, the car arrives 0.47 s later, the model reads the late position and
+corrects the other way.
+
+Nominal steering for that curve at that speed is ~2.2 deg. The episode swings 15.3.
+
+**SO THE NEXT SUSPECT IS A POSITION LOOP, NOT AN ACTUATOR ONE.** The candidate worth checking first
+is the lane centering trim, because it is the only thing in the stack that closes a LATERAL POSITION
+feedback loop, and he raised it from 0.25 to 0.55 immediately before this drive. Its correction is
+computed against where the plan will be versus lane centre, applied to `kappa_cmd`, and therefore
+changes the car's path, which changes what the model sees, which changes the plan. With ~0.47 s of
+delay in that loop it can ring, and a slow limit cycle is exactly the signature. **An earlier note
+here called it "not a feedback loop that can wind up" -- that was wrong. It is not a loop through
+the CONTROLLER; it is a loop through the ROAD and the model.**
+
+**Do not act on that yet. It is a hypothesis from one dump.** The test is cheap and he can run it:
+one drive at `lane_centering_strength_ang` 0.0 with everything else unchanged, scored with
+`bp_lateral_rate.py --swing 8`. If the >= 8 deg rate falls, it is the trim.
+
+### AND THE 65% FIGURE IS FIX **PLUS** TRIM, NOT FIX ALONE
+
+Stated because it would otherwise be quoted as the fix's own number. 000003eb/ec ran
+`lane_centering_strength_ang` **0.25**; 000003ed ran **0.55**. He raised it between the two drives,
+so the 0.95 -> 0.33 episodes/minute improvement is both changes together. The gains were matched
+(1.194/1.15 vs 1.197/1.143) and the fix is the larger and better-understood of the two, but the
+trim is not controlled for and the honest attribution is "the two changes together".
+
+### HIS NEW LOWER GAINS ARE WORSE. BOTH METRICS, SAME DAY, FIX HELD CONSTANT.
+
+He dropped to 0.957/0.829 with dampening 0.69 after 000003ed, and 000003ee-f1 ran on them:
+
+                        >= 8 deg/min    >= 2 deg/min
+    3ed  1.197/1.143        0.32           12.93
+    3ef  0.957/0.829        0.51           14.37
+
+Worse on both, and worst where he drives -- 60-75 mph went 0.18 -> 0.33. **Tell him to put
+1.197/1.143 with dampening 0.81 back**, and note it is a recommendation he applies, not a default
+to push. Route mix is the usual caveat, but both routes are highway-dominated (3ed 156 min above
+60 mph, 3ef 61 min), so this is better matched than most comparisons here.

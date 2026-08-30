@@ -26,6 +26,14 @@ HANDS OFF, latActive, and only where BOTH ego lane lines are confident -- with n
 trim reduces to the user's bias term and is not being asked to centre anything, so those frames
 say nothing about it either way.
 
+A second comparison became available on 2026-08-29 when he raised the strength from 0.25 to 0.55.
+Pass explicit groups to score any pair, since the built-in ones only describe the 08-28 flip:
+
+    python tools/bp_lane_centering_ab.py <dir> --group "0.25:000003e7,000003e8" --group "0.55:000003ed"
+
+Groups may name routes in DIFFERENT directories; pass --dir before each --group to switch. Reading
+across directories is the point here, because the 0.25 and 0.55 samples are on different days.
+
     python tools/bp_lane_centering_ab.py <dir-of-rlog.zst>
 """
 import bisect
