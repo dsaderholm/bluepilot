@@ -5704,3 +5704,56 @@ itself by ~50% of the curve, on every bundle he has tried. The idea worth buildi
 filter -- damp hard only while the road has been bent, same sign, for several seconds; release
 instantly on a large or sign-changing move so entry and exit are untouched. Not built; it needs to
 be the only variable on a drive.
+### CHERRY-PICKED ba20937aac FROM bp-dev-191 -- AND IT CONFIRMS THE DEAD-THRESHOLD FINDING
+
+He asked for the whole BluePilot repo checked. One commit touching the angle path is not in our
+history and it targets exactly what this file has been measuring: **`ba20937aac` "Predicted_Curvature
+Weight Blending"**, Praeuner, 2026-08-25, on `bp-dev-191`. **We took PR #192 off that branch and
+missed the commit underneath it.** He approved taking it: *"Yes, take it. I trust bp-dev."*
+
+Three changes, and the first is independent confirmation from the person who owns the file:
+
+    _desired_falling   abs(des) < abs(last) - 0.010          -> abs(last) > 0.001 and
+                                                                abs(des) < abs(last) * 0.8
+    _kappa_entering    kappa_at_t_base > abs(des)            -> abs(des) > 0.001 and
+                                                                kappa_at_t_base > abs(des) * 1.25
+    b_blend            snapped between b and b*0.25          -> ramps 0.1/call toward a target of
+                                                                b*0.25 (exit) / b*0.35 (straight) / b
+
+**The `_desired_falling` change is the fix for the bug measured here two days earlier** -- 0.010 1/m
+is 5.4x the p99 fall across 239,038 intervals, so the exit-biased blend fired on 0.054% of them.
+Upstream reached the same conclusion and fixed it the right way: a RELATIVE threshold is scale-free
+and cannot go stale against a cadence change the way the absolute one did. That is the second time
+this file has recorded an absolute per-call delta rotting; prefer ratios.
+
+**b_blend IS NOW PERSISTENT STATE ON THE CarController**, which is the category that once made this
+car undrivable. `LateralAngleExt.__init__` IS called explicitly from carcontroller.py:89, it is
+seeded there, and it is reset at all three early-return sites so a re-engage cannot inherit the last
+drive's weight.
+
+### AND IT IS INERT ON THE GENTLE CURVES HE ACTUALLY COMPLAINS ABOUT
+
+**Both new guards carry an `abs(...) > 0.001` floor -- a 1000 m radius.** Found by picking 0.0010 as
+a test value and watching the test fail on `>` rather than `>=`. His reported episodes include
+1271 m, 1327 m and 2514 m radii, i.e. kappa 0.0004-0.00079, all BELOW that floor. On those curves
+neither `_kappa_entering` nor `_desired_falling` can fire, so the exit-biased blend still never runs
+and the ramp never leaves `b`.
+
+So: a real improvement on curves tighter than ~1000 m, and **nothing at all on the gentle sweepers
+where he first described the symptom** (*"It's on larger curves too, yes"*). Do not report it to him
+as a fix for the whole complaint. `test_blend_weight_ramp.py::test_IT_IS_STILL_INERT_ON_CURVES_
+GENTLER_THAN_1000_M` pins this so it is not rediscovered.
+
+### AND ONE OF MY OWN TESTS WAS VACUOUS UNTIL MUTATION TESTING SAID SO
+
+`test_blend_weight_ramp.py` MIRRORS the ramp arithmetic rather than executing it, so it passes
+whether or not the shipped code matches. Setting `b_step = 1.0` (snap instead of ramp) left it
+green. `test_lateral_blend_horizon.py::TestTheBlendWeightRampRunsForReal` drives the real
+`update_angle_strategy` and reads `ext.b_blend` back, and the same mutation now fails it.
+
+**The scenario is what made it real.** The first attempt drove a hard exit, but on call one
+`_desired_curvature_last` is 0 so `_desired_falling` cannot fire, the default branch was selected,
+the target equalled the seed, and the weight had nowhere to move -- a test that could not observe
+the thing it was named for. A STRAIGHTAWAY (`desired` 0.0005, below the 0.00125 gate) selects
+`b*0.35` on the very first call with no history needed, which is the cheapest scenario where target
+differs from seed.
