@@ -600,17 +600,6 @@ class BluePilotLayout(Widget):
       enabled=lambda: self._safe_get_bool(self._params, "enable_lane_positioning_ang"),
       icon="chffr_wheel.png"
     )
-    self._ford_blend_horizon_scale = float_control_item(
-      lambda: tr("Steering Lookahead Scale"),
-      lambda: tr("How far ahead angle steering aims, as a fraction of the learned steering delay. "
-                 "1.0 is standard. Lower turns in later and overshoots less; too low steers late "
-                 "and weakly. Measurement on this car puts the real response near 0.55."),
-      param="FordBlendHorizonScale",
-      min_value=0.4,
-      max_value=1.2,
-      step=0.05,
-      icon="chffr_wheel.png"
-    )
     self._lane_centering_strength_ang = float_control_item(
       lambda: tr("Lane Centering Strength"),
       lambda: tr("How much authority the lane centering trim has vs. the model's own path (0.0-1.0)."),
@@ -709,7 +698,6 @@ class BluePilotLayout(Widget):
       self._enable_lane_positioning_ang,
       self._custom_path_offset_ang,
       self._lane_centering_strength_ang,
-      self._ford_blend_horizon_scale,
     ]
     angle_header = CollapsibleSectionHeader(tr("Angle Tuning"))
     angle_header.set_items(angle_items)

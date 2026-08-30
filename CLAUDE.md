@@ -5656,3 +5656,51 @@ openpilot's own p99 on this car is 2.73 and his hands-on p99 is 4.14; the 2026-0
 nearly put him off the road was 5.20. **These are firm corners taken at the controller's normal
 ceiling, not the 5.91 pattern.** It is a comfort cost and it does not warrant a change before a long
 drive -- do not hand him a second setting to move while the lookahead scale is the live experiment.
+### THE OVER-COMPENSATION FINDING WAS WRONG. `FordBlendHorizonScale` IS REMOVED. HIS QUESTION CAUGHT IT.
+
+He asked *"What is the live learn steering latency thing? Wouldn't that fix this?"* -- and reading
+`lagd.py` to answer him properly is what exposed the error, one setting away from a 600-mile drive.
+
+**THE TWO NUMBERS WERE MEASURED BETWEEN DIFFERENT ENDPOINTS:**
+
+    commanded path_angle (wire, 0x3D3) -> STEERING ANGLE     0.230 s   <- what I measured
+    commanded curvature -> YAW RATE (the car rotating)       0.370 s   r=0.988, same drive
+    lagd's own learned lateralDelay                          0.393 s   <- agrees
+
+`lagd.update_points()` correlates `la_desired = desiredCurvature * v^2` against
+`la_actual_pose = yaw_rate * v` -- the command against the CAR ACTUALLY ROTATING, taken from
+`livePose`. My figure was the command against the WHEEL MOVING. The ~0.14 s between them is tire
+slip and the vehicle's own yaw response, and **the compensation must aim at the second one.**
+
+So `lat_action_t = 0.393 + DT_MDL + DT_MDL/2 = 0.468` is self-consistent and correct. There is no
+over-compensation, the "we aim twice as far ahead as the car needs" claim is withdrawn, and
+`FordBlendHorizonScale` -- param, UI control, SunnyLink entry -- is removed rather than parked at a
+neutral default, because its whole reason expired. Setting it to the recommended 0.55 would have
+UNDER-compensated and partly undone the blend-horizon fix that measured well.
+
+**COMPARE ENDPOINTS BEFORE COMPARING LAGS.** This is the "print both on the same frame" rule
+arriving as a choice of WHAT to correlate rather than WHEN, and it is the second time in two days a
+lag conclusion has died on it -- the first was comparing lag-adjusted `desiredCurvature` against
+same-frame `curvature`. Before quoting any delay: name both signals and check the other figure spans
+the same pair.
+
+**AND lagd ONLY LEARNS WHILE TURNING, which is his other question and is correct design.** Its gate
+is `np.abs(self.yaw_rate) >= self.min_yr`. On a straight both signals are flat and every time-shift
+correlates equally, so a straight-road sample teaches nothing and would drag the estimate toward
+noise.
+
+**WHAT SURVIVES FROM THAT ROUND**, because it stands on its own evidence:
+
+- Q1's real content: the lag is the CAR, not our 20 Hz cadence. `STEER_STEP = 5` is ~0.075 s of the
+  ~0.39 s, so a 100 Hz command rate buys back under a fifth. Still true.
+- Q2: the plan does NOT react to the tracking error (r = +0.09). Still true, and still the reason
+  the "angle mode has no closed loop" fix direction is dead.
+- `clip_curvature` is not distorting the plan; averaging the model's path buys 9%.
+- The SunnyLink audit blind spot and the three orphaned controls -- both independently real, both
+  kept. Audit now reads 38/38.
+
+**AND THE REMAINING LEAD IS UNCHANGED:** the model re-plans the road every frame and disagrees with
+itself by ~50% of the curve, on every bundle he has tried. The idea worth building is a CURVE-HOLD
+filter -- damp hard only while the road has been bent, same sign, for several seconds; release
+instantly on a large or sign-changing move so entry and exit are untouched. Not built; it needs to
+be the only variable on a drive.
