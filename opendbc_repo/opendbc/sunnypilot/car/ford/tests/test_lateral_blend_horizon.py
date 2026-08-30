@@ -150,14 +150,15 @@ def _ramp(k0, k1):
   return [k0 + (k1 - k0) * min(t, 1.0) for t in T_IDXS]
 
 
-def _run(delay, v_ego, desired, curvatures):
+def _run(delay, v_ego, desired, curvatures, calls=1):
   _FakeLiveDelay.lateralDelay = delay
   CP = _explorer_cp()
   ext = _Harness(CP)
   ext.human_turn_detector = _ForcedDetector(False)
   ext.model = _Model(curvatures, v_ego)
   cs = _CS(vEgoRaw=v_ego, vEgo=v_ego)
-  ext.update_angle_strategy(_CC(latActive=True), cs, _Actuators(curvature=desired), CP)
+  for _ in range(calls):
+    ext.update_angle_strategy(_CC(latActive=True), cs, _Actuators(curvature=desired), CP)
   return ext
 
 
@@ -227,6 +228,48 @@ class TestTheEntryDecisionKeepsTheClip(unittest.TestCase):
     curvatures = [0.012 + 0.010 * min(t, 1.0) for t in T_IDXS]   # above desired everywhere
     ext = _run(0.45, v_ego, desired, curvatures)
     self.assertAlmostEqual(self._kappa_factor_from(ext, 0.45, v_ego), 1.0, places=3)
+
+
+class TestTheBlendWeightRampRunsForReal(unittest.TestCase):
+  """Drives the SHIPPED path, unlike test_blend_weight_ramp.py which mirrors the arithmetic.
+
+  A mirror test passes whether or not the real code matches it -- which is the vacuous-test shape
+  this repo keeps recording. This one reads `ext.b_blend` off a harness that actually called
+  `update_angle_strategy`, so deleting the ramp fails it."""
+
+  def tearDown(self):
+    _FakeLiveDelay.lateralDelay = 0.2
+
+  # A STRAIGHTAWAY selects target = b * 0.35 = 0.175 on the very first call, with no history
+  # needed: desired below 0.00125 makes `_on_straightaway` true, while `_kappa_entering` and
+  # `_desired_falling` both refuse below their 0.001 floor. That is the cheapest scenario in which
+  # the target differs from the seeded weight, which is what makes the ramp observable at all.
+  _STRAIGHT_DESIRED = 0.0005
+
+  def test_one_call_cannot_move_the_weight_more_than_one_step(self):
+    v = _VLT_V_HIGH_MS + 5.0
+    ext = _run(0.38, v, self._STRAIGHT_DESIRED, _ramp(0.0004, 0.0004), calls=1)
+    self.assertAlmostEqual(ext.b_blend, 0.40, places=6,
+                           msg="one call must move exactly one b_step from 0.50 toward 0.175; "
+                               "landing on 0.175 is the instant jump ba20937aac removes")
+
+  def test_it_takes_several_calls_to_reach_the_straightaway_weight(self):
+    v = _VLT_V_HIGH_MS + 5.0
+    ext = _run(0.38, v, self._STRAIGHT_DESIRED, _ramp(0.0004, 0.0004), calls=10)
+    self.assertAlmostEqual(ext.b_blend, 0.175, places=6)
+
+  def test_the_weight_is_seeded_before_any_call(self):
+    CP = _explorer_cp()
+    ext = _Harness(CP)
+    self.assertAlmostEqual(ext.b_blend, 0.50,
+                           msg="unseeded state on the CarController is what made the car undrivable once")
+
+  def test_repeated_calls_settle_rather_than_oscillate(self):
+    v = _VLT_V_HIGH_MS + 5.0
+    a = _run(0.38, v, self._STRAIGHT_DESIRED, _ramp(0.0004, 0.0004), calls=20)
+    b = _run(0.38, v, self._STRAIGHT_DESIRED, _ramp(0.0004, 0.0004), calls=40)
+    self.assertAlmostEqual(a.b_blend, b.b_blend, places=6,
+                           msg="20 and 40 calls must agree -- otherwise the ramp is hunting")
 
 
 if __name__ == "__main__":

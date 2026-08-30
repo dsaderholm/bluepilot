@@ -169,12 +169,11 @@ class LateralAngleExt:
     # in params_keys.h and nothing reads one. It is a hardcoded 0.50 on every drive, and a note in
     # CLAUDE.md calling it "his to move" was wrong for the same reason. Checked 2026-08-28.
     self.path_angle_blend_ratio = _FORD_PATH_ANGLE_BLEND_RATIO_DEFAULT
+    # Persistent because ba20937aac ramps it rather than setting it -- so it must be seeded and
+    # reset wherever the strategy bails out, or a re-engage inherits the last drive's weight.
+    self.b_blend = _FORD_PATH_ANGLE_BLEND_RATIO_DEFAULT
     # Max extra VLT above the blend base. Also not a param -- ``FordVLTExtraMax`` does not exist.
     self.vlt_extra_max = _VLT_T_EXTRA_MAX
-    # FusionPilot: fraction of modeld's own lat_action_t that the blend samples the model at.
-    # 1.0 is the shipped behavior (sample where the planner aimed). See the block in
-    # update_angle_strategy for the measurement that makes a lower value worth trying.
-    self.blend_horizon_scale = 1.0
     # Telemetry: final path_angle (rad) after limits (see bp_card_publisher)
     self.bp_path_angle_final = 0.0
     # High-speed gain factors: set per-platform via carFingerprint in update_angle_params.
@@ -242,7 +241,6 @@ class LateralAngleExt:
         ("low_speed_curv_factor", "FordLowSpeedFactor_ang", 0.5, 1.5),
         ("high_speed_curv_factor", "FordHighSpeedFactor_ang", 0.5, 1.5),
         ("user_dampening_factor", "FordHighSpeedDampening_ang", 0.25, 1.25),
-        ("blend_horizon_scale", "FordBlendHorizonScale", 0.4, 1.2),
       ):
         try:
           raw = params.get(key, return_default=True)
@@ -297,6 +295,7 @@ class LateralAngleExt:
       self.path_angle_last = 0.0
       self.bp_path_angle_final = 0.0
       self.apply_curvature_last = 0.0
+      self.b_blend = self.path_angle_blend_ratio
       self.bp_angle_rate_limited = False
       self.bp_curvature_rate_limited = False
       self.bp_curvature_deviation_limited = False
@@ -343,6 +342,7 @@ class LateralAngleExt:
       self.path_angle_last = 0.0
       self.bp_path_angle_final = 0.0
       self.apply_curvature_last = 0.0
+      self.b_blend = self.path_angle_blend_ratio
       self.bp_angle_rate_limited = False
       self.bp_curvature_rate_limited = False
       self.bp_curvature_deviation_limited = False
@@ -398,6 +398,7 @@ class LateralAngleExt:
       self.path_angle_last = 0.0
       self.bp_path_angle_final = 0.0
       self.apply_curvature_last = 0.0
+      self.b_blend = self.path_angle_blend_ratio
       self.bp_angle_rate_limited = False
       self.bp_curvature_rate_limited = False
       self.bp_curvature_deviation_limited = False
@@ -439,7 +440,15 @@ class LateralAngleExt:
     if self.model is not None and len(self.model.orientationRate.z) >= 17:
       _curvatures_ref = np.array(self.model.orientationRate.z) / max(0.01, v_ego)
       _kappa_at_t_base = abs(float(interp(_t_base, ModelConstants.T_IDXS, _curvatures_ref)))
-    _kappa_entering = _kappa_at_t_base > abs(desired_curvature)
+    # BluePilot ba20937aac (Praeuner, 2026-08-25, bp-dev-191 "Predicted_Curvature Weight Blending"):
+    # require the road to be MEANINGFULLY bent and the model to see 25% more curvature ahead, not
+    # merely any excess. The bare `>` latched on noise wherever desired sat near zero, which is most
+    # of a straight road -- and `_kappa_entering` gates both the extra lookahead and, through
+    # `_on_exit_near_limit`, the exit-biased blend below.
+    _kappa_entering = (
+      abs(desired_curvature) > 0.001 and
+      _kappa_at_t_base > abs(desired_curvature) * 1.25
+    )
     if _kappa_entering:
       _kappa_factor = 1.0  # curve deepening ahead: full extra lookahead for gradual entry
     else:
@@ -472,18 +481,21 @@ class LateralAngleExt:
     #   _t_blend_base           SAMPLING depth for the blend -- matches the planner's compensation.
     # The apex failure runs through _kappa_entering, and _kappa_entering does not read this value.
     #
-    # MEASURED 2026-08-29, and it is why `blend_horizon_scale` exists. Decoding the commanded
-    # path_angle off the wire (0x3D3) and correlating its DERIVATIVE against the steering angle's,
-    # on transients only, puts the PSCM's actual response at **0.23 s** -- a clean peak, r rising
-    # 0.083 -> 0.178 across 0-0.25 s and falling to 0.048 by 0.80 s. A levels fit says 0.31 s. Both
-    # sit far below the 0.468 s modeld compensates, so the command aims roughly TWICE as far ahead
-    # as the car actually needs, reaches the future curvature early, and overshoots -- which is
-    # exactly what the wire shows at t+4793.8 on 000003ed: desired 2.53 while actual was 4.07.
-    # Scaling this base down lines the sample up with the measured response. Ships at 1.0 (no
-    # change) because only a drive can say whether it helps; ~0.55 is the value the measurement
-    # points at.
-    _t_blend_base = (float(clip(_lateral_delay, 0.1, _VLT_BLEND_DELAY_MAX)) + _MODELD_ACTION_DELAY_S) \
-        * float(clip(self.blend_horizon_scale, 0.4, 1.2))
+    # AND THIS HORIZON IS CORRECT AS WRITTEN -- confirmed 2026-08-29 after a wrong turn worth
+    # recording, because the wrong version was one setting away from reaching a 600-mile drive.
+    # Correlating commanded path_angle off the wire (0x3D3) against the STEERING ANGLE gives
+    # 0.230 s, which read as proof that modeld's 0.468 s over-compensates by a factor of two. It is
+    # not. `lagd` correlates the command against YAW RATE -- the car actually rotating -- and
+    # measuring it that way on the same drive gives **0.370 s (r=0.988)** against lagd's learned
+    # 0.393 s. The ~0.14 s between the two figures is the wheel moving versus the car responding to
+    # it, and the compensation has to aim at the second. lat_action_t = 0.393 + 0.075 is therefore
+    # self-consistent, and a `FordBlendHorizonScale` knob built on the 0.230 s figure was added and
+    # removed the same day.
+    #
+    # **COMPARE ENDPOINTS BEFORE COMPARING LAGS.** Two lag numbers are only comparable if they span
+    # the same two signals; this file's "print both on the same frame" rule, arriving as a choice of
+    # what to correlate rather than when.
+    _t_blend_base = float(clip(_lateral_delay, 0.1, _VLT_BLEND_DELAY_MAX)) + _MODELD_ACTION_DELAY_S
     curvature_lookup_time = _t_blend_base + self.vlt_extra_max * _speed_factor * _kappa_factor
     self.bp_curvature_lookup_time = curvature_lookup_time
 
@@ -519,10 +531,35 @@ class LateralAngleExt:
     # that same real-world trigger rate on this branch's actual 20Hz cadence; unscaled it fired at
     # 0.04 (1/m)/s, collapsing the model blend on mild straightening instead of genuine exits.
     # Same bug class and fix as _PSCM_SAT_UNWIND_RATE and _soft_roc above.
-    _desired_falling = abs(desired_curvature) < abs(self._desired_curvature_last) - 0.010
+    # AND THE ABSOLUTE THRESHOLD ABOVE IS WHY IT NEVER FIRED. Measured 2026-08-29 across 239,038
+    # angle-path intervals on 000003eb/ec: 0.010 1/m is **5.4x the p99 fall**, so `_desired_falling`
+    # fired on 0.054% of them and the exit-biased blend never ran on a single ordinary curve exit.
+    # BluePilot reached the same conclusion independently -- ba20937aac replaces the absolute delta
+    # with a RELATIVE one, which is scale-free and therefore cannot go stale against a cadence or a
+    # road: a 20% drop is a 20% drop at any curvature.
+    _desired_falling = (
+      abs(self._desired_curvature_last) > 0.001 and
+      abs(desired_curvature) < abs(self._desired_curvature_last) * 0.8
+    )
     _on_exit_near_limit = not _kappa_entering and (_pscm_lim >= 1 or _in_hard_sat or _desired_falling)
-    b_blend = float(clip(b * 0.25, 0.0, 1.0)) if _on_exit_near_limit else b
-    requested_curvature = predicted_curvature * b_blend + desired_curvature * (1.0 - b_blend)
+    _on_straightaway = (not _kappa_entering and not _desired_falling and abs(desired_curvature) < 0.00125)
+    # Step function for b_blend -- ba20937aac's own comment: "Prevents instant jumps between .5 and
+    # .125 predicted_curvature weight." The weight is a MULTIPLIER on the model's contribution, so
+    # snapping it between 0.5 and 0.125 steps the commanded curvature on a frame where the road did
+    # nothing. Ramping at 0.1 per call (20 Hz -> ~0.19 s to traverse the full range) makes the
+    # transition a slew instead of an edge.
+    if _on_exit_near_limit:
+      target_b_blend = b * 0.25
+    elif _on_straightaway:
+      target_b_blend = b * 0.35
+    else:
+      target_b_blend = b
+    b_step = 0.1
+    if target_b_blend > self.b_blend:
+      self.b_blend = min(target_b_blend, self.b_blend + b_step)
+    else:
+      self.b_blend = max(target_b_blend, self.b_blend - b_step)
+    requested_curvature = predicted_curvature * self.b_blend + desired_curvature * (1.0 - self.b_blend)
     self._desired_curvature_last = desired_curvature
 
     if self.model is not None:

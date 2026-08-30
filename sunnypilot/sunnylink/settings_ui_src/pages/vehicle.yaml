@@ -375,17 +375,6 @@ sections:
     - type: param
       key: enable_lane_positioning_ang
       equals: true
-  - key: FordBlendHorizonScale
-    widget: option
-    title: '[Lateral Tuning] Steering Lookahead Scale (Angle)'
-    description: How far ahead angle steering aims, as a fraction of the learned steering delay. 1.0 is standard. Lower turns in later and overshoots less; too low steers late and weakly. Measurement on this car puts the real steering response near 0.55.
-    min: 0.4
-    max: 1.2
-    step: 0.05
-    visibility:
-    - type: param
-      key: FordPrefLateralControl
-      equals: 1
   - key: FordHighSpeedDampening_ang
     widget: option
     title: '[Lateral Tuning] High Speed Low Curve Adjustment Factor (Angle)'

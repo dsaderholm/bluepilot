@@ -7722,3 +7722,190 @@ also why "it rebuilt on the last boot" cannot be assumed.
 reporting the feature as shipped.** Verifying by file content -- which this file already insists on
 over verifying by hash -- is not enough here, because the source is correct and the binary is not.
 Ask the compiled module.
+### THE OVER-COMPENSATION FINDING WAS WRONG. `FordBlendHorizonScale` IS REMOVED. HIS QUESTION CAUGHT IT.
+
+He asked *"What is the live learn steering latency thing? Wouldn't that fix this?"* -- and reading
+`lagd.py` to answer him properly is what exposed the error, one setting away from a 600-mile drive.
+
+**THE TWO NUMBERS WERE MEASURED BETWEEN DIFFERENT ENDPOINTS:**
+
+    commanded path_angle (wire, 0x3D3) -> STEERING ANGLE     0.230 s   <- what I measured
+    commanded curvature -> YAW RATE (the car rotating)       0.370 s   r=0.988, same drive
+    lagd's own learned lateralDelay                          0.393 s   <- agrees
+
+`lagd.update_points()` correlates `la_desired = desiredCurvature * v^2` against
+`la_actual_pose = yaw_rate * v` -- the command against the CAR ACTUALLY ROTATING, taken from
+`livePose`. My figure was the command against the WHEEL MOVING. The ~0.14 s between them is tire
+slip and the vehicle's own yaw response, and **the compensation must aim at the second one.**
+
+So `lat_action_t = 0.393 + DT_MDL + DT_MDL/2 = 0.468` is self-consistent and correct. There is no
+over-compensation, the "we aim twice as far ahead as the car needs" claim is withdrawn, and
+`FordBlendHorizonScale` -- param, UI control, SunnyLink entry -- is removed rather than parked at a
+neutral default, because its whole reason expired. Setting it to the recommended 0.55 would have
+UNDER-compensated and partly undone the blend-horizon fix that measured well.
+
+**COMPARE ENDPOINTS BEFORE COMPARING LAGS.** This is the "print both on the same frame" rule
+arriving as a choice of WHAT to correlate rather than WHEN, and it is the second time in two days a
+lag conclusion has died on it -- the first was comparing lag-adjusted `desiredCurvature` against
+same-frame `curvature`. Before quoting any delay: name both signals and check the other figure spans
+the same pair.
+
+**AND lagd ONLY LEARNS WHILE TURNING, which is his other question and is correct design.** Its gate
+is `np.abs(self.yaw_rate) >= self.min_yr`. On a straight both signals are flat and every time-shift
+correlates equally, so a straight-road sample teaches nothing and would drag the estimate toward
+noise.
+
+**WHAT SURVIVES FROM THAT ROUND**, because it stands on its own evidence:
+
+- Q1's real content: the lag is the CAR, not our 20 Hz cadence. `STEER_STEP = 5` is ~0.075 s of the
+  ~0.39 s, so a 100 Hz command rate buys back under a fifth. Still true.
+- Q2: the plan does NOT react to the tracking error (r = +0.09). Still true, and still the reason
+  the "angle mode has no closed loop" fix direction is dead.
+- `clip_curvature` is not distorting the plan; averaging the model's path buys 9%.
+- The SunnyLink audit blind spot and the three orphaned controls -- both independently real, both
+  kept. Audit now reads 38/38.
+
+**AND THE REMAINING LEAD IS UNCHANGED:** the model re-plans the road every frame and disagrees with
+itself by ~50% of the curve, on every bundle he has tried. The idea worth building is a CURVE-HOLD
+filter -- damp hard only while the road has been bent, same sign, for several seconds; release
+instantly on a large or sign-changing move so entry and exit are untouched. Not built; it needs to
+be the only variable on a drive.
+### CHERRY-PICKED ba20937aac FROM bp-dev-191 -- AND IT CONFIRMS THE DEAD-THRESHOLD FINDING
+
+He asked for the whole BluePilot repo checked. One commit touching the angle path is not in our
+history and it targets exactly what this file has been measuring: **`ba20937aac` "Predicted_Curvature
+Weight Blending"**, Praeuner, 2026-08-25, on `bp-dev-191`. **We took PR #192 off that branch and
+missed the commit underneath it.** He approved taking it: *"Yes, take it. I trust bp-dev."*
+
+Three changes, and the first is independent confirmation from the person who owns the file:
+
+    _desired_falling   abs(des) < abs(last) - 0.010          -> abs(last) > 0.001 and
+                                                                abs(des) < abs(last) * 0.8
+    _kappa_entering    kappa_at_t_base > abs(des)            -> abs(des) > 0.001 and
+                                                                kappa_at_t_base > abs(des) * 1.25
+    b_blend            snapped between b and b*0.25          -> ramps 0.1/call toward a target of
+                                                                b*0.25 (exit) / b*0.35 (straight) / b
+
+**The `_desired_falling` change is the fix for the bug measured here two days earlier** -- 0.010 1/m
+is 5.4x the p99 fall across 239,038 intervals, so the exit-biased blend fired on 0.054% of them.
+Upstream reached the same conclusion and fixed it the right way: a RELATIVE threshold is scale-free
+and cannot go stale against a cadence change the way the absolute one did. That is the second time
+this file has recorded an absolute per-call delta rotting; prefer ratios.
+
+**b_blend IS NOW PERSISTENT STATE ON THE CarController**, which is the category that once made this
+car undrivable. `LateralAngleExt.__init__` IS called explicitly from carcontroller.py:89, it is
+seeded there, and it is reset at all three early-return sites so a re-engage cannot inherit the last
+drive's weight.
+
+### AND IT IS INERT ON THE GENTLE CURVES HE ACTUALLY COMPLAINS ABOUT
+
+**Both new guards carry an `abs(...) > 0.001` floor -- a 1000 m radius.** Found by picking 0.0010 as
+a test value and watching the test fail on `>` rather than `>=`. His reported episodes include
+1271 m, 1327 m and 2514 m radii, i.e. kappa 0.0004-0.00079, all BELOW that floor. On those curves
+neither `_kappa_entering` nor `_desired_falling` can fire, so the exit-biased blend still never runs
+and the ramp never leaves `b`.
+
+So: a real improvement on curves tighter than ~1000 m, and **nothing at all on the gentle sweepers
+where he first described the symptom** (*"It's on larger curves too, yes"*). Do not report it to him
+as a fix for the whole complaint. `test_blend_weight_ramp.py::test_IT_IS_STILL_INERT_ON_CURVES_
+GENTLER_THAN_1000_M` pins this so it is not rediscovered.
+
+### AND ONE OF MY OWN TESTS WAS VACUOUS UNTIL MUTATION TESTING SAID SO
+
+`test_blend_weight_ramp.py` MIRRORS the ramp arithmetic rather than executing it, so it passes
+whether or not the shipped code matches. Setting `b_step = 1.0` (snap instead of ramp) left it
+green. `test_lateral_blend_horizon.py::TestTheBlendWeightRampRunsForReal` drives the real
+`update_angle_strategy` and reads `ext.b_blend` back, and the same mutation now fails it.
+
+**The scenario is what made it real.** The first attempt drove a hard exit, but on call one
+`_desired_curvature_last` is 0 so `_desired_falling` cannot fire, the default branch was selected,
+the target equalled the seed, and the weight had nowhere to move -- a test that could not observe
+the thing it was named for. A STRAIGHTAWAY (`desired` 0.0005, below the 0.00125 gate) selects
+`b*0.35` on the very first call with no history needed, which is the cheapest scenario where target
+differs from seed.
+### AND ba20937aac IS SUB-PERCEPTUAL ON HIS CAR. HE SAW IT IN ONE GLANCE AT THE CHART.
+
+Replayed both the old and new blend logic over recorded frames (`tools/bp_lateral_blend_replay.py`)
+and plotted the two commands against each other. His response: *"Those lines are the same."* They
+are. Converting the difference to steering angle, which is the only unit he can judge:
+
+    window            command diff (1/km)              as STEERING ANGLE
+    gentle 1773 m     med 0.011  p90 0.046  max 0.130  med 0.031  p90 0.128  max 0.362 deg
+    tight  447 m      med 0.000  p90 0.009  max 0.026  med 0.000  p90 0.025  max 0.072 deg
+
+    his ping-pong episodes                    7 - 15 deg of swing
+    dither already measured as imperceptible  0.10 - 0.30 deg
+
+**The whole cherry-pick moves the wheel by 0.03 deg typically and 0.36 deg at its worst -- inside
+the noise floor this file already proved he cannot feel.** It is a correct upstream bug fix and it
+will not change anything he perceives. Do not tell him the merge is worth waiting for, and do not
+let a later session quote "180 of 240 frames differ" as evidence it did something.
+
+**THIS IS THE "ASK HOW BIG BEFORE CONCLUDING FROM HOW OFTEN" RULE, VIOLATED IN THE FILE THAT
+RECORDS IT.** The first pass reported frames-differing and a mechanism and a direction, and never
+once computed a magnitude. The same failure produced the retracted 1.2 Hz ringing analysis, where
+every aggregate turned out to be characterising 0.10-0.30 deg of dither. **Convert to the unit the
+driver judges in -- degrees at the wheel -- before reporting that a change does anything.**
+
+**Also corrected in the same breath:** the earlier note that the fix is "inert on gentle curves" was
+wrong in the other direction. It DOES act there, through the `_on_straightaway` branch (`abs(des) <
+0.00125`, an 800 m radius), which drops the weight to b*0.35 -- so the 1000 m floor on
+`_kappa_entering` / `_desired_falling` is not the whole story. The action is real; the magnitude is
+what makes it irrelevant.
+
+**And the framing "trusts the wobbling model less and the planner more" was imprecise.** BOTH blend
+inputs are the model's: `desired` is `action.desiredCurvature` after `clip_curvature`, and
+`predicted` is a raw interpolation of `orientationRate.z`. The change leans on the more PROCESSED
+model signal, not away from the model.
+
+**So the lateral problem is exactly where it was**, and the honest position for his 600-mile drive
+is: nothing to set, nothing to wait for, expect no change. The open lead remains the plan's own
+~50%-of-curve oscillation, and the untried idea is the curve-hold filter -- damp only while the road
+has been steadily bent, release instantly on a real change. Any future candidate gets converted to
+degrees at the wheel BEFORE it is described to him.
+### WHICH CURVES IT ACTUALLY STRUGGLES ON -- MEASURED, AFTER HE HAD TO ASK FOR IT
+
+*"You should know what curves it struggles on because you have all the logs."* He was right, and
+asking him was the wrong move. He also named the real process failure: *"I keep saying one thing and
+then it throws you completely off your conclusion."* True -- several reversals this session were
+re-reasoning from his last sentence rather than from data already on disk.
+
+`tools/bp_lateral_by_radius.py`, route 000003ed, hands off, per MINUTE OF EXPOSURE:
+
+    radius                    minutes    eps   per min   med swing   x nominal
+    under 200 m                   0.3      3      9.25      29.3 deg      1.6x
+    200-500 m                     2.5     38     15.50       4.0 deg      0.6x
+    500-1000 m                   13.2    259     19.69       3.3 deg      0.9x
+    1000-2000 m                  18.7    332     17.78       2.5 deg      1.3x
+    over 2000 m                 122.8   1521     12.39       2.2 deg      7.6x
+
+**The worst rate is 500-2000 m -- fast sweepers through large highway curves.** His instinct
+("really it is tighter ones") beat my framing, which had drifted to 1271-2500 m.
+
+**'x nominal' is what stops the table being read wrong**, and a count alone cannot say it:
+
+- under 200 m looks dramatic at 29 deg but is 1.6x what the curve REQUIRES -- real cornering, and
+  0.3 minutes of a 3.3-hour drive
+- over 2000 m has a wild 7.6x but a 2.2 deg absolute swing on near-straight road: that is the dither
+  band this file already established as barely perceptible
+- 500-2000 m is the only place both are true at once -- highest rate AND swings at or above what the
+  road asks for
+
+**So the target band is 500-2000 m.** Anything proposed for this symptom should be evaluated there,
+not at the extremes.
+
+### AND `FordHighSpeedDampening_ang` IS THE LARGEST LEVER FOUND ALL SESSION
+
+It multiplies the LOW-CURVATURE high-speed gain only (`low_gain_calc = interp(v, BP, [1.00,
+GAIN_LOWC * user_dampening_factor])`), so it acts on exactly the open end of the target band. He runs
+**0.69** against a 1.0 default. At 75 mph with his 0.957/0.829, raising it to 1.0 is:
+
+    2500 m  +45% command     1271 m  +41%     800 m  +34%     500 m  +25%
+
+For scale, the ba20937aac cherry-pick moves the wheel 0.36 deg at its absolute worst. This is tens
+of percent of the command. **It is his setting, it is reversible from the seat, and it is the first
+thing to try** -- 0.85 before 1.0, so the direction is felt before the magnitude.
+
+The honest risk, and it must be said with it: gain scales whatever it is given, and the plan
+oscillation is still there, so this may trade "weak and late" for "busier". He has described the
+current setting as weak, so he is on the wrong side of that trade today.
