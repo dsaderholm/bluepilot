@@ -7295,3 +7295,381 @@ why "is the planner jittering" and "is the PSCM overshooting" were both the wron
 was live as a hypothesis and the data refuses both. The 2x dominance threshold is deliberately
 blunt, because a verdict rendered off a 27% difference is what produced the withdrawn "THE PSCM IS
 THE OSCILLATOR".
+
+## 2026-08-29: THE BLEND FIX WORKS. BIG EPISODES DOWN 65%, SMALL DITHER UNCHANGED.
+
+*"I think lateral was better, but still not great."* Both halves of that are in the data, and they
+are different phenomena.
+
+**THE COMPARISON IS ALMOST PERFECTLY MATCHED, by luck.** Route 000003ed (191 segments, 159 minutes
+hands-off) ran gains **1.197/1.143** with lane centering 0.55 and the blend fix. Yesterday's
+000003eb/ec ran **1.194/1.146-1.163**, lane centering 0.55 (0.25 for part), no fix. Same settings,
+so the fix is very nearly the only variable. His later sweep down to 0.957/0.829 happened in
+000003ee-f1, AFTER the long drive -- do not mix those in.
+
+**COUNT EPISODES PER MINUTE OF EXPOSURE, NEVER RAW.** Raw counts read 1425 vs 254 and look like a
+massive regression; 1352 of the 1425 are at 60-75 mph because that drive was interstate while
+yesterday's was mixed surface roads. `tools/bp_lateral_rate.py` divides by minutes actually spent
+hands-off and latActive in each band. **Fifth instance of the denominator error in this file.**
+
+    >= 2 deg swing (every small wobble)        >= 8 deg swing (what he would feel)
+    speed      no fix   fix    change          speed      no fix   fix    change
+    30-45       19.40  16.93    -13%           45-60        1.78  0.80     -55%
+    45-60       15.37  13.58    -12%           60-75        0.53  0.18     -66%
+    60-75       11.13  12.07     +8%           75-95        0.42  0.30     -29%
+    75-95       14.77  13.30    -10%           ALL          0.95  0.33     -65%
+    ALL         13.63  12.83     -6%
+
+**So the felt events -- turn in too far, correct back -- are down about two thirds, and the constant
+small dither is unchanged.** That is exactly the shape of his report, and it says the remaining
+problem is a DIFFERENT mechanism from the one fixed. Do not expect more from the horizon.
+
+The 8-30 and 30-45 rows in the >= 8 deg table are 1.2 minutes of exposure each and are noise; do
+not read the +3.22 as a regression.
+
+**STEADY-STATE DELIVERY IS UNCHANGED AND THAT IS CORRECT.** Matched-curvature delivery moved 0.87
+-> 0.88 overall. The fix targets the TRANSIENT; delivery at steady state measures GAIN. A metric
+that cannot move is not evidence either way, and quoting it as "no effect" would have been wrong.
+
+**HE INDEPENDENTLY WALKED THE GAINS BACK DOWN**, from 1.197/1.143 to **0.957/0.829** -- essentially
+his pre-excursion 0.912/0.828 -- during 000003ee-f1. That is the predicted consequence: the
+inflated gains were compensating for the shortfall the fix removed, so with it fixed the car was
+over-eager and he dialled them out. He was not told to do this.
+
+**WHAT IS LEFT.** ~13 episodes/minute of >= 2 deg wobble, unchanged. That is the next target and
+it is not the blend. The reversal attribution (31% command / 35% car / 33% coupled, flat across
+speed) says it is a loop rather than one side, so the candidates are the PSCM's own response and
+the planner's desired curvature -- and `_desired_falling` being effectively dead (0.054% of
+intervals, threshold 5.4x the p99 fall) means the exit-biased blend still never runs.
+
+### AND EVERY PRE-FIX TIMING CONCLUSION IS SUSPECT
+
+From the passing-assist session, confirmed on the road: before `2106064495`, drives threw 103
+commIssue events with 96 carrying the all-three-plannerd-outputs-invalid signature; on the four
+drives since there are 12, all in a startup cascade in the first two minutes, then **zero across
+~113 segments and two hours**. `path_from_mapd` rebuilding the map path at 20 Hz against a 1 Hz
+message really was it.
+
+**So plannerd was stalling up to 17.6 ms per frame on curvy roads for every route up to 000003ec.**
+Anything measured there that looked like a controller being LATE was measured through that stall.
+The specific claim at risk is *"SCC-Map published the corner speed two seconds after peak
+cornering"* on 000003c9. Re-check it on a post-fix drive before quoting it again.
+
+### OPERATIONAL: WHAT COST AN HOUR TONIGHT
+
+Three separate things, each of which looks exactly like "the car is offline":
+
+- **A stale host key.** ICS re-leased the comma a new address and the old one was in known_hosts.
+  With `BatchMode` the failure is silent -- TCP connects, banner exchanges, then it hangs at
+  "Authenticating". `ssh -v` says `Host key verification failed` in one line. Fix with
+  `ssh-keygen -R <ip>` then `-o StrictHostKeyChecking=accept-new`. **Prefer the hostname**, which
+  follows the address.
+- **Bitwarden locked.** `ssh-add -l` returning `agent refused operation` is the tell, and it is
+  distinguishable from the above: a locked vault refuses, a bad host key hangs.
+- **Hotel wifi.** His hotspot is ICS'd off it, so when the hotel drops, ICS resets the hotspot and
+  the comma's link dies mid-transfer. A single-connection 3 GB stream died twice at ~1.2 GB.
+  **Pull in small batches that resume from what is already on disk** -- 12 segments per batch
+  survived it; one big stream did not.
+
+### LATENCY IS NOT WHAT IS LEFT. THE PLAN ITSELF REVERSES.
+
+*"Nothing it did wrong today felt small... make sure you look at everything related to latency."*
+Both halves answered on 000003ed, `tools/bp_lateral_lag_residual.py`.
+
+**THE COMPENSATION IS CLOSED.** Shifting `curvature` against `desiredCurvature` and scoring only
+turning, hands-off frames:
+
+    learned lateralDelay          0.392 s
+    modeld aims (lat_action_t)    0.467 s
+    best-fit shift, all turning   NO minimum -- error rises monotonically 0.00248 -> 0.00290
+                                  across 0 to 0.9 s, so no shift improves the fit
+    best-fit inside >= 8 deg      0.500 s, residual +0.033 s
+
+33 ms, and even that is suspect: the wobble is ~1.2 Hz (0.83 s period) so a 0.5 s shift sits near
+antiphase and can manufacture a minimum. **There is no uncompensated lag left to find.** Do not
+spend another evening on `steerActuatorDelay`, the 0.15 clip, or LagdValueCache.
+
+**AND HIS "NOTHING FELT SMALL" RETIRES THE >= 2 DEG METRIC.** The 12-17 episodes/minute of >= 2 deg
+wobble is not what he feels; every conclusion about the remaining problem must be drawn from the
+>= 8 deg population, which runs 0.32/minute on 000003ed.
+
+**WHAT THE BIG ONES ACTUALLY ARE: the DESIRED curvature reverses sign.** t+9115.7, 83 mph, on a
+steady ~500-600 m bend:
+
+    9114.0   desired -0.00188   R  532 m   left
+    9115.6   desired -0.00003   R  huge    straight
+    9116.2   desired +0.00077   R 1298 m   RIGHT -- opposite lock
+    9117.8   desired -0.00199   R  502 m   back to left
+
+`actual` tracks it, lagging but faithful. **The car is not overshooting a clean command; it is
+correctly executing an S-curve the road does not have.** That is `controlsState.desiredCurvature`,
+which is `modelV2.action.desiredCurvature` through `clip_curvature` -- UPSTREAM of every Ford-side
+gain, trim and limiter. Period ~4.7 s, far slower than the 1.2 Hz dither, so it is a slow limit
+cycle: the model commands, the car arrives 0.47 s later, the model reads the late position and
+corrects the other way.
+
+Nominal steering for that curve at that speed is ~2.2 deg. The episode swings 15.3.
+
+**SO THE NEXT SUSPECT IS A POSITION LOOP, NOT AN ACTUATOR ONE.** The candidate worth checking first
+is the lane centering trim, because it is the only thing in the stack that closes a LATERAL POSITION
+feedback loop, and he raised it from 0.25 to 0.55 immediately before this drive. Its correction is
+computed against where the plan will be versus lane centre, applied to `kappa_cmd`, and therefore
+changes the car's path, which changes what the model sees, which changes the plan. With ~0.47 s of
+delay in that loop it can ring, and a slow limit cycle is exactly the signature. **An earlier note
+here called it "not a feedback loop that can wind up" -- that was wrong. It is not a loop through
+the CONTROLLER; it is a loop through the ROAD and the model.**
+
+**Do not act on that yet. It is a hypothesis from one dump.** The test is cheap and he can run it:
+one drive at `lane_centering_strength_ang` 0.0 with everything else unchanged, scored with
+`bp_lateral_rate.py --swing 8`. If the >= 8 deg rate falls, it is the trim.
+
+### AND THE 65% FIGURE IS FIX **PLUS** TRIM, NOT FIX ALONE
+
+Stated because it would otherwise be quoted as the fix's own number. 000003eb/ec ran
+`lane_centering_strength_ang` **0.25**; 000003ed ran **0.55**. He raised it between the two drives,
+so the 0.95 -> 0.33 episodes/minute improvement is both changes together. The gains were matched
+(1.194/1.15 vs 1.197/1.143) and the fix is the larger and better-understood of the two, but the
+trim is not controlled for and the honest attribution is "the two changes together".
+
+### HIS NEW LOWER GAINS ARE WORSE. BOTH METRICS, SAME DAY, FIX HELD CONSTANT.
+
+He dropped to 0.957/0.829 with dampening 0.69 after 000003ed, and 000003ee-f1 ran on them:
+
+                        >= 8 deg/min    >= 2 deg/min
+    3ed  1.197/1.143        0.32           12.93
+    3ef  0.957/0.829        0.51           14.37
+
+Worse on both, and worst where he drives -- 60-75 mph went 0.18 -> 0.33. **Tell him to put
+1.197/1.143 with dampening 0.81 back**, and note it is a recommendation he applies, not a default
+to push. Route mix is the usual caveat, but both routes are highway-dominated (3ed 156 min above
+60 mph, 3ef 61 min), so this is better matched than most comparisons here.
+
+### THE CURVE PING-PONG IS IN THE MODEL'S PLAN. NOTHING HE CAN SET REACHES IT.
+
+*"It was just ping ponging so much on curves."* And, correcting me: *"But gains that high would make
+it go too far, right? I started the drive with that and backed out."*
+
+**HE WAS RIGHT AND I HAD RECOMMENDED THE OPPOSITE.** All 199 segments of 000003ed ran 1.197/1.143
+with zero changes, so he drove 3.3 hours on those gains, felt it ping-pong on curves, and lowered
+them afterwards. I had just told him to put them back, off a metric that ranked them better.
+
+**WHY THE METRIC WAS WRONG: A 2 SECOND WINDOW CANNOT SEE A 4.7 SECOND CYCLE.**
+`bp_lateral_episodes.py` and `bp_lateral_rate.py` use `WIN_S = 2.0`. The limit cycle found on this
+same drive has a ~4.7 s period. Those tools measure fast wobble and are structurally blind to the
+thing he reports, so ranking two settings with them was meaningless -- the same shape as the
+episode detector that could only ever return zero for suppressed corners. **When the driver and the
+instrument disagree, check the instrument's window against the phenomenon's period before believing
+the instrument.**
+
+`tools/bp_lateral_curve_cycle.py` uses 6 s windows, requires the road to be genuinely bent for the
+whole window (|desired| above 6e-4 and never changing sign), hands off, >= 45 mph, and measures how
+far `desired` swings about the curve's own mean and how often it re-crosses it. **It qualifies on
+DESIRED, not on steering angle: angle scales with gain, so testing on angle marks any high-gain
+setting worse by construction.**
+
+**AND EVERYTHING HE CAN SET IS EXONERATED:**
+
+    build / setting                          curve osc/min   median swing
+    Yosemite 3d1  no lane centering, no fix       3.43            45%
+    Yosemite 3dc  no lane centering, no fix       5.78            54%
+    today 3ed     LC 0.55, blend fix, gains hi    3.91            48%
+    today 3ef     LC 0.55, blend fix, gains lo    3.91            52%
+
+**3.91 against 3.91 across his entire gain change.** Gains scale the command AFTER the plan is
+made, so they cannot touch an oscillation that is in the plan -- which is also why no tuning sweep
+has ever fixed this and why his friend gets it on different settings.
+
+**AND IT KILLS THE LANE-CENTERING HYPOTHESIS I RAISED ONE ENTRY AGO.** The Yosemite rows predate
+the bp-dev cherry-pick, so that build has no lane centering code in it at all, and it oscillates at
+the same rate and the same amplitude. Do not re-raise the trim as the cause; the phenomenon is older
+than the feature. (Yesterday's 3e2-3ea cannot referee it either way -- surface roads, 0.4 min of
+qualifying curve-holding across all of them, and zero for the lane-centering-off group.)
+
+**WHAT IS ACTUALLY LEFT.** `controlsState.desiredCurvature` is `modelV2.action.desiredCurvature`
+through `clip_curvature`. It swings a MEDIAN 48-54% of the curve's own value while holding a steady
+bend, on every build measured. On a 500 m curve the plan wanders between roughly 330 m and 1000 m
+of equivalent steering. That is upstream of every gain, trim, limiter and blend this fork owns.
+
+The one lever that could plausibly reach it is the MODEL ITSELF -- `ModelManagerSelectedBundle` is
+unset on his device, i.e. the default bundle, and he has said he tried other models on the
+California trip and *"nothing really made steering perfect"*. Scoring bundles with
+`bp_lateral_curve_cycle.py` is the first measurement that could tell them apart on this specific
+failure, and it needs one drive per bundle on roads with sustained curves.
+
+**DO NOT propose another gain, dampening, blend-ratio or lane-centering change for this symptom.**
+Four separate settings and one code fix have now been measured against it and none of them move it.
+
+### AND HIS TIMELINE FACT IS THE DIAGNOSIS: ANGLE MODE HAS NO CLOSED LOOP ON CURVATURE.
+
+*"Its been like this since path angle steering was added."* That is the sentence that explains the
+whole thing, and it survives the objection that the oscillation lives in `desiredCurvature`, which
+is computed upstream of the Ford angle code. **The loop closes through the ROAD**: the angle path
+steers, the car moves, the camera sees a different view, the model re-plans. So the model's own
+output is downstream of how well angle mode tracks.
+
+    curvature mode   sends apply_curvature. The PSCM closes ITS OWN loop on curvature and keeps
+                     correcting until the car is at the commanded value. Delivery ~1.0 by design.
+    angle mode       sends path_angle = kappa_cmd * v_ego * curvature_factor. An OPEN-LOOP
+                     feedforward conversion. There is no feedback term anywhere in the path.
+
+And the conversion is measurably wrong in one direction: delivery is **0.87-0.93 everywhere, never
+centred on 1.0**, confirmed against the gyro so it is not a steerRatio artifact. A persistent bias
+inside a loop closed by something else is exactly what forces that something else to hunt: the
+model sees the car drifting wide, asks for more curvature, the car still falls short, the model
+asks harder, the correction lands 0.47 s late, the model backs off hard. Period ~4.7 s.
+
+Weak but correctly-signed support on 000003ed: windows with delivery below 0.80 swing a median
+**71%** against 46-50% for 0.80-1.00 (n=15 in the worst bin, so it is a hint, not a proof).
+
+**THE FIX DIRECTION, AND IT IS NOT GOING BACK TO CURVATURE** (which he has refused twice and does
+not need to): give angle mode the loop curvature mode gets free. A SLOW, CLAMPED feedback term on
+(desired - actual) curvature, added to `kappa_cmd` upstream of the existing limiters the way
+`lane_center_trim` already is, so the steady-state shortfall goes to zero and the model has nothing
+left to chase.
+
+**Do not rush it.** An integrator in a path carrying 0.47 s of delay oscillates worse than no
+integrator if its gain is too high, and shipping a lateral change on one evening's reasoning is the
+5.20 m/s^2 pattern. It needs: a rate limit, a magnitude clamp, freezing while `steeringPressed` or
+during lane changes, and a bench check that it cannot wind up when the PSCM is saturated.
+
+`tools/bp_lateral_curve_cycle.py` is the instrument for judging it -- curve oscillation per minute
+of curve holding, which is the only metric so far that tracks what he reports.
+### THE "SNAP-BACK" IS THE CAR LAGGING A RELEASE. I HAD IT BACKWARDS, AND THE WIRE SAID SO.
+
+He asked for more examples before a fix, which is what caught this. `bp_lateral_snapback.py` found
+126 events on 000003ed, 8.4 per minute of curve holding, median 38% of delivered curvature lost --
+and a suspiciously identical 36-38% median on every other build and setting measured. That
+constancy read as one clean mechanism. It is an artifact.
+
+**Decoding LateralMotionControl (0x3D3) off sendcan for the worst event reverses the order:**
+
+    t+4793.0   path_angle -0.110   desired 3.96   actual 3.82   steer -15.3 deg
+    t+4793.8   path_angle -0.067   desired 2.53   actual 4.07   steer -16.2 deg
+    t+4794.4   path_angle -0.034   desired 1.47   actual 3.07   steer -12.3 deg
+    t+4794.6   path_angle -0.030   desired 1.48   actual 0.83   steer  -3.9 deg
+
+`desired` collapsed FIRST. `path_angle` tracked it down faithfully. The car tracked `path_angle`.
+Nothing abandoned a curve, and no limiter of ours fired -- measured, not assumed: inside those
+windows `curvatureDeviationLimited` 0.13%, `humanTurnLateralPaused` 0.00%, `angleRateLimited`
+1.14%, `stallBlipActive` 1.98%, so ~97% of frames have no limiter at all. The deviation clip is
+also ruled out by arithmetic: `CURVATURE_ERROR` is 2.0 1/km and the gaps in these events are ~0.9.
+
+**THE DETECTOR'S GUARD COULD BE SATISFIED BY THE OPPOSITE OF THE PHENOMENON.** `a0 >= 0.75 * d0`
+was meant to mean "the car had reached the curve". At t+4794.1 actual was 4.07 against desired
+2.01 -- ABOVE desired, lagging a release that had already happened -- and that passes a `>=` test
+exactly as well as genuinely holding a curve does. The window then began after the collapse, so
+`desired` looked steady across it.
+
+So those 126 events are the EXIT HALF of the limit cycle already described: the plan swings, the
+command follows it exactly, the car arrives ~0.4 s late, and that lag carries `actual` past
+`desired` on every reversal. One mechanism, not two.
+
+**AND IT KILLS THE FEEDBACK FIX THE PREVIOUS ENTRY PROPOSED.** There is no delivery shortfall to
+integrate away here -- the car delivered 4.07 when asked for 2.01. An integral term on
+(desired - actual) would push harder into precisely the excursions that hurt. **Do not build it.**
+The steady-state under-delivery (0.87-0.93) is real and is a different regime from these
+transients; any future feedback term has to be shown not to fire during a release before it ships.
+
+**Third instance in this file of the same shape:** a detector whose qualifying test can be met by
+the opposite of the phenomenon (after the SCC veto that could only return zero, and the funnel of
+marginals that hid an exclusion). **Check a top-ranked event against raw data before believing a
+rate.** `tools/bp_lateral_wirewin.py` decodes path_angle for one narrow window and is the cheap way
+to do it.
+## 2026-08-29: THE LAG IS THE CAR, THE PLAN DOES NOT REACT TO IT, AND WE OVER-COMPENSATE.
+
+He asked for both open questions measured before any fix: *"Go measure both of these. I need this
+fixed, I am driving 600 more miles soon."*
+
+**Q1 -- THE LAG IS THE PSCM, NOT OUR CADENCE.** `tools/bp_lateral_loop.py` shifts the commanded
+path_angle ON THE WIRE (0x3D3 off sendcan) against the steering angle, so the interval contains only
+the PSCM and the mechanics -- everything upstream is already baked into path_angle by then.
+
+    levels fit, turning frames, hands off     0.310 s   (peak r 0.979, but the curve is FLAT:
+                                                         0.966 at zero shift, 0.965 at 0.80 s)
+    DERIVATIVES, transients only              0.230 s   (r 0.083 -> 0.178 -> 0.048, a clean peak)
+
+Our command cadence is `STEER_STEP = 5` -> 20 Hz, i.e. ~0.075 s of quantisation plus zero-order
+hold. **Going to 100 Hz buys back under a fifth of the delay.** Use the derivative figure; the
+levels fit is soft because both signals have nearly the same shape at every shift.
+
+**Q2 -- THE PLAN DOES NOT REACT TO THE CAR BEING LATE.** Correlating the tracking error e(t) with
+d(desired)/dt at t+lag peaks at **r = +0.09** (strongest at 0.80 s; it is -0.20 at zero lag, which
+is the algebraic relation, not a response). **Reducing the lag will not quiet the plan.** The
+oscillation originates in the model and the lag only amplifies it into what he feels.
+
+**AND THAT KILLS THE "ANGLE MODE HAS NO CLOSED LOOP" FIX DIRECTION FROM THE ENTRY ABOVE.** If the
+plan were hunting a persistent under-delivery, error would lead plan change. It does not.
+
+### AND THE ACTUAL FINDING: WE AIM ROUGHLY TWICE AS FAR AHEAD AS THE CAR NEEDS
+
+    modeld compensates   lat_action_t = LagdValueCache + DT_MDL + DT_MDL/2 = 0.468 s
+    the PSCM responds in                                                     0.230 s
+    over-compensation                                                       +0.238 s
+
+The wire agrees: at t+4793.8 on 000003ed, `desired` was 2.53 1/km while `actual` was **4.07** -- the
+car doing MORE curvature than the plan currently wanted, which is what aiming too far ahead
+produces. It reaches the future curvature early, overshoots, and then the plan falls away.
+
+**`FordBlendHorizonScale` ships at 1.0 (no change) with a settings control.** It scales
+`_t_blend_base` as a fraction of `lat_action_t`; ~0.55 lines the sample up with the measured
+response. It is a road question and he has 600 miles to answer it with.
+
+### THREE THINGS RULED OUT ON THE WAY, EACH BY MEASUREMENT
+
+- **`clip_curvature` is not distorting the plan.** Its ISO jerk limit is `MAX_LATERAL_JERK / v^2`
+  = 0.0045 1/m/s at 75 mph. Observed |d(desired)/dt| reaches it on 1.7% of frames with NO pinning
+  signature (0.12% in the 99-100% band). And its returned `curvature_limited` flag does **not**
+  include the rate limit at all -- only the lateral-accel and max-curvature clamps -- so the jerk
+  limiter is silent and must be measured by its signature, never read off a flag.
+- **Averaging the model's PATH does not help.** Point sample at `lat_action_t` vs the mean over
+  +-0.45 s around it: frame-to-frame wobble 0.0000375 -> 0.0000341, **-9.1%**. The whole path moves
+  together each frame; the model is re-planning the road, not jittering one point. So no smoothing
+  WITHIN a frame can fix it.
+- **A first pass reported `clip_curvature` modifying 26.66% of frames.** That was pairing noise --
+  modelV2 is 20 Hz and controlsState 100 Hz, and pairing one action with the next controlsState
+  frame manufactures differences during transients. The median difference is exactly 0.
+
+### AND THE SUNNYLINK AUDIT WAS BLIND TO AN ENTIRE SETTINGS SCREEN
+
+Adding `FordBlendHorizonScale` surfaced it. `bp_sunnylink_settings_audit.py` reported **35/35
+reachable, 0 missing** while the new control was not in `settings_ui.json` at all. Two causes,
+stacked, and the second is the serious one:
+
+- `OUR_PREFIXES` had `FordSynthesize` and `FordPref` but not the lateral family. Widened to `Ford`.
+- **`ITEM_CALLS` listed only sunnypilot's four `*_item_sp` constructors.** `UI_DIRS` has always
+  included `selfdrive/ui/bp/layouts/settings`, but that screen builds controls with
+  `float_control_item` / `int_control_item` / `toggle_item` -- so the audit walked the file,
+  recognized nothing, and reported compliance. **A scanner that reads the right files and
+  understands none of their calls is indistinguishable from a clean audit.**
+
+That is why `FordLowSpeedFactor_ang`, `FordHighSpeedFactor_ang`, `FordHighSpeedDampening_ang` and
+the lane-centering trio were in `settings_ui.json` only because somebody hand-edited the JSON --
+and **regenerating from the YAML source would have silently deleted three of them**, which is the
+exact failure the COMMA 4 section warns about. Verified by regenerating with my YAML change stashed:
+60 lines deleted. All three are now ported into `settings_ui_src/pages/vehicle.yaml`, the generator
+is idempotent, and the audit reads **39/39**.
+
+**Check the audit by adding a setting and watching it FAIL first.** It has now been green through
+two different structural blind spots.
+### SCC-MAP VETO, RE-MEASURED POST-FIX: 13 REAL CORNERS SUPPRESSED, ZERO PHANTOMS -- AND IT IS COMFORT, NOT SAFETY
+
+The pre-fix veto numbers were measured through plannerd stalls and were flagged as suspect. Route
+000003ed (post-fix, `bp_scc_veto_cost.py`):
+
+    veto episodes where the map was inventing a corner :  0
+    veto episodes that suppressed a REAL corner        : 13
+    ratios                                              0.9-1.0x  (the map's radius MATCHED the
+                                                                   radius he actually drove)
+
+So the camera veto is now wrong in every case it fires here -- the opposite of the Yosemite picture,
+where phantoms were the problem. **But check what it cost before treating it as urgent**, which the
+3.0x verdict column cannot do:
+
+    t+5640    peak lat 2.98 m/s^2 @ 73 mph, radius 353 m, hands OFF
+    t+5662    peak lat 2.84        @ 71 mph, radius 357 m, hands OFF
+    t+10409   peak lat 2.68        @ 70 mph, radius 367 m, hands ON
+
+openpilot's own p99 on this car is 2.73 and his hands-on p99 is 4.14; the 2026-08-23 event that
+nearly put him off the road was 5.20. **These are firm corners taken at the controller's normal
+ceiling, not the 5.91 pattern.** It is a comfort cost and it does not warrant a change before a long
+drive -- do not hand him a second setting to move while the lookahead scale is the live experiment.

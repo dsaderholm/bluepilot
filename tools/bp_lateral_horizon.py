@@ -31,7 +31,13 @@ gap between the horizons exactly where he reports the symptom.
 HANDS OFF, latActive. A hands-ON window is his steering, which is the split that produced the wrong
 3.21 m/s^2 figure and contaminated the first ping-pong dump.
 
-    python tools/bp_lateral_horizon.py <dir-of-rlog.zst> [route ...]
+Pass --fixed for routes recorded on a build that carries the blend-horizon fix (a98f50a34b and
+later). It swaps in the shipped `_t_blend_base` so the reported loss is what those drives ACTUALLY
+paid, and on a fixed build that number should collapse toward zero. Running the default (old)
+formula against a fixed build measures a car that no longer exists -- the same class of mistake as
+scoring a drive against settings it was not driven with.
+
+    python tools/bp_lateral_horizon.py <dir-of-rlog.zst> [--fixed] [route ...]
 """
 import bisect
 import collections
@@ -77,7 +83,9 @@ def seg_key(p):
 
 def main():
   d = sys.argv[1]
-  routes = set(sys.argv[2:])
+  argv = [a for a in sys.argv[2:] if a != "--fixed"]
+  fixed = "--fixed" in sys.argv
+  routes = set(argv)
   files = sorted(glob.glob(os.path.join(d, "*.rlog.zst")), key=seg_key)
   if routes:
     files = [f for f in files if os.path.basename(f).split("--")[0] in routes]
@@ -198,7 +206,10 @@ def main():
         kappa_factor = 1.0
       else:
         kappa_factor = float(np.interp(abs(des), [VLT_KAPPA_FULL, VLT_KAPPA_TAPER], [1.0, 0.0]))
-      lookup = t_base + VLT_T_EXTRA_MAX * speed_factor * kappa_factor
+      # The blend base. On a fixed build this is the planner's own compensation horizon; before
+      # the fix it was the clipped DECISION base, which is the whole defect.
+      blend_base = (min(max(ld, 0.1), 0.45) + DT_MDL + DT_MDL / 2.0) if fixed else t_base
+      lookup = blend_base + VLT_T_EXTRA_MAX * speed_factor * kappa_factor
       pred = float(np.interp(lookup, T_IDXS[:len(curvatures)], curvatures))
       requested = pred * BLEND_B + des * (1.0 - BLEND_B)
 
@@ -227,6 +238,8 @@ def main():
       rate_bins[bin_of(rate)].append(loss)
 
   print("=== WHAT THE PREDICTED/DESIRED BLEND COSTS ===")
+  print()
+  print("  blend base: %s" % ("FIXED (planner's own horizon)" if fixed else "pre-fix (clipped decision base)"))
   print()
   if lat_action_ts:
     print("  modeld aims the command %.3f s ahead (LagdValueCache + DT_MDL + DT_MDL/2)."

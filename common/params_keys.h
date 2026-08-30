@@ -785,6 +785,13 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // under-turns and needs to arrive slower -- see the SCC sensitivity comment above.
     {"FordLowSpeedFactor_ang", {PERSISTENT | BACKUP, FLOAT, "0.912"}},
     {"FordHighSpeedFactor_ang", {PERSISTENT | BACKUP, FLOAT, "0.828"}},
+    // FusionPilot: scales how far ahead lateral_angle_ext samples the model for the
+    // predicted/desired blend, as a fraction of modeld's own lat_action_t. 1.0 keeps the
+    // shipped behavior. Measured 2026-08-29: the PSCM responds in ~0.23 s (derivative fit on
+    // transients, r peaks 0.083->0.178->0.048 across 0-0.8 s) while modeld compensates 0.468 s,
+    // so the command reaches the future curvature early and overshoots. ~0.55 lines the sample
+    // up with the measured response; it is a road question, not a bench one.
+    {"FordBlendHorizonScale", {PERSISTENT | BACKUP, FLOAT, "1.0"}},
     {"FordHighSpeedDampening_ang", {PERSISTENT | BACKUP, FLOAT, "0.85"}},
     {"BPLateralSchemeParamsMigratedV1", {PERSISTENT | BACKUP, STRING, "0"}},
     // STRING, not BOOL -- see the note in params_migration: a BOOL marker made put("1") raise, so
