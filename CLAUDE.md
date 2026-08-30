@@ -5634,3 +5634,25 @@ is idempotent, and the audit reads **39/39**.
 
 **Check the audit by adding a setting and watching it FAIL first.** It has now been green through
 two different structural blind spots.
+### SCC-MAP VETO, RE-MEASURED POST-FIX: 13 REAL CORNERS SUPPRESSED, ZERO PHANTOMS -- AND IT IS COMFORT, NOT SAFETY
+
+The pre-fix veto numbers were measured through plannerd stalls and were flagged as suspect. Route
+000003ed (post-fix, `bp_scc_veto_cost.py`):
+
+    veto episodes where the map was inventing a corner :  0
+    veto episodes that suppressed a REAL corner        : 13
+    ratios                                              0.9-1.0x  (the map's radius MATCHED the
+                                                                   radius he actually drove)
+
+So the camera veto is now wrong in every case it fires here -- the opposite of the Yosemite picture,
+where phantoms were the problem. **But check what it cost before treating it as urgent**, which the
+3.0x verdict column cannot do:
+
+    t+5640    peak lat 2.98 m/s^2 @ 73 mph, radius 353 m, hands OFF
+    t+5662    peak lat 2.84        @ 71 mph, radius 357 m, hands OFF
+    t+10409   peak lat 2.68        @ 70 mph, radius 367 m, hands ON
+
+openpilot's own p99 on this car is 2.73 and his hands-on p99 is 4.14; the 2026-08-23 event that
+nearly put him off the road was 5.20. **These are firm corners taken at the controller's normal
+ceiling, not the 5.91 pattern.** It is a comfort cost and it does not warrant a change before a long
+drive -- do not hand him a second setting to move while the lookahead scale is the live experiment.
