@@ -274,6 +274,16 @@ sections:
       key: PassingAssistLogEnabled
       equals: true
     items:
+    - key: FordBlinkerBlinkPeriod
+      widget: option
+      title: Blink Spacing If Unmeasurable (ms)
+      description: Normally ignored. openpilot watches your lamp and blinks in step with it, so the rhythm is your car's
+        own and needs no setting. This is only used if your car never reports its lamp, leaving nothing to follow -- then
+        it falls back to this fixed spacing. Steps of 10 because a measured flasher lands on values a coarser step cannot
+        reach.
+      min: 500
+      max: 1500
+      step: 10
     - key: PassingAssistChime
       widget: toggle
       title: Chime When It Decides Or Backs Out
