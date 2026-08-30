@@ -28,7 +28,6 @@ import statistics
 import sys
 
 import capnp
-import numpy as np
 import zstandard
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
