@@ -7673,3 +7673,52 @@ openpilot's own p99 on this car is 2.73 and his hands-on p99 is 4.14; the 2026-0
 nearly put him off the road was 5.20. **These are firm corners taken at the controller's normal
 ceiling, not the 5.91 pattern.** It is a comfort cost and it does not warrant a change before a long
 drive -- do not hand him a second setting to move while the lookahead scale is the live experiment.
+## 2026-08-29: A NEW PARAM CAN SILENTLY NOT EXIST ON THE DEVICE. THE SCONS CACHE SERVES A STALE .so.
+
+Found deploying `FordBlendHorizonScale`. The key was in `common/params_keys.h` on the device, the
+branch was correct, the reboot was clean -- and the running system had never heard of it:
+
+    UnknownKeyName b'FordBlendHorizonScale'
+
+**`Params.get` RAISES on an unknown key.** So this is not a setting that quietly reads its default;
+it is an exception waiting for whatever code touches it first.
+
+**HOW TO TELL IT APART FROM EVERY OTHER FAILURE, because it looks like nothing is wrong.** The key
+is in the header, `git` says the file is right, and other params work perfectly. The only thing that
+distinguishes it is asking the COMPILED module, not the source:
+
+    strings /data/openpilot/common/params_pyx.so | grep -c "^FordBlendHorizonScale$"     # 0 = stale
+    strings /data/openpilot/common/params_pyx.so | grep -c "^MapdV2$"                    # 1 = control
+
+Always run the control. A zero on both means `strings` is not finding key names at all and the test
+is meaningless; a zero on one and a one on the other is this bug exactly.
+
+**TWO MECHANISMS, AND ONLY THE SECOND ONE IS THE REAL ANSWER:**
+
+1. `params_keys.h` is reached through a C include chain scons's scanner does not follow from the
+   `.pyx`, so editing it does not by itself trigger a recompile. `touch`ing the header does not help
+   either -- scons signs on CONTENT.
+2. **And deleting the object does not help, because the LINK RESULT comes out of the build cache:**
+
+       [CXX] common/params_pyx.o
+       Retrieved `common/params_pyx.so' from cache          <-- the stale one, straight back
+
+   So `rm common/params_pyx.o && scons` recompiles and then restores the same old `.so` over it. The
+   log says `done building targets` and the key is still missing. Use `--cache-disable`:
+
+       rm -f common/params_pyx.o common/params_pyx.so common/params_pyx.cpp
+       scons -j4 --cache-disable common/params_pyx.so
+
+**CAPNP IS NOT AFFECTED -- CHECKED, NOT ASSUMED.** `wantedSide` and `plannerChecks` both came back
+live from `custom.LongitudinalPlanSP` on the same device in the same state. Only `params_pyx` was
+stale, so a capnp field landing correctly says NOTHING about whether a param did.
+
+**WHY IT PROBABLY BIT NOW.** The device clock has no battery-backed RTC and reads 1970 until GPS or
+NTP fixes it, so files written across boots carry timestamps two months apart in both directions
+(see the clock entry below). Any build decision made on mtime is unreliable on this device, which is
+also why "it rebuilt on the last boot" cannot be assumed.
+
+**THE RULE: after deploying a commit that adds a Params key, verify the key on the DEVICE before
+reporting the feature as shipped.** Verifying by file content -- which this file already insists on
+over verifying by hash -- is not enough here, because the source is correct and the binary is not.
+Ask the compiled module.
