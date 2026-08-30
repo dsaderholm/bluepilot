@@ -5278,3 +5278,78 @@ why "is the planner jittering" and "is the PSCM overshooting" were both the wron
 was live as a hypothesis and the data refuses both. The 2x dominance threshold is deliberately
 blunt, because a verdict rendered off a 27% difference is what produced the withdrawn "THE PSCM IS
 THE OSCILLATOR".
+
+## 2026-08-29: THE BLEND FIX WORKS. BIG EPISODES DOWN 65%, SMALL DITHER UNCHANGED.
+
+*"I think lateral was better, but still not great."* Both halves of that are in the data, and they
+are different phenomena.
+
+**THE COMPARISON IS ALMOST PERFECTLY MATCHED, by luck.** Route 000003ed (191 segments, 159 minutes
+hands-off) ran gains **1.197/1.143** with lane centering 0.55 and the blend fix. Yesterday's
+000003eb/ec ran **1.194/1.146-1.163**, lane centering 0.55 (0.25 for part), no fix. Same settings,
+so the fix is very nearly the only variable. His later sweep down to 0.957/0.829 happened in
+000003ee-f1, AFTER the long drive -- do not mix those in.
+
+**COUNT EPISODES PER MINUTE OF EXPOSURE, NEVER RAW.** Raw counts read 1425 vs 254 and look like a
+massive regression; 1352 of the 1425 are at 60-75 mph because that drive was interstate while
+yesterday's was mixed surface roads. `tools/bp_lateral_rate.py` divides by minutes actually spent
+hands-off and latActive in each band. **Fifth instance of the denominator error in this file.**
+
+    >= 2 deg swing (every small wobble)        >= 8 deg swing (what he would feel)
+    speed      no fix   fix    change          speed      no fix   fix    change
+    30-45       19.40  16.93    -13%           45-60        1.78  0.80     -55%
+    45-60       15.37  13.58    -12%           60-75        0.53  0.18     -66%
+    60-75       11.13  12.07     +8%           75-95        0.42  0.30     -29%
+    75-95       14.77  13.30    -10%           ALL          0.95  0.33     -65%
+    ALL         13.63  12.83     -6%
+
+**So the felt events -- turn in too far, correct back -- are down about two thirds, and the constant
+small dither is unchanged.** That is exactly the shape of his report, and it says the remaining
+problem is a DIFFERENT mechanism from the one fixed. Do not expect more from the horizon.
+
+The 8-30 and 30-45 rows in the >= 8 deg table are 1.2 minutes of exposure each and are noise; do
+not read the +3.22 as a regression.
+
+**STEADY-STATE DELIVERY IS UNCHANGED AND THAT IS CORRECT.** Matched-curvature delivery moved 0.87
+-> 0.88 overall. The fix targets the TRANSIENT; delivery at steady state measures GAIN. A metric
+that cannot move is not evidence either way, and quoting it as "no effect" would have been wrong.
+
+**HE INDEPENDENTLY WALKED THE GAINS BACK DOWN**, from 1.197/1.143 to **0.957/0.829** -- essentially
+his pre-excursion 0.912/0.828 -- during 000003ee-f1. That is the predicted consequence: the
+inflated gains were compensating for the shortfall the fix removed, so with it fixed the car was
+over-eager and he dialled them out. He was not told to do this.
+
+**WHAT IS LEFT.** ~13 episodes/minute of >= 2 deg wobble, unchanged. That is the next target and
+it is not the blend. The reversal attribution (31% command / 35% car / 33% coupled, flat across
+speed) says it is a loop rather than one side, so the candidates are the PSCM's own response and
+the planner's desired curvature -- and `_desired_falling` being effectively dead (0.054% of
+intervals, threshold 5.4x the p99 fall) means the exit-biased blend still never runs.
+
+### AND EVERY PRE-FIX TIMING CONCLUSION IS SUSPECT
+
+From the passing-assist session, confirmed on the road: before `2106064495`, drives threw 103
+commIssue events with 96 carrying the all-three-plannerd-outputs-invalid signature; on the four
+drives since there are 12, all in a startup cascade in the first two minutes, then **zero across
+~113 segments and two hours**. `path_from_mapd` rebuilding the map path at 20 Hz against a 1 Hz
+message really was it.
+
+**So plannerd was stalling up to 17.6 ms per frame on curvy roads for every route up to 000003ec.**
+Anything measured there that looked like a controller being LATE was measured through that stall.
+The specific claim at risk is *"SCC-Map published the corner speed two seconds after peak
+cornering"* on 000003c9. Re-check it on a post-fix drive before quoting it again.
+
+### OPERATIONAL: WHAT COST AN HOUR TONIGHT
+
+Three separate things, each of which looks exactly like "the car is offline":
+
+- **A stale host key.** ICS re-leased the comma a new address and the old one was in known_hosts.
+  With `BatchMode` the failure is silent -- TCP connects, banner exchanges, then it hangs at
+  "Authenticating". `ssh -v` says `Host key verification failed` in one line. Fix with
+  `ssh-keygen -R <ip>` then `-o StrictHostKeyChecking=accept-new`. **Prefer the hostname**, which
+  follows the address.
+- **Bitwarden locked.** `ssh-add -l` returning `agent refused operation` is the tell, and it is
+  distinguishable from the above: a locked vault refuses, a bad host key hangs.
+- **Hotel wifi.** His hotspot is ICS'd off it, so when the hotel drops, ICS resets the hotspot and
+  the comma's link dies mid-transfer. A single-connection 3 GB stream died twice at ~1.2 GB.
+  **Pull in small batches that resume from what is already on disk** -- 12 segments per batch
+  survived it; one big stream did not.
