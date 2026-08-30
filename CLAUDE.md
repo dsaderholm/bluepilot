@@ -5517,3 +5517,44 @@ during lane changes, and a bench check that it cannot wind up when the PSCM is s
 
 `tools/bp_lateral_curve_cycle.py` is the instrument for judging it -- curve oscillation per minute
 of curve holding, which is the only metric so far that tracks what he reports.
+### THE "SNAP-BACK" IS THE CAR LAGGING A RELEASE. I HAD IT BACKWARDS, AND THE WIRE SAID SO.
+
+He asked for more examples before a fix, which is what caught this. `bp_lateral_snapback.py` found
+126 events on 000003ed, 8.4 per minute of curve holding, median 38% of delivered curvature lost --
+and a suspiciously identical 36-38% median on every other build and setting measured. That
+constancy read as one clean mechanism. It is an artifact.
+
+**Decoding LateralMotionControl (0x3D3) off sendcan for the worst event reverses the order:**
+
+    t+4793.0   path_angle -0.110   desired 3.96   actual 3.82   steer -15.3 deg
+    t+4793.8   path_angle -0.067   desired 2.53   actual 4.07   steer -16.2 deg
+    t+4794.4   path_angle -0.034   desired 1.47   actual 3.07   steer -12.3 deg
+    t+4794.6   path_angle -0.030   desired 1.48   actual 0.83   steer  -3.9 deg
+
+`desired` collapsed FIRST. `path_angle` tracked it down faithfully. The car tracked `path_angle`.
+Nothing abandoned a curve, and no limiter of ours fired -- measured, not assumed: inside those
+windows `curvatureDeviationLimited` 0.13%, `humanTurnLateralPaused` 0.00%, `angleRateLimited`
+1.14%, `stallBlipActive` 1.98%, so ~97% of frames have no limiter at all. The deviation clip is
+also ruled out by arithmetic: `CURVATURE_ERROR` is 2.0 1/km and the gaps in these events are ~0.9.
+
+**THE DETECTOR'S GUARD COULD BE SATISFIED BY THE OPPOSITE OF THE PHENOMENON.** `a0 >= 0.75 * d0`
+was meant to mean "the car had reached the curve". At t+4794.1 actual was 4.07 against desired
+2.01 -- ABOVE desired, lagging a release that had already happened -- and that passes a `>=` test
+exactly as well as genuinely holding a curve does. The window then began after the collapse, so
+`desired` looked steady across it.
+
+So those 126 events are the EXIT HALF of the limit cycle already described: the plan swings, the
+command follows it exactly, the car arrives ~0.4 s late, and that lag carries `actual` past
+`desired` on every reversal. One mechanism, not two.
+
+**AND IT KILLS THE FEEDBACK FIX THE PREVIOUS ENTRY PROPOSED.** There is no delivery shortfall to
+integrate away here -- the car delivered 4.07 when asked for 2.01. An integral term on
+(desired - actual) would push harder into precisely the excursions that hurt. **Do not build it.**
+The steady-state under-delivery (0.87-0.93) is real and is a different regime from these
+transients; any future feedback term has to be shown not to fire during a release before it ships.
+
+**Third instance in this file of the same shape:** a detector whose qualifying test can be met by
+the opposite of the phenomenon (after the SCC veto that could only return zero, and the funnel of
+marginals that hid an exclusion). **Check a top-ranked event against raw data before believing a
+rate.** `tools/bp_lateral_wirewin.py` decodes path_angle for one narrow window and is the cheap way
+to do it.
