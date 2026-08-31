@@ -42,7 +42,8 @@ import pytest
 from cereal import log
 
 import sunnypilot.mapd.live_map_data.mapd_v2_map_data as mv2
-from sunnypilot.mapd.live_map_data.mapd_v2_map_data import MapdV2MapData, MAPD_V2_STALL_S
+from sunnypilot.mapd.live_map_data.mapd_v2_map_data import (
+  MapdV2MapData, MAPD_V2_STALL_S, MAPD_V2_COLD_START_S, MAPD_V2_BUDGET_RESET_S)
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
@@ -91,6 +92,8 @@ def make(mapd_alive: bool, localizer_valid: bool) -> MapdV2MapData:
   obj._last_tile_loaded = None
   obj._last_way_selection = None
   obj._stall_since = None
+  obj._mapd_seen = False
+  obj._alive_since = None
   return obj
 
 
@@ -192,11 +195,57 @@ class TestTheStallClock:
     m.reset_stall()
     assert m.stalled_s == 0.0
 
-  def test_the_threshold_is_slower_than_startup_but_far_faster_than_the_failure(self):
-    """60 s is not arbitrary. mapd v2 loads tiles at startup and is legitimately quiet for some
-    seconds, while the failure this answers lasted for five entire drives -- so detection speed buys
-    nothing and a short threshold buys a restart loop."""
+  def test_THE_COLD_START_GRACE_CLEARS_THE_MEASURED_HEALTHY_STARTUP(self):
+    """The number that must come from the logs, not from reasoning.
+
+    Gap between liveLocationKalman going valid and mapd v2's FIRST mapdOut frame, on the three
+    routes where it worked: -37.0 s (3f4), +93.8 s (3f3), +195.8 s (3f2). The first version of this
+    watchdog shipped a single 60 s threshold, which would have bounced a HEALTHY mapd v2 on two of
+    those three -- and each bounce restarts tile loading against a 524 MB dataset, so it could stop
+    mapd ever finishing while spending the whole restart budget in the first minutes of a drive."""
+    worst_measured_healthy_startup_s = 195.8
+    assert MAPD_V2_COLD_START_S > worst_measured_healthy_startup_s * 1.5, (
+      "the cold-start grace does not clear the measured healthy startup with margin -- the watchdog "
+      "would bounce a working mapd v2 during a normal boot")
+
+  def test_the_post_startup_threshold_is_shorter_than_the_grace(self):
+    """Once it has published, silence is a real fault and does not need the startup grace."""
+    assert MAPD_V2_STALL_S < MAPD_V2_COLD_START_S
     assert 30.0 <= MAPD_V2_STALL_S <= 180.0
+
+  def test_A_HEALTHY_COLD_START_IS_NOT_A_STALL(self, clock):
+    """Route 3f2 replayed through the real code: the localizer went valid 195.8 s before mapd v2's
+    first frame, and mapd was FINE. The single-60 s version would have bounced it here."""
+    m = make(mapd_alive=False, localizer_valid=True)
+    m.update_location()
+    clock.advance(195.8)
+    m.update_location()
+    assert m.stalled_s == pytest.approx(195.8)
+    assert m.stall_threshold_s == MAPD_V2_COLD_START_S
+    assert not m.is_stalled, "a healthy 195.8 s cold start is being called a stall"
+    assert 195.8 > MAPD_V2_STALL_S, "fixture no longer exceeds the post-startup threshold; it must"
+
+  def test_once_it_has_published_the_short_threshold_applies(self, clock):
+    m = make(mapd_alive=True, localizer_valid=True)
+    m.update_location()                      # marks _mapd_seen
+    assert m._mapd_seen is True
+    assert m.stall_threshold_s == MAPD_V2_STALL_S
+    m.sm.alive["mapdOut"] = False
+    m.sm.valid["mapdOut"] = False
+    m.update_location()
+    clock.advance(MAPD_V2_STALL_S + 1.0)
+    assert m.is_stalled
+
+  def test_healthy_s_tracks_continuous_uptime(self, clock):
+    m = make(mapd_alive=True, localizer_valid=True)
+    m.update_location()
+    clock.advance(120.0)
+    m.update_location()
+    assert m.healthy_s == 120.0
+    m.sm.alive["mapdOut"] = False
+    m.sm.valid["mapdOut"] = False
+    m.update_location()
+    assert m.healthy_s == 0.0, "healthy time survived mapd going silent"
 
 
 @pytest.fixture
@@ -240,14 +289,24 @@ def mgr(monkeypatch):
   return mod, fake
 
 
-class StubSource:
-  def __init__(self, stalled_s):
+class StubSource(MapdV2MapData):
+  """A REAL MapdV2MapData subclass, because _watch_for_stall now rejects anything else by isinstance
+  -- passing OsmMapData would AttributeError inside mapd_manager's loop and kill the daemon. Does
+  not call super().__init__, which would build a SubMaster needing compiled msgq."""
+
+  def __init__(self, stalled_s, healthy_s=0.0, seen=True):
     self._s = stalled_s
+    self._h = healthy_s
+    self._mapd_seen = seen
     self.reset_calls = 0
 
   @property
   def stalled_s(self):
     return self._s
+
+  @property
+  def healthy_s(self):
+    return self._h
 
   def reset_stall(self):
     self.reset_calls += 1
@@ -310,6 +369,39 @@ class TestTheWatchdog:
     assert restarts == mod.MAPD_V2_MAX_RESTARTS
     assert fake.writes == [], "restarting forever is a core spent on a cause we have not found"
 
+  def test_A_COLD_START_SOURCE_IS_NOT_RESTARTED(self, mgr):
+    """The threshold decision lives on the class. Confirm the watchdog honours `is_stalled` rather
+    than comparing against MAPD_V2_STALL_S itself -- doing the latter reintroduces the bug that
+    would have bounced healthy mapd v2 on routes 3f2 and 3f3."""
+    mod, fake = mgr
+    assert mod._watch_for_stall(StubSource(MAPD_V2_STALL_S + 1.0, seen=False), 0) == 0
+    assert fake.writes == []
+
+  def test_the_budget_refills_after_a_long_healthy_stretch(self, mgr):
+    """Without this the cap is per-BOOT and a 600-mile drive goes blind after the fifth stall."""
+    mod, _ = mgr
+    src = StubSource(0.0, healthy_s=MAPD_V2_BUDGET_RESET_S + 1.0)
+    assert mod._watch_for_stall(src, mod.MAPD_V2_MAX_RESTARTS) == 0
+
+  def test_the_budget_does_not_refill_on_a_brief_recovery(self, mgr):
+    """Otherwise a process that comes up, publishes for a second and dies again refills forever,
+    which is the restart storm the cap exists to prevent."""
+    mod, _ = mgr
+    src = StubSource(0.0, healthy_s=10.0)
+    assert mod._watch_for_stall(src, mod.MAPD_V2_MAX_RESTARTS) == mod.MAPD_V2_MAX_RESTARTS
+
+  def test_A_NON_MAPD_V2_SOURCE_IS_IGNORED(self, mgr):
+    """OsmMapData has neither is_stalled nor reset_stall. An AttributeError raised here kills
+    mapd_manager, which has no restart_if_crash, taking liveMapDataSP down for the whole drive --
+    strictly worse than the stall this watchdog exists to fix."""
+    mod, fake = mgr
+
+    class NotMapdV2:
+      pass
+
+    assert mod._watch_for_stall(NotMapdV2(), 0) == 0
+    assert fake.writes == []
+
   def test_observe_and_off_states_are_untouched(self, mgr):
     """mapd_manager passes None unless the state is 2. In state 1 SLA reads v1, so a quiet v2 costs
     the comparison and nothing on the road; in state 0 v2 is not running at all."""
@@ -361,11 +453,18 @@ class TestTheManagerGate:
     assert "MapdV2RestartRequest" in keys, "the stubbed Params raises on unknown keys, as the device does"
 
   def test_THE_REQUEST_CANNOT_SURVIVE_A_BOOT(self):
-    """A request left set by a mapd_manager that died would keep mapd_v2 stopped indefinitely. Two
-    independent clears: the param flag, and mapd_manager writing False at startup."""
+    """A request left set across a boot would keep mapd_v2 stopped. The param flag is the guarantee;
+    within a boot, the gate clearing it as it acts is what prevents a wedge."""
     keys = open(os.path.join(ROOT, "common/params_keys.h"), encoding="utf-8").read()
     line = next(x for x in keys.splitlines() if "MapdV2RestartRequest" in x)
     assert "CLEAR_ON_MANAGER_START" in line, f"not cleared on manager start: {line.strip()}"
     assert "PERSISTENT" not in line, f"a PERSISTENT request can disable mapd v2 forever: {line.strip()}"
+
+  def test_MAPD_MANAGER_NEVER_WRITES_FALSE(self):
+    """It used to, at startup, as belt-and-braces. With the gate self-clearing that write can only
+    ERASE a request this process set moments earlier that manager has not yet seen -- losing a
+    recovery silently. The only writer of False is the gate."""
     mgr_src = open(os.path.join(ROOT, "sunnypilot/mapd/mapd_manager.py"), encoding="utf-8").read()
-    assert 'put_bool("MapdV2RestartRequest", False)' in mgr_src
+    assert 'put_bool("MapdV2RestartRequest", False)' not in mgr_src, (
+      "mapd_manager writes False, which can swallow an in-flight restart request")
+    assert mgr_src.count('put_bool("MapdV2RestartRequest"') == 1

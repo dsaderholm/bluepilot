@@ -16,16 +16,19 @@ from openpilot.common.params import Params
 from openpilot.common.realtime import Ratekeeper, config_realtime_process
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.selfdrived.alertmanager import set_offroad_alert
-from openpilot.sunnypilot.mapd.live_map_data.mapd_v2_map_data import MapdV2MapData, MAPD_V2_STALL_S
+from openpilot.sunnypilot.mapd.live_map_data.mapd_v2_map_data import MapdV2MapData, MAPD_V2_BUDGET_RESET_S
 from openpilot.sunnypilot.mapd.live_map_data.osm_map_data import OsmMapData
 from openpilot.system.hardware.hw import Paths
 from openpilot.sunnypilot.mapd import MAPD_PATH, MAPD_V2_OFF, MAPD_V2_ON
 from openpilot.sunnypilot.mapd.mapd_settings import MapdSettingsSync
 from openpilot.sunnypilot.mapd.mapd_installer import VERSION, update_installed_version
 
-# FusionPilot: how many times one drive may bounce a stalled mapd v2. A cap rather than unlimited
-# because the failure it answers has an unknown cause -- if restarting does not fix it, restarting
-# forever is a core spent on nothing, and the ERROR lines are already in the route either way.
+# FusionPilot: how many times a stalled mapd v2 may be bounced before the watchdog gives up. A cap
+# rather than unlimited because the failure it answers has an unknown cause -- if restarting does
+# not fix it, restarting forever is a core spent on nothing.
+#
+# It REFILLS after MAPD_V2_BUDGET_RESET_S of continuous health. Without that it is a per-BOOT cap,
+# and a 600-mile drive that stalls six times goes silently blind after the fifth.
 MAPD_V2_MAX_RESTARTS = 5
 
 # PFEIFER - MAPD {{
@@ -138,21 +141,39 @@ def _watch_for_stall(live_map_sp, restarts: int) -> int:
   as it acts on it, which needs no other process to be alive.
 
   Re-requesting every tick is prevented by `reset_stall()`, not by a pending flag: the stall clock
-  restarts, so the next request cannot come sooner than MAPD_V2_STALL_S later.
+  restarts, so the next request cannot come sooner than a full threshold later.
+
+  WHICH threshold is `MapdV2MapData`'s business, not this function's -- a cold start and a mid-drive
+  stall look identical here and are not the same event. See MAPD_V2_COLD_START_S.
   """
-  if live_map_sp is None or restarts >= MAPD_V2_MAX_RESTARTS:
+  # Explicit, rather than trusting the caller's `if use_v2` to keep OsmMapData out: that guard is at
+  # the call site and looks redundant, and an AttributeError raised here kills mapd_manager, which
+  # has no restart_if_crash and would take liveMapDataSP down with it for the whole drive.
+  #
+  # Duck-typed rather than isinstance, deliberately: this repo is importable as both `sunnypilot.x`
+  # and `openpilot.sunnypilot.x`, which produces TWO distinct class objects for one class, so an
+  # isinstance gate silently rejects a genuine MapdV2MapData depending on how the caller imported
+  # it. The attributes are what this function actually needs.
+  if not hasattr(live_map_sp, "is_stalled"):
     return restarts
 
-  if live_map_sp.stalled_s < MAPD_V2_STALL_S:
+  # Refill the budget after a long healthy stretch, so the cap limits a restart STORM rather than
+  # the number of recoveries a long drive may have.
+  if restarts and live_map_sp.healthy_s >= MAPD_V2_BUDGET_RESET_S:
+    cloudlog.warning(f"mapd v2: healthy for {live_map_sp.healthy_s:.0f}s, restart budget refilled")
+    restarts = 0
+
+  if restarts >= MAPD_V2_MAX_RESTARTS or not live_map_sp.is_stalled:
     return restarts
 
   restarts += 1
   cloudlog.error(f"mapd v2: STALLED -- mapdOut silent for {live_map_sp.stalled_s:.0f}s with a valid "
-                 f"position. Requesting restart {restarts}/{MAPD_V2_MAX_RESTARTS}.")
+                 f"position (threshold {live_map_sp.stall_threshold_s:.0f}s). "
+                 f"Requesting restart {restarts}/{MAPD_V2_MAX_RESTARTS}.")
   params.put_bool("MapdV2RestartRequest", True)
-  # Reset BEFORE the process comes back, so the next check cannot fire until a full MAPD_V2_STALL_S
-  # of fresh silence. Without this the stall clock keeps running through the restart and the budget
-  # is spent in a handful of consecutive ticks.
+  # Reset BEFORE the process comes back, so the next check cannot fire until a full threshold of
+  # fresh silence. Without this the stall clock keeps running through the restart and the budget is
+  # spent in a handful of consecutive ticks.
   live_map_sp.reset_stall()
   return restarts
 
@@ -178,10 +199,11 @@ def main_thread():
   cloudlog.warning(f"mapd: MapdV2={mapd_v2_state}, live map source = "
                    f"{'mapd v2 (mapdOut)' if use_v2 else 'v1 (/dev/shm/params)'}")
 
-  # FusionPilot: stall watchdog state. Cleared here as well as by CLEAR_ON_MANAGER_START, because a
-  # request left set by a mapd_manager that died would keep mapd_v2 stopped for the whole drive --
-  # a watchdog that can disable the thing it guards is worse than none.
-  params.put_bool("MapdV2RestartRequest", False)
+  # FusionPilot: NO startup clear of MapdV2RestartRequest. It was here as belt-and-braces against a
+  # mapd_manager that died holding the request set -- but `mapd_v2_ready` now clears it as it acts
+  # on it, so nothing can be wedged, and writing False here can instead ERASE a request this process
+  # set moments ago that manager has not yet seen, losing a recovery silently.
+  # CLEAR_ON_MANAGER_START still covers a stale value across a boot.
   restarts = 0
 
   # Create folder needed for OSM

@@ -5905,13 +5905,57 @@ included).
 **THE CAUSE IS STILL UNKNOWN.** What is built is a RECOVERY, not a diagnosis -- see the stall
 watchdog below.
 
-**THE FIX: A STALL WATCHDOG.** `MapdV2MapData` now times how long `mapdOut` has been silent WHILE
-THE LOCALIZER HAS A VALID POSITION (offroad it is legitimately silent, so counting that would bounce
-the process in his driveway). After `MAPD_V2_STALL_S` = 60 s, `mapd_manager` sets
-`MapdV2RestartRequest`; `mapd_v2_ready` returns False while it stands, so manager stops mapd_v2;
-the request is released on the next tick and manager starts it again. Capped at
-`MAPD_V2_MAX_RESTARTS` = 5 per drive, because restarting forever against an unknown cause is a core
-spent on nothing. `test_mapd_v2_stall_watchdog.py`, 11/11 mutants killed.
+**THE FIX: A STALL WATCHDOG.** `MapdV2MapData` times how long `mapdOut` has been silent WHILE THE
+LOCALIZER HAS A VALID POSITION (offroad it is legitimately silent, so counting that would bounce the
+process in his driveway). When it crosses the threshold `mapd_manager` sets `MapdV2RestartRequest`;
+`mapd_v2_ready` clears it and returns False, so manager stops mapd_v2 and starts it on the next
+pass. `test_mapd_v2_stall_watchdog.py`, 17/17 mutants killed.
+
+**AND THE FIRST VERSION OF IT WOULD HAVE MADE HIS 600-MILE DRIVE WORSE. A REVIEW CAUGHT IT.** It
+shipped a single `MAPD_V2_STALL_S = 60.0`, chosen from the assumption that startup was "some
+seconds". Measured on the three routes where mapd v2 WORKED -- gap from `liveLocationKalman` going
+valid to the first `mapdOut` frame:
+
+    3f4    -37.0 s   (mapd was already publishing before the localizer converged)
+    3f3    +93.8 s
+    3f2   +195.8 s
+
+**A healthy mapd v2 is silent for over three minutes while it loads tiles from the 524 MB offline
+US dataset.** The 60 s watchdog would have bounced a WORKING process on two of those three routes,
+and every bounce restarts tile loading -- so it could have stopped mapd ever finishing while
+spending the whole restart budget in the first minutes. Strictly worse than no watchdog.
+
+    MAPD_V2_COLD_START_S = 420.0   before the first frame this process ever publishes (2.1x the
+                                   measured worst case)
+    MAPD_V2_STALL_S      =  60.0   after it has published once, silence is a real fault
+    MAPD_V2_BUDGET_RESET_S = 1800  continuous health that refills the restart budget
+
+**The budget refills**, because `MAPD_V2_MAX_RESTARTS = 5` held as a per-BOOT cap means a long drive
+that stalls six times goes silently blind after the fifth.
+
+**THE GENERAL LESSON, and it is this file's own rule failing in the file that records it: the number
+came from reasoning when the logs that could settle it were already on disk.** Worse, the test
+asserted `30 <= MAPD_V2_STALL_S <= 180` -- an invented window that BLESSED the broken value and
+would have failed the correct one. A test whose bound is guessed does not defend a threshold, it
+freezes the guess. `test_THE_COLD_START_GRACE_CLEARS_THE_MEASURED_HEALTHY_STARTUP` now carries the
+195.8 s measurement.
+
+**THREE MORE HOLES THE REVIEW FOUND, all of the same family -- the guard disabling what it guards:**
+
+- **The watchdog released its own request on a later tick.** `mapd_manager` has no
+  `restart_if_crash` and `NativeProcess.start()` returns early while `self.proc` is not None, so a
+  mapd_manager that died between setting and releasing left mapd_v2 STOPPED FOR THE DRIVE. It is
+  fire-and-forget now; `mapd_v2_ready` clears the request as it acts on it, depending on no other
+  process. Safe as a predicate side effect because `ensure_running` calls `should_run` exactly once
+  per process per pass and stops it in the same pass.
+- **`mapd_manager`'s startup `put_bool(False)`** could erase a request it had just set that manager
+  had not yet seen -- a lost recovery, silently. Removed; `CLEAR_ON_MANAGER_START` covers the boot.
+- **One broad `try/except: return True`** wrapped the opt-in read as well, so a transient params
+  failure started mapd v2 on a device whose owner had switched it OFF. One param call per try now.
+
+**And `isinstance` was the wrong guard**: this repo is importable as both `sunnypilot.x` and
+`openpilot.sunnypilot.x`, which makes TWO class objects for one class, so an isinstance gate rejects
+a genuine `MapdV2MapData` depending on how the caller imported it. Duck-typed on the attribute.
 
 **THE FALLBACK THAT NEEDS NO CODE, and it is his to set:** `MapdV2 = 1` (observe). `mapd_manager`
 line 129 is `MapdV2MapData() if use_v2 else OsmMapData()`, and `mapd_ready` runs v1 in states 0 and

@@ -136,9 +136,20 @@ def mapd_v2_ready(started: bool, params: Params, CP: car.CarParams) -> bool:
   if not (os.path.exists(MAPD_V2_PATH) and os.path.exists(Paths.mapd_root())):
     return False
 
+  # NARROW, one param call per try. An earlier version wrapped the opt-in read, the request read and
+  # the clear in ONE try returning True, so a transient failure reading MapdV2 started mapd v2 on a
+  # device whose owner had switched it off -- the exact cost the opt-in check exists to prevent.
   try:
-    if not params.get("MapdV2", return_default=True) > 0:
-      return False
+    opted_in = params.get("MapdV2", return_default=True) > 0
+  except Exception:
+    # The documented first-boot window: before scons rebuilds params_pyx from params_keys.h a newly
+    # declared key raises UnknownKeyName. `mapd_ready` guards the same way.
+    return True
+
+  if not opted_in:
+    return False
+
+  try:
     # FusionPilot: the stall watchdog's restart request. mapd_manager sets this when mapdOut has
     # been silent while the localizer had a valid position -- see `_watch_for_stall`. Returning
     # False is how a Python daemon asks manager to bounce a native process it does not own.
@@ -162,9 +173,8 @@ def mapd_v2_ready(started: bool, params: Params, CP: car.CarParams) -> bool:
       params.put_bool("MapdV2RestartRequest", False)
       return False
   except Exception:
-    # Same first-boot window `mapd_ready` guards: before scons rebuilds params_pyx from
-    # params_keys.h a newly declared key raises UnknownKeyName. Fall back to running v2, which is
-    # the behaviour that existed before the watchdog.
+    # Same first-boot window. Keep RUNNING rather than bouncing: a watchdog that cannot read its own
+    # request must not be able to stop the process it guards.
     return True
 
   return True
