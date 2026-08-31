@@ -5843,3 +5843,48 @@ thing to try** -- 0.85 before 1.0, so the direction is felt before the magnitude
 The honest risk, and it must be said with it: gain scales whatever it is given, and the plan
 oscillation is still there, so this may trade "weak and late" for "busier". He has described the
 current setting as weak, so he is on the wrong side of that trade today.
+## 2026-08-30: MAPD V2 DIED MID-DAY AND A TOGGLE DID NOT RECOVER IT. HE REPORTED IT; I FIRST SAID "HEALTHY".
+
+*"I thought at one point I didn't have a speed limit and I turned mapdv2 off and then turned it back
+on and then it got the speed limit."* He was right, the toggle did NOT fix it, and my first answer
+was wrong in a way this file already has a rule against.
+
+    route   segs   mapdOut   liveMapDataSP   gpsFrames   movingFrames
+    3f2      11      6810         644           583         52308
+    3f3      15     13326         873           849         64494
+    3f4      15     15647         865           831         77760
+    3f5      15         0         892           867         78670   <- died here
+    3f6       9         0         506           504         25827
+    3f7       6         0         312           277         22436
+    3f8       6         0         336           308         26059
+    3f9       9         0         491           474         32616
+
+**Zero mapdOut across 45 segments and ~185,000 moving frames, with GPS present the whole time and
+`MapdV2` reading 2 in every segment's initData.** So it is not offroad-silence, not a lost fix, and
+not the setting: the process simply stopped publishing and never resumed within the drive.
+
+**AND I REPORTED IT AS HEALTHY FIRST.** The total was 35,783 mapdOut frames, 82% `current`, 70%
+carrying a limit -- all of which came from the first three routes. **A total is not a distribution**,
+and that is the same failure as reporting "180 of 240 frames differ" without a magnitude, twice in
+two days. **Always break a health metric down BY ROUTE before calling a subsystem healthy.**
+
+**THE TOGGLE CANNOT FIX IT, AND THIS FILE ALREADY SAID SO.** From the mapd v2 section: manager does
+NOT restart a dead mapd_v2, and *only a reboot recovers*. Toggling `MapdV2` off and on is what he
+reached for, it is the natural thing to reach for, and it does not work. What he saw come back was
+not v2 -- `liveMapDataSP` kept publishing at 300-900 frames per route throughout the outage.
+
+**Current state: the device has since rebooted** (uptime 1651 s, `mapd_v2` pid age matches), so a
+fresh instance is running at 0.8% CPU. **It cannot be verified parked** -- offroad there is no
+position to resolve and v2 correctly emits nothing -- so whether it survives the next drive is open.
+
+**What he should do:** if the speed limit disappears again, **reboot, do not toggle.** And the next
+drive's logs settle whether this recurs; the check is one line, `mapdOut` frames per route, and it
+must be per route.
+
+### AND THE DEVICE CLOCK HAS RESET AGAIN
+
+`date +%s` reads 1780675437 while `/data/params/d/MapdV2` has mtime 1788115346 -- the param is
+stamped ~86 days AFTER "now". No NTP without DNS, and it has not held a GPS time fix. Consequences:
+route directory names carry wrong dates, and **mtime-vs-route ordering is unusable** until it syncs.
+The rule in this file about converting UTC to MDT still applies, but there is now a second failure
+mode above it: the clock can simply be wrong, so do not order events by timestamp at all right now.
