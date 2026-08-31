@@ -281,7 +281,11 @@ def mgr(monkeypatch):
     def __init__(self):
       self.writes = []
 
-    def put_bool(self, k, v):
+    def put_bool(self, k, v, block=False):
+      # `block` mirrors the real API (`put(self, key, dat, bool block = False)`). Without it a
+      # caller passing block=True gets a TypeError, which every param write here swallows -- so
+      # the write silently does nothing and the bug looks like it is in the code under test.
+      # test_every_params_stub_accepts_block enforces this fork-wide.
       self.writes.append((k, v))
 
   fake = RecordingParams()
