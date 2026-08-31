@@ -25,6 +25,7 @@ answer is the safe one. `mapdAlive` is cloudlogged on every transition so a rout
 import json
 import math
 import platform
+import time
 
 from cereal import log
 from openpilot.common.params import Params
@@ -36,6 +37,48 @@ from openpilot.sunnypilot.navd.helpers import Coordinate
 # FusionPilot: way-match states whose speed limit is NOT trusted. See `way_match_untrusted`.
 # A tuple rather than two comparisons so adding a state is one edit and the test can enumerate it.
 _UNTRUSTED_WAY_MATCH = ("fail", "possible")
+
+# FusionPilot: how long mapdOut may be silent, WHILE THE LOCALIZER HAS A GOOD POSITION, before the
+# process is treated as stalled. See `stalled_s` and mapd_manager's watchdog.
+#
+# 2026-08-30: routes 3f5-3f9 published ZERO mapdOut across 45 segments and ~185,000 moving frames
+# while `managerState` read `mapd_v2 running=True` on every sample, with no exit code, normal memory
+# and normal temperature. Three of those five routes were FRESH BOOTS, so this survives a reboot and
+# survives `restart_if_crash=True` -- that flag watches for the process DYING, and this process does
+# not die. Speed Limit Assist had no limit for all five drives.
+#
+# TWO THRESHOLDS, because a cold start and a mid-drive stall look identical to `mapd_alive` and are
+# NOT the same event. MEASURED on today's three healthy routes -- the gap between liveLocationKalman
+# going valid and mapd v2's FIRST mapdOut frame:
+#
+#     route 3f4    -37.0 s   (mapd was already publishing before the localizer converged)
+#     route 3f3    +93.8 s
+#     route 3f2   +195.8 s
+#
+# So a healthy mapd v2 can be silent for over three minutes after the localizer is valid, loading
+# tiles against a 524 MB offline US dataset. A single 60 s threshold -- which is what the first
+# version of this watchdog shipped -- would have bounced a WORKING process on two of those three
+# routes, and each bounce restarts tile loading, so it could prevent mapd from ever finishing while
+# burning the whole restart budget in the first minutes of a drive. That is strictly worse than no
+# watchdog, and it was found by measuring rather than by reasoning: the value had been picked from
+# the assumption that startup was "some seconds".
+MAPD_V2_COLD_START_S = 420.0   # before the first frame EVER seen by this process: 2.1x the measured worst
+MAPD_V2_STALL_S = 60.0         # after it has published at least once, silence is a real fault
+
+# How long mapd must be continuously healthy before the restart budget refills. Without this the cap
+# is per-BOOT, so a 600-mile drive that stalls six times goes blind after the fifth with nothing in
+# the log to say the watchdog had given up.
+MAPD_V2_BUDGET_RESET_S = 1800.0
+
+
+def _now() -> float:
+  """Indirection so tests can drive the stall clock deterministically. The monotonic clock has
+  ~15 ms granularity on Windows, so several calls inside one test return the SAME value -- which
+  let a mutant that re-anchors the clock on every tick pass the entire suite. That mutant makes
+  MAPD_V2_STALL_S unreachable, i.e. the watchdog never fires at all, so it is the one that most
+  needed catching. A seam is cheaper than an assertion that depends on timer resolution.
+  """
+  return time.monotonic()
 
 
 class MapdV2MapData(BaseMapData):
@@ -49,6 +92,14 @@ class MapdV2MapData(BaseMapData):
     self._last_alive: bool | None = None
     self._last_tile_loaded: bool | None = None
     self._last_way_selection: str | None = None
+
+    # FusionPilot: monotonic clock rather than a tick count, so this does not silently depend on
+    # mapd_manager's Ratekeeper rate. None means "not stalled".
+    self._stall_since: float | None = None
+    # Whether mapdOut has EVER been alive for this process. Selects which threshold applies -- see
+    # MAPD_V2_COLD_START_S.
+    self._mapd_seen = False
+    self._alive_since: float | None = None
 
   @property
   def mapd_alive(self) -> bool:
@@ -73,6 +124,22 @@ class MapdV2MapData(BaseMapData):
     location = self.sm['liveLocationKalman']
     self.localizer_valid = (location.status == log.LiveLocationKalman.Status.valid) and location.positionGeodetic.valid
 
+    # FusionPilot: only count a stall while we HAVE a position. Offroad the localizer is silent and
+    # mapd v2 correctly publishes nothing -- counting that would bounce the process in the driveway.
+    alive = self.mapd_alive
+    if alive:
+      self._mapd_seen = True
+      if self._alive_since is None:
+        self._alive_since = _now()
+    else:
+      self._alive_since = None
+
+    if self.localizer_valid and not alive:
+      if self._stall_since is None:
+        self._stall_since = _now()
+    else:
+      self._stall_since = None
+
     if self.localizer_valid:
       self.last_bearing = math.degrees(location.calibratedOrientationNED.value[2])
       self.last_position = Coordinate(location.positionGeodetic.value[0], location.positionGeodetic.value[1])
@@ -89,6 +156,32 @@ class MapdV2MapData(BaseMapData):
       params['bearing'] = self.last_bearing
 
     self.mem_params.put("LastGPSPosition", json.dumps(params), block=True)
+
+  @property
+  def stalled_s(self) -> float:
+    """Seconds mapdOut has been silent while the localizer had a valid position. 0.0 if healthy."""
+    return 0.0 if self._stall_since is None else _now() - self._stall_since
+
+  @property
+  def stall_threshold_s(self) -> float:
+    """Longer before the first frame this process ever publishes. See MAPD_V2_COLD_START_S."""
+    return MAPD_V2_STALL_S if self._mapd_seen else MAPD_V2_COLD_START_S
+
+  @property
+  def is_stalled(self) -> bool:
+    """The whole decision, kept here beside the clock rather than in mapd_manager, so the threshold
+    and the thing it is compared against cannot drift apart."""
+    return self.stalled_s >= self.stall_threshold_s
+
+  @property
+  def healthy_s(self) -> float:
+    """Seconds mapdOut has been continuously alive. Refills the restart budget."""
+    return 0.0 if self._alive_since is None else _now() - self._alive_since
+
+  def reset_stall(self) -> None:
+    """Restart the stall clock. Called when a restart has been REQUESTED, so the watchdog gives the
+    new process a full MAPD_V2_STALL_S to come up instead of asking again on the next tick."""
+    self._stall_since = None
 
   def _log_transitions(self) -> None:
     alive = self.mapd_alive

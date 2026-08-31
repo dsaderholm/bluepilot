@@ -7909,3 +7909,145 @@ thing to try** -- 0.85 before 1.0, so the direction is felt before the magnitude
 The honest risk, and it must be said with it: gain scales whatever it is given, and the plan
 oscillation is still there, so this may trade "weak and late" for "busier". He has described the
 current setting as weak, so he is on the wrong side of that trade today.
+## 2026-08-30: MAPD V2 DIED MID-DAY AND A TOGGLE DID NOT RECOVER IT. HE REPORTED IT; I FIRST SAID "HEALTHY".
+
+*"I thought at one point I didn't have a speed limit and I turned mapdv2 off and then turned it back
+on and then it got the speed limit."* He was right, the toggle did NOT fix it, and my first answer
+was wrong in a way this file already has a rule against.
+
+    route   segs   mapdOut   liveMapDataSP   gpsFrames   movingFrames
+    3f2      11      6810         644           583         52308
+    3f3      15     13326         873           849         64494
+    3f4      15     15647         865           831         77760
+    3f5      15         0         892           867         78670   <- died here
+    3f6       9         0         506           504         25827
+    3f7       6         0         312           277         22436
+    3f8       6         0         336           308         26059
+    3f9       9         0         491           474         32616
+
+**Zero mapdOut across 45 segments and ~185,000 moving frames, with GPS present the whole time and
+`MapdV2` reading 2 in every segment's initData.** So it is not offroad-silence, not a lost fix, and
+not the setting: the process simply stopped publishing and never resumed within the drive.
+
+**AND I REPORTED IT AS HEALTHY FIRST.** The total was 35,783 mapdOut frames, 82% `current`, 70%
+carrying a limit -- all of which came from the first three routes. **A total is not a distribution**,
+and that is the same failure as reporting "180 of 240 frames differ" without a magnitude, twice in
+two days. **Always break a health metric down BY ROUTE before calling a subsystem healthy.**
+
+**THE TOGGLE CANNOT FIX IT.** Toggling `MapdV2` off and on is what he reached for and it is the
+natural thing to reach for. What he saw come back was not v2 -- `liveMapDataSP` kept publishing at
+300-900 frames per route throughout the outage, carrying NO speed limit (0/892, 0/506, 0/312,
+0/336, 0/491). He had no speed limits for five consecutive drives.
+
+**AND "REBOOT, DO NOT TOGGLE" WAS WRONG. IT WAS ABOUT TO BE HANDED TO HIM BEFORE A 600-MILE DRIVE.**
+It came from this file's own mapd v2 section -- *manager does NOT restart a dead mapd_v2, only a
+reboot recovers* -- which describes a DIFFERENT failure. `logMonoTime` is since boot, and routes
+3f5, 3f7 and 3f8 each START ~62 s after boot:
+
+    3f5   62.6 .. 954.4    fresh boot, mapdOut 0
+    3f6   9617 .. 10124    same boot as 3f5
+    3f7   62.2 .. 374.4    FRESH BOOT, mapdOut 0
+    3f8   62.2 .. 397.6    FRESH BOOT, mapdOut 0
+
+**Three fresh boots, three fresh mapd_v2 processes, all publishing nothing.** A reboot does not fix
+this. Quoting a recovery from a neighbouring section because the symptom rhymed is the same failure
+as the `SpeedLimitPolicy` and `AlphaLongitudinalEnabled` entries: **check that the recorded cause
+matches THIS failure before quoting the recorded fix.**
+
+**AND `restart_if_crash=True` CANNOT SEE IT EITHER.** That flag was added 2026-08-24 for route
+000003b4 (441 "not running: mapd_v2" events) and it watches for the process DYING. Here
+`managerState` read `running=True` with no exit code on every sample of all five drives.
+
+**RULED OUT BY MEASUREMENT**, each one cheap and each one worth not re-deriving: the build (same
+commit `4adc7ff69b` in every route's initData), his settings (the per-segment params snapshot diff
+between 3f4 and 3f5 shows only the lateral gains moving), GPS (`gpsLocation` present throughout --
+and note `gpsLocationExternal` is ZERO on the WORKING routes too, so this file's claim that v2 reads
+that service is wrong; the binary subscribes to both), the network (`networkType` was `none` on 100%
+of frames on the working routes as well), the tile store (524 MB, region `US`, intact, no truncated
+files -- and the dead routes never crossed a tile boundary, all of it inside 34.25-34.50), geography,
+and the clock reset (every boot starts at the same stale RTC and corrects on GPS fix, working routes
+included).
+
+**THE CAUSE IS STILL UNKNOWN.** What is built is a RECOVERY, not a diagnosis -- see the stall
+watchdog below.
+
+**THE FIX: A STALL WATCHDOG.** `MapdV2MapData` times how long `mapdOut` has been silent WHILE THE
+LOCALIZER HAS A VALID POSITION (offroad it is legitimately silent, so counting that would bounce the
+process in his driveway). When it crosses the threshold `mapd_manager` sets `MapdV2RestartRequest`;
+`mapd_v2_ready` clears it and returns False, so manager stops mapd_v2 and starts it on the next
+pass. `test_mapd_v2_stall_watchdog.py`, 17/17 mutants killed.
+
+**AND THE FIRST VERSION OF IT WOULD HAVE MADE HIS 600-MILE DRIVE WORSE. A REVIEW CAUGHT IT.** It
+shipped a single `MAPD_V2_STALL_S = 60.0`, chosen from the assumption that startup was "some
+seconds". Measured on the three routes where mapd v2 WORKED -- gap from `liveLocationKalman` going
+valid to the first `mapdOut` frame:
+
+    3f4    -37.0 s   (mapd was already publishing before the localizer converged)
+    3f3    +93.8 s
+    3f2   +195.8 s
+
+**A healthy mapd v2 is silent for over three minutes while it loads tiles from the 524 MB offline
+US dataset.** The 60 s watchdog would have bounced a WORKING process on two of those three routes,
+and every bounce restarts tile loading -- so it could have stopped mapd ever finishing while
+spending the whole restart budget in the first minutes. Strictly worse than no watchdog.
+
+    MAPD_V2_COLD_START_S = 420.0   before the first frame this process ever publishes (2.1x the
+                                   measured worst case)
+    MAPD_V2_STALL_S      =  60.0   after it has published once, silence is a real fault
+    MAPD_V2_BUDGET_RESET_S = 1800  continuous health that refills the restart budget
+
+**The budget refills**, because `MAPD_V2_MAX_RESTARTS = 5` held as a per-BOOT cap means a long drive
+that stalls six times goes silently blind after the fifth.
+
+**THE GENERAL LESSON, and it is this file's own rule failing in the file that records it: the number
+came from reasoning when the logs that could settle it were already on disk.** Worse, the test
+asserted `30 <= MAPD_V2_STALL_S <= 180` -- an invented window that BLESSED the broken value and
+would have failed the correct one. A test whose bound is guessed does not defend a threshold, it
+freezes the guess. `test_THE_COLD_START_GRACE_CLEARS_THE_MEASURED_HEALTHY_STARTUP` now carries the
+195.8 s measurement.
+
+**THREE MORE HOLES THE REVIEW FOUND, all of the same family -- the guard disabling what it guards:**
+
+- **The watchdog released its own request on a later tick.** `mapd_manager` has no
+  `restart_if_crash` and `NativeProcess.start()` returns early while `self.proc` is not None, so a
+  mapd_manager that died between setting and releasing left mapd_v2 STOPPED FOR THE DRIVE. It is
+  fire-and-forget now; `mapd_v2_ready` clears the request as it acts on it, depending on no other
+  process. Safe as a predicate side effect because `ensure_running` calls `should_run` exactly once
+  per process per pass and stops it in the same pass.
+- **`mapd_manager`'s startup `put_bool(False)`** could erase a request it had just set that manager
+  had not yet seen -- a lost recovery, silently. Removed; `CLEAR_ON_MANAGER_START` covers the boot.
+- **One broad `try/except: return True`** wrapped the opt-in read as well, so a transient params
+  failure started mapd v2 on a device whose owner had switched it OFF. One param call per try now.
+
+**And `isinstance` was the wrong guard**: this repo is importable as both `sunnypilot.x` and
+`openpilot.sunnypilot.x`, which makes TWO class objects for one class, so an isinstance gate rejects
+a genuine `MapdV2MapData` depending on how the caller imported it. Duck-typed on the attribute.
+
+**THE FALLBACK THAT NEEDS NO CODE, and it is his to set:** `MapdV2 = 1` (observe). `mapd_manager`
+line 129 is `MapdV2MapData() if use_v2 else OsmMapData()`, and `mapd_ready` runs v1 in states 0 and
+1 -- so observe hands Speed Limit Assist to **v1**, a different binary on a different transport
+(`/dev/shm/params`), which cannot share whatever failed here. v1's binary is still installed. It
+costs a little coverage (measured on route 00000383: only-v1 1.6%, only-v2 6.7%) and a second daemon
+running, which is heat.
+
+**TWO TEST LESSONS FROM BUILDING IT, both caught by mutation testing and neither by a green run:**
+
+- **`pytest.importorskip` HID SEVEN TESTS.** `mapd_manager` does not import offline (it reaches
+  `openpilot.system.micd` through alertmanager), so the whole watchdog class SKIPPED while the run
+  reported "8 passed". Stub the MODULE chain -- micd, `system.hardware.hw`, `system.version`,
+  `system.sentry`, `common.spinner` -- and IMPORT, so a broken chain fails loudly. A skip that
+  removes a whole class is worse than a failure.
+- **NEVER ASSERT A CLOCK-DERIVED FLOAT IS ZERO.** The monotonic clock has ~15 ms granularity on
+  Windows, so a set and a read inside one test return the SAME value and `stalled_s == 0.0` passed
+  against a mutant that deleted the reset. Worse, a mutant that re-anchored the clock every tick --
+  which makes the threshold unreachable, i.e. **the watchdog never fires at all** -- survived two
+  rounds. Both needed the `_now()` seam and a fake clock. Assert on the STATE (`_stall_since is
+  None`) or on an injected clock, never on elapsed real time.
+
+### AND THE DEVICE CLOCK HAS RESET AGAIN
+
+`date +%s` reads 1780675437 while `/data/params/d/MapdV2` has mtime 1788115346 -- the param is
+stamped ~86 days AFTER "now". No NTP without DNS, and it has not held a GPS time fix. Consequences:
+route directory names carry wrong dates, and **mtime-vs-route ordering is unusable** until it syncs.
+The rule in this file about converting UTC to MDT still applies, but there is now a second failure
+mode above it: the clock can simply be wrong, so do not order events by timestamp at all right now.

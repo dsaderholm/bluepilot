@@ -151,6 +151,7 @@ DEFAULT_TARGETS = [
   "sunnypilot/mapd/tests/test_mapd_schema.py",
   "sunnypilot/mapd/tests/test_mapd_v2_map_data.py",
   "sunnypilot/mapd/tests/test_mapd_v2_restarts.py",
+  "sunnypilot/mapd/tests/test_mapd_v2_stall_watchdog.py",
   "sunnypilot/mapd/tests/test_mapd_v2_binary.py",
   "sunnypilot/mapd/tests/test_mapd_settings.py",
   # The value behind every +/- control. The widget needs pyray and cannot collect here, which
