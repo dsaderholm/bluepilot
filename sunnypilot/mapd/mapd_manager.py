@@ -119,8 +119,8 @@ def update_osm_db() -> None:
     mem_params.put("LastGPSPosition", "{}", block=True)
 
 
-def _watch_for_stall(live_map_sp, restart_pending: bool, restarts: int) -> tuple[bool, int]:
-  """Bounce mapd v2 when it is ALIVE but has stopped publishing. Returns the new watchdog state.
+def _watch_for_stall(live_map_sp, restarts: int) -> int:
+  """Bounce mapd v2 when it is ALIVE but has stopped publishing. Returns the new restart count.
 
   `restart_if_crash=True` on the mapd_v2 process covers the process DYING, which is the 2026-08-24
   failure (route 000003b4, 441 "not running: mapd_v2" events). It cannot see the 2026-08-30 failure:
@@ -129,18 +129,22 @@ def _watch_for_stall(live_map_sp, restart_pending: bool, restarts: int) -> tuple
   a reboot and a crash-restart. Speed Limit Assist had no limit at all for five consecutive drives.
 
   The restart is expressed as a PARAM rather than a signal, because a Python daemon has no business
-  killing a native process manager owns. `mapd_v2_ready` returns False while the request stands, so
-  manager stops mapd_v2; the request is cleared on the next tick and manager starts it again.
+  killing a native process manager owns.
+
+  FIRE AND FORGET -- this function never clears the request, and that is the fix for a hole in its
+  own first version. Releasing it here on a later tick made the watchdog able to DISABLE THE THING
+  IT GUARDS: mapd_manager has no `restart_if_crash`, so if it died between setting the request and
+  releasing it, mapd_v2 stayed stopped for the entire drive. `mapd_v2_ready` now clears the request
+  as it acts on it, which needs no other process to be alive.
+
+  Re-requesting every tick is prevented by `reset_stall()`, not by a pending flag: the stall clock
+  restarts, so the next request cannot come sooner than MAPD_V2_STALL_S later.
   """
-  if live_map_sp is None:
-    return False, restarts
+  if live_map_sp is None or restarts >= MAPD_V2_MAX_RESTARTS:
+    return restarts
 
-  if restart_pending:
-    params.put_bool("MapdV2RestartRequest", False)
-    return False, restarts
-
-  if restarts >= MAPD_V2_MAX_RESTARTS or live_map_sp.stalled_s < MAPD_V2_STALL_S:
-    return False, restarts
+  if live_map_sp.stalled_s < MAPD_V2_STALL_S:
+    return restarts
 
   restarts += 1
   cloudlog.error(f"mapd v2: STALLED -- mapdOut silent for {live_map_sp.stalled_s:.0f}s with a valid "
@@ -148,9 +152,9 @@ def _watch_for_stall(live_map_sp, restart_pending: bool, restarts: int) -> tuple
   params.put_bool("MapdV2RestartRequest", True)
   # Reset BEFORE the process comes back, so the next check cannot fire until a full MAPD_V2_STALL_S
   # of fresh silence. Without this the stall clock keeps running through the restart and the budget
-  # is spent in five consecutive ticks.
+  # is spent in a handful of consecutive ticks.
   live_map_sp.reset_stall()
-  return True, restarts
+  return restarts
 
 
 def main_thread():
@@ -178,7 +182,6 @@ def main_thread():
   # request left set by a mapd_manager that died would keep mapd_v2 stopped for the whole drive --
   # a watchdog that can disable the thing it guards is worse than none.
   params.put_bool("MapdV2RestartRequest", False)
-  restart_pending = False
   restarts = 0
 
   # Create folder needed for OSM
@@ -197,7 +200,7 @@ def main_thread():
     live_map_sp.tick()
     if settings_sync is not None:
       settings_sync.tick()
-    restart_pending, restarts = _watch_for_stall(live_map_sp if use_v2 else None, restart_pending, restarts)
+    restarts = _watch_for_stall(live_map_sp if use_v2 else None, restarts)
     rk.keep_time()
 
 

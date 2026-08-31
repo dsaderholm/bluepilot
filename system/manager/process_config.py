@@ -141,13 +141,25 @@ def mapd_v2_ready(started: bool, params: Params, CP: car.CarParams) -> bool:
       return False
     # FusionPilot: the stall watchdog's restart request. mapd_manager sets this when mapdOut has
     # been silent while the localizer had a valid position -- see `_watch_for_stall`. Returning
-    # False is how a Python daemon asks manager to bounce a native process it does not own: manager
-    # stops mapd_v2, mapd_manager clears the request on its next tick, and this goes true again.
+    # False is how a Python daemon asks manager to bounce a native process it does not own.
     #
     # This is NOT redundant with `restart_if_crash=True` on the process. That watches for the
     # process DYING; on 2026-08-30 mapd_v2 stayed alive with running=True and no exit code and
     # published nothing for five consecutive drives, three of them from a fresh boot.
+    #
+    # THE CLEAR HAPPENS HERE, DELIBERATELY, AND A SIDE EFFECT IN A PREDICATE IS THE LESSER EVIL.
+    # The first version had mapd_manager release the request on its next tick, which quietly made
+    # the watchdog able to DISABLE THE THING IT GUARDS: `mapd_manager` is registered without
+    # `restart_if_crash`, and `NativeProcess.start()` returns early while `self.proc` is not None,
+    # so a mapd_manager that dies between setting the request and releasing it stays dead -- and
+    # mapd_v2 stays stopped for the whole drive with Speed Limit Assist silently on nothing. That
+    # is a worse outcome than the stall it was built to fix.
+    #
+    # Safe because `ensure_running` calls `should_run` EXACTLY ONCE per process per pass and stops
+    # the process in the same pass (process.py:258-264): this pass stops mapd_v2, the next starts
+    # it. One bounce, self-limiting, and it needs no other process to be alive.
     if params.get_bool("MapdV2RestartRequest"):
+      params.put_bool("MapdV2RestartRequest", False)
       return False
   except Exception:
     # Same first-boot window `mapd_ready` guards: before scons rebuilds params_pyx from

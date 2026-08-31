@@ -259,50 +259,62 @@ class TestTheWatchdog:
 
   def test_a_healthy_source_asks_for_nothing(self, mgr):
     mod, fake = mgr
-    assert mod._watch_for_stall(StubSource(0.0), False, 0) == (False, 0)
+    assert mod._watch_for_stall(StubSource(0.0), 0) == 0
     assert fake.writes == []
 
   def test_just_under_the_threshold_asks_for_nothing(self, mgr):
     mod, fake = mgr
-    assert mod._watch_for_stall(StubSource(MAPD_V2_STALL_S - 0.1), False, 0) == (False, 0)
+    assert mod._watch_for_stall(StubSource(MAPD_V2_STALL_S - 0.1), 0) == 0
     assert fake.writes == []
 
   def test_a_real_stall_requests_a_restart(self, mgr):
     mod, fake = mgr
-    pending, restarts = mod._watch_for_stall(StubSource(MAPD_V2_STALL_S + 1.0), False, 0)
-    assert pending is True and restarts == 1
+    assert mod._watch_for_stall(StubSource(MAPD_V2_STALL_S + 1.0), 0) == 1
     assert ("MapdV2RestartRequest", True) in fake.writes
 
-  def test_THE_REQUEST_IS_RELEASED_ON_THE_NEXT_TICK(self, mgr):
-    """Held forever, this DISABLES mapd v2 -- `mapd_v2_ready` returns False while it stands, so the
-    watchdog would become the thing that stopped the daemon it exists to protect."""
+  def test_THE_WATCHDOG_NEVER_RELEASES_THE_REQUEST_ITSELF(self, mgr):
+    """The hole in the first version, and the reason this is fire-and-forget.
+
+    mapd_manager is registered WITHOUT `restart_if_crash`, and NativeProcess.start() returns early
+    while self.proc is not None -- so a mapd_manager that died between setting the request and
+    releasing it would leave mapd_v2 stopped for the entire drive, with Speed Limit Assist silently
+    on nothing. The watchdog would have become a better version of the bug it was built to fix.
+    `mapd_v2_ready` clears the request as it acts on it, which depends on no other process."""
     mod, fake = mgr
-    pending, _ = mod._watch_for_stall(StubSource(0.0), True, 1)
-    assert pending is False
-    assert fake.writes == [("MapdV2RestartRequest", False)]
+    mod._watch_for_stall(StubSource(MAPD_V2_STALL_S + 1.0), 0)
+    assert ("MapdV2RestartRequest", False) not in fake.writes, (
+      "mapd_manager releases the restart request, so its death can wedge mapd_v2 off for a drive")
 
   def test_THE_STALL_CLOCK_IS_RESET_WHEN_THE_RESTART_IS_REQUESTED(self, mgr):
-    """Without this the clock keeps running while the new process loads tiles, so every remaining
-    restart in the budget is spent within a few ticks and the watchdog is finished before mapd has
-    had one chance to come up."""
+    """This is what stops it re-requesting every tick now that there is no pending flag. Without it
+    the clock keeps running while the new process loads tiles, so the whole restart budget is spent
+    in a handful of ticks and the watchdog is finished before mapd has had one chance to come up."""
     mod, _ = mgr
     src = StubSource(MAPD_V2_STALL_S + 1.0)
-    mod._watch_for_stall(src, False, 0)
+    mod._watch_for_stall(src, 0)
     assert src.reset_calls == 1
     assert src.stalled_s == 0.0
 
+  def test_a_second_request_cannot_follow_immediately(self, mgr):
+    """The behavioural consequence of the reset, driven through two real calls."""
+    mod, fake = mgr
+    src = StubSource(MAPD_V2_STALL_S + 1.0)
+    restarts = mod._watch_for_stall(src, 0)
+    restarts = mod._watch_for_stall(src, restarts)
+    assert restarts == 1, "a single stall spent two restarts"
+    assert fake.writes.count(("MapdV2RestartRequest", True)) == 1
+
   def test_the_restart_budget_is_finite(self, mgr):
     mod, fake = mgr
-    pending, restarts = mod._watch_for_stall(StubSource(MAPD_V2_STALL_S * 10), False,
-                                             mod.MAPD_V2_MAX_RESTARTS)
-    assert pending is False and restarts == mod.MAPD_V2_MAX_RESTARTS
+    restarts = mod._watch_for_stall(StubSource(MAPD_V2_STALL_S * 10), mod.MAPD_V2_MAX_RESTARTS)
+    assert restarts == mod.MAPD_V2_MAX_RESTARTS
     assert fake.writes == [], "restarting forever is a core spent on a cause we have not found"
 
   def test_observe_and_off_states_are_untouched(self, mgr):
     """mapd_manager passes None unless the state is 2. In state 1 SLA reads v1, so a quiet v2 costs
     the comparison and nothing on the road; in state 0 v2 is not running at all."""
     mod, fake = mgr
-    assert mod._watch_for_stall(None, False, 0) == (False, 0)
+    assert mod._watch_for_stall(None, 0) == 0
     assert fake.writes == []
 
 
@@ -322,6 +334,18 @@ class TestTheManagerGate:
     assert "MapdV2RestartRequest" in _fn("mapd_v2_ready"), (
       "mapd_v2_ready ignores the stall watchdog's restart request -- mapd_manager sets it and "
       "manager never stops the process, so a stalled mapd v2 stays stalled for the whole drive")
+
+  def test_THE_GATE_CLEARS_THE_REQUEST_AS_IT_ACTS_ON_IT(self):
+    """Nobody else can. mapd_manager has no `restart_if_crash`, so if the release lived there its
+    death would wedge mapd_v2 off for the drive. Safe as a predicate side effect because
+    `ensure_running` calls should_run exactly once per process per pass and stops it in the same
+    pass, so this is one bounce rather than a loop."""
+    # ast.unparse normalises quoting, so compare against a quote-normalised copy rather than
+    # guessing which style survived.
+    src = _fn("mapd_v2_ready").replace('"', "'")
+    assert "put_bool('MapdV2RestartRequest', False)" in src, (
+      "mapd_v2_ready reads the restart request but never clears it -- mapd_v2 would be stopped "
+      "forever, which is strictly worse than the stall this watchdog exists to fix")
 
   def test_the_opt_in_check_still_comes_first(self):
     """State 0 must still run nothing -- somebody tracking this branch for ICBM alone should not pay
