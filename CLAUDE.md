@@ -5868,18 +5868,71 @@ carrying a limit -- all of which came from the first three routes. **A total is 
 and that is the same failure as reporting "180 of 240 frames differ" without a magnitude, twice in
 two days. **Always break a health metric down BY ROUTE before calling a subsystem healthy.**
 
-**THE TOGGLE CANNOT FIX IT, AND THIS FILE ALREADY SAID SO.** From the mapd v2 section: manager does
-NOT restart a dead mapd_v2, and *only a reboot recovers*. Toggling `MapdV2` off and on is what he
-reached for, it is the natural thing to reach for, and it does not work. What he saw come back was
-not v2 -- `liveMapDataSP` kept publishing at 300-900 frames per route throughout the outage.
+**THE TOGGLE CANNOT FIX IT.** Toggling `MapdV2` off and on is what he reached for and it is the
+natural thing to reach for. What he saw come back was not v2 -- `liveMapDataSP` kept publishing at
+300-900 frames per route throughout the outage, carrying NO speed limit (0/892, 0/506, 0/312,
+0/336, 0/491). He had no speed limits for five consecutive drives.
 
-**Current state: the device has since rebooted** (uptime 1651 s, `mapd_v2` pid age matches), so a
-fresh instance is running at 0.8% CPU. **It cannot be verified parked** -- offroad there is no
-position to resolve and v2 correctly emits nothing -- so whether it survives the next drive is open.
+**AND "REBOOT, DO NOT TOGGLE" WAS WRONG. IT WAS ABOUT TO BE HANDED TO HIM BEFORE A 600-MILE DRIVE.**
+It came from this file's own mapd v2 section -- *manager does NOT restart a dead mapd_v2, only a
+reboot recovers* -- which describes a DIFFERENT failure. `logMonoTime` is since boot, and routes
+3f5, 3f7 and 3f8 each START ~62 s after boot:
 
-**What he should do:** if the speed limit disappears again, **reboot, do not toggle.** And the next
-drive's logs settle whether this recurs; the check is one line, `mapdOut` frames per route, and it
-must be per route.
+    3f5   62.6 .. 954.4    fresh boot, mapdOut 0
+    3f6   9617 .. 10124    same boot as 3f5
+    3f7   62.2 .. 374.4    FRESH BOOT, mapdOut 0
+    3f8   62.2 .. 397.6    FRESH BOOT, mapdOut 0
+
+**Three fresh boots, three fresh mapd_v2 processes, all publishing nothing.** A reboot does not fix
+this. Quoting a recovery from a neighbouring section because the symptom rhymed is the same failure
+as the `SpeedLimitPolicy` and `AlphaLongitudinalEnabled` entries: **check that the recorded cause
+matches THIS failure before quoting the recorded fix.**
+
+**AND `restart_if_crash=True` CANNOT SEE IT EITHER.** That flag was added 2026-08-24 for route
+000003b4 (441 "not running: mapd_v2" events) and it watches for the process DYING. Here
+`managerState` read `running=True` with no exit code on every sample of all five drives.
+
+**RULED OUT BY MEASUREMENT**, each one cheap and each one worth not re-deriving: the build (same
+commit `4adc7ff69b` in every route's initData), his settings (the per-segment params snapshot diff
+between 3f4 and 3f5 shows only the lateral gains moving), GPS (`gpsLocation` present throughout --
+and note `gpsLocationExternal` is ZERO on the WORKING routes too, so this file's claim that v2 reads
+that service is wrong; the binary subscribes to both), the network (`networkType` was `none` on 100%
+of frames on the working routes as well), the tile store (524 MB, region `US`, intact, no truncated
+files -- and the dead routes never crossed a tile boundary, all of it inside 34.25-34.50), geography,
+and the clock reset (every boot starts at the same stale RTC and corrects on GPS fix, working routes
+included).
+
+**THE CAUSE IS STILL UNKNOWN.** What is built is a RECOVERY, not a diagnosis -- see the stall
+watchdog below.
+
+**THE FIX: A STALL WATCHDOG.** `MapdV2MapData` now times how long `mapdOut` has been silent WHILE
+THE LOCALIZER HAS A VALID POSITION (offroad it is legitimately silent, so counting that would bounce
+the process in his driveway). After `MAPD_V2_STALL_S` = 60 s, `mapd_manager` sets
+`MapdV2RestartRequest`; `mapd_v2_ready` returns False while it stands, so manager stops mapd_v2;
+the request is released on the next tick and manager starts it again. Capped at
+`MAPD_V2_MAX_RESTARTS` = 5 per drive, because restarting forever against an unknown cause is a core
+spent on nothing. `test_mapd_v2_stall_watchdog.py`, 11/11 mutants killed.
+
+**THE FALLBACK THAT NEEDS NO CODE, and it is his to set:** `MapdV2 = 1` (observe). `mapd_manager`
+line 129 is `MapdV2MapData() if use_v2 else OsmMapData()`, and `mapd_ready` runs v1 in states 0 and
+1 -- so observe hands Speed Limit Assist to **v1**, a different binary on a different transport
+(`/dev/shm/params`), which cannot share whatever failed here. v1's binary is still installed. It
+costs a little coverage (measured on route 00000383: only-v1 1.6%, only-v2 6.7%) and a second daemon
+running, which is heat.
+
+**TWO TEST LESSONS FROM BUILDING IT, both caught by mutation testing and neither by a green run:**
+
+- **`pytest.importorskip` HID SEVEN TESTS.** `mapd_manager` does not import offline (it reaches
+  `openpilot.system.micd` through alertmanager), so the whole watchdog class SKIPPED while the run
+  reported "8 passed". Stub the MODULE chain -- micd, `system.hardware.hw`, `system.version`,
+  `system.sentry`, `common.spinner` -- and IMPORT, so a broken chain fails loudly. A skip that
+  removes a whole class is worse than a failure.
+- **NEVER ASSERT A CLOCK-DERIVED FLOAT IS ZERO.** The monotonic clock has ~15 ms granularity on
+  Windows, so a set and a read inside one test return the SAME value and `stalled_s == 0.0` passed
+  against a mutant that deleted the reset. Worse, a mutant that re-anchored the clock every tick --
+  which makes the threshold unreachable, i.e. **the watchdog never fires at all** -- survived two
+  rounds. Both needed the `_now()` seam and a fake clock. Assert on the STATE (`_stall_since is
+  None`) or on an injected clock, never on elapsed real time.
 
 ### AND THE DEVICE CLOCK HAS RESET AGAIN
 

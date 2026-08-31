@@ -25,6 +25,7 @@ answer is the safe one. `mapdAlive` is cloudlogged on every transition so a rout
 import json
 import math
 import platform
+import time
 
 from cereal import log
 from openpilot.common.params import Params
@@ -36,6 +37,30 @@ from openpilot.sunnypilot.navd.helpers import Coordinate
 # FusionPilot: way-match states whose speed limit is NOT trusted. See `way_match_untrusted`.
 # A tuple rather than two comparisons so adding a state is one edit and the test can enumerate it.
 _UNTRUSTED_WAY_MATCH = ("fail", "possible")
+
+# FusionPilot: how long mapdOut may be silent, WHILE THE LOCALIZER HAS A GOOD POSITION, before the
+# process is treated as stalled. See `stalled_s` and mapd_manager's watchdog.
+#
+# 2026-08-30: routes 3f5-3f9 published ZERO mapdOut across 45 segments and ~185,000 moving frames
+# while `managerState` read `mapd_v2 running=True` on every sample, with no exit code, normal memory
+# and normal temperature. Three of those five routes were FRESH BOOTS, so this survives a reboot and
+# survives `restart_if_crash=True` -- that flag watches for the process DYING, and this process does
+# not die. Speed Limit Assist had no limit for all five drives.
+#
+# 60 s is deliberately slow. mapd v2 loads tiles at startup and is legitimately quiet for some
+# seconds; the failure being caught lasted for entire drives, so detection speed is worth nothing
+# and a restart loop would cost a core.
+MAPD_V2_STALL_S = 60.0
+
+
+def _now() -> float:
+  """Indirection so tests can drive the stall clock deterministically. The monotonic clock has
+  ~15 ms granularity on Windows, so several calls inside one test return the SAME value -- which
+  let a mutant that re-anchors the clock on every tick pass the entire suite. That mutant makes
+  MAPD_V2_STALL_S unreachable, i.e. the watchdog never fires at all, so it is the one that most
+  needed catching. A seam is cheaper than an assertion that depends on timer resolution.
+  """
+  return time.monotonic()
 
 
 class MapdV2MapData(BaseMapData):
@@ -49,6 +74,10 @@ class MapdV2MapData(BaseMapData):
     self._last_alive: bool | None = None
     self._last_tile_loaded: bool | None = None
     self._last_way_selection: str | None = None
+
+    # FusionPilot: monotonic clock rather than a tick count, so this does not silently depend on
+    # mapd_manager's Ratekeeper rate. None means "not stalled".
+    self._stall_since: float | None = None
 
   @property
   def mapd_alive(self) -> bool:
@@ -73,6 +102,14 @@ class MapdV2MapData(BaseMapData):
     location = self.sm['liveLocationKalman']
     self.localizer_valid = (location.status == log.LiveLocationKalman.Status.valid) and location.positionGeodetic.valid
 
+    # FusionPilot: only count a stall while we HAVE a position. Offroad the localizer is silent and
+    # mapd v2 correctly publishes nothing -- counting that would bounce the process in the driveway.
+    if self.localizer_valid and not self.mapd_alive:
+      if self._stall_since is None:
+        self._stall_since = _now()
+    else:
+      self._stall_since = None
+
     if self.localizer_valid:
       self.last_bearing = math.degrees(location.calibratedOrientationNED.value[2])
       self.last_position = Coordinate(location.positionGeodetic.value[0], location.positionGeodetic.value[1])
@@ -89,6 +126,16 @@ class MapdV2MapData(BaseMapData):
       params['bearing'] = self.last_bearing
 
     self.mem_params.put("LastGPSPosition", json.dumps(params), block=True)
+
+  @property
+  def stalled_s(self) -> float:
+    """Seconds mapdOut has been silent while the localizer had a valid position. 0.0 if healthy."""
+    return 0.0 if self._stall_since is None else _now() - self._stall_since
+
+  def reset_stall(self) -> None:
+    """Restart the stall clock. Called when a restart has been REQUESTED, so the watchdog gives the
+    new process a full MAPD_V2_STALL_S to come up instead of asking again on the next tick."""
+    self._stall_since = None
 
   def _log_transitions(self) -> None:
     alive = self.mapd_alive

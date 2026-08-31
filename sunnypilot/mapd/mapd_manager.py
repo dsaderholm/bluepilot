@@ -16,12 +16,17 @@ from openpilot.common.params import Params
 from openpilot.common.realtime import Ratekeeper, config_realtime_process
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.selfdrived.alertmanager import set_offroad_alert
-from openpilot.sunnypilot.mapd.live_map_data.mapd_v2_map_data import MapdV2MapData
+from openpilot.sunnypilot.mapd.live_map_data.mapd_v2_map_data import MapdV2MapData, MAPD_V2_STALL_S
 from openpilot.sunnypilot.mapd.live_map_data.osm_map_data import OsmMapData
 from openpilot.system.hardware.hw import Paths
 from openpilot.sunnypilot.mapd import MAPD_PATH, MAPD_V2_OFF, MAPD_V2_ON
 from openpilot.sunnypilot.mapd.mapd_settings import MapdSettingsSync
 from openpilot.sunnypilot.mapd.mapd_installer import VERSION, update_installed_version
+
+# FusionPilot: how many times one drive may bounce a stalled mapd v2. A cap rather than unlimited
+# because the failure it answers has an unknown cause -- if restarting does not fix it, restarting
+# forever is a core spent on nothing, and the ERROR lines are already in the route either way.
+MAPD_V2_MAX_RESTARTS = 5
 
 # PFEIFER - MAPD {{
 params = Params()
@@ -114,6 +119,40 @@ def update_osm_db() -> None:
     mem_params.put("LastGPSPosition", "{}", block=True)
 
 
+def _watch_for_stall(live_map_sp, restart_pending: bool, restarts: int) -> tuple[bool, int]:
+  """Bounce mapd v2 when it is ALIVE but has stopped publishing. Returns the new watchdog state.
+
+  `restart_if_crash=True` on the mapd_v2 process covers the process DYING, which is the 2026-08-24
+  failure (route 000003b4, 441 "not running: mapd_v2" events). It cannot see the 2026-08-30 failure:
+  routes 3f5-3f9 published zero mapdOut across 45 segments while managerState read running=True on
+  every sample, with no exit code -- and three of those routes were fresh boots, so it survives both
+  a reboot and a crash-restart. Speed Limit Assist had no limit at all for five consecutive drives.
+
+  The restart is expressed as a PARAM rather than a signal, because a Python daemon has no business
+  killing a native process manager owns. `mapd_v2_ready` returns False while the request stands, so
+  manager stops mapd_v2; the request is cleared on the next tick and manager starts it again.
+  """
+  if live_map_sp is None:
+    return False, restarts
+
+  if restart_pending:
+    params.put_bool("MapdV2RestartRequest", False)
+    return False, restarts
+
+  if restarts >= MAPD_V2_MAX_RESTARTS or live_map_sp.stalled_s < MAPD_V2_STALL_S:
+    return False, restarts
+
+  restarts += 1
+  cloudlog.error(f"mapd v2: STALLED -- mapdOut silent for {live_map_sp.stalled_s:.0f}s with a valid "
+                 f"position. Requesting restart {restarts}/{MAPD_V2_MAX_RESTARTS}.")
+  params.put_bool("MapdV2RestartRequest", True)
+  # Reset BEFORE the process comes back, so the next check cannot fire until a full MAPD_V2_STALL_S
+  # of fresh silence. Without this the stall clock keeps running through the restart and the budget
+  # is spent in five consecutive ticks.
+  live_map_sp.reset_stall()
+  return True, restarts
+
+
 def main_thread():
   update_installed_version(VERSION, params)
   config_realtime_process([0, 1, 2, 3], 5)
@@ -135,6 +174,13 @@ def main_thread():
   cloudlog.warning(f"mapd: MapdV2={mapd_v2_state}, live map source = "
                    f"{'mapd v2 (mapdOut)' if use_v2 else 'v1 (/dev/shm/params)'}")
 
+  # FusionPilot: stall watchdog state. Cleared here as well as by CLEAR_ON_MANAGER_START, because a
+  # request left set by a mapd_manager that died would keep mapd_v2 stopped for the whole drive --
+  # a watchdog that can disable the thing it guards is worse than none.
+  params.put_bool("MapdV2RestartRequest", False)
+  restart_pending = False
+  restarts = 0
+
   # Create folder needed for OSM
   try:
     os.mkdir(Paths.mapd_root())
@@ -151,6 +197,7 @@ def main_thread():
     live_map_sp.tick()
     if settings_sync is not None:
       settings_sync.tick()
+    restart_pending, restarts = _watch_for_stall(live_map_sp if use_v2 else None, restart_pending, restarts)
     rk.keep_time()
 
 

@@ -402,6 +402,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // said `fail`, which this fork refuses anyway. v2 read HIGHER in 108 of 121 disagreements, so
     // this is not a slower car.
     {"MapdV2", {PERSISTENT | BACKUP, INT, "2"}},
+    {"MapdV2RestartRequest", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION, BOOL}},
     {"MapSpeedLimit", {CLEAR_ON_ONROAD_TRANSITION, FLOAT, "0.0"}},
     {"NextMapSpeedLimit", {CLEAR_ON_ONROAD_TRANSITION, JSON}},
     {"Offroad_OSMUpdateRequired", {CLEAR_ON_MANAGER_START, JSON}},

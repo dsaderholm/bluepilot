@@ -133,8 +133,29 @@ def mapd_v2_ready(started: bool, params: Params, CP: car.CarParams) -> bool:
   of a core and 200 MB for a migration that is ours, not theirs. The binary ships either way; what
   it costs is opt-in.
   """
-  return bool(params.get("MapdV2", return_default=True) > 0 and
-              os.path.exists(MAPD_V2_PATH) and os.path.exists(Paths.mapd_root()))
+  if not (os.path.exists(MAPD_V2_PATH) and os.path.exists(Paths.mapd_root())):
+    return False
+
+  try:
+    if not params.get("MapdV2", return_default=True) > 0:
+      return False
+    # FusionPilot: the stall watchdog's restart request. mapd_manager sets this when mapdOut has
+    # been silent while the localizer had a valid position -- see `_watch_for_stall`. Returning
+    # False is how a Python daemon asks manager to bounce a native process it does not own: manager
+    # stops mapd_v2, mapd_manager clears the request on its next tick, and this goes true again.
+    #
+    # This is NOT redundant with `restart_if_crash=True` on the process. That watches for the
+    # process DYING; on 2026-08-30 mapd_v2 stayed alive with running=True and no exit code and
+    # published nothing for five consecutive drives, three of them from a fresh boot.
+    if params.get_bool("MapdV2RestartRequest"):
+      return False
+  except Exception:
+    # Same first-boot window `mapd_ready` guards: before scons rebuilds params_pyx from
+    # params_keys.h a newly declared key raises UnknownKeyName. Fall back to running v2, which is
+    # the behaviour that existed before the watchdog.
+    return True
+
+  return True
 
 def uploader_ready(started: bool, params: Params, CP: car.CarParams) -> bool:
   if not params.get_bool("OnroadUploads"):
