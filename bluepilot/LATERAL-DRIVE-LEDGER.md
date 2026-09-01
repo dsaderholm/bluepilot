@@ -9,6 +9,12 @@ could use. This file is the durable half of a drive: kilobytes that survive the 
 describes a car that never existed.** So every row records the CONFIGURATION beside the numbers, and
 the confounds are stated rather than left for someone to rediscover.
 
+**The raw logs for every route below are kept**, off the device and outside any git repo, at
+`Sandbox/drivelogs/2026-08-31_600mi_lateral_sweep/` (454 segments, 4.9 GB). They are a settings
+sweep across matched roads including one mid-route change, which is not reproducible once
+`deleter.py` rotates them off the car. Needed only for a question this file does not already
+answer.
+
 ## How each number was produced
 
 | column | tool | conditions |
