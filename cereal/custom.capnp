@@ -736,6 +736,28 @@ struct ControllerStateBP @0xcd96dafb67a082d0 {
   # Only published by Ford BP, so other cars show nothing.
   activeLateralMode @54 :LateralMode;
 
+  # FusionPilot: the angle-mode command and the gain that produced it. NONE of this reached a route
+  # before 2026-09-01, and answering "why did it under-deliver on that curve" therefore needed the
+  # CAN wire decoded (LateralMotionControl 0x3D3 off sendcan) plus a re-implementation of the gain
+  # schedule in a tool -- a number only one tool can produce has never been checked.
+  #
+  # `curvature_factor` is the one that matters. It is an interpolation over |kappa_cmd| between a
+  # low-curvature and a high-curvature gain, so the SAME settings deliver different authority
+  # depending on how bent the road is -- and on 2026-09-01 that cost real curve authority with
+  # nothing in any log able to show it. Publishing kappaCmd beside the two anchors makes the whole
+  # ramp reconstructible from a drive instead of modelled.
+  #
+  # laneCenterCorrection is the lane-centering trim's own contribution, added INTO kappa_cmd
+  # upstream of every limiter. It is the only closed position loop in the lateral stack and the
+  # measured cause of a 29-44 cm straight-road weave, which was likewise invisible in the logs.
+  pathAngleFinal       @55 :Float32;  # rad, the commanded path angle after all limits
+  kappaCmd             @56 :Float32;  # 1/m, commanded curvature -- where on the gain ramp we sat
+  curvatureFactor      @57 :Float32;  # the gain actually applied to kappa_cmd * v_ego
+  laneCenterCorrection @58 :Float32;  # 1/m, lane-centering trim's contribution to kappaCmd
+  gainLowCurv          @59 :Float32;  # ramp anchor at |kappa| = 0.0005, after user factors
+  gainHighCurv         @60 :Float32;  # ramp anchor at the speed-dependent boundary
+  blendWeight          @61 :Float32;  # predicted-vs-desired blend weight actually used this frame
+
   enum LateralMode {
     openpilot @0;  # BP lateral bypassed (disable_BP_lat_UI)
     curvature @1;

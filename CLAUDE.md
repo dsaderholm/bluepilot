@@ -5828,6 +5828,123 @@ re-reasoning from his last sentence rather than from data already on disk.
 **So the target band is 500-2000 m.** Anything proposed for this symptom should be evaluated there,
 not at the extremes.
 
+## 2026-09-01: THE GAIN SCHEDULE IS A SLOPE, AND HIS THREE SYMPTOMS ARE THREE POSITIONS ON IT
+
+He tuned all through a 600-mile drive, landed on `low 0.981 / high 0.51 / damp 0.78 / LC 0.15`, and
+the next morning could not take curves. **Nothing changed overnight** -- and both halves are true.
+
+**READ THE SCHEDULE AS LEVEL + SLOPE, not as three independent knobs:**
+
+    low_gain  = interp(v, [11.18, 31.29], [1.00, 1.00 * damp])           <- the LEVEL
+    high_gain = interp(v, [11.18, 31.29], [1.30 * lof, 1.15 * hif])
+    boundary  = interp(v, [11.18, 31.29], [0.02, 0.0045])
+    curvature_factor = interp(|kappa_cmd|, [0.0005, boundary], [low_gain, high_gain])
+
+`damp` sets the level at low curvature. The GAP between `damp` and `1.15 * hif` sets the slope, and
+the slope is what he has been feeling all along. Incremental gain `cf + kappa*(dcf/dkappa)` at
+85 mph -- how hard the wheel reacts when the PLAN moves, which is what oscillates:
+
+    damp 0.85, high 0.845         straight 0.850  gentle 0.875  sweeper 0.911  tight 0.987  slope +30
+    damp 0.70, high 0.845         straight 0.700  gentle 0.757  sweeper 0.836  tight 1.006  slope +68
+    damp 0.78, high 0.51  (HIS)   straight 0.780  gentle 0.740  sweeper 0.683  tight 0.562  slope -48
+    damp 0.78, high 0.68  (flat)  straight 0.780  gentle 0.780  sweeper 0.780  tight 0.780  slope   0
+
+**His three reports map onto that column exactly, and he found all of it by driving:**
+
+- *lowering dampening fixed straights and caused aggressive ping-pong ON CURVES* -- it drops the
+  level, which STEEPENS the slope (+30 -> +68). Reaction on a 400 m curve rises to 1.006.
+- *lowering the high factor killed ping-pong everywhere but it cannot take tight curves* -- slope
+  inverted to -48. **The quiet curves and the weak curves are the same fact**: the car reacts LESS
+  the more the road bends.
+- *straights still ping-ponged, so I lowered dampening again* -- the level, which is the only thing
+  that acts below the ramp start.
+
+**THE FLAT POINT IS `damp / 1.15` = 0.678 for him, AND IT MOVES WITH DAMPENING** (0.70 -> 0.61,
+0.85 -> 0.74). Changing one knob silently re-tilts the ramp, which is the trap he fell into.
+
+**WHY IT DID NOT TRANSFER, MEASURED:** the whole 600-mile drive was 90-93% curves over 2000 m radius
+at 75+ mph. The morning drive was 68%, with 18% at 1000-2000 m and 11% at 500-1000 m -- **14x the
+sub-1000 m exposure**. He tested `high 0.51` for 600 miles on road where it barely participates: at
+a 2000 m radius, high 0.51 and high 0.87 produce an IDENTICAL 0.780.
+
+**AND HIS STRAIGHT-ROAD PING-PONG WAS NEVER THE HIGH FACTOR.** `curvature_factor` interpolates from
+`|kappa| = 0.0005`, so below that the high factor is OUTSIDE the interpolation and has no effect at
+all. Measured across 254 minutes of straight road at 70+ mph on three routes:
+
+    median |kappa| on straights   0.000053 - 0.000073   (13,600 - 18,900 m radius)
+    peak excursion per window     p50 0.00017-0.00025   p90 0.00030-0.00049  <- still under 0.0005
+    FRAMES above the ramp start   1.0% / 1.2% / 1.9%
+
+**98-99% of his straight-road frames are below the line where the high factor starts**, so 0.51 and
+0.68 are bit-identical there. Straights are the LEVEL (dampening) and the lane-centering loop, and
+nothing else.
+
+### THE STRAIGHT-ROAD WEAVE IS A POSITION LOOP, AND IT IS THE ONLY ONE IN THE STACK
+
+His hypothesis, and it measures out. `lane_center_trim` is a PURE PROPORTIONAL controller --
+`raw = 2*error / lookahead**2`, no derivative term -- with a 0.4 s smoothing filter stacked on the
+car own ~0.39 s lag, added into `kappa_cmd` upstream of every limiter. On straight road at
+70+ mph, hands off:
+
+    route      LC     straight min   median off-centre   p2p swing   crossings/min
+    00000400   0.55       33.0            0.05 m           0.29 m        17.5
+    00000402   0.55       87.9            0.04 m           0.31 m        20.0
+    00000405   0.55      118.0            0.06 m           0.44 m        13.7
+    00000406   0.15        1.1            0.21 m           0.36 m         6.5
+
+**29-44 cm peak-to-peak, crossing lane centre 14-20 times a minute.** For scale, the steering dither
+chased for days elsewhere in this file is 0.10-0.30 DEGREES and provably imperceptible; a third of a
+metre of lane position is not. At LC 0.15 the crossing rate halves and the median offset goes
+4-6 cm -> 21 cm: the classic P-gain trade, less hunting for worse centring.
+
+**So the three knobs have three separate jobs**, and treating them as interchangeable is what made
+the tuning circular:
+
+    weaving on straights    lane_centering_strength_ang   it is the position loop causing it
+    overall firmness        FordHighSpeedDampening_ang    the level
+    curve ping-pong vs
+      tight-curve authority FordHighSpeedFactor_ang       the slope; damp/1.15 is flat
+
+**Dampening was the expensive way to fix a straight-road problem** -- it works only by lowering gain
+everywhere, and it drags the ramp bottom down, which is what produced the +68 curve ping-pong.
+
+**THE DURABLE FIX IS CODE, NOT A SLIDER:** the trim is P-only with ~0.8 s of loop lag. Adding a
+derivative/lead term or cutting `_SMOOTH_TAU_S` would let him run real centring authority without
+the weave, instead of choosing between hunting and sitting 21 cm off centre. Not built.
+
+### AND NONE OF IT WAS ANSWERABLE FROM A ROUTE. THE GAIN IS NOW PUBLISHED.
+
+Every number above needed `LateralMotionControl` (0x3D3) decoded off `sendcan` plus the gain
+schedule RE-IMPLEMENTED in a tool, because `curvature_factor` -- the value that multiplies the
+command -- was computed every frame and published nowhere. `bp_path_angle_final` carried a comment
+saying exactly that and a tool was built around the gap instead of closing it.
+
+**That is this fork oldest bug for the FIFTH time** (after the SCC veto suppressed target, the
+three ICBM readouts, the DEC slow-down fields, and the stop-override funnel). `ControllerStateBP`
+now carries `pathAngleFinal @55`, `kappaCmd @56`, `curvatureFactor @57`, `laneCenterCorrection @58`,
+`gainLowCurv @59`, `gainHighCurv @60`, `blendWeight @61`, so the whole ramp is reconstructible from
+a drive. `test_lateral_telemetry_published.py`, 13/13 mutants killed.
+
+**ORDINALS: `@55+` IS SAFE HERE AND IT WAS CHECKED, NOT ASSUMED.** `ControllerStateBP` is identical
+at `@0..@54` on `icbm-manual-override-and-tuning`, `passing-assist-phase1` AND `radar-detector`, so
+passing assist rebases onto this with no collision -- unlike `CarStateBP`, where the same move would
+have hit `blisRight @5`, which has wire history in every route on the device. **`route-intent` has
+its own `@55` (`accAuthority`) and must renumber at rebase**: its field has no recorded history on
+the car and that branch is not what he drives.
+
+**THREE THINGS THE BUILD ITSELF TAUGHT:**
+
+- **capnp REFUSES `np.float64` AND `np.float32`, verified by assignment.** `curvature_factor` is the
+  return of `numpy.interp`, so it IS an np.float64 -- publishing it uncast is the 2026-08-18
+  plannerd death exactly. The first version of that test used `np.array`, which any binding refuses,
+  and would have passed while the realistic failure went unchecked.
+- **A `hasattr` test cannot tell a wired value from a constant zero**, which is the entire failure
+  being fixed. Deleting the capture in `lateral_angle_ext` survived mutation testing until a test
+  compared each published field against the controller OWN live variable. Non-zero is not enough
+  either: deleting the blend-weight capture leaves the `__init__` seed of 0.5, which is non-zero.
+- **`conftest.py` is not available here** -- `bp_offline_test.py` runs with `--noconftest`, so the
+  pytest fixture-import idiom needs `# noqa: F811` rather than the idiomatic fix.
+
 ### AND `FordHighSpeedDampening_ang` IS THE LARGEST LEVER FOUND ALL SESSION
 
 It multiplies the LOW-CURVATURE high-speed gain only (`low_gain_calc = interp(v, BP, [1.00,

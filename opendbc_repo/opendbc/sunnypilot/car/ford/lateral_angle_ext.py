@@ -176,6 +176,15 @@ class LateralAngleExt:
     self.vlt_extra_max = _VLT_T_EXTRA_MAX
     # Telemetry: final path_angle (rad) after limits (see bp_card_publisher)
     self.bp_path_angle_final = 0.0
+    # FusionPilot: the gain that produced that path_angle, and the lane trim's own contribution.
+    # Published on controllerStateBP -- see custom.capnp. Without these a route cannot say what
+    # authority the car actually had on a given curve, which is exactly the question that needed
+    # the CAN wire decoded on 2026-09-01.
+    self.bp_curvature_factor = 0.0
+    self.bp_lane_center_correction = 0.0
+    self.bp_gain_low_curv = 0.0
+    self.bp_gain_high_curv = 0.0
+    self.bp_blend_weight = _FORD_PATH_ANGLE_BLEND_RATIO_DEFAULT
     # High-speed gain factors: set per-platform via carFingerprint in update_angle_params.
     self.path_angle_gain_lowC_highV = 1.0   # dampening at high speed, low curvature
     self.path_angle_gain_highC_highV = 1.0  # gain at high speed, high curvature
@@ -294,6 +303,11 @@ class LateralAngleExt:
     if not CC.latActive:
       self.path_angle_last = 0.0
       self.bp_path_angle_final = 0.0
+      self.bp_curvature_factor = 0.0
+      self.bp_lane_center_correction = 0.0
+      self.bp_gain_low_curv = 0.0
+      self.bp_gain_high_curv = 0.0
+      self.bp_blend_weight = self.path_angle_blend_ratio
       self.apply_curvature_last = 0.0
       self.b_blend = self.path_angle_blend_ratio
       self.bp_angle_rate_limited = False
@@ -341,6 +355,11 @@ class LateralAngleExt:
     if self.angle_human_turn_active:
       self.path_angle_last = 0.0
       self.bp_path_angle_final = 0.0
+      self.bp_curvature_factor = 0.0
+      self.bp_lane_center_correction = 0.0
+      self.bp_gain_low_curv = 0.0
+      self.bp_gain_high_curv = 0.0
+      self.bp_blend_weight = self.path_angle_blend_ratio
       self.apply_curvature_last = 0.0
       self.b_blend = self.path_angle_blend_ratio
       self.bp_angle_rate_limited = False
@@ -397,6 +416,11 @@ class LateralAngleExt:
       self.angle_stall_blip_active = True
       self.path_angle_last = 0.0
       self.bp_path_angle_final = 0.0
+      self.bp_curvature_factor = 0.0
+      self.bp_lane_center_correction = 0.0
+      self.bp_gain_low_curv = 0.0
+      self.bp_gain_high_curv = 0.0
+      self.bp_blend_weight = self.path_angle_blend_ratio
       self.apply_curvature_last = 0.0
       self.b_blend = self.path_angle_blend_ratio
       self.bp_angle_rate_limited = False
@@ -587,10 +611,15 @@ class LateralAngleExt:
     # changes (see lane_center_trim.py). Applied here, before the deviation clip below, so the
     # trimmed value inherits every limiter this file already applies to kappa_cmd instead of
     # bypassing them.
+    _kappa_before_trim = kappa_cmd
     kappa_cmd = self.lane_center_trim.update(
       kappa_cmd, self.model, v_ego, self.enable_lane_positioning_ang,
       self.custom_path_offset_ang, self.lane_centering_strength_ang,
       CC.latActive, self.lane_change)
+    # FusionPilot: what the trim actually contributed this frame. Measured as the DELTA rather than
+    # read off the trim's own `correction` property, so it stays honest if the trim ever gains an
+    # early return that leaves the property stale.
+    self.bp_lane_center_correction = float(kappa_cmd - _kappa_before_trim)
 
     # BluePilot: clip kappa_cmd to current_curvature (measured, from yaw rate) +- CURVATURE_ERROR,
     # mirroring lateral_curv_ext.py's apply_ford_curvature_limits_ext exactly (same formula, same
@@ -649,6 +678,12 @@ class LateralAngleExt:
 
     # As the curve gets bigger, we will need a little boost to the signal to to not understeer
     self.curvature_factor = interp(abs(kappa_cmd), [0.0005, high_gain_boundary], [self.low_gain_calc, self.high_gain_calc])
+    # FusionPilot: telemetry. Captured HERE rather than recomputed by a reader, so the published
+    # number is the one that multiplied the command and cannot drift from it.
+    self.bp_curvature_factor = float(self.curvature_factor)
+    self.bp_gain_low_curv = float(self.low_gain_calc)
+    self.bp_gain_high_curv = float(self.high_gain_calc)
+    self.bp_blend_weight = float(self.b_blend)
 
     path_angle_calc = kappa_cmd * v_ego * self.curvature_factor
     path_angle = path_angle_calc

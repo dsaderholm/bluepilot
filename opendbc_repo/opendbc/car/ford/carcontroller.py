@@ -275,6 +275,17 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
         self.humanTurnLateralPaused = self.angle_human_turn_active if _angle_mode else False
         self.stallBlipActive = self.angle_stall_blip_active if _angle_mode else False
 
+        # FusionPilot: angle-mode command + gain telemetry for controllerStateBP. Zeroed outside
+        # angle mode rather than left stale -- a held-over value reads as a live one, which is how
+        # a settings snapshot lied about a car that never existed.
+        self.pathAngleFinal = float(getattr(self, 'bp_path_angle_final', 0.0)) if _angle_mode else 0.0
+        self.kappaCmd = float(getattr(self, 'bp_kappa_cmd', 0.0)) if _angle_mode else 0.0
+        self.curvatureFactor = float(getattr(self, 'bp_curvature_factor', 0.0)) if _angle_mode else 0.0
+        self.laneCenterCorrection = float(getattr(self, 'bp_lane_center_correction', 0.0)) if _angle_mode else 0.0
+        self.gainLowCurv = float(getattr(self, 'bp_gain_low_curv', 0.0)) if _angle_mode else 0.0
+        self.gainHighCurv = float(getattr(self, 'bp_gain_high_curv', 0.0)) if _angle_mode else 0.0
+        self.blendWeight = float(getattr(self, 'bp_blend_weight', 0.0)) if _angle_mode else 0.0
+
         # BluePilot: angle-mode human-turn override -- send lateral inactive (mode 0) while the
         # driver manually turns, so the PSCM releases cleanly instead of stalling 2-3 s on
         # re-engage (observed on Mach-E). Panda-clean: every ford.h check has a legitimate
