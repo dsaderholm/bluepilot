@@ -1,24 +1,25 @@
 """FusionPilot: the settings screen tells him where the gain ramp goes flat. Keep that number true.
 
 `curvature_factor` interpolates from `FordHighSpeedDampening_ang` at low curvature to
-`1.15 * FordHighSpeedFactor_ang` at high curvature, so the ramp is flat when those are equal --
-i.e. at High = Dampening / 1.15. That 1.15 is `_GAIN_CAN[1]` in
-opendbc/sunnypilot/car/ford/lateral_angle_ext.py, the high-curvature gain anchor for a non-CAN-FD
-Ford, which is his car.
+`anchor * FordHighSpeedFactor_ang` at high curvature, so the ramp is flat when those are equal --
+i.e. at High = Dampening / anchor. That anchor is the high-curvature gain for the platform, in
+opendbc/sunnypilot/car/ford/angle_gains.py.
 
-The settings screen DUPLICATES it rather than importing it, deliberately: the UI process has no
-business pulling in the car layer to render a description. This file is the price of that choice --
-it is the "make the note executable" rule, because a duplicated constant with a comment saying
-"keep these in sync" is exactly the kind of prose that stops being true the moment the code moves.
+AND THAT ANCHOR IS PLATFORM-SPECIFIC -- 1.15 on CAN, 0.95 on a CAN-FD truck, 1.05 on a CAN-FD
+unibody SUV. The settings screen shipped a hardcoded 1.15 for exactly one commit, which would have
+told an F-150 owner a flat point that is nothing of the sort. It now imports
+`angle_gains.flat_high_speed_factor` and passes its own `carFingerprint`, so there is no duplicated
+constant left to drift -- `angle_gains.py` deliberately imports only `CAR` so the UI process is not
+dragging the car layer in to render a description.
 
-Parsed rather than imported: `bluepilot.py` needs pyray and the whole UI stack, and
-`lateral_angle_ext.py` reaches the opendbc car layer, so neither imports in the offline suite.
+Parsed rather than imported where it must be: `bluepilot.py` needs pyray and the whole UI stack.
 """
 from __future__ import annotations
 
-import ast
 import os
 import re
+
+import pytest
 
 
 def _repo_root() -> str:
@@ -32,33 +33,49 @@ def _repo_root() -> str:
 
 ROOT = _repo_root()
 UI = os.path.join(ROOT, "selfdrive/ui/bp/layouts/settings/bluepilot.py")
-LAT = os.path.join(ROOT, "opendbc_repo/opendbc/sunnypilot/car/ford/lateral_angle_ext.py")
-
-
-def _ui_anchor() -> float:
-  src = open(UI, encoding="utf-8").read()
-  for node in ast.walk(ast.parse(src)):
-    if isinstance(node, ast.Assign):
-      for t in node.targets:
-        if isinstance(t, ast.Name) and t.id == "_HIGH_CURV_GAIN_ANCHOR":
-          return float(ast.literal_eval(node.value))
-  raise AssertionError("_HIGH_CURV_GAIN_ANCHOR is gone from the settings screen")
 
 
 def _gain_can_high() -> float:
-  src = open(LAT, encoding="utf-8").read()
-  m = re.search(r"^_GAIN_CAN\s*=\s*\(([^)]+)\)", src, re.MULTILINE)
-  assert m, "_GAIN_CAN is gone from lateral_angle_ext"
-  low, high = (float(x) for x in m.group(1).split(","))
-  return high
+  from opendbc.sunnypilot.car.ford.angle_gains import GAIN_CAN
+  return GAIN_CAN[1]
 
 
-def test_flat_point_matches_the_gain_schedule():
-  """If these drift, the settings screen confidently prints a flat point that is not flat -- which
-  is worse than printing nothing, because he would tune to it."""
-  assert _ui_anchor() == _gain_can_high(), (
-    f"the settings screen divides Dampening by {_ui_anchor()} but the gain schedule uses "
-    f"{_gain_can_high()} -- the flat point shown on the car is wrong")
+def test_the_screen_uses_the_SHARED_helper_not_its_own_constant():
+  """There must be no second copy of the anchor to drift. A hardcoded number here is how the screen
+  told a CAN-FD owner the wrong flat point for one commit."""
+  src = open(UI, encoding="utf-8").read()
+  assert "flat_high_speed_factor" in src, (
+    "the settings screen no longer uses the shared flat-point helper")
+  assert "_HIGH_CURV_GAIN_ANCHOR" not in src, (
+    "the settings screen has re-introduced its own copy of the gain anchor")
+
+
+def test_the_flat_point_is_PLATFORM_SPECIFIC():
+  """The bug this file exists for. One High value cannot be flat on every Ford, so the screen must
+  ask the car rather than assume his."""
+  from opendbc.car.ford.values import CAR
+  from opendbc.sunnypilot.car.ford.angle_gains import flat_high_speed_factor
+  can = flat_high_speed_factor(0.78, CAR.FORD_FUSION_MK5)
+  truck = flat_high_speed_factor(0.78, CAR.FORD_F_150_MK14)
+  suv = flat_high_speed_factor(0.78, CAR.FORD_MUSTANG_MACH_E_MK1)
+  assert can == pytest.approx(0.78 / 1.15, abs=1e-4)
+  assert truck == pytest.approx(0.78 / 0.95, abs=1e-4)
+  assert suv == pytest.approx(0.78 / 1.05, abs=1e-4)
+  assert len({round(can, 3), round(truck, 3), round(suv, 3)}) == 3, (
+    "the flat point is the same on all three platforms -- the anchor is being ignored")
+
+
+def test_the_screen_passes_the_cars_own_fingerprint():
+  src = open(UI, encoding="utf-8").read()
+  assert "carFingerprint" in src, (
+    "the screen computes a flat point without asking which car it is on")
+
+
+def test_an_unknown_fingerprint_falls_back_to_CAN():
+  """`update_angle_params` has always defaulted anything outside the two CAN-FD sets to the CAN
+  pair. The helper must agree, or the screen and the controller disagree on an unrecognised car."""
+  from opendbc.sunnypilot.car.ford.angle_gains import flat_high_speed_factor
+  assert flat_high_speed_factor(0.78, None) == pytest.approx(0.78 / 1.15, abs=1e-4)
 
 
 def test_the_screen_actually_shows_it():
@@ -84,5 +101,6 @@ def test_the_dampening_default_and_the_factor_default_ARE_the_flat_point():
   damp = default("FordHighSpeedDampening_ang")
   high = default("FordHighSpeedFactor_ang")
   assert high == round(damp / _gain_can_high(), 2), (
-    f"shipped defaults are not the flat pair: Dampening {damp} implies High "
-    f"{damp / _gain_can_high():.3f}, but High ships at {high}")
+    f"shipped defaults are not the flat pair FOR A CAN FORD: Dampening {damp} implies High "
+    f"{damp / _gain_can_high():.3f}, but High ships at {high}. A single default cannot be flat on "
+    "every platform -- see the params_keys.h comment; CAN-FD owners set theirs from the screen.")

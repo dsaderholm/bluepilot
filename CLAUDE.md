@@ -5966,6 +5966,23 @@ so the gains are re-read every frame. `IsOnroad` was checked first.
 Upstream ships 1.0/1.0/1.0 for the three gains and we were ALREADY overriding all three, so this
 costs no new merge surface. The two lane-centering keys are entirely ours.
 
+**AND THE FLAT POINT IS PLATFORM-SPECIFIC, WHICH MATTERS BECAUSE HIS FRIEND RUNS THIS BRANCH.** He
+pointed that out -- *"my friend uses this branch and not passing assist"* -- and it turned a shipped
+default into a defect: the high-curvature anchor is 1.15 on CAN, 0.95 on a CAN-FD truck and 1.05 on
+a CAN-FD unibody SUV, so `0.78 / 0.68` is flat on a Fusion and INVERTED on an F-150 or a Mach-E.
+That is the exact failure the defaults exist to fix, shipped to somebody else's car.
+
+A single default cannot be flat everywhere, so the fix is that the SCREEN now tells each owner their
+own number: `opendbc/sunnypilot/car/ford/angle_gains.py` holds the anchors and
+`flat_high_speed_factor(damp, fingerprint)`, imported by both `lateral_angle_ext` and the settings
+screen. It deliberately imports only `CAR`, so the UI process is not dragging the car layer in to
+render a description, and there is no duplicated constant left to drift. CAN-FD owners set High to
+0.82 (truck) or 0.74 (unibody SUV) at dampening 0.78.
+
+**The settings screen hardcoded 1.15 for exactly one commit.** It would have printed a confident
+flat point that was nothing of the sort, and an owner would have tuned to it -- worse than printing
+nothing. Caught only because he said who else uses the branch.
+
 **AND THE COUPLING IS NOW VISIBLE INSTEAD OF A TRAP.** The two settings descriptions are computed at
 display time -- `float_control_item` takes a lambda, so this is free -- and the High Speed
 Adjustment Factor now names its own flat point for the CURRENT dampening, while the Dampening

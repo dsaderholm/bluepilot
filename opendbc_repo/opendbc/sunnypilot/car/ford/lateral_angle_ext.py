@@ -37,31 +37,25 @@ from numpy import clip, interp
 
 from opendbc.car import DT_CTRL
 from opendbc.car.lateral import apply_std_steer_angle_limits
-from opendbc.car.ford.values import CAR, CarControllerParams
+from opendbc.car.ford.values import CarControllerParams
 from opendbc.sunnypilot.car.ford.lateral_curv_ext import LateralResult
 from opendbc.sunnypilot.car.ford.human_turn import HumanTurnDetector
 from opendbc.sunnypilot.car.ford.lane_center_trim import LaneCenterTrim
+from opendbc.sunnypilot.car.ford.angle_gains import (
+  GAIN_CAN, GAIN_CANFD_BOF, GAIN_CANFD_SUV, CANFD_BOF_CARS, CANFD_SUV_CARS,
+)
 from opendbc.sunnypilot.car.ford.values_ext import BP_ANGLE_LIMITS
 from selfdrive.modeld.constants import ModelConstants
 
-# Hard-coded per-platform gain defaults.
-# CAN vehicles (Escape MK4, Bronco Sport, Explorer, Maverick, Edge)
-_GAIN_CAN         = (1.00, 1.15)
-# CAN-FD body-on-frame trucks (F-150, Lightning, Expedition, Ranger)
-_GAIN_CANFD_BOF   = (0.95, 0.95)
-# CAN-FD unibody SUVs (Mustang Mach-E, Escape MK4.5)
-_GAIN_CANFD_SUV   = (1.00, 1.05)
-
-_CANFD_BOF_CARS = frozenset({
-  CAR.FORD_F_150_MK14,
-  CAR.FORD_F_150_LIGHTNING_MK1,
-  CAR.FORD_EXPEDITION_MK4,
-  CAR.FORD_RANGER_MK2,
-})
-_CANFD_SUV_CARS = frozenset({
-  CAR.FORD_MUSTANG_MACH_E_MK1,
-  CAR.FORD_ESCAPE_MK4_5,
-})
+# Per-platform gain anchors now live in angle_gains.py so the SETTINGS SCREEN can compute the flat
+# point for the car it is running on without importing this module (which needs numpy, modeld
+# constants and the rest of the car layer). Re-exported under the old private names because the
+# existing tests and call sites here use them.
+_GAIN_CAN = GAIN_CAN
+_GAIN_CANFD_BOF = GAIN_CANFD_BOF
+_GAIN_CANFD_SUV = GAIN_CANFD_SUV
+_CANFD_BOF_CARS = CANFD_BOF_CARS
+_CANFD_SUV_CARS = CANFD_SUV_CARS
 
 
 # DBC ``LatCtlPath_An_Actl`` (rad) — panda safety uses the same in ``ford.h``; PSCM enforces in firmware.

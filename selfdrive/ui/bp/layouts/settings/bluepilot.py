@@ -12,6 +12,7 @@ from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.lib.multilang import tr
 from openpilot.system.ui.lib.wifi_manager import WifiManager, Network
 from opendbc.car.ford.values import FordFlags
+from opendbc.sunnypilot.car.ford.angle_gains import flat_high_speed_factor
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.selfdrive.ui.bp.widgets.float_control_item import float_control_item, int_control_item
 from openpilot.selfdrive.ui.bp.widgets.section_header import CollapsibleSectionHeader
@@ -43,24 +44,23 @@ class BluePilotLayout(Widget):
     except UnknownKeyName:
       return default
 
-  # The high-curvature gain anchor for a non-CAN-FD Ford: `_GAIN_CAN[1]` in
-  # opendbc/sunnypilot/car/ford/lateral_angle_ext.py. Duplicated rather than imported so the UI
-  # process does not pull in the car layer -- `test_flat_point_matches_the_gain_schedule` fails if
-  # the two ever drift, which is this fork's "make the note executable" rule.
-  _HIGH_CURV_GAIN_ANCHOR = 1.15
-
   def _flat_high_speed_factor(self) -> float:
-    """The High Speed Adjustment Factor at which gain stops depending on curve size.
+    """The High Speed Adjustment Factor at which gain stops depending on curve size, FOR THIS CAR.
 
-    `curvature_factor` interpolates from `Dampening` at low curvature to `1.15 * HighFactor` at
-    high curvature, so the ramp is flat when those two are equal. IT MOVES WITH DAMPENING, which is
-    the whole reason this is shown: changing one knob silently re-tilts the other's meaning.
+    `curvature_factor` interpolates from `Dampening` at low curvature to `anchor * HighFactor` at
+    high curvature, so the ramp is flat when those are equal. Two things move it, and both used to
+    be invisible: DAMPENING, and the PLATFORM -- the anchor is 1.15 on a CAN Ford, 0.95 on a CAN-FD
+    truck and 1.05 on a CAN-FD unibody SUV.
+
+    A hardcoded 1.15 here (which is what this shipped as for one commit) would tell an F-150 owner
+    a flat point that is nothing of the sort, and they would tune to it.
     """
     try:
       damp = float(self._safe_get(self._params, "FordHighSpeedDampening_ang", 1.0))
     except (TypeError, ValueError):
       damp = 1.0
-    return damp / self._HIGH_CURV_GAIN_ANCHOR
+    fp = getattr(ui_state.CP, "carFingerprint", None) if ui_state.CP is not None else None
+    return flat_high_speed_factor(damp, fp)
 
   def _high_speed_factor_description(self) -> str:
     flat = self._flat_high_speed_factor()
@@ -68,9 +68,9 @@ class BluePilotLayout(Widget):
       "Scales the high-speed steering response in angle mode, and sets how gain CHANGES with curve "
       "size. Above {flat:.2f} the car steers harder the more the road bends (can ping-pong on "
       "curves); below it, the car steers LESS the more the road bends (calm, but weak on tighter "
-      "curves). At {flat:.2f} the response is the same on every curve. That number is your "
-      "Dampening divided by {anchor:.2f}, so it MOVES when you change Dampening."
-    ).format(flat=flat, anchor=self._HIGH_CURV_GAIN_ANCHOR)
+      "curves). At {flat:.2f} the response is the same on every curve. That number depends on your "
+      "Dampening AND on your vehicle, so it MOVES when you change Dampening."
+    ).format(flat=flat)
 
   def _dampening_description(self) -> str:
     flat = self._flat_high_speed_factor()

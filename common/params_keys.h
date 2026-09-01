@@ -650,6 +650,16 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     //
     // Upstream ships 1.0/1.0/1.0. We were already overriding all three, so this costs no new merge
     // surface. See CLAUDE.md "THE GAIN SCHEDULE IS A SLOPE" for the measurements.
+    //
+    // THE FLAT POINT IS PLATFORM-SPECIFIC AND THIS PAIR IS FLAT ONLY ON A CAN FORD. The high-
+    // curvature anchor is 1.15 on CAN (Fusion, Edge, Escape MK4, Bronco Sport, Explorer, Maverick),
+    // 0.95 on CAN-FD trucks and 1.05 on CAN-FD unibody SUVs -- so 0.78 / 0.68 is flat on the first
+    // and INVERTED on the other two, which is the failure these values exist to fix. A single
+    // default cannot be flat everywhere. CAN-FD owners on this branch should read the flat point
+    // off their own settings screen (it is computed per-vehicle) and set High to it:
+    //
+    //     CAN-FD truck        0.78 / 0.95 = 0.82
+    //     CAN-FD unibody SUV  0.78 / 1.05 = 0.74
     {"FordLowSpeedFactor_ang", {PERSISTENT | BACKUP, FLOAT, "0.981"}},
     {"FordHighSpeedFactor_ang", {PERSISTENT | BACKUP, FLOAT, "0.68"}},
     {"FordHighSpeedDampening_ang", {PERSISTENT | BACKUP, FLOAT, "0.78"}},
