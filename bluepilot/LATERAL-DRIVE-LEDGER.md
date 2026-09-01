@@ -41,8 +41,22 @@ Read this before any row below. `low` / `high` / `damp` are `FordLowSpeedFactor_
 | 2026-09-01 | `00000403` seg 0 | 0.981 | 0.51 | **0.85** | 0.55 |
 | 2026-09-01 | `00000406` seg 0 | 0.981 | 0.51 | **0.78** | **0.15** |
 | 2026-09-01 | set by hand, post-drive | 0.981 | **0.68** | 0.78 | 0.15 |
+| 2026-09-01 | set by hand, + damper | 0.981 | 0.68 | 0.78 | 0.15 + **damp 0.3** |
 
-The last row is the flat point (`damp / 1.15` on a CAN Ford) and has NOT been driven yet.
+**Neither of the last two rows has been driven.** The first is the flat point (`damp / 1.15` on a
+CAN Ford). The second adds `lane_centering_damping_ang` 0.3, the lead term on the position loop.
+
+**Two changes at once, and they are readable apart because they act in different places.** The high
+factor is the ramp SLOPE and is bit-identical below `|kappa| = 0.0005`, which is 98-99% of
+straight-road frames -- so it cannot touch the weave. The damper acts on the position loop, and the
+weave metric qualifies on straight road only. Score them with different rows of this file:
+
+    high 0.51 -> 0.68    the delivery-by-radius table, and whether tight curves hold
+    damper 0 -> 0.3      the straight-road weave table (p2p offset, crossings/min)
+
+`lane_centering_strength_ang` is deliberately LEFT at 0.15 for that drive. Raising it in the same
+breath would make the weave numbers unattributable, and 0.5 is the reward if the damper works, not
+part of the test.
 
 ## Roads driven — the reason nothing transferred
 
