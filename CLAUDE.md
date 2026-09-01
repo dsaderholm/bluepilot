@@ -8254,3 +8254,57 @@ stamped ~86 days AFTER "now". No NTP without DNS, and it has not held a GPS time
 route directory names carry wrong dates, and **mtime-vs-route ordering is unusable** until it syncs.
 The rule in this file about converting UTC to MDT still applies, but there is now a second failure
 mode above it: the clock can simply be wrong, so do not order events by timestamp at all right now.
+
+## 2026-09-01: `SUGGESTION_HOLD_S` IS CORRECTLY SIZED. THE ABORTS ARE NOT A THRESHOLD PROBLEM.
+
+Route 00000405, ALL 176 segments decoded on the laptop. The drive was picked because its summary
+looked pathological -- 29 aborts against only 2.2 minutes of `wantedSeconds`, ~13 per wanted-minute,
+where a 146-minute drive the same day managed 2.
+
+**DO NOT RAISE `SUGGESTION_HOLD_S`. The measurement was done and the lever is not there.**
+
+    nothingSlower runs        159
+      RECOVERED (real dips)     7    <- the entire population a longer hold can save
+      genuinely ended         152
+
+    hold   dips covered      deaths delayed
+    0.6      4/7  (57%)      17/152        <- shipped
+    0.9      5/7  (71%)       6/152
+    2.0      7/7 (100%)       4/152
+
+Going from 0.6 s to 2.0 s buys **three aborts on a three-hour drive**, in exchange for holding a
+dead suggestion up to 2 s longer. 0.6 was sized as "four times the longest observed dip" in August
+and it still clears the p75 (0.60 s) of the dips measured here.
+
+### THE SAMPLED ESTIMATE THAT SAID OTHERWISE WAS WRONG TWICE OVER
+
+A 22-of-176 spread first reported "32% of dips exceed the hold" and nearly bought a constant change.
+Both errors are ones this file already warns about:
+
+- **The sample over-represented the cluster.** Every 8th segment happened to include segment 168,
+  which alone holds 9 of the drive's 34 aborts. A spread is not a random sample when the thing being
+  counted is clustered.
+- **IT COUNTED THE WRONG POPULATION.** Every `nothingSlower` run was treated as a recoverable dip.
+  152 of 159 were the episode genuinely ending -- the gate was right and there was nothing to save.
+  **A "dip" is only a dip if the suggestion comes back; otherwise it is the feature working.**
+
+### WHERE THE ABORTS ACTUALLY ARE, all 34 on the full drive
+
+    none            10   unexplained
+    nothingSlower    9   ~3 winnable, see above
+    noLead           9   THE RADAR DROPPED THE TRACK
+    driverActive     4   him taking over -- correct, not a defect
+    noLaneAvailable  1
+
+So the threshold story explains a quarter of it and most of that quarter is not recoverable.
+`noLead` is the interesting one and it is not a tuning question: it is the Ford radar losing the car
+about to be passed, the same sensor whose `radarState` invalidations turned up in the commIssue work.
+Whether those 9 are the lead genuinely leaving or a track dropping and reacquiring is unmeasured.
+
+### AND THE EFFECTIVE DEFICIT BAR SITS INSIDE THE TRAFFIC, WHICH IS HIS SETTING NOT A BUG
+
+`minDeficitActive` measured **8.9 mph** on that drive against a `PassingAssistMinDeficit` of 4,
+because `PassingAssistPatience` is 18 -- a 1.8x multiplier applied at or below the posted limit.
+Lead deficits ran p10 9.1 / p50 9.7, so **62% of frames with a lead sat within +/-1 mph of the bar**.
+That is maximum flicker exposure by construction, and it is a preference: patience 18 means "only
+bother me if a pass is worth 1.8x the usual gain when I am not in a hurry." Name it, never change it.
