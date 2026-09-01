@@ -5945,6 +5945,75 @@ the car and that branch is not what he drives.
 - **`conftest.py` is not available here** -- `bp_offline_test.py` runs with `--noconftest`, so the
   pytest fixture-import idiom needs `# noqa: F811` rather than the idiomatic fix.
 
+### WHAT SHIPPED, 2026-09-01: HIS SET IS NOW THE DEFAULT, AND THE FLAT POINT IS ON SCREEN
+
+He asked for it directly -- *"see if you can change the settings yourself and definitely make these
+the defaults on this fork"* -- which lifts the standing "settings are his, name the toggle, never
+change it" rule FOR THIS CHANGE ONLY. It is not a general licence.
+
+**ON HIS CAR:** `FordHighSpeedFactor_ang` 0.51 -> 0.68, written directly to
+`/data/params/d/`. No reboot needed -- `update_angle_params` is called inside `CarController.update`,
+so the gains are re-read every frame. `IsOnroad` was checked first.
+
+**THE SHIPPED DEFAULTS ARE NOW HIS MEASURED SET, with High at the flat point:**
+
+    FordLowSpeedFactor_ang       0.912 -> 0.981
+    FordHighSpeedFactor_ang      0.828 -> 0.68     (= 0.78 / 1.15, the zero-slope value)
+    FordHighSpeedDampening_ang   0.85  -> 0.78
+    enable_lane_positioning_ang  0     -> 1
+    lane_centering_strength_ang  0.25  -> 0.15
+
+Upstream ships 1.0/1.0/1.0 for the three gains and we were ALREADY overriding all three, so this
+costs no new merge surface. The two lane-centering keys are entirely ours.
+
+**AND THE COUPLING IS NOW VISIBLE INSTEAD OF A TRAP.** The two settings descriptions are computed at
+display time -- `float_control_item` takes a lambda, so this is free -- and the High Speed
+Adjustment Factor now names its own flat point for the CURRENT dampening, while the Dampening
+description warns that changing it moves that number. The divisor is duplicated in the UI rather
+than imported (the UI process should not pull in the car layer) and
+`test_flat_point_matches_the_gain_schedule` fails if it ever drifts from `_GAIN_CAN[1]`.
+
+### `lane_centering_damping_ang` -- BUILT, SHIPS AT 0.0, AND ONE DRIVE SETTLES IT
+
+The trim acts on `error + damping * d(error)/dt` instead of `error` alone. `damping` is a lead TIME
+in seconds, so the sum is still a position and goes through the existing geometry and every existing
+limiter untouched.
+
+**IT SHIPS INERT AND THAT IS THE POINT.** How this loop responds to a lead term is unmeasured, and a
+lateral change shipped on reasoning alone is how the 5.20 m/s^2 event happened. Same reasoning that
+shipped `StockAccStopOverride` off. `test_zero_damping_is_bit_identical_to_the_old_controller`
+proves 0.0 reproduces the pure-P controller EXACTLY, and `test_the_SHIPPED_DEFAULT_is_zero` fails if
+a later edit turns it on without a drive behind it. 10/10 mutants killed.
+
+**Try 0.3.** If the straight-road weave falls without the centring offset going back to 21 cm, the
+damper is right and `lane_centering_strength_ang` can go back up toward 0.5. Score it with the
+weave measurement (lane-centre offset p2p and crossings per minute on straight road at 70+ mph),
+not with `bp_lateral_rate.py` -- a 2 s window cannot see a 6 s position oscillation.
+
+**TWO THINGS THE TESTS GOT WRONG FIRST, both corrected by looking at the numbers:**
+
+- **`abs(damped) < abs(undamped)` IS THE WRONG ASSERTION for a closing error.** A strong lead
+  legitimately drives the command PAST zero and out the other side -- that is what a derivative term
+  does -- so measuring with `abs()` reads correct behaviour as a failure. Assert the SIGNED value.
+- **The window cannot be chosen by where the ERROR turns.** `_error_rate` is filtered
+  (`_DERIV_TAU_S` 0.2 s) and lags the error by a few frames, so the first frames after the turn are
+  still being led the old way. Gate the assertion on the rate the controller ACTUALLY USED.
+
+### THE SUNNYLINK AUDIT HAD A THIRD BLIND SPOT, FOUND THE WAY THE COMMENT SAYS TO FIND ONE
+
+Adding `lane_centering_damping_ang` and watching the audit report **38/38, 0 missing** is what
+surfaced it. `OUR_PREFIXES` is a list of CAPITALISED names -- `Icbm`, `Ford`, `Mapd` and friends --
+and the whole angle-mode lane positioning family is lowercase:
+
+    enable_lane_positioning_ang   custom_path_offset_ang
+    lane_centering_strength_ang   lane_centering_damping_ang
+
+**None of them matched any prefix, so the audit has never once checked them** -- including through
+the entire period this file was recording that three of them reached `settings_ui.json` only by
+hand-editing. Widened; the audit went 38/38 -> 41/42 (1 genuinely missing) -> 42/42 after the YAML
+entry. **Third structural blind spot in that tool, and the third one found by adding a setting and
+watching it stay green rather than by reading it.**
+
 ### AND `FordHighSpeedDampening_ang` IS THE LARGEST LEVER FOUND ALL SESSION
 
 It multiplies the LOW-CURVATURE high-speed gain only (`low_gain_calc = interp(v, BP, [1.00,

@@ -43,6 +43,44 @@ class BluePilotLayout(Widget):
     except UnknownKeyName:
       return default
 
+  # The high-curvature gain anchor for a non-CAN-FD Ford: `_GAIN_CAN[1]` in
+  # opendbc/sunnypilot/car/ford/lateral_angle_ext.py. Duplicated rather than imported so the UI
+  # process does not pull in the car layer -- `test_flat_point_matches_the_gain_schedule` fails if
+  # the two ever drift, which is this fork's "make the note executable" rule.
+  _HIGH_CURV_GAIN_ANCHOR = 1.15
+
+  def _flat_high_speed_factor(self) -> float:
+    """The High Speed Adjustment Factor at which gain stops depending on curve size.
+
+    `curvature_factor` interpolates from `Dampening` at low curvature to `1.15 * HighFactor` at
+    high curvature, so the ramp is flat when those two are equal. IT MOVES WITH DAMPENING, which is
+    the whole reason this is shown: changing one knob silently re-tilts the other's meaning.
+    """
+    try:
+      damp = float(self._safe_get(self._params, "FordHighSpeedDampening_ang", 1.0))
+    except (TypeError, ValueError):
+      damp = 1.0
+    return damp / self._HIGH_CURV_GAIN_ANCHOR
+
+  def _high_speed_factor_description(self) -> str:
+    flat = self._flat_high_speed_factor()
+    return tr(
+      "Scales the high-speed steering response in angle mode, and sets how gain CHANGES with curve "
+      "size. Above {flat:.2f} the car steers harder the more the road bends (can ping-pong on "
+      "curves); below it, the car steers LESS the more the road bends (calm, but weak on tighter "
+      "curves). At {flat:.2f} the response is the same on every curve. That number is your "
+      "Dampening divided by {anchor:.2f}, so it MOVES when you change Dampening."
+    ).format(flat=flat, anchor=self._HIGH_CURV_GAIN_ANCHOR)
+
+  def _dampening_description(self) -> str:
+    flat = self._flat_high_speed_factor()
+    return tr(
+      "Overall steering firmness at high speed on gentle roads. If oversteering, reduce. If "
+      "understeering, increase. Note this also moves the High Speed Adjustment Factor's flat "
+      "point, which is now {flat:.2f} -- lowering Dampening alone makes the car react harder the "
+      "more the road bends."
+    ).format(flat=flat)
+
   @staticmethod
   def _safe_get(params: Params, key: str, default=None):
     """Get param; return default if key is unknown (e.g. dev environment with reduced params)."""
@@ -563,7 +601,7 @@ class BluePilotLayout(Widget):
     )
     self._high_speed_curv_factor = float_control_item(
       lambda: tr("High Speed Adjustment Factor"),
-      lambda: tr("Scales the high-speed steering response in angle mode. Adjust for personal feel. Default 1.0."),
+      self._high_speed_factor_description,
       param="FordHighSpeedFactor_ang",
       min_value=0.5,
       max_value=1.5,
@@ -572,7 +610,7 @@ class BluePilotLayout(Widget):
     )
     self._high_speed_dampening = float_control_item(
       lambda: tr("High Speed Low Curve Adjustment Factor"),
-      lambda: tr("Tune adjustment factor for low curve straightaways (highways) at high speeds. If oversteering, reduce. If understeering, increase"),
+      self._dampening_description,
       param="FordHighSpeedDampening_ang",
       min_value=0.25,
       max_value=1.25,
@@ -604,6 +642,16 @@ class BluePilotLayout(Widget):
       lambda: tr("Lane Centering Strength"),
       lambda: tr("How much authority the lane centering trim has vs. the model's own path (0.0-1.0)."),
       param="lane_centering_strength_ang",
+      min_value=0.0,
+      max_value=1.0,
+      step=0.05,
+      enabled=lambda: self._safe_get_bool(self._params, "enable_lane_positioning_ang"),
+      icon="chffr_wheel.png"
+    )
+    self._lane_centering_damping_ang = float_control_item(
+      lambda: tr("Lane Centering Damping"),
+      lambda: tr('Damps the lane centering loop instead of weakening it. Lane centering is a pure proportional controller, so it can weave on straight roads -- measured at 29-44 cm side to side. This is a lead time in seconds acting on how fast the error is changing; 0 is the original behaviour. Try 0.3 to get centring authority back without the weave. Not yet tested on the road.'),
+      param="lane_centering_damping_ang",
       min_value=0.0,
       max_value=1.0,
       step=0.05,
@@ -698,6 +746,7 @@ class BluePilotLayout(Widget):
       self._enable_lane_positioning_ang,
       self._custom_path_offset_ang,
       self._lane_centering_strength_ang,
+      self._lane_centering_damping_ang,
     ]
     angle_header = CollapsibleSectionHeader(tr("Angle Tuning"))
     angle_header.set_items(angle_items)
@@ -951,6 +1000,7 @@ class BluePilotLayout(Widget):
     self._enable_lane_positioning_ang.action_item.set_enabled(is_angle)
     self._custom_path_offset_ang.action_item.set_enabled(is_angle and lane_pos_ang)
     self._lane_centering_strength_ang.action_item.set_enabled(is_angle and lane_pos_ang)
+    self._lane_centering_damping_ang.action_item.set_enabled(is_angle and lane_pos_ang)
     # Curvature-mode items: always visible (Curvature Tuning section), greyed out when angle mode is active
     self._lane_change_factor_high_curv.action_item.set_enabled(is_curv)
     self._enable_human_turn_detection.action_item.set_enabled(is_curv)

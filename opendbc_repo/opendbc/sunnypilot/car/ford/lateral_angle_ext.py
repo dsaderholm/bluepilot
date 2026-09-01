@@ -205,6 +205,9 @@ class LateralAngleExt:
     self.enable_lane_positioning_ang = False
     self.custom_path_offset_ang = 0.0
     self.lane_centering_strength_ang = 0.25
+    # FusionPilot: lead time (s) for the lane-centering position loop. 0.0 is the pure-P controller
+    # this shipped as -- see lane_center_trim.py for why it exists and why it ships inert.
+    self.lane_centering_damping_ang = 0.0
     # Telemetry: variable curvature lookup time used this frame (s)
     self.bp_curvature_lookup_time = _VLT_T_EXTRA_MAX + 0.3725  # warm start at ~0.5s
     # BluePilot: error-clipped kappa path_angle was derived from -- carcontroller.py reads this as
@@ -273,6 +276,7 @@ class LateralAngleExt:
       for attr, key, min_value, max_value in (
         ("custom_path_offset_ang", "custom_path_offset_ang", -0.5, 0.5),
         ("lane_centering_strength_ang", "lane_centering_strength_ang", 0.0, 1.0),
+        ("lane_centering_damping_ang", "lane_centering_damping_ang", 0.0, 1.0),
       ):
         try:
           raw = params.get(key, return_default=True)
@@ -615,7 +619,7 @@ class LateralAngleExt:
     kappa_cmd = self.lane_center_trim.update(
       kappa_cmd, self.model, v_ego, self.enable_lane_positioning_ang,
       self.custom_path_offset_ang, self.lane_centering_strength_ang,
-      CC.latActive, self.lane_change)
+      CC.latActive, self.lane_change, self.lane_centering_damping_ang)
     # FusionPilot: what the trim actually contributed this frame. Measured as the DELTA rather than
     # read off the trim's own `correction` property, so it stays honest if the trim ever gains an
     # early return that leaves the property stale.

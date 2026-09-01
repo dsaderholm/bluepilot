@@ -79,16 +79,46 @@ _SMOOTH_TAU_S = 0.4
 # typical confidence-transition jump (a fraction of that) resolves proportionally faster.
 _CORRECTION_ROC_PER_TICK = 0.00015
 
+# FusionPilot: DERIVATIVE (lead) term for the position loop. `lane_centering_damping_ang` is a lead
+# TIME in seconds, so the controller acts on `error + damping * d(error)/dt` -- dimensionally the
+# same quantity as `error`, which is why it can go straight through the existing geometry.
+#
+# WHY IT EXISTS. This trim is the ONLY closed loop in the whole lateral stack, and it is PURE
+# PROPORTIONAL: no derivative term at all, with `_SMOOTH_TAU_S` 0.4 s of filter lag stacked on the
+# car's own ~0.39 s of steering lag. A P controller with ~0.8 s of loop lag rings, and it does --
+# measured on straight road at 70+ mph, hands off:
+#
+#     strength 0.55   29-44 cm peak-to-peak, crossing lane centre 14-20 times a minute
+#     strength 0.15   crossings halved, median offset 4-6 cm -> 21 cm
+#
+# Lowering the gain is the only lever available today and it buys calm with centring accuracy.
+# Damping the loop is the fix that does not make that trade.
+#
+# SHIPS AT 0.0, WHICH IS EXACTLY THE OLD BEHAVIOUR, and the reason is about the car rather than
+# caution about the code: how this loop responds to a lead term is UNMEASURED. The same reasoning
+# shipped `StockAccStopOverride` off. `test_zero_damping_is_bit_identical_to_the_old_controller`
+# pins that a 0.0 value cannot change a single command.
+_DERIV_TAU_S = 0.2        # filter on d(error)/dt -- model position is noisy and D amplifies noise
+_MAX_LEAD_M = 0.5         # clamp on the lead contribution, metres, so D can never dominate P
+_MAX_DAMPING_S = 1.0      # ceiling on the user value
+_TICK_S = 0.05            # BluePilot lateral tick is 20 Hz, same assumption as _SMOOTH_TAU_S above
+
 
 class LaneCenterTrim:
   def __init__(self):
     self._correction = 0.0
+    # FusionPilot: derivative-term state. `None` means "no previous sample", which must produce a
+    # ZERO derivative rather than a huge one on the first frame after a reset.
+    self._error_last: float | None = None
+    self._error_rate = 0.0
 
   def reset(self) -> None:
     self._correction = 0.0
+    self._error_last = None
+    self._error_rate = 0.0
 
   def update(self, kappa_cmd: float, model, v_ego: float, enabled: bool, offset: float,
-             gain: float, lat_active: bool, lane_change: bool) -> float:
+             gain: float, lat_active: bool, lane_change: bool, damping: float = 0.0) -> float:
     """Returns ``kappa_cmd``, nudged toward (lane-blend target + ``offset``) when active.
 
     ``offset`` (m): positive shifts the target right, negative left (same sign convention as
@@ -114,7 +144,7 @@ class LaneCenterTrim:
       self.reset()
       return kappa_cmd
 
-    valid, raw = self._raw_correction(model, v_ego, offset)
+    valid, raw = self._raw_correction(model, v_ego, offset, damping)
     if not valid:
       # Only true failure case now: model.position itself is unusable, so there's no baseline
       # to offset from at all (see _raw_correction). Lane-line-only failures fall back to the
@@ -137,7 +167,7 @@ class LaneCenterTrim:
     """Telemetry: last applied correction (1/m)."""
     return self._correction
 
-  def _raw_correction(self, model, v_ego: float, offset: float) -> tuple[bool, float]:
+  def _raw_correction(self, model, v_ego: float, offset: float, damping: float = 0.0) -> tuple[bool, float]:
     try:
       pos_x = np.asarray(model.position.x, dtype=float)
       pos_y = np.asarray(model.position.y, dtype=float)
@@ -158,7 +188,21 @@ class LaneCenterTrim:
     target_y = model_y * (1.0 - scale) + laneline_center_y * scale
 
     error = (target_y + offset) - model_y
-    raw = 2.0 * error / (lookahead ** 2)
+
+    # FusionPilot: PD lead. Tracked unconditionally so the rate estimate is warm the moment the
+    # user turns damping on mid-drive, rather than starting from a cold filter mid-corner.
+    if self._error_last is None:
+      rate_raw = 0.0
+    else:
+      rate_raw = (error - self._error_last) / _TICK_S
+    self._error_last = error
+    d_alpha = 1.0 - np.exp(-_TICK_S / _DERIV_TAU_S)
+    self._error_rate = float(d_alpha * rate_raw + (1.0 - d_alpha) * self._error_rate)
+
+    damping = float(np.clip(damping, 0.0, _MAX_DAMPING_S)) if np.isfinite(damping) else 0.0
+    lead = float(np.clip(damping * self._error_rate, -_MAX_LEAD_M, _MAX_LEAD_M))
+
+    raw = 2.0 * (error + lead) / (lookahead ** 2)
     return True, float(raw)
 
   def _laneline_blend(self, model, lookahead: float) -> tuple[float, float]:

@@ -115,6 +115,8 @@ DEFAULT_TARGETS = [
   "sunnypilot/mapd/tests/test_mapd_v2_restarts.py",
   "sunnypilot/mapd/tests/test_mapd_v2_stall_watchdog.py",
   "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_lateral_telemetry_published.py",
+  "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_lane_center_damping.py",
+  "selfdrive/ui/tests/test_lateral_settings_flat_point.py",
   "sunnypilot/mapd/tests/test_mapd_v2_binary.py",
   "sunnypilot/mapd/tests/test_mapd_settings.py",
   # The value behind every +/- control. The widget needs pyray and cannot collect here, which

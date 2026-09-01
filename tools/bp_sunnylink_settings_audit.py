@@ -57,7 +57,13 @@ SETTINGS_UI_JSON = ROOT / "sunnypilot/sunnylink/settings_ui.json"
 # hand-edited the JSON -- and regenerating from the YAML source would have silently deleted them.
 # Widened to bare "Ford", which subsumes both of the old entries and every lateral tuning key.
 OUR_PREFIXES = ("Icbm", "SmartCruiseControl", "SpeedLimit", "PassingAssist", "RadarDetector",
-                "Mapd", "StockAcc", "Ford")
+                "Mapd", "StockAcc", "Ford",
+                # THIRD BLIND SPOT, found 2026-09-01 the way the comment above says to find one:
+                # by adding a setting and watching the audit stay green. The angle-mode lane
+                # positioning family is lowercase and matched NO prefix, so all four of its params
+                # were invisible here -- the audit has never once checked them, including while
+                # CLAUDE.md was recording that three of them reached settings_ui.json only by hand.
+                "lane_centering", "enable_lane_positioning", "custom_path_offset")
 
 # NOT a gap in the list above, and not to be "fixed" by adding it. `BPSentryEnabled` is the fork's
 # crash-reporting KILL SWITCH -- upstream inits Sentry unconditionally and this fork returns early
