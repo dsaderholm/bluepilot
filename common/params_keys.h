@@ -659,7 +659,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // NOT derived from this car's angle gains, and that is settled rather than assumed. Two
     // earlier attempts got it wrong in opposite directions, so the reasoning is recorded here.
     //
-    // The owner runs FordLowSpeedFactor_ang = 0.912 / FordHighSpeedFactor_ang = 0.828. Per
+    // The owner runs FordLowSpeedFactor_ang = 0.981 / FordHighSpeedFactor_ang = 0.68. Per
     // BluePilot's own writeup of angle control, that gain is a CALIBRATION: path_angle is derived
     // as curvature * v_ego * gain, which is pure geometry, and the gain exists only because the
     // PSCM continuously compensates for yaw, sway and roll against a factory model of the vehicle
@@ -784,9 +784,44 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // Below 1.0 means the wheel turns LESS for the same commanded geometry. At a correctly
     // calibrated gain the car tracks the path it was asked to. It does NOT mean the car
     // under-turns and needs to arrive slower -- see the SCC sensitivity comment above.
-    {"FordLowSpeedFactor_ang", {PERSISTENT | BACKUP, FLOAT, "0.912"}},
-    {"FordHighSpeedFactor_ang", {PERSISTENT | BACKUP, FLOAT, "0.828"}},
-    {"FordHighSpeedDampening_ang", {PERSISTENT | BACKUP, FLOAT, "0.85"}},
+    //
+    // 2026-09-01: THESE THREE ARE NOT INDEPENDENT. Read them as a LEVEL and a SLOPE.
+    //
+    //   low_gain  = interp(v, [11.18, 31.29], [1.00, 1.00 * Dampening])      <- the LEVEL
+    //   high_gain = interp(v, [11.18, 31.29], [1.30 * Low, 1.15 * High])
+    //   curvature_factor = interp(|kappa_cmd|, [0.0005, boundary], [low_gain, high_gain])
+    //
+    // Dampening sets the gain at low curvature. The GAP between it and 1.15 * High sets how the
+    // gain CHANGES as the road bends, and that slope is what the owner spent a 600-mile drive
+    // chasing without knowing it was one number:
+    //
+    //   slope steeply POSITIVE   the wheel reacts harder the more the road bends -> ping-pong on
+    //                            curves. This is what lowering Dampening alone produces.
+    //   slope NEGATIVE           the wheel reacts LESS the more the road bends -> quiet curves and
+    //                            no authority on tight ones. Same fact, not two.
+    //   slope ZERO               response independent of curve size, at High = Dampening / 1.15.
+    //
+    // The defaults below are HIS measured set with High at that flat point (0.78 / 1.15 = 0.678),
+    // so the shipped configuration has no curvature-dependent gain at all. Chosen because the
+    // alternative is a schedule whose flat point MOVES whenever Dampening is touched -- change one
+    // knob and the ramp silently re-tilts, which is exactly how a setting that was perfect for
+    // 600 miles could not take curves the next morning.
+    //
+    // Upstream ships 1.0/1.0/1.0. We were already overriding all three, so this costs no new merge
+    // surface. See CLAUDE.md "THE GAIN SCHEDULE IS A SLOPE" for the measurements.
+    //
+    // THE FLAT POINT IS PLATFORM-SPECIFIC AND THIS PAIR IS FLAT ONLY ON A CAN FORD. The high-
+    // curvature anchor is 1.15 on CAN (Fusion, Edge, Escape MK4, Bronco Sport, Explorer, Maverick),
+    // 0.95 on CAN-FD trucks and 1.05 on CAN-FD unibody SUVs -- so 0.78 / 0.68 is flat on the first
+    // and INVERTED on the other two, which is the failure these values exist to fix. A single
+    // default cannot be flat everywhere. CAN-FD owners on this branch should read the flat point
+    // off their own settings screen (it is computed per-vehicle) and set High to it:
+    //
+    //     CAN-FD truck        0.78 / 0.95 = 0.82
+    //     CAN-FD unibody SUV  0.78 / 1.05 = 0.74
+    {"FordLowSpeedFactor_ang", {PERSISTENT | BACKUP, FLOAT, "0.981"}},
+    {"FordHighSpeedFactor_ang", {PERSISTENT | BACKUP, FLOAT, "0.68"}},
+    {"FordHighSpeedDampening_ang", {PERSISTENT | BACKUP, FLOAT, "0.78"}},
     {"BPLateralSchemeParamsMigratedV1", {PERSISTENT | BACKUP, STRING, "0"}},
     // STRING, not BOOL -- see the note in params_migration: a BOOL marker made put("1") raise, so
     // the marker never stuck and the migration re-ran (and re-clobbered) on every boot.
@@ -794,9 +829,33 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
 
     // BluePilot: angle-mode lane centering trim (advanced lane positioning) -- see
     // opendbc/sunnypilot/car/ford/lane_center_trim.py.
-    {"enable_lane_positioning_ang", {PERSISTENT | BACKUP, BOOL, "0"}},
+    //
+    // ON by default as of 2026-09-01: it is a feature this fork carries, and a feature defaulting
+    // off is a recommendation not to use it.
+    //
+    // STRENGTH IS THE ONE KNOB THAT OWNS STRAIGHT-ROAD WEAVING, and 0.25 -> 0.15 is measured, not
+    // preference. The trim is a PURE PROPORTIONAL position controller with no derivative term, and
+    // it is the only closed loop in the whole lateral stack -- so it rings. On straight road at
+    // 70+ mph, hands off:
+    //
+    //   strength 0.55   29-44 cm peak-to-peak, crossing lane centre 14-20 times a minute
+    //   strength 0.15   crossings halved, median offset 4-6 cm -> 21 cm
+    //
+    // That is the classic P-gain trade: less hunting bought with worse centring. 0.15 is the side
+    // of it he chose after driving both. The durable fix is damping the loop rather than starving
+    // it -- see lane_centering_damping_ang.
+    {"enable_lane_positioning_ang", {PERSISTENT | BACKUP, BOOL, "1"}},
     {"custom_path_offset_ang", {PERSISTENT | BACKUP, FLOAT, "0.0"}},
-    {"lane_centering_strength_ang", {PERSISTENT | BACKUP, FLOAT, "0.25"}},
+    {"lane_centering_strength_ang", {PERSISTENT | BACKUP, FLOAT, "0.15"}},
+    // FusionPilot: lead time in SECONDS for the lane-centering position loop -- it acts on
+    // `error + damping * d(error)/dt` instead of error alone. 0.0 is the pure-proportional
+    // controller this has always been.
+    //
+    // Ships at 0.0 deliberately. The loop demonstrably rings (29-44 cm of straight-road weave at
+    // strength 0.55), and damping is the textbook answer -- but how THIS loop responds to a lead
+    // term is unmeasured, and a lateral change shipped on reasoning alone is how the 5.20 m/s^2
+    // event happened. One setting away, and one drive settles it.
+    {"lane_centering_damping_ang", {PERSISTENT | BACKUP, FLOAT, "0.0"}},
 
     {"disable_BP_lat_UI", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"disable_BP_long_UI", {PERSISTENT | BACKUP, BOOL, "0"}},

@@ -39,6 +39,9 @@ class LateralLayoutMici(NavScroller):
     self.lane_centering_strength_ang = BigParamFloatControl(
       "Lane Centering Strength", "lane_centering_strength_ang", min=0.0, max=1.0, step=0.05,
     )
+    self.lane_centering_damping_ang = BigParamFloatControl(
+      "Lane Centering Damping", "lane_centering_damping_ang", min=0.0, max=1.0, step=0.05,
+    )
 
     # --- Always-visible items ---
     self.disable_BP_lat = BigParamControlBP("Disable BP Lateral Control", "disable_BP_lat_UI")
@@ -88,6 +91,7 @@ class LateralLayoutMici(NavScroller):
       self.enable_lane_positioning_ang,
       self.custom_path_offset_ang,
       self.lane_centering_strength_ang,
+      self.lane_centering_damping_ang,
       self.disable_lane_change_under_speed,
       self.blinker_min_speed,
       self.lane_change_factor_high_curv,
@@ -137,6 +141,8 @@ class LateralLayoutMici(NavScroller):
     self.custom_path_offset_ang.set_enabled(lane_pos_ang)
     self.lane_centering_strength_ang.set_visible(is_angle)
     self.lane_centering_strength_ang.set_enabled(lane_pos_ang)
+    self.lane_centering_damping_ang.set_visible(is_angle)
+    self.lane_centering_damping_ang.set_enabled(lane_pos_ang)
     self.blinker_min_speed.set_enabled(ui_state.params.get_bool("BlinkerPauseLaneChange"))
     for item in (
       self.lane_change_factor_high_curv,

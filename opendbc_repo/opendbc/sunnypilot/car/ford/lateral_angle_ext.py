@@ -37,31 +37,25 @@ from numpy import clip, interp
 
 from opendbc.car import DT_CTRL
 from opendbc.car.lateral import apply_std_steer_angle_limits
-from opendbc.car.ford.values import CAR, CarControllerParams
+from opendbc.car.ford.values import CarControllerParams
 from opendbc.sunnypilot.car.ford.lateral_curv_ext import LateralResult
 from opendbc.sunnypilot.car.ford.human_turn import HumanTurnDetector
 from opendbc.sunnypilot.car.ford.lane_center_trim import LaneCenterTrim
+from opendbc.sunnypilot.car.ford.angle_gains import (
+  GAIN_CAN, GAIN_CANFD_BOF, GAIN_CANFD_SUV, CANFD_BOF_CARS, CANFD_SUV_CARS,
+)
 from opendbc.sunnypilot.car.ford.values_ext import BP_ANGLE_LIMITS
 from selfdrive.modeld.constants import ModelConstants
 
-# Hard-coded per-platform gain defaults.
-# CAN vehicles (Escape MK4, Bronco Sport, Explorer, Maverick, Edge)
-_GAIN_CAN         = (1.00, 1.15)
-# CAN-FD body-on-frame trucks (F-150, Lightning, Expedition, Ranger)
-_GAIN_CANFD_BOF   = (0.95, 0.95)
-# CAN-FD unibody SUVs (Mustang Mach-E, Escape MK4.5)
-_GAIN_CANFD_SUV   = (1.00, 1.05)
-
-_CANFD_BOF_CARS = frozenset({
-  CAR.FORD_F_150_MK14,
-  CAR.FORD_F_150_LIGHTNING_MK1,
-  CAR.FORD_EXPEDITION_MK4,
-  CAR.FORD_RANGER_MK2,
-})
-_CANFD_SUV_CARS = frozenset({
-  CAR.FORD_MUSTANG_MACH_E_MK1,
-  CAR.FORD_ESCAPE_MK4_5,
-})
+# Per-platform gain anchors now live in angle_gains.py so the SETTINGS SCREEN can compute the flat
+# point for the car it is running on without importing this module (which needs numpy, modeld
+# constants and the rest of the car layer). Re-exported under the old private names because the
+# existing tests and call sites here use them.
+_GAIN_CAN = GAIN_CAN
+_GAIN_CANFD_BOF = GAIN_CANFD_BOF
+_GAIN_CANFD_SUV = GAIN_CANFD_SUV
+_CANFD_BOF_CARS = CANFD_BOF_CARS
+_CANFD_SUV_CARS = CANFD_SUV_CARS
 
 
 # DBC ``LatCtlPath_An_Actl`` (rad) — panda safety uses the same in ``ford.h``; PSCM enforces in firmware.
@@ -176,6 +170,15 @@ class LateralAngleExt:
     self.vlt_extra_max = _VLT_T_EXTRA_MAX
     # Telemetry: final path_angle (rad) after limits (see bp_card_publisher)
     self.bp_path_angle_final = 0.0
+    # FusionPilot: the gain that produced that path_angle, and the lane trim's own contribution.
+    # Published on controllerStateBP -- see custom.capnp. Without these a route cannot say what
+    # authority the car actually had on a given curve, which is exactly the question that needed
+    # the CAN wire decoded on 2026-09-01.
+    self.bp_curvature_factor = 0.0
+    self.bp_lane_center_correction = 0.0
+    self.bp_gain_low_curv = 0.0
+    self.bp_gain_high_curv = 0.0
+    self.bp_blend_weight = _FORD_PATH_ANGLE_BLEND_RATIO_DEFAULT
     # High-speed gain factors: set per-platform via carFingerprint in update_angle_params.
     self.path_angle_gain_lowC_highV = 1.0   # dampening at high speed, low curvature
     self.path_angle_gain_highC_highV = 1.0  # gain at high speed, high curvature
@@ -196,6 +199,9 @@ class LateralAngleExt:
     self.enable_lane_positioning_ang = False
     self.custom_path_offset_ang = 0.0
     self.lane_centering_strength_ang = 0.25
+    # FusionPilot: lead time (s) for the lane-centering position loop. 0.0 is the pure-P controller
+    # this shipped as -- see lane_center_trim.py for why it exists and why it ships inert.
+    self.lane_centering_damping_ang = 0.0
     # Telemetry: variable curvature lookup time used this frame (s)
     self.bp_curvature_lookup_time = _VLT_T_EXTRA_MAX + 0.3725  # warm start at ~0.5s
     # BluePilot: error-clipped kappa path_angle was derived from -- carcontroller.py reads this as
@@ -264,6 +270,7 @@ class LateralAngleExt:
       for attr, key, min_value, max_value in (
         ("custom_path_offset_ang", "custom_path_offset_ang", -0.5, 0.5),
         ("lane_centering_strength_ang", "lane_centering_strength_ang", 0.0, 1.0),
+        ("lane_centering_damping_ang", "lane_centering_damping_ang", 0.0, 1.0),
       ):
         try:
           raw = params.get(key, return_default=True)
@@ -294,6 +301,11 @@ class LateralAngleExt:
     if not CC.latActive:
       self.path_angle_last = 0.0
       self.bp_path_angle_final = 0.0
+      self.bp_curvature_factor = 0.0
+      self.bp_lane_center_correction = 0.0
+      self.bp_gain_low_curv = 0.0
+      self.bp_gain_high_curv = 0.0
+      self.bp_blend_weight = self.path_angle_blend_ratio
       self.apply_curvature_last = 0.0
       self.b_blend = self.path_angle_blend_ratio
       self.bp_angle_rate_limited = False
@@ -341,6 +353,11 @@ class LateralAngleExt:
     if self.angle_human_turn_active:
       self.path_angle_last = 0.0
       self.bp_path_angle_final = 0.0
+      self.bp_curvature_factor = 0.0
+      self.bp_lane_center_correction = 0.0
+      self.bp_gain_low_curv = 0.0
+      self.bp_gain_high_curv = 0.0
+      self.bp_blend_weight = self.path_angle_blend_ratio
       self.apply_curvature_last = 0.0
       self.b_blend = self.path_angle_blend_ratio
       self.bp_angle_rate_limited = False
@@ -397,6 +414,11 @@ class LateralAngleExt:
       self.angle_stall_blip_active = True
       self.path_angle_last = 0.0
       self.bp_path_angle_final = 0.0
+      self.bp_curvature_factor = 0.0
+      self.bp_lane_center_correction = 0.0
+      self.bp_gain_low_curv = 0.0
+      self.bp_gain_high_curv = 0.0
+      self.bp_blend_weight = self.path_angle_blend_ratio
       self.apply_curvature_last = 0.0
       self.b_blend = self.path_angle_blend_ratio
       self.bp_angle_rate_limited = False
@@ -587,10 +609,15 @@ class LateralAngleExt:
     # changes (see lane_center_trim.py). Applied here, before the deviation clip below, so the
     # trimmed value inherits every limiter this file already applies to kappa_cmd instead of
     # bypassing them.
+    _kappa_before_trim = kappa_cmd
     kappa_cmd = self.lane_center_trim.update(
       kappa_cmd, self.model, v_ego, self.enable_lane_positioning_ang,
       self.custom_path_offset_ang, self.lane_centering_strength_ang,
-      CC.latActive, self.lane_change)
+      CC.latActive, self.lane_change, self.lane_centering_damping_ang)
+    # FusionPilot: what the trim actually contributed this frame. Measured as the DELTA rather than
+    # read off the trim's own `correction` property, so it stays honest if the trim ever gains an
+    # early return that leaves the property stale.
+    self.bp_lane_center_correction = float(kappa_cmd - _kappa_before_trim)
 
     # BluePilot: clip kappa_cmd to current_curvature (measured, from yaw rate) +- CURVATURE_ERROR,
     # mirroring lateral_curv_ext.py's apply_ford_curvature_limits_ext exactly (same formula, same
@@ -649,6 +676,12 @@ class LateralAngleExt:
 
     # As the curve gets bigger, we will need a little boost to the signal to to not understeer
     self.curvature_factor = interp(abs(kappa_cmd), [0.0005, high_gain_boundary], [self.low_gain_calc, self.high_gain_calc])
+    # FusionPilot: telemetry. Captured HERE rather than recomputed by a reader, so the published
+    # number is the one that multiplied the command and cannot drift from it.
+    self.bp_curvature_factor = float(self.curvature_factor)
+    self.bp_gain_low_curv = float(self.low_gain_calc)
+    self.bp_gain_high_curv = float(self.high_gain_calc)
+    self.bp_blend_weight = float(self.b_blend)
 
     path_angle_calc = kappa_cmd * v_ego * self.curvature_factor
     path_angle = path_angle_calc

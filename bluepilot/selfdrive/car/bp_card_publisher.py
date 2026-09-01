@@ -131,6 +131,17 @@ def publish_controller_state_bp(CI, pm):
     cs_bp.curvatureDeviationLimited = getattr(CI.CC, "curvatureDeviationLimited", False)
     cs_bp.humanTurnLateralPaused = bool(getattr(CI.CC, "humanTurnLateralPaused", False))
     cs_bp.stallBlipActive = bool(getattr(CI.CC, "stallBlipActive", False))
+    # FusionPilot: angle-mode command and applied gain. float() because these cross into capnp,
+    # where a numpy scalar raises -- the failure that killed plannerd on the first frame of a drive
+    # once. getattr defaults keep curvature-mode and non-Ford cars publishing zeros rather than
+    # raising in the publish path.
+    cs_bp.pathAngleFinal = float(getattr(CI.CC, "pathAngleFinal", 0.0))
+    cs_bp.kappaCmd = float(getattr(CI.CC, "kappaCmd", 0.0))
+    cs_bp.curvatureFactor = float(getattr(CI.CC, "curvatureFactor", 0.0))
+    cs_bp.laneCenterCorrection = float(getattr(CI.CC, "laneCenterCorrection", 0.0))
+    cs_bp.gainLowCurv = float(getattr(CI.CC, "gainLowCurv", 0.0))
+    cs_bp.gainHighCurv = float(getattr(CI.CC, "gainHighCurv", 0.0))
+    cs_bp.blendWeight = float(getattr(CI.CC, "blendWeight", 0.0))
     # FusionPilot: who authored ACCDATA this frame. Straight off the car controller, which is the
     # BluePilot: mode the controller actually ran, straight off the car controller (not Params).
     if getattr(CI.CC, "disable_BP_lat_UI", True):

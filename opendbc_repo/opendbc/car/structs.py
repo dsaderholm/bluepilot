@@ -215,6 +215,17 @@ class ControllerStateBP:
   humanTurnLateralPaused: bool = False  # angle mode: lateral forced inactive (mode 0) during a manual turn
   stallBlipActive: bool = False  # angle mode: brief mode-0 pulse resetting PSCM authority after a post-override stall
 
+  # FusionPilot: angle-mode command + the gain that produced it. See custom.capnp for why these
+  # exist -- none of it reached a route before 2026-09-01, so a curve-authority question needed the
+  # CAN wire decoded and the gain schedule re-implemented in a tool to answer.
+  pathAngleFinal: float = 0.0
+  kappaCmd: float = 0.0
+  curvatureFactor: float = 0.0
+  laneCenterCorrection: float = 0.0
+  gainLowCurv: float = 0.0
+  gainHighCurv: float = 0.0
+  blendWeight: float = 0.0
+
   # BluePilot: full BluePilot-menu settings snapshot -- see custom.capnp ControllerStateBP for
   # field-by-field param-key mapping and the field-retirement convention.
   # --- System ---
