@@ -29,6 +29,8 @@ answer.
 | column | tool | conditions |
 |---|---|---|
 | settings | `tools/bp_settings_timeline.py` | `initData.params` -- a BOOT SNAPSHOT; see the warning below |
+| settings, real | `bp_settings_timeline.py --telemetry` | `controllerStateBP` >= 70 mph; EXACT, and sees mid-route changes |
+| weave | `tools/bp_lateral_weave.py` | 6 s windows, straight, hands off, sampled at the modelV2 rate |
 | applied gain | `tools/bp_lateral_gain.py` | `controllerStateBP`, per frame; the only source that cannot lie |
 | road profile | speed and `1/desiredCurvature` histograms | hands off, latActive, > 8 mph |
 | delivery | `abs(curvature) / abs(desiredCurvature)` | STEADY STATE (desired stable within 12% for 0.5 s), hands off, >= 40 mph |
@@ -52,6 +54,13 @@ Read this before any row below. `low` / `high` / `damp` are `FordLowSpeedFactor_
 | 2026-09-01 | `00000406` seg 0 | 0.981 | 0.51 | **0.78** | **0.15** |
 | 2026-09-01 | set by hand, post-drive | 0.981 | **0.68** | 0.78 | 0.15 |
 | 2026-09-01 | set by hand, + damper | 0.981 | 0.68 | 0.78 | 0.15 + **damp 0.3** |
+| 2026-09-01 | `0000040e` seg 0-14, FROM THE WIRE | — | **0.714** | 0.780 | 0.15 + damp 0.3 |
+| 2026-09-01 | `0000040e` seg 15-30, FROM THE WIRE | — | **0.794** | 0.780 | 0.15 + damp 0.3 |
+
+**THE LAST TWO ROWS COME FROM `--telemetry`, NOT FROM `initData`, AND THEY DISAGREE WITH IT.** The
+boot snapshot says 0.68 for all 31 segments of `0000040e`; the wire says he was at 0.714 by segment
+12 and 0.794 from segment 15. He changed it TWICE during that drive and the params snapshot saw
+neither. Any row above sourced from `initData` alone is a boot value, not necessarily what drove.
 
 **Neither of the last two rows has been driven.** The first is the flat point (`damp / 1.15` on a
 CAN Ford). The second adds `lane_centering_damping_ang` 0.3, the lead term on the position loop.
@@ -100,7 +109,39 @@ centering in the same edit, so its across-the-board drop cannot be attributed to
 `00000400` seg 0-18 held the pre-change settings but produced no qualifying steady-state frames, so
 the one same-road A/B in the whole drive is empty.
 
-## Straight-road weave — the lane-centering position loop
+## Straight-road weave, RE-MEASURED 2026-09-02 with one instrument
+
+**The table below this one is the OLD instrument and is kept only as history.** It came from an
+ad-hoc script that no longer exists, at an unrecorded sampling rate; a second ad-hoc script returned
+3-4x its crossing rate on comparable road. `tools/bp_lateral_weave.py` now defines the measurement
+(6 s windows, straight throughout, hands off, lane probs >= 0.30, sampled at the modelV2 rate).
+**Only rows in THIS table may be compared with each other.**
+
+| route | LC | damper | floor | straight min | off-centre | p2p | cross/min |
+|---|---|---|---|---|---|---|---|
+| `00000400` | 0.55 | 0.0 | 70 | 23.0 | 0.05 m | 0.17 m | 90.0 |
+| `00000402` | 0.55 | 0.0 | 70 | 74.6 | 0.04 m | 0.18 m | 90.0 |
+| `00000405` | 0.55 | 0.0 | 70 | 106.7 | 0.05 m | 0.17 m | 70.0 |
+| `000003ed` | 0.55 | 0.0 | 70 | 1.5 | 0.05 m | 0.16 m | 70.0 |
+| `00000406` | **0.15** | 0.0 | 45 | 0.8 | **0.24 m** | 0.16 m | **175.0** |
+| `00000407` | 0.15 | **0.3** | 45 | 0.6 | **0.13 m** | 0.31 m | **50.0** |
+| `0000040e` | 0.15 | **0.3** | 45 | 2.4 | **0.12 m** | 0.22 m | **65.0** |
+
+**THE DAMPER MOVED BOTH COLUMNS THE RIGHT WAY, which a pure P-gain trade cannot do.** At LC 0.15 the
+undamped car sits 0.24 m off centre and crosses 175 times a minute; with the lead term it sits
+0.12-0.13 m off and crosses 50-65. Lower hunting AND better centring is the signature of a
+derivative term working, not of a gain change.
+
+**BUT THE EXPOSURE IS 0.6-2.4 MINUTES AND THE ROADS ARE NOT MATCHED.** Those three drives were
+evening errands with almost no sustained straight highway -- `00000407` rejected 17,563 frames for
+hands-on-or-not-engaged and 11,104 for speed. **This is a direction, not a result.** It needs one
+highway drive before `lane_centering_strength_ang` goes back up.
+
+**And the LC 0.55 rows say the damper has room to buy back:** at 0.55 the car centres to 0.04-0.05 m.
+If the damper holds at higher strength, that is the target -- 0.05 m centring at 50 crossings rather
+than the 70-90 it costs today.
+
+## (OLD INSTRUMENT — history only) Straight-road weave
 
 | route | LC | straight min | median off-centre | p2p swing | crossings/min |
 |---|---|---|---|---|---|

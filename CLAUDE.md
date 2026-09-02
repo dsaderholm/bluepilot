@@ -3344,6 +3344,65 @@ All four tools shared the helper, so they always agreed with each other, and not
 one-off script happened to read `carState` alone -- the one stream with no header replay in it -- and
 returned 754 s. When a tool's output has no independent cross-check, go and build one.
 
+## 2026-09-02: TWO LANDMINES UNDER EVERY RLOG TOOL
+
+### `initData.params` IS A BOOT SNAPSHOT. IT CANNOT SEE A MID-ROUTE SETTINGS CHANGE.
+
+`bp_settings_timeline.py` and the drive ledger both claimed it carried a fresh snapshot per SEGMENT,
+"so mid-route changes are visible". **False, and the ledger was built on it.**
+
+PROVEN on route 0000040e: `FordHighSpeedFactor_ang` was written at 23:12:32, segment 14 closed at
+23:12:33, the route ran to 23:28 -- and all 31 segments report the pre-change value. Sixteen minutes
+of driving on a different setting were invisible.
+
+**And the ledger's "00000400 seg 19 was a mid-route change" is WITHDRAWN**: segments 0-18 were never
+pulled off the device, so the tool was comparing seg 19 against the previous ROUTE. There has never
+been a demonstrated mid-route detection from initData.
+
+**`--telemetry` is the fix and it is EXACT, not an estimate.** At or above 70 mph the speed blend is
+saturated, so the schedule collapses and inverts:
+
+    gainLowCurv  == FordHighSpeedDampening_ang
+    gainHighCurv == anchor_high * FordHighSpeedFactor_ang
+
+Below saturation both terms are speed-blended and the recovery is impossible, so those frames are
+EXCLUDED rather than estimated -- an estimate there is indistinguishable from a real settings change,
+which is the whole failure being fixed. On 0000040e it found TWO changes initData missed: high went
+0.68 (boot) -> 0.714 -> 0.794. **A drive labelled from initData can be labelled wrong.**
+
+### IMPORTING `opendbc.car.*` AFTER `capnp.load()` KILLS THE INTERPRETER. EXIT 127, NO TRACEBACK.
+
+Measured 2026-09-02 while building the above. `opendbc.car.structs` loads its own capnp schema, and
+a second schema load in a process already holding `log.capnp` calls `abort()`:
+
+    import angle_gains alone                 ok
+    capnp.load(log.capnp) alone              ok
+    capnp.load THEN import angle_gains       exit 127, no output, no Python exception
+
+**`try/except ImportError` catches nothing** -- the process is gone. `opendbc.car.structs` is the
+innermost trigger; `opendbc.car.ford`, `opendbc.car.ford.values` and anything importing them all
+die the same way.
+
+**EVERY rlog tool loads log.capnp, so NO rlog tool can import a car constant.** Parse it out with
+`ast` instead -- `bp_settings_timeline._gain_anchors` reads `GAIN_CAN` / `GAIN_CANFD_BOF` /
+`GAIN_CANFD_SUV` straight out of `angle_gains.py`, which keeps ONE definition and adds no import.
+Hardcoding 1.15 would be wrong on CAN-FD, which is the defect the shared module exists to prevent.
+
+**And a piped exit code hid it twice.** `python ... 2>&1 | tail -3; echo $?` reports TAIL's status,
+so an aborting interpreter reads as success with empty output. Check `$?` without a pipe, or
+`${PIPESTATUS[0]}`.
+
+### THE WEAVE NUMBERS IN THE LEDGER WERE FROM A TOOL THAT NO LONGER EXISTS
+
+The 2026-09-01 weave table (p2p 0.29-0.44 m, 13.7-20.0 crossings/min) came from an ad-hoc script at
+an unrecorded sampling rate. A second ad-hoc script the next day returned 3-4x the crossing rate on
+comparable road -- not because the car changed, but because the two counted differently.
+
+**`tools/bp_lateral_weave.py` replaces both**, states its own definitions in its docstring, and
+samples at the modelV2 rate (20 Hz) because reading lane position off a 100 Hz stream makes the
+crossing count a property of the READER rather than of the road. **Every route quoted against
+another must be re-run through it.** Two numbers from two instruments are not a comparison.
+
 ## Diagnosing a road report: the tools, and the order to use them
 
 Written 2026-08-11 after an evening where three separate wrong controllers were blamed in turn. All
