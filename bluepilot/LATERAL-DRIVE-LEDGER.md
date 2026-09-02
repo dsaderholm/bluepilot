@@ -9,9 +9,18 @@ could use. This file is the durable half of a drive: kilobytes that survive the 
 describes a car that never existed.** So every row records the CONFIGURATION beside the numbers, and
 the confounds are stated rather than left for someone to rediscover.
 
+**`initData.params` CANNOT SEE A MID-ROUTE SETTINGS CHANGE, and this file previously claimed it
+could.** It is written once per boot and replayed unchanged into every segment. Proven on route
+`0000040e`: `FordHighSpeedFactor_ang` was written at 23:12:32, segment 14 closed at 23:12:33, the
+route ran to 23:28 -- and all 31 segments report the pre-change 0.68. **The earlier claim that
+`00000400` seg 19 was a detected mid-route change is WITHDRAWN**: segments 0-18 were simply never
+pulled, so the tool was comparing against the previous ROUTE, not against an earlier segment.
+Split a suspect route by segment number against the param mtime, or read `bp_lateral_gain.py`,
+which is per-frame telemetry.
+
 **The raw logs for every route below are kept**, off the device and outside any git repo, at
 `Sandbox/drivelogs/2026-08-31_600mi_lateral_sweep/` (454 segments, 4.9 GB). They are a settings
-sweep across matched roads including one mid-route change, which is not reproducible once
+sweep across matched roads, which is not reproducible once
 `deleter.py` rotates them off the car. Needed only for a question this file does not already
 answer.
 
@@ -19,7 +28,8 @@ answer.
 
 | column | tool | conditions |
 |---|---|---|
-| settings | `tools/bp_settings_timeline.py` | `initData.params`, per SEGMENT, so mid-route changes are visible |
+| settings | `tools/bp_settings_timeline.py` | `initData.params` -- a BOOT SNAPSHOT; see the warning below |
+| applied gain | `tools/bp_lateral_gain.py` | `controllerStateBP`, per frame; the only source that cannot lie |
 | road profile | speed and `1/desiredCurvature` histograms | hands off, latActive, > 8 mph |
 | delivery | `abs(curvature) / abs(desiredCurvature)` | STEADY STATE (desired stable within 12% for 0.5 s), hands off, >= 40 mph |
 | revs/min | tracking-error sign flips per minute of genuine turning | `abs(desired) > 0.0007`, hands off |

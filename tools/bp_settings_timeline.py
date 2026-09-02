@@ -30,7 +30,8 @@ log_capnp = capnp.load(os.path.join(REPO, "cereal", "log.capnp"),
 WATCH = {
   "LATERAL": ("FordLowSpeedFactor_ang", "FordHighSpeedFactor_ang", "FordHighSpeedDampening_ang",
               "FordVLTExtraMax", "FordPathAngleBlendRatio", "enable_lane_positioning_ang",
-              "custom_path_offset_ang", "lane_centering_strength_ang", "LagdToggle",
+              "custom_path_offset_ang", "lane_centering_strength_ang",
+              "lane_centering_damping_ang", "LagdToggle",
               "LagdValueCache"),
   "SCC":     ("SmartCruiseControlVision", "SmartCruiseControlMap",
               "SmartCruiseControlVisionLowSpeedFactor", "SmartCruiseControlVisionHighSpeedFactor",
@@ -82,6 +83,13 @@ def main():
   files = sorted(glob.glob(os.path.join(d, "*.rlog.zst")), key=seg_key)
   if routes:
     files = [f for f in files if os.path.basename(f).split("--")[0] in routes]
+  print("  initData.params is a BOOT SNAPSHOT, replayed unchanged into every segment of a route.")
+  print("  A setting changed MID-ROUTE therefore does NOT appear here -- PROVEN on 0000040e, where")
+  print("  FordHighSpeedFactor_ang was written at 23:12:32, segment 14 closed at 23:12:33, and all")
+  print("  31 segments still report the pre-change value. Split such a route BY SEGMENT NUMBER")
+  print("  against the param mtime, or read the gain telemetry with bp_lateral_gain.py, which is")
+  print("  published per frame and cannot lie about what actually multiplied the command.")
+  print()
 
   print("=== SETTINGS TIMELINE (one line per CHANGE, not per segment) ===")
   print()
