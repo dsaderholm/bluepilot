@@ -99,6 +99,45 @@ def test_button_row_fits_on_screen(row):
   )
 
 
+# -----------------------------------------------------------------------------------------------
+# DESCRIPTION LENGTH IS NOT A FAILURE MODE ON THIS SCREEN. A test asserting it was written on
+# 2026-09-02 and DELETED THE SAME HOUR, because the repo refuted its own premise.
+#
+# The road report was "the UI is now messed up near where I change the lane centering", and the day
+# before, three descriptions there had been added or rewritten at 466, 364 and 308 characters when
+# nothing on THAT screen exceeded 308. That looked like a clean story. The bound was set at 308 --
+# the longest string known to have shipped without complaint -- and the test then failed on nine
+# OTHER descriptions, including 815, 548 and 412 characters on the ICBM cruise screen. Those have
+# shipped on his car for weeks and he has never once mentioned them.
+#
+# So 308 was never a ceiling; it was just the largest value on one screen. Raising the bound to 815
+# to make the test pass would have been fitting the threshold to the data it was supposed to judge,
+# which is exactly the "a guessed bound freezes the guess" failure recorded in CLAUDE.md for
+# MAPD_V2_STALL_S. The honest conclusion is that the hypothesis is dead: 815 characters renders
+# acceptably, therefore 466 was not what he saw.
+#
+# The descriptions were left shortened -- the 466-character one was rambling and the information it
+# carries fits in 205 -- but that is EDITING, not a fix, and it must not be reported as one.
+#
+# HIS REPORT REMAINS UNDIAGNOSED, and the shape of it is why: "it looks fine now but didn't look
+# right when driving." A static layout problem cannot be intermittent. Two theories about ListItem
+# were also built and withdrawn by reading it properly -- `_parse_description` DOES update
+# `_prev_description`, and the row height IS recomputed after `_update_state`. Settings screens
+# cannot be rendered offline, so the next step is a screenshot or the UI's own swaglog, not another
+# static check.
+
+
+def test_the_dynamic_descriptions_still_carry_the_flat_point():
+  """Shortening must not throw the number away. The flat point is the one thing on that screen a
+  CAN-FD owner cannot work out for themselves, and it is why those descriptions are dynamic."""
+  src = (REPO / "selfdrive" / "ui" / "bp" / "layouts" / "settings" / "bluepilot.py").read_text(
+    encoding="utf-8")
+  for fn in ("_high_speed_factor_description", "_dampening_description"):
+    body = src.split("def " + fn, 1)[1].split("  def ", 1)[0]
+    assert "{flat:.2f}" in body, f"{fn} no longer renders the flat point"
+    assert "format(flat=flat)" in body, f"{fn} no longer formats it in"
+
+
 def test_bp_tests_are_registered():
   """FusionPilot: a test file the runner never collects is worse than no test at all.
 
