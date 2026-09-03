@@ -3544,6 +3544,113 @@ All four tools shared the helper, so they always agreed with each other, and not
 one-off script happened to read `carState` alone -- the one stream with no header replay in it -- and
 returned 754 s. When a tool's output has no independent cross-check, go and build one.
 
+## 2026-09-02: TWO LANDMINES UNDER EVERY RLOG TOOL
+
+### `initData.params` IS A BOOT SNAPSHOT. IT CANNOT SEE A MID-ROUTE SETTINGS CHANGE.
+
+`bp_settings_timeline.py` and the drive ledger both claimed it carried a fresh snapshot per SEGMENT,
+"so mid-route changes are visible". **False, and the ledger was built on it.**
+
+PROVEN on route 0000040e: `FordHighSpeedFactor_ang` was written at 23:12:32, segment 14 closed at
+23:12:33, the route ran to 23:28 -- and all 31 segments report the pre-change value. Sixteen minutes
+of driving on a different setting were invisible.
+
+**And the ledger's "00000400 seg 19 was a mid-route change" is WITHDRAWN**: segments 0-18 were never
+pulled off the device, so the tool was comparing seg 19 against the previous ROUTE. There has never
+been a demonstrated mid-route detection from initData.
+
+**`--telemetry` is the fix and it is EXACT, not an estimate.** At or above 70 mph the speed blend is
+saturated, so the schedule collapses and inverts:
+
+    gainLowCurv  == FordHighSpeedDampening_ang
+    gainHighCurv == anchor_high * FordHighSpeedFactor_ang
+
+Below saturation both terms are speed-blended and the recovery is impossible, so those frames are
+EXCLUDED rather than estimated -- an estimate there is indistinguishable from a real settings change,
+which is the whole failure being fixed. On 0000040e it found TWO changes initData missed: high went
+0.68 (boot) -> 0.714 -> 0.794. **A drive labelled from initData can be labelled wrong.**
+
+### IMPORTING `opendbc.car.*` AFTER `capnp.load()` KILLS THE INTERPRETER. EXIT 127, NO TRACEBACK.
+
+Measured 2026-09-02 while building the above. `opendbc.car.structs` loads its own capnp schema, and
+a second schema load in a process already holding `log.capnp` calls `abort()`:
+
+    import angle_gains alone                 ok
+    capnp.load(log.capnp) alone              ok
+    capnp.load THEN import angle_gains       exit 127, no output, no Python exception
+
+**`try/except ImportError` catches nothing** -- the process is gone. `opendbc.car.structs` is the
+innermost trigger; `opendbc.car.ford`, `opendbc.car.ford.values` and anything importing them all
+die the same way.
+
+**EVERY rlog tool loads log.capnp, so NO rlog tool can import a car constant.** Parse it out with
+`ast` instead -- `bp_settings_timeline._gain_anchors` reads `GAIN_CAN` / `GAIN_CANFD_BOF` /
+`GAIN_CANFD_SUV` straight out of `angle_gains.py`, which keeps ONE definition and adds no import.
+Hardcoding 1.15 would be wrong on CAN-FD, which is the defect the shared module exists to prevent.
+
+**And a piped exit code hid it twice.** `python ... 2>&1 | tail -3; echo $?` reports TAIL's status,
+so an aborting interpreter reads as success with empty output. Check `$?` without a pipe, or
+`${PIPESTATUS[0]}`.
+
+### A MEDIAN OVER A HANDFUL OF WINDOWS IS NOT A MEASUREMENT. 2026-09-03.
+
+The damper was reported as working -- "both columns the right way, which a P-gain trade cannot do"
+-- off 0.6-2.4 minutes of qualifying road. Two drives later, SAME settings, same tool:
+
+    0000040e   median  65 crossings/min   range [20-190]   24 windows
+    0000041c   median 100                 range [10-230]   13 windows
+    0000041d   median 180                 range [30-290]    9 windows
+
+**Three brackets that overlap almost entirely: one distribution, no measurable effect.** The spread
+across identical settings was wider than the effect being looked for, and that was not checked
+before it was reported as a direction.
+
+**THE FIX IS IN THE OUTPUT, NOT IN RESOLVING TO BE CAREFUL.** `bp_lateral_weave` now prints the
+median, the min-max ACROSS WINDOWS, and the window count. A thin row now looks thin. Do the same to
+any tool whose verdict is a median: the bracket is what stops a 9-window number reading like a
+result. **Do not fix this by inventing a minimum window count** -- that is the guessed-bound failure
+recorded for MAPD_V2_STALL_S; show the spread and let it disqualify itself.
+
+**AND "HE HAS NOT DRIVEN ENOUGH HIGHWAY" WAS WRONG -- IT WAS THE TOOL. He asked, which is the only
+reason it was checked.** Decomposed per route, on carState:
+
+    route        driving   >=65 mph   ...ENGAGED hands-off   ...& straight
+    00000412       7.9        0.0            0.0                 0.0
+    0000041a      11.9        0.0            0.0                 0.0
+    0000041b      15.5        0.0            0.0                 0.0
+    0000041c      17.5        7.3            6.4                 3.2
+    0000041d      13.3        4.5            3.6                 1.7
+
+**11.8 minutes above 65 mph and he was ENGAGED, HANDS OFF for 85% of it.** Three routes were
+genuinely pure surface driving; two were not. The thin samples were `bp_lateral_weave` discarding
+road, not an absence of it: 3.1 qualifying minutes on `0000041c` scored as 1.3, because emitting a
+6 s window and CLEARING the buffer binned every remainder shorter than the window. Lane-line
+probability was never the constraint (median 0.98). Fixed by sliding the window 3 s instead of
+clearing it, and the `min` column now reports road that passed every gate rather than window count
+times 6 s, which double-counted the overlap.
+
+**BEFORE TELLING HIM THE DATA IS TOO THIN, CHECK WHETHER THE TOOL IS THE ONE THINNING IT.** A gate
+that rejects and a window that discards look identical in the output, and only one of them is about
+his driving.
+
+**AND THE CURVE METRIC IS IN THE SAME STATE ON THOSE DRIVES.** 2.35 osc/min at 47% swing on
+`0000041c` (1.7 min of curve-holding) against 4.29 at 60% on `0000041d` (0.7 min). The historical
+range on this car is 3.43-5.78 at 45-54%, so both readings sit inside it and disagree with each
+other by more than any effect. **His recent drives are surface roads** -- every route rejected
+6,000-13,000 model frames for hands-on-or-not-engaged -- so neither open question can be scored
+from them. It needs sustained highway, and saying so is the answer rather than a smaller number.
+
+### THE WEAVE NUMBERS IN THE LEDGER WERE FROM A TOOL THAT NO LONGER EXISTS
+
+The 2026-09-01 weave table (p2p 0.29-0.44 m, 13.7-20.0 crossings/min) came from an ad-hoc script at
+an unrecorded sampling rate. A second ad-hoc script the next day returned 3-4x the crossing rate on
+comparable road -- not because the car changed, but because the two counted differently.
+
+**`tools/bp_lateral_weave.py` replaces both**, states its own definitions in its docstring, and
+samples at the modelV2 rate (20 Hz) because reading lane position off a 100 Hz stream makes the
+crossing count a property of the READER rather than of the road. **Every route quoted against
+another must be re-run through it.** Two numbers from two instruments are not a comparison.
+
 ## Diagnosing a road report: the tools, and the order to use them
 
 Written 2026-08-11 after an evening where three separate wrong controllers were blamed in turn. All
@@ -3615,6 +3722,198 @@ I-80/I-215 interchange was CORRECT: 16 degrees of steering at 37 mph is a 174 m 
 model's implied radius there was 180 m. Real ramp, appropriate slowing -- if anything ~8 mph more
 conservative than his measured comfort. Three positions were taken on this event in one day; the one
 that held is the one with two independent measurements agreeing on the same frame.
+
+## EVERY BLUEPILOT BRANCH, CHECKED 2026-09-03. TWO COMMITS WE DO NOT HAVE AND SHOULD KNOW ABOUT.
+
+He asked twice -- "did you take anything else", then "check the dev branches too" -- and the second
+ask is what found these. **Releases: newest is `bp-7.0` and we are 0 commits behind it. There is no
+`bp-8.0`.** Dev branches on the remote: `bp-dev`, `bp-dev-191`, `bp-dev-expedition`,
+`bp-dev-f150-mk14.5`, `bp-dev-mici-ui`, `bp-dev-old`, `bp-dev-rl-ui`, `bp-dev-ui`, `bp-jmc-lane`,
+`bp-livedelay-icon`, `bp-no-stall`, `bp-sync-*`, plus two archives.
+
+`bp-no-stall` is 0 ahead. `bp-livedelay-icon` is 4 ahead, one trivial. The platform and UI branches
+are other people's cars. **Everything on `bp-dev` touching the Ford lateral path we already have BY
+CONTENT** -- the StarPilot guards, the correction rate limit, the interpolation update. Two do not.
+
+### `0cb9165427` on `bp-jmc-lane` -- THE TRIM COMPETES WITH THE PLANNER FOR THE DEVIATION BUDGET
+
+Unmerged, John Christman, 2026-08-27, *"avoid lane positioning at limits and takeover oscillation"*.
+**WE HAVE THE ONE-SIDED FORM IT FIXES.** Ours adds the trim into `kappa_cmd` (line ~613) and then
+clips the COMBINED value:
+
+    kappa_cmd = self.lane_center_trim.update(...)
+    if v_ego > 9:
+      kappa_cmd = clip(kappa_cmd, current_curvature -+ CarControllerParams.CURVATURE_ERROR)
+
+Theirs gives the planner first claim and hands the trim the remainder, with the reason stated
+plainly: *"a one-sided form lets the trim subtract authority while the planner is already clipped
+short in a curve."*
+
+**THAT IS EXACTLY THIS CAR'S REGIME.** Delivery is 0.87-0.93, i.e. measured lags desired, so in a
+curve `abs(planner - measured)` is already near the budget and the trim can only push further out
+of it -- where the clip cuts the sum, not the trim's share of it.
+
+**IT IS NOT A SAFETY PROBLEM AND IT DOES NOT INVALIDATE THE LC 0.35 DRIVE.** The clip bounds the
+total either way, so nothing can exceed measured +- CURVATURE_ERROR. And the straight-road weave
+test runs where the planner has budget to spare, so the primary question that drive answers is
+untouched. **What it can confound is CURVE behaviour at raised strength**, which matters because
+`lane_centering_strength_ang` went 0.15 -> 0.35 on 2026-09-03.
+
+It also carries `_PRESS_RELEASE_S = 0.3`, debouncing `steeringPressed` because *"a 30 ms dip inside
+a 1.7 s hold fired a pulse (route 00000399 t=172.04)"* -- a takeover-oscillation guard on the stall
+blip. This fork has its own history of `steeringPressed` chatter, so that is worth reading before
+anyone re-derives it.
+
+### `fc228b4099` on `bp-dev` -- cruise-button event storm on sustained hold
+
+*"ford: fix combo cruise-button event storm on sustained hold."* Not read in detail yet. **It is
+adjacent to a failure this file already spent a day on** -- `update_manual_button_timers` only
+zeroing on a RELEASE while this car's SCCM sends one physical press as a burst of PRESS events, which
+stuck a hold for 87 seconds. Read it against that section before deciding.
+
+**NONE OF THE FOUR (these two plus `a15672fb15` and `77ec55c73e`) HAVE BEEN TAKEN.** All are
+behaviour changes to a branch his car auto-pulls, on a day he is driving, with one experiment
+already in flight.
+
+## THE PSCM NEVER REPORTS LIMITING ON THIS CAR. THE SIGNAL IS DEAD ON NON-CAN-FD FORDS.
+
+He asked what came of "the PSCM reports when it is limiting". **It does not, on his car**, and the
+`_pscm_lim` clamp in `lateral_angle_ext` can therefore never fire. Established three ways:
+
+1. **`FORD_FUSION_MK5.config.flags` is 2** -- `ALT_STEER_ANGLE` only, `CANFD` (1) NOT set. (The
+   `flags 18` quoted elsewhere in this file is the RUNTIME value; `TSR` (16) is added from the
+   camera-bus fingerprint, not the static config. Both readings agree that CANFD is clear.)
+2. **`Lane_Assist_Data3_FD1` (972) is registered only under `if CP.flags & FordFlags.CANFD`**, so
+   it is not in his parser at all -- and `carstate.py` carries the reason in its own comment beside
+   the one signal it reads from that message: *"this signal is always 0 on non-CAN FD cars."*
+3. **Decoded off his raw CAN anyway: 100% `LimitNotReached` across 61,626 frames** on routes
+   `0000041c`/`0000041d`, including 757 frames of ENGAGED, hands-off cornering above 2.0 m/s^2.
+   `LatCtlSte_D_Stat` in the same message reads `Unavailable` on 100% of frames, which is the
+   sanity check failing loudly: openpilot sets `steerFaultTemporary` when that is not in (1,2,3),
+   so a real 0 would mean the car never steers. The message is simply all zeros.
+
+**CONSEQUENCES:**
+
+- **`_pscm_lim = getattr(CS, 'lat_ctl_lim_stat', 0)` is ALWAYS 0** -- and not only because the
+  message is dead: **nothing anywhere assigns `lat_ctl_lim_stat`.** The attribute does not exist
+  outside two test stubs. So `_in_hard_sat` reduces to `_dbc_sat` alone and the `_pscm_lim >= 1`
+  branch is unreachable. This file already recorded "`_pscm_lim` is silent in angle mode" and
+  attributed it to ANGLE MODE; the real reason is the PLATFORM, and it would be silent in curvature
+  mode too.
+- **There is no telemetry on this car that says the PSCM hit its authority limit.** Every claim
+  about the ~2.5 m/s^2 ceiling rests on indirect evidence -- our own deviation limiter biting above
+  2.5, hands-on% climbing past 3.0, delivery sitting at 0.87-0.93. Those agree with each other and
+  none of them is the PSCM saying so.
+- **So the torque-ceiling hypothesis cannot be confirmed OR refuted from this signal**, and that is
+  worth telling anyone building the interceptor: on a non-CAN-FD Ford there is no limit status to
+  instrument against, before or after.
+- **Do not "fix" this by registering the message.** It is CANFD-gated upstream for a documented
+  reason and would return zeros.
+
+## THE TORQUE INTERCEPTOR IS BLUEPILOT'S, NOT OURS. 2026-09-03.
+
+  *"We just need the torque interceptor and then I'll use SCC."*
+  *"The torque interceptor will obviously be made and designed and everything from BluePilot and
+  their devs, so we just need to wait for that. I will have little involvement in that."*
+
+**So the PSCM authority ceiling has a hardware answer coming from upstream, and it is not this
+fork's work.** Do not design around it, do not propose alternatives to it, do not scope software
+that tries to buy authority back, and do not ask him about it -- he has said his involvement is
+minimal. **There is no torque-interceptor concept anywhere in this tree** (checked 2026-09-03,
+zero hits across .py/.capnp/.h/.md), so if it lands it arrives as new upstream code.
+
+**WHAT IT WOULD CHANGE, worth knowing so nobody re-derives it:** if the PSCM held nearer his
+4.1 m/s^2, the corner speeds SCC asks for become acceptable, he stops taking over, and the entire
+longitudinal curve programme gets a consumer again. Much of the angle-mode gain tuning would also
+need re-measuring rather than carrying forward. **None of that is actionable until it exists.**
+
+## bp-dev-191: WE HAVE MOST OF IT BY CONTENT, AND THREE COMMITS MATTER. 2026-09-03.
+
+He asked whether that branch had been looked at. One commit had been taken from it (`ba20937aac`,
+2026-08-29) and it was never re-checked; it is 23 commits ahead of us. **Checked BY CONTENT, because
+these arrive under different hashes through the release branch.**
+
+**ALREADY OURS, do not re-take:** the StarPilot guards (`_WIDTH_TOLERANCE_BP/V`,
+`_STD_TOLERANCE_BP/V`, the confidence `min()`, the isfinite and monotonic-x checks), the correction
+rate limit (`_CORRECTION_ROC_PER_TICK`, which a grep for "rate_limit" misses), and the
+`curvature_factor` interpolation update -- our tree already has the `[0.0005, high_gain_boundary]`
+ramp with `interp(v, [11.18, 31.29], [0.02, 0.0045])`.
+
+**A first pass reported "we have NONE of the guards" off a grep for the wrong constant names.**
+Reading the file settled it in one command. Grep for the CONCEPT and then read, or the report is
+about your pattern rather than the code.
+
+**NOT OURS, and the first one moves numbers already given to him:**
+
+| commit | what | effect |
+|---|---|---|
+| `a15672fb15` | `high_gain_boundary` `[0.02,0.0045]` -> `[0.015,0.0035]` | the ramp gets SHORTER, so the same high factor is ~33% steeper |
+| `77ec55c73e` | blend `b` tapers to 0 across `_VLT_V_LOW/HIGH_MS`; `_kappa_entering` 1.25 -> 1.1; `_desired_falling` 0.8 -> 0.9 | pure `desired` at highway speed |
+| (part of `94bf8144d4`) | `_MAX_APPLIED_CORRECTION = 0.0015` on the POST-gain correction | binds above `lane_centering_strength_ang` 0.375 |
+
+**THE BOUNDARY CHANGE, quantified at 85 mph with his damp 0.78:**
+
+    high 0.794   slope +33 (ours today)  ->  +44 with the commit
+    high 0.850   slope +49               ->  +66
+    high 0.900   slope +64               ->  +85
+    the MEASURED-BAD +68 arrives at high 0.915 today  ->  0.856 with the commit
+
+So the "stop at 0.90" ceiling handed to him on 2026-09-03 is correct for the code his car runs and
+becomes ~0.85 if that commit is taken. **Taking it silently would invalidate a number he is tuning
+against.**
+
+**AND THE 0.0015 CAP QUALIFIES THE LANE-CENTERING ADVICE GIVEN THE SAME DAY.** Applied correction is
+`_MAX_RAW_CORRECTION` (0.004) times gain:
+
+    LC 0.15 -> 0.0006      LC 0.35 -> 0.0014      LC 0.50 -> 0.0020      LC 0.55 -> 0.0022
+
+**0.35 sits just under the cap; 0.5 and 0.55 exceed it.** Upstream's own comment says it "stops a
+fake stuck steering rack from happening, because it is under the curvature error and stall gap" --
+a failure mode, not a comfort number. He ran 0.55 for the whole 600-mile drive with no complaint,
+so it is not obviously dangerous on this car, but **"0.5 is well supported" was said before this cap
+was known and should not be repeated without it.**
+
+## HE IS NOT USING SCC-VISION OR SCC-MAP. 2026-09-03, unprompted.
+
+  *"I am not really using SCC Vision or even map. They work great, but since the PSCM needs to go
+  so slow, I just take over, if you get what I mean."*
+
+**HE IS NOT REPORTING A BUG. He is saying the feature is correct and unusable, which is a harder
+problem and a different one.** Do not respond to this by tuning a sensitivity, adding a defense, or
+touching `SmartCruiseControlMapFactor`. The controllers are doing what a car with this PSCM should
+do; the PSCM is why the answer is unacceptable.
+
+**THE CHAIN, entirely from measurements already in this file:**
+
+    the PSCM comfortably holds       ~2.5 m/s^2      a 259 m corner -> 57 mph
+    openpilot's own p99               2.73                        -> 59 mph
+    HE drives that corner at          ~4.1                        -> 64 mph, measured
+
+So SCC slows correctly for a bend the PSCM cannot hold at his speed, he does not want to be that
+slow, and he takes the corner himself -- longitudinally AND laterally, because at his speed the
+PSCM cannot track it either.
+
+**IT IS VISIBLE IN THE DRIVE DATA AND WAS MEASURED BEFORE HE SAID IT.** Hands-on above 65 mph:
+13% on `0000041c`, 19% on `0000041d`. That is this, and it is the same signature already recorded
+years-ago-in-fork-time as *"hands-on% climbs the same curve -- 6% low, 90%+ above 3.0 -- so he TAKES
+OVER exactly where the PSCM starts losing the line."*
+
+**WHAT IT MEANS FOR PRIORITY, and this is the point of the entry:**
+
+- **SCC-Map and SCC-Vision tuning currently has NO CONSUMER.** The veto defenses, the corner-speed
+  factor pair, the late-detection work, the exit-ramp problem -- all of it improves a feature he
+  drives around. Do not spend effort there and do not open a session with it.
+- **THE LATERAL WORK IS THE THING THAT UNLOCKS THEM.** If the PSCM held a corner nearer his 4.1,
+  SCC would be asking for a speed he would accept, and he would stop taking over. That makes the
+  angle-mode tracking work upstream of the entire longitudinal curve programme rather than a
+  comfort project running beside it.
+- **Do not switch SCC off for him.** He said it works and he did not ask. It is his toggle, and a
+  feature he ignores costs him nothing while a setting changed under him costs trust.
+
+**AND IT RETIRES A STANDING QUESTION.** "The PSCM angle-mode authority limit is a CAR FACT nobody
+here has measured yet" has been open since 2026-08-19 as the number blocking the tile-curvature
+corner-speed work. That work is now pointless until the authority itself moves: a better corner
+speed still lands under his comfort, and he still takes over.
 
 ## SCC-Map has four defenses now, and they are deliberately different questions
 

@@ -1,0 +1,250 @@
+"""Straight-road weave: how far the car wanders across the lane, and how often it crosses centre.
+
+This is the metric for `lane_centering_strength_ang` and `lane_centering_damping_ang`, because
+those are the only closed POSITION loop in the stack. It is deliberately NOT a steering-angle
+metric: angle scales with the gain schedule, so an angle-based test marks any high-gain setting
+worse by construction and would confound the two knobs.
+
+WHY THIS TOOL EXISTS RATHER THAN THE NUMBERS ALREADY IN THE LEDGER. Those were produced by an
+ad-hoc script that no longer exists, at an unrecorded sampling rate. A second ad-hoc script written
+on 2026-09-02 returned crossing rates 3-4x higher on comparable road -- not because the car
+changed, but because the two counted crossings differently. **Two numbers from two instruments are
+not a comparison.** So this is a tool, it states its own definitions, and every route quoted against
+another must be re-run through it.
+
+SAMPLES AT THE MODEL RATE, WHICH IS THE POINT. `modelV2` publishes at 20 Hz. Reading lane position
+off a 100 Hz stream resamples each model frame five times, and any crossing count then depends on
+the reader's rate rather than on the road. One sample per model frame, always.
+
+    python tools/bp_lateral_weave.py <dir> [--speed 70] [--route 00000407] [--segs 0-14]
+
+Definitions, so a future reader can tell whether a quoted number came from here:
+
+    straight        |desiredCurvature| < 2.5e-4 (a 4000 m radius) for the WHOLE window
+    window          6.0 s, SLIDING by 3.0 s, abandoned if any frame fails a gate
+    min             minutes of road that passed every gate -- NOT the window count times 6 s,
+                    which double-counts the overlap
+    offset          (laneLines[1].y[0] + laneLines[2].y[0]) / 2, metres, + is left of centre
+    gates           hands off, latActive, speed >= floor, both lane-line probs >= 0.30
+    crossings/min   sign changes of (offset - window mean), per minute of qualifying road
+    p2p             max(offset) - min(offset) within the window, median across windows
+"""
+import argparse
+import collections
+import glob
+import os
+import statistics
+
+import capnp
+import zstandard
+
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+capnp.remove_import_hook()
+log_capnp = capnp.load(os.path.join(REPO, "cereal", "log.capnp"),
+                       imports=[os.path.join(REPO, "cereal")])
+
+MPH = 2.23694
+WIN_S = 6.0
+STEP_S = 3.0        # 50% overlap; see the slide comment in scan()
+STRAIGHT_KAPPA = 2.5e-4
+MIN_LANE_PROB = 0.30
+
+# Every param that can move this metric, so a route's own configuration is printed beside its
+# numbers rather than looked up in a file that may have drifted.
+CONFIG_KEYS = ("lane_centering_strength_ang", "lane_centering_damping_ang",
+               "enable_lane_positioning_ang", "custom_path_offset_ang")
+
+
+def segno(path):
+  try:
+    return int(os.path.basename(path).split("--")[2].split(".")[0])
+  except (IndexError, ValueError):
+    return -1
+
+
+def route_of(path):
+  return os.path.basename(path).split("--")[0]
+
+
+def read_config(files):
+  """Boot-snapshot config. initData is replayed unchanged into every segment, so this is the value
+  at BOOT and cannot show a mid-route change -- see bp_settings_timeline.py."""
+  for p in files:
+    try:
+      with open(p, "rb") as fh:
+        raw = zstandard.ZstdDecompressor().stream_reader(fh).read()
+      for m in log_capnp.Event.read_multiple_bytes(raw, traversal_limit_in_words=2 ** 32):
+        if m.which() == "initData":
+          e = {x.key: x.value for x in m.initData.params.entries}
+          out = {}
+          for k in CONFIG_KEYS:
+            v = e.get(k, b"")
+            v = v.decode("utf-8", "replace") if isinstance(v, bytes) else str(v)
+            out[k] = v
+          return out
+    except Exception:
+      continue
+  return {k: "?" for k in CONFIG_KEYS}
+
+
+def scan(files, speed_floor):
+  lat = False
+  hands = False
+  v = 0.0
+  des = 0.0
+  window = []
+  offs, p2p, cross = [], [], []
+  minutes = 0.0
+  qualifying = 0
+  rejected = collections.Counter()
+
+  for p in files:
+    try:
+      with open(p, "rb") as fh:
+        raw = zstandard.ZstdDecompressor().stream_reader(fh).read()
+      evs = log_capnp.Event.read_multiple_bytes(raw, traversal_limit_in_words=2 ** 32)
+    except Exception:
+      continue
+    while True:
+      try:
+        m = next(evs)
+      except StopIteration:
+        break
+      except Exception:
+        break
+      w = m.which()
+      try:
+        if w == "carControl":
+          lat = bool(m.carControl.latActive)
+        elif w == "carState":
+          v = float(m.carState.vEgo) * MPH
+          hands = bool(m.carState.steeringPressed)
+        elif w == "controlsState":
+          des = float(m.controlsState.desiredCurvature)
+        elif w == "modelV2":
+          # ONE sample per model frame. Resampling this onto a 100 Hz stream makes the crossing
+          # count a property of the reader instead of the road.
+          t = m.logMonoTime / 1e9
+          ll = m.modelV2.laneLines
+          probs = m.modelV2.laneLineProbs
+          ok = True
+          if not (lat and not hands):
+            ok = False
+            rejected["hands or lat"] += 1
+          elif v < speed_floor:
+            ok = False
+            rejected["too slow"] += 1
+          elif abs(des) >= STRAIGHT_KAPPA:
+            ok = False
+            rejected["not straight"] += 1
+          elif len(ll) < 3 or not len(ll[1].y) or not len(ll[2].y):
+            ok = False
+            rejected["no lane lines"] += 1
+          elif len(probs) < 3 or probs[1] < MIN_LANE_PROB or probs[2] < MIN_LANE_PROB:
+            ok = False
+            rejected["lane prob low"] += 1
+
+          if not ok:
+            window = []
+            continue
+          window.append((t, (float(ll[1].y[0]) + float(ll[2].y[0])) / 2.0))
+          qualifying += 1
+          if window[-1][0] - window[0][0] >= WIN_S:
+            o = [x for _, x in window]
+            mean = statistics.fmean(o)
+            n = sum(1 for a, b in zip(o, o[1:]) if (a - mean) * (b - mean) < 0)
+            offs.append(statistics.median([abs(x) for x in o]))
+            p2p.append(max(o) - min(o))
+            cross.append(n / (WIN_S / 60.0))
+            minutes += WIN_S / 60.0
+            # SLIDE, do not discard. Emitting a window and clearing threw away every remainder
+            # shorter than WIN_S -- measured 2026-09-03 as 58% of road that passed every other
+            # gate (3.1 qualifying minutes on 0000041c, 1.3 scored). A run of 11 s gave one
+            # window and binned 5 s. Keeping the tail means an 11 s run yields windows at 0-6 and
+            # STEP_S onward instead of one.
+            #
+            # The windows now OVERLAP, so they are not independent samples and the [range] column
+            # narrows slightly against a fully independent draw. That is the right trade here: the
+            # range exists to stop a thin row reading as a result, and having more of the road in
+            # it serves that better than statistical purity on a sample this small.
+            cut = window[0][0] + STEP_S
+            while window and window[0][0] < cut:
+              window.pop(0)
+      except Exception:
+        continue
+  return dict(offs=offs, p2p=p2p, cross=cross, minutes=minutes, rejected=rejected,
+              qualifying_min=qualifying / 20.0 / 60.0)
+
+
+def main():
+  ap = argparse.ArgumentParser()
+  ap.add_argument("directory")
+  ap.add_argument("--speed", type=float, default=70.0, help="mph floor (default 70)")
+  ap.add_argument("--route", action="append", help="limit to route(s)")
+  ap.add_argument("--segs", help="segment range within a single route, e.g. 0-14")
+  ap.add_argument("--min-windows", type=int, default=5,
+                  help="below this many windows a route reports INSUFFICIENT rather than a number")
+  args = ap.parse_args()
+
+  files = sorted(glob.glob(os.path.join(args.directory, "*.rlog.zst")), key=segno)
+  if args.route:
+    files = [f for f in files if route_of(f) in set(args.route)]
+  lo = hi = None
+  if args.segs:
+    lo, hi = (int(x) for x in args.segs.split("-"))
+    files = [f for f in files if lo <= segno(f) <= hi]
+
+  groups = collections.OrderedDict()
+  for f in files:
+    groups.setdefault(route_of(f), []).append(f)
+  if not groups:
+    print("no matching segments")
+    return
+
+  label = "route" if not args.segs else f"route (segs {lo}-{hi})"
+  print(f"=== STRAIGHT-ROAD WEAVE, >= {args.speed:.0f} mph ===")
+  print(f"   {WIN_S:.0f} s windows, straight throughout, hands off, lane probs >= {MIN_LANE_PROB}")
+  print("   Sampled at the modelV2 rate. Comparable ONLY with other output of this tool.\n")
+  print(f"  {label:<26}{'LC':>6}{'damp':>6}{'min':>8}{'off-centre':>12}{'p2p':>9}"
+        f"{'cross/min':>12}{'[range]':>10}{'wins':>6}")
+
+  thin = []
+  for route, fs in groups.items():
+    cfg = read_config(fs)
+    r = scan(fs, args.speed)
+    lc = cfg["lane_centering_strength_ang"][:5]
+    dp = cfg["lane_centering_damping_ang"][:5] or "-"
+    if len(r["offs"]) < args.min_windows:
+      print(f"  {route:<26}{lc:>6}{dp:>6}{r['qualifying_min']:>8.1f}"
+            f"{'INSUFFICIENT -- ' + str(len(r['offs'])) + ' windows':>32}")
+      thin.append((route, r))
+      continue
+    cr = sorted(r["cross"])
+    print(f"  {route:<26}{lc:>6}{dp:>6}{r['qualifying_min']:>8.1f}"
+          f"{statistics.median(r['offs']):>11.2f}m{statistics.median(r['p2p']):>8.2f}m"
+          f"{statistics.median(r['cross']):>8.0f}"
+          f"{' [%.0f-%.0f]' % (cr[0], cr[-1]):>10}{len(cr):>6}")
+
+  if thin:
+    print("\n  Why the thin routes had no qualifying road:")
+    for route, r in thin:
+      top = ", ".join(f"{k} {c}" for k, c in r["rejected"].most_common(3))
+      print(f"    {route}: {top}")
+
+  print("\n  off-centre  median |offset| within a window -- how far off centre it SITS")
+  print("  p2p         max-min within a window -- how far it WANDERS")
+  print("  cross/min   sign changes about the window mean -- how OFTEN it hunts")
+  print("\n  A low crossing rate with a high off-centre is the P-gain trade, not an improvement.")
+  print("  Read all three columns or the trade is invisible.")
+  print()
+  print("  cross/min shows the MEDIAN, then [min-max ACROSS WINDOWS], then the window count. A")
+  print("  median over a handful of windows reads exactly like a measurement and is not one.")
+  print("  MEASURED 2026-09-03: at 5-13 windows the SAME settings (LC 0.15, damper 0.3) gave 50-65")
+  print("  crossings/min on one pair of routes and 100-160 on the next -- a spread WIDER than the")
+  print("  effect being looked for, and it had already been reported as a direction before anyone")
+  print("  checked that. If the bracket is wide or the window count is small, the row is not")
+  print("  comparable to anything, including itself on another drive.")
+
+
+if __name__ == "__main__":
+  main()

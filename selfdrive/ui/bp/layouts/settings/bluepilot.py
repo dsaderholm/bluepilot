@@ -65,20 +65,16 @@ class BluePilotLayout(Widget):
   def _high_speed_factor_description(self) -> str:
     flat = self._flat_high_speed_factor()
     return tr(
-      "Scales the high-speed steering response in angle mode, and sets how gain CHANGES with curve "
-      "size. Above {flat:.2f} the car steers harder the more the road bends (can ping-pong on "
-      "curves); below it, the car steers LESS the more the road bends (calm, but weak on tighter "
-      "curves). At {flat:.2f} the response is the same on every curve. That number depends on your "
-      "Dampening AND on your vehicle, so it MOVES when you change Dampening."
+      "Sets how steering gain CHANGES with curve size. Above {flat:.2f} the car steers harder the "
+      "tighter the curve; below it, softer. At {flat:.2f} it is the same on every curve. That "
+      "number moves when you change Dampening."
     ).format(flat=flat)
 
   def _dampening_description(self) -> str:
     flat = self._flat_high_speed_factor()
     return tr(
-      "Overall steering firmness at high speed on gentle roads. If oversteering, reduce. If "
-      "understeering, increase. Note this also moves the High Speed Adjustment Factor's flat "
-      "point, which is now {flat:.2f} -- lowering Dampening alone makes the car react harder the "
-      "more the road bends."
+      "Overall steering firmness at high speed on gentle roads and straights. It also moves the "
+      "High Speed Adjustment Factor's flat point, now {flat:.2f}."
     ).format(flat=flat)
 
   @staticmethod
@@ -654,7 +650,9 @@ class BluePilotLayout(Widget):
     )
     self._lane_centering_damping_ang = float_control_item(
       lambda: tr("Lane Centering Damping"),
-      lambda: tr('Damps the lane centering loop instead of weakening it. Lane centering is a pure proportional controller, so it can weave on straight roads -- measured at 29-44 cm side to side. This is a lead time in seconds acting on how fast the error is changing; 0 is the original behaviour. Try 0.3 to get centring authority back without the weave. Not yet tested on the road.'),
+      lambda: tr('Damps the lane centering loop instead of weakening it, so you can keep centering '
+                 'authority without weaving on straights. A lead time in seconds; 0 is the '
+                 'original behavior. Try 0.3.'),
       param="lane_centering_damping_ang",
       min_value=0.0,
       max_value=1.0,
