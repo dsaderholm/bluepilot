@@ -3523,6 +3523,58 @@ model's implied radius there was 180 m. Real ramp, appropriate slowing -- if any
 conservative than his measured comfort. Three positions were taken on this event in one day; the one
 that held is the one with two independent measurements agreeing on the same frame.
 
+## EVERY BLUEPILOT BRANCH, CHECKED 2026-09-03. TWO COMMITS WE DO NOT HAVE AND SHOULD KNOW ABOUT.
+
+He asked twice -- "did you take anything else", then "check the dev branches too" -- and the second
+ask is what found these. **Releases: newest is `bp-7.0` and we are 0 commits behind it. There is no
+`bp-8.0`.** Dev branches on the remote: `bp-dev`, `bp-dev-191`, `bp-dev-expedition`,
+`bp-dev-f150-mk14.5`, `bp-dev-mici-ui`, `bp-dev-old`, `bp-dev-rl-ui`, `bp-dev-ui`, `bp-jmc-lane`,
+`bp-livedelay-icon`, `bp-no-stall`, `bp-sync-*`, plus two archives.
+
+`bp-no-stall` is 0 ahead. `bp-livedelay-icon` is 4 ahead, one trivial. The platform and UI branches
+are other people's cars. **Everything on `bp-dev` touching the Ford lateral path we already have BY
+CONTENT** -- the StarPilot guards, the correction rate limit, the interpolation update. Two do not.
+
+### `0cb9165427` on `bp-jmc-lane` -- THE TRIM COMPETES WITH THE PLANNER FOR THE DEVIATION BUDGET
+
+Unmerged, John Christman, 2026-08-27, *"avoid lane positioning at limits and takeover oscillation"*.
+**WE HAVE THE ONE-SIDED FORM IT FIXES.** Ours adds the trim into `kappa_cmd` (line ~613) and then
+clips the COMBINED value:
+
+    kappa_cmd = self.lane_center_trim.update(...)
+    if v_ego > 9:
+      kappa_cmd = clip(kappa_cmd, current_curvature -+ CarControllerParams.CURVATURE_ERROR)
+
+Theirs gives the planner first claim and hands the trim the remainder, with the reason stated
+plainly: *"a one-sided form lets the trim subtract authority while the planner is already clipped
+short in a curve."*
+
+**THAT IS EXACTLY THIS CAR'S REGIME.** Delivery is 0.87-0.93, i.e. measured lags desired, so in a
+curve `abs(planner - measured)` is already near the budget and the trim can only push further out
+of it -- where the clip cuts the sum, not the trim's share of it.
+
+**IT IS NOT A SAFETY PROBLEM AND IT DOES NOT INVALIDATE THE LC 0.35 DRIVE.** The clip bounds the
+total either way, so nothing can exceed measured +- CURVATURE_ERROR. And the straight-road weave
+test runs where the planner has budget to spare, so the primary question that drive answers is
+untouched. **What it can confound is CURVE behaviour at raised strength**, which matters because
+`lane_centering_strength_ang` went 0.15 -> 0.35 on 2026-09-03.
+
+It also carries `_PRESS_RELEASE_S = 0.3`, debouncing `steeringPressed` because *"a 30 ms dip inside
+a 1.7 s hold fired a pulse (route 00000399 t=172.04)"* -- a takeover-oscillation guard on the stall
+blip. This fork has its own history of `steeringPressed` chatter, so that is worth reading before
+anyone re-derives it.
+
+### `fc228b4099` on `bp-dev` -- cruise-button event storm on sustained hold
+
+*"ford: fix combo cruise-button event storm on sustained hold."* Not read in detail yet. **It is
+adjacent to a failure this file already spent a day on** -- `update_manual_button_timers` only
+zeroing on a RELEASE while this car's SCCM sends one physical press as a burst of PRESS events, which
+stuck a hold for 87 seconds. Read it against that section before deciding.
+
+**NONE OF THE FOUR (these two plus `a15672fb15` and `77ec55c73e`) HAVE BEEN TAKEN.** All are
+behaviour changes to a branch his car auto-pulls, on a day he is driving, with one experiment
+already in flight.
+
 ## THE PSCM NEVER REPORTS LIMITING ON THIS CAR. THE SIGNAL IS DEAD ON NON-CAN-FD FORDS.
 
 He asked what came of "the PSCM reports when it is limiting". **It does not, on his car**, and the
