@@ -127,7 +127,16 @@ ad-hoc script that no longer exists, at an unrecorded sampling rate; a second ad
 | `00000407` | 0.15 | **0.3** | 45 | 0.6 | **0.13 m** | 0.31 m | **50.0** |
 | `0000040e` | 0.15 | **0.3** | 45 | 2.4 | **0.12 m** | 0.22 m | **65.0** |
 
-**THE DAMPER MOVED BOTH COLUMNS THE RIGHT WAY, which a pure P-gain trade cannot do.** At LC 0.15 the
+**THAT DAMPER CLAIM IS WITHDRAWN, 2026-09-03. IT DID NOT REPLICATE.** Two drives later, on the
+SAME settings and through the same tool, `0000041c` and `0000041d` read 100 and 180 crossings/min
+against the 50-65 recorded below. And the per-window RANGE settles it: `[20-190]` on `0000040e`,
+`[10-230]` on `0000041c`, `[30-290]` on `0000041d` -- three brackets that overlap almost entirely,
+i.e. one distribution and no measurable effect. **The spread across identical settings was wider
+than the effect, and it was reported as a direction before anyone checked that.** `bp_lateral_weave`
+now prints the range and the window count for exactly this reason. What follows is kept as the
+record of the error, not as a result:
+
+**(WITHDRAWN) The damper moved both columns the right way, which a pure P-gain trade cannot do.** At LC 0.15 the
 undamped car sits 0.24 m off centre and crosses 175 times a minute; with the lead term it sits
 0.12-0.13 m off and crosses 50-65. Lower hunting AND better centring is the signature of a
 derivative term working, not of a gain change.

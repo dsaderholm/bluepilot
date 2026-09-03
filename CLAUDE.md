@@ -3392,6 +3392,32 @@ Hardcoding 1.15 would be wrong on CAN-FD, which is the defect the shared module 
 so an aborting interpreter reads as success with empty output. Check `$?` without a pipe, or
 `${PIPESTATUS[0]}`.
 
+### A MEDIAN OVER A HANDFUL OF WINDOWS IS NOT A MEASUREMENT. 2026-09-03.
+
+The damper was reported as working -- "both columns the right way, which a P-gain trade cannot do"
+-- off 0.6-2.4 minutes of qualifying road. Two drives later, SAME settings, same tool:
+
+    0000040e   median  65 crossings/min   range [20-190]   24 windows
+    0000041c   median 100                 range [10-230]   13 windows
+    0000041d   median 180                 range [30-290]    9 windows
+
+**Three brackets that overlap almost entirely: one distribution, no measurable effect.** The spread
+across identical settings was wider than the effect being looked for, and that was not checked
+before it was reported as a direction.
+
+**THE FIX IS IN THE OUTPUT, NOT IN RESOLVING TO BE CAREFUL.** `bp_lateral_weave` now prints the
+median, the min-max ACROSS WINDOWS, and the window count. A thin row now looks thin. Do the same to
+any tool whose verdict is a median: the bracket is what stops a 9-window number reading like a
+result. **Do not fix this by inventing a minimum window count** -- that is the guessed-bound failure
+recorded for MAPD_V2_STALL_S; show the spread and let it disqualify itself.
+
+**AND THE CURVE METRIC IS IN THE SAME STATE ON THOSE DRIVES.** 2.35 osc/min at 47% swing on
+`0000041c` (1.7 min of curve-holding) against 4.29 at 60% on `0000041d` (0.7 min). The historical
+range on this car is 3.43-5.78 at 45-54%, so both readings sit inside it and disagree with each
+other by more than any effect. **His recent drives are surface roads** -- every route rejected
+6,000-13,000 model frames for hands-on-or-not-engaged -- so neither open question can be scored
+from them. It needs sustained highway, and saying so is the answer rather than a smaller number.
+
 ### THE WEAVE NUMBERS IN THE LEDGER WERE FROM A TOOL THAT NO LONGER EXISTS
 
 The 2026-09-01 weave table (p2p 0.29-0.44 m, 13.7-20.0 crossings/min) came from an ad-hoc script at

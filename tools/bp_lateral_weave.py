@@ -187,7 +187,8 @@ def main():
   print(f"=== STRAIGHT-ROAD WEAVE, >= {args.speed:.0f} mph ===")
   print(f"   {WIN_S:.0f} s windows, straight throughout, hands off, lane probs >= {MIN_LANE_PROB}")
   print("   Sampled at the modelV2 rate. Comparable ONLY with other output of this tool.\n")
-  print(f"  {label:<26}{'LC':>6}{'damp':>6}{'min':>8}{'off-centre':>12}{'p2p':>9}{'cross/min':>11}")
+  print(f"  {label:<26}{'LC':>6}{'damp':>6}{'min':>8}{'off-centre':>12}{'p2p':>9}"
+        f"{'cross/min':>12}{'[range]':>10}{'wins':>6}")
 
   thin = []
   for route, fs in groups.items():
@@ -200,9 +201,11 @@ def main():
             f"{'INSUFFICIENT -- ' + str(len(r['offs'])) + ' windows':>32}")
       thin.append((route, r))
       continue
+    cr = sorted(r["cross"])
     print(f"  {route:<26}{lc:>6}{dp:>6}{r['minutes']:>8.1f}"
           f"{statistics.median(r['offs']):>11.2f}m{statistics.median(r['p2p']):>8.2f}m"
-          f"{statistics.median(r['cross']):>11.1f}")
+          f"{statistics.median(r['cross']):>8.0f}"
+          f"{' [%.0f-%.0f]' % (cr[0], cr[-1]):>10}{len(cr):>6}")
 
   if thin:
     print("\n  Why the thin routes had no qualifying road:")
@@ -215,6 +218,14 @@ def main():
   print("  cross/min   sign changes about the window mean -- how OFTEN it hunts")
   print("\n  A low crossing rate with a high off-centre is the P-gain trade, not an improvement.")
   print("  Read all three columns or the trade is invisible.")
+  print()
+  print("  cross/min shows the MEDIAN, then [min-max ACROSS WINDOWS], then the window count. A")
+  print("  median over a handful of windows reads exactly like a measurement and is not one.")
+  print("  MEASURED 2026-09-03: at 5-13 windows the SAME settings (LC 0.15, damper 0.3) gave 50-65")
+  print("  crossings/min on one pair of routes and 100-160 on the next -- a spread WIDER than the")
+  print("  effect being looked for, and it had already been reported as a direction before anyone")
+  print("  checked that. If the bracket is wide or the window count is small, the row is not")
+  print("  comparable to anything, including itself on another drive.")
 
 
 if __name__ == "__main__":
