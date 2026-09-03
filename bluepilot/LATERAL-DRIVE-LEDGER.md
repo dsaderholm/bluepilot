@@ -133,7 +133,52 @@ centering in the same edit, so its across-the-board drop cannot be attributed to
 `00000400` seg 0-18 held the pre-change settings but produced no qualifying steady-state frames, so
 the one same-road A/B in the whole drive is empty.
 
-## Straight-road weave, RE-MEASURED 2026-09-02 with one instrument
+## Straight-road weave -- THE REAL BASELINE, 2026-09-03, 65 mph floor
+
+The 600-mile sweep re-scored with the sliding-window tool. **274 minutes of qualifying road at
+LC 0.55**, 405-2174 windows per route, against the 13-24 windows every earlier comparison rested on.
+
+| route | LC | damper | min | off-centre | p2p | cross/min | [range] | windows |
+|---|---|---|---|---|---|---|---|---|
+| `00000400` | 0.55 | — | 43.7 | 0.05 m | 0.16 m | 90 | [10-380] | 405 |
+| `00000402` | 0.55 | — | 98.6 | 0.04 m | 0.18 m | 90 | [10-320] | 1413 |
+| `00000405` | 0.55 | — | 131.8 | 0.05 m | 0.17 m | 70 | [10-400] | 2174 |
+| `000003ed` | 0.55 | — | 2.3 | 0.05 m | 0.16 m | 80 | [30-190] | 27 |
+| `00000406` | **0.15** | — | 2.0 | **0.21 m** | 0.16 m | 120 | [10-270] | 13 |
+| `0000040e` | 0.15 | 0.3 | 4.0 | 0.18 m | 0.22 m | 70 | [10-190] | 24 |
+| `0000041c` | 0.15 | 0.3 | 3.1 | 0.13 m | 0.21 m | 90 | [10-230] | 15 |
+| `0000041d` | 0.15 | 0.3 | 1.6 | 0.03 m | 0.15 m | 170 | [30-300] | 11 |
+
+**THE CENTERING EFFECT IS REAL AND LARGE.** Four independent LC 0.55 routes agree to a hundredth of
+a metre -- 0.04-0.05 m off centre -- against 0.21 m at LC 0.15. A four-fold difference, reproduced
+across 4,019 windows. That is the measurement behind his 2026-09-03 report, *"it was hugging some
+edges"*, and it is why raising the strength is the right response.
+
+**BUT THE OTHER HALF OF THE "P-GAIN TRADE" IS NOT SUPPORTED, AND THIS FILE HAS BEEN ASSERTING IT.**
+The standing story was "less hunting for worse centring" -- LC 0.15 was said to HALVE the crossing
+rate, 17.5-20 down to 6.5. Those numbers came from the retired ad-hoc script. Through this tool:
+
+    LC 0.55   70-90 crossings/min   n = 405, 1413, 2174, 27
+    LC 0.15      120                n = 13
+
+**Lower strength did not reduce hunting. If anything it crossed MORE**, though 13 windows cannot
+carry that claim on its own. What can be said with 4,000 windows behind it is that the 70-90 figure
+at LC 0.55 is solid, and nothing at LC 0.15 beats it.
+
+**So the trade he made was worse centring for no measured reduction in weave.** Raising
+`lane_centering_strength_ang` back up is well-supported, and 0.55 itself has 274 minutes of evidence
+showing tight centring at a crossing rate no worse than 0.15. **0.35 is a cautious first step, not a
+compromise between two known-good options.**
+
+**AND IT NARROWS WHAT THE DAMPER HAS TO PROVE.** If the weave was never the cost of high strength,
+then the damper is not needed to buy strength back -- it is only worth keeping if it improves
+something at 0.35+ on its own. Score that on the next drive with real highway.
+
+**Read the [range] column before comparing any two rows.** Individual windows run 10-400 crossings
+per minute on every setting; only the median over hundreds of windows is stable, which is exactly
+why the 11-24 window rows below cannot separate anything.
+
+## (SUPERSEDED -- 13-24 windows, thin) Straight-road weave, RE-MEASURED 2026-09-02 with one instrument
 
 **The table below this one is the OLD instrument and is kept only as history.** It came from an
 ad-hoc script that no longer exists, at an unrecorded sampling rate; a second ad-hoc script returned
