@@ -56,6 +56,24 @@ Read this before any row below. `low` / `high` / `damp` are `FordLowSpeedFactor_
 | 2026-09-01 | set by hand, + damper | 0.981 | 0.68 | 0.78 | 0.15 + **damp 0.3** |
 | 2026-09-01 | `0000040e` seg 0-14, FROM THE WIRE | — | **0.714** | 0.780 | 0.15 + damp 0.3 |
 | 2026-09-01 | `0000040e` seg 15-30, FROM THE WIRE | — | **0.794** | 0.780 | 0.15 + damp 0.3 |
+| 2026-09-02 | `0000041c` -> `0000041d`, FROM THE WIRE | — | 0.784 -> **0.794** | 0.780 | 0.15 + damp 0.3 |
+| 2026-09-03 | set by hand, ROAD REPORT | 1.017 | 0.794 | 0.780 | **0.35** + damp 0.3 |
+
+**The last row is a road report, not a sweep: "it was hugging some edges."** That is the measured
+cost of LC 0.15 -- the car sits 0.10-0.24 m off centre there against 0.04-0.05 m at 0.55 -- so his
+report and the weave table agree. `custom_path_offset_ang` was checked first and is 0.0, so nothing
+was biasing him sideways; it is purely strength.
+
+**AND IT IS THE DAMPER TEST THAT COULD NOT BE RUN BEFORE.** At LC 0.15 the position loop is too weak
+for a lead term to matter, which is part of why the weave numbers were indistinguishable noise. At
+0.35 the loop has real authority, so the next drive separates the two outcomes:
+
+    edges stop, straights stay calm   the damper works, and 0.5 is available
+    edges stop, weave returns         the damper is not doing its job at 0.3
+
+Both are worth more than the five drives before it. Score it with `bp_lateral_weave.py` and READ THE
+RANGE COLUMN, not the median -- and only on a route with real sustained highway, because every drive
+from `00000412` to `0000041d` had under 1.3 minutes of qualifying straight.
 
 **THE LAST TWO ROWS COME FROM `--telemetry`, NOT FROM `initData`, AND THEY DISAGREE WITH IT.** The
 boot snapshot says 0.68 for all 31 segments of `0000040e`; the wire says he was at 0.714 by segment
