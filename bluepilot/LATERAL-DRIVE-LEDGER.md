@@ -72,8 +72,14 @@ for a lead term to matter, which is part of why the weave numbers were indisting
     edges stop, weave returns         the damper is not doing its job at 0.3
 
 Both are worth more than the five drives before it. Score it with `bp_lateral_weave.py` and READ THE
-RANGE COLUMN, not the median -- and only on a route with real sustained highway, because every drive
-from `00000412` to `0000041d` had under 1.3 minutes of qualifying straight.
+RANGE COLUMN, not the median.
+
+**AND THE "NOT ENOUGH HIGHWAY" CLAIM ABOUT THOSE DRIVES IS WITHDRAWN.** `0000041c` and `0000041d`
+carry 7.3 and 4.5 minutes above 65 mph, engaged hands-off for 85% of it. The thin scores were the
+tool discarding road -- a 6 s window was emitted and the buffer CLEARED, binning every remainder
+shorter than the window, which cost 58%. It slides by 3 s now and those routes read 3.1 and 1.6
+qualifying minutes. `00000412`, `0000041a` and `0000041b` really were pure surface driving with zero
+time above 65.
 
 **THE LAST TWO ROWS COME FROM `--telemetry`, NOT FROM `initData`, AND THEY DISAGREE WITH IT.** The
 boot snapshot says 0.68 for all 31 segments of `0000040e`; the wire says he was at 0.714 by segment

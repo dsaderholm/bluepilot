@@ -3411,6 +3411,28 @@ any tool whose verdict is a median: the bracket is what stops a 9-window number 
 result. **Do not fix this by inventing a minimum window count** -- that is the guessed-bound failure
 recorded for MAPD_V2_STALL_S; show the spread and let it disqualify itself.
 
+**AND "HE HAS NOT DRIVEN ENOUGH HIGHWAY" WAS WRONG -- IT WAS THE TOOL. He asked, which is the only
+reason it was checked.** Decomposed per route, on carState:
+
+    route        driving   >=65 mph   ...ENGAGED hands-off   ...& straight
+    00000412       7.9        0.0            0.0                 0.0
+    0000041a      11.9        0.0            0.0                 0.0
+    0000041b      15.5        0.0            0.0                 0.0
+    0000041c      17.5        7.3            6.4                 3.2
+    0000041d      13.3        4.5            3.6                 1.7
+
+**11.8 minutes above 65 mph and he was ENGAGED, HANDS OFF for 85% of it.** Three routes were
+genuinely pure surface driving; two were not. The thin samples were `bp_lateral_weave` discarding
+road, not an absence of it: 3.1 qualifying minutes on `0000041c` scored as 1.3, because emitting a
+6 s window and CLEARING the buffer binned every remainder shorter than the window. Lane-line
+probability was never the constraint (median 0.98). Fixed by sliding the window 3 s instead of
+clearing it, and the `min` column now reports road that passed every gate rather than window count
+times 6 s, which double-counted the overlap.
+
+**BEFORE TELLING HIM THE DATA IS TOO THIN, CHECK WHETHER THE TOOL IS THE ONE THINNING IT.** A gate
+that rejects and a window that discards look identical in the output, and only one of them is about
+his driving.
+
 **AND THE CURVE METRIC IS IN THE SAME STATE ON THOSE DRIVES.** 2.35 osc/min at 47% swing on
 `0000041c` (1.7 min of curve-holding) against 4.29 at 60% on `0000041d` (0.7 min). The historical
 range on this car is 3.43-5.78 at 45-54%, so both readings sit inside it and disagree with each

@@ -21,7 +21,9 @@ the reader's rate rather than on the road. One sample per model frame, always.
 Definitions, so a future reader can tell whether a quoted number came from here:
 
     straight        |desiredCurvature| < 2.5e-4 (a 4000 m radius) for the WHOLE window
-    window          6.0 s, non-overlapping, discarded if any frame fails a gate
+    window          6.0 s, SLIDING by 3.0 s, abandoned if any frame fails a gate
+    min             minutes of road that passed every gate -- NOT the window count times 6 s,
+                    which double-counts the overlap
     offset          (laneLines[1].y[0] + laneLines[2].y[0]) / 2, metres, + is left of centre
     gates           hands off, latActive, speed >= floor, both lane-line probs >= 0.30
     crossings/min   sign changes of (offset - window mean), per minute of qualifying road
@@ -43,6 +45,7 @@ log_capnp = capnp.load(os.path.join(REPO, "cereal", "log.capnp"),
 
 MPH = 2.23694
 WIN_S = 6.0
+STEP_S = 3.0        # 50% overlap; see the slide comment in scan()
 STRAIGHT_KAPPA = 2.5e-4
 MIN_LANE_PROB = 0.30
 
@@ -92,6 +95,7 @@ def scan(files, speed_floor):
   window = []
   offs, p2p, cross = [], [], []
   minutes = 0.0
+  qualifying = 0
   rejected = collections.Counter()
 
   for p in files:
@@ -144,6 +148,7 @@ def scan(files, speed_floor):
             window = []
             continue
           window.append((t, (float(ll[1].y[0]) + float(ll[2].y[0])) / 2.0))
+          qualifying += 1
           if window[-1][0] - window[0][0] >= WIN_S:
             o = [x for _, x in window]
             mean = statistics.fmean(o)
@@ -152,10 +157,23 @@ def scan(files, speed_floor):
             p2p.append(max(o) - min(o))
             cross.append(n / (WIN_S / 60.0))
             minutes += WIN_S / 60.0
-            window = []
+            # SLIDE, do not discard. Emitting a window and clearing threw away every remainder
+            # shorter than WIN_S -- measured 2026-09-03 as 58% of road that passed every other
+            # gate (3.1 qualifying minutes on 0000041c, 1.3 scored). A run of 11 s gave one
+            # window and binned 5 s. Keeping the tail means an 11 s run yields windows at 0-6 and
+            # STEP_S onward instead of one.
+            #
+            # The windows now OVERLAP, so they are not independent samples and the [range] column
+            # narrows slightly against a fully independent draw. That is the right trade here: the
+            # range exists to stop a thin row reading as a result, and having more of the road in
+            # it serves that better than statistical purity on a sample this small.
+            cut = window[0][0] + STEP_S
+            while window and window[0][0] < cut:
+              window.pop(0)
       except Exception:
         continue
-  return dict(offs=offs, p2p=p2p, cross=cross, minutes=minutes, rejected=rejected)
+  return dict(offs=offs, p2p=p2p, cross=cross, minutes=minutes, rejected=rejected,
+              qualifying_min=qualifying / 20.0 / 60.0)
 
 
 def main():
@@ -197,12 +215,12 @@ def main():
     lc = cfg["lane_centering_strength_ang"][:5]
     dp = cfg["lane_centering_damping_ang"][:5] or "-"
     if len(r["offs"]) < args.min_windows:
-      print(f"  {route:<26}{lc:>6}{dp:>6}{r['minutes']:>8.1f}"
+      print(f"  {route:<26}{lc:>6}{dp:>6}{r['qualifying_min']:>8.1f}"
             f"{'INSUFFICIENT -- ' + str(len(r['offs'])) + ' windows':>32}")
       thin.append((route, r))
       continue
     cr = sorted(r["cross"])
-    print(f"  {route:<26}{lc:>6}{dp:>6}{r['minutes']:>8.1f}"
+    print(f"  {route:<26}{lc:>6}{dp:>6}{r['qualifying_min']:>8.1f}"
           f"{statistics.median(r['offs']):>11.2f}m{statistics.median(r['p2p']):>8.2f}m"
           f"{statistics.median(r['cross']):>8.0f}"
           f"{' [%.0f-%.0f]' % (cr[0], cr[-1]):>10}{len(cr):>6}")
