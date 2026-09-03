@@ -3523,6 +3523,48 @@ model's implied radius there was 180 m. Real ramp, appropriate slowing -- if any
 conservative than his measured comfort. Three positions were taken on this event in one day; the one
 that held is the one with two independent measurements agreeing on the same frame.
 
+## HE IS NOT USING SCC-VISION OR SCC-MAP. 2026-09-03, unprompted.
+
+  *"I am not really using SCC Vision or even map. They work great, but since the PSCM needs to go
+  so slow, I just take over, if you get what I mean."*
+
+**HE IS NOT REPORTING A BUG. He is saying the feature is correct and unusable, which is a harder
+problem and a different one.** Do not respond to this by tuning a sensitivity, adding a defense, or
+touching `SmartCruiseControlMapFactor`. The controllers are doing what a car with this PSCM should
+do; the PSCM is why the answer is unacceptable.
+
+**THE CHAIN, entirely from measurements already in this file:**
+
+    the PSCM comfortably holds       ~2.5 m/s^2      a 259 m corner -> 57 mph
+    openpilot's own p99               2.73                        -> 59 mph
+    HE drives that corner at          ~4.1                        -> 64 mph, measured
+
+So SCC slows correctly for a bend the PSCM cannot hold at his speed, he does not want to be that
+slow, and he takes the corner himself -- longitudinally AND laterally, because at his speed the
+PSCM cannot track it either.
+
+**IT IS VISIBLE IN THE DRIVE DATA AND WAS MEASURED BEFORE HE SAID IT.** Hands-on above 65 mph:
+13% on `0000041c`, 19% on `0000041d`. That is this, and it is the same signature already recorded
+years-ago-in-fork-time as *"hands-on% climbs the same curve -- 6% low, 90%+ above 3.0 -- so he TAKES
+OVER exactly where the PSCM starts losing the line."*
+
+**WHAT IT MEANS FOR PRIORITY, and this is the point of the entry:**
+
+- **SCC-Map and SCC-Vision tuning currently has NO CONSUMER.** The veto defenses, the corner-speed
+  factor pair, the late-detection work, the exit-ramp problem -- all of it improves a feature he
+  drives around. Do not spend effort there and do not open a session with it.
+- **THE LATERAL WORK IS THE THING THAT UNLOCKS THEM.** If the PSCM held a corner nearer his 4.1,
+  SCC would be asking for a speed he would accept, and he would stop taking over. That makes the
+  angle-mode tracking work upstream of the entire longitudinal curve programme rather than a
+  comfort project running beside it.
+- **Do not switch SCC off for him.** He said it works and he did not ask. It is his toggle, and a
+  feature he ignores costs him nothing while a setting changed under him costs trust.
+
+**AND IT RETIRES A STANDING QUESTION.** "The PSCM angle-mode authority limit is a CAR FACT nobody
+here has measured yet" has been open since 2026-08-19 as the number blocking the tile-curvature
+corner-speed work. That work is now pointless until the authority itself moves: a better corner
+speed still lands under his comfort, and he still takes over.
+
 ## SCC-Map has four defenses now, and they are deliberately different questions
 
 Built up across 2026-08-10 and 2026-08-11 from measured events. They stack, and the split between
