@@ -3523,6 +3523,69 @@ model's implied radius there was 180 m. Real ramp, appropriate slowing -- if any
 conservative than his measured comfort. Three positions were taken on this event in one day; the one
 that held is the one with two independent measurements agreeing on the same frame.
 
+## THE TORQUE INTERCEPTOR IS BLUEPILOT'S, NOT OURS. 2026-09-03.
+
+  *"We just need the torque interceptor and then I'll use SCC."*
+  *"The torque interceptor will obviously be made and designed and everything from BluePilot and
+  their devs, so we just need to wait for that. I will have little involvement in that."*
+
+**So the PSCM authority ceiling has a hardware answer coming from upstream, and it is not this
+fork's work.** Do not design around it, do not propose alternatives to it, do not scope software
+that tries to buy authority back, and do not ask him about it -- he has said his involvement is
+minimal. **There is no torque-interceptor concept anywhere in this tree** (checked 2026-09-03,
+zero hits across .py/.capnp/.h/.md), so if it lands it arrives as new upstream code.
+
+**WHAT IT WOULD CHANGE, worth knowing so nobody re-derives it:** if the PSCM held nearer his
+4.1 m/s^2, the corner speeds SCC asks for become acceptable, he stops taking over, and the entire
+longitudinal curve programme gets a consumer again. Much of the angle-mode gain tuning would also
+need re-measuring rather than carrying forward. **None of that is actionable until it exists.**
+
+## bp-dev-191: WE HAVE MOST OF IT BY CONTENT, AND THREE COMMITS MATTER. 2026-09-03.
+
+He asked whether that branch had been looked at. One commit had been taken from it (`ba20937aac`,
+2026-08-29) and it was never re-checked; it is 23 commits ahead of us. **Checked BY CONTENT, because
+these arrive under different hashes through the release branch.**
+
+**ALREADY OURS, do not re-take:** the StarPilot guards (`_WIDTH_TOLERANCE_BP/V`,
+`_STD_TOLERANCE_BP/V`, the confidence `min()`, the isfinite and monotonic-x checks), the correction
+rate limit (`_CORRECTION_ROC_PER_TICK`, which a grep for "rate_limit" misses), and the
+`curvature_factor` interpolation update -- our tree already has the `[0.0005, high_gain_boundary]`
+ramp with `interp(v, [11.18, 31.29], [0.02, 0.0045])`.
+
+**A first pass reported "we have NONE of the guards" off a grep for the wrong constant names.**
+Reading the file settled it in one command. Grep for the CONCEPT and then read, or the report is
+about your pattern rather than the code.
+
+**NOT OURS, and the first one moves numbers already given to him:**
+
+| commit | what | effect |
+|---|---|---|
+| `a15672fb15` | `high_gain_boundary` `[0.02,0.0045]` -> `[0.015,0.0035]` | the ramp gets SHORTER, so the same high factor is ~33% steeper |
+| `77ec55c73e` | blend `b` tapers to 0 across `_VLT_V_LOW/HIGH_MS`; `_kappa_entering` 1.25 -> 1.1; `_desired_falling` 0.8 -> 0.9 | pure `desired` at highway speed |
+| (part of `94bf8144d4`) | `_MAX_APPLIED_CORRECTION = 0.0015` on the POST-gain correction | binds above `lane_centering_strength_ang` 0.375 |
+
+**THE BOUNDARY CHANGE, quantified at 85 mph with his damp 0.78:**
+
+    high 0.794   slope +33 (ours today)  ->  +44 with the commit
+    high 0.850   slope +49               ->  +66
+    high 0.900   slope +64               ->  +85
+    the MEASURED-BAD +68 arrives at high 0.915 today  ->  0.856 with the commit
+
+So the "stop at 0.90" ceiling handed to him on 2026-09-03 is correct for the code his car runs and
+becomes ~0.85 if that commit is taken. **Taking it silently would invalidate a number he is tuning
+against.**
+
+**AND THE 0.0015 CAP QUALIFIES THE LANE-CENTERING ADVICE GIVEN THE SAME DAY.** Applied correction is
+`_MAX_RAW_CORRECTION` (0.004) times gain:
+
+    LC 0.15 -> 0.0006      LC 0.35 -> 0.0014      LC 0.50 -> 0.0020      LC 0.55 -> 0.0022
+
+**0.35 sits just under the cap; 0.5 and 0.55 exceed it.** Upstream's own comment says it "stops a
+fake stuck steering rack from happening, because it is under the curvature error and stall gap" --
+a failure mode, not a comfort number. He ran 0.55 for the whole 600-mile drive with no complaint,
+so it is not obviously dangerous on this car, but **"0.5 is well supported" was said before this cap
+was known and should not be repeated without it.**
+
 ## HE IS NOT USING SCC-VISION OR SCC-MAP. 2026-09-03, unprompted.
 
   *"I am not really using SCC Vision or even map. They work great, but since the PSCM needs to go
