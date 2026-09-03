@@ -3523,6 +3523,41 @@ model's implied radius there was 180 m. Real ramp, appropriate slowing -- if any
 conservative than his measured comfort. Three positions were taken on this event in one day; the one
 that held is the one with two independent measurements agreeing on the same frame.
 
+## THE PSCM NEVER REPORTS LIMITING ON THIS CAR. THE SIGNAL IS DEAD ON NON-CAN-FD FORDS.
+
+He asked what came of "the PSCM reports when it is limiting". **It does not, on his car**, and the
+`_pscm_lim` clamp in `lateral_angle_ext` can therefore never fire. Established three ways:
+
+1. **`FORD_FUSION_MK5.config.flags` is 2** -- `ALT_STEER_ANGLE` only, `CANFD` (1) NOT set. (The
+   `flags 18` quoted elsewhere in this file is the RUNTIME value; `TSR` (16) is added from the
+   camera-bus fingerprint, not the static config. Both readings agree that CANFD is clear.)
+2. **`Lane_Assist_Data3_FD1` (972) is registered only under `if CP.flags & FordFlags.CANFD`**, so
+   it is not in his parser at all -- and `carstate.py` carries the reason in its own comment beside
+   the one signal it reads from that message: *"this signal is always 0 on non-CAN FD cars."*
+3. **Decoded off his raw CAN anyway: 100% `LimitNotReached` across 61,626 frames** on routes
+   `0000041c`/`0000041d`, including 757 frames of ENGAGED, hands-off cornering above 2.0 m/s^2.
+   `LatCtlSte_D_Stat` in the same message reads `Unavailable` on 100% of frames, which is the
+   sanity check failing loudly: openpilot sets `steerFaultTemporary` when that is not in (1,2,3),
+   so a real 0 would mean the car never steers. The message is simply all zeros.
+
+**CONSEQUENCES:**
+
+- **`_pscm_lim = getattr(CS, 'lat_ctl_lim_stat', 0)` is ALWAYS 0** -- and not only because the
+  message is dead: **nothing anywhere assigns `lat_ctl_lim_stat`.** The attribute does not exist
+  outside two test stubs. So `_in_hard_sat` reduces to `_dbc_sat` alone and the `_pscm_lim >= 1`
+  branch is unreachable. This file already recorded "`_pscm_lim` is silent in angle mode" and
+  attributed it to ANGLE MODE; the real reason is the PLATFORM, and it would be silent in curvature
+  mode too.
+- **There is no telemetry on this car that says the PSCM hit its authority limit.** Every claim
+  about the ~2.5 m/s^2 ceiling rests on indirect evidence -- our own deviation limiter biting above
+  2.5, hands-on% climbing past 3.0, delivery sitting at 0.87-0.93. Those agree with each other and
+  none of them is the PSCM saying so.
+- **So the torque-ceiling hypothesis cannot be confirmed OR refuted from this signal**, and that is
+  worth telling anyone building the interceptor: on a non-CAN-FD Ford there is no limit status to
+  instrument against, before or after.
+- **Do not "fix" this by registering the message.** It is CANFD-gated upstream for a documented
+  reason and would return zeros.
+
 ## THE TORQUE INTERCEPTOR IS BLUEPILOT'S, NOT OURS. 2026-09-03.
 
   *"We just need the torque interceptor and then I'll use SCC."*
