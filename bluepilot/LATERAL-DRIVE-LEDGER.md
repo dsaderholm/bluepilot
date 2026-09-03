@@ -133,6 +133,50 @@ centering in the same edit, so its across-the-board drop cannot be attributed to
 `00000400` seg 0-18 held the pre-change settings but produced no qualifying steady-state frames, so
 the one same-road A/B in the whole drive is empty.
 
+## THE "PSCM CANNOT HOLD 2.5 m/s^2" STORY IS NOT SUPPORTED. 2026-09-03.
+
+He asked where the 2.5 recommendation came from. Re-deriving it destroyed it, in three steps.
+
+**1. THE ORIGINAL WAS A BIN EDGE, FROM ONE ROUTE, WITH A CONFOUND.** The 2026-08-19 table binned
+lateral accel 0.5 wide and read "deviation limiter quiet to 2.5, then 9.1%, then 27.4%". 2.5 is the
+EDGE of the last clean bin, so the knee could sit anywhere from 2.3 to 2.9 -- and hands-on% climbs
+the same bins (37% -> 56% -> 90%). The deviation limiter fires when commanded and measured curvature
+diverge, which is what a DRIVER STEERING looks like. It may have been measuring him.
+
+**2. RE-MEASURED HANDS-OFF, POOLED, IT LOOKED LIKE A KNEE AT 2.0** -- delivery 0.89-0.97 below 1.75,
+then 0.74-0.82 from 2.0 up, across 48,000 frames of the sweep. **That was pooled across his entire
+tuning sweep**, which is the error this file exists to prevent.
+
+**3. SPLIT BY SETTINGS, THE KNEE BELONGS TO THE GAIN RAMP, NOT THE CAR:**
+
+| route | ramp | 1.75 | 2.00 | 2.25 | 2.50 |
+|---|---|---|---|---|---|
+| `00000405` | high 0.51, INVERTED | 0.888 | **0.711** | **0.718** | — |
+| `00000402` | high 0.51, INVERTED | 0.911 | — | — | — |
+| `0000041c`/`d` | high 0.794, RISING | 0.858 | **0.809** | **0.866** | **0.886** |
+
+At `high 0.51` the incremental gain on a tight curve is 0.562 -- the schedule cuts the command 44%
+ON PURPOSE. Delivery is actual/commanded, so an inverted ramp produces exactly this signature. **The
+"car cannot hold it" reading was the setting doing what it was set to do.**
+
+**WHAT IS ACTUALLY ESTABLISHED:** on his current rising ramp there is NO measured tracking
+degradation up to 2.5 m/s^2, which is as high as openpilot ever commands hands-off. **There is no
+evidence of a PSCM tracking limit anywhere in the range openpilot uses.**
+
+**WHAT REMAINS UNKNOWN, and it is the honest gap:** 2.5-3.0 has almost no hands-off data because
+openpilot does not command there, and above 3.0 is unreachable -- `MAX_LATERAL_ACCEL_NO_ROLL = 3.0`
+in `clip_curvature` is an EU-guideline limit applied to every car, upstream of the Ford layer. So
+the PSCM ceiling has never been tested, and cannot be from recorded drives.
+
+**CONSEQUENCE FOR THE RECOMMENDATION.** 2.5 still stands as a target, but for a DIFFERENT reason
+than it was given: not "the car cannot do more", but "it is the top of the measured-clean range and
+openpilot's own ceiling is 3.0 anyway". And the binding constraint is neither -- it is
+`SmartCruiseControlMapHighSpeedFactor` capping at 100, which pins SCC-Map to mapd's 2.2.
+
+**AND IT WEAKENS THE INTERCEPTOR CASE.** The argument was that the PSCM cannot hold his corner
+speeds. That is not measured. What IS measured is a 3.0 software clamp he cannot exceed with any
+hardware.
+
 ## Straight-road weave -- THE REAL BASELINE, 2026-09-03, 65 mph floor
 
 The 600-mile sweep re-scored with the sliding-window tool. **274 minutes of qualifying road at
