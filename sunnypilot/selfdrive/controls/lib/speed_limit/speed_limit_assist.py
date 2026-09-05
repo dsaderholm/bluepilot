@@ -24,6 +24,13 @@ SpeedLimitAssistState = custom.LongitudinalPlanSP.SpeedLimit.AssistState
 SpeedLimitSource = custom.LongitudinalPlanSP.SpeedLimit.Source
 
 ACTIVE_STATES = (SpeedLimitAssistState.active, SpeedLimitAssistState.adapting)
+
+# FusionPilot: how long before SLA may announce taking the set speed again. This is the ALERT'S OWN
+# DURATION (5.0 s, see `speedLimitChanged` / `speedLimitActive` in sunnypilot's events.py), not a
+# number anyone picked: a second announcement inside that window arrives while the first is still on
+# screen, so it can only ever be redundant. Route 00000427 fired three in 1.5 s off one flicker.
+ANNOUNCE_COOLDOWN_S = 5.0
+ANNOUNCE_COOLDOWN_FRAMES = int(ANNOUNCE_COOLDOWN_S / DT_MDL)
 ENABLED_STATES = (SpeedLimitAssistState.preActive, SpeedLimitAssistState.pending, *ACTIVE_STATES)
 
 DISABLED_GUARD_PERIOD = 0.5  # secs.
@@ -85,6 +92,7 @@ class SpeedLimitAssist:
     self._speed_limit = 0.
     self._speed_limit_final_last = 0.
     self.speed_limit_prev = 0.
+    self._frames_since_announce = 1 << 30   # seeded high: never gag the first one
     self.speed_limit_final_last_conv = 0
     self.prev_speed_limit_final_last_conv = 0
     self._gas_pressed = False
@@ -142,6 +150,44 @@ class SpeedLimitAssist:
     return bool(self.v_cruise_cluster_conv < CONFIRM_SPEED_THRESHOLD[self.is_metric])
 
   def update_active_event(self, events_sp: EventsSP) -> None:
+    """Announce SLA taking the set speed -- but only when it is actually taking it.
+
+    FusionPilot 2026-09-05, from his report: *"It's still telling me set speed changed to the speed
+    limit all the time now, even when the set speed didn't change at all"* and *"we were on SLA and
+    not a hold and it just kept telling me it changed even though it didn't."*
+
+    **THIS IS A DIFFERENT ALERT FROM THE ONE FIXED ON 2026-08-27, WHICH IS WHY HE SAID "STILL".**
+    That fix deferred `speedLimitAutoSet` ("Raising/Lowering set speed to N mph speed limit") to a
+    hold. The alert he is describing is `speedLimitChanged`, whose text is literally "Set speed
+    changed" -- and its trigger has nothing to do with the set speed changing. It fires on the ENTRY
+    EDGE into an active state, and picks the wording purely from whether the cluster is below
+    `CONFIRM_SPEED_THRESHOLD` (50 mph here). Measured on route 00000427:
+
+        12 announcements in 13 minutes; 6 of them with the dash NOT MOVING AT ALL
+        four of those inside 30 s, dash pinned at 22 with the limit at 22
+
+    **AND THE ENTRY EDGES ARE NOT A BUG -- 9 of the 12 are `disabled -> active`**, i.e. him cycling
+    cruise at lights on a surface street (35.5% of that drive had cruise off). So the churn is his
+    driving and the announcement is the thing that is wrong: re-engaging cruise on a road whose
+    limit the set speed already sits at is not a change and must not be announced as one.
+
+    TWO GUARDS, and they kill different halves of the 12:
+
+    1. `target_set_speed_confirmed` -- the set speed ALREADY equals the target, so nothing is going
+       to happen. Saying nothing is correct; rewording it to `speedLimitActive` ("Auto adjusting to
+       speed limit") would be equally untrue and chimes identically.
+    2. The re-announce cooldown, which is the ALERT'S OWN DURATION rather than an invented number.
+       Both alerts render for 5.0 s, so a second announcement inside that window lands while the
+       first is still on screen -- definitionally redundant. Route 00000427 t+375 fired three times
+       in 1.5 s off an `active -> inactive -> active` flicker: three chimes, one real change.
+    """
+    if self.target_set_speed_confirmed:
+      return
+
+    if self._frames_since_announce < ANNOUNCE_COOLDOWN_FRAMES:
+      return
+    self._frames_since_announce = 0
+
     if self.v_cruise_cluster_below_confirm_speed_threshold:
       events_sp.add(EventNameSP.speedLimitChanged)
     else:
@@ -494,6 +540,7 @@ class SpeedLimitAssist:
     return enabled, active
 
   def update_events(self, events_sp: EventsSP, v_baseline_conv: float = 0.0) -> None:
+    self._frames_since_announce = min(self._frames_since_announce + 1, 1 << 30)
     # BluePilot: announce every automatic set-speed change, raise or lower, so a bad limit is
     # seen rather than only felt. Fires on the target changing, which is when the assist commits.
     #

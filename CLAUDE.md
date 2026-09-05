@@ -9688,3 +9688,287 @@ back. Score it on a drive with nothing else moving, against `tools/bp_lateral_ph
 UNWINDING row and its degrees column) and `tools/bp_lateral_by_radius.py` in the 500-2000 m band.
 The alert gate shipped the same day cannot confound it -- that changes nothing the car does -- but if
 the steering feels different, it is this.
+
+## 2026-09-05: THE LATCH IS DRIVEN. IT RUNS, AND THE UNWIND TAIL HALVED.
+
+Route `00000427`, 13 segments, 7.5 minutes hands-off, first drive with both the alert gate and the
+exit-blend latch. **Verified BY CONTENT on the device** (`grep -c` for `steer_saturated_gate` and
+`_EXIT_LATCH_CALLS`), not by hash, because the branch was rebased.
+
+**NOTHING LATERAL MOVED, which is what makes it scoreable.** Params read off the device with mtimes
+converted to MDT: the gains, both lane-centering keys and the damper are all unchanged since 09-01
+to 09-04. `SteerAlertLaneGate` was written 12:44 MDT -- manager storing the new key's shipped
+default on the first boot after the update, four minutes before the drive.
+
+**ONE OTHER VARIABLE, and it is his:** `SmartCruiseControlMapFactor` 90 -> 100, written 12:40 MDT,
+five minutes before the route. It scales SCC-Map's corner speed at or below 25 mph. The two drives'
+speed profiles are nearly identical (p50 24 vs 27 mph, p90 34 vs 34), so it did not visibly move
+what the car did -- but it is a second change on the drive and is stated rather than ignored.
+
+### IT RUNS. 13.5x MORE TIME AT THE EXIT WEIGHT.
+
+    BEFORE  424/425, LC 0.45, no latch    34 of  6470 calls at b_blend 0.125   0.53%
+    AFTER   00000427, latch                901 of 12585 calls at 0.125         7.16%
+
+901 is almost exactly the 87 qualifying gate firings times the 10-call hold, so the mechanism is
+doing precisely what it was built to do and nothing more.
+
+**I REPORTED "THE LATCH DID NOT WORK" FIRST, AND IT WAS A PERCENTILE READ AS A MINIMUM.**
+`blendWeight` p10 was 0.175 on both drives, and that was quoted as "0.125 is never reached". The
+exit weight occupies ~1-7% of calls, which is BELOW p10's resolution by construction. **A percentile
+cannot answer a question about a rare value; count it.** Same family as "ask how big before
+concluding from how often", one layer over.
+
+**AND THE HYPOTHESIS BUILT ON THAT WRONG READING WAS ALSO WRONG.** `_kappa_entering` was accused of
+zeroing the latch constantly. Recomputed from `modelV2.orientationRate.z` and `liveDelay` exactly as
+the module does: it is true on 1.0% of calls and blocks only **16% of gate firings**. 84% select the
+exit branch, which is what the 901 calls show. The release is not the problem and was never the
+problem.
+
+### THE OUTCOME: THE HIGHWAY UNWIND TAIL IS DOWN ~50%, ON A MATCHED SAMPLE
+
+`tools/bp_lateral_phases.py`, same flags, comparable roads:
+
+    band / phase                    BEFORE (no latch)            AFTER (latch)
+    tight <500 m   UNWIND ratio     0.825  p90 1.46             0.907  p90 1.39
+    tight <500 m   UNWIND degrees   med -1.35  p90 +3.13  p99 +41.51    med -0.83  p90 +4.04  p99 +21.03
+    hwy 500-2000 m UNWIND ratio     1.020  p90 2.28   n=1520    1.012  p90 1.69   n=3415
+    hwy 500-2000 m UNWIND degrees   med +0.05  p90 +3.18  p99 +8.98     med +0.03  p90 +1.39  p99 +5.60
+
+**The 500-2000 m band is the one to read** -- this file already established it as the target band --
+and it improved on every tail measure with a real sample behind it: p90 overshoot **+3.18 -> +1.39
+degrees (-56%)**, p99 **+8.98 -> +5.60 (-38%)**, p90 ratio 2.28 -> 1.69. The medians barely move,
+which is exactly what a tail fix should look like and is what the pre-build magnitude check
+predicted (p50 0.34 deg, p90 1.54, p99 4.66).
+
+**The tight <500 m band is mixed and thin.** p99 halves (+41.51 -> +21.03) but p90 rises slightly
+(+3.13 -> +4.04), and with n=451/703 unwinding frames a p99 is the fourth-to-seventh worst sample.
+Do not quote that row as a result either way.
+
+**ONE DRIVE, 7.5 MINUTES HANDS-OFF.** The exit-weight occupancy is robust (thousands of calls); the
+outcome is one matched pair on comparable surface roads. It wants a highway drive before the tail
+numbers are treated as settled.
+
+### THE ALERT GATE IS UNSCORED AND THAT IS ARITHMETIC, NOT A FAILURE
+
+**Zero `steerSaturated` episodes on the whole route**, reconstructed and raw. The base rate is 61
+episodes across 701 segments, so 13 segments expects about ONE. Zero is uninformative -- it is not
+evidence the gate works and not evidence it does not. **Do not report an absence at this sample size
+as a result**; it needs a drive with the 29-56 mph curves that produce the alerts.
+
+## 2026-09-05: "SET SPEED CHANGED" WAS 99% NOISE. TWO GUARDS, MEASURED ACROSS FOUR PULLS.
+
+*"It's still telling me set speed changed to the speed limit all the time now, even when the set
+speed didn't change at all."* Then, narrowing it himself: *"I think we were on SLA and not a hold
+and it just kept telling me it changed even though it didn't."*
+
+**IT IS A DIFFERENT ALERT FROM THE ONE FIXED ON 2026-08-27, WHICH IS WHY HE SAID "STILL".** That fix
+gated `speedLimitAutoSet` on a hold. This is `speedLimitChanged` / `speedLimitActive`, fired from
+`update_active_event` on the ENTRY EDGE into an active state -- **a trigger that never consulted the
+set speed at all**, and which picks its wording purely from whether the cluster is under
+`CONFIRM_SPEED_THRESHOLD`. Chasing the 2026-08-27 alert again would have found nothing wrong.
+
+### THE MEASUREMENT, AND IT IS THE WHOLE ARGUMENT
+
+`speedLimitChanged` rising edges, with the two SHIPPED guards replayed over the recorded frames:
+
+    pull                        fires   dash ALREADY at target   inside 5.0 s   survive
+    00000427                       17            17                    5           0
+    2026-09-04 lc_035_vs_045       54            50                   48           0
+    2026-09-03 post_damper         11            10                    9           0
+    2026-09-01 damper_and_gain     13            12                    6           1
+    TOTAL                          95            94                   68           1
+
+**Ninety-five announcements, ninety-four of them with the dash already sitting on the number.**
+
+**AND THE ONE SURVIVOR IS THE PROOF THE GUARDS ARE SHAPED RIGHT, not merely aggressive:**
+`t+14384.5, dash 48, target 40` -- SLA about to bring the set speed down eight miles an hour. That
+is the sentence the alert exists to say, and it is the only time in four drives it was true.
+
+**SAY THE COST OUT LOUD RATHER THAN LETTING HIM FIND IT: this alert now fires about once in four
+drives.** That is not a bug, it is what "only when it is true" costs on his roads -- ICBM has
+usually already walked the dash to the limit before the entry edge happens, because the entry edges
+are him cycling cruise at lights (35.5% of 00000427 had cruise off).
+
+### THE TWO GUARDS
+
+1. **`target_set_speed_confirmed`** -- the dash already equals the target, so nothing is going to
+   happen. Rewording it to `speedLimitActive` would be equally untrue and chimes identically.
+2. **A re-announce cooldown that IS THE ALERT'S OWN 5.0 s DURATION**, not a number anyone picked: a
+   second announcement inside that window lands while the first is still on screen. Route 00000427
+   t+375 fired three times in 1.5 s off one `active -> inactive -> active` flicker.
+
+**Guard 1 returns BEFORE the counter is zeroed**, so a suppressed no-op cannot spend the cooldown
+and mute a real announcement behind it. Swapping the two kills a test, deliberately.
+
+### `speedLimitAutoSet` WAS AUDITED AND IS LEFT ALONE -- IT FIRES ONCE IN TWELVE MINUTES
+
+It carries the SAME `promptSingleHigh` chime and has NO cooldown, so it looked like the same bug one
+file over. Measured on 00000427: **1 fire in 12.1 minutes, 0 with a motionless dash.** The
+2026-08-27 hold gate plus the resolver's `fail`/`possible` refusals already hold it. Adding a
+cooldown there would be **refusing a bit by association**, which this file already records as
+costing more than the bit ever did.
+
+### THE SAMPLING TRAPS, BOTH HIT IN ONE HOUR
+
+- **`Alert.duration` IS IN CONTROL FRAMES.** `int(duration / DT_CTRL)`, so the shipped alert reads
+  **500** where the cooldown constant reads **5.0**. The test that ties the constant to the alert
+  asserted `duration == ANNOUNCE_COOLDOWN_S` and failed `500 == 5.0`. Two fields both called a
+  duration, on different clocks -- the units half of "compare endpoints before comparing".
+- **THE FIRST REPLAY USED `assist.vTarget`. THE CODE USES `resolver.speedLimitFinalLast`.** Caught
+  by reading line 261 rather than trusting the name. It happened to give the same answer here
+  because SLA was tracking the limit exactly, which is precisely how this trap survives.
+
+### AND THE 20 "ERRORS" IN THAT FOLDER ARE PRE-EXISTING AND EXPECTED
+
+`bp_offline_test.py sunnypilot/.../speed_limit/` reports **20 errors at HEAD as well** -- the folder
+holds `test_speed_limit_assist.py`, which needs the device stack and is deliberately excluded from
+`DEFAULT_TARGETS` by NAME. Running the DIRECTORY pulls it back in. Run the named files, or the
+whole suite; a directory run in that folder is not a signal.
+
+### THE `__new__` FIXTURES ARE FINE. DO NOT BUILD MACHINERY FOR THEM.
+
+Adding one field to `__init__` broke seven tests in `test_the_announcement_defers_to_a_hold.py` with
+`AttributeError` -- those fixtures use `SpeedLimitAssist.__new__` because `__init__` needs a real
+`CP`/`CP_SP` the runnable suite does not have. **That is the system working**: it failed loudly, in
+seven places, and was diagnosed in minutes. The dangerous version is a `getattr` default that would
+have hidden it. Seed the field in the fixture and move on. (The other three `__new__` fixtures in
+that folder never reach `update_events` and were checked, not assumed.)
+
+**MUTATION-TESTED, 9 mutants, 8 killed.** The survivor is `<` -> `<=` on the cooldown boundary --
+one model frame in a hundred, 50 ms on a 5 s window. Immaterial, and stated rather than chased with
+a contorted test.
+
+## 2026-09-05: THE SHIFTER READ "SPORT" AT A LIGHT AND ARMED A SOFT DISABLE SIX TIMES
+
+Found sweeping route 00000427 after he asked what else was on the drive. Everything else in the
+event histogram was startup (`parkBrake`, `wrongGear`, `controlsMismatch`, `reverseGear`,
+`radarTempUnavailable`, `commIssue` -- ALL inside the first 8.1 s, parked, cruise off, gear going
+park -> reverse -> drive as he backed out) or him parking at the end. **Print event timings before
+calling any of them a finding; a histogram alone would have had me chasing a park-brake ghost.**
+
+The one mid-drive item is real:
+
+    t+299.2 .. 313.8   gearShifter flickers drive -> unknown -> drive, SIX times
+                       engaged True and latActive True throughout, stopped at a light
+
+**DECODED OFF THE WIRE RATHER THAN GUESSED**, per the rule that already paid twice here.
+`TransGearData.GearLvrPos_D_Actl` (560, bits `12|4@0+` -> `(byte1 >> 1) & 0xF`) over the drive:
+
+    3  Drive               35572
+    0  Park                  579
+    4  Sport_DriveSport      262      <- ALL of them inside that one window
+    1  Reverse                 4
+    2  Neutral                 4
+
+**Value 14 `Unknown_Position` and 15 `Fault` appear ZERO times.** So this is not a signal dropout
+and not a TCM fault -- the lever genuinely read S. That distinction is the whole finding, and only
+the wire could make it.
+
+**AND IT IS TWO SEPARATE GAPS STACKED, WHICH IS WHY FIXING THE OBVIOUS ONE DOES NOTHING:**
+
+1. `GEAR_SHIFTER_MAP` has `'SPORT'` but the DBC string is `Sport_DriveSport`, which uppercases to
+   `SPORT_DRIVESPORT` -- not a key. So a legitimate gear falls through to `GearShifter.unknown`.
+2. **Even mapped correctly it would still fire.** `car_specific.py:108` raises `wrongGear` unless
+   the gear is `drive` or in `CI.DRIVABLE_GEARS`, and **Ford's is `(low, manumatic)` -- no sport.**
+   GM and Honda list sport; Ford does not.
+
+`wrongGear` is `ET.SOFT_DISABLE`, so each flicker armed a disengage countdown at a light.
+
+**IT COST HIM NOTHING AND THAT WAS MARGIN, NOT DESIGN.** Six runs, lengths 1.20 / 1.14 / 1.22 /
+0.72 / 0.52 / 0.32 s against `SOFT_DISABLE_TIME = 3` -- the longest used 41% of the budget. A
+flicker three times longer disengages him mid-intersection.
+
+**NOT FIXED, DELIBERATELY.** One window, on one drive, and the fix touches gear handling, which is
+the category this file says not to ship on an evening's reasoning. **And the question that decides
+it is his, not mine: does he ever actually drive in S?** If yes, Ford's `DRIVABLE_GEARS` is simply
+wrong for this car and both gaps want closing. If he does not -- if the lever was merely brushed --
+then the honest fix is nothing at all, and a mapping change would only make a real S engagement
+silent. ASK BEFORE DESIGNING AROUND SOMETHING HE DRIVES EVERY DAY.
+
+### AND THE REST OF THE DRIVE IS HEALTHY, MEASURED PER SEGMENT
+
+- **mapd v2 held 20 Hz on all 13 segments** (~1200 `mapdOut` per segment, 1199-1221). The
+  2026-08-30 stall did not recur. Broken down BY SEGMENT deliberately, because a total is how that
+  death got reported as healthy.
+- **`modelStopBraking` fired twice and both look timely** -- t+136.0 at 31.5 mph decelerating
+  monotonically to 21.6, and t+236.4 at 33.7 down to 29.1. Neither shows the ~12 s late arming of
+  route 000003bb. The first bottoming near 21.6 is the 20 mph Ford floor, not a failure.
+- `modeld` dropped 57 / 9 / 10 frames in three bursts, all in segment 0 (1123 `modelV2` against
+  1200 elsewhere) -- boot, not a running fault.
+- 65.1% engaged, 7.0% hands-on, 24.3% brake pressed, 24.9% standstill, peak 36.8 mph. A surface
+  drive, and the braking share is his documented "he takes every stop himself".
+
+### RESOLVED THE SAME DAY: HE DOES IT ON PURPOSE, SO IT IS FIXED
+
+*"I love switching into sport mode to make it go crazy."* That answers the question the entry above
+left open, and it turns the finding from a curiosity into a defect worth two upstream lines.
+
+**AND IT WAS WORSE THAN FIRST REPORTED.** The first write-up said it "cost him nothing". Checking
+`selfdriveState` rather than stopping at `carState` shows he SAW every one of them:
+
+    t+299.1  softDisabling  "openpilot will disengage"
+    t+302.2  softDisabling  "openpilot will disengage"
+    ... six times in fourteen seconds, at one light
+
+`enabled` and `active` stayed True, so nothing was lost -- but "it cost him nothing" and "he was
+warned six times that he was about to lose it" are different statements, and only the second is
+what he experienced. **Read one layer past the struct that answers the mechanical question.**
+
+**THE FIX IS TWO LINES IN TWO UPSTREAM FILES, and both are needed:**
+
+    opendbc/car/interfaces.py   'SPORT_DRIVESPORT': GearShifter.sport   <- the DBC spelling
+    opendbc/car/ford/interface.py   DRIVABLE_GEARS += (sport,)          <- GM and Honda already had it
+
+**The upstream-scope test passes on both halves**: it is his car, it is what he SEES, and he does it
+deliberately. Two modified upstream lines is the merge cost and it is worth it.
+
+**WHY ALLOWING IT IS CORRECT RATHER THAN JUST QUIETER, and it is measured:** Ford's own ACC stayed
+engaged through all six S windows (`cruiseState.enabled` True throughout), so the car itself permits
+ACC in Sport. openpilot refusing it was openpilot disagreeing with the car, not with the driver.
+
+**FAULT VALUES ARE DELIBERATELY LEFT UNMAPPED.** 14 `Unknown_Position` and 15 `Fault` still decode
+to `unknown` and still raise `wrongGear`. Mapping them away would silence the alert for the case it
+actually exists for -- and a test fails if anyone does, because the tempting "fix" for a future
+gear complaint is exactly that.
+
+`test_sport_is_a_driving_gear.py`, 8 tests, **5 mutants, 0 survivors** -- including over-widening
+to reverse and silencing the fault codes. The predicate test drives `car_specific.py`'s own
+expression against the real `CarInterface.DRIVABLE_GEARS` by stubbing the micd import chain rather
+than skipping, so it cannot pass vacuously.
+
+### CORRECTION: HE DOES NOT DRIVE IN S. THE FIX STANDS; MY REASON FOR IT DID NOT.
+
+*"I never actually use sport mode."* -- said right after *"I love switching into sport mode to make
+it go crazy"* and *"It's funny to watch it panic when I am in sport mode."* All three reconcile:
+**he flicks the lever to watch openpilot react, and does not drive in Sport.**
+
+**THE DATA SAID SO THE WHOLE TIME AND I READ IT THROUGH HIS SENTENCE INSTEAD.** Six runs of
+1.20 / 1.14 / 1.22 / 0.72 / 0.52 / 0.32 s, every one inside ONE 14-second window, at ONE light,
+STOPPED, and never again across 12 minutes. Driving in Sport would be minutes of continuous value 4.
+That shape is a lever being flicked at a red light, and it was on screen before he said anything.
+
+This is the failure he named himself on 2026-08-29: *"I keep saying one thing and then it throws you
+completely off your conclusion."* **Score the data first; use his sentence to choose what to
+measure, never as the measurement.**
+
+**WHAT SURVIVES, AND WHY THE CODE DOES NOT CHANGE BACK:**
+
+- **The decode fix is right independent of him.** The DBC says value 4 is Sport. Decoding it as
+  `GearShifter.unknown` is a plain bug, and it would be a bug on a car nobody ever shifts.
+- **`DRIVABLE_GEARS` is right for a REASON THAT DOES NOT MENTION HIS PREFERENCES:** the lever
+  reported S while `cruiseState.enabled` was True, so **Ford's own ACC was running in Sport**.
+  openpilot was disagreeing with the car. That measurement is what justifies the change; "he uses
+  it deliberately" was decoration I should not have leaned on.
+- **The hazard is unchanged and is what actually decides it.** A flick is 1.2 s against
+  `SOFT_DISABLE_TIME = 3`. He is one slightly longer flick from being disengaged at a light, for a
+  gear his car is happy to run ACC in.
+
+**WHAT IT COSTS HIM: the panic was entertainment and it is gone.** Said plainly rather than left for
+him to notice, because it is the one thing he actually liked about this. Reverting is one line in
+`ford/interface.py` if he wants it back -- but the disengage risk comes back with it.
+
+**DECIDED, 2026-09-05: *"Keep the fix, don't revert it."*** The revert offered two paragraphs above
+is CLOSED. Do not re-offer it, and do not treat the lost entertainment as a wart to solve -- he was
+told what it cost and chose it. Same shape as pinned holds and curvature mode, both of which got
+re-raised after he had already decided.

@@ -40,6 +40,11 @@ GEAR_SHIFTER_MAP: dict[str, structs.CarState.GearShifter] = {
   'T': GearShifter.manumatic, 'MANUAL': GearShifter.manumatic,
   'D': GearShifter.drive, 'DRIVE': GearShifter.drive,
   'S': GearShifter.sport, 'SPORT': GearShifter.sport,
+  # FusionPilot: Ford's DBC spells it Sport_DriveSport (TransGearData.GearLvrPos_D_Actl == 4).
+  # Without this key a real S selection decodes as GearShifter.unknown and raises wrongGear,
+  # which is ET.SOFT_DISABLE -- measured on route 00000427 as six "openpilot will disengage"
+  # warnings at one light. Value 14 Unknown_Position and 15 Fault stay unmapped on purpose.
+  'SPORT_DRIVESPORT': GearShifter.sport,
   'L': GearShifter.low, 'LOW': GearShifter.low,
   'B': GearShifter.brake, 'BRAKE': GearShifter.brake,
 }

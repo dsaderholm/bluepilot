@@ -18,7 +18,12 @@ class CarInterface(CarInterfaceBase):
   CarController = CarController
   RadarInterface = RadarInterface
 
-  DRIVABLE_GEARS = (structs.CarState.GearShifter.low, structs.CarState.GearShifter.manumatic)
+  # FusionPilot: sport is a DRIVING gear on this car and he uses it deliberately. Ford's own
+  # ACC stays engaged in S -- measured, cruiseState.enabled was True across all six S windows
+  # on route 00000427 -- so openpilot refusing it only produced a soft disable he could see.
+  # GM and Honda already list sport; Ford's omission is what made the gear-map fix insufficient.
+  DRIVABLE_GEARS = (structs.CarState.GearShifter.low, structs.CarState.GearShifter.manumatic,
+                    structs.CarState.GearShifter.sport)
 
   @staticmethod
   def get_pid_accel_limits(CP, CP_SP, current_speed, cruise_speed):
