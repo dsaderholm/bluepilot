@@ -6999,3 +6999,73 @@ download volume is not free for him.
 lanes:backward), 129 (change / change:lanes), 130 (hov:lanes), 131 (highway=stop nodes). pfeiferj
 engaged constructively on 127 and 129 and has not returned. `currentDirectionLanes`, the field he
 proposed on 127, does not exist in the repo. Nothing to consume yet.
+
+## 2026-09-05: THE TACO BELL QUESTION -- CAN FIRMWARE GET THIS CAR TO INTERSECTION TURNS?
+
+His long-term goal, stated plainly: *"I want to be able to recreate the Taco Bell drive from Comma
+one day with my car, which requires more steering... I am looking into the future."* So the target
+is INTERSECTION TURNS (10-15 m radius at 10-15 mph), not lane keeping. He asked whether
+`ghostdev137/ford-pscm-re` could get him there and let him drop angle mode.
+
+### ANGLE MODE IS THE RIGHT MODE FOR THIS. CURVATURE MODE COULD NEVER DO IT.
+
+    ceiling                          tightest radius it permits
+    LatCtlCurv_No_Actl signal        48 m at ANY speed   (+-0.02094 1/m; panda FORD_CURVATURE_MAX)
+    LatCtlPath_An_Actl signal        scales with SPEED:  5.6 m @ 5 mph, 11.2 @ 10, 16.8 @ 15
+    clip_curvature ISO 3.0           1.7 m @ 5 mph, 6.7 @ 10, 15.0 @ 15, 26.6 @ 20
+
+**The curvature interface caps at a 48 m radius, forever.** An intersection turn is impossible in
+curvature mode on this car, at any speed. The PATH ANGLE ceiling divides by speed, so it opens up
+exactly where turns happen.
+
+**PROVEN ON HIS OWN CAR TONIGHT**, route 00000423 seg 5, hands off:
+
+    23 m radius at 18.8 mph  ->  kappa 0.0435 1/m  -- ABOVE the 0.0209 curvature-signal cap
+                                 path_angle 0.478 rad = 91% of the 0.5235 signal maximum
+
+**He has already commanded turns tighter than the curvature interface can encode.** So "move on
+from angle steering and be like other cars" would be moving the WRONG WAY for his stated goal.
+
+### THE WIRE CAN ALREADY DO THE TACO BELL DRIVE. THE PSCM CANNOT.
+
+At 10 mph the path-angle signal permits 11.2 m and ISO permits 6.7 m -- an intersection turn fits.
+What does not fit is DELIVERY: measured 2026-09-04, the PSCM returns **0.83** of what it is told at
+40 mph and degrades to **0.743** as the command grows. **Worst exactly where he would need it best.**
+
+**So the gap is authority, not interface** -- and authority is precisely what a calibration patch
+addresses. That is what `LKA_FULL_AUTHORITY.VBF` is in that repo: a 12-entry u16 bell curve at
+`cal+0x1660`, peak `44 -> 32` between two builds, drive-confirmed +184% column torque. **Nobody
+wrote firmware.** They edited a lookup table, after months of RE with the module on a bench.
+
+### WHY THE TORQUE INTERCEPTOR EXISTS, AND WHAT WOULD REPLACE IT
+
+**His PSCM has NO torque input.** Verified in his own DBC: `LateralMotionControl` (979) carries
+`LatCtlPath_An_Actl` (rad), `LatCtlCurv_No_Actl` (1/m) and `LatCtlPathOffst_L_Actl` (m) -- geometry
+only. The sole `DesiredTorq*` messages are `DesiredTorqBrk` from ABS_ESC, which is BRAKE torque.
+There is no byte on his bus meaning "apply N Nm to the steering."
+
+That is exactly why an interceptor is needed -- it injects torque where no bus path exists. **The
+Transit does not need one**: it accepts `0x213 DesTorq` directly, which is why that repo ships an
+openpilot page saying "drive 0x213 continuously, you do not need Ford LCA."
+
+**A cal patch and the interceptor buy the SAME THING for his goal -- authority -- and the cal patch
+needs no hardware.** Neither lets him leave angle mode, and neither should: see above.
+
+### WHAT WOULD ACTUALLY HAVE TO HAPPEN, AND WHAT IS NOT POSSIBLE
+
+**Not possible:** vibe-coding EPAS firmware. Not for me and not for anyone -- that repo built a
+patched Ghidra SLEIGH spec and pushed a Binary Ninja v850 lifter to 99.81% decode coverage to find
+*which bytes to change*. I have no dump, no bench, no flash path and no way to verify.
+
+**Not covered:** documented vehicles are Transit 2025/2026, Escape 2022/2024, F-150 2021/2022. **No
+Edge, no Fusion.** F-150 is explicitly "not cross-compatible" with Transit/Escape -- different
+vendor, different MCU, different cal layout. His retrofitted Edge PSCM is a FOURTH platform.
+
+**The cheap, non-destructive first step:** read the Edge PSCM calibration over UDS (`0x730`/`0x738`)
+with FORScan and see whether it has recognisable table structure -- the bell-curve authority family
+is a Ford EPAS design pattern and appears at three sites in one F-150 cal. That is a READ. It
+answers "is this a project or a dead end" without touching the car.
+
+**And keep the stock VBF before anything else.** Their `backups/` exists for that reason, one of
+their own patches reverts AS-built on a power cycle, and his PSCM is a retrofit he has already tuned
+into place -- bricking it means sourcing another Edge module and redoing all of it.
