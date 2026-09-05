@@ -6659,3 +6659,56 @@ different one, measured.
 at 500-1000 m, +9.4% at 286-500, +2.2% at 100-286. It is silently compensating for the shortfall
 above, which is very likely why raising `lane_centering_strength_ang` fixed his "hugging some edges".
 **Any measurement of delivery that does not subtract the trim is measuring the trim.**
+
+### AND HIS Q3/CAN CAR IS THE *LESS* RESTRICTED FORD, NOT THE MORE. 2026-09-04.
+
+He said *"I know my Q3 CAN car is supposed to be worse than a CAN FD one"* -- that is the common
+belief and for LATERAL AUTHORITY it is backwards. Upstream's own comment states the trade:
+
+    # Ford Q4/CAN FD has more torque available compared to Q3/CAN so we limit it based on
+    # lateral acceleration.
+    if CP.flags & FordFlags.CANFD:
+      curvature_accel_limit = MAX_LATERAL_ACCEL / (max(v_ego_raw, 1) ** 2)   # ~2.4 m/s^2
+
+**CAN FD has more torque and is therefore CAPPED. His car is not.** Three places it lands:
+
+    carcontroller.py:64   the ~2.4 m/s^2 clip is inside `if CP.flags & FordFlags.CANFD`
+    ford.h:245/804        FORD_STEERING_LIMITS = FORD_LIMITS(false, ...) for him
+                          FORD_CANFD_STEERING_LIMITS = FORD_LIMITS(true, ...)
+                          -- the flag IS `limit_lateral_acceleration`, and it drives
+                          `.angle_is_curvature` too
+    angle_gains.py        GAIN_CAN high anchor 1.15  vs  CANFD_BOF 0.95, CANFD_SUV 1.05
+
+So on the turn measured above his car reached **3.52 m/s^2 bank-adjusted -- above the 2.4 any CAN FD
+Ford is allowed at all**, and it runs the highest gain anchor of the three platforms. The only limit
+it met was `clip_curvature`'s ISO 3.0, which binds every openpilot car on every platform.
+
+**WHAT HE ACTUALLY GIVES UP IS TRACKING, NOT AUTHORITY.** Torque-controlled platforms close their
+loop inside openpilot and are tunable there; angle mode hands the loop to the PSCM, which returns
+0.78-0.95 of what it is told (see the decomposition above). That is a different axis from how much
+the car is permitted to ask for, and conflating the two is what makes "CAN is worse" sound obvious.
+
+**DO NOT extend this into numbers for other platforms.** Nothing here has measured a non-Ford car,
+and openpilot's 3.0 clamp being universal is a code fact, not a measurement of what those cars
+deliver.
+
+### SLOWING DOWN BUYS BOTH RADIUS AND TRACKING
+
+    certain, arithmetic:  the ISO clamp is 3.0 / v^2, so the tightest permitted radius scales with
+                          v^2 -- 107 m at 40 mph, 27 m at 20 mph, 15 m at 15 mph
+    measured:             the PSCM tracks SMALL commands better, and the same corner asks for a
+                          smaller path_angle when slower (path_angle = kappa * v * gain)
+
+    100-286 m band     0-25 mph  cmd 0.047 rad  PSCM 0.894
+                      35-45 mph  cmd 0.074      PSCM 0.849
+                      25-35 mph  cmd 0.107      PSCM 0.806
+                      45-60 mph  cmd 0.126      PSCM 0.777
+
+**Monotonic in COMMAND SIZE, not in speed** -- which is the same relationship the speed-controlled
+table above found, arrived at from the other direction.
+
+**One row refuses it and is reported rather than dropped:** 286-500 m at 0-25 mph reads 0.566 with
+p25-p75 of 0.35-0.68. Its median command is 0.019 rad -- about one degree of wheel -- where
+`controlsState.curvature` (steering angle through the vehicle model) is noise-dominated and the
+ratio means little. It is not evidence against, and it is not evidence for. **Do not quote a
+tracking ratio computed on a command under ~0.03 rad.**
