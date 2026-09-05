@@ -32,6 +32,7 @@ from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management.con
 from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management.pinned_holds import PinnedHolds
 BaselineSource = custom.IntelligentCruiseButtonManagement.BaselineSource
 from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP
+from openpilot.bluepilot.selfdrive.selfdrived.steer_saturated_gate import SteerSaturatedGate
 
 REPLAY = "REPLAY" in os.environ
 SIMULATION = "SIMULATION" in os.environ
@@ -122,6 +123,8 @@ class SelfdriveD(CruiseHelper):
                                   ignore_valid=ignore, frequency=int(1/DT_CTRL))
 
     # read params
+    self.steer_saturated_gate = SteerSaturatedGate()
+    self.steer_saturated_gate.read_params(self.params)
     self.is_metric = self.params.get_bool("IsMetric")
     self.is_ldw_enabled = self.params.get_bool("IsLdwEnabled")
     self.disengage_on_accelerator = self.params.get_bool("DisengageOnAccelerator")
@@ -475,7 +478,12 @@ class SelfdriveD(CruiseHelper):
       undershooting = abs(desired_lateral_accel) / abs(1e-3 + actual_lateral_accel) > 1.2
       turning = abs(desired_lateral_accel) > 1.0
       # TODO: lac.saturated includes speed and other checks, should be pulled out
-      if undershooting and turning and lac.saturated:
+      # FusionPilot: the alert fires on SATURATION, which is a fact about the command rather
+      # than about where the car ended up -- measured, it is right about one time in four and
+      # chimes for two seconds each time. The gate asks whether the car is actually out of
+      # position before telling him, and fails OPEN whenever it cannot see the lane. Nothing
+      # else reads it: `lac.saturated` still reaches every consumer it always did.
+      if undershooting and turning and lac.saturated and self.steer_saturated_gate.should_alert(self.sm):
         self.events.add(EventName.steerSaturated)
 
     # Check for FCW
@@ -733,6 +741,7 @@ class SelfdriveD(CruiseHelper):
       self.personality = self.params.get("LongitudinalPersonality", return_default=True)
 
       self.mads.read_params()
+      self.steer_saturated_gate.read_params(self.params)
       time.sleep(0.1)
 
   def run(self):

@@ -63,7 +63,11 @@ OUR_PREFIXES = ("Icbm", "SmartCruiseControl", "SpeedLimit", "PassingAssist", "Ra
                 # positioning family is lowercase and matched NO prefix, so all four of its params
                 # were invisible here -- the audit has never once checked them, including while
                 # CLAUDE.md was recording that three of them reached settings_ui.json only by hand.
-                "lane_centering", "enable_lane_positioning", "custom_path_offset")
+                "lane_centering", "enable_lane_positioning", "custom_path_offset",
+                # FOURTH: `SteerAlertLaneGate` (2026-09-05). Added with the prefix and the audit
+                # was run BEFORE the YAML entry existed, so it was watched failing rather than
+                # trusted green -- which is the only check that has ever caught this list.
+                "SteerAlert")
 
 # NOT a gap in the list above, and not to be "fixed" by adding it. `BPSentryEnabled` is the fork's
 # crash-reporting KILL SWITCH -- upstream inits Sentry unconditionally and this fork returns early
@@ -135,6 +139,29 @@ def _literal(node, consts: dict | None = None) -> object | None:
   return None
 
 
+def _toggle_param(call: ast.Call) -> str | None:
+  """The param a bare `toggle_item(...)` reads and writes, when it has no `param=` kwarg.
+
+  FIFTH BLIND SPOT, found 2026-09-05 the way the four before it were found: by adding a setting,
+  running the audit, and watching it stay green. `toggle_item` on the BluePilot screen does not take
+  a `param` -- it takes `initial_state=self._safe_get_bool(self._params, "X")` and
+  `callback=lambda state: self._toggle_callback(state, "X")` -- so requiring `param=` made EVERY
+  toggle on that screen invisible. `enable_lane_positioning_ang` and `enable_lane_positioning_curv`
+  had never once been checked, and the audit reported 42/42 while doing it.
+
+  The name is taken only when both kwargs name the SAME string, which is what makes it a param
+  rather than any string that happens to be nearby: a toggle that reads one key and writes another
+  is a bug this returns None for rather than silently blessing.
+  """
+  kw = {k.arg: k.value for k in call.keywords if k.arg}
+  reads = {n.value for n in ast.walk(kw["initial_state"]) if isinstance(n, ast.Constant)
+           and isinstance(n.value, str)} if "initial_state" in kw else set()
+  writes = {n.value for n in ast.walk(kw["callback"]) if isinstance(n, ast.Constant)
+            and isinstance(n.value, str)} if "callback" in kw else set()
+  both = reads & writes
+  return both.pop() if len(both) == 1 else None
+
+
 def collect_ui_settings() -> dict[str, dict]:
   """Every fork-owned setting the on-device UI defines, keyed by param name."""
   found: dict[str, dict] = {}
@@ -158,6 +185,8 @@ def collect_ui_settings() -> dict[str, dict]:
           continue
         kw = {k.arg: k.value for k in node.keywords if k.arg}
         param = _literal(kw.get("param"), consts)
+        if param is None and widget == "toggle":
+          param = _toggle_param(node)
         if not isinstance(param, str) or param in DELIBERATELY_NOT_REMOTE:
           continue
         if not param.startswith(OUR_PREFIXES):

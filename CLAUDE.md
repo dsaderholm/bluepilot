@@ -7344,7 +7344,7 @@ table accepts it) but nobody has drive-confirmed above it.
 **Do not spend effort on this before that comparison.** It is a read, it is cheap, and it is the
 difference between a project and a dead end. Everything else in this thread is downstream of it.
 
-### THE STEERING-EXHAUSTED ALERT IS 88% NOISE, AND THAT IS FIXABLE FOR FREE
+### THE STEERING-EXHAUSTED ALERT IS MOSTLY NOISE, AND IT IS GATED NOW (the 88% below is WITHDRAWN)
 
 *"Those steering exhausted warnings drive me crazy."* Measured lane position during every
 `steerSaturated` frame in the 2026-09-04/05 pull:
@@ -7376,8 +7376,73 @@ signal it exists to carry.
 keeping every episode where he genuinely went wide. No firmware, no hardware, no driving change --
 it changes only what he is TOLD, not what the car does.
 
-**NOT BUILT TONIGHT.** `steerSaturated` is upstream openpilot's event, so the gating belongs
-wherever this fork can add it without owning the event, and the threshold wants checking against
-more than 33 episodes before it ships. But it passes the upstream-scope test outright -- it changes
-what he SEES, on his car, every drive -- and it is the highest value-per-effort item on the whole
-lateral list. **Do this before anything involving a flash.**
+**BUILT 2026-09-05, and the 88% in this heading is WRONG -- see the correction below.**
+
+## 2026-09-05: THE ALERT GATE IS SHIPPED. AND THE 88% WAS A SMALL-SAMPLE NUMBER.
+
+`bluepilot/selfdrive/selfdrived/steer_saturated_gate.py`, one condition in `selfdrived.py:479`,
+toggle **Only Warn When Out Of Lane** (`SteerAlertLaneGate`), ON.
+
+**THE FIRST THING TO FIX IS THE FIGURE THIS FILE HAS BEEN CARRYING.** "88% noise, 33 alerts -> 4"
+came from 33 episodes on ONE pull, scored as "worst offset never exceeded 0.30 m", and it never
+asked what the gate does with an episode whose lane it cannot measure. Re-run across every route on
+disk -- **701 segments, 24 routes, 61 episodes, 3446 alerting frames**:
+
+                          n         p50      p90     p99     max
+    while alerting       2998     0.24 m    0.67    1.43    1.67
+    normal driving    2403770     0.06 m    0.22    0.70    1.83
+
+    threshold   0.20   0.30   0.40   0.50   0.60   0.75   1.00
+    shown         44     35     29     24     22     16     14
+    silenced      17     26     32     37     39     45     47
+
+**61 alerts become 24, not 4. A 61% cut, not 88%.** Still the largest free improvement on the
+lateral list, and still worth having -- but the number he is told has to be the one from the whole
+sample, and the small-sample version overstated it by nearly a third. **Fifth instance in this file
+of a rate published before the denominator was checked.**
+
+**14 OF THE 61 ARE UNMEASURABLE AND ALWAYS FIRE.** That is the fail-open path, it is 23% of all
+alerts, and most of it is 15-40 mph on unmarked streets and intersections where the model has no
+lane lines. It is the remaining noise and it STAYS: the only other position source is `roadEdges`,
+which measures past the shoulder and has already caused one bug here. Anyone tempted to shrink that
+number should read the road-edge rule first.
+
+**WHY IT LIVES WHERE IT DOES.** `steerSaturated` is upstream's event, so the fork owns a GATE rather
+than the event: `should_alert(self.sm)` is one term added to upstream's existing `if`, and the
+arithmetic sits in a fork-owned module that imports nothing but `math`. That import list is
+load-bearing -- `tools/bp_steer_saturated.py` IMPORTS `lane_deviation` from it, and an rlog tool has
+already called `capnp.load()`, so a module reaching `opendbc.car.*` would abort the interpreter.
+
+**NO NEW CAPNP FIELD, AND THAT IS NOT THE "COMPUTED AND NEVER RENDERED" BUG.** Every input is
+already logged -- `modelV2.laneLines` / `laneLineProbs` for the deviation, `controlsState` and
+`carState` for the trigger -- and the tool runs the SHIPPED function over them, so a drive explains
+every suppression exactly. Publishing a field would have added wire surface to duplicate what the
+route already carries.
+
+**THE TOOL RECONSTRUCTS THE ALERT AT 100 Hz AND MUST KEEP DOING SO.** The first version read
+`onroadEvents` and undercounted by thirty: selfdrived logs that stream "every second or on change"
+(selfdrived.py:666), so a 3 s alert leaves ~3 samples and a `max()` over them is a max over three
+arbitrary instants. It prints the raw `onroadEvents` count beside the reconstruction as the
+cross-check (122 against 3446 across the pull, which is the expected ratio).
+
+**MUTATION-TESTED, 11 mutants, 0 survivors** -- including the two that matter: dropping the
+`deviation is None` branch (unmeasurable would go quiet) and deleting the latch reset (one wide
+corner would alert for the rest of the drive).
+
+### AND THE SUNNYLINK AUDIT HAD A FIFTH BLIND SPOT. FOUND THE WAY THE OTHER FOUR WERE.
+
+Adding the param, adding `SteerAlert` to `OUR_PREFIXES`, and running the audit BEFORE writing any
+YAML -- it reported **42/42, 0 missing**.
+
+`collect_ui_settings` required a `param=` kwarg. The BluePilot settings screen's `toggle_item` does
+not take one: it takes `initial_state=self._safe_get_bool(self._params, "X")` and
+`callback=lambda state: self._toggle_callback(state, "X")`. **So every toggle on that screen has
+always been invisible to the audit** -- `enable_lane_positioning_ang` and
+`enable_lane_positioning_curv` included, during the exact period this file was recording that three
+members of that family reached `settings_ui.json` only by hand-editing.
+
+`_toggle_param` now reads the name out of those two kwargs and takes it only when both name the SAME
+string -- a toggle that reads one key and writes another is a bug, not a setting. The audit went
+42 -> 49 known settings, six of the seven newly-visible ones were already reachable, and the new one
+was correctly reported missing. **The check is still the same one: add a setting and watch it FAIL.
+This tool has now been green through five different structural blind spots.**

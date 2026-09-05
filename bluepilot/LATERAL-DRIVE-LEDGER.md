@@ -36,6 +36,7 @@ answer.
 | delivery | `abs(curvature) / abs(desiredCurvature)` | STEADY STATE (desired stable within 12% for 0.5 s), hands off, >= 40 mph |
 | revs/min | tracking-error sign flips per minute of genuine turning | `abs(desired) > 0.0007`, hands off |
 | weave | lane-centre offset from `modelV2.laneLines[1..2].y[0]` | straight road (6 s median under 0.00025 1/m), hands off, >= 70 mph |
+| steer alerts | `tools/bp_steer_saturated.py` | selfdrived's own alert condition reconstructed at 100 Hz; episodes, not frames |
 
 Delivery is the steady state the car SETTLES at, which measures GAIN. It cannot move on a change
 that targets the transient, and quoting it as "no effect" for one of those is wrong.
@@ -394,3 +395,28 @@ whole ratio, so raising the low factor 1.007 -> 1.20 to fix the 0.665 turn-in ta
 from 1.33 to 1.58. **Run `bp_lateral_phases.py` and read all three rows before any gain advice.**
 And convert to degrees first: his 0.794 -> 0.804 step is **0.025 deg at the wheel**, an order of
 magnitude under the imperceptible-dither floor, so no drive could ever have scored it.
+
+## STEER-ALERT COUNTS ARE NOT COMPARABLE ACROSS 2026-09-05
+
+The steering-exhausted alert is gated on lane deviation from that date
+(`SteerAlertLaneGate`, ON). So "how many take-control warnings did that drive throw" measures the
+GATE from here on, not the lateral tuning, and a before/after across the change is meaningless.
+
+**`tools/bp_steer_saturated.py` is unaffected and is the row to use either way**: it reconstructs
+selfdrived's own condition from `controlsState` and `carState` rather than reading the raised event,
+so it reports what saturation the drive PRODUCED regardless of what the driver was told. Score
+lateral changes on its episode count; score the gate on its `--sweep`.
+
+The baseline, across every route on disk at the moment the gate landed:
+
+| pull | segments | episodes | shown at 0.50 m | unmeasurable |
+|---|---|---|---|---|
+| 2026-08-31 600 mi | 454 | 18 | 7 | 1 |
+| 2026-09-01 damper/gain A/B | 70 | 8 | 5 | 5 |
+| 2026-09-03 post damper | 68 | 8 | 5 | 3 |
+| 2026-09-04 LC 0.35 vs 0.45 | 109 | 27 | 7 | 5 |
+| **all** | **701** | **61** | **24** | **14** |
+
+Note the route mix dominates the raw count -- the 600 mi interstate pull threw 18 episodes across
+454 segments while the 109-segment surface-road pull threw 27. **Per minute of exposure in the
+29-56 mph / 111-286 m band is the comparison; a raw count compares the route.**
