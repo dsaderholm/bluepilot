@@ -7568,3 +7568,70 @@ back. Score it on a drive with nothing else moving, against `tools/bp_lateral_ph
 UNWINDING row and its degrees column) and `tools/bp_lateral_by_radius.py` in the 500-2000 m band.
 The alert gate shipped the same day cannot confound it -- that changes nothing the car does -- but if
 the steering feels different, it is this.
+
+## 2026-09-05: THE LATCH IS DRIVEN. IT RUNS, AND THE UNWIND TAIL HALVED.
+
+Route `00000427`, 13 segments, 7.5 minutes hands-off, first drive with both the alert gate and the
+exit-blend latch. **Verified BY CONTENT on the device** (`grep -c` for `steer_saturated_gate` and
+`_EXIT_LATCH_CALLS`), not by hash, because the branch was rebased.
+
+**NOTHING LATERAL MOVED, which is what makes it scoreable.** Params read off the device with mtimes
+converted to MDT: the gains, both lane-centering keys and the damper are all unchanged since 09-01
+to 09-04. `SteerAlertLaneGate` was written 12:44 MDT -- manager storing the new key's shipped
+default on the first boot after the update, four minutes before the drive.
+
+**ONE OTHER VARIABLE, and it is his:** `SmartCruiseControlMapFactor` 90 -> 100, written 12:40 MDT,
+five minutes before the route. It scales SCC-Map's corner speed at or below 25 mph. The two drives'
+speed profiles are nearly identical (p50 24 vs 27 mph, p90 34 vs 34), so it did not visibly move
+what the car did -- but it is a second change on the drive and is stated rather than ignored.
+
+### IT RUNS. 13.5x MORE TIME AT THE EXIT WEIGHT.
+
+    BEFORE  424/425, LC 0.45, no latch    34 of  6470 calls at b_blend 0.125   0.53%
+    AFTER   00000427, latch                901 of 12585 calls at 0.125         7.16%
+
+901 is almost exactly the 87 qualifying gate firings times the 10-call hold, so the mechanism is
+doing precisely what it was built to do and nothing more.
+
+**I REPORTED "THE LATCH DID NOT WORK" FIRST, AND IT WAS A PERCENTILE READ AS A MINIMUM.**
+`blendWeight` p10 was 0.175 on both drives, and that was quoted as "0.125 is never reached". The
+exit weight occupies ~1-7% of calls, which is BELOW p10's resolution by construction. **A percentile
+cannot answer a question about a rare value; count it.** Same family as "ask how big before
+concluding from how often", one layer over.
+
+**AND THE HYPOTHESIS BUILT ON THAT WRONG READING WAS ALSO WRONG.** `_kappa_entering` was accused of
+zeroing the latch constantly. Recomputed from `modelV2.orientationRate.z` and `liveDelay` exactly as
+the module does: it is true on 1.0% of calls and blocks only **16% of gate firings**. 84% select the
+exit branch, which is what the 901 calls show. The release is not the problem and was never the
+problem.
+
+### THE OUTCOME: THE HIGHWAY UNWIND TAIL IS DOWN ~50%, ON A MATCHED SAMPLE
+
+`tools/bp_lateral_phases.py`, same flags, comparable roads:
+
+    band / phase                    BEFORE (no latch)            AFTER (latch)
+    tight <500 m   UNWIND ratio     0.825  p90 1.46             0.907  p90 1.39
+    tight <500 m   UNWIND degrees   med -1.35  p90 +3.13  p99 +41.51    med -0.83  p90 +4.04  p99 +21.03
+    hwy 500-2000 m UNWIND ratio     1.020  p90 2.28   n=1520    1.012  p90 1.69   n=3415
+    hwy 500-2000 m UNWIND degrees   med +0.05  p90 +3.18  p99 +8.98     med +0.03  p90 +1.39  p99 +5.60
+
+**The 500-2000 m band is the one to read** -- this file already established it as the target band --
+and it improved on every tail measure with a real sample behind it: p90 overshoot **+3.18 -> +1.39
+degrees (-56%)**, p99 **+8.98 -> +5.60 (-38%)**, p90 ratio 2.28 -> 1.69. The medians barely move,
+which is exactly what a tail fix should look like and is what the pre-build magnitude check
+predicted (p50 0.34 deg, p90 1.54, p99 4.66).
+
+**The tight <500 m band is mixed and thin.** p99 halves (+41.51 -> +21.03) but p90 rises slightly
+(+3.13 -> +4.04), and with n=451/703 unwinding frames a p99 is the fourth-to-seventh worst sample.
+Do not quote that row as a result either way.
+
+**ONE DRIVE, 7.5 MINUTES HANDS-OFF.** The exit-weight occupancy is robust (thousands of calls); the
+outcome is one matched pair on comparable surface roads. It wants a highway drive before the tail
+numbers are treated as settled.
+
+### THE ALERT GATE IS UNSCORED AND THAT IS ARITHMETIC, NOT A FAILURE
+
+**Zero `steerSaturated` episodes on the whole route**, reconstructed and raw. The base rate is 61
+episodes across 701 segments, so 13 segments expects about ONE. Zero is uninformative -- it is not
+evidence the gate works and not evidence it does not. **Do not report an absence at this sample size
+as a result**; it needs a drive with the 29-56 mph curves that produce the alerts.

@@ -420,3 +420,29 @@ The baseline, across every route on disk at the moment the gate landed:
 Note the route mix dominates the raw count -- the 600 mi interstate pull threw 18 episodes across
 454 segments while the 109-segment surface-road pull threw 27. **Per minute of exposure in the
 29-56 mph / 111-286 m band is the comparison; a raw count compares the route.**
+
+## 00000427 -- 2026-09-05, THE EXIT-BLEND LATCH'S FIRST DRIVE
+
+| | BEFORE 424/425 | AFTER 00000427 |
+|---|---|---|
+| build | LC 0.45, no latch | LC 0.45, **exit latch (10 calls)** |
+| other changes | -- | `SmartCruiseControlMapFactor` 90 -> 100 (12:40 MDT, 5 min before) |
+| hands-off | 4.8 min | 7.5 min |
+| speed p10/p50/p90 | 17 / 24 / 34 mph | 15 / 27 / 34 mph |
+| calls at b_blend 0.125 | 34 / 6470 = **0.53%** | 901 / 12585 = **7.16%** |
+| hwy 500-2000 UNWIND p90 deg | **+3.18d** | **+1.39d** |
+| hwy 500-2000 UNWIND p99 deg | +8.98d | +5.60d |
+| hwy 500-2000 UNWIND ratio | 1.020 (p90 2.28) n=1520 | 1.012 (p90 1.69) n=3415 |
+| tight <500 UNWIND p90/p99 deg | +3.13d / +41.51d | +4.04d / +21.03d (n thin) |
+| steerSaturated episodes | -- | **0** (13 segments expects ~1; uninformative) |
+
+The gains, both lane-centering keys and the damper were unchanged across both drives -- checked on
+the device by mtime, converted to MDT. The speed profiles match closely, so this is the best-matched
+lateral before/after in this file.
+
+**READ THE 500-2000 m ROW AND NOT THE TIGHT ONE.** The tight band's p99 is the 4th-to-7th worst of
+451/703 frames; the highway band has 1520/3415 behind it and moved on every tail measure.
+
+**AND `blendWeight` PERCENTILES CANNOT SCORE THIS.** The exit weight occupies 0.5-7% of calls, below
+p10's resolution -- p10 reads 0.175 on both drives. Count calls at or below 0.130; do not quote a
+percentile.
