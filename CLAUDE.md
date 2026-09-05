@@ -7718,3 +7718,63 @@ that folder never reach `update_events` and were checked, not assumed.)
 **MUTATION-TESTED, 9 mutants, 8 killed.** The survivor is `<` -> `<=` on the cooldown boundary --
 one model frame in a hundred, 50 ms on a 5 s window. Immaterial, and stated rather than chased with
 a contorted test.
+
+## 2026-09-05: THE SHIFTER READ "SPORT" AT A LIGHT AND ARMED A SOFT DISABLE SIX TIMES
+
+Found sweeping route 00000427 after he asked what else was on the drive. Everything else in the
+event histogram was startup (`parkBrake`, `wrongGear`, `controlsMismatch`, `reverseGear`,
+`radarTempUnavailable`, `commIssue` -- ALL inside the first 8.1 s, parked, cruise off, gear going
+park -> reverse -> drive as he backed out) or him parking at the end. **Print event timings before
+calling any of them a finding; a histogram alone would have had me chasing a park-brake ghost.**
+
+The one mid-drive item is real:
+
+    t+299.2 .. 313.8   gearShifter flickers drive -> unknown -> drive, SIX times
+                       engaged True and latActive True throughout, stopped at a light
+
+**DECODED OFF THE WIRE RATHER THAN GUESSED**, per the rule that already paid twice here.
+`TransGearData.GearLvrPos_D_Actl` (560, bits `12|4@0+` -> `(byte1 >> 1) & 0xF`) over the drive:
+
+    3  Drive               35572
+    0  Park                  579
+    4  Sport_DriveSport      262      <- ALL of them inside that one window
+    1  Reverse                 4
+    2  Neutral                 4
+
+**Value 14 `Unknown_Position` and 15 `Fault` appear ZERO times.** So this is not a signal dropout
+and not a TCM fault -- the lever genuinely read S. That distinction is the whole finding, and only
+the wire could make it.
+
+**AND IT IS TWO SEPARATE GAPS STACKED, WHICH IS WHY FIXING THE OBVIOUS ONE DOES NOTHING:**
+
+1. `GEAR_SHIFTER_MAP` has `'SPORT'` but the DBC string is `Sport_DriveSport`, which uppercases to
+   `SPORT_DRIVESPORT` -- not a key. So a legitimate gear falls through to `GearShifter.unknown`.
+2. **Even mapped correctly it would still fire.** `car_specific.py:108` raises `wrongGear` unless
+   the gear is `drive` or in `CI.DRIVABLE_GEARS`, and **Ford's is `(low, manumatic)` -- no sport.**
+   GM and Honda list sport; Ford does not.
+
+`wrongGear` is `ET.SOFT_DISABLE`, so each flicker armed a disengage countdown at a light.
+
+**IT COST HIM NOTHING AND THAT WAS MARGIN, NOT DESIGN.** Six runs, lengths 1.20 / 1.14 / 1.22 /
+0.72 / 0.52 / 0.32 s against `SOFT_DISABLE_TIME = 3` -- the longest used 41% of the budget. A
+flicker three times longer disengages him mid-intersection.
+
+**NOT FIXED, DELIBERATELY.** One window, on one drive, and the fix touches gear handling, which is
+the category this file says not to ship on an evening's reasoning. **And the question that decides
+it is his, not mine: does he ever actually drive in S?** If yes, Ford's `DRIVABLE_GEARS` is simply
+wrong for this car and both gaps want closing. If he does not -- if the lever was merely brushed --
+then the honest fix is nothing at all, and a mapping change would only make a real S engagement
+silent. ASK BEFORE DESIGNING AROUND SOMETHING HE DRIVES EVERY DAY.
+
+### AND THE REST OF THE DRIVE IS HEALTHY, MEASURED PER SEGMENT
+
+- **mapd v2 held 20 Hz on all 13 segments** (~1200 `mapdOut` per segment, 1199-1221). The
+  2026-08-30 stall did not recur. Broken down BY SEGMENT deliberately, because a total is how that
+  death got reported as healthy.
+- **`modelStopBraking` fired twice and both look timely** -- t+136.0 at 31.5 mph decelerating
+  monotonically to 21.6, and t+236.4 at 33.7 down to 29.1. Neither shows the ~12 s late arming of
+  route 000003bb. The first bottoming near 21.6 is the 20 mph Ford floor, not a failure.
+- `modeld` dropped 57 / 9 / 10 frames in three bursts, all in segment 0 (1123 `modelV2` against
+  1200 elsewhere) -- boot, not a running fault.
+- 65.1% engaged, 7.0% hands-on, 24.3% brake pressed, 24.9% standstill, peak 36.8 mph. A surface
+  drive, and the braking share is his documented "he takes every stop himself".
