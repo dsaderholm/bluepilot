@@ -6762,3 +6762,63 @@ for the same corner, and the PSCM tracks small commands better (0.894 at 0.047 r
 So `ford-acc-parity` (`../bluepilot-ford`) is not a side project to the lateral work -- **it is the
 lever on tight turns**, and the torque interceptor is the lever on fast ones. Different regimes,
 different fixes. Longitudinal authoring still does not belong on this branch.
+
+### THE EXIT-BIASED BLEND IS STILL DEAD AFTER `ba20937aac`, AND FOR A SECOND REASON NOBODY MEASURED
+
+His complaint is exit overshoot. **The one mechanism in this file aimed at exit overshoot has run to
+completion ONCE in 44 segments.** Measured 2026-09-04 with `blendWeight @61`, which is why this was
+findable at all.
+
+    population           phase        n   med blend    p10    p90   % below 0.45
+    all curves      turning in    44161       0.175   0.17   0.40          90.1%
+    all curves       UNWINDING    47397       0.175   0.17   0.40          90.6%
+    tight <500 m    turning in     3036       0.500   0.50   0.50           0.9%
+    tight <500 m     UNWINDING     2101       0.500   0.50   0.50           1.3%
+
+**On anything actually bent, `b_blend` is pinned at the 0.500 seed.** The 0.175 on the pooled row is
+`b * 0.35` -- the `_on_straightaway` branch (`abs(des) < 0.00125`) firing on near-straight road. The
+exit branch's `b * 0.25` = 0.125 is never reached anywhere: the p10 across every population is 0.17.
+
+**TWO INDEPENDENT REASONS, AND THE SECOND IS NEW.**
+
+**1. The relative threshold is at the 1st percentile of falling intervals.** `ba20937aac` replaced
+the absolute 0.010 1/m delta with `abs(des) < abs(last) * 0.8`, compared once per `STEER_STEP = 5`
+(0.05 s). Measured on falling intervals:
+
+    band                    n   med ratio    p10    p01    min   % under 0.80
+    tight <500 m         2561      0.9801  0.931  0.777  0.384          1.41%
+    highway 500-2000 m   2006      0.9683  0.876  0.658  0.244          3.44%
+
+A 20% drop in 50 ms is the ~1st percentile of what this planner does. The absolute form fired on
+0.054% of intervals; the relative form fires on 1.1-3.4%. **Twenty times better and still dead.**
+The relative threshold IS the right shape -- scale-free, cannot go stale -- it is simply set five
+times too strict for this car's planner.
+
+**2. EVEN WHEN IT FIRES, IT FIRES FOR ONE CALL, AND THE RAMP NEEDS FOUR.** `ba20937aac` also added
+`b_step = 0.1` per call to stop the weight snapping between 0.5 and 0.125 -- a good change on its
+own. But 0.500 -> 0.125 is 0.375 of travel, so it needs **four consecutive firing calls**:
+
+    consecutive calls   episodes   share
+                    1         80    87.9%
+                    2          9     9.9%
+                    3          1     1.1%
+                    4          1     1.1%
+
+    gate fired on 105 of 9484 calls (1.11%)
+    episodes long enough to reach the exit weight (4+):  1 of 91
+
+**87.9% of firings are a single isolated call, and the blend reached its exit target exactly once.**
+Neither half is wrong by itself; the product of a 1-in-90 trigger and a 4-call ramp is zero.
+
+**DO NOT FIX THIS TONIGHT, AND DO NOT FIX IT BY MOVING ONE NUMBER.** A threshold loosened without
+the run-length problem still needs four in a row; a ramp sped up without the threshold still almost
+never triggers. The shape that would work is a LATCH -- once an exit is detected, hold the exit
+state for a bounded number of calls so the ramp can traverse -- and that is a design change to the
+lateral path on a branch his car auto-pulls. **This is the 5.20 m/s^2 pattern if it is written in an
+evening and handed to him.** Record it, measure it against `bp_lateral_by_radius` and the phase
+table above, and ship it on its own drive with nothing else moving.
+
+**And note what it does NOT explain.** The exit overshoot in degrees is median +0.16d on tight
+curves -- imperceptible. It is the tail that hurts: p90 +3.21d, p99 +10.81d. The gate's 1.4% firing
+rate lands on the fastest falls, which are plausibly those same tail frames, so a working exit blend
+targets the right events. That is an argument for fixing it, not evidence that it would have.
