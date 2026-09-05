@@ -7127,3 +7127,46 @@ that repo built a patched Ghidra SLEIGH spec and a 99.81%-coverage lifter merely
 EXISTING bytes to change. But the stronger answer is that the feature would be redundant: his LCA
 geometry path already achieves 0.979 at highway. **The torque interceptor exists for cars with no
 working lane-centering interface. He has one.**
+
+### IS CURVATURE MODE DEAD? NO -- IT IS BETTER AT THE ONE THING HE COMPLAINS ABOUT
+
+His question, and it deserves a straight answer instead of the one-line dismissal it got first.
+
+**What curvature mode has that angle mode structurally cannot:** the PSCM closes ITS OWN loop on
+commanded curvature and keeps correcting until the car is there. Angle mode is open-loop
+feedforward -- it commands and hopes. **On the UNWIND that is exactly his complaint:** measured
+2026-09-04, angle mode carries PAST on exits (highway unwind ratio 1.070, p90 1.59, p90 +3.18 deg),
+and an open loop has no mechanism to pull it back. A closed loop would.
+
+**HONEST LIMIT ON THAT CLAIM: there are ZERO curvature-mode frames in any pulled log** -- 119,450
+angle, 0 curvature. So it is a code-reading claim about his car, NOT a measurement, and it must be
+labelled that way until a curvature drive exists. What IS measured is that angle mode already
+tracks **0.979** at highway, so the STEADY-STATE gain from switching is about 2%. Any real benefit
+would be in the transient, which nothing on disk can score.
+
+**What curvature costs: the 48 m radius cap, at any speed, forever.** Intersection turns become
+impossible. So it is not "better" -- it is better ABOVE ~48 m and unusable below.
+
+**AND THE MODE IS RE-READ EVERY FRAME, WHICH MAKES A SPEED-SCHEDULED SWITCH MECHANICALLY POSSIBLE.**
+`carcontroller.py:173-174` calls `update_lateral_params` / `update_angle_params` inside
+`CarController.update()`, so `self.primary_lateral_control` refreshes per frame and is consumed at
+lines 260/268/324 to choose the message. **Curvature above a speed threshold, angle below**, would
+give closed-loop tracking on highway curves AND angle-mode reach at intersections. Not built, not
+trivial (the two modes send different messages and the transition needs designing), but the
+plumbing does not forbid it. **This is the one genuinely new architectural idea from this thread.**
+
+### WHAT ELSE IN THAT REPO APPLIES, ITEM BY ITEM -- HE ASKED AND IT WAS NOT ANSWERED
+
+    LKA 10 s lockout        SOLVED there (LKA_NO_LOCKOUT.VBF, flashed+confirmed) and IRRELEVANT
+                            here: his car has no lockout. Tonight's logs show continuous latActive
+                            across whole segments; he drives hands-off for minutes.
+    APA high-speed          parking assist. Unrelated feature, no bearing on lane centering.
+    APA standstill          same.
+    LCA enable              them reaching for the interface he already has. Half-works.
+    min-speed floor         theirs is ~40 kph on stock LKA. His LCA has no such floor.
+
+**"Or any other modifications like that?"** Conceivable on a cal: authority tables, speed floors,
+rate limits -- all NUMBERS in existing tables. Not conceivable: a new CAN handler, a torque input,
+or any new BEHAVIOUR, because that is authoring code into a 1 MB AUTOSAR V850 image with no source,
+no toolchain and ASIL-D supervision. **The line is "change an existing number" vs "add a feature",
+and everything that repo shipped is on the first side of it.**
