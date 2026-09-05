@@ -7852,3 +7852,20 @@ him to notice, because it is the one thing he actually liked about this. Reverti
 is CLOSED. Do not re-offer it, and do not treat the lost entertainment as a wart to solve -- he was
 told what it cost and chose it. Same shape as pinned holds and curvature mode, both of which got
 re-raised after he had already decided.
+
+## STALE-FACT CORRECTION, 2026-09-05: THE MAPD PIN IS ALREADY v2.3.1
+
+The handoff section above is headed **"WE ARE PINNED TO v2.3.0"** and says so in its body. That is
+no longer true -- `sunnypilot/mapd/__init__.py` reads `MAPD_V2_VERSION = "v2.3.1"`, bumped in
+`240e7d1b9c` ("version pin, sha, and the two new capnp fields -- **BINARY PENDING**").
+
+**Checked because the alternative was offering him work that is already done.** The handoff note was
+written by another session and the code moved underneath it -- which is this file's own recurring
+failure (*"a claim about behaviour that lives only in prose stops being true the moment the code
+moves"*). **Read the constant, never the paragraph about the constant.**
+
+**WHAT IS STILL OPEN ON IT, and it is narrower than the heading suggests:** the commit says BINARY
+PENDING, and `MapdV2Version` is unset on the device, so whether the car is actually RUNNING 2.3.1
+is unverified. And route 00000427 cannot answer it either way -- mapd held a clean 20 Hz on all 13
+segments, but that was surface roads with small map paths. **The collapse was only ever seen on
+652-point paths (Tioga Road, 1.6 Hz against a declared 20), so only a curvy-highway drive tests it.**
