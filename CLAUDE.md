@@ -7069,3 +7069,61 @@ answers "is this a project or a dead end" without touching the car.
 **And keep the stock VBF before anything else.** Their `backups/` exists for that reason, one of
 their own patches reverts AS-built on a power cycle, and his PSCM is a retrofit he has already tuned
 into place -- bricking it means sourcing another Edge module and redoing all of it.
+
+### HIS CORRECTION: WE USE LCA, NOT LKA -- AND IT RETIRES THE WHOLE PATCH TABLE
+
+*"But we aren't using LKA, we are using LCA."* Correct, and it is the most important thing in this
+whole thread. Every shipped patch in that repo solves a TRANSIT problem this car does not have:
+
+    LKA_NO_LOCKOUT.VBF          Transit's LKA gives ONE 10 ms pulse then 10 s of nothing.
+                                HIS CAR HAS NO LOCKOUT -- he drives hands-off for minutes.
+    LKA_FULL_AUTHORITY.VBF      raises the 0x213 DesTorq cap on the LKA path.
+                                HE IS NOT ON THE LKA PATH AT ALL.
+    LKA_APA_*                   parking assist. Unrelated feature.
+    LCA_ENABLED.VBF             they are TRYING to reach the interface he already has,
+                                and it only half-works ("AS-built reverts on power cycle").
+
+**Transit has LKA and is fighting to get LCA. He has LCA.** He is on the destination of their
+hardest open problem. Do not describe their patch table as applicable to this car.
+
+### AND A FIRMWARE TABLE WOULD NOT LET HIM TAKE CURVES FASTER. MEASURED.
+
+He asked directly: *"Would modifying a table make it steer more at higher speeds so I can take
+curves faster?"* Measured over 56,707 engaged hands-off frames on real curves at >= 55 mph:
+
+    PSCM tracking                             p50 0.979
+    commanded lateral accel                   p50 0.96  p90 1.92  p99 2.61  max 3.37 m/s^2
+    frames within 10% of the ISO 3.0 clamp    284  (0.50%)
+
+**The rack already delivers 98% at highway speed, and openpilot's own clamp is binding on half a
+percent of frames.** Neither is the constraint. **There is nothing at highway speed for a firmware
+authority patch to buy** -- which also agrees with the already-retracted "PSCM cannot hold 2.5"
+story (commit 585ef47afb: the knee was the gain ramp, not the rack).
+
+What DOES cap curve speed is above the rack entirely: SCC's corner-speed formula (which he does not
+use), and our own gain schedule sitting at 0.834 -- and raising THAT is the recommendation he
+correctly refused, because a gain multiplies the unwind overshoot by the same factor.
+
+**Firmware would help in exactly ONE regime: low-speed tight turns**, where the PSCM returns 0.784
+and falls toward 0.743 as the command grows. That is the Taco Bell case and nothing else.
+
+### CURVATURE vs ANGLE IS A REAL TRADE, AND HE IS ALREADY ON THE RIGHT SIDE FOR HIS GOAL
+
+    curvature mode   PSCM closes its OWN loop -> delivery ~1.0 by design, and it would unwind
+                     under closed-loop correction. BUT the signal caps at a 48 m radius, at any
+                     speed, so an intersection turn is impossible. Taco Bell drive: dead.
+    angle mode       open-loop feedforward, delivery 0.78-0.98. Ceiling scales with 1/speed, so
+                     it reaches 11.2 m at 10 mph. Taco Bell drive: possible.
+
+Angle mode already measures **0.979 at highway**, so switching to curvature would buy ~2% there and
+cost the tight-turn future outright. **He is on the right mode.** (He has also refused going back to
+curvature twice; this is the measured reason he was right, not a reason to re-raise it.)
+
+### "CAN'T YOU VIBE-CODE A TORQUE INPUT?" -- NO, AND HE DOES NOT NEED ONE
+
+Adding a torque command means authoring a CAN handler into a 1 MB AUTOSAR V850 binary with no
+source, no toolchain for the target, no bench, and ASIL-D supervision that would trap it -- when
+that repo built a patched Ghidra SLEIGH spec and a 99.81%-coverage lifter merely to find which
+EXISTING bytes to change. But the stronger answer is that the feature would be redundant: his LCA
+geometry path already achieves 0.979 at highway. **The torque interceptor exists for cars with no
+working lane-centering interface. He has one.**
