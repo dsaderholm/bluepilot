@@ -7869,3 +7869,69 @@ PENDING, and `MapdV2Version` is unset on the device, so whether the car is actua
 is unverified. And route 00000427 cannot answer it either way -- mapd held a clean 20 Hz on all 13
 segments, but that was surface roads with small map paths. **The collapse was only ever seen on
 652-point paths (Tioga Road, 1.6 Hz against a declared 20), so only a curvy-highway drive tests it.**
+
+## 2026-09-05: THE PSCM LIMIT IS POLICY, NOT PHYSICS. MEASURED, AND IT WAS HIS ARGUMENT.
+
+The question blocking every "can we buy more steering authority" discussion was whether the rack is
+being TOLD to stop or is physically out of capability. **It is answered, and the answer is told.**
+
+**THE INSTRUMENT WAS ON THE WIRE THE WHOLE TIME.** `EPAS_INFO` (130) -- a message openpilot ALREADY
+parses for `SteeringColumnTorque` and `EPAS_Failure` -- also carries `SteMdule_I_Est`, the PSCM's own
+motor current. openpilot discards it. `tools/bp_eps_current.py` decodes it.
+
+    EPS motor current                    n        p50    p90    p99     MAX
+    HIS hands on the wheel           118,184     0.05   2.00  20.00   75.85 A
+    openpilot, reporting SATURATED     4,710     0.10   0.55   2.00    5.05 A
+    openpilot, normal                275,939     0.00   0.05   0.30    2.00 A
+
+**Fifteen times more current when he turns the wheel himself than when openpilot reports steering
+exhaustion.** A rack at its capability cannot show that gap.
+
+**HIS ARGUMENT IS WHAT CLOSED IT** -- *"I mean I steer manually completely and have no limits."* The
+proof was already in logs on this laptop; it needed his framing to know what to compare.
+
+**AND HE THEN ARGUED AGAINST HIMSELF, CORRECTLY, AND THE OBJECTION WAS TESTED:** *"isn't the deal
+like if I am steering it is less work for the motor and less heat or something?"* Assist does share
+the load with the driver, and EPS motors do thermally derate. **Refuted by the signature:**
+
+    position through episode   0-20%  20-40%  40-60%  60-80%  80-100%
+    mean current                0.16    0.21    0.24    0.26     0.28   <- RISES
+
+Derating decays; this rises. It starts at 0.11 on the first frame, and episodes are **0.5 s median**
+(4.4 s max) -- nothing thermal happens in half a second from a standing start. And load-sharing
+would need the numbers to be close; they are 150x apart at the median.
+
+**AND `steerSaturated` IS NOT THE MODULE REPORTING A LIMIT.** It is openpilot noticing its OWN
+command sat at its OWN ceiling while the car under-delivered. `LatCtlLim_D_Stat` is dead on
+non-CAN-FD Fords, so the PSCM never reports limiting at all. The true picture is a rack returning
+74-89% of what it is asked **while drawing half an amp**.
+
+### WHAT THIS SETTLES, AND WHAT IT DOES NOT
+
+**Settled: there is roughly an order of magnitude of headroom in that motor.** Do not re-open
+"maybe the rack is physically saturating" -- it is measured and false. Any future authority work
+(firmware calibration, the BluePilot torque interceptor) has something real to act on.
+
+**Not settled: how to reach it.** The calibration is `K2GC-14D007-BD.VBF`, 32 KB of u16 fixed-point,
+and its tables are unlabelled. **The published F-150 reverse engineering DOES NOT TRANSFER** -- their
+cal is float32, so no offset, axis or patch site applies. Verified by finding their signatures at
+their documented offsets in THEIR cal and finding none in his. Full write-up, both extracted cals and
+the analysis scripts live in `Nextcloud/Projects/Car/OpenPilot/PSCM-RE/`.
+
+**THE FIRMWARE ITSELF IS DELIBERATELY NOT IN THIS REPO.** `dsaderholm/bluepilot` is PUBLIC, and Ford
+VBFs are Ford's. The findings and the tooling are here; the binaries stay off GitHub.
+
+### TWO MEASUREMENT LESSONS, both paid for in this session
+
+- **Motorola bit order: after a byte you advance to the NEXT byte, not the previous one.** The first
+  decode walked to byte1 and returned two distinct values across 45,000 samples. Two values is the
+  tell that the bit math is wrong, not that the signal is dull.
+- **VALIDATE A DECODER ON A SIGNAL WHOSE TRUTH YOU ALREADY HAVE, before reading anything into a new
+  one.** `byte0*0.0625-8` reproduces `carState.steeringTorque` to 0.006 Nm; `byte4*0.05+6` gives
+  battery voltage. Without that check, "these amps look implausibly low" is indistinguishable from
+  "my bit math is wrong" -- and it WAS briefly written off as a bad DBC scale, until 75.85 A under
+  manual steering proved the scale correct all along. The tool now refuses to print currents if the
+  self-check fails.
+- **Most of EPAS_INFO is dead on this retrofit module** -- bytes 1, 5, 6, 7 are frozen constants and
+  `DrvSte_Tq_Actl` is a fixed 128 = 0.0 Nm. Third dead signal on this PSCM. Check a field varies
+  before trusting it.
