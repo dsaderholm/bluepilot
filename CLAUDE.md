@@ -6564,3 +6564,98 @@ planned**, which is running wide rather than turning gently -- and delivery at t
 `_SPEED_RAMP_BP = (0.0, 9.0, 15.0)` -> `_SPEED_RAMP_V = (0.0, 0.0, 1.0)` working: the lane-centering
 trim is OFF below 20 mph and full at 34. **A lane-centering setting cannot explain anything he
 reports below 20 mph**, in either direction.
+
+## 2026-09-04: THE LATERAL CHAIN, DECOMPOSED. THE PSCM CEILING IS MEASURED AT LAST.
+
+`ControllerStateBP` has published `kappaCmd`, `curvatureFactor` and `laneCenterCorrection` since
+2026-09-01, and this is the first analysis to use all three together. **It splits the long-standing
+"delivery is 0.87-0.93" number into three independent links, and they have completely different
+causes at different speeds.** Steady state (desired within 5% for a full 0.5 s), hands off,
+latActive, 44 segments of routes 0000041e / 0000041f / 00000423.
+
+    desired --[trim + clip]--> kappa_cmd --[our gain]--> command --[PSCM]--> actual
+
+          radius      n    mph   trim+clip  our gain    PSCM   = delivery
+    500-  1000 m    552   70.1       1.055     0.834   0.952       0.865
+    286-   500 m    861   39.3       1.071     0.973   0.889       0.862
+    100-   286 m    906   40.7       1.041     1.005   0.784       0.859
+
+**THE DELIVERY COLUMN IS FLAT AT 0.86 AND MEANS THREE DIFFERENT THINGS.** Pooling it, which every
+previous measurement here did, hid that entirely:
+
+- **Highway curve, 70 mph: the shortfall is OURS.** Gain 0.834, PSCM 0.952. `FordHighSpeedDampening_ang`
+  and `FordHighSpeedFactor_ang` close this, and the car will deliver what they ask for.
+- **Turn, 40 mph: the shortfall is the PSCM.** Our gain is already 1.005 -- the schedule is at unity
+  -- and the car returns 0.784. **No setting in this fork reaches that column.**
+
+(The three columns are medians of ratios and do not multiply to the fourth exactly; the pattern is
+the finding, not the arithmetic identity.)
+
+### AND THE PSCM CEILING IS SOFT AND PROGRESSIVE, NOT A CLIP. SPEED-CONTROLLED.
+
+Binned by commanded `pathAngleFinal` WITHIN each speed band, because a first pass pooled by command
+size put 39 mph and 75 mph frames in adjacent rows and manufactured a trend:
+
+    30-45 mph   0.830  0.808  0.871  0.765      (command 0.021 -> 0.228 rad)
+    45-60 mph   0.892  0.800  0.772  0.743      (0.026 -> 0.171 rad)  <- monotonic
+    60-80 mph   1.069  0.933  0.983  0.945      (0.015 -> 0.068 rad, small commands only)
+
+**The PSCM tracks essentially perfectly when asked for little and degrades steadily as the command
+grows.** 45-60 mph is the cleanest run and falls 0.892 -> 0.743 monotonically -- and that is the
+same band this file already flags three independent ways as the worst on this car.
+
+**THIS IS THE FIRST QUANTITATIVE MEASURE OF THE AUTHORITY LIMIT.** The section above records that
+`LatCtlLim_D_Stat` is dead on non-CAN-FD Fords, so the PSCM never reports limiting and every earlier
+claim about ~2.5 m/s^2 rested on indirect signatures (our deviation limiter biting, hands-on% rising,
+delivery sitting at 0.87-0.93). **The tracking ratio against command size, speed-controlled, is a
+direct measure and it does not need the dead signal.** Use it to score the torque interceptor when
+it arrives: the same table, before and after.
+
+**WHAT IT MEANS FOR TUNING, and it is a diminishing return rather than a wall:** at 0.17 rad of
+commanded path_angle the PSCM returns 74 cents on the dollar, so commanding 35% more nets about 26%
+more actual. Not nothing -- but the gain amplifies the plan's own ~50%-of-curve oscillation at the
+same time, so this is a real trade and not a free win.
+
+### HIS TUNING STEPS ARE TWO ORDERS OF MAGNITUDE TOO SMALL TO JUDGE
+
+The wire recovered his change as `FordHighSpeedFactor_ang` 0.794 -> 0.804. In the unit he judges in:
+
+    radius   nominal   cf .794   cf .804    delta at the wheel
+     1000m     2.79d     0.797     0.798        0.004 deg
+      500m     5.57d     0.830     0.834        0.025 deg
+      350m     7.96d     0.858     0.865        0.055 deg
+
+**0.025 degrees.** The dither this file proved imperceptible is 0.10-0.30 deg. To move the wheel by
+even 0.30 deg at 500 m he needs 0.794 -> **0.90**. Every A/B he has run at this step size was
+unscoreable before the drive started, and telling him a drive "showed" anything at this resolution
+would be inventing a result. **Quote the step in degrees before recommending a drive to test it.**
+
+### THE TRIM IS NOT EATING THE DEVIATION BUDGET. `0cb9165427` IS REFUSED ON EVIDENCE.
+
+The deviation clip (`measured +- CURVATURE_ERROR`, 0.002 1/m) binds hard on tight curves:
+
+    radius        n     % clipped   budget p50   p90
+    500-1000 m   13798      0.54%        0.17   0.42
+    286- 500 m    8302      2.67%        0.26   0.54
+    100- 286 m    5674     16.90%        0.44   1.04
+      0- 100 m     311     54.66%        0.72   4.41
+
+That looked like the one-sided-budget bug `0cb9165427` fixes -- *"a one-sided form lets the trim
+subtract authority while the planner is already clipped short in a curve"* -- and this file had it
+flagged as a real risk. **Re-running the clip with and without the trim's contribution refuses it:**
+
+    radius        clipped   planner ALONE   TRIM-CAUSED   % of frames
+    500-1000 m         80              80             0         0.00%
+    286- 500 m        207             207             0         0.00%
+    100- 286 m        606             566            59         1.04%
+      0- 100 m         88              88             0         0.00%
+
+**The clipping is the planner's own, in every band.** The trim causes it on 1.04% of frames in one
+band, and there it destroys 0.000076 1/m of planner curvature -- **0.21 degrees of wheel, below the
+dither floor.** Do not take that commit for this reason; if it is ever taken it must be for a
+different one, measured.
+
+**And the trim is NOT neutral on curves** -- signed with the bend it is +16.6% of commanded curvature
+at 500-1000 m, +9.4% at 286-500, +2.2% at 100-286. It is silently compensating for the shortfall
+above, which is very likely why raising `lane_centering_strength_ang` fixed his "hugging some edges".
+**Any measurement of delivery that does not subtract the trim is measuring the trim.**
