@@ -108,6 +108,7 @@ DEFAULT_TARGETS = [
   "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_tsr_reliability.py",
   "sunnypilot/selfdrive/selfdrived/tests/test_unconfirmed_lead_alert_truth.py",
   "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_apim_gps_quality.py",
+  "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_sport_is_a_driving_gear.py",
   "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_synthesized_set_cruise.py",
   "sunnypilot/selfdrive/controls/lib/smart_cruise_control/tests/test_tile_curvature.py",
   # Named file, not the directory: test_mapd_version.py beside it hashes the installed mapd binary

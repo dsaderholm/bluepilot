@@ -7778,3 +7778,41 @@ silent. ASK BEFORE DESIGNING AROUND SOMETHING HE DRIVES EVERY DAY.
   1200 elsewhere) -- boot, not a running fault.
 - 65.1% engaged, 7.0% hands-on, 24.3% brake pressed, 24.9% standstill, peak 36.8 mph. A surface
   drive, and the braking share is his documented "he takes every stop himself".
+
+### RESOLVED THE SAME DAY: HE DOES IT ON PURPOSE, SO IT IS FIXED
+
+*"I love switching into sport mode to make it go crazy."* That answers the question the entry above
+left open, and it turns the finding from a curiosity into a defect worth two upstream lines.
+
+**AND IT WAS WORSE THAN FIRST REPORTED.** The first write-up said it "cost him nothing". Checking
+`selfdriveState` rather than stopping at `carState` shows he SAW every one of them:
+
+    t+299.1  softDisabling  "openpilot will disengage"
+    t+302.2  softDisabling  "openpilot will disengage"
+    ... six times in fourteen seconds, at one light
+
+`enabled` and `active` stayed True, so nothing was lost -- but "it cost him nothing" and "he was
+warned six times that he was about to lose it" are different statements, and only the second is
+what he experienced. **Read one layer past the struct that answers the mechanical question.**
+
+**THE FIX IS TWO LINES IN TWO UPSTREAM FILES, and both are needed:**
+
+    opendbc/car/interfaces.py   'SPORT_DRIVESPORT': GearShifter.sport   <- the DBC spelling
+    opendbc/car/ford/interface.py   DRIVABLE_GEARS += (sport,)          <- GM and Honda already had it
+
+**The upstream-scope test passes on both halves**: it is his car, it is what he SEES, and he does it
+deliberately. Two modified upstream lines is the merge cost and it is worth it.
+
+**WHY ALLOWING IT IS CORRECT RATHER THAN JUST QUIETER, and it is measured:** Ford's own ACC stayed
+engaged through all six S windows (`cruiseState.enabled` True throughout), so the car itself permits
+ACC in Sport. openpilot refusing it was openpilot disagreeing with the car, not with the driver.
+
+**FAULT VALUES ARE DELIBERATELY LEFT UNMAPPED.** 14 `Unknown_Position` and 15 `Fault` still decode
+to `unknown` and still raise `wrongGear`. Mapping them away would silence the alert for the case it
+actually exists for -- and a test fails if anyone does, because the tempting "fix" for a future
+gear complaint is exactly that.
+
+`test_sport_is_a_driving_gear.py`, 8 tests, **5 mutants, 0 survivors** -- including over-widening
+to reverse and silencing the fault codes. The predicate test drives `car_specific.py`'s own
+expression against the real `CarInterface.DRIVABLE_GEARS` by stubbing the micd import chain rather
+than skipping, so it cannot pass vacuously.
