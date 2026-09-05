@@ -101,6 +101,7 @@ DEFAULT_TARGETS = [
   "sunnypilot/selfdrive/controls/lib/speed_limit/tests/test_sla_leaves_disabled_while_icbm_moves_the_cluster.py",
   "sunnypilot/selfdrive/controls/lib/speed_limit/tests/test_sla_survives_a_gas_override.py",
   "sunnypilot/selfdrive/controls/lib/speed_limit/tests/test_the_announcement_defers_to_a_hold.py",
+  "sunnypilot/selfdrive/controls/lib/speed_limit/tests/test_the_set_speed_changed_announcement.py",
   "sunnypilot/selfdrive/controls/lib/smart_cruise_control/tests/test_the_blindness_veto_needs_a_blind_camera.py",
   "sunnypilot/selfdrive/controls/lib/smart_cruise_control/tests/test_vision_target_holds_its_minimum.py",
   "opendbc_repo/opendbc/sunnypilot/car/ford/tests/test_replay_his_drive.py",

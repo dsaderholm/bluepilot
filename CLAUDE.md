@@ -7635,3 +7635,86 @@ numbers are treated as settled.
 episodes across 701 segments, so 13 segments expects about ONE. Zero is uninformative -- it is not
 evidence the gate works and not evidence it does not. **Do not report an absence at this sample size
 as a result**; it needs a drive with the 29-56 mph curves that produce the alerts.
+
+## 2026-09-05: "SET SPEED CHANGED" WAS 99% NOISE. TWO GUARDS, MEASURED ACROSS FOUR PULLS.
+
+*"It's still telling me set speed changed to the speed limit all the time now, even when the set
+speed didn't change at all."* Then, narrowing it himself: *"I think we were on SLA and not a hold
+and it just kept telling me it changed even though it didn't."*
+
+**IT IS A DIFFERENT ALERT FROM THE ONE FIXED ON 2026-08-27, WHICH IS WHY HE SAID "STILL".** That fix
+gated `speedLimitAutoSet` on a hold. This is `speedLimitChanged` / `speedLimitActive`, fired from
+`update_active_event` on the ENTRY EDGE into an active state -- **a trigger that never consulted the
+set speed at all**, and which picks its wording purely from whether the cluster is under
+`CONFIRM_SPEED_THRESHOLD`. Chasing the 2026-08-27 alert again would have found nothing wrong.
+
+### THE MEASUREMENT, AND IT IS THE WHOLE ARGUMENT
+
+`speedLimitChanged` rising edges, with the two SHIPPED guards replayed over the recorded frames:
+
+    pull                        fires   dash ALREADY at target   inside 5.0 s   survive
+    00000427                       17            17                    5           0
+    2026-09-04 lc_035_vs_045       54            50                   48           0
+    2026-09-03 post_damper         11            10                    9           0
+    2026-09-01 damper_and_gain     13            12                    6           1
+    TOTAL                          95            94                   68           1
+
+**Ninety-five announcements, ninety-four of them with the dash already sitting on the number.**
+
+**AND THE ONE SURVIVOR IS THE PROOF THE GUARDS ARE SHAPED RIGHT, not merely aggressive:**
+`t+14384.5, dash 48, target 40` -- SLA about to bring the set speed down eight miles an hour. That
+is the sentence the alert exists to say, and it is the only time in four drives it was true.
+
+**SAY THE COST OUT LOUD RATHER THAN LETTING HIM FIND IT: this alert now fires about once in four
+drives.** That is not a bug, it is what "only when it is true" costs on his roads -- ICBM has
+usually already walked the dash to the limit before the entry edge happens, because the entry edges
+are him cycling cruise at lights (35.5% of 00000427 had cruise off).
+
+### THE TWO GUARDS
+
+1. **`target_set_speed_confirmed`** -- the dash already equals the target, so nothing is going to
+   happen. Rewording it to `speedLimitActive` would be equally untrue and chimes identically.
+2. **A re-announce cooldown that IS THE ALERT'S OWN 5.0 s DURATION**, not a number anyone picked: a
+   second announcement inside that window lands while the first is still on screen. Route 00000427
+   t+375 fired three times in 1.5 s off one `active -> inactive -> active` flicker.
+
+**Guard 1 returns BEFORE the counter is zeroed**, so a suppressed no-op cannot spend the cooldown
+and mute a real announcement behind it. Swapping the two kills a test, deliberately.
+
+### `speedLimitAutoSet` WAS AUDITED AND IS LEFT ALONE -- IT FIRES ONCE IN TWELVE MINUTES
+
+It carries the SAME `promptSingleHigh` chime and has NO cooldown, so it looked like the same bug one
+file over. Measured on 00000427: **1 fire in 12.1 minutes, 0 with a motionless dash.** The
+2026-08-27 hold gate plus the resolver's `fail`/`possible` refusals already hold it. Adding a
+cooldown there would be **refusing a bit by association**, which this file already records as
+costing more than the bit ever did.
+
+### THE SAMPLING TRAPS, BOTH HIT IN ONE HOUR
+
+- **`Alert.duration` IS IN CONTROL FRAMES.** `int(duration / DT_CTRL)`, so the shipped alert reads
+  **500** where the cooldown constant reads **5.0**. The test that ties the constant to the alert
+  asserted `duration == ANNOUNCE_COOLDOWN_S` and failed `500 == 5.0`. Two fields both called a
+  duration, on different clocks -- the units half of "compare endpoints before comparing".
+- **THE FIRST REPLAY USED `assist.vTarget`. THE CODE USES `resolver.speedLimitFinalLast`.** Caught
+  by reading line 261 rather than trusting the name. It happened to give the same answer here
+  because SLA was tracking the limit exactly, which is precisely how this trap survives.
+
+### AND THE 20 "ERRORS" IN THAT FOLDER ARE PRE-EXISTING AND EXPECTED
+
+`bp_offline_test.py sunnypilot/.../speed_limit/` reports **20 errors at HEAD as well** -- the folder
+holds `test_speed_limit_assist.py`, which needs the device stack and is deliberately excluded from
+`DEFAULT_TARGETS` by NAME. Running the DIRECTORY pulls it back in. Run the named files, or the
+whole suite; a directory run in that folder is not a signal.
+
+### THE `__new__` FIXTURES ARE FINE. DO NOT BUILD MACHINERY FOR THEM.
+
+Adding one field to `__init__` broke seven tests in `test_the_announcement_defers_to_a_hold.py` with
+`AttributeError` -- those fixtures use `SpeedLimitAssist.__new__` because `__init__` needs a real
+`CP`/`CP_SP` the runnable suite does not have. **That is the system working**: it failed loudly, in
+seven places, and was diagnosed in minutes. The dangerous version is a `getattr` default that would
+have hidden it. Seed the field in the fixture and move on. (The other three `__new__` fixtures in
+that folder never reach `update_events` and were checked, not assumed.)
+
+**MUTATION-TESTED, 9 mutants, 8 killed.** The survivor is `<` -> `<=` on the cooldown boundary --
+one model frame in a hundred, 50 ms on a 5 s window. Immaterial, and stated rather than chased with
+a contorted test.
