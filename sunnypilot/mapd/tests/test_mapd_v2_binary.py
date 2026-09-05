@@ -18,8 +18,8 @@ import os
 
 from openpilot.sunnypilot.mapd import MAPD_V2_PATH, MAPD_V2_VERSION
 
-# sha256 of https://github.com/pfeiferj/openpilot-mapd/releases/download/v2.3.0/mapd
-MAPD_V2_SHA256 = "a08f0a9bea3ec099738932964d8dbf066f6f47539395ecb979530cbc99b748a1"
+# sha256 of https://github.com/pfeiferj/openpilot-mapd/releases/download/v2.3.1/mapd
+MAPD_V2_SHA256 = "db99c010103da86db17dc7c196822e26c70be091066093629923c3b80d5648bc"
 MAPD_V2_SIZE = 21806000
 
 

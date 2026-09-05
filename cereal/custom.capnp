@@ -926,6 +926,16 @@ struct MapdExtendedOut @0xa30662f84033036c {
   settings @1 :Text;
   path @2 :List(MapdPathPoint);
   position @3 :MapdPosition;
+  # mapd v2.3.1 appended these two. Taken VERBATIM from pfeiferj's own custom.capnp -- the Mapd*
+  # structs are THEIRS and capnp reads by POSITION, so our copy must match theirs field for field.
+  # Additive at the end, so a v2.3.0 binary (which sends neither) still decodes correctly here.
+  #
+  # They are also the metric that scores the upgrade: v2.3.1's release note is "message publishing
+  # is now on its own thread that ensures a constant 20 hz publish rate", and mapdOut was measured
+  # at 13.85-16.16 Hz on 2026-09-04/05 with mapdExtendedOut at 0.96 Hz. Read these back on the next
+  # drive instead of re-deriving the rate from message timestamps.
+  loopRateAverage @4 :Float32;
+  loopRateMin @5 :Float32;
 }
 
 enum MapdInputType {
