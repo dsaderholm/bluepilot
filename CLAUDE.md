@@ -7446,3 +7446,71 @@ string -- a toggle that reads one key and writes another is a bug, not a setting
 42 -> 49 known settings, six of the seven newly-visible ones were already reachable, and the new one
 was correctly reported missing. **The check is still the same one: add a setting and watch it FAIL.
 This tool has now been green through five different structural blind spots.**
+
+## 2026-09-05: THE SPEED FLOOR IS THE WRONG LEVER, AND I NAMED IT AS THE RIGHT ONE
+
+He asked for the cost of raising `sat_check_min_speed` to be measured. `tools/bp_steer_alert_floor.py`
+re-simulates `_check_saturation` at arbitrary floors and dwell times over recorded routes, and
+**validates against the flag the car published: 99.99% agreement at the shipped 5.0 m/s / 1.0 s over
+4,080,086 angle-mode frames.** A counterfactual that cannot reproduce the factual is not a
+measurement, so that line is printed first and everything under it is worthless without it.
+
+**MY CLAIM THAT IT WAS "THE ONE CHANGE THAT WOULD TAKE THE REMAINING COUNT DOWN MEANINGFULLY" IS
+WITHDRAWN.** It rested on "11 of the 14 unmeasurable episodes are under 40 mph", which is true and
+says nothing: the base `LatControl` floor is **22.4 mph**, and only TWO of those 14 are below it.
+Under 40 mph is not under 22. **A shape argument was let stand as a magnitude argument** -- the same
+failure as the ba20937aac write-up, where a real mechanism moved the wheel 0.03 degrees.
+
+    floor   mph    episodes  on screen   removed   ...that were on screen   supervision lost
+     5.0   11.2       60        23          -              -                      -    SHIPS
+     8.0   17.9       59        22          1              1                    1.3%
+    10.0   22.4       57        20          3              3                    3.7%
+    12.0   26.8       57        20          3              3                    5.8%
+    14.0   31.3       42        16         17              7                    9.1%
+    16.0   35.8       36        13         24             10                   11.6%
+    18.0   40.3       30        10         30             13                   13.9%
+
+**Every alert a defensible floor removes is one the lane gate was SHOWING**, because the alerts that
+survive the gate ARE the low-speed unmeasurable ones. That is not a coincidence, it is the two
+mechanisms being anti-correlated by construction. Going far enough to matter (18 m/s, 40 mph) takes
+two MEASURED-WIDE episodes with it -- 0.82 m and 0.76 m, both at 36 mph -- and stops watching 14% of
+engaged driving.
+
+**A FLOOR REMOVES SUPERVISION, NOT JUST ALERTS.** Below it `sat_time` never accumulates, so the car
+can saturate indefinitely and nothing can ever fire. That column is in the tool output because a
+count of alerts cannot show it.
+
+### THE DWELL TIME IS BETTER AIMED AND STILL NOT FREE
+
+`sat_limit` is `CP.steerLimitTimer`. Grepped across the whole tree it reaches exactly one line --
+`latcontrol.py:9` -- and its capnp comment reads "time before steerLimitAlert is issued", so it
+**cannot change how the car drives**; it only decides how long a saturation must persist before he
+is told. Ford already carries 1.0 s, the longest of any brand (most are 0.4).
+
+    dwell   episodes   on screen   removed   ...that were on screen
+     1.0       60         23          -             -                SHIPS
+     1.5       30         16         28             7
+     2.0       20          9         39            12
+     3.0       10          6         50            17
+
+1.5 s halves everything and costs no supervision at any speed -- **but three of the seven on-screen
+alerts it removes were measured genuinely wide: 0.76 m at 36 mph, 0.75 m at 75 mph, 0.53 m at
+71 mph.** Those are the events the alert exists for.
+
+### VERDICT: SHIP NEITHER. THE LANE GATE IS THE ONLY LEVER HERE THAT DISCRIMINATES.
+
+A floor asks how fast the car was going and a dwell asks how long it lasted; neither asks whether
+anything was wrong. The gate asks the only question that separates the two populations, which is why
+it cuts 61 alerts to 24 without losing a single wide one, and why both of these cut real warnings the
+moment they cut anything. **Do not raise either on the strength of an alert count alone.**
+
+**AND THE TWO TOOLS DISAGREE BY ONE EPISODE (61/24 against 60/23), WHICH IS EXPECTED AND IS STATED
+RATHER THAN RECONCILED AWAY.** `bp_steer_saturated.py` reads the flag the car published;
+`bp_steer_alert_floor.py` re-simulates it and counts angle-mode frames only. 476 frames of 4.08 M
+differ. Quote whichever tool produced a number, and never mix them in one table.
+
+**A MATCHING BUG IN THE FIRST VERSION DOUBLED THE COST COLUMN.** Episodes were matched across
+settings by rounded start time -- but raising either lever DELAYS accumulation, so the same
+saturation fires later and reads as one episode lost plus one new. Now matched on the two windows
+being within 3 s of overlapping. The 1.5 s row went from "19 lost" to "13 lost" on the first pull
+that exposed it.
