@@ -10,11 +10,15 @@ import time
 import cereal.messaging as messaging
 from opendbc.car import structs
 from openpilot.common.params import Params
+from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.car.helpers import convert_to_capnp
 
 _SETTINGS_INTERVAL = 5.0  # re-read params at most every 5 s
 _settings_last_read: float = 0.0
 _settings_cache: dict = {}
+# Latched off for the drive if either publisher ever raises -- see publish_controller_state_bp.
+_publish_failed: bool = False
+_car_state_publish_failed: bool = False
 
 
 def _get_bool(p: Params, key: str, default: bool = False) -> bool:
@@ -117,10 +121,50 @@ def _refresh_settings_cache() -> dict:
     "bmsPredictedCurvatureBlendRatioHigh": _get_float(p, "pc_blend_ratio_high_C_UI_curv", 0.4),
     "bmsPredictedCurvatureBlendRatioLow":  _get_float(p, "pc_blend_ratio_low_C_UI_curv", 0.4),
     "bmsCenteringPidGain":             _get_float(p, "LC_PID_gain_UI_curv", 3.0),
+    # --- Angle-mode lane positioning ---
+    # The four *_curv entries above are the CURVATURE-mode keys. This car runs angle mode, so
+    # without these the settings that actually govern it never reached a route -- which is why the
+    # 2026-09-04 lane_centering_strength_ang 0.35 -> 0.45 change could not be scored afterwards.
+    "bmsHighSpeedDampening":           _get_float(p, "FordHighSpeedDampening_ang", 1.0),
+    "bmsEnableLanePositioningAng":     _get_bool(p, "enable_lane_positioning_ang"),
+    "bmsInLaneOffsetAng":              _get_float(p, "custom_path_offset_ang", 0.0),
+    "bmsLaneCenteringStrength":        _get_float(p, "lane_centering_strength_ang", 0.0),
+    "bmsLaneCenteringDamping":         _get_float(p, "lane_centering_damping_ang", 0.0),
   }
 
 
 def publish_controller_state_bp(CI, pm):
+  """Publish controllerStateBP, LATCHED OFF for the drive on any failure.
+
+  **THIS IS CALLED UNGUARDED FROM card.py's control loop** (card.py:298), so before this wrapper
+  existed, ANY exception in here took the car off the road -- the car would sit on "waiting to
+  start". That is the failure mode this repo already paid for once, when a single AttributeError in
+  `icbm.py::_update_gap` made the car undrivable, and the rule written down then applies exactly:
+  a convenience must degrade to doing nothing, never to stopping the car.
+
+  Everything published here is DIAGNOSTIC. Nothing in the driving path reads controllerStateBP, so
+  losing it costs a route's telemetry and nothing else -- while a raise costs the drive. The
+  settings snapshot is the specific hazard: it is a dict of ~60 field names applied with `setattr`
+  in a loop, so one field renamed in `custom.capnp` without its entry here, or one type that capnp
+  refuses (a numpy scalar -- the failure that killed plannerd on the first frame of a drive), takes
+  out `card`.
+
+  LATCHED rather than retried, and the reason is the same as `icbm_gap_failed`: a per-frame failure
+  that logged every 10 ms would flood swaglog and bury the very line that explains it. One
+  exception, one log, then silence for the drive.
+  """
+  global _publish_failed
+  if _publish_failed:
+    return
+  try:
+    _publish_controller_state_bp(CI, pm)
+  except Exception:
+    _publish_failed = True
+    cloudlog.exception("bp_card_publisher: controllerStateBP DISABLED for this drive after an "
+                       "exception -- diagnostics are lost, driving is unaffected")
+
+
+def _publish_controller_state_bp(CI, pm):
   """Publish controllerStateBP if the car controller reports lateralUncertainty."""
   global _settings_last_read, _settings_cache
   if hasattr(CI.CC, "lateralUncertainty"):
@@ -179,6 +223,23 @@ def publish_controller_state_bp(CI, pm):
 
 
 def publish_car_state_bp(CI, pm, can_valid):
+  """Publish carStateBP, LATCHED OFF for the drive on any failure.
+
+  Same argument as publish_controller_state_bp above: called unguarded from card.py, publishes
+  nothing the driving path reads, so it must degrade to doing nothing rather than to stopping the
+  car. Kept separate from that latch so one failing publisher does not silence the other.
+  """
+  global _car_state_publish_failed
+  if _car_state_publish_failed:
+    return
+  try:
+    _publish_car_state_bp(CI, pm, can_valid)
+  except Exception:
+    _car_state_publish_failed = True
+    cloudlog.exception("bp_card_publisher: carStateBP DISABLED for this drive after an exception")
+
+
+def _publish_car_state_bp(CI, pm, can_valid):
   """Publish carStateBP (hybrid drive gauge data) if available from car state."""
   if hasattr(CI.CS, 'car_state_bp_msg') and CI.CS.car_state_bp_msg is not None:
     cs_bp_send = CI.CS.car_state_bp_msg

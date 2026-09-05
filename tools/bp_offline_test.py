@@ -56,6 +56,7 @@ DEFAULT_TARGETS = [
   # Named rather than by directory: sunnypilot/selfdrive/car/tests/ also holds device-only tests.
   "sunnypilot/selfdrive/car/intelligent_cruise_button_management/tests/",
   "opendbc_repo/opendbc/sunnypilot/car/ford/tests/",
+  "bluepilot/selfdrive/car/tests/test_bp_card_publisher.py",
   # (that directory glob already covers test_button_mapping.py)
   "sunnypilot/selfdrive/controls/lib/tests/test_unconfirmed_lead.py",
   "sunnypilot/selfdrive/controls/lib/smart_cruise_control/tests/test_map_model_veto.py",

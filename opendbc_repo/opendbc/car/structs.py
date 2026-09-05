@@ -281,6 +281,12 @@ class ControllerStateBP:
   bmsPredictedCurvatureBlendRatioHigh: float = 0.4
   bmsPredictedCurvatureBlendRatioLow: float = 0.4
   bmsCenteringPidGain: float = 3.0
+  # --- Angle-mode lane positioning (the curvature entries above are the _curv keys) ---
+  bmsHighSpeedDampening: float = 1.0
+  bmsEnableLanePositioningAng: bool = False
+  bmsInLaneOffsetAng: float = 0.0
+  bmsLaneCenteringStrength: float = 0.0
+  bmsLaneCenteringDamping: float = 0.0
   # --- Fingerprint ---
   bmsFingerprintForced: bool = False
   bmsFingerprint: str = ""
