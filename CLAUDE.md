@@ -9972,3 +9972,124 @@ him to notice, because it is the one thing he actually liked about this. Reverti
 is CLOSED. Do not re-offer it, and do not treat the lost entertainment as a wart to solve -- he was
 told what it cost and chose it. Same shape as pinned holds and curvature mode, both of which got
 re-raised after he had already decided.
+
+## STALE-FACT CORRECTION, 2026-09-05: THE MAPD PIN IS ALREADY v2.3.1
+
+The handoff section above is headed **"WE ARE PINNED TO v2.3.0"** and says so in its body. That is
+no longer true -- `sunnypilot/mapd/__init__.py` reads `MAPD_V2_VERSION = "v2.3.1"`, bumped in
+`240e7d1b9c` ("version pin, sha, and the two new capnp fields -- **BINARY PENDING**").
+
+**Checked because the alternative was offering him work that is already done.** The handoff note was
+written by another session and the code moved underneath it -- which is this file's own recurring
+failure (*"a claim about behaviour that lives only in prose stops being true the moment the code
+moves"*). **Read the constant, never the paragraph about the constant.**
+
+**WHAT IS STILL OPEN ON IT, and it is narrower than the heading suggests:** the commit says BINARY
+PENDING, and `MapdV2Version` is unset on the device, so whether the car is actually RUNNING 2.3.1
+is unverified. And route 00000427 cannot answer it either way -- mapd held a clean 20 Hz on all 13
+segments, but that was surface roads with small map paths. **The collapse was only ever seen on
+652-point paths (Tioga Road, 1.6 Hz against a declared 20), so only a curvy-highway drive tests it.**
+
+## 2026-09-05: THE PSCM LIMIT IS POLICY, NOT PHYSICS. MEASURED, AND IT WAS HIS ARGUMENT.
+
+The question blocking every "can we buy more steering authority" discussion was whether the rack is
+being TOLD to stop or is physically out of capability. **It is answered, and the answer is told.**
+
+**THE INSTRUMENT WAS ON THE WIRE THE WHOLE TIME.** `EPAS_INFO` (130) -- a message openpilot ALREADY
+parses for `SteeringColumnTorque` and `EPAS_Failure` -- also carries `SteMdule_I_Est`, the PSCM's own
+motor current. openpilot discards it. `tools/bp_eps_current.py` decodes it.
+
+    EPS motor current                    n        p50    p90    p99     MAX
+    HIS hands on the wheel           118,184     0.05   2.00  20.00   75.85 A
+    openpilot, reporting SATURATED     4,710     0.10   0.55   2.00    5.05 A
+    openpilot, normal                275,939     0.00   0.05   0.30    2.00 A
+
+**Fifteen times more current when he turns the wheel himself than when openpilot reports steering
+exhaustion.** A rack at its capability cannot show that gap.
+
+**HIS ARGUMENT IS WHAT CLOSED IT** -- *"I mean I steer manually completely and have no limits."* The
+proof was already in logs on this laptop; it needed his framing to know what to compare.
+
+**AND HE THEN ARGUED AGAINST HIMSELF, CORRECTLY, AND THE OBJECTION WAS TESTED:** *"isn't the deal
+like if I am steering it is less work for the motor and less heat or something?"* Assist does share
+the load with the driver, and EPS motors do thermally derate. **Refuted by the signature:**
+
+    position through episode   0-20%  20-40%  40-60%  60-80%  80-100%
+    mean current                0.16    0.21    0.24    0.26     0.28   <- RISES
+
+Derating decays; this rises. It starts at 0.11 on the first frame, and episodes are **0.5 s median**
+(4.4 s max) -- nothing thermal happens in half a second from a standing start. And load-sharing
+would need the numbers to be close; they are 150x apart at the median.
+
+**AND `steerSaturated` IS NOT THE MODULE REPORTING A LIMIT.** It is openpilot noticing its OWN
+command sat at its OWN ceiling while the car under-delivered. `LatCtlLim_D_Stat` is dead on
+non-CAN-FD Fords, so the PSCM never reports limiting at all. The true picture is a rack returning
+74-89% of what it is asked **while drawing half an amp**.
+
+### WHAT THIS SETTLES, AND WHAT IT DOES NOT
+
+**Settled: there is roughly an order of magnitude of headroom in that motor.** Do not re-open
+"maybe the rack is physically saturating" -- it is measured and false. Any future authority work
+(firmware calibration, the BluePilot torque interceptor) has something real to act on.
+
+**Not settled: how to reach it.** The calibration is `K2GC-14D007-BD.VBF`, 32 KB of u16 fixed-point,
+and its tables are unlabelled. **The published F-150 reverse engineering DOES NOT TRANSFER** -- their
+cal is float32, so no offset, axis or patch site applies. Verified by finding their signatures at
+their documented offsets in THEIR cal and finding none in his. Full write-up, both extracted cals and
+the analysis scripts live in `Nextcloud/Projects/Car/OpenPilot/PSCM-RE/`.
+
+**THE FIRMWARE ITSELF IS DELIBERATELY NOT IN THIS REPO.** `dsaderholm/bluepilot` is PUBLIC, and Ford
+VBFs are Ford's. The findings and the tooling are here; the binaries stay off GitHub.
+
+### TWO MEASUREMENT LESSONS, both paid for in this session
+
+- **Motorola bit order: after a byte you advance to the NEXT byte, not the previous one.** The first
+  decode walked to byte1 and returned two distinct values across 45,000 samples. Two values is the
+  tell that the bit math is wrong, not that the signal is dull.
+- **VALIDATE A DECODER ON A SIGNAL WHOSE TRUTH YOU ALREADY HAVE, before reading anything into a new
+  one.** `byte0*0.0625-8` reproduces `carState.steeringTorque` to 0.006 Nm; `byte4*0.05+6` gives
+  battery voltage. Without that check, "these amps look implausibly low" is indistinguishable from
+  "my bit math is wrong" -- and it WAS briefly written off as a bad DBC scale, until 75.85 A under
+  manual steering proved the scale correct all along. The tool now refuses to print currents if the
+  self-check fails.
+- **Most of EPAS_INFO is dead on this retrofit module** -- bytes 1, 5, 6, 7 are frozen constants and
+  `DrvSte_Tq_Actl` is a fixed 128 = 0.0 Nm. Third dead signal on this PSCM. Check a field varies
+  before trusting it.
+
+### CORRECTION, SAME DAY: "POLICY NOT PHYSICS" WAS OVERSTATED. NO CEILING IS BEING HIT.
+
+The entry above concluded the limit is a configured ceiling. **The measurement that would show a
+ceiling was then run, and it does not.** Binning EPS current against commanded `pathAngleFinal`
+within saturation episodes (2026-09-04 pull, 4,709 saturated / 272,811 control samples):
+
+    command rad      SATURATED              non-saturated control
+                   cur p50   delivery      cur p50   delivery
+    0.05-0.08        0.15      0.688         0.05      0.870
+    0.08-0.12        0.15      0.756         0.10      0.899
+    0.12-0.30        0.50      0.844         0.15      0.974
+
+**Current rises monotonically with command in BOTH populations. Nothing plateaus.** A hard
+configured cap would flatten; this does not.
+
+**And the informative column is the comparison: at the SAME command, saturated frames draw ~3x MORE
+current and deliver LESS.** More effort, worse result. That is a LOAD signature -- the rack fighting
+real road forces -- not the signature of a controller holding it back.
+
+**WHAT SURVIVES:** the level gap. 0.5 A during saturation against 75.85 A demonstrated under manual
+steering. The motor is nowhere near its capability, and that is still measured fact.
+
+**WHAT DOES NOT SURVIVE:** the mechanism. There is no evidence of a ceiling being hit, so "a
+calibration table is clamping it" is now a hypothesis with no supporting signature. Two readings
+remain and this measurement cannot separate them:
+
+  - a low authority GAIN -- the module maps the angle request to a modest torque demand, smoothly
+    (still a calibration thing, but a slope rather than a clamp)
+  - the rack genuinely losing ground to load, with electrical headroom it is simply not asked for
+
+**Only the >= 0.05 rad rows carry weight.** The small-command rows show delivery 0.27-0.37, but they
+sit at 16-28 mph with commands under 0.03 rad, where this file already records that the tracking
+ratio is noise-dominated and must not be quoted.
+
+**THE LESSON, and it is this file's own, again:** the level comparison (75 vs 0.5) was real and got
+generalised into a mechanism it does not establish. Ask what signature the proposed mechanism would
+LEAVE, then go and look for that specific thing, before naming the mechanism.
