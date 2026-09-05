@@ -303,8 +303,94 @@ python tools/bp_lateral_gain.py <dir>               # applied gain + ramp shape,
 python tools/bp_lateral_matched.py <dir>            # delivery at matched curvature
 python tools/bp_lateral_curve_cycle.py <dir>        # the 6 s curve oscillation, the only metric that
                                                     # tracks what he reports on curves
+python tools/bp_lateral_phases.py <dir>             # turning-in / holding / unwinding, in DEGREES --
+                                                    # MANDATORY before any gain recommendation
 ```
 
 `bp_lateral_rate.py` and `bp_lateral_episodes.py` use a 2 s window and are STRUCTURALLY BLIND to the
 ~4.7 s limit cycle. Do not rank two settings with them; that mistake produced a recommendation he
 had already rejected from the seat.
+
+---
+
+## 2026-09-04/05: eight routes, 109 of 115 segments
+
+Raw logs at `Sandbox/drivelogs/2026-09-04_lc_035_vs_045/`. Config read off the DEVICE with its
+mtime, converted to local time, because a raw `stat` line is UTC and quoting one unconverted is how
+this drive got mis-split for an hour:
+
+    FordLowSpeedFactor_ang       1.007    2026-09-03 17:31 MDT
+    FordHighSpeedFactor_ang      0.804    2026-09-03 17:31 MDT   (wire-recovered 0.794 -> 0.804)
+    FordHighSpeedDampening_ang   0.78     2026-09-01 01:29 MDT
+    lane_centering_strength_ang  0.45     2026-09-04 10:37 MDT   <- the split
+    lane_centering_damping_ang   0.3      2026-09-01 18:45 MDT
+
+    0000041e 09-03 12:09   0000041f 09-03 17:00   00000420 09-03 19:30   } LC 0.35
+    00000421 09-04 08:58   00000422 09-04 09:08                          }
+    00000423 09-04 10:28   SPANS the change (started 9 min before it)
+    00000424 09-04 17:30   00000425 09-04 18:40                          } LC 0.45
+
+### Delivery by PHASE -- the number that matters, and the one a median hides
+
+`tools/bp_lateral_phases.py`. Steady state is one point in the middle of a spread; the driver feels
+the ends.
+
+| band | phase | n | ratio | p90 | median deg | p90 deg | p99 deg |
+|---|---|---|---|---|---|---|---|
+| tight <500 m | turning in | 3085 | 0.665 | 0.86 | -3.29 | -1.16 | +0.44 |
+| tight <500 m | holding | 21029 | 0.868 | 1.01 | -1.30 | +0.10 | +2.29 |
+| tight <500 m | **UNWINDING** | 2105 | **1.018** | 1.33 | +0.16 | **+3.21** | **+10.81** |
+| highway 500-2000 m | turning in | 9976 | 0.440 | 0.85 | -1.37 | -0.40 | +0.57 |
+| highway 500-2000 m | holding | 24980 | 0.835 | 1.06 | -0.58 | +0.17 | +0.98 |
+| highway 500-2000 m | **UNWINDING** | 8446 | **1.070** | 1.59 | +0.05 | **+3.18** | **+8.98** |
+
+**Lazy in, overshoot out.** The median exit overshoot is imperceptible; the TAIL is what he reports.
+
+### Where the missing curvature goes
+
+| band | n | mph | trim+clip | our gain | PSCM |
+|---|---|---|---|---|---|
+| tight <500 m | 2294 | 39.2 | 1.041 | **0.985** | **0.828** |
+| highway 500-2000 m | 844 | 72.6 | 1.039 | **0.829** | **0.997** |
+
+**The flat 0.86 delivery means two different things.** At highway the gain is short and the car
+tracks fine -- settings close it. At 40 mph the gain is already at unity and the PSCM returns 0.83 --
+**no setting in this fork reaches that column.** Speed-controlled, PSCM tracking falls 0.892 -> 0.743
+across 45-60 mph as the command grows: a soft, progressive authority ceiling, and the first direct
+measure of it on this car. **This is the before/after metric for the torque interceptor.**
+
+### LC 0.35 vs 0.45 -- NO CONCLUSION, and the reason is the sample
+
+Matched on radius AND speed (matching radius alone puts interstate at 70 mph beside surface streets
+at 30), UNWINDING only:
+
+| radius | speed | LC | n | ratio | p90 | med deg | p90 deg |
+|---|---|---|---|---|---|---|---|
+| 100-286 m | 20-35 | 0.35 | 727 | 0.999 | 1.25 | -0.02 | +3.78 |
+| 100-286 m | 20-35 | **0.45** | **79** | 0.900 | 2.46 | -1.17 | **+19.54** |
+| 286-500 m | 20-35 | 0.35 | 1129 | 1.108 | 1.51 | +0.85 | +3.43 |
+| 286-500 m | 20-35 | 0.45 | 143 | 1.070 | 1.46 | +0.60 | +4.05 |
+| 500-2000 m | 20-35 | 0.35 | 4112 | 1.140 | 1.83 | +0.37 | +2.22 |
+| 500-2000 m | 20-35 | 0.45 | 1073 | 0.977 | 2.23 | -0.03 | +2.68 |
+
+Every median equal or slightly better at 0.45. The one dramatic row is **n=79** -- under a second of
+road, one or two turn exits. **Not a finding.** The straight-road weave scores ZERO windows at 0.45:
+83,669 curve frames at 0.35 (p50 39 mph) against 8,932 at 0.45 (p50 21 mph), with no overlapping
+road type. **VERDICT: keep 0.45.** One ordinary drive with highway and 35-50 mph curves settles it.
+
+### The exit-biased blend has run to completion ONCE in 44 segments
+
+`blendWeight` is pinned at its 0.500 seed on anything bent (p10 = p90 = 0.50 on tight curves). Two
+compounding causes: the gate needs a 20% fall per 0.05 s, which is this planner's ~1st percentile
+(1.03% of calls), and 87.9% of firings last a SINGLE call while the 0.1/call ramp needs four.
+BluePilot PR 191's looser 0.95 gate fires 11x more and still leaves 96% of detections under four
+calls. **The fix is a latch, not a moved number, and it needs its own drive.**
+
+### Do NOT recommend a gain off this table's steady-state column
+
+Tried on 2026-09-04, rejected from the seat -- *"Changing those settings higher will lead to more
+oversteer, though. It oversteered on that tight turn today."* He was right: a gain multiplies the
+whole ratio, so raising the low factor 1.007 -> 1.20 to fix the 0.665 turn-in takes the unwind p90
+from 1.33 to 1.58. **Run `bp_lateral_phases.py` and read all three rows before any gain advice.**
+And convert to degrees first: his 0.794 -> 0.804 step is **0.025 deg at the wheel**, an order of
+magnitude under the imperceptible-dither floor, so no drive could ever have scored it.
