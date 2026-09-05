@@ -6487,3 +6487,80 @@ stamped ~86 days AFTER "now". No NTP without DNS, and it has not held a GPS time
 route directory names carry wrong dates, and **mtime-vs-route ordering is unusable** until it syncs.
 The rule in this file about converting UTC to MDT still applies, but there is now a second failure
 mode above it: the clock can simply be wrong, so do not order events by timestamp at all right now.
+## 2026-09-04: WHAT LETS IT TAKE A REAL TURN -- AND WHAT ACTUALLY CAPS IT
+
+He reported a large left turn before a freeway on-ramp and asked what enabled it: *"I couldn't
+believe how far it turned the wheel."* Then, crucially: *"No, it did it well! I want it to be able
+to do that in the future!"* -- **a capability report, not a safety report.** The first reading of it
+here was as an incident and that was wrong.
+
+### THE FIRST ANSWER WAS WRONG. THE PEAK OF THAT TURN WAS HIS HANDS, NOT OPENPILOT.
+
+`find_turn.py` ranked route 00000423 seg 13 t+49.9 as "94.8 deg ENGAGED hands-off" and it was
+reported to him that way. Splitting `latActive` from `steeringPressed` and dumping the window
+reverses it:
+
+    t+46.15  lat Y  hands .    -0.7d      openpilot has it
+    t+46.25  lat .  hands .     2.2d      LATERAL DROPS OUT
+    t+47.85  lat .  hands Y   220.5d      HIS turn, openpilot not steering
+    t+48.86  lat Y  hands Y   177.0d      openpilot back, cf 1.309
+    t+49.95  lat Y  hands .    84.4d      hands off, driving the exit
+
+**`latActive` false for 2.5 s across the entire peak.** A tool that ANDs the two flags into one
+"engaged" column cannot show this, and the ranked row it produced read as a controller achievement.
+**Print `latActive` and `steeringPressed` as separate columns in any lateral event dump** -- this is
+the same split that corrected the 3.21 m/s^2 figure, arriving through a tool's output format rather
+than through a filter.
+
+### THE REAL ANSWER: 102.4 DEGREES, BUILT FROM ZERO, HANDS OFF
+
+Route 00000423 seg 5 is the biggest turn openpilot has taken BY ITSELF in this pull:
+
+    t+2.01   18.8 mph      0.1d   latacc 0.00   cap 3.07   cf 1.000   hands off
+    t+4.56                32.2d   latacc 1.21   cap 3.45   cf 1.309   hands off
+    t+5.76   18.8 mph    102.4d   latacc 2.97   cap 3.51   cf 1.309   hands off
+    t+7.46 .. 8.36                latacc 3.52   cap 3.51              PINNED for 0.9 s
+
+**The ISO lateral-acceleration clamp is what caps it, and on that turn it BOUND.** Not the wheel,
+not the PSCM, not any Ford gain. `clip_curvature` limits desired curvature to
+`(MAX_LATERAL_ACCEL_NO_ROLL - roll * g) / v^2` with `MAX_LATERAL_ACCEL_NO_ROLL = 3.0`; that road was
+banked, so the cap read 3.51 and the plan sat welded to it for nearly a second.
+
+**Measured ceiling on this pull, engaged, under 20 mph, n=44,219 frames:**
+
+    p50 0.107   p90 1.255   p99 3.032   p99.9 3.518   max 3.535 m/s^2
+
+The max exceeding 3.0 is the roll term, not a violation -- do not read it as the clamp failing.
+
+### THE THREE THINGS THAT MAKE LOW-SPEED TURNS WORK, AND THEY ARE NOT THE HIGHWAY KNOBS
+
+1. **`FordLowSpeedFactor_ang` sets the ceiling of the ramp, and he raised it himself** 0.981 ->
+   1.007 on 2026-09-03. `high_gain = 1.30 * lof` at low speed = **1.309**, which is exactly the
+   `curvatureFactor` observed saturated through both turns.
+2. **The ramp is SHORT at low speed.** `boundary = interp(v, [11.18, 31.29], [0.02, 0.0045])`, so at
+   or below 25 mph full gain arrives by kappa 0.02 -- a **50 m** radius -- against **222 m** at
+   75 mph. A turn saturates the schedule almost immediately; a highway sweeper never does.
+3. **The 3.0 clamp is permissive at low speed.** It is a CURVATURE limit, so the slower the car the
+   more wheel it permits: 15 m radius at 15 mph, 23 m at 18.8, 82 m at 35, 330 m at 70.
+
+**SO `FordLowSpeedFactor_ang` IS THE TURN-AUTHORITY KNOB AND `FordHighSpeedFactor_ang` IS NOT.**
+They govern different regimes that barely overlap, and every tuning conversation in this file until
+now has been about the high one. **Do not lower the low factor while chasing highway behaviour** --
+it is what makes turns like this possible.
+
+### AND THERE IS NO SETTING THAT MAKES A TURN GENTLER
+
+He asked whether that turn was "a little tight". It is a fair read -- 3.5 m/s^2 is above openpilot's
+own p99 on this car (2.73) and near his hands-on p99 (4.14). But the commanded curvature comes from
+the model and `clip_curvature`, both UPSTREAM of every Ford gain, trim and limiter this fork owns.
+
+**Lowering `FordLowSpeedFactor_ang` does not plan a wider turn. It under-delivers the turn already
+planned**, which is running wide rather than turning gently -- and delivery at that peak was already
+0.88. Anyone reaching for that knob to soften a turn is reaching for the wrong end of the loop.
+
+### THE TRIM WAS NOT INVOLVED, AS DESIGNED
+
+`laneCenterCorrection` was **exactly 0.00000** on every frame of both turns, at LC 0.45. That is
+`_SPEED_RAMP_BP = (0.0, 9.0, 15.0)` -> `_SPEED_RAMP_V = (0.0, 0.0, 1.0)` working: the lane-centering
+trim is OFF below 20 mph and full at 34. **A lane-centering setting cannot explain anything he
+reports below 20 mph**, in either direction.
