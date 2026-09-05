@@ -7203,3 +7203,27 @@ so it is an authority/tracking shortfall, not the tyres or the ISO clamp.
 already records the sharper version of this -- *"SATURATION IS NOT THE FAILURE. RUNNING WIDE IS"* --
 and delivery during these episodes is 0.76, so the car IS running wide. **Before concluding a
 subsystem is healthy, check whether the gate excluded the frames the driver is describing.**
+
+### CURVATURE MODE IS CLOSED. THIRD REFUSAL. STOP RAISING IT.
+
+*"No, we shouldn't go back to curvature."* -- 2026-09-05, after two earlier refusals already
+recorded in this file. It was raised a FOURTH time that night on the strength of the closed-loop
+argument below, and he said no again.
+
+**The technical case does not matter any more and must not be re-litigated.** Same shape as
+`pinned-holds-rejected`: he has decided, the decision is his to make, and re-deriving a good reason
+is not new information. Do not propose a curvature drive, a curvature A/B, or a speed-scheduled
+mode switch. The analysis stays in this file as a record of what was considered, not as a pending
+idea.
+
+**AND IT NARROWS THE 29-56 mph SATURATION PROBLEM TO ONE LEVER.** With curvature off the table:
+
+    raise the gain          trades running-wide for MORE unwind overshoot -- the same knob, and
+                            he refused that on 2026-09-04 for exactly that reason
+    shorten the boundary    same trade, narrower band (this is a15672fb15 on PR 192)
+    curvature mode          REFUSED, permanently
+    PSCM authority          the ONLY lever that raises delivery WITHOUT raising the command
+
+**So the firmware cal read is not one option among several -- it is the only remaining path to the
+thing he actually complains about.** Everything in software trades saturation against overshoot,
+because both scale with the same multiplier.
