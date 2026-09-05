@@ -102,6 +102,32 @@ _VLT_KAPPA_TAPER = 0.020             # 1/m — no extra lookahead above this cur
 #                                                             action_delay = DT_MDL / 2
 # Kept as a named constant rather than a literal so a change in modeld is a one-line change here.
 _MODELD_ACTION_DELAY_S = _DT_MDL + _DT_MDL / 2.0
+
+# FusionPilot: how many angle-path calls the exit state is HELD after the gate last fired.
+#
+# ba20937aac's exit gate and its 0.1-per-call ramp are individually right and their PRODUCT is
+# zero. Measured across 44 segments with `blendWeight` telemetry: the gate fires on ~1% of calls,
+# **87.9% of firings are a single isolated call**, and 0.500 -> 0.125 needs FOUR consecutive
+# firings to traverse. The exit weight was reached exactly once in 44 segments. Loosening the
+# threshold alone still needs four in a row; speeding the ramp alone still almost never triggers.
+#
+# 10 CALLS IS 0.50 s AND IT IS MEASURED, NOT PICKED. Gaps between consecutive fires inside one
+# unwind (only gaps under 2 s counted, so separate corners are not merged), n=176:
+#
+#     p50 4 calls   p75 7   p90 15   p95 18
+#     a 4-call latch bridges 57% of them, 8-call 79%, 10-call 86%, 12-call 89%, 16-call 93%
+#
+# 10 sits at the knee: past it each extra call buys two or three points and spends more of the
+# corner committed to the exit weight. Four is the floor -- the ramp needs four calls to walk
+# 0.500 -> 0.125 at 0.1 per call, so anything shorter reproduces the defect exactly.
+# Re-derive with `tools/bp_blend_latch_scale.py` before moving it.
+#
+# AND THE MAGNITUDE WAS CHECKED FIRST, because a correct fix to this same blend (ba20937aac) moved
+# the wheel 0.03 deg and was invisible. What the latch can reach, in degrees at the wheel:
+# p50 0.34, p90 1.54, p99 4.66, max 10.04 -- and 55% of firings clear the 0.30 deg dither floor.
+# The median is barely over it; **this is a TAIL fix**, which is the right shape, because the exit
+# overshoot it targets is also a tail (median +0.16 deg, p90 +3.21, p99 +10.81).
+_EXIT_LATCH_CALLS = 10
 # Ceiling on the delay the BLEND horizon will honor. Not the 0.15 s decision clip below -- this one
 # only bounds how deep the model is sampled if liveDelay ever runs away, and 0.45 s + DT_MDL*1.5
 # still lands inside the range modeld itself uses on this car (measured 0.393 s).
@@ -166,6 +192,9 @@ class LateralAngleExt:
     # Persistent because ba20937aac ramps it rather than setting it -- so it must be seeded and
     # reset wherever the strategy bails out, or a re-engage inherits the last drive's weight.
     self.b_blend = _FORD_PATH_ANGLE_BLEND_RATIO_DEFAULT
+    # FusionPilot: calls remaining in the held exit state -- see _EXIT_LATCH_CALLS. Persistent for
+    # the same reason b_blend is, and reset at every bail-out beside it.
+    self._exit_latch_calls = 0
     # Max extra VLT above the blend base. Also not a param -- ``FordVLTExtraMax`` does not exist.
     self.vlt_extra_max = _VLT_T_EXTRA_MAX
     # Telemetry: final path_angle (rad) after limits (see bp_card_publisher)
@@ -308,6 +337,7 @@ class LateralAngleExt:
       self.bp_blend_weight = self.path_angle_blend_ratio
       self.apply_curvature_last = 0.0
       self.b_blend = self.path_angle_blend_ratio
+      self._exit_latch_calls = 0
       self.bp_angle_rate_limited = False
       self.bp_curvature_rate_limited = False
       self.bp_curvature_deviation_limited = False
@@ -360,6 +390,7 @@ class LateralAngleExt:
       self.bp_blend_weight = self.path_angle_blend_ratio
       self.apply_curvature_last = 0.0
       self.b_blend = self.path_angle_blend_ratio
+      self._exit_latch_calls = 0
       self.bp_angle_rate_limited = False
       self.bp_curvature_rate_limited = False
       self.bp_curvature_deviation_limited = False
@@ -421,6 +452,7 @@ class LateralAngleExt:
       self.bp_blend_weight = self.path_angle_blend_ratio
       self.apply_curvature_last = 0.0
       self.b_blend = self.path_angle_blend_ratio
+      self._exit_latch_calls = 0
       self.bp_angle_rate_limited = False
       self.bp_curvature_rate_limited = False
       self.bp_curvature_deviation_limited = False
@@ -563,7 +595,27 @@ class LateralAngleExt:
       abs(self._desired_curvature_last) > 0.001 and
       abs(desired_curvature) < abs(self._desired_curvature_last) * 0.8
     )
-    _on_exit_near_limit = not _kappa_entering and (_pscm_lim >= 1 or _in_hard_sat or _desired_falling)
+    # FusionPilot: LATCH the exit state, because the gate and the ramp cancel each other out.
+    #
+    # `_exit_gate` is an EDGE -- 87.9% of its firings are a single isolated call -- while the ramp
+    # below needs four consecutive calls to walk b_blend from 0.500 to 0.125. Measured over 44
+    # segments of `blendWeight` telemetry, the exit weight was reached ONCE. Holding the state for
+    # `_EXIT_LATCH_CALLS` after the last firing lets the ramp traverse and spend the unwind there,
+    # which is the whole mechanism this branch has been describing as "dead" since 2026-08-29.
+    #
+    # THE RELEASE IS THE SAFETY-CRITICAL HALF AND IT IS IMMEDIATE. `_kappa_entering` -- the road
+    # bending again -- zeroes the latch on the frame it appears, ahead of any decrement, so a new
+    # turn-in can never be served a stale exit weight. A held exit state leans the command on the
+    # planner's lag-adjusted target instead of the model's prediction, which is right while the
+    # road is opening and wrong the instant it closes.
+    _exit_gate = _pscm_lim >= 1 or _in_hard_sat or _desired_falling
+    if _kappa_entering:
+      self._exit_latch_calls = 0
+    elif _exit_gate:
+      self._exit_latch_calls = _EXIT_LATCH_CALLS
+    elif self._exit_latch_calls > 0:
+      self._exit_latch_calls -= 1
+    _on_exit_near_limit = not _kappa_entering and (_exit_gate or self._exit_latch_calls > 0)
     _on_straightaway = (not _kappa_entering and not _desired_falling and abs(desired_curvature) < 0.00125)
     # Step function for b_blend -- ba20937aac's own comment: "Prevents instant jumps between .5 and
     # .125 predicted_curvature weight." The weight is a MULTIPLIER on the model's contribution, so
