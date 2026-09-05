@@ -7847,3 +7847,8 @@ measure, never as the measurement.**
 **WHAT IT COSTS HIM: the panic was entertainment and it is gone.** Said plainly rather than left for
 him to notice, because it is the one thing he actually liked about this. Reverting is one line in
 `ford/interface.py` if he wants it back -- but the disengage risk comes back with it.
+
+**DECIDED, 2026-09-05: *"Keep the fix, don't revert it."*** The revert offered two paragraphs above
+is CLOSED. Do not re-offer it, and do not treat the lost entertainment as a wart to solve -- he was
+told what it cost and chose it. Same shape as pinned holds and curvature mode, both of which got
+re-raised after he had already decided.
