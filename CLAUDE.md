@@ -7227,3 +7227,66 @@ idea.
 **So the firmware cal read is not one option among several -- it is the only remaining path to the
 thing he actually complains about.** Everything in software trades saturation against overshoot,
 because both scale with the same multiplier.
+
+### CORRECTION: THE F-150 WORK IS A CLOSE TEMPLATE FOR THIS CAR, NOT A DISTANT ONE
+
+He asked whether the whole repo had been read. It had not -- only the README, architecture,
+openpilot notes and one findings file. The `analysis/f150/` directory is most of the repo and it
+contains the two most relevant files in it for this car. **Reading them revises the "fourth
+platform, months of work, from scratch" answer given earlier the same night.**
+
+**ALL FOUR MESSAGES IN THEIR F-150 LCA TABLE ARE IN HIS DBC:**
+
+    0x3D3  LateralMotionControl      979  <- his primary command, the one openpilot drives
+    0x3D6  LateralMotionControl2     982
+    0x3D7  Steer_Assist_Data         983
+    0x3CC  Lane_Assist_Data3_FD1     972
+
+So the F-150 PSCM speaks the SAME lateral protocol as his Edge unit. The Transit does not -- it is
+the `0x3CA LKA` + `0x213 DesTorq` architecture. **The earlier framing ("F-150 is not
+cross-compatible with Transit/Escape, so Edge is a fourth platform") is true and was used to imply
+the wrong thing: it is the F-150 work that transfers, and it transfers well.**
+
+**AND HE HAS LKA AND APA TOO** (Edge PSCM is a full ADAS module), so the F-150 feature-envelope
+block -- `cal+0x00B8..0x0147`, 144 bytes of float32 defining the speed/angle/torque window for LKA,
+LCA/BlueCruise and APA together -- is directly analogous rather than partly applicable.
+
+### TWO PATCHES, TWO DIFFERENT PROBLEMS OF HIS
+
+**1. THE SHARED ANGLE SCALER -- `analysis/f150/angle_scale_patch.md`, a TWO-BYTE patch.**
+
+    0x1009690e   movhi   0x4480, r0, r11   ; r11 = float 1024.0   <- the scale factor
+    0x10096912   mulf.s  r11, r17, r12
+    0x10096916   trncf.sw r12, r10
+
+One function decodes the wire-domain angle command and converts it to the controller's integer
+domain, and **every one of the six steering modes goes through it -- LKA, LDW, LCA, TJA, APA,
+BlueCruise.** The scale is a single `movhi` immediate because float32 1024.0 has zero low bits.
+Change `0x4480` and the whole car's angle interpretation scales.
+
+**WHAT THAT WOULD BUY HIM: it breaks the SIGNAL CEILING.** `LatCtlPath_An_Actl` maxes at 0.5235 rad,
+which caps him at an 11.2 m radius at 10 mph and is 100% consumed by a 10 m turn. With a 2x scaler
+openpilot commands half the angle for the same result, so the Taco Bell radius comes back inside the
+signal range with headroom. **It does NOT fix saturation** -- tracking degrades WITH command size
+(0.892 -> 0.743), which is authority, not scale; scaling just reaches the authority wall sooner.
+
+**2. THE AUTHORITY BELL CURVE -- `cal+0x1660`/`0x25B4`/`0x350C`, 12-entry u16.** This is the
+saturation one, and therefore the one for the 29-56 mph / 111-286 m band where he actually gets
+steering-exhausted warnings.
+
+### AND IT MAY BE AN AFTERNOON, NOT MONTHS
+
+**F-150 RE was "a one-afternoon job" and Transit is a multi-day slog, for ONE reason:** F-150 PSCM
+is baseline Renesas V850, which stock Ghidra 12 lifts cleanly; Transit is RH850-extended, whose
+extension opcodes break the decompiler. **His Edge PSCM is 2019/2020 -- the same generation as the
+2021 F-150 -- so baseline V850 is the likely case**, which would put it on the easy path.
+
+**The method is fully documented and transferable** (`angle_scale_patch.md`, "the xref trick"):
+locate the CAN RX handlers for `0x3CA`, `0x3D3` and `0x3A8`, follow each call chain to physical
+units, find the function appearing in ALL THREE -- that is the shared angle reader -- then read its
+last basic block for the `movhi` float constant.
+
+**So the honest revision: this is not "reverse-engineer a module from scratch." It is "port a
+documented procedure to a new image of the same protocol family."** Still needs a firmware dump, a
+bench, Ghidra and someone to flash and drive it -- none of which I can do -- but the earlier "months
+of work" framing was wrong and was based on not having read the repo.
