@@ -6948,3 +6948,54 @@ settles it is one ORDINARY drive at 0.45 on highway plus 35-50 mph curves -- not
 **AND THE BOOT SNAPSHOT DOES NOW READ 0.449 ON 424/425**, which confirms the time mapping
 independently -- so `initData` labels a route correctly whenever the route does not SPAN the change.
 The 2026-09-01 telemetry fields added today make the spanning case readable too, from the next drive.
+
+## FOR THE ICBM SESSION: mapd v2.3.1 FIXES THE PUBLISH-RATE COLLAPSE. WE ARE PINNED TO v2.3.0.
+
+Left here rather than sent as a message because cross-session messaging was unavailable in the
+passing-assist session when this was found, and because a message dies with the session while this
+file does not. He asked for you to be told; this is the telling.
+
+**`sunnypilot/mapd/__init__.py` has `MAPD_V2_VERSION = "v2.3.0"`. pfeiferj released v2.3.1 on
+2026-08-21.** Its notes, verbatim:
+
+    * message publishing is now on its own thread that ensures a constant 20 hz publish rate
+    * Large performance improvements in main loop
+    * bump to latest gomsgq with additional shadow subscriber safety
+    * fix for maps generation near coordinates limits
+
+**THE FIRST LINE IS THE HALF OF HIS commIssue BUG WE DID NOT FIX.** Measured on the Yosemite drive:
+`mapdOut` collapsed from its declared 20 Hz to **1.6 Hz** on Tioga Road, tracking map path size
+(652 points there against ~50 on open highway), and the collapse correlated with every commIssue
+segment. The cause was mapd publishing from inside its own map calculation loop.
+
+We fixed the DOWNSTREAM cost -- SCC-Map rebuilding that path 20x per message (2106064495). That was
+real and it is what was stalling plannerd. But mapd's own publish rate collapsing is a SECOND,
+independent defect in the same chain, and it is fixed upstream rather than here.
+
+**HISTORY WORTH KNOWING BEFORE BUMPING.** They needed three passes:
+
+    2026-08-18  PR #128 merged  "Publish mapdOut independently of map calculations"
+    2026-08-19  PR #134         REVERTED #128
+    2026-08-19  PR #132/#135    re-landed with a strict send rate, then slice caching
+    2026-08-21  v2.3.1          released
+
+So the first attempt was wrong enough to back out within a day. It is the shipped release now, but
+that is not a version to take on the release note alone.
+
+**WHY THIS IS YOURS AND NOT PASSING ASSIST'S.** The pin is in `sunnypilot/mapd/`, which the base
+branch owns, and bumping it swaps the BINARY running on his car -- a different class of change from
+the Python around it. Nothing here has driven v2.3.1.
+
+**WHAT WOULD MAKE IT MEASURABLE, and we now have the instrument for it.** `mapdOut` publish rate is
+readable straight from a route, and the pre-fix baseline is on disk: 1.6-8.7 Hz on the curvy
+segments of 000003dc/000003de against a declared 20. A post-bump drive on comparable road either
+holds 20 Hz or it does not, and that is a one-number answer.
+
+**ALSO OPEN UPSTREAM, relevant to him:** PR #136 "Reduce non-intersecting map archive downloads",
+opened 2026-09-04, not merged. His comma downloads tiles over a phone hotspot with no DNS, so
+download volume is not free for him.
+
+**AND HIS FOUR ISSUES ARE STILL OPEN AND UNANSWERED SINCE 2026-08-17** -- 127 (lanes:forward /
+lanes:backward), 129 (change / change:lanes), 130 (hov:lanes), 131 (highway=stop nodes). pfeiferj
+engaged constructively on 127 and 129 and has not returned. `currentDirectionLanes`, the field he
+proposed on 127, does not exist in the repo. Nothing to consume yet.
