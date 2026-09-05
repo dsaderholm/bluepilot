@@ -7935,3 +7935,41 @@ VBFs are Ford's. The findings and the tooling are here; the binaries stay off Gi
 - **Most of EPAS_INFO is dead on this retrofit module** -- bytes 1, 5, 6, 7 are frozen constants and
   `DrvSte_Tq_Actl` is a fixed 128 = 0.0 Nm. Third dead signal on this PSCM. Check a field varies
   before trusting it.
+
+### CORRECTION, SAME DAY: "POLICY NOT PHYSICS" WAS OVERSTATED. NO CEILING IS BEING HIT.
+
+The entry above concluded the limit is a configured ceiling. **The measurement that would show a
+ceiling was then run, and it does not.** Binning EPS current against commanded `pathAngleFinal`
+within saturation episodes (2026-09-04 pull, 4,709 saturated / 272,811 control samples):
+
+    command rad      SATURATED              non-saturated control
+                   cur p50   delivery      cur p50   delivery
+    0.05-0.08        0.15      0.688         0.05      0.870
+    0.08-0.12        0.15      0.756         0.10      0.899
+    0.12-0.30        0.50      0.844         0.15      0.974
+
+**Current rises monotonically with command in BOTH populations. Nothing plateaus.** A hard
+configured cap would flatten; this does not.
+
+**And the informative column is the comparison: at the SAME command, saturated frames draw ~3x MORE
+current and deliver LESS.** More effort, worse result. That is a LOAD signature -- the rack fighting
+real road forces -- not the signature of a controller holding it back.
+
+**WHAT SURVIVES:** the level gap. 0.5 A during saturation against 75.85 A demonstrated under manual
+steering. The motor is nowhere near its capability, and that is still measured fact.
+
+**WHAT DOES NOT SURVIVE:** the mechanism. There is no evidence of a ceiling being hit, so "a
+calibration table is clamping it" is now a hypothesis with no supporting signature. Two readings
+remain and this measurement cannot separate them:
+
+  - a low authority GAIN -- the module maps the angle request to a modest torque demand, smoothly
+    (still a calibration thing, but a slope rather than a clamp)
+  - the rack genuinely losing ground to load, with electrical headroom it is simply not asked for
+
+**Only the >= 0.05 rad rows carry weight.** The small-command rows show delivery 0.27-0.37, but they
+sit at 16-28 mph with commands under 0.03 rad, where this file already records that the tracking
+ratio is noise-dominated and must not be quoted.
+
+**THE LESSON, and it is this file's own, again:** the level comparison (75 vs 0.5) was real and got
+generalised into a mechanism it does not establish. Ask what signature the proposed mechanism would
+LEAVE, then go and look for that specific thing, before naming the mechanism.
