@@ -7816,3 +7816,34 @@ gear complaint is exactly that.
 to reverse and silencing the fault codes. The predicate test drives `car_specific.py`'s own
 expression against the real `CarInterface.DRIVABLE_GEARS` by stubbing the micd import chain rather
 than skipping, so it cannot pass vacuously.
+
+### CORRECTION: HE DOES NOT DRIVE IN S. THE FIX STANDS; MY REASON FOR IT DID NOT.
+
+*"I never actually use sport mode."* -- said right after *"I love switching into sport mode to make
+it go crazy"* and *"It's funny to watch it panic when I am in sport mode."* All three reconcile:
+**he flicks the lever to watch openpilot react, and does not drive in Sport.**
+
+**THE DATA SAID SO THE WHOLE TIME AND I READ IT THROUGH HIS SENTENCE INSTEAD.** Six runs of
+1.20 / 1.14 / 1.22 / 0.72 / 0.52 / 0.32 s, every one inside ONE 14-second window, at ONE light,
+STOPPED, and never again across 12 minutes. Driving in Sport would be minutes of continuous value 4.
+That shape is a lever being flicked at a red light, and it was on screen before he said anything.
+
+This is the failure he named himself on 2026-08-29: *"I keep saying one thing and then it throws you
+completely off your conclusion."* **Score the data first; use his sentence to choose what to
+measure, never as the measurement.**
+
+**WHAT SURVIVES, AND WHY THE CODE DOES NOT CHANGE BACK:**
+
+- **The decode fix is right independent of him.** The DBC says value 4 is Sport. Decoding it as
+  `GearShifter.unknown` is a plain bug, and it would be a bug on a car nobody ever shifts.
+- **`DRIVABLE_GEARS` is right for a REASON THAT DOES NOT MENTION HIS PREFERENCES:** the lever
+  reported S while `cruiseState.enabled` was True, so **Ford's own ACC was running in Sport**.
+  openpilot was disagreeing with the car. That measurement is what justifies the change; "he uses
+  it deliberately" was decoration I should not have leaned on.
+- **The hazard is unchanged and is what actually decides it.** A flick is 1.2 s against
+  `SOFT_DISABLE_TIME = 3`. He is one slightly longer flick from being disengaged at a light, for a
+  gear his car is happy to run ACC in.
+
+**WHAT IT COSTS HIM: the panic was entertainment and it is gone.** Said plainly rather than left for
+him to notice, because it is the one thing he actually liked about this. Reverting is one line in
+`ford/interface.py` if he wants it back -- but the disengage risk comes back with it.
