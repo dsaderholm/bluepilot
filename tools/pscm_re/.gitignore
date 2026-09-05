@@ -1,0 +1,7 @@
+# Ford firmware and anything extracted from it NEVER goes in this repo -- it is public and the
+# VBFs are Ford's. The findings and the analysis code are ours and are committed; the bytes are not.
+# Keep them in Nextcloud/Projects/Car/OpenPilot/ instead.
+*.bin
+*.vbf
+*.VBF
+*.elf
