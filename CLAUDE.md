@@ -7343,3 +7343,41 @@ table accepts it) but nobody has drive-confirmed above it.
 
 **Do not spend effort on this before that comparison.** It is a read, it is cheap, and it is the
 difference between a project and a dead end. Everything else in this thread is downstream of it.
+
+### THE STEERING-EXHAUSTED ALERT IS 88% NOISE, AND THAT IS FIXABLE FOR FREE
+
+*"Those steering exhausted warnings drive me crazy."* Measured lane position during every
+`steerSaturated` frame in the 2026-09-04/05 pull:
+
+                         n        p50      p90     p99     max
+    during saturation   1537    0.18 m    0.68    1.56    1.67
+    normal driving    294093    0.10 m    0.36    0.93    1.93
+
+    33 episodes, WORST lane offset in each:
+      never exceeded 0.30 m   26 of 33  (79%)
+      ever exceeded  0.50 m    4 of 33  (12%)
+      ever exceeded  0.75 m    3 of 33  (9%)
+
+**When the alert fires the car is typically 18 cm off centre in a 3.7 m lane -- barely worse than
+its normal 10 cm.** The alert is right 9-12% of the time.
+
+**AND HE ALREADY TOLD US THE RIGHT RULE.** `mapd_v2_path.py` records his own words -- *"I just
+ignore most steering saturated errors until it starts to stray enough from my lane"* -- and the
+conclusion drawn there, **"SATURATION IS NOT THE FAILURE. RUNNING WIDE IS."** That principle was
+used to tune SCC's corner speed and **never applied to the ALERT ITSELF**, which is where he
+actually experiences it.
+
+**THE COST OF LEAVING IT: he is trained to ignore it, and 3 of the 33 episodes reached 0.75-1.67 m
+-- nearly half a lane.** Those are the ones worth seeing, and they arrive in the same costume as the
+30 that are not. An alert with a 1-in-10 hit rate is worse than no alert, because it destroys the
+signal it exists to carry.
+
+**THE FIX, SPECIFIABLE FROM THIS DATA: gate the alert on lane deviation, ~0.5 m. 33 alerts -> 4**,
+keeping every episode where he genuinely went wide. No firmware, no hardware, no driving change --
+it changes only what he is TOLD, not what the car does.
+
+**NOT BUILT TONIGHT.** `steerSaturated` is upstream openpilot's event, so the gating belongs
+wherever this fork can add it without owning the event, and the threshold wants checking against
+more than 33 episodes before it ships. But it passes the upstream-scope test outright -- it changes
+what he SEES, on his car, every drive -- and it is the highest value-per-effort item on the whole
+lateral list. **Do this before anything involving a flash.**
