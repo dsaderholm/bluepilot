@@ -6712,3 +6712,53 @@ p25-p75 of 0.35-0.68. Its median command is 0.019 rad -- about one degree of whe
 `controlsState.curvature` (steering angle through the vehicle model) is noise-dominated and the
 ratio means little. It is not evidence against, and it is not evidence for. **Do not quote a
 tracking ratio computed on a command under ~0.03 rad.**
+
+### AND THE STEADY-STATE DECOMPOSITION ABOVE MUST NOT BE TUNED ON. HE CAUGHT THIS.
+
+The table above says delivery is 0.86 and the gain is short, and a "raise the gains" recommendation
+was built on it and given to him. **He refused it from the seat: *"Changing those settings higher
+will lead to more oversteer, though. It oversteered on that tight turn today."*** He is right, and
+the wire says so within minutes of being asked:
+
+    tight  <500 m, any speed   turning in 0.664   holding 0.868   UNWINDING 1.017   53% over 1.0
+    highway 500-2000 m, 60+    turning in 0.500   holding 0.861   UNWINDING 1.076   65% over 1.0
+
+**The car turns in lazily and carries PAST on the unwind.** Steady state is one point in the middle
+of a spread that runs 0.50 to 1.08, and the spread is the 0.39 s lag, which this file already
+records as correctly compensated (learned 0.393, aimed 0.468, residual 33 ms).
+
+**A GAIN MULTIPLIES THE WHOLE RATIO, ENTRY AND EXIT ALIKE. IT CANNOT NARROW A SPREAD.** Raising
+`FordLowSpeedFactor_ang` 1.007 -> 1.20 to fix the 0.66 turn-in takes the unwind from 1.017 to ~1.21
+and its p90 from 1.33 to 1.58 -- worsening exactly the thing he reported. The same argument kills
+the `FordHighSpeedDampening_ang` 0.78 -> 0.92 recommendation, and the overshoot is WORSE on highway
+curves (1.076, 65% of frames over 1.0) than on tight ones.
+
+**HIS SETTINGS ARE AT THE RIGHT POINT AND ARE NOT TO BE MOVED.** 1.007 / 0.804 / 0.78 put the EXIT
+nearest 1.0, which is the correct end to protect: exit overshoot is what reads as oversteer and is
+the direction that costs a lane. He arrived there by driving.
+
+**THE RULE: never recommend a gain change off a steady-state number alone.** Steady state measures
+where the middle of the distribution sits; the driver feels the ENDS. Print turning-in / holding /
+unwinding before any gain recommendation leaves this repo. This is the same family as "ask how big
+before concluding from how often" -- here it is *ask across what phase* before concluding from a
+median.
+
+### AND THE LONGITUDINAL WORK IS WHAT UNLOCKS TIGHTER TURNS. HIS PLAN, AND IT IS CORRECT.
+
+  *"unless you see anything I need to change in my settings, we need to work on the longitudinal
+  parity project to take tighter turns"*
+
+The chain is arithmetic and it holds:
+
+    tighter turn        needs lower speed -- clip_curvature permits 3.0 / v^2
+    ICBM + Ford ACC     floors at 20 mph (FORD's floor, he confirmed it) -> 27 m minimum radius
+    op long             has NO floor -> 15 m at 15 mph, 10 m at 12 mph
+    op long is unusable ONLY because it cannot coast -- which IS `ford-acc-parity`
+
+**And it helps TWICE, which is not obvious:** lower speed also means a smaller commanded path_angle
+for the same corner, and the PSCM tracks small commands better (0.894 at 0.047 rad vs 0.777 at
+0.126). Clamp headroom AND tracking, from one change.
+
+So `ford-acc-parity` (`../bluepilot-ford`) is not a side project to the lateral work -- **it is the
+lever on tight turns**, and the torque interceptor is the lever on fast ones. Different regimes,
+different fixes. Longitudinal authoring still does not belong on this branch.
