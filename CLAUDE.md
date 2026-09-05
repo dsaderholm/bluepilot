@@ -8607,3 +8607,1030 @@ because `PassingAssistPatience` is 18 -- a 1.8x multiplier applied at or below t
 Lead deficits ran p10 9.1 / p50 9.7, so **62% of frames with a lead sat within +/-1 mph of the bar**.
 That is maximum flicker exposure by construction, and it is a preference: patience 18 means "only
 bother me if a pass is worth 1.8x the usual gain when I am not in a hurry." Name it, never change it.
+## 2026-09-04: WHAT LETS IT TAKE A REAL TURN -- AND WHAT ACTUALLY CAPS IT
+
+He reported a large left turn before a freeway on-ramp and asked what enabled it: *"I couldn't
+believe how far it turned the wheel."* Then, crucially: *"No, it did it well! I want it to be able
+to do that in the future!"* -- **a capability report, not a safety report.** The first reading of it
+here was as an incident and that was wrong.
+
+### THE FIRST ANSWER WAS WRONG. THE PEAK OF THAT TURN WAS HIS HANDS, NOT OPENPILOT.
+
+`find_turn.py` ranked route 00000423 seg 13 t+49.9 as "94.8 deg ENGAGED hands-off" and it was
+reported to him that way. Splitting `latActive` from `steeringPressed` and dumping the window
+reverses it:
+
+    t+46.15  lat Y  hands .    -0.7d      openpilot has it
+    t+46.25  lat .  hands .     2.2d      LATERAL DROPS OUT
+    t+47.85  lat .  hands Y   220.5d      HIS turn, openpilot not steering
+    t+48.86  lat Y  hands Y   177.0d      openpilot back, cf 1.309
+    t+49.95  lat Y  hands .    84.4d      hands off, driving the exit
+
+**`latActive` false for 2.5 s across the entire peak.** A tool that ANDs the two flags into one
+"engaged" column cannot show this, and the ranked row it produced read as a controller achievement.
+**Print `latActive` and `steeringPressed` as separate columns in any lateral event dump** -- this is
+the same split that corrected the 3.21 m/s^2 figure, arriving through a tool's output format rather
+than through a filter.
+
+### THE REAL ANSWER: 102.4 DEGREES, BUILT FROM ZERO, HANDS OFF
+
+Route 00000423 seg 5 is the biggest turn openpilot has taken BY ITSELF in this pull:
+
+    t+2.01   18.8 mph      0.1d   latacc 0.00   cap 3.07   cf 1.000   hands off
+    t+4.56                32.2d   latacc 1.21   cap 3.45   cf 1.309   hands off
+    t+5.76   18.8 mph    102.4d   latacc 2.97   cap 3.51   cf 1.309   hands off
+    t+7.46 .. 8.36                latacc 3.52   cap 3.51              PINNED for 0.9 s
+
+**The ISO lateral-acceleration clamp is what caps it, and on that turn it BOUND.** Not the wheel,
+not the PSCM, not any Ford gain. `clip_curvature` limits desired curvature to
+`(MAX_LATERAL_ACCEL_NO_ROLL - roll * g) / v^2` with `MAX_LATERAL_ACCEL_NO_ROLL = 3.0`; that road was
+banked, so the cap read 3.51 and the plan sat welded to it for nearly a second.
+
+**Measured ceiling on this pull, engaged, under 20 mph, n=44,219 frames:**
+
+    p50 0.107   p90 1.255   p99 3.032   p99.9 3.518   max 3.535 m/s^2
+
+The max exceeding 3.0 is the roll term, not a violation -- do not read it as the clamp failing.
+
+### THE THREE THINGS THAT MAKE LOW-SPEED TURNS WORK, AND THEY ARE NOT THE HIGHWAY KNOBS
+
+1. **`FordLowSpeedFactor_ang` sets the ceiling of the ramp, and he raised it himself** 0.981 ->
+   1.007 on 2026-09-03. `high_gain = 1.30 * lof` at low speed = **1.309**, which is exactly the
+   `curvatureFactor` observed saturated through both turns.
+2. **The ramp is SHORT at low speed.** `boundary = interp(v, [11.18, 31.29], [0.02, 0.0045])`, so at
+   or below 25 mph full gain arrives by kappa 0.02 -- a **50 m** radius -- against **222 m** at
+   75 mph. A turn saturates the schedule almost immediately; a highway sweeper never does.
+3. **The 3.0 clamp is permissive at low speed.** It is a CURVATURE limit, so the slower the car the
+   more wheel it permits: 15 m radius at 15 mph, 23 m at 18.8, 82 m at 35, 330 m at 70.
+
+**SO `FordLowSpeedFactor_ang` IS THE TURN-AUTHORITY KNOB AND `FordHighSpeedFactor_ang` IS NOT.**
+They govern different regimes that barely overlap, and every tuning conversation in this file until
+now has been about the high one. **Do not lower the low factor while chasing highway behaviour** --
+it is what makes turns like this possible.
+
+### AND THERE IS NO SETTING THAT MAKES A TURN GENTLER
+
+He asked whether that turn was "a little tight". It is a fair read -- 3.5 m/s^2 is above openpilot's
+own p99 on this car (2.73) and near his hands-on p99 (4.14). But the commanded curvature comes from
+the model and `clip_curvature`, both UPSTREAM of every Ford gain, trim and limiter this fork owns.
+
+**Lowering `FordLowSpeedFactor_ang` does not plan a wider turn. It under-delivers the turn already
+planned**, which is running wide rather than turning gently -- and delivery at that peak was already
+0.88. Anyone reaching for that knob to soften a turn is reaching for the wrong end of the loop.
+
+### THE TRIM WAS NOT INVOLVED, AS DESIGNED
+
+`laneCenterCorrection` was **exactly 0.00000** on every frame of both turns, at LC 0.45. That is
+`_SPEED_RAMP_BP = (0.0, 9.0, 15.0)` -> `_SPEED_RAMP_V = (0.0, 0.0, 1.0)` working: the lane-centering
+trim is OFF below 20 mph and full at 34. **A lane-centering setting cannot explain anything he
+reports below 20 mph**, in either direction.
+
+## 2026-09-04: THE LATERAL CHAIN, DECOMPOSED. THE PSCM CEILING IS MEASURED AT LAST.
+
+`ControllerStateBP` has published `kappaCmd`, `curvatureFactor` and `laneCenterCorrection` since
+2026-09-01, and this is the first analysis to use all three together. **It splits the long-standing
+"delivery is 0.87-0.93" number into three independent links, and they have completely different
+causes at different speeds.** Steady state (desired within 5% for a full 0.5 s), hands off,
+latActive, 44 segments of routes 0000041e / 0000041f / 00000423.
+
+    desired --[trim + clip]--> kappa_cmd --[our gain]--> command --[PSCM]--> actual
+
+          radius      n    mph   trim+clip  our gain    PSCM   = delivery
+    500-  1000 m    552   70.1       1.055     0.834   0.952       0.865
+    286-   500 m    861   39.3       1.071     0.973   0.889       0.862
+    100-   286 m    906   40.7       1.041     1.005   0.784       0.859
+
+**THE DELIVERY COLUMN IS FLAT AT 0.86 AND MEANS THREE DIFFERENT THINGS.** Pooling it, which every
+previous measurement here did, hid that entirely:
+
+- **Highway curve, 70 mph: the shortfall is OURS.** Gain 0.834, PSCM 0.952. `FordHighSpeedDampening_ang`
+  and `FordHighSpeedFactor_ang` close this, and the car will deliver what they ask for.
+- **Turn, 40 mph: the shortfall is the PSCM.** Our gain is already 1.005 -- the schedule is at unity
+  -- and the car returns 0.784. **No setting in this fork reaches that column.**
+
+(The three columns are medians of ratios and do not multiply to the fourth exactly; the pattern is
+the finding, not the arithmetic identity.)
+
+### AND THE PSCM CEILING IS SOFT AND PROGRESSIVE, NOT A CLIP. SPEED-CONTROLLED.
+
+Binned by commanded `pathAngleFinal` WITHIN each speed band, because a first pass pooled by command
+size put 39 mph and 75 mph frames in adjacent rows and manufactured a trend:
+
+    30-45 mph   0.830  0.808  0.871  0.765      (command 0.021 -> 0.228 rad)
+    45-60 mph   0.892  0.800  0.772  0.743      (0.026 -> 0.171 rad)  <- monotonic
+    60-80 mph   1.069  0.933  0.983  0.945      (0.015 -> 0.068 rad, small commands only)
+
+**The PSCM tracks essentially perfectly when asked for little and degrades steadily as the command
+grows.** 45-60 mph is the cleanest run and falls 0.892 -> 0.743 monotonically -- and that is the
+same band this file already flags three independent ways as the worst on this car.
+
+**THIS IS THE FIRST QUANTITATIVE MEASURE OF THE AUTHORITY LIMIT.** The section above records that
+`LatCtlLim_D_Stat` is dead on non-CAN-FD Fords, so the PSCM never reports limiting and every earlier
+claim about ~2.5 m/s^2 rested on indirect signatures (our deviation limiter biting, hands-on% rising,
+delivery sitting at 0.87-0.93). **The tracking ratio against command size, speed-controlled, is a
+direct measure and it does not need the dead signal.** Use it to score the torque interceptor when
+it arrives: the same table, before and after.
+
+**WHAT IT MEANS FOR TUNING, and it is a diminishing return rather than a wall:** at 0.17 rad of
+commanded path_angle the PSCM returns 74 cents on the dollar, so commanding 35% more nets about 26%
+more actual. Not nothing -- but the gain amplifies the plan's own ~50%-of-curve oscillation at the
+same time, so this is a real trade and not a free win.
+
+### HIS TUNING STEPS ARE TWO ORDERS OF MAGNITUDE TOO SMALL TO JUDGE
+
+The wire recovered his change as `FordHighSpeedFactor_ang` 0.794 -> 0.804. In the unit he judges in:
+
+    radius   nominal   cf .794   cf .804    delta at the wheel
+     1000m     2.79d     0.797     0.798        0.004 deg
+      500m     5.57d     0.830     0.834        0.025 deg
+      350m     7.96d     0.858     0.865        0.055 deg
+
+**0.025 degrees.** The dither this file proved imperceptible is 0.10-0.30 deg. To move the wheel by
+even 0.30 deg at 500 m he needs 0.794 -> **0.90**. Every A/B he has run at this step size was
+unscoreable before the drive started, and telling him a drive "showed" anything at this resolution
+would be inventing a result. **Quote the step in degrees before recommending a drive to test it.**
+
+### THE TRIM IS NOT EATING THE DEVIATION BUDGET. `0cb9165427` IS REFUSED ON EVIDENCE.
+
+The deviation clip (`measured +- CURVATURE_ERROR`, 0.002 1/m) binds hard on tight curves:
+
+    radius        n     % clipped   budget p50   p90
+    500-1000 m   13798      0.54%        0.17   0.42
+    286- 500 m    8302      2.67%        0.26   0.54
+    100- 286 m    5674     16.90%        0.44   1.04
+      0- 100 m     311     54.66%        0.72   4.41
+
+That looked like the one-sided-budget bug `0cb9165427` fixes -- *"a one-sided form lets the trim
+subtract authority while the planner is already clipped short in a curve"* -- and this file had it
+flagged as a real risk. **Re-running the clip with and without the trim's contribution refuses it:**
+
+    radius        clipped   planner ALONE   TRIM-CAUSED   % of frames
+    500-1000 m         80              80             0         0.00%
+    286- 500 m        207             207             0         0.00%
+    100- 286 m        606             566            59         1.04%
+      0- 100 m         88              88             0         0.00%
+
+**The clipping is the planner's own, in every band.** The trim causes it on 1.04% of frames in one
+band, and there it destroys 0.000076 1/m of planner curvature -- **0.21 degrees of wheel, below the
+dither floor.** Do not take that commit for this reason; if it is ever taken it must be for a
+different one, measured.
+
+**And the trim is NOT neutral on curves** -- signed with the bend it is +16.6% of commanded curvature
+at 500-1000 m, +9.4% at 286-500, +2.2% at 100-286. It is silently compensating for the shortfall
+above, which is very likely why raising `lane_centering_strength_ang` fixed his "hugging some edges".
+**Any measurement of delivery that does not subtract the trim is measuring the trim.**
+
+### AND HIS Q3/CAN CAR IS THE *LESS* RESTRICTED FORD, NOT THE MORE. 2026-09-04.
+
+He said *"I know my Q3 CAN car is supposed to be worse than a CAN FD one"* -- that is the common
+belief and for LATERAL AUTHORITY it is backwards. Upstream's own comment states the trade:
+
+    # Ford Q4/CAN FD has more torque available compared to Q3/CAN so we limit it based on
+    # lateral acceleration.
+    if CP.flags & FordFlags.CANFD:
+      curvature_accel_limit = MAX_LATERAL_ACCEL / (max(v_ego_raw, 1) ** 2)   # ~2.4 m/s^2
+
+**CAN FD has more torque and is therefore CAPPED. His car is not.** Three places it lands:
+
+    carcontroller.py:64   the ~2.4 m/s^2 clip is inside `if CP.flags & FordFlags.CANFD`
+    ford.h:245/804        FORD_STEERING_LIMITS = FORD_LIMITS(false, ...) for him
+                          FORD_CANFD_STEERING_LIMITS = FORD_LIMITS(true, ...)
+                          -- the flag IS `limit_lateral_acceleration`, and it drives
+                          `.angle_is_curvature` too
+    angle_gains.py        GAIN_CAN high anchor 1.15  vs  CANFD_BOF 0.95, CANFD_SUV 1.05
+
+So on the turn measured above his car reached **3.52 m/s^2 bank-adjusted -- above the 2.4 any CAN FD
+Ford is allowed at all**, and it runs the highest gain anchor of the three platforms. The only limit
+it met was `clip_curvature`'s ISO 3.0, which binds every openpilot car on every platform.
+
+**WHAT HE ACTUALLY GIVES UP IS TRACKING, NOT AUTHORITY.** Torque-controlled platforms close their
+loop inside openpilot and are tunable there; angle mode hands the loop to the PSCM, which returns
+0.78-0.95 of what it is told (see the decomposition above). That is a different axis from how much
+the car is permitted to ask for, and conflating the two is what makes "CAN is worse" sound obvious.
+
+**DO NOT extend this into numbers for other platforms.** Nothing here has measured a non-Ford car,
+and openpilot's 3.0 clamp being universal is a code fact, not a measurement of what those cars
+deliver.
+
+### SLOWING DOWN BUYS BOTH RADIUS AND TRACKING
+
+    certain, arithmetic:  the ISO clamp is 3.0 / v^2, so the tightest permitted radius scales with
+                          v^2 -- 107 m at 40 mph, 27 m at 20 mph, 15 m at 15 mph
+    measured:             the PSCM tracks SMALL commands better, and the same corner asks for a
+                          smaller path_angle when slower (path_angle = kappa * v * gain)
+
+    100-286 m band     0-25 mph  cmd 0.047 rad  PSCM 0.894
+                      35-45 mph  cmd 0.074      PSCM 0.849
+                      25-35 mph  cmd 0.107      PSCM 0.806
+                      45-60 mph  cmd 0.126      PSCM 0.777
+
+**Monotonic in COMMAND SIZE, not in speed** -- which is the same relationship the speed-controlled
+table above found, arrived at from the other direction.
+
+**One row refuses it and is reported rather than dropped:** 286-500 m at 0-25 mph reads 0.566 with
+p25-p75 of 0.35-0.68. Its median command is 0.019 rad -- about one degree of wheel -- where
+`controlsState.curvature` (steering angle through the vehicle model) is noise-dominated and the
+ratio means little. It is not evidence against, and it is not evidence for. **Do not quote a
+tracking ratio computed on a command under ~0.03 rad.**
+
+### AND THE STEADY-STATE DECOMPOSITION ABOVE MUST NOT BE TUNED ON. HE CAUGHT THIS.
+
+The table above says delivery is 0.86 and the gain is short, and a "raise the gains" recommendation
+was built on it and given to him. **He refused it from the seat: *"Changing those settings higher
+will lead to more oversteer, though. It oversteered on that tight turn today."*** He is right, and
+the wire says so within minutes of being asked:
+
+    tight  <500 m, any speed   turning in 0.664   holding 0.868   UNWINDING 1.017   53% over 1.0
+    highway 500-2000 m, 60+    turning in 0.500   holding 0.861   UNWINDING 1.076   65% over 1.0
+
+**The car turns in lazily and carries PAST on the unwind.** Steady state is one point in the middle
+of a spread that runs 0.50 to 1.08, and the spread is the 0.39 s lag, which this file already
+records as correctly compensated (learned 0.393, aimed 0.468, residual 33 ms).
+
+**A GAIN MULTIPLIES THE WHOLE RATIO, ENTRY AND EXIT ALIKE. IT CANNOT NARROW A SPREAD.** Raising
+`FordLowSpeedFactor_ang` 1.007 -> 1.20 to fix the 0.66 turn-in takes the unwind from 1.017 to ~1.21
+and its p90 from 1.33 to 1.58 -- worsening exactly the thing he reported. The same argument kills
+the `FordHighSpeedDampening_ang` 0.78 -> 0.92 recommendation, and the overshoot is WORSE on highway
+curves (1.076, 65% of frames over 1.0) than on tight ones.
+
+**HIS SETTINGS ARE AT THE RIGHT POINT AND ARE NOT TO BE MOVED.** 1.007 / 0.804 / 0.78 put the EXIT
+nearest 1.0, which is the correct end to protect: exit overshoot is what reads as oversteer and is
+the direction that costs a lane. He arrived there by driving.
+
+**THE RULE: never recommend a gain change off a steady-state number alone.** Steady state measures
+where the middle of the distribution sits; the driver feels the ENDS. Print turning-in / holding /
+unwinding before any gain recommendation leaves this repo. This is the same family as "ask how big
+before concluding from how often" -- here it is *ask across what phase* before concluding from a
+median.
+
+### AND THE LONGITUDINAL WORK IS WHAT UNLOCKS TIGHTER TURNS. HIS PLAN, AND IT IS CORRECT.
+
+  *"unless you see anything I need to change in my settings, we need to work on the longitudinal
+  parity project to take tighter turns"*
+
+The chain is arithmetic and it holds:
+
+    tighter turn        needs lower speed -- clip_curvature permits 3.0 / v^2
+    ICBM + Ford ACC     floors at 20 mph (FORD's floor, he confirmed it) -> 27 m minimum radius
+    op long             has NO floor -> 15 m at 15 mph, 10 m at 12 mph
+    op long is unusable ONLY because it cannot coast -- which IS `ford-acc-parity`
+
+**And it helps TWICE, which is not obvious:** lower speed also means a smaller commanded path_angle
+for the same corner, and the PSCM tracks small commands better (0.894 at 0.047 rad vs 0.777 at
+0.126). Clamp headroom AND tracking, from one change.
+
+So `ford-acc-parity` (`../bluepilot-ford`) is not a side project to the lateral work -- **it is the
+lever on tight turns**, and the torque interceptor is the lever on fast ones. Different regimes,
+different fixes. Longitudinal authoring still does not belong on this branch.
+
+### THE EXIT-BIASED BLEND IS STILL DEAD AFTER `ba20937aac`, AND FOR A SECOND REASON NOBODY MEASURED
+
+His complaint is exit overshoot. **The one mechanism in this file aimed at exit overshoot has run to
+completion ONCE in 44 segments.** Measured 2026-09-04 with `blendWeight @61`, which is why this was
+findable at all.
+
+    population           phase        n   med blend    p10    p90   % below 0.45
+    all curves      turning in    44161       0.175   0.17   0.40          90.1%
+    all curves       UNWINDING    47397       0.175   0.17   0.40          90.6%
+    tight <500 m    turning in     3036       0.500   0.50   0.50           0.9%
+    tight <500 m     UNWINDING     2101       0.500   0.50   0.50           1.3%
+
+**On anything actually bent, `b_blend` is pinned at the 0.500 seed.** The 0.175 on the pooled row is
+`b * 0.35` -- the `_on_straightaway` branch (`abs(des) < 0.00125`) firing on near-straight road. The
+exit branch's `b * 0.25` = 0.125 is never reached anywhere: the p10 across every population is 0.17.
+
+**TWO INDEPENDENT REASONS, AND THE SECOND IS NEW.**
+
+**1. The relative threshold is at the 1st percentile of falling intervals.** `ba20937aac` replaced
+the absolute 0.010 1/m delta with `abs(des) < abs(last) * 0.8`, compared once per `STEER_STEP = 5`
+(0.05 s). Measured on falling intervals:
+
+    band                    n   med ratio    p10    p01    min   % under 0.80
+    tight <500 m         2561      0.9801  0.931  0.777  0.384          1.41%
+    highway 500-2000 m   2006      0.9683  0.876  0.658  0.244          3.44%
+
+A 20% drop in 50 ms is the ~1st percentile of what this planner does. The absolute form fired on
+0.054% of intervals; the relative form fires on 1.1-3.4%. **Twenty times better and still dead.**
+The relative threshold IS the right shape -- scale-free, cannot go stale -- it is simply set five
+times too strict for this car's planner.
+
+**2. EVEN WHEN IT FIRES, IT FIRES FOR ONE CALL, AND THE RAMP NEEDS FOUR.** `ba20937aac` also added
+`b_step = 0.1` per call to stop the weight snapping between 0.5 and 0.125 -- a good change on its
+own. But 0.500 -> 0.125 is 0.375 of travel, so it needs **four consecutive firing calls**:
+
+    consecutive calls   episodes   share
+                    1         80    87.9%
+                    2          9     9.9%
+                    3          1     1.1%
+                    4          1     1.1%
+
+    gate fired on 105 of 9484 calls (1.11%)
+    episodes long enough to reach the exit weight (4+):  1 of 91
+
+**87.9% of firings are a single isolated call, and the blend reached its exit target exactly once.**
+Neither half is wrong by itself; the product of a 1-in-90 trigger and a 4-call ramp is zero.
+
+**DO NOT FIX THIS TONIGHT, AND DO NOT FIX IT BY MOVING ONE NUMBER.** A threshold loosened without
+the run-length problem still needs four in a row; a ramp sped up without the threshold still almost
+never triggers. The shape that would work is a LATCH -- once an exit is detected, hold the exit
+state for a bounded number of calls so the ramp can traverse -- and that is a design change to the
+lateral path on a branch his car auto-pulls. **This is the 5.20 m/s^2 pattern if it is written in an
+evening and handed to him.** Record it, measure it against `bp_lateral_by_radius` and the phase
+table above, and ship it on its own drive with nothing else moving.
+
+**And note what it does NOT explain.** The exit overshoot in degrees is median +0.16d on tight
+curves -- imperceptible. It is the tail that hurts: p90 +3.21d, p99 +10.81d. The gate's 1.4% firing
+rate lands on the fastest falls, which are plausibly those same tail frames, so a working exit blend
+targets the right events. That is an argument for fixing it, not evidence that it would have.
+
+## 2026-09-05: UPSTREAM SURVEY. ONE COMMIT WE ALREADY HAVE, AND PR 191 REWROTE THE GAIN SCHEDULE.
+
+    releases        bp-7.0 newest, we are 0 behind, still NO bp-8.0
+    bp-dev          exactly ONE new commit since 2026-09-03: fc228b4099
+    bp-dev-191      nothing new (a15672fb15 / 77ec55c73e / ed251bfb85, all already assessed)
+    deleted         bp-dev-188, bp-dev-193, bp-dev-ALP, bp-dev-UISAD
+
+**`fc228b4099` (combo cruise-button event storm) IS ALREADY OURS BY CONTENT.** Verified rather than
+assumed: theirs adds `self.prev_button_signal` keyed by `can_msg`; ours is `self.combo_states` keyed
+by `group`, and `group = COMBO_GROUPS.get(button.can_msg)` -- the same granularity. Both also fix
+the `processed_signals` scoping. Ours additionally documents that `processed_signals` is an
+early-out and `combo_states` is the correctness guard, with the mutation that proves it. Nothing to
+take.
+
+**HE IS NOT A STAKEHOLDER IN 191/192 AND SAID SO.** Praeuner apologised to him on #192 for pushing
+commits "before seeing you had also made commits on your end"; he replied *"I'm just messing around
+with this stuff on my own fork... I don't have any stake in how 191/192 shake out."* Do not treat
+those PRs as his to steer, and do not draft comments for them unasked.
+
+### PR 191's NEW HEAD `fd221cd05c` (2026-09-04) REWRITES THE WHOLE SCHEDULE
+
+    low_gain   unchanged:  interp(v, [11.18, 31.29], [1.00, damp])
+    high_gain  1.30*lof -> 1.40*lof   AND   anchor*hif -> 1.20*anchor*hif
+    boundary   interp(v,[11.18,31.29],[0.02,0.0045]) -> interp(v,[8.94,13.41,16.54,31.29],
+                                                               [0.02,0.0195,0.018,0.0035])
+    plus       low-pass filters (0.80/0.20) on _speed_factor, _kappa_factor and b_blend
+    plus       _kappa_entering 1.1 -> 1.05, _desired_falling 0.9 -> 0.95
+
+**AT HIS SETTINGS (1.007 / 0.804 / 0.78), IN DEGREES AT THE WHEEL:**
+
+     75mph  500m   cf 0.834 -> 0.945   +13.3%   +0.59d
+     75mph  350m   cf 0.865 -> 1.039   +20.1%   +1.31d
+     40mph  193m   cf 1.010 -> 1.038    +2.8%   +0.33d
+     18mph   50m   cf 1.309 -> 1.410    +7.7%   +5.00d
+     18mph   27m   cf 1.309 -> 1.410    +7.7%   +9.25d
+
+**IT PULLS BOTH WAYS ON HIM AT ONCE.** The low-speed half is exactly the turn authority he asked for
+on 2026-09-04 (*"I want it to be able to do that in the future"*). The highway half raises a command
+whose EXIT OVERSHOOT he reported the same night, and a gain multiplies the whole ratio:
+
+    highway 500-2000 m   unwind median 1.070 -> 1.160    p90 1.59 -> 1.72
+    tight    <500 m      unwind median 1.018 -> 1.039    p90 1.33 -> 1.36
+
+**AND HIS FLAT POINT MOVES 0.678 -> 0.565**, so his 0.804 becomes a far steeper slope than he tuned
+it to be. Keeping his current slope would mean High 0.804 -> **0.670**. That is the retune burden
+alan-polk objected to on #192 in as many words -- *"Changing the interpolation range means everyone
+on bp-7.0 has to retune."*
+
+### THEIR EXIT-GATE FIX DOES NOT REVIVE THE DEAD BLEND. MEASURED ON HIS OWN LOGS.
+
+`_desired_falling` 0.9 -> 0.95 is the right direction and close to the value the 2026-09-04 analysis
+derived independently. But it is paired with an exponential filter that is SLOWER than the step ramp
+it replaces, and the compound defect survives:
+
+    gate    fires   % of calls   runs   4+ consecutive   7+
+    0.80      107        1.03%     93       1 (  1%)      0     <- ours (b_step 0.1, needs 4)
+    0.90      430        4.13%    331       7 (  2%)      0
+    0.95     1173       11.27%    800      32 (  4%)      2     <- PR191 (0.80/0.20, needs ~7)
+
+**Eleven times more firings and still 96% of exit detections last under four calls.** It moves the
+mechanism from "reached its target once in 44 segments" to "moves meaningfully on 4% of exits" --
+a real improvement to something that was dead, not a fix.
+
+**VERDICT: DO NOT TAKE IT.** It is an open PR taking commits daily, its own reviewer has objected to
+the retune burden, and on this car it worsens the symptom he reported tonight unless he
+simultaneously drops High to 0.670. **Watch it; the 1.30 -> 1.40 low-speed anchor is the half worth
+having, and it is separable.** If it is ever taken, every number quoted to him on 2026-09-04 --
+the flat point, the 0.90 ceiling, the degrees-per-step table -- is invalidated and must be re-derived
+before he tunes against it.
+
+## 2026-09-05: THE LC 0.35 vs 0.45 A/B DOES NOT RESOLVE -- AND TWO ERRORS ON THE WAY
+
+### I QUOTED A DEVICE TIMESTAMP WITHOUT CONVERTING IT. FOURTH INSTANCE.
+
+`lane_centering_strength_ang` was reported to him as written at **16:37**. That is the raw `stat`
+output, which is **UTC**. Local is **10:37 MDT**. This file already carries the rule -- *"NEVER QUOTE
+A PARAM VALUE OUT OF THIS FILE. READ IT OFF THE DEVICE WITH ITS MTIME"* and *"THE DEVICE RUNS IN UTC.
+HE DOES NOT"* -- and it was broken anyway, by reading a `stat` line straight into a sentence.
+
+It mattered: at 16:37 the change looked like it came AFTER every route pulled, so the absence of any
+0.45 label read as a telemetry gap. At 10:37 it lands 9 minutes into route 00000423, which is
+exactly why the earlier session split that route at segment 10.
+
+    LC 0.45 written           2026-09-04 10:37:32 MDT
+    0000041e 09-03 12:09  0000041f 09-03 17:00  00000420 09-03 19:30   <- 0.35
+    00000421 09-04 08:58  00000422 09-04 09:08                          <- 0.35
+    00000423 09-04 10:28  <- STARTED 9 MIN BEFORE THE CHANGE, spans it
+    00000424 09-04 17:30  00000425 09-04 18:40                          <- 0.45
+
+### AND I CHECKED "DOES THE DEVICE STILL HAVE THE SEGMENTS" WITH THE WRONG QUESTION
+
+The pull was reported as complete at 72/72, with the earlier 114 figure dismissed as stale. **The
+query only listed the three routes already on disk.** The device had EIGHT routes and 115 segments;
+43 were missing, including both 0.45 drives. `ls` restricted to what you already have can only ever
+tell you that you have it. **Enumerate from the DEVICE side and diff, never from the local side.**
+
+### THE RESULT: NO CONCLUSION, AND THE REASON IS THE SAMPLE
+
+Matched on radius AND speed (a first pass matched radius only, and the 0.45 pool's "500-2000 m" is
+gentle surface-street curves at 30 mph against interstate at 70 in the 0.35 pool):
+
+      radius      speed     LC      n   ratio    p90   med deg   p90 deg
+     100-286     20-35     0.35    727   0.999   1.25    -0.02d     3.78d
+     100-286     20-35     0.45     79   0.900   2.46    -1.17d    19.54d
+     286-500     20-35     0.35   1129   1.108   1.51     0.85d     3.43d
+     286-500     20-35     0.45    143   1.070   1.46     0.60d     4.05d
+     500-2000    20-35     0.35   4112   1.140   1.83     0.37d     2.22d
+     500-2000    20-35     0.45   1073   0.977   2.23    -0.03d     2.68d
+
+**Every median is equal or slightly better at 0.45.** The 100-286 m p90 going 3.78d -> 19.54d is the
+only dramatic row and it is **n=79** -- under a second of road, one or two turn exits. Not a finding.
+
+**THE STRAIGHT-ROAD WEAVE IS UNSCOREABLE FOR A PLAIN REASON, NOT A TOOL ONE:** 00000424 and 00000425
+have **ZERO** qualifying windows, rejected as "too slow" on 2853 and 3607 frames. He has not driven
+highway since changing the setting.
+
+    LC 0.35   n=83669 curve frames   p50 39 mph   p90 76
+    LC 0.45   n= 8932                p50 21 mph   p90 32
+
+**Nine to one, and no overlapping road type.** VERDICT: keep 0.45; nothing argues against it. What
+settles it is one ORDINARY drive at 0.45 on highway plus 35-50 mph curves -- not a test pattern.
+
+**AND THE BOOT SNAPSHOT DOES NOW READ 0.449 ON 424/425**, which confirms the time mapping
+independently -- so `initData` labels a route correctly whenever the route does not SPAN the change.
+The 2026-09-01 telemetry fields added today make the spanning case readable too, from the next drive.
+
+## FOR THE ICBM SESSION: mapd v2.3.1 FIXES THE PUBLISH-RATE COLLAPSE. WE ARE PINNED TO v2.3.0.
+
+Left here rather than sent as a message because cross-session messaging was unavailable in the
+passing-assist session when this was found, and because a message dies with the session while this
+file does not. He asked for you to be told; this is the telling.
+
+**`sunnypilot/mapd/__init__.py` has `MAPD_V2_VERSION = "v2.3.0"`. pfeiferj released v2.3.1 on
+2026-08-21.** Its notes, verbatim:
+
+    * message publishing is now on its own thread that ensures a constant 20 hz publish rate
+    * Large performance improvements in main loop
+    * bump to latest gomsgq with additional shadow subscriber safety
+    * fix for maps generation near coordinates limits
+
+**THE FIRST LINE IS THE HALF OF HIS commIssue BUG WE DID NOT FIX.** Measured on the Yosemite drive:
+`mapdOut` collapsed from its declared 20 Hz to **1.6 Hz** on Tioga Road, tracking map path size
+(652 points there against ~50 on open highway), and the collapse correlated with every commIssue
+segment. The cause was mapd publishing from inside its own map calculation loop.
+
+We fixed the DOWNSTREAM cost -- SCC-Map rebuilding that path 20x per message (2106064495). That was
+real and it is what was stalling plannerd. But mapd's own publish rate collapsing is a SECOND,
+independent defect in the same chain, and it is fixed upstream rather than here.
+
+**HISTORY WORTH KNOWING BEFORE BUMPING.** They needed three passes:
+
+    2026-08-18  PR #128 merged  "Publish mapdOut independently of map calculations"
+    2026-08-19  PR #134         REVERTED #128
+    2026-08-19  PR #132/#135    re-landed with a strict send rate, then slice caching
+    2026-08-21  v2.3.1          released
+
+So the first attempt was wrong enough to back out within a day. It is the shipped release now, but
+that is not a version to take on the release note alone.
+
+**WHY THIS IS YOURS AND NOT PASSING ASSIST'S.** The pin is in `sunnypilot/mapd/`, which the base
+branch owns, and bumping it swaps the BINARY running on his car -- a different class of change from
+the Python around it. Nothing here has driven v2.3.1.
+
+**WHAT WOULD MAKE IT MEASURABLE, and we now have the instrument for it.** `mapdOut` publish rate is
+readable straight from a route, and the pre-fix baseline is on disk: 1.6-8.7 Hz on the curvy
+segments of 000003dc/000003de against a declared 20. A post-bump drive on comparable road either
+holds 20 Hz or it does not, and that is a one-number answer.
+
+**ALSO OPEN UPSTREAM, relevant to him:** PR #136 "Reduce non-intersecting map archive downloads",
+opened 2026-09-04, not merged. His comma downloads tiles over a phone hotspot with no DNS, so
+download volume is not free for him.
+
+**AND HIS FOUR ISSUES ARE STILL OPEN AND UNANSWERED SINCE 2026-08-17** -- 127 (lanes:forward /
+lanes:backward), 129 (change / change:lanes), 130 (hov:lanes), 131 (highway=stop nodes). pfeiferj
+engaged constructively on 127 and 129 and has not returned. `currentDirectionLanes`, the field he
+proposed on 127, does not exist in the repo. Nothing to consume yet.
+
+## 2026-09-05: THE TACO BELL QUESTION -- CAN FIRMWARE GET THIS CAR TO INTERSECTION TURNS?
+
+His long-term goal, stated plainly: *"I want to be able to recreate the Taco Bell drive from Comma
+one day with my car, which requires more steering... I am looking into the future."* So the target
+is INTERSECTION TURNS (10-15 m radius at 10-15 mph), not lane keeping. He asked whether
+`ghostdev137/ford-pscm-re` could get him there and let him drop angle mode.
+
+### ANGLE MODE IS THE RIGHT MODE FOR THIS. CURVATURE MODE COULD NEVER DO IT.
+
+    ceiling                          tightest radius it permits
+    LatCtlCurv_No_Actl signal        48 m at ANY speed   (+-0.02094 1/m; panda FORD_CURVATURE_MAX)
+    LatCtlPath_An_Actl signal        scales with SPEED:  5.6 m @ 5 mph, 11.2 @ 10, 16.8 @ 15
+    clip_curvature ISO 3.0           1.7 m @ 5 mph, 6.7 @ 10, 15.0 @ 15, 26.6 @ 20
+
+**The curvature interface caps at a 48 m radius, forever.** An intersection turn is impossible in
+curvature mode on this car, at any speed. The PATH ANGLE ceiling divides by speed, so it opens up
+exactly where turns happen.
+
+**PROVEN ON HIS OWN CAR TONIGHT**, route 00000423 seg 5, hands off:
+
+    23 m radius at 18.8 mph  ->  kappa 0.0435 1/m  -- ABOVE the 0.0209 curvature-signal cap
+                                 path_angle 0.478 rad = 91% of the 0.5235 signal maximum
+
+**He has already commanded turns tighter than the curvature interface can encode.** So "move on
+from angle steering and be like other cars" would be moving the WRONG WAY for his stated goal.
+
+### THE WIRE CAN ALREADY DO THE TACO BELL DRIVE. THE PSCM CANNOT.
+
+At 10 mph the path-angle signal permits 11.2 m and ISO permits 6.7 m -- an intersection turn fits.
+What does not fit is DELIVERY: measured 2026-09-04, the PSCM returns **0.83** of what it is told at
+40 mph and degrades to **0.743** as the command grows. **Worst exactly where he would need it best.**
+
+**So the gap is authority, not interface** -- and authority is precisely what a calibration patch
+addresses. That is what `LKA_FULL_AUTHORITY.VBF` is in that repo: a 12-entry u16 bell curve at
+`cal+0x1660`, peak `44 -> 32` between two builds, drive-confirmed +184% column torque. **Nobody
+wrote firmware.** They edited a lookup table, after months of RE with the module on a bench.
+
+### WHY THE TORQUE INTERCEPTOR EXISTS, AND WHAT WOULD REPLACE IT
+
+**His PSCM has NO torque input.** Verified in his own DBC: `LateralMotionControl` (979) carries
+`LatCtlPath_An_Actl` (rad), `LatCtlCurv_No_Actl` (1/m) and `LatCtlPathOffst_L_Actl` (m) -- geometry
+only. The sole `DesiredTorq*` messages are `DesiredTorqBrk` from ABS_ESC, which is BRAKE torque.
+There is no byte on his bus meaning "apply N Nm to the steering."
+
+That is exactly why an interceptor is needed -- it injects torque where no bus path exists. **The
+Transit does not need one**: it accepts `0x213 DesTorq` directly, which is why that repo ships an
+openpilot page saying "drive 0x213 continuously, you do not need Ford LCA."
+
+**A cal patch and the interceptor buy the SAME THING for his goal -- authority -- and the cal patch
+needs no hardware.** Neither lets him leave angle mode, and neither should: see above.
+
+### WHAT WOULD ACTUALLY HAVE TO HAPPEN, AND WHAT IS NOT POSSIBLE
+
+**Not possible:** vibe-coding EPAS firmware. Not for me and not for anyone -- that repo built a
+patched Ghidra SLEIGH spec and pushed a Binary Ninja v850 lifter to 99.81% decode coverage to find
+*which bytes to change*. I have no dump, no bench, no flash path and no way to verify.
+
+**Not covered:** documented vehicles are Transit 2025/2026, Escape 2022/2024, F-150 2021/2022. **No
+Edge, no Fusion.** F-150 is explicitly "not cross-compatible" with Transit/Escape -- different
+vendor, different MCU, different cal layout. His retrofitted Edge PSCM is a FOURTH platform.
+
+**The cheap, non-destructive first step:** read the Edge PSCM calibration over UDS (`0x730`/`0x738`)
+with FORScan and see whether it has recognisable table structure -- the bell-curve authority family
+is a Ford EPAS design pattern and appears at three sites in one F-150 cal. That is a READ. It
+answers "is this a project or a dead end" without touching the car.
+
+**And keep the stock VBF before anything else.** Their `backups/` exists for that reason, one of
+their own patches reverts AS-built on a power cycle, and his PSCM is a retrofit he has already tuned
+into place -- bricking it means sourcing another Edge module and redoing all of it.
+
+### HIS CORRECTION: WE USE LCA, NOT LKA -- AND IT RETIRES THE WHOLE PATCH TABLE
+
+*"But we aren't using LKA, we are using LCA."* Correct, and it is the most important thing in this
+whole thread. Every shipped patch in that repo solves a TRANSIT problem this car does not have:
+
+    LKA_NO_LOCKOUT.VBF          Transit's LKA gives ONE 10 ms pulse then 10 s of nothing.
+                                HIS CAR HAS NO LOCKOUT -- he drives hands-off for minutes.
+    LKA_FULL_AUTHORITY.VBF      raises the 0x213 DesTorq cap on the LKA path.
+                                HE IS NOT ON THE LKA PATH AT ALL.
+    LKA_APA_*                   parking assist. Unrelated feature.
+    LCA_ENABLED.VBF             they are TRYING to reach the interface he already has,
+                                and it only half-works ("AS-built reverts on power cycle").
+
+**Transit has LKA and is fighting to get LCA. He has LCA.** He is on the destination of their
+hardest open problem. Do not describe their patch table as applicable to this car.
+
+### AND A FIRMWARE TABLE WOULD NOT LET HIM TAKE CURVES FASTER. MEASURED.
+
+He asked directly: *"Would modifying a table make it steer more at higher speeds so I can take
+curves faster?"* Measured over 56,707 engaged hands-off frames on real curves at >= 55 mph:
+
+    PSCM tracking                             p50 0.979
+    commanded lateral accel                   p50 0.96  p90 1.92  p99 2.61  max 3.37 m/s^2
+    frames within 10% of the ISO 3.0 clamp    284  (0.50%)
+
+**The rack already delivers 98% at highway speed, and openpilot's own clamp is binding on half a
+percent of frames.** Neither is the constraint. **There is nothing at highway speed for a firmware
+authority patch to buy** -- which also agrees with the already-retracted "PSCM cannot hold 2.5"
+story (commit 585ef47afb: the knee was the gain ramp, not the rack).
+
+What DOES cap curve speed is above the rack entirely: SCC's corner-speed formula (which he does not
+use), and our own gain schedule sitting at 0.834 -- and raising THAT is the recommendation he
+correctly refused, because a gain multiplies the unwind overshoot by the same factor.
+
+**Firmware would help in exactly ONE regime: low-speed tight turns**, where the PSCM returns 0.784
+and falls toward 0.743 as the command grows. That is the Taco Bell case and nothing else.
+
+### CURVATURE vs ANGLE IS A REAL TRADE, AND HE IS ALREADY ON THE RIGHT SIDE FOR HIS GOAL
+
+    curvature mode   PSCM closes its OWN loop -> delivery ~1.0 by design, and it would unwind
+                     under closed-loop correction. BUT the signal caps at a 48 m radius, at any
+                     speed, so an intersection turn is impossible. Taco Bell drive: dead.
+    angle mode       open-loop feedforward, delivery 0.78-0.98. Ceiling scales with 1/speed, so
+                     it reaches 11.2 m at 10 mph. Taco Bell drive: possible.
+
+Angle mode already measures **0.979 at highway**, so switching to curvature would buy ~2% there and
+cost the tight-turn future outright. **He is on the right mode.** (He has also refused going back to
+curvature twice; this is the measured reason he was right, not a reason to re-raise it.)
+
+### "CAN'T YOU VIBE-CODE A TORQUE INPUT?" -- NO, AND HE DOES NOT NEED ONE
+
+Adding a torque command means authoring a CAN handler into a 1 MB AUTOSAR V850 binary with no
+source, no toolchain for the target, no bench, and ASIL-D supervision that would trap it -- when
+that repo built a patched Ghidra SLEIGH spec and a 99.81%-coverage lifter merely to find which
+EXISTING bytes to change. But the stronger answer is that the feature would be redundant: his LCA
+geometry path already achieves 0.979 at highway. **The torque interceptor exists for cars with no
+working lane-centering interface. He has one.**
+
+### IS CURVATURE MODE DEAD? NO -- IT IS BETTER AT THE ONE THING HE COMPLAINS ABOUT
+
+His question, and it deserves a straight answer instead of the one-line dismissal it got first.
+
+**What curvature mode has that angle mode structurally cannot:** the PSCM closes ITS OWN loop on
+commanded curvature and keeps correcting until the car is there. Angle mode is open-loop
+feedforward -- it commands and hopes. **On the UNWIND that is exactly his complaint:** measured
+2026-09-04, angle mode carries PAST on exits (highway unwind ratio 1.070, p90 1.59, p90 +3.18 deg),
+and an open loop has no mechanism to pull it back. A closed loop would.
+
+**HONEST LIMIT ON THAT CLAIM: there are ZERO curvature-mode frames in any pulled log** -- 119,450
+angle, 0 curvature. So it is a code-reading claim about his car, NOT a measurement, and it must be
+labelled that way until a curvature drive exists. What IS measured is that angle mode already
+tracks **0.979** at highway, so the STEADY-STATE gain from switching is about 2%. Any real benefit
+would be in the transient, which nothing on disk can score.
+
+**What curvature costs: the 48 m radius cap, at any speed, forever.** Intersection turns become
+impossible. So it is not "better" -- it is better ABOVE ~48 m and unusable below.
+
+**AND THE MODE IS RE-READ EVERY FRAME, WHICH MAKES A SPEED-SCHEDULED SWITCH MECHANICALLY POSSIBLE.**
+`carcontroller.py:173-174` calls `update_lateral_params` / `update_angle_params` inside
+`CarController.update()`, so `self.primary_lateral_control` refreshes per frame and is consumed at
+lines 260/268/324 to choose the message. **Curvature above a speed threshold, angle below**, would
+give closed-loop tracking on highway curves AND angle-mode reach at intersections. Not built, not
+trivial (the two modes send different messages and the transition needs designing), but the
+plumbing does not forbid it. **This is the one genuinely new architectural idea from this thread.**
+
+### WHAT ELSE IN THAT REPO APPLIES, ITEM BY ITEM -- HE ASKED AND IT WAS NOT ANSWERED
+
+    LKA 10 s lockout        SOLVED there (LKA_NO_LOCKOUT.VBF, flashed+confirmed) and IRRELEVANT
+                            here: his car has no lockout. Tonight's logs show continuous latActive
+                            across whole segments; he drives hands-off for minutes.
+    APA high-speed          parking assist. Unrelated feature, no bearing on lane centering.
+    APA standstill          same.
+    LCA enable              them reaching for the interface he already has. Half-works.
+    min-speed floor         theirs is ~40 kph on stock LKA. His LCA has no such floor.
+
+**"Or any other modifications like that?"** Conceivable on a cal: authority tables, speed floors,
+rate limits -- all NUMBERS in existing tables. Not conceivable: a new CAN handler, a torque input,
+or any new BEHAVIOUR, because that is authoring code into a 1 MB AUTOSAR V850 image with no source,
+no toolchain and ASIL-D supervision. **The line is "change an existing number" vs "add a feature",
+and everything that repo shipped is on the first side of it.**
+
+### CORRECTION: "NOTHING FOR FIRMWARE AT HIGHWAY SPEED" WAS TOO NARROW. HE CAUGHT IT.
+
+*"I get steering exhausted warnings all the time so I don't think it's doing as well as I could on
+highways."* Measured `steerSaturated` across the 2026-09-04/05 pull -- 1545 frames, 33 episodes,
+0.44% of latActive frames:
+
+    speed     p10 28.9   p50 35.2   p90 55.6 mph
+    radius    p10  111   p50  152   p90  286 m
+    delivery  p10 0.67   p50 0.76   p90 0.85
+    lat accel p10 1.15   p50 1.67   p90 3.40 m/s^2
+    hands ON during saturation: 1%
+
+**The saturation is at 29-56 mph on 111-286 m curves, hands off, delivering 0.76.** The "PSCM tracks
+0.979, nothing for firmware to buy" finding was measured at >= 55 mph on 500-2000 m radii. **Both
+numbers are true and the wrong one was generalised.** He was told there was nothing there; there is.
+
+**SO THE REGIMES ARE THREE, NOT TWO:**
+
+    >55 mph, >500 m      PSCM 0.979    fine. Firmware buys nothing. Limit is our gain + ISO clamp.
+    29-56 mph, 111-286 m PSCM 0.76-0.83, 33 saturation episodes  <- HIS ACTUAL COMPLAINT
+    <25 mph, tight       PSCM 0.78     the Taco Bell case
+
+**A firmware authority patch would help in the middle band too**, which is the one he drives daily
+and the one where `bp_lateral_by_radius` already put 112 of 301 episodes (45-60 mph). Median lateral
+accel during saturation is only 1.67 m/s^2 -- **modest cornering with poor delivery, not physics** --
+so it is an authority/tracking shortfall, not the tyres or the ISO clamp.
+
+**AND THE FILTER LESSON, for the sixth time in this file:** the highway analysis gated on
+`v >= 55 mph`, which excluded the entire population where the failure lives. `mapd_v2_path.py`
+already records the sharper version of this -- *"SATURATION IS NOT THE FAILURE. RUNNING WIDE IS"* --
+and delivery during these episodes is 0.76, so the car IS running wide. **Before concluding a
+subsystem is healthy, check whether the gate excluded the frames the driver is describing.**
+
+### CURVATURE MODE IS CLOSED. THIRD REFUSAL. STOP RAISING IT.
+
+*"No, we shouldn't go back to curvature."* -- 2026-09-05, after two earlier refusals already
+recorded in this file. It was raised a FOURTH time that night on the strength of the closed-loop
+argument below, and he said no again.
+
+**The technical case does not matter any more and must not be re-litigated.** Same shape as
+`pinned-holds-rejected`: he has decided, the decision is his to make, and re-deriving a good reason
+is not new information. Do not propose a curvature drive, a curvature A/B, or a speed-scheduled
+mode switch. The analysis stays in this file as a record of what was considered, not as a pending
+idea.
+
+**AND IT NARROWS THE 29-56 mph SATURATION PROBLEM TO ONE LEVER.** With curvature off the table:
+
+    raise the gain          trades running-wide for MORE unwind overshoot -- the same knob, and
+                            he refused that on 2026-09-04 for exactly that reason
+    shorten the boundary    same trade, narrower band (this is a15672fb15 on PR 192)
+    curvature mode          REFUSED, permanently
+    PSCM authority          the ONLY lever that raises delivery WITHOUT raising the command
+
+**So the firmware cal read is not one option among several -- it is the only remaining path to the
+thing he actually complains about.** Everything in software trades saturation against overshoot,
+because both scale with the same multiplier.
+
+### CORRECTION: THE F-150 WORK IS A CLOSE TEMPLATE FOR THIS CAR, NOT A DISTANT ONE
+
+He asked whether the whole repo had been read. It had not -- only the README, architecture,
+openpilot notes and one findings file. The `analysis/f150/` directory is most of the repo and it
+contains the two most relevant files in it for this car. **Reading them revises the "fourth
+platform, months of work, from scratch" answer given earlier the same night.**
+
+**ALL FOUR MESSAGES IN THEIR F-150 LCA TABLE ARE IN HIS DBC:**
+
+    0x3D3  LateralMotionControl      979  <- his primary command, the one openpilot drives
+    0x3D6  LateralMotionControl2     982
+    0x3D7  Steer_Assist_Data         983
+    0x3CC  Lane_Assist_Data3_FD1     972
+
+So the F-150 PSCM speaks the SAME lateral protocol as his Edge unit. The Transit does not -- it is
+the `0x3CA LKA` + `0x213 DesTorq` architecture. **The earlier framing ("F-150 is not
+cross-compatible with Transit/Escape, so Edge is a fourth platform") is true and was used to imply
+the wrong thing: it is the F-150 work that transfers, and it transfers well.**
+
+**AND HE HAS LKA AND APA TOO** (Edge PSCM is a full ADAS module), so the F-150 feature-envelope
+block -- `cal+0x00B8..0x0147`, 144 bytes of float32 defining the speed/angle/torque window for LKA,
+LCA/BlueCruise and APA together -- is directly analogous rather than partly applicable.
+
+### TWO PATCHES, TWO DIFFERENT PROBLEMS OF HIS
+
+**1. THE SHARED ANGLE SCALER -- `analysis/f150/angle_scale_patch.md`, a TWO-BYTE patch.**
+
+    0x1009690e   movhi   0x4480, r0, r11   ; r11 = float 1024.0   <- the scale factor
+    0x10096912   mulf.s  r11, r17, r12
+    0x10096916   trncf.sw r12, r10
+
+One function decodes the wire-domain angle command and converts it to the controller's integer
+domain, and **every one of the six steering modes goes through it -- LKA, LDW, LCA, TJA, APA,
+BlueCruise.** The scale is a single `movhi` immediate because float32 1024.0 has zero low bits.
+Change `0x4480` and the whole car's angle interpretation scales.
+
+**WHAT THAT WOULD BUY HIM: it breaks the SIGNAL CEILING.** `LatCtlPath_An_Actl` maxes at 0.5235 rad,
+which caps him at an 11.2 m radius at 10 mph and is 100% consumed by a 10 m turn. With a 2x scaler
+openpilot commands half the angle for the same result, so the Taco Bell radius comes back inside the
+signal range with headroom. **It does NOT fix saturation** -- tracking degrades WITH command size
+(0.892 -> 0.743), which is authority, not scale; scaling just reaches the authority wall sooner.
+
+**2. THE AUTHORITY BELL CURVE -- `cal+0x1660`/`0x25B4`/`0x350C`, 12-entry u16.** This is the
+saturation one, and therefore the one for the 29-56 mph / 111-286 m band where he actually gets
+steering-exhausted warnings.
+
+### AND IT MAY BE AN AFTERNOON, NOT MONTHS
+
+**F-150 RE was "a one-afternoon job" and Transit is a multi-day slog, for ONE reason:** F-150 PSCM
+is baseline Renesas V850, which stock Ghidra 12 lifts cleanly; Transit is RH850-extended, whose
+extension opcodes break the decompiler. **His Edge PSCM is 2019/2020 -- the same generation as the
+2021 F-150 -- so baseline V850 is the likely case**, which would put it on the easy path.
+
+**The method is fully documented and transferable** (`angle_scale_patch.md`, "the xref trick"):
+locate the CAN RX handlers for `0x3CA`, `0x3D3` and `0x3A8`, follow each call chain to physical
+units, find the function appearing in ALL THREE -- that is the shared angle reader -- then read its
+last basic block for the `movhi` float constant.
+
+**So the honest revision: this is not "reverse-engineer a module from scratch." It is "port a
+documented procedure to a new image of the same protocol family."** Still needs a firmware dump, a
+bench, Ghidra and someone to flash and drive it -- none of which I can do -- but the earlier "months
+of work" framing was wrong and was based on not having read the repo.
+
+### FULL READ OF ford-pscm-re: TWO CORRECTIONS, AND THE TEST THAT DECIDES IT
+
+Read the project files (the 254-markdown count is mostly vendored Binary Ninja / unicorn / fmt docs;
+the actual project is ~65 files). **Two things said earlier the same night are now withdrawn.**
+
+**WITHDRAWN 1 -- "his Edge is probably the easy Ghidra path". THE REPO CONTRADICTS ITSELF.**
+
+    README.md + angle_scale_patch.md   Transit = RH850 (hard), F-150 = baseline V850 ("one-afternoon
+                                       job", stock Ghidra lifts it clean)
+    verdict.md                         F-150 = RH850, Transit = the OLDER V850E2M
+
+**Both cite the same evidence string `AH850S54GxxxxxV101`, and they are exactly inverted.** So the
+claim that an Edge PSCM would land on the easy path rests on contradictory ground and must not be
+repeated. Which MCU his module runs is unknown and is answered by the dump, not by inference.
+
+**WITHDRAWN 2 -- the +184% headroom figure does NOT apply to this car.** The actual tables:
+
+    Transit stock LKA        [0,   0.2, 0.4, 0.7, 1.0, 1.5, 2.0, 7.0 ]  Nm
+    F-150 LCA/BlueCruise     [0.0, 0.7, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5 ]  Nm   <- the patch TARGET
+    speed axis (+0x0404)     [0,   10,  30,  50,  70,  90,  130, 250 ]  kph
+
+**`LKA_FULL_AUTHORITY.VBF` sets Transit's table TO the F-150 lane-centering envelope.** His Edge is
+a BlueCruise-class module running LCA, so **his table is plausibly already at or near that envelope
+-- the patch's destination is his starting point.** The +184% was Transit going from crippled to
+normal, not normal to enhanced. Going ABOVE the LCA envelope is possible (their 2X file proves the
+table accepts it) but nobody has drive-confirmed above it.
+
+**WHAT SURVIVES AND IS GENUINELY USEFUL:**
+
+- **No runtime signature verification of the calibration.** `verdict.md`: 1.5 MB of strategy has zero
+  SHA/RSA constants and no embedded public key; the SBL's hardware SHA-256 verifies only ITSELF.
+  **A patched cal flashes and runs.** That was the biggest open "will this even work" question.
+- **The cal is mostly empty:** 195,584 bytes, **only ~15.7% live data**, 84% reserved zero. And only
+  ~0.5% is statically attributable to a reader function -- everything else goes through AUTOSAR
+  `Rte_Prm` pointer tables, so table ROLES come from shape and cross-vehicle diffing, not xrefs.
+- **Ford made BlueCruise LESS aggressive than baseline in places** -- the BDL->EDL diff REDUCES the
+  bell-curve authority peak 44->32 and HALVES the ramp schedule. Counterintuitive, and a caution
+  against assuming the BlueCruise cal is the maximum.
+- The angle-scaler method and the concrete F-150 offsets (`+0x0120` LCA engage-min = 10.0,
+  `+0x0114` LKA min-speed, `+0x07ADC` LKA arm timer) are a real template.
+
+### THE ONE TEST THAT DECIDES WHETHER ANY OF THIS IS WORTH DOING
+
+**Dump his cal, find the torque-vs-speed table, and compare it to
+`[0.0, 0.7, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5]`.**
+
+    his table is LOWER   -> real headroom, and the saturation at 29-56 mph has a firmware answer
+    his table is AT/ABOVE-> the firmware idea is much weaker than tonight implied, and the
+                            remaining lever is the ANGLE SCALER for signal range, not authority
+
+**Do not spend effort on this before that comparison.** It is a read, it is cheap, and it is the
+difference between a project and a dead end. Everything else in this thread is downstream of it.
+
+### THE STEERING-EXHAUSTED ALERT IS MOSTLY NOISE, AND IT IS GATED NOW (the 88% below is WITHDRAWN)
+
+*"Those steering exhausted warnings drive me crazy."* Measured lane position during every
+`steerSaturated` frame in the 2026-09-04/05 pull:
+
+                         n        p50      p90     p99     max
+    during saturation   1537    0.18 m    0.68    1.56    1.67
+    normal driving    294093    0.10 m    0.36    0.93    1.93
+
+    33 episodes, WORST lane offset in each:
+      never exceeded 0.30 m   26 of 33  (79%)
+      ever exceeded  0.50 m    4 of 33  (12%)
+      ever exceeded  0.75 m    3 of 33  (9%)
+
+**When the alert fires the car is typically 18 cm off centre in a 3.7 m lane -- barely worse than
+its normal 10 cm.** The alert is right 9-12% of the time.
+
+**AND HE ALREADY TOLD US THE RIGHT RULE.** `mapd_v2_path.py` records his own words -- *"I just
+ignore most steering saturated errors until it starts to stray enough from my lane"* -- and the
+conclusion drawn there, **"SATURATION IS NOT THE FAILURE. RUNNING WIDE IS."** That principle was
+used to tune SCC's corner speed and **never applied to the ALERT ITSELF**, which is where he
+actually experiences it.
+
+**THE COST OF LEAVING IT: he is trained to ignore it, and 3 of the 33 episodes reached 0.75-1.67 m
+-- nearly half a lane.** Those are the ones worth seeing, and they arrive in the same costume as the
+30 that are not. An alert with a 1-in-10 hit rate is worse than no alert, because it destroys the
+signal it exists to carry.
+
+**THE FIX, SPECIFIABLE FROM THIS DATA: gate the alert on lane deviation, ~0.5 m. 33 alerts -> 4**,
+keeping every episode where he genuinely went wide. No firmware, no hardware, no driving change --
+it changes only what he is TOLD, not what the car does.
+
+**BUILT 2026-09-05, and the 88% in this heading is WRONG -- see the correction below.**
+
+## 2026-09-05: THE ALERT GATE IS SHIPPED. AND THE 88% WAS A SMALL-SAMPLE NUMBER.
+
+`bluepilot/selfdrive/selfdrived/steer_saturated_gate.py`, one condition in `selfdrived.py:479`,
+toggle **Only Warn When Out Of Lane** (`SteerAlertLaneGate`), ON.
+
+**THE FIRST THING TO FIX IS THE FIGURE THIS FILE HAS BEEN CARRYING.** "88% noise, 33 alerts -> 4"
+came from 33 episodes on ONE pull, scored as "worst offset never exceeded 0.30 m", and it never
+asked what the gate does with an episode whose lane it cannot measure. Re-run across every route on
+disk -- **701 segments, 24 routes, 61 episodes, 3446 alerting frames**:
+
+                          n         p50      p90     p99     max
+    while alerting       2998     0.24 m    0.67    1.43    1.67
+    normal driving    2403770     0.06 m    0.22    0.70    1.83
+
+    threshold   0.20   0.30   0.40   0.50   0.60   0.75   1.00
+    shown         44     35     29     24     22     16     14
+    silenced      17     26     32     37     39     45     47
+
+**61 alerts become 24, not 4. A 61% cut, not 88%.** Still the largest free improvement on the
+lateral list, and still worth having -- but the number he is told has to be the one from the whole
+sample, and the small-sample version overstated it by nearly a third. **Fifth instance in this file
+of a rate published before the denominator was checked.**
+
+**14 OF THE 61 ARE UNMEASURABLE AND ALWAYS FIRE.** That is the fail-open path, it is 23% of all
+alerts, and most of it is 15-40 mph on unmarked streets and intersections where the model has no
+lane lines. It is the remaining noise and it STAYS: the only other position source is `roadEdges`,
+which measures past the shoulder and has already caused one bug here. Anyone tempted to shrink that
+number should read the road-edge rule first.
+
+**WHY IT LIVES WHERE IT DOES.** `steerSaturated` is upstream's event, so the fork owns a GATE rather
+than the event: `should_alert(self.sm)` is one term added to upstream's existing `if`, and the
+arithmetic sits in a fork-owned module that imports nothing but `math`. That import list is
+load-bearing -- `tools/bp_steer_saturated.py` IMPORTS `lane_deviation` from it, and an rlog tool has
+already called `capnp.load()`, so a module reaching `opendbc.car.*` would abort the interpreter.
+
+**NO NEW CAPNP FIELD, AND THAT IS NOT THE "COMPUTED AND NEVER RENDERED" BUG.** Every input is
+already logged -- `modelV2.laneLines` / `laneLineProbs` for the deviation, `controlsState` and
+`carState` for the trigger -- and the tool runs the SHIPPED function over them, so a drive explains
+every suppression exactly. Publishing a field would have added wire surface to duplicate what the
+route already carries.
+
+**THE TOOL RECONSTRUCTS THE ALERT AT 100 Hz AND MUST KEEP DOING SO.** The first version read
+`onroadEvents` and undercounted by thirty: selfdrived logs that stream "every second or on change"
+(selfdrived.py:666), so a 3 s alert leaves ~3 samples and a `max()` over them is a max over three
+arbitrary instants. It prints the raw `onroadEvents` count beside the reconstruction as the
+cross-check (122 against 3446 across the pull, which is the expected ratio).
+
+**MUTATION-TESTED, 11 mutants, 0 survivors** -- including the two that matter: dropping the
+`deviation is None` branch (unmeasurable would go quiet) and deleting the latch reset (one wide
+corner would alert for the rest of the drive).
+
+### AND THE SUNNYLINK AUDIT HAD A FIFTH BLIND SPOT. FOUND THE WAY THE OTHER FOUR WERE.
+
+Adding the param, adding `SteerAlert` to `OUR_PREFIXES`, and running the audit BEFORE writing any
+YAML -- it reported **42/42, 0 missing**.
+
+`collect_ui_settings` required a `param=` kwarg. The BluePilot settings screen's `toggle_item` does
+not take one: it takes `initial_state=self._safe_get_bool(self._params, "X")` and
+`callback=lambda state: self._toggle_callback(state, "X")`. **So every toggle on that screen has
+always been invisible to the audit** -- `enable_lane_positioning_ang` and
+`enable_lane_positioning_curv` included, during the exact period this file was recording that three
+members of that family reached `settings_ui.json` only by hand-editing.
+
+`_toggle_param` now reads the name out of those two kwargs and takes it only when both name the SAME
+string -- a toggle that reads one key and writes another is a bug, not a setting. The audit went
+42 -> 49 known settings, six of the seven newly-visible ones were already reachable, and the new one
+was correctly reported missing. **The check is still the same one: add a setting and watch it FAIL.
+This tool has now been green through five different structural blind spots.**
+
+## 2026-09-05: THE SPEED FLOOR IS THE WRONG LEVER, AND I NAMED IT AS THE RIGHT ONE
+
+He asked for the cost of raising `sat_check_min_speed` to be measured. `tools/bp_steer_alert_floor.py`
+re-simulates `_check_saturation` at arbitrary floors and dwell times over recorded routes, and
+**validates against the flag the car published: 99.99% agreement at the shipped 5.0 m/s / 1.0 s over
+4,080,086 angle-mode frames.** A counterfactual that cannot reproduce the factual is not a
+measurement, so that line is printed first and everything under it is worthless without it.
+
+**MY CLAIM THAT IT WAS "THE ONE CHANGE THAT WOULD TAKE THE REMAINING COUNT DOWN MEANINGFULLY" IS
+WITHDRAWN.** It rested on "11 of the 14 unmeasurable episodes are under 40 mph", which is true and
+says nothing: the base `LatControl` floor is **22.4 mph**, and only TWO of those 14 are below it.
+Under 40 mph is not under 22. **A shape argument was let stand as a magnitude argument** -- the same
+failure as the ba20937aac write-up, where a real mechanism moved the wheel 0.03 degrees.
+
+    floor   mph    episodes  on screen   removed   ...that were on screen   supervision lost
+     5.0   11.2       60        23          -              -                      -    SHIPS
+     8.0   17.9       59        22          1              1                    1.3%
+    10.0   22.4       57        20          3              3                    3.7%
+    12.0   26.8       57        20          3              3                    5.8%
+    14.0   31.3       42        16         17              7                    9.1%
+    16.0   35.8       36        13         24             10                   11.6%
+    18.0   40.3       30        10         30             13                   13.9%
+
+**Every alert a defensible floor removes is one the lane gate was SHOWING**, because the alerts that
+survive the gate ARE the low-speed unmeasurable ones. That is not a coincidence, it is the two
+mechanisms being anti-correlated by construction. Going far enough to matter (18 m/s, 40 mph) takes
+two MEASURED-WIDE episodes with it -- 0.82 m and 0.76 m, both at 36 mph -- and stops watching 14% of
+engaged driving.
+
+**A FLOOR REMOVES SUPERVISION, NOT JUST ALERTS.** Below it `sat_time` never accumulates, so the car
+can saturate indefinitely and nothing can ever fire. That column is in the tool output because a
+count of alerts cannot show it.
+
+### THE DWELL TIME IS BETTER AIMED AND STILL NOT FREE
+
+`sat_limit` is `CP.steerLimitTimer`. Grepped across the whole tree it reaches exactly one line --
+`latcontrol.py:9` -- and its capnp comment reads "time before steerLimitAlert is issued", so it
+**cannot change how the car drives**; it only decides how long a saturation must persist before he
+is told. Ford already carries 1.0 s, the longest of any brand (most are 0.4).
+
+    dwell   episodes   on screen   removed   ...that were on screen
+     1.0       60         23          -             -                SHIPS
+     1.5       30         16         28             7
+     2.0       20          9         39            12
+     3.0       10          6         50            17
+
+1.5 s halves everything and costs no supervision at any speed -- **but three of the seven on-screen
+alerts it removes were measured genuinely wide: 0.76 m at 36 mph, 0.75 m at 75 mph, 0.53 m at
+71 mph.** Those are the events the alert exists for.
+
+### VERDICT: SHIP NEITHER. THE LANE GATE IS THE ONLY LEVER HERE THAT DISCRIMINATES.
+
+A floor asks how fast the car was going and a dwell asks how long it lasted; neither asks whether
+anything was wrong. The gate asks the only question that separates the two populations, which is why
+it cuts 61 alerts to 24 without losing a single wide one, and why both of these cut real warnings the
+moment they cut anything. **Do not raise either on the strength of an alert count alone.**
+
+**AND THE TWO TOOLS DISAGREE BY ONE EPISODE (61/24 against 60/23), WHICH IS EXPECTED AND IS STATED
+RATHER THAN RECONCILED AWAY.** `bp_steer_saturated.py` reads the flag the car published;
+`bp_steer_alert_floor.py` re-simulates it and counts angle-mode frames only. 476 frames of 4.08 M
+differ. Quote whichever tool produced a number, and never mix them in one table.
+
+**A MATCHING BUG IN THE FIRST VERSION DOUBLED THE COST COLUMN.** Episodes were matched across
+settings by rounded start time -- but raising either lever DELAYS accumulation, so the same
+saturation fires later and reads as one episode lost plus one new. Now matched on the two windows
+being within 3 s of overlapping. The 1.5 s row went from "19 lost" to "13 lost" on the first pull
+that exposed it.

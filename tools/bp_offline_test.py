@@ -56,6 +56,8 @@ DEFAULT_TARGETS = [
   # Named rather than by directory: sunnypilot/selfdrive/car/tests/ also holds device-only tests.
   "sunnypilot/selfdrive/car/intelligent_cruise_button_management/tests/",
   "opendbc_repo/opendbc/sunnypilot/car/ford/tests/",
+  "bluepilot/selfdrive/car/tests/test_bp_card_publisher.py",
+  "bluepilot/selfdrive/selfdrived/tests/test_steer_saturated_gate.py",
   # (that directory glob already covers test_button_mapping.py)
   # The whole folder: unconfirmed lead, passing assist, the adjacent-lane radar work and the
   # maneuver dry run all live here and all collect offline.

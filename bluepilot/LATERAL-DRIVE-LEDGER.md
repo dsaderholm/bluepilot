@@ -36,6 +36,7 @@ answer.
 | delivery | `abs(curvature) / abs(desiredCurvature)` | STEADY STATE (desired stable within 12% for 0.5 s), hands off, >= 40 mph |
 | revs/min | tracking-error sign flips per minute of genuine turning | `abs(desired) > 0.0007`, hands off |
 | weave | lane-centre offset from `modelV2.laneLines[1..2].y[0]` | straight road (6 s median under 0.00025 1/m), hands off, >= 70 mph |
+| steer alerts | `tools/bp_steer_saturated.py` | selfdrived's own alert condition reconstructed at 100 Hz; episodes, not frames |
 
 Delivery is the steady state the car SETTLES at, which measures GAIN. It cannot move on a change
 that targets the transient, and quoting it as "no effect" for one of those is wrong.
@@ -132,6 +133,50 @@ not anything the driver did, because the settings are constant across a row. On 
 centering in the same edit, so its across-the-board drop cannot be attributed to either one.
 `00000400` seg 0-18 held the pre-change settings but produced no qualifying steady-state frames, so
 the one same-road A/B in the whole drive is empty.
+
+## THE "PSCM CANNOT HOLD 2.5 m/s^2" STORY IS NOT SUPPORTED. 2026-09-03.
+
+He asked where the 2.5 recommendation came from. Re-deriving it destroyed it, in three steps.
+
+**1. THE ORIGINAL WAS A BIN EDGE, FROM ONE ROUTE, WITH A CONFOUND.** The 2026-08-19 table binned
+lateral accel 0.5 wide and read "deviation limiter quiet to 2.5, then 9.1%, then 27.4%". 2.5 is the
+EDGE of the last clean bin, so the knee could sit anywhere from 2.3 to 2.9 -- and hands-on% climbs
+the same bins (37% -> 56% -> 90%). The deviation limiter fires when commanded and measured curvature
+diverge, which is what a DRIVER STEERING looks like. It may have been measuring him.
+
+**2. RE-MEASURED HANDS-OFF, POOLED, IT LOOKED LIKE A KNEE AT 2.0** -- delivery 0.89-0.97 below 1.75,
+then 0.74-0.82 from 2.0 up, across 48,000 frames of the sweep. **That was pooled across his entire
+tuning sweep**, which is the error this file exists to prevent.
+
+**3. SPLIT BY SETTINGS, THE KNEE BELONGS TO THE GAIN RAMP, NOT THE CAR:**
+
+| route | ramp | 1.75 | 2.00 | 2.25 | 2.50 |
+|---|---|---|---|---|---|
+| `00000405` | high 0.51, INVERTED | 0.888 | **0.711** | **0.718** | — |
+| `00000402` | high 0.51, INVERTED | 0.911 | — | — | — |
+| `0000041c`/`d` | high 0.794, RISING | 0.858 | **0.809** | **0.866** | **0.886** |
+
+At `high 0.51` the incremental gain on a tight curve is 0.562 -- the schedule cuts the command 44%
+ON PURPOSE. Delivery is actual/commanded, so an inverted ramp produces exactly this signature. **The
+"car cannot hold it" reading was the setting doing what it was set to do.**
+
+**WHAT IS ACTUALLY ESTABLISHED:** on his current rising ramp there is NO measured tracking
+degradation up to 2.5 m/s^2, which is as high as openpilot ever commands hands-off. **There is no
+evidence of a PSCM tracking limit anywhere in the range openpilot uses.**
+
+**WHAT REMAINS UNKNOWN, and it is the honest gap:** 2.5-3.0 has almost no hands-off data because
+openpilot does not command there, and above 3.0 is unreachable -- `MAX_LATERAL_ACCEL_NO_ROLL = 3.0`
+in `clip_curvature` is an EU-guideline limit applied to every car, upstream of the Ford layer. So
+the PSCM ceiling has never been tested, and cannot be from recorded drives.
+
+**CONSEQUENCE FOR THE RECOMMENDATION.** 2.5 still stands as a target, but for a DIFFERENT reason
+than it was given: not "the car cannot do more", but "it is the top of the measured-clean range and
+openpilot's own ceiling is 3.0 anyway". And the binding constraint is neither -- it is
+`SmartCruiseControlMapHighSpeedFactor` capping at 100, which pins SCC-Map to mapd's 2.2.
+
+**AND IT WEAKENS THE INTERCEPTOR CASE.** The argument was that the PSCM cannot hold his corner
+speeds. That is not measured. What IS measured is a 3.0 software clamp he cannot exceed with any
+hardware.
 
 ## Straight-road weave -- THE REAL BASELINE, 2026-09-03, 65 mph floor
 
@@ -259,8 +304,119 @@ python tools/bp_lateral_gain.py <dir>               # applied gain + ramp shape,
 python tools/bp_lateral_matched.py <dir>            # delivery at matched curvature
 python tools/bp_lateral_curve_cycle.py <dir>        # the 6 s curve oscillation, the only metric that
                                                     # tracks what he reports on curves
+python tools/bp_lateral_phases.py <dir>             # turning-in / holding / unwinding, in DEGREES --
+                                                    # MANDATORY before any gain recommendation
 ```
 
 `bp_lateral_rate.py` and `bp_lateral_episodes.py` use a 2 s window and are STRUCTURALLY BLIND to the
 ~4.7 s limit cycle. Do not rank two settings with them; that mistake produced a recommendation he
 had already rejected from the seat.
+
+---
+
+## 2026-09-04/05: eight routes, 109 of 115 segments
+
+Raw logs at `Sandbox/drivelogs/2026-09-04_lc_035_vs_045/`. Config read off the DEVICE with its
+mtime, converted to local time, because a raw `stat` line is UTC and quoting one unconverted is how
+this drive got mis-split for an hour:
+
+    FordLowSpeedFactor_ang       1.007    2026-09-03 17:31 MDT
+    FordHighSpeedFactor_ang      0.804    2026-09-03 17:31 MDT   (wire-recovered 0.794 -> 0.804)
+    FordHighSpeedDampening_ang   0.78     2026-09-01 01:29 MDT
+    lane_centering_strength_ang  0.45     2026-09-04 10:37 MDT   <- the split
+    lane_centering_damping_ang   0.3      2026-09-01 18:45 MDT
+
+    0000041e 09-03 12:09   0000041f 09-03 17:00   00000420 09-03 19:30   } LC 0.35
+    00000421 09-04 08:58   00000422 09-04 09:08                          }
+    00000423 09-04 10:28   SPANS the change (started 9 min before it)
+    00000424 09-04 17:30   00000425 09-04 18:40                          } LC 0.45
+
+### Delivery by PHASE -- the number that matters, and the one a median hides
+
+`tools/bp_lateral_phases.py`. Steady state is one point in the middle of a spread; the driver feels
+the ends.
+
+| band | phase | n | ratio | p90 | median deg | p90 deg | p99 deg |
+|---|---|---|---|---|---|---|---|
+| tight <500 m | turning in | 3085 | 0.665 | 0.86 | -3.29 | -1.16 | +0.44 |
+| tight <500 m | holding | 21029 | 0.868 | 1.01 | -1.30 | +0.10 | +2.29 |
+| tight <500 m | **UNWINDING** | 2105 | **1.018** | 1.33 | +0.16 | **+3.21** | **+10.81** |
+| highway 500-2000 m | turning in | 9976 | 0.440 | 0.85 | -1.37 | -0.40 | +0.57 |
+| highway 500-2000 m | holding | 24980 | 0.835 | 1.06 | -0.58 | +0.17 | +0.98 |
+| highway 500-2000 m | **UNWINDING** | 8446 | **1.070** | 1.59 | +0.05 | **+3.18** | **+8.98** |
+
+**Lazy in, overshoot out.** The median exit overshoot is imperceptible; the TAIL is what he reports.
+
+### Where the missing curvature goes
+
+| band | n | mph | trim+clip | our gain | PSCM |
+|---|---|---|---|---|---|
+| tight <500 m | 2294 | 39.2 | 1.041 | **0.985** | **0.828** |
+| highway 500-2000 m | 844 | 72.6 | 1.039 | **0.829** | **0.997** |
+
+**The flat 0.86 delivery means two different things.** At highway the gain is short and the car
+tracks fine -- settings close it. At 40 mph the gain is already at unity and the PSCM returns 0.83 --
+**no setting in this fork reaches that column.** Speed-controlled, PSCM tracking falls 0.892 -> 0.743
+across 45-60 mph as the command grows: a soft, progressive authority ceiling, and the first direct
+measure of it on this car. **This is the before/after metric for the torque interceptor.**
+
+### LC 0.35 vs 0.45 -- NO CONCLUSION, and the reason is the sample
+
+Matched on radius AND speed (matching radius alone puts interstate at 70 mph beside surface streets
+at 30), UNWINDING only:
+
+| radius | speed | LC | n | ratio | p90 | med deg | p90 deg |
+|---|---|---|---|---|---|---|---|
+| 100-286 m | 20-35 | 0.35 | 727 | 0.999 | 1.25 | -0.02 | +3.78 |
+| 100-286 m | 20-35 | **0.45** | **79** | 0.900 | 2.46 | -1.17 | **+19.54** |
+| 286-500 m | 20-35 | 0.35 | 1129 | 1.108 | 1.51 | +0.85 | +3.43 |
+| 286-500 m | 20-35 | 0.45 | 143 | 1.070 | 1.46 | +0.60 | +4.05 |
+| 500-2000 m | 20-35 | 0.35 | 4112 | 1.140 | 1.83 | +0.37 | +2.22 |
+| 500-2000 m | 20-35 | 0.45 | 1073 | 0.977 | 2.23 | -0.03 | +2.68 |
+
+Every median equal or slightly better at 0.45. The one dramatic row is **n=79** -- under a second of
+road, one or two turn exits. **Not a finding.** The straight-road weave scores ZERO windows at 0.45:
+83,669 curve frames at 0.35 (p50 39 mph) against 8,932 at 0.45 (p50 21 mph), with no overlapping
+road type. **VERDICT: keep 0.45.** One ordinary drive with highway and 35-50 mph curves settles it.
+
+### The exit-biased blend has run to completion ONCE in 44 segments
+
+`blendWeight` is pinned at its 0.500 seed on anything bent (p10 = p90 = 0.50 on tight curves). Two
+compounding causes: the gate needs a 20% fall per 0.05 s, which is this planner's ~1st percentile
+(1.03% of calls), and 87.9% of firings last a SINGLE call while the 0.1/call ramp needs four.
+BluePilot PR 191's looser 0.95 gate fires 11x more and still leaves 96% of detections under four
+calls. **The fix is a latch, not a moved number, and it needs its own drive.**
+
+### Do NOT recommend a gain off this table's steady-state column
+
+Tried on 2026-09-04, rejected from the seat -- *"Changing those settings higher will lead to more
+oversteer, though. It oversteered on that tight turn today."* He was right: a gain multiplies the
+whole ratio, so raising the low factor 1.007 -> 1.20 to fix the 0.665 turn-in takes the unwind p90
+from 1.33 to 1.58. **Run `bp_lateral_phases.py` and read all three rows before any gain advice.**
+And convert to degrees first: his 0.794 -> 0.804 step is **0.025 deg at the wheel**, an order of
+magnitude under the imperceptible-dither floor, so no drive could ever have scored it.
+
+## STEER-ALERT COUNTS ARE NOT COMPARABLE ACROSS 2026-09-05
+
+The steering-exhausted alert is gated on lane deviation from that date
+(`SteerAlertLaneGate`, ON). So "how many take-control warnings did that drive throw" measures the
+GATE from here on, not the lateral tuning, and a before/after across the change is meaningless.
+
+**`tools/bp_steer_saturated.py` is unaffected and is the row to use either way**: it reconstructs
+selfdrived's own condition from `controlsState` and `carState` rather than reading the raised event,
+so it reports what saturation the drive PRODUCED regardless of what the driver was told. Score
+lateral changes on its episode count; score the gate on its `--sweep`.
+
+The baseline, across every route on disk at the moment the gate landed:
+
+| pull | segments | episodes | shown at 0.50 m | unmeasurable |
+|---|---|---|---|---|
+| 2026-08-31 600 mi | 454 | 18 | 7 | 1 |
+| 2026-09-01 damper/gain A/B | 70 | 8 | 5 | 5 |
+| 2026-09-03 post damper | 68 | 8 | 5 | 3 |
+| 2026-09-04 LC 0.35 vs 0.45 | 109 | 27 | 7 | 5 |
+| **all** | **701** | **61** | **24** | **14** |
+
+Note the route mix dominates the raw count -- the 600 mi interstate pull threw 18 episodes across
+454 segments while the 109-segment surface-road pull threw 27. **Per minute of exposure in the
+29-56 mph / 111-286 m band is the comparison; a raw count compares the route.**

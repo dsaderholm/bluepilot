@@ -313,6 +313,14 @@ sections:
     - type: param
       key: BlinkerPauseLaneChange
       equals: true
+  - key: SteerAlertLaneGate
+    widget: toggle
+    title: '[Lateral Tuning] Only Warn When Out Of Lane'
+    description: Hold back "Take Control - Turn Exceeds Steering Limit" until the car is more than 20 inches
+      from lane center. Measured across 24 of your routes the alert fires with the car a median 9 inches off
+      center, against 2 inches in normal driving, so most of them are corners it is taking correctly - 61
+      warnings become 24, and every one where the car really went wide is kept. Nothing the car does changes,
+      and the warning still appears whenever the lane cannot be seen. Turn off for stock behavior. Default on.
   # Angle-mode tuning (hidden unless Primary Control Variable = Angle)
   - key: FordLowSpeedFactor_ang
     widget: option
@@ -380,7 +388,7 @@ sections:
     title: '[Lateral Tuning] Lane Centering Damping (Angle)'
     description: Damps the lane centering loop instead of weakening it. Lane centering is a pure proportional
       controller, so it can weave on straight roads - measured at 29-44 cm side to side. This is a lead time
-      in seconds acting on how fast the error is changing; 0 is the original behaviour. Try 0.3 to get centring
+      in seconds acting on how fast the error is changing; 0 is the original behavior. Try 0.3 to get centering
       authority back without the weave. Not yet tested on the road. Default 0.0.
     min: 0.0
     max: 1.0

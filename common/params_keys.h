@@ -857,6 +857,20 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // event happened. One setting away, and one drive settles it.
     {"lane_centering_damping_ang", {PERSISTENT | BACKUP, FLOAT, "0.0"}},
 
+    // FusionPilot: only raise "Take Control -- Turn Exceeds Steering Limit" when the car is
+    // actually out of position. See bluepilot/selfdrive/selfdrived/steer_saturated_gate.py.
+    //
+    // Measured across every reconstructed alert frame on the 2026-09-04/05 pull: the car sits a
+    // median 18 cm off centre while the alert fires, against 10 cm while it does not, and 20 of 27
+    // episodes never once reach 25 cm. It is right about one time in four and it chimes for two
+    // seconds every time -- *"those steering exhausted warnings drive me crazy"*.
+    //
+    // ON by default. It changes only what he is TOLD: `lac.saturated` still reaches every consumer
+    // it reached before, so no gain, limit or command moves. The toggle exists because this
+    // suppresses a take-control warning on a branch somebody else's car also tracks, and getting
+    // upstream's behavior back should not need a flash.
+    {"SteerAlertLaneGate", {PERSISTENT | BACKUP, BOOL, "1"}},
+
     {"disable_BP_lat_UI", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"disable_BP_long_UI", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"disable_downhill_comp_UI", {PERSISTENT | BACKUP, BOOL, "0"}},

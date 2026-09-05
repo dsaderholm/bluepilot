@@ -1515,6 +1515,21 @@ struct ControllerStateBP @0xcd96dafb67a082d0 {
   gainHighCurv         @60 :Float32;  # ramp anchor at the speed-dependent boundary
   blendWeight          @61 :Float32;  # predicted-vs-desired blend weight actually used this frame
 
+  # FusionPilot 2026-09-04: the ANGLE-mode lane-positioning settings. The bms block above carries
+  # `enable_lane_positioning_curv`, `custom_path_offset_curv` and `LC_PID_gain_UI_curv` -- all
+  # three are the CURVATURE-mode keys, and this car runs angle mode, so the five settings that
+  # actually govern it were absent from a struct whose stated purpose is one field per menu item.
+  #
+  # THAT COST A MEASUREMENT. On 2026-09-04 `lane_centering_strength_ang` was raised 0.35 -> 0.45
+  # mid-drive; `initData.params` is a boot snapshot and cannot see a mid-route change, and nothing
+  # on the wire carried the value either, so the drive could not be split on the change it was
+  # recorded to test. Every setting whose effect anyone might A/B has to reach a route.
+  bmsHighSpeedDampening        @62 :Float32;  # FordHighSpeedDampening_ang -- the ramp LEVEL
+  bmsEnableLanePositioningAng  @63 :Bool;     # enable_lane_positioning_ang
+  bmsInLaneOffsetAng           @64 :Float32;  # custom_path_offset_ang
+  bmsLaneCenteringStrength     @65 :Float32;  # lane_centering_strength_ang
+  bmsLaneCenteringDamping      @66 :Float32;  # lane_centering_damping_ang
+
   enum LateralMode {
     openpilot @0;  # BP lateral bypassed (disable_BP_lat_UI)
     curvature @1;
@@ -1844,6 +1859,16 @@ struct MapdExtendedOut @0xa30662f84033036c {
   settings @1 :Text;
   path @2 :List(MapdPathPoint);
   position @3 :MapdPosition;
+  # mapd v2.3.1 appended these two. Taken VERBATIM from pfeiferj's own custom.capnp -- the Mapd*
+  # structs are THEIRS and capnp reads by POSITION, so our copy must match theirs field for field.
+  # Additive at the end, so a v2.3.0 binary (which sends neither) still decodes correctly here.
+  #
+  # They are also the metric that scores the upgrade: v2.3.1's release note is "message publishing
+  # is now on its own thread that ensures a constant 20 hz publish rate", and mapdOut was measured
+  # at 13.85-16.16 Hz on 2026-09-04/05 with mapdExtendedOut at 0.96 Hz. Read these back on the next
+  # drive instead of re-deriving the rate from message timestamps.
+  loopRateAverage @4 :Float32;
+  loopRateMin @5 :Float32;
 }
 
 enum MapdInputType {

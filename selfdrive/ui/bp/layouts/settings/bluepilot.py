@@ -698,6 +698,20 @@ class BluePilotLayout(Widget):
     )
 
     # Show lateral control mode overlay toggle
+    self._steer_alert_lane_gate = toggle_item(
+      lambda: tr("Only Warn When Out Of Lane"),
+      lambda: tr('Hold back "Take Control - Turn Exceeds Steering Limit" until the car is more '
+                 'than 20 inches from lane center. Measured across 24 of your routes the alert '
+                 'fires with the car a median 9 inches off center, against 2 inches in normal '
+                 'driving, so most of them are corners it is taking correctly - 61 warnings become '
+                 '24, and every one where the car really went wide is kept. Nothing the car does '
+                 'changes, and the warning still appears whenever the lane cannot be seen. Turn '
+                 'off for stock behavior. Default on.'),
+      initial_state=self._safe_get_bool(self._params, "SteerAlertLaneGate"),
+      callback=lambda state: self._toggle_callback(state, "SteerAlertLaneGate"),
+      icon="chffr_wheel.png"
+    )
+
     self._show_lateral_control = toggle_item(
       lambda: tr("Show Lateral Control Mode"),
       lambda: tr("Display the lateral control mode overlay on the steering wheel icon."),
@@ -778,6 +792,7 @@ class BluePilotLayout(Widget):
       self._disable_lane_change_under_speed,
       self._blinker_min_speed,
       self._show_lateral_control,
+      self._steer_alert_lane_gate,
     ]
     lateral_header = CollapsibleSectionHeader(tr("Lateral Tuning"))
     lateral_header.set_items(lateral_items + [angle_header, curv_header])
