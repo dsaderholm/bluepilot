@@ -7290,3 +7290,56 @@ last basic block for the `movhi` float constant.
 documented procedure to a new image of the same protocol family."** Still needs a firmware dump, a
 bench, Ghidra and someone to flash and drive it -- none of which I can do -- but the earlier "months
 of work" framing was wrong and was based on not having read the repo.
+
+### FULL READ OF ford-pscm-re: TWO CORRECTIONS, AND THE TEST THAT DECIDES IT
+
+Read the project files (the 254-markdown count is mostly vendored Binary Ninja / unicorn / fmt docs;
+the actual project is ~65 files). **Two things said earlier the same night are now withdrawn.**
+
+**WITHDRAWN 1 -- "his Edge is probably the easy Ghidra path". THE REPO CONTRADICTS ITSELF.**
+
+    README.md + angle_scale_patch.md   Transit = RH850 (hard), F-150 = baseline V850 ("one-afternoon
+                                       job", stock Ghidra lifts it clean)
+    verdict.md                         F-150 = RH850, Transit = the OLDER V850E2M
+
+**Both cite the same evidence string `AH850S54GxxxxxV101`, and they are exactly inverted.** So the
+claim that an Edge PSCM would land on the easy path rests on contradictory ground and must not be
+repeated. Which MCU his module runs is unknown and is answered by the dump, not by inference.
+
+**WITHDRAWN 2 -- the +184% headroom figure does NOT apply to this car.** The actual tables:
+
+    Transit stock LKA        [0,   0.2, 0.4, 0.7, 1.0, 1.5, 2.0, 7.0 ]  Nm
+    F-150 LCA/BlueCruise     [0.0, 0.7, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5 ]  Nm   <- the patch TARGET
+    speed axis (+0x0404)     [0,   10,  30,  50,  70,  90,  130, 250 ]  kph
+
+**`LKA_FULL_AUTHORITY.VBF` sets Transit's table TO the F-150 lane-centering envelope.** His Edge is
+a BlueCruise-class module running LCA, so **his table is plausibly already at or near that envelope
+-- the patch's destination is his starting point.** The +184% was Transit going from crippled to
+normal, not normal to enhanced. Going ABOVE the LCA envelope is possible (their 2X file proves the
+table accepts it) but nobody has drive-confirmed above it.
+
+**WHAT SURVIVES AND IS GENUINELY USEFUL:**
+
+- **No runtime signature verification of the calibration.** `verdict.md`: 1.5 MB of strategy has zero
+  SHA/RSA constants and no embedded public key; the SBL's hardware SHA-256 verifies only ITSELF.
+  **A patched cal flashes and runs.** That was the biggest open "will this even work" question.
+- **The cal is mostly empty:** 195,584 bytes, **only ~15.7% live data**, 84% reserved zero. And only
+  ~0.5% is statically attributable to a reader function -- everything else goes through AUTOSAR
+  `Rte_Prm` pointer tables, so table ROLES come from shape and cross-vehicle diffing, not xrefs.
+- **Ford made BlueCruise LESS aggressive than baseline in places** -- the BDL->EDL diff REDUCES the
+  bell-curve authority peak 44->32 and HALVES the ramp schedule. Counterintuitive, and a caution
+  against assuming the BlueCruise cal is the maximum.
+- The angle-scaler method and the concrete F-150 offsets (`+0x0120` LCA engage-min = 10.0,
+  `+0x0114` LKA min-speed, `+0x07ADC` LKA arm timer) are a real template.
+
+### THE ONE TEST THAT DECIDES WHETHER ANY OF THIS IS WORTH DOING
+
+**Dump his cal, find the torque-vs-speed table, and compare it to
+`[0.0, 0.7, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5]`.**
+
+    his table is LOWER   -> real headroom, and the saturation at 29-56 mph has a firmware answer
+    his table is AT/ABOVE-> the firmware idea is much weaker than tonight implied, and the
+                            remaining lever is the ANGLE SCALER for signal range, not authority
+
+**Do not spend effort on this before that comparison.** It is a read, it is cheap, and it is the
+difference between a project and a dead end. Everything else in this thread is downstream of it.
