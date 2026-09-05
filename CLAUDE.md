@@ -6822,3 +6822,73 @@ table above, and ship it on its own drive with nothing else moving.
 curves -- imperceptible. It is the tail that hurts: p90 +3.21d, p99 +10.81d. The gate's 1.4% firing
 rate lands on the fastest falls, which are plausibly those same tail frames, so a working exit blend
 targets the right events. That is an argument for fixing it, not evidence that it would have.
+
+## 2026-09-05: UPSTREAM SURVEY. ONE COMMIT WE ALREADY HAVE, AND PR 191 REWROTE THE GAIN SCHEDULE.
+
+    releases        bp-7.0 newest, we are 0 behind, still NO bp-8.0
+    bp-dev          exactly ONE new commit since 2026-09-03: fc228b4099
+    bp-dev-191      nothing new (a15672fb15 / 77ec55c73e / ed251bfb85, all already assessed)
+    deleted         bp-dev-188, bp-dev-193, bp-dev-ALP, bp-dev-UISAD
+
+**`fc228b4099` (combo cruise-button event storm) IS ALREADY OURS BY CONTENT.** Verified rather than
+assumed: theirs adds `self.prev_button_signal` keyed by `can_msg`; ours is `self.combo_states` keyed
+by `group`, and `group = COMBO_GROUPS.get(button.can_msg)` -- the same granularity. Both also fix
+the `processed_signals` scoping. Ours additionally documents that `processed_signals` is an
+early-out and `combo_states` is the correctness guard, with the mutation that proves it. Nothing to
+take.
+
+**HE IS NOT A STAKEHOLDER IN 191/192 AND SAID SO.** Praeuner apologised to him on #192 for pushing
+commits "before seeing you had also made commits on your end"; he replied *"I'm just messing around
+with this stuff on my own fork... I don't have any stake in how 191/192 shake out."* Do not treat
+those PRs as his to steer, and do not draft comments for them unasked.
+
+### PR 191's NEW HEAD `fd221cd05c` (2026-09-04) REWRITES THE WHOLE SCHEDULE
+
+    low_gain   unchanged:  interp(v, [11.18, 31.29], [1.00, damp])
+    high_gain  1.30*lof -> 1.40*lof   AND   anchor*hif -> 1.20*anchor*hif
+    boundary   interp(v,[11.18,31.29],[0.02,0.0045]) -> interp(v,[8.94,13.41,16.54,31.29],
+                                                               [0.02,0.0195,0.018,0.0035])
+    plus       low-pass filters (0.80/0.20) on _speed_factor, _kappa_factor and b_blend
+    plus       _kappa_entering 1.1 -> 1.05, _desired_falling 0.9 -> 0.95
+
+**AT HIS SETTINGS (1.007 / 0.804 / 0.78), IN DEGREES AT THE WHEEL:**
+
+     75mph  500m   cf 0.834 -> 0.945   +13.3%   +0.59d
+     75mph  350m   cf 0.865 -> 1.039   +20.1%   +1.31d
+     40mph  193m   cf 1.010 -> 1.038    +2.8%   +0.33d
+     18mph   50m   cf 1.309 -> 1.410    +7.7%   +5.00d
+     18mph   27m   cf 1.309 -> 1.410    +7.7%   +9.25d
+
+**IT PULLS BOTH WAYS ON HIM AT ONCE.** The low-speed half is exactly the turn authority he asked for
+on 2026-09-04 (*"I want it to be able to do that in the future"*). The highway half raises a command
+whose EXIT OVERSHOOT he reported the same night, and a gain multiplies the whole ratio:
+
+    highway 500-2000 m   unwind median 1.070 -> 1.160    p90 1.59 -> 1.72
+    tight    <500 m      unwind median 1.018 -> 1.039    p90 1.33 -> 1.36
+
+**AND HIS FLAT POINT MOVES 0.678 -> 0.565**, so his 0.804 becomes a far steeper slope than he tuned
+it to be. Keeping his current slope would mean High 0.804 -> **0.670**. That is the retune burden
+alan-polk objected to on #192 in as many words -- *"Changing the interpolation range means everyone
+on bp-7.0 has to retune."*
+
+### THEIR EXIT-GATE FIX DOES NOT REVIVE THE DEAD BLEND. MEASURED ON HIS OWN LOGS.
+
+`_desired_falling` 0.9 -> 0.95 is the right direction and close to the value the 2026-09-04 analysis
+derived independently. But it is paired with an exponential filter that is SLOWER than the step ramp
+it replaces, and the compound defect survives:
+
+    gate    fires   % of calls   runs   4+ consecutive   7+
+    0.80      107        1.03%     93       1 (  1%)      0     <- ours (b_step 0.1, needs 4)
+    0.90      430        4.13%    331       7 (  2%)      0
+    0.95     1173       11.27%    800      32 (  4%)      2     <- PR191 (0.80/0.20, needs ~7)
+
+**Eleven times more firings and still 96% of exit detections last under four calls.** It moves the
+mechanism from "reached its target once in 44 segments" to "moves meaningfully on 4% of exits" --
+a real improvement to something that was dead, not a fix.
+
+**VERDICT: DO NOT TAKE IT.** It is an open PR taking commits daily, its own reviewer has objected to
+the retune burden, and on this car it worsens the symptom he reported tonight unless he
+simultaneously drops High to 0.670. **Watch it; the 1.30 -> 1.40 low-speed anchor is the half worth
+having, and it is separable.** If it is ever taken, every number quoted to him on 2026-09-04 --
+the flat point, the 0.90 ceiling, the degrees-per-step table -- is invalidated and must be re-derived
+before he tunes against it.
