@@ -7170,3 +7170,36 @@ rate limits -- all NUMBERS in existing tables. Not conceivable: a new CAN handle
 or any new BEHAVIOUR, because that is authoring code into a 1 MB AUTOSAR V850 image with no source,
 no toolchain and ASIL-D supervision. **The line is "change an existing number" vs "add a feature",
 and everything that repo shipped is on the first side of it.**
+
+### CORRECTION: "NOTHING FOR FIRMWARE AT HIGHWAY SPEED" WAS TOO NARROW. HE CAUGHT IT.
+
+*"I get steering exhausted warnings all the time so I don't think it's doing as well as I could on
+highways."* Measured `steerSaturated` across the 2026-09-04/05 pull -- 1545 frames, 33 episodes,
+0.44% of latActive frames:
+
+    speed     p10 28.9   p50 35.2   p90 55.6 mph
+    radius    p10  111   p50  152   p90  286 m
+    delivery  p10 0.67   p50 0.76   p90 0.85
+    lat accel p10 1.15   p50 1.67   p90 3.40 m/s^2
+    hands ON during saturation: 1%
+
+**The saturation is at 29-56 mph on 111-286 m curves, hands off, delivering 0.76.** The "PSCM tracks
+0.979, nothing for firmware to buy" finding was measured at >= 55 mph on 500-2000 m radii. **Both
+numbers are true and the wrong one was generalised.** He was told there was nothing there; there is.
+
+**SO THE REGIMES ARE THREE, NOT TWO:**
+
+    >55 mph, >500 m      PSCM 0.979    fine. Firmware buys nothing. Limit is our gain + ISO clamp.
+    29-56 mph, 111-286 m PSCM 0.76-0.83, 33 saturation episodes  <- HIS ACTUAL COMPLAINT
+    <25 mph, tight       PSCM 0.78     the Taco Bell case
+
+**A firmware authority patch would help in the middle band too**, which is the one he drives daily
+and the one where `bp_lateral_by_radius` already put 112 of 301 episodes (45-60 mph). Median lateral
+accel during saturation is only 1.67 m/s^2 -- **modest cornering with poor delivery, not physics** --
+so it is an authority/tracking shortfall, not the tyres or the ISO clamp.
+
+**AND THE FILTER LESSON, for the sixth time in this file:** the highway analysis gated on
+`v >= 55 mph`, which excluded the entire population where the failure lives. `mapd_v2_path.py`
+already records the sharper version of this -- *"SATURATION IS NOT THE FAILURE. RUNNING WIDE IS"* --
+and delivery during these episodes is 0.76, so the car IS running wide. **Before concluding a
+subsystem is healthy, check whether the gate excluded the frames the driver is describing.**
