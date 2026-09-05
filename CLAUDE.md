@@ -7514,3 +7514,57 @@ settings by rounded start time -- but raising either lever DELAYS accumulation, 
 saturation fires later and reads as one episode lost plus one new. Now matched on the two windows
 being within 3 s of overlapping. The 1.5 s row went from "19 lost" to "13 lost" on the first pull
 that exposed it.
+
+## 2026-09-05: THE EXIT-BLEND LATCH IS BUILT. IT IS A TAIL FIX AND IT SAYS SO.
+
+The mechanism this file has called dead since 2026-08-29 now runs. `_EXIT_LATCH_CALLS = 10` in
+`lateral_angle_ext.py` holds the exit state for 0.50 s after the gate last fires, so the 0.1-per-call
+ramp can actually walk `b_blend` from 0.500 to 0.125 instead of taking one step and springing back.
+
+**THE MAGNITUDE WAS CHECKED BEFORE ANYTHING WAS WRITTEN, and that was the promise made to him.**
+`tools/bp_blend_latch_scale.py` recovers `predicted` by inversion from published telemetry
+(`predicted = (kappaCmd - laneCenterCorrection - desired*(1-b)) / b`) and reports what the latch can
+reach in the only unit he judges in:
+
+    reachable swing   p50 0.34 deg   p90 1.54   p99 4.66   max 10.04
+    at or over the 0.30 deg dither floor:  162 of 295 firings (55%)
+
+**The median is barely over the floor. This is a TAIL fix and must be described as one** -- which is
+the right shape, because the exit overshoot it targets is itself a tail: median +0.16 deg, p90 +3.21,
+p99 +10.81. A median-vs-median comparison would have called this pointless and been wrong.
+
+**`_EXIT_LATCH_CALLS = 10` IS MEASURED.** Gaps between consecutive fires inside one unwind, n=176:
+p50 4 calls, p75 7, p90 15. A 4-call latch bridges 57%, 8-call 79%, **10-call 86%**, 12-call 89%,
+16-call 93%. Ten sits at the knee, and four is the hard floor because the ramp needs four calls to
+traverse -- anything shorter reproduces the defect exactly.
+
+**THE RELEASE IS THE SAFETY-CRITICAL HALF.** `_kappa_entering` zeroes the latch on the frame it
+appears, ahead of any decrement, so a new turn-in can never be served a stale exit weight. **Only
+mutation testing caught that the two branches must be tested in that order**: swapping them left all
+nine other tests green, because `_on_exit_near_limit` carries its own `not _kappa_entering` and hides
+the bad arm until the following call. 12 mutants, 0 survivors.
+
+### THE SAMPLING INTERVAL CAUGHT ME TWICE IN ONE HOUR, AND IT MOVED THE ANSWER THREE TIMES
+
+`controllerStateBP` is published from card at **100 Hz**, but `update_angle_strategy` runs inside
+`STEER_STEP = 5` -- so every value repeats five times. `_desired_falling` compares consecutive
+angle-path CALLS. Three ways of sampling gave three different magnitudes for the same question:
+
+    every 100 Hz frame          fires 0.11% of calls, reachable p50 1.04 deg   <- selects only the
+                                                                                  sharpest falls
+    "the published values changed"  fires 0.56%, reachable p50 0.07 deg        <- under-counts calls
+                                                                                  (10.6 frames each)
+    RESAMPLED AT 20 Hz          fires 0.54%, reachable p50 0.34 deg            <- correct
+
+**I reported the first number to him before catching it.** This file already carries the rule --
+*"check what interval a comparison spans before scoring it"*, written on 2026-08-28 about this exact
+gate -- and it was broken anyway. **Resample on TIME; do not try to detect the call**, because two
+consecutive calls on steady road publish identical values and an edge detector silently drops them.
+
+### WHAT IS NOT YET KNOWN
+
+It has never been driven. The replay says what the COMMAND does and cannot say what the car does
+back. Score it on a drive with nothing else moving, against `tools/bp_lateral_phases.py` (the
+UNWINDING row and its degrees column) and `tools/bp_lateral_by_radius.py` in the 500-2000 m band.
+The alert gate shipped the same day cannot confound it -- that changes nothing the car does -- but if
+the steering feels different, it is this.
