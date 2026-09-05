@@ -6892,3 +6892,59 @@ simultaneously drops High to 0.670. **Watch it; the 1.30 -> 1.40 low-speed ancho
 having, and it is separable.** If it is ever taken, every number quoted to him on 2026-09-04 --
 the flat point, the 0.90 ceiling, the degrees-per-step table -- is invalidated and must be re-derived
 before he tunes against it.
+
+## 2026-09-05: THE LC 0.35 vs 0.45 A/B DOES NOT RESOLVE -- AND TWO ERRORS ON THE WAY
+
+### I QUOTED A DEVICE TIMESTAMP WITHOUT CONVERTING IT. FOURTH INSTANCE.
+
+`lane_centering_strength_ang` was reported to him as written at **16:37**. That is the raw `stat`
+output, which is **UTC**. Local is **10:37 MDT**. This file already carries the rule -- *"NEVER QUOTE
+A PARAM VALUE OUT OF THIS FILE. READ IT OFF THE DEVICE WITH ITS MTIME"* and *"THE DEVICE RUNS IN UTC.
+HE DOES NOT"* -- and it was broken anyway, by reading a `stat` line straight into a sentence.
+
+It mattered: at 16:37 the change looked like it came AFTER every route pulled, so the absence of any
+0.45 label read as a telemetry gap. At 10:37 it lands 9 minutes into route 00000423, which is
+exactly why the earlier session split that route at segment 10.
+
+    LC 0.45 written           2026-09-04 10:37:32 MDT
+    0000041e 09-03 12:09  0000041f 09-03 17:00  00000420 09-03 19:30   <- 0.35
+    00000421 09-04 08:58  00000422 09-04 09:08                          <- 0.35
+    00000423 09-04 10:28  <- STARTED 9 MIN BEFORE THE CHANGE, spans it
+    00000424 09-04 17:30  00000425 09-04 18:40                          <- 0.45
+
+### AND I CHECKED "DOES THE DEVICE STILL HAVE THE SEGMENTS" WITH THE WRONG QUESTION
+
+The pull was reported as complete at 72/72, with the earlier 114 figure dismissed as stale. **The
+query only listed the three routes already on disk.** The device had EIGHT routes and 115 segments;
+43 were missing, including both 0.45 drives. `ls` restricted to what you already have can only ever
+tell you that you have it. **Enumerate from the DEVICE side and diff, never from the local side.**
+
+### THE RESULT: NO CONCLUSION, AND THE REASON IS THE SAMPLE
+
+Matched on radius AND speed (a first pass matched radius only, and the 0.45 pool's "500-2000 m" is
+gentle surface-street curves at 30 mph against interstate at 70 in the 0.35 pool):
+
+      radius      speed     LC      n   ratio    p90   med deg   p90 deg
+     100-286     20-35     0.35    727   0.999   1.25    -0.02d     3.78d
+     100-286     20-35     0.45     79   0.900   2.46    -1.17d    19.54d
+     286-500     20-35     0.35   1129   1.108   1.51     0.85d     3.43d
+     286-500     20-35     0.45    143   1.070   1.46     0.60d     4.05d
+     500-2000    20-35     0.35   4112   1.140   1.83     0.37d     2.22d
+     500-2000    20-35     0.45   1073   0.977   2.23    -0.03d     2.68d
+
+**Every median is equal or slightly better at 0.45.** The 100-286 m p90 going 3.78d -> 19.54d is the
+only dramatic row and it is **n=79** -- under a second of road, one or two turn exits. Not a finding.
+
+**THE STRAIGHT-ROAD WEAVE IS UNSCOREABLE FOR A PLAIN REASON, NOT A TOOL ONE:** 00000424 and 00000425
+have **ZERO** qualifying windows, rejected as "too slow" on 2853 and 3607 frames. He has not driven
+highway since changing the setting.
+
+    LC 0.35   n=83669 curve frames   p50 39 mph   p90 76
+    LC 0.45   n= 8932                p50 21 mph   p90 32
+
+**Nine to one, and no overlapping road type.** VERDICT: keep 0.45; nothing argues against it. What
+settles it is one ORDINARY drive at 0.45 on highway plus 35-50 mph curves -- not a test pattern.
+
+**AND THE BOOT SNAPSHOT DOES NOW READ 0.449 ON 424/425**, which confirms the time mapping
+independently -- so `initData` labels a route correctly whenever the route does not SPAN the change.
+The 2026-09-01 telemetry fields added today make the spanning case readable too, from the next drive.
