@@ -45,6 +45,7 @@ def _sla(limit_conv: int, prev_conv: int) -> SpeedLimitAssist:
   # __new__ skips __init__, so per-drive state has to be seeded by hand. Seeded HIGH for the same
   # reason __init__ does: the re-announce cooldown must never gag the first announcement.
   s._frames_since_announce = 1 << 30
+  s._frames_since_auto_set = 1 << 30
   return s
 
 

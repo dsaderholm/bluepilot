@@ -7973,3 +7973,70 @@ ratio is noise-dominated and must not be quoted.
 **THE LESSON, and it is this file's own, again:** the level comparison (75 vs 0.5) was real and got
 generalised into a mechanism it does not establish. Ask what signature the proposed mechanism would
 LEAVE, then go and look for that specific thing, before naming the mechanism.
+
+## 2026-09-05: BOTH FIXES VALIDATED ON THE ROAD -- AND THE AUDIT THAT SPARED `speedLimitAutoSet` WAS WRONG
+
+He said of route 00000429 *"just drove the same route, so it's probably not that helpful."* It was
+the most useful drive of the day: `passing-assist-phase1` rebased at **14:34 MDT** and the route ran
+at **17:25 MDT**, so it carried both of the day's fixes. **Check the device reflog against the route
+time before deciding what a drive can test** -- an earlier reply in that same conversation told him
+neither fix was on his car, which was true when said and stale by the time he drove.
+
+### "SET SPEED CHANGED" -- the fix does exactly what it was built to do
+
+Same route, before (00000427) and after (00000429):
+
+    speedLimitChanged     fires   per min   dash DIDN'T move   fired inside 5 s
+    before                  17      1.41           7                  5
+    after                    7      0.33           0                  0
+
+**Both targeted populations went to zero and seven genuine announcements survived**, each with the
+set speed actually moving.
+
+**AND IT RETIRES MY OWN "ONCE IN FOUR DRIVES" WARNING.** That estimate came from pulls that happened
+to contain almost no real limit changes. Here it spoke 7 times in 21 minutes, all legitimate. The
+guards did not gut the alert.
+
+### THE SPORT FIX: ZERO SOFT-DISABLE
+
+    lever read Sport      before 262 raw frames    after 152   (he used it again)
+    carState gearShifter  before unknown x524      after sport x305
+    wrongGear edges       before 7                 after 2   (park/reverse at start -- correct)
+    softDisabling frames  before 524               after 0
+
+`unknown` is gone from the gear entirely and the "openpilot will disengage" warnings with it, while
+the alert still fires for the gears it is actually for.
+
+### AND THE AUDIT THAT LEFT `speedLimitAutoSet` ALONE WAS SAMPLED WRONG
+
+Earlier the same day that alert was audited and deliberately spared, on the grounds that it "fires
+once in 12.1 minutes with zero motionless-dash cases" -- **measured on route 00000427, where it
+happened to fire exactly ONCE.** Across all five pulls:
+
+    pull                       fires   dash still   inside 5 s
+    2026-09-01 damper_ab           6        0            3
+    2026-09-03 post_damper         5        0            4
+    2026-09-04 lc_035_vs_045       7        1            5
+    2026-09-05 gate_and_latch      1        0            0   <- the one the audit used
+    2026-09-05 after_fixes         9        1            5
+    TOTAL                         28        2           17
+
+**61% of them land inside the previous announcement's own on-screen window.** The audit checked the
+right column ("dash still" really is clean, 2 of 28) and read the COUNT off a one-event drive. Same
+denominator failure as the alert it was auditing, one file over.
+
+**FIXED, with its OWN duration: `AUTO_SET_COOLDOWN_S = 4.0`**, because
+`speed_limit_auto_set_alert` renders for 4.0 s and the other two render for 5.0. Reusing the 5.0
+would have been a number nobody measured, which is the whole thing these guards exist to avoid.
+Placed BELOW the hold check so a hold-suppressed announcement -- one that was never made -- cannot
+spend the window and mute a real one behind it. **5 mutants, 0 survivors**, including the reordering.
+
+### THE LATCH IS STILL UNCONFIRMED, AND "SAME ROUTE" DID NOT MEAN "MATCHED PROFILE"
+
+    500-2000 m unwind    427: p90 +1.39d  p99 +5.60d     429: p90 +2.17d  p99 +4.75d
+
+Moved both ways, and the tight band is far worse (p90 4.04d -> 32.15d). **The drives are not
+comparable: 427 has 732 park frames, 429 has 44,199 plus 3,068 in reverse.** This one was full of
+parking and maneuvering, which contaminates the tight band completely. Calling it "the ideal matched
+repeat" beforehand assumed same route means same profile. It does not -- check the gear and speed
+histograms before claiming two drives are matched.
