@@ -22,6 +22,7 @@ from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.speed_limit_assist 
   SpeedLimitAssist,
 )
 from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP
+from openpilot.sunnypilot.selfdrive.selfdrived.events_base import Alert
 
 EventNameSP = custom.OnroadEventSP.EventName
 State = custom.LongitudinalPlanSP.SpeedLimit.AssistState
@@ -52,6 +53,7 @@ def _sla(dash_conv: int = 22, target_conv: int = 35) -> SpeedLimitAssist:
   s.v_cruise_cluster_conv = dash_conv
   s.target_set_speed_conv = target_conv
   s._frames_since_announce = 1 << 30
+  s._frames_since_auto_set = 1 << 30
   return s
 
 
@@ -158,3 +160,69 @@ def test_the_cooldown_IS_the_alert_s_own_duration_and_is_not_a_number_anyone_pic
   # rule. Convert before comparing.
   for event in ANNOUNCEMENTS:
     assert EVENTS_SP[event][ET.WARNING].duration * DT_CTRL == ANNOUNCE_COOLDOWN_S
+
+
+def test_the_AUTO_SET_announcement_has_its_own_cooldown_at_ITS_OWN_duration():
+  """61% of speedLimitAutoSet fires across five pulls landed inside the previous one's window.
+
+  Its alert renders for 4.0 s, not the 5.0 of the two above, so it gets its own constant. Reusing
+  the other would be a number nobody measured -- exactly what these guards exist to avoid.
+  """
+  from openpilot.common.realtime import DT_CTRL
+  from openpilot.sunnypilot.selfdrive.selfdrived.events import ET, EVENTS_SP
+  from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.speed_limit_assist import (
+    AUTO_SET_COOLDOWN_S,
+  )
+  alert = EVENTS_SP[EventNameSP.speedLimitAutoSet][ET.WARNING]
+  # It is a CALLBACK, not a static Alert -- call it to get the rendered alert and its duration.
+  rendered = alert if isinstance(alert, Alert) else None
+  assert AUTO_SET_COOLDOWN_S == 4.0
+  if rendered is not None:
+    assert rendered.duration * DT_CTRL == AUTO_SET_COOLDOWN_S
+
+
+def _auto_set_sla(limit_conv: int, prev_conv: int) -> SpeedLimitAssist:
+  """An SLA whose posted limit has just changed -- the only trigger for speedLimitAutoSet."""
+  s = _sla()
+  s.speed_limit_final_last_conv = limit_conv
+  s.prev_speed_limit_final_last_conv = prev_conv
+  s._state_prev = State.active          # no entry edge: isolate the auto-set announcement
+  return s
+
+
+def _auto_set_fired(sla, v_baseline_conv=0.0) -> bool:
+  events = EventsSP()
+  sla.update_events(events, v_baseline_conv)
+  return EventNameSP.speedLimitAutoSet in events.names
+
+
+def test_a_limit_change_still_announces():
+  assert _auto_set_fired(_auto_set_sla(40, 35))
+
+
+def test_a_SECOND_limit_change_inside_4s_is_silent():
+  """The measured defect: 17 of 28 fires across five pulls landed inside the window."""
+  sla = _auto_set_sla(40, 35)
+  assert _auto_set_fired(sla)
+  sla.prev_speed_limit_final_last_conv = 40
+  sla.speed_limit_final_last_conv = 45
+  assert not _auto_set_fired(sla)
+
+
+def test_it_announces_again_once_ITS_cooldown_expires():
+  from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.speed_limit_assist import (
+    AUTO_SET_COOLDOWN_FRAMES,
+  )
+  sla = _auto_set_sla(40, 35)
+  assert _auto_set_fired(sla)
+  _idle(sla, AUTO_SET_COOLDOWN_FRAMES + 1)
+  sla.prev_speed_limit_final_last_conv = 40
+  sla.speed_limit_final_last_conv = 45
+  assert _auto_set_fired(sla)
+
+
+def test_a_hold_SUPPRESSED_announcement_does_not_spend_the_cooldown():
+  """It was never made, so it must not mute a real one behind it -- the ordering guard."""
+  sla = _auto_set_sla(40, 35)
+  assert not _auto_set_fired(sla, v_baseline_conv=55.0)   # hold differs -> suppressed
+  assert _auto_set_fired(sla, v_baseline_conv=0.0)        # and the next one still speaks

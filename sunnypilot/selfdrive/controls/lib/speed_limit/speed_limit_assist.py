@@ -31,6 +31,17 @@ ACTIVE_STATES = (SpeedLimitAssistState.active, SpeedLimitAssistState.adapting)
 # screen, so it can only ever be redundant. Route 00000427 fired three in 1.5 s off one flicker.
 ANNOUNCE_COOLDOWN_S = 5.0
 ANNOUNCE_COOLDOWN_FRAMES = int(ANNOUNCE_COOLDOWN_S / DT_MDL)
+
+# FusionPilot 2026-09-05, ROUND TWO. `speedLimitAutoSet` needed the same guard and the first audit
+# missed it. That audit checked the right thing on the wrong sample: on route 00000427 the alert
+# fired ONCE, so its repeat column read 0 and it was left alone as "not a spam source". Across all
+# five pulls it is 28 fires with **17 of them (61%) inside the previous one's on-screen window**.
+#
+# ITS DURATION IS 4.0 s, NOT 5.0 -- `speed_limit_auto_set_alert` renders for 4. Reusing the other
+# constant would have been a number nobody measured, which is the whole failure this guard exists to
+# avoid. One alert, one cooldown, each equal to its own time on screen.
+AUTO_SET_COOLDOWN_S = 4.0
+AUTO_SET_COOLDOWN_FRAMES = int(AUTO_SET_COOLDOWN_S / DT_MDL)
 ENABLED_STATES = (SpeedLimitAssistState.preActive, SpeedLimitAssistState.pending, *ACTIVE_STATES)
 
 DISABLED_GUARD_PERIOD = 0.5  # secs.
@@ -93,6 +104,7 @@ class SpeedLimitAssist:
     self._speed_limit_final_last = 0.
     self.speed_limit_prev = 0.
     self._frames_since_announce = 1 << 30   # seeded high: never gag the first one
+    self._frames_since_auto_set = 1 << 30   # same, for the auto-set announcement
     self.speed_limit_final_last_conv = 0
     self.prev_speed_limit_final_last_conv = 0
     self._gas_pressed = False
@@ -541,6 +553,7 @@ class SpeedLimitAssist:
 
   def update_events(self, events_sp: EventsSP, v_baseline_conv: float = 0.0) -> None:
     self._frames_since_announce = min(self._frames_since_announce + 1, 1 << 30)
+    self._frames_since_auto_set = min(self._frames_since_auto_set + 1, 1 << 30)
     # BluePilot: announce every automatic set-speed change, raise or lower, so a bad limit is
     # seen rather than only felt. Fires on the target changing, which is when the assist commits.
     #
@@ -562,7 +575,11 @@ class SpeedLimitAssist:
     if (self.auto_follow and self.is_active and
         self.speed_limit_final_last_conv != self.prev_speed_limit_final_last_conv):
       hold_wins = v_baseline_conv > 0 and round(v_baseline_conv) != round(self.speed_limit_final_last_conv)
-      if not hold_wins:
+      # The cooldown sits BELOW the hold check on purpose: an announcement the hold suppressed was
+      # never made, so it must not spend the window and mute a real one behind it. Same ordering as
+      # `target_set_speed_confirmed` in update_active_event, and a test pins it.
+      if not hold_wins and self._frames_since_auto_set >= AUTO_SET_COOLDOWN_FRAMES:
+        self._frames_since_auto_set = 0
         events_sp.add(EventNameSP.speedLimitAutoSet)
 
     if self.state == SpeedLimitAssistState.preActive:
