@@ -8040,3 +8040,63 @@ comparable: 427 has 732 park frames, 429 has 44,199 plus 3,068 in reverse.** Thi
 parking and maneuvering, which contaminates the tight band completely. Calling it "the ideal matched
 repeat" beforehand assumed same route means same profile. It does not -- check the gear and speed
 histograms before claiming two drives are matched.
+
+## 2026-09-07: "THE SPEED KEPT LOWERING ON I-215" -- AN EMPTY v2 PATH FALLING BACK TO v1
+
+*"On the way back on I-215 the speed kept lowering every time on cruise so I couldn't use it."*
+Route 00000430 (today, 4:05 PM), 32 segments.
+
+**IT IS SCC-MAP, AND THE GEOMETRY IS THE PROOF.** Comparing the map's corner SPEED against the car's
+speed proves nothing; the invariant is the radius. Thirteen SCC-Map windows, every one asking
+**17.2 mph = a 27 m radius**, against the road he was actually on:
+
+    t+1338   asks 17 (R=27m)   he drove R=904 m     34x too tight   Belt Route (I-215)
+    t+1353   asks 17 (R=27m)   he drove R=3282 m   122x too tight   Belt Route
+    t+1451   asks 17 (R=27m)   he drove R=5283 m   196x too tight   Belt Route
+    t+1696   asks 17 (R=27m)   he drove R=6611 m   246x too tight   I-80
+
+Peak lateral acceleration during all of them: **0.00**. The previous worst on record here was 23x.
+
+### THE CHAIN, AND THREE HYPOTHESES KILLED ON THE WAY
+
+**NOT mapd's curvature.** Dumped the live path: 24 points, tightest `curvature` 0.002053 = a 487 m
+freeway bend, priced by mapd at 73 mph. Coordinates all valid Salt Lake positions, sensible 140-230 m
+spacing, no nulls.
+
+**NOT our own curvature function.** Ran `curvature_profile_multiscale` on those exact coordinates:
+it returns 0.001971 (507 m) where mapd says 487 m -- agreement, not invention. **That whole path
+prices its tightest point at 76.5 mph.**
+
+**NOT a publish-rate collapse.** `mapdOut` runs a clean 20.00 Hz. `mapdExtendedOut` runs 1.00 Hz,
+which is its DECLARED rate in `services.py` and by design, and `alive` allows 10x the period.
+`valid` is True on all 1891 messages and the position is non-zero on all of them.
+
+**THE CAUSE: 246 of 1891 path frames (13%) arrive with an EMPTY path.** `path_from_mapd` returns
+None for `len(points) == 0`, `smart_cruise_control.py` caches that None, and SCC-Map then reads
+**mapd v1** -- which serves the phantom. That is why the number is a CONSTANT 17.2 across thirteen
+windows on two different freeways: it is not computed from the road he is on.
+
+**The published target contradicting the live path is the tell.** At t+1339.9 SCC-Map asks 17.2
+while the path in hand prices its worst point at 76.5. When a controller's output cannot be derived
+from its stated input, the input is not the one it used.
+
+### THE FALLBACK IS DELIBERATE, WHICH IS WHY THIS NEEDS DESIGN AND NOT A QUICK EDIT
+
+This file already records it: *"SCC-Map also FALLS BACK to v1 when v2 is selected but silent.
+Deliberate: ... here v1 is still the shipped curve source and the failure being avoided is not
+slowing for a corner."* Deleting the fallback trades phantom slowdowns for missed real corners, and
+the 2026-08-18 fix in this same function already handled the neighbouring case -- *a straight path
+with no velocities returns an EMPTY target list* -- but that is `targets` being empty AFTER the walk.
+**An empty `points` list is a different branch and still falls through to v1.**
+
+The likely right answer is that an empty path from a LIVE, VALID mapd means "v2 has nothing to say
+here", not "go ask v1" -- but that is a judgement about which failure is worse, on the branch his car
+auto-pulls, and it is not being written at the end of a long session. **Do not shorten this to "just
+delete the fallback."**
+
+### WHAT HE CAN DO TONIGHT, AND IT IS HIS TOGGLE
+
+**`SmartCruiseControlMap`** ("Smart Cruise Control - Map"), `params_keys.h:494`, default ON. Turning
+it off stops the phantom slowdowns immediately and costs him nothing he uses -- 2026-09-03, his own
+words: *"I am not really using SCC Vision or even map. They work great, but since the PSCM needs to
+go so slow, I just take over."* **Named, not changed** -- settings are his.
