@@ -396,6 +396,22 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       # time: PUBLISHING A DECISION WITHOUT ITS INPUTS -- or here, without its CONSEQUENCE -- leaves
       # a real road report undiagnosable. 0 means no suppressed target this frame.
       vetoedVTarget @9 :Float32;
+
+      # FusionPilot 2026-09-07: WHICH SOURCE THE WALK ACTUALLY USED, and how many targets it had.
+      #
+      # He reported "the speed kept lowering every time on cruise so I couldn't use it" on I-215.
+      # SCC-Map emitted a constant 17.2 mph at 70+ mph, thirteen times, peak lateral accel 0.00.
+      # Replaying the SHIPPED SmartCruiseControlMap against the recorded mapdExtendedOut proves the
+      # v2 path cannot produce that: fed the real path it outputs 223.7 mph (the 100 m/s sentinel),
+      # while the path's own tightest point prices at 76.5 mph. So the device was on the v1
+      # fallback -- but NOTHING ON THE WIRE SAYS WHICH SOURCE THE WALK READ, so that had to be
+      # established by elimination across two wrong theories first.
+      #
+      # This is the fifth time in this file a rule could not be explained from a drive because its
+      # own inputs were never published. One bool ends it.
+      usedMapdV2 @10 :Bool;         # the walk read the v2 path; false means it fell back to v1
+      targetCount @11 :UInt16;      # how many corner targets the walk had. 0 with usedMapdV2 true
+                                    # is "v2 says no corners"; 0 with false is "v1 had nothing".
     }
 
     enum VisionState {
