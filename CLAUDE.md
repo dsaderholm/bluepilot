@@ -8100,3 +8100,48 @@ delete the fallback."**
 it off stops the phantom slowdowns immediately and costs him nothing he uses -- 2026-09-03, his own
 words: *"I am not really using SCC Vision or even map. They work great, but since the PSCM needs to
 go so slow, I just take over."* **Named, not changed** -- settings are his.
+
+### CORRECTION, SAME NIGHT: THE EMPTY-PATH DIAGNOSIS ABOVE IS WRONG. TWO THEORIES DIED.
+
+**RETRACTED #1 -- "13% of path frames are empty, so SCC-Map falls back to v1."** The 246 empty
+frames are ONE contiguous 246-second run, **100% of them with `waySelectionType == fail`, at a
+median speed of 0 mph with an empty road name** -- the car parked before the drive. During the
+actual I-215 slowdowns the way match was `current` on "Belt Route" with a full 24-point path. The
+empty-path branch never ran on the freeway. **A percentage was quoted without asking WHERE those
+frames were**, which is this file's own denominator rule failing again.
+
+**RETRACTED #2 -- "`min_v` keeps its 100.0 sentinel and is published."** That predicts
+`100 * high_speed_factor`, and both his factors read **100 (= 1.0)**, so it predicts 224 mph, not
+17.2. Checked the params rather than assuming, which is the only reason it did not ship.
+
+### WHAT IS ACTUALLY ESTABLISHED, and it is enough to act on
+
+    t+1339..1359   state=turning  active=True  vTarget=17.2 mph  targetDistance=0.0  car at 70-74 mph
+
+- **SCC-Map emits a constant 17.2 mph on I-215 and I-80 at 70+ mph**, in 13 windows, with peak
+  lateral acceleration 0.00.
+- **The live v2 path does not justify it.** Reconstructed with the shipped
+  `curvature_profile_multiscale` on the real coordinates: tightest point 0.00205 (487 m), which
+  prices at **76.5 mph**. mapd's own curvature agrees (487 m vs our 507 m). Neither map data nor our
+  math invented a corner.
+- **`targetDistance` publishes 0.0 during it, and `self.target_distance` is seeded `float('inf')`
+  and only written inside the `valid_velocities` loop** -- and inf clamps to 0 on the wire here, the
+  same convention as `slowDownEndpoint`. **So no corner was selected, and a target was published
+  anyway.** That is the defect, whatever line produces it.
+- Everything upstream is healthy: `mapdOut` 20.00 Hz, `mapdExtendedOut` at its declared 1.00 Hz,
+  `valid` on all 1891 messages, position non-zero on all, `MapdV2 = 2`, `MAPD_V2_ON = 2`, both
+  factors 100.
+
+**THE REMAINING SUSPECT IS THE HOLD PATH IN `update_calculations`** -- the `return` inside
+`if self.v_target < min_v and not (self.target_lat == 0 ...)`, which keeps the previous `v_target`
+while `target_distance` has already been reset to inf. That MATCHES the observed pair (held 17.2 with
+inf distance) and nothing else checked does. **It is a hypothesis, not a finding** -- pinning it needs
+either instrumentation of `target_lat/target_lon/min_v` (none of which reach the wire) or a careful
+read that is not being done at the end of a long session, after two wrong answers on the same bug.
+
+**PUBLISH `target_lat`, `target_lon` and `min_v`.** This is the fifth time in this file a rule could
+not be explained from a drive because its own inputs were never on the wire, and the standing
+instruction is to add the log line rather than a third inference. That is the next concrete step.
+
+**His mitigation is unchanged and is his toggle: `SmartCruiseControlMap` off.** It costs him nothing
+he uses and stops the phantom slowdowns immediately.
