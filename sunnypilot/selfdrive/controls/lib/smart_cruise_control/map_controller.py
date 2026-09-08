@@ -200,6 +200,9 @@ class SmartCruiseControlMap:
     # the Ford CarController, set in a method that was never called. update_calculations() is
     # reachable without update() and the suite proved it within a minute of this being missing.
     self.mapd_v2_path: tuple | None = None
+    # Declared here for the same reason as mapd_v2_path above: an attribute that only exists
+    # once some other method has run is the 2026-08-15 undrivable-car shape.
+    self.used_mapd_v2: bool = False
 
   def get_v_target_from_control(self) -> float:
     if self.is_active:
@@ -234,6 +237,7 @@ class SmartCruiseControlMap:
     # migration and MUST stay that way for now. Each defense was bought with a measured event on
     # these roads, and re-deriving them against a full profile is a separate job to do WITH drive
     # data, not the same afternoon as the source swap. Change one thing at a time on a car.
+    self.used_mapd_v2 = self.mapd_v2_path is not None
     if self.mapd_v2_path is not None:
       self.last_position, self.target_velocities = self.mapd_v2_path
     else:

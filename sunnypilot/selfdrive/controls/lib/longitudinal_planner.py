@@ -263,6 +263,11 @@ class LongitudinalPlannerSP:
     sccMap.modelVetoed = bool(self.scc.map.model_vetoed)
     sccMap.cameraNotSeen = bool(self.scc.map.camera_not_seen)
     sccMap.vetoedVTarget = float(self.scc.map.vetoed_v_target)
+    # WHICH SOURCE the walk read. Established by replay on 2026-09-07 that the v2 path cannot
+    # produce the phantom he reported, so the device was on v1 -- and proving that took eliminating
+    # two wrong theories because nothing said so on the wire.
+    sccMap.usedMapdV2 = bool(self.scc.map.used_mapd_v2)
+    sccMap.targetCount = min(len(self.scc.map.target_velocities or []), 65535)
 
     # Speed Limit
     speedLimit = longitudinalPlanSP.speedLimit

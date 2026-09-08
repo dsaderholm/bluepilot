@@ -146,3 +146,52 @@ class TestTheGatesThemselvesAreUnchanged:
   @pytest.mark.parametrize("attr,val", [("MODEL_DISAGREE_LAT_ACC", 0.4)])
   def test_the_veto_threshold_is_where_the_measurement_left_it(self, attr, val):
     assert math.isclose(getattr(mc, attr), val)
+
+
+class TestWhichSourceTheWalkRead:
+  """FusionPilot 2026-09-07: `usedMapdV2` and `targetCount`.
+
+  *"On the way back on I-215 the speed kept lowering every time on cruise so I couldn't use it."*
+  SCC-Map emitted a constant 17.2 mph at 70+ mph, thirteen times, peak lateral accel 0.00.
+
+  Replaying the SHIPPED `SmartCruiseControlMap` against the recorded `mapdExtendedOut` settles what
+  two rounds of reasoning could not: fed the real v2 path it outputs **223.7 mph** (the 100 m/s
+  sentinel), while that path's own tightest point prices at **76.5 mph**. It cannot produce 17.2.
+  So the device was on the v1 fallback -- and establishing that required eliminating two wrong
+  theories first, purely because NOTHING ON THE WIRE SAID WHICH SOURCE THE WALK READ.
+
+  Fifth instance in this repo of a decision published without its inputs.
+  """
+
+  def test_the_controller_records_which_source_it_used(self):
+    src = inspect.getsource(mc)
+    assert "self.used_mapd_v2 = self.mapd_v2_path is not None" in src, \
+      "used_mapd_v2 must be set from the SAME expression that chooses the source, not re-derived"
+
+  def test_it_exists_before_any_frame_runs(self):
+    """The 2026-08-15 undrivable-car shape: an attribute that only exists once a method has run."""
+    src = inspect.getsource(mc)
+    body = src.split("def __init__", 1)[1].split("def ", 1)[0]
+    assert "self.used_mapd_v2" in body, "used_mapd_v2 is not initialised in __init__"
+
+  def test_the_planner_publishes_both(self):
+    src = _planner_src()
+    for field, attr in (("usedMapdV2", "used_mapd_v2"), ("targetCount", "target_velocities")):
+      assert f"sccMap.{field}" in src, f"{field} is never published"
+      assert attr in src, f"{field} is published but never fed from {attr}"
+
+  def test_the_capnp_struct_carries_them(self):
+    import pathlib
+    here = pathlib.Path(mc.__file__).resolve()
+    root = next(q for q in here.parents if (q / "cereal/custom.capnp").exists())
+    text = (root / "cereal/custom.capnp").read_text(encoding="utf-8")
+    block = text[text.index("struct Map {"):]
+    block = block[:block.index("}")]   # struct Map carries no nested braces
+    for f in ("usedMapdV2", "targetCount"):
+      assert f in block, f"{f} is not declared on SmartCruiseControl.Map"
+
+  def test_target_count_cannot_overflow_its_field(self):
+    """UInt16. A path longer than 65535 must clamp, not wrap to a small number and read as healthy."""
+    src = _planner_src()
+    assert "min(len(self.scc.map.target_velocities or []), 65535)" in src, \
+      "targetCount must be clamped to the UInt16 range at the publish site"

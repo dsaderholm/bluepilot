@@ -10160,3 +10160,200 @@ comparable: 427 has 732 park frames, 429 has 44,199 plus 3,068 in reverse.** Thi
 parking and maneuvering, which contaminates the tight band completely. Calling it "the ideal matched
 repeat" beforehand assumed same route means same profile. It does not -- check the gear and speed
 histograms before claiming two drives are matched.
+
+## 2026-09-07: "THE SPEED KEPT LOWERING ON I-215" -- AN EMPTY v2 PATH FALLING BACK TO v1
+
+*"On the way back on I-215 the speed kept lowering every time on cruise so I couldn't use it."*
+Route 00000430 (today, 4:05 PM), 32 segments.
+
+**IT IS SCC-MAP, AND THE GEOMETRY IS THE PROOF.** Comparing the map's corner SPEED against the car's
+speed proves nothing; the invariant is the radius. Thirteen SCC-Map windows, every one asking
+**17.2 mph = a 27 m radius**, against the road he was actually on:
+
+    t+1338   asks 17 (R=27m)   he drove R=904 m     34x too tight   Belt Route (I-215)
+    t+1353   asks 17 (R=27m)   he drove R=3282 m   122x too tight   Belt Route
+    t+1451   asks 17 (R=27m)   he drove R=5283 m   196x too tight   Belt Route
+    t+1696   asks 17 (R=27m)   he drove R=6611 m   246x too tight   I-80
+
+Peak lateral acceleration during all of them: **0.00**. The previous worst on record here was 23x.
+
+### THE CHAIN, AND THREE HYPOTHESES KILLED ON THE WAY
+
+**NOT mapd's curvature.** Dumped the live path: 24 points, tightest `curvature` 0.002053 = a 487 m
+freeway bend, priced by mapd at 73 mph. Coordinates all valid Salt Lake positions, sensible 140-230 m
+spacing, no nulls.
+
+**NOT our own curvature function.** Ran `curvature_profile_multiscale` on those exact coordinates:
+it returns 0.001971 (507 m) where mapd says 487 m -- agreement, not invention. **That whole path
+prices its tightest point at 76.5 mph.**
+
+**NOT a publish-rate collapse.** `mapdOut` runs a clean 20.00 Hz. `mapdExtendedOut` runs 1.00 Hz,
+which is its DECLARED rate in `services.py` and by design, and `alive` allows 10x the period.
+`valid` is True on all 1891 messages and the position is non-zero on all of them.
+
+**THE CAUSE: 246 of 1891 path frames (13%) arrive with an EMPTY path.** `path_from_mapd` returns
+None for `len(points) == 0`, `smart_cruise_control.py` caches that None, and SCC-Map then reads
+**mapd v1** -- which serves the phantom. That is why the number is a CONSTANT 17.2 across thirteen
+windows on two different freeways: it is not computed from the road he is on.
+
+**The published target contradicting the live path is the tell.** At t+1339.9 SCC-Map asks 17.2
+while the path in hand prices its worst point at 76.5. When a controller's output cannot be derived
+from its stated input, the input is not the one it used.
+
+### THE FALLBACK IS DELIBERATE, WHICH IS WHY THIS NEEDS DESIGN AND NOT A QUICK EDIT
+
+This file already records it: *"SCC-Map also FALLS BACK to v1 when v2 is selected but silent.
+Deliberate: ... here v1 is still the shipped curve source and the failure being avoided is not
+slowing for a corner."* Deleting the fallback trades phantom slowdowns for missed real corners, and
+the 2026-08-18 fix in this same function already handled the neighbouring case -- *a straight path
+with no velocities returns an EMPTY target list* -- but that is `targets` being empty AFTER the walk.
+**An empty `points` list is a different branch and still falls through to v1.**
+
+The likely right answer is that an empty path from a LIVE, VALID mapd means "v2 has nothing to say
+here", not "go ask v1" -- but that is a judgement about which failure is worse, on the branch his car
+auto-pulls, and it is not being written at the end of a long session. **Do not shorten this to "just
+delete the fallback."**
+
+### WHAT HE CAN DO TONIGHT, AND IT IS HIS TOGGLE
+
+**`SmartCruiseControlMap`** ("Smart Cruise Control - Map"), `params_keys.h:494`, default ON. Turning
+it off stops the phantom slowdowns immediately and costs him nothing he uses -- 2026-09-03, his own
+words: *"I am not really using SCC Vision or even map. They work great, but since the PSCM needs to
+go so slow, I just take over."* **Named, not changed** -- settings are his.
+
+### CORRECTION, SAME NIGHT: THE EMPTY-PATH DIAGNOSIS ABOVE IS WRONG. TWO THEORIES DIED.
+
+**RETRACTED #1 -- "13% of path frames are empty, so SCC-Map falls back to v1."** The 246 empty
+frames are ONE contiguous 246-second run, **100% of them with `waySelectionType == fail`, at a
+median speed of 0 mph with an empty road name** -- the car parked before the drive. During the
+actual I-215 slowdowns the way match was `current` on "Belt Route" with a full 24-point path. The
+empty-path branch never ran on the freeway. **A percentage was quoted without asking WHERE those
+frames were**, which is this file's own denominator rule failing again.
+
+**RETRACTED #2 -- "`min_v` keeps its 100.0 sentinel and is published."** That predicts
+`100 * high_speed_factor`, and both his factors read **100 (= 1.0)**, so it predicts 224 mph, not
+17.2. Checked the params rather than assuming, which is the only reason it did not ship.
+
+### WHAT IS ACTUALLY ESTABLISHED, and it is enough to act on
+
+    t+1339..1359   state=turning  active=True  vTarget=17.2 mph  targetDistance=0.0  car at 70-74 mph
+
+- **SCC-Map emits a constant 17.2 mph on I-215 and I-80 at 70+ mph**, in 13 windows, with peak
+  lateral acceleration 0.00.
+- **The live v2 path does not justify it.** Reconstructed with the shipped
+  `curvature_profile_multiscale` on the real coordinates: tightest point 0.00205 (487 m), which
+  prices at **76.5 mph**. mapd's own curvature agrees (487 m vs our 507 m). Neither map data nor our
+  math invented a corner.
+- **`targetDistance` publishes 0.0 during it, and `self.target_distance` is seeded `float('inf')`
+  and only written inside the `valid_velocities` loop** -- and inf clamps to 0 on the wire here, the
+  same convention as `slowDownEndpoint`. **So no corner was selected, and a target was published
+  anyway.** That is the defect, whatever line produces it.
+- Everything upstream is healthy: `mapdOut` 20.00 Hz, `mapdExtendedOut` at its declared 1.00 Hz,
+  `valid` on all 1891 messages, position non-zero on all, `MapdV2 = 2`, `MAPD_V2_ON = 2`, both
+  factors 100.
+
+**(SUPERSEDED THE SAME DAY -- the suspect below is WRONG, see the next section.)** The suspect was
+**THE HOLD PATH IN `update_calculations`** -- the `return` inside
+`if self.v_target < min_v and not (self.target_lat == 0 ...)`, which keeps the previous `v_target`
+while `target_distance` has already been reset to inf. That MATCHES the observed pair (held 17.2 with
+inf distance) and nothing else checked does. **It is a hypothesis, not a finding** -- pinning it needs
+either instrumentation of `target_lat/target_lon/min_v` (none of which reach the wire) or a careful
+read that is not being done at the end of a long session, after two wrong answers on the same bug.
+
+**(DONE, AND IT WAS NOT WHAT WAS NEEDED -- `usedMapdV2` and `targetCount` shipped, and neither
+would have caught this; see below.)** This is the fifth time in this file a rule could
+not be explained from a drive because its own inputs were never on the wire, and the standing
+instruction is to add the log line rather than a third inference. That is the next concrete step.
+
+**His mitigation is unchanged and is his toggle: `SmartCruiseControlMap` off.** It costs him nothing
+he uses and stops the phantom slowdowns immediately.
+
+## 2026-09-07: SOLVED. SCC-MAP SPENT SEVEN MINUTES WALKING A MAP PATH FROM A ROAD HE HAD LEFT.
+
+The third diagnosis of the I-215 phantom, and this one is proven by exact floats rather than by
+elimination. **Both suspects named above -- the hold path in `update_calculations`, and publishing
+`target_lat`/`target_lon`/`min_v` -- were wrong.**
+
+### WHAT THE DRIVE SAYS, AND IT IS ARITHMETIC RATHER THAN JUDGEMENT
+
+Route 00000430, 1,900 seconds, published exactly TWO `vTarget` values and TWO finite
+`targetDistance` values:
+
+    vTarget          255.0 (V_CRUISE_UNSET)  x36783        7.690868377685547  x950
+    targetDistance   645.3853759765625       602.384033203125       (and inf)
+
+Thirteen active windows spread over 360 s and seven miles of two different freeways, every one
+carrying the same three floats to the last bit. **A live distance to a corner cannot do that.**
+
+### THE PROOF: FREEZE THE PATH AND THE NUMBERS COME BACK
+
+Replaying the SHIPPED `SmartCruiseControlMap` over the recorded `mapdExtendedOut`, with full state
+history from t+1200 so the hold path could engage if it wanted to:
+
+    LIVE path, from t+1200      v_target 223.7 mph, target_distance inf, no corner ever selected
+    path FROZEN at t+1287.5     v_target never 7.6909
+    path FROZEN at t+1290.5     7.6909, but distances 626.8 / 669.9
+    path FROZEN at t+1291.5     7.6909 AND 645.3854 AND 602.384   <-- ALL THREE, EXACTLY
+    path FROZEN at t+1292.5     7.6909, but distances 620.2 / 577.2
+
+**One freeze point reproduces the drive and no other does.** The last map path SCC-Map ever
+consumed arrived at t+1290.9; it walked that path for the remaining ~400 seconds.
+
+**The 7.69 m/s corner is REAL map geometry** at 40.637489, -111.808718 -- it appears in the live v2
+path for 30 consecutive messages, t+1287.9 to t+1316.9, and prices at 17.2 mph honestly. It was
+simply nowhere near him any more. Nothing invented a corner; the walk was reading an old map.
+
+### FIVE THINGS RULED OUT BY MEASUREMENT, EACH OF WHICH LOOKED LIKE THE ANSWER
+
+- **mapd itself was healthy.** 1889 `mapdExtendedOut` messages, inter-arrival p50 1.00 s, p90 1.00,
+  **max 1.02**, zero gaps over the 10 s `alive` threshold, `valid` True on all 1889, position
+  non-zero on all 1889, path 17-29 points, position advancing normally across the freeze.
+- **The build is not the question.** `git diff cd3828bb15 HEAD` over
+  `smart_cruise_control/` is EMPTY except the telemetry added the same day, and the device's
+  working tree is dirty by one PNG. The replay is of the code that ran.
+- **The v1 fallback cannot produce it.** **Nothing in this tree writes `MapTargetVelocities`** --
+  only the v1 mapd binary does, and at `MapdV2 = 2` `mapd_ready` never starts it. `/dev/shm/params/d/`
+  holds `LastGPSPosition` and `OSMDownloadBounds` and nothing else. So the v1 branch hands the walk
+  an EMPTY list, which produces 223.7 mph, not 17.2.
+- **Not the model veto, not the state machine.** `modelVetoed` and `cameraNotSeen` were False on
+  every frame of every window.
+- **Not `min_v`'s 100.0 sentinel** (retracted earlier) and **not the empty-path branch**
+  (retracted earlier). Both stay retracted.
+
+### THE FIX: THE CACHE NOW HAS AN AGE OF ITS OWN
+
+`SmartCruiseControl.update` caches the built path and rebuilds it only when
+`sm.updated['mapdExtendedOut']`. Its ONLY invalidation was `alive`/`valid` -- somebody else's
+liveness rule -- and a cache invalidated only by somebody else's rule inherits that rule's blind
+spots. `MAPD_V2_PATH_MAX_AGE_S = 5.0` drops a path that has not been rebuilt in five seconds,
+whatever alive says, and logs `SCC-Map: DROPPED A STALE MAPD PATH` once on the edge.
+
+**5.0 s is FIVE TIMES the worst inter-arrival ever observed on this service** (max 1.02 s across
+1889 messages) and two orders of magnitude short of the 400 s that happened -- a measured bound,
+not a guessed one, which is the `MAPD_V2_STALL_S` lesson applied rather than re-learned.
+
+**ONE-DIRECTIONAL.** Dropping the cache falls back to v1, which does not run at state 2, so the
+worst this can do is leave SCC-Map idle. Missing a mapped corner is the cost; acting on one seven
+minutes behind the car is what it replaces.
+
+**WHY THE CACHE WENT STALE IS STILL NOT ESTABLISHED, and that is stated rather than papered over.**
+`SubMaster.update_msgs` takes `alive` False after `10 / freq` seconds without a receive, so
+"stopped being `updated` while staying alive" should be impossible for a 1 Hz service -- and it
+happened for 400 s. The msgq-level cause is unidentified. The age guard does not depend on knowing
+it, which is the point of preferring an age over another liveness predicate.
+
+### AND THE TELEMETRY SHIPPED THE SAME DAY WOULD NOT HAVE CAUGHT IT
+
+`usedMapdV2` reads True for a stale cache -- the path is non-None, it is just old -- and
+`targetCount` reads a healthy 17-19. **A field that says WHICH source was read cannot answer WHEN
+it was read.** With the guard in place they become the readout anyway: a stale drop turns
+`usedMapdV2` False, so the next drive says so on the wire.
+
+**His mitigation is unchanged and remains his toggle: `SmartCruiseControlMap` off.** It costs him
+nothing he uses -- *"I am not really using SCC Vision or even map"* -- and the fix is not on his car
+until passing assist rebases.
+
+**MUTATION-TESTED, 9 mutants, 8 killed, 1 EQUIVALENT and named.** Moving the age check above the
+rebuild kills no test, because the rebuild simply puts the path back -- it costs a misleading log
+line and nothing else. Moving it BELOW the hand-off is not equivalent and is caught. The test that
+claimed to defend the first ordering had its own docstring corrected by that result.

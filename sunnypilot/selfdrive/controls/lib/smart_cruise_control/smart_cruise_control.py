@@ -6,10 +6,48 @@ See the LICENSE.md file in the root directory for more details.
 """
 import cereal.messaging as messaging
 from openpilot.common.params import Params
+from openpilot.common.realtime import DT_MDL
+from openpilot.common.swaglog import cloudlog
 from openpilot.sunnypilot.mapd import MAPD_V2_ON
 from openpilot.sunnypilot.selfdrive.controls.lib.smart_cruise_control.mapd_v2_path import path_from_mapd
 from openpilot.sunnypilot.selfdrive.controls.lib.smart_cruise_control.vision_controller import SmartCruiseControlVision
 from openpilot.sunnypilot.selfdrive.controls.lib.smart_cruise_control.map_controller import SmartCruiseControlMap
+
+
+# FusionPilot 2026-09-07: HOW OLD A CACHED MAP PATH MAY BE BEFORE IT IS THROWN AWAY.
+#
+# He reported "the speed kept lowering every time on cruise so I couldn't use it" on I-215.
+# SCC-Map published a CONSTANT 17.2 mph -- a 27 m radius -- in thirteen windows at 70+ mph, with
+# peak lateral acceleration 0.00. Across that whole 1,900 s drive the plan carried exactly TWO
+# vTarget values (255.0 unset, and 7.690868377685547) and exactly TWO finite targetDistances
+# (645.3853759765625 and 602.384033203125), unchanged over seven miles and two freeways. A live
+# distance to a corner cannot do that.
+#
+# Replaying the shipped controller over the recorded messages settles what it was. With the live
+# path, from full state history, it never produces 17.2 -- it produces 223.7 with no corner
+# selected. FREEZING the path at the message received at t+1290.9 reproduces all three floats
+# exactly, and no other freeze point does. So the walk spent the last SEVEN MINUTES of that drive
+# on a path from a road it had already left. The 7.69 m/s corner is real map geometry at
+# 40.637489, -111.808718 -- it was simply nowhere near him any more.
+#
+# WHY THE CACHE WENT STALE IS NOT ESTABLISHED. `mapdExtendedOut` itself was healthy the whole time:
+# 1889 messages, 1.00 Hz, no gap over 10 s, `valid` on every one, position non-zero on every one.
+# The only invalidation this cache had was alive/valid, and SubMaster takes `alive` False after
+# 10 / freq seconds without a receive -- so "stopped being `updated` while staying alive" should be
+# impossible, and it happened anyway. That tension is unresolved and is stated rather than papered
+# over.
+#
+# WHICH IS THE ARGUMENT FOR AN AGE OF ITS OWN. A cache invalidated only by somebody else's liveness
+# rule inherits that rule's blind spots; one that knows how old it is does not care what caused the
+# gap. 5.0 s is FIVE TIMES the worst inter-arrival ever observed on this service (p50 1.00 s,
+# p90 1.00 s, max 1.02 s across 1889 messages on this drive), so it cannot fire on a hiccup, and it
+# is two orders of magnitude short of the 400 s that happened.
+#
+# ONE-DIRECTIONAL: dropping the cache falls back to v1, which at MapdV2 = 2 does not run at all, so
+# the worst this can do is leave SCC-Map idle. Not slowing for a mapped corner is the cost; acting
+# on a corner seven minutes behind you is what it replaces.
+MAPD_V2_PATH_MAX_AGE_S = 5.0
+MAPD_V2_PATH_MAX_AGE_FRAMES = int(MAPD_V2_PATH_MAX_AGE_S / DT_MDL)
 
 
 class SmartCruiseControl:
@@ -23,6 +61,10 @@ class SmartCruiseControl:
     # See the cache in update(). None means "v2 has nothing to say", which is also its value
     # before the first mapdExtendedOut arrives.
     self._mapd_v2_path: tuple | None = None
+    # Frames since the cache was last REBUILT, not since a message arrived. Seeded high so a path
+    # that never arrives is stale rather than fresh -- the same reason the announcement cooldowns
+    # seed high, and the opposite of the bug this guard exists for.
+    self._frames_since_path: int = 1 << 30
 
   def update(self, sm: messaging.SubMaster, long_enabled: bool, long_override: bool, v_ego: float, a_ego: float, v_cruise: float) -> None:
     # BluePilot: vision FIRST. The map controller cross-checks its own curve against what the
@@ -59,10 +101,19 @@ class SmartCruiseControl:
     if not self.use_mapd_v2:
       mapd_v2_path = None
     else:
+      self._frames_since_path += 1
       if not (sm.alive['mapdExtendedOut'] and sm.valid['mapdExtendedOut']):
         self._mapd_v2_path = None
       elif sm.updated['mapdExtendedOut']:
         self._mapd_v2_path = path_from_mapd(sm)
+        self._frames_since_path = 0
+      # AND THE CACHE'S OWN AGE, which is what the I-215 drive needed and did not have. Checked
+      # after the rebuild so a path built this frame is never dropped, and logged once on the edge
+      # rather than every frame -- a rule that fires 20 times a second cannot be read off a drive.
+      if self._mapd_v2_path is not None and self._frames_since_path >= MAPD_V2_PATH_MAX_AGE_FRAMES:
+        cloudlog.error("SCC-Map: DROPPED A STALE MAPD PATH after %.1f s" %
+                       (self._frames_since_path * DT_MDL))
+        self._mapd_v2_path = None
       mapd_v2_path = self._mapd_v2_path
     self.map.update(long_enabled, long_override, v_ego, a_ego, v_cruise,
                     model_lat_acc=self.vision.max_pred_lat_acc, mapd_v2_path=mapd_v2_path)
