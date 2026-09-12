@@ -8302,3 +8302,50 @@ liveTracks runs at ~8.3 Hz and is not phase-locked to the camera, so roughly one
 lands in a modelV2 poll -- the observer sees about a fifth of the radar it thinks it sees, at random.
 Not a freeze like the map path, but a 5x under-sample of the evidence every overtake gate
 accumulates. That branch owns it; this is the note, not the fix.
+
+## 2026-09-12: UPSTREAM SURVEY. TOOK PR #190 (COMM ISSUE AFTER REVERSE). #191 STILL NOT TAKEN.
+
+    releases        bp-7.0 newest, 0 behind, still NO bp-8.0
+    bp-dev          13 commits past bp-7.0; tip 2026-09-01 (#195)
+    moved           bp-dev-191 (2026-09-10), bp-jmc-lane (2026-09-07)
+
+**TAKEN: PR #190, `ad4ec5ee1e` + `72792c20df`, cherry-picked with -x.** BluePilot issue #188 --
+"Communication Issue Between Processes | longitudinalPlan" right after Reverse -> Drive. **It is his
+alert**: 12 times across 26 drives the week of 2026-09-08, every one 1-6 s after
+`radarTempUnavailable` from backing out (route 00000447 t+644..646). Two halves: the Delphi MRR
+holds `radarUnavailableTemporary` ~1 s past the scan-index freeze (his radar IS that path --
+`FORD_FUSION_MK5` keeps the default `Bus.radar: DELPHI_MRR`), and selfdrived debounces the generic
+commIssue catch-all 20 frames. `test_radar_recovers_quietly_from_reverse.py` drives the real
+`_update_delphi_mrr`, 4 mutants 0 survivors; the debounce half is read, not run.
+
+**AND THE 2026-09-03 SURVEY MISSED IT** because it checked bp-dev only for LATERAL commits. It merged
+2026-08-24. **Survey every file an upstream commit touches, not the subsystem under discussion.**
+
+**EVERY OTHER bp-dev COMMIT IS OURS BY CONTENT, now checked across all 13:** fc228b4099 (combo
+buttons), the ALP lane-centering stack (10101012d8, 560e80e9d5 model-position fallback, af4bc410c9
+rate limit, 94bf8144d4/80825b8156/e5b92cc48b guards -- except the 0.0015 applied cap, already
+recorded as not ours), the two lane-centering default commits (ours differ deliberately), the
+`.gitattributes` scoping, and the sentry memory tuning (808a4d9cdc). `git apply --reverse --check`
+reports all of them "diverged", which is noise from the re-merges -- read the content.
+
+**PR #191 IS STILL OPEN AND REWROTE ITSELF AGAIN on 2026-09-10** (`154c8703fe`, "Restore original
+low speed behaviors"): speed breakpoints `[11.18, 31.29] -> [13.41, 26.82]`, high-curvature gain
+`anchor*hif -> 1.10*anchor*hif`, the ramp end FIXED at `|kappa| 0.002` (500 m) instead of our
+speed-blended boundary, a new low-pass on the kappa used for gain, and `b` faded to 0 across
+55-60 mph. At his settings (1.009 / 0.812 / 0.78):
+
+    75 mph  1000 m   cf 0.799 -> 0.862   +8%
+    75 mph   500 m   cf 0.838 -> 1.027   +23%   ~+1.0 deg at the wheel
+    75 mph   300 m   cf 0.889 -> 1.027   +16%
+    40 mph   200 m   cf 1.008 -> 1.216   +21%   ~+2.9 deg
+
+**Same verdict as 2026-09-05: do not take it.** It is a moving open PR, it retunes his steering by
+10-20% on curves, and a gain multiplies the exit overshoot he reported. Re-derive every number he
+tunes against if it ever lands in a release.
+
+**PR #194 (bp-jmc-lane) is still open and WIP** -- new commits are "lane nudge", "lane indicator
+option", "sunnylink", plus its body now says both lateral strategies move to a 0.003 deviation band
+instead of `CURVATURE_ERROR` (0.002). That widening is a behavior change to the clip measured on
+2026-09-04 and is NOT covered by the earlier refusal of `0cb9165427`; evaluate it separately if it
+merges.
+
