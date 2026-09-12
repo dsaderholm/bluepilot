@@ -10357,3 +10357,55 @@ until passing assist rebases.
 rebuild kills no test, because the rebuild simply puts the path back -- it costs a misleading log
 line and nothing else. Moving it BELOW the hand-off is not equivalent and is caught. The test that
 claimed to defend the first ordering had its own docstring corrected by that result.
+
+## 2026-09-12: "ABORTS OUT OF `changing`" ARE NOT A DEFECT. RETRACTING WHAT I CALLED ONE.
+
+On 2026-09-01 I reported **6 aborts out of `changing`** on route 00000405 as a real defect -- "the car
+starting to move and changing its mind". It is not, and it cannot be, by construction.
+
+`passing_maneuver.py` gives `changing` exactly four exits, and **no gate can reach any of them**:
+
+    change_duration_s elapsed   -> finishing   the crossing completed
+    collision_abort             -> aborting    something is arriving -- the one input allowed to reverse
+    driver_override             -> idle        HIM taking the car back
+    too_slow                    -> idle        below PassingAssistMinSpeed, the situation is gone
+
+An abort scan that counts every transition other than `finishing`/`aborting` as a back-out therefore
+counts ONLY the last two -- both deliberate, both correct. The module says so in as many words: *"The
+driver taking their car back is not a gate and is not an abort worth counting against the system -- it
+is the correct outcome, at any phase, including mid-crossing."*
+
+Re-measured on build 8e979260 (29 routes, 5.9 h, decoded on the device): **3 transitions out of
+`changing`, all necessarily one of those two exits.** One read `driverActive` directly.
+
+**TWO MISTAKES MADE IT LOOK LIKE A DEFECT, and both are reusable warnings:**
+
+- **The label was borrowed from the wrong phase.** The scan classified anything held >= 4.8 s as
+  "window expired" -- `SIGNAL_WINDOW_S` belongs to `signaling`. `changing` has no such window, so the
+  label described a mechanism that does not exist in that phase. **A heuristic keyed on one phase's
+  constant is wrong on every other phase, and nothing flags it.**
+- **I did not read the phase's exits before calling one of them a defect.** Four lines of the state
+  machine settle it. That is the "read the code before building anything" rule, broken on a finding
+  rather than on a build.
+
+**If this needs measuring properly in future, split the two:** record `driver_override` vs `too_slow` at
+the transition. Neither is a defect, but the ratio says whether he is taking over mid-crossing or just
+slowing below the minimum -- the first is interesting once this actuates.
+
+### WHAT THE SAME SCAN SAYS IS REAL
+
+    aborts          73 over 5.9 h -> 12.4/hour     identical to the 11.6 h highway batch (12.5/h)
+    by reason       wanted->none with blockedBy none   31   <- the largest bucket, still unexplained
+                    wanted->none: nothingSlower        15
+                    wanted->none: driverActive          6   (him -- correct)
+                    wanted->none: adjacentSlow          6
+                    wanted->none: noLaneAvailable       5
+                    wanted->none: tooSlow               3   (correct)
+    noLead          3 total: 2 reacquired within 2 s (radar track flicker), 1 lead genuinely left
+
+**The rate is stable across a highway mix and a local mix at ~12.5/hour.** That is itself a finding:
+whatever drives the flicker does not scale with road type.
+
+**`wanted->none` with `blockedBy none` is the one worth chasing.** `blockedBy none` means a suggestion
+was being made on that frame, yet `wanted_side` dropped. `wanted_side` is geometry-only and debounced
+separately from the suggestion, so the geometry is what flickered while every gate stayed happy.
