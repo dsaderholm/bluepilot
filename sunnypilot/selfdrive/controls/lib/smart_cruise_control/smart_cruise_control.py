@@ -30,14 +30,10 @@ from openpilot.sunnypilot.selfdrive.controls.lib.smart_cruise_control.map_contro
 # on a path from a road it had already left. The 7.69 m/s corner is real map geometry at
 # 40.637489, -111.808718 -- it was simply nowhere near him any more.
 #
-# WHY THE CACHE WENT STALE IS NOT ESTABLISHED. `mapdExtendedOut` itself was healthy the whole time:
-# 1889 messages, 1.00 Hz, no gap over 10 s, `valid` on every one, position non-zero on every one.
-# The only invalidation this cache had was alive/valid, and SubMaster takes `alive` False after
-# 10 / freq seconds without a receive -- so "stopped being `updated` while staying alive" should be
-# impossible, and it happened anyway. That tension is unresolved and is stated rather than papered
-# over.
+# WHY IT WENT STALE WAS FOUND 2026-09-12, AND IT WAS NOT MAPD: see `_new_mapd_message` below. The
+# rebuild was keyed on `sm.updated`, and in plannerd that flag almost never reaches this code.
 #
-# WHICH IS THE ARGUMENT FOR AN AGE OF ITS OWN. A cache invalidated only by somebody else's liveness
+# THE AGE STAYS ANYWAY, as the backstop it was built to be. A cache invalidated only by somebody else's liveness
 # rule inherits that rule's blind spots; one that knows how old it is does not care what caused the
 # gap. 5.0 s is FIVE TIMES the worst inter-arrival ever observed on this service (p50 1.00 s,
 # p90 1.00 s, max 1.02 s across 1889 messages on this drive), so it cannot fire on a hiccup, and it
@@ -48,6 +44,37 @@ from openpilot.sunnypilot.selfdrive.controls.lib.smart_cruise_control.map_contro
 # on a corner seven minutes behind you is what it replaces.
 MAPD_V2_PATH_MAX_AGE_S = 5.0
 MAPD_V2_PATH_MAX_AGE_FRAMES = int(MAPD_V2_PATH_MAX_AGE_S / DT_MDL)
+
+
+def _new_mapd_message(sm, last_mono: int) -> bool:
+  """FusionPilot 2026-09-12: has a NEW mapdExtendedOut arrived since the path was last built?
+
+  NOT `sm.updated`, and this is the whole I-215 phantom. plannerd is
+
+      sm = SubMaster([...], poll='carState')
+      while True:
+        sm.update()                     # every carState -- 100 Hz -- and it resets EVERY updated flag
+        if sm.updated['modelV2']:       # 20 Hz
+          longitudinal_planner.update(sm)
+
+  so a 1 Hz message's `updated` flag is visible here only if it was received in the SAME 10 ms poll
+  cycle as a modelV2. Everywhere else it was set and cleared on a poll the planner never ran on. And
+  `alive` stays True the whole time, because the messages ARE being received -- which is exactly the
+  "stale while alive" that looked impossible.
+
+  PREDICTED FROM TIMESTAMPS ALONE ON ROUTE 00000430, and it matches the drive to the message: only
+  233 of 1,891 mapdExtendedOut (12.3%) landed in a modelV2 cycle, and between t+1172.9 and t+1888.9
+  exactly ONE did -- t+1290.9, the very message a separate replay had already pinned as the frozen
+  path. mapd publishes on a steady 1.00 Hz clock and modelV2 on the camera's 20 Hz one, so the phase
+  between them drifts slowly: minutes of normal refresh, then minutes of none.
+
+  The per-service `logMonoTime` is set on RECEIPT, in whichever poll cycle that happens, and it
+  survives until the next message. So a changed value means a new message whatever cycle it landed
+  in. Both start at 0, so nothing is built before the first message -- and this branch is behind
+  `alive` anyway. (An explicit `mono != 0` clause was tried and mutation testing showed it could
+  never change the answer, so it is not here.)
+  """
+  return sm.logMonoTime['mapdExtendedOut'] != last_mono
 
 
 class SmartCruiseControl:
@@ -65,6 +92,9 @@ class SmartCruiseControl:
     # that never arrives is stale rather than fresh -- the same reason the announcement cooldowns
     # seed high, and the opposite of the bug this guard exists for.
     self._frames_since_path: int = 1 << 30
+    # logMonoTime of the message the cached path was built from. 0 = never built, which matches
+    # SubMaster's own value for a service that has not been received.
+    self._mapd_v2_path_mono: int = 0
 
   def update(self, sm: messaging.SubMaster, long_enabled: bool, long_override: bool, v_ego: float, a_ego: float, v_cruise: float) -> None:
     # BluePilot: vision FIRST. The map controller cross-checks its own curve against what the
@@ -95,16 +125,20 @@ class SmartCruiseControl:
     # value is identical, not a stale stand-in. `Coordinate` copies floats and the targets are
     # dicts of floats, which is what this file already builds them as, for exactly this reason.
     #
-    # The alive/valid clear is NOT optional: without it a v2 that dies leaves `updated` False
-    # forever and the last path would be served indefinitely, which is the one way caching could
-    # turn a fallback into a stale answer.
+    # The alive/valid clear is NOT optional: without it a v2 that dies leaves no new message forever
+    # and the last path would be served indefinitely, which is the one way caching could turn a
+    # fallback into a stale answer.
+    #
+    # AND "WHEN THE MESSAGE CHANGES" MUST NOT BE READ FROM `sm.updated` -- that is the bug this
+    # caching introduced on 2026-08-28 and that the I-215 drive paid for. See `_new_mapd_message`.
     if not self.use_mapd_v2:
       mapd_v2_path = None
     else:
       self._frames_since_path += 1
       if not (sm.alive['mapdExtendedOut'] and sm.valid['mapdExtendedOut']):
         self._mapd_v2_path = None
-      elif sm.updated['mapdExtendedOut']:
+      elif _new_mapd_message(sm, self._mapd_v2_path_mono):
+        self._mapd_v2_path_mono = sm.logMonoTime['mapdExtendedOut']
         self._mapd_v2_path = path_from_mapd(sm)
         self._frames_since_path = 0
       # AND THE CACHE'S OWN AGE, which is what the I-215 drive needed and did not have. Checked

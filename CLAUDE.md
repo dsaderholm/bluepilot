@@ -8216,7 +8216,7 @@ not a guessed one, which is the `MAPD_V2_STALL_S` lesson applied rather than re-
 worst this can do is leave SCC-Map idle. Missing a mapped corner is the cost; acting on one seven
 minutes behind the car is what it replaces.
 
-**WHY THE CACHE WENT STALE IS STILL NOT ESTABLISHED, and that is stated rather than papered over.**
+**(ANSWERED 2026-09-12 -- see the next section. It was `sm.updated`, not mapd.)** Why the cache went stale was not yet established:
 `SubMaster.update_msgs` takes `alive` False after `10 / freq` seconds without a receive, so
 "stopped being `updated` while staying alive" should be impossible for a 1 Hz service -- and it
 happened for 400 s. The msgq-level cause is unidentified. The age guard does not depend on knowing
@@ -8237,3 +8237,56 @@ until passing assist rebases.
 rebuild kills no test, because the rebuild simply puts the path back -- it costs a misleading log
 line and nothing else. Moving it BELOW the hand-off is not equivalent and is caught. The test that
 claimed to defend the first ordering had its own docstring corrected by that result.
+
+## 2026-09-12: THE ROOT CAUSE. `sm.updated` IN plannerd ALMOST NEVER REACHES THE PLANNER.
+
+The I-215 phantom was not mapd, not msgq and not the walk. It is plannerd's loop:
+
+    sm = SubMaster([...], poll='carState')
+    while True:
+      sm.update()                     # every carState, 100 Hz -- clears EVERY updated flag
+      if sm.updated['modelV2']:       # 20 Hz
+        longitudinal_planner.update(sm)
+
+**A slower service's `updated` flag is visible inside the planner only if its message was received
+in the SAME 10 ms poll as a modelV2.** Otherwise it is set and cleared on a poll the planner never
+runs on. `alive` stays True throughout, because the messages ARE received -- which is exactly the
+"stale while alive" the previous section called impossible.
+
+**PREDICTED FROM TIMESTAMPS ALONE, AND IT MATCHES THE DRIVE TO THE MESSAGE.** Route 00000430:
+receipt cycle = first carState at or after each message's logMonoTime; visible = same cycle as a
+modelV2 (`drivelogs/2026-09-12_review/tools/updated_race.py`):
+
+    mapdExtendedOut visible to the planner     233 of 1,891   12.3%
+    longest stretch with none visible           597 s   t+1291.9 .. t+1888.9
+    the ONLY visible message t+1172.9..1888.9   t+1290.9  <-- the frozen path the replay pinned
+
+mapd publishes on a steady 1.00 Hz clock and modelV2 follows the camera at 20 Hz, so the phase
+between them drifts slowly: minutes of normal refresh, then minutes of nothing.
+
+**IT WAS INTRODUCED ON 2026-08-28 BY `2106064495`**, the commit that cached the path to stop a 17.6 ms
+per-frame stall soft-disabling him. The cache was right. Keying it on `sm.updated` was wrong for this
+process, and `test_mapd_path_is_cached.py` then REQUIRED the flag, enshrining the bug. That test is
+reversed.
+
+**THE 5 s AGE GUARD FROM 2026-09-07 CAUGHT IT ON THE ROAD, WHICH IS HOW THIS WAS FOUND.** On the
+week's drives `SCC-Map: DROPPED A STALE MAPD PATH` fires repeatedly, and the new `usedMapdV2` field
+shows SCC-Map reading NO map for minutes at a time on the highway. So for that week the guard turned
+a phantom slowdown into no map curve slowing at all -- the one-directional failure it was built to
+choose.
+
+**THE FIX: key the rebuild on `sm.logMonoTime['mapdExtendedOut']` changing** (`_new_mapd_message`).
+logMonoTime is set on receipt in whatever poll cycle, and kept until the next message. The age guard
+stays as the backstop.
+
+### THE RULE, FOR EVERY BRANCH: NEVER READ `sm.updated[X]` INSIDE CODE GATED ON `sm.updated[Y]`
+
+Unless X is Y, or X is the polled service. The flag means "received on THIS poll", and the planner
+does not run on most polls. Use `logMonoTime` (or `recv_frame`) to ask "is there a new one since I
+last looked".
+
+**PASSING ASSIST HAS ONE: `adjacent_lane.py` ~line 993, `if not sm.updated['liveTracks']: return`.**
+liveTracks runs at ~8.3 Hz and is not phase-locked to the camera, so roughly one message in five
+lands in a modelV2 poll -- the observer sees about a fifth of the radar it thinks it sees, at random.
+Not a freeze like the map path, but a 5x under-sample of the evidence every overtake gate
+accumulates. That branch owns it; this is the note, not the fix.

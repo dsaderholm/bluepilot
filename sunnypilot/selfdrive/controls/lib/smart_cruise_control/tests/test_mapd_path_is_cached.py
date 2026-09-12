@@ -49,16 +49,39 @@ def test_path_from_mapd_is_not_called_unconditionally():
                            "17.6 ms stall that soft-disabled him")
 
 
-def test_the_rebuild_is_gated_on_the_message_updating():
+def test_the_rebuild_is_gated_on_a_NEW_MESSAGE_and_NEVER_on_sm_updated():
+  """REVERSED 2026-09-12. This test used to REQUIRE `sm.updated['mapdExtendedOut']`, and in doing so
+  it enshrined the bug behind the I-215 phantom.
+
+  plannerd polls carState at 100 Hz and runs the planner only when `sm.updated['modelV2']`, and
+  `SubMaster.update()` clears every `updated` flag on every poll. So a 1 Hz message's flag reaches
+  this code only when it landed in the same 10 ms poll as a modelV2: 12.3% of messages on route
+  00000430, and none at all for 597 seconds straight, during which SCC-Map walked a path from t+1290.9
+  and asked for 17.2 mph at 74 mph. The cache fix this file documents was right; the flag it keyed on
+  was wrong for this process.
+
+  The rebuild keys on `logMonoTime` instead -- set on receipt in whatever poll cycle, and kept until
+  the next message.
+  """
   src = open(SRC, encoding="utf-8").read()
   tree = ast.parse(src)
-  found = False
+  gates = []
   for node in ast.walk(tree):
     if isinstance(node, ast.If) and _calls_to(node, "path_from_mapd"):
-      test_src = ast.unparse(node.test)
-      if "updated" in test_src and "mapdExtendedOut" in test_src:
-        found = True
-  assert found, "the rebuild must be guarded by sm.updated['mapdExtendedOut']"
+      # only the test of the branch that directly holds the call
+      for st in node.body:
+        if _calls_to(st, "path_from_mapd"):
+          gates.append(ast.unparse(node.test))
+      for orelse in node.orelse:
+        if isinstance(orelse, ast.If) and any(_calls_to(st, "path_from_mapd") for st in orelse.body):
+          gates.append(ast.unparse(orelse.test))
+  assert gates, "could not find the branch that rebuilds the path"
+  for g in gates:
+    assert "updated" not in g, f"the rebuild is gated on sm.updated again ({g}) -- that is the I-215 bug"
+  assert any("_new_mapd_message" in g for g in gates), f"the rebuild is not gated on a new message: {gates}"
+  helper = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_new_mapd_message")
+  body = "".join(ast.unparse(st) for st in helper.body[1:])   # skip the docstring
+  assert "logMonoTime" in body and "updated" not in body
 
 
 def test_a_dead_publisher_clears_the_cache():

@@ -46,10 +46,17 @@ class _Recorder:
 
 
 class _SM:
-  def __init__(self, alive=True, valid=True, updated=True):
+  """What plannerd's SubMaster looks like ON A PLANNER FRAME.
+
+  `updated` defaults to FALSE even when a message has just arrived, because that is what plannerd
+  shows the planner roughly 88% of the time: the flag was set and cleared on a 100 Hz carState poll
+  the planner did not run on. `logMonoTime` is the receipt stamp that survives that.
+  """
+  def __init__(self, mono, alive=True, valid=True, updated=False):
     self.alive = {"mapdExtendedOut": alive}
     self.valid = {"mapdExtendedOut": valid}
     self.updated = {"mapdExtendedOut": updated}
+    self.logMonoTime = {"mapdExtendedOut": mono}
 
   def __getitem__(self, k):
     return None
@@ -69,6 +76,8 @@ def scc(monkeypatch):
   s.use_mapd_v2 = True
   s._mapd_v2_path = None
   s._frames_since_path = 1 << 30
+  s._mapd_v2_path_mono = 0
+  s._test_mono = 0   # the fake publisher's clock, not a controller field
   # The build is under test, not the translation. Returning a fixed object keeps a rebuild
   # observable as "the SAME path came back", which is what the age question is about.
   monkeypatch.setattr(scc_mod.smart_cruise_control, "path_from_mapd", lambda sm: A_PATH)
@@ -76,7 +85,11 @@ def scc(monkeypatch):
 
 
 def _run(s, frames: int, updated: bool) -> None:
-  sm = _SM(updated=updated)
+  """`updated=True` means a NEW message arrived before these frames -- told to the controller the
+  way plannerd actually tells it, by a new logMonoTime, with the `updated` flag already cleared."""
+  if updated:
+    s._test_mono += 1_000_000_000
+  sm = _SM(s._test_mono)
   for _ in range(frames):
     s.update(sm, True, False, 30.0, 0.0, 30.0)
 
@@ -144,7 +157,7 @@ def test_the_FIRST_frames_of_a_drive_hand_nothing(scc):
 def test_a_dead_service_still_clears_the_cache(scc):
   """The original alive/valid invalidation is not replaced by the age -- both are wanted."""
   _run(scc, 1, updated=True)
-  sm = _SM(alive=False)
+  sm = _SM(scc._test_mono, alive=False)
   scc.update(sm, True, False, 30.0, 0.0, 30.0)
   assert _handed(scc) is None
 
@@ -160,6 +173,37 @@ def test_the_max_age_is_FIVE_TIMES_THE_WORST_OBSERVED_GAP_not_a_number_anyone_pi
   assert MAPD_V2_PATH_MAX_AGE_FRAMES == int(5.0 / DT_MDL)
 
 
+def test_THE_I215_RACE_a_new_message_whose_updated_flag_the_planner_never_saw_is_still_used(scc):
+  """The root cause, 2026-09-12. plannerd polls carState at 100 Hz and runs the planner only on a
+  modelV2 frame, and `SubMaster.update()` clears every `updated` flag on every poll. On route
+  00000430 only 12.3% of mapdExtendedOut landed in a modelV2 poll, and for 597 s straight none did --
+  so a controller keyed on `updated` walked the path from t+1290.9 for ten minutes.
+
+  Here the flag is False on every frame the controller runs, exactly as on the car, and the second
+  message must still replace the first.
+  """
+  scc_mod.smart_cruise_control.path_from_mapd, first = (lambda sm: ANOTHER_PATH), None
+  _run(scc, 1, updated=True)
+  first = _handed(scc)
+  scc_mod.smart_cruise_control.path_from_mapd = lambda sm: A_PATH
+  _run(scc, 1, updated=True)
+  assert first == ANOTHER_PATH
+  assert _handed(scc) == A_PATH, "a new message was ignored because its `updated` flag was cleared"
+
+
+def test_a_stale_updated_flag_with_NO_new_message_does_not_rebuild(scc):
+  """The other half: the flag is not the signal in either direction. Same logMonoTime, flag True,
+  and the path must not be rebuilt -- it would be rebuilt from the same message, which is the 17.6 ms
+  per-frame cost the cache exists to avoid."""
+  calls = []
+  scc_mod.smart_cruise_control.path_from_mapd = lambda sm: (calls.append(1), A_PATH)[1]
+  _run(scc, 1, updated=True)
+  sm = _SM(scc._test_mono, updated=True)
+  for _ in range(10):
+    scc.update(sm, True, False, 30.0, 0.0, 30.0)
+  assert len(calls) == 1
+
+
 def test_the_counter_EXISTS_BEFORE_ANY_FRAME_RUNS():
   """The 2026-08-15 undrivable-car shape: an attribute that only exists once a method has run.
 
@@ -172,6 +216,7 @@ def test_the_counter_EXISTS_BEFORE_ANY_FRAME_RUNS():
   from openpilot.sunnypilot.selfdrive.controls.lib.smart_cruise_control import smart_cruise_control as m
   body = inspect.getsource(m.SmartCruiseControl).split("def __init__", 1)[1].split("def ", 1)[0]
   assert "self._frames_since_path" in body, "_frames_since_path is not initialised in __init__"
+  assert "self._mapd_v2_path_mono" in body, "_mapd_v2_path_mono is not initialised in __init__"
 
 
 def test_v2_being_switched_off_still_hands_nothing(scc):
