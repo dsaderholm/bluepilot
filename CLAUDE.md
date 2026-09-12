@@ -8328,7 +8328,7 @@ recorded as not ours), the two lane-centering default commits (ours differ delib
 `.gitattributes` scoping, and the sentry memory tuning (808a4d9cdc). `git apply --reverse --check`
 reports all of them "diverged", which is noise from the re-merges -- read the content.
 
-**PR #191 IS STILL OPEN AND REWROTE ITSELF AGAIN on 2026-09-10** (`154c8703fe`, "Restore original
+**PR #191 IS STILL OPEN AND REWROTE ITSELF AGAIN on 2026-09-10** (alan-polk merged it into the TEST branch `bp-dev-191`, not bp-dev; #192 closed 2026-09-11 as folded into #191; Praeuner says no retune is needed, which the table below contradicts at his settings) (`154c8703fe`, "Restore original
 low speed behaviors"): speed breakpoints `[11.18, 31.29] -> [13.41, 26.82]`, high-curvature gain
 `anchor*hif -> 1.10*anchor*hif`, the ramp end FIXED at `|kappa| 0.002` (500 m) instead of our
 speed-blended boundary, a new low-pass on the kappa used for gain, and `b` faded to 0 across
@@ -8339,6 +8339,7 @@ speed-blended boundary, a new low-pass on the kappa used for gain, and `b` faded
     75 mph   300 m   cf 0.889 -> 1.027   +16%
     40 mph   200 m   cf 1.008 -> 1.216   +21%   ~+2.9 deg
 
+**HIS CALL, 2026-09-12: *"leave it until it's in a release."*** Do not re-raise it before then.
 **Same verdict as 2026-09-05: do not take it.** It is a moving open PR, it retunes his steering by
 10-20% on curves, and a gain multiplies the exit overshoot he reported. Re-derive every number he
 tunes against if it ever lands in a release.
