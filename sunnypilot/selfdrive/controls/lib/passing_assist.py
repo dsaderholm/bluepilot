@@ -3378,7 +3378,23 @@ class PassingAssistDetector:
       return
 
     if not spotted:
-      self._reset_outputs(Blocked.nothingSlower)
+      # FusionPilot 2026-09-12: DEBOUNCED, the same two lines noLaneAvailable uses below, and for the
+      # same reason its comment records -- this early return is reached BEFORE wanted_side is
+      # computed, so a hard clear here bypasses WANTED_FALL_S entirely.
+      #
+      # It was a hard clear, and nothingSlower is on HOLD_THROUGH. So on a brief dip _hold_suggestion
+      # restored the suggestion and overwrote blocked_by to none, while _run_maneuver read the
+      # already-zeroed wanted_side and aborted. The maneuver backed out under a suggestion still on
+      # screen, and the abort frame read `wantedSide none, blockedBy none` -- 31 of 73 aborts on build
+      # 8e979260, the largest bucket, unexplained because both naming fields had been overwritten.
+      #
+      # NOT keep_wanted=True alone. The debounce lives further down _decide, so keep_wanted by itself
+      # leaves wanted_side untouched and a persistent nothingSlower freezes it -- the stale-wanted
+      # keep-right bug the hard clear was added for. Feeding the debounce `none` first keeps both
+      # promises: a dip under WANTED_FALL_S is ridden out, a real one still falls, and keep-right's
+      # 25 s settle cannot suggest inside that 0.75 s. test_nothing_slower_dip.py holds all three.
+      self.wanted_side = self._debounce_wanted(Side.none)
+      self._reset_outputs(Blocked.nothingSlower, keep_wanted=True)
       self._keep_right()
       return
 
