@@ -10409,3 +10409,56 @@ whatever drives the flicker does not scale with road type.
 **`wanted->none` with `blockedBy none` is the one worth chasing.** `blockedBy none` means a suggestion
 was being made on that frame, yet `wanted_side` dropped. `wanted_side` is geometry-only and debounced
 separately from the suggestion, so the geometry is what flickered while every gate stayed happy.
+
+## 2026-09-12: SOLVED. THE `wanted->none, blockedBy none` ABORTS WERE nothingSlower HARD-CLEARING UNDER THE HOLD.
+
+The largest abort bucket above -- 31 of 73 -- was not geometry flicker. It was two mechanisms
+disagreeing about one gate, in one frame:
+
+    _decide           nothingSlower early return -> _reset_outputs(nothingSlower)
+                      zeroes wanted_side, blocked_by = nothingSlower
+    _hold_suggestion  nothingSlower is on HOLD_THROUGH -> restores the suggestion and
+                      OVERWRITES blocked_by to none
+    _run_maneuver     reads wanted_side = none -> ABORTS
+
+So the maneuver backed out under a suggestion still on screen, and the abort frame read `wantedSide
+none, blockedBy none` because both naming fields had been overwritten. **A cause that erases its own
+log entry reads as "unexplained" to every tool.**
+
+**FOUND BY MEASURED ELIMINATION, not argument.** Geometry rebuilt from its four sub-terms matched the
+published flag on 845,724 of 845,724 side-frames, so the reconstruction was trustworthy, and geometry
+held through 56 of 70 signaling aborts. Oncoming was false on all of them. Adjacent-slow rebuilt from
+`blocks_move` explained 10 more (+4 brief). What remained could not come from `raw_wanted` at all, so
+the question became what ELSE writes `wanted_side` -- five sites, and one is an early return that
+runs BEFORE the debounce.
+
+**`noLaneAvailable` NEVER HAD THIS, and its own comment describes the bug.** It feeds the debounce
+`Side.none` and resets with `keep_wanted=True`, under a note that an early return before
+`wanted_side` is computed makes the debounce useless. nothingSlower had the same shape and never got
+the same two lines. It has them now (`cc9b910b0a`).
+
+### `keep_wanted=True` ALONE IS THE TRAP, AND THE SUITE PASSED IT
+
+Tried first; every controls test stayed green. It is wrong: the debounce is only reached past this
+early return, so `keep_wanted` alone never touches `wanted_side`, and a persistent nothingSlower
+FREEZES it -- the stale-wanted keep-right bug the hard clear existed for. **The existing guard in
+`test_drive_scenarios` drives `status=False`, the noLead path, so it cannot see this branch.** A
+fixture that exercises a sibling path is not a guard on this one.
+
+`test_nothing_slower_dip.py` separates all three versions: the original fails the dip test (a
+0.38 s dip aborted), keep_wanted-alone fails the sustained and freeze tests, the fix passes all
+three. Mutation-verified in both directions.
+
+### WHAT IT DOES NOT CLAIM
+
+- Passing assist commands nothing today, so this changes the dry-run abort count and the on-screen
+  sequence, not how the car drives.
+- **31 is the size of the bucket, not the size of the fix.** Sub-0.75 s dips are saved; real ends
+  still abort, correctly. Baseline is 12.4 aborts/hour on build 8e979260 -- score the next drives PER
+  HOUR against it, and expect the `none/none` bucket to shrink rather than the total to vanish.
+- The 14 geometry-false aborts (edgeStd 7, paint 5, width 2) are untouched. That is the real
+  geometry flicker and it has not been chased.
+
+**THE REUSABLE LESSON: when a value is debounced, grep every WRITE of the value, not the debounce.**
+An early return above it bypasses it silently, and a second mechanism restoring a sibling field
+removes the evidence in the same frame.
