@@ -612,6 +612,16 @@ that read his SET as a RESUME because the dash still carried the old number. The
 now decides; `set_press_frames` mirrors `resume_press_frames`, and RESUME wins if both are armed.
 | `CNCL` (`CcAslButtnCnclResPress`) | `cancel` | also reports `resumeCruise`; harmless, resume is reachable from either |
 
+**THE CNCL ROW IS WRONG ABOUT THE SIGNAL. MEASURED 2026-09-12 off raw CAN (`src 0`, 0x083) across 43
+segments:** his CNCL button sets `CcAslButtnCnclPress` (bit 8) -- 12 presses -- and
+`CcAslButtnCnclResPress` (bit 21) rose ZERO times. `values_ext.py` maps `cancel` to bit 21, so **card
+has never emitted a `cancel` buttonEvent on this car** (0 across the same segments, against 36
+accelCruise and 18 set/decel). Ford ACC still cancels -- the PCM reads the wheel directly -- so the
+only consumers that miss it are MADS's `manualLongitudinalRequired` alert and the cancel timer in
+`cruise_ext.py`. **Not changed**: nothing he drives depends on it today, and turning the event on
+adds alerts nobody has asked for. Same shape as "His + button was invisible" -- a mapping written from
+the signal NAME, never checked against the wire.
+
 The wheel is **CNCL / RES+ / SET−**, with CNCL as its own dedicated button — confirmed from a photo
 on 2026-08-04. RES+ and SET− are single keys that change meaning with cruise state.
 
@@ -8269,9 +8279,11 @@ per-frame stall soft-disabling him. The cache was right. Keying it on `sm.update
 process, and `test_mapd_path_is_cached.py` then REQUIRED the flag, enshrining the bug. That test is
 reversed.
 
-**THE 5 s AGE GUARD FROM 2026-09-07 CAUGHT IT ON THE ROAD, WHICH IS HOW THIS WAS FOUND.** On the
-week's drives `SCC-Map: DROPPED A STALE MAPD PATH` fires repeatedly, and the new `usedMapdV2` field
-shows SCC-Map reading NO map for minutes at a time on the highway. So for that week the guard turned
+**THE 5 s AGE GUARD FROM 2026-09-07 CAUGHT IT ON THE ROAD, WHICH IS HOW THIS WAS FOUND.** Measured
+over the week of 2026-09-08..12 (26 driving routes, 241 moving minutes, build `8e979260d0`, qlogs):
+`SCC-Map: DROPPED A STALE MAPD PATH` logged **150** times, and `usedMapdV2` says SCC-Map had a map
+path on only **22%** of plan frames above 25 mph (per route 0% to 38%), while `mapdExtendedOut` had
+ZERO gaps over 1.0 s the entire week. So for that week the guard turned
 a phantom slowdown into no map curve slowing at all -- the one-directional failure it was built to
 choose.
 
