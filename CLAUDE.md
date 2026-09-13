@@ -690,6 +690,16 @@ that read his SET as a RESUME because the dash still carried the old number. The
 now decides; `set_press_frames` mirrors `resume_press_frames`, and RESUME wins if both are armed.
 | `CNCL` (`CcAslButtnCnclResPress`) | `cancel` | also reports `resumeCruise`; harmless, resume is reachable from either |
 
+**THE CNCL ROW IS WRONG ABOUT THE SIGNAL. MEASURED 2026-09-12 off raw CAN (`src 0`, 0x083) across 43
+segments:** his CNCL button sets `CcAslButtnCnclPress` (bit 8) -- 12 presses -- and
+`CcAslButtnCnclResPress` (bit 21) rose ZERO times. `values_ext.py` maps `cancel` to bit 21, so **card
+has never emitted a `cancel` buttonEvent on this car** (0 across the same segments, against 36
+accelCruise and 18 set/decel). Ford ACC still cancels -- the PCM reads the wheel directly -- so the
+only consumers that miss it are MADS's `manualLongitudinalRequired` alert and the cancel timer in
+`cruise_ext.py`. **Not changed**: nothing he drives depends on it today, and turning the event on
+adds alerts nobody has asked for. Same shape as "His + button was invisible" -- a mapping written from
+the signal NAME, never checked against the wire.
+
 The wheel is **CNCL / RES+ / SET−**, with CNCL as its own dedicated button — confirmed from a photo
 on 2026-08-04. RES+ and SET− are single keys that change meaning with cruise state.
 
@@ -10336,7 +10346,7 @@ not a guessed one, which is the `MAPD_V2_STALL_S` lesson applied rather than re-
 worst this can do is leave SCC-Map idle. Missing a mapped corner is the cost; acting on one seven
 minutes behind the car is what it replaces.
 
-**WHY THE CACHE WENT STALE IS STILL NOT ESTABLISHED, and that is stated rather than papered over.**
+**(ANSWERED 2026-09-12 -- see the next section. It was `sm.updated`, not mapd.)** Why the cache went stale was not yet established:
 `SubMaster.update_msgs` takes `alive` False after `10 / freq` seconds without a receive, so
 "stopped being `updated` while staying alive" should be impossible for a 1 Hz service -- and it
 happened for 400 s. The msgq-level cause is unidentified. The age guard does not depend on knowing
@@ -10462,3 +10472,106 @@ three. Mutation-verified in both directions.
 **THE REUSABLE LESSON: when a value is debounced, grep every WRITE of the value, not the debounce.**
 An early return above it bypasses it silently, and a second mechanism restoring a sibling field
 removes the evidence in the same frame.
+
+## 2026-09-12: THE ROOT CAUSE. `sm.updated` IN plannerd ALMOST NEVER REACHES THE PLANNER.
+
+The I-215 phantom was not mapd, not msgq and not the walk. It is plannerd's loop:
+
+    sm = SubMaster([...], poll='carState')
+    while True:
+      sm.update()                     # every carState, 100 Hz -- clears EVERY updated flag
+      if sm.updated['modelV2']:       # 20 Hz
+        longitudinal_planner.update(sm)
+
+**A slower service's `updated` flag is visible inside the planner only if its message was received
+in the SAME 10 ms poll as a modelV2.** Otherwise it is set and cleared on a poll the planner never
+runs on. `alive` stays True throughout, because the messages ARE received -- which is exactly the
+"stale while alive" the previous section called impossible.
+
+**PREDICTED FROM TIMESTAMPS ALONE, AND IT MATCHES THE DRIVE TO THE MESSAGE.** Route 00000430:
+receipt cycle = first carState at or after each message's logMonoTime; visible = same cycle as a
+modelV2 (`drivelogs/2026-09-12_review/tools/updated_race.py`):
+
+    mapdExtendedOut visible to the planner     233 of 1,891   12.3%
+    longest stretch with none visible           597 s   t+1291.9 .. t+1888.9
+    the ONLY visible message t+1172.9..1888.9   t+1290.9  <-- the frozen path the replay pinned
+
+mapd publishes on a steady 1.00 Hz clock and modelV2 follows the camera at 20 Hz, so the phase
+between them drifts slowly: minutes of normal refresh, then minutes of nothing.
+
+**IT WAS INTRODUCED ON 2026-08-28 BY `2106064495`**, the commit that cached the path to stop a 17.6 ms
+per-frame stall soft-disabling him. The cache was right. Keying it on `sm.updated` was wrong for this
+process, and `test_mapd_path_is_cached.py` then REQUIRED the flag, enshrining the bug. That test is
+reversed.
+
+**THE 5 s AGE GUARD FROM 2026-09-07 CAUGHT IT ON THE ROAD, WHICH IS HOW THIS WAS FOUND.** Measured
+over the week of 2026-09-08..12 (26 driving routes, 241 moving minutes, build `8e979260d0`, qlogs):
+`SCC-Map: DROPPED A STALE MAPD PATH` logged **150** times, and `usedMapdV2` says SCC-Map had a map
+path on only **22%** of plan frames above 25 mph (per route 0% to 38%), while `mapdExtendedOut` had
+ZERO gaps over 1.0 s the entire week. So for that week the guard turned
+a phantom slowdown into no map curve slowing at all -- the one-directional failure it was built to
+choose.
+
+**THE FIX: key the rebuild on `sm.logMonoTime['mapdExtendedOut']` changing** (`_new_mapd_message`).
+logMonoTime is set on receipt in whatever poll cycle, and kept until the next message. The age guard
+stays as the backstop.
+
+### THE RULE, FOR EVERY BRANCH: NEVER READ `sm.updated[X]` INSIDE CODE GATED ON `sm.updated[Y]`
+
+Unless X is Y, or X is the polled service. The flag means "received on THIS poll", and the planner
+does not run on most polls. Use `logMonoTime` (or `recv_frame`) to ask "is there a new one since I
+last looked".
+
+**PASSING ASSIST HAS ONE: `adjacent_lane.py` ~line 993, `if not sm.updated['liveTracks']: return`.**
+liveTracks runs at ~8.3 Hz and is not phase-locked to the camera, so roughly one message in five
+lands in a modelV2 poll -- the observer sees about a fifth of the radar it thinks it sees, at random.
+Not a freeze like the map path, but a 5x under-sample of the evidence every overtake gate
+accumulates. That branch owns it; this is the note, not the fix.
+
+## 2026-09-12: UPSTREAM SURVEY. TOOK PR #190 (COMM ISSUE AFTER REVERSE). #191 STILL NOT TAKEN.
+
+    releases        bp-7.0 newest, 0 behind, still NO bp-8.0
+    bp-dev          13 commits past bp-7.0; tip 2026-09-01 (#195)
+    moved           bp-dev-191 (2026-09-10), bp-jmc-lane (2026-09-07)
+
+**TAKEN: PR #190, `ad4ec5ee1e` + `72792c20df`, cherry-picked with -x.** BluePilot issue #188 --
+"Communication Issue Between Processes | longitudinalPlan" right after Reverse -> Drive. **It is his
+alert**: 12 times across 26 drives the week of 2026-09-08, every one 1-6 s after
+`radarTempUnavailable` from backing out (route 00000447 t+644..646). Two halves: the Delphi MRR
+holds `radarUnavailableTemporary` ~1 s past the scan-index freeze (his radar IS that path --
+`FORD_FUSION_MK5` keeps the default `Bus.radar: DELPHI_MRR`), and selfdrived debounces the generic
+commIssue catch-all 20 frames. `test_radar_recovers_quietly_from_reverse.py` drives the real
+`_update_delphi_mrr`, 4 mutants 0 survivors; the debounce half is read, not run.
+
+**AND THE 2026-09-03 SURVEY MISSED IT** because it checked bp-dev only for LATERAL commits. It merged
+2026-08-24. **Survey every file an upstream commit touches, not the subsystem under discussion.**
+
+**EVERY OTHER bp-dev COMMIT IS OURS BY CONTENT, now checked across all 13:** fc228b4099 (combo
+buttons), the ALP lane-centering stack (10101012d8, 560e80e9d5 model-position fallback, af4bc410c9
+rate limit, 94bf8144d4/80825b8156/e5b92cc48b guards -- except the 0.0015 applied cap, already
+recorded as not ours), the two lane-centering default commits (ours differ deliberately), the
+`.gitattributes` scoping, and the sentry memory tuning (808a4d9cdc). `git apply --reverse --check`
+reports all of them "diverged", which is noise from the re-merges -- read the content.
+
+**PR #191 IS STILL OPEN AND REWROTE ITSELF AGAIN on 2026-09-10** (alan-polk merged it into the TEST branch `bp-dev-191`, not bp-dev; #192 closed 2026-09-11 as folded into #191; Praeuner says no retune is needed, which the table below contradicts at his settings) (`154c8703fe`, "Restore original
+low speed behaviors"): speed breakpoints `[11.18, 31.29] -> [13.41, 26.82]`, high-curvature gain
+`anchor*hif -> 1.10*anchor*hif`, the ramp end FIXED at `|kappa| 0.002` (500 m) instead of our
+speed-blended boundary, a new low-pass on the kappa used for gain, and `b` faded to 0 across
+55-60 mph. At his settings (1.009 / 0.812 / 0.78):
+
+    75 mph  1000 m   cf 0.799 -> 0.862   +8%
+    75 mph   500 m   cf 0.838 -> 1.027   +23%   ~+1.0 deg at the wheel
+    75 mph   300 m   cf 0.889 -> 1.027   +16%
+    40 mph   200 m   cf 1.008 -> 1.216   +21%   ~+2.9 deg
+
+**HIS CALL, 2026-09-12: *"leave it until it's in a release."*** Do not re-raise it before then.
+**Same verdict as 2026-09-05: do not take it.** It is a moving open PR, it retunes his steering by
+10-20% on curves, and a gain multiplies the exit overshoot he reported. Re-derive every number he
+tunes against if it ever lands in a release.
+
+**PR #194 (bp-jmc-lane) is still open and WIP** -- new commits are "lane nudge", "lane indicator
+option", "sunnylink", plus its body now says both lateral strategies move to a 0.003 deviation band
+instead of `CURVATURE_ERROR` (0.002). That widening is a behavior change to the clip measured on
+2026-09-04 and is NOT covered by the earlier refusal of `0cb9165427`; evaluate it separately if it
+merges.
+
