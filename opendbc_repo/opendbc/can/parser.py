@@ -136,6 +136,8 @@ class CANParser:
     self.ts_nanos: dict[int | str, dict[str, int]] = {}
     self.addresses: set[int] = set()
     self.message_states: dict[int, MessageState] = {}
+    # FusionPilot: addresses whose vl_all lists were filled by the previous update() -- see update().
+    self._vl_all_dirty: set[int] = set()
 
     for name_or_addr, freq in messages:
       if isinstance(name_or_addr, numbers.Number):
@@ -217,11 +219,18 @@ class CANParser:
     if strings and not isinstance(strings[0], list | tuple):
       strings = [strings]
 
-    for addr in self.addresses:
+    # FusionPilot 2026-09-15: clear only the vl_all lists the PREVIOUS update() filled. A list is
+    # appended to only inside a successful MessageState.parse, and every successful parse adds its
+    # address to updated_addrs, so every other list is already empty -- clearing all of them was
+    # ~1,050 list.clear() calls every 10 ms across card's three Ford parsers, ~7-9% of card's CPU on
+    # a core that measured 89-93% busy. The dirty set is bound BEFORE the loop, so an exception
+    # part-way through still leaves it naming everything that was appended.
+    for addr in self._vl_all_dirty:
       for k in self.vl_all[addr]:
         self.vl_all[addr][k].clear()
 
     updated_addrs: set[int] = set()
+    self._vl_all_dirty = updated_addrs
     for entry in strings:
       t = entry[0]
       frames = entry[1]
