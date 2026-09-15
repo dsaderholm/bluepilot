@@ -1,6 +1,6 @@
 import glob, os, sys
 import capnp, zstandard
-REPO = r"C:\Users\D.J. Saderholm\Documents\GitHub\Sandbox\bluepilot-icbm"
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 capnp.remove_import_hook()
 L = capnp.load(os.path.join(REPO,"cereal","log.capnp"), imports=[os.path.join(REPO,"cereal")])
 ADDR, SCALE, OFFSET = 979, 0.0005, -0.5
