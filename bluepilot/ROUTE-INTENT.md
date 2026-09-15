@@ -451,8 +451,17 @@ the right shape rather than re-deriving that the bus is a dead end.
 
 ## 3. The canbox -- open, and worth answering for other reasons
 
-**UNVERIFIED, and explicitly not to be assumed.** Only BLIS routing is confirmed. Nothing about the
-canbox is documented anywhere in the repo.
+**UNVERIFIED, and explicitly not to be assumed.** Only BLIS routing is confirmed.
+
+**What BartBK has said it does on a Fusion, 2026-08-09 (Discord, transcribed 2026-09-14):** a menu
+toggling the heated steering wheel, heated windshield and camera; an added AUTOHOLD option; BLIS
+frame routing; automatic start-stop disable; reading and resetting DTCs. It is made by a separate
+"creator" BartBK works with, and a new version was being tested as of 2026-08-12.
+
+**That list is suggestive and does not settle the question below.** Toggling body features and
+adding autohold means the box both reads and WRITES body CAN, so it is more than a passive
+fixed-list decoder. Whether it will forward an ARBITRARY ID onto the bus the panda reads is still
+the unanswered question -- asked 2026-08-16, no reply as of 2026-09-14.
 
 His question was whether it could route MS-CAN to a bus we see, the way he is doing for BLIS. The
 answer splits:
