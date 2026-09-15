@@ -8478,8 +8478,11 @@ suite green, each mutation-tested:**
 - **The radar scan-index 0/1 cycles are still decoded and then discarded** by `_update_delphi_mrr`.
   Skipping them needs the header scan index BEFORE the detections parse, which the CANParser API does
   not give; not attempted.
-- **`convert_carControlSP` (~7-8%)** sits on the ICBM sendButton path; it needs the same kind of
-  equivalence harness (identical CarControlSP dataclass out) before it goes near the car.
+- **`convert_carControlSP` -- MEASURED, NOT WORTH IT.** Converting only the four substructs instead of
+  the whole message builds an identical dataclass on all 12,001 recorded messages and is **3%** faster
+  (124 -> 120 us). The time is the dataclass constructors, not `to_dict`. The profiler's 7-8% assumed
+  handing CarController a different object, which would be a Ford-only fork of a sunnypilot helper on
+  the ICBM sendButton path -- not for 7% of card.
 - **THE CAP ITSELF.** Only after the above and a drive's procLog shows core 4 low enough. Estimate
   with the x1.57 rule (1.69 GHz) or x1.27 (2.09 GHz) against MEASURED per-core p99.
 - **DO NOT MOVE selfdrived OR controlsd ONTO CORE 6 OR 7 to make room -- checked, and it is wrong.**
