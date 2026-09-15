@@ -10665,3 +10665,133 @@ mid-edit. One run wrote a `.pyc` whose line numbers belong to an intermediate so
 `test_every_field_in_the_schema_is_actually_published`) then failed on correct code, and so did
 AttributeErrors from half-applied edits. **Before diagnosing a source-inspection failure after a
 multi-edit, delete `__pycache__` and rerun.** Edit one file sequentially if the hook is on.
+## 2026-09-14: STEERING REVIEW OF 045b..046a. NO SETTING CHANGES, AND THE TAIL WAS INTERSECTIONS.
+
+*"Take a look at my latest drives. Take a look at steering specifically and see if I need to change
+any settings."* Twelve real drives (Sat 09-12 5:31 PM to Mon 09-14 4:51 PM MDT), build `cc9b910b0a`,
+~136 moving minutes, 87 hands-off latActive, ~31 at 65+ mph. Settings read off the device with
+mtimes: low 1.009 / high 0.812 (09-07), dampening 0.78 -> **0.79** (09-13 5:30 PM, mid-route 0460;
+0.01 is imperceptible), LC 0.45 (09-04), lane-centering damping 0.3 (09-01), gate on.
+
+**VERDICT: nothing to change.** The shipped tools, same flags as every earlier entry:
+
+    bp_lateral_phases --speed 25   hwy 500-2000 m UNWIND  med +0.21d  p90 +1.69d  p99 +3.50d
+    bp_lateral_phases --speed 50   hwy 500-2000 m UNWIND  med +0.33d  p90 +1.33d  p99 +2.69d
+                                   (427, latch day: p90 +1.39d p99 +5.60d; pre-latch p99 +8.98d)
+    decomposition, 73 mph          our gain 0.839   PSCM 0.983   -- same as 2026-09-04
+    bp_lateral_rate --swing 8      60-75 mph 0.11/min (27 min)   -- best recorded (3ed was 0.18)
+    bp_lateral_curve_cycle         3.3 osc/min, swing 49-57%    -- inside the historical 2.35-5.78
+    bp_lateral_weave 70+ mph       off-centre 3-8 cm, p2p 11-21 cm, cross/min 30-155 [wide ranges]
+    bp_steer_saturated             13 episodes / 214 segments   -- same rate as the 701-seg baseline
+
+**THE LOW-SPEED ROWS ARE INTERSECTION TURNS. RUN PHASES AT `--speed 25` BEFORE QUOTING A TAIL.**
+The same routes, tight <500 m UNWINDING p99:
+
+    --speed 9    +73.07d        --speed 25    +15.12d        --speed 50    +1.85d
+
+At an intersection the curvature is large, so a small lag ratio becomes tens of degrees -- the
+DEGREES column scales with the corner, not with the fault. `bp_lateral_rate`'s 8-30 mph row
+(3.91/min) is the same contamination: a smooth 90-degree turn with dither in its derivative passes a
+2 s swing-plus-reversals test. The 9 mph default stays (it is what the 2026-09-04 tables used), but a
+tail read off it is about turns, not about his complaint.
+
+**THE WORST HIGHWAY WINDOWS ARE THE PLAN, AGAIN.** 046a t+2583-2613 at 76-79 mph: desiredCurvature
+swung 90-126% of the 650-880 m curve it was holding, 7.6-8.7 deg of steering. Upstream of every
+gain; same phenomenon as 2026-08-29.
+
+### RUNNING ANALYSIS ON THE PARKED CAR, WHEN THE LINK CANNOT CARRY LOGS
+
+On home wifi the car's signal was too weak to copy logs: an rlog stalled at 131 KB after five
+minutes (~0.4 KB/s), scp died with "Connection closed" (Windows scp speaks SFTP; use `ssh ... cat >`
+through `cmd /c` redirection when it works at all). Small ssh commands worked fine. So the tools ran
+ON the device, which "DECODE OFF-DEVICE" forbids for a reason -- and the reason was the guard's
+granularity, which this closes:
+
+    /data/steer_review/wd.sh <name> <cmd...>
+      refuses to start if IsOnroad; runs the job via setsid + nice 19 + ionice idle;
+      polls IsOnroad every 0.5 s and SIGKILLs the whole process group on ignition;
+      output to /data/steer_review/out/<name>.txt (not tmpfs /tmp)
+
+manager sets IsOnroad before it starts any onroad process, so the job is dead before openpilot is
+running -- unlike a between-segments check, which left a segment's worth of solid CPU overlapping
+startup. **Off-device is still the rule whenever the link can move the files.** Decode cost on the
+device: ~2.6 s per segment to iterate, 8-10 minutes per tool over 214 segments.
+
+**`sm.updated` IN passing assist's `adjacent_lane.py` IS DELIBERATELY STILL THERE.** Reported to that
+session with the rule above; it replayed AdjacentLane both ways over 427/429/430. The shipped
+observer sees 20-22% of liveTracks, and at full rate the right-side oncoming memory goes from 0% to
+36-50% of moving two-way frames and the same-direction latch (which RELEASES the turn-lane veto) to
+96-100%. The one-in-five sample has been an accidental clutter filter; the corroboration counts have
+to be re-derived before the keying is fixed. That branch owns it.
+
+## 2026-09-15: THE OVERHEATING. UNCAPPED BIG CORES, AND WHY THE CAP CANNOT SIMPLY COME BACK.
+
+*"Let's fix the overheating."* He passed on the community explanation: AGNOS pins the big cluster at
+2.6 GHz, comma capped it (`scaling_max_freq = 1689600`, openpilot #38132), and a device showing 2.4+
+GHz predates the fix. **On his car that reading is not an old build -- it is BluePilot's choice.**
+
+    policy4 (cores 4-7)   governor performance   scaling_max 2649600   pinned there ~30 h in time_in_state
+    policy0 (cores 0-3)   governor ondemand      scaling_max 1766400
+
+**`afdd528d76` (alan-polk, 2026-06-17) DELIBERATELY REMOVED comma's cap**, saying it starved the UI and
+real-time processes into commIssue and that the kernel's thermal framework throttles reactively.
+`system/hardware/tici/hardware.py` carries that comment. Both halves were checked on his car:
+
+- **The kernel does not throttle in the range that matters.** CPU step trip points are **110 C**
+  (GPU 105 C); openpilot flags overheated from 96 C. His comma peaked at 105 C, so nothing managed
+  frequency anywhere between the fan target (80 C) and openpilot's own warning.
+- **The starvation claim is TRUE on this fork's load**, and that is the real finding. Per core while
+  driving (deviceState, routes 461/463/46a): core 4 p50 91-93%, p90 93-100%. procLog, validated
+  against deviceState within 2 points on the big cores:
+
+      core 4   card 54.8%   selfdrived 20.5%   controlsd 13.6%   = 88.9%   (deviceState 90.3%)
+      core 5   ui 37%, plannerd 12%, radard            ~54%
+      core 6   camerad ~10%                            core 7   modeld + dmonitoringmodeld ~25%
+
+  openpilot's own budget (`selfdrive/test/test_onroad.py`) is **card 26%**. At 1.69 GHz capacity falls
+  by 1.57x, so core 4 would need ~140%. **Parked with the ignition on card was 57.4% -- higher than
+  driving** -- so it is fixed per-step overhead, and a parked-only cap starves it the same way.
+
+**WHERE THE HEAT ACTUALLY HAPPENS: PARKED.** somPowerDrawW is ~5.7 W parked or moving (7.0 W at
+100 C, leakage). Moving, maxTempC p50 74-81 C with the fan at 70-86%. Parked-onroad, 046a sat at
+**p50 100 C for 31 minutes**, 0463 booted into 105 C. The load is constant; airflow is not.
+`selfdrivedLagging` (517 events on 0463, 112 on 046a) came only in those hot parked minutes before he
+engaged. kswapd0 was heavy on 0463 (mem 76-79%) -- worth watching, not acted on.
+
+**WHERE CARD'S TIME GOES** -- profiled offline by replaying the real Ford CarInterface/CarState/
+CarController/RadarInterface over route 00000429 (carState matched the log 99.5-100%); laptop to
+device scale ~2.4x user time, and ~28% of card's device CPU is kernel time a replay cannot see:
+
+    radar CANParser.update (bus 1, 66 msgs x 33 Hz x 10 sigs)  20%   + RadarInterface logic 4%
+    CarController.update                                       16%   (25 Params reads/step = ~6%)
+    pt + cam CANParser.update                                  12%
+    CarState.update (incl. carstate_ext, carStateBP build)     12%
+    convert_carControlSP (to_dict + 5 dataclasses)             9.5%
+    controllerStateBP build + publish at 100 Hz                8.3%
+    engaged lateral strategy                                   3.8%   <- the driving logic is cheap
+    unread signals decoded                                     ~17% across the parsers
+
+**SHIPPED 2026-09-15, replay step mean 1.65 -> 1.33 ms (-19%), suite green, each mutation-tested:**
+
+1. `3850b4b610` CarController reads the UI params once per `PARAMS_REFRESH_FRAMES` (1 s), not every
+   frame -- 2,500 file reads/s gone. Settings land within a second.
+2. `4a2e2700bb` controllerStateBP at 20 Hz on the step after each Ford steer step; services.py
+   declares 20 Hz / decimation 2 (qlog still 10 Hz). selfdrived ignores it; the UI reads alive only.
+3. `f837cc2fd2` CANParser clears only the vl_all lists the previous update filled -- exactly
+   equivalent, ~1,050 list.clear() calls per step gone. comma's file; generic and upstreamable.
+
+**NOT YET, AND WHY -- in order of size:**
+
+- **A dedicated Delphi MRR decoder (~12-15% of card).** Only 5 of 10 signals per detection are read
+  and `radar_interface.py` discards scan-index 0/1 cycles after decoding them. It feeds liveTracks,
+  which passing assist's observer is built on, so it needs a replay-equivalence harness over recorded
+  bus-1 traffic (identical RadarData out) before it goes near the car.
+- **`convert_carControlSP` (~7-8%)** sits on the ICBM sendButton path; same bar.
+- **THE CAP ITSELF.** Only after the above and a drive's procLog shows core 4 low enough. Estimate
+  with the x1.57 rule (1.69 GHz) or x1.27 (2.09 GHz) against MEASURED per-core p99, and consider moving
+  selfdrived off core 4 (core 6 is ~90% idle, but camerad's IRQs live there -- check priorities).
+
+**DO NOT re-add comma's 1689600 on this fork's current load.** It is the right fix for stock
+openpilot and measurably wrong here: it would saturate core 4 while driving, which is BluePilot's
+commIssue report reproduced by arithmetic.
+

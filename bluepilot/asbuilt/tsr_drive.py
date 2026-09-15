@@ -16,7 +16,7 @@ from collections import Counter, defaultdict
 import capnp
 import zstandard as zstd
 
-REPO = r"C:\Users\D.J. Saderholm\Documents\GitHub\Sandbox\bluepilot-icbm"
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DBC = os.path.join(REPO, "opendbc_repo", "opendbc", "dbc", "ford_lincoln_base_pt.dbc")
 
 capnp.remove_import_hook()

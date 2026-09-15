@@ -166,6 +166,9 @@ DEFAULT_TARGETS = [
   # is why its logic lives in param_value_cache.py -- there was nothing to test before, and
   # nothing caught the read that wiped his angle tuning.
   "selfdrive/ui/bp/widgets/tests/",
+  # Named, not the directory: opendbc/can/tests/ is comma's, and only this file is ours -- the
+  # CANParser change that stopped clearing ~1,050 empty lists every 10 ms (overheating, 2026-09-15).
+  "opendbc_repo/opendbc/can/tests/test_vl_all_clears_only_dirty.py",
   # The changed-defaults migration. Back after being deleted for a day: "I always want you to
   # write defaults, but not tweaks I've made to other settings."
 ]

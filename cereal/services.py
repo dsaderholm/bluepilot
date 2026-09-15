@@ -96,7 +96,7 @@ _services: dict[str, tuple] = {
   "liveLocationKalman": (True, 20.),
 
   # BluePilot: controllerStateBP (lateral uncertainty) + carStateBP (hybrid drive)
-  "controllerStateBP": (True, 100., 10),
+  "controllerStateBP": (True, 20., 2),  # FusionPilot: 20 Hz, see bp_card_publisher.PUBLISH_EVERY_FRAMES
   "carStateBP": (True, 100., 10),
   # FusionPilot: the rear radar digest, at the rate the sensor actually runs. 20 Hz rather than
   # carStateBP's 100 -- treat that one as a mistake not to repeat, not a precedent.

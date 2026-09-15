@@ -231,3 +231,77 @@ def test_the_angle_fields_are_not_the_curvature_fields():
   assert snapshot["bmsLaneCenteringStrength"] == pytest.approx(0.45)
   assert snapshot["bmsInLaneOffsetAng"] == 0.0, "the _ang offset must not read the _curv key"
   assert snapshot["bmsInLaneOffset"] == pytest.approx(0.9), "the _curv field still reads _curv"
+
+
+# ---------------------------------------------------------------------------------------------
+# 20 Hz, on the step after each LateralMotionControl step. See PUBLISH_EVERY_FRAMES.
+
+class _FakePM:
+  def __init__(self):
+    self.sent = []
+
+  def send(self, name, msg):
+    self.sent.append(name)
+
+
+def _ci(frame=None):
+  cc = types.SimpleNamespace(lateralUncertainty=0.0)
+  if frame is not None:
+    cc.frame = frame
+  return types.SimpleNamespace(CC=cc, CP=None)
+
+
+def test_controller_state_goes_out_once_per_steer_step_right_after_it():
+  """card calls the publisher every 10 ms, after CarController.update has incremented `frame`. The
+  angle strategy runs on frames where frame % 5 == 0 BEFORE that increment, so the publish belongs on
+  post-increment frames 1, 6, 11, 16 -- the first step that carries the fresh values."""
+  mod, _ = _load()
+  pm = _FakePM()
+  published = []
+  for frame in range(1, 21):
+    before = len(pm.sent)
+    mod._publish_controller_state_bp(_ci(frame), pm)
+    if len(pm.sent) > before:
+      published.append(frame)
+  assert published == [1, 6, 11, 16]
+
+
+def test_a_frame_that_did_not_advance_is_not_published_twice():
+  """card skips CarController.update while carControl is not alive, so `frame` can stand still for
+  many calls. Republishing it would be stale state at 100 Hz again."""
+  mod, _ = _load()
+  pm = _FakePM()
+  for _ in range(10):
+    mod._publish_controller_state_bp(_ci(6), pm)
+  assert pm.sent == ["controllerStateBP"]
+
+
+def test_a_controller_without_a_frame_counter_still_publishes_every_call():
+  """The old behaviour, kept for any controller that sets lateralUncertainty without a frame."""
+  mod, _ = _load()
+  pm = _FakePM()
+  for _ in range(7):
+    mod._publish_controller_state_bp(_ci(None), pm)
+  assert len(pm.sent) == 7
+
+
+def test_the_rate_matches_fords_steer_step_and_the_declared_service_frequency():
+  """Three numbers that must agree: the publisher's step, Ford's LateralMotionControl step, and the
+  frequency services.py declares (which is what every SubMaster's alive check is computed from)."""
+  import ast
+  import os
+  from opendbc.car.ford.values import CarControllerParams
+  mod, _ = _load()
+  assert mod.PUBLISH_EVERY_FRAMES == CarControllerParams.STEER_STEP
+
+  here = os.path.dirname(os.path.abspath(__file__))
+  services_py = os.path.join(here, "..", "..", "..", "..", "cereal", "services.py")
+  tree = ast.parse(open(services_py, encoding="utf-8").read())
+  entry = None
+  for node in ast.walk(tree):
+    if isinstance(node, ast.Dict):
+      for k, v in zip(node.keys, node.values, strict=False):
+        if isinstance(k, ast.Constant) and k.value == "controllerStateBP":
+          entry = ast.literal_eval(v)
+  assert entry is not None, "controllerStateBP missing from services.py"
+  assert entry[1] == pytest.approx(100.0 / mod.PUBLISH_EVERY_FRAMES)

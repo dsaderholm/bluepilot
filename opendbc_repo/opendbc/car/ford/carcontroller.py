@@ -29,6 +29,13 @@ from opendbc.sunnypilot.car.ford.gap_control import FordGapController
 # deepest, so it never binds where Ford would have asked for more. See the block that applies it.
 _STANDSTILL_ACCEL_FLOOR = -0.5
 
+# FusionPilot: re-read the UI-tunable params once a second, not every 10 ms. The four readers below
+# are plain value copies -- 25 Params reads per call, each an open/read/close on the device -- so at
+# 100 Hz they were 2,500 file reads a second on core 4, the core card, controlsd and selfdrived share
+# and the one that measured 89-93% busy (2026-09-14). A settings change now takes effect within a
+# second, which nothing needs faster. Measured cost before: ~6% of card's user time plus kernel time.
+PARAMS_REFRESH_FRAMES = 100
+
 LongCtrlState = structs.CarControl.Actuators.LongControlState
 VisualAlert = structs.CarControl.HUDControl.VisualAlert
 
@@ -103,6 +110,7 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
     self.packer = CANPacker(dbc_names[Bus.pt])
     self.CAN = fordcan.CanBus(CP)
 
+    self.params_refresh_in = 0  # FusionPilot: 0 = read on the first update
     self.apply_curvature_last = 0
     self.anti_overshoot_curvature_last = 0
     self.disable_BP_lat_UI = False
@@ -176,12 +184,17 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
     # BluePilot: update SubMaster (modelV2, liveParameters, selfdriveState, radarState) and vehicle model
     LateralCurvExt.update_sm(self)
 
-    # BluePilot: read runtime params from UI
-    LateralCurvExt.update_lateral_params(self, self.params)
-    LateralAngleExt.update_angle_params(self, self.params)
-    self.disable_BP_lat_UI = self.params.get_bool("disable_BP_lat_UI")
-    LongitudinalExt.update_long_params(self, self.params)
-    HudExt.update_hud_params(self, self.params, self.CP)
+    # BluePilot: read runtime params from UI. FusionPilot: once per PARAMS_REFRESH_FRAMES, always on
+    # the first call. A countdown rather than `self.frame %`, so no path that skips the frame
+    # increment can freeze the refresh; a missing attribute reads every frame, the old behaviour.
+    if getattr(self, "params_refresh_in", 0) <= 0:
+      LateralCurvExt.update_lateral_params(self, self.params)
+      LateralAngleExt.update_angle_params(self, self.params)
+      self.disable_BP_lat_UI = self.params.get_bool("disable_BP_lat_UI")
+      LongitudinalExt.update_long_params(self, self.params)
+      HudExt.update_hud_params(self, self.params, self.CP)
+      self.params_refresh_in = PARAMS_REFRESH_FRAMES
+    self.params_refresh_in -= 1
 
     actuators = CC.actuators
     hud_control = CC.hudControl
