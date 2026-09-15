@@ -81,7 +81,30 @@ def _create_delphi_esr_radar_can_parser(CP) -> CANParser:
   return CANParser(RADAR.DELPHI_ESR, messages, CanBus(CP).radar)
 
 
-def _create_delphi_mrr_radar_can_parser(CP) -> CANParser:
+# FusionPilot 2026-09-15: the only MRR_Detection signals _update_delphi_mrr reads. Each detection
+# message carries ten; the other five (amplitude, azimuth confidence, super-res, ND target, host-vehicle
+# clutter) were decoded 64 times per scan, 33 times a second, and never looked at. The radar parse was
+# the single largest cost in card (~20%), on a comma core measured 89-93% busy.
+_MRR_DETECTION_SIGNALS_READ = ("CAN_SCAN_INDEX_2LSB", "CAN_DET_VALID_LEVEL", "CAN_DET_RANGE",
+                               "CAN_DET_AZIMUTH", "CAN_DET_RANGE_RATE")
+
+
+def _prune_unread_mrr_detection_signals(parser: CANParser) -> None:
+  """Stop the parser decoding detection signals nothing reads.
+
+  Only the decode list shrinks: vl keeps every name (an unread one simply stays 0.0), and any
+  counter or checksum signal is kept so can_valid means exactly what it did. Must run before the first
+  update, while MessageState.vals is still unsized.
+  """
+  for i in range(1, DELPHI_MRR_RADAR_MSG_COUNT + 1):
+    msg = parser.dbc.name_to_msg[f"MRR_Detection_{i:03d}"]
+    state = parser.message_states[msg.address]
+    keep = {f"{prefix}_{i:02d}" for prefix in _MRR_DETECTION_SIGNALS_READ}
+    state.signals = [s for s in state.signals
+                     if s.name in keep or s.type == 1 or s.calc_checksum is not None]
+
+
+def _create_delphi_mrr_radar_can_parser(CP, prune: bool = True) -> CANParser:
   messages = [
     ("MRR_Header_InformationDetections", 33),
     ("MRR_Header_SensorCoverage", 33),
@@ -91,7 +114,10 @@ def _create_delphi_mrr_radar_can_parser(CP) -> CANParser:
     msg = f"MRR_Detection_{i:03d}"
     messages += [(msg, 33)]
 
-  return CANParser(RADAR.DELPHI_MRR, messages, CanBus(CP).radar)
+  parser = CANParser(RADAR.DELPHI_MRR, messages, CanBus(CP).radar)
+  if prune:
+    _prune_unread_mrr_detection_signals(parser)
+  return parser
 
 
 # BluePilot: CAN-FD 64-message MRR (DELPHI_MRR_64) radar parser
