@@ -455,8 +455,9 @@ the right shape rather than re-deriving that the bus is a dead end.
 
 **What BartBK has said it does on a Fusion, 2026-08-09 (Discord, transcribed 2026-09-14):** a menu
 toggling the heated steering wheel, heated windshield and camera; an added AUTOHOLD option; BLIS
-frame routing; automatic start-stop disable; reading and resetting DTCs. It is made by a separate
-"creator" BartBK works with, and a new version was being tested as of 2026-08-12.
+frame routing; automatic start-stop disable; reading and resetting DTCs. It is made by Karol;
+BartBK is the official seller for the US and South America (2026-07-11), and a new version was
+being tested as of 2026-08-12.
 
 **That list is suggestive and does not settle the question below.** Toggling body features and
 adding autohold means the box both reads and WRITES body CAN, so it is more than a passive
