@@ -599,3 +599,58 @@ def _passthrough_cc(carcontroller_parts):
                            gap_target=0, long_active=True)
   return cc, CS, CC, CC_SP, structs
 
+
+class _CountingParams:
+  """Wraps the offline Params stub: counts every read and lets a test change a stored value."""
+  def __init__(self, real):
+    self.real = real
+    self.reads = 0
+    self.overrides = {}
+
+  def get(self, key, *a, **k):
+    self.reads += 1
+    return self.overrides[key] if key in self.overrides else self.real.get(key, *a, **k)
+
+  def get_bool(self, key, *a, **k):
+    self.reads += 1
+    return self.real.get_bool(key, *a, **k)
+
+
+def test_ui_params_are_read_once_a_second_not_every_frame(carcontroller_parts):
+  """FusionPilot 2026-09-15: the UI params are refreshed every PARAMS_REFRESH_FRAMES, not per frame.
+
+  On the device every Params read is an open/read/close, and CarController.update did 25 of them per
+  call -- 2,500 a second on core 4, which card, controlsd and selfdrived share and which measured
+  89-93% busy. Three things must hold: the values exist on the FIRST frame (the rest of update reads
+  them immediately), the reads drop to one refresh per window, and a changed setting still arrives.
+  """
+  from opendbc.car.ford import carcontroller as ccmod
+  CarController, dbc_names, CP, CP_SP, structs = carcontroller_parts
+  cc = CarController(dbc_names, CP, CP_SP)
+  counting = _CountingParams(cc.params)
+  cc.params = counting
+  out = structs.CarState()
+  out.vEgo = 20.0
+  out.vEgoRaw = 20.0
+  out.cruiseState.enabled = True
+  out.cruiseState.available = True
+  CS = FakeCarState(out)
+  CC, CC_SP = _car_control(structs, enabled=True,
+                           send_button=structs.IntelligentCruiseButtonManagement.SendButtonState.none,
+                           gap_target=0)
+  n = ccmod.PARAMS_REFRESH_FRAMES
+
+  cc.update(CC, CC_SP, CS, 0)
+  per_refresh = counting.reads
+  assert per_refresh > 0, "the params must be read on the very first frame"
+
+  for frame in range(1, 4 * n):
+    cc.update(CC, CC_SP, CS, frame * 10_000_000)
+  assert counting.reads == 4 * per_refresh, \
+    f"{counting.reads} reads over {4 * n} frames; expected one refresh of {per_refresh} per {n} frames"
+
+  counting.overrides["FordHighSpeedDampening_ang"] = 0.5
+  for frame in range(4 * n, 5 * n):
+    cc.update(CC, CC_SP, CS, frame * 10_000_000)
+  assert cc.user_dampening_factor == 0.5, "a changed setting must still be picked up within one window"
+
