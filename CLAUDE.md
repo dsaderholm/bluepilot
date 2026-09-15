@@ -10575,3 +10575,44 @@ instead of `CURVATURE_ERROR` (0.002). That widening is a behavior change to the 
 2026-09-04 and is NOT covered by the earlier refusal of `0cb9165427`; evaluate it separately if it
 merges.
 
+
+## 2026-09-14: THE liveTracks `sm.updated` RACE IS REAL -- AND THE ONE-LINE FIX IS NOT SAFE TO SHIP
+
+The ICBM session flagged `adjacent_lane.py` `if not sm.updated['liveTracks']: return` as the same race
+that froze the map path. **Confirmed, and measured rather than argued.** Replaying the REAL
+`AdjacentLane` twice over recorded rlogs -- once keyed on the flag as shipped, once on liveTracks
+`logMonoTime` changing -- with each message received on the first carState at or after it:
+
+    route      road        liveTracks   shipped observer sees
+    00000430   I-215/I-80    8.53 Hz      22.4% of messages
+    00000429   surface       8.93 Hz      20.4%
+    00000427   surface       8.34 Hz      21.7%
+
+**But feeding it every message changes what the gates conclude, a lot, and in both directions:**
+
+    moving frames, NOT one-way per map        shipped  ->  full rate
+    RIGHT oncoming veto memory   00000429       0.0%   ->  50.4%
+                                 00000430       0.0%   ->  35.8%
+    LEFT  same-direction latch   00000429      74.3%   ->  95.7%
+    RIGHT same-direction latch   00000427      35.8%   -> 100.0%
+
+**Right-side oncoming traffic on a US road is clutter, so the one-in-five sample has been acting as an
+ACCIDENTAL CLUTTER FILTER.** Every corroboration constant -- `ONCOMING_FRAMES`, `SAME_DIRECTION_FRAMES`
+(3 within 1.5 s), `DEBOUNCE_FRAMES`, `OVERTAKE_FRAMES` -- is written for 8.3 Hz, and has in fact run at
+about 1.7 Hz since it was written. At 1.7 Hz a 0.12-0.48 s clutter track is seen at most once and can
+never corroborate; at the designed rate it can. And every oncoming-floor sweep in this file was scored
+on flags produced by the undersampled observer.
+
+**THE SAME-DIRECTION HALF IS THE DANGEROUS ONE.** That latch is the only thing that releases the strict
+turn-lane veto -- the OPENING direction -- and it goes to ~96-100% of two-way frames at full rate.
+Shipping the keying fix alone reopens the 2026-08-09 center-turn-lane failure through a sampling change.
+Same shape as the edge-std term: something measuring the wrong thing was doing real refusing.
+
+**SO IT IS NOT FIXED, DELIBERATELY.** Passing assist commands nothing, so the undersample costs dry-run
+fidelity, not safety. The fix is the keying PLUS re-deriving the corroboration counts for the real
+message rate, scored on two-way roads for the same-direction release before anything else, and on the
+right-side oncoming false edges. Do not ship `logMonoTime` keying on its own.
+
+**What the replay does not model:** `divided` is approximated as `mapdOut.oneWay and tileLoaded`,
+strict two-way is assumed on, memory 90 s, and the planner's per-frame `max_distance_m` is fixed at
+150 m. Both runs share those inputs, so the COMPARISON stands; the absolute shares are approximate.
