@@ -8481,8 +8481,11 @@ suite green, each mutation-tested:**
 - **`convert_carControlSP` (~7-8%)** sits on the ICBM sendButton path; it needs the same kind of
   equivalence harness (identical CarControlSP dataclass out) before it goes near the car.
 - **THE CAP ITSELF.** Only after the above and a drive's procLog shows core 4 low enough. Estimate
-  with the x1.57 rule (1.69 GHz) or x1.27 (2.09 GHz) against MEASURED per-core p99, and consider moving
-  selfdrived off core 4 (core 6 is ~90% idle, but camerad's IRQs live there -- check priorities).
+  with the x1.57 rule (1.69 GHz) or x1.27 (2.09 GHz) against MEASURED per-core p99.
+- **DO NOT MOVE selfdrived OR controlsd ONTO CORE 6 OR 7 to make room -- checked, and it is wrong.**
+  Core 6 looks ~90% idle because it is ISOLATED for camerad: `system/camerad/main.cc` sets affinity
+  only, "doesn't need RT priority since we're using isolcpus". A CTRL_HIGH (53) process there would
+  preempt the camera. Core 7 is modeld at RT 54-55, which would preempt selfdrived and lag it.
 
 **DO NOT re-add comma's 1689600 on this fork's current load.** It is the right fix for stock
 openpilot and measurably wrong here: it would saturate core 4 while driving, which is BluePilot's
