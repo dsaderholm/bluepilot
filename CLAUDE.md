@@ -10771,7 +10771,8 @@ device scale ~2.4x user time, and ~28% of card's device CPU is kernel time a rep
     engaged lateral strategy                                   3.8%   <- the driving logic is cheap
     unread signals decoded                                     ~17% across the parsers
 
-**SHIPPED 2026-09-15, replay step mean 1.65 -> 1.33 ms (-19%), suite green, each mutation-tested:**
+**SHIPPED 2026-09-15, replay step mean 1.65 -> 1.25 ms engaged (-24%), 1.62 -> 1.18 ms parked (-27%),
+suite green, each mutation-tested:**
 
 1. `3850b4b610` CarController reads the UI params once per `PARAMS_REFRESH_FRAMES` (1 s), not every
    frame -- 2,500 file reads/s gone. Settings land within a second.
@@ -10779,14 +10780,21 @@ device scale ~2.4x user time, and ~28% of card's device CPU is kernel time a rep
    declares 20 Hz / decimation 2 (qlog still 10 Hz). selfdrived ignores it; the UI reads alive only.
 3. `f837cc2fd2` CANParser clears only the vl_all lists the previous update filled -- exactly
    equivalent, ~1,050 list.clear() calls per step gone. comma's file; generic and upstreamable.
+4. `fbbffe3d69` The Delphi MRR parser decodes only the 5 of 10 detection signals `_update_delphi_mrr`
+   reads. Proved on route 00000429 (6 segments, the real RadarInterface pruned vs unpruned): 36,002
+   updates, 84,349 points, **0 differences**, and the comparator flags 500/500 when a read signal is
+   pruned instead. RadarInterface.update -30%. An AST guard fails if the update ever reads a pruned
+   signal -- vl keeps every name, so it would silently read 0.0. **The equivalence harness that proved
+   it: compare `rd.to_dict()` with NaN normalised -- RadarPoint.aRel/yvRel are NaN, so a plain `==`
+   reports every output as different and reads like a broken change.**
 
 **NOT YET, AND WHY -- in order of size:**
 
-- **A dedicated Delphi MRR decoder (~12-15% of card).** Only 5 of 10 signals per detection are read
-  and `radar_interface.py` discards scan-index 0/1 cycles after decoding them. It feeds liveTracks,
-  which passing assist's observer is built on, so it needs a replay-equivalence harness over recorded
-  bus-1 traffic (identical RadarData out) before it goes near the car.
-- **`convert_carControlSP` (~7-8%)** sits on the ICBM sendButton path; same bar.
+- **The radar scan-index 0/1 cycles are still decoded and then discarded** by `_update_delphi_mrr`.
+  Skipping them needs the header scan index BEFORE the detections parse, which the CANParser API does
+  not give; not attempted.
+- **`convert_carControlSP` (~7-8%)** sits on the ICBM sendButton path; it needs the same kind of
+  equivalence harness (identical CarControlSP dataclass out) before it goes near the car.
 - **THE CAP ITSELF.** Only after the above and a drive's procLog shows core 4 low enough. Estimate
   with the x1.57 rule (1.69 GHz) or x1.27 (2.09 GHz) against MEASURED per-core p99, and consider moving
   selfdrived off core 4 (core 6 is ~90% idle, but camerad's IRQs live there -- check priorities).
