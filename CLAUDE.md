@@ -10616,3 +10616,52 @@ right-side oncoming false edges. Do not ship `logMonoTime` keying on its own.
 **What the replay does not model:** `divided` is approximated as `mapdOut.oneWay and tileLoaded`,
 strict two-way is assumed on, memory 90 s, and the planner's per-frame `max_distance_m` is fixed at
 150 m. Both runs share those inputs, so the COMPARISON stands; the absolute shares are approximate.
+
+## 2026-09-15: THE DRIVE-61 blockedBy FLICKER. THE GRACE NOW CARRIES THE VERDICT, NOT ONLY THE TIMER.
+
+Route 0000046a (drive 61), segments 37-47: blockedBy flipped nothingSlower <-> noLaneAvailable 242 times
+inside 0.4 s, flooding the stored timeline. Measured on the parked car (segments 30-50, 18.6 moving
+minutes), two causes. Neither is the model path:
+
+    lead leaves the 1.5 m path bound    519 runs, 492 (95%) back within 8 frames (the 0.4 s grace)
+      same-vehicle yRel frame-to-frame  p90 1.16 m, p99 3.79 m
+      model path Y at the same dRel     p90 0.14 m, p99 0.39 m    <- radar lateral noise, not the path
+    leadOne jumps to another vehicle    140 swaps, 118 (84%) back within 8 frames
+      ...that changed vLead > 2 mph     105, of which 97 (92%) back within 8 frames
+
+**The bound failure was already free in the TIMER (`_lead_gap`) and still returned False.** That is
+exactly the combination the no-lead branch in `_decide` calls "the worst of both": the confirmation
+survives while the verdict blinks. **A swap was worse.** The other car's vLead failed the deficit, and
+`_clear_confirmation` restarted the confirmation about 7.5 times a minute.
+
+**The fix (`LEAD_SWAP_D_M` in passing_assist.py):**
+- A bound failure inside the grace now returns the carried verdict.
+- A leadOne jump of more than 8 m from the tracked lead is treated as a gap frame. The tracked lead is
+  projected forward by its own vRel.
+- After the grace, the new car is judged on its own numbers.
+
+`test_lead_verdict_grace.py`, 9 tests, 8 mutants, 0 survivors.
+
+**ONLY AN ESTABLISHED VERDICT IS CARRIED** (`approach_seconds >= LEAD_GAP_GRACE_S`). WANTED_RISE_S is
+0.3 s, shorter than the grace. Without that guard, one radar frame carried for 0.4 s would light the
+blinker, which is evidence that opens being cheaper than evidence that refuses. Both carry paths have
+a test that fails without it.
+
+**KNOWN AND NOT CHANGED: the no-lead branch still carries on `approach_seconds > 0`**, so one slow frame
+followed by a dropout carries for the grace. It was left alone deliberately. That branch hard-clears
+wanted_side (`_reset_outputs(noLead)` without keep_wanted), so tightening it there would reintroduce
+the dropout-abort path that cc9b910b0a closed for nothingSlower.
+
+**Costs, stated:**
+- A slow lead that really leaves the path ends the suggestion 0.4 s later.
+- A real cut-in by a faster car is refused 0.4 s later.
+
+Every other gate below spotted is still evaluated live, and passing assist commands nothing today.
+Score the next drive on blockedBy flips per moving minute against drive 61.
+
+**TEST-HOOK TRAP, found the same session.** Parallel Edit calls fired the post-edit suite hook
+mid-edit. One run wrote a `.pyc` whose line numbers belong to an intermediate source. The two
+`inspect.getsource` tests (`test_the_hog_condition_no_longer_reads_left_geometry`,
+`test_every_field_in_the_schema_is_actually_published`) then failed on correct code, and so did
+AttributeErrors from half-applied edits. **Before diagnosing a source-inspection failure after a
+multi-edit, delete `__pycache__` and rerun.** Edit one file sequentially if the hook is on.

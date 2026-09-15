@@ -517,6 +517,30 @@ PATIENCE_FULL_EXCESS_MPH = 8.0   # at or above this far over the limit, no extra
 LEAD_GAP_GRACE_S = 0.4
 CONFIRM_DECAY_RATE = 3.0
 
+# THE GRACE CARRIES THE VERDICT, NOT ONLY THE TIMER -- for every way a lead briefly stops qualifying,
+# not just a dropped return. Measured on route 0000046a, segments 30-50, 18.6 moving minutes:
+#
+#   lead leaves the 1.5 m path bound    519 runs, 492 (95%) back inside 8 frames (the grace)
+#     the radar's lateral noise on the SAME vehicle: yRel moves p90 1.16 m / p99 3.79 m frame to
+#     frame, against 0.14 / 0.39 m for the model path at the same distance. Not the path moving.
+#   leadOne jumps to another vehicle     140 swaps, 118 (84%) back inside 8 frames; of the 105 that
+#     changed vLead by more than 2 mph, 97 (92%)
+#
+# Both used to reach _should_pass as failed frames. The bound failure was already free in the TIMER and
+# still returned False -- the combination the no-lead branch in _decide calls the worst of both: the
+# confirmation survives while blockedBy flips nothingSlower <-> noLaneAvailable every 0.1-0.3 s (242
+# flips in 11 segments, flooding the timeline). A swap was worse: the other car's vLead failed the
+# deficit and _clear_confirmation started the confirmation over, about 7.5 times a minute.
+#
+# A jump this far between 20 Hz frames is a different vehicle: a car closing at 40 m/s moves 2 m, and the
+# check projects the tracked lead forward by its own vRel before comparing.
+#
+# ONLY AN ESTABLISHED VERDICT IS CARRIED. WANTED_RISE_S (0.3 s) is shorter than the grace, so carrying a
+# single frame's verdict for 0.4 s would light the blinker on one radar reading -- evidence that opens
+# cheaper than evidence that refuses. A verdict is carried no longer than the confirmation that built it.
+# Past the grace a swap is simply the lead now, judged on its own numbers.
+LEAD_SWAP_D_M = 8.0
+
 # The same problem at the range boundary rather than the speed one. A lead sitting either side of
 # the look-ahead distance would alternate in and out; once it is being tracked it may drift this
 # much further out before it counts as gone.
@@ -806,6 +830,10 @@ class PassingAssistDetector:
     # passing. Latched rather than recomputed so the answer cannot chatter frame to frame.
     self.lead_is_slow = False
     self._lead_gap_s = 0.0
+    # The lead the verdict belongs to, and how long ago it was last seen. See LEAD_SWAP_D_M.
+    self._lead_anchor_d = None
+    self._lead_anchor_v = 0.0
+    self._lead_anchor_age_s = 0.0
     # The side that is clear RIGHT NOW, before the confirmation timer has anything to say about it.
     # `suggestion` is what commits to moving.
     self.clear_side = Side.none
@@ -1770,14 +1798,26 @@ class PassingAssistDetector:
     # radarState yRel is left-POSITIVE like the radar's; flip to the camera frame before comparing
     # against the path. See MAX_LEAD_D_PATH_M for why this is no longer lead.dPath.
     self.lead_d_path = abs(-float(lead.yRel) - path_offset(model, float(lead.dRel))) if model is not None else 0.0
+
+    # leadOne is a different vehicle for a moment. A gap, not a verdict on the other car's numbers --
+    # see LEAD_SWAP_D_M. Checked against the grace BEFORE spending it, the same arithmetic as _lead_gap.
+    d_rel = float(lead.dRel)
+    if (self._lead_swapped(d_rel) and self._verdict_established()
+        and self._lead_gap_s + DT_MDL <= LEAD_GAP_GRACE_S):
+      self._lead_gap()
+      return self.lead_is_slow
+    self._lead_anchor_d, self._lead_anchor_v, self._lead_anchor_age_s = d_rel, float(lead.vRel), 0.0
+
     # Once a lead is being tracked it may drift a little further out before it counts as gone --
     # see RANGE_HYSTERESIS_M. Without this a car hovering at the look-ahead distance alternates in
     # and out of range and the confirmation never completes.
     max_d = self.max_distance_m + (RANGE_HYSTERESIS_M if self.approach_seconds > 0.0 else 0.0)
     if self.lead_d_path > MAX_LEAD_D_PATH_M or lead.dRel > max_d:
-      # Momentarily outside a bound. Free for a short while, then decaying. See LEAD_GAP_GRACE_S.
+      # Momentarily outside a bound. Free for a short while -- the verdict as well as the timer, see
+      # LEAD_SWAP_D_M -- then decaying. Inside the grace _lead_gap changes nothing, so the verdict read
+      # after it is the one built before this frame.
       self._lead_gap()
-      return False
+      return self._lead_gap_s <= LEAD_GAP_GRACE_S and self._verdict_established()
 
     # See DEFICIT_HYSTERESIS_MPH. Harder to become slow than to stay slow.
     hysteresis = DEFICIT_HYSTERESIS_MPH * CV.MPH_TO_MS if self.lead_is_slow else 0.0
@@ -2565,6 +2605,17 @@ class PassingAssistDetector:
     if self.approach_seconds == 0.0:
       self.lead_is_slow = False
 
+  def _verdict_established(self) -> bool:
+    """A slow verdict built by at least as much evidence as the grace would carry it. See LEAD_SWAP_D_M."""
+    return self.lead_is_slow and self.approach_seconds >= LEAD_GAP_GRACE_S
+
+  def _lead_swapped(self, d_rel: float) -> bool:
+    """leadOne is not the vehicle the verdict was built on: too far from where that one should be now."""
+    if self._lead_anchor_d is None:
+      return False
+    predicted = self._lead_anchor_d + self._lead_anchor_v * self._lead_anchor_age_s
+    return abs(d_rel - predicted) > LEAD_SWAP_D_M
+
   def _clear_confirmation(self) -> None:
     """A changed situation rather than a noisy one: start over properly."""
     self.approach_seconds = 0.0
@@ -3318,6 +3369,10 @@ class PassingAssistDetector:
       self._reset_outputs(Blocked.driverActive)
       return
 
+    # One frame older, whether or not the lead is seen this frame. See LEAD_SWAP_D_M. The early returns
+    # above skip this, and every one clears the confirmation, so nothing can be carried until good frames
+    # have re-anchored it -- a stale anchor is never acted on.
+    self._lead_anchor_age_s += DT_MDL
     in_grace = False
     if not lead.status:
       # A single missed radar return is the same car, not a different situation. Free inside the
