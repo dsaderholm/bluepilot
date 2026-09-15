@@ -20,6 +20,17 @@ _settings_cache: dict = {}
 _publish_failed: bool = False
 _car_state_publish_failed: bool = False
 
+# FusionPilot 2026-09-15: controllerStateBP goes out at 20 Hz, on the card step right after each
+# LateralMotionControl step (Ford STEER_STEP = 5), instead of every 10 ms. Building and serializing
+# ~70 fields was 8.5% of card's time on core 4, which measured 89-93% busy, and the lateral fields it
+# carries are only recomputed every fifth frame -- the other four publishes repeated them. Nothing in
+# the driving path reads it: selfdrived ignores it for alive/freq/valid and the UI reads only
+# activeLateralMode and `alive`. services.py declares 20 Hz to match. Keyed on the controller's own
+# frame (incremented at the end of CarController.update), so it never publishes twice for one frame
+# and goes quiet when card is not applying controls, which is when nothing in it changes.
+PUBLISH_EVERY_FRAMES = 5
+_last_published_frame = None
+
 
 def _get_bool(p: Params, key: str, default: bool = False) -> bool:
   try:
@@ -166,8 +177,13 @@ def publish_controller_state_bp(CI, pm):
 
 def _publish_controller_state_bp(CI, pm):
   """Publish controllerStateBP if the car controller reports lateralUncertainty."""
-  global _settings_last_read, _settings_cache
+  global _settings_last_read, _settings_cache, _last_published_frame
   if hasattr(CI.CC, "lateralUncertainty"):
+    frame = getattr(CI.CC, "frame", None)
+    if isinstance(frame, int) and not isinstance(frame, bool):
+      if frame == _last_published_frame or (frame - 1) % PUBLISH_EVERY_FRAMES != 0:
+        return
+      _last_published_frame = frame
     cs_bp = structs.ControllerStateBP()
     cs_bp.lateralUncertainty = CI.CC.lateralUncertainty
     cs_bp.angleRateLimited = getattr(CI.CC, "angleRateLimited", False)
