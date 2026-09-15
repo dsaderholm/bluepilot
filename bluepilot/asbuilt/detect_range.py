@@ -2,7 +2,7 @@
 import glob, math, os, sys
 import capnp, zstandard as zstd
 
-REPO = r"C:\Users\D.J. Saderholm\Documents\GitHub\Sandbox\bluepilot-icbm"
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 capnp.remove_import_hook()
 log_capnp = capnp.load(os.path.join(REPO, "cereal", "log.capnp"),
                        imports=[os.path.join(REPO, "cereal"),
