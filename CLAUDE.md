@@ -10803,3 +10803,54 @@ suite green, each mutation-tested:**
 openpilot and measurably wrong here: it would saturate core 4 while driving, which is BluePilot's
 commIssue report reproduced by arithmetic.
 
+
+### THE FLICKER FIX WORKED AND THE ABORTS DID NOT FALL. TWO NEW FIELDS, BECAUSE THE RECORDED ONES CANNOT SAY WHY.
+
+Five drives after the grace fix (0000046b-f, build 476dc5a46a), scored per moving minute against
+drive 61 so the comparison is not a raw count:
+
+    blockedBy nothingSlower<->noLaneAvailable flips within 0.4 s, per MOVING MINUTE
+      0000046a  drive 61, BEFORE     23.7      leadOne swaps 36.4/min
+      0000046b .. 0000046f, AFTER    1.1 - 4.6   leadOne swaps 10.5 - 24.0/min
+
+**Down about 5x once normalised per lead swap, so the fix did what it was built to do.** The
+blockedBy timeline is readable again.
+
+**THE ABORTS DID NOT FOLLOW, and that is the finding.** 18 aborts over ~31.5 moving minutes today
+against 5 in 14.1 on drive 61, and the highway drive 0000046f carried 13 of them in 17 minutes --
+45.8/hour against the 12.4/hour baseline this file recorded on build 8e979260. **So the flicker and
+the aborts were never the same defect**, and fixing one says nothing about the other. Score them
+separately from here.
+
+**EVERY ONE OF THE 13 HAS THE SAME SHAPE, and none of the recorded fields name it.** In bursts --
+four inside eight seconds -- a single frame of `wantedSide none` while `suggestion` still stood,
+`blockedBy` reading `none`, the lead present, and `confirmSeconds` pinned at 2.00. That last one is
+what makes it interesting: `approach_seconds` at its cap rules out every path through
+`_clear_confirmation`, so the confirmation never lapsed. It re-arms ~0.3-0.45 s later, which is
+`WANTED_RISE_S`.
+
+**TWO MECHANISMS FIT AND THE WIRE CANNOT SEPARATE THEM**, which is the fifth instance in this file
+of a decision published without its inputs:
+
+    the debounce released      raw wanted was none for WANTED_FALL_S and the recovery is one rise
+    a gate hard-cleared it     _reset_outputs without keep_wanted, and _hold_suggestion rewrote
+                               blockedBy to none in the same frame -- exactly the cc9b910b0a shape,
+                               which is a cause that erases its own log entry
+
+`rawWantedSide @110` and `blockedByDecided @111` are the two raw terms, captured before the debounce
+and before the hold respectively. **The next drive names the mechanism instead of a sixth inference.**
+
+**AND `suggestion` STANDING WHILE `wantedSide` IS NONE IS NOT ITSELF THE DEFECT.** The suggestion is
+built from `clear_side`; the debounce holds `wanted` back for `WANTED_RISE_S`, so the two are
+legitimately inconsistent during every rise. `passing_maneuver` leaves `signaling` on
+`wanted == none or wanted != side`, so that ordinary inconsistency is what ends the dry run --
+which is precisely why the raw terms were needed to tell a normal rise from a gate letting go.
+
+`test_abort_cause_fields.py` asserts on the PUBLISHED message, not on the attributes, because
+publishing the wrong one of a near-identical pair is the failure mode here: `wantedSide` and
+`rawWantedSide` agree on most frames, so a field fed from its neighbour reads perfectly plausibly in
+a drive and is silent on exactly the frames the aborts live on. 4 tests, 4 mutants, 0 survivors.
+
+**AND THE RISE IS ONE FRAME LONGER THAN THE ARITHMETIC SUGGESTS.** `_debounce_wanted` starts its
+timer at zero on the frame the raw answer changes, so a rise takes `int(WANTED_RISE_S / DT_MDL) + 1`
+frames. The first version of that test was off by one and the TEST was wrong, not the code.

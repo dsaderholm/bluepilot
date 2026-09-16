@@ -1052,6 +1052,28 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
     # enough, and it is measurable now instead of inferred.
     wantedSide @109 :Side;
 
+    # `wantedSide` BEFORE the debounce, and `blockedBy` BEFORE the hold. Both are inputs to values
+    # already on the wire, and both are published for the same reason those were: a drive could not
+    # name why a maneuver backed out.
+    #
+    # PUBLISHED 2026-09-15, AFTER TWO INFERENCES ON ONE DRIVE. Route 0000046f: 13 aborts in 17
+    # moving minutes, in bursts -- four in eight seconds -- every one of them a single frame of
+    # `wantedSide none` while `suggestion` stood, `blockedBy` read none, the lead was still there
+    # and `confirmSeconds` sat at its cap. Which rules out every path that calls _clear_confirmation,
+    # and leaves two candidates that the recorded fields cannot separate:
+    #
+    #   the debounce released      rawWantedSide was none for WANTED_FALL_S, and the ~0.3 s before
+    #                              wanted returns is WANTED_RISE_S. rawWantedSide settles this.
+    #   a gate hard-cleared it     _reset_outputs without keep_wanted, with _hold_suggestion then
+    #                              rewriting blockedBy to none in the same frame -- a cause that
+    #                              erases its own log entry. blockedByDecided settles that one.
+    #
+    # `suggestion` can legitimately be a side while `wantedSide` is none, because the suggestion is
+    # built from clear_side and the debounce holds wanted back for WANTED_RISE_S. So the pair being
+    # inconsistent is NOT itself the defect -- which is exactly why the raw terms are needed.
+    rawWantedSide @110 :Side;
+    blockedByDecided @111 :Blocked;
+
   }
 
   struct DynamicExperimentalControl {

@@ -823,6 +823,10 @@ class PassingAssistDetector:
   def __init__(self):
     self.suggestion = Side.none
     self.blocked_by = Blocked.disabled
+    # What _decide concluded, before _hold_suggestion overwrites blocked_by to none on a held frame.
+    # See rawWantedSide in custom.capnp for why both of these are on the wire.
+    self.blocked_by_decided = Blocked.disabled
+    self.raw_wanted_side = Side.none
     self.reason = Reason.none
     self.approach_seconds = 0.0
     self.keep_right_seconds = 0.0
@@ -2918,7 +2922,11 @@ class PassingAssistDetector:
     # request must survive: asking only once a lane is clear would arrive after the ~4.5 s the gap
     # takes to reach. So only a return BEFORE the `spotted` check leaves this False.
     self._gap_pursuing = False
+    self.raw_wanted_side = Side.none
     self._decide(sm, v_cruise, long_enabled, speed_limit_target, posted_limit)
+    # BEFORE the hold, which is the whole point -- _hold_suggestion rewrites blocked_by to none on a
+    # held frame, so the reason _decide reached is otherwise gone by the time anything records it.
+    self.blocked_by_decided = self.blocked_by
     self._update_gap_request()
     self._hold_suggestion()
     self._track_curve(sm, float(sm['carState'].vEgo))
@@ -3627,6 +3635,9 @@ class PassingAssistDetector:
     want_left = self.left_geometry_ok and not onc_left and not adj_left
     want_right = self.right_geometry_ok and not onc_right and not adj_right
     raw_wanted = Side.left if want_left else Side.right if want_right else Side.none
+    # The debounce's INPUT, kept for the wire. Every early return above leaves it none, which is the
+    # honest answer there -- the geometry was never asked.
+    self.raw_wanted_side = raw_wanted
     self.wanted_side = self._debounce_wanted(raw_wanted)
 
     left_ok = (self.left_geometry_ok and not onc_left and not self.left_blindspot and
@@ -3793,6 +3804,9 @@ class PassingAssistDetector:
     # the deciding term is absent from every route and blockedBy `none` is all a drive can report.
     passingAssist.wantedSide = pa.wanted_side
     passingAssist.blockedBy = pa.blocked_by
+    # The two raw terms behind the two fields above. See custom.capnp.
+    passingAssist.rawWantedSide = pa.raw_wanted_side
+    passingAssist.blockedByDecided = pa.blocked_by_decided
     # One timer now. The field keeps its name so older logs stay comparable.
     passingAssist.confirmSeconds = float(pa.approach_seconds)
     passingAssist.hasLead = pa.has_lead
