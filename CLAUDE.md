@@ -8494,3 +8494,90 @@ suite green, each mutation-tested:**
 openpilot and measurably wrong here: it would saturate core 4 while driving, which is BluePilot's
 commIssue report reproduced by arithmetic.
 
+## 2026-09-15 EVENING: THE BLINKER PAUSES CAME OFF, AND THE HEAT WORK IS VALIDATED ON THE ROAD
+
+Five drives, routes 0000046b..0000046f, build `476dc5a46a`, pulled off the device at 1.5 MB/s and
+decoded on the laptop. Both toggles read 0 (`BlinkerPauseLateralControl`, `BlinkerPauseLaneChange`);
+`LaneTurnDesire` 1, `LaneTurnValue` 19, unchanged.
+
+### LATERAL BELOW 20 MPH WITH A BLINKER: 0% -> 89%
+
+    Sept 4-7, pauses ON     lateral active on     0% of 81,589 frames
+    Sept 15,   pauses OFF   lateral active on    89% of 54,429 frames
+                            the other 11%: driver on the wheel 9.7%, not engaged 1.6%
+
+All 7 turns taken from a stop had lateral active from the first frame above 1 mph (0 of 15 before).
+
+### THE TURN DESIRE REACHES THE MODEL AT A STANDSTILL AND CANNOT PRODUCE A WHEEL COMMAND
+
+He asked whether the wheel could pre-turn at a light. Measured over ~43,000 stopped-in-drive frames
+across six drives, split on `modelDataV2SP.laneTurnDirection` (the desire actually sent -- it has no
+minimum speed and is fed whether or not lateral is paused):
+
+    desire at the stop   model turnL   model turnR   planned heading change over 10 s   path length
+    turnLeft                0.23          0.01                 0.0 deg                      1 m
+    turnRight               0.13          0.13 (p90 0.95)      0.0 deg                      5 m
+    none                    0.01          0.01                 0.0 deg                      2 m
+
+**The model HEARS the desire -- its own turn reading goes 0.01 -> 0.13-0.95 -- and its plan still
+contains no turn**, because while stopped it plans to stay stopped: the path is a 1-5 m stub with
+zero planned yaw. `action.desiredCurvature` is heading change over the next ~0.47 s, which is 0 at
+0 mph by construction, and the angle command is `kappa * v_ego * factor`, which is 0 at 0 mph twice
+over. **A pre-turn feature could not read a target from the model; it would have to invent an angle.**
+Not built, and the safety argument against it is his to weigh: wheels turned while stopped point the
+car into the cross street if he is rear-ended.
+
+### AND THE CAR STILL DOES NOT TAKE THE TURN -- HE DOES
+
+Through those 7 turns, with lateral ACTIVE the whole way:
+
+     speed      car's angle command   his wheel   hands on
+     0-1 mph          0.00 deg          0.3 deg      0%
+     3-6 mph          0.26              0.6         25%
+     6-10 mph         0.56             29.7         63%
+
+The model asks for ~0.01 1/m (a 100 m radius) where an intersection turn needs ~0.1. The desire
+biases which path it picks; it does not make openpilot corner. Say that plainly rather than letting
+the toggle imply otherwise.
+
+### THE HEAT WORK IS CONFIRMED ON THE ROAD, AND THE CAP STAYS REFUSED
+
+He noticed it himself -- *"the fan was running way less hard"* -- and the instruments agree:
+
+    route 046a (Sept 14, pre-fix)    THROTTLED 61.0% of frames    peak 105 C
+    route 046f (Sept 15, post-fix)   THROTTLED  6.5%              peak  96 C   fan p50 70%, p90 83%
+
+    card       55-57% of a core -> 41.5% (p90 42.6)      core 4   p50 91-93% -> 80.0 (p90 83.7)
+    locationd  48.0   ui 38.0   selfdrived 21.0   controlsd 13.5   modeld 15.5   plannerd 12.0
+
+**So the -24%/-27% replay estimate held on the car.** The 1689600 cap is still refused and now by
+measurement rather than arithmetic alone: core 4 at 80% of 2.65 GHz needs ~125% of a core at
+1.69 GHz. Cores 0-3 sit at 51-59% and core 6 at 1.1% -- but core 6 is isolcpus for camerad and
+core 7 is modeld at RT, so the do-not-rebalance ruling above is unchanged.
+
+**The car-side changes are validated onroad, which they were not before**: card started on all five
+drives, `controllerStateBP` arrives at 0.199 per carState frame on every route (the 20 Hz publisher),
+process health clean, and the pruned Delphi MRR parser produced 18-25 points per liveTracks frame
+with leads on 34-90% of radarState frames and **zero** radarErrors.
+
+### CHECK 3 WAS SCORING PRESSES AGAINST A NUMBER THAT STOPPED BEING THE AIM IN AUGUST
+
+`bp_drive_checkup` called 8 of 12 presses on 046f *"moved ONLY the ICBM number, which is the
+complaint"*, and it was about to be reported to him as a regression. All 12 moved the HOLD, which is
+what the set-speed box has shown since the badge was deleted on 2026-08-22. Fixed to compare the AIM
+(the hold when one is up, the MAX otherwise) with a `converged` bucket for a press landing inside a
+walk ICBM was already making; verified on the device -- all three routes now OK, 0 dash-only.
+
+**A diagnostic outlives the behaviour it was written against.** This is the same shape as the stale
+`RECOVERY` guidance and the mapd pin paragraph: when a readout is the only thing saying something is
+wrong, check whether the thing it measures still means what it meant.
+
+### TWO TRAPS FROM THE TOOLING, BOTH CHEAP TO REPEAT
+
+- **AN EMPTY CAPNP LIST IS TRUTHY.** `if m.radarState.radarErrors:` was True on every frame of every
+  route -- 38,978 "radar errors" on 046f -- and `list(...)` gives 0. Any capnp list must be
+  `list()`ed or `len()`ed before it is tested. It reads exactly like a subsystem failing hard.
+- **`modelV2.position` is a SPATIAL path and `np.interp` clamps past its end.** Reading y at 10 m on
+  a plan that only reaches 3 m returns the last point, not a curve. Print the path LENGTH beside any
+  offset taken from it, or a stopped car looks like it planned a straight line.
+
