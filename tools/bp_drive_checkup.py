@@ -16,7 +16,9 @@ WHAT IT CHECKS, and which complaint each one answers:
                            published. On the drive that prompted the fix, `active` was reached ZERO
                            times across 5,207 frames.
   3. +/- ROUTING           "it changes the ICBM little speed number, not the max". For every driver
-                           press, which of the two numbers moved in the second after it.
+                           press, whether the number the car is DRIVEN to moved in the second after
+                           it -- the hold when one is up, the MAX otherwise. Reading the MAX alone
+                           calls a press that moved a hold the complaint; see `Checkup._aim`.
   4. ACC AUTHORITY         Who drove. ford / opStop / fallback / inert / openpilot, as a share of
                            longitudinal frames, from the field published for exactly this.
   5. CAMERA CANCEL BRICK   CLOSED 2026-08-19 -- six consecutive drives with zero inert frames and
@@ -232,6 +234,7 @@ class Checkup:
         self.gap_button_presses += 1
       elif bt in DRIVER_SET_BUTTONS:
         self._pending.append({"t": t, "type": bt, "dash0": dash, "max0": max_sp,
+                              "aim0": self._aim(max_sp), "aim1": None,
                               "dash1": None, "max1": None})
 
     # Resolve any press whose window has closed.
@@ -239,10 +242,23 @@ class Checkup:
     for p in self._pending:
       if t - p["t"] >= PRESS_WINDOW_S:
         p["dash1"], p["max1"] = dash, max_sp
+        p["aim1"] = self._aim(max_sp)
         self.presses.append(p)
       else:
         still.append(p)
     self._pending = still
+
+  def _aim(self, max_sp: float) -> float:
+    """The number the car is being DRIVEN to -- the hold when one is up, otherwise the MAX.
+
+    Check 3 used to read `vCruiseCluster` alone, and that stopped being the aim on 2026-08-22 when
+    the hold badge was deleted and the set-speed box started showing the hold (`max_box_state.aim`).
+    A press that creates or moves a hold leaves the MAX where it is BY DESIGN, so the old rule
+    reported the fork's own behaviour as the complaint it was written for: across routes
+    0000046b..0000046f, 12 of 24 driver presses read `dash only`, and every one of them either moved
+    the hold or walked the dash onto the MAX.
+    """
+    return self._prev_baseline if self._prev_baseline > 0.0 else max_sp
 
   def plan_sp(self, lp) -> None:
     try:
@@ -286,6 +302,10 @@ class Checkup:
         pass
 
   def controller_bp(self, cbp) -> None:
+    """Nothing to accumulate: `accAuthority` went with the passthrough in a623652cf1.
+
+    The message itself still arrives -- 20 Hz of it, ~0.2 per carState frame on route 0000046f --
+    so checks 4 and 5 must not say it never did. They report the deletion instead."""
     pass
 
   def acc_faulted(self) -> None:
@@ -464,30 +484,39 @@ def render(c: Checkup, capped: bool) -> None:
   if not c.presses:
     print("3. +/- routing         ?  no driver set-speed presses in this drive")
   else:
-    moved_max = moved_dash = moved_both = moved_neither = 0
+    moved_aim = converged = moved_dash = moved_neither = 0
     for p in c.presses:
-      dm = abs((p["max1"] or 0) - p["max0"]) > PRESS_EPS_MPH
+      aim0 = p["aim0"]
+      aim1 = p["aim1"] if p["aim1"] is not None else aim0
       dd = abs((p["dash1"] or 0) - p["dash0"]) > PRESS_EPS_MPH
-      if dm and dd:
-        moved_both += 1
-      elif dm:
-        moved_max += 1
+      if abs(aim1 - aim0) > PRESS_EPS_MPH:
+        moved_aim += 1
+      elif dd and abs((p["dash1"] or 0) - aim1) <= PRESS_EPS_MPH:
+        # The aim held still and the dash ARRIVED on it: ICBM was already walking the set speed
+        # there and the press landed inside that walk. Not the complaint.
+        converged += 1
       elif dd:
         moved_dash += 1
       else:
         moved_neither += 1
-    ok = moved_max + moved_both > 0 and moved_dash == 0
+    # A press that moved NOTHING is not evidence either way -- it is most often a press against a
+    # limit the car was already sitting on. `no data` says so; the old form printed BAD with a zero
+    # in the sentence.
+    ok = False if moved_dash else (True if moved_aim + converged else None)
     print("3. +/- routing         " + verdict(
       ok,
-      "every press moved the MAX ({} max, {} both)".format(moved_max, moved_both),
-      "{} press(es) moved ONLY the ICBM number, which is the complaint".format(moved_dash)))
-    print("   {} presses: max-only {}  dash-only {}  both {}  neither {}".format(
-      len(c.presses), moved_max, moved_dash, moved_both, moved_neither))
+      "every press moved the number the car is driven to ({} moved the aim, {} arrived on it)".format(
+        moved_aim, converged),
+      "{} press(es) moved the dash and left the AIM where it was, which is the complaint".format(
+        moved_dash),
+      "{} press(es), and not one of them moved anything".format(len(c.presses))))
+    print("   {} presses: aim {}  converged {}  dash-only {}  neither {}".format(
+      len(c.presses), moved_aim, converged, moved_dash, moved_neither))
 
   # 4 -----------------------------------------------------------------------------------
   tot_auth = sum(c.authority.values())
   if tot_auth == 0:
-    print("4. ACC authority       ?  controllerStateBP never arrived")
+    print("4. ACC authority       -- the stock ACC passthrough was DELETED (a623652cf1); there is no authority to report")
   else:
     ford = c.authority.get("ford", 0)
     inert = c.authority.get("inert", 0)
@@ -507,7 +536,7 @@ def render(c: Checkup, capped: bool) -> None:
   # 5 -----------------------------------------------------------------------------------
   inert_n = c.authority.get("inert", 0)
   if tot_auth == 0:
-    print("5. Passthrough brick   ?  controllerStateBP never arrived")
+    print("5. Passthrough brick   -- deleted with the passthrough; nothing can go inert any more")
   else:
     print("5. Passthrough brick   " + verdict(
       inert_n == 0,
