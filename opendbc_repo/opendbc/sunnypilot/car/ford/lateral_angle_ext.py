@@ -182,6 +182,41 @@ def pscm_d_ref_m(v_ego_ms: float) -> float:
   return d
 
 
+# FusionPilot: HOLD THE STEERING THROUGH A STOP (FordLowSpeedAngleHold_ang, mph; 0 = off).
+#
+# His report, 2026-09-16: *"if it starts steering to prepare for a turn, I stop before it makes
+# that turn, and then start driving (like at a red light), the wheel goes back to the middle and
+# then it tries to go back. It like loses what it was doing."*
+#
+# It does not lose the plan. modeld HOLDS `desiredCurvature` below MIN_LAT_CONTROL_SPEED
+# (`prev_action.desiredCurvature`), so the request survives the stop. Two things on THIS side erase it:
+#
+#   1. path_angle = kappa_cmd * v_ego * curvature_factor   -> the SPEED TERM goes to zero at a stop.
+#      Route 00000471: at a standstill the model asked for 0.0087 and the wire carried 0.00.
+#   2. predicted_curvature = orientationRate.z / v_ego      -> a stopped plan has no yaw, so the
+#      prediction half of the blend reads ~0 and halves whatever the desired half still carries.
+#
+# Below the hold speed this floors the speed term at the hold speed and fades the prediction's
+# weight to zero with speed, so the command is the model's own held request at the angle the car
+# had at the hold speed -- continuous through the stop and back out of it. Above the hold speed
+# NOTHING changes, and at 0 it is bit-identical to the controller as it was.
+#
+# The rack DOES follow commands at walking pace, which is what makes this worth testing -- measured
+# 2026-09-16 over routes 00000470..476, hands off, wheel read 0.3 s after the command, as a share of
+# the commanded step: 0.03 at 0.5-3 mph, 0.17 at 3-6, 0.17-0.23 at 6-16, and 0.16 at 25-45 mph
+# where the car demonstrably steers. So it responds from ~3 mph up the same as at speed; below 3
+# it mostly does not, and at a dead stop nobody knows, because nothing nonzero was ever sent there.
+#
+# THE CAP IS A SAFETY BOUND, NOT A PREFERENCE. ford.h's shadow-curvature proximity check
+# (`ford_shadow_curvature_error_check`) only runs above FORD_PATH_ANGLE_LIMITS.angle_error_min_speed
+# (9.9 m/s). The prediction fade changes kappa_cmd -- the value that check reads -- so the hold must
+# never be active at a speed the check can see. 15 mph is 6.7 m/s. The path-angle rate limit
+# (`_soft_roc`, mirrored by path_angle_cmd_checks) is applied AFTER this, so a held command still
+# arrives at the rack no faster than any other command.
+ANGLE_HOLD_MAX_MPH = 15.0
+_MPH_TO_MS = 0.44704
+
+
 class LateralAngleExt:
   def __init__(self, CP=None, CP_SP=None):
     # Predicted-curvature blend for path_angle: pred * b + desired * (1-b).
@@ -231,6 +266,9 @@ class LateralAngleExt:
     # FusionPilot: lead time (s) for the lane-centering position loop. 0.0 is the pure-P controller
     # this shipped as -- see lane_center_trim.py for why it exists and why it ships inert.
     self.lane_centering_damping_ang = 0.0
+    # FusionPilot: hold speed (m/s) for the speed term below which the steering is held through a
+    # stop -- see ANGLE_HOLD_MAX_MPH. 0.0 is the controller as it always was.
+    self.angle_hold_speed_ms = 0.0
     # Telemetry: variable curvature lookup time used this frame (s)
     self.bp_curvature_lookup_time = _VLT_T_EXTRA_MAX + 0.3725  # warm start at ~0.5s
     # BluePilot: error-clipped kappa path_angle was derived from -- carcontroller.py reads this as
@@ -308,6 +346,14 @@ class LateralAngleExt:
               float(raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw), min_value, max_value)))
         except Exception:
           pass
+      try:
+        raw = params.get("FordLowSpeedAngleHold_ang", return_default=True)
+        if raw is not None and raw != b"":
+          mph = float(clip(float(raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw),
+                           0.0, ANGLE_HOLD_MAX_MPH))
+          self.angle_hold_speed_ms = mph * _MPH_TO_MS
+      except Exception:
+        pass
 
   def update_angle_strategy(self, CC, CS, actuators, CP):
     """
@@ -633,7 +679,16 @@ class LateralAngleExt:
       self.b_blend = min(target_b_blend, self.b_blend + b_step)
     else:
       self.b_blend = max(target_b_blend, self.b_blend - b_step)
-    requested_curvature = predicted_curvature * self.b_blend + desired_curvature * (1.0 - self.b_blend)
+    # FusionPilot: below the hold speed the prediction is yaw rate divided by a speed heading for
+    # zero, and a stopped plan has no yaw -- fade its weight out with speed so the command is the
+    # model's own held request. `b_blend` itself is untouched: it is ramped state, and the hold must
+    # not leave a different weight behind when the car pulls away.
+    _hold_ms = self.angle_hold_speed_ms
+    if _hold_ms > 0.0 and v_ego < _hold_ms:
+      _pred_weight = self.b_blend * max(0.0, v_ego) / _hold_ms
+    else:
+      _pred_weight = self.b_blend
+    requested_curvature = predicted_curvature * _pred_weight + desired_curvature * (1.0 - _pred_weight)
     self._desired_curvature_last = desired_curvature
 
     if self.model is not None:
@@ -733,9 +788,12 @@ class LateralAngleExt:
     self.bp_curvature_factor = float(self.curvature_factor)
     self.bp_gain_low_curv = float(self.low_gain_calc)
     self.bp_gain_high_curv = float(self.high_gain_calc)
-    self.bp_blend_weight = float(self.b_blend)
+    self.bp_blend_weight = float(_pred_weight)
 
-    path_angle_calc = kappa_cmd * v_ego * self.curvature_factor
+    # FusionPilot: the speed term, floored at the hold speed -- see ANGLE_HOLD_MAX_MPH. The gain
+    # schedule above keeps reading the real v_ego; only the geometry's speed is held.
+    _v_angle = max(v_ego, _hold_ms) if _hold_ms > 0.0 else v_ego
+    path_angle_calc = kappa_cmd * _v_angle * self.curvature_factor
     path_angle = path_angle_calc
 
 
