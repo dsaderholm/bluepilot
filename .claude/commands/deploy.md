@@ -73,7 +73,26 @@ the device's own schema rather than in the file:
 
 Note `python` is not on a non-interactive PATH — use `bash -lc` or `/usr/local/venv/bin/python`.
 
-## 5. Reboot
+## 5. Reboot -- BUT ONLY AFTER THE OTHER SESSIONS HAVE SAID GO
+
+**Two or more sessions share this car. A reboot kills every SSH session and on-device job, and wipes
+`/tmp`.** 2026-09-16: passing assist rebooted it while the ICBM session was mid-investigation, and
+he had to say so: *"Watch your reboots! Another session is looking at stuff!"*
+
+Before rebooting, every time:
+
+1. `ListAgents` -- find the other sessions working on this car (ICBM, passing assist, radar detector).
+2. `SendMessage` each one: the commit you are putting on, and that you are about to reboot. Ask them
+   to reply when clear. **Wait for the reply.** Do not reboot on silence.
+3. On the device, look for someone else's work before trusting the replies:
+
+```
+who; ps -eo pid,etime,args | grep -e "[p]ython.*steer_review" -e "[p]ython.*tools/bp_" -e "[w]d.sh"
+```
+
+   Any analysis job or foreign SSH session means wait, or ask whose it is.
+
+Only then:
 
 ```
 sudo reboot

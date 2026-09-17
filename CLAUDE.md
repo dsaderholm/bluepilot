@@ -10897,3 +10897,13 @@ counts as "braking" in *"I don't want to involve braking when doing the lane cha
 rule to interpret -- asked, not assumed. If he says brake requests only, the change is the crossing
 reading `accDecelRequest` alone while the metric keeps engine braking; it OPENS crossings, so it
 needs his yes.
+
+## A REBOOT IS NOT MINE ALONE. ASK THE OTHER SESSIONS FIRST.
+
+2026-09-16: passing assist rebooted the car for a deploy while the ICBM session was investigating on
+it. *"Watch your reboots! Another session is looking at stuff!"* This file already said "say so
+before rebooting a device another session is using" (2026-08-28, when a reboot wiped a finished
+analysis in `/tmp`) -- a rule in prose, broken again. It is now step 5 of `/deploy`: `ListAgents`,
+`SendMessage` every session working on this car, **wait for a reply**, check `who` and running
+analysis jobs on the device, then reboot. "Do reboots and updates unasked" still holds -- unasked by
+HIM, not unannounced to the sessions sharing the car.
