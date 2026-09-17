@@ -3412,7 +3412,7 @@
           "key": "FordLowSpeedAngleHold_ang",
           "widget": "option",
           "title": "[Lateral Tuning] Hold Steering Through Stops (Angle, mph)",
-          "description": "On a right turn, below this speed the car keeps the steering it had instead of letting the wheel fall to the middle as you stop, then swing back when you pull away. Left turns are never held, so the car is not left pointed across traffic. 0 is the original behavior. Try 10. Not yet tested on the road. Default 0.",
+          "description": "On a right turn, below this speed the car keeps the steering it had instead of letting the wheel fall to the middle as you stop, then swing back when you pull away. A left is held only when you are stopped behind a car, so you are never left pointed across oncoming traffic at the front of the line. 0 is the original behavior. Try 10. Not yet tested on the road. Default 0.",
           "min": 0.0,
           "max": 15.0,
           "step": 1.0,

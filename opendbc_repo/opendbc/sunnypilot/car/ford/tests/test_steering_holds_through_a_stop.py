@@ -18,7 +18,7 @@ import pathlib
 import re
 import unittest
 
-from opendbc.sunnypilot.car.ford.lateral_angle_ext import ANGLE_HOLD_MAX_MPH, _MPH_TO_MS
+from opendbc.sunnypilot.car.ford.lateral_angle_ext import ANGLE_HOLD_LEFT_LEAD_M, ANGLE_HOLD_MAX_MPH, _MPH_TO_MS
 from opendbc.sunnypilot.car.ford.tests.test_lateral_blend_horizon import (
   _Actuators, _CC, _CS, _FakeLiveDelay, _ForcedDetector, _Harness, _Model, _explorer_cp, T_IDXS,
 )
@@ -132,11 +132,12 @@ class TestRightTurnsOnly(unittest.TestCase):
   def tearDown(self):
     _FakeLiveDelay.lateralDelay = 0.2
 
-  def test_a_left_turn_is_never_held_at_a_stop(self):
+  def test_a_left_turn_with_nothing_ahead_is_not_held_at_a_stop(self):
+    # The shared harness has no radar at all, which is also the fail-closed path: no lead, no hold.
     off = _run(0.0, 0.0, desired=-TURN)
     on = _run(HOLD_MPH, 0.0, desired=-TURN)
     self.assertEqual(on.bp_path_angle_final, 0.0,
-                     "a left held at a light points the car at the opposing lanes")
+                     "first at the line, a left held at a light points the car at the opposing lanes")
     for field in ("bp_path_angle_final", "bp_kappa_cmd", "bp_blend_weight", "b_blend"):
       self.assertEqual(getattr(off, field), getattr(on, field), field)
 
@@ -159,6 +160,133 @@ class TestRightTurnsOnly(unittest.TestCase):
     # ever drops the minus sign, the hold would start holding LEFT turns, and this fails first.
     src = (REPO / "selfdrive/controls/controlsd.py").read_text(encoding="utf-8")
     self.assertRegex(src, r"self\.curvature\s*=\s*-\s*self\.VM\.calc_curvature\(")
+
+
+class _Lead:
+  def __init__(self, d_rel, radar):
+    self.status = d_rel is not None
+    self.dRel = 0.0 if d_rel is None else d_rel
+    self.radar = radar
+    self.vLead = 0.0
+
+
+class _RadarState:
+  def __init__(self, d_rel, radar):
+    self.leadOne = _Lead(d_rel, radar)
+
+
+class _SM:
+  """The two services the angle strategy reads, with `alive` -- the shared harness has neither."""
+
+  def __init__(self):
+    self.alive = {"radarState": True}
+    self.radar = _RadarState(None, True)
+    self.explode = False
+
+  def __getitem__(self, key):
+    if self.explode:
+      raise RuntimeError("messaging is broken")
+    if key == "liveDelay":
+      return _FakeLiveDelay()
+    if key == "radarState":
+      return self.radar
+    raise KeyError(key)
+
+
+def _drive(steps, desired=-TURN, hold_mph=HOLD_MPH):
+  """steps: (v m/s, lead dRel or None, radar-confirmed, alive, latActive, calls). Returns ext."""
+  _FakeLiveDelay.lateralDelay = 0.38
+  CP = _explorer_cp()
+  ext = _Harness(CP)
+  ext.human_turn_detector = _ForcedDetector(False)
+  ext.update_angle_params(_Params(hold_mph))
+  sm = _SM()
+  ext.sm = sm
+  for v, d_rel, radar, alive, lat, calls in steps:
+    sm.radar = _RadarState(d_rel, radar)
+    sm.alive["radarState"] = alive
+    ext.model = _Model([desired for _ in T_IDXS], max(v, 0.0))
+    cs = _CS(vEgoRaw=v, vEgo=v)
+    for _ in range(calls):
+      ext.update_angle_strategy(_CC(latActive=lat), cs, _Actuators(curvature=desired), CP)
+  return ext
+
+
+STOPPED = 0.0
+ROLLING = HOLD_MPH * _MPH_TO_MS + 2.0
+
+
+class TestALeftIsHeldBehindACar(unittest.TestCase):
+  """His rule: a rear-end behind a stopped car pushes you into that car whatever the wheel does."""
+
+  def tearDown(self):
+    _FakeLiveDelay.lateralDelay = 0.2
+
+  def assertHeld(self, ext):
+    self.assertLess(ext.bp_path_angle_final, -0.05, "a left held at a stop must be a real command")
+    self.assertAlmostEqual(ext.bp_path_angle_final,
+                           ext.bp_kappa_cmd * HOLD_MPH * _MPH_TO_MS * ext.bp_curvature_factor, places=6)
+
+  def test_stopped_behind_a_car_the_left_is_held(self):
+    self.assertHeld(_drive([(STOPPED, 4.0, True, True, True, 40)]))
+
+  def test_first_at_the_line_the_left_is_not_held(self):
+    self.assertEqual(_drive([(STOPPED, None, True, True, True, 40)]).bp_path_angle_final, 0.0)
+
+  def test_cross_traffic_across_the_intersection_does_not_arm_it(self):
+    # First at the line the radar sees cross traffic at 16-40 m. That is not a car to be shoved into.
+    self.assertEqual(_drive([(STOPPED, 20.0, True, True, True, 40)]).bp_path_angle_final, 0.0)
+
+  def test_a_vision_only_lead_does_not_arm_it(self):
+    self.assertEqual(_drive([(STOPPED, 4.0, False, True, True, 40)]).bp_path_angle_final, 0.0)
+
+  def test_a_stale_radar_does_not_arm_it(self):
+    self.assertEqual(_drive([(STOPPED, 4.0, True, False, True, 40)]).bp_path_angle_final, 0.0)
+
+  def test_broken_messaging_neither_arms_it_nor_raises(self):
+    CP = _explorer_cp()
+    ext = _Harness(CP)
+    ext.human_turn_detector = _ForcedDetector(False)
+    ext.update_angle_params(_Params(HOLD_MPH))
+    sm = _SM()
+    ext.sm = sm
+    ext.model = _Model([-TURN for _ in T_IDXS], 0.0)
+    sm.explode = True
+    self.assertFalse(ext._radar_lead_within(ANGLE_HOLD_LEFT_LEAD_M),
+                     "an exception here is inside CarController.update -- it must land on False")
+
+  def test_the_hold_survives_the_car_ahead_pulling_away(self):
+    # Released the instant the lead moves, the wheel would drop exactly as the queue starts --
+    # the "goes back to the middle and then tries to go back" this whole feature exists to remove.
+    self.assertHeld(_drive([(STOPPED, 4.0, True, True, True, 10),
+                            (STOPPED, None, True, True, True, 40)]))
+
+  def test_driving_off_above_the_hold_speed_disarms_it(self):
+    ext = _drive([(STOPPED, 4.0, True, True, True, 10),
+                  (ROLLING, None, True, True, True, 5),
+                  (STOPPED, None, True, True, True, 40)])
+    self.assertEqual(ext.bp_path_angle_final, 0.0, "the next light, first at the line, must not inherit it")
+
+  def test_lateral_dropping_out_disarms_it(self):
+    ext = _drive([(STOPPED, 4.0, True, True, True, 10),
+                  (STOPPED, None, True, True, False, 1),
+                  (STOPPED, None, True, True, True, 40)])
+    self.assertEqual(ext.bp_path_angle_final, 0.0)
+
+  def test_arming_needs_the_hold_to_be_on(self):
+    ext = _drive([(STOPPED, 4.0, True, True, True, 40)], hold_mph=0.0)
+    self.assertFalse(ext.angle_hold_left_armed)
+    self.assertEqual(ext.bp_path_angle_final, 0.0)
+
+  def test_a_right_turn_does_not_need_a_car_ahead(self):
+    ext = _drive([(STOPPED, None, True, True, True, 40)], desired=TURN)
+    self.assertGreater(ext.bp_path_angle_final, 0.05)
+
+  def test_the_distance_sits_between_the_two_measured_populations(self):
+    # 70 stops, 2026-09-04..15: stopped behind a car the lead sat 2.8-5.3 m ahead (p50 per stop);
+    # first at the line the nearest thing seen was cross traffic from 16 m out.
+    self.assertGreater(ANGLE_HOLD_LEFT_LEAD_M, 5.3)
+    self.assertLess(ANGLE_HOLD_LEFT_LEAD_M, 16.0)
 
 
 class TestTheSettingIsBounded(unittest.TestCase):
