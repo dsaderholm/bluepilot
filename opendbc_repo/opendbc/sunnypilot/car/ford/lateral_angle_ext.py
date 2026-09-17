@@ -207,6 +207,25 @@ def pscm_d_ref_m(v_ego_ms: float) -> float:
 # where the car demonstrably steers. So it responds from ~3 mph up the same as at speed; below 3
 # it mostly does not, and at a dead stop nobody knows, because nothing nonzero was ever sent there.
 #
+# RIGHT TURNS ONLY, AND THAT IS HIS RULE, NOT A LIMITATION. 2026-09-16: *"I have seen it point my
+# car at a stop where it would go across traffic. I am not a big fan of that... I'm talking about
+# right turns where you are going that way anyway."* A wheel held LEFT at a light points the car at
+# the opposing lanes, so a rear-end shoves it into them; held RIGHT it points where the car is going.
+# Lefts keep the controller exactly as it was.
+#
+# RIGHT IS POSITIVE CURVATURE, measured and not assumed -- one dump on route 00000471 looked like it
+# disagreed. It does not: openpilot's controls curvature is `-VM.calc_curvature(steer_angle, ...)`
+# (controlsd.py), so with the steering angle positive-LEFT, curvature is positive-RIGHT on every car.
+# Routes 0000046b..f, 4-20 mph, |yaw| > 0.15 rad/s:
+#     right blinker  5,220 turning frames   desiredCurvature > 0 on 99.3%   gyro z > 0 on 99.4%
+#     left blinker   4,859 turning frames   desiredCurvature > 0 on  1.0%   gyro z > 0 on  0.0%
+# (livePose's device frame is z-DOWN, which is why the gyro agrees with curvature and not the wheel.)
+# This assumes right-hand traffic, where a right turn crosses no opposing lane.
+#
+# Left turns under a freeway -- waiting to turn onto the on-ramp -- are the case he also wants, and
+# they are NOT covered: nothing the camera sees says "under a freeway", so it would take the map, and
+# the map deciding alone to hold the wheel turned is his decision to make, not this commit's.
+#
 # THE CAP IS A SAFETY BOUND, NOT A PREFERENCE. ford.h's shadow-curvature proximity check
 # (`ford_shadow_curvature_error_check`) only runs above FORD_PATH_ANGLE_LIMITS.angle_error_min_speed
 # (9.9 m/s). The prediction fade changes kappa_cmd -- the value that check reads -- so the hold must
@@ -683,7 +702,8 @@ class LateralAngleExt:
     # zero, and a stopped plan has no yaw -- fade its weight out with speed so the command is the
     # model's own held request. `b_blend` itself is untouched: it is ramped state, and the hold must
     # not leave a different weight behind when the car pulls away.
-    _hold_ms = self.angle_hold_speed_ms
+    # Right turns only -- positive curvature, see ANGLE_HOLD_MAX_MPH. A left keeps the old controller.
+    _hold_ms = self.angle_hold_speed_ms if desired_curvature > 0.0 else 0.0
     if _hold_ms > 0.0 and v_ego < _hold_ms:
       _pred_weight = self.b_blend * max(0.0, v_ego) / _hold_ms
     else:
