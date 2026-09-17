@@ -8581,7 +8581,7 @@ wrong, check whether the thing it measures still means what it meant.
   a plan that only reaches 3 m returns the last point, not a curve. Print the path LENGTH beside any
   offset taken from it, or a stopped car looks like it planned a straight line.
 
-## 2026-09-16: HOLD THE STEERING THROUGH A STOP -- RIGHT TURNS ONLY, HIS RULE
+## 2026-09-16: HOLD THE STEERING THROUGH A STOP -- RIGHTS, AND LEFTS BEHIND A CAR. HIS RULES.
 
 *"if it starts steering to prepare for a turn, I stop before it makes that turn, and then start
 driving... the wheel goes back to the middle and then it tries to go back."* It does not lose the
@@ -8591,7 +8591,7 @@ plan zeroes. `FordLowSpeedAngleHold_ang` (mph, ships 0) floors the speed term an
 prediction below the hold speed. Mechanism, measurements and bounds are in `lateral_angle_ext.py`
 above `ANGLE_HOLD_MAX_MPH`; do not re-derive them.
 
-**RIGHT TURNS ONLY, AND IT IS HIS DECISION, NOT A LIMITATION.** *"I have seen it point my car at a
+**RIGHT TURNS ALWAYS, AND IT IS HIS DECISION, NOT A LIMITATION.** *"I have seen it point my car at a
 stop where it would go across traffic. I am not a big fan of that... I'm talking about right turns
 where you are going that way anyway."* A left held at a light is pointed at the opposing lanes.
 
@@ -8600,10 +8600,24 @@ where you are going that way anyway."* A left held at a light is pointed at the 
 right-blinker turning frames positive, 1.0% of 4,859 left. `livePose` z is DOWN, so the gyro agrees
 with curvature and the steering angle carries the opposite sign. A test pins the controlsd line.
 
-**OPEN, AND HIS TO DECIDE: left turns UNDER A FREEWAY** (waiting to turn onto the on-ramp). He wants
-those held too -- *"those under freeway intersections are technically left turns"*. Nothing the
-camera sees says "under a freeway", so it would take the map, and the map alone deciding to hold the
-wheel turned is exactly the map-as-permission shape this file forbids. Asked, not built.
+**A LEFT IS HELD ONCE A RADAR-CONFIRMED CAR IS WITHIN 8 m AHEAD -- also his rule, same day.** He
+first asked for single-point-interchange lefts. **Ramp geometry cannot find them**: at 8 exit-ramp
+stops the car was NOT in a sustained curve (heading change -19..+7 deg over the last 10 s), so only
+the map could, and the map alone deciding to hold the wheel turned is the forbidden shape. Then he
+gave the real rule: *"it happens even when I stop behind vehicles, so if I get rear ended I'm going
+to hit that vehicle either way. I know that I was taught not to turn the wheel if I am turning into
+oncoming traffic."* The hazard is being SHOVED into the opposing lanes, and a car stopped ahead ends
+the shove. Measured at 70 stops, radarState.leadOne while stopped:
+
+    stopped behind a car   lead on 100% of the stop, dRel p50 2.8-5.3 m, radar-confirmed 100%
+    first at the line      lead on 0-38%, and what it sees is cross traffic at 16-40 m
+
+**It LATCHES** -- armed below the hold speed, cleared above it or when lateral drops. Released when
+the lead moves, the wheel would drop exactly as the queue pulls away, which is the original
+complaint. The one case the latch keeps: the car ahead leaves on its own (right on red) and he is
+first at the line with the wheel held. Stated in the code, not solved. `_radar_lead_within` fails
+closed on a stale, vision-only, missing or throwing radarState -- it runs inside
+CarController.update and only ever UNLOCKS a hold. 10 mutants, 0 survivors.
 
 **THE RACK FOLLOWS COMMANDS AT WALKING PACE -- from ~3 mph up.** Routes 470..476, hands off, wheel
 read 0.3 s after the command, share of the commanded step: 0.03 at 0.5-3 mph, 0.17 at 3-6, 0.17-0.23

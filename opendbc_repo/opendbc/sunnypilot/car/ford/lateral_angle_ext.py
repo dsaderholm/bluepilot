@@ -207,11 +207,11 @@ def pscm_d_ref_m(v_ego_ms: float) -> float:
 # where the car demonstrably steers. So it responds from ~3 mph up the same as at speed; below 3
 # it mostly does not, and at a dead stop nobody knows, because nothing nonzero was ever sent there.
 #
-# RIGHT TURNS ONLY, AND THAT IS HIS RULE, NOT A LIMITATION. 2026-09-16: *"I have seen it point my
+# RIGHT TURNS, AND THAT IS HIS RULE, NOT A LIMITATION. 2026-09-16: *"I have seen it point my
 # car at a stop where it would go across traffic. I am not a big fan of that... I'm talking about
 # right turns where you are going that way anyway."* A wheel held LEFT at a light points the car at
 # the opposing lanes, so a rear-end shoves it into them; held RIGHT it points where the car is going.
-# Lefts keep the controller exactly as it was.
+# A left keeps the controller exactly as it was UNLESS a car is stopped right in front -- see below.
 #
 # RIGHT IS POSITIVE CURVATURE, measured and not assumed -- one dump on route 00000471 looked like it
 # disagreed. It does not: openpilot's controls curvature is `-VM.calc_curvature(steer_angle, ...)`
@@ -222,9 +222,24 @@ def pscm_d_ref_m(v_ego_ms: float) -> float:
 # (livePose's device frame is z-DOWN, which is why the gyro agrees with curvature and not the wheel.)
 # This assumes right-hand traffic, where a right turn crosses no opposing lane.
 #
-# Left turns under a freeway -- waiting to turn onto the on-ramp -- are the case he also wants, and
-# they are NOT covered: nothing the camera sees says "under a freeway", so it would take the map, and
-# the map deciding alone to hold the wheel turned is his decision to make, not this commit's.
+# A LEFT IS HELD WHEN A CAR IS STOPPED RIGHT IN FRONT, ALSO HIS RULE. 2026-09-16: *"it happens even
+# when I stop behind vehicles, so if I get rear ended I'm going to hit that vehicle either way. I know
+# that I was taught not to turn the wheel if I am turning into oncoming traffic."* The hazard of a
+# turned wheel is being SHOVED INTO the opposing lanes; with a car stopped a few metres ahead the
+# shove ends in that car whatever the wheel is doing. That also covers most single-point interchange
+# lefts he asked about, which queue -- and the map was ruled out for them first: at 8 exit-ramp stops
+# the car was NOT in a sustained curve beforehand (heading change -19..+7 deg over 10 s), so ramp
+# geometry cannot tell them apart and nothing else short of the map could.
+#
+# Measured at 70 stops across his 2026-09-04..09-15 drives, radarState.leadOne while stopped:
+#     stopped behind a car    lead on 100% of the stop, dRel p50 2.8-5.3 m, radar-confirmed 100%
+#     first at the line       lead on 0-38%, and what it sees is cross traffic at 16-40 m
+# so ANGLE_HOLD_LEFT_LEAD_M = 8 m admits every queue and none of the intersections. It must be RADAR-
+# confirmed (a vision-only lead cannot arm it) and it LATCHES: armed below the hold speed, cleared
+# only above it. Released the instant the lead moves, the hold would drop the wheel exactly as the
+# queue pulls away -- the "goes back to the middle and then tries to go back" this exists to remove.
+# The one case the latch keeps that he might not want: the car ahead leaves on its own (a right on
+# red) and he is left first at the line with the wheel held. That is stated, not solved.
 #
 # THE CAP IS A SAFETY BOUND, NOT A PREFERENCE. ford.h's shadow-curvature proximity check
 # (`ford_shadow_curvature_error_check`) only runs above FORD_PATH_ANGLE_LIMITS.angle_error_min_speed
@@ -233,6 +248,7 @@ def pscm_d_ref_m(v_ego_ms: float) -> float:
 # (`_soft_roc`, mirrored by path_angle_cmd_checks) is applied AFTER this, so a held command still
 # arrives at the rack no faster than any other command.
 ANGLE_HOLD_MAX_MPH = 15.0
+ANGLE_HOLD_LEFT_LEAD_M = 8.0
 _MPH_TO_MS = 0.44704
 
 
@@ -288,6 +304,9 @@ class LateralAngleExt:
     # FusionPilot: hold speed (m/s) for the speed term below which the steering is held through a
     # stop -- see ANGLE_HOLD_MAX_MPH. 0.0 is the controller as it always was.
     self.angle_hold_speed_ms = 0.0
+    # FusionPilot: a radar-confirmed car was within ANGLE_HOLD_LEFT_LEAD_M while below the hold speed,
+    # so a LEFT may be held too. Latched until the car is back above the hold speed.
+    self.angle_hold_left_armed = False
     # Telemetry: variable curvature lookup time used this frame (s)
     self.bp_curvature_lookup_time = _VLT_T_EXTRA_MAX + 0.3725  # warm start at ~0.5s
     # BluePilot: error-clipped kappa path_angle was derived from -- carcontroller.py reads this as
@@ -374,6 +393,18 @@ class LateralAngleExt:
       except Exception:
         pass
 
+  def _radar_lead_within(self, distance_m: float) -> bool:
+    """A radar-confirmed lead closer than distance_m. False on anything missing, stale or unreadable:
+    this only ever UNLOCKS a left hold, so every failure has to land on not holding -- and it runs
+    inside CarController.update, where an exception stops the car."""
+    try:
+      if not self.sm.alive['radarState']:
+        return False
+      lead = self.sm['radarState'].leadOne
+      return bool(lead.status and lead.radar and 0.0 < float(lead.dRel) < distance_m)
+    except Exception:
+      return False
+
   def update_angle_strategy(self, CC, CS, actuators, CP):
     """
     Curvature from planner (+ optional predicted blend, + lane centering trim) → path_angle via
@@ -393,6 +424,7 @@ class LateralAngleExt:
     precision = 1
 
     if not CC.latActive:
+      self.angle_hold_left_armed = False
       self.path_angle_last = 0.0
       self.bp_path_angle_final = 0.0
       self.bp_curvature_factor = 0.0
@@ -702,8 +734,16 @@ class LateralAngleExt:
     # zero, and a stopped plan has no yaw -- fade its weight out with speed so the command is the
     # model's own held request. `b_blend` itself is untouched: it is ramped state, and the hold must
     # not leave a different weight behind when the car pulls away.
-    # Right turns only -- positive curvature, see ANGLE_HOLD_MAX_MPH. A left keeps the old controller.
-    _hold_ms = self.angle_hold_speed_ms if desired_curvature > 0.0 else 0.0
+    # Right turns always; a left only once a car is stopped right in front -- see ANGLE_HOLD_MAX_MPH
+    # and ANGLE_HOLD_LEFT_LEAD_M. Otherwise a left keeps the old controller exactly.
+    _hold_setting = self.angle_hold_speed_ms
+    if _hold_setting > 0.0 and v_ego < _hold_setting:
+      if not self.angle_hold_left_armed and self._radar_lead_within(ANGLE_HOLD_LEFT_LEAD_M):
+        self.angle_hold_left_armed = True
+    else:
+      self.angle_hold_left_armed = False
+    _hold_side_ok = desired_curvature > 0.0 or (desired_curvature < 0.0 and self.angle_hold_left_armed)
+    _hold_ms = _hold_setting if _hold_side_ok else 0.0
     if _hold_ms > 0.0 and v_ego < _hold_ms:
       _pred_weight = self.b_blend * max(0.0, v_ego) / _hold_ms
     else:
