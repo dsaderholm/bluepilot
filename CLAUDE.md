@@ -10854,3 +10854,46 @@ a drive and is silent on exactly the frames the aborts live on. 4 tests, 4 mutan
 **AND THE RISE IS ONE FRAME LONGER THAN THE ARITHMETIC SUGGESTS.** `_debounce_wanted` starts its
 timer at zero on the frame the raw answer changes, so a rise takes `int(WANTED_RISE_S / DT_MDL) + 1`
 frames. The first version of that test was off by one and the TEST was wrong, not the code.
+
+## 2026-09-16: THE NEW FIELDS NAMED THE ABORT ON THEIR FIRST DRIVE. A STALE LINE BYPASSED THE DEBOUNCE.
+
+Routes 00000470-476 on build 5c3e15b239. `tools`-style scan in the session scratchpad (`pa_cause.py`),
+aborts counted as increments of `maneuverAborts`:
+
+    3  HARD CLEAR  adjacentSlow        raw and wanted dropped on the SAME frame, one frame of refusal
+    2  debounce fall  noLaneAvailable  raw none for 16 frames, released after WANTED_FALL_S -- correct
+    1  window expired                  see the braking hold below
+
+**A same-frame drop is impossible through `_debounce_wanted`**, so something wrote `wanted_side`
+after it. The gate-refusal branch of `_decide` called `_reset_outputs(blocked, keep_wanted=True)` and
+then REASSIGNED `wanted_side` from the raw `want_left`/`want_right`. That line dates from 2026-08-10,
+when `_reset_outputs` cleared unconditionally; `keep_wanted` arrived 2026-08-15 and the line stayed,
+so it overwrote the debounced value with the raw one on every frame the branch ran -- in BOTH
+directions. One frame of `adjacentSlow` dropped a standing signal (00000476 at 76 mph, twice, each
+behind a 72 mph lead with an 80 mph car in the left lane), and one frame of geometry behind an
+occupied blind spot lit the signal without `WANTED_RISE_S`. Removed.
+`test_gate_refusal_keeps_the_debounce.py`: 3 tests, both mutants (line restored, keep_wanted off)
+killed by all three. The crossing is unaffected -- it waits on `suggested`, computed live.
+
+**Same shape as cc9b910b0a, found faster:** a debounced value written by a second site. The rule
+already in this file applies -- grep every WRITE of a debounced value, not the debounce.
+
+### AT HIGHWAY SPEED THE CROSSING IS HELD BY ENGINE BRAKING, NOT BRAKING. HIS CALL, NOT CHANGED.
+
+`passing_maneuver` crosses only when `not acc_braking`, and `acc_braking` is `accBrakingAtDecision`:
+`accDecelRequest OR -4.5 < AccPrpl_A_Rq < -0.15` (engine braking was added for the reactive-vs-
+preemptive METRIC, and the crossing reused the flag). 44 signaling sequences, routes 046a-046f and
+471-476:
+
+    speed    sequences   crossed  window expired   ready-to-cross time held by acc_braking
+    <45         21          3           0            47%   (mostly real brake requests -- queues)
+    45-60       11          2           0            34%
+    >=60        12          2           5            96%   ALL engine band, ZERO brake requests
+
+Following a slower lead at 75 mph, Ford holds a slightly negative propulsion request continuously
+(aEgo ~0), so the gate the comment describes as "a second or two" sits closed for the whole 5 s
+window. **Nothing actuates, so this costs dry-run completions, not safety.** Whether engine braking
+counts as "braking" in *"I don't want to involve braking when doing the lane change itself"* is his
+rule to interpret -- asked, not assumed. If he says brake requests only, the change is the crossing
+reading `accDecelRequest` alone while the metric keeps engine braking; it OPENS crossings, so it
+needs his yes.

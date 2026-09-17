@@ -3663,14 +3663,16 @@ class PassingAssistDetector:
         blocked = Blocked.blindspotOccupied
       # keep_wanted: see _debounce_wanted. wanted_side was already set from this frame's geometry
       # just above, and this branch is the gate saying no -- which is the flicker case.
+      #
+      # NOTHING IS PUT BACK HERE, AND THAT IS THE FIX. A line used to reassign wanted_side from the
+      # RAW want_left/want_right, written 2026-08-10 when _reset_outputs cleared it unconditionally.
+      # keep_wanted arrived 2026-08-15 and the line stayed -- so on every frame this branch ran it
+      # overwrote the debounced value with the raw one, in BOTH directions. One frame of adjacentSlow
+      # dropped a standing signal outright (route 00000476, 76 mph: two aborts, each a single frame),
+      # and one frame of geometry behind an occupied blind spot lit it without WANTED_RISE_S.
+      # Found by rawWantedSide / blockedByDecided on their first drive. The crossing is unaffected:
+      # it waits on `suggested`, which is computed live below and already refuses on this branch.
       self._reset_outputs(blocked, keep_wanted=True)
-      # AND PUT IT BACK, because this is the one path it has to survive. _reset_outputs clears
-      # wanted_side, which is right for every early return above -- those mean no pass is warranted
-      # at all, and a stale value there lit the blinker during a keep-right. THIS branch means the
-      # opposite: a pass IS warranted and a gate is what is stopping it, which is precisely when the
-      # signal should be up waiting. Clearing it here made the whole signal-first change a no-op on
-      # the only path that matters.
-      self.wanted_side = Side.left if want_left else Side.right if want_right else Side.none
       return
 
     # Left is preferred where both are available: passing on the right is the wrong default, and
