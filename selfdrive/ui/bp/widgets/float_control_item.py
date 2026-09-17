@@ -7,7 +7,7 @@ from openpilot.system.ui.widgets import Widget
 from openpilot.system.ui.widgets.list_view import ListItem, ItemAction
 from openpilot.system.ui.widgets.button import Button, ButtonStyle
 from openpilot.system.ui.widgets.label import gui_label
-from openpilot.system.ui.lib.application import FontWeight, gui_app, MousePos
+from openpilot.system.ui.lib.application import FontWeight, gui_app
 from openpilot.system.ui.lib.multilang import tr
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 
@@ -163,34 +163,14 @@ class FloatControlAction(ItemAction):
     self._plus_button.set_enabled(current_value is not None and is_enabled
                                   and current_value < self.max_value)
     self._plus_button.render(plus_rect)
-    
+
     return False
-  
-  def _handle_mouse_release(self, mouse_pos: MousePos):
-    """Handle mouse clicks on buttons."""
-    value_text = self._value_text(self._get_value())
-    
-    button_y = self._rect.y + (self._rect.height - BUTTON_SIZE) / 2
-    
-    # Calculate button positions (same as in _render)
-    value_text_width = measure_text_cached(self._font, value_text, ITEM_TEXT_FONT_SIZE).x
-    value_width = value_text_width + 20
-    total_button_space = BUTTON_SIZE * 2 + BUTTON_SPACING * 2
-    total_width = total_button_space + value_width
-    RIGHT_PADDING = 20
-    start_x = self._rect.x + self._rect.width - total_width - RIGHT_PADDING
-    
-    minus_rect = rl.Rectangle(start_x, button_y, BUTTON_SIZE, BUTTON_SIZE)
-    if rl.check_collision_point_rec(mouse_pos, minus_rect):
-      self._minus_button._handle_mouse_release(mouse_pos)
-      return
-    
-    plus_rect = rl.Rectangle(start_x + BUTTON_SIZE + BUTTON_SPACING + value_width + BUTTON_SPACING, button_y, BUTTON_SIZE, BUTTON_SIZE)
-    if rl.check_collision_point_rec(mouse_pos, plus_rect):
-      self._plus_button._handle_mouse_release(mouse_pos)
-      return
-    
-    super()._handle_mouse_release(mouse_pos)
+
+  # FusionPilot: NO _handle_mouse_release override here. The +/- buttons are rendered above, and a
+  # rendered Button handles its own tap. This class used to catch the same release and forward it
+  # to the button as well, so every tap stepped TWICE -- a 1.0 step went 0, 2, 4 and down 15, 13,
+  # 11, and 10 could not be set (2026-09-17). test_stepper_moves_once_per_tap.py drives the real
+  # event path and fails if a forward comes back.
 
 
 def float_control_item(title: str | Callable[[], str], description: str | Callable[[], str] | None = None,

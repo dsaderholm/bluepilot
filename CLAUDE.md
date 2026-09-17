@@ -11089,3 +11089,20 @@ suggestion is withdrawn.
 Where it happens: pulling away from a stop line or out of a queue, usually behind a car making the
 same left. The model starts a wide arc (R 25-40 m) as the car moves. Upstream of every setting here.
 `left_turn_summary.py` and `left_turn_dump.py` (session scratchpad) are the instruments.
+
+## 2026-09-17: EVERY +/- STEPPER ON THE FUSIONPILOT SETTINGS PAGE MOVED TWO STEPS PER TAP
+
+*"That setting didn't let me set 10, I had to do 11"* -- then *"it's like the other settings in there
+that go in steps."* `FloatControlAction` rendered its +/- `Button`s (which handle their own taps) AND
+caught the same release in its own `_handle_mouse_release` and forwarded it to the button. Two
+callbacks per tap: a 1.0 stepper went 0, 2, 4 ... and down 15, 13, 11, so 10 was unreachable; the
+0.01 angle gains moved 0.02. Upstream bp-7.0 has the same forward. Removed;
+`selfdrive/ui/tests/test_stepper_moves_once_per_tap.py` drives the real widget event path (only
+drawing and fonts stubbed) and failed 4 of 5 before the fix. `float_input_dialog_tici.py` forwards to
+its confirm/cancel buttons the same way; left alone, since firing a confirm twice sets the same result.
+
+**HIS CALL: keep the fix here and do not report it upstream** -- *"Leave it here, though, they will fix
+it themselves some day."* When upstream does fix it, take theirs and drop ours; the test stays.
+
+**Any on-device value he set with a stepper before this landed on an EVEN multiple of the step from
+where he started.** Read values off the device; do not assume a number he quotes was reachable.
