@@ -240,9 +240,9 @@ class PassingManeuver:
              acc_braking: bool = False) -> None:
     """One frame.
 
-    `acc_braking` -- Ford's ACC is slowing the car for this lead RIGHT NOW. Holds the crossing in
-                    `signaling` rather than cancelling it: braking mid-lane-change is the thing he
-                    most wants to avoid, and it costs a second or two on a lead already matched.
+    `acc_braking` -- Ford's ACC is REQUESTING THE BRAKES for this lead right now. Holds the crossing
+                    in `signaling` rather than cancelling it, to brake as little as possible during
+                    the lane change. Engine braking does not count -- his call, 2026-09-16.
     `too_slow`   -- below the minimum speed. Ends the sequence AT ANY PHASE, like driver_override.
     `wanted`     -- a slow car is spotted and a lane exists that side. LIGHTS THE BLINKER, and says
                     nothing about whether entering it is safe. See SIGNAL_WINDOW_S. Defaults to
@@ -396,7 +396,10 @@ class PassingManeuver:
         self._clear_held_s = 0.0
 
       # ...AND THE CAR IS NOT BRAKING. Asked for directly on 2026-08-14: "I don't want to involve
-      # braking when doing the lane change itself."
+      # braking when doing the lane change itself." Narrowed 2026-09-16 to REAL BRAKE REQUESTS: "It's
+      # fine if it has to brake to lane change, I just want it to brake the least amount possible."
+      # Engine braking held every highway crossing, because following a slower lead IS engine
+      # braking on this car -- so the rule was being enforced against coasting, not braking.
       #
       # This does NOT delay the decision. ACC deceleration still releases the approach hold -- see
       # closingIn in passing_assist -- so a braking car has already committed to passing and the

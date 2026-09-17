@@ -861,6 +861,8 @@ class PassingAssistDetector:
     self.acc_braking_at_decision = False
     self.acc_precharge_at_decision = False
     self.acc_braking_available = False
+    # A REAL brake request only, no engine braking. What holds the crossing -- see _acc_braking.
+    self.acc_brake_requested = False
     # See accBrakingOnsetDRel in custom.capnp -- the margin this whole design assumes, measured
     # rather than estimated. 0 means ACC never asked for deceleration during this approach.
     self.acc_onset_d_rel = 0.0
@@ -1713,6 +1715,7 @@ class PassingAssistDetector:
     self.acc_braking_at_decision = False
     self.acc_precharge_at_decision = False
     self.acc_braking_available = False
+    self.acc_brake_requested = False
     if car_state_bp is None:
       return
     bls = getattr(car_state_bp, 'brakeLightStatus', None)
@@ -1725,6 +1728,13 @@ class PassingAssistDetector:
     propulsion = float(getattr(bls, 'accPropulsionRequest', 0.0) or 0.0)
     engine_braking = ACC_PROPULSION_INACTIVE < propulsion < ACC_ENGINE_BRAKE_MS2
     self.acc_braking_at_decision = bool(bls.accDecelRequest) or engine_braking
+    # THE CROSSING READS THIS ONE, NOT THE LINE ABOVE. His call, 2026-09-16: "Real brake requests
+    # only. It's fine if it has to brake to lane change, I just want it to brake the least amount
+    # possible." Engine braking belongs in the metric above and not in the crossing gate: following
+    # a slower lead at highway speed, Ford holds AccPrpl_A_Rq in the engine band continuously with
+    # aEgo ~0, and reusing the metric's flag held 96 % of ready-to-cross time at 60+ mph -- 12
+    # sequences, 2 crossed, 5 expired their window, zero brake requests among them.
+    self.acc_brake_requested = bool(bls.accDecelRequest)
 
   def _blindspot(self, car_state_bp) -> None:
     """Is BLIS actually reporting, as opposed to silently reading 'clear' because it is absent?
@@ -3098,10 +3108,10 @@ class PassingAssistDetector:
       # See PassingManeuver.update. The detector refuses below this speed, but a refusal cannot
       # reach a committed crossing -- this can.
       too_slow=bool(CS.vEgo < self.min_speed_ms),
-      # See PassingManeuver.update. Despite its name this is the LIVE per-frame value -- _acc_braking
-      # recomputes it every update from accDecelRequest plus engine braking. Holds the crossing, not
-      # the decision: ACC deceleration is what RELEASES the approach hold above.
-      acc_braking=bool(self.acc_braking_at_decision),
+      # See PassingManeuver.update. LIVE per frame, and a real brake request ONLY -- engine braking
+      # is deliberately excluded here while acc_braking_at_decision keeps it. See _acc_braking.
+      # Holds the crossing, not the decision: ACC deceleration is what RELEASES the approach hold.
+      acc_braking=bool(self.acc_brake_requested),
       suggested=self.suggestion if self.reason == Reason.passing else Side.none,
       confirming=self.approach_seconds > 0.0 and not confirmed,
       confirmed=confirmed,

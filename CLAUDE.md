@@ -10878,7 +10878,7 @@ killed by all three. The crossing is unaffected -- it waits on `suggested`, comp
 **Same shape as cc9b910b0a, found faster:** a debounced value written by a second site. The rule
 already in this file applies -- grep every WRITE of a debounced value, not the debounce.
 
-### AT HIGHWAY SPEED THE CROSSING IS HELD BY ENGINE BRAKING, NOT BRAKING. HIS CALL, NOT CHANGED.
+### AT HIGHWAY SPEED THE CROSSING WAS HELD BY ENGINE BRAKING, NOT BRAKING. HE DECIDED: BRAKE REQUESTS ONLY.
 
 `passing_maneuver` crosses only when `not acc_braking`, and `acc_braking` is `accBrakingAtDecision`:
 `accDecelRequest OR -4.5 < AccPrpl_A_Rq < -0.15` (engine braking was added for the reactive-vs-
@@ -10897,6 +10897,19 @@ counts as "braking" in *"I don't want to involve braking when doing the lane cha
 rule to interpret -- asked, not assumed. If he says brake requests only, the change is the crossing
 reading `accDecelRequest` alone while the metric keeps engine braking; it OPENS crossings, so it
 needs his yes.
+
+**HIS ANSWER, same day:** *"Real brake requests only. I mean, it's fine if it has to brake to lane
+change, I just want it to brake the least amount possible."* Done: the crossing reads
+`acc_brake_requested` (`accDecelRequest` alone); `acc_braking_at_decision` keeps engine braking for
+the metric, and `accBrakingAtDecision` on the wire is unchanged so recorded drives keep their
+meaning. **No new field needed** -- `carStateBP.brakeLightStatus.accDecelRequest` is already logged,
+so a drive can reconstruct exactly what held a crossing. `test_crossing_waits_on_brake_requests_only.py`,
+4 tests, 3 mutants killed. Score the next highway drive on sequences crossed at 60+ mph against
+2 of 12.
+
+**Read his sentence as the INTENT, not only the rule:** braking during a lane change is allowed, the
+goal is the least of it. So the hold waits out a brake request rather than forbidding one, and it
+stays bounded by `SIGNAL_WINDOW_S`.
 
 ## A REBOOT IS NOT MINE ALONE. ASK THE OTHER SESSIONS FIRST.
 
