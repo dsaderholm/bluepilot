@@ -663,9 +663,10 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"FordLowSpeedFactor_ang", {PERSISTENT | BACKUP, FLOAT, "0.981"}},
     {"FordHighSpeedFactor_ang", {PERSISTENT | BACKUP, FLOAT, "0.68"}},
     {"FordHighSpeedDampening_ang", {PERSISTENT | BACKUP, FLOAT, "0.78"}},
-    // FusionPilot: hold the steering through a stop, in MPH; 0 is off. Below this speed the angle
-    // command's speed term is floored here, so the wheel keeps the angle it had instead of falling
-    // to the middle as the car stops and swinging back on pull-away. Capped at 15 mph, which keeps it
+    // FusionPilot: hold the steering through a stop on a RIGHT turn, in MPH; 0 is off. Below this
+    // speed the angle command's speed term is floored here, so the wheel keeps the angle it had
+    // instead of falling to the middle as the car stops and swinging back on pull-away. Lefts are
+    // never held: pointed left at a light, a rear-end pushes the car into the opposing lanes. Capped at 15 mph, which keeps it
     // below the speed ford.h's shadow-curvature check runs at -- see lateral_angle_ext.py.
     //
     // Ships at 0 deliberately, and the reason is about the car: the rack follows commands from ~3 mph

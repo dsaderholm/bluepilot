@@ -126,6 +126,41 @@ class TestItChangesNothingItShouldNot(unittest.TestCase):
                            ext.bp_kappa_cmd * HOLD_MPH * _MPH_TO_MS * ext.bp_curvature_factor, places=6)
 
 
+class TestRightTurnsOnly(unittest.TestCase):
+  """His rule: never leave the car pointed across traffic. A left keeps the old controller exactly."""
+
+  def tearDown(self):
+    _FakeLiveDelay.lateralDelay = 0.2
+
+  def test_a_left_turn_is_never_held_at_a_stop(self):
+    off = _run(0.0, 0.0, desired=-TURN)
+    on = _run(HOLD_MPH, 0.0, desired=-TURN)
+    self.assertEqual(on.bp_path_angle_final, 0.0,
+                     "a left held at a light points the car at the opposing lanes")
+    for field in ("bp_path_angle_final", "bp_kappa_cmd", "bp_blend_weight", "b_blend"):
+      self.assertEqual(getattr(off, field), getattr(on, field), field)
+
+  def test_a_left_turn_is_unchanged_at_every_speed_below_the_hold(self):
+    for v in (0.5, 1.5, 3.0, HOLD_MPH * _MPH_TO_MS - 0.2):
+      off = _run(0.0, v, desired=-TURN, model_curvature=-TURN * 0.5)
+      on = _run(HOLD_MPH, v, desired=-TURN, model_curvature=-TURN * 0.5)
+      for field in ("bp_path_angle_final", "bp_kappa_cmd", "bp_blend_weight"):
+        self.assertEqual(getattr(off, field), getattr(on, field), "%s at %.1f m/s" % (field, v))
+
+  def test_the_same_turn_to_the_right_is_held(self):
+    # The mirror image of the test above -- so a sign flip in the gate fails one of the two.
+    on = _run(HOLD_MPH, 0.0, desired=TURN)
+    self.assertGreater(on.bp_path_angle_final, 0.05)
+
+  def test_right_is_positive_curvature_because_controlsd_negates_the_steering_angle(self):
+    # The whole gate rests on this line. With the steering angle positive-LEFT, it is what makes
+    # controls curvature positive-RIGHT on every car -- measured on his drives as 99.3% of 5,220
+    # right-blinker turning frames positive, and 1.0% of 4,859 left-blinker frames. If upstream
+    # ever drops the minus sign, the hold would start holding LEFT turns, and this fails first.
+    src = (REPO / "selfdrive/controls/controlsd.py").read_text(encoding="utf-8")
+    self.assertRegex(src, r"self\.curvature\s*=\s*-\s*self\.VM\.calc_curvature\(")
+
+
 class TestTheSettingIsBounded(unittest.TestCase):
   def test_the_setting_reads_in_mph(self):
     ext = _Harness(_explorer_cp())

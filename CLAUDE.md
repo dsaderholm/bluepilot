@@ -8581,3 +8581,38 @@ wrong, check whether the thing it measures still means what it meant.
   a plan that only reaches 3 m returns the last point, not a curve. Print the path LENGTH beside any
   offset taken from it, or a stopped car looks like it planned a straight line.
 
+## 2026-09-16: HOLD THE STEERING THROUGH A STOP -- RIGHT TURNS ONLY, HIS RULE
+
+*"if it starts steering to prepare for a turn, I stop before it makes that turn, and then start
+driving... the wheel goes back to the middle and then it tries to go back."* It does not lose the
+plan: modeld HOLDS `desiredCurvature` below 0.3 m/s. Our side erases it -- `kappa * v_ego * gain`
+goes to zero with speed, and the prediction half of the blend is yaw rate / speed, which a stopped
+plan zeroes. `FordLowSpeedAngleHold_ang` (mph, ships 0) floors the speed term and fades the
+prediction below the hold speed. Mechanism, measurements and bounds are in `lateral_angle_ext.py`
+above `ANGLE_HOLD_MAX_MPH`; do not re-derive them.
+
+**RIGHT TURNS ONLY, AND IT IS HIS DECISION, NOT A LIMITATION.** *"I have seen it point my car at a
+stop where it would go across traffic. I am not a big fan of that... I'm talking about right turns
+where you are going that way anyway."* A left held at a light is pointed at the opposing lanes.
+
+**RIGHT IS POSITIVE CURVATURE ON EVERY CAR** -- `controlsd.py` negates the steering angle into
+`self.curvature`. Measured, not assumed, because one dump looked like it disagreed: 99.3% of 5,220
+right-blinker turning frames positive, 1.0% of 4,859 left. `livePose` z is DOWN, so the gyro agrees
+with curvature and the steering angle carries the opposite sign. A test pins the controlsd line.
+
+**OPEN, AND HIS TO DECIDE: left turns UNDER A FREEWAY** (waiting to turn onto the on-ramp). He wants
+those held too -- *"those under freeway intersections are technically left turns"*. Nothing the
+camera sees says "under a freeway", so it would take the map, and the map alone deciding to hold the
+wheel turned is exactly the map-as-permission shape this file forbids. Asked, not built.
+
+**THE RACK FOLLOWS COMMANDS AT WALKING PACE -- from ~3 mph up.** Routes 470..476, hands off, wheel
+read 0.3 s after the command, share of the commanded step: 0.03 at 0.5-3 mph, 0.17 at 3-6, 0.17-0.23
+at 6-16, 0.16 at 25-45 mph where it demonstrably steers. **`pathAngleFinal * steerRatio` IS NOT
+DEGREES AT THE WHEEL** -- the same ratio reads 0.16 at speed, so that product overstates the wheel
+about 6x. "89 degrees of wheel" was reported to him off it and corrected.
+
+**AND THE TWO "CAR STEERED" TURNS FROM A STOP WERE HIS HANDS.** `turn_onset.py` scored them hands-off
+because long parked stretches diluted the pressed share under 30%. The frame dump showed the wheel
+moved only once `steeringPressed` went true (2.8-3.5 Nm). Score hands on the MOVING frames, never on
+an episode average that includes the stop.
+

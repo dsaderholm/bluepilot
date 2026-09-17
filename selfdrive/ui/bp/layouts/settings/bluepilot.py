@@ -616,10 +616,10 @@ class BluePilotLayout(Widget):
 
     self._low_speed_angle_hold = float_control_item(
       lambda: tr("Hold Steering Through Stops (mph)"),
-      lambda: tr('Below this speed the car keeps the steering it had instead of letting the wheel '
-                 'fall to the middle as you stop, then swing back when you pull away. 0 is the '
-                 'original behavior. Try 10 at a light with your blinker on. It can hold the wheel '
-                 'turned while you are stopped.'),
+      lambda: tr('On a right turn, below this speed the car keeps the steering it had instead of '
+                 'letting the wheel fall to the middle as you stop, then swing back when you pull '
+                 'away. Left turns are never held, so the car is not left pointed across traffic. '
+                 '0 is the original behavior. Try 10.'),
       param="FordLowSpeedAngleHold_ang",
       min_value=0.0,
       max_value=15.0,
