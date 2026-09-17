@@ -11062,3 +11062,30 @@ because long parked stretches diluted the pressed share under 30%. The frame dum
 moved only once `steeringPressed` went true (2.8-3.5 Nm). Score hands on the MOVING frames, never on
 an episode average that includes the stop.
 
+
+## 2026-09-16: THE EARLY LEFT TURN IS THE MODEL'S ARC, NOT THE TURN DESIRE. DO NOT LOWER LaneTurnValue.
+
+*"I have noticed the model turning the wheel quite early for some unprotected lefts."* Measured over
+39 left turns (routes 046b-046f, 471-476; >= 60 deg, under 25 mph at the 45-degree point, left
+blinker). The corner is anchored at the 45-degree point, because the start of a turn moves earlier
+the earlier the car steers.
+
+    the car began the turn (lateral on, hands off)   9 of 39
+      earlier than a clean arc of the radius it drove   p50 8 m, worst 17 m   (about a second)
+      a radar lead ahead when it began                  7 of 9
+    the turn desire ON as it began                      6 of 9
+      Sept 15 split: desire on 28.5 m before the corner, desire off 28.3 m -- no difference
+
+**The desire does not start it.** When turnLeft switched on during an approach (routes 046c t+33421,
+046d t+34017), the model kept a straight or slightly right plan until the car was ~25-30 m from the
+corner, the same place it began with no desire at all. The wheel follows the plan within 1-2 m
+(ask onset vs wheel >= 10 deg), so nothing in our angle path adds lead either.
+
+**Lowering Adjust Lane Turn Speed (`LaneTurnValue`, 19) would cost, not help:** 31 of the 39 corners
+were taken at 10 mph or more, so a value of 10 switches the desire OFF mid-turn on most of his turns
+while leaving the early start where it is. It was suggested to him before this was measured; that
+suggestion is withdrawn.
+
+Where it happens: pulling away from a stop line or out of a queue, usually behind a car making the
+same left. The model starts a wide arc (R 25-40 m) as the car moves. Upstream of every setting here.
+`left_turn_summary.py` and `left_turn_dump.py` (session scratchpad) are the instruments.
