@@ -614,6 +614,19 @@ class BluePilotLayout(Widget):
       icon="chffr_wheel.png"
     )
 
+    self._low_speed_angle_hold = float_control_item(
+      lambda: tr("Hold Steering Through Stops (mph)"),
+      lambda: tr('Below this speed the car keeps the steering it had instead of letting the wheel '
+                 'fall to the middle as you stop, then swing back when you pull away. 0 is the '
+                 'original behavior. Try 10 at a light with your blinker on. It can hold the wheel '
+                 'turned while you are stopped.'),
+      param="FordLowSpeedAngleHold_ang",
+      min_value=0.0,
+      max_value=15.0,
+      step=1.0,
+      icon="chffr_wheel.png"
+    )
+
     # Lane centering trim — angle mode's "advanced lane positioning" (curvature-domain trim,
     # see lane_center_trim.py). Mirrors the curv-mode items below, one-to-one, but scoped to
     # its own _ang params.
@@ -754,6 +767,7 @@ class BluePilotLayout(Widget):
       self._low_speed_curv_factor,
       self._high_speed_curv_factor,
       self._high_speed_dampening,
+      self._low_speed_angle_hold,
       self._lane_change_factor_high_ang,
       self._enable_lane_positioning_ang,
       self._custom_path_offset_ang,
@@ -1009,6 +1023,7 @@ class BluePilotLayout(Widget):
     self._low_speed_curv_factor.action_item.set_enabled(is_angle)
     self._high_speed_curv_factor.action_item.set_enabled(is_angle)
     self._high_speed_dampening.action_item.set_enabled(is_angle)
+    self._low_speed_angle_hold.action_item.set_enabled(is_angle)
     self._lane_change_factor_high_ang.action_item.set_enabled(is_angle)
     self._enable_lane_positioning_ang.action_item.set_enabled(is_angle)
     self._custom_path_offset_ang.action_item.set_enabled(is_angle and lane_pos_ang)
