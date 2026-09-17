@@ -8669,5 +8669,8 @@ callbacks per tap: a 1.0 stepper went 0, 2, 4 ... and down 15, 13, 11, so 10 was
 drawing and fonts stubbed) and failed 4 of 5 before the fix. `float_input_dialog_tici.py` forwards to
 its confirm/cancel buttons the same way; left alone, since firing a confirm twice sets the same result.
 
+**HIS CALL: keep the fix here and do not report it upstream** -- *"Leave it here, though, they will fix
+it themselves some day."* When upstream does fix it, take theirs and drop ours; the test stays.
+
 **Any on-device value he set with a stepper before this landed on an EVEN multiple of the step from
 where he started.** Read values off the device; do not assume a number he quotes was reachable.
