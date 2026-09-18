@@ -124,7 +124,8 @@ def carcontroller_parts():
   return CarController, {Bus.pt: "ford_lincoln_base_pt"}, CP, CP_SP, structs
 
 
-def _car_control(structs, *, enabled, send_button, gap_target, long_active=False, accel=None):
+def _car_control(structs, *, enabled, send_button, gap_target, long_active=False, accel=None,
+                 curvature=None):
   """Match card's call convention EXACTLY: CC is a capnp READER, CC_SP is the opendbc dataclass.
 
   `selfdrive/car/card.py` does `self.CI.apply(CC, convert_carControlSP(CC_SP), now_nanos)` with CC
@@ -149,6 +150,10 @@ def _car_control(structs, *, enabled, send_button, gap_target, long_active=False
   if accel is not None:
     msg.actuators.accel = accel
     msg.actuators.longControlState = capnp_car.CarControl.Actuators.LongControlState.pid
+  # `curvature` is what the planner is asking of the STEERING. Without it every lateral case here
+  # runs against a plan that wants to go straight, which is the same fixture hole `accel` closed.
+  if curvature is not None:
+    msg.actuators.curvature = curvature
 
   CC_SP = structs.CarControlSP()
   CC_SP.intelligentCruiseButtonManagement.sendButton = send_button
@@ -654,3 +659,42 @@ def test_ui_params_are_read_once_a_second_not_every_frame(carcontroller_parts):
     cc.update(CC, CC_SP, CS, frame * 10_000_000)
   assert cc.user_dampening_factor == 0.5, "a changed setting must still be picked up within one window"
 
+
+def test_the_stop_hold_latch_survives_a_real_carcontroller(carcontroller_parts):
+  """FusionPilot 2026-09-17: the stop-hold curvature latch, driven through a REAL CarController.
+
+  It adds per-drive state to the angle path (`angle_hold_kappa`), and this file exists because a
+  wiring mistake in exactly that layer -- state that the logic tests could not see -- is what made
+  the car undrivable on 2026-08-15. So the question here is not whether the latch is right, it is
+  whether the object survives an approach and a stop with the hold switched on.
+
+  The shape is the measured one: a turn with speed, then a standstill where the model has given the
+  turn up. See ANGLE_HOLD_CAPTURE_MIN_MPH in lateral_angle_ext.py.
+  """
+  CarController, dbc_names, CP, CP_SP, structs = carcontroller_parts
+  cc = CarController(dbc_names, CP, CP_SP)
+  counting = _CountingParams(cc.params)
+  counting.overrides["FordLowSpeedAngleHold_ang"] = 11.0
+  cc.params = counting
+
+  out = structs.CarState()
+  out.cruiseState.enabled = True
+  out.cruiseState.available = True
+  CS = FakeCarState(out)
+
+  frame = 0
+  for v, kappa in ((8.0, 0.02), (0.0, 0.0002)):
+    out.vEgo = v
+    out.vEgoRaw = v
+    CC, CC_SP = _car_control(structs, enabled=True,
+                             send_button=structs.IntelligentCruiseButtonManagement.SendButtonState.none,
+                             gap_target=0, curvature=kappa)
+    for _ in range(40):
+      cc.update(CC, CC_SP, CS, frame * 10_000_000)
+      frame += 1
+
+  assert cc.angle_hold_kappa == pytest.approx(0.02), \
+    "the approach must leave the turn latched -- if this is 0 the capture never ran on the real object"
+  assert cc.angleHoldKappa == pytest.approx(0.02), \
+    "and the telemetry the drive is read with must carry it"
+  assert isinstance(cc.angleHoldKappa, float), "a numpy scalar here is what killed plannerd once"
