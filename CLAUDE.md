@@ -8709,3 +8709,43 @@ hold, so the floored speed term never applied.
 sweeper), 36d, then 24d and below, with the 300+ deg wheel angles all reading `hands Y` -- parking,
 not steering. `turn_hands_off.py` (session scratchpad) is the instrument; it scores hands only on
 moving frames and never ANDs the two flags.
+
+## 2026-09-17: THE HOLD WORKS. THE MODEL GIVES UP THE TURN AT 10 MPH, WHICH THE HOLD CANNOT RECOVER.
+
+First drives with `FordLowSpeedAngleHold_ang = 11` (written 08:53 MDT, three minutes INTO route
+00000478 -- so 477 is the only clean pre-hold drive today and it has no qualifying stops; there is
+no before/after to be had from 2026-09-17).
+
+**THE MECHANISM IS CONFIRMED ON THE ROAD.** Route 0000047c, t+80682, stopped behind a car 3 m ahead,
+lateral active, 13 s of standstill:
+
+    t         mph   wheel   cmd rad  blend  desCurv  lead
+    80675.5  12.4   +27.7   -0.0488   0.50  -0.0078     9   <- above the hold, asking LEFT
+    80676.5  10.2   +15.1   +0.0036   0.19  +0.0018     8   <- below it, and the model has FLIPPED
+    80678.6   5.0   -10.2   +0.0178   0.23  +0.0036     5
+    80682.6   0.0    -1.9   +0.0012   0.00  +0.0002     3   <- standstill, command NON-ZERO
+
+At the standstill `blendWeight` is 0.00 (the predicted half faded out, as designed) and
+`pathAngleFinal` is **0.0012 rad, not zero**: 0.0002 1/m x 4.92 m/s (11 mph) x ~1.3 gain = 0.0013.
+That is the floored speed term, arithmetically. Before this feature the same frame commanded exactly
+0.000 because `kappa * v_ego * gain` has `v_ego = 0` in it.
+
+**AND IT DOES NOT FIX THE COMPLAINT, because it holds whatever the model is asking for and the model
+stops asking at about 10 mph.** `desiredCurvature` flipped from -0.0078 (left) to +0.0018 (right)
+between 12.4 and 10.2 mph -- before the wheel crossed zero, so the model led and the wheel followed.
+The same shape appears at the stop ending the turn at t+79943: -0.0074 at 30 mph decaying to
+-0.0000 by 1 mph. modeld DOES freeze its plan below 0.3 m/s (the constant +0.0002 above, for 13
+seconds) -- it freezes the STRAIGHT plan it adopted ten seconds earlier.
+
+**So the speed floor is necessary and not sufficient.** What would close it is holding the last
+SIGNIFICANT curvature rather than the last curvature, and that is a design change to the lateral
+path on a branch his car auto-pulls -- do not write it in an evening. Measure first: the open
+question is whether the model relaxes the turn on every low-speed approach or only when it has a
+lead stopped in front of it.
+
+**24 stops across 479-47c and not one is the failure he described.** Every stop that came in with
+the wheel past 10 deg had `steeringPressed` or lateral off -- parking and tight maneuvers. The
+feature has not yet been given the case it was built for. `stops_hold.py` and `stop_frames.py`
+(session scratchpad) are the instruments; `stops_hold.py`'s `side` column is taken at hold-speed
+ENTRY and therefore disagrees with the per-frame decision in exactly the case above, where the
+model flips sign on the way down. Read `blendWeight` at the standstill, not that column.
