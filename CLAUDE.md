@@ -8674,3 +8674,38 @@ it themselves some day."* When upstream does fix it, take theirs and drop ours; 
 
 **Any on-device value he set with a stepper before this landed on an EVEN multiple of the step from
 where he started.** Read values off the device; do not assume a number he quotes was reachable.
+
+## 2026-09-17: IT TOOK AN 88-DEGREE LEFT BY ITSELF. A 19 m RADIUS, 86% OF THE WIRE'S ANGLE RANGE.
+
+*"It did pretty much make a full left turn which was incredible in the latest drive. I think I
+straightened up since it struggles to do that still."* Route 0000047c, t+79644, left blinker,
+13-17 mph. `latActive` and `steeringPressed` printed SEPARATELY, per the 2026-09-04 rule:
+
+    s     mph   heading   desCurv   cmd rad   wheel   hands  lat
+    2.0  16.3     1 deg   -0.0133   -0.123     22.8      .    Y
+    4.5  14.4    22       -0.0419   -0.356     78.9      .    Y
+    6.5  14.2    47       -0.0503   -0.408    100.2      .    Y
+    7.5  15.1    62       -0.0525   -0.450    105.3      .    Y   <- the car, hands off
+    8.0  16.1    70       -0.0435   -0.410    114.6      Y    Y   <- he straightens up
+    9.5  19.7    88       -0.0013    0.000      5.4      .    Y
+
+**88 degrees of heading in nine seconds, 66 of them with lateral active and his hands off.** The
+model asked for **0.0525 1/m -- a 19 m radius** -- and the command reached **0.450 rad, 86% of
+`FORD_DBC_PATH_ANGLE_MAX` (0.5235)**. For scale, the 39 left turns measured the day before had the
+car starting 9 of them and finishing none; this is the first intersection-grade turn openpilot has
+driven on this car.
+
+**He is right that he straightened it, and the last 20 degrees are therefore unmeasured.**
+`steeringPressed` blips once 38 deg in and is continuous from 70 deg, with the wheel at 105 deg and
+the command still near the wire's limit. Do not report this as "it completed the turn".
+
+**The turn desire is still not what makes this happen** -- same conclusion as the day before. What
+is different is the model's own plan: it asked for an intersection radius WHILE MOVING, which the
+stopped-car measurements (2026-09-15) say it never does from a standstill. And
+`FordLowSpeedAngleHold_ang` is irrelevant here: the whole turn ran at 13-17 mph, above the 11 mph
+hold, so the floored speed term never applied.
+
+**The other 8 left turns in that route are his.** Ranked by hands-off heading: 49d (a 45 mph
+sweeper), 36d, then 24d and below, with the 300+ deg wheel angles all reading `hands Y` -- parking,
+not steering. `turn_hands_off.py` (session scratchpad) is the instrument; it scores hands only on
+moving frames and never ANDs the two flags.
