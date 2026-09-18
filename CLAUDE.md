@@ -11196,3 +11196,51 @@ it printed correctly.
 
 Start detached jobs with a plain `ssh` call, never through a retry wrapper, and have the remote
 command refuse when `pgrep -f "[n]ame"` already finds one. Retry only READ-ONLY commands.
+
+## 2026-09-17: BOTH PASSING-ASSIST FIXES VALIDATED ON THE ROAD. AND TWO WAYS A LOG COPY LIES.
+
+Six drives on build 9d4f87b8fe (routes 00000477-47c, 31.3 moving minutes above 34 mph), scored from
+QLOGS pulled off-device, with the three segments that mattered pulled at full rate:
+
+    aborts / moving hour        12.4 (build 8e979260)  ->  45.8 on 0000046f  ->  3.8 HERE
+    one-frame adjacentSlow      3 on one drive         ->  ZERO
+    signaling sequences          6 total (>=60 mph: 2, 45-60: 2, <45: 4)
+    crossings                    3 (one at 74 mph, one at 48, one at 44)
+
+**Both remaining aborts are the CORRECT kind, confirmed at 20 Hz** (0000047b seg 10, 43 mph): raw
+disagreed for exactly 0.80 s with `blockedByDecided = noLaneAvailable` before `wanted_side`
+released -- a debounce fall, which is WANTED_FALL_S doing its job. No hard clears anywhere.
+
+**THE HIGHWAY NUMBER IS NOT SETTLED AND MUST NOT BE QUOTED AS ONE.** Two sequences at 60+ mph, one
+crossed. Against 2 of 12 before, that is consistent and proves nothing -- the same trap this file
+records five times. Worse, the 74 mph crossing had **zero engine braking during it**, so it does not
+even exercise the 2026-09-16 gate change. What would: a highway sequence where ACC sits in the
+engine band, which is what every pre-fix 60+ sequence looked like.
+
+### A COPY THAT IS THE RIGHT SIZE CAN STILL BE THE WRONG BYTES. HASH IT.
+
+`rlog.zst` for 00000478 seg 9 came off the device at EXACTLY the device's byte count and failed to
+decompress. md5 on both sides: `5169241b...` on the car, `1f5a5e00...` locally. **A size check passes
+this; only a hash catches it.** Two more copies came back as 0 bytes while the wrapper reported
+success, because the local resolver was failing (`Not enough memory resources`) and `cmd /c ... >
+file` still created the file. So:
+
+    pull, then md5sum on the device and compare -- retry on mismatch, never on size
+    d41d8cd98f00b204e9800998ecf8427e is the md5 of EMPTY. Seeing it means the transfer never ran.
+
+`tools/`-style pulls should batch per route and verify per file; one 40 MB stream over his wifi
+(~200 KB/s) truncated at 22.6 MB mid-file, which is the 2026-08-29 hotel-wifi lesson again.
+
+### AND A MULTI-FRAME ZSTD LOG READS AS CORRUPTION
+
+One qlog decompressed on the device (`zstd -t` clean, md5 identical to the local copy) and threw
+`ZstdError: Data corruption detected` in Python. openpilot can write a log as several CONCATENATED
+zstd frames and `ZstdDecompressor().stream_reader(...)` stops after the first, which surfaces as
+corruption rather than as a short read. **Every off-device reader here needs
+`read_across_frames=True`.** Without it the failure looks like a bad file and invites a re-pull that
+cannot help -- which is exactly what it got.
+
+**AND THE CAR UPDATES ITSELF, WHICH IS EASY TO FORGET WHILE CHASING REACHABILITY.** It went off the
+network for an hour; when it came back it had already pulled `e8fc60a401` and rebooted on its own,
+so the stepper fix was live before anything was deployed by hand. Read the device's HEAD before
+planning a deploy, not after.
