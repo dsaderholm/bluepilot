@@ -1568,6 +1568,13 @@ struct ControllerStateBP @0xcd96dafb67a082d0 {
   bmsLaneCenteringStrength     @65 :Float32;  # lane_centering_strength_ang
   bmsLaneCenteringDamping      @66 :Float32;  # lane_centering_damping_ang
 
+  # FusionPilot 2026-09-17: the curvature the stop hold LATCHED and actually used this frame, 0.0
+  # whenever the model's own request was the larger one -- see ANGLE_HOLD_CAPTURE_MIN_MPH in
+  # lateral_angle_ext.py. pathAngleFinal says the command was non-zero at a standstill; only this
+  # says whether that was the latch or the model. The first drives with the hold could not be read
+  # without it.
+  angleHoldKappa               @67 :Float32;  # 1/m, + is RIGHT
+
   enum LateralMode {
     openpilot @0;  # BP lateral bypassed (disable_BP_lat_UI)
     curvature @1;

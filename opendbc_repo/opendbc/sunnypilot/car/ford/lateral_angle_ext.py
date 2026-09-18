@@ -251,6 +251,41 @@ ANGLE_HOLD_MAX_MPH = 15.0
 ANGLE_HOLD_LEFT_LEAD_M = 8.0
 _MPH_TO_MS = 0.44704
 
+# FLOORING THE SPEED TERM IS NOT ENOUGH, AND THE FIRST DRIVES WITH THE HOLD SAID SO. 2026-09-17.
+# `path_angle = kappa * max(v, hold) * gain` keeps the SPEED alive through a stop, and the model
+# takes the CURVATURE away before the car gets there. Measured over 13 approaches to a standstill
+# that were turning between 20 and 12 mph with lateral active -- share of the peak request still
+# being asked for on the way down:
+#
+#                             at 10 mph   at 5 mph   at 2 mph   stopped   flipped sign
+#     a lead inside 8 m  n=8     116%         75%        12%       -11%      6 of 8
+#     no lead            n=5      67%        104%         6%       -18%      3 of 5
+#
+# Intact at 5 mph, gone by 2, and nine of thirteen end up asking the OTHER WAY at the standstill.
+# The two groups are the same, so a stopped car in front is not what makes it let go. Raising the
+# setting cannot reach this: whatever the speed floor is, it multiplies a curvature that is already
+# zero.
+#
+# So the last SIGNIFICANT curvature is latched while the car still has one -- above
+# ANGLE_HOLD_CAPTURE_MIN_MPH -- and used as a FLOOR on the magnitude below the hold speed. 5 mph is
+# where the measurement says the request is still whole; 0.005 1/m is a 200 m radius, the smallest
+# bend that puts a visible angle on the wheel, and the same threshold the stop instruments use to
+# call a side.
+#
+# RELEASE, and every one of these matters more than the hold itself:
+#   - the model asks the OTHER WAY with a real magnitude -> it has re-planned, drop the latch
+#   - back above the capture speed with nothing significant to ask for -> cleared by the capture
+#     rule itself, which is what hands the wheel back as the car pulls away
+#   - lateral inactive, the driver steering, or the stall blip -> cleared at those bail-outs
+# The side rules are unchanged and are applied to the LATCHED value rather than the model's live
+# one: rights always, a left only while ANGLE_HOLD_LEFT_LEAD_M is armed.
+#
+# The command can step when the latch releases. `_soft_roc` below bounds that, as it bounds every
+# other command, so the wheel unwinds no faster than it would from any other change.
+ANGLE_HOLD_CAPTURE_MIN_MPH = 5.0
+ANGLE_HOLD_KAPPA_MIN = 0.005
+_ANGLE_HOLD_CAPTURE_MIN_MS = ANGLE_HOLD_CAPTURE_MIN_MPH * _MPH_TO_MS
+
 
 class LateralAngleExt:
   def __init__(self, CP=None, CP_SP=None):
@@ -307,6 +342,14 @@ class LateralAngleExt:
     # FusionPilot: a radar-confirmed car was within ANGLE_HOLD_LEFT_LEAD_M while below the hold speed,
     # so a LEFT may be held too. Latched until the car is back above the hold speed.
     self.angle_hold_left_armed = False
+    # FusionPilot: the last significant curvature the model asked for while the car still had speed
+    # -- see ANGLE_HOLD_CAPTURE_MIN_MPH. Zero means nothing to hold, which is the old controller.
+    self.angle_hold_kappa = 0.0
+    # Telemetry: the latched curvature ACTUALLY USED this frame, 0.0 when the model's own request
+    # was the larger one. Published as angleHoldKappa -- without it a drive cannot tell a hold that
+    # worked from a stop the model never let go of, which is the question the first drives with
+    # this feature could not answer.
+    self.bp_angle_hold_kappa = 0.0
     # Telemetry: variable curvature lookup time used this frame (s)
     self.bp_curvature_lookup_time = _VLT_T_EXTRA_MAX + 0.3725  # warm start at ~0.5s
     # BluePilot: error-clipped kappa path_angle was derived from -- carcontroller.py reads this as
@@ -435,6 +478,8 @@ class LateralAngleExt:
       self.apply_curvature_last = 0.0
       self.b_blend = self.path_angle_blend_ratio
       self._exit_latch_calls = 0
+      self.angle_hold_kappa = 0.0
+      self.bp_angle_hold_kappa = 0.0
       self.bp_angle_rate_limited = False
       self.bp_curvature_rate_limited = False
       self.bp_curvature_deviation_limited = False
@@ -488,6 +533,8 @@ class LateralAngleExt:
       self.apply_curvature_last = 0.0
       self.b_blend = self.path_angle_blend_ratio
       self._exit_latch_calls = 0
+      self.angle_hold_kappa = 0.0
+      self.bp_angle_hold_kappa = 0.0
       self.bp_angle_rate_limited = False
       self.bp_curvature_rate_limited = False
       self.bp_curvature_deviation_limited = False
@@ -550,6 +597,8 @@ class LateralAngleExt:
       self.apply_curvature_last = 0.0
       self.b_blend = self.path_angle_blend_ratio
       self._exit_latch_calls = 0
+      self.angle_hold_kappa = 0.0
+      self.bp_angle_hold_kappa = 0.0
       self.bp_angle_rate_limited = False
       self.bp_curvature_rate_limited = False
       self.bp_curvature_deviation_limited = False
@@ -737,18 +786,48 @@ class LateralAngleExt:
     # Right turns always; a left only once a car is stopped right in front -- see ANGLE_HOLD_MAX_MPH
     # and ANGLE_HOLD_LEFT_LEAD_M. Otherwise a left keeps the old controller exactly.
     _hold_setting = self.angle_hold_speed_ms
-    if _hold_setting > 0.0 and v_ego < _hold_setting:
+    _in_hold_band = _hold_setting > 0.0 and v_ego < _hold_setting
+    if _in_hold_band:
       if not self.angle_hold_left_armed and self._radar_lead_within(ANGLE_HOLD_LEFT_LEAD_M):
         self.angle_hold_left_armed = True
     else:
       self.angle_hold_left_armed = False
-    _hold_side_ok = desired_curvature > 0.0 or (desired_curvature < 0.0 and self.angle_hold_left_armed)
+
+    # FusionPilot: latch the curvature itself -- see ANGLE_HOLD_CAPTURE_MIN_MPH for why the speed
+    # floor alone cannot keep a turned wheel through a stop. Capture runs at every speed above the
+    # capture floor rather than only inside the hold band, so the value is already loaded on the way
+    # down and stays current on ordinary road: a frame with nothing significant to ask for CLEARS it.
+    if _hold_setting <= 0.0:
+      # Off is off. Capturing while the setting is 0 would leave state behind that nothing can use,
+      # and turning the setting on mid-drive would inherit a curvature from a road already passed.
+      self.angle_hold_kappa = 0.0
+    elif v_ego >= _ANGLE_HOLD_CAPTURE_MIN_MS:
+      self.angle_hold_kappa = desired_curvature if abs(desired_curvature) >= ANGLE_HOLD_KAPPA_MIN else 0.0
+    elif (self.angle_hold_kappa * desired_curvature < 0.0 and
+          abs(desired_curvature) >= ANGLE_HOLD_KAPPA_MIN):
+      # The model wants the other way and means it. It has re-planned; the latch is stale.
+      self.angle_hold_kappa = 0.0
+
+    _hold_kappa = self.angle_hold_kappa
+    _latch_side_ok = _hold_kappa > 0.0 or (_hold_kappa < 0.0 and self.angle_hold_left_armed)
+    # A FLOOR on the magnitude, never a replacement: whenever the model asks for more than the
+    # latch, the model wins and this is a no-op.
+    _latch_in_use = _in_hold_band and _latch_side_ok and abs(_hold_kappa) > abs(desired_curvature)
+    _hold_curvature = _hold_kappa if _latch_in_use else desired_curvature
+    self.bp_angle_hold_kappa = float(_hold_kappa) if _latch_in_use else 0.0
+
+    # The side test reads the EFFECTIVE curvature, not the model's live one -- at a standstill the
+    # model's own request is a near-zero of arbitrary sign, and letting that decide which way the
+    # car is "turning" is how a held left could arrive with no lead armed.
+    _hold_side_ok = _hold_curvature > 0.0 or (_hold_curvature < 0.0 and self.angle_hold_left_armed)
     _hold_ms = _hold_setting if _hold_side_ok else 0.0
     if _hold_ms > 0.0 and v_ego < _hold_ms:
       _pred_weight = self.b_blend * max(0.0, v_ego) / _hold_ms
     else:
       _pred_weight = self.b_blend
-    requested_curvature = predicted_curvature * _pred_weight + desired_curvature * (1.0 - _pred_weight)
+    requested_curvature = predicted_curvature * _pred_weight + _hold_curvature * (1.0 - _pred_weight)
+    # Exit detection keeps comparing the MODEL's own values. The latch is a command-side floor and
+    # must not make the planner look like it is still asking for a turn it has dropped.
     self._desired_curvature_last = desired_curvature
 
     if self.model is not None:

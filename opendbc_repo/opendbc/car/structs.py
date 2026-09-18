@@ -225,6 +225,7 @@ class ControllerStateBP:
   gainLowCurv: float = 0.0
   gainHighCurv: float = 0.0
   blendWeight: float = 0.0
+  angleHoldKappa: float = 0.0
 
   # BluePilot: full BluePilot-menu settings snapshot -- see custom.capnp ControllerStateBP for
   # field-by-field param-key mapping and the field-retirement convention.

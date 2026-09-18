@@ -202,6 +202,7 @@ def _publish_controller_state_bp(CI, pm):
     cs_bp.gainLowCurv = float(getattr(CI.CC, "gainLowCurv", 0.0))
     cs_bp.gainHighCurv = float(getattr(CI.CC, "gainHighCurv", 0.0))
     cs_bp.blendWeight = float(getattr(CI.CC, "blendWeight", 0.0))
+    cs_bp.angleHoldKappa = float(getattr(CI.CC, "angleHoldKappa", 0.0))
     # FusionPilot: who authored ACCDATA this frame. Straight off the car controller, which is the
     # BluePilot: mode the controller actually ran, straight off the car controller (not Params).
     if getattr(CI.CC, "disable_BP_lat_UI", True):

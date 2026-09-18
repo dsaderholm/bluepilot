@@ -11244,3 +11244,76 @@ cannot help -- which is exactly what it got.
 network for an hour; when it came back it had already pulled `e8fc60a401` and rebooted on its own,
 so the stepper fix was live before anything was deployed by hand. Read the device's HEAD before
 planning a deploy, not after.
+### AND IT IS EVERY LOW-SPEED STOP, NOT JUST THE ONES BEHIND A CAR. THE CURVATURE DIES BY 2 MPH.
+
+The open question from the entry above, answered on 13 approaches to a standstill that were turning
+between 20 and 12 mph with lateral active (routes 046b-046f, decoded on the laptop). Share of the
+peak request still being asked for on the way down:
+
+                            at 10 mph   at 5 mph   at 2 mph   stopped   flipped sign
+    a lead inside 8 m  n=8     116%         75%        12%       -11%      6 of 8
+    no lead            n=5      67%        104%         6%       -18%      3 of 5
+
+**The two groups are the same.** A stopped car in front is not what makes the model let go -- it
+lets go on every low-speed approach, and `desiredCurvature` is essentially intact at 5 mph and gone
+by 2. Nine of thirteen are asking the OTHER WAY by the standstill.
+
+**So the 11 mph speed floor is aimed at the wrong end.** `path_angle = kappa * max(v, hold) * gain`
+keeps the SPEED term alive from 11 mph down, and kappa itself survives to about 5 mph and then
+collapses -- so the product is near zero at the standstill no matter what the hold speed is set to.
+Raising the setting cannot fix it; the feature as built cannot keep a turned wheel through a stop.
+
+**What would: latch the last SIGNIFICANT curvature, captured while the car is still above ~5 mph,
+and hold THAT through the standstill** -- the existing side rules unchanged (rights always, lefts
+only with a radar lead inside 8 m), released on speed above the hold, lateral dropping, or the
+driver on the wheel. That is a real change to the steering path on a branch his car auto-pulls, so
+it ships on its own drive with nothing else moving.
+
+**`steeringPressed` is a COLUMN here, not a filter, and that was the fix to the instrument.**
+Requiring hands off at a single 15 mph frame rejected 94 of 95 approaches on the device -- including
+the one this was built to explain. The four rows with hands under 30% show the same collapse as the
+rest, which is what makes the result survive the contamination.
+
+## 2026-09-17: THE CURVATURE LATCH IS BUILT. IT IS UNDRIVEN AND IT SHIPS ON ITS OWN DRIVE.
+
+He asked for it after the measurement above: *"Go ahead and build it."* The speed floor keeps
+`path_angle = kappa * max(v, hold) * gain` alive through a stop and the model takes `kappa` away by
+2 mph, so the product is zero whatever the setting reads. The latch holds the last SIGNIFICANT
+curvature the model asked for while the car still had one, and uses it as a FLOOR below the hold
+speed.
+
+    ANGLE_HOLD_CAPTURE_MIN_MPH = 5.0     where the 13 approaches say the request is still whole
+    ANGLE_HOLD_KAPPA_MIN       = 0.005   a 200 m radius -- the smallest bend with a visible wheel
+                                         angle, and the threshold the stop instruments already use
+
+**Capture runs at every speed above the floor, not only inside the hold band**, so the value is
+loaded on the way down and stays current on ordinary road: a frame with nothing significant to ask
+for CLEARS it. That is also what hands the wheel back on the pull-away -- crossing 5 mph with the
+model still quiet clears the latch, rather than holding the turn out to 11 mph.
+
+**A FLOOR, NEVER A REPLACEMENT.** `abs(latched) > abs(desired)` or the model wins, so it is a no-op
+on every frame the model is still asking for the turn.
+
+**RELEASES, and they matter more than the hold:** the model asking the OTHER WAY with a real
+magnitude (9 of 13 approaches end up asking the other way, but as noise -- a real reversal is a
+re-plan and drops the latch); lateral inactive; the driver steering; the stall blip; and the setting
+at 0, which clears rather than accumulating state nothing can use.
+
+**THE SIDE TEST NOW READS THE EFFECTIVE CURVATURE, NOT THE MODEL'S LIVE ONE.** At a standstill the
+model's own request is a near-zero of arbitrary sign; letting that decide which way the car is
+turning is how a held LEFT could arrive with no lead armed. Rights always, lefts only while
+`ANGLE_HOLD_LEFT_LEAD_M` is armed -- unchanged, applied to the latched value.
+
+**`angleHoldKappa @67` publishes the latched curvature ACTUALLY USED, 0.0 otherwise.** Without it a
+drive cannot tell a hold that worked from a stop the model never let go of, which is exactly the
+question the first hold drives could not answer. Ordinals: `ControllerStateBP` ended at @66 here.
+
+**13 mutants, 0 survivors**, including the two that decide whether it is safe: dropping the side
+rule (a left held with no lead) and reading the model's noise for the side. 25 behavioural tests in
+`test_stop_hold_latches_the_curvature.py`, plus a case in `test_carcontroller_smoke.py` that drives
+the REAL CarController through an approach and a stop with the hold on and asserts the latch
+engaged -- the 2026-08-15 rule, because this adds per-drive state to the angle path.
+
+**IT HAS NEVER BEEN DRIVEN.** Score it with `stops_hold.py` (wheel kept at the stop, and the
+pull-away dip) and `stop_frames.py` on a drive with nothing else moving. The failure to watch for is
+the opposite of the old one: a wheel held out at a stop the model genuinely re-planned.

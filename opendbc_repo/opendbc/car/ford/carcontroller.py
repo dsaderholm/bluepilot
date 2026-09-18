@@ -328,6 +328,7 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
         self.gainLowCurv = float(getattr(self, 'bp_gain_low_curv', 0.0)) if _angle_mode else 0.0
         self.gainHighCurv = float(getattr(self, 'bp_gain_high_curv', 0.0)) if _angle_mode else 0.0
         self.blendWeight = float(getattr(self, 'bp_blend_weight', 0.0)) if _angle_mode else 0.0
+        self.angleHoldKappa = float(getattr(self, 'bp_angle_hold_kappa', 0.0)) if _angle_mode else 0.0
 
         # BluePilot: angle-mode human-turn override -- send lateral inactive (mode 0) while the
         # driver manually turns, so the PSCM releases cleanly instead of stalling 2-3 s on
