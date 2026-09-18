@@ -8764,3 +8764,33 @@ it printed correctly.
 
 Start detached jobs with a plain `ssh` call, never through a retry wrapper, and have the remote
 command refuse when `pgrep -f "[n]ame"` already finds one. Retry only READ-ONLY commands.
+
+### AND IT IS EVERY LOW-SPEED STOP, NOT JUST THE ONES BEHIND A CAR. THE CURVATURE DIES BY 2 MPH.
+
+The open question from the entry above, answered on 13 approaches to a standstill that were turning
+between 20 and 12 mph with lateral active (routes 046b-046f, decoded on the laptop). Share of the
+peak request still being asked for on the way down:
+
+                            at 10 mph   at 5 mph   at 2 mph   stopped   flipped sign
+    a lead inside 8 m  n=8     116%         75%        12%       -11%      6 of 8
+    no lead            n=5      67%        104%         6%       -18%      3 of 5
+
+**The two groups are the same.** A stopped car in front is not what makes the model let go -- it
+lets go on every low-speed approach, and `desiredCurvature` is essentially intact at 5 mph and gone
+by 2. Nine of thirteen are asking the OTHER WAY by the standstill.
+
+**So the 11 mph speed floor is aimed at the wrong end.** `path_angle = kappa * max(v, hold) * gain`
+keeps the SPEED term alive from 11 mph down, and kappa itself survives to about 5 mph and then
+collapses -- so the product is near zero at the standstill no matter what the hold speed is set to.
+Raising the setting cannot fix it; the feature as built cannot keep a turned wheel through a stop.
+
+**What would: latch the last SIGNIFICANT curvature, captured while the car is still above ~5 mph,
+and hold THAT through the standstill** -- the existing side rules unchanged (rights always, lefts
+only with a radar lead inside 8 m), released on speed above the hold, lateral dropping, or the
+driver on the wheel. That is a real change to the steering path on a branch his car auto-pulls, so
+it ships on its own drive with nothing else moving.
+
+**`steeringPressed` is a COLUMN here, not a filter, and that was the fix to the instrument.**
+Requiring hands off at a single 15 mph frame rejected 94 of 95 approaches on the device -- including
+the one this was built to explain. The four rows with hands under 30% show the same collapse as the
+rest, which is what makes the result survive the contamination.
