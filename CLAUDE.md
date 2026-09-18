@@ -11106,3 +11106,93 @@ it themselves some day."* When upstream does fix it, take theirs and drop ours; 
 
 **Any on-device value he set with a stepper before this landed on an EVEN multiple of the step from
 where he started.** Read values off the device; do not assume a number he quotes was reachable.
+
+## 2026-09-17: IT TOOK AN 88-DEGREE LEFT BY ITSELF. A 19 m RADIUS, 86% OF THE WIRE'S ANGLE RANGE.
+
+*"It did pretty much make a full left turn which was incredible in the latest drive. I think I
+straightened up since it struggles to do that still."* Route 0000047c, t+79644, left blinker,
+13-17 mph. `latActive` and `steeringPressed` printed SEPARATELY, per the 2026-09-04 rule:
+
+    s     mph   heading   desCurv   cmd rad   wheel   hands  lat
+    2.0  16.3     1 deg   -0.0133   -0.123     22.8      .    Y
+    4.5  14.4    22       -0.0419   -0.356     78.9      .    Y
+    6.5  14.2    47       -0.0503   -0.408    100.2      .    Y
+    7.5  15.1    62       -0.0525   -0.450    105.3      .    Y   <- the car, hands off
+    8.0  16.1    70       -0.0435   -0.410    114.6      Y    Y   <- he straightens up
+    9.5  19.7    88       -0.0013    0.000      5.4      .    Y
+
+**88 degrees of heading in nine seconds, 66 of them with lateral active and his hands off.** The
+model asked for **0.0525 1/m -- a 19 m radius** -- and the command reached **0.450 rad, 86% of
+`FORD_DBC_PATH_ANGLE_MAX` (0.5235)**. For scale, the 39 left turns measured the day before had the
+car starting 9 of them and finishing none; this is the first intersection-grade turn openpilot has
+driven on this car.
+
+**He is right that he straightened it, and the last 20 degrees are therefore unmeasured.**
+`steeringPressed` blips once 38 deg in and is continuous from 70 deg, with the wheel at 105 deg and
+the command still near the wire's limit. Do not report this as "it completed the turn".
+
+**The turn desire is still not what makes this happen** -- same conclusion as the day before. What
+is different is the model's own plan: it asked for an intersection radius WHILE MOVING, which the
+stopped-car measurements (2026-09-15) say it never does from a standstill. And
+`FordLowSpeedAngleHold_ang` is irrelevant here: the whole turn ran at 13-17 mph, above the 11 mph
+hold, so the floored speed term never applied.
+
+**The other 8 left turns in that route are his.** Ranked by hands-off heading: 49d (a 45 mph
+sweeper), 36d, then 24d and below, with the 300+ deg wheel angles all reading `hands Y` -- parking,
+not steering. `turn_hands_off.py` (session scratchpad) is the instrument; it scores hands only on
+moving frames and never ANDs the two flags.
+
+## 2026-09-17: THE HOLD WORKS. THE MODEL GIVES UP THE TURN AT 10 MPH, WHICH THE HOLD CANNOT RECOVER.
+
+First drives with `FordLowSpeedAngleHold_ang = 11` (written 08:53 MDT, three minutes INTO route
+00000478 -- so 477 is the only clean pre-hold drive today and it has no qualifying stops; there is
+no before/after to be had from 2026-09-17).
+
+**THE MECHANISM IS CONFIRMED ON THE ROAD.** Route 0000047c, t+80682, stopped behind a car 3 m ahead,
+lateral active, 13 s of standstill:
+
+    t         mph   wheel   cmd rad  blend  desCurv  lead
+    80675.5  12.4   +27.7   -0.0488   0.50  -0.0078     9   <- above the hold, asking LEFT
+    80676.5  10.2   +15.1   +0.0036   0.19  +0.0018     8   <- below it, and the model has FLIPPED
+    80678.6   5.0   -10.2   +0.0178   0.23  +0.0036     5
+    80682.6   0.0    -1.9   +0.0012   0.00  +0.0002     3   <- standstill, command NON-ZERO
+
+At the standstill `blendWeight` is 0.00 (the predicted half faded out, as designed) and
+`pathAngleFinal` is **0.0012 rad, not zero**: 0.0002 1/m x 4.92 m/s (11 mph) x ~1.3 gain = 0.0013.
+That is the floored speed term, arithmetically. Before this feature the same frame commanded exactly
+0.000 because `kappa * v_ego * gain` has `v_ego = 0` in it.
+
+**AND IT DOES NOT FIX THE COMPLAINT, because it holds whatever the model is asking for and the model
+stops asking at about 10 mph.** `desiredCurvature` flipped from -0.0078 (left) to +0.0018 (right)
+between 12.4 and 10.2 mph -- before the wheel crossed zero, so the model led and the wheel followed.
+The same shape appears at the stop ending the turn at t+79943: -0.0074 at 30 mph decaying to
+-0.0000 by 1 mph. modeld DOES freeze its plan below 0.3 m/s (the constant +0.0002 above, for 13
+seconds) -- it freezes the STRAIGHT plan it adopted ten seconds earlier.
+
+**So the speed floor is necessary and not sufficient.** What would close it is holding the last
+SIGNIFICANT curvature rather than the last curvature, and that is a design change to the lateral
+path on a branch his car auto-pulls -- do not write it in an evening. Measure first: the open
+question is whether the model relaxes the turn on every low-speed approach or only when it has a
+lead stopped in front of it.
+
+**24 stops across 479-47c and not one is the failure he described.** Every stop that came in with
+the wheel past 10 deg had `steeringPressed` or lateral off -- parking and tight maneuvers. The
+feature has not yet been given the case it was built for. `stops_hold.py` and `stop_frames.py`
+(session scratchpad) are the instruments; `stops_hold.py`'s `side` column is taken at hold-speed
+ENTRY and therefore disagrees with the per-frame decision in exactly the case above, where the
+model flips sign on the way down. Read `blendWeight` at the standstill, not that column.
+
+### A RETRYING SSH WRAPPER MUST NEVER LAUNCH A DETACHED JOB. IT LAUNCHES IT N TIMES.
+
+2026-09-17, on the weak home link. The retry helper written for dropped connections (5 tries, long
+timeouts) was used to start a `wd.sh` analysis. The remote command returned non-zero for an
+unrelated reason, so the helper "retried" -- and each retry started ANOTHER copy of the job. Three
+were found running at once, all writing `out/<name>.txt.part` through the same `>` truncation, and
+the one that finished first `mv`d a 19-byte file into place reading `EXIT 0 after 351 s`.
+
+**A clean exit code with no output is the signature.** It reads exactly like a script that printed
+nothing, and the script was checked twice -- parsed, then run interactively on three segments, where
+it printed correctly.
+
+Start detached jobs with a plain `ssh` call, never through a retry wrapper, and have the remote
+command refuse when `pgrep -f "[n]ame"` already finds one. Retry only READ-ONLY commands.
