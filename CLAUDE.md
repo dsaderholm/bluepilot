@@ -8749,3 +8749,18 @@ feature has not yet been given the case it was built for. `stops_hold.py` and `s
 (session scratchpad) are the instruments; `stops_hold.py`'s `side` column is taken at hold-speed
 ENTRY and therefore disagrees with the per-frame decision in exactly the case above, where the
 model flips sign on the way down. Read `blendWeight` at the standstill, not that column.
+
+### A RETRYING SSH WRAPPER MUST NEVER LAUNCH A DETACHED JOB. IT LAUNCHES IT N TIMES.
+
+2026-09-17, on the weak home link. The retry helper written for dropped connections (5 tries, long
+timeouts) was used to start a `wd.sh` analysis. The remote command returned non-zero for an
+unrelated reason, so the helper "retried" -- and each retry started ANOTHER copy of the job. Three
+were found running at once, all writing `out/<name>.txt.part` through the same `>` truncation, and
+the one that finished first `mv`d a 19-byte file into place reading `EXIT 0 after 351 s`.
+
+**A clean exit code with no output is the signature.** It reads exactly like a script that printed
+nothing, and the script was checked twice -- parsed, then run interactively on three segments, where
+it printed correctly.
+
+Start detached jobs with a plain `ssh` call, never through a retry wrapper, and have the remote
+command refuse when `pgrep -f "[n]ame"` already finds one. Retry only READ-ONLY commands.
