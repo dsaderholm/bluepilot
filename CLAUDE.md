@@ -8838,3 +8838,18 @@ engaged -- the 2026-08-15 rule, because this adds per-drive state to the angle p
 **IT HAS NEVER BEEN DRIVEN.** Score it with `stops_hold.py` (wheel kept at the stop, and the
 pull-away dip) and `stop_frames.py` on a drive with nothing else moving. The failure to watch for is
 the opposite of the old one: a wheel held out at a stop the model genuinely re-planned.
+
+### AND `grep -c _handle_mouse_release` READS 1 IN BOTH STATES. IT COST A WRONG REPORT.
+
+2026-09-17. The fix DELETED the override and left a comment saying *"NO `_handle_mouse_release`
+override here"* -- so the phrase survives the fix, and a bare count cannot tell the bug from its own
+postmortem. Checking the deployed build that way said the fix was missing; it had been on his car
+since e8fc60a401, and he was told otherwise.
+
+**`grep -c "def _handle_mouse_release"` is the check** -- 0 means fixed. Same family as "assert on
+the expression, not a window": a pattern that matches the explanation as well as the code is not a
+test of anything. Both sessions hit it independently on the same build, which is what makes it worth
+writing down rather than remembering.
+
+**And settle a deployed-build question with `git show <build>:<path>`, not with a grep on the device
+tree** -- it answers for the exact commit and cannot be confused by an edit, a rebase or a comment.
