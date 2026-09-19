@@ -11317,3 +11317,44 @@ engaged -- the 2026-08-15 rule, because this adds per-drive state to the angle p
 **IT HAS NEVER BEEN DRIVEN.** Score it with `stops_hold.py` (wheel kept at the stop, and the
 pull-away dip) and `stop_frames.py` on a drive with nothing else moving. The failure to watch for is
 the opposite of the old one: a wheel held out at a stop the model genuinely re-planned.
+
+## 2026-09-18: THE BRAKE-REQUEST GATE IS PROVEN ON THE ROAD. AND AN ABORT THAT IS A SIDE CHANGE.
+
+Eight drives, build 46b58a9023 (frozen for the stop-hold drive, so passing assist moved nothing).
+Six were parked or crawling; the road time is 00000480 (7.5 moving min) and 00000487 (4.8), both
+highway. **All three signaling sequences were at 60+ mph, which is the band every earlier sample
+lacked.**
+
+**THE PROOF THE 2026-09-16 GATE CHANGE WAS RIGHT, and it is one line of the dump:**
+
+    seq t+52.0  76 mph  6.9 s  CROSSED  suggestion-up 6.9 s  brakeReq 0.0 s  engine 6.0 s
+
+**Engine braking for 6.0 of the 6.9 seconds, zero brake requests, and it crossed.** Under the old
+gate that sequence is exactly the 96%-held case -- ready to cross, held by the engine band, window
+expires at 5 s. It is the first sequence on record that both exercises the change and completes.
+
+    crossings at 60+ mph   2 of 12 sequences BEFORE  ->  3 of 5 since (1 of 2, then 2 of 3)
+
+Still a small sample and stated as one, but unlike the 2026-09-17 crossing it is no longer consistent
+-with-anything: that one had zero engine braking and therefore tested nothing.
+
+### THE ONE ABORT IS A SIDE CHANGE, AND MY CLASSIFIER CALLED IT A HARD CLEAR
+
+t+13.5, 79 mph, signaling RIGHT. raw alternated R/L for a second (`R x4 L x1 R x4 L x1 R x1 L x1
+R x3 L x1 R x1 L x7`), then held LEFT for 0.35 s, so `_debounce_wanted` granted the new side after
+WANTED_RISE_S and the maneuver aborted because `wanted != side`. **0.1 s later it signalled left and
+crossed.** So the abort is the detector changing its mind between two available lanes, not a gate
+letting go, and the pass happened anyway.
+
+**The scan tool labelled it `HARD CLEAR (one frame)` because it only knew two endings.** `run`
+counts frames where raw disagrees with the OLD side, which on a side change is not the fall time at
+all -- the same shape as measuring a fall against the wrong constant, and the third time in this
+file a scan's own label has been the wrong half of the finding. Fixed: a side change is its own
+verdict, checked before either timing test.
+
+**WHAT IS WORTH A LOOK LATER, NOT NOW:** the right blinker was up for 1.5 s before the sequence
+became a left pass. Nothing moved -- signaling only -- but "never signal what you're not doing" says
+a lamp shown to traffic behind should not advertise the other side. The debounce already forbids
+sliding R->L without passing through none INSIDE `wanted`; what happened here is the maneuver being
+torn down and restarted on the other side in consecutive frames, which is legal by construction.
+Once this actuates, that is a 1.5 s wrong-side lamp and it needs a stand-down between sides.
