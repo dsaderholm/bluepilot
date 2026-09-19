@@ -20,7 +20,8 @@ See the LICENSE.md file in the root directory for more details.
 import unittest
 
 from opendbc.sunnypilot.car.ford.lateral_angle_ext import (
-  ANGLE_HOLD_CAPTURE_MIN_MPH, ANGLE_HOLD_KAPPA_MIN, ANGLE_HOLD_LEFT_LEAD_M, _MPH_TO_MS,
+  ANGLE_HOLD_CAPTURE_MIN_MPH, ANGLE_HOLD_FORGET_M, ANGLE_HOLD_KAPPA_MIN, ANGLE_HOLD_LEFT_LEAD_M,
+  _MPH_TO_MS,
 )
 from opendbc.sunnypilot.car.ford.tests.test_lateral_blend_horizon import (
   _Actuators, _CC, _CS, _FakeLiveDelay, _ForcedDetector, _Harness, _Model, _explorer_cp, T_IDXS,
@@ -56,6 +57,33 @@ def _step(ext, v, desired, calls=40, lat=True, model_curvature=None):
   cs = _CS(vEgoRaw=v, vEgo=v)
   for _ in range(calls):
     ext.update_angle_strategy(_CC(latActive=lat), cs, _Actuators(curvature=desired), ext.CP)
+  return ext
+
+
+def _frames(ext, v, desired, calls=40, lat=True):
+  """Frames with the model object left alone.
+
+  `_step` replaces ext.model, and the human-turn bail-out fires for ~6 frames afterwards and zeroes
+  the latch -- so a latch rule that only bites when the value CARRIES cannot be tested across two
+  `_step` calls. It is the fixture, not the car: on the road the model is one object all drive.
+  """
+  cs = _CS(vEgoRaw=v, vEgo=v)
+  for _ in range(calls):
+    ext.update_angle_strategy(_CC(latActive=lat), cs, _Actuators(curvature=desired), ext.CP)
+  return ext
+
+
+def _ease(ext, v, start, end, calls=40):
+  """Walk the request from one value to another, model object untouched.
+
+  A STEP change in the request trips the override bail-out, which zeroes the latch -- and a zeroed
+  latch makes every capture rule look identical, which is how the "keep the strongest" rule went
+  untested at first. Easing is also what the model does: it never jumps 0.012 1/m in one 20 Hz frame.
+  """
+  cs = _CS(vEgoRaw=v, vEgo=v)
+  for i in range(calls):
+    d = start + (end - start) * (i + 1) / calls
+    ext.update_angle_strategy(_CC(latActive=True), cs, _Actuators(curvature=d), ext.CP)
   return ext
 
 
@@ -138,23 +166,46 @@ class TestTheReleases(unittest.TestCase):
     _FakeLiveDelay.lateralDelay = 0.2
 
   def test_the_model_asking_the_other_way_drops_the_latch(self):
-    # 9 of the 13 measured approaches end up asking the other way. A near-zero flip is noise and is
-    # held through; a real request the other way is the model re-planning and must win.
+    # 9 of the 13 approaches measured on 2026-09-16 end up asking the other way, and on 2026-09-18
+    # 3 of 5 were doing it by 2 mph. So "the other way" alone cannot be the release -- the release
+    # is the model asking the other way with at least as much authority as the latch has.
     noise = _approach_then_stop(at_stop=-GONE)
     self.assertGreater(noise.bp_path_angle_final, 0.05, "a near-zero flip is not a re-plan")
 
     ext = _ext(HOLD_MPH)
     _step(ext, APPROACH_MS, TURN, model_curvature=TURN)
-    _step(ext, 0.0, -ANGLE_HOLD_KAPPA_MIN * 1.5, model_curvature=0.0)
+    _step(ext, 0.0, -TURN, model_curvature=0.0)
     self.assertEqual(ext.angle_hold_kappa, 0.0, "it wants the other way and means it")
     self.assertLessEqual(ext.bp_path_angle_final, 0.0)
+
+  def test_a_weaker_request_the_other_way_is_not_a_re_plan(self):
+    # The one that used to clear the latch. It cannot be a re-plan: the latch is only a FLOOR, so a
+    # request the model means MORE than the latch already wins without clearing anything. What is
+    # left under that bar is the arbitrary-sign near-zero a stopped car always publishes.
+    ext = _ext(HOLD_MPH)
+    _step(ext, APPROACH_MS, TURN, model_curvature=TURN)
+    _step(ext, 0.0, -ANGLE_HOLD_KAPPA_MIN * 1.5, model_curvature=0.0)
+    self.assertAlmostEqual(ext.angle_hold_kappa, TURN, places=6,
+                           msg="-0.0075 against a latched 0.02 is noise, not the model re-planning")
+    self.assertGreater(ext.bp_path_angle_final, 0.05, "and the turn is still held")
 
   def test_pulling_away_hands_the_wheel_back(self):
     ext = _approach_then_stop()
     self.assertNotEqual(ext.angle_hold_kappa, 0.0)
-    _step(ext, CAPTURE_MS + 0.5, GONE, model_curvature=0.0)
+    # ANGLE_HOLD_FORGET_M of road with nothing significant asked for: 8 m of creep, then 16 m at
+    # road speed. The corner is behind the car and the wheel is the model's again.
+    _step(ext, 4.0, GONE, model_curvature=0.0)
+    _step(ext, APPROACH_MS, GONE, model_curvature=0.0)
     self.assertEqual(ext.angle_hold_kappa, 0.0,
-                     "back above the capture speed with nothing to ask for, the latch is cleared")
+                     "a straight covered above the capture speed is what hands the wheel back")
+
+  def test_creeping_forward_a_few_metres_does_not_hand_it_back(self):
+    # Edging up at a light is not the corner ending. The old rule dropped the latch on the first
+    # frame of the creep, which is the pull-away dip the stop instrument measures at p50 0% kept.
+    ext = _approach_then_stop()
+    _step(ext, CAPTURE_MS + 0.5, GONE, model_curvature=0.0)
+    self.assertAlmostEqual(ext.angle_hold_kappa, TURN, places=6,
+                           msg="~2.7 m of creep is nothing like ANGLE_HOLD_FORGET_M of road")
 
   def test_lateral_going_inactive_clears_it(self):
     ext = _approach_then_stop()
@@ -168,6 +219,103 @@ class TestTheReleases(unittest.TestCase):
     _step(ext, 0.0, GONE, calls=2, model_curvature=0.0)
     self.assertEqual(ext.angle_hold_kappa, 0.0)
     self.assertEqual(ext.bp_angle_hold_kappa, 0.0)
+
+
+class TestTheRequestFlickering(unittest.TestCase):
+  """2026-09-18: the first build shipped a capture that CLEARED on one quiet frame, and the model's
+  request crosses the threshold -- and zero -- repeatedly on the way down to a stop. It latched at
+  1 of the 4 stops it was eligible for, and there it kept 0.0050: ANGLE_HOLD_KAPPA_MIN exactly, the
+  smallest value that rule was able to hold."""
+
+  def tearDown(self):
+    _FakeLiveDelay.lateralDelay = 0.2
+
+  def test_the_measured_approach_keeps_its_turn(self):
+    # Route 00000480 t+5643.6, the one eligible stop in the decay scan: a right turn, hands off,
+    # lateral on, hold armed. +0.0196 at 12 mph, +0.0100 at 10 mph, -0.0031 at 5 mph, stopped.
+    ext = _ext(HOLD_MPH)
+    _step(ext, 5.4, 0.0196, model_curvature=0.0196)     # 12 mph, above the hold band
+    _step(ext, 4.5, 0.0100, model_curvature=0.0100)     # 10 mph, inside it
+    _step(ext, 2.3, -0.0031, model_curvature=0.0)       # 5 mph: sub-threshold AND the wrong way
+    _step(ext, 0.0, GONE, model_curvature=0.0)
+    self.assertAlmostEqual(ext.angle_hold_kappa, 0.0196, places=6,
+                           msg="this stop latched 0.0000 on the shipped build")
+    self.assertGreater(ext.bp_path_angle_final, 0.05, "and it must reach the wire")
+
+  def test_the_band_keeps_the_strongest_of_the_approach(self):
+    # Slowing THROUGH the band, the wheel is already turned as far as the strongest request put it.
+    ext = _ext(HOLD_MPH)
+    _step(ext, 5.4, TURN, model_curvature=TURN)
+    _step(ext, 4.0, TURN * 0.4, model_curvature=TURN * 0.4)
+    self.assertAlmostEqual(ext.angle_hold_kappa, TURN, places=6)
+
+  def test_above_the_band_it_tracks_down_instead(self):
+    # Or a tight corner would ride up to road speed with the car and be waiting at the next stop.
+    # Driven WITHOUT a model swap on purpose: the swap's bail-out would clear the latch and then
+    # any rule at all would look like it tracked down. See _frames.
+    ext = _ext(HOLD_MPH)
+    _step(ext, 12.0, TURN, model_curvature=TURN)
+    self.assertAlmostEqual(ext.angle_hold_kappa, TURN, places=6)
+    _ease(ext, 12.0, TURN, TURN * 0.4)
+    _frames(ext, 12.0, TURN * 0.4, calls=4)
+    self.assertAlmostEqual(ext.angle_hold_kappa, TURN * 0.4, places=6,
+                           msg="above the band the live request is the latch, strongest or not")
+
+  def test_the_band_keeps_the_strongest_without_a_reset_to_help_it(self):
+    # The companion: the same easing request, below the hold speed, must NOT track down.
+    ext = _ext(HOLD_MPH)
+    _step(ext, 4.5, TURN, model_curvature=TURN)
+    _ease(ext, 4.5, TURN, TURN * 0.4)
+    _frames(ext, 4.5, TURN * 0.4, calls=4)
+    self.assertAlmostEqual(ext.angle_hold_kappa, TURN, places=6)
+
+  def test_a_new_side_at_speed_replaces_it_rather_than_being_kept(self):
+    ext = _ext(HOLD_MPH)
+    _step(ext, 4.5, TURN, model_curvature=TURN)
+    _step(ext, 4.5, -TURN * 0.4, model_curvature=-TURN * 0.4)
+    self.assertAlmostEqual(ext.angle_hold_kappa, -TURN * 0.4, places=6,
+                           msg="keeping the strongest is about ONE turn, not about whichever was bigger")
+
+  def test_the_forgetting_is_road_and_not_frames(self):
+    # The same quiet time forgets at road speed and keeps at creep speed, which is the whole reason
+    # ANGLE_HOLD_FORGET_M is metres.
+    slow = _ext(HOLD_MPH)
+    _step(slow, 5.4, TURN, model_curvature=TURN)
+    _step(slow, 3.0, GONE, calls=60, model_curvature=0.0)     # 9 m
+    self.assertAlmostEqual(slow.angle_hold_kappa, TURN, places=6)
+
+    fast = _ext(HOLD_MPH)
+    _step(fast, 5.4, TURN, model_curvature=TURN)
+    _step(fast, 20.0, GONE, calls=60, model_curvature=0.0)    # 60 m
+    self.assertEqual(fast.angle_hold_kappa, 0.0)
+
+  def test_a_turn_asked_for_again_starts_the_forgetting_over(self):
+    # 10 m of quiet, a corner, 10 m of quiet. That is 20 m of quiet road only if the significant
+    # frames in the middle count for nothing -- and then ANGLE_HOLD_FORGET_M would be reached by a
+    # car that has been asking for the turn the whole time.
+    ext = _ext(HOLD_MPH)
+    _step(ext, 5.4, TURN, model_curvature=TURN)
+    _frames(ext, 5.4, GONE, calls=40)                  # 10.8 m
+    self.assertAlmostEqual(ext.angle_hold_kappa, TURN, places=6)
+    _frames(ext, 5.4, TURN, calls=4)
+    self.assertEqual(ext.angle_hold_quiet_m, 0.0, "a real request resets the forgetting")
+    _frames(ext, 5.4, GONE, calls=40)                  # another 10.8 m
+    self.assertAlmostEqual(ext.angle_hold_kappa, TURN, places=6,
+                           msg="21.6 m of quiet split by a corner is not 21.6 m of quiet")
+
+  def test_the_quiet_road_does_not_carry_across_a_bail_out(self):
+    # Lateral dropping out resets the accumulator with the latch, or a re-engage would inherit most
+    # of a forget distance from a road the car has since left.
+    ext = _ext(HOLD_MPH)
+    _step(ext, 5.4, TURN, model_curvature=TURN)
+    _step(ext, 5.4, GONE, calls=40, model_curvature=0.0)      # 10.8 m of quiet, latch still held
+    self.assertAlmostEqual(ext.angle_hold_kappa, TURN, places=6)
+    _step(ext, 5.4, GONE, calls=2, lat=False, model_curvature=0.0)
+    self.assertEqual(ext.angle_hold_quiet_m, 0.0)
+    _step(ext, 5.4, TURN, model_curvature=TURN)
+    _step(ext, 5.4, GONE, calls=40, model_curvature=0.0)
+    self.assertAlmostEqual(ext.angle_hold_kappa, TURN, places=6,
+                           msg="10.8 m after a bail-out is 10.8 m, not 21.6 m")
 
 
 class TestWhatItRefusesToLatch(unittest.TestCase):
@@ -188,9 +336,10 @@ class TestWhatItRefusesToLatch(unittest.TestCase):
   def test_a_straight_at_speed_clears_a_stale_latch(self):
     ext = _ext(HOLD_MPH)
     _step(ext, APPROACH_MS, TURN, model_curvature=TURN)
-    _step(ext, APPROACH_MS, GONE, model_curvature=0.0)
+    _step(ext, APPROACH_MS, GONE, calls=80, model_curvature=0.0)   # 32 m, twice ANGLE_HOLD_FORGET_M
     self.assertEqual(ext.angle_hold_kappa, 0.0,
                      "the road straightened while the car still had speed -- that is a real straightening")
+    self.assertGreater(ANGLE_HOLD_FORGET_M, 0.0, "a zero forget distance would pass this vacuously")
 
 
 class TestTheSideRulesAreUnchanged(unittest.TestCase):

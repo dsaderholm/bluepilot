@@ -11318,6 +11318,91 @@ engaged -- the 2026-08-15 rule, because this adds per-drive state to the angle p
 pull-away dip) and `stop_frames.py` on a drive with nothing else moving. The failure to watch for is
 the opposite of the old one: a wheel held out at a stop the model genuinely re-planned.
 
+### AND `grep -c _handle_mouse_release` READS 1 IN BOTH STATES. IT COST A WRONG REPORT.
+
+2026-09-17. The fix DELETED the override and left a comment saying *"NO `_handle_mouse_release`
+override here"* -- so the phrase survives the fix, and a bare count cannot tell the bug from its own
+postmortem. Checking the deployed build that way said the fix was missing; it had been on his car
+since e8fc60a401, and he was told otherwise.
+
+**`grep -c "def _handle_mouse_release"` is the check** -- 0 means fixed. Same family as "assert on
+the expression, not a window": a pattern that matches the explanation as well as the code is not a
+test of anything. Both sessions hit it independently on the same build, which is what makes it worth
+writing down rather than remembering.
+
+**And settle a deployed-build question with `git show <build>:<path>`, not with a grep on the device
+tree** -- it answers for the exact commit and cannot be confused by an edit, a rebase or a comment.
+
+## 2026-09-18: THE LATCH DROVE 1 OF 4 ELIGIBLE STOPS, AND IT HAD CAPTURED THE THRESHOLD ITSELF
+
+First drives on `46b58a9023`, the build that shipped the curvature latch: eight routes, 20 stops,
+hold at 11 mph, scored with `stops2.py` (stops_hold.py plus an `angleHoldKappa` column).
+
+**Eligible is 4, not 20.** Of the 20 stops, 9 had lateral inactive and several more were lefts with
+nothing ahead, which the side rule refuses. Four had lateral active AND a side the hold may act on.
+The latch drove the command at **one** of them, and there it kept the wheel at 8%: -37.3 deg coming
+in, -3.0 deg at the standstill.
+
+**What it had captured there was 0.0050 -- `ANGLE_HOLD_KAPPA_MIN` exactly**, the smallest value the
+rule was able to hold. That number is the whole diagnosis.
+
+### THE CAPTURE WAS A SINGLE-FRAME ASSIGNMENT, AND THE REQUEST FLICKERS THROUGH THE FLOOR
+
+The shipped rule was `angle_hold_kappa = desired if abs(desired) >= 0.005 else 0.0`, evaluated every
+frame above 5 mph. So the LAST frame above the capture speed decided everything, and any frame
+asking for less than the threshold *erased the whole turn*.
+
+The re-run decay scan over the same drives says that is exactly what the road does. Five approaches
+qualified; share of the peak request still being asked for:
+
+```
+              at 10 mph   at 5 mph   at 2 mph   stopped
+  lead  n=2       51%         3%        -8%        3%
+  none  n=3       49%       103%       -31%      -10%
+```
+
+Route 00000480 t+5643.6 -- a right, hands off, lateral on, hold armed, one of the four eligible --
+went **+0.0196 at 12 mph, +0.0100 at 10 mph, -0.0031 at 5 mph**. That last sample is sub-threshold
+AND the wrong way, so the latch was wiped at the crossing and the stop got nothing. It scored
+`latch 0.0000`.
+
+**This also kills the "capture at the hold speed instead of 5 mph" idea** that the 2026-09-17 note
+proposed. At 5 mph the model is still asking 96-103% of its peak on most approaches. The floor was
+never the problem; throwing the value away on one frame was.
+
+### THE REBUILD: REMEMBER, DO NOT RE-DECIDE
+
+- **`ANGLE_HOLD_FORGET_M = 15.0`.** A quiet frame no longer clears anything. It accumulates ROAD
+  covered above the capture speed with nothing significant asked for, and only 15 m of it drops the
+  turn. Distance, not seconds: the same 3 s is a corner still under the car at 12 mph and half a
+  block at 45 mph. Any significant frame resets it to zero.
+- **Inside the hold band the strongest request of the approach wins**; above the band the latch just
+  tracks the live value, so a tight corner cannot ride back up to road speed with the car and be
+  waiting at the next stop.
+- **The opposite-way release now needs the model's own authority**: it clears only when the request
+  is the other way AND at least as large as the latch. A weaker opposite request cannot be a re-plan
+  -- the latch is only ever a floor, so anything the model means more than the latch already wins
+  without clearing anything, and what is left under that bar is the arbitrary-sign near-zero a
+  stopped car always publishes (3 of 5 approaches were asking the other way at 2 mph).
+
+34 tests, 9 of 9 mutants caught. Still undriven.
+
+### A STEP CHANGE IN THE REQUEST TRIPS THE OVERRIDE BAIL-OUT AND ZEROES THE LATCH IN THE FIXTURE
+
+Two mutants survived the first pass, and both survived for the same reason: `_step` in the angle
+tests swaps the model object and jumps `actuators.curvature` in one frame, which trips the
+human-turn override branch for ~6 frames -- and that branch **resets `angle_hold_kappa`**. A latch
+that is zero at the start of the second step re-captures the live value, so every capture rule looks
+identical and a "step, step, read the attribute" test cannot see a rule that only matters when the
+value CARRIES across frames.
+
+**For any latched state in the angle path, drive the change the way the model does it**: keep one
+model object and ease the request over frames (`_ease` / `_frames` in
+`test_stop_hold_latches_the_curvature.py`). The 0.012 1/m one-frame jump the old test used is not
+something a 20 Hz planner ever produces. Same family as the 2026-09-16 lesson about fixtures being
+more orderly than reality -- here the fixture was more VIOLENT than reality, which hides bugs just
+as well.
+
 ## 2026-09-18: THE BRAKE-REQUEST GATE IS PROVEN ON THE ROAD. AND AN ABORT THAT IS A SIDE CHANGE.
 
 Eight drives, build 46b58a9023 (frozen for the stop-hold drive, so passing assist moved nothing).
