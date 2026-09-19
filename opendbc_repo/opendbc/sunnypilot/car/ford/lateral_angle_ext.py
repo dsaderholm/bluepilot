@@ -273,9 +273,14 @@ _MPH_TO_MS = 0.44704
 # call a side.
 #
 # RELEASE, and every one of these matters more than the hold itself:
-#   - the model asks the OTHER WAY with a real magnitude -> it has re-planned, drop the latch
-#   - back above the capture speed with nothing significant to ask for -> cleared by the capture
-#     rule itself, which is what hands the wheel back as the car pulls away
+#   - the model asks the OTHER WAY with at least the latch's own authority -> it has re-planned,
+#     drop the latch. A WEAKER opposite request is not a re-plan: the latch is only ever a floor,
+#     so anything the model means more than the latch already wins without clearing anything, and
+#     what is left below that bar is the arbitrary-sign noise of a standstill. Measured 2026-09-18:
+#     the request is asking the other way at 2 mph on 3 of 5 approaches and at the standstill on 3
+#     of 5, which is the signal this exists to reject rather than to obey.
+#   - ANGLE_HOLD_FORGET_M of road covered above the capture speed with nothing significant to ask
+#     for -> the corner is behind the car; this is what hands the wheel back as it pulls away
 #   - lateral inactive, the driver steering, or the stall blip -> cleared at those bail-outs
 # The side rules are unchanged and are applied to the LATCHED value rather than the model's live
 # one: rights always, a left only while ANGLE_HOLD_LEFT_LEAD_M is armed.
@@ -284,6 +289,16 @@ _MPH_TO_MS = 0.44704
 # other command, so the wheel unwinds no faster than it would from any other change.
 ANGLE_HOLD_CAPTURE_MIN_MPH = 5.0
 ANGLE_HOLD_KAPPA_MIN = 0.005
+# How much ROAD, not how much time, the car may cover asking for nothing significant before the
+# latched turn counts as behind it. Distance rather than seconds because the same 3 s is a corner
+# still under the car at 12 mph and half a block at 45 mph. 15 m is longer than any measured
+# approach spends between the request dying and the standstill (a 12 mph approach is ~10 m of road
+# in total, a 20 mph one ~26 m), and it bounds the other way just as tightly: the worst this can do
+# is hold a few degrees of a corner that ended less than 15 m before the car stopped.
+#
+# Frames that ask for something significant reset it, so the measured failure -- a request that
+# flickers across the threshold on the way down -- cannot reach this at all.
+ANGLE_HOLD_FORGET_M = 15.0
 _ANGLE_HOLD_CAPTURE_MIN_MS = ANGLE_HOLD_CAPTURE_MIN_MPH * _MPH_TO_MS
 
 
@@ -345,6 +360,9 @@ class LateralAngleExt:
     # FusionPilot: the last significant curvature the model asked for while the car still had speed
     # -- see ANGLE_HOLD_CAPTURE_MIN_MPH. Zero means nothing to hold, which is the old controller.
     self.angle_hold_kappa = 0.0
+    # FusionPilot: road covered since the model last asked for something significant, while above
+    # the capture speed -- see ANGLE_HOLD_FORGET_M. Reset by every significant frame.
+    self.angle_hold_quiet_m = 0.0
     # Telemetry: the latched curvature ACTUALLY USED this frame, 0.0 when the model's own request
     # was the larger one. Published as angleHoldKappa -- without it a drive cannot tell a hold that
     # worked from a stop the model never let go of, which is the question the first drives with
@@ -479,6 +497,7 @@ class LateralAngleExt:
       self.b_blend = self.path_angle_blend_ratio
       self._exit_latch_calls = 0
       self.angle_hold_kappa = 0.0
+      self.angle_hold_quiet_m = 0.0
       self.bp_angle_hold_kappa = 0.0
       self.bp_angle_rate_limited = False
       self.bp_curvature_rate_limited = False
@@ -534,6 +553,7 @@ class LateralAngleExt:
       self.b_blend = self.path_angle_blend_ratio
       self._exit_latch_calls = 0
       self.angle_hold_kappa = 0.0
+      self.angle_hold_quiet_m = 0.0
       self.bp_angle_hold_kappa = 0.0
       self.bp_angle_rate_limited = False
       self.bp_curvature_rate_limited = False
@@ -598,6 +618,7 @@ class LateralAngleExt:
       self.b_blend = self.path_angle_blend_ratio
       self._exit_latch_calls = 0
       self.angle_hold_kappa = 0.0
+      self.angle_hold_quiet_m = 0.0
       self.bp_angle_hold_kappa = 0.0
       self.bp_angle_rate_limited = False
       self.bp_curvature_rate_limited = False
@@ -801,12 +822,31 @@ class LateralAngleExt:
       # Off is off. Capturing while the setting is 0 would leave state behind that nothing can use,
       # and turning the setting on mid-drive would inherit a curvature from a road already passed.
       self.angle_hold_kappa = 0.0
+      self.angle_hold_quiet_m = 0.0
     elif v_ego >= _ANGLE_HOLD_CAPTURE_MIN_MS:
-      self.angle_hold_kappa = desired_curvature if abs(desired_curvature) >= ANGLE_HOLD_KAPPA_MIN else 0.0
+      if abs(desired_curvature) >= ANGLE_HOLD_KAPPA_MIN:
+        # Inside the hold band the STRONGEST request of the approach is the one the stop needs --
+        # the wheel is already turned that far and the whole complaint is that it unwinds. Above
+        # the band the latch merely tracks, so a tight corner cannot follow the car back up to
+        # road speed and be waiting at the next stop.
+        _keep = (_in_hold_band and desired_curvature * self.angle_hold_kappa > 0.0 and
+                 abs(self.angle_hold_kappa) > abs(desired_curvature))
+        if not _keep:
+          self.angle_hold_kappa = desired_curvature
+        self.angle_hold_quiet_m = 0.0
+      elif self.angle_hold_kappa != 0.0:
+        # One quiet frame is NOT the model letting go of the turn. Measured 2026-09-18: clearing on
+        # a single sub-threshold frame emptied the latch before the stop on 3 of the 4 stops it was
+        # eligible for, because the request crosses the threshold repeatedly on the way down.
+        self.angle_hold_quiet_m += max(0.0, v_ego) * _STEER_DT
+        if self.angle_hold_quiet_m >= ANGLE_HOLD_FORGET_M:
+          self.angle_hold_kappa = 0.0
     elif (self.angle_hold_kappa * desired_curvature < 0.0 and
-          abs(desired_curvature) >= ANGLE_HOLD_KAPPA_MIN):
-      # The model wants the other way and means it. It has re-planned; the latch is stale.
+          abs(desired_curvature) >= abs(self.angle_hold_kappa)):
+      # The model wants the other way and has more authority than the latch -- a re-plan, and the
+      # latch is stale. A WEAKER opposite request is not one: see the RELEASE note above.
       self.angle_hold_kappa = 0.0
+      self.angle_hold_quiet_m = 0.0
 
     _hold_kappa = self.angle_hold_kappa
     _latch_side_ok = _hold_kappa > 0.0 or (_hold_kappa < 0.0 and self.angle_hold_left_armed)
