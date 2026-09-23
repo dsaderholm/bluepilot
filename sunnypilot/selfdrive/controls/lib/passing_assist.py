@@ -3398,8 +3398,33 @@ class PassingAssistDetector:
       self._lead_gap()
       self.has_lead = False
       self.lead_ttc = NO_TTC_S
-      if self._lead_gap_s > LEAD_GAP_GRACE_S or self.approach_seconds == 0.0:
+      if self._lead_gap_s > LEAD_GAP_GRACE_S:
         self._reset_outputs(Blocked.noLead)
+        self._keep_right()
+        return
+      if self.approach_seconds == 0.0:
+        # INSIDE the grace with no confirmation to carry. The verdict is still refused -- the
+        # suggestion and clear_side go to none on this frame, so nothing opens on an unestablished
+        # approach -- but the DEBOUNCED SIDE is left alone, because "a single missed radar return
+        # is the same car, not a different situation" is the whole premise of the window above and
+        # does not stop being true because the confirmation has not built yet.
+        #
+        # THE MEASURED FAILURE, build 0bde6ff361, 21 routes / 154.6 moving minutes / 33 aborts.
+        # Seven of the seventeen aborts pulled at full rate are ONE frame of noLead while the raw
+        # geometry still wanted the lane -- route 0000048e seg 18 at 74 mph:
+        #     raw      L x23  - x1
+        #     decided  nothingSlower x23  noLead x1
+        # a signal up for 1.15 s ended by a single frame, re-armed, and killed again three more
+        # times inside twelve seconds. They reached the old hard clear through
+        # `approach_seconds == 0.0`, NOT through the gap, so the grace never got to absorb them.
+        #
+        # DELIBERATELY NOT the cc9b910b0a shape (feed the debounce `none`, keep_wanted). That was
+        # written first and it FAILED test_no_pass_warranted_clears_it_immediately, which states
+        # the property directly: hysteresis is for geometry wobbling, and a lead that has really
+        # gone must not wait out WANTED_FALL_S. So the hard clear past the grace is kept exactly
+        # as it was, and only the window the grace already owns is corrected. The freeze that
+        # keep_wanted implies is bounded by LEAD_GAP_GRACE_S, after which the branch above fires.
+        self._reset_outputs(Blocked.noLead, keep_wanted=True)
         self._keep_right()
         return
       # Inside the window with a live confirmation: carry on. Absorbing a dropped return in the
