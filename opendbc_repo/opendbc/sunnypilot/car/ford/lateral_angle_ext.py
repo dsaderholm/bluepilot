@@ -273,12 +273,14 @@ _MPH_TO_MS = 0.44704
 # call a side.
 #
 # RELEASE, and every one of these matters more than the hold itself:
-#   - the model asks the OTHER WAY with at least the latch's own authority -> it has re-planned,
-#     drop the latch. A WEAKER opposite request is not a re-plan: the latch is only ever a floor,
-#     so anything the model means more than the latch already wins without clearing anything, and
-#     what is left below that bar is the arbitrary-sign noise of a standstill. Measured 2026-09-18:
-#     the request is asking the other way at 2 mph on 3 of 5 approaches and at the standstill on 3
-#     of 5, which is the signal this exists to reject rather than to obey.
+#   - the model asks the OTHER WAY with a real magnitude -> it has re-planned, drop the latch.
+#     From 2026-09-18 to 2026-09-22 this instead required the model to OUT-MUSCLE the latch, on the
+#     argument that a stronger opposite request already wins without clearing anything. That
+#     argument is true about which value drives the command and it misses the case that matters:
+#     while the model asks GENTLY the other way, the latch is not standing aside, it is actively
+#     steering the opposite direction. Route 00000494 t+84171 held -0.4950 rad -- 99% of the wire's
+#     range -- for seven seconds at a standstill against a model asking +0.0142, because 0.0142
+#     can never reach a 0.2 bar. A gentle re-plan is still a re-plan.
 #   - ANGLE_HOLD_FORGET_M of road covered above the capture speed with nothing significant to ask
 #     for -> the corner is behind the car; this is what hands the wheel back as it pulls away
 #   - lateral inactive, the driver steering, or the stall blip -> cleared at those bail-outs
@@ -289,6 +291,15 @@ _MPH_TO_MS = 0.44704
 # other command, so the wheel unwinds no faster than it would from any other change.
 ANGLE_HOLD_CAPTURE_MIN_MPH = 5.0
 ANGLE_HOLD_KAPPA_MIN = 0.005
+# ...and a CEILING, because the floor alone let a parking maneuver be latched. 0.10 1/m is a 10 m
+# radius. Nothing the car drives up to a stop line is tighter than that: the tightest turn openpilot
+# has taken on this car asked 0.0525 (a 19 m radius, 2026-09-17), and the two stop holds that worked
+# on the road captured 0.0224 and 0.0817. Above it is a lot, not a road -- 0.2 is MAX_CURVATURE in
+# drive_helpers.py, the absolute clamp, and it is what route 00000494 latched while he parked.
+#
+# A request over the ceiling does not CLEAR the latch, it is simply not captured: it is the model
+# asking for something this feature has no business holding, not evidence the turn is over.
+ANGLE_HOLD_KAPPA_MAX = 0.10
 # How much ROAD, not how much time, the car may cover asking for nothing significant before the
 # latched turn counts as behind it. Distance rather than seconds because the same 3 s is a corner
 # still under the car at 12 mph and half a block at 45 mph. 15 m is longer than any measured
@@ -824,7 +835,11 @@ class LateralAngleExt:
       self.angle_hold_kappa = 0.0
       self.angle_hold_quiet_m = 0.0
     elif v_ego >= _ANGLE_HOLD_CAPTURE_MIN_MS:
-      if abs(desired_curvature) >= ANGLE_HOLD_KAPPA_MIN:
+      if abs(desired_curvature) > ANGLE_HOLD_KAPPA_MAX:
+        # A parking-lot radius. Not captured, and not treated as quiet either -- see
+        # ANGLE_HOLD_KAPPA_MAX. Whatever is already latched keeps its own quiet distance running.
+        pass
+      elif abs(desired_curvature) >= ANGLE_HOLD_KAPPA_MIN:
         # Inside the hold band the STRONGEST request of the approach is the one the stop needs --
         # the wheel is already turned that far and the whole complaint is that it unwinds. Above
         # the band the latch merely tracks, so a tight corner cannot follow the car back up to
@@ -842,9 +857,10 @@ class LateralAngleExt:
         if self.angle_hold_quiet_m >= ANGLE_HOLD_FORGET_M:
           self.angle_hold_kappa = 0.0
     elif (self.angle_hold_kappa * desired_curvature < 0.0 and
-          abs(desired_curvature) >= abs(self.angle_hold_kappa)):
-      # The model wants the other way and has more authority than the latch -- a re-plan, and the
-      # latch is stale. A WEAKER opposite request is not one: see the RELEASE note above.
+          abs(desired_curvature) >= ANGLE_HOLD_KAPPA_MIN):
+      # The model wants the other way and means it. It has re-planned; the latch is stale. This
+      # does NOT require the model to out-muscle the latch -- see the RELEASE note above for the
+      # seven seconds of full-scale opposite command that requirement produced.
       self.angle_hold_kappa = 0.0
       self.angle_hold_quiet_m = 0.0
 

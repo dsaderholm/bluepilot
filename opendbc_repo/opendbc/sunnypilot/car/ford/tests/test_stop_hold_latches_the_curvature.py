@@ -20,7 +20,8 @@ See the LICENSE.md file in the root directory for more details.
 import unittest
 
 from opendbc.sunnypilot.car.ford.lateral_angle_ext import (
-  ANGLE_HOLD_CAPTURE_MIN_MPH, ANGLE_HOLD_FORGET_M, ANGLE_HOLD_KAPPA_MIN, ANGLE_HOLD_LEFT_LEAD_M,
+  ANGLE_HOLD_CAPTURE_MIN_MPH, ANGLE_HOLD_FORGET_M, ANGLE_HOLD_KAPPA_MAX,
+  ANGLE_HOLD_KAPPA_MIN, ANGLE_HOLD_LEFT_LEAD_M,
   _MPH_TO_MS,
 )
 from opendbc.sunnypilot.car.ford.tests.test_lateral_blend_horizon import (
@@ -178,16 +179,35 @@ class TestTheReleases(unittest.TestCase):
     self.assertEqual(ext.angle_hold_kappa, 0.0, "it wants the other way and means it")
     self.assertLessEqual(ext.bp_path_angle_final, 0.0)
 
-  def test_a_weaker_request_the_other_way_is_not_a_re_plan(self):
-    # The one that used to clear the latch. It cannot be a re-plan: the latch is only a FLOOR, so a
-    # request the model means MORE than the latch already wins without clearing anything. What is
-    # left under that bar is the arbitrary-sign near-zero a stopped car always publishes.
+  def test_a_gentle_request_the_other_way_is_still_a_re_plan(self):
+    """2026-09-22, route 00000494 t+84171 -- and this test asserted the OPPOSITE for four days.
+
+    The argument for the weak rule was that a stronger opposite request already wins on its own, so
+    anything under that bar must be standstill noise. It misses what the latch is doing meanwhile:
+    it is not standing aside, it is steering the other way. On the road that produced -0.4950 rad,
+    99% of the wire's range, held for seven seconds at a standstill against a model asking +0.0142.
+    """
     ext = _ext(HOLD_MPH)
     _step(ext, APPROACH_MS, TURN, model_curvature=TURN)
     _step(ext, 0.0, -ANGLE_HOLD_KAPPA_MIN * 1.5, model_curvature=0.0)
-    self.assertAlmostEqual(ext.angle_hold_kappa, TURN, places=6,
-                           msg="-0.0075 against a latched 0.02 is noise, not the model re-planning")
-    self.assertGreater(ext.bp_path_angle_final, 0.05, "and the turn is still held")
+    self.assertEqual(ext.angle_hold_kappa, 0.0,
+                     "a real request the other way releases it, however gentle")
+    self.assertLessEqual(ext.bp_path_angle_final, 0.0)
+
+  def test_the_measured_seven_seconds_cannot_happen_again(self):
+    """The road case end to end: a parking crank, then a stop with the model asking the other way."""
+    ext = _ext(HOLD_MPH)
+    _step(ext, 2.5, -0.2, model_curvature=-0.2)          # 5 mph, MAX_CURVATURE -- parking
+    self.assertEqual(ext.angle_hold_kappa, 0.0, "a 5 m radius is never latched")
+    _step(ext, 0.0, 0.0142, model_curvature=0.0)         # stopped, the model has re-planned
+    self.assertEqual(ext.bp_angle_hold_kappa, 0.0, "and nothing is held against it")
+    # What went wrong on the road was the SIGN, not the size: -0.4950 rad while the model asked
+    # +0.0142. The speed floor still applies to the model's own live request here, which is the
+    # feature working -- so assert the command agrees with the model rather than opposing it.
+    self.assertGreater(ext.bp_path_angle_final, 0.0,
+                       "the command must follow the re-plan, not fight it")
+    self.assertLess(abs(ext.bp_path_angle_final), 0.15,
+                    "and nowhere near the 0.4950 rad the latch held")
 
   def test_pulling_away_hands_the_wheel_back(self):
     ext = _approach_then_stop()
@@ -316,6 +336,50 @@ class TestTheRequestFlickering(unittest.TestCase):
     _step(ext, 5.4, GONE, calls=40, model_curvature=0.0)
     self.assertAlmostEqual(ext.angle_hold_kappa, TURN, places=6,
                            msg="10.8 m after a bail-out is 10.8 m, not 21.6 m")
+
+
+class TestTheCeiling(unittest.TestCase):
+  """ANGLE_HOLD_KAPPA_MAX. The capture had a floor and no ceiling until 2026-09-22, so a parking
+  maneuver was eligible: route 00000494 latched -0.2000, which is MAX_CURVATURE in drive_helpers.py
+  and a 5 m radius."""
+
+  def tearDown(self):
+    _FakeLiveDelay.lateralDelay = 0.2
+
+  def test_a_parking_radius_is_never_latched(self):
+    ext = _ext(HOLD_MPH)
+    _step(ext, APPROACH_MS, 0.2, model_curvature=0.2)
+    self.assertEqual(ext.angle_hold_kappa, 0.0)
+
+  def test_a_real_turn_still_is(self):
+    # The tightest openpilot has driven on this car: 0.0525, a 19 m radius, 2026-09-17.
+    ext = _ext(HOLD_MPH)
+    _step(ext, APPROACH_MS, 0.0525, model_curvature=0.0525)
+    self.assertAlmostEqual(ext.angle_hold_kappa, 0.0525, places=6)
+
+  def test_the_boundary_is_where_it_says_it_is(self):
+    at = _ext(HOLD_MPH)
+    _step(at, APPROACH_MS, ANGLE_HOLD_KAPPA_MAX, model_curvature=ANGLE_HOLD_KAPPA_MAX)
+    self.assertAlmostEqual(at.angle_hold_kappa, ANGLE_HOLD_KAPPA_MAX, places=6)
+
+    over = _ext(HOLD_MPH)
+    _step(over, APPROACH_MS, ANGLE_HOLD_KAPPA_MAX * 1.01,
+          model_curvature=ANGLE_HOLD_KAPPA_MAX * 1.01)
+    self.assertEqual(over.angle_hold_kappa, 0.0)
+
+  def test_going_over_the_ceiling_does_not_wipe_a_good_latch(self):
+    # Over the ceiling is "not for this feature to hold", NOT "the turn is over". Wiping here would
+    # hand the measured failure back in the other costume: the request crosses on the way in.
+    ext = _ext(HOLD_MPH)
+    _step(ext, APPROACH_MS, TURN, model_curvature=TURN)
+    _frames(ext, APPROACH_MS, 0.2, calls=4)
+    self.assertAlmostEqual(ext.angle_hold_kappa, TURN, places=6)
+
+  def test_nor_does_it_count_as_quiet_road(self):
+    ext = _ext(HOLD_MPH)
+    _step(ext, APPROACH_MS, TURN, model_curvature=TURN)
+    _frames(ext, APPROACH_MS, 0.2, calls=4)
+    self.assertEqual(ext.angle_hold_quiet_m, 0.0)
 
 
 class TestWhatItRefusesToLatch(unittest.TestCase):
