@@ -11443,3 +11443,68 @@ a lamp shown to traffic behind should not advertise the other side. The debounce
 sliding R->L without passing through none INSIDE `wanted`; what happened here is the maneuver being
 torn down and restarted on the other side in consecutive frames, which is legal by construction.
 Once this actuates, that is a 1.5 s wrong-side lamp and it needs a stand-down between sides.
+## 2026-09-22: THE LATCH HELD FULL-SCALE OPPOSITE STEERING FOR SEVEN SECONDS AT A STANDSTILL
+
+21 routes and 154.6 moving minutes on `0bde6ff361`, the rebuilt latch. It works on the road -- and
+it also produced the worst lateral command this fork has recorded, from a rule written four days
+earlier in this file.
+
+### THE GOOD HALF: ON A REAL APPROACH-TO-STOP TURN IT KEEPS THE WHEEL
+
+91 stops, scored with `stops2.py` at `HOLD_MPH=10` (he moved the setting off 11, so scoring at 11
+would have mislabelled which stops were eligible). Funnelled, because "16 of 91 fired" is the same
+denominator error this file records five times already:
+
+```
+  all stops                                            n= 91   latch drove 16
+    lateral active the whole stop, hands off           n= 61   latch drove  8
+      ...and the hold's side rule allows it            n=  9   latch drove  5
+        ...and the wheel was turned >=10 deg coming in n=  4   latch drove  2
+```
+
+Both of those two kept the wheel: **-14.5 -> -15.0 deg (103%)** and **-14.5 -> -11.7 (81%)**,
+against the previous build's single firing at 8%. That is the feature doing its job. Four eligible
+turned-wheel stops is still a thin sample and the two that did not fire were 0.7 s and 0.2 s rolling
+stops.
+
+### THE BAD HALF: IT LATCHED A PARKING MANEUVER AND COULD NOT LET GO
+
+8 of the 16 firings were parking or hands-on, several commanding ~0.495 rad. Route 00000494
+t+84171, frame by frame:
+
+```
+ 84166.6   5.6 mph  wheel +414.3  cmd -0.4400  desCurv -0.2000   <- MAX_CURVATURE, the clamp
+ 84169.7   1.5      wheel +441.9  cmd -0.4950  desCurv -0.0377
+ 84171.7   0.2      wheel +358.5  cmd -0.4950  desCurv +0.0142   <- stopped, model wants the OTHER WAY
+ 84173.2   0.2      wheel +200.7  cmd -0.4950  desCurv +0.0142
+ 84174.7   0.0      wheel  -15.7  cmd  0.0000                    <- only lateral dropping ended it
+```
+
+`-0.2000` is `MAX_CURVATURE` in `drive_helpers.py` exactly -- openpilot's absolute clamp, a **5 m
+radius**. He was cranking the wheel into a spot at 5 mph. The latch took it and held **-0.4950 rad,
+99% of `FORD_DBC_PATH_ANGLE_MIN`, for seven seconds** through the standstill while the model asked
+`+0.0142` the other way.
+
+**TWO DEFECTS, BOTH MINE, BOTH FROM 2026-09-18:**
+
+1. **The capture had a floor and no ceiling.** `ANGLE_HOLD_KAPPA_MAX = 0.10` (a 10 m radius) now
+   bounds it. Every approach-to-stop turn measured on this car is under it -- the tightest openpilot
+   has driven asked 0.0525, and the two stop holds that worked captured 0.0224 and 0.0817. Over the
+   ceiling is NOT captured and is NOT treated as quiet road or as a release: it is the model asking
+   for something this feature has no business holding, not evidence the turn is over.
+2. **The opposite-way release was weakened to require the model to OUT-MUSCLE the latch.** Reverted
+   to a real magnitude (`>= ANGLE_HOLD_KAPPA_MIN`). The argument for the weak rule is in this file
+   and it reads well: a stronger opposite request already wins without clearing anything, so what is
+   left below that bar is standstill noise. **It is true about which value drives the command and it
+   misses what the latch does meanwhile -- it is not standing aside, it is steering the other way.**
+   Against a 0.2 latch, a genuine 0.0142 re-plan can never reach the bar. A gentle re-plan is still
+   a re-plan.
+
+40 tests, 7 of 7 mutants caught, suite 1229. The test that blessed the weak rule is REVERSED and
+carries the route and timestamp, because the paper argument is persuasive enough that it was written
+here once already and only the car refutes it.
+
+**THE RULE THIS IS AN INSTANCE OF: a threshold with a floor and no ceiling is only half specified.**
+Ask what the LARGEST admissible value is at the same time as the smallest, and check it against what
+the signal does in the regimes the feature is not for -- parking, maneuvering, standing still. Both
+of this feature's defects so far have been at an end of the range nobody bounded.
