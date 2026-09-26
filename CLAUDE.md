@@ -11873,3 +11873,76 @@ from one code path so the comparison is honest:
 - **Pick the segments first.** `findtwoway.py` scores two-way share per segment off qlogs; most of
   his driving is `oneWay=True`, and a sweep run on divided-only segments reports 0 two-way frames
   and silently measures nothing. The first single-segment trial did exactly that.
+## 2026-09-25: 105 DEGREES IS OPENPILOT'S CEILING ON THIS CAR. ANY BIGGER PEAK IS HIS HANDS.
+
+Three turn-analysis gates were set wrong in one evening, and he had to correct the third himself:
+*"right turns definitely would go way more than I've ever seen the wheel turn. I've only seen it
+turn a little over 90 degrees."* Then: *"Come on, Claude, we've got to remember this."*
+
+He is right and the number is already in this file. The 2026-09-17 entry records openpilot's largest
+turn ever on this car: 88 degrees of heading, **105.3 degrees of wheel**, with the command at 86% of
+`FORD_DBC_PATH_ANGLE_MAX`. That is the ceiling, and it is a CAR FACT -- the wire and the ISO clamp
+set it, not tuning.
+
+**So a peak wheel angle of 300-490 degrees is HIS HANDS, categorically.** The first turn-exit scan
+selected 141 "turns of >= 45 deg" with no upper bound and reported *"136 of 141 exits he took within
+1 s of the peak"* as if it were the complaint quantified. It was measuring him parking: 480 deg of
+wheel at 4 mph with 270 deg of heading change is a parking crank, and the answer was preordained.
+
+**A DEGREE THRESHOLD WAS NEVER THE RIGHT SELECTOR.** The question is whether openpilot was steering
+at the moment being scored, so the selector is `latActive and not steeringPressed` ON THE PEAK
+FRAME. That is not the same as the 2026-09-04 rule about printing the two flags as separate columns
+-- that rule is about DISPLAY, and this is about choosing a population, which is legitimate as long
+as it is stated.
+
+**THE SHAPE OF THE ERROR, because it alternated:** 2026-09-14 gated unwind analysis to highway and
+excluded the intersection turns he actually complains about; 2026-09-25 gated a turn scan so loosely
+it admitted parking. Too tight then too loose is the same failure -- a gate chosen from a number
+rather than from what the driver is describing. **Say out loud which population the driver means,
+then write the gate to select exactly that, and sanity-check the result against a known ceiling
+before reading anything into it.**
+
+**AND HE HAS TOLD US WHAT THE CAR CAN DO: lefts at intersections work, rights do not.** That is
+geometry and it is arithmetic from constants already in this file. A left is a 20-30 m arc; a right
+hugs the corner at 8-12 m. At 15 mph `clip_curvature` permits 15.0 m and the wire permits 16.8 m --
+so a left fits and a right is already past the ISO clamp and cannot be planned at all. Rights need
+the car SLOWER, and the 20 mph ICBM floor is what prevents that. Same chain as the longitudinal
+parity argument, arrived at from the driver's own observation rather than from a table.
+
+## 2026-09-25: THE "SET SPEED GOES UP ONE AND DOWN ONE" IS `apply_gas_handoff` WORKING
+
+*"Sometimes my set speed will change if I set and there's no SLA speed. Sometimes it will like go up
+one or down one, which is weird."*
+
+Route 0000049d t+33085, frame by frame, with the pedal column that settles it:
+
+```
+  t         mph   dash  target  raw   hold  gas   send
+  33085.17  75.5  75.0   76.0   75.0  75.0  GAS   increase
+  33085.31  75.6  77.0   76.0   75.0  75.0  GAS   decrease     <- ONE press moved the dash TWO
+  33085.89  75.8  77.0   76.0   75.0  75.0  GAS   decrease
+```
+
+**The plan asked 75, the hold was 75, and the aim came out 76.** `apply_gas_handoff` raises the
+target to the speed the driver has ACTUALLY REACHED while the pedal is down -- `round(75.5)` is 76 --
+and deliberately does not touch the baseline, because pressing the accelerator is not the same
+statement as pressing SET. So it nudges to 76, he lifts, the hold pulls it back to 75. Up one, down
+one. **Working exactly as its docstring says.**
+
+It was built for "accelerate from a 35 zone onto a 65 road and the number is still 35 when you
+lift", where the gap is 30 mph. At HALF A MILE AN HOUR the same mechanism is indistinguishable from
+a controller that cannot settle, and nothing on screen explains it. A deadband -- do not chase the
+handoff while it is within a mph or two of the current number -- costs nothing the feature is for.
+
+**AND THERE IS A REAL DEFECT BESIDE IT: one `increase` moved the dash 75 -> 77.** Two mph from a
+single press, inside the tap band that is supposed to deliver exactly one, which then forces a
+`decrease` to come back. That doubles the visible wobble and is a separate bug from the cause.
+2026-08-25 verified 869 of 875 ICBM dash steps were 1 mph, so this is not the common case -- but it
+is in the episode he is complaining about, which is where it matters.
+
+**METHOD NOTE, because the first hypothesis was wrong and cheap to check:** the sweep was written
+expecting a ROUNDING SEAM between where the hold is captured and where the dash is read, and looked
+for errors clustered at +-1. The errors were p50 -4 and p10 -15 -- mostly the stop and curve paths
+legitimately asking for less. What identified the real cause was the 118-of-702 SMALL-error
+population, and then one episode with `vTargetRaw` and `gasPressed` as columns. **Publish the
+inputs of the rule you suspect, on the frames it acted, before theorising about the output.**

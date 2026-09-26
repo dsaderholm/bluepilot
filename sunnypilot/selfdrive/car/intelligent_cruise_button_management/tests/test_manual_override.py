@@ -23,6 +23,7 @@ from cereal import car, custom
 from openpilot.common.constants import CV
 from openpilot.sunnypilot.selfdrive.car.cruise_ext import V_CRUISE_MAX
 from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management.controller import (
+  GAS_HANDOFF_MIN_GAIN,
   IntelligentCruiseButtonManagement, DEFAULT_BASELINE_RESET_DELTA,
 )
 
@@ -1878,6 +1879,34 @@ class TestGasPedalHandoff:
     """On the gas but below the set speed -- e.g. accelerating within a hold -- changes nothing."""
     icbm = self._icbm(gas=True, cluster=70, road=45, limit=70)
     assert icbm.v_target <= 70
+
+  def test_half_a_mile_an_hour_ahead_is_not_a_handoff(self):
+    """2026-09-25, route 0000049d t+33085, and it is what he reported as the set speed moving on
+    its own: doing 75.5 with the set speed at 75, the target came out 76, ICBM pressed up, and
+    pressed back down when he lifted. Up one, down one.
+
+    The handoff exists for a 30 mph gap. Following half a mile an hour is indistinguishable from a
+    controller that cannot settle, and it costs a press in each direction."""
+    icbm = self._icbm(gas=True, cluster=75, road=75.5, limit=75)
+    assert icbm.v_target <= 75, (
+      f"target {icbm.v_target} -- the handoff chased 0.5 mph, which is the reported wobble")
+
+  def test_but_a_real_gap_is_still_followed(self):
+    """The floor must not cost the case the feature was built for."""
+    icbm = self._icbm(gas=True, cluster=75, road=78, limit=75)
+    assert icbm.v_target >= 78, f"target {icbm.v_target} -- a 3 mph gap must still hand off"
+
+  def test_the_floor_is_where_it_says_it_is(self):
+    below = self._icbm(gas=True, cluster=60, road=60 + GAS_HANDOFF_MIN_GAIN - 1, limit=60)
+    assert below.v_target <= 60, "inside the floor, nothing moves"
+    at = self._icbm(gas=True, cluster=60, road=60 + GAS_HANDOFF_MIN_GAIN, limit=60)
+    assert at.v_target >= 60 + GAS_HANDOFF_MIN_GAIN, "at the floor, the handoff takes it"
+
+  def test_the_handoff_still_never_touches_the_hold(self):
+    """Its docstring is explicit that pressing the accelerator is not the same statement as
+    pressing SET, and the deadband must not quietly change that."""
+    icbm = self._icbm(gas=True, cluster=75, road=85, limit=75)
+    assert icbm.v_baseline in (0, 75), f"the hold moved to {icbm.v_baseline} on the throttle"
 
   def test_no_handoff_without_the_pedal(self):
     icbm = self._icbm(gas=False, cluster=35, road=65)
