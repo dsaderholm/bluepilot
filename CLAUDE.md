@@ -11946,3 +11946,51 @@ for errors clustered at +-1. The errors were p50 -4 and p10 -15 -- mostly the st
 legitimately asking for less. What identified the real cause was the 118-of-702 SMALL-error
 population, and then one episode with `vTargetRaw` and `gasPressed` as columns. **Publish the
 inputs of the rule you suspect, on the frames it acted, before theorising about the output.**
+
+## 2026-09-26: A FULL TABLE OF ZEROS IS NOT A NULL RESULT. IT IS NO DATA.
+
+Relaunching the interrupted `ONCOMING_FRAMES` sweep, I ran `oncsweep.py` with **no arguments**. Its
+segments come from `sys.argv[1:]`, so it swept nothing -- and printed its entire formatted table:
+seven candidate rows, both keyings, every cell `0.0%`, `EXIT 0 after 2 s`. The only tell is line
+one, `segments: 0`.
+
+**That is worse than the empty file it replaced.** `oncsweep.txt.part` from the killed run was 0
+bytes, which is obviously nothing. A complete table is the exact SHAPE of an answer, and the
+conclusion it invites -- *the constant makes no difference at any value* -- is one somebody would
+write down. This file already records "a zero from a new diagnostic is a claim about the TOOL until
+something independent agrees"; the new half is that a zero-filled TABLE hides its own N.
+
+**The rule: print N before the table, and refuse to print the table when N is 0.** Both
+`sdsweep.py` and `oncsweep.py` have the print-then-trust shape.
+
+**And the sweep's segment list has to be rebuilt every time, because routes rotate off.** The 10
+segments the 2026-09-25 harness used are gone; `deleter.py` holds 5 GB free and the device now
+starts at 0000049d. Run `findtwoway.py <routes>` first and pick from its output -- 8 two-way
+dominant for the opening risk, 4 pure divided for coverage.
+
+### THREE DEVICE FACTS, each of which cost a round
+
+- **The tmux on `pts/0` is AGNOS's own.** `ps` shows `/usr/bin/tmux new-session -s comma -d
+  /usr/comma/comma.sh` with an etime equal to uptime. It is on `who` after every boot and is never
+  a person. **Check what a tmux is RUNNING before treating a pts as a foreign session** -- I held a
+  reboot and asked two peers about it first. Same shape as `grep -c _handle_mouse_release` reading
+  1 in both states: a surface signal that cannot separate the two cases it is asked about.
+- **`wd.sh` cds to `/data/openpilot`, so a RELATIVE script path fails inside it.** `wd.sh twoway2
+  ... ./findtwoway.py` died instantly with `can't open file '/data/openpilot/findtwoway.py'`. It
+  fails loudly into the output file, which is the good case. Absolute paths only.
+- **`pgrep -f` self-matched AGAIN, in a new costume.** `pgrep -f "[o]ncsweep.py"` returned a hit
+  because the SAME `bash -lc` line also carried the unbracketed `/data/steer_review/oncsweep.py` in
+  its launch half. **The bracket trick protects the PATTERN, not the rest of the command line.**
+  It reported ALREADY RUNNING with nothing running, which is the direction that silently skips the
+  work. Use `ps -eo args | grep <name> | grep -v "bash -lc"`.
+
+### THE RESOLVER, NOT THE CAR: "Not enough memory resources"
+
+`ssh comma-34b959b` returned `Could not resolve hostname comma-34b959b: Not enough memory resources
+are available to process this command`, and `[System.Net.Dns]::GetHostAddresses` returned the same.
+**That is the Windows resolver failing on this laptop, not the device being absent** -- it has now
+produced three different "the car is offline" reports across two sessions.
+
+He had also moved networks: laptop on SSID `Capital Tech` at `10.0.1.50`, car at **`10.0.1.184`**,
+found by sweeping the /24 and matching the wlan0 MAC `00:0a:f5:e4:4a:bc` in ARP. **Sweep and match
+the MAC; never ask him for an IP**, and never read a resolver error as a statement about the car.
