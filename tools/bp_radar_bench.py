@@ -11,6 +11,19 @@ bench session and typed in.
   python tools/bp_radar_bench.py --record cap.json --seconds 30
   python tools/bp_rear_digest_sim.py cap.json            # then replay it
 
+IT ALSO SNIFFS THE CAR'S MS-CAN, which is the one thing here that needs no canbox. Ford puts
+MS-CAN on OBD-II pins 3 (H) and 11 (L) -- the pair FORScan uses to reach the APIM -- and it runs at
+125k, so the bitrate had to stop being a constant:
+
+  python tools/bp_radar_bench.py --record nav.json --bitrate 125000 --seconds 120
+
+Record one capture with a navigation app ROUTING and one with no route, then diff them the way
+`bp_can_nav_diff.py` diffs two routes. That answers whether the turn instruction is on MS-CAN at
+all, which has otherwise been waiting on hardware since 2026-08.
+
+IT NEVER TRANSMITS. `receive_own_messages=False`, no filters, no writes -- the same property the
+radar side relies on, and it matters more here: this is the car's live body bus, not a bench.
+
 RUN IT WITH THE 3.12 VENV -- ../.venv-bp312/Scripts/python.exe -- which is where python-can and
 pyserial live. The device does not have python-can and does not need it; this is a bench tool.
 
@@ -51,7 +64,10 @@ from openpilot.tools.bp_rear_digest_sim import (  # noqa: E402
   MRR_END, MRR_HEADER, MRR_START, Detection, mrr_layout, sig,
 )
 
+# The RADAR's private bus. MS-CAN is 125k -- see --bitrate, which exists so this adapter can also
+# sniff the car's medium-speed bus from OBD-II pins 3 and 11 without a canbox.
 BITRATE = 500000
+MS_CAN_BITRATE = 125000
 DBC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
                    "opendbc_repo", "opendbc", "dbc", "FORD_CADS.dbc")
 
@@ -90,9 +106,10 @@ def open_bus(args):
   ch = args.channel or guess_channel()
   if ch is None:
     sys.exit("no known USB-CAN adapter found. Run --list and pass --channel COMn.")
-  print(f"opening {args.interface} on {ch} at {BITRATE} ...")
+  rate = args.bitrate
+  print(f"opening {args.interface} on {ch} at {rate} ...")
   # receive_own_messages off and no filters: this listens and never writes.
-  return can.Bus(interface=args.interface, channel=ch, bitrate=BITRATE, receive_own_messages=False)
+  return can.Bus(interface=args.interface, channel=ch, bitrate=rate, receive_own_messages=False)
 
 
 def decode_cycle(layout, cycle):
@@ -213,6 +230,8 @@ def main() -> int:
   ap.add_argument("--seconds", type=float, default=30.0)
   ap.add_argument("--channel", default=None, help="COM port; auto-detected if omitted")
   ap.add_argument("--interface", default="slcan", help="python-can interface (default slcan)")
+  ap.add_argument("--bitrate", type=int, default=BITRATE,
+                  help=f"bus speed; {BITRATE} for the radar, {MS_CAN_BITRATE} for Ford MS-CAN")
   args = ap.parse_args()
 
   if args.list:
