@@ -212,6 +212,17 @@ has ~4x margin on exactly the transition he is worried about.
 taxonomy. He does not want a richer concept of a hold; he wants the simple one to work. Check
 whether the current code already does the thing before proposing a model for it.
 
+**AND ONE THING THE DELETION SURFACED BUT DID NOT FIX: mici swallows every tap that is not the
+lateral overlay.** `MiciHudRendererBP._handle_mouse_press` returns early when the overlay is off
+screen and never calls `super()`, so on the comma 4 no tap reaches upstream's handler at all. That
+predates the pin removal -- both branches always returned -- but with the pin branch gone the
+function has one job and the gap is plain.
+
+It is NOT fixed here, deliberately: it changes tap routing on a screen this car does not have (he
+runs a 3X), it cannot be rendered or driven offline, and the big screen's own history is that
+getting this ordering wrong made a gesture read as dead for days. Whoever ports more of the on-road
+UI to mici should settle it then, with the screen in front of them.
+
 **PINNED HOLDS ARE DELETED, 2026-09-25.** He said it plainly -- *"yeah delete pins, I don't want
 them"* -- which is the fourth time he has told us he does not want the concept. `pinned_holds.py`,
 `apply_pinned_hold`, the five `IcbmPin*`/`IcbmHoldObservations` params, the three settings controls,

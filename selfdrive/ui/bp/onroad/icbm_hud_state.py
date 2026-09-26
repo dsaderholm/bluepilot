@@ -135,8 +135,9 @@ def max_box_state(hold: float, sla_fallback: float | None, set_speed: float, das
   with his own number under it -- the common case on the roads where holds matter most.
 
   RANK 3 USED TO BE THE PIN BEING OFFERED. Pinned holds were deleted on 2026-09-25 -- he had asked
-  three times not to have them and one had never once been created on the car -- so the ranking is
-  one shorter and the corner mark on the box is gone with it.
+  four times not to have them, the fourth being "yeah delete pins, I don't want them", and not one
+  had ever been created on the car -- so the ranking is one shorter and the corner mark on the box
+  is gone with it.
   """
   hold_driving = hold > 0
   if hold_driving:
@@ -155,8 +156,8 @@ def max_box_state(hold: float, sla_fallback: float | None, set_speed: float, das
   # one: *"I'm not sure if that means the hold is still there or not."*
   #
   # Rank 2 exists to answer "what would I get back if I cancelled". When the answer is the number
-  # already filling the box it answers nothing, and it costs the slot that rank 4 would have used to
-  # say HOLD -- which is the one thing he actually wanted to know. Fall through instead.
+  # already filling the box it answers nothing, and it costs the slot that rank 3 would have used
+  # to say HOLD -- which is the one thing he actually wanted to know. Fall through instead.
   if (hold_driving and sla_fallback is not None and sla_fallback > 0
       and round(sla_fallback) != round(aim)):
     return MaxBoxState(aim, str(round(sla_fallback)), True, True, hold_locked=locked)

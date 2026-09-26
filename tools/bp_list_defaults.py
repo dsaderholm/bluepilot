@@ -72,7 +72,32 @@ for menu, title, key, typ, val, note in rows:
   if title:
     by[menu].append((title, key, typ, val, note))
 
+# THE HEADER IS EMITTED HERE, NOT HAND-ADDED TO THE FILE. It used to live only in
+# BP-DEFAULTS.md, so `--md > BP-DEFAULTS.md` -- the exact command the header itself tells you to
+# run -- destroyed it. The obvious recovery was to hand-edit single rows instead, and the file
+# then drifted: by 2026-09-25 it still listed `SmartCruiseControlVisionEarliness`, a param this
+# fork had deleted, gave High Speed Adjustment Factor as 0.87 against a shipped 0.68, and was
+# missing seven FusionPilot rows. He reads that table to decide what to set on the car.
+#
+# A generator whose output cannot be redirected over its own file is a generator nobody uses.
+MD_HEADER = """# Every setting this branch ships, and what it ships as
+
+Generated -- do not hand-edit. Regenerate with:
+
+```bash
+python tools/bp_list_defaults.py --md > BP-DEFAULTS.md
+```
+
+Your car keeps the FIRST value it ever booted for a key, so where the code has moved since, your
+device may still hold the old one. That is what this table is for: walk the screens and compare.
+
+
+A `(was X)` means the shipped default moved during development -- those are the ones most likely
+to disagree with your device.
+"""
+
 if md:
+  print(MD_HEADER)
   print("| Where | Control | Ships as | Key |")
   print("|---|---|---|---|")
 for menu in sorted(by):

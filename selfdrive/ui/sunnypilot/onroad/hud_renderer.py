@@ -86,13 +86,17 @@ class HudRendererSP(HudRenderer):
     the fallback is today's behaviour.
     """
     # THROUGH THE SHARED READER, not inline. A second copy of the enum positions here is exactly
-    # the drift `icbm_hud_state` exists to prevent.
+    # the drift `icbm_hud_state` exists to prevent -- and this function used to do BOTH: it called
+    # the reader for `hold_locked` and then opened `selfdriveStateSP` again, inline, for a raw
+    # `vBaseline`, three lines under the comment forbidding it. Caught reviewing the pin deletion.
+    #
+    # The two were not the same number. The reader gates the baseline on `overrideState` being
+    # manual; the inline read took `vBaseline` whatever the state said. They agree today only
+    # because every capture site in the controller sets the state before the value and
+    # `SpeedHold.clear()` moves both together -- an invariant nothing enforces. One capture path
+    # written the other way round and the box would tint for a hold the reader says is not there.
     icbm_state = read_icbm_hud_state(ui_state.sm)
-    try:
-      icbm = ui_state.sm['selfdriveStateSP'].intelligentCruiseButtonManagement
-      hold = float(icbm.vBaseline)
-    except Exception:  # noqa: BLE001 -- see docstring
-      hold = 0.0
+    hold = float(icbm_state.baseline)
 
     sla = None
     try:
