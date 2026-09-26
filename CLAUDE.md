@@ -8989,3 +8989,39 @@ here once already and only the car refutes it.
 Ask what the LARGEST admissible value is at the same time as the smallest, and check it against what
 the signal does in the regimes the feature is not for -- parking, maneuvering, standing still. Both
 of this feature's defects so far have been at an end of the range nobody bounded.
+
+## 2026-09-25: 105 DEGREES IS OPENPILOT'S CEILING ON THIS CAR. ANY BIGGER PEAK IS HIS HANDS.
+
+Three turn-analysis gates were set wrong in one evening, and he had to correct the third himself:
+*"right turns definitely would go way more than I've ever seen the wheel turn. I've only seen it
+turn a little over 90 degrees."* Then: *"Come on, Claude, we've got to remember this."*
+
+He is right and the number is already in this file. The 2026-09-17 entry records openpilot's largest
+turn ever on this car: 88 degrees of heading, **105.3 degrees of wheel**, with the command at 86% of
+`FORD_DBC_PATH_ANGLE_MAX`. That is the ceiling, and it is a CAR FACT -- the wire and the ISO clamp
+set it, not tuning.
+
+**So a peak wheel angle of 300-490 degrees is HIS HANDS, categorically.** The first turn-exit scan
+selected 141 "turns of >= 45 deg" with no upper bound and reported *"136 of 141 exits he took within
+1 s of the peak"* as if it were the complaint quantified. It was measuring him parking: 480 deg of
+wheel at 4 mph with 270 deg of heading change is a parking crank, and the answer was preordained.
+
+**A DEGREE THRESHOLD WAS NEVER THE RIGHT SELECTOR.** The question is whether openpilot was steering
+at the moment being scored, so the selector is `latActive and not steeringPressed` ON THE PEAK
+FRAME. That is not the same as the 2026-09-04 rule about printing the two flags as separate columns
+-- that rule is about DISPLAY, and this is about choosing a population, which is legitimate as long
+as it is stated.
+
+**THE SHAPE OF THE ERROR, because it alternated:** 2026-09-14 gated unwind analysis to highway and
+excluded the intersection turns he actually complains about; 2026-09-25 gated a turn scan so loosely
+it admitted parking. Too tight then too loose is the same failure -- a gate chosen from a number
+rather than from what the driver is describing. **Say out loud which population the driver means,
+then write the gate to select exactly that, and sanity-check the result against a known ceiling
+before reading anything into it.**
+
+**AND HE HAS TOLD US WHAT THE CAR CAN DO: lefts at intersections work, rights do not.** That is
+geometry and it is arithmetic from constants already in this file. A left is a 20-30 m arc; a right
+hugs the corner at 8-12 m. At 15 mph `clip_curvature` permits 15.0 m and the wire permits 16.8 m --
+so a left fits and a right is already past the ISO clamp and cannot be planned at all. Rights need
+the car SLOWER, and the 20 mph ICBM floor is what prevents that. Same chain as the longitudinal
+parity argument, arrived at from the driver's own observation rather than from a table.
