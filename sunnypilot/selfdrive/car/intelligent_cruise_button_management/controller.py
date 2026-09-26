@@ -112,8 +112,21 @@ SET_BUTTONS = (ButtonType.setCruise,)
 # ON long enough for opendbc's ford/icbm.py to put one frame on the wire (it emits at most one per
 # 0.05 s), then a gap long enough that the car reads a release rather than a repeat.
 TAP_BAND = 2
-TAP_ON_FRAMES = 8
+# SIX, and the number is forced rather than chosen. `ford/icbm.py` emits a button frame when
+# `(frame - last_button_frame) * DT_CTRL > 0.05`, which at 100 Hz is one frame every 6. A request
+# held for 8 frames therefore spans TWO slots and puts two presses on the wire -- measured on route
+# 0000049d t+33085, where one `increase` moved the dash 75 -> 77 and forced a `decrease` back.
+# At 6 the first frame of the window emits (the previous emission is a whole cycle behind) and the
+# next eligible frame is 6, which is already past the window. Exactly one, provably.
+# `test_tap_puts_one_frame_on_the_wire.py` replays that emitter rule rather than restating it.
+TAP_ON_FRAMES = 6
 TAP_CYCLE_FRAMES = 60
+# How far the car must be AHEAD of the set speed before the gas handoff follows it up. The handoff
+# exists for "accelerate from a 35 zone onto a 65 road and the number is still 35 when you lift" --
+# a 30 mph gap. Without a floor it also fires at 0.5 mph: doing 75.5 with the set speed at 75 rounds
+# to 76, presses up, and presses back down on lift, which reads as the controller failing to settle
+# and is what he reported on 2026-09-25. 2 keeps every case the feature was built for.
+GAS_HANDOFF_MIN_GAIN = 2
 
 RESUME_PRESS_MEMORY_FRAMES = 150  # 1.5 s at 100 Hz, generous next to the engage delay
 SET_PRESS_MEMORY_FRAMES = 150     # same window, same reason -- the PCM reports enabled late
@@ -1039,7 +1052,10 @@ class IntelligentCruiseButtonManagement:
 
     # Past the rise limiter on purpose. That limiter exists to stop ACC lunging when the target
     # jumps up, and ACC is not driving here -- metering the number would just recreate the lag.
-    if v_ego_conv > self.v_target:
+    #
+    # ...but only once the car is genuinely AHEAD -- see GAS_HANDOFF_MIN_GAIN. Following a half mph
+    # is indistinguishable from a controller that cannot settle, and costs a press in each direction.
+    if v_ego_conv - self.v_target >= GAS_HANDOFF_MIN_GAIN:
       self.rise_anchor = 0
       self.rise_stall_frames = 0
       return v_ego_conv
