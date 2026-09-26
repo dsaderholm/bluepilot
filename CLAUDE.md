@@ -3996,10 +3996,27 @@ The driver outranks all of it: their own press, or any gap movement we did not c
 lease on the spot and is NOT pressed back over.
 
 **What is still unknown is the only thing that matters:** whether the camera accepts an injected gap
-press at all. It cannot be settled offline and there is no requester yet, so the first real passing
-assist request is the experiment. The controller diagnoses itself and gives up safely, and every
-transition is `cloudlog.warning`ed as `ICBM gap: mode=... result=...` so the answer is readable off
-a route rather than inferred.
+press at all. It cannot be settled offline, and it is now one drive away rather than one branch away.
+
+**THE REQUESTER HAS EXISTED SINCE 2026-08-15 AND THIS PARAGRAPH CLAIMED OTHERWISE FOR SIX WEEKS.**
+`cd6967eb9d` on `passing-assist-phase1` -- "request the closer gap, and stop asking is the part that
+matters" -- wired `_update_gap_request` into `longitudinalPlanSP.accGapRequest` the DAY AFTER this
+controller landed. Both halves have been complete since August: passing assist decides it wants
+gap 1 and asserts the lease, ICBM presses and reads the camera's answer back. The only thing holding
+it shut is `IcbmGapControl`, which reads **0 on his device, written 2026-08-18 09:42 MDT and
+untouched since** -- four days after the button was built. Nothing was missing. Nobody flipped it.
+
+**AND THE REQUEST IS NOT GATED ON THE REAR RADAR, deliberately.** `_gap_pursuing` is set from the car
+AHEAD, not from whether a lane is available, so it fires on approaches passing assist merely
+SUGGESTS. Testing this needs no hardware and does not wait on the rear radar or on actuation.
+
+**HE IS GOING TO TEST IT -- 2026-09-26, his decision, his switch.** So the next drive with a slow
+lead answers the camera question. Read it off the route: `ICBM gap: mode=... inverted=... result=...`
+at warning level names which press form the camera honoured and whether the direction is inverted,
+and `carStateBP.accGap` says whether the gap actually moved. The controller diagnoses itself and
+gives up safely. **A drive with no slow lead answers nothing** -- the request needs something to
+pursue, so silence is a statement about the traffic, not about the camera, and must not be written
+up as "the press does not work".
 
 **And nobody knows what gaps 1-5 ARE.** He set his by feel and thinks 3/5 is about two seconds.
 `tools/bp_gap_seconds.py` measures it from any route -- headway during steady following only, since
