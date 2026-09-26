@@ -26,12 +26,20 @@ See the LICENSE.md file in the root directory for more details.
 # drive the same object the day ICBM is gone. Nothing crosses a process boundary and no timing
 # relationship moves.
 #
-# WHAT IS DELIBERATELY NOT HERE YET: the persistent param keys (`IcbmPinnedHolds`,
-# `IcbmHoldObservations`, `IcbmBaselineResetDelta`) and the capnp fields (`vBaseline`,
-# `baselineSource`, `pinSuggestion`). Renaming a PERSISTENT key discards his stored value, and the
-# capnp fields have WIRE HISTORY in every recorded route -- renumbering makes every drive on disk
-# decode as garbage. Those are a separate change, through the `_BP_LATERAL_SCHEME_PARAM_RENAMES`
-# machinery that exists for exactly this, and renaming the field while keeping the ordinal.
+# WHAT IS DELIBERATELY NOT HERE YET: the persistent param key `IcbmBaselineResetDelta` and the
+# capnp fields `vBaseline` and `baselineSource`. Renaming a PERSISTENT key discards his stored
+# value, and the capnp fields have WIRE HISTORY in every recorded route -- renumbering makes every
+# drive on disk decode as garbage. Those are a separate change, through the
+# `_BP_LATERAL_SCHEME_PARAM_RENAMES` machinery that exists for exactly this, and renaming the field
+# while keeping the ordinal.
+#
+# PINNED HOLDS WENT WITH THIS MIGRATION RATHER THAN THROUGH IT, 2026-09-25. He had asked three
+# times not to have them -- *"I doubt I am going to use pinned holds at all"*, *"I just want to be
+# able to override the speed when I want and it to not be remembered"*, *"Remember, I don't like
+# the concept of pinned holds"* -- and `IcbmPinnedHolds` had read `[]` since 2026-08-11, so not one
+# had ever been created on the car. Deleting was cheaper than migrating and is what he asked for.
+# `pinSuggestion @7` and `BaselineSource.pinned @4` are retired in place; the ordinals cannot be
+# reused.
 
 from cereal import custom
 

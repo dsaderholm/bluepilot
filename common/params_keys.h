@@ -219,46 +219,6 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"IcbmResumeGateEnabled", {PERSISTENT | BACKUP, BOOL, "1"}},
     {"IcbmResumeMinGap", {PERSISTENT | BACKUP, INT, "6"}},        // meters of lead gap
     {"IcbmResumeMinLeadSpeed", {PERSISTENT | BACKUP, INT, "5"}},  // mph the lead must be doing
-    // BluePilot: holds pinned to a place -- JSON [{"lat":,"lon":,"speed":}], speed in display
-    // units. For the handful of spots that need the same correction on every drive: a sign the
-    // camera reliably misreads, a limit nobody drives, a school zone out of hours. Not for ramps;
-    // those are curve geometry and belong to SCC-Map.
-    {"IcbmPinnedHolds", {PERSISTENT | BACKUP, JSON}},
-    // BluePilot: places the driver has set the same hold more than once. Feeds the suggestion to
-    // pin it -- see SUGGEST_AFTER in pinned_holds.py. Suggestions never act on their own.
-    {"IcbmHoldObservations", {PERSISTENT | BACKUP, JSON}},
-    // FusionPilot: OFF, and this is a REJECTED CONCEPT rather than a feature that ships disabled.
-    //
-    // "Every feature this fork builds ships ON" is the standing rule and it does not apply here,
-    // because he does not want the idea:
-    //
-    //   *"I doubt I am going to use pinned holds at all. Those were for before I knew about how
-    //    easy it was to use OSM."*
-    //   *"I just want to be able to override the speed when I want and it to not be remembered.
-    //    Memory will be me editing OSM."*
-    //   *"Remember, I don't like the concept of pinned holds."*  -- 2026-08-26, a third time
-    //
-    // He turned it off himself at 07:38 on 2026-08-26 and the default said 1 until this change.
-    //
-    // AND IT HAS NEVER WORKED. `IcbmPinnedHolds` has read `[]` since 2026-08-11 -- a pin has never
-    // once been successfully created on this car -- so it cannot be defended as something another
-    // owner might enjoy either. Nobody has ever had it.
-    //
-    // THE END STATE IS DELETION, not this. His own rule: when a reason expires, delete rather than
-    // park at neutral, because a knob that changes nothing still reads as load-bearing. Deferred
-    // only because he leaves on a 2,000 mile drive tomorrow and this branch rebases onto his.
-    //
-    // WHEN IT IS DELETED, `pinSuggestion` IN custom.capnp MUST NOT BE RENUMBERED. It has WIRE
-    // HISTORY -- it is in every route recorded on the device -- and capnp reads by POSITION, so
-    // moving it makes every stored drive decode as garbage. Retire the field, keep the ordinal.
-    {"IcbmPinnedHoldsEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},
-    // Metres. Big enough that GPS scatter cannot step over it, small enough that a surface-street
-    // pin does not fire on the freeway above it. A pin only has to hit ONCE -- it sets a normal
-    // hold, which then persists on its own -- so this covers fix error, not the length of the zone.
-    {"IcbmPinnedHoldRadius", {PERSISTENT | BACKUP, INT, "60"}},
-    // Set by tapping the on-screen HOLD badge; consumed by selfdrived, which is where the GPS fix
-    // and the live baseline both are. Keeps the UI from needing either.
-    {"IcbmPinHoldRequest", {CLEAR_ON_MANAGER_START, BOOL}},
     // BluePilot: let a longitudinal feature ask the car for a different ACC follow gap, by pressing
     // the gap button the way ICBM presses the set-speed buttons. Closed loop against
     // AccTGap_D_Dsply in ACCDATA_3, which the camera already broadcasts and carstate already

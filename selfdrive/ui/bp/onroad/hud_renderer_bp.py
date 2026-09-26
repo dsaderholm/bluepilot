@@ -217,7 +217,6 @@ class HudRendererBP(HudRendererSP):
     # it on 2026-08-22 rather than left assigned: four of them had already become write-only, two
     # were not reset per frame, and the next person to draw a pin state would have reached for
     # last frame's answer. The box resolves all of it now, once, in `max_box_state`.
-    self._hold_rect = None      # the set-speed box, while there is a hold or an offer to tap
     self._acc_status_failed = False   # latched on any error; keeps a display bug off the screen
     self.speed_right = 0
     self._gradient_rect = None  # BluePilot: Full-width rect for header gradient
@@ -402,22 +401,6 @@ class HudRendererBP(HudRendererSP):
     # HUD elements use the (possibly offset) rect for positioning
     if self.is_cruise_available:
       self._draw_set_speed(rect)
-      # THE PIN TAP TARGET IS THE SET-SPEED BOX ITSELF, 2026-08-22. The HOLD badge that used to own
-      # this rect is gone -- since `max_box_state` landed, the box already shows the hold as the big
-      # number and tints while the hold owns it, so the badge was a second drawing of a number
-      # already on screen. His call: *"we are just going to use the target speed"*.
-      #
-      # Set HERE rather than in `_draw_acc_status`, where the badge lived, because that method
-      # returns early in several states (lamps-only, nothing to report) and the tap must keep
-      # working in all of them. A hold governing the car with no way to pin or unpin it is the
-      # defect that killed pinned holds for two days in August.
-      # Straight off the box's own resolved state, which `_draw_set_speed` wrote one line ago.
-      # `hold_driving` covers a hold worth unpinning; `pin_offer` covers a place worth pinning with
-      # no hold yet -- which is exactly the pair the old `display_value` collapsed into one number.
-      tappable = bool(self._box.hold_driving or self._box.pin_offer) if self._box else False
-      self._hold_rect = self._set_speed_rect if tappable else None
-    else:
-      self._hold_rect = None   # no box on screen, no tap target
     # BluePilot: the ACC readouts describe what ACC is doing, so they follow cruise availability.
     # The brake lamps do not -- they are a fact about the car regardless of what is driving it, and
     # the owner asked for them visible whenever the setting is on. Drawn outside that gate, and
@@ -443,37 +426,6 @@ class HudRendererBP(HudRendererSP):
     self.turn_signal_controller.render(rect)
     self.circular_alerts_renderer.render(rect)
     self.rocket_fuel.render(rect, ui_state.sm)
-
-  def _handle_mouse_release(self, mouse_pos) -> None:
-    """BluePilot: tapping the HOLD badge pins this hold to this place, or unpins it.
-
-    The badge is the tap target because it is already the thing on screen that means "hold", and
-    because the cruise buttons are full -- every one of them carries a settled meaning the owner
-    learned once, and adding a gesture would mean relearning one to gain a rare action.
-
-    Only a request is raised here. selfdrived does the work, because that is where the GPS fix and
-    the live baseline both are; the UI has neither and should not grow a second copy of either.
-    """
-    # THE BADGE TAP IS CONSUMED BEFORE THE PARENT SEES IT. This used to call super() first, so every
-    # tap reached upstream's handler and opened the sidebar -- including taps on the badge. Reported
-    # 2026-08-12: "tapping a hold does nothing, if you tap the screen it just opens the menu on the
-    # left." The pin request was still being raised underneath, but the sidebar sliding out is what
-    # the driver sees, so the gesture read as dead and the feedback was hidden behind the menu.
-    #
-    # Checking our own target first and returning is what makes it a real button rather than a
-    # side effect of a tap that also does something else.
-    # `_hold_rect` is None unless there is something to pin -- see `_render`. The second condition
-    # that used to be here read `_icbm_baseline`, which no longer exists and was saying the same
-    # thing twice.
-    if (self._hold_rect is not None
-        and rl.check_collision_point_rec(mouse_pos, self._hold_rect)):
-      try:
-        self._bp_params.put_bool("IcbmPinHoldRequest", True)
-      except Exception:
-        pass
-      return
-
-    super()._handle_mouse_release(mouse_pos)
 
   def _ahead_box_visible(self) -> bool:
     """Is sunnypilot's AHEAD box on screen, so our stack has to start below it?

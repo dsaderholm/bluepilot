@@ -20,8 +20,6 @@ device may still hold the old one. That is what this table is for: walk the scre
 | Cruise | Map Curve Braking Rate | **8** | `SmartCruiseControlMapDecel` |
 | Cruise | Max Set Speed Drop Per Step | **12** | `IcbmMaxTargetDrop` |
 | Cruise | Max Set Speed Rise Per Step | **5** | `IcbmMaxTargetRise` |
-| Cruise | Pinned Hold Range | **60** | `IcbmPinnedHoldRadius` |
-| Cruise | Remember Holds By Location | **On** | `IcbmPinnedHoldsEnabled` |
 | Cruise | Resume Minimum Gap | **6** | `IcbmResumeMinGap` |
 | Cruise | Resume Minimum Lead Speed | **5** | `IcbmResumeMinLeadSpeed` |
 | Cruise | Slow For Stop Signs And Lights | **On** | `IcbmModelStopEnabled` |

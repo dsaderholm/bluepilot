@@ -57,7 +57,7 @@ WATCH = {
   "SLA":     ("SpeedLimitMode", "SpeedLimitPolicy", "SpeedLimitAutoFollow",
               "SpeedLimitValueOffset", "SpeedLimitOffsetType", "SpeedLimitMaxSetSpeed"),
   "ICBM":    ("IntelligentCruiseButtonManagement", "IcbmMaxTargetDrop", "IcbmModelStopEnabled",
-              "IcbmPinnedHoldsEnabled", "IcbmGapControl", "IcbmBaselineResetDelta"),
+              "IcbmGapControl", "IcbmBaselineResetDelta"),
   "MODE":    ("ExperimentalMode", "DynamicExperimentalControl", "AlphaLongitudinalEnabled",
               "MapdV2", "ModelManagerSelectedBundle"),
 }

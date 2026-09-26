@@ -29,7 +29,6 @@ from openpilot.sunnypilot import get_sanitize_int_param
 from openpilot.sunnypilot.selfdrive.car.car_specific import CarSpecificEventsSP
 from openpilot.sunnypilot.selfdrive.car.cruise_helpers import CruiseHelper
 from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management.controller import IntelligentCruiseButtonManagement
-from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management.pinned_holds import PinnedHolds
 BaselineSource = custom.IntelligentCruiseButtonManagement.BaselineSource
 from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP
 from openpilot.bluepilot.selfdrive.selfdrived.steer_saturated_gate import SteerSaturatedGate
@@ -202,12 +201,6 @@ class SelfdriveD(CruiseHelper):
 
     self.mads = ModularAssistiveDrivingSystem(self)
     self.icbm = IntelligentCruiseButtonManagement(self.CP, self.CP_SP)
-    # BluePilot: holds pinned to a place. Evaluated here rather than in the controller because this
-    # is where both halves live -- the GPS fix and the live baseline -- and the UI that creates a
-    # pin needs neither.
-    self.pinned_holds = PinnedHolds(self.params)
-    self._last_observed_hold = 0   # so one hold is counted once, not once per frame
-    self.icbm_pin_suggestion = 0   # a speed worth offering to pin here, published for the badge
 
     self.car_events_sp = CarSpecificEventsSP(self.CP, self.CP_SP)
 
@@ -551,61 +544,7 @@ class SelfdriveD(CruiseHelper):
     # ceiling that never binds, so ICBM's rise limiter has nothing to meter -- see
     # apply_target_rise_limit. radarState is already subscribed above.
     lead_present = bool(self.sm['radarState'].leadOne.status) if self.sm.valid['radarState'] else False
-    self.icbm.run(CS, self.sm['carControl'], self.sm['longitudinalPlanSP'], self.is_metric, lead_present,
-                  self.update_pinned_holds())
-
-  def _pinnable_speed(self) -> int:
-    """BluePilot: the hold to learn from and to pin, INCLUDING the one the no-limit rule removed.
-
-    `enforce_hold_policy` drops the baseline on a road with no posted limit, which is what the
-    owner asked for -- the max speed is the whole interface there. But pinned holds keyed on
-    `v_baseline` for both halves of their machinery, so that change silently killed observing AND
-    pinning on exactly the roads he says pins are for: *"we do still want pinned holds since those
-    are frequently done when SLA doesn't have a number."*
-
-    Caught on 2026-08-17 from his own device rather than from the code -- `IcbmHoldObservations` was
-    6 KB and growing while `IcbmPinnedHolds` was `[]` and five days stale.
-
-    """
-    return int(self.icbm.v_baseline)
-
-  def update_pinned_holds(self) -> int:
-    """BluePilot: pinned speed for where the car is now, in display units, or 0.
-
-    Also services the pin/unpin request the HOLD badge raises. Doing both here keeps every use of
-    the GPS fix in one place; the alternative was giving the UI a position and the controller a
-    second one, and having them disagree.
-
-    Every failure mode returns 0, which reads as "no pin" and leaves ICBM exactly as it was. A
-    feature that edits the set speed from a stored file must degrade to doing nothing.
-    """
-    try:
-      self.pinned_holds.update_params()
-      gps = self.sm[self.gps_location_service]
-      if not self.sm.valid[self.gps_location_service] or not gps.hasFix:
-        return 0
-      lat, lon = float(gps.latitude), float(gps.longitude)
-
-      if self.pinned_holds.request_pending():
-        # A tap accepts a standing suggestion if there is one, otherwise pins whatever is held.
-        # Same gesture either way -- the badge shows which state you are in.
-        suggested = self.pinned_holds.suggestion(lat, lon)
-        self.pinned_holds.toggle(lat, lon, suggested or self._pinnable_speed())
-
-      # Learn from holds the DRIVER creates. Not ones a pin created -- counting those would make a
-      # suggestion evidence for itself and it would re-suggest forever.
-      baseline = self._pinnable_speed()
-      if (baseline > 0 and baseline != self._last_observed_hold
-          and self.icbm.baseline_source != BaselineSource.pinned):
-        self._last_observed_hold = baseline
-        self.pinned_holds.observe_hold(lat, lon, baseline)
-      elif baseline == 0:
-        self._last_observed_hold = 0
-
-      matched, self.icbm_pin_suggestion = self.pinned_holds.evaluate(lat, lon)
-      return matched
-    except Exception:
-      return 0
+    self.icbm.run(CS, self.sm['carControl'], self.sm['longitudinalPlanSP'], self.is_metric, lead_present)
 
   def data_sample(self):
     _car_state = messaging.recv_one(self.car_state_sock)
@@ -719,7 +658,8 @@ class SelfdriveD(CruiseHelper):
     icbm.vBaseline = float(self.icbm.v_baseline)
     icbm.holdSuppressed = self.icbm.hold_suppressed
     icbm.baselineSource = self.icbm.baseline_source
-    icbm.pinSuggestion = float(self.icbm_pin_suggestion)
+    # pinSuggestion @7 is RETIRED -- pinned holds were deleted on 2026-09-25. The field keeps its
+    # ordinal because a capnp number cannot be reused, and is left at its default 0.
     icbm.gapTarget = int(self.icbm.gap_target)
     # FusionPilot: what the hold-clearing rule actually compares. vTarget above is post-baseline
     # and equals vBaseline whenever a hold is active, so it cannot answer "did the rule see

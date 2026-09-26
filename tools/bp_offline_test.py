@@ -100,6 +100,7 @@ DEFAULT_TARGETS = [
   "selfdrive/car/tests/test_no_int_on_capnp_enums.py",
   "selfdrive/car/tests/test_dec_slow_down_published.py",
   "selfdrive/car/tests/test_capnp_accepts_published_types.py",
+  "selfdrive/car/tests/test_retired_capnp_ordinals.py",
   "sunnypilot/mapd/tests/test_only_one_map_daemon_runs.py",
   "sunnypilot/selfdrive/controls/lib/speed_limit/tests/test_sla_leaves_disabled_while_icbm_moves_the_cluster.py",
   "sunnypilot/selfdrive/controls/lib/speed_limit/tests/test_sla_survives_a_gas_override.py",

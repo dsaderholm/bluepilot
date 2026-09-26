@@ -116,7 +116,7 @@ class IntelligentCruiseButtonManagement:
   baselineSource: 'IntelligentCruiseButtonManagement.BaselineSource' = field(
     default_factory=lambda: IntelligentCruiseButtonManagement.BaselineSource.none
   )
-  pinSuggestion: float = auto_field()
+  pinSuggestion: float = auto_field()   # RETIRED 2026-09-25 -- see custom.capnp
   gapTarget: int = auto_field()  # BluePilot: requested ACC follow gap, 0 = none
   # FusionPilot: the two values the hold-clearing rule compares. vTarget above is POST-baseline and
   # equals vBaseline whenever a hold is active, so it cannot answer "did the rule see equality".
@@ -141,7 +141,7 @@ class IntelligentCruiseButtonManagement:
     press = "press"
     fallbackIdle = "fallbackIdle"
     fallbackCounter = "fallbackCounter"
-    pinned = "pinned"
+    pinned = "pinned"   # RETIRED 2026-09-25 -- see custom.capnp
 
   class OverrideState(StrEnum):
     auto = "auto"

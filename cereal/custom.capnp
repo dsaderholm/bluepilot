@@ -46,8 +46,13 @@ struct IntelligentCruiseButtonManagement {
   # it is the only way to tell the two capture paths apart in a route, and a capnp field number
   # cannot be reused once retired anyway.
   baselineSource @6 :BaselineSource;
-  # BluePilot: a speed worth offering to pin at this place, because the driver has set the same
-  # hold here before. 0 = nothing to offer. Only ever a suggestion; a tap on the badge accepts it.
+  # RETIRED 2026-09-25 with pinned holds, which he asked three times not to have and which had
+  # never once successfully created a pin on this car. Always 0 now; nothing writes it.
+  #
+  # NOT DELETED AND NOT RENUMBERED. capnp reads by POSITION, this field is in every route recorded
+  # on the device, and an ordinal cannot be reused once retired -- moving it would make every
+  # stored drive decode `gapTarget` and everything after it out of the wrong bytes. It costs four
+  # bytes to leave here and it is the only safe thing to do with it.
   pinSuggestion @7 :Float32;
 
   # BluePilot: the ACC follow-gap this fork is asking the car for (Time_Gap_1..5), or 0 for "no
@@ -113,7 +118,9 @@ struct IntelligentCruiseButtonManagement {
     press @1;           # a real ButtonEvent reached MANUAL_OVERRIDE_BUTTONS -- the primary path
     fallbackIdle @2;    # set speed moved while ICBM had been silent long enough to rule itself out
     fallbackCounter @3; # set speed moved AGAINST the button ICBM was holding
-    pinned @4;          # a hold pinned to this place on an earlier drive re-applied itself
+    # RETIRED 2026-09-25 with pinned holds. Kept because routes on the device carry `4` in this
+    # field and an enumerant, like a field, cannot have its number reused.
+    pinned @4;
   }
 }
 

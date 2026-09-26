@@ -477,10 +477,6 @@ class IntelligentCruiseButtonManagement:
     self.rise_stall_frames = 0   # cluster sitting at the ceiling with actual speed not catching up
     self.lead_present = False    # a vehicle ahead; the set speed is then a ceiling, not a demand
 
-    # BluePilot: a hold pinned to this place, in display units; 0 = none here. Edge-triggered --
-    # see apply_pinned_hold.
-    self.pinned_hold = 0
-    self.pinned_hold_prev = 0
 
     # BluePilot: the driver is on the throttle, so ACC is not driving and the set speed is free to
     # follow. See apply_gas_handoff.
@@ -1297,8 +1293,9 @@ class IntelligentCruiseButtonManagement:
         # not create a new hold from the current speed at when it was pressed without an SLA
         # number"*.
         #
-        # Labelled `press` deliberately, not a fallback: he pressed SET here, so a pinned hold
-        # should stand aside for it exactly as it does for a `+`. See `apply_pinned_hold`'s gate.
+        # Labelled `press` deliberately, not a fallback: he pressed SET here, which is as much a
+        # decision as a `+`, and `baselineSource` is how a route tells a chosen hold from an
+        # inferred one.
         if not (self.speed_limit_live and self.v_sla_target > 0):
           self.override_state = OverrideState.manual
           self.v_baseline = self.v_ego_at_set_press
@@ -1348,9 +1345,6 @@ class IntelligentCruiseButtonManagement:
           self.clear_baseline()
         self.cycle_decision_pending = False
 
-    # A pin re-applies here: after the cycle bookkeeping above, so a resume's set-speed jump is not
-    # mistaken for it, and before the press path below, so a real press in the same frame wins.
-    self.apply_pinned_hold(cruise_enabled)
 
     # While the driver is pressing, the baseline follows the cluster. It therefore settles wherever
     # they stop, and holding the button through several increments records the final speed rather
@@ -1481,16 +1475,7 @@ class IntelligentCruiseButtonManagement:
       # the target, so movement there must not redefine the hold. Without this the press path's
       # protection is worthless -- the fallback re-baselines a frame later, which is what a probe
       # caught: the hold still fell 70 -> 50 with the press path already fixed.
-      # A PIN OWNS ITS VALUE, not just its label. This branch is the INFERRED path -- it fires on
-      # set-speed movement with no button event behind it, and route 00000379 showed it firing all
-      # drive on a road with no posted limit. Letting it rewrite v_baseline replaces the number the
-      # owner deliberately pinned to this place with whatever the cluster happens to read, and the
-      # pin is edge-triggered and already spent, so nothing restores it.
-      #
-      # A real button press is a different matter and still wins: that site sets both the value and
-      # `press` unconditionally, a few lines up. Overriding a pin by hand is deliberate; drifting
-      # off one because the cluster moved is not.
-      if not self.hold_suppressed and self.baseline_source != BaselineSource.pinned:
+      if not self.hold_suppressed:
         self.v_baseline = self.v_cruise_cluster
         # NEVER downgrade a press. The question this field exists to answer is "does the press
         # path fire at all on this car", and a last-writer-wins field answers a different one.
@@ -1541,14 +1526,7 @@ class IntelligentCruiseButtonManagement:
     if self.press_settle_frames > 0:
       # Honour what was true when the press happened, not what is true now -- see press_suppressed.
       #
-      # A pin is exempt here for the same reason as the fallback capture above, and this is the site
-      # that actually bit: the INFERRED fallback arms this stand-down too, so guarding only the
-      # capture left the pin's value rewritten here a few lines later. Found by tracing every write
-      # to v_baseline rather than by reading, after the first guard did not fix the test.
-      #
-      # A genuine button press is unaffected: the press path sets `press` (and the value)
-      # unconditionally before this runs, so `pinned` is only still set when nobody pressed anything.
-      if not self.press_suppressed and self.baseline_source != BaselineSource.pinned:
+      if not self.press_suppressed:
         self.v_baseline = self.v_cruise_cluster
       # The set speed must have actually MOVED before "stable" means anything. Without this the
       # counter reaches its threshold while the cluster is merely slow to report, the stand-down
@@ -1651,11 +1629,6 @@ class IntelligentCruiseButtonManagement:
     #   * a hold BORN equal never armed it either, so it sat 164.7 s (route ac)
     #   * and both were still gated on SLA winning, which is this one.
     #
-    # A PINNED HOLD IS EXEMPT, which is his whole sentence and not a footnote to it: *"if I set my
-    # hold that I had back to the SLA speed, I want that hold gone UNLESS IT'S PINNED."* A pin is a
-    # deliberate statement about a PLACE -- he chose this speed here, on an earlier drive, and
-    # matching the posted limit today does not retract that. Clearing it would delete the pin's
-    # effect every time the limit happened to agree with it, on exactly the roads pins are for.
     # EXACT EQUALITY, and a ±1 tolerance was TRIED AND REVERTED on 2026-08-22. Review raised that
     # `v_sla_target` rounds a continuous m/s value while `v_baseline` comes off a dash that moves in
     # whole units, so with a percentage offset the two might never land on the same integer and the
@@ -1672,7 +1645,7 @@ class IntelligentCruiseButtonManagement:
     if self.speed_limit_live and self.v_sla_target > 0:
       if self.v_baseline != self.v_sla_target:
         self.baseline_diverged = True
-      elif self.baseline_source != BaselineSource.pinned:
+      else:
         self.clear_baseline()
         return
 
@@ -1686,84 +1659,6 @@ class IntelligentCruiseButtonManagement:
     if (self.plan_source == LongitudinalPlanSource.speedLimitAssist and
         abs(self.v_target_raw - self.v_target_overridden) >= self.baseline_reset_delta):
       self.clear_baseline()
-
-  def apply_pinned_hold(self, cruise_enabled: bool) -> bool:
-    """BluePilot: re-apply a hold that was pinned to this place on an earlier drive.
-
-    EDGE-triggered, not level-triggered, and that is the whole design. It fires once on entering the
-    radius and then gets out of the way, so the pin decides the NUMBER and WHERE and nothing else.
-    Everything after is an ordinary hold: the driver can adjust it and their adjustment stands,
-    curves still slow the car, hazards still override, and the usual clearing rules apply.
-
-    Level-triggering would have meant re-asserting the pinned number every frame inside the zone,
-    which takes the set speed away from the driver for as long as they are in it -- the same
-    "fighting the driver" failure the manual override latch exists to prevent.
-
-    Leaving and re-entering re-arms it, which is what makes a pin useful on a road driven daily.
-    """
-    # A hold is a number for cruise to drive to, so nothing is applied while cruise is off -- but
-    # the edge must not be CONSUMED there either. Recording it unconditionally meant a pin entered
-    # with cruise off was marked as already-fired, and since the engagement frame itself returns
-    # early (the cruise-cycle bookkeeping above), the pin was gone by the frame after. Every drive
-    # that began inside a pin's radius -- a fresh boot, a driveway or a workplace lot within 60 m of
-    # one -- silently lost it, which is most of the point of pinning a road you drive daily.
-    #
-    # Only the drop to 0 is tracked while disengaged, so leaving the radius still re-arms.
-    if not cruise_enabled:
-      if self.pinned_hold == 0:
-        self.pinned_hold_prev = 0
-      return False
-
-    fired = self.pinned_hold > 0 and self.pinned_hold != self.pinned_hold_prev
-    self.pinned_hold_prev = self.pinned_hold
-    if not fired:
-      return False
-
-    # A LIVE HOLD OUTRANKS A REMEMBERED ONE. Measured on route 0000033c at t+333, 2026-08-11: he set
-    # 75 by hand at t+134, drove into a zone with 70 pinned from an earlier drive, and the pin
-    # silently replaced his number. He reported it as "my hold dropped by 5 mph, which was strange",
-    # and strange is exactly right -- nothing he did caused it and nothing on screen said why.
-    #
-    # A pin is a record of what he wanted on some previous drive. A hold he set minutes ago is what
-    # he wants now, and when the two disagree the live one wins. The pin still applies when there is
-    # no hold, which is the case it exists for, and a pin still replaces a hold that came from
-    # another pin -- that is one remembered number superseding another, not a preference being
-    # overwritten.
-    #
-    # The edge is consumed above whether or not it applies, so a blocked pin does not retry every
-    # frame inside the radius. Leaving and re-entering still re-arms it.
-    # ...AND "LIVE" MEANS CHOSEN, NOT MERELY PRESENT. Narrowed 2026-08-25, when retiring
-    # `enforce_hold_policy` made a hold exist in every SLA mode: with the old gate a pin could then
-    # never fire on the roads pins are FOR, because there was always some baseline sitting there.
-    # That is the 2026-08-16 failure ("no limit means no hold" killing pinned holds outright)
-    # arriving from the other direction.
-    #
-    # `baseline_source` already separates the two, and route 00000379 is the evidence that they are
-    # genuinely different things: a hold was up for 36.5% of that drive reading `fallbackIdle` --
-    # the path that INFERS a press from set-speed movement -- while he pressed SET five times and
-    # nothing else. Nearly every hold on it was inferred rather than chosen.
-    #
-    #   press                      he pressed +/- at a number. A decision. A pin defers to it.
-    #   fallbackIdle / Counter     the set speed moved and we inferred a hold. Carried in from the
-    #                              last road, not a statement about this place. The pin wins.
-    #   pinned                     one remembered number superseding another. The pin wins, as before.
-    #
-    # Route 0000033c is still honoured, which is the point of using the source rather than "has he
-    # pressed since entering the radius": his 75 there came from a real `+`, so it reads `press`
-    # and the pin still stands aside. His words for the alternative -- *"my hold dropped by 5 mph,
-    # which was strange"* -- remain the thing this gate exists to prevent.
-    if self.v_baseline > 0 and self.baseline_source == BaselineSource.press:
-      return False
-
-    if self.override_state != OverrideState.manual:
-      self.v_target_overridden = self.v_target_raw
-      self.baseline_diverged = False
-    self.override_state = OverrideState.manual
-    self.v_baseline = self.pinned_hold
-    self.baseline_source = BaselineSource.pinned
-    self.v_cluster_at_press = self.v_cruise_cluster
-    self.cluster_moved_since_press = False   # resets with the anchor -- see the note in the fallback
-    return True
 
   def enforce_hold_policy(self) -> None:
     """BluePilot: WITHOUT SPEED LIMIT ASSIST, EVERYTHING IS A HOLD. Rewritten 2026-08-25.
@@ -1793,11 +1688,10 @@ class IntelligentCruiseButtonManagement:
     WHAT IS LEFT IS STOCK ACC PLUS MEMORY. With SLA off or informational, `plan_source` is never
     `speedLimitAssist`, so `apply_baseline` returns the baseline for the cruise component and caps
     curves and leads with it -- the car is driven to his number and still slows for corners and
-    traffic. The addition is that the number is recorded, so `observe_hold` can suggest a pin.
+    traffic. The addition is that the number persists across a cruise cycle.
 
     NOTHING REPLACES IT, deliberately: a hold is whatever the driver last asked for, in every SLA
-    mode. `apply_pinned_hold`'s gate was narrowed in the same change to keep pins working now that
-    a baseline is usually present -- see the note there.
+    mode.
     """
     return
 
@@ -1833,13 +1727,12 @@ class IntelligentCruiseButtonManagement:
     self.gap_target = int(getattr(LP_SP, "accGapRequest", 0) or 0)
 
   def run(self, CS: car.CarState, CC: car.CarControl, LP_SP: custom.LongitudinalPlanSP, is_metric: bool,
-          lead_present: bool = False, pinned_hold: int = 0) -> None:
+          lead_present: bool = False) -> None:
     if self.CP_SP.pcmCruiseSpeed:
       return
 
     self.is_metric = is_metric
     self.lead_present = lead_present
-    self.pinned_hold = int(pinned_hold)
     self.gas_pressed = bool(CS.gasPressed)
 
     self.update_params()

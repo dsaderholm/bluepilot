@@ -745,7 +745,7 @@ class TestReturningToTheLimitHandsItBack:
     """FusionPilot, 2026-08-24, found in code review of the same evening's work.
 
     `cluster_moved_since_press` means "the cluster has moved since THIS anchor", so it is a PAIR
-    with `v_cluster_at_press`. The press path resets both. The inferred fallback and the pinned-hold
+    with `v_cluster_at_press`. The press path resets both. The inferred fallback
     path each re-anchored WITHOUT resetting the latch, so a stand-down armed by either began with
     `moved` already True from an earlier press -- and `settled` can then fire on the first stable
     frame, ending the stand-down mid-gesture.
@@ -835,20 +835,6 @@ class TestReturningToTheLimitHandsItBack:
 
     assert icbm.v_baseline == LIMIT, (
       "a hold was destroyed by a limit belonging to a road he had already left")
-    assert icbm.override_state == OverrideState.manual
-
-  def test_a_pinned_hold_at_SLAs_number_survives(self):
-    """His sentence has a carve-out and it is not a footnote: *"if I set my hold that I had back to
-    the SLA speed, I want that hold gone UNLESS IT'S PINNED."*
-
-    A pin is a statement about a PLACE, made on an earlier drive. The posted limit agreeing with it
-    today does not retract it -- and clearing it would delete the pin's effect on exactly the roads
-    pins exist for."""
-    icbm = fresh()
-    set_baseline(icbm, to=LIMIT)
-    icbm.baseline_source = BaselineSource.pinned
-    settle(icbm, LIMIT, cluster=LIMIT, frames=800)
-    assert icbm.v_baseline == LIMIT, "a PINNED hold was cleared for agreeing with the limit"
     assert icbm.override_state == OverrideState.manual
 
   def test_a_curve_matching_the_baseline_does_not_clear_it(self):
@@ -2006,7 +1992,7 @@ class TestAHoldExistsInEverySlaMode:
   badge deleted 2026-08-22. For those six days a hold was a SECOND number in its own badge, so "do
   the max speed, not the little number" was a real instruction. Once the badge went, the big number
   IS the hold -- so "just the max speed" and "everything is a hold" describe the same screen, and
-  the only thing the policy still did was throw away persistence and the pinned-holds trace.
+  the only thing the policy still did was throw away persistence across a cruise cycle.
 
   This is the FOURTH statement of the rule. The history is kept rather than deleted because each
   version was right about the behaviour he asked for and wrong about the signal to key it on --
@@ -2093,144 +2079,6 @@ class TestAHoldExistsInEverySlaMode:
     for _ in range(20):
       icbm.enforce_hold_policy()
     assert (icbm.v_baseline, icbm.override_state) == before, "enforce_hold_policy changed state"
-
-
-def in_zone(icbm, speed, frames, enabled=True, road_speed=48):
-  """Drive with a pinned hold of `speed` in range (0 means no pin here), cruise on or off."""
-  for _ in range(frames):
-    icbm.run(make_cs(road_speed, v_ego=road_speed, enabled=enabled), CC, make_lp(LIMIT), False,
-             pinned_hold=speed)
-
-
-class TestAPinnedHoldSurvivesCruiseBeingOff:
-  """The pin has to be there on the drives that START inside its radius.
-
-  That is a fresh boot in the driveway, a workplace lot within the radius, or any engagement made
-  after arriving -- and on this car it is most of them, since the pin exists for roads driven daily.
-  The edge used to be consumed the instant GPS matched, cruise state ignored, so by the time cruise
-  came on the pin was already marked as fired and the number silently never applied. Nothing showed
-  it: no alert, no event, and the pinned-holds tests only ever exercised the storage class.
-  """
-
-  def test_engaging_inside_a_pinned_zone_applies_the_pin(self):
-    icbm = fresh()
-    in_zone(icbm, 45, 200, enabled=False)          # parked or coasting in the zone, cruise off
-    in_zone(icbm, 45, 300, enabled=True)           # driver engages, still inside it
-    assert icbm.v_baseline == 45, "the pin was consumed while cruise was off"
-    assert icbm.override_state == OverrideState.manual
-    assert icbm.baseline_source == BaselineSource.pinned
-
-  def test_a_pin_entered_while_already_engaged_still_fires(self):
-    """The case that did work, kept as the counterweight: the fix must not trade one for the other."""
-    icbm = fresh()
-    in_zone(icbm, 0, 50, enabled=True)
-    in_zone(icbm, 45, 50, enabled=True)
-    assert icbm.v_baseline == 45
-    assert icbm.baseline_source == BaselineSource.pinned
-
-  def test_leaving_the_zone_with_cruise_off_still_re_arms_it(self):
-    """The drop to 0 must keep being tracked while disengaged, or a pin fires once per boot."""
-    icbm = fresh()
-    in_zone(icbm, 45, 200, enabled=False)
-    in_zone(icbm, 0, 100, enabled=False)           # drives out of range, cruise still off
-    in_zone(icbm, 45, 300, enabled=True)           # comes back and engages
-    assert icbm.v_baseline == 45, "the pin did not re-arm after leaving the radius"
-
-  def test_the_pin_that_applies_is_the_one_you_engaged_in(self):
-    """Two zones with different numbers, both passed through with cruise off."""
-    icbm = fresh()
-    in_zone(icbm, 45, 100, enabled=False)
-    in_zone(icbm, 0, 50, enabled=False)
-    in_zone(icbm, 50, 100, enabled=False)
-    in_zone(icbm, 50, 300, enabled=True)
-    assert icbm.v_baseline == 50, f"applied the wrong zone's number: {icbm.v_baseline}"
-
-
-class TestALiveHoldOutranksAPinnedOne:
-  """Measured, route 0000033c t+333 on 2026-08-11, and confirmed by the owner the same day.
-
-  He set 75 by hand at t+134, then drove into a zone with 70 pinned from an earlier drive, and the
-  pin silently replaced his number. His words: "at some point, my hold dropped by 5 miles per hour,
-  which was strange." Nothing he did caused it and nothing on screen said why.
-
-  A pin records what he wanted on a previous drive; a hold he set minutes ago is what he wants now.
-  """
-
-  @staticmethod
-  def _pressed_hold():
-    """A hold built the way he builds one: hold + from LIMIT up to DRIVER."""
-    icbm = fresh()
-    icbm.run(make_cs(LIMIT, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT), False)
-    for cluster in range(LIMIT, DRIVER + 1):
-      icbm.run(make_cs(cluster, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT), False)
-    icbm.run(make_cs(DRIVER, buttons=(ACCEL_RELEASE,)), CC, make_lp(LIMIT), False)
-    return icbm
-
-  def test_a_pin_does_not_overwrite_a_hold_he_set_by_hand(self):
-    icbm = fresh()
-    # A real press creates the hold, exactly as it did on the road.
-    icbm.run(make_cs(LIMIT, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT), False)
-    for cluster in range(LIMIT, DRIVER + 1):
-      icbm.run(make_cs(cluster, buttons=(ACCEL_PRESS,)), CC, make_lp(LIMIT), False)
-    icbm.run(make_cs(DRIVER, buttons=(ACCEL_RELEASE,)), CC, make_lp(LIMIT), False)
-    assert icbm.v_baseline == DRIVER, "no hold to defend"
-    assert icbm.baseline_source == BaselineSource.press
-
-    in_zone(icbm, DRIVER - 5, 300, enabled=True, road_speed=DRIVER)
-    assert icbm.v_baseline == DRIVER, (
-      f"the pin replaced his live hold with {icbm.v_baseline} -- THE REPORTED BUG")
-    assert icbm.baseline_source == BaselineSource.press, "the pin took ownership of his number"
-
-  def test_a_pin_OVERRIDES_a_hold_that_was_merely_INFERRED(self):
-    """The case the 2026-08-25 narrowing exists for, and it was untested until a mutation said so.
-
-    Retiring `enforce_hold_policy` means a baseline is usually present now, so a gate keyed on "any
-    live hold" would stop pins firing on exactly the roads pins are FOR -- the 2026-08-16 failure
-    ("no limit means no hold" killing pinned holds outright) arriving from the other direction.
-
-    `baseline_source` is what separates them. A hold the set speed DRIFTED into is carried in from
-    the last road and is not a statement about this place, so the pin wins; a hold he PRESSED is a
-    decision here and the pin stands aside. Route 00000379 is the evidence the two really differ: a
-    hold was up for 36.5% of that drive reading `fallbackIdle` while he pressed SET five times and
-    nothing else all drive.
-
-    THE SOURCE IS SET DIRECTLY, and that is deliberate rather than lazy. The gate is a pure function
-    of (`v_baseline`, `baseline_source`); driving the idle fallback would exercise the CAPTURE path,
-    which has its own tests and is not what is under test here. Both arms run against a real hold
-    built by a real press, so neither is a hand-made object.
-    """
-    # 1. a hold he PRESSED -- the pin must defer
-    icbm = self._pressed_hold()
-    assert icbm.baseline_source == BaselineSource.press
-    in_zone(icbm, DRIVER - 25, 300, enabled=True, road_speed=DRIVER)
-    assert icbm.v_baseline == DRIVER, "a pin overwrote a hold he set by hand"
-
-    # 2. the same hold, relabelled as one that was inferred -- the pin must win
-    icbm = self._pressed_hold()
-    icbm.baseline_source = BaselineSource.fallbackIdle
-    in_zone(icbm, DRIVER - 25, 300, enabled=True, road_speed=DRIVER)
-    assert icbm.v_baseline == DRIVER - 25, (
-      "an inferred hold blocked a pin -- pins are dead on the no-SLA roads they exist for")
-    assert icbm.baseline_source == BaselineSource.pinned
-
-  def test_a_pin_still_applies_when_there_is_no_hold(self):
-    """The case the pin exists for. The guard must not cost it."""
-    icbm = fresh()
-    in_zone(icbm, 45, 300, enabled=True)
-    assert icbm.v_baseline == 45, "the guard blocked a pin that had nothing to overwrite"
-    assert icbm.baseline_source == BaselineSource.pinned
-
-  def test_one_pin_can_still_supersede_another(self):
-    """Two remembered numbers is not a preference being overwritten -- the later place wins."""
-    icbm = fresh()
-    in_zone(icbm, 45, 300, enabled=True)
-    assert icbm.v_baseline == 45
-    in_zone(icbm, 0, 50, enabled=True)      # leave the first zone, which re-arms
-    # 65, not LIMIT: a hold that lands exactly on SLA's target is cleared by the divergence rule,
-    # which would fail this test for a reason that has nothing to do with pins.
-    in_zone(icbm, 65, 300, enabled=True)    # enter a different one
-    assert icbm.v_baseline == 65, "a pinned hold blocked the next pin"
-    assert icbm.baseline_source == BaselineSource.pinned
 
 
 class TestResumingIsNotAskingForAHold:

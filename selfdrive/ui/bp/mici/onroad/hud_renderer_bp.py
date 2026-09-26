@@ -33,8 +33,7 @@ LateralMode = ControllerStateBP.LateralMode
 # second copy of a number already on screen. This one STAYS, and the reason is not inertia:
 # `MiciHudRendererBP` extends mici's own renderer rather than sunnypilot's, so `_draw_set_speed`
 # here has no `max_box_state` and no aim concept. On this display the badge is the ONLY place the
-# hold appears, and the only tap target that can pin one. Deleting it would remove the readout, not
-# de-duplicate it.
+# hold appears. Deleting it would remove the readout, not de-duplicate it.
 #
 # So the two screens now draw the hold differently, which `icbm_hud_state` has always allowed --
 # what must not diverge is what is TRUE, and both still read it from `read_icbm_hud_state`. The way
@@ -42,23 +41,20 @@ LateralMode = ControllerStateBP.LateralMode
 HOLD_LABEL = "HOLD"
 HOLD_HEIGHT = 44
 HOLD_MARGIN = 14          # from the top and right edges of the screen
-# Wide enough to clear the pin dot, which is drawn inside this padding. Reserved in EVERY
-# state, not only when pinned: sizing the pill to its contents would make it change width
-# the moment a hold is pinned, and it is right-aligned, so the whole badge would jump.
+# Tuned against the render. It used to be wide enough to clear the pin dot as well; pinned holds
+# were deleted on 2026-09-25 and the padding was left alone, because the ACC and lamp pills share
+# this constant and the three are meant to line up.
 HOLD_PAD_X = 24
 HOLD_PAD_BOTTOM = 9       # text baseline inset, tuned against the render rather than guessed
 HOLD_LABEL_GAP = 9
 HOLD_LABEL_SIZE = 20
 HOLD_VALUE_SIZE = 30
-HOLD_DOT_INSET = 12
-HOLD_DOT_RADIUS = 4
 HOLD_FILL = rl.Color(30, 78, 176, 235)
 HOLD_EDGE = rl.Color(130, 185, 255, 255)
 HOLD_LABEL_COLOR = rl.Color(175, 210, 255, 255)
 HOLD_LOCKED_FILL = rl.Color(84, 90, 98, 225)
 HOLD_LOCKED_EDGE = rl.Color(140, 148, 156, 235)
 HOLD_LOCKED_LABEL = rl.Color(178, 186, 194, 255)
-HOLD_DOT_COLOR = rl.Color(255, 214, 90, 255)
 
 # BluePilot: the stop lamps, under the HOLD badge. Same colors as the big screen's pill.
 #
@@ -120,8 +116,6 @@ class MiciHudRendererBP(HudRenderer):
     # Latched PER READOUT on a drawing error; keeps a display bug off the screen without taking
     # the other readouts with it. See _render.
     self._readout_failed: dict[str, bool] = {}
-    # Last drawn HOLD badge rect; the tap target for pinning. None = nothing to hit.
-    self._hold_rect = None
 
   def _update_state(self) -> None:
     super()._update_state()
@@ -187,11 +181,6 @@ class MiciHudRendererBP(HudRenderer):
       result = draw(*args)
     except Exception as e:  # noqa: BLE001 -- the screen outranks any one readout
       self._readout_failed[name] = True
-      # A latched-off badge leaves no tap target behind. _hold_rect is only cleared by the badge's
-      # own no-hold path, so without this a badge that threw once would stop drawing while its last
-      # rectangle kept firing pin requests -- an invisible button, which is worse than none.
-      if name == "hold":
-        self._hold_rect = None
       bp_ui_log.state("MiciHudRenderer", f"{name}_readout_error", repr(e))
       return fallback
     return fallback if result is None else result
@@ -213,17 +202,14 @@ class MiciHudRendererBP(HudRenderer):
     lamp pills describe things the driver can also feel through the car; a hold is invisible without
     it, and the owner has twice reported being unable to tell whether an override had taken.
 
-    No tap target here. On the big screen this badge is the pin/unpin control, but mici's touch
-    handling lives in a different tree and a control that silently does nothing is worse than none.
+    No tap target here. It used to be the pin/unpin control on the big screen; pinned holds were
+    deleted on 2026-09-25 and this is purely a readout now.
     """
     hold = read_icbm_hud_state(ui_state.sm)
-    # worth_showing, not has_hold: without Speed Limit Assist the hold IS the MAX speed, so a
-    # second readout of the same number is a concept the driver has to learn for nothing.
-    if not hold.worth_showing:
-      self._hold_rect = None           # no badge on screen, no tap target
+    if not hold.has_hold:
       return rect.y + HOLD_MARGIN      # nothing drawn; the stack closes up
 
-    value = str(hold.display_value)   # the hold, or the pin being offered when there is none
+    value = str(hold.baseline)
     label_w = measure_text_cached(self._font_semi_bold, HOLD_LABEL, HOLD_LABEL_SIZE).x
     value_w = measure_text_cached(self._font_bold, value, HOLD_VALUE_SIZE).x
     width = HOLD_PAD_X * 2 + label_w + HOLD_LABEL_GAP + value_w
@@ -246,13 +232,6 @@ class MiciHudRendererBP(HudRenderer):
                                baseline - HOLD_VALUE_SIZE),
                     HOLD_VALUE_SIZE, 0, rl.WHITE)
 
-    # A pinned hold gets a dot on the LEFT edge, clear of the arrow that hangs off the right. The
-    # big screen learned that the hard way -- arrow and dot landed within a pixel of each other.
-    if hold.pinned:
-      rl.draw_circle(int(x + HOLD_DOT_INSET), int(y + HOLD_HEIGHT / 2), HOLD_DOT_RADIUS, HOLD_DOT_COLOR)
-    elif hold.pin_suggested:
-      rl.draw_ring(rl.Vector2(x + HOLD_DOT_INSET, y + HOLD_HEIGHT / 2),
-                   HOLD_DOT_RADIUS - 2, HOLD_DOT_RADIUS, 0, 360, 20, HOLD_DOT_COLOR)
     return y + HOLD_HEIGHT + LAMP_GAP
 
   def _draw_acc_pill(self, rect: rl.Rectangle, y: float) -> float:
@@ -451,29 +430,14 @@ class MiciHudRendererBP(HudRenderer):
     rl.draw_text_ex(self._font_bold, letter, rl.Vector2(text_x, text_y), text_size, 0, color)
 
   def _handle_mouse_press(self, mouse_pos):
-    """Tap the HOLD badge to pin this hold to this place, or unpin it. Then the lateral overlay.
+    """The lateral-control overlay.
 
-    CHECKED FIRST, and it consumes the event. The big screen learned this the hard way: it called
-    super() before its own hit test, so every badge tap also reached upstream's handler and slid the
-    sidebar out. The pin request was still raised underneath, but the menu is what the driver sees,
-    so the gesture read as dead. Checking our own target first is what makes it a button rather
-    than a side effect of a tap that also does something else.
-
-    Only a REQUEST is raised. selfdrived does the work, because that is where the GPS fix and the
-    live baseline are; the UI has neither and must not grow a second copy of either.
-
-    The badge is the target because it is already the thing on screen that means "hold", and
-    because the cruise buttons are full -- every one carries a settled meaning, and adding a gesture
-    would mean relearning one to gain a rare action.
+    A HOLD BADGE TAP USED TO BE CHECKED FIRST HERE, consuming the event to pin or unpin this place.
+    Pinned holds were deleted on 2026-09-25, so the badge is a readout and this handler has one job
+    again. The ordering lesson stays worth knowing: the big screen once called super() before its
+    own hit test, so every tap also reached upstream's handler and slid the sidebar out -- the
+    gesture read as dead because the menu is what the driver sees.
     """
-    if self._hold_rect is not None and rl.check_collision_point_rec(mouse_pos, self._hold_rect):
-      gui_app._mouse_events.clear()
-      try:
-        self._bp_params.put_bool("IcbmPinHoldRequest", True)
-      except Exception:  # noqa: BLE001 -- a failed pin must not take the on-road screen down
-        bp_ui_log.state("MiciHudRenderer", "pin_request_failed", True)
-      return
-
     if self._overlay_size <= 0 or self.lateral_mode not in (LateralMode.curvature, LateralMode.angle):
       return
 

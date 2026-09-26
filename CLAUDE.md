@@ -563,27 +563,67 @@ actuator-independent by construction and must survive ICBM being deleted. Filed 
 gets deleted with the scaffolding, or kept for the wrong reason. Under op long today the button
 layer goes away and holds go with it, which is the bug this migration removes.
 
-**HE EXPLICITLY DEFERRED IT: *"But don't do that now."*** Do not start it opportunistically. When it
-is started:
+**STARTED 2026-09-25, and step 1 is on the branch.** He asked for it -- *"How about you work all
+night migrating holds to SLA?"* -- which lifts the earlier *"But don't do that now."*
+
+- **`sunnypilot/selfdrive/controls/lib/speed_limit/hold.py` is the hold now.** `SpeedHold` owns the
+  five fields that had always moved together (`value`, `source`, `override_state`,
+  `target_at_capture`, `diverged`) and the `aim()` policy: a hold REPLACES cruise or SLA outright
+  and only ever CAPS a curve, map or lead target. The ICBM controller holds one and exposes the old
+  names as properties, so `2feb08dab2` is bit-identical and every pre-existing test passed untouched.
+- **A MODULE, NOT A MOVE INTO `SpeedLimitAssist`, and this is the design decision to preserve.**
+  ICBM is constructed in **selfdrived** and SLA in **plannerd**. Putting the hold inside SLA puts a
+  message round trip between his press and the hold taking effect -- in exactly the press-settle
+  timing where this file records three separate failed attempts. The hold is owned by neither
+  process: ICBM drives it today, the planner can drive the same object the day ICBM is gone.
+
+**WHAT IS LEFT, in order.** Move the capture call sites onto `hold.capture()` and drop the
+properties; move the clearing rules (the divergence arm, the limit-moved reset, the hold-equals-SLA
+clear) into the module; then the param and capnp renames.
 
 - it is `icbm-manual-override-and-tuning` work, because that branch owns the code and the others
   rebase onto it -- doing it anywhere else strands it
-- `IcbmPinnedHolds`, `IcbmHoldObservations` and `IcbmBaselineResetDelta` are PERSISTENT keys, so
-  renaming discards his stored values. Use the `_BP_LATERAL_SCHEME_PARAM_RENAMES` machinery in
-  `params_migration.py` that exists for exactly this
-- the capnp fields (`vBaseline`, `baselineSource`, `pinSuggestion`) have WIRE HISTORY in every
-  recorded route -- renumbering them makes every drive on disk decode as garbage. Rename the field,
-  never the ordinal
+- `IcbmBaselineResetDelta` is a PERSISTENT key, so renaming discards his stored value. Use the
+  `_BP_LATERAL_SCHEME_PARAM_RENAMES` machinery in `params_migration.py` that exists for exactly this
+- the capnp fields (`vBaseline`, `baselineSource`) have WIRE HISTORY in every recorded route --
+  renumbering them makes every drive on disk decode as garbage. Rename the field, never the ordinal
 - the settings labels, the SunnyLink YAML and the HUD reader all name it too; the audit
   (`bp_sunnylink_settings_audit.py`) needs the new prefix or it silently reports 100% reachable
 
-**Known violations, deliberately left alone UNTIL THEN.** `IcbmPinnedHolds*` and
-`IcbmBaselineResetDelta` are the HOLD concept, which is a planner idea that happens to live in the
-button layer — "aim at my number instead of the posted limit, and keep everything else working
-against it" needs no buttons at all. They are misnamed. Renaming a `PERSISTENT` key discards its
-stored value, so this waits until holds actually move into the planner, and is done through the
-`_BP_LATERAL_SCHEME_PARAM_RENAMES` machinery in `params_migration.py` that already exists for
-exactly this.
+**PINNED HOLDS WENT WITH THIS RATHER THAN THROUGH IT -- DELETED 2026-09-25.** See the section below.
+`IcbmPinnedHolds`/`IcbmHoldObservations` no longer need the rename machinery; they are gone.
+
+**Known violation, deliberately left alone UNTIL THEN.** `IcbmBaselineResetDelta` is the HOLD
+concept, which is a planner idea that happens to live in the button layer — "aim at my number
+instead of the posted limit, and keep everything else working against it" needs no buttons at all.
+It is misnamed, and the rename waits for the step above.
+
+### PINNED HOLDS ARE DELETED. 2026-09-25, AND HE HAD ASKED FOUR TIMES.
+
+*"yeah delete pins, I don't want them"* -- and before that, three times in August: *"I doubt I am
+going to use pinned holds at all. Those were for before I knew about how easy it was to use OSM."*
+*"I just want to be able to override the speed when I want and it to not be remembered. Memory will
+be me editing OSM."* *"Remember, I don't like the concept of pinned holds."*
+
+**AND IT HAD NEVER ONCE WORKED.** `IcbmPinnedHolds` read `[]` from 2026-08-11 until it was removed.
+Not a single pin was ever created on this car, so it could not be defended as something another
+owner might enjoy either -- nobody has ever had one.
+
+Gone: `pinned_holds.py`, `apply_pinned_hold`, `selfdrived.update_pinned_holds`, the five
+`IcbmPinnedHolds`/`IcbmHoldObservations`/`IcbmPinnedHoldsEnabled`/`IcbmPinnedHoldRadius`/
+`IcbmPinHoldRequest` params, the three settings controls and their SunnyLink entries, the set-speed
+box's `_hold_rect` tap target (and `_set_speed_rect`, which fed it), `HudRendererBP`'s whole
+`_handle_mouse_release` override, mici's pin dot, and `IcbmHudState.worth_showing` /
+`display_value`, which collapsed to `has_hold` / `baseline` once pins were gone.
+
+**TWO THINGS ARE RETIRED IN PLACE AND MUST STAY:** `pinSuggestion @7` in `custom.capnp` and
+`BaselineSource.pinned @4`. A capnp ordinal cannot be reused once retired and both are in every
+route on the device -- deleting or renumbering either makes stored drives decode out of the wrong
+bytes. `opendbc/car/structs.py` keeps its mirror for `test_structs_capnp_parity`.
+
+**The one behaviour change to know about:** the hold-equals-SLA clearing rule had a pin carve-out
+(*"I want that hold gone UNLESS IT'S PINNED"*). With no pins, a hold walked back to SLA's number
+always clears. That is the rule he asked for in the first place.
 
 **A new prefix used to carry a second obligation** -- registering it in `_BP_TRACKED_PREFIXES` so
 its shipped defaults could reach the car. That mechanism was removed on 2026-08-08 and settings now

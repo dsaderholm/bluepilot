@@ -27,7 +27,6 @@ from either donor car in stock form.
 
 What does not transfer at all:
 
-- **Pinned holds**, which are literally GPS coordinates on one person's commute
 - **Anything fitted to one driver's comfort.** The curve-speed factors were set from measured
   cornering that this driver repeatedly chose and was happy with, around 0.28-0.31 g. That is a
   preference, not a limit, and yours may differ.

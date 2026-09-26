@@ -31,20 +31,22 @@ W, H = 536, 240        # the comma 4 display, exactly
 SET_SPEED_CIRCLE = 162      # _draw_set_speed's drop shadow diameter, top-left at the rect origin
 WHEEL_D = 86                # the steering wheel, bottom-left
 
-# (caption, baseline, locked, pinned, pin_suggested, lamp_available, lamps_lit, acc, accel)
+# (caption, baseline, locked, lamp_available, lamps_lit, acc, accel)
+#
+# The `pinned` and `pin_suggested` columns went with pinned holds on 2026-09-25, along with the dot
+# this badge drew for them.
 SCENES = [
-  ("holding 70, coasting, lamps dark", 70, False, False, False, True, False, "COAST", 0.0),
-  ("braking hard enough to light the lamps", 70, False, False, False, True, True, "BRAKE", 1.4),
-  ("braking too lightly to light them", 70, False, False, False, True, False, "BRAKE", 0.4),
-  ("engine braking: slowing, no pads, no lamps", 70, False, False, False, True, False,
-   "ENG BRAKE", 0.9),
-  ("precharging: pressurised, not yet slowing", 70, False, False, False, True, False,
-   "PRE-BRAKE", 0.0),
-  ("accelerating back to the hold", 70, False, False, False, True, False, "ACCEL", 0.6),
-  ("hold suppressed by a curve, ACC braking", 70, True, False, False, True, True, "BRAKE", 1.4),
-  ("pinned here", 45, False, True, False, True, False, "COAST", 0.0),
-  ("no hold -- the stack closes up", 0, False, False, False, True, True, "BRAKE", 1.4),
-  ("cruise off: no ACC state, no lamp data", 0, False, False, False, False, False, "", 0.0),
+  ("holding 70, coasting, lamps dark", 70, False, True, False, "COAST", 0.0),
+  ("braking hard enough to light the lamps", 70, False, True, True, "BRAKE", 1.4),
+  ("braking too lightly to light them", 70, False, True, False, "BRAKE", 0.4),
+  ("engine braking: slowing, no pads, no lamps", 70, False, True, False, "ENG BRAKE", 0.9),
+  ("precharging: pressurised, not yet slowing", 70, False, True, False, "PRE-BRAKE", 0.0),
+  ("accelerating back to the hold", 70, False, True, False, "ACCEL", 0.6),
+  ("hold suppressed by a curve, ACC braking", 70, True, True, True, "BRAKE", 1.4),
+  ("a shorter number -- the pill is right-aligned, so the left edge moves", 45, False, True, False,
+   "COAST", 0.0),
+  ("no hold -- the stack closes up", 0, False, True, True, "BRAKE", 1.4),
+  ("cruise off: no ACC state, no lamp data", 0, False, False, False, "", 0.0),
 ]
 
 
@@ -67,7 +69,7 @@ def load_shipped_drawing_code():
       pass   # constants referencing car structs are irrelevant here
   exec(compile(ast.Module(body=methods, type_ignores=[]), "<methods>", "exec"), ns)
 
-  for required in ("HOLD_HEIGHT", "HOLD_FILL", "HOLD_LOCKED_FILL", "HOLD_MARGIN", "HOLD_DOT_COLOR",
+  for required in ("HOLD_HEIGHT", "HOLD_FILL", "HOLD_LOCKED_FILL", "HOLD_MARGIN",
                    "LAMP_HEIGHT", "LAMP_ON_FILL", "LAMP_OFF_FILL", "LAMP_LABEL_ON",
                    "ACC_HEIGHT", "ACC_STATUS_COLORS", "ACC_QUIET_STATES"):
     assert required in ns, f"{required} did not survive extraction -- the preview would be a lie"
@@ -86,7 +88,7 @@ def main(outdir: str) -> int:
     rl.set_texture_filter(f.texture, rl.TextureFilter.TEXTURE_FILTER_BILINEAR)
 
   rect = rl.Rectangle(0, 0, W, H)
-  for i, (caption, baseline, locked, pinned, suggested, lamp_avail, lit, acc, accel) in enumerate(SCENES):
+  for i, (caption, baseline, locked, lamp_avail, lit, acc, accel) in enumerate(SCENES):
     tex = rl.load_render_texture(W, H)
     rl.begin_texture_mode(tex)
     # A mid-grey stand-in for the camera feed: the badge has to survive a road, not a black screen.
@@ -98,9 +100,8 @@ def main(outdir: str) -> int:
 
     self = types.SimpleNamespace(_font_semi_bold=f_semi, _font_bold=f_bold,
                                  _lamp_data_available=lamp_avail, _brakes_on=lit)
-    ns["read_icbm_hud_state"] = lambda _sm, b=baseline, lo=locked, p=pinned, s=suggested: \
-      types.SimpleNamespace(has_hold=b > 0, baseline=b, hold_locked=lo, pinned=p, pin_suggested=s,
-                            arrow="")
+    ns["read_icbm_hud_state"] = lambda _sm, b=baseline, lo=locked: \
+      types.SimpleNamespace(has_hold=b > 0, baseline=b, hold_locked=lo, arrow="")
     ns["ui_state"] = types.SimpleNamespace(sm={})
     ns["read_acc_hud_state"] = lambda _sm, a=acc, mag=accel: types.SimpleNamespace(
       has_state=bool(a), state=a, accel=mag)

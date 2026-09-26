@@ -233,10 +233,14 @@ early is only safe if he is actually taking it.
    the observe drives he is already collecting, and it comes before building anything: if mapd's
    prediction is right most of the time at the forks he actually drives, the problem is much smaller
    than it looks.
-2. **His own history.** He drives the same roads daily, and this fork already has the machinery --
-   `IcbmHoldObservations` learns "he sets 45 here" from repeated sightings and offers a pin. The same
-   shape learns "at this fork he takes the ramp." No phone, no Waze, no MS-CAN, no destination to
-   enter, and it degrades to nothing on a road he has not driven.
+2. **His own history.** He drives the same roads daily, so "at this fork he takes the ramp" is
+   learnable from repeated sightings. No phone, no Waze, no MS-CAN, no destination to enter, and it
+   degrades to nothing on a road he has not driven.
+
+   **The machinery this used to point at is GONE.** `IcbmHoldObservations` and the pin it fed were
+   deleted on 2026-09-25 -- he had asked four times not to have pinned holds, and not one was ever
+   successfully created on the car. So this is a build, not a reuse, and the deletion is also the
+   warning: a place-keyed memory he did not ask for is a feature that sat dead for two months.
 3. **The turn signal** is genuine intent and openpilot already sees it -- but it arrives at the gore
    point, seconds after the decision needed to be made. Useful for CONFIRMING a prediction, useless
    for making one.

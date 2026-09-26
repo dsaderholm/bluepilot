@@ -212,10 +212,15 @@ has ~4x margin on exactly the transition he is worried about.
 taxonomy. He does not want a richer concept of a hold; he wants the simple one to work. Check
 whether the current code already does the thing before proposing a model for it.
 
-**PINNED HOLDS ARE NOW DEAD WEIGHT.** Not deleted -- he has never said "remove it" -- but do not
-build on them, do not tune their suggestion behaviour, and ask before spending anything near them.
-`observe_hold` is now gated on `IcbmPinnedHoldsEnabled` so switching them off actually stops the car
-writing anything down, which is what he asked for.
+**PINNED HOLDS ARE DELETED, 2026-09-25.** He said it plainly -- *"yeah delete pins, I don't want
+them"* -- which is the fourth time he has told us he does not want the concept. `pinned_holds.py`,
+`apply_pinned_hold`, the five `IcbmPin*`/`IcbmHoldObservations` params, the three settings controls,
+the set-speed box's tap target and mici's pin dot are all gone. `pinSuggestion @7` and
+`BaselineSource.pinned @4` are RETIRED IN PLACE -- an ordinal cannot be reused, and both are in
+every route on the device.
+
+It had also never once worked: `IcbmPinnedHolds` read `[]` from 2026-08-11 until the day it was
+removed, so not a single pin was ever created on this car.
 
 ---
 
@@ -225,19 +230,12 @@ Raised when he asked *"does this all make sense and is how most people would wan
 these are consequences of the 2026-08-25 changes that nobody chose, not bugs. Watch for them before
 building anything on top.
 
-**1. PIN SUGGESTIONS WILL GET NOISIER, and this is the concrete one.** `SUGGEST_AFTER = 3`
-observations within `DEFAULT_RADIUS_M = 60` and `SUGGEST_SPEED_TOLERANCE = 3`. Previously, with SLA
-quiet, no hold existed -- so `_pinnable_speed()` returned 0 and NOTHING was observed on those roads.
-Now every set speed is a hold, so every place he engages gets observed. Three drives setting a
-similar speed near the same spot produces a suggestion, which on a daily commute means his driveway
-or the same on-ramp inside a week.
-
-It only ever draws a hollow dot he can tap, so it is not destructive -- but pins were learned from
-DELIBERATE CORRECTIONS AGAINST SLA and are now learned from ordinary engagements. Different
-character, same mechanism. **Check `IcbmPinnedHolds` and the observation store after a few drives**;
-if suggestions are appearing at places he does not care about, the fix is a gate on the observation
-(e.g. only observe a hold that differs from what SLA/cruise would have done anyway), not a bigger
-`SUGGEST_AFTER`.
+**1. PIN SUGGESTIONS WILL GET NOISIER -- CLOSED 2026-09-25 by deleting pins.** It predicted that
+"every set speed is a hold" would make the observer learn from ordinary engagements rather than from
+deliberate corrections, so suggestions would appear at his driveway within a week. It was never
+worth a gate, because he has never wanted the feature; the whole mechanism is gone. Kept here only
+so a future "we should learn where he corrects the limit" idea starts from the objection rather than
+rediscovering it.
 
 **2. SET's MEANING NOW DEPENDS ON STATE HE CANNOT SEE AT PRESS TIME.** With a live limit it hands
 the speed to SLA; without one it holds the speed he pressed at. SLA coverage flickers, so the same
