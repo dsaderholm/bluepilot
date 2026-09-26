@@ -11508,3 +11508,126 @@ here once already and only the car refutes it.
 Ask what the LARGEST admissible value is at the same time as the smallest, and check it against what
 the signal does in the regimes the feature is not for -- parking, maneuvering, standing still. Both
 of this feature's defects so far have been at an end of the range nobody bounded.
+
+## 2026-09-25: THE RADAR-DROPOUT FIX WORKS. THE ABORT RATE DID NOT MOVE ENOUGH TO SAY SO.
+
+First measurement of afc3301ad6 / 8621d134dd on the road. 12 routes (0000049d..000004a8), all
+recorded after the 2026-09-22 deploy, scanned on the parked car because the link was under 35 KB/s.
+
+    build 0bde6ff361 (before)   33 aborts / 154.6 moving min = 12.8/hr
+    build 8621d134dd (after)    12 aborts /  69.9 moving min = 10.3/hr
+
+**DO NOT REPORT THAT AS AN IMPROVEMENT.** Under the baseline rate, 69.9 minutes expects 14.9
+aborts; 12 were observed, and P(X <= 12 given lambda 14.9) = **0.27**. That is an ordinary draw.
+Scoring a 33% improvement at p < 0.05 needs about **150 post-fix moving minutes**, roughly double
+what exists. The rate is the headline number for this feature and the one most likely to be quoted
+early -- it has now been computed, and it says nothing yet.
+
+### THE FIX IS VALIDATED ANYWAY, BY THE FRAMES RATHER THAN BY THE RATE
+
+The three noLead aborts (route 000004a4, 76-79 mph) carried the same signature the fix was built
+from -- raw L x23 - x1 / dec nothingSlower x23 noLead x1, character for character the route
+0000048e seg 18 evidence quoted in the code comment. **It was about to be written up as the fix
+having failed.** Dumping the real per-frame state instead of the abort-window summary reverses it:
+
+    t+29.20 .. 29.40   want L  lead 0  conf 1.05  dec nothingSlower   <- FIVE FRAMES, lead GONE,
+                                                                        and the side is HELD
+    t+29.45            want -  lead 0  conf 0.90  dec noLead          <- grace expired, hard clear
+
+conf decaying only at t+29.45 is the proof: _lead_gap decays approach_seconds **only** past
+LEAD_GAP_GRACE_S. So the grace absorbed 0.25-0.30 s of a genuinely absent lead -- the fix doing
+exactly its job -- and then the documented hard clear fired on a lead that had really gone. That
+branch is required to clear at once; test_no_pass_warranted_clears_it_immediately states it.
+
+**So these are not the dropout defect. They are the grace being shorter than the dropout.** What
+drives them is leadOne thrashing at 115 m: dRel alternating 90.9 to 115.6 with the deficit jumping
+2.2 to 6.1 m/s, then the radar losing both. Same family as the 2026-09-15 LEAD_SWAP_D_M work, at a
+distance and speed that work never covered. **Do not lengthen LEAD_GAP_GRACE_S on this** -- three
+events, and the sequences were 1.6 s and 0.2 s old behind a lead 115 m away with a 5 mph deficit,
+which is a marginal suggestion rather than one worth defending.
+
+### rawWantedSide IS MEANINGLESS ON ANY FRAME THAT RETURNED EARLY
+
+raw_wanted_side is cleared immediately before _decide (passing_assist ~2935) and assigned near the
+END of it. **Every early return therefore publishes none without the geometry ever having been
+asked**, so "raw went to none" and "the frame bailed out above the geometry" are the same reading.
+The raw L x23 - x1 above is the second case, and it is what made a by-design hard clear look like a
+one-frame flicker. Read rawWantedSide only WITH blockedByDecided.
+
+This is the fourth field in this file to assert something narrower than its name (overtakenVAbs,
+oneWay, vTarget, now this). **Open the capnp comment AND find where the field is written before
+building a number on it** -- a field's meaning includes which frames it is written on.
+
+### A ONE-FRAME HARD CLEAR IS ONLY A DEFECT IF THE CAUSE IS ONE THE HOLD OWNS
+
+The distinction that would have prevented the wrong report, and it was nowhere in the output:
+
+    cause in HOLD_THROUGH (noLaneAvailable, adjacentSlow, nothingSlower)   DEFECT -- the hold is
+                                                                          not long enough
+    anything else (noLead, driverActive, tooSlow)                         BY DESIGN -- no pass is
+                                                                          warranted at all
+
+tools/bp_abort_why.py now prints that verdict per event, and it was **still reading blockedBy ten
+days after blockedByDecided shipped for exactly this** -- _hold_suggestion rewrites blockedBy to
+none on held frames, so the tool's own comment about three of four events reading "none" described
+a bug it already had the field to fix. A diagnostic outliving the thing it measures, for the third
+recorded time. test_abort_verdict_mirror.py parses the real HOLD_THROUGH out of passing_assist and
+fails if the tool's copy drifts; 4 mutants, 0 survivors.
+
+### WHAT THE SAME SCAN SAYS IS HEALTHY, AND ONE THING THAT IS NOT
+
+- **The brake-request gate is holding.** 4 of 8 signaling sequences crossed at 60+ mph, against
+  18 of 36 (50%) measured after that change and 2 of 12 before it. Consistent, and still a thin
+  sample on its own.
+- **noLaneAvailable is now the dominant cause: 6 of 12**, and all four pulled at full rate are
+  "debounce fall (correct)" -- raw disagreed the full 0.80 s. Route 0000049f alone contributed 4 in
+  3.9 minutes (61.9/hr) on 31-44 mph surface road. That is the ~14 geometry-false cluster (edgeStd
+  7, paint 5, width 2) named as the next target for two weeks, and it is now the largest remaining
+  bucket by a clear margin.
+- Emergency aborts: **0** across all 12 routes.
+
+### AND THE DEPLOY QUESTION FROM 2026-09-22 IS CLOSED BY THE DRIVES, NOT BY A PROCESS LIST
+
+The outstanding item was a post-boot process check on 8621d134dd. **It is not obtainable from a
+parked car** -- card, plannerd and selfdrived are onroad processes, so their absence offroad means
+nothing, and only pandad/ui/mapd_v2/athena/loggerd/manager are up. Route existence proves nothing
+either; loggerd records whether or not card started. What settles it is that carState and
+longitudinalPlanSP are populated across all 12 routes and every one stamps gitCommit 8621d134dd.
+Two days of driving on that tree.
+
+## THE COMMA SSH BANNER SAYS UBUNTU. IT COST ANOTHER SESSION THREE DAYS.
+
+2026-09-25, and it is the second entry here about a device that looks absent and is not.
+
+mDNS was dead from this laptop -- comma-34b959b and comma-34b959b.local both unresolvable -- while
+the car sat on the network the whole time. **The ARP cache is the way in**, because the MAC is a
+constant and the address is not:
+
+```powershell
+arp -a | Select-String "0a-f5-e4-4a-bc"      # -> 192.168.1.187
+ssh -o StrictHostKeyChecking=accept-new comma@192.168.1.187
+```
+
+**THE TRAP: a port-22 sweep FINDS the car and its banner reads OpenSSH_9.6p1 Ubuntu-3ubuntu13.16.**
+AGNOS is Ubuntu-based, so that is exactly what the comma reports. The ICBM session read that
+banner, filed .187 as "his Ubuntu box", and then re-found the same host on three separate sweeps
+over three days without revisiting the label -- while its own key was failing for an unrelated
+reason (a stale host key; ssh-keygen -R plus accept-new fixed it first try).
+
+**IDENTIFY A DEVICE BY WHAT IT REPORTS ABOUT ITSELF, NEVER BY ITS SSH BANNER:**
+
+```bash
+hostname; cat /sys/class/net/wlan0/address; cat /sys/firmware/devicetree/base/model
+cat /data/params/d/DongleId; cat /VERSION
+```
+
+Here: comma-34b959b, 00:0a:f5:e4:4a:bc, comma tizi, 9c78c368d6813aef, 18.5. A wlan0 MAC matching
+the ARP entry and a comma-3X devicetree model is not a label anyone has to argue about.
+
+**And a failing key looks identical to a wrong host.** Two causes, both recorded here already:
+Bitwarden locked (ssh-add -l says "agent refused operation") and a stale host key (with BatchMode
+it HANGS rather than erroring). Neither is evidence about which machine is on the far end.
+
+**THE GENERAL SHAPE, for the third time in this file: a cheap label computed once, then carried
+forward as a fact while newer evidence went to the same conclusion it had already been filed
+under.** Same as oneWay labelling a carriageway and being read as labelling a road.

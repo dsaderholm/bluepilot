@@ -59,6 +59,29 @@ SIGNALLING = "signaling"
 # Leaving one of these for anything other than the forward phase is a back-out.
 FORWARD = {SIGNALLING: {COMMITTED, "aborting"}, COMMITTED: {"finishing", "aborting"}}
 
+# Mirrored from passing_assist.HOLD_THROUGH. These three were measured OSCILLATING on 2026-08-09,
+# so _hold_suggestion rides them out and a sequence must not die on one; seeing one here means the
+# hold is not long enough. Everything else -- noLead, driverActive, tooSlow -- means no pass is
+# warranted AT ALL, and those are required to clear the side in one frame without waiting out
+# WANTED_FALL_S (test_no_pass_warranted_clears_it_immediately states the property).
+HOLD_THROUGH = ("noLaneAvailable", "adjacentSlow", "nothingSlower")
+
+
+def _verdict(reason: str) -> str:
+  """Is this back-out a defect, or the design working?
+
+  WITHOUT THIS THE TWO READ IDENTICALLY, and on 2026-09-25 that cost a wrong report: three noLead
+  aborts at 76-79 mph were about to be written up as the radar-dropout fix having failed. They are
+  the LEAD_GAP_GRACE_S window genuinely expiring on a lead that had been gone 0.4 s -- the hard
+  clear that branch is supposed to do. A one-frame clear is only a defect when the cause is one the
+  hold owns.
+  """
+  if reason in HOLD_THROUGH:
+    return "DEFECT -- HOLD_THROUGH gate flickered, the hold is not long enough"
+  if reason == "none":
+    return "unattributed -- no cause recorded on either frame"
+  return f"by design -- {reason} means no pass is warranted at all"
+
 
 def main() -> int:
   ap = argparse.ArgumentParser()
@@ -71,7 +94,7 @@ def main() -> int:
   from cereal import custom
   f = set(custom.LongitudinalPlanSP.PassingAssist.schema.fieldnames)
   for name in ("maneuver", "maneuverSeconds", "maneuverSide", "blockedBy", "maneuverAborts",
-               "suggestion", "reason", "wantedSide"):
+               "suggestion", "reason", "wantedSide", "blockedByDecided", "rawWantedSide"):
     if name not in f:
       sys.exit(f"passingAssist has no field {name!r} -- this tool would silently report zeros")
 
@@ -115,6 +138,20 @@ def main() -> int:
           "secs": float(pa.maneuverSeconds),
           "side": str(pa.maneuverSide),
           "blocked": str(pa.blockedBy),
+          # THE CAUSE. `blockedBy` is rewritten to `none` by _hold_suggestion on any frame a
+          # HOLD_THROUGH gate is being held through, so on exactly the frames this tool cares
+          # about it names nothing -- a cause that erases its own log entry. blockedByDecided is
+          # captured BEFORE the hold and was added 2026-09-15 for this; the tool kept reading
+          # blockedBy for ten days after it existed, which is a diagnostic outliving the thing it
+          # measures. Reads `none` on routes older than that field, hence the fallback below.
+          "decided": str(pa.blockedByDecided),
+          # THE GEOMETRY'S OWN ANSWER -- and it is NOT usable on every frame. `raw_wanted_side` is
+          # cleared immediately before _decide (passing_assist ~line 2935), so ANY early return in
+          # _decide leaves it `none` without the geometry ever having been asked. So `raw none`
+          # means "geometry said no" OR "the frame returned early", and those are indistinguishable
+          # from this field alone. Read it WITH `decided`: a no-pass-warranted cause means the
+          # early-return reading is the likely one.
+          "raw": str(pa.rawWantedSide),
           # The DETECTOR's own output, which is what `wanted` is built from. blockedBy `none`
           # means a suggestion IS being made, so on a back-out it cannot name the cause -- but the
           # suggestion's SIDE can, because passing_maneuver leaves `signaling` on
@@ -150,13 +187,17 @@ def main() -> int:
           #   the reason went away    `wanted` became none this frame -- AFTER is the answer
           # Held time separates them, so both are printed and the path is named.
           window = prev["secs"] >= SIGNAL_WINDOW_S - 0.2
-          reason = prev["blocked"] if window else cur["blocked"]
+          # blockedByDecided where it exists, blockedBy only as the pre-2026-09-15 fallback. Taking
+          # blockedBy first is what made three of four events read "none" before that field landed.
+          src = prev if window else cur
+          reason = src["decided"] if src["decided"] != "none" else src["blocked"]
           # A route older than the wantedSide field reads `none` forever, which is
           # indistinguishable from the real "it evaporated" answer. Say so rather than print it.
           stale = prev["want"] == "none" and cur["want"] == "none"
           flipped = cur["want"] not in ("none", prev["side"])
           dropped = cur["want"] == "none"
           events.append({**prev, "went_to": phase, "after": cur["blocked"],
+                         "verdict": _verdict(reason),
                          "path": "window expired" if window
                                  else "wantedSide NOT LOGGED" if stale
                                  else f"wanted FLIPPED to {cur['want']}" if flipped
@@ -182,6 +223,10 @@ def main() -> int:
     lead = (f"{e['deficit']:.0f} mph slower at {e['d_rel']:.0f} m" if e["lead"] else "LEAD GONE")
     print(f"  {e['went_to']:<10} {e['side']:<6} {e['secs']:5.1f}s  {e['path']:<20} "
           f"{e['reason']:<22} {lead}")
+    # RENDERED, not merely computed. A verdict held in the dict and never printed is this fork's
+    # oldest bug, and the whole point of the column is that a reader cannot tell a flickering gate
+    # from the grace expiring by looking at the reason alone.
+    print(f"  {'':<10} {'':<6} {'':>6}  -> {e['verdict']}")
   print()
   print("  by gate:")
   for k, v in by_reason.most_common():
