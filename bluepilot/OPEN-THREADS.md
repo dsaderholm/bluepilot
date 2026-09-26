@@ -22,17 +22,18 @@ the measurements re-run.
 
 **This branch is ICBM, SCC and SLA only.** Do not add longitudinal-authoring work here.
 
-## 2. `RECOVERY BLOCKED BY THE FRAME` — episode 1 is still unexplained
+## 2. CLOSED WITH THE PASSTHROUGH: the cancel-recovery mystery
 
-Route `b5` episode 1: attribution passed, bands clean across all 7,032 camera frames, every gate
-satisfied, and recovery never ran and logged nothing. The silent refusal inside the recovery body
-now logs. **Next step:** read that line off the next drive that has an override.
+`RECOVERY BLOCKED BY THE FRAME` on route `b5` episode 1 was never explained -- attribution passed,
+the bands were clean across 7,032 camera frames, every gate was satisfied, and recovery never ran.
 
-Likely one of the unpoliced bits (`AccDeny_B_Rq`, park brake, `CmbbDeny_B_Actl`).
+**It cannot recur and it is not worth chasing.** The passthrough that raised it is deleted (item 1)
+and `passthrough-archive` is frozen. The measurements and the postmortem stay in CLAUDE.md for the
+lessons; the open question dies with the feature.
 
 ---
 
-## 4. TSR stays quarantined behind `SpeedLimitPolicy = 1`
+## 3. TSR stays quarantined behind `SpeedLimitPolicy = 1`
 
 The camera does read signs, but on the whole recorded baseline it has **only ever returned 30 mph,
 and only below 35 mph**. Those two are confounded — in this city a 30 road *is* a slow road.
@@ -135,46 +136,73 @@ is the same "only 30, only slow" pattern the baseline records. `TsrVl1Stat` is `
 
 ---
 
-## 5. Finish the Ford safety A/B for the widened gas floor
+## 4. CLOSED ON THIS BRANCH: the Ford safety A/B for the widened gas floor
 
-The panda change was verified by COMPILING it on the device -- `gcc -Wall -Wextra`, exit 0, warning
-output byte-identical to the unmodified header -- which retires the "does it build" risk that
-`tools/bp_offline_test.py` structurally cannot see.
+`ed6c0b71d7` widened panda's `min_gas` from -0.5 to -2.8 for the passthrough, and `a623652cf1`
+reverted it with everything else. **`ford.h` here reads `.min_gas = 450` (-0.5) again**, so there is
+nothing on this branch to A/B.
 
-**What is NOT finished is opendbc's own `test_ford.py`.** A full run against the modified header
-hit its 1800 s timeout partway and showed failures, and **those cannot be attributed without a
-baseline**: this fork modifies `ford.h` heavily (pinion geometry, MADS, the brake gate, the reset
-latch) against a test written for upstream's version, so red there is the expected state until
-proven otherwise. CLAUDE.md's rule -- compare against the merge base before treating a finding as
-yours.
+**The method is the part worth keeping, and `ford-acc-parity` will need it** -- that branch is where
+openpilot's propulsion floor is the whole subject:
 
-**AND THE FIRST A/B ATTEMPT WAS INVALID, which is the trap to avoid on the retry.** The script took
-its "baseline" from `/data/openpilot/.../ford.h` on the device -- and by then the passing-assist
-branch had rebased onto this one and the device had auto-pulled it, so the device's own header
-ALREADY CONTAINED the change. It printed `flag present: 3` for the baseline column. **Never take a
-baseline from the running device; take it from git.**
-
-`tools/bp_ford_gas_ab.sh` now expects `/tmp/ford_base.h`, produced by:
-
-```bash
-git show ed6c0b71d7^:opendbc_repo/opendbc/safety/modes/ford.h > /tmp/ford_base.h
-```
-
-**Next step:** scp `ford_base.h` and `ford_new.h` to the device, run the script, and compare the two
-columns. A difference is mine; anything red in both is pre-existing and belongs upstream, not here.
-
-**Note `/tmp` on the device is tmpfs and a reboot clears it** -- the tree, both headers and the
-result file all vanished once during this work. Rebuild with the tar one-liner in the script.
+- opendbc's `test_ford.py` is RED on this fork against upstream's expectations (pinion geometry,
+  MADS, the brake gate, the reset latch), so red is the expected state until a baseline proves
+  otherwise. Compare against the merge base before treating a finding as yours.
+- **Never take the baseline header from the running device.** The first attempt did, the device had
+  already auto-pulled the change, and the baseline column printed `flag present: 3`. Take it from
+  git: `git show <commit>^:opendbc_repo/opendbc/safety/modes/ford.h > /tmp/ford_base.h`.
+- `/tmp` on the device is tmpfs; a reboot took the tree, both headers and the result file once.
 
 ---
 
-## 2. Moved to `ford-acc-parity`: making op long behave like Ford ACC
+## 5. Moved to `ford-acc-parity`: making op long behave like Ford ACC
 
 The finding that replaced the passthrough -- openpilot asserts the friction brakes at -0.14 m/s^2
 and clips propulsion at -0.5, while Ford ramps engine braking to -0.66 and only hands over below
 -1.1, blending both across that band. Full detail and the measurement tools live on that branch now.
 
-## 6. WHAT A HOLD IS, SETTLED 2026-08-25. Do not redesign it again.
+## 6. CLOSED 2026-09-26: THE STEER-SATURATED ALERT IS SILENT BECAUSE THE GATE WORKS
+
+2026-09-25: *"I never see those warnings anymore."* His report was correct and is now MEASURED, so
+this thread is closed.
+
+**Silence had two possible causes and they are now separated.** The gate suppressing alerts
+(working) against no saturation occurring at all (uninformative). Route 00000427 could not tell
+them apart -- ZERO episodes across 13 segments was arithmetic, not a result, against a base rate of
+61 per 701.
+
+**139 segments, routes 000004a0/a1/a2/a3/a9, pulled off-device with zero short transfers and
+reconstructed at 100 Hz** (`tools/bp_steer_saturated.py --sweep`):
+
+    8 episodes over 200 alerting frames
+      SILENCED by the gate                              5
+      SHOWN                                             3   -- ALL THREE UNMEASURABLE
+      raw onroadEvents cross-check                      4 samples, ~1 per alerting second
+
+    while alerting   n=143   p50 0.15   p90 0.35   p99 0.38   max 0.38 m
+    baseline         n=175224  p50 0.07  p90 0.24  p99 0.56   max 1.59 m
+
+**SATURATION IS STILL HAPPENING AT THE OLD RATE.** 8 episodes in 139 segments is 0.058/segment
+against the baseline's 0.087 -- the same population, not an absence. So the answer is the gate, and
+his report is evidence that it works rather than evidence that the car stopped saturating.
+
+**EVERY SHOWN EPISODE WAS THE FAIL-OPEN PATH, NOT A WIDE ONE.** All three had no lane lines to
+judge (18-23 mph on unmarked streets, plus one at 48.5 mph whose measurable frames read 0.29 m).
+That is the gate showing the alert when it cannot see -- by design, and it is the 23%-unmeasurable
+share the 2026-09-05 write-up already predicted would be the remaining noise.
+
+**AND NOTHING WIDE WAS HIDDEN**, which is the check that matters more than the count: no measurable
+episode reached even 0.40 m against the 0.50 m threshold, so the sweep is flat from 0.30 upward and
+the gate never had to make a close call on these drives.
+
+**The honest limit: 8 episodes is thin**, and the shown/silenced split rests on 3 unmeasurable ones.
+The DIRECTION is solid because it is cross-checked three ways -- reconstruction, the published
+event stream, and the base rate -- but do not quote 5-of-8 as a precision figure. The 701-segment
+baseline's 61%-cut remains the number with a real sample behind it.
+
+---
+
+## 7. WHAT A HOLD IS, SETTLED 2026-08-25. Do not redesign it again.
 
   *"I just want to be able to override the speed when I want and it to not be remembered. Memory
   will be me editing OSM."*
@@ -212,32 +240,41 @@ has ~4x margin on exactly the transition he is worried about.
 taxonomy. He does not want a richer concept of a hold; he wants the simple one to work. Check
 whether the current code already does the thing before proposing a model for it.
 
-**PINNED HOLDS ARE NOW DEAD WEIGHT.** Not deleted -- he has never said "remove it" -- but do not
-build on them, do not tune their suggestion behaviour, and ask before spending anything near them.
-`observe_hold` is now gated on `IcbmPinnedHoldsEnabled` so switching them off actually stops the car
-writing anything down, which is what he asked for.
+**AND ONE THING THE DELETION SURFACED BUT DID NOT FIX: mici swallows every tap that is not the
+lateral overlay.** `MiciHudRendererBP._handle_mouse_press` returns early when the overlay is off
+screen and never calls `super()`, so on the comma 4 no tap reaches upstream's handler at all. That
+predates the pin removal -- both branches always returned -- but with the pin branch gone the
+function has one job and the gap is plain.
+
+It is NOT fixed here, deliberately: it changes tap routing on a screen this car does not have (he
+runs a 3X), it cannot be rendered or driven offline, and the big screen's own history is that
+getting this ordering wrong made a gesture read as dead for days. Whoever ports more of the on-road
+UI to mici should settle it then, with the screen in front of them.
+
+**PINNED HOLDS ARE DELETED, 2026-09-25.** He said it plainly -- *"yeah delete pins, I don't want
+them"* -- which is the fourth time he has told us he does not want the concept. `pinned_holds.py`,
+`apply_pinned_hold`, the five `IcbmPin*`/`IcbmHoldObservations` params, the three settings controls,
+the set-speed box's tap target and mici's pin dot are all gone. `pinSuggestion @7` and
+`BaselineSource.pinned @4` are RETIRED IN PLACE -- an ordinal cannot be reused, and both are in
+every route on the device.
+
+It had also never once worked: `IcbmPinnedHolds` read `[]` from 2026-08-11 until the day it was
+removed, so not a single pin was ever created on this car.
 
 ---
 
-## 6. Three warts in the new hold rules, none of them fixed
+## 8. Three warts in the new hold rules, none of them fixed
 
 Raised when he asked *"does this all make sense and is how most people would want to use it?"* --
 these are consequences of the 2026-08-25 changes that nobody chose, not bugs. Watch for them before
 building anything on top.
 
-**1. PIN SUGGESTIONS WILL GET NOISIER, and this is the concrete one.** `SUGGEST_AFTER = 3`
-observations within `DEFAULT_RADIUS_M = 60` and `SUGGEST_SPEED_TOLERANCE = 3`. Previously, with SLA
-quiet, no hold existed -- so `_pinnable_speed()` returned 0 and NOTHING was observed on those roads.
-Now every set speed is a hold, so every place he engages gets observed. Three drives setting a
-similar speed near the same spot produces a suggestion, which on a daily commute means his driveway
-or the same on-ramp inside a week.
-
-It only ever draws a hollow dot he can tap, so it is not destructive -- but pins were learned from
-DELIBERATE CORRECTIONS AGAINST SLA and are now learned from ordinary engagements. Different
-character, same mechanism. **Check `IcbmPinnedHolds` and the observation store after a few drives**;
-if suggestions are appearing at places he does not care about, the fix is a gate on the observation
-(e.g. only observe a hold that differs from what SLA/cruise would have done anyway), not a bigger
-`SUGGEST_AFTER`.
+**1. PIN SUGGESTIONS WILL GET NOISIER -- CLOSED 2026-09-25 by deleting pins.** It predicted that
+"every set speed is a hold" would make the observer learn from ordinary engagements rather than from
+deliberate corrections, so suggestions would appear at his driveway within a week. It was never
+worth a gate, because he has never wanted the feature; the whole mechanism is gone. Kept here only
+so a future "we should learn where he corrects the limit" idea starts from the objection rather than
+rediscovering it.
 
 **2. SET's MEANING NOW DEPENDS ON STATE HE CANNOT SEE AT PRESS TIME.** With a live limit it hands
 the speed to SLA; without one it holds the speed he pressed at. SLA coverage flickers, so the same
@@ -245,10 +282,10 @@ physical press does two different things on the same road. He sees the outcome i
 later but cannot predict it. This is the most likely source of the next *"why did it do that"*, and
 there is currently no cue.
 
-**3. THE `press` VS `fallbackIdle` DISTINCTION IS INVISIBLE.** Two holds that look identical in the
-set-speed box behave differently on entering a pinned zone -- a pressed one defers the pin, an
-inferred one loses to it. Introduced 2026-08-25 with the narrowed gate. Nothing on screen says
-which kind he has.
+**3. CLOSED 2026-09-25 BY DELETING PINS.** The `press` vs `fallbackIdle` distinction was invisible
+on screen and it MATTERED, because a pressed hold deferred to a pin and an inferred one lost to it.
+With pinned holds gone nothing reads `baselineSource` to decide anything -- it is a route diagnostic
+now and nothing else -- so two holds that look identical in the box behave identically.
 
 ---
 

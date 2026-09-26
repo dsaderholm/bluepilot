@@ -1792,3 +1792,66 @@ between a poor one and a good one.
 
 See `tools/bp_tsr_check.py` for the on-device measurement side, and `CLAUDE.md` for the standing
 rules — in particular that the region change has been tried twice and is not to be proposed again.
+
+---
+
+## 2026-09-26: HIS REGION QUESTION. THE VALUES IT READS ARE THE km/h TRIPLE.
+
+*"It reads interstate signs. It read interstate 80 and some other highway or something when I was
+in California (I think 120). What region of the world has speed signs that look like our highway
+signs?"*
+
+**THE ANSWER IS BLUE WITH WHITE NUMERALS.** Under the Vienna Convention a speed LIMIT is a white
+circle with a red ring and black numerals -- nothing like a US shield. But in the same systems a
+**blue sign with white numerals IS a speed sign**: minimum speed is a blue circle with white
+numerals, and motorway advisory/reminder plates are blue with white numerals. A US Interstate
+shield is blue with white numerals. That is the visual collision he is pointing at.
+
+**AND THE NUMBERS ARE THE SHARPER HALF. 30 / 80 / 120 IS THE CANONICAL km/h TRIPLE** -- Brazil
+posts exactly those (30 urban, 80 rural, 120 motorway), as does most of Europe. A recognizer
+carrying km/h priors accepts 80 and 120 as ordinary limits, where a US-configured one would reject
+120 outright and treat 80 on a surface street as implausible.
+
+**WHICH CONNECTS TO A FACT THIS FILE ALREADY HAD AND NEVER USED.** This car's whole IPMA
+configuration came from a **Brazilian as-built file** off the internet with no original kept. That
+was recorded as a reason not to chase a US as-built (a "correct" US config could turn off the one
+thing that works). It was never connected to WHICH VALUES the camera emits.
+
+**THE 120 IS THE ONLY UNAMBIGUOUS READ AND IT IS UNVERIFIABLE.** 30 and 80 are both legal US
+limits, so every recorded read can be argued either way -- a phantom 80 near I-80 is indistinguishable
+from a real 80 sign until you check the position. **120 mph is not a legal speed limit anywhere in
+the United States**, so a 120 read would be proof rather than inference. The California trip was
+2026-08-27 and the oldest route on the device on 2026-09-26 is 2026-09-21, so those logs are gone
+and this rests on his memory. **Do not write the 120 up as measured.**
+
+**ONE FACT THAT DOES NOT FIT, stated rather than buried:** `vLimitUnit` reads **2 = mph on 100% of
+816,010 frames** across the 139-segment 2026-09-26 pull. The camera labels its output mph. The unit
+field is configuration and the sign classifier is a separate thing, so this does not kill the
+theory, but it is not clean and should not be omitted when the theory is quoted.
+
+### WHAT IT CHANGES
+
+**TSR moves from "useless" to "wrong in a specific direction."** A camera that emits the route
+number of a nearby highway produces PLAUSIBLE HIGHWAY SPEEDS ON SURFACE STREETS -- which is exactly
+the 80 that walked the set speed to 90 for thirteen minutes on route 000003b6. "Broken and quiet"
+would be a retire-if-convenient; "broken toward high numbers on slow roads" is not.
+
+**So `SpeedLimitPolicy = 1` is LOAD-BEARING, not incidental.** It is the only policy that excludes
+the car source, it has been set since 2026-08-24 08:28 MDT, and it is the whole reason the reads
+reach nothing today. Anything that moves it off 1 re-arms the 000003b6 failure.
+
+### THE TESTABLE PREDICTION, for whenever a read next appears
+
+Every value it emits should be either a legal US speed limit OR a route number visible nearby --
+and on a surface street the route-number case is the one that matters. `tools/bp_tsr_shields.py`
+already prints each run with position, the car's speed, and the MAP's limit and road name at the
+same moment, which is exactly the correlation. **It has nothing to chew on right now**: the
+2026-09-26 pull found ZERO reads across 139 segments, so the evidence base is still only the
+historical handful.
+
+**AND THE ZERO IS ITSELF THE RETIRE ARGUMENT.** 0 reads in 139 segments against 3 in 90 segments in
+August, with the camera sitting in `Available_CameraOnly` on 99.0% of frames and
+`NoNavDataAvailable` on 99.0% -- unchanged since August despite `FordSynthesizeApimGps = 1` since
+2026-08-24, which reaches `Available_FusionMode` on only 1.0% of frames and produced no reads there
+either. The standing criterion is "any read above 35 mph, or any value other than 30". It has not
+produced a read at all.

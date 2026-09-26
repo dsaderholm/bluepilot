@@ -641,27 +641,75 @@ actuator-independent by construction and must survive ICBM being deleted. Filed 
 gets deleted with the scaffolding, or kept for the wrong reason. Under op long today the button
 layer goes away and holds go with it, which is the bug this migration removes.
 
-**HE EXPLICITLY DEFERRED IT: *"But don't do that now."*** Do not start it opportunistically. When it
-is started:
+**STARTED 2026-09-25, and step 1 is on the branch.** He asked for it -- *"How about you work all
+night migrating holds to SLA?"* -- which lifts the earlier *"But don't do that now."*
+
+- **`sunnypilot/selfdrive/controls/lib/speed_limit/hold.py` is the hold now.** `SpeedHold` owns the
+  five fields that had always moved together (`value`, `source`, `override_state`,
+  `target_at_capture`, `diverged`) and the `aim()` policy: a hold REPLACES cruise or SLA outright
+  and only ever CAPS a curve, map or lead target. The ICBM controller holds one and exposes the old
+  names as properties, so `2feb08dab2` is bit-identical and every pre-existing test passed untouched.
+- **A MODULE, NOT A MOVE INTO `SpeedLimitAssist`, and this is the design decision to preserve.**
+  ICBM is constructed in **selfdrived** and SLA in **plannerd**. Putting the hold inside SLA puts a
+  message round trip between his press and the hold taking effect -- in exactly the press-settle
+  timing where this file records three separate failed attempts. The hold is owned by neither
+  process: ICBM drives it today, the planner can drive the same object the day ICBM is gone.
+
+**THE SEPARATION IS DONE. WHAT IS LEFT IS PLUMBING WITH NO BEHAVIOR CHANGE -- DO NOT PITCH IT AS
+OUTSTANDING WORK.** On 2026-09-26 it was offered to him as "the largest item that needs nothing
+from you" and he was rightly annoyed: *"You already separated holds yesterday?????"* He had. The
+hold is its own module, owns its five fields and its policy, and outlives ICBM -- which is the
+whole thing he asked for, twice. The remainder below is shim removal and two moves; it changes
+nothing he can see and nothing the car does. Read `hold.py` before describing this migration to
+him, not the list.
+
+**WHAT IS LEFT, in order.** Move the capture call sites onto `hold.capture()` and drop the
+properties; move the clearing rules (the divergence arm, the limit-moved reset, the hold-equals-SLA
+clear) into the module; then the param and capnp renames.
 
 - it is `icbm-manual-override-and-tuning` work, because that branch owns the code and the others
   rebase onto it -- doing it anywhere else strands it
-- `IcbmPinnedHolds`, `IcbmHoldObservations` and `IcbmBaselineResetDelta` are PERSISTENT keys, so
-  renaming discards his stored values. Use the `_BP_LATERAL_SCHEME_PARAM_RENAMES` machinery in
-  `params_migration.py` that exists for exactly this
-- the capnp fields (`vBaseline`, `baselineSource`, `pinSuggestion`) have WIRE HISTORY in every
-  recorded route -- renumbering them makes every drive on disk decode as garbage. Rename the field,
-  never the ordinal
+- `IcbmBaselineResetDelta` is a PERSISTENT key, so renaming discards his stored value. Use the
+  `_BP_LATERAL_SCHEME_PARAM_RENAMES` machinery in `params_migration.py` that exists for exactly this
+- the capnp fields (`vBaseline`, `baselineSource`) have WIRE HISTORY in every recorded route --
+  renumbering them makes every drive on disk decode as garbage. Rename the field, never the ordinal
 - the settings labels, the SunnyLink YAML and the HUD reader all name it too; the audit
   (`bp_sunnylink_settings_audit.py`) needs the new prefix or it silently reports 100% reachable
 
-**Known violations, deliberately left alone UNTIL THEN.** `IcbmPinnedHolds*` and
-`IcbmBaselineResetDelta` are the HOLD concept, which is a planner idea that happens to live in the
-button layer — "aim at my number instead of the posted limit, and keep everything else working
-against it" needs no buttons at all. They are misnamed. Renaming a `PERSISTENT` key discards its
-stored value, so this waits until holds actually move into the planner, and is done through the
-`_BP_LATERAL_SCHEME_PARAM_RENAMES` machinery in `params_migration.py` that already exists for
-exactly this.
+**PINNED HOLDS WENT WITH THIS RATHER THAN THROUGH IT -- DELETED 2026-09-25.** See the section below.
+`IcbmPinnedHolds`/`IcbmHoldObservations` no longer need the rename machinery; they are gone.
+
+**Known violation, deliberately left alone UNTIL THEN.** `IcbmBaselineResetDelta` is the HOLD
+concept, which is a planner idea that happens to live in the button layer — "aim at my number
+instead of the posted limit, and keep everything else working against it" needs no buttons at all.
+It is misnamed, and the rename waits for the step above.
+
+### PINNED HOLDS ARE DELETED. 2026-09-25, AND HE HAD ASKED FOUR TIMES.
+
+*"yeah delete pins, I don't want them"* -- and before that, three times in August: *"I doubt I am
+going to use pinned holds at all. Those were for before I knew about how easy it was to use OSM."*
+*"I just want to be able to override the speed when I want and it to not be remembered. Memory will
+be me editing OSM."* *"Remember, I don't like the concept of pinned holds."*
+
+**AND IT HAD NEVER ONCE WORKED.** `IcbmPinnedHolds` read `[]` from 2026-08-11 until it was removed.
+Not a single pin was ever created on this car, so it could not be defended as something another
+owner might enjoy either -- nobody has ever had one.
+
+Gone: `pinned_holds.py`, `apply_pinned_hold`, `selfdrived.update_pinned_holds`, the five
+`IcbmPinnedHolds`/`IcbmHoldObservations`/`IcbmPinnedHoldsEnabled`/`IcbmPinnedHoldRadius`/
+`IcbmPinHoldRequest` params, the three settings controls and their SunnyLink entries, the set-speed
+box's `_hold_rect` tap target (and `_set_speed_rect`, which fed it), `HudRendererBP`'s whole
+`_handle_mouse_release` override, mici's pin dot, and `IcbmHudState.worth_showing` /
+`display_value`, which collapsed to `has_hold` / `baseline` once pins were gone.
+
+**TWO THINGS ARE RETIRED IN PLACE AND MUST STAY:** `pinSuggestion @7` in `custom.capnp` and
+`BaselineSource.pinned @4`. A capnp ordinal cannot be reused once retired and both are in every
+route on the device -- deleting or renumbering either makes stored drives decode out of the wrong
+bytes. `opendbc/car/structs.py` keeps its mirror for `test_structs_capnp_parity`.
+
+**The one behaviour change to know about:** the hold-equals-SLA clearing rule had a pin carve-out
+(*"I want that hold gone UNLESS IT'S PINNED"*). With no pins, a hold walked back to SLA's number
+always clears. That is the rule he asked for in the first place.
 
 **A new prefix used to carry a second obligation** -- registering it in `_BP_TRACKED_PREFIXES` so
 its shipped defaults could reach the car. That mechanism was removed on 2026-08-08 and settings now
@@ -2868,8 +2916,23 @@ rather than a guess. The list is one item long:
 - **`SmartCruiseControlMap` re-reads `MapTargetVelocities` whenever the v2 path is None.** That is
   the whole of it.
 
-**And `mapd_ready()` never looks at `MapdV2` at all** -- it returns True whenever the map root
-exists -- so v1 runs in every state including 2. Its measured cost is ~22% of a core and 204 MB.
+**THAT WAS TRUE WHEN WRITTEN AND IS NOT NOW. v1 ALREADY STOPS AT STATE 2, and this paragraph said
+the opposite for weeks.** `mapd_ready()` in `process_config.py` used to be a bare filesystem check
+-- True whenever the map root exists -- so v1 ran in every state, costing ~22% of a core and 204 MB
+alongside v2. It now reads `MapdV2` on every call and returns False at state 2, with its own
+docstring carrying the heat measurement that motivated it (route 389: mean 87.1 C, fan 97%, against
+79.3 C / 73% on a route with no v2).
+
+**He caught it, 2026-09-25**, when "remove v1" was offered to him as outstanding work: *"5 I feel
+like we did already."* He was right and the note was stale. **Read the predicate, not the paragraph
+about the predicate** -- the same failure as the mapd version pin, two sections down.
+
+**SO "REMOVE v1" IS DONE, and what remains is NOT dead code.** The `else` branch in
+`map_controller.update_calculations` still reads `MapTargetVelocities`, and nothing in this tree
+writes that key -- only the v1 binary does. At state 2 it therefore yields an empty list, which is
+the deliberate one-directional failure (SCC-Map idles rather than acting on a stale path). **But it
+is the LIVE path at states 0 and 1**, where v1 does run and v2 does not feed SCC-Map. Deleting it
+would break those two states. Leave it.
 
 **How often the fallback actually fires, from drive A: 9.0% of moving frames, 5 runs, longest 38 s.**
 Which was too high, and 8 of those 9 points were a bug in our own reader rather than a gap in v2:
@@ -9765,6 +9828,32 @@ numbers are treated as settled.
 episodes across 701 segments, so 13 segments expects about ONE. Zero is uninformative -- it is not
 evidence the gate works and not evidence it does not. **Do not report an absence at this sample size
 as a result**; it needs a drive with the 29-56 mph curves that produce the alerts.
+
+**CLOSED 2026-09-26, AND IT NEEDED NO NEW DRIVE -- THE ROUTES WERE ALREADY ON THE CAR.** He said
+*"I never see those warnings anymore"* and that was recorded as believed-but-unverified. 139
+segments (000004a0/a1/a2/a3/a9), reconstructed at 100 Hz: **8 episodes, 5 silenced by the gate, 3
+shown and all three UNMEASURABLE** -- the fail-open path, no lane lines to judge. The published
+`onroadEvents` stream carried 4 samples, about one per alerting second for those three, which is
+the ratio the tool's own cross-check predicts.
+
+**The load-bearing half is the base rate, not the count.** 8 in 139 is 0.058/segment against the
+baseline's 0.087 -- the same population. So saturation is still happening and the gate is why he
+stopped seeing it. And no measurable episode reached even 0.40 m against the 0.50 m threshold, so
+nothing wide was hidden and the sweep is flat from 0.30 upward.
+
+**THE INSTRUMENT'S OWN ZERO WAS THE TRAP, TWICE OVER.** The first pass ran against a directory
+layout the tool does not glob (`logs/<seg>/rlog.zst` against its `*.rlog.zst`), and a second
+`thermalStatus != "green"` check on the same pull read 100% at 46 C -- a comparison against a value
+that enum does not have (it is `ok`/`overheated`). Both printed clean, well-formed output. **A
+zero, a 100%, or a full table is only a result once you have checked that the tool could have
+produced anything else** -- which is the empty-`.part` and empty-sweep lesson arriving in a third
+costume the same day.
+
+**AND `maxTempC` IS NOT `max(cpuTempC)`** -- 74.9 against 94.6 on the same frame. The 2026-09-15
+heat table is in `maxTempC`, so quoting the other against it compares two different quantities.
+Re-measured correctly, the heat fix HELD: moving p50 79.6 C / 5.3% overheated / fan 77% against the
+post-fix 046f baseline of 96 C peak and 6.5% throttled. Parked is still 102.5 C with the fan pinned
+at 100%, which is the documented unfixed half and is not news.
 
 ## 2026-09-05: "SET SPEED CHANGED" WAS 99% NOISE. TWO GUARDS, MEASURED ACROSS FOUR PULLS.
 

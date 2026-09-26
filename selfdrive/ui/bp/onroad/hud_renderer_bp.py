@@ -140,38 +140,8 @@ LAMP_OFF_FILL = rl.Color(0, 0, 0, 150)
 LAMP_OFF_EDGE = rl.Color(120, 126, 132, 190)
 LAMP_OFF_INK = rl.Color(150, 156, 162, 255)
 
-# BluePilot: why traffic-sign recognition is not producing a limit.
-#
-# The camera says so itself, and we were already decoding both fields and reading neither. TSR has
-# been dead on this car for months with no way to tell whether it is switched off, unsupported in
-# this region, faulted, or simply not seeing a sign -- and those want completely different actions.
-#
-# Values are the DBC's own, verbatim (VAL_ 973 TsrStatMsgTxt_D_Rq / TsrMsgTxt_D_Rq). Entries mapped
-# to None mean TSR is working, so the pill does not draw -- this readout deletes itself the moment
-# the thing it diagnoses starts working, which is the only honest lifetime for a diagnostic.
-TSR_STATUS_TEXT = {
-  1: "TSR OFF",             # TSR_Off -- switched off in the vehicle's own menu
-  2: None,                  # Available_FusionMode   -- camera + nav, working
-  3: None,                  # Available_CameraOnly   -- working
-  4: "TSR NAV ONLY",        # Available_NavigationOnly -- camera not contributing
-  5: "TSR ERROR",           # TSR_Error
-  6: "TSR NO DATA",         # NoDataExists
-}
-# Checked first when it names a specific cause: TsrStatMsgTxt says whether TSR is up, TsrMsgTxt says
-# what is stopping it. "NoInformationAllOK" (1) is not a fault and must not print.
-TSR_MSG_TEXT = {
-  2: "TSR NAV OFF",         # NoNavAvailableSwitchedOff
-  3: "TSR NO NAV DATA",     # NoNavDataAvailable
-  4: "TSR NAV DATA BAD",    # WrngNavDatIncompDatCarrier
-  5: "TSR COUNTRY N/A",     # CountryNotSupported
-  6: "TSR REGION N/A",      # RegionNotSupported
-  7: "TSR OFF ROAD",        # OffRoad
-  8: "TSR LIMITED",         # LimitedSystemPerformance
-  9: "TSR SIGN UNREADABLE",  # RecgnzdSignNotUsblForDsply
-}
-TSR_PILL_FILL = rl.Color(0, 0, 0, 150)
-TSR_PILL_EDGE = rl.Color(196, 176, 70, 205)
-TSR_PILL_INK = rl.Color(226, 206, 110, 255)
+# TSR IS RETIRED, 2026-09-26. The fault/limit pill that lived here is gone -- see the note on
+# `_draw_acc_status` below for why, and `bluepilot/TSR-INVESTIGATION.md` for the measurements.
 
 # The pin dot moved to `selfdrive/ui/sunnypilot/onroad/hud_renderer.py` with the rest of the badge
 # on 2026-08-22 -- it is drawn on the set-speed box now, in the same corner, at the same size. The
@@ -386,13 +356,10 @@ class HudRendererBP(HudRendererSP):
     # through this: one is deliberate and the other is already 5 s old when it is published.
     self._acc_fallback_frames = 0
     self._lamp_data_available = False  # the BCM/brake-system lamp signal is actually being decoded
-    self._tsr_fault = ""      # why TSR is not producing a limit; "" when it is working or silent
-    self._tsr_limit = ""      # the limit the CAMERA read, when it has one
     # FIVE `_icbm_*` FIELDS LIVED HERE AND ALL FIVE WERE READ ONLY BY THE HOLD BADGE. Deleted with
     # it on 2026-08-22 rather than left assigned: four of them had already become write-only, two
     # were not reset per frame, and the next person to draw a pin state would have reached for
     # last frame's answer. The box resolves all of it now, once, in `max_box_state`.
-    self._hold_rect = None      # the set-speed box, while there is a hold or an offer to tap
     self._acc_status_failed = False   # latched on any error; keeps a display bug off the screen
     self.speed_right = 0
     self._gradient_rect = None  # BluePilot: Full-width rect for header gradient
@@ -568,26 +535,6 @@ class HudRendererBP(HudRendererSP):
     # the set-speed box, so doing it again here parsed the same two messages a second time for
     # fields nothing draws any more. The one thing still wanted -- whether there is anything to tap
     # -- comes off `self._box` in `_render`, which `_draw_set_speed` has just written.
-
-    # BluePilot: TSR fault reason. Read before the brake-status gate below -- it has nothing to do
-    # with brakes and must not disappear when that toggle is off.
-    self._tsr_fault = ""
-    self._tsr_limit = ""
-    if sm.valid['carStateBP']:
-      try:
-        tsr = sm['carStateBP'].trafficSignData
-        # Only when TSR is failing to give a usable limit. 0 and 255 are the DBC's "no limit"
-        # values, so a working camera between signs prints nothing either.
-        if tsr.dataAvailable and tsr.vLimit1 in (0, 255):
-          self._tsr_fault = TSR_MSG_TEXT.get(tsr.tsrMsg) or TSR_STATUS_TEXT.get(tsr.tsrStatus) or ""
-        elif tsr.vLimit1 not in (0, 255):
-          # BluePilot: and say so when it DOES read one. Until 2026-08-23 nothing on this screen
-          # ever confirmed a sign was captured -- the pill drew only faults, so a working read and
-          # a dead camera looked identical from the seat. Three reads were sitting in the logs
-          # unnoticed for days because of it. The unit is the DBC's: 1 km/h, 2 mph.
-          self._tsr_limit = "TSR {}{}".format(int(tsr.vLimit1), "" if tsr.vLimitUnit == 2 else " KPH")
-      except Exception:
-        pass
 
     if not self._show_brake_status:
       return
@@ -1341,22 +1288,6 @@ class HudRendererBP(HudRendererSP):
     # HUD elements use the (possibly offset) rect for positioning
     if self.is_cruise_available:
       self._draw_set_speed(rect)
-      # THE PIN TAP TARGET IS THE SET-SPEED BOX ITSELF, 2026-08-22. The HOLD badge that used to own
-      # this rect is gone -- since `max_box_state` landed, the box already shows the hold as the big
-      # number and tints while the hold owns it, so the badge was a second drawing of a number
-      # already on screen. His call: *"we are just going to use the target speed"*.
-      #
-      # Set HERE rather than in `_draw_acc_status`, where the badge lived, because that method
-      # returns early in several states (lamps-only, nothing to report) and the tap must keep
-      # working in all of them. A hold governing the car with no way to pin or unpin it is the
-      # defect that killed pinned holds for two days in August.
-      # Straight off the box's own resolved state, which `_draw_set_speed` wrote one line ago.
-      # `hold_driving` covers a hold worth unpinning; `pin_offer` covers a place worth pinning with
-      # no hold yet -- which is exactly the pair the old `display_value` collapsed into one number.
-      tappable = bool(self._box.hold_driving or self._box.pin_offer) if self._box else False
-      self._hold_rect = self._set_speed_rect if tappable else None
-    else:
-      self._hold_rect = None   # no box on screen, no tap target
     # BluePilot: the ACC readouts describe what ACC is doing, so they follow cruise availability.
     # The brake lamps do not -- they are a fact about the car regardless of what is driving it, and
     # the owner asked for them visible whenever the setting is on. Drawn outside that gate, and
@@ -1383,37 +1314,6 @@ class HudRendererBP(HudRendererSP):
     self.turn_signal_controller.render(rect)
     self.circular_alerts_renderer.render(rect)
     self.rocket_fuel.render(rect, ui_state.sm)
-
-  def _handle_mouse_release(self, mouse_pos) -> None:
-    """BluePilot: tapping the HOLD badge pins this hold to this place, or unpins it.
-
-    The badge is the tap target because it is already the thing on screen that means "hold", and
-    because the cruise buttons are full -- every one of them carries a settled meaning the owner
-    learned once, and adding a gesture would mean relearning one to gain a rare action.
-
-    Only a request is raised here. selfdrived does the work, because that is where the GPS fix and
-    the live baseline both are; the UI has neither and should not grow a second copy of either.
-    """
-    # THE BADGE TAP IS CONSUMED BEFORE THE PARENT SEES IT. This used to call super() first, so every
-    # tap reached upstream's handler and opened the sidebar -- including taps on the badge. Reported
-    # 2026-08-12: "tapping a hold does nothing, if you tap the screen it just opens the menu on the
-    # left." The pin request was still being raised underneath, but the sidebar sliding out is what
-    # the driver sees, so the gesture read as dead and the feedback was hidden behind the menu.
-    #
-    # Checking our own target first and returning is what makes it a real button rather than a
-    # side effect of a tap that also does something else.
-    # `_hold_rect` is None unless there is something to pin -- see `_render`. The second condition
-    # that used to be here read `_icbm_baseline`, which no longer exists and was saying the same
-    # thing twice.
-    if (self._hold_rect is not None
-        and rl.check_collision_point_rec(mouse_pos, self._hold_rect)):
-      try:
-        self._bp_params.put_bool("IcbmPinHoldRequest", True)
-      except Exception:
-        pass
-      return
-
-    super()._handle_mouse_release(mouse_pos)
 
   def _ahead_box_visible(self) -> bool:
     """Is sunnypilot's AHEAD box on screen, so our stack has to start below it?
@@ -1443,16 +1343,13 @@ class HudRendererBP(HudRendererSP):
     lamps_only = not self.is_cruise_available
     if self._acc_status_failed:
       return
-    # The TSR fault line is its own reason to draw. It reports a camera that is not working, which
-    # is true whether or not cruise is engaged and has nothing to do with the brake-status toggle.
-    if (lamps_only and not self._tsr_fault and not self._tsr_limit
-        and not (self._show_brake_status and self._lamp_data_available)):
+    if lamps_only and not (self._show_brake_status and self._lamp_data_available):
       return
     # THE HOLD is NOT a reason to draw this stack any more. It was, while the HOLD badge
     # lived here; the hold is now drawn by the set-speed box above and nothing in this column
     # depends on it. Leaving it in the gate would reserve the stack for a readout that no longer
     # exists, and push the ACC pill down for no reason.
-    if (not lamps_only and not self._acc_state and not self._tsr_fault and not self._tsr_limit
+    if (not lamps_only and not self._acc_state
         and not (self._show_brake_status and self._lamp_data_available)):
       return
 
@@ -1468,29 +1365,7 @@ class HudRendererBP(HudRendererSP):
     # cannot be told apart from one that is broken, and "are my lamps on right now" is a question
     # about both answers.
     if self._show_brake_status and self._lamp_data_available:
-      y += self._draw_brake_lamp_pill(x, y) + STACK_GAP
-    self._draw_tsr_pill(x, y)
-
-  def _draw_tsr_pill(self, x: float, y: float) -> int:
-    """BluePilot: the camera's own explanation for why there is no speed limit.
-
-    Outlined rather than filled: this is information, not a warning, and it sits in the same column
-    as two readouts that go solid red when they mean something urgent.
-    """
-    label = self._tsr_limit or self._tsr_fault
-    if not label:
-      return 0
-    rect = rl.Rectangle(x, y, LAMP_PILL_WIDTH, LAMP_PILL_HEIGHT)
-    rl.draw_rectangle_rounded(rect, 0.5, 10, TSR_PILL_FILL)
-    # Filled edge when a sign was actually READ, so a capture is distinguishable at a glance from
-    # the fault text that shares this pill.
-    rl.draw_rectangle_rounded_lines_ex(rect, 0.5, 10, 6 if self._tsr_limit else 3, TSR_PILL_EDGE)
-    width = measure_text_cached(self._font_semi_bold, label, LAMP_LABEL_SIZE).x
-    rl.draw_text_ex(self._font_semi_bold, label,
-                    rl.Vector2(x + (LAMP_PILL_WIDTH - width) / 2, y + 12), LAMP_LABEL_SIZE, 0,
-                    TSR_PILL_INK)
-    return LAMP_PILL_HEIGHT
-
+      self._draw_brake_lamp_pill(x, y)
 
   def _draw_brake_lamp_pill(self, x: float, y: float) -> int:
     """BluePilot: are the stop lamps lit, right now. See LAMP_* for why this is its own readout."""

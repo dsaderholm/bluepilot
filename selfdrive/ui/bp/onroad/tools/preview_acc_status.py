@@ -33,15 +33,12 @@ W, H = 1120, 1080          # the left portion of the 2160x1080 display; all of t
 HEADER_H = 300
 SET_W, SET_H = 172, 204    # UI_CONFIG.set_speed_width_imperial / set_speed_height
 
-# DICTS, NOT TUPLES, since 2026-08-22. The old tuples had one `hold` column doing two jobs -- the
-# badge's `display_value` was the hold OR the pin being offered, so an offer scene was written as
-# "hold 45". With the badge gone those are different inputs to `max_box_state` and conflating them
-# renders the wrong thing: a hold of 45 tints the box and suppresses the offer ring entirely.
+# DICTS, NOT TUPLES, since 2026-08-22. The old tuples had one `hold` column doing two jobs, which
+# rendered the wrong thing; a keyword per input is what stops that coming back.
 #
 #   dash    what the car is DOING; the label slot shows it whenever it differs from the aim
 #   limit   the posted limit, 0 for a road with none
 #   hold    the driver's own held speed, 0 for none
-#   offer   a pin being suggested here. Mutually exclusive with `hold` by construction.
 SCENES = [
   # HIS PHOTO, 2026-08-22. Hold 35, posted 30, offset +5 -- so the fallback is also 35 and rank 2
   # used to draw "35" over "35" in blue with no word on it. He could not tell whether the hold was
@@ -60,24 +57,12 @@ SCENES = [
        dash=52, limit=55, hold=70, acc="ENG BRAKE", mag=0.9, lamps=False),
   dict(cap="no hold, ACC accelerating -- the box is SLA's number",
        dash=55, limit=55, hold=0, acc="ACCEL", mag=0.6, lamps=False),
-  dict(cap="TSR READ A SIGN -- thicker edge, the number the camera saw",
-       dash=32, limit=30, hold=0, acc="COAST", mag=0.0, lamps=False, tsr_limit="TSR 30"),
-  dict(cap="TSR not working -- the camera's own reason",
-       dash=70, limit=55, hold=70, acc="COAST", mag=0.0, lamps=False, tsr="TSR REGION N/A"),
-  dict(cap="hold pinned to this place -- dot in the corner, tap the box to unpin",
-       dash=45, limit=55, hold=45, acc="COAST", mag=0.0, lamps=False, pinned=True),
-  dict(cap="worst case today: every readout at once, TSR still down",
-       dash=70, limit=55, hold=70, acc="BRAKE", mag=1.4, lamps=True, locked=True,
-       tsr="TSR NO NAV DATA", pinned=True),
-  dict(cap="you have set a hold here before -- ring, and the offer in the label",
-       dash=45, limit=55, hold=0, acc="COAST", mag=0.0, lamps=False, offer=45),
-  # No posted limit and no hold, so the box is showing wherever SET left him. The ring is the only
-  # tap target that can accept a pin, and the label is now the only thing that can say what speed
-  # is on offer -- the badge used to carry that number.
-  # Deliberately a DIFFERENT number from the aim: an offer that happens to equal what the car is
-  # already doing renders as "45 over 45" and proves nothing about whether the slot is readable.
-  dict(cap="no limit here: nothing held, a 45 offered -- tap the ring to keep it",
-       dash=55, limit=0, hold=0, acc="COAST", mag=0.0, lamps=False, offer=45),
+  # THE TWO TSR SCENES WENT WITH THE PILL, 2026-09-26. Nothing draws that readout any more.
+  dict(cap="worst case today: every readout at once",
+       dash=70, limit=55, hold=70, acc="BRAKE", mag=1.4, lamps=True, locked=True),
+  # No posted limit and nothing held, so the box is showing wherever SET left him.
+  dict(cap="no limit here and nothing held -- wherever SET left him",
+       dash=55, limit=0, hold=0, acc="COAST", mag=0.0, lamps=False),
   # A HOLD WITH NO LIMIT: rank 2 has no fallback to offer, so the label falls through to HOLD and
   # the box tints. His common case on the roads holds are actually for.
   dict(cap="hold with no posted limit -- labelled HOLD, tinted, his own number",
@@ -103,7 +88,7 @@ def load_shipped_drawing_code():
   cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "HudRendererBP")
   # `_draw_hold_badge` and `_draw_arrow` were deleted on 2026-08-22 with the badge. The hold is
   # drawn by the SET-SPEED BOX now, which lives in the sunnypilot renderer -- see `_draw_max_box`.
-  wanted = ("_draw_acc_pill", "_draw_brake_lamp_pill", "_draw_tsr_pill")
+  wanted = ("_draw_acc_pill", "_draw_brake_lamp_pill")
   methods = [n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name in wanted]
   assert len(methods) == len(wanted), f"expected {wanted}, found {[m.name for m in methods]}"
 
@@ -119,9 +104,9 @@ def load_shipped_drawing_code():
       exec(compile(ast.Module(body=[node], type_ignores=[]), "<const>", "exec"), ns)
     except NameError:
       pass
-  # The box's own palette moved to the sunnypilot renderer with the pin mark. Pulled from the
-  # SOURCE rather than copied, so a color change there cannot leave this preview showing the old
-  # one -- which is the whole reason the tool is trusted.
+  # The box's own palette lives in the sunnypilot renderer. Pulled from the SOURCE rather than
+  # copied, so a color change there cannot leave this preview showing the old one -- which is the
+  # whole reason the tool is trusted.
   sp_tree = ast.parse(open(SP_HUD, encoding="utf-8").read())
   for node in (n for n in sp_tree.body if isinstance(n, ast.Assign)):
     try:
@@ -131,7 +116,7 @@ def load_shipped_drawing_code():
   exec(compile(ast.Module(body=methods, type_ignores=[]), "<methods>", "exec"), ns)
 
   for required in ("ACC_PILL_WIDTH", "ACC_STATUS_COLORS", "STACK_GAP", "LAMP_PILL_WIDTH",
-                   "LAMP_ON_FILL", "PIN_DOT_RADIUS", "PIN_DOT_COLOR", "HOLD_DRIVING_COLOR"):
+                   "LAMP_ON_FILL", "HOLD_DRIVING_COLOR"):
     assert required in ns, f"{required} did not survive extraction -- the preview would be a lie"
   return ns
 
@@ -169,12 +154,6 @@ def _draw_max_box(f_semi, f_bold, x, y, box, ns):
   _centered(f_semi, box.label, size, x + SET_W / 2, y + ly, max_color)
   _centered(f_bold, str(round(box.aim)), 90, x + SET_W / 2, y + 77, aim_color)
 
-  if box.pinned:
-    rl.draw_circle(int(x + 20), int(y + 20), ns["PIN_DOT_RADIUS"], ns["PIN_DOT_COLOR"])
-  elif box.pin_offer:
-    rl.draw_ring(rl.Vector2(x + 20, y + 20), ns["PIN_DOT_RADIUS"] - 3, ns["PIN_DOT_RADIUS"],
-                 0, 360, 24, ns["PIN_DOT_COLOR"])
-
 
 def _draw_speed_limit_sign(f_semi, f_bold, x, y, limit):
   w = 200
@@ -189,8 +168,7 @@ def _draw_speed_limit_sign(f_semi, f_bold, x, y, limit):
 def main(outdir):
   os.makedirs(outdir, exist_ok=True)
   ns = load_shipped_drawing_code()
-  print(f"ACC_PILL={ns['ACC_PILL_WIDTH']}x{ns['ACC_PILL_HEIGHT']} STACK_GAP={ns['STACK_GAP']} "
-        f"PIN_DOT_RADIUS={ns['PIN_DOT_RADIUS']}")
+  print(f"ACC_PILL={ns['ACC_PILL_WIDTH']}x{ns['ACC_PILL_HEIGHT']} STACK_GAP={ns['STACK_GAP']}")
 
   rl.set_config_flags(rl.ConfigFlags.FLAG_WINDOW_HIDDEN | rl.ConfigFlags.FLAG_MSAA_4X_HINT)
   rl.init_window(W, H, b"acc status preview")
@@ -204,8 +182,6 @@ def main(outdir):
     cap = scene["cap"]
     dash, limit, hold = scene["dash"], scene["limit"], scene["hold"]
     acc, mag, lamps = scene["acc"], scene["mag"], scene["lamps"]
-    tsr = scene.get("tsr", "")
-    tsr_limit = scene.get("tsr_limit", "")
     # THE REAL RULE DECIDES WHAT THE BOX SAYS. Re-deriving the ranking here is how a preview starts
     # agreeing with itself instead of with the car.
     # THE SIGN AND THE FALLBACK ARE DIFFERENT NUMBERS and every scene here conflated them until
@@ -214,14 +190,11 @@ def main(outdir):
     # why the preview could not reproduce what he was looking at.
     fallback = scene.get("fallback", limit)
     box = max_box_state(hold, fallback or None, dash, dash,
-                        pin_suggestion=scene.get("offer", 0),
-                        pinned=scene.get("pinned", False),
                         hold_locked=scene.get("locked", False))
     stub = types.SimpleNamespace(
       _font_bold=fonts["bold"], _font_semi_bold=fonts["semi"],
       _acc_state=acc, _acc_accel=mag,
       _brakes_on=lamps, _show_brake_status=True, _lamp_data_available=True,
-      _tsr_fault=tsr, _tsr_limit=tsr_limit,
     )
     rl.begin_texture_mode(tex)
     # Mid-gray stands in for road: bright enough to catch anything relying on a dark backdrop.
@@ -238,8 +211,7 @@ def main(outdir):
     cy = y + SET_H + 16
     if acc:
       cy += ns["_draw_acc_pill"](stub, x, cy) + ns["STACK_GAP"]
-    cy += ns["_draw_brake_lamp_pill"](stub, x, cy) + ns["STACK_GAP"]
-    ns["_draw_tsr_pill"](stub, x, cy)
+    ns["_draw_brake_lamp_pill"](stub, x, cy)
 
     rl.draw_text_ex(fonts["med"], cap, rl.Vector2(60, H - 70), 34, 0, rl.Color(255, 255, 255, 210))
     rl.end_texture_mode()

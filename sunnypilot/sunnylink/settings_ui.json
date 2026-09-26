@@ -1569,49 +1569,6 @@
                   ]
                 },
                 {
-                  "key": "IcbmPinnedHoldRadius",
-                  "widget": "option",
-                  "title": "Pinned Hold Range",
-                  "description": "How close you have to get before a pinned hold takes effect. A pin only has to catch once, then it behaves like any other hold, so this covers GPS wander rather than the length of the road. Raise it if a pin gets missed; lower it if one fires on a road running alongside.",
-                  "min": 15,
-                  "max": 250,
-                  "step": 5,
-                  "visibility": [
-                    {
-                      "type": "capability",
-                      "field": "has_icbm",
-                      "equals": true
-                    }
-                  ],
-                  "enablement": [
-                    {
-                      "type": "capability",
-                      "field": "has_icbm",
-                      "equals": true
-                    }
-                  ]
-                },
-                {
-                  "key": "IcbmPinnedHoldsEnabled",
-                  "widget": "toggle",
-                  "title": "Remember Holds By Location",
-                  "description": "Tap the HOLD badge while driving to pin that hold to the spot you are in. It comes back on its own every time you drive through there. For the few places that need the same correction every trip: a sign the camera reads wrong, a limit nobody drives, a school zone outside school hours. Tap a pinned hold again to remove it.",
-                  "visibility": [
-                    {
-                      "type": "capability",
-                      "field": "has_icbm",
-                      "equals": true
-                    }
-                  ],
-                  "enablement": [
-                    {
-                      "type": "capability",
-                      "field": "has_icbm",
-                      "equals": true
-                    }
-                  ]
-                },
-                {
                   "key": "IcbmResumeGateEnabled",
                   "widget": "toggle",
                   "title": "Wait For The Car Ahead Before Resuming",

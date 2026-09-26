@@ -138,6 +138,9 @@ def test_the_dynamic_descriptions_still_carry_the_flat_point():
     assert "format(flat=flat)" in body, f"{fn} no longer formats it in"
 
 
+HEADER_LINES = 60  # far enough to clear a copyright block and the marker comment
+
+
 def test_bp_tests_are_registered():
   """FusionPilot: a test file the runner never collects is worse than no test at all.
 
@@ -168,14 +171,25 @@ def test_bp_tests_are_registered():
     if any(p in {".git", "__pycache__", "node_modules"} for p in path.parts):
       continue
     try:
-      mod = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+      src = path.read_text(encoding="utf-8")
+      mod = ast.parse(src, filename=str(path))
     except (SyntaxError, UnicodeDecodeError, OSError):
       continue
-    doc = ast.get_docstring(mod)
-    # Both markers: files new to this fork say FusionPilot, and files that MODIFY an upstream file
-    # keep FusionPilot, because that marker sits alongside FusionPilot's own 316 identical ones and
-    # separating them would be churn in exactly the files merges land in.
-    if not doc or ("FusionPilot" not in doc and "FusionPilot" not in doc):
+    # The marker is looked for in the file HEADER, not only the module docstring. The dominant
+    # convention in this fork is a copyright docstring followed by a `# FusionPilot:` comment --
+    # test_stop_hold_latches_the_curvature.py, test_tap_puts_one_frame_on_the_wire.py and
+    # test_speed_hold.py all look like that -- and a docstring-only scan cannot see any of them.
+    # Measured 2026-09-25: 4 fork test files were invisible to this guard. All four happened to be
+    # registered already, so it had cost nothing yet; test_speed_hold.py was the first that was not,
+    # and it was caught by the suite total failing to move rather than by this.
+    #
+    # The condition used to read `"FusionPilot" not in doc and "FusionPilot" not in doc` -- the same
+    # string twice, which is a tautology. Its comment claimed to check two markers; the rename
+    # flattened both sides onto one. Only the FusionPilot marker is checked, and now it says so:
+    # BluePilot's own marker appears in 316 upstream files and matching it would demand registering
+    # upstream's tests.
+    header = " ".join(src.splitlines()[:HEADER_LINES])
+    if "FusionPilot" not in header:
       continue
     # Must actually contain tests. bluepilot/test_web_routes.py is named like a test file and
     # carries the marker, but it is a hand-run script with no test functions -- pytest collects

@@ -305,9 +305,13 @@ sections 2 through 4. mapd is answering a different question well.
 
 ### 5b. His own driving history, if 5a is not enough
 
-He drives the same roads daily, and **the machinery already exists**:
-`IcbmHoldObservations` learns "he sets 45 here" from repeated sightings and offers a pin once it has
-seen enough. The same shape learns "at this fork he takes the ramp."
+He drives the same roads daily, so "at this fork he takes the ramp" is learnable from repeated
+sightings.
+
+**THE MACHINERY THIS USED TO POINT AT IS GONE.** `IcbmHoldObservations` and the pinned hold it fed
+were deleted on 2026-09-25: he had asked four times not to have pins, and `IcbmPinnedHolds` read
+`[]` for the whole two months it shipped, so not one was ever created. Treat that as the warning
+rather than as lost scaffolding -- a place-keyed memory he did not ask for is exactly what sat dead.
 
 No phone, no Waze, no MS-CAN, no destination to enter, and it degrades to nothing on a road he has
 not driven -- which is the correct failure.
