@@ -2828,8 +2828,23 @@ rather than a guess. The list is one item long:
 - **`SmartCruiseControlMap` re-reads `MapTargetVelocities` whenever the v2 path is None.** That is
   the whole of it.
 
-**And `mapd_ready()` never looks at `MapdV2` at all** -- it returns True whenever the map root
-exists -- so v1 runs in every state including 2. Its measured cost is ~22% of a core and 204 MB.
+**THAT WAS TRUE WHEN WRITTEN AND IS NOT NOW. v1 ALREADY STOPS AT STATE 2, and this paragraph said
+the opposite for weeks.** `mapd_ready()` in `process_config.py` used to be a bare filesystem check
+-- True whenever the map root exists -- so v1 ran in every state, costing ~22% of a core and 204 MB
+alongside v2. It now reads `MapdV2` on every call and returns False at state 2, with its own
+docstring carrying the heat measurement that motivated it (route 389: mean 87.1 C, fan 97%, against
+79.3 C / 73% on a route with no v2).
+
+**He caught it, 2026-09-25**, when "remove v1" was offered to him as outstanding work: *"5 I feel
+like we did already."* He was right and the note was stale. **Read the predicate, not the paragraph
+about the predicate** -- the same failure as the mapd version pin, two sections down.
+
+**SO "REMOVE v1" IS DONE, and what remains is NOT dead code.** The `else` branch in
+`map_controller.update_calculations` still reads `MapTargetVelocities`, and nothing in this tree
+writes that key -- only the v1 binary does. At state 2 it therefore yields an empty list, which is
+the deliberate one-directional failure (SCC-Map idles rather than acting on a stale path). **But it
+is the LIVE path at states 0 and 1**, where v1 does run and v2 does not feed SCC-Map. Deleting it
+would break those two states. Leave it.
 
 **How often the fallback actually fires, from drive A: 9.0% of moving frames, 5 runs, longest 38 s.**
 Which was too high, and 8 of those 9 points were a bug in our own reader rather than a gap in v2:

@@ -161,7 +161,24 @@ The finding that replaced the passthrough -- openpilot asserts the friction brak
 and clips propulsion at -0.5, while Ford ramps engine braking to -0.66 and only hands over below
 -1.1, blending both across that band. Full detail and the measurement tools live on that branch now.
 
-## 6. WHAT A HOLD IS, SETTLED 2026-08-25. Do not redesign it again.
+## 6. THE STEER-SATURATED ALERT: he reports it is fixed, and it is UNVERIFIED
+
+2026-09-25: *"I never see those warnings anymore."* The lane gate shipped 2026-09-05 and cut 61
+alerts to 24 across the 701-segment baseline, so this is the expected outcome and his report is the
+primary evidence.
+
+**IT IS NOT THE SAME CLAIM AS "THE GATE WORKS", and the distinction is one command.** Silence has
+two causes: the gate suppressing alerts (working), or no saturation occurring at all
+(uninformative). Route 00000427 had ZERO episodes and that was arithmetic, not a result -- 13
+segments against a base rate of 61 per 701.
+
+`tools/bp_steer_saturated.py` reports shown AND silenced separately, so the next pull settles it:
+a healthy result is a real silenced count with the shown ones still landing on wide episodes. Until
+then this is his observation, correctly believed, and not a measurement.
+
+---
+
+## 7. WHAT A HOLD IS, SETTLED 2026-08-25. Do not redesign it again.
 
   *"I just want to be able to override the speed when I want and it to not be remembered. Memory
   will be me editing OSM."*
@@ -222,7 +239,7 @@ removed, so not a single pin was ever created on this car.
 
 ---
 
-## 7. Three warts in the new hold rules, none of them fixed
+## 8. Three warts in the new hold rules, none of them fixed
 
 Raised when he asked *"does this all make sense and is how most people would want to use it?"* --
 these are consequences of the 2026-08-25 changes that nobody chose, not bugs. Watch for them before
