@@ -57,13 +57,9 @@ SCENES = [
        dash=52, limit=55, hold=70, acc="ENG BRAKE", mag=0.9, lamps=False),
   dict(cap="no hold, ACC accelerating -- the box is SLA's number",
        dash=55, limit=55, hold=0, acc="ACCEL", mag=0.6, lamps=False),
-  dict(cap="TSR READ A SIGN -- thicker edge, the number the camera saw",
-       dash=32, limit=30, hold=0, acc="COAST", mag=0.0, lamps=False, tsr_limit="TSR 30"),
-  dict(cap="TSR not working -- the camera's own reason",
-       dash=70, limit=55, hold=70, acc="COAST", mag=0.0, lamps=False, tsr="TSR REGION N/A"),
-  dict(cap="worst case today: every readout at once, TSR still down",
-       dash=70, limit=55, hold=70, acc="BRAKE", mag=1.4, lamps=True, locked=True,
-       tsr="TSR NO NAV DATA"),
+  # THE TWO TSR SCENES WENT WITH THE PILL, 2026-09-26. Nothing draws that readout any more.
+  dict(cap="worst case today: every readout at once",
+       dash=70, limit=55, hold=70, acc="BRAKE", mag=1.4, lamps=True, locked=True),
   # No posted limit and nothing held, so the box is showing wherever SET left him.
   dict(cap="no limit here and nothing held -- wherever SET left him",
        dash=55, limit=0, hold=0, acc="COAST", mag=0.0, lamps=False),
@@ -92,7 +88,7 @@ def load_shipped_drawing_code():
   cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "HudRendererBP")
   # `_draw_hold_badge` and `_draw_arrow` were deleted on 2026-08-22 with the badge. The hold is
   # drawn by the SET-SPEED BOX now, which lives in the sunnypilot renderer -- see `_draw_max_box`.
-  wanted = ("_draw_acc_pill", "_draw_brake_lamp_pill", "_draw_tsr_pill")
+  wanted = ("_draw_acc_pill", "_draw_brake_lamp_pill")
   methods = [n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name in wanted]
   assert len(methods) == len(wanted), f"expected {wanted}, found {[m.name for m in methods]}"
 
@@ -186,8 +182,6 @@ def main(outdir):
     cap = scene["cap"]
     dash, limit, hold = scene["dash"], scene["limit"], scene["hold"]
     acc, mag, lamps = scene["acc"], scene["mag"], scene["lamps"]
-    tsr = scene.get("tsr", "")
-    tsr_limit = scene.get("tsr_limit", "")
     # THE REAL RULE DECIDES WHAT THE BOX SAYS. Re-deriving the ranking here is how a preview starts
     # agreeing with itself instead of with the car.
     # THE SIGN AND THE FALLBACK ARE DIFFERENT NUMBERS and every scene here conflated them until
@@ -201,7 +195,6 @@ def main(outdir):
       _font_bold=fonts["bold"], _font_semi_bold=fonts["semi"],
       _acc_state=acc, _acc_accel=mag,
       _brakes_on=lamps, _show_brake_status=True, _lamp_data_available=True,
-      _tsr_fault=tsr, _tsr_limit=tsr_limit,
     )
     rl.begin_texture_mode(tex)
     # Mid-gray stands in for road: bright enough to catch anything relying on a dark backdrop.
@@ -218,8 +211,7 @@ def main(outdir):
     cy = y + SET_H + 16
     if acc:
       cy += ns["_draw_acc_pill"](stub, x, cy) + ns["STACK_GAP"]
-    cy += ns["_draw_brake_lamp_pill"](stub, x, cy) + ns["STACK_GAP"]
-    ns["_draw_tsr_pill"](stub, x, cy)
+    ns["_draw_brake_lamp_pill"](stub, x, cy)
 
     rl.draw_text_ex(fonts["med"], cap, rl.Vector2(60, H - 70), 34, 0, rl.Color(255, 255, 255, 210))
     rl.end_texture_mode()
