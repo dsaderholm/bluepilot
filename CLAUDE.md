@@ -11994,3 +11994,46 @@ produced three different "the car is offline" reports across two sessions.
 He had also moved networks: laptop on SSID `Capital Tech` at `10.0.1.50`, car at **`10.0.1.184`**,
 found by sweeping the /24 and matching the wlan0 MAC `00:0a:f5:e4:4a:bc` in ARP. **Sweep and match
 the MAC; never ask him for an IP**, and never read a resolver error as a statement about the car.
+
+### THE `ONCOMING_FRAMES` SWEEP RAN. IT BOUNDS THE COST AND CANNOT SHOW THE BENEFIT.
+
+12 segments off 000004a3/a4/a5/a6/a8/a9, chosen by `findtwoway.py` -- 8 two-way dominant, 4 pure
+divided. 7,477 two-way and 4,965 divided moving frames, `SAME_DIRECTION_FRAMES` fixed at 8.
+
+    SHIPPED (sm.updated keying, ONCOMING_FRAMES=3)
+      twoway   sd  0.0%   onc 93.9%        divided  sd 36.8%   onc 15.2%
+
+    FULL RATE (logMonoTime keying), sweeping ONCOMING_FRAMES
+      3    twoway onc 97.1%   divided onc 24.5%
+      11   twoway onc 96.5%   divided onc 23.7%
+      25   twoway onc 93.8%   divided onc 23.7%
+
+**IT IS FLAT. 3 to 25 moves the two-way veto 3.3 points and the divided veto 0.8.** So the COST of
+raising it -- real vetoes lost -- is near zero across an eight-fold range, which is the
+safety-critical direction and is now measured rather than argued.
+
+**IT CANNOT SHOW THE BENEFIT, and the reason is a mistake this file already records.** The tool
+scores `blocks_oncoming` as a SHARE OF FRAMES, and that flag is a 90 s decaying memory -- so one
+latch pins the share for a minute and a half whatever the count was. The 2026-08-21 entry says it
+in as many words: *"A LEVEL IS NOT AN EVENT... Count rising edges."* `bp_oncoming_adjacent.py`
+already scores edges; `oncsweep.py` does not, and that is what has to change before this question
+gets an answer.
+
+**A WRONG CLAIM I NEARLY WROTE, caught by reading the module instead of the prose.** I had
+"candidates above ~13 are structurally unreachable, because a 1.5 s window at 8.35 Hz cannot hold
+more than that." **False.** `ONCOMING_WINDOW_S` is a GAP TIMEOUT between consecutive corroborating
+messages (`if self._oncoming_gap_s > ONCOMING_WINDOW_S: self._oncoming_hits = 0`), not a fixed
+window from the first hit. Messages arrive 0.12 s apart, so the count accumulates for as long as
+traffic is in view and 25 is three seconds of sighting -- easily reached against the measured
+4.97-28.73 s real-track lifetimes. **A constant named `*_WINDOW_S` beside a count is not
+necessarily a window over that count.**
+
+**AND THE TWO SWEEPS CANNOT BE COMPARED.** 2026-09-25 ran different segments and reported shipped
+two-way sd 66.8% / onc 52.8% and divided onc 36.4% -> 73.1% at full rate. This one reads 0.0% /
+93.9% and 15.2% -> 23.7%. Same code, same keyings, wildly different roads. **Neither set is a
+settled number, and the freeway coverage cost of the keying fix is somewhere between "doubles" and
+"rises 8 points" depending on which roads you sample.** Do not quote either as the cost.
+
+**SO THE KEYING FIX STILL DOES NOT SHIP**, and the blocker is unchanged: the two-way same-direction
+latch goes 0.0% -> 85.8% at full rate with `SAME_DIRECTION_FRAMES = 8`, which is the turn-lane veto
+releasing on the road that already cost three real incidents.
