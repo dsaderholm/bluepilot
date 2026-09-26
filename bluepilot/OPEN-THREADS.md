@@ -161,20 +161,44 @@ The finding that replaced the passthrough -- openpilot asserts the friction brak
 and clips propulsion at -0.5, while Ford ramps engine braking to -0.66 and only hands over below
 -1.1, blending both across that band. Full detail and the measurement tools live on that branch now.
 
-## 6. THE STEER-SATURATED ALERT: he reports it is fixed, and it is UNVERIFIED
+## 6. CLOSED 2026-09-26: THE STEER-SATURATED ALERT IS SILENT BECAUSE THE GATE WORKS
 
-2026-09-25: *"I never see those warnings anymore."* The lane gate shipped 2026-09-05 and cut 61
-alerts to 24 across the 701-segment baseline, so this is the expected outcome and his report is the
-primary evidence.
+2026-09-25: *"I never see those warnings anymore."* His report was correct and is now MEASURED, so
+this thread is closed.
 
-**IT IS NOT THE SAME CLAIM AS "THE GATE WORKS", and the distinction is one command.** Silence has
-two causes: the gate suppressing alerts (working), or no saturation occurring at all
-(uninformative). Route 00000427 had ZERO episodes and that was arithmetic, not a result -- 13
-segments against a base rate of 61 per 701.
+**Silence had two possible causes and they are now separated.** The gate suppressing alerts
+(working) against no saturation occurring at all (uninformative). Route 00000427 could not tell
+them apart -- ZERO episodes across 13 segments was arithmetic, not a result, against a base rate of
+61 per 701.
 
-`tools/bp_steer_saturated.py` reports shown AND silenced separately, so the next pull settles it:
-a healthy result is a real silenced count with the shown ones still landing on wide episodes. Until
-then this is his observation, correctly believed, and not a measurement.
+**139 segments, routes 000004a0/a1/a2/a3/a9, pulled off-device with zero short transfers and
+reconstructed at 100 Hz** (`tools/bp_steer_saturated.py --sweep`):
+
+    8 episodes over 200 alerting frames
+      SILENCED by the gate                              5
+      SHOWN                                             3   -- ALL THREE UNMEASURABLE
+      raw onroadEvents cross-check                      4 samples, ~1 per alerting second
+
+    while alerting   n=143   p50 0.15   p90 0.35   p99 0.38   max 0.38 m
+    baseline         n=175224  p50 0.07  p90 0.24  p99 0.56   max 1.59 m
+
+**SATURATION IS STILL HAPPENING AT THE OLD RATE.** 8 episodes in 139 segments is 0.058/segment
+against the baseline's 0.087 -- the same population, not an absence. So the answer is the gate, and
+his report is evidence that it works rather than evidence that the car stopped saturating.
+
+**EVERY SHOWN EPISODE WAS THE FAIL-OPEN PATH, NOT A WIDE ONE.** All three had no lane lines to
+judge (18-23 mph on unmarked streets, plus one at 48.5 mph whose measurable frames read 0.29 m).
+That is the gate showing the alert when it cannot see -- by design, and it is the 23%-unmeasurable
+share the 2026-09-05 write-up already predicted would be the remaining noise.
+
+**AND NOTHING WIDE WAS HIDDEN**, which is the check that matters more than the count: no measurable
+episode reached even 0.40 m against the 0.50 m threshold, so the sweep is flat from 0.30 upward and
+the gate never had to make a close call on these drives.
+
+**The honest limit: 8 episodes is thin**, and the shown/silenced split rests on 3 unmeasurable ones.
+The DIRECTION is solid because it is cross-checked three ways -- reconstruction, the published
+event stream, and the base rate -- but do not quote 5-of-8 as a precision figure. The 701-segment
+baseline's 61%-cut remains the number with a real sample behind it.
 
 ---
 

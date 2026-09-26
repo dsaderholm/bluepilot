@@ -7701,6 +7701,32 @@ episodes across 701 segments, so 13 segments expects about ONE. Zero is uninform
 evidence the gate works and not evidence it does not. **Do not report an absence at this sample size
 as a result**; it needs a drive with the 29-56 mph curves that produce the alerts.
 
+**CLOSED 2026-09-26, AND IT NEEDED NO NEW DRIVE -- THE ROUTES WERE ALREADY ON THE CAR.** He said
+*"I never see those warnings anymore"* and that was recorded as believed-but-unverified. 139
+segments (000004a0/a1/a2/a3/a9), reconstructed at 100 Hz: **8 episodes, 5 silenced by the gate, 3
+shown and all three UNMEASURABLE** -- the fail-open path, no lane lines to judge. The published
+`onroadEvents` stream carried 4 samples, about one per alerting second for those three, which is
+the ratio the tool's own cross-check predicts.
+
+**The load-bearing half is the base rate, not the count.** 8 in 139 is 0.058/segment against the
+baseline's 0.087 -- the same population. So saturation is still happening and the gate is why he
+stopped seeing it. And no measurable episode reached even 0.40 m against the 0.50 m threshold, so
+nothing wide was hidden and the sweep is flat from 0.30 upward.
+
+**THE INSTRUMENT'S OWN ZERO WAS THE TRAP, TWICE OVER.** The first pass ran against a directory
+layout the tool does not glob (`logs/<seg>/rlog.zst` against its `*.rlog.zst`), and a second
+`thermalStatus != "green"` check on the same pull read 100% at 46 C -- a comparison against a value
+that enum does not have (it is `ok`/`overheated`). Both printed clean, well-formed output. **A
+zero, a 100%, or a full table is only a result once you have checked that the tool could have
+produced anything else** -- which is the empty-`.part` and empty-sweep lesson arriving in a third
+costume the same day.
+
+**AND `maxTempC` IS NOT `max(cpuTempC)`** -- 74.9 against 94.6 on the same frame. The 2026-09-15
+heat table is in `maxTempC`, so quoting the other against it compares two different quantities.
+Re-measured correctly, the heat fix HELD: moving p50 79.6 C / 5.3% overheated / fan 77% against the
+post-fix 046f baseline of 96 C peak and 6.5% throttled. Parked is still 102.5 C with the fan pinned
+at 100%, which is the documented unfixed half and is not news.
+
 ## 2026-09-05: "SET SPEED CHANGED" WAS 99% NOISE. TWO GUARDS, MEASURED ACROSS FOUR PULLS.
 
 *"It's still telling me set speed changed to the speed limit all the time now, even when the set
