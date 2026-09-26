@@ -73,6 +73,20 @@ HOLD_THROUGH = ("noLaneAvailable", "adjacentSlow", "nothingSlower")
 FALL_FRAMES = 15
 
 
+def _sustained_held(causes) -> int:
+  """How many of the last FALL_FRAMES the sustained cause occupied.
+
+  THE THIRD CATEGORY, and without it the verdict is wrong on every real event. A HOLD_THROUGH gate
+  that flickers for a frame is the cc9b910b0a defect; the SAME gate refusing for the whole window
+  is _debounce_wanted working exactly as designed, because WANTED_FALL_S of continuous refusal is
+  precisely what it is built to wait for. Measured 2026-09-25: all twelve post-fix aborts are
+  HOLD_THROUGH causes, and labelling all twelve a defect would point the next session at raising
+  WANTED_FALL_S -- the permissive direction, on evidence that says the gates were right.
+  """
+  ranked = Counter(c for c in causes if c != "none").most_common(1)
+  return ranked[0][1] if ranked else 0
+
+
 def _sustained(causes) -> str:
   """The gate that ran the debounce down, as opposed to the one refusing at the instant it expired.
 
@@ -86,7 +100,7 @@ def _sustained(causes) -> str:
   return ranked[0][0] if ranked else "none"
 
 
-def _verdict(reason: str) -> str:
+def _verdict(reason: str, held: int) -> str:
   """Is this back-out a defect, or the design working?
 
   WITHOUT THIS THE TWO READ IDENTICALLY, and on 2026-09-25 that cost a wrong report: three noLead
@@ -96,7 +110,11 @@ def _verdict(reason: str) -> str:
   hold owns.
   """
   if reason in HOLD_THROUGH:
-    return "DEFECT -- HOLD_THROUGH gate flickered, the hold is not long enough"
+    if held >= FALL_FRAMES:
+      return (f"by design -- {reason} refused for the whole WANTED_FALL_S window, "
+              "which is what the debounce waits for")
+    return (f"DEFECT -- {reason} is on HOLD_THROUGH and only held {held}/{FALL_FRAMES} frames, "
+            "so the hold let go of a gate it owns")
   if reason == "none":
     return "unattributed -- no cause recorded on either frame"
   return f"by design -- {reason} means no pass is warranted at all"
@@ -224,7 +242,7 @@ def main() -> int:
           flipped = cur["want"] not in ("none", prev["side"])
           dropped = cur["want"] == "none"
           events.append({**prev, "went_to": phase, "after": cur["blocked"],
-                         "verdict": _verdict(reason),
+                         "verdict": _verdict(reason, _sustained_held(recent)),
                          "instant": instant,
                          "path": "window expired" if window
                                  else "wantedSide NOT LOGGED" if stale

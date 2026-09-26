@@ -46,27 +46,56 @@ def test_the_tools_copy_of_hold_through_matches_passing_assist():
 
 
 @pytest.mark.parametrize("reason", ["noLaneAvailable", "adjacentSlow", "nothingSlower"])
-def test_a_gate_the_hold_owns_is_reported_as_a_defect(reason):
-  assert _tool()._verdict(reason).startswith("DEFECT")
+def test_a_gate_the_hold_owns_that_only_FLICKERED_is_a_defect(reason):
+  """A frame or two of a HOLD_THROUGH cause is the cc9b910b0a bug class."""
+  assert _tool()._verdict(reason, held=1).startswith("DEFECT")
+
+
+@pytest.mark.parametrize("reason", ["noLaneAvailable", "adjacentSlow", "nothingSlower"])
+def test_the_same_gate_refusing_for_the_WHOLE_window_is_not_a_defect(reason):
+  """The distinction that keeps the verdict honest.
+
+  All twelve aborts in the 2026-09-25 post-fix set are HOLD_THROUGH causes that held for the full
+  WANTED_FALL_S. Calling those defects would send the next session at WANTED_FALL_S -- lengthening
+  the window a maneuver survives on stale evidence, which is the permissive direction, on data
+  that says the gates were right.
+  """
+  m = _tool()
+  v = m._verdict(reason, held=m.FALL_FRAMES)
+  assert not v.startswith("DEFECT")
+  assert "by design" in v
+
+
+def test_the_held_count_comes_from_the_window():
+  """_sustained_held must count the modal cause, not the window length or the raw total."""
+  m = _tool()
+  assert m._sustained_held(["adjacentSlow"] * 15) == 15
+  assert m._sustained_held(["none"] * 10 + ["adjacentSlow"] * 5) == 5
+  assert m._sustained_held(["none"] * 10) == 0
+  # the coincidental last frame must not be credited with the window
+  assert m._sustained_held(["adjacentSlow"] * 14 + ["noLaneAvailable"]) == 14
 
 
 @pytest.mark.parametrize("reason", ["noLead", "driverActive", "tooSlow"])
-def test_no_pass_warranted_is_reported_as_correct(reason):
-  """The case that cost the wrong report. These MUST NOT read as defects.
+@pytest.mark.parametrize("held", [0, 1, 7, 15])
+def test_no_pass_warranted_is_reported_as_correct(reason, held):
+  """The case that cost the wrong report. These MUST NOT read as defects, at ANY hold length.
 
   noLead is deliberately not on HOLD_THROUGH: a lead that has really gone means no pass is
   warranted at all, and the hard clear there is the documented behaviour rather than a flicker.
+  Swept over held because the hold length must not be able to turn one of these into a defect.
   """
-  v = _tool()._verdict(reason)
+  v = _tool()._verdict(reason, held)
   assert not v.startswith("DEFECT")
   assert "by design" in v
 
 
 def test_an_unattributed_abort_is_neither():
   """`none` must not fall into the by-design bucket and read as a clean bill of health."""
-  v = _tool()._verdict("none")
-  assert not v.startswith("DEFECT")
-  assert "by design" not in v
+  for held in (0, 1, 15):
+    v = _tool()._verdict("none", held)
+    assert not v.startswith("DEFECT")
+    assert "by design" not in v
 
 
 def test_the_verdict_is_actually_printed():
@@ -140,3 +169,33 @@ def test_the_fall_window_matches_the_debounce():
   # DT_MDL is openpilot's model cadence, 20 Hz.
   assert _tool().FALL_FRAMES == round(fall / 0.05), (
     f"FALL_FRAMES {_tool().FALL_FRAMES} no longer matches WANTED_FALL_S {fall} at 20 Hz")
+
+
+def test_the_verdict_call_site_passes_the_held_count():
+  """A call site that omits it would relabel every sustained refusal a defect, silently.
+
+  `held` is a required argument so that mistake is a TypeError rather than a wrong answer -- but
+  nothing in this suite runs main(), so the call site itself is pinned here too. This was the one
+  mutant that survived the first pass.
+  """
+  import ast as _ast
+  tree = _ast.parse(open(TOOL, encoding="utf-8").read())
+  calls = [n for n in _ast.walk(tree)
+           if isinstance(n, _ast.Call) and getattr(n.func, "id", "") == "_verdict"]
+  assert calls, "nothing calls _verdict"
+  for c in calls:
+    assert len(c.args) + len(c.keywords) == 2, (
+      "_verdict must be called with the reason AND the held count")
+    # AND the count must be COMPUTED. `_verdict(reason, 0)` has two arguments and relabels every
+    # sustained refusal a defect -- it survived two rounds of mutation testing that only counted
+    # the arguments. Pin the expression, not the arity.
+    held = c.keywords[0].value if c.keywords else c.args[1]
+    assert isinstance(held, _ast.Call) and getattr(held.func, "id", "") == "_sustained_held", (
+      "the held count must come from _sustained_held, not a literal")
+
+
+def test_the_held_count_is_required():
+  """No default, so omitting it cannot quietly mean zero."""
+  import inspect
+  sig = inspect.signature(_tool()._verdict)
+  assert sig.parameters["held"].default is inspect.Parameter.empty
