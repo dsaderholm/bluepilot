@@ -22,17 +22,18 @@ the measurements re-run.
 
 **This branch is ICBM, SCC and SLA only.** Do not add longitudinal-authoring work here.
 
-## 2. `RECOVERY BLOCKED BY THE FRAME` — episode 1 is still unexplained
+## 2. CLOSED WITH THE PASSTHROUGH: the cancel-recovery mystery
 
-Route `b5` episode 1: attribution passed, bands clean across all 7,032 camera frames, every gate
-satisfied, and recovery never ran and logged nothing. The silent refusal inside the recovery body
-now logs. **Next step:** read that line off the next drive that has an override.
+`RECOVERY BLOCKED BY THE FRAME` on route `b5` episode 1 was never explained -- attribution passed,
+the bands were clean across 7,032 camera frames, every gate was satisfied, and recovery never ran.
 
-Likely one of the unpoliced bits (`AccDeny_B_Rq`, park brake, `CmbbDeny_B_Actl`).
+**It cannot recur and it is not worth chasing.** The passthrough that raised it is deleted (item 1)
+and `passthrough-archive` is frozen. The measurements and the postmortem stay in CLAUDE.md for the
+lessons; the open question dies with the feature.
 
 ---
 
-## 4. TSR stays quarantined behind `SpeedLimitPolicy = 1`
+## 3. TSR stays quarantined behind `SpeedLimitPolicy = 1`
 
 The camera does read signs, but on the whole recorded baseline it has **only ever returned 30 mph,
 and only below 35 mph**. Those two are confounded — in this city a 30 road *is* a slow road.
@@ -135,40 +136,26 @@ is the same "only 30, only slow" pattern the baseline records. `TsrVl1Stat` is `
 
 ---
 
-## 5. Finish the Ford safety A/B for the widened gas floor
+## 4. CLOSED ON THIS BRANCH: the Ford safety A/B for the widened gas floor
 
-The panda change was verified by COMPILING it on the device -- `gcc -Wall -Wextra`, exit 0, warning
-output byte-identical to the unmodified header -- which retires the "does it build" risk that
-`tools/bp_offline_test.py` structurally cannot see.
+`ed6c0b71d7` widened panda's `min_gas` from -0.5 to -2.8 for the passthrough, and `a623652cf1`
+reverted it with everything else. **`ford.h` here reads `.min_gas = 450` (-0.5) again**, so there is
+nothing on this branch to A/B.
 
-**What is NOT finished is opendbc's own `test_ford.py`.** A full run against the modified header
-hit its 1800 s timeout partway and showed failures, and **those cannot be attributed without a
-baseline**: this fork modifies `ford.h` heavily (pinion geometry, MADS, the brake gate, the reset
-latch) against a test written for upstream's version, so red there is the expected state until
-proven otherwise. CLAUDE.md's rule -- compare against the merge base before treating a finding as
-yours.
+**The method is the part worth keeping, and `ford-acc-parity` will need it** -- that branch is where
+openpilot's propulsion floor is the whole subject:
 
-**AND THE FIRST A/B ATTEMPT WAS INVALID, which is the trap to avoid on the retry.** The script took
-its "baseline" from `/data/openpilot/.../ford.h` on the device -- and by then the passing-assist
-branch had rebased onto this one and the device had auto-pulled it, so the device's own header
-ALREADY CONTAINED the change. It printed `flag present: 3` for the baseline column. **Never take a
-baseline from the running device; take it from git.**
-
-`tools/bp_ford_gas_ab.sh` now expects `/tmp/ford_base.h`, produced by:
-
-```bash
-git show ed6c0b71d7^:opendbc_repo/opendbc/safety/modes/ford.h > /tmp/ford_base.h
-```
-
-**Next step:** scp `ford_base.h` and `ford_new.h` to the device, run the script, and compare the two
-columns. A difference is mine; anything red in both is pre-existing and belongs upstream, not here.
-
-**Note `/tmp` on the device is tmpfs and a reboot clears it** -- the tree, both headers and the
-result file all vanished once during this work. Rebuild with the tar one-liner in the script.
+- opendbc's `test_ford.py` is RED on this fork against upstream's expectations (pinion geometry,
+  MADS, the brake gate, the reset latch), so red is the expected state until a baseline proves
+  otherwise. Compare against the merge base before treating a finding as yours.
+- **Never take the baseline header from the running device.** The first attempt did, the device had
+  already auto-pulled the change, and the baseline column printed `flag present: 3`. Take it from
+  git: `git show <commit>^:opendbc_repo/opendbc/safety/modes/ford.h > /tmp/ford_base.h`.
+- `/tmp` on the device is tmpfs; a reboot took the tree, both headers and the result file once.
 
 ---
 
-## 2. Moved to `ford-acc-parity`: making op long behave like Ford ACC
+## 5. Moved to `ford-acc-parity`: making op long behave like Ford ACC
 
 The finding that replaced the passthrough -- openpilot asserts the friction brakes at -0.14 m/s^2
 and clips propulsion at -0.5, while Ford ramps engine braking to -0.66 and only hands over below
@@ -235,7 +222,7 @@ removed, so not a single pin was ever created on this car.
 
 ---
 
-## 6. Three warts in the new hold rules, none of them fixed
+## 7. Three warts in the new hold rules, none of them fixed
 
 Raised when he asked *"does this all make sense and is how most people would want to use it?"* --
 these are consequences of the 2026-08-25 changes that nobody chose, not bugs. Watch for them before
@@ -254,10 +241,10 @@ physical press does two different things on the same road. He sees the outcome i
 later but cannot predict it. This is the most likely source of the next *"why did it do that"*, and
 there is currently no cue.
 
-**3. THE `press` VS `fallbackIdle` DISTINCTION IS INVISIBLE.** Two holds that look identical in the
-set-speed box behave differently on entering a pinned zone -- a pressed one defers the pin, an
-inferred one loses to it. Introduced 2026-08-25 with the narrowed gate. Nothing on screen says
-which kind he has.
+**3. CLOSED 2026-09-25 BY DELETING PINS.** The `press` vs `fallbackIdle` distinction was invisible
+on screen and it MATTERED, because a pressed hold deferred to a pin and an inferred one lost to it.
+With pinned holds gone nothing reads `baselineSource` to decide anything -- it is a route diagnostic
+now and nothing else -- so two holds that look identical in the box behave identically.
 
 ---
 
