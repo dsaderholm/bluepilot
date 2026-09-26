@@ -9025,3 +9025,41 @@ hugs the corner at 8-12 m. At 15 mph `clip_curvature` permits 15.0 m and the wir
 so a left fits and a right is already past the ISO clamp and cannot be planned at all. Rights need
 the car SLOWER, and the 20 mph ICBM floor is what prevents that. Same chain as the longitudinal
 parity argument, arrived at from the driver's own observation rather than from a table.
+
+## 2026-09-25: THE "SET SPEED GOES UP ONE AND DOWN ONE" IS `apply_gas_handoff` WORKING
+
+*"Sometimes my set speed will change if I set and there's no SLA speed. Sometimes it will like go up
+one or down one, which is weird."*
+
+Route 0000049d t+33085, frame by frame, with the pedal column that settles it:
+
+```
+  t         mph   dash  target  raw   hold  gas   send
+  33085.17  75.5  75.0   76.0   75.0  75.0  GAS   increase
+  33085.31  75.6  77.0   76.0   75.0  75.0  GAS   decrease     <- ONE press moved the dash TWO
+  33085.89  75.8  77.0   76.0   75.0  75.0  GAS   decrease
+```
+
+**The plan asked 75, the hold was 75, and the aim came out 76.** `apply_gas_handoff` raises the
+target to the speed the driver has ACTUALLY REACHED while the pedal is down -- `round(75.5)` is 76 --
+and deliberately does not touch the baseline, because pressing the accelerator is not the same
+statement as pressing SET. So it nudges to 76, he lifts, the hold pulls it back to 75. Up one, down
+one. **Working exactly as its docstring says.**
+
+It was built for "accelerate from a 35 zone onto a 65 road and the number is still 35 when you
+lift", where the gap is 30 mph. At HALF A MILE AN HOUR the same mechanism is indistinguishable from
+a controller that cannot settle, and nothing on screen explains it. A deadband -- do not chase the
+handoff while it is within a mph or two of the current number -- costs nothing the feature is for.
+
+**AND THERE IS A REAL DEFECT BESIDE IT: one `increase` moved the dash 75 -> 77.** Two mph from a
+single press, inside the tap band that is supposed to deliver exactly one, which then forces a
+`decrease` to come back. That doubles the visible wobble and is a separate bug from the cause.
+2026-08-25 verified 869 of 875 ICBM dash steps were 1 mph, so this is not the common case -- but it
+is in the episode he is complaining about, which is where it matters.
+
+**METHOD NOTE, because the first hypothesis was wrong and cheap to check:** the sweep was written
+expecting a ROUNDING SEAM between where the hold is captured and where the dash is read, and looked
+for errors clustered at +-1. The errors were p50 -4 and p10 -15 -- mostly the stop and curve paths
+legitimately asking for less. What identified the real cause was the 118-of-702 SMALL-error
+population, and then one episode with `vTargetRaw` and `gasPressed` as columns. **Publish the
+inputs of the rule you suspect, on the frames it acted, before theorising about the output.**
