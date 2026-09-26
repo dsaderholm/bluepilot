@@ -11631,3 +11631,94 @@ it HANGS rather than erroring). Neither is evidence about which machine is on th
 **THE GENERAL SHAPE, for the third time in this file: a cheap label computed once, then carried
 forward as a fact while newer evidence went to the same conclusion it had already been filed
 under.** Same as oneWay labelling a carriageway and being read as labelling a road.
+
+## 2026-09-25: HOV. THE DATA EXISTS, THE TILE FORMAT DROPS IT, AND THE PR IS OPEN.
+
+He reported it from the road: *"it didn't know that the HOV lane was an HOV lane... it tried to go
+in there a few times"*, then the requirement in one sentence -- *"I just wish I would know that this
+portion of I-15 has an HOV lane, so don't go into the leftmost lane."*
+
+**OSM HAS IT, verified against Overpass on his own road** (bbox 40.68,-111.94,40.78,-111.86):
+
+    way 31489320  I 15  lanes 4  hov:lanes = "designated|||"  hov:minimum = 2
+
+Eight ways, all tagged. `:lanes` values are ordered left to right in the direction of travel, so
+`designated|||` is "the leftmost of four lanes is HOV" -- his sentence, precisely, plus the
+occupancy. **The chain breaks at the TILE FORMAT, not at the publish step:** `Way` in
+mapd's `offline.capnp` carries name, ref, maxSpeed, bbox, nodes, lanes, advisorySpeed, hazard,
+oneWay, the directional/conditional maxspeeds, id and highwayClass. No HOV field of any kind. So
+the tag never reaches the device and no amount of consuming would help.
+
+**AND CONSUMING IT WOULD BE LEGAL when it lands.** Refusing to suggest the leftmost lane is the map
+REFUSING, which the map-is-evidence rule permits freely; the forbidden direction is the map OPENING
+a maneuver. A stale tile then costs a pass we would have offered anyway, never a move into the HOV.
+
+### PR 139 IS OPEN ON pfeiferj/mapd. WAITING ON CI APPROVAL, NOT ON REVIEW.
+
+https://github.com/pfeiferj/mapd/pull/139 -- +421/-278, 8 files, mergeable. It adds `hovLanes` and
+`hovMinimum` as raw Text in the shape of `maxSpeedConditional`: generator reads the tag, offline
+`Way` stores it, `maps.Way` memoizes it, `MapdOut` publishes it. **Status: `action_required`** --
+GitHub holds workflows from a first-time contributor until the maintainer approves them, so CI has
+not run. That is not a review signal and nothing is wrong.
+
+**TWO FIELDS, NOT SIX, and the count is the argument:** taginfo puts `hov:lanes` at 19,596 and
+`hov:minimum` at 12,215 against `hov:lanes:backward` 252 and `hov:lanes:forward` 216 -- about 1%.
+Carrying the directional variants would cost every tile two more Text fields for nothing.
+
+**WHAT WAS NOT VERIFIED, and the PR says so in its own body:** `go build`, `go vet` and `go test`
+were never run. `gomsgq` defines `ThreadSignal` in a cgo file and needs linux, so on Windows
+nothing in the module compiles -- not even `./maps/...`, which pulls it in transitively. What WAS
+done instead: every generated symbol the hand-written code calls was checked to exist with the
+right signature, and the `state.go` call was checked to be the same shape as the `SetRoadName` line
+above it.
+
+### REGENERATE, THEN PROVE THE TOOLCHAIN BEFORE TRUSTING THE DIFF
+
+`*.capnp.go` ARE committed in that repo and his CLAUDE.md forbids hand-editing them, so the
+bindings had to be regenerated. Go 1.25.1 and capnp 1.3.0 were unpacked into the session scratchpad
+rather than installed -- no system change, and `capnpc-go` is `go install
+capnproto.org/go/capnp/v3/capnpc-go@v3.1.0-alpha.1` with `-I ../go-capnp/std`.
+
+**THE STEP THAT MAKES THE DIFF READABLE: regenerate the UNMODIFIED schemas first and require a ZERO
+diff.** A different capnp or plugin version reformats the whole file, and the real change then
+hides inside thousands of lines nobody can review. It was zero here, so the 457/177-line generated
+diff is only the two accessor sets, `MapdOut`'s pointer count 6 -> 8, and the embedded schema blob.
+
+**`capnp.exe` IS A NATIVE WINDOWS BINARY AND LOOKS UP ITS PLUGIN ON THE WINDOWS PATH.** Exporting
+PATH from the Bash tool gives `go: no such plugin (executable should be 'capnpc-go')` while the
+plugin sits right there. Run the generation from PowerShell with `$env:PATH`.
+
+**`gofumpt -l` FLAGGING A FILE ON WINDOWS USUALLY MEANS CRLF, NOT FORMATTING.** It listed files the
+change never touched, and `gofumpt -d` on them rewrote every line -- git checks out CRLF, gofumpt
+writes LF. Confirmed harmless by running it on the same files at HEAD, which flagged them too. **Do
+not run `gofumpt -w` to make it quiet**: it would reformat the whole repo and bury the change.
+
+### HE WAS RIGHT TO ASK WHETHER AN AI PR IS WELCOME THERE, AND THE ANSWER IS EVIDENCE
+
+*"would he be okay with Claude coding stuff like this? That's why I didn't do it before."* Checked
+rather than guessed:
+
+  - **pfeiferj keeps a `CLAUDE.md` in that repo**, written to guide Claude Code working in it.
+  - **Two of the three PRs he merged on 2026-09-22 came from `codex/` branches** (FrogAi), one of
+    them +7,085/-1,392.
+
+His CLAUDE.md is also the build contract: `make capnp` after any `.capnp` edit, never hand-edit a
+generated file, `make format`, and `docs/` is the source of truth for the message schema and must
+be kept in sync. `docs/outputs.md` is updated in the PR for that reason.
+
+### THE OTHER THREE ISSUES ARE NOT PRs TO WRITE, AND THAT IS THE POINT
+
+    127 lanes:forward     DO NOT. He said "Yeah, I can work on adding this" and designed his own
+                          shape (`currentDirectionLanes`, `lanes` keeps meaning the total).
+                          Sending code for something the maintainer claimed and designed is how to
+                          annoy him. A nudge at most.
+    129 change:lanes      DO NOT. HE talked himself out of it in the thread -- `overtaking` is
+                          13.6x more common and answers a different question, and both are on 0%
+                          of the three Utah highways he sampled. Worth closing.
+    131 highway=stop      NOT NOW. Nodes, not ways, and the tile stores node COORDINATES with no
+                          tags at all -- a much larger change than the other three.
+
+Four PRs would also all touch the same two files and conflict with each other. **All four open
+issues in that repo are his**, and pfeiferj is active (three merges on 2026-09-22) -- so he is
+merging patches rather than working a request list, which is why the PR is the move and the wait
+was not.
