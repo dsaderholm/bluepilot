@@ -577,6 +577,14 @@ night migrating holds to SLA?"* -- which lifts the earlier *"But don't do that n
   timing where this file records three separate failed attempts. The hold is owned by neither
   process: ICBM drives it today, the planner can drive the same object the day ICBM is gone.
 
+**THE SEPARATION IS DONE. WHAT IS LEFT IS PLUMBING WITH NO BEHAVIOR CHANGE -- DO NOT PITCH IT AS
+OUTSTANDING WORK.** On 2026-09-26 it was offered to him as "the largest item that needs nothing
+from you" and he was rightly annoyed: *"You already separated holds yesterday?????"* He had. The
+hold is its own module, owns its five fields and its policy, and outlives ICBM -- which is the
+whole thing he asked for, twice. The remainder below is shim removal and two moves; it changes
+nothing he can see and nothing the car does. Read `hold.py` before describing this migration to
+him, not the list.
+
 **WHAT IS LEFT, in order.** Move the capture call sites onto `hold.capture()` and drop the
 properties; move the clearing rules (the divergence arm, the limit-moved reset, the hold-equals-SLA
 clear) into the module; then the param and capnp renames.
