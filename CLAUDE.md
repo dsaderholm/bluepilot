@@ -11722,3 +11722,78 @@ Four PRs would also all touch the same two files and conflict with each other. *
 issues in that repo are his**, and pfeiferj is active (three merges on 2026-09-22) -- so he is
 merging patches rather than working a request list, which is why the PR is the move and the wait
 was not.
+
+## 2026-09-25: THE liveTracks UNDERSAMPLE IS 20.0%, PERIODIC, AND WHAT IT COSTS IS SHORT SIGHTINGS
+
+`adjacent_lane.update` returns early on `not sm.updated['liveTracks']` (line ~993). plannerd polls
+carState at 100 Hz and runs the planner body only when modelV2 updated, so a liveTracks message
+reaches the observer ONLY when it lands in the same 10 ms poll as a modelV2. This is the race the
+ICBM session flagged on 2026-09-14 and handed to this branch. Measured here across five rlog
+segments, highway and surface (`tracksrate.py`):
+
+    published 8.35 Hz    VISIBLE 1.62-1.74 Hz    = 19.4-20.8%
+    gap published   p50 0.120  p90 0.121-0.128  max 0.130
+    gap VISIBLE     p50 0.600  p90 0.601-0.952  max 0.601-1.560
+
+**THE SAMPLING IS PERIODIC, NOT RANDOM -- every fifth message, 0.600 s apart.** liveTracks at
+8.35 Hz against modelV2 at 20 Hz is very nearly a 5:1 phase lock, which is why the median visible
+gap is 0.600 with a p90 of 0.601 on highway. That matters because it makes the consequence
+predictable rather than a lottery.
+
+**SO CORROBORATION IS NOT STRUCTURALLY UNREACHABLE, WHICH WAS THE FIRST GUESS AND IT WAS WRONG.**
+`ONCOMING_FRAMES` and `SAME_DIRECTION_FRAMES` both need 3 messages inside a 1.5 s window; three
+visible messages span 1.2 s, so they fit:
+
+    3-in-1.5s reachable    published 100%    VISIBLE 100% highway, 83.3-95.9% surface
+
+**WHAT IT ACTUALLY COSTS IS LATENCY AND SHORT SIGHTINGS, and the second one is the safety case.** A
+verdict takes 1.2 s of evidence instead of 0.24 s. **Any oncoming vehicle visible for less than
+about 1.8 s can never reach three messages, so the veto never fires** -- while at 8.3 Hz the same
+car gives the dozen returns the constant's own comment assumes. That is a REFUSAL being missed,
+which is the direction this fork treats as unsafe; the same latency on the same-direction latch
+merely costs coverage.
+
+### THE ONE-LINE FIX IS STILL NOT SAFE, AND THE REASON IS UNCHANGED
+
+Keying the read on `sm.logMonoTime['liveTracks']` instead of `sm.updated` gives the observer all
+8.3 Hz. Then `SAME_DIRECTION_FRAMES = 3` inside 1.5 s is met in 0.24 s by anything, and the ICBM
+replay measured the same-direction latch going to **96-100% of moving two-way frames**. That latch
+is the ONLY thing that releases the strict turn-lane veto, so fixing the keying alone reopens the
+2026-08-09 center-turn-lane failure -- three real incidents -- through a sampling change. Same
+shape as the edge-std term: something measuring the wrong thing was doing real refusing.
+
+**DO NOT SHIP THE KEYING WITHOUT A RE-DERIVED `SAME_DIRECTION_FRAMES`.**
+
+### THE DERIVATION THE CONSTANT NEEDS, AND WHY IT IS NOT SHIPPED HERE
+
+At 8.35 Hz, from the track lifetimes in BP-REAR-RADAR-PLAN.md section 6 that
+`SAME_DIRECTION_FRAMES` already cites:
+
+    clutter        0.12-0.48 s  ->   1-4 messages
+    real adjacent  4.97-28.73 s ->  41-240 messages
+
+So anything from about 5 to 40 separates them, which is a wide and comfortable gap. Two anchors
+inside it:
+
+    preserve today's EFFECTIVE evidence   3 visible msgs span 1.2 s  ->  ~11 messages at 8.35 Hz
+    clear the clutter ceiling with margin  4 messages + margin       ->  ~8 messages (0.96 s)
+
+**Neither is shipped, because a number derived from two quoted ranges is not a measurement.** This
+file's own rule for this feature is not to act on a sweep with fewer than ~20 events and to state
+the count beside any claim. The measurement that settles it is a replay of the REAL `AdjacentLane`
+at full rate with candidate counts, scored FIRST on the same-direction release on two-way roads --
+the opening direction, so the higher bar -- and second on the right-side oncoming false edges.
+Confirmed possible: the class imports on the device.
+
+**USE `openpilot.tools.lib.logreader` FOR THAT REPLAY, ON THE DEVICE, NOT A SECOND `capnp.load`.**
+`adjacent_lane` pulls in the car layer, and this file already records that importing
+`opendbc.car.*` in a process that has called `capnp.load()` calls `abort()` -- exit 127, no
+traceback, `except` never runs. The scan tools in `/data/steer_review` all load log.capnp directly
+and therefore must NOT be extended to import the class.
+
+### AND THE DECAY IS FINE, WHICH IS WORTH KNOWING BEFORE ANYONE "FIXES" IT
+
+`self.left.decay(dt)` and `tick_overtaken(dt)` run BEFORE the early return, so the memory windows
+(`ONCOMING_MEMORY_S` and friends) tick at the full 20 Hz whatever the radar does. Only the
+OBSERVATION is undersampled. A fix that moved the decay inside the new keying would quietly
+lengthen every memory window by 5x.
