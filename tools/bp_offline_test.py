@@ -83,6 +83,7 @@ DEFAULT_TARGETS = [
   "sunnypilot/selfdrive/controls/lib/speed_limit/tests/test_sla_unset_invariant.py",
   "sunnypilot/selfdrive/selfdrived/tests/test_model_stop_alert_wording.py",
   "sunnypilot/selfdrive/controls/lib/speed_limit/tests/test_speed_limit_resolver.py",
+  "sunnypilot/selfdrive/controls/lib/speed_limit/tests/test_speed_hold.py",
   "selfdrive/car/tests/test_structs_capnp_parity.py",
   "selfdrive/car/tests/test_pre_enable_standstill.py",
   "selfdrive/ui/bp/onroad/tests/",

@@ -11,6 +11,7 @@ from openpilot.common.params import Params
 from openpilot.common.realtime import DT_CTRL
 from openpilot.sunnypilot import PARAMS_UPDATE_PERIOD
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.common import Mode as SpeedLimitMode
+from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.hold import SpeedHold
 from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management.helpers import get_minimum_set_speed
 from openpilot.sunnypilot.selfdrive.car.cruise_ext import CRUISE_BUTTON_TIMER, V_CRUISE_MAX, update_manual_button_timers
 
@@ -388,9 +389,10 @@ class IntelligentCruiseButtonManagement:
 
     # BluePilot: manual override latch. AUTO = ICBM drives the set speed toward v_target;
     # MANUAL = the driver has taken it back and ICBM stops chasing entirely.
-    self.override_state = OverrideState.auto
-    self.v_target_overridden = 0   # the SLA target in force when the baseline was set
-    self.v_baseline = 0            # the driver's chosen speed; 0 = no baseline, follow SLA
+    # FusionPilot: THE HOLD now lives in speed_limit/hold.py, because it is a statement about
+    # speed policy and has to outlive ICBM -- see that module's header. The five fields below are
+    # properties over it so that nothing else in this file had to change.
+    self.hold = SpeedHold()
     self.v_target_raw = 0
     self.plan_source = LongitudinalPlanSource.cruise
     self.deadline_requesting = False  # SCC-MAP ONLY: a target with a fixed place in the road.
@@ -424,7 +426,7 @@ class IntelligentCruiseButtonManagement:
     self.cruise_cycle_frames = 0     # >0 while a resume's set-speed jump is still settling
     self.v_cluster_at_press = 0      # set speed when the driver's press was seen
     self.press_suppressed = False    # the press happened while a curve/lead owned the target
-    self.baseline_diverged = False   # has the baseline ever actually differed from SLA?
+    # (baseline_diverged lives on self.hold)
     self.speed_limit_known = False   # did the resolver have a posted limit this frame, live OR remembered?
     self.speed_limit_live = False    # is it LIVE -- speedLimitValid alone. What the clearing rule uses.
     # SLA's own target with his offset applied -- the speed the car would drive to with no hold.
@@ -460,7 +462,7 @@ class IntelligentCruiseButtonManagement:
     # is not (see RESUME_BUTTONS above). Kept because it is the only way to tell the two capture
     # paths apart in a route. Not cleared by clear_baseline: the question it answers is "did the
     # press path EVER fire this drive", so it has to survive the hold it describes.
-    self.baseline_source = BaselineSource.none
+    # (baseline_source lives on self.hold)
     self.cruise_enabled_prev = False
     self.cruise_enabled = False      # current engagement; hold_suppressed reads it
     self.v_target_valid = False
@@ -840,6 +842,55 @@ class IntelligentCruiseButtonManagement:
       floor = self.drop_anchor - self.max_target_drop
 
     return max(self.v_target, floor)
+
+
+  # FusionPilot: the hold's five fields, as properties over `self.hold`.
+  #
+  # They are properties rather than a search-and-replace of 52 call sites because this commit is
+  # required to be bit-identical: every existing test has to pass untouched, which is the only
+  # cheap proof that a refactor of the hold changed no behaviour. Call sites move onto
+  # `self.hold.capture(...)` in the commits after this one, where each move is small enough to
+  # read against the test that covers it.
+
+  @property
+  def v_baseline(self) -> int:
+    return self.hold.value
+
+  @v_baseline.setter
+  def v_baseline(self, v: int) -> None:
+    self.hold.value = v
+
+  @property
+  def override_state(self):
+    return self.hold.override_state
+
+  @override_state.setter
+  def override_state(self, v) -> None:
+    self.hold.override_state = v
+
+  @property
+  def v_target_overridden(self) -> int:
+    return self.hold.target_at_capture
+
+  @v_target_overridden.setter
+  def v_target_overridden(self, v: int) -> None:
+    self.hold.target_at_capture = v
+
+  @property
+  def baseline_diverged(self) -> bool:
+    return self.hold.diverged
+
+  @baseline_diverged.setter
+  def baseline_diverged(self, v: bool) -> None:
+    self.hold.diverged = v
+
+  @property
+  def baseline_source(self):
+    return self.hold.source
+
+  @baseline_source.setter
+  def baseline_source(self, v) -> None:
+    self.hold.source = v
 
   @property
   def hold_suppressed(self) -> bool:
@@ -1751,10 +1802,8 @@ class IntelligentCruiseButtonManagement:
     return
 
   def clear_baseline(self) -> None:
-    self.override_state = OverrideState.auto
-    self.v_baseline = 0
-    self.v_target_overridden = 0
-    self.baseline_diverged = False
+    self.hold.clear()
+    # NOT hold state: these are about the press gesture in progress, not about the driver's number.
     self.reanchor_overridden = False
     self.counter_move_accum = 0
 
