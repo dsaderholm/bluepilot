@@ -73,3 +73,70 @@ def test_the_verdict_is_actually_printed():
   """Computed and never rendered is this fork's oldest bug; the column is the whole improvement."""
   src = open(TOOL, encoding="utf-8").read()
   assert "e['verdict']" in src, "the verdict is computed but never reaches the output"
+
+
+def test_the_sustained_cause_beats_the_abort_frame():
+  """Route 0000049f seg 5 t+33.35, reproduced as the sequence the tool sees.
+
+  adjacentSlow held for the fifteen frames before the abort -- exactly WANTED_FALL_S, which is
+  what released the side. On the abort frame itself leftEdgeStd ticked 1.19 -> 1.31 and the cause
+  read noLaneAvailable for two frames while width, beyond and paint sat steady. Taking the abort
+  frame at face value names a coincidence, and it sent two scans to different answers about one
+  event before this existed.
+  """
+  m = _tool()
+  window = ["adjacentSlow"] * 15
+  assert m._sustained(window) == "adjacentSlow"
+  # the coincidental frame does not get a vote it can win on
+  assert m._sustained(window + ["noLaneAvailable"]) == "adjacentSlow"
+
+
+def test_a_genuinely_sustained_gate_is_still_named():
+  """The opposite case must keep working, or the fix trades one wrong answer for another."""
+  m = _tool()
+  assert m._sustained(["noLaneAvailable"] * 15) == "noLaneAvailable"
+
+
+def test_suggestion_frames_do_not_drown_out_the_cause():
+  """`none` means a suggestion WAS being made, so it is not a cause and must never win the vote.
+
+  It is also the most common value in most windows -- counting it would report `none` on nearly
+  every abort, which is the useless answer this whole line of work started from.
+  """
+  m = _tool()
+  assert m._sustained(["none"] * 20 + ["adjacentSlow"] * 3) == "adjacentSlow"
+  assert m._sustained(["none"] * 20) == "none"
+
+
+def test_the_disagreement_is_printed():
+  """Computed and not rendered is the recurring failure; the whole point is that a reader sees it.
+
+  PINS THE GUARD, NOT JUST THE INTERPOLATION. The first version asserted only that "e['instant']"
+  appeared in the source, and a mutant replacing the condition with `if False:` left that text
+  sitting under it and passed. Parse the branch and check the test is a real comparison of the two
+  causes -- same reason test_the_tap_target_is_the_set_speed_box parses for its assignment.
+  """
+  import ast as _ast
+  tree = _ast.parse(open(TOOL, encoding="utf-8").read())
+  found = False
+  for node in _ast.walk(tree):
+    if not isinstance(node, _ast.If) or not isinstance(node.test, _ast.Compare):
+      continue
+    keys = {_ast.unparse(n) for n in _ast.walk(node.test) if isinstance(n, _ast.Subscript)}
+    if not {"e['instant']", "e['reason']"} <= keys:
+      continue
+    printed = any(isinstance(c, _ast.Call) and getattr(c.func, "id", "") == "print"
+                  for n in node.body for c in _ast.walk(n))
+    assert printed, "the disagreement branch exists but prints nothing"
+    found = True
+  assert found, "nothing compares the abort-frame cause against the sustained one"
+
+
+def test_the_fall_window_matches_the_debounce():
+  """FALL_FRAMES is a copy of WANTED_FALL_S / DT_MDL and copies rot. Read both and compare."""
+  import re as _re
+  src = open(SRC, encoding="utf-8").read()
+  fall = float(_re.search(r"^WANTED_FALL_S = ([0-9.]+)", src, _re.M).group(1))
+  # DT_MDL is openpilot's model cadence, 20 Hz.
+  assert _tool().FALL_FRAMES == round(fall / 0.05), (
+    f"FALL_FRAMES {_tool().FALL_FRAMES} no longer matches WANTED_FALL_S {fall} at 20 Hz")

@@ -39,7 +39,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from collections import Counter
+from collections import Counter, deque
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
@@ -65,6 +65,25 @@ FORWARD = {SIGNALLING: {COMMITTED, "aborting"}, COMMITTED: {"finishing", "aborti
 # warranted AT ALL, and those are required to clear the side in one frame without waiting out
 # WANTED_FALL_S (test_no_pass_warranted_clears_it_immediately states the property).
 HOLD_THROUGH = ("noLaneAvailable", "adjacentSlow", "nothingSlower")
+
+
+# _debounce_wanted needs WANTED_FALL_S of continuous disagreement to drop the side, so the gate
+# that actually ended a sequence is the one that held for that long -- NOT whichever gate happened
+# to be refusing on the single abort frame. Mirrored from passing_assist.WANTED_FALL_S / DT_MDL.
+FALL_FRAMES = 15
+
+
+def _sustained(causes) -> str:
+  """The gate that ran the debounce down, as opposed to the one refusing at the instant it expired.
+
+  MEASURED, route 0000049f seg 5 t+33.35. The abort frame reads `noLaneAvailable` because
+  leftEdgeStd ticked 1.19 -> 1.31 for two frames. What actually ended it was `adjacentSlow`, which
+  had held for the fifteen frames before -- exactly WANTED_FALL_S -- while width, beyond and paint
+  sat rock steady. Reading the abort frame alone names a coincidence and sends the work at the
+  wrong gate; it is also why a 2 Hz qlog scan and a 20 Hz rlog scan disagreed about the same event.
+  """
+  ranked = Counter(c for c in causes if c != "none").most_common(1)
+  return ranked[0][0] if ranked else "none"
 
 
 def _verdict(reason: str) -> str:
@@ -112,6 +131,10 @@ def main() -> int:
     sys.exit(f"no segments matching any of {args.route}")
 
   prev = None
+  # Deliberately NOT reset per segment: segments are contiguous 60 s slices of one drive, so an
+  # abort in the first frames of a segment was run down by frames at the end of the previous one.
+  # Clearing here would blind the window on exactly the events that straddle a boundary.
+  recent: deque[str] = deque(maxlen=FALL_FRAMES)
   events = []
   by_reason = Counter()
   phases_seen = Counter()
@@ -174,6 +197,7 @@ def main() -> int:
       except Exception:  # noqa: BLE001
         continue
       phases_seen[phase] += 1
+      recent.append(cur["decided"])
       if prev is not None and prev["phase"] in FORWARD and phase != prev["phase"]:
         if phase not in FORWARD[prev["phase"]]:
           # BOTH FRAMES, and the first version got this backwards. It read only the PREVIOUS
@@ -190,7 +214,10 @@ def main() -> int:
           # blockedByDecided where it exists, blockedBy only as the pre-2026-09-15 fallback. Taking
           # blockedBy first is what made three of four events read "none" before that field landed.
           src = prev if window else cur
-          reason = src["decided"] if src["decided"] != "none" else src["blocked"]
+          instant = src["decided"] if src["decided"] != "none" else src["blocked"]
+          # The gate that held for WANTED_FALL_S, which is what actually released the side.
+          held = _sustained(recent)
+          reason = held if held != "none" else instant
           # A route older than the wantedSide field reads `none` forever, which is
           # indistinguishable from the real "it evaporated" answer. Say so rather than print it.
           stale = prev["want"] == "none" and cur["want"] == "none"
@@ -198,6 +225,7 @@ def main() -> int:
           dropped = cur["want"] == "none"
           events.append({**prev, "went_to": phase, "after": cur["blocked"],
                          "verdict": _verdict(reason),
+                         "instant": instant,
                          "path": "window expired" if window
                                  else "wantedSide NOT LOGGED" if stale
                                  else f"wanted FLIPPED to {cur['want']}" if flipped
@@ -227,6 +255,12 @@ def main() -> int:
     # oldest bug, and the whole point of the column is that a reader cannot tell a flickering gate
     # from the grace expiring by looking at the reason alone.
     print(f"  {'':<10} {'':<6} {'':>6}  -> {e['verdict']}")
+    # Only when they disagree, and then loudly: a sustained cause that differs from the abort
+    # frame means the obvious reading of that frame is a coincidence. Printing it every time would
+    # be noise; hiding it entirely is how the wrong gate gets worked on.
+    if e["instant"] != e["reason"]:
+      print(f"  {'':<10} {'':<6} {'':>6}     (the abort FRAME said {e['instant']} -- "
+            f"a coincidence; {e['reason']} is what held for WANTED_FALL_S)")
   print()
   print("  by gate:")
   for k, v in by_reason.most_common():
