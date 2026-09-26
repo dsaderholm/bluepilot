@@ -11797,3 +11797,79 @@ and therefore must NOT be extended to import the class.
 (`ONCOMING_MEMORY_S` and friends) tick at the full 20 Hz whatever the radar does. Only the
 OBSERVATION is undersampled. A fix that moved the decay inside the new keying would quietly
 lengthen every memory window by 5x.
+
+### THE SWEEP RAN, AND THE ANSWER IS NOT A NUMBER: BOTH COUNTS WERE CALIBRATED BY THE UNDERSAMPLE
+
+Replayed the REAL `AdjacentLane` over 10 rlog segments -- 7 with genuine two-way road, 3 divided --
+both keyings, sweeping `SAME_DIRECTION_FRAMES` with `ONCOMING_FRAMES` held at 3
+(`sdsweep.py`, 554 s on the parked car). Two-way frames 5456, divided 4601, moving only.
+
+                                  TWO-WAY                    DIVIDED
+    shipped today            sd  66.8%  veto 52.8%      sd 25.5%  veto 36.4%
+    full rate, sd = 3        sd 100.0%  veto 92.1%      sd 99.5%  veto 73.1%
+    full rate, sd = 8        sd  97.6%  veto 93.4%      sd 95.3%  veto 73.1%
+    full rate, sd = 11       sd  97.4%  veto 93.5%      sd 72.9%  veto 74.9%
+    full rate, sd = 20       sd  76.9%  veto 98.9%      sd 66.2%  veto 74.9%
+
+**`SAME_DIRECTION_FRAMES` CANNOT FIX THIS ON ITS OWN, WHICH IS WHAT THE SWEEP WAS FOR.** Even at 20
+-- nearly seven times the shipped value -- the two-way latch is 76.9% against today's 66.8%, so the
+turn-lane veto still releases MORE often than it does now. And the divided-road oncoming veto is
+flat at 73-75% across the whole sweep, because that number is driven by `ONCOMING_FRAMES`, which
+this sweep held fixed.
+
+**THE FINDING IS THE OTHER COLUMN: the oncoming veto DOUBLES on divided roads, 36.4% -> 73.1%.**
+That is passing assist refused on three quarters of freeway frames -- the feature gone on the road
+it is most used on. And it is a familiar failure: it is the 2026-08-21 report *"I was on I-15 for a
+while, and kept saying two-way road"*, which `ONCOMING_FRAMES = 3` was added to fix. **That fix
+only ever worked because the observer was seeing one message in five.** Three clutter returns
+inside 1.5 s is hard at 1.67 Hz and trivial at 8.35 Hz.
+
+So the undersample has been acting as the clutter filter for BOTH corroboration tests, and both
+constants are unknowingly calibrated against a rate nobody intended.
+
+### A CORROBORATION THRESHOLD IN MESSAGES IS RATE-DEPENDENT. IT BELONGS IN SECONDS.
+
+That is the durable fix and it is better than any pair of numbers. The window constants
+(`ONCOMING_WINDOW_S`, `SAME_DIRECTION_WINDOW_S`, both 1.5) are already in seconds; the counts are
+not, so the same code means 0.24 s of evidence at 8.35 Hz and 1.2 s at 1.67 Hz. Requiring N
+SECONDS of agreement instead of N messages is invariant to the message rate, and it makes the
+keying fix safe rather than merely survivable.
+
+**The number that falls out, and unlike the counts it is measured rather than inherited:**
+
+    clutter tracks         0.12 - 0.48 s     (BP-REAR-RADAR-PLAN.md section 6)
+    real adjacent traffic  4.97 - 28.73 s
+    today's EFFECTIVE      3 visible messages x 0.600 s = 1.2 s
+
+So anything from about 0.6 s to 4 s separates clutter from traffic, today's accidental behaviour
+sits at 1.2 s inside that band, and the ORIGINAL intent -- 3 messages at 8.3 Hz, 0.24 s -- sits
+BELOW it, which is why it does not reject clutter at the true rate.
+
+**STILL NOT SHIPPED, and the missing half is named.** The `ONCOMING_FRAMES` sweep was launched and
+the car left the network mid-run -- `wd.sh` kills on ignition, so a drive most likely ended it and
+`/data/steer_review/out/oncsweep.txt` will say so. What it answers is what restores divided-road
+coverage: the prediction is ~11 messages (1.2 s at 8.35 Hz) bringing the veto back near today's
+36%, and the prediction needs checking before anything is written.
+
+**Do not ship the keying fix with only one of the two constants re-derived.** Fixing the keying
+plus `SAME_DIRECTION_FRAMES` alone would leave the oncoming veto at 73% on divided roads, which
+trades a turn-lane risk for losing the feature on the interstate.
+
+### THE REPLAY HARNESS, SO THE NEXT SESSION DOES NOT REBUILD IT
+
+`/data/steer_review/sdsweep.py` -- runs on the device, drives the real class, and both keyings come
+from one code path so the comparison is honest:
+
+- **`openpilot.tools.lib.logreader`, never a second `capnp.load`.** `adjacent_lane` pulls in the
+  car layer and the double schema load calls `abort()` -- exit 127, no traceback.
+- **Both constants are module globals read at call time** (`adjacent_lane.py` lines 730 and 781),
+  so `al.SAME_DIRECTION_FRAMES = n` before constructing is enough. Verified.
+- **The keying difference is modelled exactly**: shipped processes a liveTracks message only when
+  its 10 ms poll bin matches a modelV2's; full rate processes every message once, on the first
+  planner tick after it arrives.
+- **`divided` is approximated as `mapdOut.oneWay and tileLoaded`** and `strict` is forced True.
+  Both runs share those inputs, so the COMPARISON holds even though the absolute shares are
+  approximate.
+- **Pick the segments first.** `findtwoway.py` scores two-way share per segment off qlogs; most of
+  his driving is `oneWay=True`, and a sweep run on divided-only segments reports 0 two-way frames
+  and silently measures nothing. The first single-segment trial did exactly that.
