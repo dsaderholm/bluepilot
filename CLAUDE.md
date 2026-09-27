@@ -4018,6 +4018,49 @@ gives up safely. **A drive with no slow lead answers nothing** -- the request ne
 pursue, so silence is a statement about the traffic, not about the camera, and must not be written
 up as "the press does not work".
 
+#### IT WORKED. THE CAMERA HONOURS AN INJECTED GAP PRESS -- 2026-09-26, route 000004aa.
+
+He turned `IcbmGapControl` on and drove. The question that could not be settled offline since
+2026-08-14 is settled, and it is the good answer:
+
+    ICBM gap: mode=incDec inverted=False result=incDec works gap=2 target=1
+
+**`incDec works`, `inverted=False`, and the toggle fallback was never needed.** The camera accepts
+inc/dec from a frame openpilot authored, in the direction the DBC implies. Every assumption the
+controller was built to probe came out in its favour, and the readback confirms the car moved:
+gap 3 -> 2 under our press.
+
+**AND THE RESTORE IS CLEAN: 8 leases, 8 restores, every one back to his 3.** That is the half that
+had to be right and it was, including on the leases that failed.
+
+**BUT IT COMPLETED ONCE IN EIGHT TRIES AND NEVER REACHED GAP 1.** Outcomes over the drive:
+
+    8   restored            every lease put his setting back
+    7   (lease opened)
+    4   press abandoned to the set speed
+    1   incDec works        the only one that landed, and it stopped at 2
+
+**THE BLOCKER IS THAT THE GAP AND THE SET SPEED ARE THE SAME BUTTON CHANNEL.** Both live in
+`Steering_Data_FD1`, so one frame carries one press, and the set speed wins. The gap request fires
+at `spotted` -- a slower car confirmed ahead -- which is EXACTLY when ICBM is walking the set speed
+down for that same car. The two wants collide by construction, not by accident, and the one success
+is the case where the set speed happened to be quiet.
+
+**The other three losses are not collisions -- the request itself ended too early.** Leases at
++125.1, +314.2 and +378.8 s restored 1.6-2.1 s after opening with no abandon logged, so
+`_gap_pursuing` went false on its own. Reaching a new gap costs up to ~4.5 s of confirmed steps, so
+a two-second pursuit cannot land one whatever the button channel is doing.
+
+**WHAT NOT TO DO WITH THIS.** Do not give the gap priority over the set speed -- the set speed is
+how this car brakes, and delaying it to change a follow distance inverts the safety order. Do not
+lengthen the lease to outlast the collision either; the abandon is latched deliberately so a
+contested press cannot be retried in a loop. The shape worth measuring is whether the gap press can
+take the frames the set speed is NOT using, which needs the set-speed duty cycle during an approach
+-- a number nobody has.
+
+**AND ONE DRIVE IS ONE DRIVE.** 8 leases, 1 success. The camera answer is binary and is now known;
+the completion rate is a sample of eight on one road and is not a rate yet.
+
 **And nobody knows what gaps 1-5 ARE.** He set his by feel and thinks 3/5 is about two seconds.
 `tools/bp_gap_seconds.py` measures it from any route -- headway during steady following only, since
 frames where the set speed binds contain no information about the setting and averaging them in
