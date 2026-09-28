@@ -4061,6 +4061,19 @@ take the frames the set speed is NOT using, which needs the set-speed duty cycle
 **AND ONE DRIVE IS ONE DRIVE.** 8 leases, 1 success. The camera answer is binary and is now known;
 the completion rate is a sample of eight on one road and is not a rate yet.
 
+**THE EXPERIMENT IS OVER, AT HIS CALL -- 2026-09-27.** He drove more with it on, said *"It worked"*,
+and switched `IcbmGapControl` back OFF: *"I guess that ends that experiment. I will let you know when
+the hardware is installed or at least when it's purchased."* So the toggle reading 0 is deliberate,
+not a regression, and **do not suggest turning it back on.** He only wants the gap moving while a
+pass is actually happening (*"I only want this gap thing for when passing assist is in operation"*),
+and that needs the rear radar, which is what "the hardware" means.
+
+**The later drives were never tallied** -- the car was off the network when he reported them. Their
+`ICBM gap:` lines are in `/data/log/swaglog.*` until they rotate off. If they are still there the
+next time the car is reachable, count them into the 8-lease table above; if they are gone, the rate
+stays one drive, and that is fine -- the thing this experiment existed to learn (does the camera
+accept an injected press at all) is answered.
+
 **And nobody knows what gaps 1-5 ARE.** He set his by feel and thinks 3/5 is about two seconds.
 `tools/bp_gap_seconds.py` measures it from any route -- headway during steady following only, since
 frames where the set speed binds contain no information about the setting and averaging them in
