@@ -41,6 +41,7 @@ from opendbc.car.ford.values import CarControllerParams
 from opendbc.sunnypilot.car.ford.lateral_curv_ext import LateralResult
 from opendbc.sunnypilot.car.ford.human_turn import HumanTurnDetector
 from opendbc.sunnypilot.car.ford.lane_center_trim import LaneCenterTrim
+from opendbc.sunnypilot.car.ford.hold_wheel_cap import HoldWheelCap
 from opendbc.sunnypilot.car.ford.angle_gains import (
   GAIN_CAN, GAIN_CANFD_BOF, GAIN_CANFD_SUV, CANFD_BOF_CARS, CANFD_SUV_CARS,
 )
@@ -379,6 +380,13 @@ class LateralAngleExt:
     # worked from a stop the model never let go of, which is the question the first drives with
     # this feature could not answer.
     self.bp_angle_hold_kappa = 0.0
+    # FusionPilot: keeps the hold from winding the wheel past the turn asked for -- see
+    # hold_wheel_cap.py. Per-drive state, reset at every bail-out beside the latch. It is WRAPPED:
+    # an exception in it would propagate out of CarController.update and stop the car, so any
+    # failure latches it off for the drive and the command is left exactly as it would have been.
+    self.hold_wheel_cap = HoldWheelCap()
+    self.hold_wheel_cap_failed = False
+    self.bp_angle_hold_wheel_trim = 0.0
     # Telemetry: variable curvature lookup time used this frame (s)
     self.bp_curvature_lookup_time = _VLT_T_EXTRA_MAX + 0.3725  # warm start at ~0.5s
     # BluePilot: error-clipped kappa path_angle was derived from -- carcontroller.py reads this as
@@ -510,6 +518,8 @@ class LateralAngleExt:
       self.angle_hold_kappa = 0.0
       self.angle_hold_quiet_m = 0.0
       self.bp_angle_hold_kappa = 0.0
+      self.hold_wheel_cap.reset()
+      self.bp_angle_hold_wheel_trim = 0.0
       self.bp_angle_rate_limited = False
       self.bp_curvature_rate_limited = False
       self.bp_curvature_deviation_limited = False
@@ -566,6 +576,8 @@ class LateralAngleExt:
       self.angle_hold_kappa = 0.0
       self.angle_hold_quiet_m = 0.0
       self.bp_angle_hold_kappa = 0.0
+      self.hold_wheel_cap.reset()
+      self.bp_angle_hold_wheel_trim = 0.0
       self.bp_angle_rate_limited = False
       self.bp_curvature_rate_limited = False
       self.bp_curvature_deviation_limited = False
@@ -631,6 +643,8 @@ class LateralAngleExt:
       self.angle_hold_kappa = 0.0
       self.angle_hold_quiet_m = 0.0
       self.bp_angle_hold_kappa = 0.0
+      self.hold_wheel_cap.reset()
+      self.bp_angle_hold_wheel_trim = 0.0
       self.bp_angle_rate_limited = False
       self.bp_curvature_rate_limited = False
       self.bp_curvature_deviation_limited = False
@@ -988,7 +1002,23 @@ class LateralAngleExt:
     # FusionPilot: the speed term, floored at the hold speed -- see ANGLE_HOLD_MAX_MPH. The gain
     # schedule above keeps reading the real v_ego; only the geometry's speed is held.
     _v_angle = max(v_ego, _hold_ms) if _hold_ms > 0.0 else v_ego
-    path_angle_calc = kappa_cmd * _v_angle * self.curvature_factor
+    # FusionPilot: ...and while that floor is doing the work, the PSCM turns the same path angle
+    # into more wheel the slower the car goes -- route 000004bb held a flat command and wound the
+    # wheel to 2.5x the turn asked for. The limiter trims the command back when the wheel passes the
+    # turn asked for; it is 1.0 whenever the floor is not active, so everywhere else this line is
+    # the command exactly as it was.
+    _wheel_scale = 1.0
+    if not self.hold_wheel_cap_failed:
+      try:
+        _wheel_scale = self.hold_wheel_cap.update(
+          _hold_ms > 0.0 and v_ego < _hold_ms, bool(CS.out.steeringPressed), kappa_cmd,
+          float(CS.out.steeringAngleDeg), float(getattr(CP, 'steerRatio', 0.0) or 0.0),
+          float(getattr(CP, 'wheelbase', 0.0) or 0.0), _STEER_DT)
+      except Exception:
+        self.hold_wheel_cap_failed = True
+        _wheel_scale = 1.0
+    self.bp_angle_hold_wheel_trim = float(1.0 - _wheel_scale)
+    path_angle_calc = kappa_cmd * _v_angle * self.curvature_factor * _wheel_scale
     path_angle = path_angle_calc
 
 

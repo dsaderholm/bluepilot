@@ -698,3 +698,39 @@ def test_the_stop_hold_latch_survives_a_real_carcontroller(carcontroller_parts):
   assert cc.angleHoldKappa == pytest.approx(0.02), \
     "and the telemetry the drive is read with must carry it"
   assert isinstance(cc.angleHoldKappa, float), "a numpy scalar here is what killed plannerd once"
+
+
+def test_the_stop_hold_wheel_limiter_survives_a_real_carcontroller(carcontroller_parts):
+  """FusionPilot 2026-09-28: the wheel limiter (hold_wheel_cap.py) adds per-drive state to the
+  angle path, so it is driven through a REAL CarController -- the 2026-08-15 rule. The shape is route
+  000004bb: a right turn latched at speed, then a stop with the wheel winding past the turn asked
+  for. It must survive that, trim, and publish the trim as a plain float."""
+  CarController, dbc_names, CP, CP_SP, structs = carcontroller_parts
+  cc = CarController(dbc_names, CP, CP_SP)
+  counting = _CountingParams(cc.params)
+  counting.overrides["FordLowSpeedAngleHold_ang"] = 10.0
+  cc.params = counting
+
+  out = structs.CarState()
+  out.cruiseState.enabled = True
+  out.cruiseState.available = True
+  CS = FakeCarState(out)
+
+  frame = 0
+  wheel = 0.0
+  for v, kappa, winding in ((5.4, 0.019, 0.0), (3.0, 0.019, -0.6), (0.0, 0.0002, -0.6)):
+    out.vEgo = v
+    out.vEgoRaw = v
+    CC, CC_SP = _car_control(structs, enabled=True,
+                             send_button=structs.IntelligentCruiseButtonManagement.SendButtonState.none,
+                             gap_target=0, curvature=kappa)
+    for _ in range(60):
+      if winding:
+        wheel = min(wheel, -55.0) + winding     # past the ~53 deg the turn asks for, and still going
+      out.steeringAngleDeg = wheel
+      cc.update(CC, CC_SP, CS, frame * 10_000_000)
+      frame += 1
+
+  assert not cc.hold_wheel_cap_failed, "the limiter latched off on a real CarController"
+  assert cc.angleHoldWheelTrim > 0.1, "a wheel winding past the turn asked for must be trimmed"
+  assert isinstance(cc.angleHoldWheelTrim, float), "a numpy scalar here is what killed plannerd once"
