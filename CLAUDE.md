@@ -9293,7 +9293,19 @@ CEILING" entry above is no longer true.** Peaks of 300+ deg are still his hands.
 latch speed rather than the curvature, and that is a design change to the steering path on a branch
 his car auto-pulls. It ships on its own drive.
 
-Then the pull-away, t+85.8..88.4: the latch released, the model asked for a 9 m right (0.105-0.118,
-at the ISO clamp for 5-12 mph), the command hit 0.478 rad (91% of the wire), and the wheel went
--107 -> -261 with his hands on from -130. *"The wheel turned so far... I was not prepared for it."*
-That is the first intersection-grade RIGHT turn openpilot has planned on this car.
+Then the pull-away, t+85.8..88.4: the latch released, the command rose to 0.478 rad (91% of the
+wire) and the wheel went -107 -> -261. **HIS HANDS DID THAT SWING, not openpilot.** He asked
+(*"I guess my hands may have been helping it"*) and the 20 Hz frames say so:
+
+    t+86.40   wheel -107.1   torque -0.44
+    t+86.45   wheel -107.1   torque -2.56   <- his push lands first; the wheel has not moved
+    t+86.50   wheel -108.6   torque -2.38   <- then the wheel starts, and he pushes WITH it to -261
+
+Torque WITH the motion is his own-steering signature on these drives -- 508 of 785 samples with
+lateral off, hands on, wheel moving; a passive hand on a rack-driven wheel reads AGAINST it. The
+model's 9 m ask (0.105-0.118) arrived after the car was already yawing -0.19 to -0.27 rad/s, so it
+most likely followed his turn rather than led it. **Whether the rack would have made that turn alone
+is UNKNOWN, and it must not be quoted as openpilot's right turn.** What openpilot did alone was the
+-130 deg held at the stop, which is the flaw above, and the maximum command on the way out.
+**Check torque direction against wheel motion before crediting any large turn to openpilot** -- the
+pressed flag alone cannot tell a hand that steers from a hand that holds on.
