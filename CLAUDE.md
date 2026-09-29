@@ -9351,13 +9351,13 @@ session's scratchpad):
 the first pass flagged four "1.2-1.5 m wide" highway curves that were nudgeless lane changes and a
 lane opening to 5.5 m at an exit.
 
-## 2026-09-28: THE STOP HOLD NOW HOLDS THE WHEEL. BUILT, UNDRIVEN, NOT ON THE CAR.
+## 2026-09-28: THE STOP HOLD NOW HOLDS THE WHEEL. ON THE CAR, UNDRIVEN.
 
 He asked for it: *"go ahead and build the stop-hold fix"*. `hold_wheel_cap.py`, wired into
-`lateral_angle_ext` where the speed term is floored. **It lives on its own branch,
-`icbm-stop-hold-wheel` -- one commit on top of `icbm-manual-override-and-tuning`, deliberately NOT on
-it**, so no routine merge or rebase of ICBM can carry it onto the car. When he picks the drive:
-merge that branch into ICBM, then ICBM into passing assist, with nothing else moving.
+`lateral_angle_ext` where the speed term is floored. It was built on its own
+branch, `icbm-stop-hold-wheel`, so no routine merge could carry it onto the car, and **merged into
+ICBM the same night at his call** -- *"tell the passing assist session to get your commits and update
+my comma"*. The next drive is its test: nothing else lateral moved with it.
 
 **THE TARGET IS THE TURN ASKED FOR, IN WHEEL DEGREES:** `steerRatio * atan(kappa_cmd * wheelbase)`.
 Checked before using it -- 9,557 hands-off frames at 2-10 mph, gyro curvature over that model is
