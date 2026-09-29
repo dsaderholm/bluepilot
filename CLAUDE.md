@@ -4196,10 +4196,83 @@ The driver outranks all of it: their own press, or any gap movement we did not c
 lease on the spot and is NOT pressed back over.
 
 **What is still unknown is the only thing that matters:** whether the camera accepts an injected gap
-press at all. It cannot be settled offline and there is no requester yet, so the first real passing
-assist request is the experiment. The controller diagnoses itself and gives up safely, and every
-transition is `cloudlog.warning`ed as `ICBM gap: mode=... result=...` so the answer is readable off
-a route rather than inferred.
+press at all. It cannot be settled offline, and it is now one drive away rather than one branch away.
+
+**THE REQUESTER HAS EXISTED SINCE 2026-08-15 AND THIS PARAGRAPH CLAIMED OTHERWISE FOR SIX WEEKS.**
+`cd6967eb9d` on `passing-assist-phase1` -- "request the closer gap, and stop asking is the part that
+matters" -- wired `_update_gap_request` into `longitudinalPlanSP.accGapRequest` the DAY AFTER this
+controller landed. Both halves have been complete since August: passing assist decides it wants
+gap 1 and asserts the lease, ICBM presses and reads the camera's answer back. The only thing holding
+it shut is `IcbmGapControl`, which reads **0 on his device, written 2026-08-18 09:42 MDT and
+untouched since** -- four days after the button was built. Nothing was missing. Nobody flipped it.
+
+**AND THE REQUEST IS NOT GATED ON THE REAR RADAR, deliberately.** `_gap_pursuing` is set from the car
+AHEAD, not from whether a lane is available, so it fires on approaches passing assist merely
+SUGGESTS. Testing this needs no hardware and does not wait on the rear radar or on actuation.
+
+**HE IS GOING TO TEST IT -- 2026-09-26, his decision, his switch.** So the next drive with a slow
+lead answers the camera question. Read it off the route: `ICBM gap: mode=... inverted=... result=...`
+at warning level names which press form the camera honoured and whether the direction is inverted,
+and `carStateBP.accGap` says whether the gap actually moved. The controller diagnoses itself and
+gives up safely. **A drive with no slow lead answers nothing** -- the request needs something to
+pursue, so silence is a statement about the traffic, not about the camera, and must not be written
+up as "the press does not work".
+
+#### IT WORKED. THE CAMERA HONOURS AN INJECTED GAP PRESS -- 2026-09-26, route 000004aa.
+
+He turned `IcbmGapControl` on and drove. The question that could not be settled offline since
+2026-08-14 is settled, and it is the good answer:
+
+    ICBM gap: mode=incDec inverted=False result=incDec works gap=2 target=1
+
+**`incDec works`, `inverted=False`, and the toggle fallback was never needed.** The camera accepts
+inc/dec from a frame openpilot authored, in the direction the DBC implies. Every assumption the
+controller was built to probe came out in its favour, and the readback confirms the car moved:
+gap 3 -> 2 under our press.
+
+**AND THE RESTORE IS CLEAN: 8 leases, 8 restores, every one back to his 3.** That is the half that
+had to be right and it was, including on the leases that failed.
+
+**BUT IT COMPLETED ONCE IN EIGHT TRIES AND NEVER REACHED GAP 1.** Outcomes over the drive:
+
+    8   restored            every lease put his setting back
+    7   (lease opened)
+    4   press abandoned to the set speed
+    1   incDec works        the only one that landed, and it stopped at 2
+
+**THE BLOCKER IS THAT THE GAP AND THE SET SPEED ARE THE SAME BUTTON CHANNEL.** Both live in
+`Steering_Data_FD1`, so one frame carries one press, and the set speed wins. The gap request fires
+at `spotted` -- a slower car confirmed ahead -- which is EXACTLY when ICBM is walking the set speed
+down for that same car. The two wants collide by construction, not by accident, and the one success
+is the case where the set speed happened to be quiet.
+
+**The other three losses are not collisions -- the request itself ended too early.** Leases at
++125.1, +314.2 and +378.8 s restored 1.6-2.1 s after opening with no abandon logged, so
+`_gap_pursuing` went false on its own. Reaching a new gap costs up to ~4.5 s of confirmed steps, so
+a two-second pursuit cannot land one whatever the button channel is doing.
+
+**WHAT NOT TO DO WITH THIS.** Do not give the gap priority over the set speed -- the set speed is
+how this car brakes, and delaying it to change a follow distance inverts the safety order. Do not
+lengthen the lease to outlast the collision either; the abandon is latched deliberately so a
+contested press cannot be retried in a loop. The shape worth measuring is whether the gap press can
+take the frames the set speed is NOT using, which needs the set-speed duty cycle during an approach
+-- a number nobody has.
+
+**AND ONE DRIVE IS ONE DRIVE.** 8 leases, 1 success. The camera answer is binary and is now known;
+the completion rate is a sample of eight on one road and is not a rate yet.
+
+**THE EXPERIMENT IS OVER, AT HIS CALL -- 2026-09-27.** He drove more with it on, said *"It worked"*,
+and switched `IcbmGapControl` back OFF: *"I guess that ends that experiment. I will let you know when
+the hardware is installed or at least when it's purchased."* So the toggle reading 0 is deliberate,
+not a regression, and **do not suggest turning it back on.** He only wants the gap moving while a
+pass is actually happening (*"I only want this gap thing for when passing assist is in operation"*),
+and that needs the rear radar, which is what "the hardware" means.
+
+**The later drives were never tallied** -- the car was off the network when he reported them. Their
+`ICBM gap:` lines are in `/data/log/swaglog.*` until they rotate off. If they are still there the
+next time the car is reachable, count them into the 8-lease table above; if they are gone, the rate
+stays one drive, and that is fine -- the thing this experiment existed to learn (does the camera
+accept an injected press at all) is answered.
 
 **And nobody knows what gaps 1-5 ARE.** He set his by feel and thinks 3/5 is about two seconds.
 `tools/bp_gap_seconds.py` measures it from any route -- headway during steady following only, since
@@ -12126,3 +12199,87 @@ settled number, and the freeway coverage cost of the keying fix is somewhere bet
 **SO THE KEYING FIX STILL DOES NOT SHIP**, and the blocker is unchanged: the two-way same-direction
 latch goes 0.0% -> 85.8% at full rate with `SAME_DIRECTION_FRAMES = 8`, which is the turn-lane veto
 releasing on the road that already cost three real incidents.
+
+## 2026-09-28: THE PSCM DECLARED ITS OWN ANGLE INVALID MID-TURN. openpilot DID NOT NOTICE.
+
+*"Towards the end of the turn, I got a bunch of errors on my instrument cluster, and it all
+permanently broke until I used FORScan to reset my DTCs."* Route 000004b7, 5:26 PM MDT. The ABS
+freeze frame (16.8 mph, 17:26:45 module clock) lands on t+404.3 of the route.
+
+    t+401.0   left turn, lat ON, hands OFF, 16 mph, wheel +40, steerSaturated
+    t+403.4   wheel STOPS at +89..92 (PSCM relative +106) -- command keeps rising 0.368 -> 0.437 rad
+    t+404.56  0x085 StePinRelInit_An_Sns -> 0xFFFF, bytes 6-7 -> FFFE        <- the PSCM, by itself
+    t+404.66  accFaulted, "Cruise Fault: Restart the car"; lateral drops and never re-engages
+
+    PSCM  C1B00:62  steering angle sensor, signal compare failure
+    PSCM  U0415     invalid data from ABS
+    ABS   C0051:67  steering wheel position sensor, signal incorrect after event
+    ABS   U0420:86  invalid data from PSCM (MIL on)
+    IPMA  U0418     invalid data from ABS
+
+**It latched in the PSCM across two ignition cycles** -- 4b8 and 4b9 are all-ones on every frame --
+and cleared part-way through 4ba, when he cleared the DTCs. Motor current through the stall was
+0.15-1.3 A and `SteMdule_D_Stat` stayed `Normal_Op_Full_Assist`, so the rack was NOT straining.
+`EPAS_Failure` stayed 0 the whole time.
+
+**WHY IT HAPPENED IS UNKNOWN.** It is the PSCM's own internal compare and nothing on the bus says
+what it compared. It is not angle magnitude alone: 2026-09-17 reached 105 deg without it, and route
+000004bb reached -130 deg hands-off the same evening without it. It is not strain. Do not invent a
+mechanism; if it recurs, the thing to look for is the same shape -- the wheel stopped short of a
+rising command for about a second.
+
+**BYTES 6-7 OF 0x085 ARE UNDOCUMENTED AND LOOK LIKE THE CENTER OFFSET.** Same 0.1/-3200 scaling as
+the angle: 14.1 deg on 4b7, and relative minus that equals the camera's absolute angle to 0.1 deg.
+FFFE at every clean boot until learned, so FFFE there alone is NORMAL. Only the angle's all-ones is
+the fault marker -- 0 all-ones frames on every clean startup on record.
+
+### THE GAP ON OUR SIDE, AND IT IS FIXED
+
+On `ALT_STEER_ANGLE` cars openpilot's `steeringAngleDeg` is the CAMERA's copy
+(`ParkAid_Data.ExtSteeringAngleReq2`), and the camera FROZE at 92.2 instead of going invalid. So
+openpilot had a stuck steering angle for the rest of the drive and no fault. **Lateral stayed off
+only because the ABS fault took cruise down with it.** `carstate.py` now raises
+`steerFaultPermanent` on the all-ones angle -- controlsd drops `latActive` on it directly and the
+driver sees "LKAS Fault". `test_pscm_angle_invalid_is_a_steer_fault.py` feeds his recorded frames
+through the REAL parser and CarState; 5 mutants, 0 survivors.
+
+Two things that limited the damage and are worth knowing: measured curvature is YAW-RATE based on
+his car (`FordPrefSteerAngleCurvature` = 0), so the frozen angle never fed the command; and paramsd
+ignores `|angle| >= 45`, so it did not learn from 92.2 either. Straight-road center after the clear
+is -0.3 / 0.0 deg against +0.6 before -- the clear did not move it.
+
+### THE STOP-HOLD WINDS THE WHEEL, IT DOES NOT HOLD IT -- route 000004bb t+77..85
+
+A right turn to a stop, hold at 10 mph, latch captured 0.019. Hands OFF the whole way:
+
+    t+77.2   9.5 mph   wheel  -35   cmd 0.068   latch 0.0142
+    t+78.0   5.9 mph   wheel  -63   cmd 0.102   latch 0.0190
+    t+80.0   2.5 mph   wheel -119   cmd 0.104
+    t+81.2   0.4 mph   wheel -130   cmd 0.108   <- stopped, and held there for four seconds
+
+**The command is flat and the wheel doubles.** The latch holds a PATH ANGLE, and the PSCM turns the
+same path angle into more wheel the slower the car goes -- its own lookahead shrinks with speed
+(`pscm_d_ref_m`, 0.5 m at rest). 2026-09-22's "kept the wheel -14.5 -> -15.0" was a gentle case of
+the same thing. **So -130 deg hands-off is openpilot alone, and the "105 DEGREES IS OPENPILOT'S
+CEILING" entry above is no longer true.** Peaks of 300+ deg are still his hands.
+
+**NOT FIXED, deliberately.** The shape that would fix it is to hold the WHEEL angle captured at the
+latch speed rather than the curvature, and that is a design change to the steering path on a branch
+his car auto-pulls. It ships on its own drive.
+
+Then the pull-away, t+85.8..88.4: the latch released, the command rose to 0.478 rad (91% of the
+wire) and the wheel went -107 -> -261. **HIS HANDS DID THAT SWING, not openpilot.** He asked
+(*"I guess my hands may have been helping it"*) and the 20 Hz frames say so:
+
+    t+86.40   wheel -107.1   torque -0.44
+    t+86.45   wheel -107.1   torque -2.56   <- his push lands first; the wheel has not moved
+    t+86.50   wheel -108.6   torque -2.38   <- then the wheel starts, and he pushes WITH it to -261
+
+Torque WITH the motion is his own-steering signature on these drives -- 508 of 785 samples with
+lateral off, hands on, wheel moving; a passive hand on a rack-driven wheel reads AGAINST it. The
+model's 9 m ask (0.105-0.118) arrived after the car was already yawing -0.19 to -0.27 rad/s, so it
+most likely followed his turn rather than led it. **Whether the rack would have made that turn alone
+is UNKNOWN, and it must not be quoted as openpilot's right turn.** What openpilot did alone was the
+-130 deg held at the stop, which is the flaw above, and the maximum command on the way out.
+**Check torque direction against wheel motion before crediting any large turn to openpilot** -- the
+pressed flag alone cannot tell a hand that steers from a hand that holds on.
