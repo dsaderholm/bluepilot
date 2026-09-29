@@ -55,6 +55,7 @@ WANT = (3, 12)
 DEFAULT_TARGETS = [
   # Named rather than by directory: sunnypilot/selfdrive/car/tests/ also holds device-only tests.
   "sunnypilot/selfdrive/car/intelligent_cruise_button_management/tests/",
+  "sunnypilot/selfdrive/car/tests/test_unrecognized_car_keeps_settings.py",
   "opendbc_repo/opendbc/sunnypilot/car/ford/tests/",
   "bluepilot/selfdrive/car/tests/test_bp_card_publisher.py",
   "bluepilot/selfdrive/selfdrived/tests/test_steer_saturated_gate.py",

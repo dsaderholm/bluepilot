@@ -87,6 +87,21 @@ def _cleanup_unsupported_params(CP: structs.CarParams, CP_SP: structs.CarParamsS
   if params is None:
     params = Params()
 
+  # FusionPilot 2026-09-28: A MOCK CAR IS ONE THAT DID NOT ANSWER, NOT ONE THAT LACKS THE FEATURE.
+  #
+  # Route 000004ba: he was clearing DTCs in FORScan, the device booted while the modules were not
+  # answering (VIN all zeros, every FW response null), and the car fingerprinted as MOCK. Everything
+  # below then read "no ICBM, no op long, PCM cruise speed" and deleted IntelligentCruiseButtonManagement,
+  # SmartCruiseControlVision, SmartCruiseControlMap and CustomAccIncrementsEnabled, and downgraded
+  # SpeedLimitMode from assist to warning. The next boot recognised the car again and drove with all
+  # of it off until he noticed and turned it back on by hand.
+  #
+  # Same rule as the UI gates: "not known" is not "not supported", and removing a PERSISTENT param is
+  # not a way to say it. A mock car drives nothing, so skipping the cleanup costs nothing.
+  if CP.brand == "mock":
+    cloudlog.warning("car not recognized (mock), leaving stored settings alone")
+    return
+
   if CP.steerControlType == structs.CarParams.SteerControlType.angle:
     cloudlog.warning("SteerControlType is angle, cleaning up params")
     params.remove("NeuralNetworkLateralControl")
