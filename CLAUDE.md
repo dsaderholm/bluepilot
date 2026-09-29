@@ -9225,3 +9225,75 @@ for errors clustered at +-1. The errors were p50 -4 and p10 -15 -- mostly the st
 legitimately asking for less. What identified the real cause was the 118-of-702 SMALL-error
 population, and then one episode with `vTargetRaw` and `gasPressed` as columns. **Publish the
 inputs of the rule you suspect, on the frames it acted, before theorising about the output.**
+
+## 2026-09-28: THE PSCM DECLARED ITS OWN ANGLE INVALID MID-TURN. openpilot DID NOT NOTICE.
+
+*"Towards the end of the turn, I got a bunch of errors on my instrument cluster, and it all
+permanently broke until I used FORScan to reset my DTCs."* Route 000004b7, 5:26 PM MDT. The ABS
+freeze frame (16.8 mph, 17:26:45 module clock) lands on t+404.3 of the route.
+
+    t+401.0   left turn, lat ON, hands OFF, 16 mph, wheel +40, steerSaturated
+    t+403.4   wheel STOPS at +89..92 (PSCM relative +106) -- command keeps rising 0.368 -> 0.437 rad
+    t+404.56  0x085 StePinRelInit_An_Sns -> 0xFFFF, bytes 6-7 -> FFFE        <- the PSCM, by itself
+    t+404.66  accFaulted, "Cruise Fault: Restart the car"; lateral drops and never re-engages
+
+    PSCM  C1B00:62  steering angle sensor, signal compare failure
+    PSCM  U0415     invalid data from ABS
+    ABS   C0051:67  steering wheel position sensor, signal incorrect after event
+    ABS   U0420:86  invalid data from PSCM (MIL on)
+    IPMA  U0418     invalid data from ABS
+
+**It latched in the PSCM across two ignition cycles** -- 4b8 and 4b9 are all-ones on every frame --
+and cleared part-way through 4ba, when he cleared the DTCs. Motor current through the stall was
+0.15-1.3 A and `SteMdule_D_Stat` stayed `Normal_Op_Full_Assist`, so the rack was NOT straining.
+`EPAS_Failure` stayed 0 the whole time.
+
+**WHY IT HAPPENED IS UNKNOWN.** It is the PSCM's own internal compare and nothing on the bus says
+what it compared. It is not angle magnitude alone: 2026-09-17 reached 105 deg without it, and route
+000004bb reached -130 deg hands-off the same evening without it. It is not strain. Do not invent a
+mechanism; if it recurs, the thing to look for is the same shape -- the wheel stopped short of a
+rising command for about a second.
+
+**BYTES 6-7 OF 0x085 ARE UNDOCUMENTED AND LOOK LIKE THE CENTER OFFSET.** Same 0.1/-3200 scaling as
+the angle: 14.1 deg on 4b7, and relative minus that equals the camera's absolute angle to 0.1 deg.
+FFFE at every clean boot until learned, so FFFE there alone is NORMAL. Only the angle's all-ones is
+the fault marker -- 0 all-ones frames on every clean startup on record.
+
+### THE GAP ON OUR SIDE, AND IT IS FIXED
+
+On `ALT_STEER_ANGLE` cars openpilot's `steeringAngleDeg` is the CAMERA's copy
+(`ParkAid_Data.ExtSteeringAngleReq2`), and the camera FROZE at 92.2 instead of going invalid. So
+openpilot had a stuck steering angle for the rest of the drive and no fault. **Lateral stayed off
+only because the ABS fault took cruise down with it.** `carstate.py` now raises
+`steerFaultPermanent` on the all-ones angle -- controlsd drops `latActive` on it directly and the
+driver sees "LKAS Fault". `test_pscm_angle_invalid_is_a_steer_fault.py` feeds his recorded frames
+through the REAL parser and CarState; 5 mutants, 0 survivors.
+
+Two things that limited the damage and are worth knowing: measured curvature is YAW-RATE based on
+his car (`FordPrefSteerAngleCurvature` = 0), so the frozen angle never fed the command; and paramsd
+ignores `|angle| >= 45`, so it did not learn from 92.2 either. Straight-road center after the clear
+is -0.3 / 0.0 deg against +0.6 before -- the clear did not move it.
+
+### THE STOP-HOLD WINDS THE WHEEL, IT DOES NOT HOLD IT -- route 000004bb t+77..85
+
+A right turn to a stop, hold at 10 mph, latch captured 0.019. Hands OFF the whole way:
+
+    t+77.2   9.5 mph   wheel  -35   cmd 0.068   latch 0.0142
+    t+78.0   5.9 mph   wheel  -63   cmd 0.102   latch 0.0190
+    t+80.0   2.5 mph   wheel -119   cmd 0.104
+    t+81.2   0.4 mph   wheel -130   cmd 0.108   <- stopped, and held there for four seconds
+
+**The command is flat and the wheel doubles.** The latch holds a PATH ANGLE, and the PSCM turns the
+same path angle into more wheel the slower the car goes -- its own lookahead shrinks with speed
+(`pscm_d_ref_m`, 0.5 m at rest). 2026-09-22's "kept the wheel -14.5 -> -15.0" was a gentle case of
+the same thing. **So -130 deg hands-off is openpilot alone, and the "105 DEGREES IS OPENPILOT'S
+CEILING" entry above is no longer true.** Peaks of 300+ deg are still his hands.
+
+**NOT FIXED, deliberately.** The shape that would fix it is to hold the WHEEL angle captured at the
+latch speed rather than the curvature, and that is a design change to the steering path on a branch
+his car auto-pulls. It ships on its own drive.
+
+Then the pull-away, t+85.8..88.4: the latch released, the model asked for a 9 m right (0.105-0.118,
+at the ISO clamp for 5-12 mph), the command hit 0.478 rad (91% of the wire), and the wheel went
+-107 -> -261 with his hands on from -130. *"The wheel turned so far... I was not prepared for it."*
+That is the first intersection-grade RIGHT turn openpilot has planned on this car.

@@ -14,6 +14,9 @@ ButtonType = structs.CarState.ButtonEvent.Type
 # BluePilot: below this the car is stopped whatever VehStop_D_Stat says. Well under any
 # real motion and above the quantization of Veh_V_ActlBrk, which is reported in km/h.
 STANDSTILL_SPEED = 0.1  # m/s
+# FusionPilot: StePinRelInit_An_Sns at raw 0xFFFF (65535 * 0.1 - 3200 = 3353.5). The DBC's valid
+# range stops at 3353.3, so anything at or above this is the PSCM's own invalid marker.
+PSCM_ANGLE_INVALID_DEG = 3353.45
 GearShifter = structs.CarState.GearShifter
 TransmissionType = structs.CarParams.TransmissionType
 
@@ -185,6 +188,16 @@ class CarState(CarStateBase, MadsCarState, CarStateExt):
     ret.steeringPressed = self.update_steering_pressed(abs(ret.steeringTorque) > CarControllerParams.STEER_DRIVER_ALLOWANCE, 5)
     ret.steerFaultTemporary = cp.vl["EPAS_INFO"]["EPAS_Failure"] == 1
     ret.steerFaultPermanent = cp.vl["EPAS_INFO"]["EPAS_Failure"] in (2, 3)
+    if self.CP.flags & FordFlags.ALT_STEER_ANGLE:
+      # FusionPilot 2026-09-28: all-ones on the PSCM's relative angle is the PSCM declaring its OWN
+      # angle sensor invalid (C1B00 "signal compare failure", route 000004b7 t+404.56). EPAS_Failure
+      # stayed 0 through it, and the angle above comes from the camera's copy in ParkAid_Data, which
+      # FROZE at the last value instead of going invalid -- so nothing here noticed, and openpilot's
+      # steering angle sat at 92.2 deg for the rest of the drive. Lateral stayed off that time only
+      # because the ABS faulted cruise too. It latched across two ignition cycles until the DTCs
+      # were cleared, so it is permanent, not temporary. Measured: 0 all-ones frames on every clean
+      # startup on record, so a normal boot cannot trip it.
+      ret.steerFaultPermanent = ret.steerFaultPermanent or steering_angle_init >= PSCM_ANGLE_INVALID_DEG
     ret.espDisabled = cp.vl["Cluster_Info1_FD1"]["DrvSlipCtlMde_D_Rq"] != 0  # 0 is default mode
 
     if self.CP.flags & FordFlags.CANFD:
