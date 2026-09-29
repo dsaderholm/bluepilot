@@ -12283,3 +12283,45 @@ is UNKNOWN, and it must not be quoted as openpilot's right turn.** What openpilo
 -130 deg held at the stop, which is the flaw above, and the maximum command on the way out.
 **Check torque direction against wheel motion before crediting any large turn to openpilot** -- the
 pressed flag alone cannot tell a hand that steers from a hand that holds on.
+
+## 2026-09-28: A FORSCAN SESSION BOOTED THE CAR AS MOCK AND DELETED HIS SETTINGS. FIXED.
+
+Route 000004ba, while he cleared the PSCM DTCs: the device booted with the modules not answering (VIN
+all zeros, every FW response null), card fingerprinted MOCK, and `_cleanup_unsupported_params`
+deleted `IntelligentCruiseButtonManagement`, `SmartCruiseControlMap`, `SmartCruiseControlVision`,
+`CustomAccIncrementsEnabled` and downgraded `SpeedLimitMode` 3 -> 2. The next boot recognised the
+car, so 000004bb/bc drove with ICBM, SCC and SLA off. He found and restored each by hand.
+
+Four sites now treat `CP.brand == "mock"` as "not known", never "not supported": card's cleanup, the
+SLA availability helper (plannerd calls it every params period), `ui_state._enforce_constraints`,
+and the cruise page. `test_unrecognized_car_keeps_settings.py`, 6 mutants 0 survivors, including the
+two that would switch the cleanup off for a real car. `AlphaLongitudinalEnabled`/`ExperimentalMode`
+are still removed on a mock boot by openpilot's own `selfdrived.py` -- inert on this branch, worth
+knowing on the op-long branch.
+
+**Card persists a mock CarParams like any other**, so `CarParamsPersistent` can say MOCK. Any new
+gate that removes a param must check the brand, not just `CP is not None`.
+
+## 2026-09-28: "SHOULD WE OPTIMIZE SCC FOR MORE STEERING?" -- NOT YET, AND WHY
+
+Asked after the PSCM gain curve showed slower = more wheel per command. Measured on 4a0-4bc
+(~290 segments; `scc_curves.py`, `hands_by_req.py`, `wide_by_cmd.py`, `map_asks.py` in that
+session's scratchpad):
+
+- **Intersection turns: SCC cannot help.** Every openpilot turn is under 20 mph and ICBM floors at
+  20. That is the op-long branch's job, and he said so himself.
+- **Road curves: the rack is not what stops him.** Hands-on share jumps to ~96% at ~2.7 m/s^2 in
+  BOTH 35-50 mph (0.13 rad required) and 50-65 mph (0.10 rad). Same g, different command -- a
+  lateral-accel threshold (his), not a path-angle one (the PSCM's). Thin: 5-10 s per bin.
+- **In curves openpilot steers hands-off it does not run wide.** Signed lane offset toward the
+  outside is -0.2 to -0.5 m (cutting in) at the larger commands; delivery 0.87-0.97.
+- **SCC barely touches his firm curves.** 23 curves >= 2.2 m/s^2 above 35 mph: 11 with cruise off
+  (lateral only), 6 on 4bc with SCC deleted by the mock boot, and on the other 6 SCC asked below his
+  speed twice while the gas was down on most.
+- **What IS wrong in SCC, on thin data:** 6 highway map asks priced corners at 0.51-0.91 of the
+  radius he then drove (too tight), two only 0.9 s ahead; vision's highway targets sat ABOVE his
+  speed (84-106 mph) so it did nothing. `_CORNER_LAT_ACC = 2.4` itself sits just under his ~2.7.
+
+**Lane deviation in a curve window must exclude `laneChangeState != off` and watch lane WIDTH** --
+the first pass flagged four "1.2-1.5 m wide" highway curves that were nudgeless lane changes and a
+lane opening to 5.5 m at an exit.

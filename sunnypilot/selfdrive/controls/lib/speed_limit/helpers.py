@@ -26,6 +26,13 @@ def set_speed_limit_assist_availability(CP: car.CarParams, CP_SP: custom.CarPara
   if params is None:
     params = Params()
 
+  # FusionPilot 2026-09-28: a MOCK car (the modules did not answer at boot) is not a car without SLA.
+  # Route 000004ba downgraded SpeedLimitMode assist -> warning this way during a FORScan session, and
+  # plannerd calls this every params period, so it would keep rewriting it. Report unavailable,
+  # never rewrite his setting. See `_cleanup_unsupported_params`.
+  if CP.brand == "mock":
+    return False
+
   is_release = params.get_bool("IsReleaseSpBranch")
   disallow_in_release = CP.brand == "tesla" and is_release
   always_disallow = CP.brand == "rivian"

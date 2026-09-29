@@ -437,7 +437,9 @@ class CruiseLayout(Widget):
     for item in self._icbm_tunables:
       item.action_item.set_enabled(ui_state.has_icbm)
 
-    if ui_state.CP is not None and ui_state.CP_SP is not None:
+    # FusionPilot 2026-09-28: `brand != "mock"` -- an unrecognized car (route 000004ba, a FORScan
+    # session) is "not known", and the block below removes params. See ui_state._enforce_constraints.
+    if ui_state.CP is not None and ui_state.CP_SP is not None and ui_state.CP.brand != "mock":
       has_icbm = ui_state.has_icbm
       has_long = ui_state.has_longitudinal_control
 

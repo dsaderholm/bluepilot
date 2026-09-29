@@ -179,6 +179,13 @@ class UIStateSP:
     has_long = self.has_longitudinal_control
     CP = self.CP
 
+    # FusionPilot 2026-09-28: a MOCK CarParams means the car did not answer at boot (route 000004ba,
+    # a FORScan session), and card persists it like any other. Every gate below would then delete
+    # ICBM and both curve controllers. Report ICBM unavailable for display; destroy nothing.
+    if CP is not None and CP.brand == "mock":
+      self.has_icbm = False
+      return
+
     if CP is not None:
       if self.params.get_bool("EnforceTorqueControl") and self.params.get_bool("NeuralNetworkLateralControl"):
         self.params.put_bool("EnforceTorqueControl", False, block=True)
