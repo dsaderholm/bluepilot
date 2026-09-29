@@ -69,6 +69,11 @@ FIELDS = [
   "gainLowCurv",
   "gainHighCurv",
   "blendWeight",
+  # FusionPilot: the stop hold's two fields, registered here so they get every check above -- the
+  # latch (2026-09-17) was never added, and the wheel limiter's trim (2026-09-28) would have repeated
+  # that.
+  "angleHoldKappa",
+  "angleHoldWheelTrim",
 ]
 
 
@@ -258,6 +263,8 @@ class TestItSurvivesARealDrive:
       ("gainLowCurv", "bp_gain_low_curv"),
       ("gainHighCurv", "bp_gain_high_curv"),
       ("blendWeight", "bp_blend_weight"),
+      ("angleHoldKappa", "bp_angle_hold_kappa"),
+      ("angleHoldWheelTrim", "bp_angle_hold_wheel_trim"),
     ):
       assert getattr(cc, published) == pytest.approx(float(getattr(cc, source))), (
         f"{published} does not match {source} -- the carcontroller hop dropped it")

@@ -12263,9 +12263,8 @@ same path angle into more wheel the slower the car goes -- its own lookahead shr
 the same thing. **So -130 deg hands-off is openpilot alone, and the "105 DEGREES IS OPENPILOT'S
 CEILING" entry above is no longer true.** Peaks of 300+ deg are still his hands.
 
-**NOT FIXED, deliberately.** The shape that would fix it is to hold the WHEEL angle captured at the
-latch speed rather than the curvature, and that is a design change to the steering path on a branch
-his car auto-pulls. It ships on its own drive.
+**BUILT THE SAME NIGHT, UNDRIVEN -- see "THE STOP HOLD NOW HOLDS THE WHEEL" below.** It ships on its
+own drive.
 
 Then the pull-away, t+85.8..88.4: the latch released, the command rose to 0.478 rad (91% of the
 wire) and the wheel went -107 -> -261. **HIS HANDS DID THAT SWING, not openpilot.** He asked
@@ -12325,3 +12324,47 @@ session's scratchpad):
 **Lane deviation in a curve window must exclude `laneChangeState != off` and watch lane WIDTH** --
 the first pass flagged four "1.2-1.5 m wide" highway curves that were nudgeless lane changes and a
 lane opening to 5.5 m at an exit.
+
+## 2026-09-28: THE STOP HOLD NOW HOLDS THE WHEEL. ON THE CAR, UNDRIVEN.
+
+He asked for it: *"go ahead and build the stop-hold fix"*. `hold_wheel_cap.py`, wired into
+`lateral_angle_ext` where the speed term is floored. It was built on its own
+branch, `icbm-stop-hold-wheel`, so no routine merge could carry it onto the car, and **merged into
+ICBM the same night at his call** -- *"tell the passing assist session to get your commits and update
+my comma"*. The next drive is its test: nothing else lateral moved with it.
+
+**THE TARGET IS THE TURN ASKED FOR, IN WHEEL DEGREES:** `steerRatio * atan(kappa_cmd * wheelbase)`.
+Checked before using it -- 9,557 hands-off frames at 2-10 mph, gyro curvature over that model is
+1.11-1.19 at every wheel angle from 15 to 540 deg, so it holds and errs PERMISSIVE (the car turns
+~14% tighter than it says). Above the hold speed the wheel already lands on it (4bb: 0.72-0.91);
+below, flooring the speed term winds it to 2.5x.
+
+**THE RULE, and each clause was bought by a failure in the harness:**
+
+- **trims only while the wheel is past the limit (geo x1.1 + 5 deg) AND still winding** -- measured
+  over 5 calls, because the angle is quantised at 0.1 deg and a one-call rate reads that flicker as
+  2 deg/s. The first version trimmed a STILL wheel too, and on a sticky rack (10 of the 15 hands-off
+  held stops on record) that drove the scale to its floor against a rack that was not answering,
+  storing up a step for the pull-away.
+- **gives command back only once the wheel is under geo itself.** Between geo and the limit is a
+  dead zone. The first version released 3 deg under the limit and the rack model cycled +-7 deg at a
+  standstill -- the wheel moving at a red light.
+- **only ever removes command** (scale <= 1, floor 0.3), off above the hold speed and with the
+  setting at 0 (bit-identical), frozen while his hands are on, released as a RAMP, reset at every
+  bail-out, and wrapped so an exception latches it off rather than stopping the car.
+
+**THE RACK MODEL IS WHAT MAKES THE TESTS MEAN SOMETHING.** Gain by speed from the 4bb ratios, 0.4 s
+lag, 0.3 s delay; uncapped it reproduces the 130 deg. Capped, the harness settles at 58.5 deg
+(geo 53, limit 63) and stays still; a sweep of lag 0.2-1.2 s, delay 0.1-0.3 s and gain +-30% settles
+63-73 deg with peaks 69-102. **A fixed model plan built at one speed mispredicts at every other one**
+-- the harness's first run did exactly that and made the limiter look late. Rebuild the model per
+call so its yaw agrees with v_ego.
+
+16 mutants, 0 survivors -- after the hands-on test was rebuilt: it had started at the scale floor,
+where a missing freeze cannot show. `angleHoldWheelTrim @68` publishes it (and `angleHoldKappa` is
+now in the telemetry registry test, which it never was). **Score the drive with
+`tools/bp_stop_hold_wheel.py`** -- geo, peak, the wheel once stopped, how far it wandered, and the
+trim, with latActive and hands as separate columns.
+
+**What it does NOT do:** make a sticky rack turn further at a standstill, or change anything above
+the hold speed. A stop where the wheel arrives nearly straight still holds nearly straight.

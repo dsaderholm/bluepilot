@@ -1581,6 +1581,10 @@ struct ControllerStateBP @0xcd96dafb67a082d0 {
   # says whether that was the latch or the model. The first drives with the hold could not be read
   # without it.
   angleHoldKappa               @67 :Float32;  # 1/m, + is RIGHT
+  # FusionPilot 2026-09-28: share of the path-angle command the stop hold's wheel limiter took away
+  # this frame, 0.0 when none -- see hold_wheel_cap.py. Route 000004bb wound the wheel to 2.5x the
+  # turn the model asked for at a standstill; this says, per frame, whether the limiter stepped in.
+  angleHoldWheelTrim           @68 :Float32;
 
   enum LateralMode {
     openpilot @0;  # BP lateral bypassed (disable_BP_lat_UI)
