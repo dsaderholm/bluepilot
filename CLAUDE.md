@@ -9433,3 +9433,12 @@ the wheel past the turn asked for; trim 0.00 everywhere but one 0.03 blip. The 4
 "16 deg wander" was ONE hand move at t+215; the wheel then sat still for 96 s. The 4bb case (a hands-off
 right turn to a stop) did not come up, so the limiter is still unscored on the case it was built for.
 `tools/bp_stop_hold_wheel.py` now reads qlogs, so a day's stops score in seconds off the car.
+
+**His two follow-up theories, both checked on 4c2 and neither fits the timing.** *"Could it have been the
+dip I was going in? I did get one low communication rate error."*
+- The comm alert was `commIssueAvgFreq` at **t+91**, nine minutes before the turn. At the turn the 0x3D3
+  frames went out every 48-52 ms and the bus echo confirms every one landed (max gap 51 ms).
+- There WAS a dip: pitch rose 0.8 -> 2.2 deg over t+626.5..627.8, with the largest vertical swing
+  (+-0.1 g) at t+626.5..627.0. That is 0.8-1.3 s BEFORE the torque onset, while the wheel stayed put;
+  at t+627.7..627.9 the car was steady (accelerometer within +-0.4 m/s^2 of g). The device's gravity
+  axis is accelerometer X on this mount -- read ax, not az, for vertical.
