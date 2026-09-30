@@ -9472,3 +9472,12 @@ hand. When the driver says hands off, compare the wheel against `geo(kappaCmd)` 
 command, then ~1100 deg/s to catch up. Our command did not change across it, so the stick-then-lurch is
 the rack's own behaviour near lock at walking pace. The wheel limiter correctly stayed out: the wheel
 never passed what the model asked for, which is the only thing it trims.
+
+**HOW TIGHT, from the gyro and wheel speed:** 80 deg of heading in 21.2 m of road, a 15 m average
+radius; the tightest second was 24 deg in 2.7 m at 5.9 mph, **a 6.3 m radius**, against the model's ask
+of 0.200 1/m -- `MAX_CURVATURE`, the 5 m clamp, so the model asked for the most openpilot permits. Peak
+lateral 1.94 m/s^2. For scale, the 2026-09-17 left was 19 m. **Why it was possible:** at 4.5 mph the ISO
+clamp allows ~1.3 m, so only the 5 m MAX_CURVATURE clamp stood between the model and the rack; the
+right side rule let the stop hold floor the speed term, pinning the command at 0.492 rad (0.42 without
+the floor); and the PSCM turns 0.492 rad into ~420 deg at walking pace. The 2026-09-25 claim that rights
+"cannot be planned" was about 15 mph -- at 5 mph they can, and this one was.
