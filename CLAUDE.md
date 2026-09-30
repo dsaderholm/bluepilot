@@ -9394,3 +9394,42 @@ trim, with latActive and hands as separate columns.
 
 **What it does NOT do:** make a sticky rack turn further at a standstill, or change anything above
 the hold speed. A stop where the wheel arrives nearly straight still holds nearly straight.
+
+## 2026-09-29: THE RIGHT TURN AT THE END OF 000004c2. openpilot TOOK IT TO 138 DEG; THE SPIN WAS THE ASSIST.
+
+*"I swear it just made a whole right turn without me touching it"* -- and, when told the log showed a
+push: *"My hands were not on it when it did that right turn, and the wheel moved a heck of a lot."*
+Route 000004c2 t+621..631, 8:28 PM MDT, first day on the stop-hold wheel limiter.
+
+    t+623.4..627.7   hands OFF, 18 -> 4.8 mph, wheel 0 -> -138, heading 0 -> ~32 deg, assist <= 1.25 A
+                     command pinned at 0.492 rad from t+625.9; model asking 0.16 1/m (6 m, geo ~420 deg)
+    t+627.41..627.88 wheel DEAD STILL at -137.8 with the command maxed -- openpilot's ceiling at 5 mph
+    t+627.76..627.88 column torque 0 -> 2.75 Nm WITH THE WHEEL STILL; assist 0.15 -> 6.4 A after it
+    t+627.89..628.70 wheel -138 -> -437 at ~1100 deg/s, assist 25-39 A, torque ~3.3 Nm the turn's way
+    t+629.05..630.3  pressed off, wheel unwinds, heading 53 -> 84 as the car speeds up
+
+**openpilot did not command the spin: the 0x3D3 frame it sent is byte-identical (`7d10000225802000`)
+from t+627.3 to 629.3.** The PSCM's power assist did it, answering a torque it MEASURED on the column,
+and the order -- sensor first, then current, then motion -- is exactly how assist works. That shape
+(still wheel, torque onset, assist, spin) occurs 24 times on the 2026-09-29 drives; the big ones are
+parking moves. **No steer fault and zero 0x085 angle-invalid frames on any drive that day.**
+
+**THE LOG CANNOT TELL A HAND FROM A PHANTOM.** He is certain nothing touched it. Then either something
+else contacted the wheel (a knee at 138 deg of lock), or the column torque sensor reported a push that
+did not happen -- in the same module that logged C1B00 (angle sensor compare) the day before. The
+second would steer the car with openpilot OFF. If it recurs with nothing on the wheel, it is a PSCM
+problem, not a tuning one; read PSCM DTCs before anything else.
+
+**Three things that were checked and must not be re-derived:**
+- **`SteMdule_I_Est` IS MAGNITUDE ONLY.** 32,732 samples on 4c2, none below -2 A, max +88. It cannot give
+  the assist's DIRECTION, and a sign-law calibration on it returned 47/53 -- noise, not a finding.
+- **The stall blip cannot have fired**: it needs `v_ego > 9.0` m/s and `|path_angle| < 0.10` rad.
+- **"Torque WITH the motion is his signature" is weak on turns.** With lateral OFF (every amp is his),
+  turns scored 24-96% with-motion, most near 40%: unwinding through a loose grip reads against. Use the
+  ONSET (torque rising while the wheel is still) instead -- it does not depend on the sign convention.
+
+**The stop-hold wheel limiter's first day: nothing to trim.** 12 held stretches on 4bd..4c2, none wound
+the wheel past the turn asked for; trim 0.00 everywhere but one 0.03 blip. The 4c0 two-minute stop's
+"16 deg wander" was ONE hand move at t+215; the wheel then sat still for 96 s. The 4bb case (a hands-off
+right turn to a stop) did not come up, so the limiter is still unscored on the case it was built for.
+`tools/bp_stop_hold_wheel.py` now reads qlogs, so a day's stops score in seconds off the car.
