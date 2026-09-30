@@ -9438,8 +9438,10 @@ right turn to a stop) did not come up, so the limiter is still unscored on the c
 dip I was going in? I did get one low communication rate error."*
 - The comm alert was `commIssueAvgFreq` at **t+91**, nine minutes before the turn. At the turn the 0x3D3
   frames went out every 48-52 ms and the bus echo confirms every one landed (max gap 51 ms).
-- There WAS a dip: pitch rose 0.8 -> 2.2 deg over t+626.5..627.8, with the largest vertical swing
-  (+-0.1 g) at t+626.5..627.0. That is 0.8-1.3 s BEFORE the torque onset, while the wheel stayed put;
+- The "dip" is not separable from braking. `livePose` pitch (+ = nose up) went 2.0 deg at t+620-622
+  (19-21 mph) -> 0.7 at t+625-625.5 (braking to 8 mph) -> 2.0 again at t+627.5-629 (nearly stopped):
+  the size and timing of an ordinary braking dive and release, and the sensor sees road grade and
+  body pitch together. The largest vertical swing (+-0.15 g) was at t+626.5..627.0. That is 0.8-1.3 s BEFORE the torque onset, while the wheel stayed put;
   at t+627.7..627.9 the car was steady (accelerometer within +-0.4 m/s^2 of g). The device's gravity
   axis is accelerometer X on this mount -- read ax, not az, for vertical.
 
