@@ -16,7 +16,8 @@ steering, not the hold's, and must not be read as either a success or a failure.
 
     python tools/bp_stop_hold_wheel.py <dir of segment folders> [route-prefix ...]
 
-Segment folders are `<route>--<n>/rlog.zst`, the layout the device and the pull scripts use.
+Segment folders are `<route>--<n>/rlog.zst` (or `qlog.zst`), the layout the device and the pull
+scripts use.
 """
 import glob
 import math
@@ -34,7 +35,12 @@ MPH = 2.23694
 
 
 def _msgs(seg):
-  raw = zstandard.ZstdDecompressor().stream_reader(open(os.path.join(seg, "rlog.zst"), "rb")).read()
+  # rlog when it was pulled, else the qlog: 10 Hz carState and controllerStateBP is enough to score a
+  # stop, and the qlogs for a whole day come off the car in seconds.
+  path = os.path.join(seg, "rlog.zst")
+  if not os.path.exists(path):
+    path = os.path.join(seg, "qlog.zst")
+  raw = zstandard.ZstdDecompressor().stream_reader(open(path, "rb")).read()
   it = log.Event.read_multiple_bytes(raw, traversal_limit_in_words=2**32)
   out = []
   while True:

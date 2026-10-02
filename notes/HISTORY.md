@@ -12368,3 +12368,92 @@ trim, with latActive and hands as separate columns.
 
 **What it does NOT do:** make a sticky rack turn further at a standstill, or change anything above
 the hold speed. A stop where the wheel arrives nearly straight still holds nearly straight.
+
+## 2026-09-29: THE RIGHT TURN AT THE END OF 000004c2. openpilot DROVE ALL OF IT. (The "push" reading below is RETRACTED -- see the correction at the end of this section.)
+
+*"I swear it just made a whole right turn without me touching it"* -- and, when told the log showed a
+push: *"My hands were not on it when it did that right turn, and the wheel moved a heck of a lot."*
+Route 000004c2 t+621..631, 8:28 PM MDT, first day on the stop-hold wheel limiter.
+
+    t+623.4..627.7   hands OFF, 18 -> 4.8 mph, wheel 0 -> -138, heading 0 -> ~32 deg, assist <= 1.25 A
+                     command pinned at 0.492 rad from t+625.9; model asking 0.16 1/m (6 m, geo ~420 deg)
+    t+627.41..627.88 wheel DEAD STILL at -137.8 with the command maxed -- openpilot's ceiling at 5 mph
+    t+627.76..627.88 column torque 0 -> 2.75 Nm WITH THE WHEEL STILL; assist 0.15 -> 6.4 A after it
+    t+627.89..628.70 wheel -138 -> -437 at ~1100 deg/s, assist 25-39 A, torque ~3.3 Nm the turn's way
+    t+629.05..630.3  pressed off, wheel unwinds, heading 53 -> 84 as the car speeds up
+
+**openpilot did not command the spin: the 0x3D3 frame it sent is byte-identical (`7d10000225802000`)
+from t+627.3 to 629.3.** The PSCM's power assist did it, answering a torque it MEASURED on the column,
+and the order -- sensor first, then current, then motion -- is exactly how assist works. That shape
+(still wheel, torque onset, assist, spin) occurs 24 times on the 2026-09-29 drives; the big ones are
+parking moves. **No steer fault and zero 0x085 angle-invalid frames on any drive that day.**
+
+**THE LOG CANNOT TELL A HAND FROM A PHANTOM.** He is certain nothing touched it. Then either something
+else contacted the wheel (a knee at 138 deg of lock), or the column torque sensor reported a push that
+did not happen -- in the same module that logged C1B00 (angle sensor compare) the day before. The
+second would steer the car with openpilot OFF. If it recurs with nothing on the wheel, it is a PSCM
+problem, not a tuning one; read PSCM DTCs before anything else.
+
+**Three things that were checked and must not be re-derived:**
+- **`SteMdule_I_Est` IS MAGNITUDE ONLY.** 32,732 samples on 4c2, none below -2 A, max +88. It cannot give
+  the assist's DIRECTION, and a sign-law calibration on it returned 47/53 -- noise, not a finding.
+- **The stall blip cannot have fired**: it needs `v_ego > 9.0` m/s and `|path_angle| < 0.10` rad.
+- **"Torque WITH the motion is his signature" is weak on turns.** With lateral OFF (every amp is his),
+  turns scored 24-96% with-motion, most near 40%: unwinding through a loose grip reads against. **And the
+  ONSET (torque rising while the wheel is still) is NOT a hands test either** -- see the correction below.
+
+**The stop-hold wheel limiter's first day: nothing to trim.** 12 held stretches on 4bd..4c2, none wound
+the wheel past the turn asked for; trim 0.00 everywhere but one 0.03 blip. The 4c0 two-minute stop's
+"16 deg wander" was ONE hand move at t+215; the wheel then sat still for 96 s. The 4bb case (a hands-off
+right turn to a stop) did not come up, so the limiter is still unscored on the case it was built for.
+`tools/bp_stop_hold_wheel.py` now reads qlogs, so a day's stops score in seconds off the car.
+
+**His two follow-up theories, both checked on 4c2 and neither fits the timing.** *"Could it have been the
+dip I was going in? I did get one low communication rate error."*
+- The comm alert was `commIssueAvgFreq` at **t+91**, nine minutes before the turn. At the turn the 0x3D3
+  frames went out every 48-52 ms and the bus echo confirms every one landed (max gap 51 ms).
+- The "dip" is not separable from braking. `livePose` pitch (+ = nose up) went 2.0 deg at t+620-622
+  (19-21 mph) -> 0.7 at t+625-625.5 (braking to 8 mph) -> 2.0 again at t+627.5-629 (nearly stopped):
+  the size and timing of an ordinary braking dive and release, and the sensor sees road grade and
+  body pitch together. The largest vertical swing (+-0.15 g) was at t+626.5..627.0. That is 0.8-1.3 s BEFORE the torque onset, while the wheel stayed put;
+  at t+627.7..627.9 the car was steady (accelerometer within +-0.4 m/s^2 of g). The device's gravity
+  axis is accelerometer X on this mount -- read ax, not az, for vertical.
+
+### CORRECTION, SAME NIGHT: THERE WAS NO PUSH. THE WHEEL CAUGHT UP TO openpilot'S OWN REQUEST.
+
+*"I'm telling you, nothing was touching the wheel."* He was right, and the column-torque reading was
+misread as a hand. Compare the wheel with the turn openpilot was ASKING for, not with its command:
+
+    t        mph   wheel   asked-for (geo of kappaCmd)   rack-model target for 0.492 rad
+    626.77   5.6   -129        -395                           -372
+    627.53   5.0   -138        -392                           -399     <- stuck 250 deg short
+    628.30   4.4   -318        -345                           -425
+    628.55   4.8   -420        -442                           -407     <- landed on the request
+    628.81   6.0   -434        -455                           -354
+    629.32   8.5   -327        -330                           -283     <- and followed it back out
+
+**openpilot asked for ~400 deg of wheel from t+626.5 and got it, half a second late and all at once.**
+The command was pinned at 0.492 rad (the stop hold floors the speed term below 10 mph, and the clip
+caps it), and the PSCM's own gain maps that to ~420 deg at 4.5 mph -- the stop-hold harness's rack
+model, fitted to route 4bb, predicts it independently. **This is the first hands-off intersection-grade
+RIGHT turn on this car**: 87 deg of heading at 4-18 mph, model asking a 6 m radius.
+
+**THE COLUMN TORQUE SENSOR READS THE RACK BREAKING FREE AS A "PUSH".** 2.75 Nm with the wheel still,
+then 25-39 A of motor current and ~1100 deg/s -- all from the PSCM carrying out a constant command.
+So **"torque rising while the wheel is still" is NOT a hands detector**, `steeringPressed` fired on a
+wheel nobody touched, and the "phantom torque sensor" possibility written above is withdrawn with the
+hand. When the driver says hands off, compare the wheel against `geo(kappaCmd)` before reading torque.
+
+**What is worth watching is the lurch, not the turn.** Stuck at -138 for 0.5 s under a steady maximum
+command, then ~1100 deg/s to catch up. Our command did not change across it, so the stick-then-lurch is
+the rack's own behaviour near lock at walking pace. The wheel limiter correctly stayed out: the wheel
+never passed what the model asked for, which is the only thing it trims.
+
+**HOW TIGHT, from the gyro and wheel speed:** 80 deg of heading in 21.2 m of road, a 15 m average
+radius; the tightest second was 24 deg in 2.7 m at 5.9 mph, **a 6.3 m radius**, against the model's ask
+of 0.200 1/m -- `MAX_CURVATURE`, the 5 m clamp, so the model asked for the most openpilot permits. Peak
+lateral 1.94 m/s^2. For scale, the 2026-09-17 left was 19 m. **Why it was possible:** at 4.5 mph the ISO
+clamp allows ~1.3 m, so only the 5 m MAX_CURVATURE clamp stood between the model and the rack; the
+right side rule let the stop hold floor the speed term, pinning the command at 0.492 rad (0.42 without
+the floor); and the PSCM turns 0.492 rad into ~420 deg at walking pace. The 2026-09-25 claim that rights
+"cannot be planned" was about 15 mph -- at 5 mph they can, and this one was.

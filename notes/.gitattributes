@@ -1,0 +1,2 @@
+# Notes are append-only: on a merge keep both sides' lines instead of conflicting.
+*.md merge=union
