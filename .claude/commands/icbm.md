@@ -29,7 +29,7 @@ git merge --no-edit origin/icbm-manual-override-and-tuning
 
 Resolve any conflicts yourself. If the merge touched
 `sunnypilot/selfdrive/car/intelligent_cruise_button_management/controller.py`, re-read **The ICBM
-button contract** in CLAUDE.md and check the resolution against it — the tests cannot catch a merge
+button contract** in `.claude/rules/icbm-buttons.md` and check the resolution against it — the tests cannot catch a merge
 that quietly changes what a cruise button means.
 
 If it touched `selfdrive/controls/plannerd.py`, resolve the SubMaster list as a **union**, and then
