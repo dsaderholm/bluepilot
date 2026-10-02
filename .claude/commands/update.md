@@ -32,7 +32,7 @@ Keep our change, re-apply theirs around it, `git add`, re-run the script to fini
   source of truth and the file is disposable.
 - **`plannerd.py`'s SubMaster list is a UNION.** Different branches add different inputs; taking
   either side whole silently removes one a controller already reads, and nothing offline notices.
-- After anything in `controller.py`, re-read **The ICBM button contract** in CLAUDE.md and check the
+- After anything in `controller.py`, re-read **The ICBM button contract** in `.claude/rules/icbm-buttons.md` and check the
   resolution against it.
 
 ## 3. Checks, in this order
