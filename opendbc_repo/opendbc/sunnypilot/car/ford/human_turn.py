@@ -7,6 +7,8 @@ each mode DOES with the signal differs: curvature-primary (``lateral_curv_ext``)
 (reset_steering + post-reset ramp); angle-primary (``lateral_angle_ext``) forces lateral inactive
 (mode 0 on the wire) and ramps path_angle back in from zero through its soft ROC on release.
 """
+import math
+
 from opendbc.car import DT_CTRL
 from opendbc.car.ford.values import CarControllerParams
 
@@ -21,6 +23,28 @@ HUMAN_TURN_HOLD_S = 1.5
 # (driver wound it up through 45 deg); only mid-maneuver grabs/nudges began beyond it.
 HUMAN_TURN_HOLD_PRETURNED_S = 3.0
 _STEER_DT = CarControllerParams.STEER_STEP * DT_CTRL  # 20 Hz lateral tick
+
+# FusionPilot 2026-10-03: a press that AGREES with lateral control's own turn is not a takeover.
+# The Fusion's column torque sensor reads the rack carrying out a large command as a push (route
+# 4c2, 2026-09-29: "pressed" on a wheel nobody touched), so in every openpilot-driven intersection
+# turn the old rule latched near the apex and handed the unwind to caster: on 000004ce/4cf/4d0 all
+# 23 overrides had torque WITH the turn and the wheel within ~20 deg of the command, and the wheel
+# then sat up to 73 deg past what the model asked for on the way out. A real takeover pushes the
+# wheel AGAINST the command or well PAST it, and either still latches. The driver loses nothing:
+# the PSCM yields to his hands whether or not lateral is in mode 0.
+FOLLOW_WHEEL_SCALE = 1.2      # the PSCM gives more wheel per command at walking pace (4c2: ~1.05x)
+FOLLOW_WHEEL_MARGIN_DEG = 15.0
+
+
+def press_follows_command(wheel_deg: float, torque: float, kappa_cmd: float,
+                          steer_ratio: float, wheelbase: float) -> bool:
+  """True when the wheel and the driver torque both go the way the commanded curvature turns, and
+  the wheel is not past that turn. Curvature + is RIGHT, wheel angle + is LEFT."""
+  if not (steer_ratio > 0.0 and wheelbase > 0.0 and math.isfinite(kappa_cmd)):
+    return False
+  geo = -math.degrees(math.atan(kappa_cmd * wheelbase)) * steer_ratio
+  return (wheel_deg * torque > 0.0 and wheel_deg * geo > 0.0
+          and abs(wheel_deg) <= abs(geo) * FOLLOW_WHEEL_SCALE + FOLLOW_WHEEL_MARGIN_DEG)
 
 
 class HumanTurnDetector:
@@ -41,7 +65,8 @@ class HumanTurnDetector:
     self._pressed_last = False
     self._press_started_preturned = False
 
-  def update(self, enabled: bool, steering_pressed: bool, steering_angle_deg: float) -> bool:
+  def update(self, enabled: bool, steering_pressed: bool, steering_angle_deg: float,
+             follows_command: bool = False) -> bool:
     self._active_last = self.active
     # Was the wheel already past the angle threshold when this press began? If so the driver is
     # touching a wheel that lateral control turned (mid-curve nudge), not driving a turn -- hold
@@ -51,7 +76,11 @@ class HumanTurnDetector:
     self._pressed_last = steering_pressed
     if not enabled:
       self.hold_timer_s = 0.0
-    elif steering_pressed and abs(steering_angle_deg) > HUMAN_TURN_ANGLE_DEG:
+    # follows_command only stops a latch from FORMING. Once latched, the caller publishes the
+    # measured curvature as its command, which the wheel always "follows" -- honoring it there would
+    # release a genuine takeover on the next tick.
+    elif (steering_pressed and abs(steering_angle_deg) > HUMAN_TURN_ANGLE_DEG
+          and (self.active or not follows_command)):
       self.hold_timer_s += _STEER_DT
     else:
       self.hold_timer_s = 0.0
