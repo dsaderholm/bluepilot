@@ -39,7 +39,7 @@ from opendbc.car import DT_CTRL
 from opendbc.car.lateral import apply_std_steer_angle_limits
 from opendbc.car.ford.values import CarControllerParams
 from opendbc.sunnypilot.car.ford.lateral_curv_ext import LateralResult
-from opendbc.sunnypilot.car.ford.human_turn import HumanTurnDetector
+from opendbc.sunnypilot.car.ford.human_turn import HumanTurnDetector, press_follows_command
 from opendbc.sunnypilot.car.ford.lane_center_trim import LaneCenterTrim
 from opendbc.sunnypilot.car.ford.hold_wheel_cap import HoldWheelCap
 from opendbc.sunnypilot.car.ford.angle_gains import (
@@ -392,6 +392,10 @@ class LateralAngleExt:
     # BluePilot: error-clipped kappa path_angle was derived from -- carcontroller.py reads this as
     # shadow_curvature for ford.h's angle-mode deviation check. Actively consumed, not telemetry.
     self.bp_kappa_cmd = 0.0
+    # FusionPilot: last tick's commanded kappa, for the human-turn "press follows command" test.
+    # 0.0 whenever no command is being sent, which makes every press count, as before.
+    self.follow_kappa_cmd = 0.0
+    self.follow_press_failed = False
     # BluePilot: rate-limit diagnostics (controllerStateBP)
     self.bp_angle_rate_limited = False      # path_angle soft-ROC clip actually bit this frame
     self.bp_curvature_rate_limited = False  # equivalent curvature would be rate-limited by curv-mode logic (sim)
@@ -533,6 +537,7 @@ class LateralAngleExt:
       # (ford.h skips the check while steer_control_enabled is 0, so the value is free to
       # follow the measurement during the inactive period itself.)
       self.bp_kappa_cmd = self.get_current_curvature(CS)
+      self.follow_kappa_cmd = 0.0
       self.human_turn_detector.reset()
       self.angle_human_turn_active = False
       self.lane_center_trim.reset()
@@ -560,8 +565,20 @@ class LateralAngleExt:
     # PSCM re-engage stall this prevents is not something a user should be able to opt out of.
     # On release, no jump seed: path_angle_last is 0, so the normal flow below ramps the command
     # back in through the soft ROC -- generous at human-turn speeds, no panda bypass involved.
+    # A press riding along with last tick's command is not a takeover (see press_follows_command --
+    # the column sensor reads the rack carrying out a big turn as a push).
+    # A failure latches the test off for the drive and falls back to the old rule (every press counts).
+    _follows = False
+    if not self.follow_press_failed:
+      try:
+        _follows = press_follows_command(
+          float(CS.out.steeringAngleDeg), float(CS.out.steeringTorque), float(self.follow_kappa_cmd),
+          float(getattr(CP, 'steerRatio', 0.0) or 0.0), float(getattr(CP, 'wheelbase', 0.0) or 0.0))
+      except Exception:
+        self.follow_press_failed = True
+        _follows = False
     self.angle_human_turn_active = self.human_turn_detector.update(
-      True, CS.out.steeringPressed, CS.out.steeringAngleDeg)
+      True, CS.out.steeringPressed, CS.out.steeringAngleDeg, _follows)
     if self.angle_human_turn_active:
       self.path_angle_last = 0.0
       self.bp_path_angle_final = 0.0
@@ -586,6 +603,7 @@ class LateralAngleExt:
       # there): the driver is steering, so the honest command is the car's actual curvature,
       # and the panda-latched shadow stays current for the re-engage frame.
       self.bp_kappa_cmd = self.get_current_curvature(CS)
+      self.follow_kappa_cmd = 0.0
       # Keep exit detection current so resume doesn't compare against a stale pre-turn value.
       self._desired_curvature_last = float(actuators.curvature)
       self.lane_center_trim.reset()
@@ -651,6 +669,7 @@ class LateralAngleExt:
       self.sim_curvature_last = 0.0
       # Truthful shadow during the blip (see the inactive-path comment).
       self.bp_kappa_cmd = self.get_current_curvature(CS)
+      self.follow_kappa_cmd = 0.0
       self._desired_curvature_last = float(actuators.curvature)
       self.lane_center_trim.reset()
       self.precision_type = 1
@@ -1082,6 +1101,9 @@ class LateralAngleExt:
     # this (driver fighting a sustained curve with the mode still enabled). The honest command
     # during a press is the driver's actual curvature.
     self.bp_kappa_cmd = self.get_current_curvature(CS) if CS.out.steeringPressed else kappa_cmd
+    # FusionPilot: the command itself, pressed or not -- what press_follows_command compares the
+    # wheel against next tick. bp_kappa_cmd can't serve: during a press it IS the wheel's curvature.
+    self.follow_kappa_cmd = kappa_cmd
 
     # BluePilot: would the equivalent curvature (kappa_cmd) have been rate-limited by curvature-mode's
     # ROC (apply_std_steer_angle_limits)? kappa_cmd is already error-clipped above (same clip

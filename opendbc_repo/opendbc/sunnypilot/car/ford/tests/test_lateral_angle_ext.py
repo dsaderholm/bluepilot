@@ -129,6 +129,7 @@ class _CSOut:
   vEgoRaw: float = 15.0
   vEgo: float = 15.0
   steeringPressed: bool = False
+  steeringTorque: float = 0.0
   steeringAngleDeg: float = 0.0
   yawRate: float = 0.0
 

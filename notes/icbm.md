@@ -33,3 +33,21 @@ the detector is reading him correctly. If his hands are off, it is the rack fals
 4c2 (torque is not a hands detector), and the fix is to stop the override from latching while the
 torque and the wheel both agree with openpilot's own command: a takeover pushes the wheel past the
 command or against it. That touches the driver-override path and ships on its own drive.
+
+### BUILT: A PRESS THAT RIDES ALONG WITH THE TURN NO LONGER HANDS THE CAR OVER
+
+He can't say where his hands were ("they may be, if I am about to hit a car"), so the timing decided
+it: on every override the press began at turn-in, with torque WITH the turn, while openpilot was
+keeping up; the latch formed near the apex and the slow unwind came after it. His rescue, when it
+comes, is torque AGAINST the turn.
+
+`human_turn.press_follows_command`: wheel and torque both the command's way, and the wheel not past
+`geo(cmd) * 1.2 + 15 deg`. Such a press resets the hold timer; anything else latches as before
+(1.5 s, or 3.0 s if the press began past 45 deg). Once latched it ignores agreement, because the
+angle path then publishes the measured curvature as its command. The command compared is
+`follow_kappa_cmd`, NOT `bp_kappa_cmd`, which is the wheel's own curvature during a press (that
+mistake would have disabled the override; the first replay made it too). Curvature mode unchanged.
+
+Replay on 4ce/4cf/4d0 with the true command (`pathAngleFinal / (v * curvatureFactor)`): 23 overrides
+under the old rule, 1 under the new (4d0 t+640, where the wheel ran past the command). Ships on its
+own drive; on that drive, score the unwind on lefts against `geo(desiredCurvature)`.

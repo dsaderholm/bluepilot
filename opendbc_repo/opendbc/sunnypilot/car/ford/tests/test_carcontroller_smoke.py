@@ -37,6 +37,7 @@ common case, not an edge case.
 """
 from __future__ import annotations
 
+import math
 import os
 import re
 import sys
@@ -734,3 +735,38 @@ def test_the_stop_hold_wheel_limiter_survives_a_real_carcontroller(carcontroller
   assert not cc.hold_wheel_cap_failed, "the limiter latched off on a real CarController"
   assert cc.angleHoldWheelTrim > 0.1, "a wheel winding past the turn asked for must be trimmed"
   assert isinstance(cc.angleHoldWheelTrim, float), "a numpy scalar here is what killed plannerd once"
+
+
+def test_a_press_riding_along_with_the_turn_survives_a_real_carcontroller(carcontroller_parts):
+  """FusionPilot 2026-10-03: the human-turn override now asks whether a press follows the command
+  (human_turn.press_follows_command), which reads steeringTorque and per-tick state on the angle path.
+  Route 000004d0's left: wound in, then "pressed" with torque WITH the turn for longer than any hold.
+  It must not raise, must not latch off, and must keep steering instead of handing over."""
+  CarController, dbc_names, CP, CP_SP, structs = carcontroller_parts
+  cc = CarController(dbc_names, CP, CP_SP)
+
+  out = structs.CarState()
+  out.cruiseState.enabled = True
+  out.cruiseState.available = True
+  out.vEgo = out.vEgoRaw = 5.0
+  CS = FakeCarState(out)
+
+  frame = 0
+  handed_over = False
+  for k in range(1000):   # 100 Hz frames, lateral every 5th: a 200-frame wind-in, then 8 s pressed
+    kappa = -0.10 * min(1.0, k / 200.0)
+    CC, CC_SP = _car_control(structs, enabled=True,
+                             send_button=structs.IntelligentCruiseButtonManagement.SendButtonState.none,
+                             gap_target=0, curvature=kappa)
+    if k >= 200:
+      out.steeringPressed = True
+      out.steeringTorque = 2.5
+    cmd = cc.follow_kappa_cmd
+    out.steeringAngleDeg = -math.degrees(math.atan(cmd * CP.wheelbase)) * CP.steerRatio
+    cc.update(CC, CC_SP, CS, frame * 10_000_000)
+    handed_over = handed_over or cc.angle_human_turn_active
+    frame += 1
+
+  assert not cc.follow_press_failed, "the follow test latched off on a real CarController"
+  assert out.steeringAngleDeg > 45.0, "the case must reach the override's angle threshold"
+  assert not handed_over, "a press riding along with the turn handed the car over"
