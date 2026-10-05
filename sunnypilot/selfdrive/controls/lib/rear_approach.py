@@ -74,6 +74,10 @@ UNSAFE_TTC_S = 8.0
 COLLISION_TTC_S = 3.0
 # Returned when nothing is closing, so callers can compare numerically without special-casing.
 NO_THREAT_TTC_S = 999.0
+# How old a rear digest may be and still describe the road. Three planner frames: rides out a
+# missed or late message; a car closing at 20 mph covers about 1.3 m in it, well inside the margin
+# between UNSAFE_TTC_S and COLLISION_TTC_S. Past it the side falls back to BLIS as a missing digest does.
+REAR_STALE_S = 0.15
 
 
 class RearApproachSide:
@@ -199,7 +203,12 @@ class RearApproach:
     # The digest, when a feeder is fitted. Absent on every car that has not had one built, which is
     # why this is a quiet return rather than anything that logs or alerts.
     try:
-      if not sm.valid.get("rearRadarBP", False) or not sm.updated.get("rearRadarBP", False):
+      # FRESH BY AGE, NOT BY `updated`. `updated` is "arrived since the last planner tick", so a
+      # digest that does not land on every modelV2 frame dropped to BLIS on the frames it missed --
+      # which revokes may_actuate and, through request_side, the lane-change desire mid-crossing.
+      # The same race the shared rules forbid (`sm.updated[X]` inside code gated on another
+      # service); logMonoTime is the fix they name. 2026-10-05 review.
+      if not sm.valid.get("rearRadarBP", False) or not self._fresh(sm):
         self._update_from_blis(sm)
         return
       rr = sm["rearRadarBP"]
@@ -232,6 +241,20 @@ class RearApproach:
         side.source = Source.radar
         continue
       side.from_radar(float(msg.dRel), float(msg.vRel))
+
+  @staticmethod
+  def _fresh(sm) -> bool:
+    """Is the last rearRadarBP digest recent, measured against this frame's modelV2?
+
+    Never received reads logMonoTime 0, which is stale by any clock, so no digest is never fresh.
+    A dead feeder still goes stale within REAR_STALE_S, after which BLIS takes over as before.
+    """
+    try:
+      rr_t = int(sm.logMonoTime["rearRadarBP"])
+      now = int(sm.logMonoTime["modelV2"])
+    except (KeyError, AttributeError, TypeError, ValueError):
+      return False
+    return rr_t > 0 and 0 <= now - rr_t <= REAR_STALE_S * 1e9
 
   def _update_from_blis(self, sm) -> None:
     """Fall back to blind-spot occupancy when no rear radar digest is arriving.

@@ -150,6 +150,9 @@ class _FakeSM:
     self.data = data
     self.valid = {k: True for k in data} if valid is None else valid
     self.updated = {k: True for k in data} if updated is None else updated
+    # Read by AGE in rear_approach._fresh: updated -> same timestamp as modelV2, else a second old.
+    self.logMonoTime = {k: int(10e9) if self.updated.get(k) else int(9e9) for k in data}
+    self.logMonoTime["modelV2"] = int(10e9)
 
   def __getitem__(self, k):
     return self.data[k]

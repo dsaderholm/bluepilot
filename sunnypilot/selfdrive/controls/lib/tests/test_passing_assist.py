@@ -86,6 +86,9 @@ class FakeSubMaster:
     self.alive = dict.fromkeys(data, True)
     self.valid = dict.fromkeys(data, True)
     self.updated = dict.fromkeys(data, True) if updated is None else updated
+    # Age-based freshness (rear_approach._fresh): updated means current, otherwise a second old.
+    self.logMonoTime = {k: int(10e9) if self.updated.get(k, True) else int(9e9) for k in data}
+    self.logMonoTime["modelV2"] = int(10e9)
 
   def __getitem__(self, s):
     return self.data[s]
@@ -3879,6 +3882,7 @@ class TestNothingActuatesWithoutRearCoverage:
     class _SM:
       def __init__(self, data):
         self.data, self.valid, self.updated = data, dict.fromkeys(data, True), dict.fromkeys(data, True)
+        self.logMonoTime = {**dict.fromkeys(data, int(10e9)), "modelV2": int(10e9)}
 
       def __getitem__(self, k):
         return self.data[k]

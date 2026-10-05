@@ -21,3 +21,14 @@ same source as the lane strip; unknown means not leftmost, so no warning. Guarde
    (that showed a right suggestion against a left blinker). Reverses
    `test_falls_through_to_right_when_left_occupied`; right is still offered when there is no left lane.
 Only these three files were reviewed; passing_maneuver, adjacent_lane, rear and the UI were not.
+
+## 2026-10-05: second review pass (maneuver, desire bridge, rear, adjacent, planner), two fixes
+1. `LongitudinalPlannerSP` now wraps `passing_assist.update()`/`.publish()`; the first exception is
+   logged (`cloudlog.exception`) and latches `passing_assist_failed` for the drive: no chimes, gap
+   request 0, and actuating/desireOk/blinkerWouldBeOn forced off. Guarded by
+   `test_planner_passing_assist_guard.py` (ast; nothing offline builds the planner).
+2. `RearApproach` judges the digest fresh by `logMonoTime` age (`REAR_STALE_S` 0.15 s vs modelV2), not
+   `sm.updated`. A digest missing one planner tick no longer drops to BLIS, which would have revoked
+   may_actuate and the desire mid-crossing. Test fakes now carry `logMonoTime`.
+Reviewed and left alone: passing_maneuver, passing_assist_desire, adjacent_lane (its liveTracks
+`sm.updated` race is the known one already logged as unsafe to change). UI/settings not reviewed.

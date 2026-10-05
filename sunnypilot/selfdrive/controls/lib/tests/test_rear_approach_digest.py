@@ -13,7 +13,7 @@ collapsed. Each is a real thing that can happen to a part bolted behind a bumper
 """
 from types import SimpleNamespace
 
-from openpilot.sunnypilot.selfdrive.controls.lib.rear_approach import RearApproach
+from openpilot.sunnypilot.selfdrive.controls.lib.rear_approach import RearApproach, Source
 
 
 def digest(*, available=True, alive=True, hz=33, left=None, right=None):
@@ -34,6 +34,9 @@ class FakeSM:
     self._msg = msg
     self.valid = {} if missing else {"rearRadarBP": valid}
     self.updated = {} if missing else {"rearRadarBP": updated}
+    # Freshness is read by AGE (rear_approach._fresh); `updated=False` means a digest a second old.
+    self.logMonoTime = {} if missing else {"modelV2": int(10e9),
+                                           "rearRadarBP": int(10e9) if updated else int(9e9)}
 
   def __getitem__(self, k):
     if self._missing:
@@ -113,3 +116,30 @@ class TestWhatItDoesWhenItCanSee:
     assert ra.left.available and ra.left.detected
     assert not ra.left.closing
     assert not ra.left.demands_abort
+
+
+class TestFreshnessIsByAgeNotByUpdated:
+  """2026-10-05 review. `sm.updated` is "arrived since the last planner tick"; a digest that misses
+  one modelV2 frame used to drop to BLIS, revoking may_actuate and the desire mid-crossing."""
+
+  def _sm(self, age_s):
+    sm = FakeSM(digest(left={"detected": False}, right={"detected": False}), updated=False)
+    sm.logMonoTime = {"modelV2": int(10e9), "rearRadarBP": int(10e9 - age_s * 1e9)}
+    return sm
+
+  def test_a_digest_that_skipped_one_frame_is_still_the_radar(self):
+    ra = RearApproach()
+    ra.update(self._sm(0.05))
+    assert ra.left.available and ra.left.source == Source.radar
+
+  def test_a_digest_past_the_staleness_bound_is_not(self):
+    ra = RearApproach()
+    ra.update(self._sm(0.5))
+    assert not (ra.left.available and ra.left.source == Source.radar)
+
+  def test_never_received_is_never_fresh(self):
+    ra = RearApproach()
+    sm = self._sm(0.0)
+    sm.logMonoTime["rearRadarBP"] = 0
+    ra.update(sm)
+    assert not ra.left.available

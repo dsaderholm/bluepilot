@@ -7,6 +7,7 @@ See the LICENSE.md file in the root directory for more details.
 
 import math
 from cereal import messaging, custom
+from openpilot.common.swaglog import cloudlog
 from opendbc.car import structs
 from openpilot.common.constants import CV
 from openpilot.selfdrive.car.cruise import V_CRUISE_MAX, V_CRUISE_UNSET
@@ -40,6 +41,10 @@ class LongitudinalPlannerSP:
     self.sla = SpeedLimitAssist(CP, CP_SP)
     self.unconfirmed_lead = UnconfirmedLeadDetector()
     self.passing_assist = PassingAssistDetector()
+    # FusionPilot: latched True by the first exception out of the detector. Passing assist only
+    # narrates, so a bug in it must cost the feature for this drive, never plannerd -- which is what
+    # an unguarded raise did (an AttributeError at a capnp boundary cost a drive on 2026-08-18).
+    self.passing_assist_failed = False
     self.generation = int(model_bundle.generation) if (model_bundle := get_active_bundle()) else None
     self.source = LongitudinalPlanSource.cruise
     self.e2e_alerts_helper = E2EAlertsHelper()
@@ -94,16 +99,21 @@ class LongitudinalPlannerSP:
     # far over the limit he has ASKED to go, and gating that on SLA being enabled would switch the
     # measurement off precisely when the driver is the one choosing the speed.
     posted = float(self.resolver.speed_limit) if self.resolver.speed_limit_valid else 0.0
-    self.passing_assist.update(sm, v_cruise_cluster, long_enabled, sl_target, posted)
+    if not self.passing_assist_failed:
+      try:
+        self.passing_assist.update(sm, v_cruise_cluster, long_enabled, sl_target, posted)
+      except Exception:
+        cloudlog.exception("passing assist raised; disabled for this drive")
+        self.passing_assist_failed = True
     # ...with one exception to "log only": a chime when it decides. See passingAssistSuggested --
     # the panel is the whole readout for this feature and nobody is reading it at the moment that
     # matters. Still no target and no return value; the only thing that leaves here is a sound.
-    if self.passing_assist.suggestion_started and self.passing_assist.chime_enabled:
+    if not self.passing_assist_failed and self.passing_assist.suggestion_started and self.passing_assist.chime_enabled:
       self.events_sp.add(EventNameSP.passingAssistSuggested)
     # ...and the lower one when it backs out. Same toggle: a driver who wants to be told what it is
     # doing wants both halves, and a control that announces only the successes would be worse than
     # no control at all.
-    if self.passing_assist.abort_started and self.passing_assist.chime_enabled:
+    if not self.passing_assist_failed and self.passing_assist.abort_started and self.passing_assist.chime_enabled:
       self.events_sp.add(EventNameSP.passingAssistBackedOut)
 
     # Speed Limit Assist
@@ -208,7 +218,7 @@ class LongitudinalPlannerSP:
     # EARLY, because reaching a gap takes up to ~4.5 s of confirmed toggle steps and set-speed
     # presses win the wire. Requesting at the start of the maneuver would arrive after the moment it
     # was for. See PassingAssistDetector.gap_request for what "pursuing" means.
-    longitudinalPlanSP.accGapRequest = int(self.passing_assist.gap_request)
+    longitudinalPlanSP.accGapRequest = 0 if self.passing_assist_failed else int(self.passing_assist.gap_request)
 
     # Dynamic Experimental Control
     dec = longitudinalPlanSP.dec
@@ -302,7 +312,19 @@ class LongitudinalPlannerSP:
 
     # BluePilot: passing-assist observation (log only -- see the capnp comment).
     # The field copying lives in the detector so it is not upstream rebase surface.
-    self.passing_assist.publish(longitudinalPlanSP.passingAssist)
+    # A latched failure leaves the struct at its defaults -- actuating False, no side -- so nothing
+    # downstream (desire, blinker, gap request) can act on a detector that stopped mid-frame. A raise
+    # part-way through publish forces the three fields that can command anything back off.
+    if not self.passing_assist_failed:
+      try:
+        self.passing_assist.publish(longitudinalPlanSP.passingAssist)
+      except Exception:
+        cloudlog.exception("passing assist publish raised; disabled for this drive")
+        self.passing_assist_failed = True
+        pa = longitudinalPlanSP.passingAssist
+        pa.actuating = False
+        pa.desireOk = False
+        pa.blinkerWouldBeOn = False
 
     # E2E Alerts
     e2eAlerts = longitudinalPlanSP.e2eAlerts
