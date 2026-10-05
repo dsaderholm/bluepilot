@@ -172,6 +172,17 @@ class TestTheHogGateUsesTheAnchor:
       "most of a freeway drive, and that is the reported false warning")
     assert "in_leftmost_lane" in body[0], "the hog gate must ask the anchor"
 
+  def test_the_slow_pass_gate_asks_the_anchor_too(self):
+    """2026-10-05: SLOW PASS while the lane strip showed a middle lane. The overtake call was still
+    passing `not self.left_geometry_ok` as in_leftmost after the hog gate had moved to the anchor."""
+    import inspect
+    from openpilot.sunnypilot.selfdrive.controls.lib import passing_assist
+    src = inspect.getsource(passing_assist.PassingAssistDetector)
+    start = src.index("self.overtake.update(")
+    call = src[start:src.index(")\n", src.index("since_driver_change_s", start)) + 1]
+    assert "left_geometry_ok" not in call, "slow pass is back on the camera proxy for leftmost"
+    assert "lane_anchor.in_leftmost_lane()" in call, "slow pass must ask the anchor for leftmost"
+
 
 class TestFourLineBound:
   """The middle-lane fix. He watched the strip go blank whenever he moved to a middle lane, and it

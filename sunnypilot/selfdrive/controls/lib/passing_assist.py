@@ -3057,8 +3057,11 @@ class PassingAssistDetector:
     # fresh suggestion was still live, which is the subset least in need of measuring.
     # in_leftmost: no lane to our LEFT, the same term _track_lane_hog uses. See the note in
     # OvertakeProgress.update for why a slow pass only matters from the far left lane.
+    # THE ANCHOR, NOT `not left_geometry_ok`. The hog gate moved to the anchor after 2026-08-19 and
+    # this call was left on the camera proxy, so he saw SLOW PASS on 2026-10-05 while the lane
+    # strip (the same anchor) showed him in a middle lane. Unknown reads as not leftmost: no warning.
     self.overtake.update(CS.vEgo, self.adjacent.left, self.adjacent.right, self._settle_s,
-                         self.since_driver_change_s, not self.left_geometry_ok)
+                         self.since_driver_change_s, self.lane_anchor.in_leftmost_lane())
 
     # Counted AFTER every gate has run, so blocked_by is final for this frame. Only while a
     # slower car is actually spotted -- an empty road is not evidence about anything -- and only
