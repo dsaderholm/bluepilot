@@ -553,3 +553,65 @@ class TestBothOuterLinesAbsent:
     a.update(0.05, None, 9.9, 3, True, 0.02, 0.02)
     assert a.no_lane_left is True
     assert a.line_bounds == (2, 2), "the witness and the bound must agree on the same evidence"
+
+
+class TestReview20261005:
+  """Four findings from the 2026-10-05 review, after SLOW PASS fired in a middle lane."""
+
+  @staticmethod
+  def _cs(left=False, right=False):
+    from types import SimpleNamespace
+    return SimpleNamespace(vEgo=30.0, leftBlinker=left, rightBlinker=right,
+                           steeringPressed=False, brakePressed=False)
+
+  @staticmethod
+  def _detector_in_lane(index, total=5):
+    from openpilot.sunnypilot.selfdrive.controls.lib.passing_assist import PassingAssistDetector
+    d = PassingAssistDetector()
+    d.has_lead = False
+    d.lane_anchor.index, d.lane_anchor.lanes_total = index, total
+    return d
+
+  def test_a_known_middle_lane_vetoes_the_line_witness(self):
+    """Two lanes, latched in the right one; one frame both outer lines read absent. The bound is
+    None for n < 3, so only the witness spoke -- and it used to answer leftmost."""
+    a = LaneAnchor()
+    a.update(0.05, HALF, 0.2, 2, True, 0.9, 0.02)
+    assert a.index == 0
+    a.update(0.05, None, None, 2, True, 0.01, 0.01)
+    assert a.index == 0 and a.no_lane_left
+    assert a.in_leftmost_lane() is False
+
+  def test_a_cancelled_tap_does_not_move_the_anchor(self):
+    d = self._detector_in_lane(2)
+    for _ in range(10):
+      d._track_driver_change(self._cs(left=True), lane_changing=False)
+    d._track_driver_change(self._cs(), lane_changing=False)
+    assert d.lane_anchor.index != 3, "a stalk tap with no lane change shifted the anchor"
+    assert d.lane_anchor.index is None, "no evidence of a move: the index must be dropped"
+
+  def test_a_real_change_is_still_followed(self):
+    d = self._detector_in_lane(2)
+    d._track_driver_change(self._cs(left=True), lane_changing=False)
+    for _ in range(10):
+      d._track_driver_change(self._cs(left=True), lane_changing=True)
+    d._track_driver_change(self._cs(), lane_changing=False)
+    assert d.lane_anchor.index == 3
+
+  def test_our_own_blinker_is_not_a_driver_change(self):
+    d = self._detector_in_lane(2)
+    from openpilot.sunnypilot.selfdrive.controls.lib.passing_assist import Side
+    d._own_blinker = lambda: Side.left
+    for _ in range(10):
+      d._track_driver_change(self._cs(left=True), lane_changing=True)
+    d._track_driver_change(self._cs(), lane_changing=False)
+    assert d.driver_change_standdown == 0.0, "our own signal stood the system down as if he had"
+    assert d.lane_anchor.index == 2
+
+  def test_a_waiting_left_pass_never_becomes_a_right_suggestion(self):
+    import inspect
+    from openpilot.sunnypilot.selfdrive.controls.lib import passing_assist
+    src = inspect.getsource(passing_assist.PassingAssistDetector._decide)
+    gate = "if self.wanted_side == Side.left and want_left and not left_ok:"
+    assert gate in src and src.index(gate) < src.index("self.clear_side = Side.left if left_ok"), \
+      "a left pass blocked by the blind spot fell through to suggesting the right"

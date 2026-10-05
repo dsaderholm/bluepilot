@@ -81,7 +81,7 @@ The three unknowns
 Thresholds are starting values, not derived constants. Refit them from logs; that is the point.
 """
 
-from cereal import custom
+from cereal import custom, log
 from openpilot.common.constants import CV
 from openpilot.common.params import Params
 from openpilot.common.realtime import DT_MDL
@@ -1041,6 +1041,7 @@ class PassingAssistDetector:
     self.last_v_ego = 0.0
     self.driver_change_was_exit = False
     self._driver_blinker = None       # side currently being signaled, or None
+    self._blinker_saw_change = False  # did the lane-change state machine run during that signal
     self._signalled_over_widening = False
     self._steer_held_s = 0.0
     # See EXIT_WATCH_S. Speed just before the driver's current maneuver began, and the watch it
@@ -2228,7 +2229,7 @@ class PassingAssistDetector:
       return 0.0
     return self._block_seconds.get(int(Blocked.none), 0.0) / self.wanted_seconds
 
-  def _track_driver_change(self, CS) -> None:
+  def _track_driver_change(self, CS, lane_changing: bool = False) -> None:
     """Watch the driver's own stalk and stand down after they use it. See SETTLE_AFTER_CHANGE_S.
 
     The exit test is latched WHILE they signal, not sampled after. Once the car has moved into the
@@ -2312,12 +2313,21 @@ class PassingAssistDetector:
         self._stand_down(self._signalled_over_widening, rightward=None)
         return
 
-    side = 'left' if CS.leftBlinker else 'right' if CS.rightBlinker else None
+    # OUR OWN BLINKER IS NOT THE DRIVER'S, the same subtraction _driver_override makes. Inert until
+    # self.actuating; after that, without it every pass this system made would be recorded as his,
+    # stand itself down, and shift the lane anchor. 2026-10-05 review.
+    ours = self._own_blinker()
+    left_on = bool(CS.leftBlinker) and ours != Side.left
+    right_on = bool(CS.rightBlinker) and ours != Side.right
+    side = 'left' if left_on else 'right' if right_on else None
+    if side is not None and lane_changing:
+      self._blinker_saw_change = True
     if side is not None:
       if self._driver_blinker != side:
         if side == 'left' and self.has_lead:
           self._record_driver_pass()
         self._driver_blinker = side
+        self._blinker_saw_change = bool(lane_changing)
         # NOT cleared if the wheel is already being held. Drifting over and signaling afterwards
         # is one maneuver, and clearing here threw away the widening the steering had already
         # seen -- so an exit taken in that order got the four second pause instead of the full
@@ -2361,8 +2371,14 @@ class PassingAssistDetector:
 
     # Stalk just went off: the change is done, or they thought better of it. Either way, pause.
     rightward = self._driver_blinker == 'right'
-    self._stand_down(rightward and self._moved_toward_an_exit(), rightward=rightward)
+    # A CANCELLED TAP IS NOT A LANE CHANGE. Following one shifted the anchor a lane, and in the
+    # middle of a five-lane road the line bound cannot catch it, so a wrong index rode to
+    # MAX_LATCH_S and could read as leftmost. Follow the move only when the lane-change state
+    # machine actually ran during this signal; otherwise drop the index (unknown = no warning).
+    self._stand_down(rightward and self._moved_toward_an_exit(), rightward=rightward,
+                     anchor_follows=self._blinker_saw_change)
     self._driver_blinker = None
+    self._blinker_saw_change = False
 
   def _moved_toward_an_exit(self) -> bool:
     """Rightward, and it looks like exit preparation rather than lane discipline.
@@ -2473,7 +2489,8 @@ class PassingAssistDetector:
     # fires one frame before the exit stand-down would have expired must never shorten it.
     self.driver_change_standdown = max(self.driver_change_standdown, self.exit_standdown_s)
 
-  def _stand_down(self, was_exit: bool, rightward: bool | None = None) -> None:
+  def _stand_down(self, was_exit: bool, rightward: bool | None = None,
+                  anchor_follows: bool = True) -> None:
     """The driver just finished a maneuver of their own. Pause, and forget what was beside us.
 
     Called from both routes into a stand-down -- the stalk and a silent steering takeover -- for the
@@ -2498,7 +2515,9 @@ class PassingAssistDetector:
     # FOLLOW the change rather than forget it. Edge-triggered on purpose: this runs once per
     # maneuver, where the direction is known, while the stand-down block below runs every frame
     # for several seconds and would shift the index once per frame if it did this.
-    self.lane_anchor.note_lane_change(rightward=rightward)
+    # anchor_follows: the stalk gives the direction, not proof of a move -- see the cancelled-tap
+    # note in _track_driver_change. Without proof the index is dropped rather than shifted.
+    self.lane_anchor.note_lane_change(rightward=rightward if anchor_follows else None)
     self._signalled_over_widening = False
     self.right_lane_age_s = 0.0
     # Cleared unconditionally first, so a second change during a watch replaces it rather than
@@ -3346,7 +3365,13 @@ class PassingAssistDetector:
     # early on. It used to sit after the speed gate, which meant slowing below the minimum froze
     # it -- and slowing down is exactly what taking an exit involves, so the pause would have been
     # waiting on the driveway instead of expiring on the ramp.
-    self._track_driver_change(CS)
+    try:
+      lc_state = sm['modelV2'].meta.laneChangeState
+      lane_changing = lc_state in (log.LaneChangeState.laneChangeStarting,
+                                   log.LaneChangeState.laneChangeFinishing)
+    except (KeyError, AttributeError):
+      lane_changing = False
+    self._track_driver_change(CS, lane_changing)
 
     self._update_enable(self._lka_toggle(car_state_bp))
 
@@ -3682,6 +3707,14 @@ class PassingAssistDetector:
                not self.rear.left.blocks_lane_change and not adj_left)
     right_ok = (self.right_geometry_ok and not onc_right and not self.right_blindspot and
                 not self.rear.right.blocks_lane_change and not adj_right)
+    # A LEFT PASS WAITING ON THE LEFT DOES NOT BECOME A RIGHT PASS. With the signal up for the left
+    # and the left blind spot or rear momentarily occupied, right_ok used to become the suggestion:
+    # panel and chime said RIGHT while the blinker said LEFT, and it offered the pass on the right he
+    # calls the wrong default at the exact moment the design is waiting for the left. 2026-10-05.
+    # want_left as well, so this only fires when blind spot or rear is what stops the left -- the
+    # cases the blockedBy chain below names correctly.
+    if self.wanted_side == Side.left and want_left and not left_ok:
+      right_ok = False
 
     if not (left_ok or right_ok):
       # Name the gate that actually decided it, most severe first. Oncoming outranks everything:

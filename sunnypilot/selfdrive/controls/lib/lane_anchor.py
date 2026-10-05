@@ -432,8 +432,14 @@ class LaneAnchor:
     that caller must require `self.index is not None` as well -- a warning may be wrong, a
     maneuver may not.
     """
-    if self.to_our_left() == 0:
+    left = self.to_our_left()
+    if left == 0:
       return True
+    # A KNOWN lane with lanes to its left vetoes the line witness. Without this a carried index the
+    # line bound could not check (two lanes, or no far-right prob) answered "leftmost" on one frame
+    # of a missing far-left line, while the strip drew the lane the index names. 2026-10-05 review.
+    if left is not None and left > 0:
+      return False
     if self.line_bounds is not None and self.lanes_total:
       lo, hi = self.line_bounds
       if lo == hi == self.lanes_total - 1:

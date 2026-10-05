@@ -391,9 +391,18 @@ class TestPassingAssistBlindspot:
     assert det.suggestion == Side.none
     assert det.blocked_by == Blocked.blindspotOccupied
 
-  def test_falls_through_to_right_when_left_occupied(self):
+  def test_waits_for_the_left_rather_than_falling_through_to_right(self):
+    """Reversed 2026-10-05 review: falling through to RIGHT while the signal was up for the LEFT
+    showed a right suggestion against a left blinker, and offered the pass on the right."""
     det = run(PassingAssistDetector(), STUCK_FRAMES, left_bs=True,
               probs=(0.9, 0.99, 0.99, 0.9), edges=(-7.0, 7.0))
+    assert det.wanted_side == Side.left
+    assert det.suggestion == Side.none
+    assert det.blocked_by == Blocked.blindspotOccupied
+
+  def test_right_is_offered_when_there_is_no_left_lane(self):
+    det = run(PassingAssistDetector(), STUCK_FRAMES,
+              probs=(0.2, 0.99, 0.99, 0.9), edges=(-1.8, 7.0))
     assert det.suggestion == Side.right
 
   def test_unavailable_blindspot_is_recorded(self):
@@ -1227,8 +1236,8 @@ class TestLaneAge:
   def test_passing_is_unaffected_by_the_keep_right_gates(self):
     """They are scoped to keep-right. Overtaking on the right is a different decision and the
     driver is choosing to make it."""
-    det = run(PassingAssistDetector(), STUCK_FRAMES, left_bs=True,
-              probs=(0.9, 0.99, 0.99, 0.9), edges=(-7.0, 7.0))
+    det = run(PassingAssistDetector(), STUCK_FRAMES,
+              probs=(0.2, 0.99, 0.99, 0.9), edges=(-1.8, 7.0))
     assert det.suggestion == Side.right
     assert det.reason == Reason.passing
 
