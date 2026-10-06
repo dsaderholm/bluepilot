@@ -118,6 +118,11 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
     # card's control loop.
     self.icbm_gap = FordGapController()
     self.icbm_gap_failed = False
+    # FusionPilot: ICBM's first-frame alignment state (icbm.py, TAP_ALIGN_MAX_FRAMES). Same reason
+    # it lives here as the gap state above.
+    self.icbm_tap_align_failed = False
+    self.icbm_tap_pending = None
+    self.icbm_tap_wait = 0
     # FusionPilot: synthesize the two APIM GPS messages the IPMA never receives, so it can leave
     # NoNavDataAvailable and enter Fusion mode -- the state in which it actually reads signs. Read
     # once at init; this changes what a module on the bus is fed and is

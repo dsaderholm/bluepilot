@@ -94,3 +94,29 @@ which ICBM chases (75 -> 78 -> 77 -> 80). Not his complaint; noted only.
 
 The fix is his setting (he sets 75 by hand on 70 roads: an offset of +5 above 65 would plan 75), not
 ICBM code. Settings are his; told him where.
+
+### FOUND AND FIXED: ICBM'S ONE-FRAME TAPS LAND IN THE SCCM'S DEAD HALF AND STAY THERE
+
+He said it is not the holds. With holds excluded (`selfdriveStateSP` vBaseline == 0), the shape is
+in the TAP band: 25 waits of 2-43 s across 33 drives where ICBM, 1-2 mph under its target, kept
+tapping RES+ and the dash did not move (4c4 t+364: 78 under 80 for 43 s at 75 mph; 4d5 t+185: 31
+under 33 for 20 s, ~35 taps, then one landed and a held press jumped it to 40).
+
+The frames DID go out (sendcan 131, bus 0 and 2, one per 0.6 s, SetInc bit set; no counter or
+checksum in Steering_Data_FD1). What decides is WHEN, against the SCCM's own 10 Hz frame on bus 0:
+
+    0-50 ms after the SCCM frame     4 of 4 taps registered
+    50-100 ms after it               2 of 83 registered
+
+(4 rlog segments: 4ce--13, 4d2--4, 4d2--5, 4d5--3; `tapphase.py` in the session scratchpad.) The tap
+cycle, `TAP_CYCLE_FRAMES` 60 = 0.6 s, is an exact multiple of 100 ms, so a late phase never walks
+off; it stays late until the clocks drift. And the rise limiter cannot step past it: it waits for
+the cluster to reach its ceiling, which the dead taps never deliver.
+
+Fix (`icbm.py` `_align_first_frame`, `carstate_ext.buttons_stock_fresh`): a new press's first frame
+waits for the tick on which the SCCM's frame was parsed (`cp.vl_all` non-empty), at most
+`TAP_ALIGN_MAX_FRAMES` 12; a held press keeps its 6-frame cadence after that. Unknown freshness reads
+as fresh (old behaviour); any exception latches the aligner off for the drive. Smoke tests drive the
+real CarController; each guard mutation-tested.
+
+On the next drive: rerun the tap-band scan; the 2 s+ waits should be gone or near it.
