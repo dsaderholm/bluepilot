@@ -51,3 +51,24 @@ mistake would have disabled the override; the first replay made it too). Curvatu
 Replay on 4ce/4cf/4d0 with the true command (`pathAngleFinal / (v * curvatureFactor)`): 23 overrides
 under the old rule, 1 under the new (4d0 t+640, where the wheel ran past the command). Ships on its
 own drive; on that drive, score the unwind on lefts against `geo(desiredCurvature)`.
+
+## 2026-10-05: "IT STRUGGLES TO GET BACK UP TO MAX" -- NOT FOUND AS A STALL ON 4dc..4e0
+
+Drives 000004dc..000004e0 (2026-10-05, about 10 min of cruise in all), qlogs in
+`drivelogs/2026-10-05_icbm_top_speed`. His words: when ICBM goes back up to max it stays under and he
+has to nudge it up.
+
+- **Every climb back finished on its own.** Slowest: 4dc t+269 -> 276, dash 26 -> 45 in 6.5 s, the
+  last 2 mph by taps (`TAP_BAND` 2, one tap per `TAP_CYCLE_FRAMES` 0.6 s; 43 -> 45 took ~3.5 s).
+  4dd t+228 -> 233, 31 -> 50 in 5.5 s in rise-limiter steps (36, 41, 46, 50).
+- **openpilot's max reads ~2% above the dash and that is not a shortfall.** `vCruiseCluster` 82.1 kph
+  = 51.01 mph with the dash at 50; 78.86 kph = 49.0 with the dash at 48. Without SLA the max is derived
+  from Ford's own set speed. ICBM holding dash 50 under "max 51" IS the max.
+- **What pulled it down was the model-stop path** (`unconfirmedLead.trigger == modelStop`): 6 firings
+  at 42-49 mph, 0.5-3.5 s each, target 20-37 mph, none followed by a stop within 25 s; gas pressed
+  within 3 s after 5 of the 6. The one firing on 4ce/4cf/4d0 ended in a real stop. Code and params
+  (`IcbmModelStopEnabled` 1, `IcbmModelStopMinDecel` 10) unchanged since August.
+- His manual presses on these drives (4dd t+208, 4df t+473, 4e0 t+315) were not "stuck under max".
+- 4ce t+788 (2026-10-02): dash 75 under max 80 for 5 min was HIS SET- press, i.e. his own hold.
+
+He doesn't think it is the model stop. Open: which drive or place showed the stall he means.
