@@ -72,3 +72,25 @@ has to nudge it up.
 - 4ce t+788 (2026-10-02): dash 75 under max 80 for 5 min was HIS SET- press, i.e. his own hold.
 
 He doesn't think it is the model stop. Open: which drive or place showed the stall he means.
+
+### FOUND, ACROSS 33 DRIVES: THE "STUCK UNDER MAX" STRETCHES ARE HIS OWN HOLDS AGAINST THE +10 OFFSET
+
+`stuck.py`-style scan of 4c3..4e0 (open road, cruise on, dash >= 1.5 mph under the plan after the 2%
+cluster offset, no lead within 100 m, no SCC or unconfirmed lead): 43 stretches, almost all on 70 mph
+freeways with the plan at 80 and ICBM holding 75 (or 70) and sending nothing, up to 87 s each, on
+4c8, 4ce, 4d2, 4d3, 4d9, 4da.
+
+Full-rate rlogs show how they start, both times checked: 4ce t+787.6 (held SET- 80 -> 75) and 4d2
+t+326.8 (three SET- taps 78 -> 75), each within seconds of SLA raising the set speed to 80. That is
+`SpeedLimitOffsetHigh` = 10 above `SpeedLimitOffsetHighThreshold` 65: a 70 limit plans 80, and he
+takes it back to 75 by hand every time. Per the button contract that is a HOLD (`selfdriveStateSP`
+shows vBaseline 77 -> 75, `baselineSource` press, `overrideState` manual), and it clears only when the
+set speed returns exactly to SLA's target or the limit moves more than `IcbmBaselineResetDelta` 10 --
+so ICBM, correctly by its rules, never takes it back up to 80.
+
+The hold fields are on `selfdriveStateSP`; `carControlSP`'s copy has vBaseline/vTargetRaw 0. Read the
+former. Also seen: the plan flips 75 <-> 80 for a second when the limit drops out (4ce t+783.3-784.2),
+which ICBM chases (75 -> 78 -> 77 -> 80). Not his complaint; noted only.
+
+The fix is his setting (he sets 75 by hand on 70 roads: an offset of +5 above 65 would plan 75), not
+ICBM code. Settings are his; told him where.
