@@ -311,6 +311,13 @@ class DriverMonitoring:
       self._reset_awareness()
       return
 
+    # dm-wheel-touch: steering input counts as attention even when the head is turned (looking into a curve he
+    # steers himself). Eyes closed or a phone in view still count against him.
+    if self.driver_interacting and self.awareness > 0 and \
+       not (self.face_detected and (self.distracted_types['eye'] or self.distracted_types['phone'])):
+      self._reset_awareness()
+      return
+
     awareness_prev = self.awareness
     _reaching_alert_1 = self.awareness - self.step_change <= self.threshold_alert_1
     _reaching_alert_3 = self.awareness - self.step_change <= 0

@@ -235,6 +235,39 @@ def _build_sm(selfdrive_enabled, lat_active, steering_pressed, gas_pressed):
   }
 
 
+def _run_with_wheel(ds, steering):
+  DM = DriverMonitoring()
+  lvls = []
+  for _ in range(int(TEST_TIMESPAN / DT_DMON)):
+    DM._update_states(ds, [0, 0, 0], 0, True, False)
+    DM._update_events(steering, True, False, False)
+    lvls.append(DM.alert_level)
+  return lvls, DM
+
+
+def _head_turned_msg():
+  ds = make_msg(True)
+  ds.leftDriverData.faceOrientation = [0., 0.8, 0.]
+  return ds
+
+
+def test_wheel_touch_covers_head_turn():
+  # dm-wheel-touch: head turned (looking into a curve) while steering never alerts
+  lvls, DM = _run_with_wheel(_head_turned_msg(), True)
+  assert DM.distracted_types['pose'] and not DM.distracted_types['eye']
+  assert max(lvls) == 0
+
+
+def test_head_turn_without_wheel_still_alerts():
+  lvls, _ = _run_with_wheel(_head_turned_msg(), False)
+  assert max(lvls) == 3
+
+
+def test_wheel_touch_does_not_cover_eyes_closed():
+  lvls, _ = _run_with_wheel(msg_DISTRACTED, True)
+  assert max(lvls) == 3
+
+
 @pytest.mark.parametrize("selfdrive_enabled, lat_active, steering, gas, expected_op_engaged, expected_driver_engaged", [
   (False, False, False, False, False, False),  # disabled
   (True,  False, False, False, True,  False),  # OP enabled
