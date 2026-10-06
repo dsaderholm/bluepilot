@@ -770,3 +770,75 @@ def test_a_press_riding_along_with_the_turn_survives_a_real_carcontroller(carcon
   assert not cc.follow_press_failed, "the follow test latched off on a real CarController"
   assert out.steeringAngleDeg > 45.0, "the case must reach the override's angle threshold"
   assert not handed_over, "a press riding along with the turn handed the car over"
+
+
+def _icbm_presses(cc, CS, out, structs, plan, fresh_phase=None, fresh_never=False):
+  """Drive a REAL CarController through `plan` (one send_button per frame) and return the frames on
+  which a Steering_Data_FD1 press went out. The SCCM's own frame "arrives" every 10 frames at
+  `fresh_phase` -- the 10 Hz cycle the alignment keys on."""
+  emitted = []
+  for frame, button in enumerate(plan):
+    CS.buttons_stock_fresh = (not fresh_never) and fresh_phase is not None and frame % 10 == fresh_phase
+    CC, CC_SP = _car_control(structs, enabled=True, send_button=button, gap_target=0)
+    _, can_sends = cc.update(CC, CC_SP, CS, frame * 10_000_000)
+    if any(addr == 131 for addr, _dat, _bus in can_sends):
+      emitted.append(frame)
+  return emitted
+
+
+def _cruising(carcontroller_parts):
+  CarController, dbc_names, CP, CP_SP, structs = carcontroller_parts
+  cc = CarController(dbc_names, CP, CP_SP)
+  out = structs.CarState()
+  out.cruiseState.enabled = True
+  out.cruiseState.available = True
+  out.vEgo = out.vEgoRaw = 13.0
+  return cc, FakeCarState(out), out, structs
+
+
+def _taps(structs, n=5, on=6, cycle=60):
+  B = structs.IntelligentCruiseButtonManagement.SendButtonState
+  return [B.increase if f % cycle < on else B.none for f in range(n * cycle)]
+
+
+def test_a_tap_lands_just_after_the_sccms_own_frame(carcontroller_parts):
+  """FusionPilot 2026-10-05: taps 50-100 ms after the SCCM's frame registered 2 of 83 on his car,
+  taps 0-50 ms after it 4 of 4, and a 0.6 s tap clock is locked to that 100 ms cycle -- so a late
+  phase stayed late for up to 43 s (route 4c4, 78 under 80). Here the request rises 3 frames after
+  the SCCM's frame and would go out ~30-80 ms late; it must instead wait for the next SCCM frame and
+  go out on that tick, once per tap."""
+  cc, CS, out, structs = _cruising(carcontroller_parts)
+  emitted = _icbm_presses(cc, CS, out, structs, _taps(structs), fresh_phase=7)
+  assert len(emitted) == 5, f"one press per tap, five taps: {emitted}"
+  assert all(f % 10 == 7 for f in emitted), f"a tap went out off the SCCM's tick: {emitted}"
+  assert not cc.icbm_tap_align_failed
+
+
+def test_a_tap_still_goes_out_if_the_sccm_frame_never_comes(carcontroller_parts):
+  cc, CS, out, structs = _cruising(carcontroller_parts)
+  from opendbc.sunnypilot.car.ford.icbm import TAP_ALIGN_MAX_FRAMES
+  emitted = _icbm_presses(cc, CS, out, structs, _taps(structs), fresh_never=True)
+  assert len(emitted) == 5, f"a missing SCCM frame must delay a tap, never drop it: {emitted}"
+  assert all((f % 60) < TAP_ALIGN_MAX_FRAMES for f in emitted), emitted
+
+
+def test_a_held_press_keeps_its_cadence(carcontroller_parts):
+  """A held button moves this car 5 mph and is timed by how long it is held; only its FIRST frame
+  may move, by under one SCCM period."""
+  cc, CS, out, structs = _cruising(carcontroller_parts)
+  B = structs.IntelligentCruiseButtonManagement.SendButtonState
+  emitted = _icbm_presses(cc, CS, out, structs, [B.increase] * 100, fresh_phase=7)
+  assert emitted and emitted[0] == 7, emitted
+  gaps = {b - a for a, b in zip(emitted, emitted[1:])}
+  assert gaps == {6}, f"the hold's 20 Hz cadence changed: {emitted}"
+
+
+def test_a_broken_aligner_latches_off_and_the_button_still_goes_out(carcontroller_parts):
+  cc, CS, out, structs = _cruising(carcontroller_parts)
+  B = structs.IntelligentCruiseButtonManagement.SendButtonState
+  cc.icbm_btn_prev = B.increase        # mid-press, so no rising edge re-seeds the pending slot
+  cc.icbm_tap_pending = B.increase
+  cc.icbm_tap_wait = None               # `+= 1` raises inside the aligner
+  emitted = _icbm_presses(cc, CS, out, structs, [B.increase] * 20, fresh_phase=0)
+  assert cc.icbm_tap_align_failed, "the failure must latch off rather than retry every frame"
+  assert emitted, "with the aligner off the press must still reach the wire the old way"

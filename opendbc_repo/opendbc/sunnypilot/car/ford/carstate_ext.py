@@ -151,6 +151,7 @@ class CarStateExt:
     # cleared -- one frame proves the car supplies them and the synthesizer must stay out of the
     # way for the rest of the drive. See opendbc/sunnypilot/car/ford/apim_gps.py.
     self.apim_gps_nav_seen = False
+    self.buttons_stock_fresh = True
 
   @staticmethod
   def _signal_high(cp, button) -> bool:
@@ -178,6 +179,15 @@ class CarStateExt:
       can_parsers: Dictionary of CAN parsers by bus
     """
     cp = can_parsers[Bus.pt]
+
+    # FusionPilot 2026-10-05: did the SCCM's own Steering_Data_FD1 arrive on THIS tick? vl_all holds
+    # only the frames parsed in the current update, so non-empty means fresh. ICBM's emitter waits for
+    # it before putting a TAP on the wire -- see TAP_ALIGN_MAX_FRAMES in icbm.py for why. Unknown
+    # (a merge dropped the message) reads as fresh, which is exactly the old, unaligned behaviour.
+    try:
+      self.buttons_stock_fresh = len(cp.vl_all["Steering_Data_FD1"]["CcAslButtnSetIncPress"]) > 0
+    except (KeyError, AttributeError, TypeError):
+      self.buttons_stock_fresh = True
 
     # FusionPilot: ts_nanos stays 0 for a message that has never been received, so a non-zero
     # timestamp is proof the APIM sent it. Wrapped because the registration is ours and a merge

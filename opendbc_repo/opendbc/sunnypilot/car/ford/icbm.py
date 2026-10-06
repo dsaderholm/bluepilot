@@ -27,6 +27,19 @@ BUTTON_SIGNALS = {
 # BluePilot: the physical gap buttons, watched so the driver's own press can be told from ours.
 _DRIVER_GAP_SIGNALS = (SIGNAL_INCREASE, SIGNAL_DECREASE, SIGNAL_TOGGLE)
 
+# FusionPilot 2026-10-05: the FIRST frame of every press waits for the SCCM's own frame.
+#
+# A tap is one frame on the wire (TAP_ON_FRAMES in the ICBM controller), and whether the car takes
+# it depends on WHEN it lands in the SCCM's 100 ms cycle. Measured on four rlog segments (4ce, 4d2,
+# 4d5): taps 0-50 ms after the SCCM's Steering_Data_FD1 registered 4 of 4; taps 50-100 ms after it
+# registered 2 of 83. The tap cycle is 0.6 s, an exact multiple of 100 ms, so the phase does not
+# walk -- once it lands late it STAYS late, and the set speed sits 1-2 mph under its target until the
+# clocks drift: 25 stalls of 2-43 s across 33 drives (4c4: 78 under 80 for 43 s at 75 mph). That is
+# "it stays under max and I have to nudge it up". So hold the first frame until the tick the SCCM's
+# frame arrives (CS.buttons_stock_fresh), at most one SCCM period plus margin. A held press keeps its
+# 20 Hz cadence after that first frame; only its start moves, by under 0.12 s.
+TAP_ALIGN_MAX_FRAMES = 12
+
 
 class IntelligentCruiseButtonManagementInterface(IntelligentCruiseButtonManagementInterfaceBase):
   """WARNING: `self` IS THE CARCONTROLLER, NOT AN INSTANCE OF THIS CLASS.
@@ -76,9 +89,24 @@ class IntelligentCruiseButtonManagementInterface(IntelligentCruiseButtonManageme
     # and stop there -- neither "always" nor "never" nor either direction. It needs the aim, which
     # lives in ICBM's units in selfdrived, and the carcontroller has no is_metric to compare
     # against it. Do not reach for a direction test again as a shortcut to it.
-    preempted = self.ICBM.sendButton != SendButtonState.none
-    if preempted:
-      button_signal = BUTTON_SIGNALS[self.ICBM.sendButton]
+    req = self.ICBM.sendButton
+    # The aligner can send the press's first frame itself, or still be holding one; either way the
+    # ordinary path below stands down for this tick. A failure latches it off for the drive and the
+    # emitter is exactly what it was before (getattr default True: never initialized = off).
+    aligned_pending, aligned_sent = None, False
+    if not getattr(self, "icbm_tap_align_failed", True):
+      try:
+        aligned_pending, aligned_sent = IntelligentCruiseButtonManagementInterface._align_first_frame(
+          self, CS, req, packer, CAN, can_sends)
+      except Exception:  # noqa: BLE001 -- an exception here must never reach card
+        self.icbm_tap_align_failed = True
+        self.icbm_tap_pending = None
+        aligned_pending, aligned_sent = None, False
+        cloudlog.exception("ICBM tap alignment disabled for this drive")
+
+    preempted = req != SendButtonState.none or aligned_pending is not None
+    if req != SendButtonState.none and aligned_pending is None and not aligned_sent:
+      button_signal = BUTTON_SIGNALS[req]
 
       # Ford sends button messages at 10Hz (every 0.1s), but we send at 20Hz (every 0.05s) per CarControllerParams.BUTTONS_STEP
       # Only send if enough time has passed since last button press
@@ -111,6 +139,37 @@ class IntelligentCruiseButtonManagementInterface(IntelligentCruiseButtonManageme
         self.last_button_frame = self.frame
 
     return can_sends, self.last_button_frame
+
+  def _align_first_frame(self, CS, req, packer, CAN, can_sends) -> tuple:
+    """Hold a new press's first frame until the SCCM's own frame arrives; see TAP_ALIGN_MAX_FRAMES.
+
+    `self` is the CarController (see the class docstring); its state lives in attributes it owns.
+    Returns (still-pending button or None, whether a frame was sent this tick).
+    """
+    prev = getattr(self, "icbm_btn_prev", SendButtonState.none)
+    self.icbm_btn_prev = req
+    if req != SendButtonState.none and prev == SendButtonState.none:
+      self.icbm_tap_pending = req
+      self.icbm_tap_wait = 0
+
+    pending = getattr(self, "icbm_tap_pending", None)
+    if pending is None:
+      return None, False
+    if req != SendButtonState.none and req != pending:
+      # Direction changed while waiting: the stale press is dropped, the new one goes the old way.
+      self.icbm_tap_pending = None
+      return None, False
+
+    self.icbm_tap_wait += 1
+    fresh = bool(getattr(CS, "buttons_stock_fresh", True))
+    if (fresh or self.icbm_tap_wait >= TAP_ALIGN_MAX_FRAMES) and (self.frame - self.last_button_frame) * DT_CTRL > 0.05:
+      signal = BUTTON_SIGNALS[pending]
+      can_sends.append(fordcan_ext.create_button_msg(packer, CAN.camera, CS.buttons_stock_values, icbm_button=signal))
+      can_sends.append(fordcan_ext.create_button_msg(packer, CAN.main, CS.buttons_stock_values, icbm_button=signal))
+      self.last_button_frame = self.frame
+      self.icbm_tap_pending = None
+      return None, True
+    return pending, False
 
   def _update_gap(self, CS, preempted: bool = False) -> str | None:
     """Read the camera's reported gap, feed the lease, and return the signal to press.

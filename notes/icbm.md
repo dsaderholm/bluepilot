@@ -51,3 +51,72 @@ mistake would have disabled the override; the first replay made it too). Curvatu
 Replay on 4ce/4cf/4d0 with the true command (`pathAngleFinal / (v * curvatureFactor)`): 23 overrides
 under the old rule, 1 under the new (4d0 t+640, where the wheel ran past the command). Ships on its
 own drive; on that drive, score the unwind on lefts against `geo(desiredCurvature)`.
+
+## 2026-10-05: "IT STRUGGLES TO GET BACK UP TO MAX" -- NOT FOUND AS A STALL ON 4dc..4e0
+
+Drives 000004dc..000004e0 (2026-10-05, about 10 min of cruise in all), qlogs in
+`drivelogs/2026-10-05_icbm_top_speed`. His words: when ICBM goes back up to max it stays under and he
+has to nudge it up.
+
+- **Every climb back finished on its own.** Slowest: 4dc t+269 -> 276, dash 26 -> 45 in 6.5 s, the
+  last 2 mph by taps (`TAP_BAND` 2, one tap per `TAP_CYCLE_FRAMES` 0.6 s; 43 -> 45 took ~3.5 s).
+  4dd t+228 -> 233, 31 -> 50 in 5.5 s in rise-limiter steps (36, 41, 46, 50).
+- **openpilot's max reads ~2% above the dash and that is not a shortfall.** `vCruiseCluster` 82.1 kph
+  = 51.01 mph with the dash at 50; 78.86 kph = 49.0 with the dash at 48. Without SLA the max is derived
+  from Ford's own set speed. ICBM holding dash 50 under "max 51" IS the max.
+- **What pulled it down was the model-stop path** (`unconfirmedLead.trigger == modelStop`): 6 firings
+  at 42-49 mph, 0.5-3.5 s each, target 20-37 mph, none followed by a stop within 25 s; gas pressed
+  within 3 s after 5 of the 6. The one firing on 4ce/4cf/4d0 ended in a real stop. Code and params
+  (`IcbmModelStopEnabled` 1, `IcbmModelStopMinDecel` 10) unchanged since August.
+- His manual presses on these drives (4dd t+208, 4df t+473, 4e0 t+315) were not "stuck under max".
+- 4ce t+788 (2026-10-02): dash 75 under max 80 for 5 min was HIS SET- press, i.e. his own hold.
+
+He doesn't think it is the model stop. Open: which drive or place showed the stall he means.
+
+### FOUND, ACROSS 33 DRIVES: THE "STUCK UNDER MAX" STRETCHES ARE HIS OWN HOLDS AGAINST THE +10 OFFSET
+
+`stuck.py`-style scan of 4c3..4e0 (open road, cruise on, dash >= 1.5 mph under the plan after the 2%
+cluster offset, no lead within 100 m, no SCC or unconfirmed lead): 43 stretches, almost all on 70 mph
+freeways with the plan at 80 and ICBM holding 75 (or 70) and sending nothing, up to 87 s each, on
+4c8, 4ce, 4d2, 4d3, 4d9, 4da.
+
+Full-rate rlogs show how they start, both times checked: 4ce t+787.6 (held SET- 80 -> 75) and 4d2
+t+326.8 (three SET- taps 78 -> 75), each within seconds of SLA raising the set speed to 80. That is
+`SpeedLimitOffsetHigh` = 10 above `SpeedLimitOffsetHighThreshold` 65: a 70 limit plans 80, and he
+takes it back to 75 by hand every time. Per the button contract that is a HOLD (`selfdriveStateSP`
+shows vBaseline 77 -> 75, `baselineSource` press, `overrideState` manual), and it clears only when the
+set speed returns exactly to SLA's target or the limit moves more than `IcbmBaselineResetDelta` 10 --
+so ICBM, correctly by its rules, never takes it back up to 80.
+
+The hold fields are on `selfdriveStateSP`; `carControlSP`'s copy has vBaseline/vTargetRaw 0. Read the
+former. Also seen: the plan flips 75 <-> 80 for a second when the limit drops out (4ce t+783.3-784.2),
+which ICBM chases (75 -> 78 -> 77 -> 80). Not his complaint; noted only.
+
+The fix is his setting (he sets 75 by hand on 70 roads: an offset of +5 above 65 would plan 75), not
+ICBM code. Settings are his; told him where.
+
+### FOUND AND FIXED: ICBM'S ONE-FRAME TAPS LAND IN THE SCCM'S DEAD HALF AND STAY THERE
+
+He said it is not the holds. With holds excluded (`selfdriveStateSP` vBaseline == 0), the shape is
+in the TAP band: 25 waits of 2-43 s across 33 drives where ICBM, 1-2 mph under its target, kept
+tapping RES+ and the dash did not move (4c4 t+364: 78 under 80 for 43 s at 75 mph; 4d5 t+185: 31
+under 33 for 20 s, ~35 taps, then one landed and a held press jumped it to 40).
+
+The frames DID go out (sendcan 131, bus 0 and 2, one per 0.6 s, SetInc bit set; no counter or
+checksum in Steering_Data_FD1). What decides is WHEN, against the SCCM's own 10 Hz frame on bus 0:
+
+    0-50 ms after the SCCM frame     4 of 4 taps registered
+    50-100 ms after it               2 of 83 registered
+
+(4 rlog segments: 4ce--13, 4d2--4, 4d2--5, 4d5--3; `tapphase.py` in the session scratchpad.) The tap
+cycle, `TAP_CYCLE_FRAMES` 60 = 0.6 s, is an exact multiple of 100 ms, so a late phase never walks
+off; it stays late until the clocks drift. And the rise limiter cannot step past it: it waits for
+the cluster to reach its ceiling, which the dead taps never deliver.
+
+Fix (`icbm.py` `_align_first_frame`, `carstate_ext.buttons_stock_fresh`): a new press's first frame
+waits for the tick on which the SCCM's frame was parsed (`cp.vl_all` non-empty), at most
+`TAP_ALIGN_MAX_FRAMES` 12; a held press keeps its 6-frame cadence after that. Unknown freshness reads
+as fresh (old behaviour); any exception latches the aligner off for the drive. Smoke tests drive the
+real CarController; each guard mutation-tested.
+
+On the next drive: rerun the tap-band scan; the 2 s+ waits should be gone or near it.
