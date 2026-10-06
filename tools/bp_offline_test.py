@@ -122,6 +122,7 @@ DEFAULT_TARGETS = [
   # and cannot run without the device. The schema guard pins mapd v2's ordinals, which are theirs
   # rather than ours -- capnp reads by position, so drift decodes as different fields with no error.
   "sunnypilot/mapd/tests/test_mapd_schema.py",
+  "selfdrive/monitoring/test_monitoring.py",
   "sunnypilot/mapd/tests/test_mapd_v2_map_data.py",
   "sunnypilot/mapd/tests/test_mapd_v2_restarts.py",
   "sunnypilot/mapd/tests/test_mapd_v2_stall_watchdog.py",
@@ -174,7 +175,7 @@ def install_stubs() -> None:
   text_keys = set(re.findall(r'\{"(\w+)", \{[^,]+, (?:STRING|JSON|BYTES|TIME)[,}]', keys_src))
 
   rt = types.ModuleType("openpilot.common.realtime")
-  rt.DT_CTRL, rt.DT_MDL, rt.DT_HW = 0.01, 0.05, 0.5
+  rt.DT_CTRL, rt.DT_MDL, rt.DT_HW, rt.DT_DMON = 0.01, 0.05, 0.5, 0.05
   rt.Ratekeeper = type("Ratekeeper", (), {"__init__": lambda self, *a, **k: None,
                                           "keep_time": lambda self: False,
                                           "monitor_time": lambda self: False, "frame": 0})
