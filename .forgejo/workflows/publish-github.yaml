@@ -1,0 +1,31 @@
+# Publishes this branch to GitHub as `main`. Forgejo is the source of truth; GitHub is a public copy
+# with this one branch only. Needs the repo secret GH_DEPLOY_KEY (a write deploy key on GitHub).
+name: publish-github
+
+on:
+  push:
+    branches: [icbm-manual-override-and-tuning]
+
+jobs:
+  publish:
+    runs-on: docker
+    container:
+      image: code.forgejo.org/oci/node:22-bookworm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push to GitHub main
+        env:
+          KEY: ${{ secrets.GH_DEPLOY_KEY }}
+        run: |
+          set -eu
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends openssh-client
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/id
+          chmod 600 ~/.ssh/id
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          GIT_SSH_COMMAND='ssh -i ~/.ssh/id -o IdentitiesOnly=yes' \
+            git push --force git@github.com:dsaderholm/bluepilot.git HEAD:refs/heads/main
