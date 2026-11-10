@@ -26,7 +26,7 @@ from opendbc.car.ford.values import CAR
 # Hard-coded per-platform gain defaults: (low-curvature anchor, high-curvature anchor).
 # CAN vehicles (Escape MK4, Bronco Sport, Explorer, Maverick, Edge, Fusion MK5)
 GAIN_CAN = (1.00, 1.15)
-# CAN-FD body-on-frame trucks (F-150, Lightning, Expedition, Ranger)
+# CAN-FD body-on-frame trucks (F-150, Lightning, Ranger)
 GAIN_CANFD_BOF = (0.95, 0.95)
 # CAN-FD unibody SUVs (Mustang Mach-E, Escape MK4.5)
 GAIN_CANFD_SUV = (1.00, 1.05)
@@ -34,8 +34,15 @@ GAIN_CANFD_SUV = (1.00, 1.05)
 CANFD_BOF_CARS = frozenset({
   CAR.FORD_F_150_MK14,
   CAR.FORD_F_150_LIGHTNING_MK1,
-  CAR.FORD_EXPEDITION_MK4,
   CAR.FORD_RANGER_MK2,
+})
+# BluePilot (bp-7.0, bp-dev-expedition): Expedition MK4 was not in the beta fleet and was lumped into
+# the BOF group sight-unseen; a real user maxed the FordHighSpeedFactor_ang ceiling (1.5) and still
+# wanted more. Rather than raise the UI ceiling it gets its own base, 1.5x the BOF values. PROVISIONAL
+# until a real-world value is confirmed.
+GAIN_EXPEDITION = (GAIN_CANFD_BOF[0] * 1.5, GAIN_CANFD_BOF[1] * 1.5)
+EXPEDITION_CARS = frozenset({
+  CAR.FORD_EXPEDITION_MK4,
 })
 CANFD_SUV_CARS = frozenset({
   CAR.FORD_MUSTANG_MACH_E_MK1,
@@ -46,6 +53,8 @@ CANFD_SUV_CARS = frozenset({
 def gain_pair(fingerprint) -> tuple[float, float]:
   """(low anchor, high anchor) for a platform. Unknown fingerprints fall back to the CAN pair,
   which is what `update_angle_params` has always done for anything not in the two CAN-FD sets."""
+  if fingerprint in EXPEDITION_CARS:
+    return GAIN_EXPEDITION
   if fingerprint in CANFD_BOF_CARS:
     return GAIN_CANFD_BOF
   if fingerprint in CANFD_SUV_CARS:
