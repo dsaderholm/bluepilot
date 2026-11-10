@@ -43,7 +43,8 @@ from opendbc.sunnypilot.car.ford.human_turn import HumanTurnDetector, press_foll
 from opendbc.sunnypilot.car.ford.lane_center_trim import LaneCenterTrim
 from opendbc.sunnypilot.car.ford.hold_wheel_cap import HoldWheelCap
 from opendbc.sunnypilot.car.ford.angle_gains import (
-  GAIN_CAN, GAIN_CANFD_BOF, GAIN_CANFD_SUV, CANFD_BOF_CARS, CANFD_SUV_CARS,
+  GAIN_CAN, GAIN_CANFD_BOF, GAIN_CANFD_SUV, GAIN_EXPEDITION, CANFD_BOF_CARS, CANFD_SUV_CARS,
+  EXPEDITION_CARS,
 )
 from opendbc.sunnypilot.car.ford.values_ext import BP_ANGLE_LIMITS
 from selfdrive.modeld.constants import ModelConstants
@@ -57,6 +58,8 @@ _GAIN_CANFD_BOF = GAIN_CANFD_BOF
 _GAIN_CANFD_SUV = GAIN_CANFD_SUV
 _CANFD_BOF_CARS = CANFD_BOF_CARS
 _CANFD_SUV_CARS = CANFD_SUV_CARS
+_GAIN_EXPEDITION = GAIN_EXPEDITION
+_EXPEDITION_CARS = EXPEDITION_CARS
 
 
 # DBC ``LatCtlPath_An_Actl`` (rad) — panda safety uses the same in ``ford.h``; PSCM enforces in firmware.
@@ -423,7 +426,9 @@ class LateralAngleExt:
     """Sets per-platform gain defaults and reads user angle-tuning params."""
     self._ensure_lateral_curv_initialized(self.CP)
     fp = getattr(self.CP, 'carFingerprint', '')
-    if fp in _CANFD_BOF_CARS:
+    if fp in _EXPEDITION_CARS:
+      low, high = _GAIN_EXPEDITION
+    elif fp in _CANFD_BOF_CARS:
       low, high = _GAIN_CANFD_BOF
     elif fp in _CANFD_SUV_CARS:
       low, high = _GAIN_CANFD_SUV
