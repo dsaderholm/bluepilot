@@ -911,7 +911,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"EnableWebRoutesServer", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"BPPortalPort", {PERSISTENT | BACKUP, INT, "8088"}},
 
-    // BluePilot: connect backend — 0=Comma Connect, 1=Konik Stable, 2=Offline Mode.
+    // BluePilot: connect backend — 0=Comma Connect, 1=Konik Stable, 2=Offline Mode, 3=Self-hosted.
     // Per-backend dongle ID caches let comma <-> Konik switch without losing either identity;
     // see bluepilot/backend_switch.py. BPUseKonik is legacy (bool toggle); migrated once to
     // BPConnectBackend=1 then cleared.
@@ -920,6 +920,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"BPActiveBackend", {PERSISTENT, STRING}},
     {"BPDongleIdComma", {PERSISTENT, STRING}},
     {"BPDongleIdKonik", {PERSISTENT, STRING}},
+    {"BPDongleIdSelfhost", {PERSISTENT, STRING}},
 
     // BluePilot: UI params
     {"BPLastSeenVersion", {PERSISTENT, STRING}},

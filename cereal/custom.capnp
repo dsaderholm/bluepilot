@@ -1472,7 +1472,7 @@ struct ControllerStateBP @0xcd96dafb67a082d0 {
 
   # --- System ---
   bmsUiDebugLogging @6 :Bool;  # BPUIDebugLog
-  bmsConnectBackend @7 :UInt8;  # BPConnectBackend: 0=Comma Connect, 1=Konik Stable, 2=Offline Mode
+  bmsConnectBackend @7 :UInt8;  # BPConnectBackend: 0=Comma Connect, 1=Konik Stable, 2=Offline Mode, 3=Self-hosted
   bmsWebRoutesServerEnabled @8 :Bool;  # EnableWebRoutesServer
   bmsPreferredWifiNetwork @9 :Text;  # WifiFavoriteSSID
 
