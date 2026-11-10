@@ -37,9 +37,8 @@ to disagree with your device.
 | FusionPilot | High Speed Adjustment Factor | **0.68**  (was 1.0) | `FordHighSpeedFactor_ang` |
 | FusionPilot | High Speed Low Curve Adjustment Factor | **0.78**  (was 1.0) | `FordHighSpeedDampening_ang` |
 | FusionPilot | Hold Steering Through Stops (mph) | **0.0** | `FordLowSpeedAngleHold_ang` |
-| FusionPilot | In-Lane Offset | **0.0** | `custom_path_offset_ang` |
 | FusionPilot | Lane Centering Damping | **0.0** | `lane_centering_damping_ang` |
-| FusionPilot | Lane Centering Strength | **0.15** | `lane_centering_strength_ang` |
+| FusionPilot | Lane Centering Strength | **0.15**  (was 0.25) | `lane_centering_strength_ang` |
 | FusionPilot | Low Speed Adjustment Factor | **0.981**  (was 1.0) | `FordLowSpeedFactor_ang` |
 | Steering > Customize Blinker | Blink Spacing If Unmeasurable (ms) | **760** | `FordBlinkerBlinkPeriod` |
 | Steering > Customize Lane Change | Cancel By Turning The Blinker Off | **4** | `AutoLaneChangeCancelWindow` |
