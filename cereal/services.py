@@ -125,6 +125,11 @@ _services: dict[str, tuple] = {
   "mapdOut": (True, 20., 20, QueueSize.MEDIUM),
   "mapdExtendedOut": (True, 1., 1, QueueSize.MEDIUM),
   "mapdIn": (True, 0., 1),
+
+  # BluePilot: speed-limit sign reader (bluepilot/sign_reader). It infers about every 2 s while no
+  # sign is tracked and every frame while one is, so 20 Hz is the ceiling, not the rate; decimation
+  # 20 keeps one a second in the qlog. Logged on purpose: the whole point is comparing it to the map.
+  "signReadingBP": (True, 20., 20),
 }
 SERVICE_LIST = {name: Service(*vals) for
                 idx, (name, vals) in enumerate(_services.items())}

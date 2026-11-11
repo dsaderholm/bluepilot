@@ -59,6 +59,8 @@ DEFAULT_TARGETS = [
   "opendbc_repo/opendbc/sunnypilot/car/ford/tests/",
   "bluepilot/selfdrive/car/tests/test_bp_card_publisher.py",
   "bluepilot/selfdrive/selfdrived/tests/test_steer_saturated_gate.py",
+  "bluepilot/sign_reader/tests/test_reader.py",
+  "bluepilot/sign_reader/tests/test_limit.py",
   # (that directory glob already covers test_button_mapping.py)
   # The whole folder: unconfirmed lead, passing assist, the adjacent-lane radar work and the
   # maneuver dry run all live here and all collect offline.

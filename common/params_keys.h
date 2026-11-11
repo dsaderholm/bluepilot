@@ -904,6 +904,9 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // fork -- the owner self-hosts and does not want device telemetry leaving the car.
     {"BPSentryEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"BPUIDebugLog", {PERSISTENT, BOOL, "0"}},
+    // BluePilot: speed-limit sign reader (bluepilot/sign_reader). OFF by default: it needs a
+    // weights file that is deliberately not in the repo, and it costs CPU on the device.
+    {"BPSignReaderEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"Blindspot", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"BlinkerPauseLaneChange", {PERSISTENT | BACKUP, BOOL, "0"}},
 
