@@ -1447,7 +1447,17 @@ struct CustomReserved10 @0xcb9fd56c7057593a {
 struct CustomReserved11 @0xc2243c65e0340384 {
 }
 
-struct CustomReserved12 @0x9ccdc8676701b412 {
+# BluePilot: claims the customReserved12 slot (same struct id, same Event ordinal @138).
+# Output of bluepilot/sign_reader: the speed-limit sign reader that reads the road camera on the
+# device. Speeds are m/s, the unit the model itself uses; 0 means "no limit".
+struct SignReadingBP @0x9ccdc8676701b412 {
+  speedLimit @0 :Float32;          # the reader's HELD limit: it only changes after consistent reads
+  signSpeedLimit @1 :Float32;      # this frame's raw sign read (noisy, frequently a false positive)
+  signAgreement @2 :Float32;       # how well the raw read agrees with the held limit, 0..1
+  heldSignConfidence @3 :Float32;  # confidence the model is tracking a real sign, 0 when none
+  modelLoaded @4 :Bool;            # false when the weights file is missing or MNN failed to import
+  mapInputsFresh @5 :Bool;         # mapdOut was alive and had a tile; the model uses road name and way id
+  frameId @6 :UInt32;              # road camera frame the reading is for
 }
 
 struct ControllerStateBP @0xcd96dafb67a082d0 {

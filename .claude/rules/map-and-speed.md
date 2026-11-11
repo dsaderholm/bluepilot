@@ -25,6 +25,10 @@ paths:
 - `SmartCruiseControlMapDecel` is a trigger distance, not a rate. `longitudinalPlanSource` names a winner
   even when nobody asked: check `.active` and the published target.
 - TSR (the car source) stays excluded (`SpeedLimitPolicy` map-only): it reads I-80 route shields as 80.
+- Camera sign reader (`bluepilot/sign_reader`, `BPSignReaderEnabled`, off by default): when on it OWNS the
+  "car" source slot and TSR never fills it, even when the reader is silent. It only matters under a policy
+  that includes the car source: `car_state_priority` lets it win over the map (what I-215 needs, where the map
+  has 65 and 70 swapped); `combined` takes the lower of the two, so it can only lower. Weights are not in git.
 - He drives curves himself because of the PSCM; don't tune SCC map or vision sensitivities for him.
 - Detail: `notes/HISTORY.md`, headings "MAPD V2 IS SHIPPED", "SCC-Map has four defenses",
   "2026-09-12: THE ROOT CAUSE", "TSR".

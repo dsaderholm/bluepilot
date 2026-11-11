@@ -12,6 +12,9 @@ from openpilot.common.constants import CV
 from openpilot.common.gps import get_gps_location_service
 from openpilot.common.params import Params
 from openpilot.common.realtime import DT_MDL
+# BluePilot: the camera sign reader's gate
+from openpilot.bluepilot.sign_reader.limit import sign_reader_limit
+# End BluePilot
 from openpilot.sunnypilot import PARAMS_UPDATE_PERIOD, get_sanitize_int_param
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit import LIMIT_MAX_MAP_DATA_AGE, LIMIT_ADAPT_ACC, MAX_FIX_AGE_S
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.common import Policy, OffsetType, Fallback
@@ -74,6 +77,9 @@ class SpeedLimitResolver:
     self.offset_high_threshold = self.params.get("SpeedLimitOffsetHighThreshold", return_default=True)
     self.fallback = self.params.get("SpeedLimitFallback", return_default=True)
     self.lookahead_higher = self.params.get("SpeedLimitLookaheadHigher", return_default=True)
+    # BluePilot: read again every PARAMS_UPDATE_PERIOD in update_params, like the rest
+    self.sign_reader_enabled = self.params.get_bool("BPSignReaderEnabled")
+    # End BluePilot
 
     self.speed_limit = 0.
     self.speed_limit_last = 0.
@@ -118,6 +124,9 @@ class SpeedLimitResolver:
       self.offset_high_threshold = self.params.get("SpeedLimitOffsetHighThreshold", return_default=True)
       self.fallback = self.params.get("SpeedLimitFallback", return_default=True)
       self.lookahead_higher = self.params.get("SpeedLimitLookaheadHigher", return_default=True)
+      # BluePilot: camera sign reader on/off
+      self.sign_reader_enabled = self.params.get_bool("BPSignReaderEnabled")
+      # End BluePilot
 
   def _get_speed_limit_offset(self) -> float:
     if self.offset_type == OffsetType.off:
@@ -159,7 +168,22 @@ class SpeedLimitResolver:
 
   def _get_from_car_state(self, sm: messaging.SubMaster) -> None:
     self._reset_limit_sources(SpeedLimitSource.car)
-    self.limit_solutions[SpeedLimitSource.car] = sm['carStateSP'].speedLimit
+    # BluePilot: with the camera sign reader (bluepilot/sign_reader) switched on, THIS SLOT IS THE
+    # READER'S AND ONLY THE READER'S. The car's own sign recognition (TSR) is excluded on this fork
+    # because it reads route shields as limits (I-80 as 80), so a reader that has nothing to say
+    # must leave the slot empty -- 0 -- and not quietly hand it back to TSR. The slot is still
+    # called "car" everywhere downstream (policies, the plan's source field, the sign on screen),
+    # so none of that changes. Switched off, this is exactly the line it replaced.
+    if self.sign_reader_enabled:
+      limit = sign_reader_limit(
+        True,
+        bool(sm.alive['signReadingBP']), bool(sm.valid['signReadingBP']),
+        bool(sm['signReadingBP'].modelLoaded), sm['signReadingBP'].speedLimit,
+      )
+    else:
+      limit = sm['carStateSP'].speedLimit
+    self.limit_solutions[SpeedLimitSource.car] = limit
+    # End BluePilot
     self.distance_solutions[SpeedLimitSource.car] = 0.
 
   def _get_from_map_data(self, sm: messaging.SubMaster) -> None:

@@ -61,7 +61,9 @@ def main():
                             # Absent unless MapdV2 is 1 or 2, where sm.valid stays False and the
                             # oncoming veto keeps its pre-map behaviour exactly.
                             'liveMapDataSP', 'carStateSP', 'carStateBP', 'liveTracks', 'rearRadarBP', 'mapdOut',
-                            'selfdriveStateSP', 'mapdExtendedOut', gps_location_service],
+                            'selfdriveStateSP', 'mapdExtendedOut',
+                            'signReadingBP',  # BluePilot: camera sign reader; read by the speed-limit resolver
+                            gps_location_service],
                            poll='carState')
 
   while True:
