@@ -501,3 +501,18 @@ D.J. said "do whatever is best". With no real battery data from the car yet, the
   Sentry is on (fail-safe direction). The car test will show whether 12.3 V is right; it is a setting (12.0-13.0).
 - Tests: the real `power_monitoring.py` is run with stand-in modules (`test_power_hook.py`); the hook was mutation-checked. 106 tests.
 - **Not merged to the tracked branch** (held until D.J.'s test drive is over) and not on the comma. It adds a params key, so it needs a rebuild.
+
+## 24. First reading in the car, and what it means for the 12.3 V floor (2026-11-11)
+
+D.J. plugged the comma into the car (Fusion, parked, ignition off, harness normal) after a boot loop on his 5 V office bench supply (cause unknown; journald
+is not persistent; nothing in this boot mentions parked_recorder/ParkedRecording/guards_bp; code dormant, all flags 0). Read-only, 20:46Z:
+- `peripheralState.voltage` (what hardwared and the recorder use): n=80, min 12.07, **mean 12.21**, max 12.26 V.
+- `pandaStates[0].voltage` (second source): n=400, min 11.86, **mean 12.10**, max 12.18 V. The two sources differ by about 0.1 V and each moves by 0.1-0.4 V.
+- Comma draw 1.95 W (SoM 1.19 W), 62.4 C.
+- **The 12.3 V default floor sits above what this car reads parked.** With Sentry enabled right now the recorder would stop within about a minute and
+  hardwared (section 23) would shut the comma down after 5 minutes offroad. As shipped, Sentry would never run in this car on these readings.
+- Possible causes, not distinguished yet: a battery sitting near 12.1-12.2 V (roughly half charged if the reading is true), a panda ADC reading that is
+  low by 0.1-0.3 V, the car's own modules loading it, or simply an unrested battery after a short drive. **Measure before changing the number:**
+  (1) check the true voltage with a multimeter at the OBD port or a live 12 V socket and compare, (2) run the battery logger overnight in the car,
+  (3) see the resting voltage after a long drive. Then set the floor from data (the setting range is 12.0-13.0 V, so 12.0 is the lowest it can go now).
+- Do not lower the floor just to make Sentry run: a battery at 12.1 V with a 2 W load and recordings has little margin to start the car in winter.
