@@ -66,6 +66,22 @@ def only_onroad(started: bool, params: Params, CP: car.CarParams) -> bool:
 def only_offroad(started: bool, params: Params, CP: car.CarParams) -> bool:
   return not started
 
+# BluePilot: parked recorder gates
+def parked_recorder_run(started: bool, params: Params, CP: car.CarParams) -> bool:
+  return not started and params.get_bool("ParkedRecordingEnabled")
+
+def parked_capture(started: bool, params: Params, CP: car.CarParams) -> bool:
+  # raised by the recorder for the length of one clip: starts camerad and the stream encoder while parked
+  return not started and params.get_bool("ParkedRecordingCapture")
+
+def parked_battery_log(started: bool, params: Params, CP: car.CarParams) -> bool:
+  return not started and params.get_bool("ParkedBatteryLog")
+
+def parked_recorder_active(started: bool, params: Params, CP: car.CarParams) -> bool:
+  # set by the recorder while its battery window is open; keeps sensord (accelerometer) alive while parked
+  return not started and params.get_bool("ParkedRecordingActive")
+# End BluePilot
+
 def use_github_runner(started, params, CP: car.CarParams) -> bool:
   return not PC and params.get_bool("EnableGithubRunner") and (
     not params.get_bool("NetworkMetered") and not params.get_bool("GithubRunnerSufficientVoltage"))
@@ -196,10 +212,14 @@ procs = [
 
   NativeProcess("loggerd", "system/loggerd", ["./loggerd"], logging),
   NativeProcess("encoderd", "system/loggerd", ["./encoderd"], only_onroad),
-  NativeProcess("stream_encoderd", "system/loggerd", ["./encoderd", "--stream"], notcar),
+  # BluePilot: the parked recorder also needs the stream encoder and camerad for the length of a clip
+  NativeProcess("stream_encoderd", "system/loggerd", ["./encoderd", "--stream"], or_(notcar, parked_capture)),
+  # End BluePilot
   PythonProcess("logmessaged", "system.logmessaged", always_run),
 
-  NativeProcess("camerad", "system/camerad", ["./camerad"], driverview, enabled=not WEBCAM),
+  # BluePilot: camerad also runs for a parked recorder clip
+  NativeProcess("camerad", "system/camerad", ["./camerad"], or_(driverview, parked_capture), enabled=not WEBCAM),
+  # End BluePilot
   PythonProcess("webcamerad", "tools.webcam.camerad", driverview, enabled=WEBCAM),
   PythonProcess("proclogd", "system.proclogd", only_onroad, enabled=platform.system() != "Darwin"),
   PythonProcess("journald", "system.journald", only_onroad, platform.system() != "Darwin"),
@@ -209,7 +229,9 @@ procs = [
   PythonProcess("modeld", "selfdrive.modeld.modeld", and_(only_onroad, is_stock_model)),
   PythonProcess("dmonitoringmodeld", "selfdrive.modeld.dmonitoringmodeld", driverview, enabled=(WEBCAM or not PC)),
 
-  PythonProcess("sensord", "system.sensord.sensord", only_onroad, enabled=not PC),
+  # BluePilot: sensord also runs while the parked recorder window is open
+  PythonProcess("sensord", "system.sensord.sensord", or_(only_onroad, parked_recorder_active), enabled=not PC),
+  # End BluePilot
   PythonProcess("ui", "selfdrive.ui.ui", always_run, restart_if_crash=True),
   # BluePilot: use a fork-local subclass for optional custom sounds; upstream soundd remains unchanged.
   PythonProcess("soundd", "selfdrive.ui.bp.soundd_bp" if is_bluepilot() else "selfdrive.ui.soundd", driverview),
@@ -307,6 +329,8 @@ if is_bluepilot():
   procs += [
     PythonProcess("bp_portal", "bluepilot.backend.bp_portal", _bp_portal_enabled),
     PythonProcess("bp_route_preprocessor", "bluepilot.backend.routes.preprocessor", _bp_route_preprocessor_enabled),
+    PythonProcess("parked_recorder", "bluepilot.parked_recorder.parked_recorder_bp", parked_recorder_run, enabled=not PC),
+    PythonProcess("parked_battery_logger", "bluepilot.parked_recorder.battery_logger_bp", parked_battery_log, enabled=not PC),
   ]
 
 if os.path.exists("./github_runner.sh"):

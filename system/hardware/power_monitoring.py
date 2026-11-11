@@ -5,6 +5,9 @@ from openpilot.common.params import Params
 from openpilot.system.hardware import HARDWARE
 from openpilot.common.swaglog import cloudlog
 from openpilot.system.statsd import statlog
+# BluePilot: parked recorder offroad limit
+from bluepilot.parked_recorder.guards_bp import effective_max_time_offroad_s
+# End BluePilot
 
 CAR_VOLTAGE_LOW_PASS_K = 0.011 # LPF gain for 45s tau (dt/tau / (dt/tau + 1))
 
@@ -116,6 +119,16 @@ class PowerMonitoring:
       sp_max_time_val_s = param * 60 if param is not None and param >= 0 else MAX_TIME_OFFROAD_S
     except Exception:
       sp_max_time_val_s = MAX_TIME_OFFROAD_S
+
+    # BluePilot: the parked recorder raises the offroad limit to its window, only while enabled and the car
+    # voltage is healthy; any failure here keeps the stock limit
+    try:
+      sp_max_time_val_s = effective_max_time_offroad_s(
+        sp_max_time_val_s, self.params.get_bool("ParkedRecordingEnabled"), self.params.get("ParkedRecordingMaxHours"),
+        self.car_voltage_mV, self.params.get("ParkedRecordingMinVoltage"))
+    except Exception:
+      pass
+    # End BluePilot
 
     return 0 < sp_max_time_val_s <= offroad_time
 

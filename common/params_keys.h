@@ -911,6 +911,16 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"EnableWebRoutesServer", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"BPPortalPort", {PERSISTENT | BACKUP, INT, "8088"}},
 
+    // BluePilot: parked recorder. Registered here (not only in params.json) because the process manager
+    // gates processes on these and power_monitoring reads them before bluepilot params are registered.
+    {"ParkedRecordingEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},
+    {"ParkedRecordingMaxHours", {PERSISTENT | BACKUP, FLOAT, "4.0"}},
+    {"ParkedRecordingMinVoltage", {PERSISTENT | BACKUP, FLOAT, "12.3"}},
+    {"ParkedRecordingActive", {CLEAR_ON_MANAGER_START | DONT_LOG, BOOL, "0"}},
+    {"ParkedRecordingCapture", {CLEAR_ON_MANAGER_START | DONT_LOG, BOOL, "0"}},
+    {"ParkedBatteryLog", {PERSISTENT, BOOL, "0"}},
+    // End BluePilot
+
     // BluePilot: connect backend — 0=Comma Connect, 1=Konik Stable, 2=Offline Mode, 3=Self-hosted.
     // Per-backend dongle ID caches let comma <-> Konik switch without losing either identity;
     // see bluepilot/backend_switch.py. BPUseKonik is legacy (bool toggle); migrated once to

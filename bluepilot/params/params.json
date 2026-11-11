@@ -527,6 +527,112 @@
       "enabled": true
     },
     {
+      "name": "ParkedRecordingEnabled",
+      "default": false,
+      "type": "bool",
+      "flags": ["PERSISTENT", "BACKUP"],
+      "create_default": false,
+      "enabled": true
+    },
+    {
+      "name": "ParkedRecordingSensitivity",
+      "default": 3.0,
+      "type": "float",
+      "min": 0.5,
+      "max": 10.0,
+      "flags": ["PERSISTENT", "BACKUP"],
+      "create_default": true,
+      "enabled": true
+    },
+    {
+      "name": "ParkedRecordingMaxHours",
+      "default": 4.0,
+      "type": "float",
+      "min": 0.25,
+      "max": 12.0,
+      "flags": ["PERSISTENT", "BACKUP"],
+      "create_default": true,
+      "enabled": true
+    },
+    {
+      "name": "ParkedRecordingMinVoltage",
+      "default": 12.3,
+      "type": "float",
+      "min": 12.0,
+      "max": 13.0,
+      "flags": ["PERSISTENT", "BACKUP"],
+      "create_default": true,
+      "enabled": true
+    },
+    {
+      "name": "ParkedRecordingMaxStorageMB",
+      "default": 2048,
+      "type": "int",
+      "min": 256,
+      "max": 8192,
+      "flags": ["PERSISTENT", "BACKUP"],
+      "create_default": true,
+      "enabled": true
+    },
+    {
+      "name": "ParkedRecordingClipSeconds",
+      "default": 20,
+      "type": "int",
+      "min": 5,
+      "max": 60,
+      "flags": ["PERSISTENT", "BACKUP"],
+      "create_default": true,
+      "enabled": true
+    },
+    {
+      "name": "ParkedRecordingCapture",
+      "default": false,
+      "type": "bool",
+      "flags": ["CLEAR_ON_MANAGER_START", "DONT_LOG"],
+      "create_default": false,
+      "enabled": true
+    },
+    {
+      "name": "ParkedBatteryLog",
+      "default": false,
+      "type": "bool",
+      "flags": ["PERSISTENT"],
+      "create_default": false,
+      "enabled": true
+    },
+    {
+      "name": "ParkedBatteryLogLabel",
+      "default": "",
+      "type": "string",
+      "flags": ["PERSISTENT"],
+      "create_default": false,
+      "enabled": true
+    },
+    {
+      "name": "ParkedRecordingActive",
+      "default": false,
+      "type": "bool",
+      "flags": ["CLEAR_ON_MANAGER_START", "DONT_LOG"],
+      "create_default": false,
+      "enabled": true
+    },
+    {
+      "name": "ParkedRecordingStatus",
+      "default": "{}",
+      "type": "json",
+      "flags": ["CLEAR_ON_MANAGER_START", "DONT_LOG"],
+      "create_default": false,
+      "enabled": true
+    },
+    {
+      "name": "ParkedRecordingLastEvent",
+      "default": "{}",
+      "type": "json",
+      "flags": ["PERSISTENT", "DONT_LOG"],
+      "create_default": false,
+      "enabled": true
+    },
+    {
       "name": "EnableTethering",
       "default": false,
       "type": "bool",
