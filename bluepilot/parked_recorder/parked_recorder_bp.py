@@ -57,6 +57,7 @@ class ParkedRecorder:
     self.voltage_t: float | None = None
     self.max_storage_mb = 2048
     self.clip_seconds = 20
+    self.power_down_disabled = False
     self.limiter = EventRateLimiter(MAX_CAPTURES_PER_HOUR)
     self.socks: dict | None = None
     self.capture: dict | None = None   # {"writer", "dir", "entry"} while a clip is being recorded
@@ -82,6 +83,7 @@ class ParkedRecorder:
       self.guard.configure(self.params.get("ParkedRecordingMaxHours"), self.params.get("ParkedRecordingMinVoltage"))
       self.max_storage_mb = storage_bp.clamp_storage_mb(self.params.get("ParkedRecordingMaxStorageMB"))
       self.clip_seconds = clamp_clip_seconds(self.params.get("ParkedRecordingClipSeconds"))
+      self.power_down_disabled = bool(self.params.get_bool("DisablePowerDown"))
     except Exception:
       # unreadable settings: keep what we had (the guard always has clamped values)
       cloudlog.exception("parked_recorder: config read failed")
@@ -164,7 +166,7 @@ class ParkedRecorder:
 
     self._refresh_config(now)
 
-    if self.guard.update(now, self._filtered_voltage_mV(now)) is not None:
+    if self.guard.update(now, self._filtered_voltage_mV(now), self.power_down_disabled) is not None:
       self._finish_capture("aborted")   # cameras off first: they are the biggest drain
       if self.params.get_bool("ParkedRecordingActive"):
         # window over: release sensord so it stops too; the device itself is shut down by hardwared

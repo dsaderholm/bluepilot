@@ -314,3 +314,15 @@ def test_exit_mid_capture_turns_cameras_off(mod, tmp_path):
   with pytest.raises(KeyboardInterrupt):
     rec.run()
   assert params.values["ParkedRecordingCapture"] is False
+
+
+def test_disable_power_down_stops_it_before_anything_arms(mod, tmp_path):
+  rec, sm, params = make(mod, tmp_path, DisablePowerDown=True)
+  params.values["ParkedRecordingActive"] = True
+  advance(rec, sm, 2)
+  assert status(params) == {"state": "stopped", "reason": "power_down_disabled"}
+  assert params.values["ParkedRecordingActive"] is False
+  advance(rec, sm, 130)
+  sm.step(accel=(0.0, 0.0, 11.0))
+  rec.update()
+  assert list(tmp_path.iterdir()) == []             # and it never records, even once armed time has passed

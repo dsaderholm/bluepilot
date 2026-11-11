@@ -57,7 +57,9 @@ class ParkedGuard:
   """Latched stop conditions. Once one trips it stays tripped until the next ignition cycle (new instance).
 
   Reasons: "time" (window used up), "voltage" (filtered voltage under the floor for LOW_VOLTAGE_HOLD_S),
-  "no_voltage" (no valid reading for NO_VOLTAGE_GRACE_S after start, fail closed).
+  "no_voltage" (no valid reading for NO_VOLTAGE_GRACE_S after start, fail closed), "power_down_disabled"
+  (DisablePowerDown is set, so hardwared would never shut the device down at the end of the window: the safety
+  promise cannot be kept, so the recorder does not run).
   """
 
   def __init__(self, t_start: float, max_hours: float = 4.0, min_voltage_v: float = 12.3,
@@ -74,12 +76,14 @@ class ParkedGuard:
     self.max_hours = clamp_max_hours(max_hours)
     self.min_voltage_v = clamp_min_voltage(min_voltage_v)
 
-  def update(self, t: float, filtered_voltage_mV: float | None) -> str | None:
+  def update(self, t: float, filtered_voltage_mV: float | None, power_down_disabled: bool = False) -> str | None:
     """Returns the stop reason once tripped (and on every later call), else None."""
     if self.tripped is not None:
       return self.tripped
 
-    if t - self.t_start >= self.max_hours * 3600:
+    if power_down_disabled:
+      self.tripped = "power_down_disabled"
+    elif t - self.t_start >= self.max_hours * 3600:
       self.tripped = "time"
     elif filtered_voltage_mV is None or not math.isfinite(filtered_voltage_mV) or filtered_voltage_mV <= 0:
       # fail closed, but only once the grace period has passed: the first reading is not instant

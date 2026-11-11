@@ -399,3 +399,11 @@ power back down. Untested; loudness outside the car unknown; amp draw while play
 **Unknowns that remain:** bus behaviour parked (car test), whether the speaker is audible outside and its draw (bench test),
 whether D.J.'s FordPass HA fork exposes honk/flash/alarm (check the entity list), 12 V battery size for a Fusion (and whether
 it is the hybrid, `FordPrefHybridVehicle` was not set on the comma).
+
+## 18. `DisablePowerDown` gap closed (2026-11-10)
+
+With `DisablePowerDown` set, `power_monitoring.should_shutdown` never fires (stock behaviour), so the end of the 4 h window
+and the low-voltage floor only stopped the recorder; the comma kept drawing about 3 W. Sentry now **refuses to run** while
+`DisablePowerDown` is on (guard reason `power_down_disabled`, shown in `ParkedRecordingStatus`, latched for the ignition
+cycle): it only runs when hardwared can be relied on to power the device off at the end of the window. D.J.'s setting is
+not overridden. Tests: 3 guard tests plus 1 process test (mutation-checked).

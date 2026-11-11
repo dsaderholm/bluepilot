@@ -159,6 +159,15 @@ class TestGuard:
     assert g.update(0.3, 12600) is None
     assert g.update(100.0, 12600) is None
 
+  def test_power_down_disabled_refuses_to_run(self):
+    g = ParkedGuard(t_start=0.0)
+    assert g.update(1.0, 12600, power_down_disabled=True) == "power_down_disabled"
+    assert g.update(2.0, 12600, power_down_disabled=False) == "power_down_disabled"   # latched for this ignition cycle
+
+  def test_power_down_enabled_does_not_trip(self):
+    g = ParkedGuard(t_start=0.0)
+    assert g.update(1.0, 12600, power_down_disabled=False) is None
+
   def test_trip_is_latched(self):
     g = ParkedGuard(t_start=0.0, min_voltage_v=12.3, low_voltage_hold_s=0.0)
     g.update(1.0, 12000)
