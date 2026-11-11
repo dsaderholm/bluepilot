@@ -454,3 +454,14 @@ So Sentry's real value is evidence and a response, and any deterrent is a bonus.
   for photosensitive epilepsy). A NaN or negative time no longer crashes the function (found by a test). 90 tests.
   The overlay must set the backlight to 100% for the whole warning regardless of ambient light, keep the screen awake, and
   restore the previous brightness afterwards; that part is UI work and is not built.
+
+## 21. FordPass in Home Assistant can honk and flash (2026-11-11)
+
+D.J. showed his HA "Garage" device page (screenshot): **Doors lock/unlock, "Honk & Flash [1 sec.]" and "[3 sec.]" buttons, Local Sync and
+Remote Sync buttons, remote-start (RC) start/extend-time, and a charge-level entity that was unavailable.** So the unknown in section 17
+is answered: honk and flash exist as one-shot HA buttons. There is no separate "alarm" entity.
+- Plan (not built): comma POSTs the event (and its tier: bump or warning) to an HA webhook; an HA automation presses Honk & Flash,
+  optionally a few times with gaps, and sends the phone alert. The comma only needs the webhook step.
+- Cautions: each press goes through Ford's cloud (latency of seconds, not instant); the unofficial API reportedly locks an account
+  after about 200 calls in 24 h, so cap presses per event and per hour in the automation; the comma reaches HA only on home Wi-Fi
+  until the SIM and VPN exist; remote start is still not a sensible response to a bump.
