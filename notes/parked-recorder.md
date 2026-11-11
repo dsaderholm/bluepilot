@@ -407,3 +407,19 @@ and the low-voltage floor only stopped the recorder; the comma kept drawing abou
 `DisablePowerDown` is on (guard reason `power_down_disabled`, shown in `ParkedRecordingStatus`, latched for the ignition
 cycle): it only runs when hardwared can be relied on to power the device off at the end of the window. D.J.'s setting is
 not overridden. Tests: 3 guard tests plus 1 process test (mutation-checked).
+
+## 19. Parked idle measurement, and why sleep-mode shedding is not worth building yet (2026-11-10)
+
+Comma on the bench (5 V, wifi, screen 0%, about 19 min after a reboot), one 8 s read-only sample:
+- **Total draw 2.12 W, of which the SoM 0.83 W.** So the processor module is under 40% of the idle draw; the rest is the
+  board (panda, amp, regulators). The earlier 3.0-3.5 W readings were taken soon after a rebuild, before power save had
+  settled; steady parked idle is about 2.1 W.
+- CPU is 84% idle. Biggest users: `pandad` 23% (stock, polling), `sunnypilot` modeld-side process 9.6%, `selfdrive.ui.ui` 8.9%
+  (screen off but still rendering), `hardwared` 5%, loggerd 2%, `mapd_v2` 1.7%, sunnylink 1.6%. 1.4 GB of 3.6 GB RAM used.
+- **Battery maths:** 2.12 W at 12 V is 0.18 A. A 4 h window is about 8.5 Wh, 0.7 Ah. Even a small 12 V battery (35-45 Ah, size
+  for the Fusion not yet confirmed) loses 2% or less. IQ.Pilot-style shedding would remove part of the SoM's 0.83 W: roughly
+  0.1-0.3 W, i.e. 0.03-0.07 Ah over 4 h. Not worth the added failure modes (a stuck gate leaves the UI off in the car).
+- **What does matter:** cameras and encoder (about 5.5 W while recording; keep clips short and rate limited, as built), and later
+  the **SIM modem and VPN**, which are unmeasured and could add more than everything above. Re-run the battery logger once
+  they are on, in the car, labelled by configuration, before deciding on shedding or on a longer window.
+- Decision: **not building sleep-mode shedding now.** Revisit only if the car test shows a real drain, or for windows near 24 h.
