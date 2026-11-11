@@ -262,3 +262,7 @@ rate-limit any notification (180 s is a sensible default).
   is reachable on the tailnet; opconnect session to confirm) but adds: cellular data limits (upload event clips
   only, with a daily byte cap param), modem + Tailscale draw while parked (must be in the battery measurement),
   and Tailscale is not in this repo (installed on the device, outside the tree).
+- 2026-11-10, later: SIM is the Computers 4 People Shield plan, per D.J.: unlimited data, possible T-Mobile
+  deprioritization after 100 GB/month (slower when congested, not cut off). Not independently verified. So the
+  upload byte cap is a safety net, not a budget: keep the param, default generous (suggest 5 GB/day), and
+  prefer uploading when the network is not congested only if it ever matters. Video clips are fine to upload.
