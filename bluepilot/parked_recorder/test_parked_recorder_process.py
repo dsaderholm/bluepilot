@@ -19,7 +19,8 @@ class FakeParams:
   def __init__(self, **values):
     self.values = {
       "ParkedRecordingSensitivity": 3.0, "ParkedRecordingMaxHours": 4.0, "ParkedRecordingMinVoltage": 12.3,
-      "ParkedRecordingMaxStorageMB": 2048, "ParkedRecordingActive": False, **values,
+      "ParkedRecordingMaxStorageMB": 2048, "ParkedRecordingActive": False, "ParkedRecordingClipSeconds": 20,
+      "ParkedRecordingCapture": False, **values,
     }
 
   def get(self, key):
@@ -89,11 +90,34 @@ class Clock:
     return self.sm.t
 
 
+class FakeSock:
+  def __init__(self):
+    self.queue = []
+
+
+def frame(header=b"\x00\x00\x00\x01H", data=b"frame"):
+  enc = SimpleNamespace(header=header, data=data)
+  return SimpleNamespace(which=lambda: "enc", enc=enc)
+
+
 def make(mod, tmp_path, **param_values):
   sm = FakeSM()
   params = FakeParams(**param_values)
-  rec = mod.ParkedRecorder(params=params, sm=sm, clock=Clock(sm), events_root=str(tmp_path))
+
+  def drain(sock):
+    out, sock.queue = sock.queue, []
+    return out
+
+  rec = mod.ParkedRecorder(params=params, sm=sm, clock=Clock(sm), events_root=str(tmp_path),
+                           make_sock=lambda service: FakeSock(), drain=drain)
   return rec, sm, params
+
+
+def bump(rec, sm, **kw):
+  """Arms the recorder and bumps it; returns with a capture running."""
+  advance(rec, sm, 125, **kw)
+  sm.step(accel=(0.0, 0.0, 11.0), **kw)
+  rec.update()
 
 
 def advance(rec, sm, seconds, **kw):
@@ -124,9 +148,7 @@ def test_bump_before_armed_makes_no_event(mod, tmp_path):
 
 def test_bump_after_armed_writes_event(mod, tmp_path):
   rec, sm, params = make(mod, tmp_path)
-  advance(rec, sm, 125)
-  sm.step(accel=(0.0, 0.0, 11.0))
-  rec.update()
+  bump(rec, sm)
   events = list(tmp_path.iterdir())
   assert len(events) == 1
   entry = json.loads((events[0] / "event.json").read_text())
@@ -191,3 +213,94 @@ def test_run_clears_active_on_exit(mod, tmp_path):
     rec.run()
   assert params.values["ParkedRecordingActive"] is False
   assert status(params)["state"] == "disabled"
+
+
+def feed_frames(rec, sm, cams=("wideRoad", "driver"), n=1, data=b"frame"):
+  for cam in cams:
+    rec.socks[cam].queue.extend(frame(data=data) for _ in range(n))
+
+
+def test_bump_raises_capture_and_clip_is_written(mod, tmp_path):
+  rec, sm, params = make(mod, tmp_path)
+  bump(rec, sm)
+  assert params.values["ParkedRecordingCapture"] is True       # manager would now start camerad + encoder
+  assert status(params)["state"] == "recording"
+
+  feed_frames(rec, sm, n=3)
+  sm.step()
+  rec.update()
+  assert params.values["ParkedRecordingCapture"] is True       # clip still running
+  sm.t += 21                                                    # past the 20 s clip
+  feed_frames(rec, sm, n=1)
+  sm.step()
+  rec.update()
+
+  assert params.values["ParkedRecordingCapture"] is False
+  (event,) = list(tmp_path.iterdir())
+  entry = json.loads((event / "event.json").read_text())
+  assert entry["captured"] is True and entry["outcome"] == "ok" and entry["clipSeconds"] == 20
+  assert {f["camera"] for f in entry["files"]} == {"wideRoad", "driver"}
+  data = (event / "wideRoad.h264").read_bytes()
+  assert data == (b"\x00\x00\x00\x01Hframe") * 4              # header + data per frame, in order
+
+
+def test_no_frames_gives_up_and_stops_cameras(mod, tmp_path):
+  rec, sm, params = make(mod, tmp_path)
+  bump(rec, sm)
+  sm.t += 25                                                    # past the 20 s startup timeout, nothing arrived
+  sm.step()
+  rec.update()
+  assert params.values["ParkedRecordingCapture"] is False
+  (event,) = list(tmp_path.iterdir())
+  entry = json.loads((event / "event.json").read_text())
+  assert entry["captured"] is False and entry["outcome"] == "no_frames" and entry["files"] == []
+  assert not list(event.glob("*.h264"))                         # empty files are removed
+
+
+def test_second_bump_during_capture_is_ignored(mod, tmp_path):
+  rec, sm, params = make(mod, tmp_path)
+  bump(rec, sm)
+  sm.t += 40                                                    # cooldown over, clip still waiting for frames
+  sm.step(accel=(0.0, 0.0, 12.0))
+  rec.update()
+  assert len(list(tmp_path.iterdir())) == 1
+
+
+def test_guard_trip_mid_capture_stops_cameras_first(mod, tmp_path):
+  rec, sm, params = make(mod, tmp_path, ParkedRecordingMaxHours=0.25)   # 15 minute window
+  params.values["ParkedRecordingActive"] = True
+  bump(rec, sm)
+  assert params.values["ParkedRecordingCapture"] is True
+  feed_frames(rec, sm, n=2)
+  sm.step()
+  rec.update()                                                           # frames are read and written
+  sm.t += 15 * 60                                                        # window runs out while the clip is recording
+  sm.step()
+  rec.update()
+  assert status(params) == {"state": "stopped", "reason": "time"}
+  assert params.values["ParkedRecordingCapture"] is False
+  assert params.values["ParkedRecordingActive"] is False
+  (event,) = list(tmp_path.iterdir())
+  entry = json.loads((event / "event.json").read_text())
+  assert entry["outcome"] == "aborted" and entry["captured"] is True     # what was recorded so far is kept
+
+
+def test_rate_limit_stops_capture_not_the_log(mod, tmp_path):
+  rec, sm, params = make(mod, tmp_path)
+  for _ in range(mod.MAX_CAPTURES_PER_HOUR):
+    rec.limiter.record(sm.t)
+  bump(rec, sm)
+  assert params.values["ParkedRecordingCapture"] is False
+  (event,) = list(tmp_path.iterdir())
+  entry = json.loads((event / "event.json").read_text())
+  assert entry["captured"] is False and entry["reason"] == "rate_limited"
+
+
+def test_exit_mid_capture_turns_cameras_off(mod, tmp_path):
+  rec, sm, params = make(mod, tmp_path)
+  bump(rec, sm)
+  assert params.values["ParkedRecordingCapture"] is True
+  rec.update = lambda: (_ for _ in ()).throw(KeyboardInterrupt())
+  with pytest.raises(KeyboardInterrupt):
+    rec.run()
+  assert params.values["ParkedRecordingCapture"] is False

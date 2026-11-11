@@ -4,6 +4,7 @@ import re
 from datetime import UTC, datetime
 
 from bluepilot.parked_recorder import storage_bp
+from bluepilot.parked_recorder.capture_bp import ClipWriter, EventRateLimiter, clamp_clip_seconds
 from bluepilot.parked_recorder.detector_bp import MotionDetectorBP, ParkedTrigger, clamp_sensitivity
 from bluepilot.parked_recorder.guards_bp import (LOW_VOLTAGE_HOLD_S, ParkedGuard, VoltageLPF, clamp_max_hours,
                                                  clamp_min_voltage, effective_max_time_offroad_s)
@@ -254,3 +255,57 @@ class TestStorage:
     assert storage_bp.clamp_storage_mb("x") == 2048
     assert storage_bp.enforce_quota(str(tmp_path / "nope"), 256) == []
     assert storage_bp.list_events(str(tmp_path / "nope")) == []
+
+
+class TestClipWriter:
+  def writer(self, tmp_path, **kw):
+    return ClipWriter(tmp_path, ["wideRoad", "driver"], clip_seconds=20, t_start=100.0, **kw)
+
+  def test_waits_then_records_then_done(self, tmp_path):
+    w = self.writer(tmp_path)
+    assert w.state(105.0) == "waiting"
+    w.add_frame("wideRoad", b"H", b"d1", now=106.0)
+    assert w.state(106.0) == "recording"
+    assert w.state(125.9) == "recording"
+    assert w.state(126.0) == "done"                 # 20 s counted from the first frame, not from the trigger
+
+  def test_fails_without_frames(self, tmp_path):
+    w = self.writer(tmp_path)
+    assert w.state(100.0 + 19.9) == "waiting"
+    assert w.state(100.0 + 20.0) == "failed"
+
+  def test_size_cap_ends_the_clip(self, tmp_path):
+    w = self.writer(tmp_path, max_bytes=10)
+    w.add_frame("wideRoad", b"H", b"x" * 20, now=101.0)
+    assert w.state(101.0) == "done"
+
+  def test_close_keeps_only_cameras_with_frames(self, tmp_path):
+    w = self.writer(tmp_path)
+    w.add_frame("wideRoad", b"HH", b"dd", now=101.0)
+    w.add_frame("wideRoad", b"HH", b"ee", now=101.1)
+    w.add_frame("bogus", b"H", b"x", now=101.2)      # unknown camera ignored
+    kept = w.close()
+    assert kept == [{"name": "wideRoad.h264", "camera": "wideRoad", "bytes": 8, "frames": 2}]
+    assert (tmp_path / "wideRoad.h264").read_bytes() == b"HHddHHee"
+    assert not (tmp_path / "driver.h264").exists()
+
+  def test_frames_after_close_are_dropped_and_empty_data_ignored(self, tmp_path):
+    w = self.writer(tmp_path)
+    w.add_frame("wideRoad", b"H", b"", now=101.0)    # empty frame: not counted, clock not started
+    assert w.state(101.0) == "waiting"
+    w.close()
+    w.add_frame("wideRoad", b"H", b"late", now=102.0)
+    assert not (tmp_path / "wideRoad.h264").exists()
+
+  def test_clip_seconds_clamped(self):
+    assert clamp_clip_seconds(1) == 5 and clamp_clip_seconds(999) == 60 and clamp_clip_seconds("x") == 20
+
+
+class TestRateLimiter:
+  def test_limits_per_window(self):
+    r = EventRateLimiter(max_events=2, window_s=100.0)
+    assert r.allow(0.0)
+    r.record(0.0)
+    r.record(10.0)
+    assert not r.allow(20.0)
+    assert r.allow(101.0)                             # the first one has aged out

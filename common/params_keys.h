@@ -917,6 +917,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"ParkedRecordingMaxHours", {PERSISTENT | BACKUP, FLOAT, "4.0"}},
     {"ParkedRecordingMinVoltage", {PERSISTENT | BACKUP, FLOAT, "12.3"}},
     {"ParkedRecordingActive", {CLEAR_ON_MANAGER_START | DONT_LOG, BOOL, "0"}},
+    {"ParkedRecordingCapture", {CLEAR_ON_MANAGER_START | DONT_LOG, BOOL, "0"}},
     // End BluePilot
 
     // BluePilot: connect backend — 0=Comma Connect, 1=Konik Stable, 2=Offline Mode, 3=Self-hosted.

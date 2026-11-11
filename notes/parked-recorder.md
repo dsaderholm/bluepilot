@@ -281,3 +281,24 @@ rate-limit any notification (180 s is a sensible default).
   - sunnylink replacement: opconnect implements none of it (sunnylink talks to its own backend: roles, users,
     backups, uploader, SSO pairing) and will not take it on unless D.J. asks explicitly. No de-cloud inventory is
     being done by anyone yet.
+
+## 13. Phase 2 as built: video capture (code written, NOT run on a device)
+
+- **How:** on a bump the recorder sets `ParkedRecordingCapture`; the manager then starts `camerad` and
+  `stream_encoderd` (both gated with `or_(..., parked_capture)`, BluePilot markers). The stream encoder publishes
+  H.264 frames as cereal messages (`livestream*EncodeData`: header + data per frame, 20 Hz). The recorder
+  subscribes without conflation (a dropped frame would corrupt the clip) and writes `wideRoad.h264` and
+  `driver.h264` (Annex-B, header repeated per frame so it decodes from any point) into the event directory.
+  Nothing is transcoded on the comma; the server can remux to MP4 (ffmpeg is not on the comma-side path).
+- **Clip length** `ParkedRecordingClipSeconds` (5-60, default 20), counted from the first frame. Gives up if no
+  frame arrives in 20 s. Hard cap 120 MB per event. At most 12 captures per hour (rate limit), so wind cannot
+  keep the cameras on; a rate-limited bump still gets its `event.json`, with `captured:false`.
+- **Cameras off again** as soon as the clip ends, the guard trips (window, voltage, no voltage), or the process exits.
+- **Limits you should know:**
+  - The clip starts a few seconds *after* the bump (cameras take that long to start). Keeping the cameras on
+    while armed would catch the bump itself but costs far more power; that is a later, measured decision.
+  - The comma's cameras face **forward (wide road) and into the cabin (driver)**. Bumps to the side or rear
+    are heard by the accelerometer but not seen. It is a front-of-car and break-in recorder, not 360 degrees.
+  - Untested on hardware: the livestream encoder bitrate (default 5 Mbps per camera, ~12 MB per 20 s camera
+    clip), camerad start time, and whether camerad/encoderd start cleanly while parked with the screen off.
+- **Tests:** 58 unit tests with a fake messaging layer (stop-on-trip and no-frames paths mutation-checked).

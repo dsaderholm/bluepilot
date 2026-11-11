@@ -575,6 +575,24 @@
       "enabled": true
     },
     {
+      "name": "ParkedRecordingClipSeconds",
+      "default": 20,
+      "type": "int",
+      "min": 5,
+      "max": 60,
+      "flags": ["PERSISTENT", "BACKUP"],
+      "create_default": true,
+      "enabled": true
+    },
+    {
+      "name": "ParkedRecordingCapture",
+      "default": false,
+      "type": "bool",
+      "flags": ["CLEAR_ON_MANAGER_START", "DONT_LOG"],
+      "create_default": false,
+      "enabled": true
+    },
+    {
       "name": "ParkedRecordingActive",
       "default": false,
       "type": "bool",
