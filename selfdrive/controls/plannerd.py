@@ -40,6 +40,7 @@ def main():
   # NOTE: this list is edited by more than one branch. Resolve any conflict here as a UNION.
   sm = messaging.SubMaster(['carControl', 'carState', 'controlsState', 'liveParameters', 'radarState', 'modelV2', 'selfdriveState',
                             'liveMapDataSP', 'carStateSP', 'carStateBP', 'mapdExtendedOut', 'selfdriveStateSP',
+                            'signReadingBP',  # BluePilot: camera sign reader; read by the speed-limit resolver
                             gps_location_service],
                            poll='carState')
 

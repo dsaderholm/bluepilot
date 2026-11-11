@@ -65,16 +65,21 @@ def main():
   while not client.connect(False):
     time.sleep(0.1)
 
+  reading = {}
   while True:
     buf = client.recv(1000)
     sm.update(0)
-    if buf is None or not reader.wants_frame(client.frame_id):
+    if buf is None:
       continue
-    try:
-      reading = reader.step(client.frame_id, buf.width, buf.height, buf.stride, buf.uv_offset, buf.data, sm)
-    except Exception:
-      cloudlog.exception("bp_sign_reader: inference failed")
-      _idle(pm, "inference raised")
+    if reader.wants_frame(client.frame_id):
+      try:
+        reading = reader.step(client.frame_id, buf.width, buf.height, buf.stride, buf.uv_offset, buf.data, sm)
+      except Exception:
+        cloudlog.exception("bp_sign_reader: inference failed")
+        _idle(pm, "inference raised")
+    # Published on EVERY frame, repeating the last reading between inferences (the model looks about
+    # every 2 s). The consumer decides "is this process alive" from how recently it heard, so a
+    # reading that was only sent when the model ran would look dead most of the time.
     map_fresh = bool(sm.alive["mapdOut"] and sm["mapdOut"].tileLoaded) if "mapdOut" in sm.data else False
     _publish(pm, reading, True, map_fresh, client.frame_id)
 
