@@ -266,3 +266,18 @@ rate-limit any notification (180 s is a sensible default).
   deprioritization after 100 GB/month (slower when congested, not cut off). Not independently verified. So the
   upload byte cap is a safety net, not a budget: keep the param, default generous (suggest 5 GB/day), and
   prefer uploading when the network is not congested only if it ever matters. Video clips are fine to upload.
+- 2026-11-10, opconnect session's answers (D.J. decides the open ones):
+  - Viewer: **opconnect has none** (only `GET /drives`, JSON, groups files by first path segment). D.J. wants it
+    kept basic, Hermes via MCP to find footage. Adopted at no server cost: upload keys `<event-id>/<file>` so an
+    event shows as a "route", plus a small `event.json` (trigger, time, GPS if any, voltage, file names) uploaded
+    with the clips so Hermes can search without opening video.
+  - Size: server has no limit, but nginx (NPMplus) in front is **untested** for large PUTs; testing leaves a test
+    row/file in the live backend, so needs D.J.'s OK. No resumable upload (a drop re-sends the whole file;
+    fine for 20 s clips; chunked/Range resume can be added if needed). Signed URL lasts 1 h, bound to dongle+path.
+  - Network: comma-to-opconnect over the tunnel is **untested**. The name must resolve to NPMplus (10.69.25.12)
+    from the comma (AdGuard answers the wildcard on the LAN only: needs split DNS or a subnet route), and the
+    `lan-only` access list may or may not include the tunnel range. **Open: UniFi WireGuard or Tailscale?**
+    (the comma-remote-access branch notes say WireGuard.)
+  - sunnylink replacement: opconnect implements none of it (sunnylink talks to its own backend: roles, users,
+    backups, uploader, SSO pairing) and will not take it on unless D.J. asks explicitly. No de-cloud inventory is
+    being done by anyone yet.
