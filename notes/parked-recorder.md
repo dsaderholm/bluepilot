@@ -163,3 +163,27 @@ Tests: simulated voltage sag, timeout, panda missing, recorder process crash, ig
 - Is the Portal (on Wi-Fi/hotspot) enough for viewing, or is remote notification wanted?
 - Confirm raising the effective offroad limit only while the feature is on is acceptable (it touches
   `power_monitoring.py`, a stock file, with BluePilot markers).
+
+## 10. Archive to the NAS (added 2026-11-10, from the opconnect session; not decided)
+
+D.J. wants parked-event footage on the NAS. This changes section 7's "never uploaded": local-only stays the
+default, and archival becomes an **explicit opt-in** (`ParkedRecordingUpload`, bool, default false).
+
+- **Backend:** opconnect (`https://car.saderholm.us`, LAN-only; device side is `BPConnectBackend=3`, on
+  `passing-assist-phase1`, not yet deployed to the car). Upload is `GET v1.4/{dongle}/upload_url/?path=<key>`
+  with the device JWT, which returns `{url, headers}`, then a PUT. Keys of the form `<event-id>/<file>` are
+  accepted with no server change. Files land on TrueNAS as `<dongle>/<route>/<file>`.
+- **Missing piece:** `uploader.py` only offers qlog/qcamera/crash/boot from `log_root`. It needs a small
+  separate step in the parked recorder (or a BP uploader) that uploads from our own directory, so events
+  still stay out of `log_root` and the stock deleter. Only runs when on the LAN; events are kept locally until
+  the PUT succeeds, then follow the normal quota.
+- **Open (D.J.):** quality. Stills and short clips are small. The road camera is 10 Mbps (about 4.5 GB/hour),
+  so continuous or HQ footage is not an opconnect job; keepers go to Nextcloud via Hermes. Design for stills +
+  short clips unless he says otherwise.
+- **Honk trigger idea (untested):** no horn signal is logged. `soundPressure` (micd) is 10 Hz in rlog, about
+  1 Hz in qlog, and a honk may spike it. Check: note the time of a real honk and read `soundPressure` in that
+  segment before building anything. If it works it is one more trigger, but it is an *onroad* trigger, so it
+  belongs with a separate onroad-event feature, not the parked recorder.
+- **Retention context:** `deleter.py` frees the oldest segments under 10% or 5 GB free and protects only the
+  newest `PRESERVE_COUNT=5` preserved segments, so many automatic onroad triggers would push old clips out.
+  This is one more reason parked events live in their own directory and quota.
