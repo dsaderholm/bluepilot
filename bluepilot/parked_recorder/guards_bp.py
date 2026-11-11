@@ -1,8 +1,9 @@
 """Battery-drain safeguards for the parked recorder.
 
-Pure logic: no openpilot imports, no I/O, time is passed in. The recorder stops itself with ParkedGuard;
-hardwared stays the real backstop because power_monitoring consults effective_max_time_offroad_s, so a hung
-or restarted recorder cannot hold the device on past the window.
+Pure logic: no openpilot imports, no I/O, time is passed in. The recorder stops itself with ParkedGuard (cameras and
+accelerometer off). The shutdown itself is hardwared's job: power_monitoring consults sentry_voltage_shutdown, which
+powers the device off under the voltage floor even if the recorder has hung. The window does not power the device off
+(the stock offroad timer is 30 hours and effective_max_time_offroad_s only ever raises it).
 """
 import math
 
@@ -112,3 +113,14 @@ def effective_max_time_offroad_s(stock_s: float, enabled: bool, window_hours, vo
   if voltage_mV is None or not math.isfinite(voltage_mV) or voltage_mV < clamp_min_voltage(min_voltage_v) * 1000:
     return stock_s
   return max(stock_s, clamp_max_hours(window_hours) * 3600)
+
+
+def sentry_voltage_shutdown(enabled: bool, voltage_mV: float | None, min_voltage_v, offroad_time_s: float,
+                            min_offroad_s: float = 60.0) -> bool:
+  """True when hardwared should shut the device down because the (filtered) car voltage is under the parked recorder's
+  floor. Only while the recorder is enabled, so stock behaviour is untouched otherwise. It is stricter than the stock
+  11.8 V rule, which exists to keep the car startable, and is the real battery protection: it is enforced by hardwared,
+  not by the recorder process. An unknown voltage returns False and leaves the decision to the stock rules."""
+  if not enabled or voltage_mV is None or not math.isfinite(voltage_mV) or voltage_mV <= 0:
+    return False
+  return voltage_mV < clamp_min_voltage(min_voltage_v) * 1000 and offroad_time_s > min_offroad_s

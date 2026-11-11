@@ -9,7 +9,7 @@ from bluepilot.parked_recorder.warning_bp import (DEFAULT_STYLE, MAX_HZ, SEQUENC
                                                   clamp_warning_seconds, flash_frame)
 from bluepilot.parked_recorder.detector_bp import MotionDetectorBP, ParkedTrigger, clamp_sensitivity
 from bluepilot.parked_recorder.guards_bp import (LOW_VOLTAGE_HOLD_S, ParkedGuard, VoltageLPF, clamp_max_hours,
-                                                 clamp_min_voltage, effective_max_time_offroad_s)
+                                                 clamp_min_voltage, effective_max_time_offroad_s, sentry_voltage_shutdown)
 
 DT = 1 / 104  # accelerometer rate
 GRAVITY = (0.0, 0.0, 9.81)
@@ -376,3 +376,27 @@ class TestWarning:
 
   def test_warning_seconds_clamped(self):
     assert clamp_warning_seconds(1) == 10 and clamp_warning_seconds(999) == 120 and clamp_warning_seconds("x") == 30
+
+
+class TestSentryVoltageShutdown:
+  def test_disabled_never_shuts_down(self):
+    assert sentry_voltage_shutdown(False, 11000, 12.3, 99999) is False
+
+  def test_under_the_floor_after_the_grace_shuts_down(self):
+    assert sentry_voltage_shutdown(True, 12200, 12.3, 3600) is True
+
+  def test_above_the_floor_does_not(self):
+    assert sentry_voltage_shutdown(True, 12400, 12.3, 3600) is False
+    assert sentry_voltage_shutdown(True, 12300, 12.3, 3600) is False     # exactly at the floor is not under it
+
+  def test_needs_offroad_time(self):
+    assert sentry_voltage_shutdown(True, 12000, 12.3, 30) is False
+    assert sentry_voltage_shutdown(True, 12000, 12.3, 61) is True
+
+  def test_unknown_voltage_leaves_it_to_the_stock_rules(self):
+    for bad in (None, float("nan"), 0):
+      assert sentry_voltage_shutdown(True, bad, 12.3, 3600) is False
+
+  def test_floor_is_clamped(self):
+    assert sentry_voltage_shutdown(True, 11900, 5.0, 3600) is True       # a bad setting becomes 12.0 V, not "never"
+    assert sentry_voltage_shutdown(True, 12100, 5.0, 3600) is False

@@ -619,6 +619,14 @@
       "enabled": true
     },
     {
+      "name": "ParkedRecordingShutdownReason",
+      "default": "{}",
+      "type": "json",
+      "flags": ["PERSISTENT", "DONT_LOG"],
+      "create_default": false,
+      "enabled": true
+    },
+    {
       "name": "ParkedBatteryLog",
       "default": false,
       "type": "bool",

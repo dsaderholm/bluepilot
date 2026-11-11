@@ -7,9 +7,9 @@ clip: it raises ParkedRecordingCapture, which makes the manager start camerad an
 writes the encoder's H.264 frames to disk. The decisions live in detector_bp / guards_bp / storage_bp /
 capture_bp so they can be tested without hardware.
 
-Battery safety: the guard here stops the recorder early, but the real backstop is hardwared, which shuts the
-device down at the end of the window (power_monitoring.effective_max_time_offroad_s) and at the stock
-low-voltage floor, whether or not this process is alive.
+Battery safety: the guard here stops the recorder early (cameras and accelerometer off). Powering the device off is hardwared's
+job: power_monitoring shuts the device down under the recorder's voltage floor (guards_bp.sentry_voltage_shutdown) even if this
+process has hung. The 4 h window does not power the device off; the comma then idles under the stock offroad rules.
 
 The cameras only start after the trigger, so a clip shows the seconds after the bump (a few seconds late),
 not the bump itself. Keeping cameras on while armed would catch it but costs far more power.

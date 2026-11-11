@@ -482,3 +482,22 @@ Consequences:
   D.J.:** (a) leave as is (recorder stops at 4 h, comma stays up under stock rules); (b) make Sentry's window authoritative (shut down at the
   window end, or when voltage drops under 12.3 V, only while Sentry is enabled; the comma then leaves the tailnet); or (c) a middle path
   (window end puts the comma into a quiet state with only wifi/tailscaled, then stock shutdown). Not changed yet.
+
+## 23. Decision and fix after section 22: hardwared enforces the voltage floor (2026-11-11)
+
+D.J. said "do whatever is best". With no real battery data from the car yet, the choice was to **tighten, not loosen** the protection.
+- **New:** while `ParkedRecordingEnabled` is on, `power_monitoring.should_shutdown` also shuts the device down when the filtered car voltage is
+  under `ParkedRecordingMinVoltage` (12.3 V default) for more than 60 s offroad (and the usual 5 minute and `in_car` rules). That is stricter than
+  the stock 11.8 V and is enforced by hardwared, so it holds even if the recorder process has hung. Pure function `sentry_voltage_shutdown` in
+  `guards_bp.py`; hook marked with BluePilot comments in `power_monitoring.py`. Off whenever the recorder is off: stock behaviour is untouched.
+- **New:** when this rule is what shuts the device down, it writes `ParkedRecordingShutdownReason` ({reason, voltageV, floorV, offroadS}) once,
+  so the next boot (or the future webhook) can say why the comma went away.
+- **Unchanged on purpose:** the 4 h window still only stops the recorder, the comma then idles under the stock rules (capacity model about 12-14 h,
+  30 h timer), so remote access over the tailnet lasts as long as stock allows. `DisablePowerDown` still wins (and the recorder refuses to run then).
+- **Why not loosen now (IQ.Pilot style: measured voltage only, no capacity model):** the panda voltage calibration in the car is unknown (the
+  bench reads 5.08 V on USB), and the capacity model is an independent safety net. Revisit with the battery logger's data from the car, including
+  the SIM modem and Tailscale draw.
+- **Known consequence:** a weak or cold battery, or a voltage reading that is low in the car, will shut the comma down earlier than before while
+  Sentry is on (fail-safe direction). The car test will show whether 12.3 V is right; it is a setting (12.0-13.0).
+- Tests: the real `power_monitoring.py` is run with stand-in modules (`test_power_hook.py`); the hook was mutation-checked. 106 tests.
+- **Not merged to the tracked branch** (held until D.J.'s test drive is over) and not on the comma. It adds a params key, so it needs a rebuild.
