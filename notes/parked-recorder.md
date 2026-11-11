@@ -187,3 +187,30 @@ default, and archival becomes an **explicit opt-in** (`ParkedRecordingUpload`, b
 - **Retention context:** `deleter.py` frees the oldest segments under 10% or 5 GB free and protects only the
   newest `PRESERVE_COUNT=5` preserved segments, so many automatic onroad triggers would push old clips out.
   This is one more reason parked events live in their own directory and quota.
+
+## 11. Follow-up research (2026-11-10, at D.J.'s request: private project, read both)
+
+**StarPilot, Galaxy side (the web UI that views events).** Read after the first pass.
+- Events are catalogued in `events.json` next to the images (atomic write, mode 0600), newest first. Events
+  with no catalog entry are discovered by scanning the directory. Worth copying: the catalog is the source of
+  truth, the directory scan is the recovery path.
+- Viewing: list, per-image GET, DELETE (**refused unless offroad**, path-traversal checked), and a **live
+  view** that starts `camerad` on demand for one frame and stops it again.
+- Notifications: web push (VAPID) and optional webhook/ntfy, **rate limited to one per 180 s**.
+- **No retention or quota anywhere in the Galaxy code** (no cap on event count or size, so it grows until the
+  disk is full). Our quota in section 5 is a real addition, not a copy.
+- Still a shallow clone (no history).
+
+**IQ.Pilot (`IQLvbs/iqpilot`, read at D.J.'s request).** It contains **no parked-recording code**.
+- Its `iqpilot/system/sentry.py` is crash reporting (sentry_sdk), the same thing as ours; nothing to do with
+  bump recording.
+- A search for parked/bump/dashcam/record found nothing relevant in the public source. Its feature code ships
+  as signed compiled "private" artifacts (`artifacts/iqpilot_*_private`) that hold only vendored Python
+  closures; none matched either. The "Sentry Mode" the project advertises is not in this repo as far as I can
+  find, so it was not a source for any part of this design, and nothing was copied from it.
+- Licence (IQ.Lvbs License v1.8.3, All Rights Reserved) still bars derived products. This stays private use
+  only; if the work is ever shared, re-clear that.
+
+**Changes this suggests to the design:** add `events.json` as the catalog with a recovery scan; make live view
+an optional later feature (starts the cameras on demand, so it costs power and falls under the same budget);
+rate-limit any notification (180 s is a sensible default).
