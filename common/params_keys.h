@@ -911,14 +911,21 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"EnableWebRoutesServer", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"BPPortalPort", {PERSISTENT | BACKUP, INT, "8088"}},
 
-    // BluePilot: parked recorder. Registered here (not only in params.json) because the process manager
-    // gates processes on these and power_monitoring reads them before bluepilot params are registered.
+    // BluePilot: parked recorder. Every key the code reads or writes must be listed here: this compiled list
+    // is what Params accepts at runtime (params.json only describes them), and the process manager reads the
+    // gating keys. bluepilot/parked_recorder/test_params_registered.py checks this.
     {"ParkedRecordingEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},
+    {"ParkedRecordingSensitivity", {PERSISTENT | BACKUP, FLOAT, "3.0"}},
     {"ParkedRecordingMaxHours", {PERSISTENT | BACKUP, FLOAT, "4.0"}},
     {"ParkedRecordingMinVoltage", {PERSISTENT | BACKUP, FLOAT, "12.3"}},
+    {"ParkedRecordingMaxStorageMB", {PERSISTENT | BACKUP, INT, "2048"}},
+    {"ParkedRecordingClipSeconds", {PERSISTENT | BACKUP, INT, "20"}},
     {"ParkedRecordingActive", {CLEAR_ON_MANAGER_START | DONT_LOG, BOOL, "0"}},
     {"ParkedRecordingCapture", {CLEAR_ON_MANAGER_START | DONT_LOG, BOOL, "0"}},
+    {"ParkedRecordingStatus", {CLEAR_ON_MANAGER_START | DONT_LOG, JSON}},
+    {"ParkedRecordingLastEvent", {PERSISTENT | DONT_LOG, JSON}},
     {"ParkedBatteryLog", {PERSISTENT, BOOL, "0"}},
+    {"ParkedBatteryLogLabel", {PERSISTENT, STRING}},
     // End BluePilot
 
     // BluePilot: connect backend — 0=Comma Connect, 1=Konik Stable, 2=Offline Mode, 3=Self-hosted.

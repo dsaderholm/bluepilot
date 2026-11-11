@@ -320,3 +320,12 @@ voltage, mV/hour slope and mean/max watts.
    and drifts down on its own (surface charge), which looks like drain. Compare slopes after that.
 4. Judge by mV/hour and watts, not one reading. Draw (W) is the comma's own meter; the voltage slope is the
    battery's answer, and what sets the real safe window and floor.
+
+## 15. Bug found before the first deploy (2026-11-10)
+
+`common/params_keys.h` is the list `Params` actually accepts at runtime; `params.json` only describes params (the
+Portal reads it) and `bp_params.initialize_custom_params` is not called anywhere. Six Parked* keys were only in
+`params.json`, so on a device the recorder's first write to `ParkedRecordingLastEvent` would raise and its settings
+(sensitivity, storage, clip length) would never be read. Fixed by registering every key in `params_keys.h`;
+`test_params_registered.py` now fails if a key used by the code, or listed in `params.json`, is missing there.
+The fake Params in the other tests cannot catch this class of bug; only a real device run or this check can.
