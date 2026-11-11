@@ -66,6 +66,15 @@ def only_onroad(started: bool, params: Params, CP: car.CarParams) -> bool:
 def only_offroad(started: bool, params: Params, CP: car.CarParams) -> bool:
   return not started
 
+# BluePilot: parked recorder gates
+def parked_recorder_run(started: bool, params: Params, CP: car.CarParams) -> bool:
+  return not started and params.get_bool("ParkedRecordingEnabled")
+
+def parked_recorder_active(started: bool, params: Params, CP: car.CarParams) -> bool:
+  # set by the recorder while its battery window is open; keeps sensord (accelerometer) alive while parked
+  return not started and params.get_bool("ParkedRecordingActive")
+# End BluePilot
+
 def use_github_runner(started, params, CP: car.CarParams) -> bool:
   return not PC and params.get_bool("EnableGithubRunner") and (
     not params.get_bool("NetworkMetered") and not params.get_bool("GithubRunnerSufficientVoltage"))
@@ -209,7 +218,9 @@ procs = [
   PythonProcess("modeld", "selfdrive.modeld.modeld", and_(only_onroad, is_stock_model)),
   PythonProcess("dmonitoringmodeld", "selfdrive.modeld.dmonitoringmodeld", driverview, enabled=(WEBCAM or not PC)),
 
-  PythonProcess("sensord", "system.sensord.sensord", only_onroad, enabled=not PC),
+  # BluePilot: sensord also runs while the parked recorder window is open
+  PythonProcess("sensord", "system.sensord.sensord", or_(only_onroad, parked_recorder_active), enabled=not PC),
+  # End BluePilot
   PythonProcess("ui", "selfdrive.ui.ui", always_run, restart_if_crash=True),
   # BluePilot: use a fork-local subclass for optional custom sounds; upstream soundd remains unchanged.
   PythonProcess("soundd", "selfdrive.ui.bp.soundd_bp" if is_bluepilot() else "selfdrive.ui.soundd", driverview),
@@ -307,6 +318,7 @@ if is_bluepilot():
   procs += [
     PythonProcess("bp_portal", "bluepilot.backend.bp_portal", _bp_portal_enabled),
     PythonProcess("bp_route_preprocessor", "bluepilot.backend.routes.preprocessor", _bp_route_preprocessor_enabled),
+    PythonProcess("parked_recorder", "bluepilot.parked_recorder.parked_recorder_bp", parked_recorder_run, enabled=not PC),
   ]
 
 if os.path.exists("./github_runner.sh"):
