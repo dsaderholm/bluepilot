@@ -201,16 +201,44 @@ default, and archival becomes an **explicit opt-in** (`ParkedRecordingUpload`, b
   disk is full). Our quota in section 5 is a real addition, not a copy.
 - Still a shallow clone (no history).
 
-**IQ.Pilot (`IQLvbs/iqpilot`, read at D.J.'s request).** It contains **no parked-recording code**.
-- Its `iqpilot/system/sentry.py` is crash reporting (sentry_sdk), the same thing as ours; nothing to do with
-  bump recording.
-- A search for parked/bump/dashcam/record found nothing relevant in the public source. Its feature code ships
-  as signed compiled "private" artifacts (`artifacts/iqpilot_*_private`) that hold only vendored Python
-  closures; none matched either. The "Sentry Mode" the project advertises is not in this repo as far as I can
-  find, so it was not a source for any part of this design, and nothing was copied from it.
-- Licence (IQ.Lvbs License v1.8.3, All Rights Reserved) still bars derived products. This stays private use
-  only; if the work is ever shared, re-clear that.
+**IQ.Pilot (`IQLvbs/iqpilot`, branches `alpha`/`beta`/`release`, read at D.J.'s request; licence ignored by D.J.'s
+decision, private use).** The first pass only looked at `main`'s default checkout and wrongly said it had no parked
+recorder. It does, but the daemon is a compiled, signed bundle (`iqpilot_hephaestusd_private`), so what is readable is
+the wiring, the param list, the module names and the power code, **not the detection logic or thresholds.**
 
-**Changes this suggests to the design:** add `events.json` as the catalog with a recovery scan; make live view
+- **Shape:** one process `iqsentryd`, split into modules named `imu`, `vision` (`iqsentryvisiond`), `body`,
+  `media`, `policy`, `upload`. So it has an accelerometer trigger, a camera-based trigger, a "body" input (the
+  door-check/locked params below suggest vehicle door and lock state from CAN), a clip writer, a policy layer
+  and an uploader. The module names are the only evidence for those roles.
+- **Params (beta `params_keys.h`):** `IQSentry` (master, off), `IQSentrySensitivity` (int, 3), `IQSentryDurationH`
+  (int, 0), `IQSentryDoorCheck`, `IQSentryRequireLocked`, `IQSentryKeepStartups`, and `IQSentryRecording`
+  (CLEAR_ON_MANAGER_START). Semantics of `DurationH=0` and `KeepStartups` are not readable.
+- **Recording is video, through the stock stream encoder.** `IQSentryRecording` turns on `camerad` and
+  `stream_encoderd` (the `notcar`/livestream encoder), and `iqsentryd` runs when parked **or** while recording
+  onroad. That is the same route as our v2 idea (a parked encoder in the `stream_encoderd` style), which is now
+  a pattern with a precedent rather than a guess. Cameras are *not* on all the time: the recording flag is the gate.
+- **It is non-blocking.** `iqsentryd` is in `NON_BLOCKING_PROCESSES`, so a crash or hang in it cannot raise a
+  selfdrive alert or stop driving. Copy that: our process must be non-blocking too.
+- **Door/lock gating** (`DoorCheck`, `RequireLocked`) means it can arm only when the car is locked. On Ford, door
+  and lock states are not decoded in this tree (section 3), so this is a later, DBC-dependent feature.
+- **Power: FastSleep, their "deep standby", is software, not hardware suspend.** After 300 s parked with the screen
+  off (or when voltage sags) `hardwared` sets `DevicePowerState=low_power`, blanks the panel, and the manager
+  stops the heavy processes (`ui`, `updated`, uploader, model manager, map manager) through a `not_low_power` gate.
+  The device stays powered, `iqsentryd` is **not** in the shed list so it keeps running, and ignition or charging
+  wakes it. Thresholds: enter at 11.8 V, exit at 12.8 V, hard shutdown at 11.5 V, with the 30 Wh capacity
+  bookkeeping shutdown disabled while FastSleep is on (they use measured voltage instead). Some EVs (EV6, Tesla,
+  VW MEB) set `no_sleep` and skip the standby entirely.
+- **Not found / not readable:** detection thresholds and filtering, clip length and pre-roll, storage limits,
+  upload target, door-signal decoding, any notification path. Do not assume any of those.
+
+**What this confirms and changes in section 2/4:** my "no suspend state, bounded window" model holds (their
+standby is process shedding, not suspend). It adds something we should do: while the recorder is armed, **shed the
+heavy parked-time processes (UI, updater, map/model managers, uploader) and blank the screen**, as a lower-draw
+standby. That, not leaving the full stack idle, is what makes a multi-hour window affordable. It also warns that
+the stock 30 Wh bookkeeping model empties within hours at offroad draw regardless of real battery state, so my
+safeguard 3 (capacity < 50%) would fire early on that estimate; use measured voltage as the primary guard and
+treat capacity as advisory.
+
+**Changes this suggests to the design (both products):** add `events.json` as the catalog with a recovery scan; make live view
 an optional later feature (starts the cameras on demand, so it costs power and falls under the same budget);
 rate-limit any notification (180 s is a sensible default).
