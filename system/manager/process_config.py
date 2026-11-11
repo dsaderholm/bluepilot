@@ -304,10 +304,15 @@ if is_bluepilot():
     return params.get_bool("EnableWebRoutesServer")
   def _bp_route_preprocessor_enabled(started, params, CP):
     return params.get_bool("EnableWebRoutesServer") and only_offroad(started, params, CP)
+  # BluePilot: speed-limit sign reader. Onroad only, and only when the owner turned it on.
+  def _bp_sign_reader_enabled(started, params, CP):
+    return started and params.get_bool("BPSignReaderEnabled")
   procs += [
     PythonProcess("bp_portal", "bluepilot.backend.bp_portal", _bp_portal_enabled),
     PythonProcess("bp_route_preprocessor", "bluepilot.backend.routes.preprocessor", _bp_route_preprocessor_enabled),
+    PythonProcess("bp_sign_reader", "bluepilot.sign_reader.sign_reader", _bp_sign_reader_enabled),
   ]
+  # End BluePilot
 
 if os.path.exists("./github_runner.sh"):
   procs += [NativeProcess("github_runner_start", "system/manager", ["./github_runner.sh", "start"], and_(only_offroad, use_github_runner), sigkill=False)]
