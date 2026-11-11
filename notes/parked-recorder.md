@@ -255,3 +255,10 @@ rate-limit any notification (180 s is a sensible default).
 - Battery: D.J. wants the car battery looked at for real. Plan: a parked-time logger (car voltage + `powerDrawW`
   every 30 s) so the drain curve is measured before the window or voltage floor is trusted. Needs D.J.'s OK
   before anything touches the car or comma.
+- 2026-11-10, later: D.J. does not think the Portal is needed (this is his own fork, opconnect + a planned MCP
+  cover it, sunnylink also exists). **Design change: drop the Portal viewer (section 6) from scope.** Events
+  are listed by `event.json` on the device and viewed through opconnect/MCP.
+- D.J. plans a **SIM card and Tailscale on the comma.** That lifts the "LAN-only" limit on upload (if opconnect
+  is reachable on the tailnet; opconnect session to confirm) but adds: cellular data limits (upload event clips
+  only, with a daily byte cap param), modem + Tailscale draw while parked (must be in the battery measurement),
+  and Tailscale is not in this repo (installed on the device, outside the tree).
