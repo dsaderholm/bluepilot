@@ -242,3 +242,16 @@ treat capacity as advisory.
 **Changes this suggests to the design (both products):** add `events.json` as the catalog with a recovery scan; make live view
 an optional later feature (starts the cameras on demand, so it costs power and falls under the same budget);
 rate-limit any notification (180 s is a sensible default).
+
+## 12. Decisions from D.J. (2026-11-10)
+
+- Window: **4 hours** after ignition off is fine.
+- **Video is wanted** (stills first is acceptable only as a stepping stone).
+- Offroad-limit change (section 9, question 4): delegated to Claude; use the marked edit in `power_monitoring.py`.
+- Viewing: D.J. does not want to build on the BluePilot Portal (it is upstream BluePilot code, off by default via
+  `EnableWebRoutesServer`, and opconnect plus a planned MCP to the comma overlap it). Preferred path is
+  archive to opconnect/NAS (section 10). Not yet decided: how events are listed/viewed there, and what happens
+  when the car is away from the LAN (clips must wait on the device until it can upload).
+- Battery: D.J. wants the car battery looked at for real. Plan: a parked-time logger (car voltage + `powerDrawW`
+  every 30 s) so the drain curve is measured before the window or voltage floor is trusted. Needs D.J.'s OK
+  before anything touches the car or comma.
