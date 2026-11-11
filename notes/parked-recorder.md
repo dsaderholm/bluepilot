@@ -465,3 +465,20 @@ is answered: honk and flash exist as one-shot HA buttons. There is no separate "
 - Cautions: each press goes through Ford's cloud (latency of seconds, not instant); the unofficial API reportedly locks an account
   after about 200 calls in 24 h, so cap presses per event and per hour in the automation; the comma reaches HA only on home Wi-Fi
   until the SIM and VPN exist; remote start is still not a sensible response to a bump.
+
+## 22. CORRECTION: the stock offroad timer is 30 hours, not 30 minutes (2026-11-11)
+
+Found while answering the comma-remote-access session. `MaxTimeOffroad` is in **minutes** (`param * 60`); the default 1800 is **30 hours**
+(the sunnylink UI text says "30h is the default"; the comma's value is 1800). Sections 3 and 4 and the earlier chat said 30 minutes: wrong.
+Consequences:
+- `effective_max_time_offroad_s` never changes anything at the default: it only raises a limit, and 4 h < 30 h. The hardwared hook is a
+  no-op unless the user has set MaxTimeOffroad below the window.
+- **The 4 h window is NOT enforced by hardwared.** It only stops the recorder (and releases sensord). The comma then idles until stock
+  shutdown: the 30 Wh bookkeeping model (`car_battery_capacity_uWh <= 0`, about 12-14 h at 2.1-2.5 W), the 11.8 V filtered-voltage floor
+  (60 s after 5 min offroad), or the 30 h timer. All need `in_car` (panda seen). Not yet observed on a real ignition-off.
+- So the safety claim "hardwared powers the device off at the end of the window" is false by default. The real battery protection is the
+  stock 11.8 V floor (low for a lead-acid battery) and the capacity model; Sentry's 12.3 V floor only stops the recorder.
+- D.J. also wants the comma reachable on the tailnet after ignition off, which conflicts with a hard 4 h power-off. **Decision needed from
+  D.J.:** (a) leave as is (recorder stops at 4 h, comma stays up under stock rules); (b) make Sentry's window authoritative (shut down at the
+  window end, or when voltage drops under 12.3 V, only while Sentry is enabled; the comma then leaves the tailnet); or (c) a middle path
+  (window end puts the comma into a quiet state with only wifi/tailscaled, then stock shutdown). Not changed yet.
