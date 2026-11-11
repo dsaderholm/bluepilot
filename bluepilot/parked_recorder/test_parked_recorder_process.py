@@ -180,16 +180,26 @@ def test_window_expiry_stops(mod, tmp_path):
   assert params.values["ParkedRecordingActive"] is False
 
 
-def test_no_panda_voltage_fails_closed(mod, tmp_path):
+def test_no_panda_voltage_fails_closed_after_grace(mod, tmp_path):
   rec, sm, params = make(mod, tmp_path)
-  advance(rec, sm, 1, panda=UNKNOWN)
+  advance(rec, sm, 10, panda=UNKNOWN)
+  assert status(params)["state"] == "arming"   # grace period: not stopped yet
+  advance(rec, sm, 6, panda=UNKNOWN)
   assert status(params) == {"state": "stopped", "reason": "no_voltage"}
+
+
+def test_voltage_arriving_late_at_startup_does_not_stop_it(mod, tmp_path):
+  # the real device: the first loop runs before pandad's first voltage message
+  rec, sm, params = make(mod, tmp_path)
+  advance(rec, sm, 0.5, with_voltage=False)
+  advance(rec, sm, 5)
+  assert status(params)["state"] == "arming"
 
 
 def test_stale_voltage_fails_closed(mod, tmp_path):
   rec, sm, params = make(mod, tmp_path)
   advance(rec, sm, 1)                          # one good reading
-  advance(rec, sm, 12, with_voltage=False)     # then nothing for longer than the stale limit
+  advance(rec, sm, 30, with_voltage=False)     # then nothing for longer than the stale limit and the grace period
   assert status(params) == {"state": "stopped", "reason": "no_voltage"}
 
 

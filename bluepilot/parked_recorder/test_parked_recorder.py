@@ -147,11 +147,17 @@ class TestGuard:
     assert g.update(140.0, 12200) is None
     assert g.update(140.0 + LOW_VOLTAGE_HOLD_S - 1, 12200) is None
 
-  def test_missing_voltage_fails_closed(self):
+  def test_missing_voltage_fails_closed_after_the_grace_period(self):
+    for bad in (None, float("nan"), 0):
+      g = ParkedGuard(t_start=0.0, no_voltage_grace_s=15.0)
+      assert g.update(14.9, bad) is None            # still waiting for the first reading
+      assert g.update(15.0, bad) == "no_voltage"
+
+  def test_first_reading_inside_grace_is_fine(self):
     g = ParkedGuard(t_start=0.0)
-    assert g.update(1.0, None) == "no_voltage"
-    assert ParkedGuard(t_start=0.0).update(1.0, float("nan")) == "no_voltage"
-    assert ParkedGuard(t_start=0.0).update(1.0, 0) == "no_voltage"
+    assert g.update(0.1, None) is None              # the real device: the message arrives about 0.25 s in
+    assert g.update(0.3, 12600) is None
+    assert g.update(100.0, 12600) is None
 
   def test_trip_is_latched(self):
     g = ParkedGuard(t_start=0.0, min_voltage_v=12.3, low_voltage_hold_s=0.0)

@@ -8,6 +8,7 @@ import math
 
 VOLTAGE_LPF_TAU_S = 45.0          # same time constant as PowerMonitoring's car voltage filter
 LOW_VOLTAGE_HOLD_S = 30.0
+NO_VOLTAGE_GRACE_S = 15.0        # pandad's first voltage message arrives about 0.25 s after start; do not trip before it
 
 MAX_HOURS_RANGE = (0.25, 12.0)
 MIN_VOLTAGE_RANGE = (12.0, 13.0)
@@ -56,15 +57,16 @@ class ParkedGuard:
   """Latched stop conditions. Once one trips it stays tripped until the next ignition cycle (new instance).
 
   Reasons: "time" (window used up), "voltage" (filtered voltage under the floor for LOW_VOLTAGE_HOLD_S),
-  "no_voltage" (no valid reading, fail closed).
+  "no_voltage" (no valid reading for NO_VOLTAGE_GRACE_S after start, fail closed).
   """
 
   def __init__(self, t_start: float, max_hours: float = 4.0, min_voltage_v: float = 12.3,
-               low_voltage_hold_s: float = LOW_VOLTAGE_HOLD_S):
+               low_voltage_hold_s: float = LOW_VOLTAGE_HOLD_S, no_voltage_grace_s: float = NO_VOLTAGE_GRACE_S):
     self.t_start = t_start
     self.max_hours = clamp_max_hours(max_hours)
     self.min_voltage_v = clamp_min_voltage(min_voltage_v)
     self.low_voltage_hold_s = low_voltage_hold_s
+    self.no_voltage_grace_s = no_voltage_grace_s
     self.tripped: str | None = None
     self._low_since: float | None = None
 
@@ -80,7 +82,9 @@ class ParkedGuard:
     if t - self.t_start >= self.max_hours * 3600:
       self.tripped = "time"
     elif filtered_voltage_mV is None or not math.isfinite(filtered_voltage_mV) or filtered_voltage_mV <= 0:
-      self.tripped = "no_voltage"
+      # fail closed, but only once the grace period has passed: the first reading is not instant
+      if t - self.t_start >= self.no_voltage_grace_s:
+        self.tripped = "no_voltage"
     elif filtered_voltage_mV < self.min_voltage_v * 1000:
       if self._low_since is None:
         self._low_since = t

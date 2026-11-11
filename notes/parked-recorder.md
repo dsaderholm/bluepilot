@@ -329,3 +329,30 @@ Portal reads it) and `bp_params.initialize_custom_params` is not called anywhere
 (sensitivity, storage, clip length) would never be read. Fixed by registering every key in `params_keys.h`;
 `test_params_registered.py` now fails if a key used by the code, or listed in `params.json`, is missing there.
 The fake Params in the other tests cannot catch this class of bug; only a real device run or this check can.
+
+## 16. Bench test results (2026-11-10, comma on a bench, 5 V supply, parked, not in the car)
+
+Comma at 827311b42. Recorder and logger were enabled only for the test and switched off again; test files removed.
+
+- **Registered params work** (the section 15 fix): both processes started, nothing raised.
+- **Bug found:** the recorder stopped itself with `no_voltage` on its first loop. The panda's first voltage message
+  arrives about 0.25 s after start, and the guard failed closed at 100 ms and latched. Fixed with a 15 s grace
+  period (`NO_VOLTAGE_GRACE_S`); 3 tests fail without it.
+- **The comma reads about 4.98 V on the bench**, so the 12.3 V floor correctly stops the recorder there (guard
+  working as designed). The recorder cannot run on a 5 V supply at all; recorder runs need the car's battery.
+- **Camera capture (forced via `ParkedRecordingCapture`, no recorder):** `camerad` and `stream_encoderd` start,
+  first frame **2.1 s** after the flag; 20 s clip = 401 wide frames (13.1 MB) + 400 driver frames (12.6 MB), about
+  5.2 Mbps each, **about 26 MB per event**. Both files **decode completely** (PyAV: 401 and 400 frames at
+  1928x1208). Both processes stop within 8 s of clearing the flag. The driver camera is infrared (reads red/dark).
+  Correction to section 13: SPS/PPS headers arrive on every fifth frame (keyframes, gop 5), not on every frame;
+  the writer simply writes whatever header comes with each frame, which is correct.
+- **Power (comma's own meter):** idle parked, screen off, wifi: **3.0-3.5 W** (SoM 1.5-1.8 W). Cameras plus
+  encoder: **about 5.5 W** (peaks 6.5 W), back to 2.9 W in 8 s. So a 20 s clip costs about 0.03 Wh, negligible;
+  idle draw is what matters for the battery.
+- **Accelerometer noise at rest (60 s, 106.8 Hz):** residual after the detector's baseline: median 0.008, p99
+  0.018, p99.9 0.021, **max 0.023 m/s^2**. The default threshold (sensitivity 3 = 0.1 m/s^2) is about 4x the worst
+  noise seen, with zero false triggers at any sensitivity from 1 to 10. A mount in a car (wind, passing trucks) will
+  be noisier; the real number needs the car. `sensord` starts and stops with `ParkedRecordingActive` as designed.
+- **Not tested:** a real bump through the recorder (needs the car's 12 V and someone to knock on it), the
+  recorder-driven capture end to end, the battery logger against a real battery, upload.
+- **Battery logger worked** (rows every 30 s with voltage, draw, temperature, recorder state).
