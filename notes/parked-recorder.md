@@ -356,3 +356,46 @@ Comma at 827311b42. Recorder and logger were enabled only for the test and switc
 - **Not tested:** a real bump through the recorder (needs the car's 12 V and someone to knock on it), the
   recorder-driven capture end to end, the battery logger against a real battery, upload.
 - **Battery logger worked** (rows every 30 s with voltage, draw, temperature, recorder state).
+
+## 17. Research: what could Sentry do to deter a thief? (2026-11-10, read-only; nothing built)
+
+**The car:** the comma's stored CarParams say `FORD_FUSION_MK5` (brand ford, plain CAN, not CAN-FD, safety config `ford`).
+The Fusion DBC (`ford_fusion_2018_pt.dbc`) is small (70 signals) but has `Doors` (message 947: `Door_FL/FR/RL/RR_Open`)
+and `Steering_Buttons` (message 131, with `Left_Turn_Light` / `Right_Turn_Light`). No hazard, horn, alarm or lock *command*
+exists in this tree for the Fusion.
+
+**Can the comma command the car (lights/horn/lock) while parked? Almost certainly not as it stands:**
+- `pandad.cc` sets the panda to `NO_OUTPUT` whenever the ignition is off or the device is not onroad (its own comment
+  mentions ELM327 as the alternative), so nothing can be transmitted parked without changing that.
+- `SAFETY_ALLOUTPUT` (send anything) is compiled only under `ALLOW_DEBUG`, i.e. not in release panda firmware.
+- `SAFETY_ELM327` skips the allow-list but its TX hook only passes ISO 15765-4 diagnostic addresses (0x7DF, 0x7xx,
+  0x6xx, 0x18DB33F1, 0x18DAxxF1), 8 bytes: diagnostic/UDS requests, the family FORScan uses, not ordinary control
+  messages. Whether the harness bus reaches the body module at all is unknown (the harness taps the camera side; FORScan
+  goes through the OBD port).
+- Passing assist's blinker is a **spoof of the steering-stalk message** (`Steering_Buttons`, `create_button_msg(turn_signal=)`
+  on the main bus), sent only onroad under the Ford safety mode. That is the stalk position (left/right), not a body-module
+  command, and there is no hazard signal in it. A parked car with the bus asleep will not act on it. Bus sleep timing after
+  ignition off is unverified.
+- **Experiment that settles it (needs the car, read-only, tell D.J. first):** log CAN with the car off and locked, see
+  whether `Doors`/`Steering_Buttons` still appear and for how long after shutdown.
+
+**Home Assistant / FordPass (cloud via the car's own modem), not the comma's CAN:**
+- Fusion modem: 2017 "SYNC Connect", 2018 "FordPass Connect" (some 2018 still SYNC Connect), 2019 on Ford's list, all 2020+.
+  Ford lists remote start/stop, lock/unlock, location and health as available. Bulletin SSM 49084 (2017-2020) notes some
+  Fords with inoperative remote features until the modem is fixed.
+- HA integrations (itchannel / jrprinty / no-gram / crowedavid forks of fordpass-ha): lock/unlock and remote start are
+  evidenced; "Guard Mode" is listed (only supported cars). **Honk, flash lights and alarm: not confirmed in any search
+  result.** Unofficial API; one report of account lockout above ~200 calls per 24 h. Check the installed fork's entity list.
+- Remote start: Ford designs it so the car cannot be shifted out of park without a recognised key inside (forum and owner-
+  manual evidence, anecdotal). It does not deter anyone, wastes fuel/battery and is a CO risk in a garage. Not recommended as a response.
+
+**Speaker (Sentry-owned deterrent):** `hardwared` puts the device in power save when the ignition is off and the screen is off,
+and `set_power_save(True)` shuts the speaker amplifier down (the code says "amplifier, 100mW at idle"). `soundd` is
+only started with `driverview`. So a parked siren needs: leave power save (re-initialise the amp), start soundd, play, then
+power back down. Untested; loudness outside the car unknown; amp draw while playing unknown.
+
+**Screen:** it faces the driver, so only someone inside the car sees it.
+
+**Unknowns that remain:** bus behaviour parked (car test), whether the speaker is audible outside and its draw (bench test),
+whether D.J.'s FordPass HA fork exposes honk/flash/alarm (check the entity list), 12 V battery size for a Fusion (and whether
+it is the hybrid, `FordPrefHybridVehicle` was not set on the comma).
