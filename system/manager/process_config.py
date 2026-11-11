@@ -74,6 +74,9 @@ def parked_capture(started: bool, params: Params, CP: car.CarParams) -> bool:
   # raised by the recorder for the length of one clip: starts camerad and the stream encoder while parked
   return not started and params.get_bool("ParkedRecordingCapture")
 
+def parked_battery_log(started: bool, params: Params, CP: car.CarParams) -> bool:
+  return not started and params.get_bool("ParkedBatteryLog")
+
 def parked_recorder_active(started: bool, params: Params, CP: car.CarParams) -> bool:
   # set by the recorder while its battery window is open; keeps sensord (accelerometer) alive while parked
   return not started and params.get_bool("ParkedRecordingActive")
@@ -327,6 +330,7 @@ if is_bluepilot():
     PythonProcess("bp_portal", "bluepilot.backend.bp_portal", _bp_portal_enabled),
     PythonProcess("bp_route_preprocessor", "bluepilot.backend.routes.preprocessor", _bp_route_preprocessor_enabled),
     PythonProcess("parked_recorder", "bluepilot.parked_recorder.parked_recorder_bp", parked_recorder_run, enabled=not PC),
+    PythonProcess("parked_battery_logger", "bluepilot.parked_recorder.battery_logger_bp", parked_battery_log, enabled=not PC),
   ]
 
 if os.path.exists("./github_runner.sh"):

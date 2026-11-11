@@ -302,3 +302,21 @@ rate-limit any notification (180 s is a sensible default).
   - Untested on hardware: the livestream encoder bitrate (default 5 Mbps per camera, ~12 MB per 20 s camera
     clip), camerad start time, and whether camerad/encoderd start cleanly while parked with the screen off.
 - **Tests:** 58 unit tests with a fake messaging layer (stop-on-trip and no-frames paths mutation-checked).
+
+## 14. Parked battery logger (code written, not run in the car)
+
+`ParkedBatteryLog` (bool) starts `parked_battery_logger` while the car is off; it appends a row every 30 s to
+`/data/media/0/parked_recorder/battery_log.csv` (rotated at 5 MB): raw and filtered car voltage, `powerDrawW`,
+`somPowerDrawW`, temperature, CPU, network, screen, the recorder's state, and a run label (`ParkedBatteryLogLabel`).
+Read-only. Summary: `python -m bluepilot.parked_recorder.battery_log_bp [csv]` prints, per label, hours, start/end
+voltage, mV/hour slope and mean/max watts.
+
+**Car test (needs D.J. there and his OK; nothing here has run on a device):**
+1. Park, ignition off, doors closed, comma on. Set `ParkedBatteryLog=1` and a label (`stock`, `recorder armed`,
+   `modem+vpn`, ...), one configuration per night so the runs can be compared.
+2. The comma shuts down after `MaxTimeOffroad` (30 min stock) unless the recorder window is on; for a longer
+   baseline, raise `MaxTimeOffroad` for the test only. The 11.8 V low-voltage shutdown stays as the backstop.
+3. Ignore the first 30-60 minutes of each run: a battery that has just been driven sits above its resting voltage
+   and drifts down on its own (surface charge), which looks like drain. Compare slopes after that.
+4. Judge by mV/hour and watts, not one reading. Draw (W) is the comma's own meter; the voltage slope is the
+   battery's answer, and what sets the real safe window and floor.

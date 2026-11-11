@@ -593,6 +593,22 @@
       "enabled": true
     },
     {
+      "name": "ParkedBatteryLog",
+      "default": false,
+      "type": "bool",
+      "flags": ["PERSISTENT"],
+      "create_default": false,
+      "enabled": true
+    },
+    {
+      "name": "ParkedBatteryLogLabel",
+      "default": "",
+      "type": "string",
+      "flags": ["PERSISTENT"],
+      "create_default": false,
+      "enabled": true
+    },
+    {
       "name": "ParkedRecordingActive",
       "default": false,
       "type": "bool",
