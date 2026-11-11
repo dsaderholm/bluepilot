@@ -20,7 +20,8 @@ class FakeParams:
     self.values = {
       "ParkedRecordingSensitivity": 3.0, "ParkedRecordingMaxHours": 4.0, "ParkedRecordingMinVoltage": 12.3,
       "ParkedRecordingMaxStorageMB": 2048, "ParkedRecordingActive": False, "ParkedRecordingClipSeconds": 20,
-      "ParkedRecordingCapture": False, **values,
+      "ParkedRecordingCapture": False, "ParkedRecordingWarningEnabled": False, "ParkedRecordingWarningSeconds": 30,
+      "ParkedRecordingWarning": False, **values,
     }
 
   def get(self, key):
@@ -326,3 +327,72 @@ def test_disable_power_down_stops_it_before_anything_arms(mod, tmp_path):
   sm.step(accel=(0.0, 0.0, 11.0))
   rec.update()
   assert list(tmp_path.iterdir()) == []             # and it never records, even once armed time has passed
+
+
+def finish_capture(rec, sm):
+  """Lets a running capture time out so the next bump can register."""
+  sm.t += 25
+  sm.step()
+  rec.update()
+
+
+def test_warning_off_by_default_even_on_a_hard_hit(mod, tmp_path):
+  rec, sm, params = make(mod, tmp_path)
+  bump(rec, sm)                                                # a hard hit (score about 12)
+  assert params.values["ParkedRecordingWarning"] is False
+
+
+def test_hard_hit_raises_warning_then_it_expires(mod, tmp_path):
+  rec, sm, params = make(mod, tmp_path, ParkedRecordingWarningEnabled=True, ParkedRecordingWarningSeconds=30)
+  bump(rec, sm)
+  assert params.values["ParkedRecordingWarning"] is True
+  sm.t += 29
+  sm.step()
+  rec.update()
+  assert params.values["ParkedRecordingWarning"] is True       # still within the 30 s
+  sm.t += 2
+  sm.step()
+  rec.update()
+  assert params.values["ParkedRecordingWarning"] is False
+
+
+def test_single_light_bump_records_but_does_not_warn(mod, tmp_path):
+  rec, sm, params = make(mod, tmp_path, ParkedRecordingWarningEnabled=True)
+  advance(rec, sm, 125)
+  sm.step(accel=(0.0, 0.0, 9.81 + 0.5))                        # score about 5: an event, but not a hard hit
+  rec.update()
+  assert len(list(tmp_path.iterdir())) == 1
+  assert params.values["ParkedRecordingWarning"] is False
+
+
+def test_repeated_light_bumps_escalate(mod, tmp_path):
+  rec, sm, params = make(mod, tmp_path, ParkedRecordingWarningEnabled=True)
+  advance(rec, sm, 125)
+  for i in range(3):                                           # three light bumps inside two minutes
+    sm.step(accel=(0.0, 0.0, 9.81 + 0.5))
+    rec.update()
+    assert params.values["ParkedRecordingWarning"] is (i == 2)
+    finish_capture(rec, sm)                                    # clip times out, cooldown passes
+    advance(rec, sm, 6)
+
+
+def test_guard_trip_switches_the_warning_off(mod, tmp_path):
+  rec, sm, params = make(mod, tmp_path, ParkedRecordingWarningEnabled=True, ParkedRecordingMaxHours=0.25)
+  params.values["ParkedRecordingActive"] = True
+  bump(rec, sm)
+  assert params.values["ParkedRecordingWarning"] is True
+  sm.t += 15 * 60
+  sm.step()
+  rec.update()
+  assert status(params)["state"] == "stopped"
+  assert params.values["ParkedRecordingWarning"] is False
+
+
+def test_exit_switches_the_warning_off(mod, tmp_path):
+  rec, sm, params = make(mod, tmp_path, ParkedRecordingWarningEnabled=True)
+  bump(rec, sm)
+  assert params.values["ParkedRecordingWarning"] is True
+  rec.update = lambda: (_ for _ in ()).throw(KeyboardInterrupt())
+  with pytest.raises(KeyboardInterrupt):
+    rec.run()
+  assert params.values["ParkedRecordingWarning"] is False

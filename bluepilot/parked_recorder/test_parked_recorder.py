@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 
 from bluepilot.parked_recorder import storage_bp
 from bluepilot.parked_recorder.capture_bp import ClipWriter, EventRateLimiter, clamp_clip_seconds
+from bluepilot.parked_recorder.warning_bp import MAX_HZ, STYLES, WarningTracker, clamp_warning_seconds, flash_frame
 from bluepilot.parked_recorder.detector_bp import MotionDetectorBP, ParkedTrigger, clamp_sensitivity
 from bluepilot.parked_recorder.guards_bp import (LOW_VOLTAGE_HOLD_S, ParkedGuard, VoltageLPF, clamp_max_hours,
                                                  clamp_min_voltage, effective_max_time_offroad_s)
@@ -324,3 +325,38 @@ class TestRateLimiter:
     r.record(10.0)
     assert not r.allow(20.0)
     assert r.allow(101.0)                             # the first one has aged out
+
+
+class TestWarning:
+  def test_hard_hit_warns_at_once(self):
+    assert WarningTracker(strong_score=8.0).add_event(0.0, 12.0) is True
+
+  def test_light_single_hit_does_not_warn(self):
+    assert WarningTracker(strong_score=8.0).add_event(0.0, 5.0) is False
+
+  def test_repeated_hits_inside_the_window_warn(self):
+    t = WarningTracker(repeat_count=3, window_s=120.0)
+    assert [t.add_event(x, 5.0) for x in (0.0, 40.0, 80.0)] == [False, False, True]
+
+  def test_old_hits_age_out(self):
+    t = WarningTracker(repeat_count=3, window_s=120.0)
+    t.add_event(0.0, 5.0)
+    t.add_event(40.0, 5.0)
+    assert t.add_event(200.0, 5.0) is False         # the first two are older than 120 s
+
+  def test_flash_alternates_between_the_two_colours(self):
+    a, b = STYLES["police"]
+    seen = [flash_frame(i * 0.05, "police", hz=2.0)[0] for i in range(40)]   # 2 s at 20 fps
+    assert set(seen) == {a, b}
+    assert seen[0] == a and seen[5] == b             # 2 Hz: colour A for 0.25 s, then B for 0.25 s
+
+  def test_flash_rate_is_capped_for_photosensitivity(self):
+    ticks = sum(1 for i in range(1, 1000) if flash_frame(i * 0.001, hz=50.0)[0] != flash_frame((i - 1) * 0.001, hz=50.0)[0])
+    assert ticks <= int(MAX_HZ * 2 * 1.0) + 1        # at most 6 colour changes in 1 s
+
+  def test_unknown_style_and_bad_hz_fall_back(self):
+    assert flash_frame(0.0, "nope")[0] == STYLES["police"][0]
+    assert flash_frame(0.0, "amber", hz=float("nan"))[0] == STYLES["amber"][0]
+
+  def test_warning_seconds_clamped(self):
+    assert clamp_warning_seconds(1) == 10 and clamp_warning_seconds(999) == 120 and clamp_warning_seconds("x") == 30

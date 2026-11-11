@@ -927,6 +927,9 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"ParkedRecordingCapture", {CLEAR_ON_MANAGER_START | DONT_LOG, BOOL, "0"}},
     {"ParkedRecordingStatus", {CLEAR_ON_MANAGER_START | DONT_LOG, JSON}},
     {"ParkedRecordingLastEvent", {PERSISTENT | DONT_LOG, JSON}},
+    {"ParkedRecordingWarningEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},
+    {"ParkedRecordingWarningSeconds", {PERSISTENT | BACKUP, INT, "30"}},
+    {"ParkedRecordingWarning", {CLEAR_ON_MANAGER_START | DONT_LOG, BOOL, "0"}},
     {"ParkedBatteryLog", {PERSISTENT, BOOL, "0"}},
     {"ParkedBatteryLogLabel", {PERSISTENT, STRING}},
     // End BluePilot

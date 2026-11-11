@@ -25,6 +25,7 @@ from bluepilot.parked_recorder import storage_bp
 from bluepilot.parked_recorder.capture_bp import ClipWriter, EventRateLimiter, clamp_clip_seconds
 from bluepilot.parked_recorder.detector_bp import ParkedTrigger
 from bluepilot.parked_recorder.guards_bp import ParkedGuard, VoltageLPF
+from bluepilot.parked_recorder.warning_bp import WarningTracker, clamp_warning_seconds
 
 ARM_DELAY_S = 120.0
 COOLDOWN_S = 30.0
@@ -58,6 +59,10 @@ class ParkedRecorder:
     self.max_storage_mb = 2048
     self.clip_seconds = 20
     self.power_down_disabled = False
+    self.warning_tracker = WarningTracker()
+    self.warning_enabled = False
+    self.warning_seconds = 30
+    self.warning_until: float | None = None     # monotonic time the warning screen should be switched off
     self.limiter = EventRateLimiter(MAX_CAPTURES_PER_HOUR)
     self.socks: dict | None = None
     self.capture: dict | None = None   # {"writer", "dir", "entry"} while a clip is being recorded
@@ -84,6 +89,8 @@ class ParkedRecorder:
       self.max_storage_mb = storage_bp.clamp_storage_mb(self.params.get("ParkedRecordingMaxStorageMB"))
       self.clip_seconds = clamp_clip_seconds(self.params.get("ParkedRecordingClipSeconds"))
       self.power_down_disabled = bool(self.params.get_bool("DisablePowerDown"))
+      self.warning_enabled = bool(self.params.get_bool("ParkedRecordingWarningEnabled"))
+      self.warning_seconds = clamp_warning_seconds(self.params.get("ParkedRecordingWarningSeconds"))
     except Exception:
       # unreadable settings: keep what we had (the guard always has clamped values)
       cloudlog.exception("parked_recorder: config read failed")
@@ -117,6 +124,21 @@ class ParkedRecorder:
       self._status("armed", lastEvent=entry["eventId"], captured=False)
       return
     self._start_capture(event_dir, entry, now)
+
+  def _set_warning(self, on: bool) -> None:
+    self.warning_until = None if not on else self.warning_until
+    try:
+      self.params.put_bool("ParkedRecordingWarning", on)
+    except Exception:
+      cloudlog.exception("parked_recorder: failed to write warning flag")
+
+  def _maybe_warn(self, motion, now: float) -> None:
+    """A hard hit or repeated hits raise ParkedRecordingWarning for warning_seconds (the UI shows the screen)."""
+    escalate = self.warning_tracker.add_event(now, motion.score)
+    if escalate and self.warning_enabled:
+      self.warning_until = now + self.warning_seconds
+      self._set_warning(True)
+      cloudlog.event("parked_recorder.warning", seconds=self.warning_seconds, score=round(motion.score, 2))
 
   def _start_capture(self, event_dir, entry: dict, now: float) -> None:
     if self.socks is None:
@@ -168,12 +190,17 @@ class ParkedRecorder:
 
     if self.guard.update(now, self._filtered_voltage_mV(now), self.power_down_disabled) is not None:
       self._finish_capture("aborted")   # cameras off first: they are the biggest drain
+      if self.warning_until is not None:
+        self._set_warning(False)
       if self.params.get_bool("ParkedRecordingActive"):
         # window over: release sensord so it stops too; the device itself is shut down by hardwared
         self.params.put_bool("ParkedRecordingActive", False)
         cloudlog.warning(f"parked_recorder: stopped, reason={self.guard.tripped}")
       self._status("stopped", reason=self.guard.tripped)
       return
+
+    if self.warning_until is not None and now >= self.warning_until:
+      self._set_warning(False)
 
     if self.capture is not None:
       self._pump_capture(now)
@@ -184,6 +211,7 @@ class ParkedRecorder:
       t = self.sm.logMonoTime["accelerometer"] * 1e-9
       motion = self.trigger.update(t, list(self.sm["accelerometer"].acceleration.v))
       if motion is not None:
+        self._maybe_warn(motion, now)
         self._record_event(motion, now)
 
   def run(self) -> None:
@@ -195,6 +223,7 @@ class ParkedRecorder:
       self._finish_capture("aborted")
       self.params.put_bool("ParkedRecordingActive", False)
       self.params.put_bool("ParkedRecordingCapture", False)
+      self.params.put_bool("ParkedRecordingWarning", False)
       self._status("disabled")
 
 

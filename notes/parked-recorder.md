@@ -423,3 +423,28 @@ Comma on the bench (5 V, wifi, screen 0%, about 19 min after a reboot), one 8 s 
   the **SIM modem and VPN**, which are unmeasured and could add more than everything above. Re-run the battery logger once
   they are on, in the car, labelled by configuration, before deciding on shedding or on a longer window.
 - Decision: **not building sleep-mode shedding now.** Revisit only if the car test shows a real drain, or for windows near 24 h.
+
+## 20. What other cars do, and the parked warning (2026-11-10)
+
+**Tesla Sentry Mode** (from owner-manual and press descriptions; names and volumes unconfirmed): two stages. A minor
+trigger (someone leaning on the car) puts it in Alert: the cameras record and the **touchscreen shows a "cameras are
+recording" message**, headlights flash. A major trigger (glass break, serious impact) starts an Alarm: car alarm, lights, the
+screen brightens, reportedly loud music; the manual says it returns to standby after 30 s. **Other cars:** Rivian Gear Guard
+is the closest (internal storage, up to 10 days of clips); GM announced OnStar Connected Cameras (30 s clips, but only when
+the theft alarm fires, not on proximity); Polestar 4 per a forum post; Lucid reportedly lacks one; aftermarket dashcam
+parking modes (Garmin, BlackVue, Thinkware) record on motion but do not deter.
+
+**What deters (evidence is thin):** no rigorous study found on cameras. A Highway Loss Data Institute study reportedly found
+alarms do not noticeably reduce theft losses; people ignore them. Best-supported measures: nothing visible inside, doors locked
+(an unlocked door was the most common entry in an Aviva report), lit and busy parking, layered visible deterrents that add time.
+So Sentry's real value is evidence and a response, and any deterrent is a bonus.
+
+**Parked warning (built as logic only; the UI that draws it is NOT built):**
+- `warning_bp.py`: `WarningTracker` escalates on one hard hit (score >= 8, i.e. the peak is 8x the trigger threshold) or 3
+  triggers inside 120 s; `flash_frame()` gives the flash colour (styles: police red/blue, amber, white; capped at 3 flashes/s).
+- The recorder raises `ParkedRecordingWarning` for `ParkedRecordingWarningSeconds` (10-120, default 30) when escalation fires and
+  `ParkedRecordingWarningEnabled` is on (off by default). It clears the flag on expiry, on a guard stop, and on exit.
+- **Next (needs a screen to look at):** a BluePilot UI overlay that wakes the screen and draws it while the flag is set;
+  `selfdrive/ui` `Device` handles brightness and wake, and the overlay would hook in there. Preview mock published as a page.
+- The screen faces the driver, so it only reaches someone inside the car. Red/blue may be restricted on private vehicles in
+  some states; amber and white are the safe defaults, and the style is meant to be a setting.

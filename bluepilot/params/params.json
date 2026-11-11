@@ -593,6 +593,32 @@
       "enabled": true
     },
     {
+      "name": "ParkedRecordingWarningEnabled",
+      "default": false,
+      "type": "bool",
+      "flags": ["PERSISTENT", "BACKUP"],
+      "create_default": false,
+      "enabled": true
+    },
+    {
+      "name": "ParkedRecordingWarningSeconds",
+      "default": 30,
+      "type": "int",
+      "min": 10,
+      "max": 120,
+      "flags": ["PERSISTENT", "BACKUP"],
+      "create_default": true,
+      "enabled": true
+    },
+    {
+      "name": "ParkedRecordingWarning",
+      "default": false,
+      "type": "bool",
+      "flags": ["CLEAR_ON_MANAGER_START", "DONT_LOG"],
+      "create_default": false,
+      "enabled": true
+    },
+    {
       "name": "ParkedBatteryLog",
       "default": false,
       "type": "bool",
