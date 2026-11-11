@@ -172,3 +172,59 @@ def test_process_is_added_not_replacing_and_gated_on_the_param():
   assert 'PythonProcess("bp_sign_reader", "bluepilot.sign_reader.sign_reader", _bp_sign_reader_enabled)' in src
   fn = src.split("def _bp_sign_reader_enabled", 1)[1].split("procs +=", 1)[0]
   assert "started" in fn and 'get_bool("BPSignReaderEnabled")' in fn
+
+
+def _mnn_importable():
+  try:
+    import MNN  # noqa: F401
+    return True
+  except ImportError:
+    return False
+
+
+@pytest.mark.skipif(_mnn_importable(), reason="the system has MNN, so the fallback folder is never consulted")
+def test_mnn_comes_from_the_lib_folder_when_the_system_has_none(tmp_path, monkeypatch):
+  import sys
+  assert R.SignReader.import_mnn(tmp_path / "missing") is None
+  pkg = tmp_path / "MNN"
+  pkg.mkdir()
+  (pkg / "__init__.py").write_text("MARK = 'from the lib folder'\n")
+  monkeypatch.setattr(sys, "path", list(sys.path))
+  try:
+    assert R.SignReader.import_mnn(tmp_path).MARK == "from the lib folder"
+  finally:
+    sys.modules.pop("MNN", None)
+
+
+def _install_module():
+  import importlib.util
+  spec = importlib.util.spec_from_file_location("bp_install_sign_reader", REPO / "tools/bp_install_sign_reader.py")
+  mod = importlib.util.module_from_spec(spec)
+  spec.loader.exec_module(mod)
+  return mod
+
+
+def test_the_installer_only_copies_under_data_bluepilot_and_changes_nothing_else():
+  inst = _install_module()
+  steps = inst.plan(Path("/x/speed_limit_reader.mnn"), Path("/y/mnn"), "comma@10.69.10.206")
+  assert steps[0][0] == "ssh" and "mkdir -p" in steps[0][2]
+  for step in steps:
+    joined = " ".join(step)
+    for banned in ("reboot", "shutdown", "rm ", "git ", "pip", "systemctl", "/usr/local/venv/lib", "/etc/"):
+      assert banned not in joined, (banned, step)
+    if step[0] == "scp":
+      assert step[-1].split(":", 1)[1].startswith("/data/bluepilot/"), step
+  # the device is never written outside the two folders; the last step only imports MNN to prove it loads
+  assert "import MNN" in steps[-1][-1]
+
+
+def test_the_installer_prints_a_plan_and_does_nothing_without_yes(tmp_path):
+  import subprocess
+  import sys
+  weights = tmp_path / "w.mnn"
+  weights.write_bytes(b"x")
+  runtime = tmp_path / "rt"
+  runtime.mkdir()
+  r = subprocess.run([sys.executable, str(REPO / "tools/bp_install_sign_reader.py"), "--weights", str(weights),
+                      "--runtime", str(runtime)], capture_output=True, text=True, timeout=30)
+  assert r.returncode == 0 and "plan only" in r.stdout and "scp" in r.stdout

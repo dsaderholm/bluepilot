@@ -21,6 +21,9 @@ from pathlib import Path
 import numpy as np
 
 MODEL_PATH = Path("/data/bluepilot/models/speed_limit_reader.mnn")
+# MNN is not in the device's Python, and nothing here installs into the system packages: tools/
+# bp_install_sign_reader.py copies an aarch64 build of it into this folder and it is imported from here.
+LIB_DIR = Path("/data/bluepilot/lib")
 
 # Far older than any real message. Used for "age" inputs when a source never reported.
 NEVER_S = 1e4
@@ -129,12 +132,30 @@ class SignReader:
     self.index = output_index(spec["outputs"])
     self.state = np.zeros(len(self.index), np.float32)
 
-  @classmethod
-  def load(cls, path: Path = MODEL_PATH):
-    """A SignReader, or None when MNN or the weights file is missing (never raises for that)."""
+  @staticmethod
+  def import_mnn(lib_dir: Path = LIB_DIR):
+    """The MNN module, from the system if it is there and from lib_dir otherwise; None if neither."""
     try:
       import MNN
+      return MNN
     except ImportError:
+      pass
+    if Path(lib_dir).is_dir():
+      import sys
+      if str(lib_dir) not in sys.path:
+        sys.path.insert(0, str(lib_dir))
+      try:
+        import MNN
+        return MNN
+      except ImportError:
+        return None
+    return None
+
+  @classmethod
+  def load(cls, path: Path = MODEL_PATH, lib_dir: Path = LIB_DIR):
+    """A SignReader, or None when MNN or the weights file is missing (never raises for that)."""
+    MNN = cls.import_mnn(lib_dir)
+    if MNN is None:
       return None
     if not Path(path).is_file():
       return None
