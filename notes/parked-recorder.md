@@ -448,3 +448,9 @@ So Sentry's real value is evidence and a response, and any deterrent is a bonus.
   `selfdrive/ui` `Device` handles brightness and wake, and the overlay would hook in there. Preview mock published as a page.
 - The screen faces the driver, so it only reaches someone inside the car. Red/blue may be restricted on private vehicles in
   some states; amber and white are the safe defaults, and the style is meant to be a setting.
+- **D.J.'s choice (2026-11-10): default pattern is red/blue, then white, as a fast strobe, at maximum screen brightness.**
+  Built into `warning_bp.py`: sequence `police_white` = police (red/blue) for 6 s, then white for 4 s, repeating, at 5 flashes/s
+  by default; the ceiling was raised from 3 to 8 flashes/s at his request (still capped: fast saturated red is the worst case
+  for photosensitive epilepsy). A NaN or negative time no longer crashes the function (found by a test). 90 tests.
+  The overlay must set the backlight to 100% for the whole warning regardless of ambient light, keep the screen awake, and
+  restore the previous brightness afterwards; that part is UI work and is not built.

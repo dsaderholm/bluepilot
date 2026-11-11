@@ -5,7 +5,8 @@ from datetime import UTC, datetime
 
 from bluepilot.parked_recorder import storage_bp
 from bluepilot.parked_recorder.capture_bp import ClipWriter, EventRateLimiter, clamp_clip_seconds
-from bluepilot.parked_recorder.warning_bp import MAX_HZ, STYLES, WarningTracker, clamp_warning_seconds, flash_frame
+from bluepilot.parked_recorder.warning_bp import (DEFAULT_STYLE, MAX_HZ, SEQUENCES, STYLES, WarningTracker,
+                                                  clamp_warning_seconds, flash_frame)
 from bluepilot.parked_recorder.detector_bp import MotionDetectorBP, ParkedTrigger, clamp_sensitivity
 from bluepilot.parked_recorder.guards_bp import (LOW_VOLTAGE_HOLD_S, ParkedGuard, VoltageLPF, clamp_max_hours,
                                                  clamp_min_voltage, effective_max_time_offroad_s)
@@ -350,13 +351,28 @@ class TestWarning:
     assert set(seen) == {a, b}
     assert seen[0] == a and seen[5] == b             # 2 Hz: colour A for 0.25 s, then B for 0.25 s
 
-  def test_flash_rate_is_capped_for_photosensitivity(self):
-    ticks = sum(1 for i in range(1, 1000) if flash_frame(i * 0.001, hz=50.0)[0] != flash_frame((i - 1) * 0.001, hz=50.0)[0])
-    assert ticks <= int(MAX_HZ * 2 * 1.0) + 1        # at most 6 colour changes in 1 s
+  def test_flash_rate_is_capped(self):
+    changes = sum(1 for i in range(1, 1000) if flash_frame(i * 0.001, "white", hz=50.0)[0] != flash_frame((i - 1) * 0.001, "white", hz=50.0)[0])
+    assert changes <= int(MAX_HZ * 2) + 1            # at most 16 colour changes in 1 s, whatever hz is asked for
 
-  def test_unknown_style_and_bad_hz_fall_back(self):
-    assert flash_frame(0.0, "nope")[0] == STYLES["police"][0]
+  def test_default_is_police_then_white_and_repeats(self):
+    assert DEFAULT_STYLE == "police_white" and SEQUENCES[DEFAULT_STYLE] == [("police", 6.0), ("white", 4.0)]
+    police, white = set(STYLES["police"]), set(STYLES["white"])
+    first = {flash_frame(i * 0.01, DEFAULT_STYLE)[0] for i in range(600)}      # 0-6 s
+    second = {flash_frame(6.0 + i * 0.01, DEFAULT_STYLE)[0] for i in range(400)}  # 6-10 s
+    third = {flash_frame(10.0 + i * 0.01, DEFAULT_STYLE)[0] for i in range(600)}  # the cycle repeats
+    assert first == police and second == white and third == police
+
+  def test_default_rate_is_fast(self):
+    seen = [flash_frame(i * 0.01, "police")[0] for i in range(100)]                 # 1 s
+    flips = sum(1 for a, b in zip(seen, seen[1:], strict=False) if a != b)
+    assert flips >= 9                                    # default 5 flashes/s means 10 colour changes per second
+
+  def test_unknown_style_and_bad_input_fall_back(self):
+    assert flash_frame(0.0, "nope")[0] == STYLES["police"][0]               # unknown style: the default sequence starts on police
     assert flash_frame(0.0, "amber", hz=float("nan"))[0] == STYLES["amber"][0]
+    assert flash_frame(float("nan"), DEFAULT_STYLE)[0] == STYLES["police"][0]
+    assert flash_frame(-5.0, DEFAULT_STYLE)[0] == STYLES["police"][0]
 
   def test_warning_seconds_clamped(self):
     assert clamp_warning_seconds(1) == 10 and clamp_warning_seconds(999) == 120 and clamp_warning_seconds("x") == 30
