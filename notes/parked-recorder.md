@@ -534,3 +534,11 @@ is not persistent; nothing in this boot mentions parked_recorder/ParkedRecording
 - Adds two keys to `params_keys.h`, so the next deploy needs the rebuild and the `params_pyx.so` strings check. 123 unit tests (sender, outbox, recorder enqueue, mutation-checked).
 - Not covered: sending the clip files themselves (that is the opconnect upload, still separate), a boot-time "the comma shut down because of low voltage" message from
   `ParkedRecordingShutdownReason`, and any cellular data cap.
+
+## 26. Upload policy decided (2026-11-12, from the opconnect session; D.J. agreed)
+
+- Ordinary drives: qlog, qcamera, and (wifi only) rlog upload; full-quality video does not (about 3 TB a year, rarely viewed; the car keeps about 10 days, Hermes can pull clips over the VPN).
+- **Sentry events upload at full quality: opt-in, wifi only, a few hundred MB a month.** Honk and hard-braking triggers would be extra triggers into the same path.
+- Protocol facts: `upload_url` PUT with keys `<event-id>/<file>` plus a small `event.json` (trigger, time, GPS) beside the clips; no server size limit, NPMplus took a 40 MB PUT, so our
+  ~26 MB events are fine; no resumable upload (a dropped transfer restarts the file).
+- **Still to build:** the opt-in upload step (wifi only, reuse the outbox pattern from section 25, `event.json` with GPS only if D.J. wants it: the current event.json has none).
