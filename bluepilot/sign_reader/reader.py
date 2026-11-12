@@ -36,6 +36,16 @@ class UnsupportedInput(Exception):
   """The model asks for an input this fork cannot provide. Refuse to run rather than feed it zeros."""
 
 
+def as_flat_u8(buf) -> np.ndarray:
+  """A camera frame as a flat uint8 array, whatever the camera hands over.
+
+  On the device the road frame's `.data` is a plain memoryview, not a numpy array (it has no `.size`),
+  which is what broke the first on-car drive. np.asarray shares the memory for a memoryview; it is
+  a no-op for an array that is already flat uint8.
+  """
+  return np.asarray(buf, dtype=np.uint8).reshape(-1)
+
+
 def build_text(values: list[str]) -> np.ndarray:
   """The model's text input: its text fields joined by NUL, as raw bytes."""
   return np.frombuffer("\0".join(str(v) for v in values).encode(), np.uint8)
@@ -171,6 +181,7 @@ class SignReader:
   def step(self, frame_id: int, width: int, height: int, stride: int, uv_offset: int,
            nv12: np.ndarray, sm) -> dict[str, float]:
     import MNN
+    nv12 = as_flat_u8(nv12)
     numbers = [float(read_field(sm, f)) for f in self.spec["numbers"]]
     text = build_text([read_field(sm, f) for f in self.spec["text"]])
     context = build_context(frame_id, width, height, stride, uv_offset, numbers, self.state)

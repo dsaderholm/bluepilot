@@ -228,3 +228,23 @@ def test_the_installer_prints_a_plan_and_does_nothing_without_yes(tmp_path):
   r = subprocess.run([sys.executable, str(REPO / "tools/bp_install_sign_reader.py"), "--weights", str(weights),
                       "--runtime", str(runtime)], capture_output=True, text=True, timeout=30)
   assert r.returncode == 0 and "plan only" in r.stdout and "scp" in r.stdout
+
+
+def test_a_memoryview_frame_is_accepted_as_the_device_hands_it_over():
+  """The first on-car drive failed with: AttributeError: 'memoryview' object has no attribute 'size'.
+
+  VisionBuf.data on the device is a memoryview. Every other test here fed numpy arrays, so none of
+  them could see it. This is the type the camera actually gives.
+  """
+  raw = bytes(range(256)) * 4
+  out = R.as_flat_u8(memoryview(raw))
+  assert out.dtype == np.uint8 and out.ndim == 1 and out.size == len(raw)  # `.size` is what the model call uses
+  assert bytes(out) == raw
+  arr = np.arange(24, dtype=np.uint8).reshape(2, 12)
+  assert R.as_flat_u8(arr).shape == (24,)  # an array, even a 2-D one, comes out flat
+
+
+def test_step_converts_the_frame_before_it_is_used():
+  """Guards the call site, not just the helper: the conversion must happen inside step()."""
+  import inspect
+  assert "nv12 = as_flat_u8(nv12)" in inspect.getsource(R.SignReader.step)
