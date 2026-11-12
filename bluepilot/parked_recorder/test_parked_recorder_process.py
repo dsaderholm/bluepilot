@@ -21,7 +21,7 @@ class FakeParams:
       "ParkedRecordingSensitivity": 3.0, "ParkedRecordingMaxHours": 4.0, "ParkedRecordingMinVoltage": 12.3,
       "ParkedRecordingMaxStorageMB": 2048, "ParkedRecordingActive": False, "ParkedRecordingClipSeconds": 20,
       "ParkedRecordingCapture": False, "ParkedRecordingWarningEnabled": False, "ParkedRecordingWarningSeconds": 30,
-      "ParkedRecordingWarning": False, **values,
+      "ParkedRecordingWarning": False, "ParkedRecordingWebhookEnabled": False, **values,
     }
 
   def get(self, key):
@@ -396,3 +396,49 @@ def test_exit_switches_the_warning_off(mod, tmp_path):
   with pytest.raises(KeyboardInterrupt):
     rec.run()
   assert params.values["ParkedRecordingWarning"] is False
+
+
+def queued(tmp_path):
+  from bluepilot.parked_recorder.webhook_bp import Outbox
+  ob = Outbox(tmp_path / ".outbox")
+  return [ob.read(p) for p in ob.pending()]
+
+
+def test_webhook_off_queues_nothing(mod, tmp_path):
+  rec, sm, params = make(mod, tmp_path)
+  bump(rec, sm)
+  assert queued(tmp_path) == [] and not (tmp_path / ".outbox").exists()
+
+
+def test_bump_and_clip_are_queued_when_enabled(mod, tmp_path):
+  rec, sm, params = make(mod, tmp_path, ParkedRecordingWebhookEnabled=True)
+  bump(rec, sm)
+  assert [q["kind"] for q in queued(tmp_path)] == ["bump"]
+  bump_msg = queued(tmp_path)[0]
+  assert bump_msg["score"] > 8 and bump_msg["hits"] >= 1 and bump_msg["voltageV"] == 12.6 and bump_msg["eventId"]
+  feed_frames(rec, sm, n=2)
+  sm.step()
+  rec.update()
+  sm.t += 21
+  feed_frames(rec, sm, n=1)
+  sm.step()
+  rec.update()                                                  # the clip finishes
+  kinds = [q["kind"] for q in queued(tmp_path)]
+  assert kinds == ["bump", "clip"]
+  clip = queued(tmp_path)[1]
+  assert clip["outcome"] == "ok" and {f["name"] for f in clip["files"]} == {"wideRoad.h264", "driver.h264"}
+  assert all(set(f) == {"name", "bytes"} for f in clip["files"])   # no paths, no media
+
+
+def test_warning_is_queued_when_it_fires(mod, tmp_path):
+  rec, sm, params = make(mod, tmp_path, ParkedRecordingWebhookEnabled=True, ParkedRecordingWarningEnabled=True)
+  bump(rec, sm)
+  assert [q["kind"] for q in queued(tmp_path)] == ["warning", "bump"]
+
+
+def test_a_full_disk_does_not_stop_the_recorder(mod, tmp_path, monkeypatch):
+  rec, sm, params = make(mod, tmp_path, ParkedRecordingWebhookEnabled=True)
+  monkeypatch.setattr(rec.outbox, "enqueue", lambda payload: (_ for _ in ()).throw(OSError("disk full")))
+  bump(rec, sm)
+  assert params.values["ParkedRecordingCapture"] is True        # the event and the clip carry on regardless
+  assert [e for e in tmp_path.iterdir() if not e.name.startswith(".")]

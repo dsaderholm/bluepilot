@@ -74,6 +74,9 @@ def parked_capture(started: bool, params: Params, CP: car.CarParams) -> bool:
   # raised by the recorder for the length of one clip: starts camerad and the stream encoder while parked
   return not started and params.get_bool("ParkedRecordingCapture")
 
+def parked_webhook_run(started: bool, params: Params, CP: car.CarParams) -> bool:
+  return not started and params.get_bool("ParkedRecordingWebhookEnabled")
+
 def parked_battery_log(started: bool, params: Params, CP: car.CarParams) -> bool:
   return not started and params.get_bool("ParkedBatteryLog")
 
@@ -334,6 +337,7 @@ if is_bluepilot():
     PythonProcess("bp_route_preprocessor", "bluepilot.backend.routes.preprocessor", _bp_route_preprocessor_enabled),
     PythonProcess("parked_recorder", "bluepilot.parked_recorder.parked_recorder_bp", parked_recorder_run, enabled=not PC),
     PythonProcess("parked_battery_logger", "bluepilot.parked_recorder.battery_logger_bp", parked_battery_log, enabled=not PC),
+    PythonProcess("parked_webhookd", "bluepilot.parked_recorder.webhookd_bp", parked_webhook_run, enabled=not PC),
     PythonProcess("bp_sign_reader", "bluepilot.sign_reader.sign_reader", _bp_sign_reader_enabled),
   ]
   # End BluePilot

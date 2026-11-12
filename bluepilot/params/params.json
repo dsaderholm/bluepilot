@@ -627,6 +627,22 @@
       "enabled": true
     },
     {
+      "name": "ParkedRecordingWebhookEnabled",
+      "default": false,
+      "type": "bool",
+      "flags": ["PERSISTENT", "BACKUP"],
+      "create_default": false,
+      "enabled": true
+    },
+    {
+      "name": "ParkedRecordingWebhookUrl",
+      "default": "",
+      "type": "string",
+      "flags": ["PERSISTENT", "DONT_LOG"],
+      "create_default": false,
+      "enabled": true
+    },
+    {
       "name": "ParkedBatteryLog",
       "default": false,
       "type": "bool",

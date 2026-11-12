@@ -516,3 +516,21 @@ is not persistent; nothing in this boot mentions parked_recorder/ParkedRecording
   (1) check the true voltage with a multimeter at the OBD port or a live 12 V socket and compare, (2) run the battery logger overnight in the car,
   (3) see the resting voltage after a long drive. Then set the floor from data (the setting range is 12.0-13.0 V, so 12.0 is the lowest it can go now).
 - Do not lower the floor just to make Sentry run: a battery at 12.1 V with a 2 W load and recordings has little margin to start the car in winter.
+
+## 25. Webhook to Home Assistant, store and forward (code written on this branch, not deployed, off by default)
+
+- The recorder queues a small JSON event in a hidden outbox (`/data/media/0/parked_recorder/.outbox/`, invisible to the event list and the quota)
+  and a separate process, `parked_webhookd`, sends the queue to `ParkedRecordingWebhookUrl` every 10 s while the car is off. Nothing is lost while the comma
+  has no network (up to 200 events, 7 days) and nothing blocks the recorder or the cameras. Both settings are off or empty by default.
+- Kinds: `bump` (eventId, score, hits, voltageV), `warning` (score, hits, seconds) when the screen warning escalates, and `clip` (eventId, outcome, clipSeconds,
+  files as name and byte count). No images, no GPS, no device ids, no URL in any payload.
+- Delivery: a 2xx removes the item; no network, 5xx, 408 or 429 keep it and back off (10 s doubling to 5 min); another 4xx drops it so one bad item cannot block the queue; only
+  http and https URLs are accepted.
+- **The URL is a secret** (a Home Assistant webhook id works like a password): it is not in params backups (`ParkedRecordingWebhookUrl` has no BACKUP flag), not logged, never printed
+  by the code. D.J. enters it himself on the comma; it must not go through chat or a repo.
+- **Setting it up (D.J. does the URL step himself):** in Home Assistant create an automation with a *Webhook* trigger (note its id, keep "local only" on if the comma reaches HA over
+  the tailnet or LAN), then on the comma set `ParkedRecordingWebhookUrl` to `http(s)://<ha host>:8123/api/webhook/<id>` and `ParkedRecordingWebhookEnabled` to 1. The automation reads `trigger.json.kind`
+  (`bump`, `warning`, `clip`) and decides: phone alert on every kind, Honk & Flash on `warning`, capped per event and per hour (see section 21).
+- Adds two keys to `params_keys.h`, so the next deploy needs the rebuild and the `params_pyx.so` strings check. 123 unit tests (sender, outbox, recorder enqueue, mutation-checked).
+- Not covered: sending the clip files themselves (that is the opconnect upload, still separate), a boot-time "the comma shut down because of low voltage" message from
+  `ParkedRecordingShutdownReason`, and any cellular data cap.

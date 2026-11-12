@@ -15,6 +15,7 @@ The cameras only start after the trigger, so a clip shows the seconds after the 
 not the bump itself. Keeping cameras on while armed would catch it but costs far more power.
 """
 import time
+from pathlib import Path
 
 import cereal.messaging as messaging
 from cereal import log
@@ -26,6 +27,7 @@ from bluepilot.parked_recorder.capture_bp import ClipWriter, EventRateLimiter, c
 from bluepilot.parked_recorder.detector_bp import ParkedTrigger
 from bluepilot.parked_recorder.guards_bp import ParkedGuard, VoltageLPF
 from bluepilot.parked_recorder.warning_bp import WarningTracker, clamp_warning_seconds
+from bluepilot.parked_recorder.webhook_bp import Outbox, build_payload
 
 ARM_DELAY_S = 120.0
 COOLDOWN_S = 30.0
@@ -59,6 +61,8 @@ class ParkedRecorder:
     self.max_storage_mb = 2048
     self.clip_seconds = 20
     self.power_down_disabled = False
+    self.outbox = Outbox(Path(events_root) / ".outbox")   # hidden, so list_events and the quota never see it
+    self.webhook_enabled = False
     self.warning_tracker = WarningTracker()
     self.warning_enabled = False
     self.warning_seconds = 30
@@ -90,6 +94,7 @@ class ParkedRecorder:
       self.clip_seconds = clamp_clip_seconds(self.params.get("ParkedRecordingClipSeconds"))
       self.power_down_disabled = bool(self.params.get_bool("DisablePowerDown"))
       self.warning_enabled = bool(self.params.get_bool("ParkedRecordingWarningEnabled"))
+      self.webhook_enabled = bool(self.params.get_bool("ParkedRecordingWebhookEnabled"))
       self.warning_seconds = clamp_warning_seconds(self.params.get("ParkedRecordingWarningSeconds"))
     except Exception:
       # unreadable settings: keep what we had (the guard always has clamped values)
@@ -117,6 +122,7 @@ class ParkedRecorder:
     removed = storage_bp.enforce_quota(self.events_root, self.max_storage_mb, keep=event_dir)
     self.params.put("ParkedRecordingLastEvent", entry)
     cloudlog.event("parked_recorder.event", event_id=entry["eventId"], score=entry["score"], removed=removed)
+    self._notify("bump", eventId=entry["eventId"], score=entry["score"], hits=entry["hits"], voltageV=entry["voltageV"])
 
     if not self.limiter.allow(now):
       entry = storage_bp.write_event(event_dir, {**{k: v for k, v in entry.items() if k != "eventId"},
@@ -124,6 +130,15 @@ class ParkedRecorder:
       self._status("armed", lastEvent=entry["eventId"], captured=False)
       return
     self._start_capture(event_dir, entry, now)
+
+  def _notify(self, kind: str, **fields) -> None:
+    """Queues a small event for the webhook sender. Never raises: a full disk must not stop the recorder."""
+    if not self.webhook_enabled:
+      return
+    try:
+      self.outbox.enqueue(build_payload(kind, **fields))
+    except Exception:
+      cloudlog.exception("parked_recorder: could not queue webhook event")
 
   def _set_warning(self, on: bool) -> None:
     self.warning_until = None if not on else self.warning_until
@@ -139,6 +154,7 @@ class ParkedRecorder:
       self.warning_until = now + self.warning_seconds
       self._set_warning(True)
       cloudlog.event("parked_recorder.warning", seconds=self.warning_seconds, score=round(motion.score, 2))
+      self._notify("warning", score=round(motion.score, 2), hits=motion.hits, seconds=self.warning_seconds)
 
   def _start_capture(self, event_dir, entry: dict, now: float) -> None:
     if self.socks is None:
@@ -174,6 +190,8 @@ class ParkedRecorder:
     removed = storage_bp.enforce_quota(self.events_root, self.max_storage_mb, keep=cap["dir"])
     self.params.put("ParkedRecordingLastEvent", entry)
     cloudlog.event("parked_recorder.clip", event_id=entry["eventId"], outcome=outcome, files=len(files), removed=removed)
+    self._notify("clip", eventId=entry["eventId"], outcome=outcome, clipSeconds=entry.get("clipSeconds"),
+                 files=[{"name": f["name"], "bytes": f["bytes"]} for f in files])
     self._status("armed", lastEvent=entry["eventId"], captured=bool(files))
 
   def update(self) -> None:

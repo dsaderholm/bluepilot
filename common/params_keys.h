@@ -931,6 +931,9 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"ParkedRecordingWarningSeconds", {PERSISTENT | BACKUP, INT, "30"}},
     {"ParkedRecordingWarning", {CLEAR_ON_MANAGER_START | DONT_LOG, BOOL, "0"}},
     {"ParkedRecordingShutdownReason", {PERSISTENT | DONT_LOG, JSON}},
+    {"ParkedRecordingWebhookEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},
+    // the URL is a secret (a webhook id): not BACKUP (so it never leaves the device in a settings backup), not logged
+    {"ParkedRecordingWebhookUrl", {PERSISTENT | DONT_LOG, STRING}},
     {"ParkedBatteryLog", {PERSISTENT, BOOL, "0"}},
     {"ParkedBatteryLogLabel", {PERSISTENT, STRING}},
     // End BluePilot
