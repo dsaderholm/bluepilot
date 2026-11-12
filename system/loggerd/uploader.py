@@ -29,6 +29,13 @@ MAX_UPLOAD_SIZES = {
   "qcam": 5*1e6,
 }
 
+# BluePilot: rlog upload. Segments are uploaded in full only on unmetered connections, and only
+# when they are younger than this, so enabling it sends the last day of driving, not the whole
+# backlog still on the device.
+RLOG_NAMES = ("rlog", "rlog.zst")
+RLOG_MAX_AGE_S = 24 * 3600
+# End BluePilot
+
 allow_sleep = bool(int(os.getenv("UPLOADER_SLEEP", "1")))
 force_wifi = os.getenv("FORCEWIFI") is not None
 fake_upload = os.getenv("FAKEUPLOAD") is not None
@@ -116,6 +123,11 @@ class Uploader:
           continue
 
         # limit uploading on metered connections
+        # BluePilot: rlog only on unmetered connections and only for recent segments
+        if name in RLOG_NAMES and (metered or (time.time() - ctime) > RLOG_MAX_AGE_S):
+          continue
+        # End BluePilot
+
         if metered:
           dt = datetime.timedelta(hours=12)
           if logdir in self.immediate_folders and (datetime.datetime.now() - datetime.datetime.fromtimestamp(ctime)) < dt:
@@ -136,6 +148,12 @@ class Uploader:
     for name, key, fn in upload_files:
       if name in self.immediate_priority:
         return name, key, fn
+
+    # BluePilot: rlogs go last, so a backlog of rlogs never delays qlogs or qcameras
+    for name, key, fn in upload_files:
+      if name in RLOG_NAMES:
+        return name, key, fn
+    # End BluePilot
 
     return None
 
