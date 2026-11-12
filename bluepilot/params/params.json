@@ -619,6 +619,56 @@
       "enabled": true
     },
     {
+      "name": "ParkedRecordingShutdownReason",
+      "default": "{}",
+      "type": "json",
+      "flags": ["PERSISTENT", "DONT_LOG"],
+      "create_default": false,
+      "enabled": true
+    },
+    {
+      "name": "ParkedRecordingWebhookEnabled",
+      "default": false,
+      "type": "bool",
+      "flags": ["PERSISTENT", "BACKUP"],
+      "create_default": false,
+      "enabled": true
+    },
+    {
+      "name": "ParkedRecordingWebhookUrl",
+      "default": "",
+      "type": "string",
+      "flags": ["PERSISTENT", "DONT_LOG"],
+      "create_default": false,
+      "enabled": true
+    },
+    {
+      "name": "ParkedRecordingUpload",
+      "default": false,
+      "type": "bool",
+      "flags": ["PERSISTENT", "BACKUP"],
+      "create_default": false,
+      "enabled": true
+    },
+    {
+      "name": "ParkedRecordingUploadDailyMB",
+      "default": 1000,
+      "type": "int",
+      "min": 50,
+      "max": 10000,
+      "flags": ["PERSISTENT", "BACKUP"],
+      "create_default": true,
+      "enabled": true
+    },
+    {
+      "name": "ParkedRecordingWarningSound",
+      "default": false,
+      "type": "bool",
+      "flags": ["PERSISTENT", "BACKUP"],
+      "create_default": false,
+      "enabled": true
+    },
+    {
       "name": "ParkedBatteryLog",
       "default": false,
       "type": "bool",

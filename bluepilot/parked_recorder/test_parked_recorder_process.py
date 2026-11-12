@@ -21,7 +21,7 @@ class FakeParams:
       "ParkedRecordingSensitivity": 3.0, "ParkedRecordingMaxHours": 4.0, "ParkedRecordingMinVoltage": 12.3,
       "ParkedRecordingMaxStorageMB": 2048, "ParkedRecordingActive": False, "ParkedRecordingClipSeconds": 20,
       "ParkedRecordingCapture": False, "ParkedRecordingWarningEnabled": False, "ParkedRecordingWarningSeconds": 30,
-      "ParkedRecordingWarning": False, **values,
+      "ParkedRecordingWarning": False, "ParkedRecordingWebhookEnabled": False, "ParkedRecordingWarningSound": False, **values,
     }
 
   def get(self, key):
@@ -91,6 +91,21 @@ class Clock:
     return self.sm.t
 
 
+class FakeAudio:
+  instances = []
+
+  def __init__(self):
+    self.started = 0
+    self.stopped = 0
+    FakeAudio.instances.append(self)
+
+  def start(self):
+    self.started += 1
+
+  def stop(self):
+    self.stopped += 1
+
+
 class FakeSock:
   def __init__(self):
     self.queue = []
@@ -110,7 +125,7 @@ def make(mod, tmp_path, **param_values):
     return out
 
   rec = mod.ParkedRecorder(params=params, sm=sm, clock=Clock(sm), events_root=str(tmp_path),
-                           make_sock=lambda service: FakeSock(), drain=drain)
+                           make_sock=lambda service: FakeSock(), drain=drain, audio_factory=FakeAudio)
   return rec, sm, params
 
 
@@ -396,3 +411,98 @@ def test_exit_switches_the_warning_off(mod, tmp_path):
   with pytest.raises(KeyboardInterrupt):
     rec.run()
   assert params.values["ParkedRecordingWarning"] is False
+
+
+def queued(tmp_path):
+  from bluepilot.parked_recorder.webhook_bp import Outbox
+  ob = Outbox(tmp_path / ".outbox")
+  return [ob.read(p) for p in ob.pending()]
+
+
+def test_webhook_off_queues_nothing(mod, tmp_path):
+  rec, sm, params = make(mod, tmp_path)
+  bump(rec, sm)
+  assert queued(tmp_path) == [] and not (tmp_path / ".outbox").exists()
+
+
+def test_bump_and_clip_are_queued_when_enabled(mod, tmp_path):
+  rec, sm, params = make(mod, tmp_path, ParkedRecordingWebhookEnabled=True)
+  bump(rec, sm)
+  assert [q["kind"] for q in queued(tmp_path)] == ["bump"]
+  bump_msg = queued(tmp_path)[0]
+  assert bump_msg["score"] > 8 and bump_msg["hits"] >= 1 and bump_msg["voltageV"] == 12.6 and bump_msg["eventId"]
+  feed_frames(rec, sm, n=2)
+  sm.step()
+  rec.update()
+  sm.t += 21
+  feed_frames(rec, sm, n=1)
+  sm.step()
+  rec.update()                                                  # the clip finishes
+  kinds = [q["kind"] for q in queued(tmp_path)]
+  assert kinds == ["bump", "clip"]
+  clip = queued(tmp_path)[1]
+  assert clip["outcome"] == "ok" and {f["name"] for f in clip["files"]} == {"wideRoad.h264", "driver.h264"}
+  assert all(set(f) == {"name", "bytes"} for f in clip["files"])   # no paths, no media
+
+
+def test_warning_is_queued_when_it_fires(mod, tmp_path):
+  rec, sm, params = make(mod, tmp_path, ParkedRecordingWebhookEnabled=True, ParkedRecordingWarningEnabled=True)
+  bump(rec, sm)
+  assert [q["kind"] for q in queued(tmp_path)] == ["warning", "bump"]
+
+
+def test_a_full_disk_does_not_stop_the_recorder(mod, tmp_path, monkeypatch):
+  rec, sm, params = make(mod, tmp_path, ParkedRecordingWebhookEnabled=True)
+  monkeypatch.setattr(rec.outbox, "enqueue", lambda payload: (_ for _ in ()).throw(OSError("disk full")))
+  bump(rec, sm)
+  assert params.values["ParkedRecordingCapture"] is True        # the event and the clip carry on regardless
+  assert [e for e in tmp_path.iterdir() if not e.name.startswith(".")]
+
+
+def test_sound_plays_with_the_warning_when_enabled_and_stops_when_it_ends(mod, tmp_path):
+  FakeAudio.instances.clear()
+  rec, sm, params = make(mod, tmp_path, ParkedRecordingWarningEnabled=True, ParkedRecordingWarningSound=True,
+                         ParkedRecordingWarningSeconds=30)
+  bump(rec, sm)
+  (audio,) = FakeAudio.instances
+  assert audio.started == 1 and audio.stopped == 0
+  sm.t += 31
+  sm.step()
+  rec.update()
+  assert audio.stopped == 1 and params.values["ParkedRecordingWarning"] is False
+
+
+def test_no_sound_when_the_sound_setting_is_off(mod, tmp_path):
+  FakeAudio.instances.clear()
+  rec, sm, params = make(mod, tmp_path, ParkedRecordingWarningEnabled=True)
+  bump(rec, sm)
+  assert params.values["ParkedRecordingWarning"] is True and FakeAudio.instances == []     # the screen warning still raises; no player is even built
+
+
+def test_sound_stops_when_the_battery_guard_trips(mod, tmp_path):
+  FakeAudio.instances.clear()
+  rec, sm, params = make(mod, tmp_path, ParkedRecordingWarningEnabled=True, ParkedRecordingWarningSound=True,
+                         ParkedRecordingMaxHours=0.25)
+  params.values["ParkedRecordingActive"] = True
+  bump(rec, sm)
+  sm.t += 15 * 60
+  sm.step()
+  rec.update()
+  assert FakeAudio.instances[0].stopped >= 1
+
+
+def test_sound_stops_when_the_recorder_exits(mod, tmp_path):
+  FakeAudio.instances.clear()
+  rec, sm, params = make(mod, tmp_path, ParkedRecordingWarningEnabled=True, ParkedRecordingWarningSound=True)
+  bump(rec, sm)
+  rec.update = lambda: (_ for _ in ()).throw(KeyboardInterrupt())
+  with pytest.raises(KeyboardInterrupt):
+    rec.run()
+  assert FakeAudio.instances[0].stopped >= 1
+
+
+def test_a_broken_sound_stack_does_not_stop_the_recorder(mod, tmp_path):
+  rec, sm, params = make(mod, tmp_path, ParkedRecordingWarningEnabled=True, ParkedRecordingWarningSound=True)
+  rec.audio_factory = lambda: (_ for _ in ()).throw(ImportError("no sounddevice"))
+  bump(rec, sm)
+  assert params.values["ParkedRecordingWarning"] is True and params.values["ParkedRecordingCapture"] is True

@@ -465,3 +465,116 @@ is answered: honk and flash exist as one-shot HA buttons. There is no separate "
 - Cautions: each press goes through Ford's cloud (latency of seconds, not instant); the unofficial API reportedly locks an account
   after about 200 calls in 24 h, so cap presses per event and per hour in the automation; the comma reaches HA only on home Wi-Fi
   until the SIM and VPN exist; remote start is still not a sensible response to a bump.
+
+## 22. CORRECTION: the stock offroad timer is 30 hours, not 30 minutes (2026-11-11)
+
+Found while answering the comma-remote-access session. `MaxTimeOffroad` is in **minutes** (`param * 60`); the default 1800 is **30 hours**
+(the sunnylink UI text says "30h is the default"; the comma's value is 1800). Sections 3 and 4 and the earlier chat said 30 minutes: wrong.
+Consequences:
+- `effective_max_time_offroad_s` never changes anything at the default: it only raises a limit, and 4 h < 30 h. The hardwared hook is a
+  no-op unless the user has set MaxTimeOffroad below the window.
+- **The 4 h window is NOT enforced by hardwared.** It only stops the recorder (and releases sensord). The comma then idles until stock
+  shutdown: the 30 Wh bookkeeping model (`car_battery_capacity_uWh <= 0`, about 12-14 h at 2.1-2.5 W), the 11.8 V filtered-voltage floor
+  (60 s after 5 min offroad), or the 30 h timer. All need `in_car` (panda seen). Not yet observed on a real ignition-off.
+- So the safety claim "hardwared powers the device off at the end of the window" is false by default. The real battery protection is the
+  stock 11.8 V floor (low for a lead-acid battery) and the capacity model; Sentry's 12.3 V floor only stops the recorder.
+- D.J. also wants the comma reachable on the tailnet after ignition off, which conflicts with a hard 4 h power-off. **Decision needed from
+  D.J.:** (a) leave as is (recorder stops at 4 h, comma stays up under stock rules); (b) make Sentry's window authoritative (shut down at the
+  window end, or when voltage drops under 12.3 V, only while Sentry is enabled; the comma then leaves the tailnet); or (c) a middle path
+  (window end puts the comma into a quiet state with only wifi/tailscaled, then stock shutdown). Not changed yet.
+
+## 23. Decision and fix after section 22: hardwared enforces the voltage floor (2026-11-11)
+
+D.J. said "do whatever is best". With no real battery data from the car yet, the choice was to **tighten, not loosen** the protection.
+- **New:** while `ParkedRecordingEnabled` is on, `power_monitoring.should_shutdown` also shuts the device down when the filtered car voltage is
+  under `ParkedRecordingMinVoltage` (12.3 V default) for more than 60 s offroad (and the usual 5 minute and `in_car` rules). That is stricter than
+  the stock 11.8 V and is enforced by hardwared, so it holds even if the recorder process has hung. Pure function `sentry_voltage_shutdown` in
+  `guards_bp.py`; hook marked with BluePilot comments in `power_monitoring.py`. Off whenever the recorder is off: stock behaviour is untouched.
+- **New:** when this rule is what shuts the device down, it writes `ParkedRecordingShutdownReason` ({reason, voltageV, floorV, offroadS}) once,
+  so the next boot (or the future webhook) can say why the comma went away.
+- **Unchanged on purpose:** the 4 h window still only stops the recorder, the comma then idles under the stock rules (capacity model about 12-14 h,
+  30 h timer), so remote access over the tailnet lasts as long as stock allows. `DisablePowerDown` still wins (and the recorder refuses to run then).
+- **Why not loosen now (IQ.Pilot style: measured voltage only, no capacity model):** the panda voltage calibration in the car is unknown (the
+  bench reads 5.08 V on USB), and the capacity model is an independent safety net. Revisit with the battery logger's data from the car, including
+  the SIM modem and Tailscale draw.
+- **Known consequence:** a weak or cold battery, or a voltage reading that is low in the car, will shut the comma down earlier than before while
+  Sentry is on (fail-safe direction). The car test will show whether 12.3 V is right; it is a setting (12.0-13.0).
+- Tests: the real `power_monitoring.py` is run with stand-in modules (`test_power_hook.py`); the hook was mutation-checked. 106 tests.
+- **Not merged to the tracked branch** (held until D.J.'s test drive is over) and not on the comma. It adds a params key, so it needs a rebuild.
+
+## 24. First reading in the car, and what it means for the 12.3 V floor (2026-11-11)
+
+D.J. plugged the comma into the car (Fusion, parked, ignition off, harness normal) after a boot loop on his 5 V office bench supply (cause unknown; journald
+is not persistent; nothing in this boot mentions parked_recorder/ParkedRecording/guards_bp; code dormant, all flags 0). Read-only, 20:46Z:
+- `peripheralState.voltage` (what hardwared and the recorder use): n=80, min 12.07, **mean 12.21**, max 12.26 V.
+- `pandaStates[0].voltage` (second source): n=400, min 11.86, **mean 12.10**, max 12.18 V. The two sources differ by about 0.1 V and each moves by 0.1-0.4 V.
+- Comma draw 1.95 W (SoM 1.19 W), 62.4 C.
+- **The 12.3 V default floor sits above what this car reads parked.** With Sentry enabled right now the recorder would stop within about a minute and
+  hardwared (section 23) would shut the comma down after 5 minutes offroad. As shipped, Sentry would never run in this car on these readings.
+- Possible causes, not distinguished yet: a battery sitting near 12.1-12.2 V (roughly half charged if the reading is true), a panda ADC reading that is
+  low by 0.1-0.3 V, the car's own modules loading it, or simply an unrested battery after a short drive. **Measure before changing the number:**
+  (1) check the true voltage with a multimeter at the OBD port or a live 12 V socket and compare, (2) run the battery logger overnight in the car,
+  (3) see the resting voltage after a long drive. Then set the floor from data (the setting range is 12.0-13.0 V, so 12.0 is the lowest it can go now).
+- Do not lower the floor just to make Sentry run: a battery at 12.1 V with a 2 W load and recordings has little margin to start the car in winter.
+
+## 25. Webhook to Home Assistant, store and forward (code written on this branch, not deployed, off by default)
+
+- The recorder queues a small JSON event in a hidden outbox (`/data/media/0/parked_recorder/.outbox/`, invisible to the event list and the quota)
+  and a separate process, `parked_webhookd`, sends the queue to `ParkedRecordingWebhookUrl` every 10 s while the car is off. Nothing is lost while the comma
+  has no network (up to 200 events, 7 days) and nothing blocks the recorder or the cameras. Both settings are off or empty by default.
+- Kinds: `bump` (eventId, score, hits, voltageV), `warning` (score, hits, seconds) when the screen warning escalates, and `clip` (eventId, outcome, clipSeconds,
+  files as name and byte count). No images, no GPS, no device ids, no URL in any payload.
+- Delivery: a 2xx removes the item; no network, 5xx, 408 or 429 keep it and back off (10 s doubling to 5 min); another 4xx drops it so one bad item cannot block the queue; only
+  http and https URLs are accepted.
+- **The URL is a secret** (a Home Assistant webhook id works like a password): it is not in params backups (`ParkedRecordingWebhookUrl` has no BACKUP flag), not logged, never printed
+  by the code. D.J. enters it himself on the comma; it must not go through chat or a repo.
+- **Setting it up (D.J. does the URL step himself):** in Home Assistant create an automation with a *Webhook* trigger (note its id, keep "local only" on if the comma reaches HA over
+  the tailnet or LAN), then on the comma set `ParkedRecordingWebhookUrl` to `http(s)://<ha host>:8123/api/webhook/<id>` and `ParkedRecordingWebhookEnabled` to 1. The automation reads `trigger.json.kind`
+  (`bump`, `warning`, `clip`) and decides: phone alert on every kind, Honk & Flash on `warning`, capped per event and per hour (see section 21).
+- Adds two keys to `params_keys.h`, so the next deploy needs the rebuild and the `params_pyx.so` strings check. 123 unit tests (sender, outbox, recorder enqueue, mutation-checked).
+- Not covered: sending the clip files themselves (that is the opconnect upload, still separate), a boot-time "the comma shut down because of low voltage" message from
+  `ParkedRecordingShutdownReason`, and any cellular data cap.
+
+## 26. Upload policy decided (2026-11-12, from the opconnect session; D.J. agreed)
+
+- Ordinary drives: qlog, qcamera, and (wifi only) rlog upload; full-quality video does not (about 3 TB a year, rarely viewed; the car keeps about 10 days, Hermes can pull clips over the VPN).
+- **Sentry events upload at full quality: opt-in, wifi only, a few hundred MB a month.** Honk and hard-braking triggers would be extra triggers into the same path.
+- Protocol facts: `upload_url` PUT with keys `<event-id>/<file>` plus a small `event.json` (trigger, time, GPS) beside the clips; no server size limit, NPMplus took a 40 MB PUT, so our
+  ~26 MB events are fine; no resumable upload (a dropped transfer restarts the file).
+- **Still to build:** the opt-in upload step (wifi only, reuse the outbox pattern from section 25, `event.json` with GPS only if D.J. wants it: the current event.json has none).
+
+## 27. Opt-in upload of events to opconnect (code written on this branch, not deployed, off by default)
+
+Built to the policy in section 26. `upload_bp.py` (pure logic, tested) and `uploadd_bp.py` (the process, thin glue, NOT testable here).
+- Sends one event at a time, files with the key `<event-id>/<file>` (media first, `event.json` last), using the stock signed-URL flow
+  (`Api.get("v1.4/<dongle>/upload_url/", path=<key>)` then PUT). Per-file `.sent` markers mean a restart or a dropped connection never resends a file that is
+  already up; `.uploaded` marks a finished event. Backoff 10 s doubling to 5 min; a 4xx other than 401/403/408/429 skips that file for good (so one bad file cannot block the queue).
+- **Safeguards, all required:** `ParkedRecordingUpload` is on (default off), `BPConnectBackend == 3` (self-hosted only, so footage can never go to comma's cloud by
+  mistake), the link is unmetered Wi-Fi, the car is off, and the daily cap has room (`ParkedRecordingUploadDailyMB`, default 1000, range 50-10000, kept in a small file so a restart does not reset it).
+- The quota now deletes **already-uploaded events first**, so a full disk never costs footage that is not on the server yet.
+- `event.json` has no GPS (D.J. has not asked for it); add it deliberately if wanted.
+- Adds two keys to `params_keys.h` (rebuild and strings check on deploy). 134 unit tests; the cap and the quota preference were mutation-checked.
+- **Unverified until it runs on the comma:** `uploadd_bp.py` imports `openpilot.common.api`, `requests` and cereal, which this box cannot load; it was written to mirror
+  `system/loggerd/uploader.py` (same `Api` calls, same `networkType`/`networkMetered` fields). The first real test needs the comma on Wi-Fi, `BPConnectBackend=3`, the device
+  registered with opconnect (the comma-remote-access session had that check queued), and one captured event.
+
+## 28. Speaker test, the approved voice clip, and the warning sound (2026-11-12, D.J. at the bench comma)
+
+- **First test heard nothing** because the speaker amplifier was **shut down**: while parked with the screen off, hardwared powers the amp down (register 0x51 bit 7 = 0, read as
+  0x00). Waking it with `Amplifier.initialize_configuration()`, the same call hardwared makes when it leaves power save, made the siren **loud and clear** in the room. Restoring it with
+  `set_global_shutdown(True)` put it back. Both done from a temporary script; nothing left on the comma. Sound itself is cheap: draw barely moved (mean 2.0 W, peak 3.2 W).
+- **Loudness:** full digital scale through the stock path (mono 48 kHz, default device) is as loud as this speaker goes; the amp has its own limiter, so I did not touch its settings.
+- **Voice clip:** D.J. wanted it as loud as possible (not odd). Piper TTS, EQ'd for the speaker, fast leveller and soft clip to about -2.7 dBFS speech level, same as the siren. By ear he found
+  "Warning. You are being recorded." hard to understand but "Leave the vehicle now" clear, preferred the **Ryan** voice, and chose **clip 4**: "Attention. Intruder detected. Your face has been recorded.
+  Leave the vehicle immediately." Saved as `bluepilot/parked_recorder/sounds/intruder_ryan.wav` (11.5 s) with `make_warning_clips.py` and a README. The text claims nothing untrue
+  (the driver camera does record the cabin).
+- **Playback built (`warning_audio_bp.py`, off by default via `ParkedRecordingWarningSound`):** while the warning flag is up it wakes the amp, plays voice then a 5 s siren, repeats, and on stop
+  (flag expiry, battery guard stop, process exit, or an error) cuts the sound and puts the amp back exactly as it was (shut down if it was shut down, untouched if it was on). A missing sound stack
+  cannot stop the recorder. Adds one key to `params_keys.h`. 150 unit tests; the amp restore and the stop path were mutation-checked.
+- **Not done:** the screen overlay (still needs the UI code and the comma in front of us), and none of this is deployed (needs the rebuild and strings check; branch not merged to the tracked branch).
+
+## 29. Warning screen (on-device overlay)
+
+`ParkedWarningOverlayBP` (`selfdrive/ui/bp/onroad/parked_warning_overlay_bp.py`) draws a full-screen police red/blue (6 s) then white (4 s) flash at 5 Hz (cap 8) with RECORDING, from `warning_bp.flash_frame`. It shows only while `ParkedRecordingWarning` is set AND the car is parked (no ignition, not started). The on/off and elapsed-time logic is `warning_screen_bp.WarningScreenState` (pure, tested). It gives up after 130 s if the recorder dies with the param stuck, and re-arms once the param has been seen false.
+Wiring (all marked `# BluePilot:`): `layouts/main.py` draws it over every screen and sets `device.parked_warning`; `ui_state.Device` keeps the screen awake and forces brightness 100 while that is set.
+NOT verified on the device or in raylib: needs a deploy (passing-assist session) and a bump or `ParkedRecordingWarning=1` with the car off to see it.
