@@ -542,3 +542,18 @@ is not persistent; nothing in this boot mentions parked_recorder/ParkedRecording
 - Protocol facts: `upload_url` PUT with keys `<event-id>/<file>` plus a small `event.json` (trigger, time, GPS) beside the clips; no server size limit, NPMplus took a 40 MB PUT, so our
   ~26 MB events are fine; no resumable upload (a dropped transfer restarts the file).
 - **Still to build:** the opt-in upload step (wifi only, reuse the outbox pattern from section 25, `event.json` with GPS only if D.J. wants it: the current event.json has none).
+
+## 27. Opt-in upload of events to opconnect (code written on this branch, not deployed, off by default)
+
+Built to the policy in section 26. `upload_bp.py` (pure logic, tested) and `uploadd_bp.py` (the process, thin glue, NOT testable here).
+- Sends one event at a time, files with the key `<event-id>/<file>` (media first, `event.json` last), using the stock signed-URL flow
+  (`Api.get("v1.4/<dongle>/upload_url/", path=<key>)` then PUT). Per-file `.sent` markers mean a restart or a dropped connection never resends a file that is
+  already up; `.uploaded` marks a finished event. Backoff 10 s doubling to 5 min; a 4xx other than 401/403/408/429 skips that file for good (so one bad file cannot block the queue).
+- **Safeguards, all required:** `ParkedRecordingUpload` is on (default off), `BPConnectBackend == 3` (self-hosted only, so footage can never go to comma's cloud by
+  mistake), the link is unmetered Wi-Fi, the car is off, and the daily cap has room (`ParkedRecordingUploadDailyMB`, default 1000, range 50-10000, kept in a small file so a restart does not reset it).
+- The quota now deletes **already-uploaded events first**, so a full disk never costs footage that is not on the server yet.
+- `event.json` has no GPS (D.J. has not asked for it); add it deliberately if wanted.
+- Adds two keys to `params_keys.h` (rebuild and strings check on deploy). 134 unit tests; the cap and the quota preference were mutation-checked.
+- **Unverified until it runs on the comma:** `uploadd_bp.py` imports `openpilot.common.api`, `requests` and cereal, which this box cannot load; it was written to mirror
+  `system/loggerd/uploader.py` (same `Api` calls, same `networkType`/`networkMetered` fields). The first real test needs the comma on Wi-Fi, `BPConnectBackend=3`, the device
+  registered with opconnect (the comma-remote-access session had that check queued), and one captured event.

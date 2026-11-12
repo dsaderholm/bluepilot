@@ -12,6 +12,7 @@ from pathlib import Path
 
 EVENTS_ROOT = "/data/media/0/parked_recorder"
 EVENT_FILE = "event.json"
+UPLOADED_MARK = ".uploaded"   # written by the uploader once every file of the event is on the server
 MIN_STORAGE_MB, MAX_STORAGE_MB = 256, 8192
 
 
@@ -79,7 +80,8 @@ def enforce_quota(root: str, max_mb: int, keep: Path | None = None) -> list[str]
   sizes = {e: _dir_size(e) for e in events}
   total = sum(sizes.values())
   removed = []
-  for e in events:
+  # events already safe on the server go first (oldest first), then the oldest that are not
+  for e in sorted(events, key=lambda ev: not (ev / UPLOADED_MARK).exists()):
     if total <= limit:
       break
     if keep is not None and e == keep:

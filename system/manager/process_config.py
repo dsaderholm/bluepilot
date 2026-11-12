@@ -77,6 +77,9 @@ def parked_capture(started: bool, params: Params, CP: car.CarParams) -> bool:
 def parked_webhook_run(started: bool, params: Params, CP: car.CarParams) -> bool:
   return not started and params.get_bool("ParkedRecordingWebhookEnabled")
 
+def parked_upload_run(started: bool, params: Params, CP: car.CarParams) -> bool:
+  return not started and params.get_bool("ParkedRecordingUpload")
+
 def parked_battery_log(started: bool, params: Params, CP: car.CarParams) -> bool:
   return not started and params.get_bool("ParkedBatteryLog")
 
@@ -338,6 +341,7 @@ if is_bluepilot():
     PythonProcess("parked_recorder", "bluepilot.parked_recorder.parked_recorder_bp", parked_recorder_run, enabled=not PC),
     PythonProcess("parked_battery_logger", "bluepilot.parked_recorder.battery_logger_bp", parked_battery_log, enabled=not PC),
     PythonProcess("parked_webhookd", "bluepilot.parked_recorder.webhookd_bp", parked_webhook_run, enabled=not PC),
+    PythonProcess("parked_uploadd", "bluepilot.parked_recorder.uploadd_bp", parked_upload_run, enabled=not PC),
     PythonProcess("bp_sign_reader", "bluepilot.sign_reader.sign_reader", _bp_sign_reader_enabled),
   ]
   # End BluePilot
