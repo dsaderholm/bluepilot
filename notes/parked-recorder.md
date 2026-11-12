@@ -572,3 +572,9 @@ Built to the policy in section 26. `upload_bp.py` (pure logic, tested) and `uplo
   (flag expiry, battery guard stop, process exit, or an error) cuts the sound and puts the amp back exactly as it was (shut down if it was shut down, untouched if it was on). A missing sound stack
   cannot stop the recorder. Adds one key to `params_keys.h`. 150 unit tests; the amp restore and the stop path were mutation-checked.
 - **Not done:** the screen overlay (still needs the UI code and the comma in front of us), and none of this is deployed (needs the rebuild and strings check; branch not merged to the tracked branch).
+
+## 29. Warning screen (on-device overlay)
+
+`ParkedWarningOverlayBP` (`selfdrive/ui/bp/onroad/parked_warning_overlay_bp.py`) draws a full-screen police red/blue (6 s) then white (4 s) flash at 5 Hz (cap 8) with RECORDING, from `warning_bp.flash_frame`. It shows only while `ParkedRecordingWarning` is set AND the car is parked (no ignition, not started). The on/off and elapsed-time logic is `warning_screen_bp.WarningScreenState` (pure, tested). It gives up after 130 s if the recorder dies with the param stuck, and re-arms once the param has been seen false.
+Wiring (all marked `# BluePilot:`): `layouts/main.py` draws it over every screen and sets `device.parked_warning`; `ui_state.Device` keeps the screen awake and forces brightness 100 while that is set.
+NOT verified on the device or in raylib: needs a deploy (passing-assist session) and a bump or `ParkedRecordingWarning=1` with the car off to see it.
