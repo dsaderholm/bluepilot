@@ -61,6 +61,7 @@ DEFAULT_TARGETS = [
   "bluepilot/selfdrive/selfdrived/tests/test_steer_saturated_gate.py",
   "bluepilot/sign_reader/tests/test_reader.py",
   "bluepilot/sign_reader/tests/test_limit.py",
+  "bluepilot/sign_reader/tests/test_guard.py",
   # (that directory glob already covers test_button_mapping.py)
   "sunnypilot/selfdrive/controls/lib/tests/test_unconfirmed_lead.py",
   "sunnypilot/selfdrive/controls/lib/smart_cruise_control/tests/test_map_model_veto.py",
