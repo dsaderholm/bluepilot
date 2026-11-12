@@ -190,17 +190,6 @@ class TestUploader(UploaderTestCase):
 
 
   # BluePilot: rlog upload rules
-  def _run_uploader(self):
-    self.start_thread()
-    time.sleep(1)
-    self.join_thread()
-
-  def test_rlog_skipped_when_too_old(self, monkeypatch):
-    monkeypatch.setattr(uploader, "RLOG_MAX_AGE_S", -1)
-    self.gen_files(boot=False)
-    self._run_uploader()
-    assert log_handler.upload_order == [f"{self.seg_dir}/qlog.zst"]
-
   def test_rlog_skipped_when_metered(self, monkeypatch):
     monkeypatch.setattr(uploader, "force_wifi", False)
     self.gen_files(boot=False)
