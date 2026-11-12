@@ -27,6 +27,7 @@ from bluepilot.parked_recorder.capture_bp import ClipWriter, EventRateLimiter, c
 from bluepilot.parked_recorder.detector_bp import ParkedTrigger
 from bluepilot.parked_recorder.guards_bp import ParkedGuard, VoltageLPF
 from bluepilot.parked_recorder.warning_bp import WarningTracker, clamp_warning_seconds
+from bluepilot.parked_recorder.warning_audio_bp import make_default as make_warning_audio
 from bluepilot.parked_recorder.webhook_bp import Outbox, build_payload
 
 ARM_DELAY_S = 120.0
@@ -45,7 +46,7 @@ CAPTURE_CAMERAS = {
 
 class ParkedRecorder:
   def __init__(self, params=None, sm=None, clock=time.monotonic, events_root: str = storage_bp.EVENTS_ROOT,
-               make_sock=None, drain=None):
+               make_sock=None, drain=None, audio_factory=None):
     self.params = params or Params()
     self.sm = sm if sm is not None else messaging.SubMaster(["accelerometer", "peripheralState"])
     self.clock = clock
@@ -63,6 +64,9 @@ class ParkedRecorder:
     self.power_down_disabled = False
     self.outbox = Outbox(Path(events_root) / ".outbox")   # hidden, so list_events and the quota never see it
     self.webhook_enabled = False
+    self.audio_factory = audio_factory or make_warning_audio
+    self.audio = None                      # built on first use, so a missing sound stack cannot stop the recorder from starting
+    self.sound_enabled = False
     self.warning_tracker = WarningTracker()
     self.warning_enabled = False
     self.warning_seconds = 30
@@ -95,6 +99,7 @@ class ParkedRecorder:
       self.power_down_disabled = bool(self.params.get_bool("DisablePowerDown"))
       self.warning_enabled = bool(self.params.get_bool("ParkedRecordingWarningEnabled"))
       self.webhook_enabled = bool(self.params.get_bool("ParkedRecordingWebhookEnabled"))
+      self.sound_enabled = bool(self.params.get_bool("ParkedRecordingWarningSound"))
       self.warning_seconds = clamp_warning_seconds(self.params.get("ParkedRecordingWarningSeconds"))
     except Exception:
       # unreadable settings: keep what we had (the guard always has clamped values)
@@ -140,8 +145,24 @@ class ParkedRecorder:
     except Exception:
       cloudlog.exception("parked_recorder: could not queue webhook event")
 
+  def _audio(self, start: bool) -> None:
+    """Starts or stops the spoken warning and siren. Never raises: no sound stack must not stop the recorder."""
+    try:
+      if start:
+        if self.audio is None:
+          self.audio = self.audio_factory()
+        self.audio.start()
+      elif self.audio is not None:
+        self.audio.stop()
+    except Exception:
+      cloudlog.exception("parked_recorder: warning audio failed")
+
   def _set_warning(self, on: bool) -> None:
     self.warning_until = None if not on else self.warning_until
+    if on and self.sound_enabled:
+      self._audio(True)
+    elif not on:
+      self._audio(False)
     try:
       self.params.put_bool("ParkedRecordingWarning", on)
     except Exception:
@@ -242,6 +263,7 @@ class ParkedRecorder:
       self.params.put_bool("ParkedRecordingActive", False)
       self.params.put_bool("ParkedRecordingCapture", False)
       self.params.put_bool("ParkedRecordingWarning", False)
+      self._audio(False)
       self._status("disabled")
 
 

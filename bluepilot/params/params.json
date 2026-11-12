@@ -661,6 +661,14 @@
       "enabled": true
     },
     {
+      "name": "ParkedRecordingWarningSound",
+      "default": false,
+      "type": "bool",
+      "flags": ["PERSISTENT", "BACKUP"],
+      "create_default": false,
+      "enabled": true
+    },
+    {
       "name": "ParkedBatteryLog",
       "default": false,
       "type": "bool",

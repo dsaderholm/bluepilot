@@ -557,3 +557,18 @@ Built to the policy in section 26. `upload_bp.py` (pure logic, tested) and `uplo
 - **Unverified until it runs on the comma:** `uploadd_bp.py` imports `openpilot.common.api`, `requests` and cereal, which this box cannot load; it was written to mirror
   `system/loggerd/uploader.py` (same `Api` calls, same `networkType`/`networkMetered` fields). The first real test needs the comma on Wi-Fi, `BPConnectBackend=3`, the device
   registered with opconnect (the comma-remote-access session had that check queued), and one captured event.
+
+## 28. Speaker test, the approved voice clip, and the warning sound (2026-11-12, D.J. at the bench comma)
+
+- **First test heard nothing** because the speaker amplifier was **shut down**: while parked with the screen off, hardwared powers the amp down (register 0x51 bit 7 = 0, read as
+  0x00). Waking it with `Amplifier.initialize_configuration()`, the same call hardwared makes when it leaves power save, made the siren **loud and clear** in the room. Restoring it with
+  `set_global_shutdown(True)` put it back. Both done from a temporary script; nothing left on the comma. Sound itself is cheap: draw barely moved (mean 2.0 W, peak 3.2 W).
+- **Loudness:** full digital scale through the stock path (mono 48 kHz, default device) is as loud as this speaker goes; the amp has its own limiter, so I did not touch its settings.
+- **Voice clip:** D.J. wanted it as loud as possible (not odd). Piper TTS, EQ'd for the speaker, fast leveller and soft clip to about -2.7 dBFS speech level, same as the siren. By ear he found
+  "Warning. You are being recorded." hard to understand but "Leave the vehicle now" clear, preferred the **Ryan** voice, and chose **clip 4**: "Attention. Intruder detected. Your face has been recorded.
+  Leave the vehicle immediately." Saved as `bluepilot/parked_recorder/sounds/intruder_ryan.wav` (11.5 s) with `make_warning_clips.py` and a README. The text claims nothing untrue
+  (the driver camera does record the cabin).
+- **Playback built (`warning_audio_bp.py`, off by default via `ParkedRecordingWarningSound`):** while the warning flag is up it wakes the amp, plays voice then a 5 s siren, repeats, and on stop
+  (flag expiry, battery guard stop, process exit, or an error) cuts the sound and puts the amp back exactly as it was (shut down if it was shut down, untouched if it was on). A missing sound stack
+  cannot stop the recorder. Adds one key to `params_keys.h`. 150 unit tests; the amp restore and the stop path were mutation-checked.
+- **Not done:** the screen overlay (still needs the UI code and the comma in front of us), and none of this is deployed (needs the rebuild and strings check; branch not merged to the tracked branch).
