@@ -63,7 +63,9 @@ DEFAULT_TARGETS = [
   "bluepilot/sign_reader/tests/test_limit.py",
   "bluepilot/sign_reader/tests/test_guard.py",
   # (that directory glob already covers test_button_mapping.py)
-  "sunnypilot/selfdrive/controls/lib/tests/test_unconfirmed_lead.py",
+  # The whole folder: unconfirmed lead, passing assist, the adjacent-lane radar work and the
+  # maneuver dry run all live here and all collect offline.
+  "sunnypilot/selfdrive/controls/lib/tests/",
   "sunnypilot/selfdrive/controls/lib/smart_cruise_control/tests/test_map_model_veto.py",
   "sunnypilot/selfdrive/controls/lib/smart_cruise_control/tests/test_map_veto_published.py",
   "sunnypilot/selfdrive/controls/lib/smart_cruise_control/tests/test_mapd_v2_path.py",
@@ -78,6 +80,11 @@ DEFAULT_TARGETS = [
   "selfdrive/ui/tests/test_readme_is_built.py",
   "selfdrive/ui/tests/test_sunnylink_settings_complete.py",
   "selfdrive/ui/tests/test_drive_clock.py",
+  "selfdrive/ui/tests/test_route_intent_score.py",
+  "selfdrive/ui/tests/test_oncoming_falsepos.py",
+  "selfdrive/ui/tests/test_mapd_restarts.py",
+  "selfdrive/ui/tests/test_osm_tag_census.py",
+  "selfdrive/ui/tests/test_left_edge_profile.py",
   "selfdrive/ui/tests/test_press_routing_reads_the_aim.py",
   "selfdrive/ui/tests/test_stepper_moves_once_per_tap.py",
   # Named files, not the directory: test_speed_limit_assist.py in the same folder imports the
@@ -90,7 +97,16 @@ DEFAULT_TARGETS = [
   "sunnypilot/selfdrive/controls/lib/speed_limit/tests/test_speed_hold.py",
   "selfdrive/car/tests/test_structs_capnp_parity.py",
   "selfdrive/car/tests/test_pre_enable_standstill.py",
+  # FusionPilot: passing assist -- the observer, the radar's adjacent-lane and oncoming detection,
+  # and the static guards over the settings layouts (param types, orphaned and dangling items).
+  "selfdrive/car/tests/test_param_write_types.py",
+  "selfdrive/car/tests/test_settings_widget_params.py",
+  # Guards the stub the whole passing-assist suite runs against. Named, like its neighbours --
+  # the folder holds device-only tests that cannot collect here.
+  "selfdrive/car/tests/test_stub_param_defaults.py",
+  "selfdrive/ui/bp/layouts/settings/tests/",
   "selfdrive/ui/bp/onroad/tests/",
+  "selfdrive/ui/bp/onroad/tests/test_no_int_on_capnp_enums.py",
   "system/tests/test_sentry_disabled_by_default.py",
   # Guards the policy stated in CLAUDE.md's "Params, defaults, and his settings": nothing may write
   # a settings key. It lived only on the passing assist branch, where the policy is not stated, so
@@ -101,7 +117,29 @@ DEFAULT_TARGETS = [
   # happens. BPDefaultsGeneration was exactly that, before it was removed with the defaults
   # migration on 2026-08-08.
   "selfdrive/car/tests/test_params_keys_unique.py",
+  # A duplicate capnp ordinal makes capnp ABORT the process at import, so the whole suite vanishes
+  # with a traceback that names pytest and never mentions a schema. Two branches adding a field in
+  # different parts of one file is not a conflict git can see.
+  "selfdrive/car/tests/test_capnp_ordinals_unique.py",
+  # Rear radar detections reaching the lead path would slow the car for a vehicle BEHIND it, via
+  # unconfirmed_lead -> ICBM. Static, because the guarantee is structural and structural guarantees
+  # are the kind a later change erases with every test still green.
+  "selfdrive/car/tests/test_rear_radar_isolation.py",
+  # Built at car init, where a bad parser strands the car on "waiting to start". Stubs CANParser
+  # and asserts on the arguments -- the behavioural suite cannot reach this code at all.
+  "selfdrive/car/tests/test_rear_radar_parser.py",
+  # The reduction the feeder performs, proven in Python because it becomes C++ on a part behind a
+  # bumper. A sign error here inverts closing and receding, which looks entirely reasonable in a log.
+  "selfdrive/car/tests/test_rear_digest_reduction.py",
   "selfdrive/car/tests/test_no_int_on_capnp_enums.py",
+  # Both written for passing assist and neither ever collected -- caught by
+  # test_bp_tests_are_registered, which is the only reason anyone noticed. A test that does not
+  # run is worse than no test: it reads as coverage.
+  "selfdrive/car/tests/test_passing_assist_screen.py",
+  "selfdrive/car/tests/test_settings_claims.py",
+  # A sub-panel that builds a back button and never draws it opens and cannot be left. Found by
+  # hand on the last check before a drive, in a panel added the same day.
+  "selfdrive/car/tests/test_sub_layouts_have_a_way_out.py",
   "selfdrive/car/tests/test_dec_slow_down_published.py",
   "selfdrive/car/tests/test_capnp_accepts_published_types.py",
   "selfdrive/car/tests/test_retired_capnp_ordinals.py",
@@ -141,6 +179,8 @@ DEFAULT_TARGETS = [
   # Named, not the directory: opendbc/can/tests/ is comma's, and only this file is ours -- the
   # CANParser change that stopped clearing ~1,050 empty lists every 10 ms (overheating, 2026-09-15).
   "opendbc_repo/opendbc/can/tests/test_vl_all_clears_only_dirty.py",
+  # The changed-defaults migration. Back after being deleted for a day: "I always want you to
+  # write defaults, but not tweaks I've made to other settings."
 ]
 
 
@@ -203,13 +243,25 @@ def install_stubs() -> None:
 
   class Params:
     """Reads defaults straight out of params_keys.h, so a test that references an undeclared
-    key fails here the same way it would on the device."""
+    key fails here the same way it would on the device.
+
+    Writes are kept, and shared across instances the way the real key-value store is. They used to
+    be no-ops, which quietly broke any test whose fixture sets a param and whose subject reads it
+    back through its own Params() -- the write vanished and the subject saw the default. That is
+    what kept test_lane_turn_desire out of the target list below: two of its cases looked like
+    genuine failures and were an artifact of this stub.
+    """
+    _store: dict = {}
+
     def __init__(self, *a, **k):
       pass
 
     def get(self, key, *a, **k):
       if key not in known:
         raise KeyError(f"UnknownKeyName: {key}")
+      # A write wins over the default, then the default is parsed the way the device parses it.
+      if key in self._store:
+        return self._store[key]
       if key in text_keys:
         return defaults.get(key)          # None when unset, exactly like the device
       raw = defaults.get(key, "0")
@@ -218,13 +270,18 @@ def install_stubs() -> None:
     def get_bool(self, key, *a, **k):
       if key not in known:
         raise KeyError(f"UnknownKeyName: {key}")
+      if key in self._store:
+        return bool(self._store[key])
       return defaults.get(key, "0") == "1"
 
-    def put(self, *a, **k):
-      pass
+    def put(self, key, value, *a, **k):
+      self._store[key] = value
 
-    def put_bool(self, *a, **k):
-      pass
+    def put_bool(self, key, value, *a, **k):
+      self._store[key] = bool(value)
+
+    def remove(self, key, *a, **k):
+      self._store.pop(key, None)
 
   pp = types.ModuleType("openpilot.common.params")
   pp.Params = Params

@@ -52,10 +52,68 @@ class LaneChangeSettingsLayout(Widget):
                              "(BSM) detects a obstructing vehicle, ensuring safe maneuvering."),
     )
 
+    # BluePilot: how long after the blind spot clears before the change may start. See
+    # DEFAULT_BSM_HOLD_S in auto_lane_change.py -- the original arithmetic gave exactly one second
+    # regardless of the delay above, which moved the car over onto a vehicle that had only just
+    # stopped being beside it.
+    self._cancel_window = option_item_sp(
+      title=lambda: tr("Cancel By Turning The Blinker Off"),
+      description=lambda: tr("How long after a lane change starts that turning the blinker off "
+                             "calls it off. Stock openpilot cannot be cancelled at all -- once it "
+                             "begins, the blinker is never looked at again. Past this window it "
+                             "finishes instead, because going back from most of the way across is "
+                             "a second lane change rather than an undo. Off restores the stock "
+                             "behavior."),
+      param="AutoLaneChangeCancelWindow",
+      min_value=0, max_value=5, value_change_step=1,
+      label_callback=lambda v: tr("Off") if v == 0 else f"{v} s",
+      inline=True)
+
+    self._one_touch = option_item_sp(
+      title=lambda: tr("Your One-Touch Flash Time"),
+      description=lambda: tr("How long your blinker keeps flashing from a tap of the stalk. Set in "
+                             "the body module, not here -- this only has to match it. It is what "
+                             "tells a cancel apart from the flashes simply running out: turn the "
+                             "signal off early and the lane change is called off, but let it "
+                             "finish on its own and nothing happens. Get this wrong in the low "
+                             "direction and a finished flash can look like you changing your "
+                             "mind."),
+      param="AutoLaneChangeOneTouchTime",
+      min_value=0, max_value=10, value_change_step=1,
+      label_callback=lambda v: tr("Off") if v == 0 else f"{v} s",
+      inline=True)
+
+    self._revert = toggle_item_sp(
+      title=lambda: tr("Steer Back When Cancelled"),
+      description=lambda: tr("Return to the lane you started in, instead of just stopping. "
+                             "Without this, cancelling only releases the steering, and the car "
+                             "settles into whichever lane it is nearest -- which part way across "
+                             "is usually the new one, so the change completes anyway. A lane "
+                             "change the other way is the same maneuver in reverse, so that is "
+                             "what it does. If the blind spot is lit on the side you would return "
+                             "to, it finishes the original change instead."),
+      param="AutoLaneChangeRevert")
+
+    self._bsm_hold = option_item_sp(
+      title=lambda: tr("Wait After Blind Spot Clears"),
+      description=lambda: tr("How long to keep waiting after the blind spot indicator goes out. "
+                             "Blind spot monitoring only reports that a vehicle is no longer "
+                             "beside you -- it cannot say whether it is now ahead or behind, or "
+                             "how fast it is closing. A longer wait buys distance in place of a "
+                             "measurement. Shorten it only once a rear-facing sensor is fitted."),
+      param="AutoLaneChangeBsmHoldTime",
+      min_value=1, max_value=10, value_change_step=1,
+      label_callback=lambda v: f"{v} s",
+      inline=True)
+
     items = [
       self._lane_change_timer,
       LineSeparatorSP(40),
       self._bsm_delay,
+      self._cancel_window,
+      self._one_touch,
+      self._revert,
+      self._bsm_hold,
     ]
 
     return items
@@ -78,4 +136,12 @@ class LaneChangeSettingsLayout(Widget):
     enable_bsm = ui_state.CP is not None and ui_state.CP.enableBsm
     if not enable_bsm and ui_state.params.get_bool("AutoLaneChangeBsmDelay"):
       ui_state.params.remove("AutoLaneChangeBsmDelay")
-    self._bsm_delay.action_item.set_enabled(enable_bsm and ui_state.params.get("AutoLaneChangeTimer", return_default=True) > AutoLaneChangeMode.NUDGE)
+    bsm_usable = enable_bsm and ui_state.params.get("AutoLaneChangeTimer", return_default=True) > AutoLaneChangeMode.NUDGE
+    self._bsm_delay.action_item.set_enabled(bsm_usable)
+    # The hold only does anything while the delay itself is on, so it follows it rather than
+    # sitting live above a switched-off feature.
+    self._bsm_hold.action_item.set_enabled(bsm_usable and self._bsm_delay.action_item.get_state())
+    # Steering back is only reachable while there is a window in which to cancel at all.
+    cancellable = ui_state.params.get("AutoLaneChangeCancelWindow", return_default=True) > 0
+    self._revert.action_item.set_enabled(cancellable)
+    self._one_touch.action_item.set_enabled(cancellable)

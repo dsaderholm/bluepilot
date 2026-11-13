@@ -35,6 +35,84 @@ It is not. The consequence is that an untested push reaches a car being driven, 
 - The command below is how he takes an update DELIBERATELY and immediately. It is not the only way
   code arrives.
 
+## WHEN THE CAR'S NETWORK INTERCEPTS TLS, SHIP A BUNDLE. DO NOT WAIT FOR THE UPDATER.
+
+Second occurrence, 2026-08-17, and the first time it was worked around rather than reported. On some
+networks the device gets a filtering proxy that presents its own certificate for github.com:
+
+    fatal: unable to access 'https://github.com/dsaderholm/bluepilot.git/':
+    SSL: certificate subject name (gw.intermountainchristian.org) does not match target host name
+
+Everything about the car looks healthy. It is on the right branch, the working tree is clean, and
+the UI says nothing. The only tells are in params:
+
+    UpdateFailedCount        47
+    LastUpdateException      command failed: ['git', 'ls-remote', '--heads']
+    UpdaterCurrentDescription  ... / 2d17964 / Aug 17     <- the commit it is STUCK on
+
+**SO "I PUSHED, THE CAR WILL PULL IT WITHIN THE HOUR" CAN BE FALSE FOR DAYS.** That sentence was
+said to him on 2026-08-17 while the car had taken nothing for six hours. **After any push that
+matters, read the device's HEAD rather than assuming the pull happened.**
+
+**The fix needs no network on the device**, because the laptop can reach both GitHub and the car even
+when the car cannot reach GitHub:
+
+```bash
+git bundle create /tmp/fp.bundle <device-HEAD>..<branch>       # on the laptop
+scp /tmp/fp.bundle comma@<host>:/tmp/fp.bundle
+```
+
+then on the device:
+
+```bash
+cd /data/openpilot && git bundle verify /tmp/fp.bundle
+git fetch /tmp/fp.bundle <branch>:refs/remotes/origin/<branch> -f
+git reset --hard origin/<branch>
+```
+
+35 commits came to 192 KB. The bundle is a thin pack against the commit the device already has, so
+it stays small however far behind the car is, and `git bundle verify` refuses up front if the device
+lacks the base rather than half-applying.
+
+**DO THE RESET AND THE REBOOT YOURSELF.** Reversed 2026-08-19, in his words after being handed the
+command a third time: *"You do reboots and updates! I don't care!"* Handing back a reboot is the
+same failure as a "want me to..." sign-off -- work described instead of done -- and it is the step
+that decides whether any of it reached him at all, since code is inert until processes restart.
+
+So: push, fetch and `git reset --hard` on the device, verify by CONTENT, then `sudo reboot`. All of
+it, unasked, and do not print the command for him to run.
+
+**The one thing that still gates it is whether he is DRIVING.** Check `IsOnroad` first and never
+touch the car while it is onroad. That constraint has not changed and never will.
+
+**Then verify by CONTENT, not by hash** -- see the rebase section below for why a matching hash has
+lied here before. `grep -c` for a string the new commit introduced and one it removed.
+
+## THE SLASH COMMANDS ARE FOR ME TO RUN, NOT FOR HIM
+
+Added 2026-08-22, and he corrected the assumption behind them within the hour: *"For me it's cool
+that you're making these, but I won't run them. You will."*
+
+So they are not a keystroke saving for him. **They exist so the procedure runs the same way every
+time instead of being rebuilt out of this file's prose on each occasion** -- which is how a step
+learned the hard way gets skipped. `.claude/commands/` in this repo, so they reach every worktree by
+rebase like everything else here.
+
+**HE WILL ASK IN WORDS. THE MAPPING IS MINE TO MAKE, AND IT IS THE FRAGILE PART:**
+
+| What he says | Run |
+|---|---|
+| "any new ICBM commits?", "get the latest ICBM commits", "check ICBM" | `/icbm` |
+| "is my comma updated?", "update my comma", "push it to the car" | `/deploy` |
+| "update BluePilot", "get the latest version", "there's a new BluePilot" | `/update` |
+
+Invoke the command rather than reconstructing the steps. If the command does not exist in the
+session yet -- they are only picked up at session start, so one created mid-session is not callable
+-- follow the file's contents directly and say that is what happened.
+
+**When a step in one of these is learned the hard way, it goes in the COMMAND, not only here.** A
+rule in this file is read; a rule in the command is executed.
+
 ## START HERE if the owner asks to update
 
 They will open a fresh session and say something like *"update BluePilot"*, *"get the latest
@@ -1216,7 +1294,9 @@ So every symptom he reported -- the cycling, the chime, the park brake at the st
 for a little bit" -- traces to `AccPrpl_A_Pred` not being pinned. Pinning it takes that same window
 from 51.7% refused to 0.5%.
 
-**CLOSED 2026-08-19: THE BRICK HAS NOT RECURRED IN SIX CONSECUTIVE DRIVES.** He said the DTCs he had
+**RECURRED 2026-08-21 on route 000003a0 -- inert 602 frames, the camera latched cancel and openpilot drove the rest. The six-drive streak below stands as history, not as a closure.**
+
+**WAS CLOSED 2026-08-19: THE BRICK HAD NOT RECURRED IN SIX CONSECUTIVE DRIVES.** He said the DTCs he had
 offered probably no longer mattered, and the logs agree -- every route after 0000038d:
 
     0000038e  22 segs   inert 0   accFaulted 0   ford 99.9% of engaged
@@ -3022,7 +3102,7 @@ triple. PAIRWISE, AND AGAINST ENGAGEMENT, is what showed it. A funnel of margina
 exclusion -- nor can it tell a contradiction from a state that merely never arose, which is exactly
 the distinction the first write-up got wrong.
 
-### THE FAN IS NOT A FAULT. MEASURED, TWICE, AND CLOSED.
+### THE FAN IS NOT A FAULT -- BUT THE THROTTLING IS. REOPENED 2026-08-21.
 
 *"I still feel like my fans are running pretty hard."* Route 00000393, 2026-08-19:
 
@@ -3041,6 +3121,118 @@ process that three separate measurements now say is not there.
 **And the earlier `intakeTempC` idea was worthless** -- it reads 0.0 on this hardware, so the
 "ambient proxy" added to `bp_drive_checkup` that morning proves nothing. The temperature TRACE over
 the drive, beside cpu and mem, is what actually answers the question; a single peak never could.
+
+**REOPENED 2026-08-21, and the entry above is now only half true.** Route 000003a1, a 15-minute
+drive:
+
+    peak CPU temp   106.7 C        fan 100%
+    thermalStatus   ok 1181  OVERHEATED 633     <- 34.9% of the drive
+    first non-ok    t+9.9 s
+
+`thermalStatus` was `ok` on all 3,084 frames the day this was closed. It is not now. **At
+`overheated` openpilot derates itself**, so this is the cooling LOSING rather than working hard,
+and it is a different question from the fan being loud.
+
+**It began 10 seconds in, so the device started the drive hot** -- parked in August is the obvious
+candidate, and 000003a0 the same day peaked at 80 C with `thermalStatus` ok throughout, so it is
+not every drive. Not caused by diagnostics either: the device read 46 C at idle right after, with
+every analysis job finished.
+
+**AND THE CHECKUP COULD NOT ANSWER IT, WHICH IS THE PROCESS FINDING.** `bp_drive_checkup` was
+reading `deviceState` the whole time -- `maxTempC`, `intakeTempC`, `fanSpeedPercentDesired` -- and
+never read `thermalStatus`, the one field that separates a working fan from a throttling device.
+It printed a temperature and a paragraph explaining that a temperature is not a verdict, which was
+correct and useless. Answering the question meant writing a second script against the same message.
+
+**This fork's oldest bug, from the outside this time:** a value available and not rendered. Section
+8 now prints the `thermalStatus` histogram and says BAD when anything derated. **When a check
+deliberately refuses to render a verdict, ask whether the deciding field is one it already has.**
+
+**AND IT IS NOT NEW -- CORRECTING WHAT WAS SAID AN HOUR EARLIER.** The first write-up called this a
+regression. Run over the last EIGHT routes it is two of them, and the older one predates every
+change made that day:
+
+    000003a1   908 s   peak 105 C   fan 100%   OVERHEATED 633/1814   34.9%
+    0000039c  1091 s   peak  97 C   fan 100%   OVERHEATED 453/2183   20.8%
+    0000039f  1171 s   peak  83 C   fan  83%   ok throughout          <- the LONGEST drive
+    0000039a   950 s   peak  87 C   fan 100%   ok throughout
+    the other four                              ok throughout
+
+**Duration is not the driver** -- the longest drive of the eight is clean. Both bad ones ran the fan
+at 100%, but so did a clean one, so the fan pinning is a symptom and not the discriminator either.
+It has been happening for days and nothing reported it, because the check printed a temperature and
+declined to judge it while the field that judges it sat unread in the same message.
+
+**So "MEASURED, TWICE, AND CLOSED" was closed on the wrong field.** Both of those measurements were
+real and neither looked at `thermalStatus`.
+
+## 25 PASSING-ASSIST FIELDS ARE LOGGED INTO EVERY ROUTE AND READ BY NOTHING
+
+2026-08-21. An audit of every top-level `PassingAssist` field against every consumer -- both
+renderers, the car-side readers, the desire path, and all of `tools/` -- came out:
+
+    108 fields   71 on a screen or acted on   12 diagnostics only   25 READ BY NOTHING
+
+For those 25 the only three references in the repo are a comment, a comment, and the publish line.
+**This is the fork's oldest bug one level out**: not "computed and never rendered" but "recorded and
+never READ", which is worse in one way -- an unrendered value stops being written when someone
+deletes it, while these accumulate in every drive looking like evidence nobody wanted.
+
+`tools/bp_passing_unread.py` is the reader. First results, route 0000039f, 23,308 frames:
+
+**THE CONSTANT THAT "HAD NO SAFE VALUE UNTIL MEASURED" IS NOW MEASURED.** `accBrakingOnsetDRel`:
+
+    n=3435   min 14 m   p50 85 m   p90 120 m   MAX 125 m
+
+The close-in hold has to stay clear of 125 m: inside that, ACC is already braking, so waiting to
+"let ACC deal with it" is waiting forever. Note the p50 of 85 m against the 137 m recorded earlier
+from a single event -- **137 was the tail, not the typical case**, and sizing anything off it would
+have been far too conservative.
+
+**THE ONCOMING VETO IS ALMOST ENTIRELY MEMORY, NOT SIGHTINGS.** `oncomingSeenSeconds` 0.1 s against
+`oncomingRememberedSeconds` 6.7 s -- **99.3% remembered**. The 90 s window is doing essentially all
+the work on this drive, which is exactly what a false fire on a divided highway looks like from the
+inside. That is the first hard evidence about the I-15 report and it points at the window length
+rather than at the detector.
+
+Also first-read: 15 decisions, of which ACC was already braking on 3 and merely pre-charging on 3;
+`clearShare` p50 0.05, so nothing was stopping a pass on about 5% of the drive.
+
+**A LEVEL IS NOT AN EVENT, and the tool made that mistake in its first run** -- it counted
+`driverChangeStandDown` frames and reported 2,413 lane changes where there were 16. The docstring
+warns about denominators; the file broke its own rule. Count rising edges.
+
+**BOTH NUMBERS ABOVE WERE ONE DRIVE, AND FIVE DRIVES CORRECT BOTH.** 0000039a / 39c / 39f / 3a0 / 3a1:
+
+    accBrakingOnsetDRel      n      p50      MAX
+    0000039a              2245     42 m     71 m
+    0000039c               364     31 m    117 m
+    0000039f              3435     85 m    125 m
+    000003a1              1134     64 m    117 m
+    000003a0              never -- ACC did not brake for a lead at all on that drive
+
+**The MAX is stable at 117-125 m across every drive that has one, so the close-in hold clearing
+125 m is a real bound.** The p50 is NOT stable -- 31 to 85 m depending on the drive -- so quoting
+85 as "the typical case" was itself a one-drive number. The 137 m recorded elsewhere sits above all
+four maxima, which confirms it was a tail; it is not far above, so the old bound was conservative
+rather than wrong.
+
+**AND THE ONCOMING-VETO FINDING NEEDS ITS DENOMINATOR STATED, which the first write-up did not.**
+It fired on TWO of the five drives, for **0.9 s and 6.7 s** -- 7.6 seconds across five drives. The
+"99.3% remembered" is true and describes almost nothing:
+
+    0000039a   never fired        000003a0   never fired        000003a1   never fired
+    0000039c   0.9 s, 100% remembered
+    0000039f   6.7 s,  99.3% remembered
+
+So the sentence "the 90 s window is doing essentially all the work" is right about the SHARE and
+wrong about the implication -- it invites retuning a window that governs seven seconds per five
+drives. **Do not touch `ONCOMING_MEMORY_S` on this evidence.** The I-15 report is a rare event and
+the measurement needed to chase it is the one already asked for: roughly when and where.
+
+**This is the denominator rule biting in the other direction, and it is worth noticing.** Every
+previous instance in this file was a rate inflated by dead frames in the denominator. This one is a
+share that is perfectly correct over a numerator too small to act on. Check BOTH ends.
 
 ### LOW-SPEED CURVES: VISION IS STRUCTURALLY UNABLE TO HELP, AND THE MAP RARELY GETS A CHANCE
 
@@ -3286,6 +3478,14 @@ they are facts, not choices.
 The curve gate is worth noting as both 2 and 3, which is why it is the strongest of the recent gates:
 "I don't want to pass on curves" is a preference, and the PSCM authority limit underneath it is a car
 fact. When those two agree, the number is not a guess.
+
+**Checked against the industry in `bluepilot/MODEL-VS-CODE.md`**, and it mostly holds. Mobileye's
+RSS is this rule formalized -- five verifiable mathematical rules sitting OVER the learned perception,
+operating on assumed bounds on perception error. Waymo BUILT the end-to-end version (EMMA), kept it
+as research, and ships modular, their co-CEO calling monolithic "wildly inadequate to go to full
+autonomy safely and at scale". Tesla bets the other way and replaced 300k lines of C++ with one
+network. And his own car already runs the standard shape -- a learned path inside a written envelope,
+since panda enforces torque and accel limits regardless of what the model asks for.
 
 **What this costs, stated because it is real:** written code only refuses what somebody thought of.
 The center turn lane was not thought of -- the road taught us, twice, and it is still not fully
@@ -4308,6 +4508,28 @@ were green against the bug they were written for.
 - **Changes made on one branch reach the others because he rebases every time.** So CLAUDE.md is the
   channel that actually travels between sessions; per-directory memory is not.
 
+## NEVER WRITE `owner/repo#N` IN A COMMIT MESSAGE
+
+Done once, 2026-08-17, in `de53b9ca2`. GitHub turns a fully-qualified issue reference in a commit
+message into a CROSS-REPOSITORY EVENT, so that commit now appears in a stranger's issue thread on
+`pfeiferj/mapd` -- titled "measure stop sign coverage: good, unlike every other tag we hoped for".
+
+The clutter is not the problem. **It advertised a SECOND feature request inside the first one's
+thread**, which is precisely the thing that request list says never to do: one ask per thread, or a
+volunteer maintainer deprioritises both. An internal commit title leaked our next ask into the issue
+we were waiting on.
+
+It cannot be cleanly withdrawn from this side, and a comment explaining it would be louder than the
+reference. So it stands, and the rule is to not do it again.
+
+- **In commit messages**, write it unlinkable: `mapd issue 127`, or `pfeiferj/mapd issue 127`. No `#`
+  immediately after the repo name.
+- **A bare `#127` is harmless** -- it resolves against this repo, not theirs.
+- **In markdown files it is fine.** GitHub scans commit messages and issue comments, not file
+  contents, so `bluepilot/MAPD-V2-PLAN.md` may reference it freely and does.
+
+Same reasoning applies to any upstream tracker -- commaai, sunnypilot, opendbc. A commit here should
+never be able to speak in someone else's thread.
 ## 2026-08-26: THE SET SPEED WENT TO 80 AT A STOP. A `possible` WAY MATCH DID IT.
 
 *"On my second most recent drive today at one point at the beginning my speed went to 80 while it
@@ -4664,6 +4886,1619 @@ radar; Fusion ABS, IPC, steering column). Platform `FORD_FUSION_MK5`, `flags 18`
 `ALT_STEER_ANGLE | TSR`, **not** CAN FD — that combination is what exposed the duplicate-message
 bug, so keep it in mind when reasoning about flag-gated branches.
 
+## THE MODEL'S ROAD EDGE IS THE EDGE OF THE SHOULDER, NOT OF THE RIGHTMOST LANE
+
+Measured 2026-08-19 on route 0000038f, and it invalidated the arithmetic the lane anchor was built
+on. Worth reading before ANY future use of `modelV2.roadEdges` as a distance-to-lane.
+
+The anchor converts metres-to-right-edge into a lane index by assuming a car centred in the
+rightmost lane sits half a lane -- 1.85 m -- from the edge. A cross-check against the four lane
+lines came back at **79.9%**: of 289 frames where both witnesses spoke, 231 disagreed, and every
+one had the same signature. **Re-measured clean on 2026-08-20 after a stale-state fix, it is 95.4%
+and 99.2% on two freeway drives** -- the earlier figure was diluted by frames where neither witness
+had spoken. The edge does not disagree occasionally; it disagrees essentially always, which is what
+a systematic one-lane bias looks like.
+
+    outer RIGHT line probability 0.01   ->  nothing to our right  ->  the RIGHTMOST lane
+    right road edge                     ->  3.7 to 5.1 m away
+    lane_index_from_edge                ->  "lane 1"
+
+1.85 m plus a two-to-three metre freeway shoulder is 3.7 to 5.1 m exactly. **The edge index has
+been reading about one lane too far left wherever a shoulder exists, which on his roads is
+everywhere.**
+
+**It also explains the survey the module was built on.** The trusted right-edge readings had a p50
+of 4.6-4.8 m and that was read as "mostly lane 1". It was mostly lane 0 with a shoulder. A number
+measured correctly, interpreted against an assumption nobody had stated.
+
+So the edge is now a CORROBORATOR: it may pick a lane out of a range the lines allow, and it is
+refused when it contradicts the lines or when there is no bound to check it against.
+
+**AND THE FOLLOW-UP IS "DO NOT BUILD IT".** The obvious next step is to learn the shoulder and
+correct the edge back into a first-class witness. Measured on the same drive, and the correction
+would work -- the shoulder is 3.22 m past our own right lane line, and 1.68 + 3.22 = 4.90 against
+a measured 4.81. **But on all 145 motorway frames where the edge was trustworthy at all, the lines
+already said RIGHTMOST: zero middle, zero leftmost.** The edge is only readable from the one lane
+the lines identify for free, so a corrected edge produces no reading we do not already have. An
+estimator, a cache and a staleness rule to buy nothing.
+
+The same drive measured the real lane width at **p50 3.36 m** against the 3.70 the anchor assumes
+-- 11-foot lanes, tightly distributed (p10 3.29, p90 3.43). Left alone deliberately: it feeds only
+the edge path, which no longer places us, and tuning a constant to one road is exactly how the
+shoulder assumption got baked in.
+
+**THE LESSON IS ABOUT THE DIAGNOSTIC, NOT THE GEOMETRY.** The cross-check was added the same
+morning as a quiet "measure it, do not act on it" counter, on the reasoning that refusing on a
+contradiction was unmeasured and might discard good readings. That caution was right and it is
+also what found the bug -- an estimator with no second opinion had been shipping a systematic
+one-lane bias, and 1918 green tests said nothing, because every fixture agreed with the same wrong
+assumption. **When two sensors can be made to answer the same question, make them, and print the
+disagreement rate before trusting either.**
+
+## A DIAGNOSTIC THAT READS A FIELD THAT DOES NOT EXIST REPORTS ZERO, AND ZERO LOOKS LIKE A FINDING
+
+2026-08-19. `bp_anchor_replay.py` and a second tool both read
+`longitudinalPlanSP.passingAssist.leadIsSlow`. **That field has never existed.** `lead_is_slow` is
+internal to the detector and is not on the wire. capnp raised AttributeError, a broad
+`except (AttributeError, TypeError, ValueError)` swallowed it, and both tools reported
+
+    no slow-lead frames on this drive; the conjunction cannot be scored here
+
+across SIX routes and 60,000 moving frames -- on drives that produced 43 suggestions, which cannot
+happen without a slow lead. It was reported to him twice as a measurement before the arithmetic was
+questioned.
+
+**Reconstruct it instead: `speedDeficit >= minDeficitActive` with `hasLead`**, both of which are
+published. The real numbers, once fixed: 10,561 slow-lead frames on 0000038e, and the corrected
+anchor calls it LEFTMOST on 16.1% of them. That is the slow-pass warning's actual firing rate.
+
+**Two rules out of it, and the second is the general one:**
+
+- **A broad `except` around a SCHEMA read turns a typo into a confident zero.** It is right for a
+  field that is genuinely absent on some frames, and catastrophic for a misspelled one. Validate
+  field names against `custom.<Struct>.schema.fieldnames` at startup and `sys.exit` on a miss --
+  `bp_anchor_replay.py` now does.
+- **A zero from a new diagnostic is a claim about the TOOL until something independent agrees.**
+  The same shape as the mapd-v2 timing trap already in this file: absence in a log is evidence
+  about the log's conditions first. Here 43 suggestions were sitting in the same routes saying the
+  opposite, and nothing cross-checked them.
+
+## laneLineStds: MEASURED, AND THERE IS NOTHING THERE. DO NOT GATE ON IT.
+
+`laneLineStds` is published every frame and read by NOTHING in the whole tree, upstream included --
+only a replay visualizer. It looked like a real gap: `_geometry` trusts lane line POSITIONS to
+measure the width of the lane it would move into, checks only `MIN_ADJACENT_LINE_PROB`, and that
+gate OPENS a pass, so cheap opening evidence is exactly what the rules here forbid.
+
+Measured across three routes, at the REAL thresholds rather than assumed ones:
+
+    lines the gate trusts (prob >= 0.5)          44,891
+    ...located worse than MAX_ROAD_EDGE_STD 1.2       0     0.0%
+    p90 of those stds                           0.23-0.40 m
+
+**A std gate would refuse nothing.** Probability already implies a well-located line on these roads.
+Leave the field alone.
+
+**And the first run of this used prob >= 0.30 and a 0.5 m bar, both invented**, which returned a
+plausible 1.8% and would have justified building the gate. `MIN_ADJACENT_LINE_PROB` is 0.5 and
+`MAX_ROAD_EDGE_STD` is 1.2, in the file. **Read the constant before measuring against it.**
+
+## THE UNUSED mapdOut FIELDS ARE UNUSED FOR A REASON. MEASURED ON HIS ROADS, 2026-08-19.
+
+Ten of mapdOut's twenty-seven fields are consumed. He asked whether ICBM should be reading some of
+the rest. Measured across routes 00000392 and 00000393, 22,696 mapdOut frames, and the answer is
+almost entirely no -- which is worth having written down, because every one of these looks useful
+in the schema.
+
+    hazard / nextHazard / nextHazardDistance    0.0%   EMPTY on his roads
+    conditionalSpeedLimit                       0.0%   EMPTY -- no school-zone / time-varying limits
+    speedLimitSuggestedSpeed                    0.0%   EMPTY
+    advisorySpeed                               0.1%   15 frames, all 65 mph
+    nextAdvisorySpeed                           1.8%   45-65 mph, p50 376 m ahead
+    speedLimitAccepted                        100% True   never refuses, so it says nothing
+    roadContext                    freeway 58% / city 42%   strictly coarser than highwayClass
+    estimatedRoadWidth                        100%   and it is FAKE -- see below
+    distanceFromWayCenter                    86.7%   max 43.42 m, still impossible, still unusable
+
+**`hazard` was the best candidate and it is empty.** A mapped hazard with a distance is exactly the
+input the set-speed descent needs, because the ramp problem is a DETECTION TIME problem and a map
+is the only thing that can see past the camera. OSM has no hazards on his roads. Do not plan around
+it.
+
+**`estimatedRoadWidth` IS `lanes * 3.7`. It is not a measurement of anything.** 19,296 of 22,696
+frames match exactly; the other 3,400 are `lanes == 0`, where it emits a fabricated 7.4 rather than
+nothing. So it carries zero information the lane count does not already carry, it is built on the
+same 3.7 m assumption the anchor makes -- which measured 3.36 m on his actual roads -- and a
+consumer treating it as measured gets an invented two-lane road 15% of the time. **It was the
+candidate input for a shoulder correction. It cannot serve that or any other measurement purpose.**
+
+**`nextAdvisorySpeed` is the only one with any life in it**, at 1.8% with a usable lookahead
+distance, and its distance goes NEGATIVE (min -2.68 m), so it would need its own sanity gate. Not
+worth it at that coverage.
+
+**The general shape:** a field being populated is not the same as a field carrying information.
+`speedLimitAccepted` is 100% populated and always True. `estimatedRoadWidth` is 100% populated and
+derived. `advisorySpeed` is honestly empty. Check what a field SAYS, not whether it is set.
+
+## noLaneAvailable IS MOSTLY THE SYSTEM BEING RIGHT. 1.3% OF IT IS WORTH FIXING.
+
+Measured 2026-08-20 across routes 00000397/99/9a with `tools/bp_no_lane_why.py`. It is the top
+blocker at 59-89% of refused frames, and that number invites exactly one wrong conclusion, which
+was reached and reported to him before it was checked.
+
+    noLaneAvailable refusals above 34 mph                     2,116
+      a vehicle was IN that lane -- correct                     774   36.6%
+      lane empty                                              1,342   63.4%
+        ...and we were already in the LEFTMOST lane -- correct   884   65.9% of empty
+        ...lane position unknown                                431   32.1% of empty
+        ...A LANE DID EXIST AND IT STILL REFUSED                  27    2.0% of empty
+
+**The genuinely wrong refusals are 27 frames, 1.3% of the total.** The gate is not broken and the
+camera is not the feature's main problem.
+
+**HIS FRAMING IS THE CORRECT ONE**, 2026-08-20: *"A lot of lane changes are correct, I just have to
+wait for no one to be in that lane. Once we get BLIS and rear radar, it won't make these
+suggestions as much."* The 36.6% occupied share is precisely that, and BLIS plus a rear radar will
+let those be stated as "occupied" rather than collapsed into "no lane".
+
+**WHAT SENT THE INVESTIGATION THE WRONG WAY** was `bp_passing_report.py`'s own verdict line, which
+read *"a left lane EXISTS -- these refusals are the camera, not the road"* whenever the radar had
+tracked a vehicle to the left. The premise is right and the conclusion does not follow: a tracked
+vehicle proves the lane EXISTS and simultaneously proves it was OCCUPIED, which is the single best
+reason to refuse. Fixed, and it is a warning about diagnostic prose generally -- a tool that prints
+a VERDICT rather than a number gets believed, so its reasoning has to survive the same scrutiny as
+the code.
+
+**AND THE 32% "lane position unknown" IS MOSTLY NOT A GAP EITHER.** Measured with
+`tools/bp_lane_unknown_why.py --refusals`, restricted to those exact frames:
+
+    empty noLaneAvailable refusals            1,335    anchor knew the lane on 63.7%
+    UNKNOWN                                     485
+      road is TWO-WAY                           338   69.7%   refusal BY DESIGN
+      two lanes with a line each side            61   12.6%   map count vs paint disagree
+      bound is a RANGE (1,2), edge untrusted     54   11.1%   middle of a 4-lane road
+      bound is a RANGE (1,3), edge untrusted     32    6.6%   middle of a 5-lane road
+
+Two-way roads are 70% of it and they are not coverage to close: the map's `lanes` counts BOTH
+directions there, so counting leftward from the shoulder walks into oncoming. Refusing is the
+whole point. What is left -- the two RANGE rows -- is 86 frames, and on a 4 or 5 lane road the
+lines can only ever narrow, never pin, so the strip already shows it correctly as a range.
+
+**So the actionable remainder across all three drives is under a hundred frames.** Whole-drive
+anchor coverage is a different number with a different denominator (61.9% known, 76.7% of unknowns
+two-way) and the two must not be quoted for each other.
+
+## THE TWO OUTER LANE LINES ARE NOT SYMMETRIC. BOTH ABSENT MEANS LEFTMOST, NOT IMPOSSIBLE.
+
+He reported driving I-215 and the strip never filling the left box. Route 0000039c, "Belt Route",
+motorway, 3 lanes, one-way, 2,429 frames:
+
+    anchor said lane 1 (middle)          1,646
+    anchor said lane 0 (right)             677
+    anchor said lane 2 (LEFT)               80
+    witness said "no lane to my left"      383   <- the same state, 300 frames apart
+
+`lane_bounds_from_lines` called both-outer-lines-absent a contradiction -- a car cannot be leftmost
+and rightmost at once -- and threw those ~300 frames away. That reasoning treats the two outer
+lines as equally reliable. **They are not**, measured across 17,090 motorway frames and keyed on
+the ROAD EDGE so the ground truth does not come from the lines themselves:
+
+    IN THE RIGHTMOST LANE, proved by the edge:
+      far-LEFT line, one lane away     read as ABSENT on   0.7%    p50 0.76
+      far-RIGHT line, off the road     read as ABSENT on 100.0%    p50 0.01
+
+A missing far-left line is therefore strong evidence of being leftmost; a missing far-RIGHT line at
+two lanes' distance is mostly RANGE. Both absent is the leftmost lane with the far side out of
+reach. It is 7.2% of 3-lane frames and only 0.6-0.8% on wider roads.
+
+**On TWO lanes it stays a refusal**, because from either lane the other outer line is one lane
+away -- exactly the distance the measurement shows is reliable -- so absence there is anomalous
+rather than range-limited.
+
+**AND THE ASYMMETRY IS THE GENERAL LESSON.** `NO_LEFT_LINE_PROB` was measured against the outer
+LEFT line and then reused for the right one with no equivalent measurement, which the max review
+flagged before this drive did. A threshold validated on one signal is not validated on its mirror,
+however symmetric the code looks. `tools/bp_outer_lines.py` is the measurement.
+
+## THE SLOW-PASS WARNING IS CONFIRMED CORRECT ON THE ROAD. 2026-08-20.
+
+His words after route 0000039f: *"I think the slow pass thing was valid."* That closes the
+2026-08-19 report -- *"I also got slow pass when I wasn't in the far left lane"* -- which is the
+complaint the whole lane anchor was built to answer.
+
+    slow-lead frames                     10,022
+    ...and the anchor says LEFTMOST       5,208   52.0%
+    ...and the FULL three-term gate         610    6.1%   <- what he actually saw, and it was right
+
+**DO NOT RETUNE THE HOG GATE.** It is now confirmed by the only instrument that can confirm it.
+The three terms are `lead_is_slow AND in_leftmost_lane() AND right_geometry_ok`, and the third does
+most of the filtering: he was in the left lane behind someone slow for half the drive and it spoke
+on the 6% where there was somewhere to move.
+
+**The chain that got here, so none of it gets undone:**
+
+- the hog gate keyed on `not left_geometry_ok`, which is not a lane position at all -- that was the
+  2026-08-19 bug
+- it moved onto `in_leftmost_lane()`, which was then structurally unreachable on a wide road
+  because the right edge cannot be seen from the left lane
+- reading all FOUR lane lines made it reachable, and both-outer-lines-absent made it reachable on
+  three-lane roads specifically
+- and the review found the `_stand_down` direction default that was walking the index left on every
+  steering nudge, which would have made this fire in the RIGHT lane again
+
+**What is still unconfirmed** is the five-lane case. Route 0000039f claimed lane 4 on 0.2% of
+frames, so I-15's five lanes remain almost unexercised.
+
+## PASSING ASSIST CANNOT SEE A CONSTRUCTION ZONE. Reported 2026-08-19.
+
+*"It also did try to change lanes into a construction zone's cones earlier today."*
+
+**Every gate we have says that lane is clear, and by every signal we read, it is.** Cones return
+almost nothing on radar, so the lane is empty. The painted lines are still under them, so the
+geometry test passes. And the LEFT road edge -- the one thing that might notice a barrier -- is
+trusted **0.0% of the time** on multi-lane motorway, measured on route 0000038e. There is no signal
+in the system that carries "you may not go there".
+
+**Same shape as the California HOV lane**, and worth filing beside it: a lane that physically
+exists, looks empty, and must not be entered. Neither the map nor the sensors say so. A temporary
+work zone is not in OSM either -- `highway=construction` is for rebuilt roads, not this week's cones.
+
+**Two candidates, neither checked, and BOTH need the route rather than reasoning:**
+
+- **The model may already know.** `roadEdges` is trained on real scenes and a coned taper is a
+  common one. If the left edge moves inward through a work zone even at low confidence, that is the
+  signal -- and it would be the first thing the left edge has ever been good for here.
+- **The context around it.** Work zones usually carry a speed limit drop, sometimes a map lane-count
+  change, often an unusual `roadEdgeStds`. Any of those could gate it.
+
+**~~What is needed to find it: roughly WHEN and WHERE.~~ STOP ASKING. THE DATA IS GONE.** Corrected
+2026-08-23, after the ask had been put to him a third time: *"I have no fucking idea when the
+construction zone thing happened and that was weeks ago. Do we really need that?"*
+
+**No -- and it was never obtainable.** The event was on routes 0000038e / 0000038f, 2026-08-19. The
+oldest route still on the device is **00000393**. They rotated off days ago, so even a perfect
+answer from him would have pointed at deleted segments. Nobody checked that before asking.
+
+**AND IT IS NOW CAPTURED PASSIVELY, so the ask is not merely dead but unnecessary.** `leftNarrowingM`
+is published on every frame and `leftNarrowingShare` / `leftNarrowingMax` / `leftNarrowingBroken`
+land in every drive summary. A future work zone records itself; he does not have to notice it,
+remember it, or report it. **The right move is to wait for a drive, not to interrogate him about an
+old one.**
+
+**THE GENERAL LESSON, and it cost three rounds of his patience:** before asking him to recall
+something, check whether the data that recall would point at still exists. A question he cannot
+answer is bad; a question that could not have helped if he had is worse.
+
+**Until then the honest position is that this is a MISSING SENSE, not a tuning problem**, and it is
+a reason not to let the maneuver act unsupervised in a work zone.
+
+## A SENSOR THAT CANNOT MEASURE SOMETHING MUST NOT BE GIVEN A NUMBER FOR IT
+
+2026-08-21, found by wiring the BLIS producer into `RearApproach` -- the code had been sitting
+unwired since it was written, so nothing had ever exercised it.
+
+`RearApproachSide.from_blis` set `ttc = 0.0`. BLIS reports no range and no closing rate, so that
+number was invented; it was there so the veto in `blocks_lane_change` -- which tests
+`ttc < UNSAFE_TTC_S` -- would fire at all. **The same field is tested by `demands_abort` at
+`ttc < COLLISION_TTC_S`, which is the ONE input allowed to reverse a crossing already begun.** So a
+car merely SITTING in the blind spot would have commanded an emergency reversal, at 50 Hz, on
+presence-only evidence.
+
+Its own docstring said the opposite -- *"blocks_lane_change therefore cannot fire on the TTC test,
+and a BLIS source can only ever veto on presence"* -- and the code had contradicted it from the
+first line. **A docstring describing a property the code does not have is not a comment drift
+problem; it is the design that was meant to be there.**
+
+    ttc                 stays NO_THREAT_TTC_S on a BLIS source
+    blocks_lane_change  tests `closing` directly for BLIS -- presence IS the veto, and an explicit
+                        not-closing still clears it
+    demands_abort       refuses a BLIS source outright
+
+**Refusing to START on presence stays, because that costs a pass. Backing out half-way between two
+lanes is a maneuver in its own right** -- at 8 s the right answer is to keep going and let them
+settle behind, at 3 s they are arriving whatever anyone does, and BLIS cannot tell those apart.
+Same rule as everywhere else here: evidence that opens a maneuver, or commands one, must never be
+cheaper than evidence that refuses one.
+
+**THE GATE REVIEW IS THE REUSABLE PART.** Before wiring any new source into a shared struct,
+enumerate every consumer and label each REFUSES / AUTHORIZES / DISPLAYS:
+
+    may_actuate            AUTHORIZES a commanded move    radar only
+    _must_abort            reverses a committed crossing  refuses -- and it is an ACTION
+    left_ok / right_ok     refuses the pass               refuses
+    the blockedBy branch   names rearApproaching          display
+    keep-right timer       resets the wait                delays
+
+Six consumers, one authorizes, and the review as first written called `_must_abort` a refusal
+because it stops a maneuver. **It stops one maneuver by performing another**, which is what the
+fabricated TTC turned into a 50 Hz event. Ask what a consumer DOES, not what it prevents.
+
+**And the four `TestTheBackedOutChime` tests are what caught it**, by asserting `aborts` while the
+bug routed every blocked frame into `emergency_aborts` -- a counter split made for exactly this
+distinction, doing its job years before anyone read it. Keep counters separated by CAUSE even when
+nothing yet distinguishes them.
+
+## A FIELD STOPS BEING A LOG LABEL THE MOMENT A GATE READS IT
+
+2026-08-21, from the code review of the BLIS producer, and it is the sharper half of that day.
+
+`RearApproachSide.source` was written to record WHICH SENSOR ANSWERED so a drive log full of
+BLIS-sourced decisions could not be read as though a radar had cleared them. Then `may_actuate`
+started reading it -- `available and source == Source.radar` -- and nothing anywhere said the field
+had changed job. Meanwhile the radar producer's "seen and empty" branch had always done this:
+
+    if not bool(msg.detected):
+      side.available = True      # a real answer: watched, and nothing there
+      continue                   # ...and source stays Source.none
+
+So once a rear radar is fitted:
+
+    radar reports a CAR behind     source=radar   may_actuate True   ...then vetoed below
+    radar reports a CLEAR lane     source=none    may_actuate FALSE
+
+**Permission was granted only in the case the next gate refuses.** Actuation would have been dead
+on precisely the lane a pass wants, and the failure is silent -- no error, no log line, just a
+feature that never fires.
+
+**THE REVIEW FOUND IT BY ASKING WHO READS THE FIELD, NOT BY READING THE DIFF.** The diff was three
+properties and a producer; the bug was in an unchanged line four screens away that the diff gave a
+new consumer. **When a change adds a reader of an existing field, audit every WRITER of that field
+-- the diff shows you the reader and hides the writers.**
+
+**AND IT WAS PROBED, NOT REASONED.** `RearApproach.update` was driven against a hand-built digest
+and asked to print `source`: empty gives 0, a target gives 2. That took two minutes and settled
+what an hour of reading the call chain had not.
+
+**WHY 2000 GREEN TESTS SAID NOTHING.** The actuation-gate fixture assigns `available` and `source`
+together:
+
+    d.rear.left.available = left
+    if left:
+      d.rear.left.source = src
+
+which GUARANTEES an invariant the producer does not hold. Same shape as every entry in "Fixtures
+more orderly than reality", and the same answer as "Replay the class, not a funnel": one test now
+drives the real `RearApproach.update` into `may_actuate`. **A fixture that writes two fields
+together can never catch a producer that writes only one.**
+
+**And the panel inherited it within the hour** -- a caveat added the same session tested
+`str(source) == 'radar'` and would have rendered "rear: blind spot only" on a car with a working
+radar. A wrong invariant propagates to every new consumer until someone writes it down, which is
+what the module header now does: *a source must be set wherever availability is claimed*.
+
+## THE REAR DIGEST REPORTS THE SOONEST TARGET, NOT THE NEAREST
+
+Changed 2026-08-21 on a measurement. `bp_rear_digest_sim.reduce_to_sides` -- the reference
+`rear_radar_feeder.ino` mirrors -- picked `min(d_rel)` under a docstring arguing "the target that
+matters is the one arriving first". That is a TIME-TO-CONTACT argument for a different target:
+
+    80 m back at 15 m/s   ->  TTC  5.3 s   REFUSES the pass (UNSAFE_TTC_S is 8.0)
+    20 m back at  2 m/s   ->  TTC 10.0 s   allows it
+
+**The feeder reduces many targets to one, so whatever it drops is invisible downstream** --
+`targetCount` is the only tell that anything else was there. That makes the reduction the single
+place in the rear chain where evidence is DESTROYED rather than weighed.
+
+Measured with `tools/bp_digest_pick_rule.py` on route 000003a1, 30,257 radar scans:
+
+    side-scans with 2+ closing targets      33,287
+    nearest and soonest DISAGREE             5,573   16.7%
+    ...and the disagreement CROSSES 8 s      1,298    3.9%
+    worst: nearest reported 12.0 s while a discarded target sat at 0.4 s
+
+**SAFE TO CHANGE WITHOUT A ROAD TEST because it is MONOTONICALLY CONSERVATIVE**: `min(TTC)` is by
+construction <= every other target's TTC, so the new rule refuses everywhere the old one refused
+and sometimes more. It cannot open a lane the old rule closed. One divide per detection.
+
+Front radar as a proxy, stated in the tool -- there is no rear radar, so read 3.9% as "multi-target
+scenes on his roads separate the two rules this often", not as a rear-radar rate.
+
+**And the test that kept passing is the lesson.** `test_the_nearest_closing_target_wins` gives all
+three of its targets the SAME closing speed, where nearest and soonest are the same target -- so it
+held under either rule and the suite stayed quiet. A fixture that cannot distinguish two candidate
+rules is not evidence for either.
+
+**CONFIRMED ACROSS FIVE DRIVES, 2026-08-21** -- because 3.9% was one route, and two other one-route
+numbers had to be walked back the same day:
+
+    route       2+ closing   DISAGREE          CROSSES 8 s        worst crossing
+    000003a1        33,287    5,573  16.7%     1,298   3.9%       12.0 s vs 0.4 s
+    0000039a        35,986    6,624  18.4%     2,043   5.7%       12.1 s vs 0.7 s   (5 targets)
+    0000039c        46,412   13,195  28.4%     2,498   5.4%       31.8 s vs 0.7 s  (16 targets)
+    0000039f        57,971   15,523  26.8%     4,417   7.6%        8.5 s vs 0.4 s
+    000003a0        32,268    5,376  16.7%     1,456   4.5%       16.8 s vs 0.3 s  (17 targets)
+
+**Crossings are 3.9-7.6% on every drive, never zero, and the worst cases are not marginal** -- 31.8
+seconds reported while a discarded target sat at 0.7 s, on a side carrying sixteen closing targets.
+The single-drive number was if anything the LOW end. Unlike the other two one-drive figures that
+day, this one held.
+
+## THE REAR RADAR CAN BE READ FROM THE LAPTOP: `tools/bp_radar_bench.py`
+
+Written 2026-08-21, and it is the tool `bp_rear_digest_sim.py` had named as its input source since
+the day it was written, against a file that did not exist. Run it with `../.venv-bp312/Scripts/
+python.exe` -- python-can and pyserial are there, and the device has neither and needs neither.
+
+    --list                     finds the adapter by VID:PID (the RH-02 is 16D0:117E, slcan)
+    --live                     strongest return per cycle, for the angle questions
+    --record cap.json          a capture bp_rear_digest_sim.py replays
+
+**FIRST LIGHT, same day, 15 s off the real sensor:** 2172 frames/s, 33.4 Hz, 36x reduction, 0
+closing targets. Every number the 2026-08-14 bench produced by hand, reproduced from a file that
+replays. **The MRR free-runs -- all four scan modes rotating with nothing transmitted** -- so the
+ESR gateway-frame handshake that `BP-REAR-RADAR-PLAN.md` sections 3 and 4 are built around is
+doubly dead.
+
+**A BENCH CAPTURE INDOORS CANNOT CALIBRATE THE ANGLE, and it looks like it can.** That capture had
+2 of 64 slots firing, both pinned at 2.55-2.59 m, azimuth in two clusters 17 degrees apart -- one
+per scan mode. 2.57 m is under 6% of the short-range mode's 42-45 m reach, so it is near field, and
+one object reading 17 degrees apart by scan mode is what unreliable angle estimation looks like.
+**`AZIMUTH_OFFSET_RAD` and the azimuth SIGN need a reflector at 10-20 m outdoors with clear space**,
+placed unambiguously on one side. Getting the sign wrong swaps left and right: the veto guards the
+lane you are not entering, and every gate downstream looks healthy doing it.
+
+## LOG IT THE SESSION IT ARRIVES. A COMMIT MESSAGE IS NOT LOGGING.
+
+Asked for on 2026-08-21, twice: *"Make sure to log everything"*, then *"We need to remember to log
+more in the future! For all sessions."*
+
+**What prompted it.** That one day produced five facts that were real, load-bearing and written
+nowhere a future session would look:
+
+- **A vendor email from 2026-08-14.** Electroneering's answers on the feeder board -- 6" pigtails,
+  per-channel termination, CAN H/L per wire colour, enclosure size, MAX3051. Seven facts, three not
+  derivable from anything else, one that changes the install. It sat in his inbox for a week while
+  this repo carried a WRONG bill of materials, and it was logged only because he pasted it in.
+- **A bench session from 2026-08-14.** 2140 frames/s and the MRR free-running with no transmit
+  path. It survived as ONE SENTENCE inside a code docstring -- so a memory file still said to buy
+  an ESR and feed it four gateway frames, which is the dead path the bench had already closed.
+- **Two decisions** -- the digest pick rule moving to `min(TTC)`, and `bp_radar_bench.py` existing
+  at all -- lived only in commit messages and a tool docstring.
+
+**WHY A COMMIT MESSAGE DOES NOT COUNT.** Nobody greps `git log`. The next session reads this file,
+the module docstring, and the plan document. A decision recorded only in a commit is functionally
+lost, and worse than lost when a document still says the old thing -- that is exactly how the BOM
+came to list two parts for a board that is one.
+
+**The rule:**
+
+1. **A fact from outside the code gets transcribed the same session.** Vendor replies, bench
+   measurements, part numbers, prices, road observations, anything he states as decided. The test:
+   did this come from somewhere `grep` cannot reach? Then write it down.
+2. **Put it where it will be USED.** Wiring goes in the firmware header, because that is what is
+   open with a crimper in hand. Part choices go in the BOM. Cross-cutting rules go here.
+3. **Record the SOURCE and DATE.** "Vendor, Tindie 2026-08-14" is checkable. "The board has 6 inch
+   wires" is not.
+4. **Audit before reporting done.** List what the session established, then grep for each item.
+   Anything living only in scrollback or `git log` is not logged. Run on the day this was written,
+   that audit found two gaps immediately.
+5. **NEW INFORMATION ARRIVES ATTACHED TO OLD WRONG INFORMATION.** The vendor reply invalidated a
+   BOM. The bench session invalidated a memory. After writing the new fact, go and find what it
+   makes stale -- that is the half that gets skipped.
+6. **CONCLUSIONS REACHED IN CONVERSATION COUNT, NOT JUST FACTS FROM OUTSIDE.** This rule was written
+   on 2026-08-21 naming vendor replies and bench measurements, and **it failed the next day on
+   exactly the case it did not name.** A recommendation had been worked out with him -- report the
+   Waze bug through the BETA program rather than the support ticket, because beta reports reach the
+   integration team and skip triage -- and what reached the repo was a bare URL in a source list.
+   When he asked "do you remember what we were doing with that?", the answer was no.
+
+   **A SOURCE LINK IS NOT A DECISION.** If a link is worth keeping, the sentence saying what it is
+   for is worth keeping with it, in the section where the decision lives rather than in a citation
+   list at the bottom. The same goes for any option weighed and chosen in chat: the reasoning is the
+   artifact, and it evaporates unless it is written where the next reader is looking.
+
+   His words: *"I wish you had written all that down."*
+
+## `oncomingAdjacent` FIRES ON ONE-WAY ROADS, AND ONLY BELOW 43 MPH. 2026-08-21.
+
+**THE 28.9% BELOW IS WITHDRAWN AS A RATE, BY THE SAME MISTAKE THIS FILE RECORDS FOUR TIMES.**
+`oncoming_adjacent_seconds` is set to `memory_s` on a corroborated sighting and DECAYS by dt every
+cycle; the published flag is just `> 0.0`. So a frame share measures how long the 90 s window stays
+open, not how often anything was seen. Counting RISING EDGES instead, with
+`tools/bp_oncoming_adjacent.py`:
+
+    route       edges L/R   on a road mapdOut calls ONE-WAY   plausible (two-way)
+    0000039c        3 / 2                 2                          3
+    0000039f        3 / 1                 4                          0
+    000003a1        1 / 0                 1                          0
+
+**TEN sightings across three drives, and SEVEN of them on one-way roads** -- where opposing traffic
+in the adjacent lane is impossible. That is provable from evidence already recorded and needed no
+"when and where" from him, which is what every previous attempt at this stalled on.
+
+**AND EVERY FALSE EDGE IS AT OR BELOW 43 MPH, five at or below 30:**
+
+    0 mph, 2 mph, 11 mph, 22 mph, 28 mph, 30 mph, 43 mph
+    highwayClass: primary x4, secondary x2, motorwayLink x1
+
+**The reason is arithmetic.** `min_oncoming_ms(v_ego)` is `max(MIN_ONCOMING_MS, 0.5 * v_ego)` with
+`MIN_ONCOMING_MS = 5.0`. Below **22 mph** the scaled term is under the flat floor, so the floor IS
+5 m/s. The speed-scaled fix added 2026-08-15 was built for the freeway case -- its own comment says
+it "rejects -8.4 at freeway speed" -- and **by construction it does nothing at low speed.** It
+addressed the case that was measured and left the case that was not.
+
+**DO NOT JUST LOWER OR RAISE THE CONSTANT.** What that would cost is unmeasured: the 5 m/s floor
+exists for the 25 mph arterial, which is a real two-way case this car drives, and tightening it
+trades a false veto for a missed one. The measurement that decides it is the same shape as the one
+that produced this table -- score candidate floors against these ten edges AND against the two-way
+edges they must keep.
+
+**The veto itself is fine and this is not urgent.** It fired 6.7 s on the drive with four bad
+edges, so something downstream is already declining to act on them. The flag is one input away from
+a refusal, which is why it is worth fixing and not worth rushing.
+
+**TEN MORE DRIVES, 2026-08-22, AND "SEVEN OF TEN" WAS ITSELF A SMALL SAMPLE.** Routes 3a2 through
+3ab added 20 more edges: **17 plausible two-way, 3 impossible.** Pooled over all thirteen drives:
+
+    30 rising edges     10 ON A ONE-WAY ROAD (33%)     20 two-way, plausible
+
+**So the false rate is a THIRD, not seven in ten.** The first three drives were unrepresentative and
+were reported as though they settled it -- the fourth time in two days a small sample was quoted as
+a rate here, and the second time in this very entry. **Sample size before rate, every time.**
+
+**WHAT SURVIVED, AND IT IS STRONGER NOW:** every one of the ten impossible edges is at or below
+**43 mph** -- 0, -0, 2, 11, 21, 22, 28, 29, 30, 43 -- against a scaled floor that is inert below 22
+and only reaches 9.6 m/s at 43. Ten points instead of seven, spanning three more drives and a
+different network of roads, all on the same side of the same threshold. The low-speed diagnosis is
+now the well-supported half and the frequency was the weak half, which is the opposite of how the
+first write-up read.
+
+**And the clearest single case is new:** route 000003aa, `highwayClass=primary`, `oneWay=True`, at
+**-0 mph** -- stationary. Whatever the radar called opposing traffic in the adjacent lane, the car
+was not moving on a one-way road at the time.
+
+### AND RAISING THE FLOOR DOES NOT SEPARATE THEM. MEASURED, 2026-08-22.
+
+`bp_oncoming_adjacent.py` now scores candidate floors against every recorded edge -- how many FALSE
+ones a floor would have killed against how many REAL two-way ones it would have taken with them.
+Pooled over eleven drives, 30 edges:
+
+    flat  frac      FALSE killed        REAL lost
+     5.0  0.50    0 of 10    0%      2 of 20   10%   <- LIVE
+     5.0  0.70    3 of 10   30%      2 of 20   10%
+     7.0  0.70    5 of 10   50%      5 of 20   25%
+     9.0  0.50    7 of 10   70%      9 of 20   45%
+    11.0  0.50    7 of 10   70%     13 of 20   65%
+
+**Every gain costs roughly proportionally, so |v_abs| does not discriminate.** The false edges and
+the real ones live in the same speed band. This is the measurement the previous entry asked for and
+it says the change it was leaning toward is not available.
+
+**The one FREE move is the FRACTION, not the flat floor:** 0.50 -> 0.70 kills 3 of 10 false edges
+and loses NO real edge the live rule was not already losing. Cheap, real, and small.
+
+**DONE, 2026-08-23. `ONCOMING_SPEED_FRACTION` is 0.7.** The flat floor is untouched -- raising it
+costs real edges immediately and it is what the 25 mph arterial case depends on.
+
+**A TEST HAD ALREADY WRITTEN DOWN THE CONDITION FOR MAKING THIS CHANGE, AND IT WAS MET.**
+`test_the_day_drive_reading_is_NOT_rejected_and_that_is_deliberate` admitted -15.6 m/s at 30 m/s ego
+and said in its own docstring: *"If day-drive oncoming keeps showing up at half road speed on divided
+highways, THAT is the evidence to raise the fraction on -- several drives, not one number."* Eleven
+drives and thirty edges is that evidence, so the test is now
+`test_the_day_drive_reading_IS_rejected_now_and_the_old_test_named_the_condition`.
+
+**The asymmetry that originally forbade it is respected rather than overruled**, which is the part
+that makes this a measurement and not a change of mind. The old argument was that a missed oncoming
+car means suggesting a pass into head-on traffic while a false veto only costs a pass, so the floor
+must stay generous. Still true -- and the sweep says this change costs NOTHING on the missed side,
+losing no real edge the old value was not already losing. The two cases that must not break both
+still pass: a 25 mph oncoming car on a 30 mph arterial is still seen, and a real highway oncoming
+car at -27 m/s still vetoes.
+
+**A TEST WHOSE DOCSTRING NAMES ITS OWN REVERSAL CONDITION IS THE PATTERN TO COPY.** It turned what
+would have been an argument into a lookup: the constant was not defended on taste, it was defended
+until a specific, stated bar was cleared.
+
+#### FIRST ROAD DATA AFTER THE CHANGE: 4 EDGES, 0 IMPOSSIBLE -- AND THAT IS NOT YET PROOF
+
+Five night drives, routes 000003b2-b6, 32 segments, all recorded after the 17:25 deploy:
+
+    oncomingAdjacent RISING EDGES:  left 3  right 1
+    two-way road -- plausible                 4
+    ON A ONE-WAY ROAD -- impossible           0
+
+Against 30 edges with 10 impossible (33%) over the eleven drives at 0.5.
+
+**DO NOT WRITE THIS UP AS "THE FIX WORKS".** Zero-of-four cannot distinguish a real improvement from
+an ordinary run of luck: at the OLD 33% rate, four draws come back clean about one time in five.
+This is consistent with the change and is not evidence for it. That is the fifth instance in this
+file of a small sample being available to quote as a rate, and the first one where the temptation is
+to confirm my own change rather than to discover something.
+
+**The stronger signal is the edge RATE, and it is also confounded.** 30 edges over 11 drives is
+2.7 per drive; 4 over 5 is 0.8. Raising the floor should do exactly that -- but these are NIGHT
+drives on different roads, so road mix and traffic explain some unknown share of it. What would
+settle it is more drives at 0.7, which arrive on their own.
+
+**AND THE SWEEP BROKE THE MOMENT ITS OWN ADVICE WAS TAKEN.** The candidate fractions were hardcoded
+`(ONCOMING_SPEED_FRACTION, 0.7)`, so once the constant became 0.7 every row printed twice, both
+labelled live, exploring nothing. **A sweep that hardcodes the value it exists to question stops
+being a sweep as soon as its recommendation is adopted.** Candidates are now a deduped set that
+straddles whatever is live. Found by reading the output; no test would have caught it.
+
+##### AND FIXING IT OVERTURNED THE READING ABOVE: THE FRACTION IS INERT ON THESE DRIVES
+
+With the sweep actually sweeping, 0.50 / 0.70 / 0.85 produce **identical rows at every flat floor**.
+Nothing separates them, which means no edge's `|v_abs|` fell between `0.5 * v_ego` and `0.7 * v_ego`.
+The flat 5.0 m/s floor bound all four; the fraction never got a vote.
+
+    5.0   0.50 / 0.70 / 0.85     0 of 0 false killed     0 of 4 real lost
+    7.0   0.50 / 0.70 / 0.85     0 of 0                  1 of 4
+    11.0  0.50 / 0.70 / 0.85     0 of 0                  2 of 4
+
+**So "4 edges, 0 impossible" is not weak evidence for the change -- it is NO evidence about it.**
+The entry above called it a small sample, which was true and not the point: the constant that
+changed was switched off for the whole of this data. `max(5.0, f * v)` only distinguishes f at all
+above 7.1 m/s, and it takes an edge landing inside the narrow band between the two to score
+differently.
+
+That is the SAME shape as the finding that produced the speed-scaled floor in the first place --
+*"below 22 mph the scaled term is under the flat floor, so the floor IS 5 m/s"*. The mechanism was
+already written down here, and I still read a null from the inert regime as a result.
+
+**What would actually test 0.7: rising edges above roughly 16 mph.** Freeway and fast arterial, which
+is where the false edges lived anyway -- every one of the original ten was at or below 43 mph, and
+the flat floor covers the bottom of that range. Until such edges appear, the change is unmeasured on
+the road rather than unproven.
+
+##### THOSE EDGES ARRIVED, AND THEY BROKE THE METHOD RATHER THAN THE CONSTANT
+
+Route 000003b7, 2026-08-24, a genuine freeway drive. Three rising edges, two on roads the map calls
+one-way -- and once the tool was made to print the number the floor actually compares:
+
+    secondary     oneWay=True   ego 29 mph   target |v_abs| 39 mph   floor was 20 mph
+    motorwayLink  oneWay=True   ego 30 mph   target |v_abs| 29 mph   floor was 21 mph
+
+**No floor in the sweep touches them** -- 0 of 2 killed at every combination up to flat 11.0 with
+fraction 0.85. And 39 mph of apparent opposing motion is not angle-error clutter. It is a vehicle.
+
+**SO "ONE-WAY THEREFORE IMPOSSIBLE" IS WRONG, AND THAT ASSUMPTION IS WHAT THE 33% FALSE RATE WAS
+BUILT ON.** `oneWay=True` says THIS carriageway runs one way. It does not say no opposing traffic is
+nearby:
+
+- a **divided highway is one-way on BOTH carriageways**, and they sit next to each other
+- a **`motorwayLink` ramp** at an interchange usually has its opposite number a few metres away
+
+Across a narrow median a real oncoming vehicle is exactly what the radar should see. The flag is
+then not wrong about the traffic -- it is wrong about it being ADJACENT, which is a lateral-binning
+problem, not a speed-floor one.
+
+**The tool now splits the verdict** into slow clutter on a one-way road (genuinely impossible) and
+"moving like real traffic, likely across a median", and the floor sweep scores only the first as a
+gain. Pooling them asks a floor to reject genuine oncoming traffic, which is the one thing it must
+never do.
+
+**WHAT THIS COSTS, STATED PLAINLY:** the 33% figure -- 10 of 30 edges "impossible" -- is now an
+upper bound, not a rate. Some unknown share of those ten were fast, and the fast ones are probably
+real. The 0.50 -> 0.70 change was made on that pooled number. It is not thereby wrong: it was scored
+as free, losing no real two-way edge, and that part does not depend on the classification. But the
+GAIN it was credited with is overstated by however many of the three "false" edges it killed were
+in fact traffic across a median.
+
+**The general shape, and this file has it twice now:** a label that is cheap to compute gets used as
+ground truth, and the measurement inherits whatever the label was actually asserting rather than
+what it was read as meaning. `oneWay` labels a carriageway; it was read as labelling a road.
+
+###### AND THE FLOOR LEVER IS DEAD TWICE OVER: THE LAST FALSE EDGE IS TOO FAST, NOT TOO SLOW
+
+Four drives pooled (000003b7 through 000003ba), 41 segments, eight rising edges:
+
+    two-way road -- plausible                                     4
+    one-way, MOVING LIKE REAL TRAFFIC -- likely across a median    3
+    one-way, IMPLAUSIBLY FAST -- radar artifact                    1
+
+**Exactly one genuine false positive in eight**, and the floor sweep reads `0/0 killed` at every
+combination -- every change only LOSES real edges. There is nothing left for a floor to win, which
+retires that lever on current evidence.
+
+**And the one bad edge is ABOVE every floor, not below it.** `primary, oneWay=True, ego 1 mph,
+target |v_abs| 95 mph`. A floor rejects what sits under it; this sits far over. So the speed floor is
+structurally incapable of catching the only false edge left -- a second, independent reason the
+lever is finished.
+
+**THE REAL GAP: `min_oncoming_ms` HAS NO UPPER BOUND AT ALL.** It is `max(MIN_ONCOMING_MS, fraction *
+v_ego)` and nothing anywhere caps the other end, so an arbitrarily large reading counts as oncoming
+traffic and buys a 90 s veto.
+
+**DO NOT COPY THE TOOL'S 85 MPH INTO THE CAR.** `oncomingVAbs` is the target's GROUND speed, not a
+closing speed, and he drives I-15 where the posted limit is 80 -- so real opposing traffic on a
+divided highway legitimately reads near 80-85. A ceiling there would start refusing genuine oncoming
+vehicles on his fastest roads, which is the one failure this whole detector exists to prevent. 85 is
+sound as a DIAGNOSTIC split and would be dangerous as a gate; a car-side ceiling has to sit well
+above real traffic, and what "well above" means on his roads is not yet measured.
+
+**And note which direction a ceiling moves things:** suppressing a sighting REMOVES a veto, so it
+OPENS a maneuver and carries the higher bar. One bad edge in eight is not that bar.
+
+**The narrowing term, meanwhile, finally has something to refuse.** On `primary` across these three
+drives the would-admit set has a real tail -- p99 7.91, max 9.99 -- and a 1.5 m gate refuses 8.6% of
+it while touching 0.0% of what the gate opens today. That is the first road class where the taper
+check does visible work at zero measured cost.
+
+####### "DEAD TWICE OVER" WAS WRONG. IT WAS EIGHT EDGES, AND IT WAS ANOTHER SMALL SAMPLE.
+
+Three more drives, pooled to SEVEN (000003b7-bd), 85 segments, 16 rising edges:
+
+    two-way road -- plausible                                     8
+    one-way, MOVING LIKE REAL TRAFFIC -- likely across a median    3
+    ON A ONE-WAY ROAD, slow -- clutter, impossible                 3
+    one-way, IMPLAUSIBLY FAST -- radar artifact                    2
+
+**The eight-edge batch happened to contain ZERO slow-clutter edges, so the sweep read 0/0 and the
+lever looked finished. It is not.** Three of the next eight were exactly the clutter a floor exists
+to reject, and the pooled sweep has a free move in it:
+
+    flat  frac    FALSE killed   real LOST
+     5.0  0.70      0 of 5        0 of 11    <- live
+     7.0  0.70      1 of 5        0 of 11    <- FREE
+     9.0  0.70      3 of 5        2 of 11
+
+**Raising the FLAT floor 5.0 -> 7.0 kills one false edge and loses nothing** -- including nothing
+from the median-crossing set, which the scorer counts as real and protects, correctly. And it does
+not touch the case the flat floor exists for: a 25 mph oncoming car reads 11.2 m/s, still well clear
+of 7.0. Note this contradicts the earlier line that "raising the flat floor costs real edges
+immediately" -- that was measured under the wrong classification, when median crossings were being
+counted as false positives a higher floor could win.
+
+**NOT SHIPPED, and the reason is the entry title.** The gain is ONE edge in sixteen, and the change
+removes a veto, so it opens a maneuver and carries the higher bar. Acting on it now would be making
+the same mistake a third time in one file.
+
+**THE PATTERN IS NOW THE FINDING, and it deserves to outrank any of the individual numbers.** In
+this feature, every conclusion drawn from fewer than about ten events has needed revision:
+
+    28.9% memory-window share      withdrawn -- frames, not edges
+    "seven of ten impossible"      became 33% on ten more drives
+    33% false rate                 became an upper bound once oneWay was understood
+    "0 of 4, the fix works"        no evidence at all -- the constant was inert there
+    "dead twice over"              THIS -- eight edges, zero of them the relevant kind
+
+**So the rule for this detector specifically: do not act on a sweep with fewer than ~20 edges, and
+state the edge count beside any claim made from one.** The sweep is cheap to re-run and the edges
+accumulate on their own; there has never been a reason to act early, only a temptation to.
+
+## THE COVERAGE PROBLEM IS A CAMERA PROBLEM, AND RADAR TRAFFIC SEPARATES 6:1 ON IT
+
+2026-08-24. Asked the right question for the first time. The previous three attempts all asked *how
+do I loosen the geometry gate*; the question that matters is **what else on this car knows a lane
+exists**, and it came out of him pushing back on a gloomy forecast:
+
+  *"I wanted it to be better than me since radar can know if the car is slower faster than I can."*
+
+**He is right, and the forecast was mis-framed.** Radar IS better than him at that, instantly and
+exactly, and it was never the bottleneck. `blockedBy` reason 7 is `noLaneAvailable` -- "geometry says
+there is nowhere to go" -- and it is the top blocker on 53-87% of every drive. The limiting sense is
+**"is there a lane over there"**, which is the camera, and which is the one thing a human does
+effortlessly. Measured agreement with his own passes: **5 of 55 eligible, 9%.**
+
+    is that car slower, and by how much      radar beats him -- already working
+    is there a lane to move into             he beats it badly -- this is the 9%
+
+**`tools/bp_radar_lane_proof.py`, seven drives, frames where the LEFT GATE REFUSED:**
+
+    road        refused  radar blind  sameDir  TRAVELLING  oncoming  TRAV,no onc
+    one-way       38938        0.0%     93.8%      87.2%     22.3%        73.0%
+    TWO-WAY        6981        0.0%     78.1%      36.2%     86.5%        11.8%
+
+The candidate rule -- **a vehicle went PAST us on the left, and no opposing traffic has been seen
+there** -- fires on 73.0% of refused one-way frames and 11.8% of refused two-way frames. **And the
+guard doing the separating is `oncomingAdjacent`, a RADAR fact, not the map**, which is precisely
+what the 2026-08-09 revert note demanded before this could be re-proposed.
+
+**THE SPEED TEST IS WHAT THE REVERTED VERSION LACKED.** `sameDirectionRecent` alone is 78.1% on
+two-way roads -- useless. `overtakenVAbs > 0` requires a vehicle to have gone PAST us, which a car
+easing into a turn lane does not do, and that alone drops two-way from 78.1% to 36.2%. The oncoming
+guard takes it the rest of the way to 11.8%. **That gap is the turn-lane exposure the note asked
+for, and it is now measured rather than argued.**
+
+### THREE REASONS THIS IS NOT A GREEN LIGHT, AND THE THIRD IS THE ONE THAT BITES
+
+1. **11.8% IS NOT ZERO.** A center turn lane is exactly "two-way road, traffic going our way, nobody
+   coming right now", and on ~824 frames here that description held. The 2026-08-09 failure was
+   three lane changes. This rule alone would still permit some of them.
+
+2. **BOTH GUARD FIELDS ARE MEMORY-BASED.** `oncomingAdjacent` and `sameDirectionRecent` carry decay
+   windows, so "no oncoming" means "none seen recently". On a quiet two-way road that is the normal
+   state, which is the same shape as the 90 s memory window that made `oncomingAdjacent` read 28.9%
+   of frames when the sighting count was tiny.
+
+3. **73% OF REFUSED FRAMES IS NOT 73% MORE PASSES, AND READING IT THAT WAY WOULD BE THE DENOMINATOR
+   ERROR AGAIN.** Most refused frames are not pass opportunities at all -- no slow lead, wrong
+   speed, driver active. The number that matters is how many of the 50 passes he makes that the
+   feature currently misses would become available, and **that is not measured.** It is the next
+   thing to measure and it is strictly smaller than 73%.
+
+**What a safe version would need**, in order: the speed test (have it), the oncoming guard (have
+it), a two-way refusal that does not depend on the map being present, and a measurement in
+DECISIONS rather than frames. The map may legitimately refuse here -- `oneWay` false blocking the
+rule is the map refusing, which is allowed -- but leaning on it re-creates the dependency the revert
+note was written to avoid, and costs the roads where `tileLoaded` is false.
+
+**This is the best lead on the coverage ceiling that exists.** It is also the exact idea that put
+the car into a turn lane three times, so it gets built slowly or not at all.
+
+### CORRECTION, SAME HOUR: THE SPEED TEST WAS A LATCH. 73% WAS REALLY 21%.
+
+Found reviewing my own tool, by checking what the field asserts instead of trusting its name.
+
+`overtakenVAbs > 0` reads as "a vehicle went past us". It is not. custom.capnp calls it **"ground
+speed of the LAST one"**, it is LATCHED, and `adjacent_lane` deliberately carries it across resets
+in the `held` tuple so a sensor dropout cannot erase it -- with a comment saying exactly why. On a
+freeway it becomes true in the first minute of a drive and stays true. **The column was measuring
+"somebody overtook us at some point", which is nearly a constant on divided roads.**
+
+Corrected to `overtakenCount > 0 AND overtakenSeconds <= 15 s`. The count is needed because
+`overtakenSeconds` means both "seconds since the last one" AND "0 = never seen", so zero alone
+cannot separate "just happened" from "never happened" -- a trap in the field itself.
+
+    road        refused  sameDir  ever ovtk  ovtk<15s  oncoming  RECENT,no onc
+    one-way       38938    93.8%      87.2%     24.4%     22.3%          21.0%
+    TWO-WAY        6981    78.1%      36.2%      5.4%     86.5%           2.5%
+
+**THE HEADLINE WAS INFLATED 3.5x: 73.0% -> 21.0%.** And the correction cuts BOTH ways, which is why
+it is worth having rather than merely embarrassing:
+
+    recovery on one-way    73.0% -> 21.0%    much weaker
+    turn-lane exposure     11.8% ->  2.5%    much safer
+    separation ratio         6:1  ->  8.4:1  the recency test genuinely discriminates
+
+So the rule is a smaller win and a considerably safer one. 21% of refused frames on divided roads,
+against a gate that opens 22% today, is roughly a +75% relative improvement in reachability -- not
+the tripling the first number implied, and still the largest available.
+
+**THE DENOMINATOR CAVEAT SURVIVES UNCHANGED AND IS STILL THE BINDING ONE.** 21% of refused FRAMES is
+not 21% more passes. Most refused frames are not pass opportunities at all. The number that decides
+whether this is worth building is in DECISIONS, and it is still unmeasured.
+
+**AND THE LESSON IS THE ONE FROM `oneWay`, TWELVE HOURS LATER:** a field asserting one thing, read as
+asserting another, with the misreading flattering the result. Both times the fix was to open the
+schema comment rather than trust the identifier. **Every field this feature leans on should have its
+capnp comment read once, deliberately, before a number built on it is published.**
+
+### IN DECISIONS IT IS ONE PASS IN TWENTY -- AND THE BIGGEST GAP IS NOT SOFTWARE AT ALL
+
+`tools/bp_pass_decisions.py`, eight drives, **20 passes** -- exactly the threshold this file set two
+hours earlier for when a number here may be acted on. A pass is the detector's own definition:
+rising edge of his left stalk, sampled the frame BEFORE it goes up, moving, lead ahead.
+
+    passes he made                     20
+    PA already agreed                   1     5%
+    refused for another reason         16    80%
+    refused on GEOMETRY                 3    15%
+      ...lane-proof rule would fire     1     5%
+
+**THE ENTIRE LANE-PROOF LEAD IS WORTH ONE PASS IN TWENTY.** And it is stable: 1 of 3 geometry misses
+at n=16, still 1 of 3 at n=20. The frame-level numbers -- 73%, then 21% -- were never wrong, they
+were in a unit that does not convert. Most refused frames are not pass opportunities.
+
+**WHY PA WAS SILENT AT THE MOMENT HE SIGNALLED, AND THIS IS THE REAL FINDING:**
+
+    notEngaged            8      <- openpilot longitudinal was not engaged
+    driverChangedLanes    3
+    tooSlow               3
+    noLaneAvailable       3      <- geometry, the thing three sessions have been spent on
+    nothingSlower         2
+    none                  1
+
+**He passes with cruise off 40% of the time -- nearly three times as often as geometry blocks him.**
+`OFF_BY_DESIGN` correctly excludes those from the agreement denominator, which is why they have been
+invisible: the score says "of the passes it could have had an opinion about", and that phrasing hid
+that the set is less than half his passing.
+
+Strip the off-by-design reasons and **9 of 20 passes were eligible**; geometry is 3 of those 9. So
+geometry IS the top addressable blocker, and the addressable set is under half his driving.
+
+**WHAT THIS MEANS FOR EFFORT, and it reverses the priority three sessions ran on:** the geometry gate
+is the hardest problem here and worth at most 1 pass in 20. Whether he is ENGAGED when he passes is
+worth up to 8 in 20, costs no code, and has never been looked at. **Nobody measured which blocker
+dominated before optimising one of them.**
+
+**Do not "fix" this by relaxing the engagement precondition.** It is not a gate to loosen -- a
+feature that commands a lane change while openpilot is not driving is a different and much worse
+thing.
+
+#### AND "IT IS HIS HABIT" WAS WRONG WITHIN THE HOUR. IT IS A VERDICT ON THE FEATURE.
+
+His answer, unprompted, on being told he passes with cruise off 40% of the time:
+
+  *"Today I was behind some very slow drivers that I wanted to get around fast, so cruise was off,
+   if you know what I mean."*
+
+**He disengages BECAUSE of what the system does, in exactly the situation the feature exists for.**
+The advice that followed the measurement -- "engage cruise on roads where you would expect to pass"
+-- is therefore backwards: it asks him to accept a worse pass so the feature can be scored on it.
+
+**AND THIS CONFIRMS THE ONE THING THAT WAS RECORDED AS UNMEASURED.** See the ACC-suppression
+section: passing assist actuates the blinker over CAN, stock Ford ACC brakes ~4x less often with the
+DRIVER's stalk blinker, and whether an injected blinker earns the same treatment has never been
+tested. That section's own conclusion:
+
+  *"the first half of a commanded pass is slower than the same pass made by hand. That is the cost,
+   it is fixed, and the only lever left is the follow gap itself."*
+
+It was written as a predicted cost. **He has now reported it as lived experience, and this fork
+treats his report of his own car as outranking inference.** The 8-of-20 `notEngaged` count is that
+cost, measured, without anyone having set out to measure it.
+
+**WHAT IT MEANS FOR THE FORECAST, and it is worse than the coverage story:** solving geometry and
+fitting the rear radar still leaves him turning cruise off for the passes he cares most about. A
+feature that is only used for the passes he does not mind being slow is not the feature he asked
+for. **The longitudinal behaviour during a pass is not a side issue -- on this evidence it is the
+gating one**, and it has had a fraction of the attention the geometry gate has.
+
+**Levers that exist, in order of how proven they are:**
+
+1. **The follow-gap button.** Built (`gap_control.py`), closed-loop, OFF by default under
+   `IcbmGapControl`. Never requested by passing assist and never exercised on the road.
+2. **The blinker-suppression question**, still unmeasured and answerable from logs already recorded:
+   compare `carState.leftBlinker` duty cycle during a COMMANDED blink against a stalk blink. Near
+   100% kills most of the hypothesis; near 50% quantifies what a fix must beat.
+3. **Nothing else.** Under ICBM the longitudinal authority is Ford's. Passing assist cannot make the
+   car accelerate; it can only ask for a gap and a set speed and let Ford choose the means.
+
+**The measurement that turns his sentence into a number** is how hard he accelerates through a
+manual pass against what Ford's ACC delivers in the same situation. That is `aEgo` during his
+cruise-off passes versus `aEgo` while ACC is driving, and it needs no new drive.
+
+##### MEASURED: FORD *CAN* NEARLY MATCH HIM. IT JUST HAS NO REASON TO.
+
+`tools/bp_pass_accel.py`, eight drives, 13 cruise-off left-stalk passes:
+
+    aEgo, m/s^2                    n      p50    p90    p99    MAX
+    HIS pass, cruise off        8213     0.47   1.17   2.16   3.82
+    FORD ACC, below set speed  62570     0.25   0.79   1.39   3.09
+
+**The capability gap is small and the behaviour gap is large.** Ford reaches 3.09 against his 3.82 --
+81%, and his own figure is a floor rather than a limit. But typically he uses **1.9x** what ACC does
+(0.47 vs 0.25) and 1.48x at p90.
+
+So the slow pass is not a ceiling on what the car can do. **It is that ACC has no reason to hurry**,
+because the only things governing it are the set speed and the follow gap. That is good news: it
+makes the problem a request problem rather than a hardware one.
+
+##### AND HIS SECOND REASON IS THE SAME LEVER FROM THE OTHER SIDE
+
+  *"I also wanted to get closer to some of these slow people hogging the left lane."*
+
+Two independent reasons for switching cruise off, both naming the follow gap:
+
+    wanted to get around them FAST      ACC accelerates ~half as hard as he does
+    wanted to get CLOSER first          ACC holds a gap he considers too large
+
+**BLINKER-ACC-SUPPRESSION already concluded that the follow gap is the only lever left, and the gap
+controller is BUILT** -- `opendbc/sunnypilot/car/ford/gap_control.py`, closed-loop against
+`ACCDATA_3`, driver input outranks it, asserted-not-timed so silence restores. It is behind
+`IcbmGapControl`, **defaults OFF, and has never had a requester**: `longitudinalPlanSP.accGapRequest`
+is plumbed and nothing has ever set it.
+
+**So the piece that would change his behaviour is the one piece that was finished and never wired
+up.** Its own note says the first real passing-assist request is the experiment that proves whether
+the camera honours an injected gap press at all.
+
+**Two things to be careful of before building it, and neither is a reason not to:**
+
+- **The gap button ACTUATES.** Unlike everything else passing assist does today, a gap request
+  presses a real button on his wheel and changes how the car follows. This is not another gate that
+  commands nothing, so it does not get shipped on a measurement and a hunch.
+- **It only helps while ACC is driving.** His complaint is about driving manually. The bet is that a
+  closer gap and a harder pass make cruise worth leaving on -- which is exactly the loop that has to
+  be closed for any of this to matter, and it is untested.
+
+`IcbmGapControl` is his toggle, and it is off. Naming it is the whole intervention for now.
+
+**AND THE OBVIOUS DISCRIMINATOR IS FORBIDDEN, which is worth stating before someone reaches for it.**
+`oneWay` from the map separates these perfectly by construction -- it is what labels them. But
+suppressing an oncoming sighting because the map says one-way is **the map REMOVING a refusal**,
+which is the map opening a maneuver. The rule in this file is absolute: *map data MAY REFUSE, MUST
+NEVER OPEN*. A stale tile would then admit a pass into oncoming traffic, and "no map costs coverage,
+never safety" would stop being true. **Do not use `oneWay` to gate this flag**, however well it
+would score.
+
+**A caveat on the table, because the tool cannot be exact here.** Two REAL edges score as lost under
+the LIVE rule, which is impossible if the scored `oncomingVAbs` were the value that triggered them --
+so on ~7% of edges the value at the edge frame is not the triggering sighting's. The flag latches
+after `ONCOMING_FRAMES` of corroboration and the tool reads the frame the latch appears on. Treat
+the columns as accurate to a couple of edges, which does not change the shape.
+
+## (superseded) `oncomingAdjacent` READS TRUE ON 28.9% OF LEFT FRAMES ON A FREEWAY. FIRST READ 2026-08-21.
+
+The struct audit that found 25 unread `PassingAssist` fields was widened to every fork-authored
+capnp struct: **53 fields across 13 structs have at most one mention in the whole tree** (one
+mention being the publish line). Most are deliberate raw logging -- `SideDetect` says so in its own
+comment. Two are not, and they are the sharpest thing found all day.
+
+`AdjacentLane.oncomingAdjacent` and `.sameDirectionRecent`. custom.capnp introduces them as *"the
+two facts that decide whether this side is refused, logged because they are what a disputed
+decision comes down to and neither is visible from the road."* **Nothing had ever read either
+one** -- so the fields recorded specifically to settle the I-15 oncoming false fire had been
+accumulating unread since the day they were added.
+
+Route 0000039f, 23,308 frames, now readable through `tools/bp_passing_unread.py`:
+
+    left    oncomingADJACENT  6737  28.9%    sameDirectionRecent 19231  82.5%   overtaken p50 74 mph
+    right   oncomingADJACENT  3207  13.8%    sameDirectionRecent 21902  94.0%   overtaken p50 27 mph
+
+**`oncomingAdjacent` means opposing traffic in the lane RIGHT NEXT to us, and no setting overrides
+it.** On a divided highway it should be near zero. 28.9% on the left, on a drive where the same
+side also reports same-direction traffic at a p50 of 74 mph on 82.5% of frames, cannot both be
+describing that road.
+
+**AND IT DOES NOT REACH THE VETO, WHICH IS THE OTHER HALF.** The oncoming veto fired for 6.7 s on
+this same drive. So the flag is noisy and something downstream is refusing to act on it -- the
+guard is working. **Do not "fix" this by tightening the veto; it is already tight.** What is wrong
+is the flag, and the flag being wrong is only interesting because it is one input away from a
+refusal that would be.
+
+**This is the strongest lead yet on the one confirmed on-road bug**, and it still needs the same
+thing every other attempt needed: roughly WHEN and WHERE the false fire happened, so
+`bp_why_it_suggested.py` can be pointed at the window. What has changed is that the two fields that
+settle it are now readable instead of theoretical.
+
+**And the general finding is the audit technique.** Compare every field of a struct against every
+consumer in the tree, counting a single mention as "published and never read". It found 25 fields
+in one struct, then 53 across thirteen, then this. **A schema comment saying a field exists to
+settle disputes is a promise that something reads it. Check.**
+
+## THE LEFT PASS GATE OPENS ON 0-30% OF MOTORWAY, AND NO ONE THRESHOLD FIXES IT
+
+2026-08-22, `tools/bp_left_gate_reach.py`. Prompted by five straight drives where the drive report
+named `edge unsure` as the top left-refusal term at 50-62%.
+
+**FIRST, TWO NUMBERS IN THIS FILE WERE WRONG.**
+
+- *"the LEFT road edge is trusted 0.0% of the time on multi-lane motorway"* -- measured on one
+  route. Across four drives the left edge passes its own threshold on **14%, 32%, 67%** of moving
+  motorway frames. Not zero, and not consistent.
+- **`bp_passing_report`'s "road edge refused, by mph: 70+ 100%" is NOT a reachability figure.** Its
+  denominator is REFUSED frames -- `_edge_by_speed[band][0]` counts refusals, not frames. So 100%
+  means "when it refused, the edge was among the reasons", which is compatible with the gate opening
+  most of the time. Reading it the other way is the denominator error, for the fifth time.
+
+**WHAT REACHABILITY ACTUALLY IS**, moving frames only, by road class:
+
+    route     class        frames  GATE OPEN  edge ok  paint ok  edgeStd p50   p10
+    000003ab  motorway       5528       27%      32%       84%         1.53   0.93
+    0000039f  motorway       9054       30%      67%       52%         0.95   0.59
+    000003aa  motorway       5155        0%      14%       70%         6.60   0.56
+    000003a8  secondary      2500        6%      90%       71%         0.91   0.77
+
+**THE BINDING TERM ALTERNATES.** On 3ab the edge refuses (32% ok) while paint is fine (84%). On 39f
+paint refuses (52%) while the edge is fine (67%). **No single threshold is the answer**, which is
+the same shape as the oncoming-floor result the same day.
+
+**AND ON 3aa THE EDGE MEASUREMENT IS NOT MARGINAL, IT IS GARBAGE:** p50 **6.60** against a 1.2
+threshold, with p10 at 0.56 -- a bimodal distribution, fine on a tenth of frames and five times the
+threshold in the middle. That is a measurement failure, not a threshold that needs moving, and it
+is why loosening buys nothing there.
+
+**WHAT LOOSENING `MAX_ROAD_EDGE_STD` WOULD ACTUALLY BUY**, with the CEILING stated -- the share of
+frames where paint, width and room-beyond ALL already pass, so the edge is the only refuser:
+
+    route     ceiling   1.2    1.5    1.8    2.1    2.5    3.0
+    000003ab      83%   27%    43%    47%    50%    52%    55%
+    0000039f      52%   30%    33%    35%    37%    39%    40%
+    000003aa      70%    0%     1%     2%     3%     5%     7%
+
+Best case 27 -> 52%, worst case nothing. **The ceiling is the number to notice**: on 52-83% of
+motorway frames the edge-std term is the ONLY thing refusing, so the coverage genuinely is there to
+win -- but not by this lever, and not evenly.
+
+**DO NOT LOOSEN IT ON THIS EVIDENCE.** Coverage is not the test, because this direction OPENS a
+maneuver: *evidence that opens must never be cheaper than evidence that refuses*. The threshold's
+own comment already records that its units were once inferred from a rendering clamp and were wrong,
+and that 0.5 -> 1.2 was made on the same kind of argument. What is missing is what `roadEdgeStds`
+MEANS physically at 1.5 versus 6.6, and whether the model is uncertain or simply wrong there.
+
+**The honest state: this is the largest coverage loss in the feature and its cause is not a
+threshold.** The next step is the measurement nobody has done -- what the left edge is doing on the
+frames where its std explodes, checked against the lane lines on the same frame, which is the
+technique that found the shoulder bias.
+
+## `roadEdgeStds` IS A DISTANCE PROXY, NOT A CONFIDENCE FLAG. THE LEFT GATE REFUSES WIDE ROADS.
+
+2026-08-22, `tools/bp_left_edge_truth.py`, three drives, 44,000 moving frames. This is the
+measurement the previous entry said was missing, and it settles which lever is wrong.
+
+**The question was whether a big `leftEdgeStd` means the POSITION is bad.** Two witnesses on the
+same frame, which is the technique that found the shoulder bias: the road edge and the outermost
+believed left lane line both measure the left side of the road, so their gap is a shoulder -- real,
+positive, roughly constant. Plus frame-to-frame jump, which needs no second witness at all.
+
+    leftEdgeStd     frames    shoulder gap p50    frame jump p50 / p90    |edge| p50
+    0.0-1.2          34-62%       2.56 - 3.95        0.13-0.16 / 0.38-0.49    5.5 - 7.6
+    1.2-2.0          18-26%       4.47 - 4.69        0.14-0.19 / 0.45-0.55    7.9 - 8.8
+    2.0-4.0           9-13%       4.54 - 4.89        0.13-0.15 / 0.37-0.43    8.9 - 9.3
+    4.0-8.0           5-15%       4.90 - 5.16        0.12-0.14 / 0.31-0.36    9.3 - 9.9
+    8.0+              6-20%       5.40 - 5.50        0.14-0.15 / 0.38-0.40   10.0 - 10.4
+
+**THE FRAME-TO-FRAME JUMP IS FLAT.** 0.13 m at std 0.5 and 0.14 m at std 8+, with p90 identical
+too. The edge position does not wander at high std -- it is exactly as steady as at low std. So the
+std is NOT reporting an unstable measurement.
+
+**THE GAP NEVER GOES NEGATIVE AND NEVER GOES WILD.** It grows smoothly, and its p10 grows with it
+(1.1-1.5 at the bottom band, 4.5-4.9 at the top), so the whole distribution shifts rather than a
+bad tail appearing. Nothing here looks like garbage.
+
+**WHAT THE STD ACTUALLY TRACKS IS DISTANCE.** `|edge|` goes 5.5-7.6 m at the bottom band to
+10.0-10.4 m at the top, monotonically, on all three drives. The model is less certain about things
+further away, which is ordinary and correct behaviour for it.
+
+**SO `MAX_ROAD_EDGE_STD` IS ACTING AS A DISTANCE CUTOFF ON THE LEFT ROAD EDGE**, and that is
+backwards for this gate. A distant left edge means a WIDE road -- more lanes out there, more room to
+pass into. The gate refuses hardest exactly where passing is most available, which is why route
+000003aa read `gate open 0%` on motorway with an edge-std p50 of 6.60: a wide freeway, a far median,
+a high std, and a refusal.
+
+**THE LEVER IS THE WRONG SHAPE, NOT THE WRONG VALUE.** The previous entry's sweep (1.2 -> 2.5 buys
+27 -> 52% on one drive and 0 -> 5% on another) now makes sense: raising a distance cutoff helps only
+where the distance happened to be near it. Loosening it further is not the fix and neither is
+leaving it.
+
+**WHAT THIS DOES NOT ESTABLISH, and it is the part that stops this becoming a change today.** The
+gap being 5.4 m past the outer paint does not say WHAT is out there. Shoulder, median, barrier, or
+two more lanes all produce the same number, and `_geometry` already has a term for room past the
+paint (`MIN_EDGE_BEYOND_LINE_M`) which is a different question from confidence. Deciding what the
+edge term should ask instead needs that separation, and this measurement cannot make it.
+
+**Nothing changed on the strength of this.** It reframes the problem and retires one candidate fix,
+which is what it was for.
+
+## NOTHING AVAILABLE CAN OPEN THE LEFT GATE MORE THAN THE EDGE ALREADY DOES
+
+2026-08-22. The close of the left-gate investigation, and the answer is that both candidate
+replacements fail -- for opposite reasons, and neither is a tuning problem.
+
+**The setup.** `bp_left_edge_truth.py` established that `leftEdgeStd` tracks DISTANCE rather than
+confidence, so `MAX_ROAD_EDGE_STD` acts as a distance cutoff and refuses wide roads -- the wrong
+shape for a gate that should open where there are more lanes. So: what could ask the right question
+instead?
+
+**CANDIDATE 1, THE LANE ANCHOR. It answers, and it is forbidden.** On the motorway frames where
+edge-std is the SOLE refuser -- 8,650 across three drives -- the anchor is not blind at all:
+
+    000003ab  motorway  3080 frames   LANE EXISTS 19% pinned + 81% range   unknown  0%
+    000003aa  motorway  3591 frames   LANE EXISTS  9% pinned + 91% range   unknown  0%
+    0000039f  motorway  1980 frames   LANE EXISTS         100% pinned      unknown  0%
+
+Essentially 100% say a lane exists to the left. **But `lanes_total_out` comes from the MAP** --
+mapdOut `lanes`, gated on `one_way` -- so letting it open the gate is the map opening a maneuver.
+*Map data MAY REFUSE, MUST NEVER OPEN.* A stale tile would then admit a pass into whatever is
+actually there. This is the second time in two days that the map has scored perfectly on a question
+it is not allowed to answer; the first was `oneWay` for the oncoming flag.
+
+**CANDIDATE 2, THE FAR-LEFT LANE LINE. Camera-only, legal -- and it carries no information.** It is
+believed on **100%** of those same frames, on every road class and every drive, which looks like a
+strong signal and is the opposite. This file already measured why:
+
+    far-LEFT line, one lane away, read as ABSENT on 0.7% of frames -- even from the RIGHTMOST lane
+
+The far-left line is believed ~99% of the time regardless of how many lanes there are. A test that
+is true almost always opens almost everything, which is not a gate.
+
+**AND THAT ASYMMETRY IS THE REAL FINDING, not a limitation of these two candidates.** Absence of
+the far-left line is RARE, so it is informative -- which is exactly why `no_lane_left` works and why
+both-outer-lines-absent could be turned into a leftmost verdict. Presence is near-universal, so it
+is not. **The camera can refuse on this question and cannot open on it.** Combined with the map rule
+above, nothing currently on the car can open the left gate more than the road edge already does.
+
+**So the edge term stays, and its wrongness is now understood rather than suspected.** It refuses
+wide roads because std tracks distance; the coverage lost is real (52-83% of motorway frames have
+the edge as sole refuser); and there is no legal, informative substitute available today.
+
+**What WOULD change it, stated so the next session does not re-derive these three dead ends:** a
+signal that says "there is a travel lane to my left" from the camera, in the POSITIVE direction,
+that is not true almost everywhere. Candidates nobody has measured: the far-left line's LATERAL
+POSITION rather than its probability (a line at 5.5 m is a lane away, one at 1.9 m is our own),
+`laneLineStds` on that specific line, or the adjacent-lane radar seeing traffic two lanes out.
+The first is cheap and is where to start.
+
+### AND THE FIRST ONE IS ALREADY IN THE GATE. IT IS `left_lane_width`. 2026-08-22.
+
+The paragraph above sent the next session off to build "the far-left line's LATERAL POSITION rather
+than its probability". Reading `_lane_and_beyond` before building it, that is what the gate's own
+width term already is:
+
+    width = sign * (far_y - near_y)      far_y = laneLines[LL_FAR_LEFT], near_y = laneLines[LL_LEFT]
+
+The far-left line's position measured against ego's OWN left line -- exactly "a line at 5.5 m is a
+lane away, one at 1.9 m is our own", computed every frame, published as `leftLaneWidth`, and gated
+by `MIN_LANE_WIDTH_M <= width <= MAX_LANE_WIDTH_M`. **So there is nothing to add. The open question
+is whether the term we already have DISCRIMINATES**, which is a different and much cheaper question
+than building a new signal.
+
+**AND THE TOOL THAT WOULD ANSWER IT HAD BEEN COLLECTING BOTH REMAINING TERMS AND PRINTING NEITHER.**
+`bp_left_gate_reach.py` counted `widthOk` and `beyondOk` from the day it was written and printed
+only `edge ok` and `paint ok` -- this fork's oldest bug, inside the tool built to diagnose the gate,
+which is why the four-term table in the entry above has two columns missing. That is also why the
+sweep could report a 52-83% "ceiling" without anyone noticing which term owns the other half.
+
+**The measurement now queued** is the separation test: label frames by the LANE ANCHOR -- "a lane
+exists to my left" vs "leftmost" -- and report each CAMERA term's p10/p50/p90 in each class. Using
+the map to LABEL a measurement is legitimate; using it to OPEN a gate is not, and the anchor scoring
+~100% "lane exists" on the sole-refuser frames is precisely why it can label this and never carry it.
+
+A term whose distribution is the same in both classes carries no information about whether a lane is
+there. That is what sank the far-left line's PROBABILITY, and the same test applied to its POSITION
+is the whole remaining question.
+
+**Do not read the 0.7% absence figure as evidence about position.** It was measured from the
+RIGHTMOST lane, where there genuinely ARE lanes to the left -- so a believed far-left line there is
+the model being right, not the model being useless. What was never measured is what that line does
+from the LEFTMOST lane, and position and probability may well part company there.
+
+**AND THE SECOND CANDIDATE IS NOT UNMEASURED EITHER -- THIS FILE CONTRADICTED ITSELF.** The list
+above names "`laneLineStds` on that specific line" as something nobody has measured, while the
+entry **laneLineStds: MEASURED, AND THERE IS NOTHING THERE** sits a few hundred lines earlier. Two
+places in this file disagreeing about one measured fact is the exact thing recorded elsewhere here
+as how a line of investigation gets closed on the wrong evidence.
+
+They are not quite the same question, which is why this is a narrowing rather than a deletion. The
+earlier entry measured every trusted line POOLED and asked whether a std gate would REFUSE anything
+(0 of 44,891, so no). The left-gate candidate is the far-left line SPECIFICALLY, asked as a
+DISCRIMINATOR between two classes. A field can be useless as a refusal gate and still separate.
+
+But it is strongly suggestive: if far-left stds are all under 1.2, the distribution is compressed
+and has little room to separate. **`bp_left_gate_reach.py` now scores it in the same run**, so this
+gets a real answer instead of a third opinion.
+
+**All three named candidates are now scored by one run**, with the far-left line's PROBABILITY kept
+in the table as the CONTROL -- it is the one already known to carry nothing, so a term that
+separates should look visibly unlike it, and everything looking like it means the METHOD is what
+failed. The absolute position `farLeftY` is scored beside the relative `width` because the two can
+disagree: a wide ego lane with a phantom line at a plausible offset produces the same width. Only
+the third candidate, the radar seeing traffic two lanes out, needs building -- nothing computes it.
+
+**Two things that look like next steps and are already answered by the table in the entry above**,
+so nobody spends a drive on them:
+
+- **`left_edge_beyond` is not the binding half of `left_edge_ok`.** `bp_left_edge_truth.py` measured
+  the shoulder gap -- which is the same quantity -- at p10 1.1-1.5 m in the std band the gate
+  accepts, against `MIN_EDGE_BEYOND_LINE_M` of 0.8. It passes ~90% of the time there, so `edge ok`
+  is the std cutoff almost alone. The hypothesis that the two halves of that term pull in opposite
+  directions -- a close edge leaving no room past the paint, a far edge failing the std -- is
+  refuted by data already collected.
+- **The edge POSITION is usable at every std.** Frame-to-frame jump is flat at 0.13-0.14 m from
+  std 0.5 to std 8+, and the gap never goes negative. So a future replacement for the std cutoff may
+  legitimately read the edge's POSITION; what it must not do is read its std as a confidence.
+
+## MEASURED: `width` IS DEAD, `beyond` AND `paint` ARE THE DISCRIMINATORS, `std` MEASURES NOTHING
+
+2026-08-22, `bp_left_gate_reach.py` over four drives (0000039f, 000003a8, 000003aa, 000003ab),
+19,737 moving motorway frames. This is the separation test the entry above queued, and it closes the
+candidate list.
+
+**THE CANDIDATE THE LAST SESSION WAS SENT TO BUILD IS DEAD, AND FOR AN INTERESTING REASON.** Frames
+labelled by whether a lane exists to our left, each CAMERA term reported per class:
+
+    motorway            p10      p50      p90        n
+    width  lane exists  3.30     3.49     3.66     6736
+    width     leftmost  3.17     3.45     3.67     5441      <- IDENTICAL. no information.
+    farLeftY   exists   4.74     5.06     5.50     6736
+    farLeftY leftmost   4.49     5.07     5.91     5441      <- IDENTICAL. no information.
+    beyond     exists   2.21     3.52     5.25     6736
+    beyond   leftmost  -1.76     0.11     4.67     5441      <- SEPARATES, hugely
+    paint      exists   0.44     0.73     0.92     6736
+    paint    leftmost   0.00     0.02     0.12     5441      <- SEPARATES, hugely
+    farLeftStd exists   0.15     0.21     0.35     6736
+    farLeftStd leftmost 0.26     0.40     0.77     5441      <- separates ~2x, right direction
+
+**The model publishes a phantom far-left line at a full lane's width even when we are in the
+leftmost lane.** 3.45 m out, 5.07 m absolute, indistinguishable from a real adjacent lane. That is
+why the positional test cannot work and it is not a threshold problem -- there is no value of
+`MIN_LANE_WIDTH_M` that separates 3.45 from 3.49.
+
+**`width` IS NOT USELESS, IT IS ANSWERING A DIFFERENT QUESTION.** Per route it passes 98-99% on
+motorway and 0-50% on secondary/tertiary/residential. So it separates a MULTI-LANE ROAD from a
+TWO-LANE ROAD, which is real work, and does not separate the leftmost lane from a middle one. Both
+statements are true and only the second one is what the gate needs on a freeway.
+
+**AND THE CIRCULARITY WAS CHECKED RATHER THAN ASSUMED.** `anchor_verdict` labels the leftmost class
+from `noLaneLeft` first, and `noLaneLeft` IS the far-left lane line being absent -- so the `paint`
+row looked tautological. `--map-only-labels` drops it and keeps the map's pinned index alone. **The
+leftmost class came back byte-identical: same 5441 frames, same percentiles on every term.** Every
+`noLaneLeft` frame was also map-pinned leftmost, so the two witnesses agree completely and the paint
+separation is real. Note the negative rows were never at risk either way: a circular label can only
+INFLATE a separation, never hide one.
+
+**SO THE GATE ALREADY CONTAINS TWO WORKING DISCRIMINATORS AND ONE TERM THAT MEASURES DISTANCE.**
+
+    paint   left_line_prob >= 0.5              separates. WORKING.
+    beyond  left_edge_beyond >= 0.8            separates. WORKING.
+    width   3.0 <= left_lane_width <= 4.5      inert on motorway (98-99%), works on narrow roads
+    std     left_edge_std <= 1.2               tracks DISTANCE. Measures nothing about lane existence.
+
+Per route on motorway, which is what makes the std term's behaviour obvious:
+
+    route      frames   OPEN   edge  paint  width  beyond
+    0000039f     9054    30%    67%    52%    99%     66%
+    000003aa     5155     0%    14%    70%    99%     86%
+    000003ab     5528    27%    32%    84%    98%    100%
+
+`edge` swings 14-67% between drives while paint and beyond stay in a sensible band. That swing is the
+distance cutoff catching how wide the road happened to be.
+
+**THE PROPOSED CHANGE, NOT MADE:** drop `left_std <= MAX_ROAD_EDGE_STD` from `left_edge_ok` and let
+`left_edge_beyond` carry the edge. It takes motorway reachability from **22% to 65%** -- the ceiling
+the sweep already measured -- and it does NOT remove the road edge from the gate, because `beyond` is
+computed from the edge POSITION, which `bp_left_edge_truth.py` measured as steady at every std band
+(frame jump flat at 0.13-0.14 m from std 0.5 to 8+).
+
+**IT IS NOT MADE HERE FOR TWO REASONS, AND THE SECOND IS THE REAL ONE.**
+
+1. A previous session wrote **DO NOT LOOSEN IT ON THIS EVIDENCE** into this file. The evidence has
+   genuinely changed -- that instruction was written against a coverage sweep, and this is a
+   discrimination measurement that says WHY the term is wrong -- but reversing a written safety
+   instruction on a lane-change gate is his call to hear about, not one to take quietly.
+2. **THE CONSTRUCTION ZONE.** In a coned work zone the left edge is unreliable, so a high std was
+   refusing there INCIDENTALLY. Dropping it removes an accidental defense on the one hazard this
+   fork has already recorded as a missing sense. There is an argument that `beyond` still protects
+   -- cones pulling the edge inward shrink it -- but that is reasoning, not measurement, and the
+   Lagoon and work-zone events still have no when-and-where to check it against.
+
+**What would settle 2:** the located construction-zone event. It has been asked for twice and is
+still the highest-value thing he could supply for passing assist.
+
+### AND IT WAS SETTLED, FOR MOTORWAY, WITHOUT THE EVENT. 2026-08-22.
+
+`tools/bp_left_taper.py`, 8 drives, 86,000 moving frames. The blocker above assumed a high edge std
+was refusing in coned zones, so dropping it would remove a work-zone defense. **On motorway that
+defense never existed.**
+
+Taper is the gap between ego's own left lane line and the left road edge, near minus far -- the
+mirror of `_road_widening`, which already does this on the RIGHT to spot an off-ramp. Three
+populations, the middle one being exactly what dropping the std cutoff would newly open:
+
+    class          OPEN TODAY p99 / max      WOULD ADMIT p99 / max
+    motorway          0.51 / 1.44               0.71 / 1.38        <- INDISTINGUISHABLE
+    primary           0.62 / 0.88               4.58 / 9.44        <- long tail the open set lacks
+    secondary         0.67 / 0.83          p90 5.99 / 10.40        <- 23% of it past 1.0 m
+    tertiary          0.28 / 0.43               3.25 / 3.48
+
+**On motorway the frames the std cutoff refuses look exactly like the frames it lets through**, so
+there it was refusing on DISTANCE and nothing else -- which is what the separation test said and
+this confirms from an independent direction. Below motorway it was catching narrowing road, for the
+wrong reason, and that IS worth keeping deliberately.
+
+**`MAX_LEFT_NARROWING_M = 1.5` is where nothing currently open is refused.** The largest narrowing
+on any frame the gate opens today, across all 86,000, is 1.44 m. So the refusal costs nothing that
+works -- the cheap direction, which is the direction a refusal is allowed to be cheap in.
+
+**IT GATES NOTHING YET, AND THAT IS THE POINT.** It is published (`leftNarrowingM`), summarised
+(`leftNarrowingShare`, `leftNarrowingMax`) and printed by `bp_passing_report`, with a test pinning
+that `left_geometry_ok` is unchanged. This fork's own rule, from the SCC-Map source swap: *changing
+the source and the judgement in one step would produce a drive that cannot say which half moved.*
+So the std removal is now a separately-attributable one-liner, once narrowing has been watched.
+
+**TWO DIFFERENCES FROM THE RIGHT-SIDE SIBLING, both deliberate and both tested.** The SIGN is
+inverted -- `_road_widening` throws narrowing away with `max(0.0, far - near)` and is right to, since
+on the right a narrowing road is a lane ending the availability test already handles. And it does
+NOT inherit the `roadEdgeStds` guard, because a work zone is exactly where that std explodes and the
+guard would blind the measurement to its own subject.
+
+**WHAT IS STILL NOT ANSWERED, stated so a null does not get read as a finding:** on motorway the
+taper never exceeds 1.44 m in this data, so the new term would fire nowhere there. That is either
+"these 8 drives contained no motorway work zone" or "cones do not move the modelled edge on a
+freeway", and **the data cannot tell those apart.** The located event is still what separates them,
+and it is now scoreable against fixed numbers rather than needing the analysis rebuilt.
+
+### THE FIX IS VERIFIED ON HIS DRIVES, AND THE 689 IS THE PROOF
+
+Routes 000003ae/af/b0/b1, 2026-08-23 21:14 onward -- the first four drives to run the corrected
+code. Published `leftNarrowingM`, read straight from the logs:
+
+    moving frames                          5070
+    p50 0.00   p90 0.36   p99 0.97   max   9.75
+    past the 1.5 m threshold                 16    0.32%     (was 11.65% on drive 31)
+    implausible >10 m while MOVING           15    0.30%     -> counted as leftNarrowingBroken
+    implausible >10 m while STOPPED         689              -> excluded by the speed floor
+
+**The 689 is the whole defect, sitting in one number.** Those frames were what produced the 99.95 m
+reading, and they were never a road narrowing -- they are a parked car's modelled edge. With the
+floor in, the detector's distribution now matches `bp_left_taper.py` on the same routes (tool: p90
+0.35, p99 0.83) instead of disagreeing with it by a factor of ten.
+
+**BUT THESE DRIVES DO NOT ADVANCE THE GATE QUESTION, and that must not be read as if they did.**
+They are 97.6% `tertiary` with the gate open on 1.7% of frames and only 36 in the would-admit set,
+none above 1.0 m of taper. So they verify the INSTRUMENT and exercise no real taper. A null here is
+a statement about four slow local drives, nothing more.
+
+**The std removal is therefore still justified on the MOTORWAY argument alone** -- would-admit and
+open-today being indistinguishable there -- and not by anything these four drives show.
+
+### THE STD REMOVAL WAS ATTEMPTED AND REVERTED. THE CENTER TURN LANE KILLS IT.
+
+2026-08-23, with his go-ahead, and the suite stopped it. **Do not attempt this again without first
+answering the question at the bottom of this entry.**
+
+The change was `left_edge_ok = beyond_ok and not left_narrowing`, dropping the std cutoff, with the
+taper term added as the deliberate replacement for what the cutoff was doing by accident. Eleven
+tests failed. Most were bookkeeping -- fixtures that used a high `edge_stds` as a convenient way to
+make geometry refuse -- but one group was not:
+
+    TestTrafficMayNotStandInForTheRoadEdge
+
+**Its own docstring describes the case, and it is the one road where this change is unsafe:**
+
+  *"A center turn lane is painted like a travel lane, sized like one, and has cars moving down it in
+  our direction. EVERY TERM THAT SURVIVED THE WAIVER PASSES ON IT. The waived terms were the only
+  ones that did not -- so the waiver was, on that road, the whole gate."*
+
+The waived terms are the two EDGE-derived ones. On the 2026-08-09 drive behind it, `leftEdgeStd` had
+a median of 2.12 and the edge was the ONLY objection on 2,865 frames. Remove the std cutoff and
+`beyond` is left holding that case alone, with nothing measured saying it can. **That road already
+cost three real incidents** -- *"It tried to change lanes into the center turn lane median thing 3
+times!"*
+
+**AND THE DOCSTRING NAMES THE EXACT MISTAKE I MADE, which is why this is worth writing down rather
+than just reverting:**
+
+  *"What the freeway measurement could not contain: a freeway has no turn lane. Generalising from it
+  to every road is the actual mistake, and it is not visible in the number."*
+
+Every measurement behind the removal -- the separation test, the taper populations, the 22% -> 65%
+reachability -- was taken on motorway and motorwayLink. All of it is still correct. **None of it can
+see a road that has no turn lane in it.** The 2026-08-09 waiver was justified by a freeway
+measurement in precisely the same shape and the road disproved it in two drives.
+
+#### MEASURED, SAME DAY: `beyond` CANNOT CARRY IT. THE REMOVAL IS DEAD.
+
+`tools/bp_turn_lane_gate.py`, 12 routes. Restricted to moving frames where PAINT AND WIDTH BOTH
+PASS -- the terms the docstring says a center turn lane satisfies -- and split by whether the radar
+saw same-direction traffic in the candidate lane, which is what made a turn lane look like a travel
+lane in the first place:
+
+    road      same-dir left    frames   STD ONLY  beyond only     both   neither
+    TWO-WAY   True               4940      70.4%         0.0%     0.0%     29.6%
+    TWO-WAY   False              1473      21.9%         0.0%     0.0%     78.1%
+    one-way   True              33413      60.0%         0.2%     0.0%     39.8%
+    one-way   False              2131      25.9%         0.2%     0.0%     73.9%
+
+**On the exact trap condition -- top row -- the std cutoff is the ONLY refuser on 70.4% of frames,
+and `beyond` refuses 0.0% of them.** Removing the cutoff opens roughly 3,500 frames on two-way roads
+with traffic moving our way in the lane we would enter. That is the 2026-08-09 failure, reproduced
+in advance from data already on the device.
+
+**AND IT REFRAMES THE WHOLE CHANGE, which is the part worth keeping.** `beyond only` is 0.0-0.2%
+everywhere. Among frames that already pass paint and width, **the edge-std term is doing ALL of the
+remaining refusing.** So 22% -> 65% was never "recovering coverage a bad term was costing" -- it was
+removing the last gate standing. Both earlier findings survive and are compatible with this: `beyond`
+does separate lane-exists from leftmost (3.52 vs 0.11), and among paint+width-passing frames -- which
+are mostly lane-exists already -- it has almost nothing left to refuse.
+
+**DO NOT PROPOSE THIS AGAIN.** Not with a better threshold, not with the taper term, not scoped by
+road class. The question that blocked it has been asked and answered.
+
+**WHAT REMAINS TRUE:** on motorway the cutoff refuses frames whose taper distribution is
+indistinguishable from the ones it passes, and `roadEdgeStds` really does track distance rather than
+confidence. Those measurements were correct. What they never established -- and what this one shows
+-- is that anything else was ready to refuse in its place.
+
+**THE REUSABLE LESSON:** "term X measures the wrong thing" and "term X can be removed" are different
+claims, and only the second one needs to know what still refuses when it is gone. Three separate
+measurements answered the first and none of them touched the second.
+
+**~~WHAT WOULD MAKE IT POSSIBLE~~ -- superseded by the measurement above. Kept for the reasoning:**
+
+1. ~~**Measure whether `beyond` alone refuses a center turn lane.**~~ **DONE. It does not.** It
+   needed frames from an arterial with a turn lane -- two-way roads turned out to be a usable
+   superset, since OSM does not tag the trap and a clean result there would have been trustworthy.
+   It was not clean.
+2. **Not by scoping the removal to motorway.** `highwayClass` comes from the map, and using it to
+   REMOVE a refusal is the map opening a maneuver. Forbidden, however well it would work.
+3. **Not by trusting the taper term to cover it.** A center turn lane does not narrow; that is the
+   point of it. The taper check is orthogonal to this failure and cannot substitute.
+
+**What survives unchanged:** the narrowing term (shipped, still gating nothing), and the finding
+that on MOTORWAY the std cutoff discriminates nothing. Both remain true. What is retired is the
+belief that the motorway finding licenses removing the term globally.
+
+2026-08-22, `tools/bp_route_intent_score.py`, four drives, 63,000 mapdOut frames. This is
+`bluepilot/ROUTE-INTENT.md` step 2, which said to score the guess already running before building
+anything, and it closes the cheap option.
+
+    route      resolved   correct        lead: median / best / worst
+    000003ab       88       88 (100%)      1.0 s / 1.2 s / 0.5 s
+    000003aa       77       75 ( 97%)      1.0 s / 2.7 s / 0.4 s
+    000003a8       22       21 ( 95%)      1.0 s / 3.1 s / 0.9 s
+    0000039f       76       73 ( 96%)      1.0 s / 1.9 s / 0.7 s
+
+**The budget is about 8 SECONDS** -- a 65 -> 38 mph exit at the 3.3 mph/s the set speed actually
+delivers. One second is an eighth of it. `waySelectionType == predicted` is not predicting the fork,
+it is confirming it at about the moment the road does.
+
+**ACCURACY WAS THE VANITY FIGURE AND THE TOOL WAS BUILT KNOWING THAT.** Its docstring says "two
+numbers, and the second one decides it". Had this been scored on accuracy alone, 96-100% would have
+read as a solved problem and something would have been built on top of a signal that arrives too
+late to act on. **When a signal has to beat a deadline, the metric is lead time, not correctness.**
+
+Ramps -- the case the exit problem is about -- are 25/25, 8/8 and 3/5, at the same 1.0 s median. The
+blinker was `none` at resolution on 35 of 38, so his signal is not carrying it either.
+
+**This does not say mapd is doing badly.** Predicting a fork earlier needs the DESTINATION, which
+mapd does not have and this car cannot supply. It answers a different question well.
+
+**What it changes:** ROUTE-INTENT 5a is closed, and 5b -- learning his own forks from repeated
+driving, the `IcbmHoldObservations` shape -- is now justified by evidence rather than by argument.
+It is the only candidate that can be early, because it knows before the fork is in sight.
+
+## ROUTE INTENT FOR PASSING ASSIST: WAZE DECIDES, OSM IS THE MAP. His design, 2026-08-22.
+
+Full write-up in `bluepilot/ROUTE-INTENT.md` sections 8-9. The short version, because the framing
+matters more than any single finding:
+
+**IT IS NOT "BUILD NAVIGATION", IT IS A SOURCE SWAP.** Nobody writes a router. Waze already routes,
+knows traffic and reroutes, and **is already running on his phone into Android Auto on every drive**
+-- zero marginal cost, nothing to enter. The OSM tiles already on the device are the map. Only the
+WIRE between them is missing.
+
+**AND PASSING ASSIST OUTRANKS IT:** *"Of course I care more about automatic passing than
+navigation."* So this is INSTRUMENTAL. Destination entry, turn-by-turn rendering and a routing
+engine serve a navigation product he is not asking for.
+
+**Three things measured that day, each of which kills a cheaper idea:**
+
+- **The CAN path is PENDING THE CANBOX, not closed** -- and it may be the best path of the three.
+  Ford does broadcast route state: `APIM_Data_FD1` (0x32B) carries `DistToStopover_L_Actl`. That
+  message is ABSENT from every bus the comma logs today, along with Nav_2/Nav_3 and every APIM
+  address except position (0x462). It also carries exterior-light signals, so the absence is about
+  the BUS rather than navigation being off.
+
+  **It was written up as "closed" and he corrected it:** *"MS-CAN will be routed with the CANBOX,
+  though, just like we are using it for BLIS!"* So it arrives WITH BLIS rather than never.
+
+  **The argument that it exists at all is structural:** the IPC is a separate module from the APIM
+  and it renders turn-by-turn, so the instruction must cross SOME bus. Which bus and which message
+  are the open questions; the canbox answers the first.
+
+  **And it decouples from the Waze bug entirely** -- Google Maps still renders on his IPC, so that
+  data crosses the bus TODAY. A routed MS-CAN delivers route intent from whichever app works, making
+  Waze the preferred source rather than a prerequisite.
+
+  **Still not established:** that the maneuver is broadcast at all rather than only a distance.
+  `APIM_Data_FD1` has no turn field and the DBC is community reverse-engineered.
+
+  **THE MEASUREMENT NEEDS NO HARDWARE AND COMES FIRST:** drive with Google Maps NAVIGATING, diff the
+  logged buses against a no-route drive. Anything that appears or starts varying is the channel.
+- **The notification fallback is ALIVE**, and `ROUTE-INTENT.md` section 2b said it might not be. His
+  screenshot shows Waze's notification carrying a maneuver glyph and a distance while the CLUSTER
+  path is dead. **The two publishing paths fail independently** -- 2b treated one failure as
+  evidence about the other.
+- **Neither half needs inventing.** FrogPilot already turns route intent into lane positioning
+  ("keeps left or right appropriately at forks and exits") with primeless Mapbox routing.
+  CarrotPilot already ships an Android **Navigation Data Bridge** that scrapes AMAP/Tencent/Google
+  Maps and feeds a fork. Nobody uses Waze, because Waze exposes no route to third parties -- which
+  is exactly why the notification is the fallback.
+
+**THE RULE THAT DECIDES THE BUILD ORDER.** Route intent OPENS or REFUSES a maneuver, so *evidence
+that opens must never be cheaper than evidence that refuses*. A turn instruction may freely REFUSE
+-- "do not offer a pass 300 m before his exit" -- which needs no wayId join, no map join, and is
+useful the day any source lands. Letting it OPEN a lane change is a much higher bar.
+
+**So build the REFUSAL first, behind a transport-agnostic interface, against a stub.** Waze IPC,
+Waze notification and Mapbox then become interchangeable sources, and **nothing is sequenced behind
+Waze fixing a bug** -- which matters, because he filed it through two channels the same day and got
+the same triage template both times.
+
+**Do not wait for comma.** They did not pause navigation, they REMOVED it: no `selfdrive/navd/`, and
+`navInstruction`/`navRoute`/`navModel` are all DEPRECATED ordinals. Same shape as the mapd v1
+situation recorded above, same answer.
+
+**AND THIS IS A DIFFERENT BRANCH'S WORK. His instruction, 2026-08-22:** *"we would want to create a
+new session and branch and everything and keep passing assist as it is."* So none of it lands on
+`passing-assist-phase1`. That branch stays where it is; the route-intent consumer is built beside
+it and reaches it the way everything else does, by rebase. `ROUTE-INTENT.md` is the handoff document
+for that session and is written to be read cold.
+
+**AND IT IS A CHILD OF PASSING ASSIST, NOT A SIBLING** -- his correction: *"It will build off of
+passing assist, right? Just like passing assist builds off ICBM?"* Yes.
+
+    icbm-manual-override-and-tuning
+      └── passing-assist-phase1        takes ICBM by MERGE, per the reflog
+            └── route-intent  (new)    takes passing assist the same way
+
+The radar detector is a sibling because it needs nothing passing assist owns. Route intent is the
+opposite -- it exists to feed passing assist's gates and consumes the lane anchor, `_geometry`, the
+maneuver state machine and the panel. Branching it off ICBM would leave it without all of them.
 ## 2026-08-24: THE "SET SPEED CHANGED" SPAM WAS A SHAKING TARGET, NOT A HUNTING CONTROLLER
 
 His report was *"it keeps telling me set speed changed and the max speed is flashing fast"*, and the
@@ -5049,6 +6884,188 @@ lifting off, which is the failure that gate exists to prevent.
 Any real fix has to debounce the FLAG term alone, before it is ANDed with the physics term. That is
 a change to what `model_candidate` is made of, not to how its result is accumulated.
 
+## 2026-08-26: FOUR BACK-OUTS, AND THE TERM THAT DECIDES THEM WAS NEVER ON THE WIRE
+
+`maneuverAborts` is the number the whole dry run exists to produce -- custom.capnp calls it *"a
+blinker shown to traffic behind for a maneuver that did not happen... anything else names an
+unstable gate that no amount of reading the code would have found."* Routes 000003c1-c9,
+`tools/bp_abort_why.py`, 159,000 maneuver frames:
+
+    to        side   held  why it left        refused by         lead
+    waiting   left   1.1s  reason went away   noLaneAvailable    51 mph slower at 35 m
+    waiting   left   0.6s  reason went away   none               51 mph slower at 61 m
+    waiting   left   1.2s  reason went away   none               21 mph slower at 56 m
+    idle      left   0.6s  reason went away   notEngaged         29 mph slower at 44 m
+
+**NONE REACHED `changing`.** That is the committed phase -- 469 frames of it on these drives -- and
+every back-out happened in `signaling`, under 1.3 s, with the lead still sitting there. So nothing
+would have moved the car even once this actuates; what it costs is a blinker.
+
+**AND `notEngaged` IS THE 40% FINDING ARRIVING FROM A NEW DIRECTION.** One of the four is him
+switching cruise off mid-sequence, on a lead 29 mph slower at 44 m -- exactly *"I was behind some
+very slow drivers that I wanted to get around fast, so cruise was off"*. It is not a gate defect.
+
+### THE TOOL READ THE WRONG FRAME, THEN THE WRONG FIELD, AND BOTH ARE THE SAME MISTAKE
+
+**FIRST: it read blockedBy from the frame BEFORE the transition**, reasoning that the maneuver is
+torn down by the next one. Backwards -- blockedBy is the DETECTOR's verdict, recomputed every frame
+whatever the maneuver is doing.
+
+**SECOND, AND THIS IS THE ONE:** `blocked_by = Blocked.none` means **A SUGGESTION IS BEING MADE**
+(passing_assist.py:3610, :3706). So throughout `signaling` it reads `none` by construction, and on
+a back-out it is the one value that CANNOT name a cause. It printed `none` on two of four, and
+"nothing was blocking yet it backed out" read like a finding.
+
+**THIRD: `suggestion` is not `wanted` either.** passing_maneuver leaves `signaling` on
+`wanted == Side.none or wanted != self.side`, and `wanted` is `wanted_side`:
+
+    wanted      a slow car is spotted and a lane exists that side. GEOMETRY ALONE. Lights the blinker.
+    suggestion  the same, AND every safety gate passes, AND the confirmation has completed.
+
+**`wanted_side` HAD NEVER BEEN PUBLISHED.** Now `wantedSide @109`. Third instance in this fork of a
+decision logged without its input, after `hasSlowDown` and the SCC-Map veto terms, and the rule was
+already written down: *when a rule cannot be explained from a drive, add the log line rather than a
+third inference.* It took two inferences to remember it.
+
+**The test drives `wanted` and `suggestion` APART rather than checking something was assigned.** A
+suggestion-fed field is non-none on most of the same frames and reads entirely plausibly in a log,
+while being silent on exactly the frames the aborts live on. Mutation-tested against that
+substitution; two of its three cases fail on it.
+
+**And the tool refuses to guess on old routes.** Every route recorded before this reads `wantedSide`
+as `none` on every frame, which is indistinguishable from the real "it evaporated" answer -- so it
+prints `wantedSide NOT LOGGED` instead of a wrong attribution. **A field added to explain a defect
+makes every earlier route look like the defect's worst case.**
+
+### WHAT THE NEXT DRIVE ANSWERS, AND WHY IT MATTERS MORE LATER THAN NOW
+
+`wanted_side` is DEBOUNCED (`WANTED_RISE_S` / `WANTED_FALL_S`), and that debounce was bought by
+**126 aborts in 37 minutes**. So a back-out that lands on `wanted went to none` means the hold is
+still not long enough -- measurable now instead of arguable. Four in nine drives against 126 in 37
+minutes is the debounce having done nearly all of its job.
+
+**Not a trip risk and not urgent.** It commands nothing today. It is the READINESS metric for when
+the rear radar lands, and 4-across-nine-drives is worth understanding rather than averaging away.
+
+## 2026-08-28: `commIssue` SOFT-DISABLED HIM FOR 1,000 MILES. THREE CAUSES RULED OUT BY MEASUREMENT.
+
+*"I just drove from Salt Lake City to Yosemite and got this a lot... my Comma screen FPS went low
+and the passing assist overlay would flash. I tried turning passing assist off, but that didn't
+help. The fans were also really loud when it was quite cool in the car."*
+
+**THIS IS NOT A BANNER. `EventName.commIssue` is `ET.SOFT_DISABLE`** (events.py:680) with
+`ET.NO_ENTRY` beside it, so it DISENGAGED him and then blocked re-engagement. Any future report of
+it should be treated at that severity from the first sentence.
+
+12 segments pulled off routes 000003dc and 000003de and decoded on the laptop.
+
+### WHAT IT IS NOT -- and each of these was the leading theory at some point that day
+
+    THERMAL     thermalStatus `ok` on 1273 of 1273 samples. Peak 89.6 C, fan pinned 91-100%.
+                The fans are loud because a windshield-mounted device in August is hot and the
+                cooling is WORKING. Nothing derated. (Contrast 2026-08-21, where 34.9% OVERHEATED
+                was real -- so this had to be measured, not assumed either way.)
+    CPU         54.2% p50 in the bad segments against 51.5% in the clean ones, and `mapd_v2` is
+                **0.5%**. No process shows a meaningful delta.
+    PASSING ASSIST  `if not self.enabled: ... return` sits above all the work, so switching it off
+                genuinely stops the compute -- which is exactly why switching it off changed
+                nothing. It also appears in no `valid` chain anywhere.
+
+**THE "TOP PROCESSES BY CPU" TABLE THAT STARTED THE CPU THEORY WAS MEANINGLESS.** `procLog`'s
+`cpuUser`/`cpuSystem` are CUMULATIVE tick counters, so ranking them ranks LONG-LIVED processes, not
+busy ones -- `selfdrive.ui.ui` and `mapd_v2` topped it while using almost nothing. **Difference
+consecutive samples or the table is an age chart.**
+
+### WHAT IT IS: plannerd PUBLISHES ON TIME AND MARKS ITS OWN OUTPUT INVALID
+
+    segment   longitudinalPlan       plannerd output rate     mapdOut     mapd path pts
+    3dc-55    162 INVALID / 162      20.2 Hz, p99 gap 67ms      1.6 Hz          652
+    3de-00    600 INVALID / 1128     20.0 Hz, p99 gap 62ms      8.7 Hz          652
+    3de-10    336 INVALID / 1200     20.0 Hz, p99 gap 64ms      6.5 Hz          537
+    3dc-08    0   INVALID / 1200     20.0 Hz                    ~6 Hz           295
+    3de-34    0   INVALID /  511     20.0 Hz                   19.3 Hz            0
+
+The rate is never the problem. `longitudinalPlan.valid` is
+`sm.all_checks(['carState','controlsState','selfdriveState','radarState'])`, selfdrived sees the
+invalid message, and raises commIssue.
+
+**ONE SEGMENT IS FULLY ATTRIBUTED AND IT IS THE RADAR.** On 3dc-00 `radarState.valid` was False on
+**738 of 1176** frames, with 27 radar events beside it, against 718 invalid plan frames. That is the
+publisher declaring its own data bad -- nothing to do with maps or curves.
+
+**THE OTHER TWO ARE NOT.** On 3de-10 all four services were alive, valid, and on-rate at publish
+time, and a replay of the REAL `FrequencyTracker` over publish timestamps reproduces nothing. Only
+plannerd's OWN receive timing can explain those, and that is not reconstructable off-device --
+`SubMaster` records `recv_time` inside plannerd's loop, not when the message was published.
+
+### `all_checks` IS THREE DIFFERENT TESTS AND THE LOG RECORDED WHICH ONE FAILED: NONE OF THEM
+
+    alive     (now - recv_time) < 10/frequency. For radarState that is 500 ms; the worst gap
+              measured was 89 ms, so alive never tripped on published timing.
+    freq_ok   a rolling average against a per-service band. **radarState's is 16-24 Hz -- +/-20%,
+              far tighter than the 100 Hz services' 40-120 Hz** -- and it is the narrowest gate on
+              the whole longitudinal plan. Note it can fail from ABOVE: a stalled loop draining a
+              backlog reads as too FAST.
+    valid     the publisher's own flag. This is what 3dc-00 was.
+
+`plannerChecks @11` now publishes all three as bitmasks over the four services, plus the resulting
+bool. **Fourth instance in this fork of a decision logged without its input**, after `hasSlowDown`,
+the SCC-Map veto terms and `wantedSide` two days ago. The rule is written down and was not followed
+again: *when a rule cannot be explained from a drive, add the log line rather than a third
+inference.* Three inferences were made here first -- thermal, CPU, and mapd -- and all three were
+wrong.
+
+`test_planner_checks_mirror_the_plan` parses upstream's `service_list` and ours and fails if they
+drift, because a diagnostic naming a different set of services than the rule it explains would be
+believed. Mutation-tested by dropping one service.
+
+### THE CORRELATION THAT IS REAL AND UNEXPLAINED
+
+commIssue tracks mapd path size and `mapdOut` lateness monotonically across all 12 segments --
+Tioga Road publishes a **652-point** path against ~50 on open highway, and `mapdOut` collapses from
+20 Hz to 1.6 Hz there. But `mapdOut` is in NO valid chain, and mapd_v2's CPU is 0.5%, so the
+mechanism is not established. **Do not act on this correlation.** `MapdV2` is his setting and
+dropping it to 0 or 1 is the cheap experiment that would separate "the map path is causing this"
+from "curvy mountain roads are causing this and the map path is another symptom of them".
+
+## 2026-08-28: THE COMMA CAN COME UP WITH NO IPv4 ADDRESS AT ALL. `-4` IS THEN THE THING THAT FAILS.
+
+Found by the ICBM session at Rush Creek Lodge and verified here independently. After a reboot on his
+Windows hotspot the device was unreachable from two sessions at once, and every instinct in this file
+pointed the wrong way.
+
+**The device's own view, which is what settles it:**
+
+    inet  127.0.0.1/8 scope host lo              <- the ONLY IPv4 address it has
+    inet6 fe80::20a:f5ff:fee4:4abc/64 scope link
+
+**It had no IPv4 lease on any interface.** So it was never down, `192.168.137.242` was dead because
+nothing held that address any more, and full port-22 sweeps of `192.168.137.0/24` and both halves of
+the lodge `/23` found nothing because there was nothing in v4 to find. ARP was empty for the same
+reason.
+
+    ssh -6 comma@fe80::20a:f5ff:fee4:4abc%11
+
+**The `%11` is mandatory** -- a link-local address is only meaningful with a scope id, and on Windows
+that is the interface INDEX of the adapter the device is on (here "Local Area Connection* 2", the
+ICS/hotspot adapter). `ipconfig` or `Get-NetAdapter | Format-Table Name, ifIndex` gives it. It is
+per-machine and per-adapter, so it is not a constant to memorise -- the ADDRESS is stable (it is
+derived from the MAC), the scope id is not.
+
+**THIS INVERTS THE STANDING "force `-4`" HABIT, in exactly the case where the device looks dead.**
+That habit is still right on a normal network -- it exists because mDNS resolving to a v6 address the
+laptop cannot route produces a long hang. But when the device HAS no v4 address, `-4` is the thing
+that guarantees failure. **A timeout on `-4` while mDNS resolves fine is the signature: try `-6` with
+a scope id before concluding the device is down or hunting for it on a subnet.**
+
+**AND `/tmp` ON THE DEVICE IS tmpfs.** A reboot wipes it. A finished analysis parked in `/tmp` was
+destroyed by a reboot from the other session, which had no way to know it was there. **Write
+long-running job output to `/data`, and say so before rebooting a device another session is using**
+-- two sessions share this car and neither can see the other's jobs.
+
+**The DNS half, same network:** on that hotspot the device has SSH but cannot resolve `github.com`,
+so `git fetch` dies while ssh works perfectly. That is the bundle case already documented above, and
+it is a SECOND independent failure mode of the same network -- do not let fixing one hide the other.
 ## 2026-08-27: THE SLC -> YOSEMITE TRIP. 17 ROUTES, 338 SEGMENTS, DECODED ON THE LAPTOP.
 
 The first validation drive for the ramp-approach horizon fix, which was on the car the whole way.
@@ -6101,6 +8118,55 @@ openpilot's own p99 on this car is 2.73 and his hands-on p99 is 4.14; the 2026-0
 nearly put him off the road was 5.20. **These are firm corners taken at the controller's normal
 ceiling, not the 5.91 pattern.** It is a comfort cost and it does not warrant a change before a long
 drive -- do not hand him a second setting to move while the lookahead scale is the live experiment.
+## 2026-08-29: A NEW PARAM CAN SILENTLY NOT EXIST ON THE DEVICE. THE SCONS CACHE SERVES A STALE .so.
+
+Found deploying `FordBlendHorizonScale`. The key was in `common/params_keys.h` on the device, the
+branch was correct, the reboot was clean -- and the running system had never heard of it:
+
+    UnknownKeyName b'FordBlendHorizonScale'
+
+**`Params.get` RAISES on an unknown key.** So this is not a setting that quietly reads its default;
+it is an exception waiting for whatever code touches it first.
+
+**HOW TO TELL IT APART FROM EVERY OTHER FAILURE, because it looks like nothing is wrong.** The key
+is in the header, `git` says the file is right, and other params work perfectly. The only thing that
+distinguishes it is asking the COMPILED module, not the source:
+
+    strings /data/openpilot/common/params_pyx.so | grep -c "^FordBlendHorizonScale$"     # 0 = stale
+    strings /data/openpilot/common/params_pyx.so | grep -c "^MapdV2$"                    # 1 = control
+
+Always run the control. A zero on both means `strings` is not finding key names at all and the test
+is meaningless; a zero on one and a one on the other is this bug exactly.
+
+**TWO MECHANISMS, AND ONLY THE SECOND ONE IS THE REAL ANSWER:**
+
+1. `params_keys.h` is reached through a C include chain scons's scanner does not follow from the
+   `.pyx`, so editing it does not by itself trigger a recompile. `touch`ing the header does not help
+   either -- scons signs on CONTENT.
+2. **And deleting the object does not help, because the LINK RESULT comes out of the build cache:**
+
+       [CXX] common/params_pyx.o
+       Retrieved `common/params_pyx.so' from cache          <-- the stale one, straight back
+
+   So `rm common/params_pyx.o && scons` recompiles and then restores the same old `.so` over it. The
+   log says `done building targets` and the key is still missing. Use `--cache-disable`:
+
+       rm -f common/params_pyx.o common/params_pyx.so common/params_pyx.cpp
+       scons -j4 --cache-disable common/params_pyx.so
+
+**CAPNP IS NOT AFFECTED -- CHECKED, NOT ASSUMED.** `wantedSide` and `plannerChecks` both came back
+live from `custom.LongitudinalPlanSP` on the same device in the same state. Only `params_pyx` was
+stale, so a capnp field landing correctly says NOTHING about whether a param did.
+
+**WHY IT PROBABLY BIT NOW.** The device clock has no battery-backed RTC and reads 1970 until GPS or
+NTP fixes it, so files written across boots carry timestamps two months apart in both directions
+(see the clock entry below). Any build decision made on mtime is unreliable on this device, which is
+also why "it rebuilt on the last boot" cannot be assumed.
+
+**THE RULE: after deploying a commit that adds a Params key, verify the key on the DEVICE before
+reporting the feature as shipped.** Verifying by file content -- which this file already insists on
+over verifying by hash -- is not enough here, because the source is correct and the binary is not.
+Ask the compiled module.
 ### THE OVER-COMPENSATION FINDING WAS WRONG. `FordBlendHorizonScale` IS REMOVED. HIS QUESTION CAUGHT IT.
 
 He asked *"What is the live learn steering latency thing? Wouldn't that fix this?"* -- and reading
@@ -6633,6 +8699,60 @@ stamped ~86 days AFTER "now". No NTP without DNS, and it has not held a GPS time
 route directory names carry wrong dates, and **mtime-vs-route ordering is unusable** until it syncs.
 The rule in this file about converting UTC to MDT still applies, but there is now a second failure
 mode above it: the clock can simply be wrong, so do not order events by timestamp at all right now.
+
+## 2026-09-01: `SUGGESTION_HOLD_S` IS CORRECTLY SIZED. THE ABORTS ARE NOT A THRESHOLD PROBLEM.
+
+Route 00000405, ALL 176 segments decoded on the laptop. The drive was picked because its summary
+looked pathological -- 29 aborts against only 2.2 minutes of `wantedSeconds`, ~13 per wanted-minute,
+where a 146-minute drive the same day managed 2.
+
+**DO NOT RAISE `SUGGESTION_HOLD_S`. The measurement was done and the lever is not there.**
+
+    nothingSlower runs        159
+      RECOVERED (real dips)     7    <- the entire population a longer hold can save
+      genuinely ended         152
+
+    hold   dips covered      deaths delayed
+    0.6      4/7  (57%)      17/152        <- shipped
+    0.9      5/7  (71%)       6/152
+    2.0      7/7 (100%)       4/152
+
+Going from 0.6 s to 2.0 s buys **three aborts on a three-hour drive**, in exchange for holding a
+dead suggestion up to 2 s longer. 0.6 was sized as "four times the longest observed dip" in August
+and it still clears the p75 (0.60 s) of the dips measured here.
+
+### THE SAMPLED ESTIMATE THAT SAID OTHERWISE WAS WRONG TWICE OVER
+
+A 22-of-176 spread first reported "32% of dips exceed the hold" and nearly bought a constant change.
+Both errors are ones this file already warns about:
+
+- **The sample over-represented the cluster.** Every 8th segment happened to include segment 168,
+  which alone holds 9 of the drive's 34 aborts. A spread is not a random sample when the thing being
+  counted is clustered.
+- **IT COUNTED THE WRONG POPULATION.** Every `nothingSlower` run was treated as a recoverable dip.
+  152 of 159 were the episode genuinely ending -- the gate was right and there was nothing to save.
+  **A "dip" is only a dip if the suggestion comes back; otherwise it is the feature working.**
+
+### WHERE THE ABORTS ACTUALLY ARE, all 34 on the full drive
+
+    none            10   unexplained
+    nothingSlower    9   ~3 winnable, see above
+    noLead           9   THE RADAR DROPPED THE TRACK
+    driverActive     4   him taking over -- correct, not a defect
+    noLaneAvailable  1
+
+So the threshold story explains a quarter of it and most of that quarter is not recoverable.
+`noLead` is the interesting one and it is not a tuning question: it is the Ford radar losing the car
+about to be passed, the same sensor whose `radarState` invalidations turned up in the commIssue work.
+Whether those 9 are the lead genuinely leaving or a track dropping and reacquiring is unmeasured.
+
+### AND THE EFFECTIVE DEFICIT BAR SITS INSIDE THE TRAFFIC, WHICH IS HIS SETTING NOT A BUG
+
+`minDeficitActive` measured **8.9 mph** on that drive against a `PassingAssistMinDeficit` of 4,
+because `PassingAssistPatience` is 18 -- a 1.8x multiplier applied at or below the posted limit.
+Lead deficits ran p10 9.1 / p50 9.7, so **62% of frames with a lead sat within +/-1 mph of the bar**.
+That is maximum flicker exposure by construction, and it is a preference: patience 18 means "only
+bother me if a pass is worth 1.8x the usual gain when I am not in a hurry." Name it, never change it.
 ## 2026-09-04: WHAT LETS IT TAKE A REAL TURN -- AND WHAT ACTUALLY CAPS IT
 
 He reported a large left turn before a freeway on-ramp and asked what enabled it: *"I couldn't
@@ -8410,6 +10530,111 @@ rebuild kills no test, because the rebuild simply puts the path back -- it costs
 line and nothing else. Moving it BELOW the hand-off is not equivalent and is caught. The test that
 claimed to defend the first ordering had its own docstring corrected by that result.
 
+## 2026-09-12: "ABORTS OUT OF `changing`" ARE NOT A DEFECT. RETRACTING WHAT I CALLED ONE.
+
+On 2026-09-01 I reported **6 aborts out of `changing`** on route 00000405 as a real defect -- "the car
+starting to move and changing its mind". It is not, and it cannot be, by construction.
+
+`passing_maneuver.py` gives `changing` exactly four exits, and **no gate can reach any of them**:
+
+    change_duration_s elapsed   -> finishing   the crossing completed
+    collision_abort             -> aborting    something is arriving -- the one input allowed to reverse
+    driver_override             -> idle        HIM taking the car back
+    too_slow                    -> idle        below PassingAssistMinSpeed, the situation is gone
+
+An abort scan that counts every transition other than `finishing`/`aborting` as a back-out therefore
+counts ONLY the last two -- both deliberate, both correct. The module says so in as many words: *"The
+driver taking their car back is not a gate and is not an abort worth counting against the system -- it
+is the correct outcome, at any phase, including mid-crossing."*
+
+Re-measured on build 8e979260 (29 routes, 5.9 h, decoded on the device): **3 transitions out of
+`changing`, all necessarily one of those two exits.** One read `driverActive` directly.
+
+**TWO MISTAKES MADE IT LOOK LIKE A DEFECT, and both are reusable warnings:**
+
+- **The label was borrowed from the wrong phase.** The scan classified anything held >= 4.8 s as
+  "window expired" -- `SIGNAL_WINDOW_S` belongs to `signaling`. `changing` has no such window, so the
+  label described a mechanism that does not exist in that phase. **A heuristic keyed on one phase's
+  constant is wrong on every other phase, and nothing flags it.**
+- **I did not read the phase's exits before calling one of them a defect.** Four lines of the state
+  machine settle it. That is the "read the code before building anything" rule, broken on a finding
+  rather than on a build.
+
+**If this needs measuring properly in future, split the two:** record `driver_override` vs `too_slow` at
+the transition. Neither is a defect, but the ratio says whether he is taking over mid-crossing or just
+slowing below the minimum -- the first is interesting once this actuates.
+
+### WHAT THE SAME SCAN SAYS IS REAL
+
+    aborts          73 over 5.9 h -> 12.4/hour     identical to the 11.6 h highway batch (12.5/h)
+    by reason       wanted->none with blockedBy none   31   <- the largest bucket, still unexplained
+                    wanted->none: nothingSlower        15
+                    wanted->none: driverActive          6   (him -- correct)
+                    wanted->none: adjacentSlow          6
+                    wanted->none: noLaneAvailable       5
+                    wanted->none: tooSlow               3   (correct)
+    noLead          3 total: 2 reacquired within 2 s (radar track flicker), 1 lead genuinely left
+
+**The rate is stable across a highway mix and a local mix at ~12.5/hour.** That is itself a finding:
+whatever drives the flicker does not scale with road type.
+
+**`wanted->none` with `blockedBy none` is the one worth chasing.** `blockedBy none` means a suggestion
+was being made on that frame, yet `wanted_side` dropped. `wanted_side` is geometry-only and debounced
+separately from the suggestion, so the geometry is what flickered while every gate stayed happy.
+
+## 2026-09-12: SOLVED. THE `wanted->none, blockedBy none` ABORTS WERE nothingSlower HARD-CLEARING UNDER THE HOLD.
+
+The largest abort bucket above -- 31 of 73 -- was not geometry flicker. It was two mechanisms
+disagreeing about one gate, in one frame:
+
+    _decide           nothingSlower early return -> _reset_outputs(nothingSlower)
+                      zeroes wanted_side, blocked_by = nothingSlower
+    _hold_suggestion  nothingSlower is on HOLD_THROUGH -> restores the suggestion and
+                      OVERWRITES blocked_by to none
+    _run_maneuver     reads wanted_side = none -> ABORTS
+
+So the maneuver backed out under a suggestion still on screen, and the abort frame read `wantedSide
+none, blockedBy none` because both naming fields had been overwritten. **A cause that erases its own
+log entry reads as "unexplained" to every tool.**
+
+**FOUND BY MEASURED ELIMINATION, not argument.** Geometry rebuilt from its four sub-terms matched the
+published flag on 845,724 of 845,724 side-frames, so the reconstruction was trustworthy, and geometry
+held through 56 of 70 signaling aborts. Oncoming was false on all of them. Adjacent-slow rebuilt from
+`blocks_move` explained 10 more (+4 brief). What remained could not come from `raw_wanted` at all, so
+the question became what ELSE writes `wanted_side` -- five sites, and one is an early return that
+runs BEFORE the debounce.
+
+**`noLaneAvailable` NEVER HAD THIS, and its own comment describes the bug.** It feeds the debounce
+`Side.none` and resets with `keep_wanted=True`, under a note that an early return before
+`wanted_side` is computed makes the debounce useless. nothingSlower had the same shape and never got
+the same two lines. It has them now (`cc9b910b0a`).
+
+### `keep_wanted=True` ALONE IS THE TRAP, AND THE SUITE PASSED IT
+
+Tried first; every controls test stayed green. It is wrong: the debounce is only reached past this
+early return, so `keep_wanted` alone never touches `wanted_side`, and a persistent nothingSlower
+FREEZES it -- the stale-wanted keep-right bug the hard clear existed for. **The existing guard in
+`test_drive_scenarios` drives `status=False`, the noLead path, so it cannot see this branch.** A
+fixture that exercises a sibling path is not a guard on this one.
+
+`test_nothing_slower_dip.py` separates all three versions: the original fails the dip test (a
+0.38 s dip aborted), keep_wanted-alone fails the sustained and freeze tests, the fix passes all
+three. Mutation-verified in both directions.
+
+### WHAT IT DOES NOT CLAIM
+
+- Passing assist commands nothing today, so this changes the dry-run abort count and the on-screen
+  sequence, not how the car drives.
+- **31 is the size of the bucket, not the size of the fix.** Sub-0.75 s dips are saved; real ends
+  still abort, correctly. Baseline is 12.4 aborts/hour on build 8e979260 -- score the next drives PER
+  HOUR against it, and expect the `none/none` bucket to shrink rather than the total to vanish.
+- The 14 geometry-false aborts (edgeStd 7, paint 5, width 2) are untouched. That is the real
+  geometry flicker and it has not been chased.
+
+**THE REUSABLE LESSON: when a value is debounced, grep every WRITE of the value, not the debounce.**
+An early return above it bypasses it silently, and a second mechanism restoring a sibling field
+removes the evidence in the same frame.
+
 ## 2026-09-12: THE ROOT CAUSE. `sm.updated` IN plannerd ALMOST NEVER REACHES THE PLANNER.
 
 The I-215 phantom was not mapd, not msgq and not the walk. It is plannerd's loop:
@@ -8512,6 +10737,96 @@ instead of `CURVATURE_ERROR` (0.002). That widening is a behavior change to the 
 2026-09-04 and is NOT covered by the earlier refusal of `0cb9165427`; evaluate it separately if it
 merges.
 
+
+## 2026-09-14: THE liveTracks `sm.updated` RACE IS REAL -- AND THE ONE-LINE FIX IS NOT SAFE TO SHIP
+
+The ICBM session flagged `adjacent_lane.py` `if not sm.updated['liveTracks']: return` as the same race
+that froze the map path. **Confirmed, and measured rather than argued.** Replaying the REAL
+`AdjacentLane` twice over recorded rlogs -- once keyed on the flag as shipped, once on liveTracks
+`logMonoTime` changing -- with each message received on the first carState at or after it:
+
+    route      road        liveTracks   shipped observer sees
+    00000430   I-215/I-80    8.53 Hz      22.4% of messages
+    00000429   surface       8.93 Hz      20.4%
+    00000427   surface       8.34 Hz      21.7%
+
+**But feeding it every message changes what the gates conclude, a lot, and in both directions:**
+
+    moving frames, NOT one-way per map        shipped  ->  full rate
+    RIGHT oncoming veto memory   00000429       0.0%   ->  50.4%
+                                 00000430       0.0%   ->  35.8%
+    LEFT  same-direction latch   00000429      74.3%   ->  95.7%
+    RIGHT same-direction latch   00000427      35.8%   -> 100.0%
+
+**Right-side oncoming traffic on a US road is clutter, so the one-in-five sample has been acting as an
+ACCIDENTAL CLUTTER FILTER.** Every corroboration constant -- `ONCOMING_FRAMES`, `SAME_DIRECTION_FRAMES`
+(3 within 1.5 s), `DEBOUNCE_FRAMES`, `OVERTAKE_FRAMES` -- is written for 8.3 Hz, and has in fact run at
+about 1.7 Hz since it was written. At 1.7 Hz a 0.12-0.48 s clutter track is seen at most once and can
+never corroborate; at the designed rate it can. And every oncoming-floor sweep in this file was scored
+on flags produced by the undersampled observer.
+
+**THE SAME-DIRECTION HALF IS THE DANGEROUS ONE.** That latch is the only thing that releases the strict
+turn-lane veto -- the OPENING direction -- and it goes to ~96-100% of two-way frames at full rate.
+Shipping the keying fix alone reopens the 2026-08-09 center-turn-lane failure through a sampling change.
+Same shape as the edge-std term: something measuring the wrong thing was doing real refusing.
+
+**SO IT IS NOT FIXED, DELIBERATELY.** Passing assist commands nothing, so the undersample costs dry-run
+fidelity, not safety. The fix is the keying PLUS re-deriving the corroboration counts for the real
+message rate, scored on two-way roads for the same-direction release before anything else, and on the
+right-side oncoming false edges. Do not ship `logMonoTime` keying on its own.
+
+**What the replay does not model:** `divided` is approximated as `mapdOut.oneWay and tileLoaded`,
+strict two-way is assumed on, memory 90 s, and the planner's per-frame `max_distance_m` is fixed at
+150 m. Both runs share those inputs, so the COMPARISON stands; the absolute shares are approximate.
+
+## 2026-09-15: THE DRIVE-61 blockedBy FLICKER. THE GRACE NOW CARRIES THE VERDICT, NOT ONLY THE TIMER.
+
+Route 0000046a (drive 61), segments 37-47: blockedBy flipped nothingSlower <-> noLaneAvailable 242 times
+inside 0.4 s, flooding the stored timeline. Measured on the parked car (segments 30-50, 18.6 moving
+minutes), two causes. Neither is the model path:
+
+    lead leaves the 1.5 m path bound    519 runs, 492 (95%) back within 8 frames (the 0.4 s grace)
+      same-vehicle yRel frame-to-frame  p90 1.16 m, p99 3.79 m
+      model path Y at the same dRel     p90 0.14 m, p99 0.39 m    <- radar lateral noise, not the path
+    leadOne jumps to another vehicle    140 swaps, 118 (84%) back within 8 frames
+      ...that changed vLead > 2 mph     105, of which 97 (92%) back within 8 frames
+
+**The bound failure was already free in the TIMER (`_lead_gap`) and still returned False.** That is
+exactly the combination the no-lead branch in `_decide` calls "the worst of both": the confirmation
+survives while the verdict blinks. **A swap was worse.** The other car's vLead failed the deficit, and
+`_clear_confirmation` restarted the confirmation about 7.5 times a minute.
+
+**The fix (`LEAD_SWAP_D_M` in passing_assist.py):**
+- A bound failure inside the grace now returns the carried verdict.
+- A leadOne jump of more than 8 m from the tracked lead is treated as a gap frame. The tracked lead is
+  projected forward by its own vRel.
+- After the grace, the new car is judged on its own numbers.
+
+`test_lead_verdict_grace.py`, 9 tests, 8 mutants, 0 survivors.
+
+**ONLY AN ESTABLISHED VERDICT IS CARRIED** (`approach_seconds >= LEAD_GAP_GRACE_S`). WANTED_RISE_S is
+0.3 s, shorter than the grace. Without that guard, one radar frame carried for 0.4 s would light the
+blinker, which is evidence that opens being cheaper than evidence that refuses. Both carry paths have
+a test that fails without it.
+
+**KNOWN AND NOT CHANGED: the no-lead branch still carries on `approach_seconds > 0`**, so one slow frame
+followed by a dropout carries for the grace. It was left alone deliberately. That branch hard-clears
+wanted_side (`_reset_outputs(noLead)` without keep_wanted), so tightening it there would reintroduce
+the dropout-abort path that cc9b910b0a closed for nothingSlower.
+
+**Costs, stated:**
+- A slow lead that really leaves the path ends the suggestion 0.4 s later.
+- A real cut-in by a faster car is refused 0.4 s later.
+
+Every other gate below spotted is still evaluated live, and passing assist commands nothing today.
+Score the next drive on blockedBy flips per moving minute against drive 61.
+
+**TEST-HOOK TRAP, found the same session.** Parallel Edit calls fired the post-edit suite hook
+mid-edit. One run wrote a `.pyc` whose line numbers belong to an intermediate source. The two
+`inspect.getsource` tests (`test_the_hog_condition_no_longer_reads_left_geometry`,
+`test_every_field_in_the_schema_is_actually_published`) then failed on correct code, and so did
+AttributeErrors from half-applied edits. **Before diagnosing a source-inspection failure after a
+multi-edit, delete `__pycache__` and rerun.** Edit one file sequentially if the hook is on.
 ## 2026-09-14: STEERING REVIEW OF 045b..046a. NO SETTING CHANGES, AND THE TAIL WAS INTERSECTIONS.
 
 *"Take a look at my latest drives. Take a look at steering specifically and see if I need to change
@@ -8656,6 +10971,123 @@ suite green, each mutation-tested:**
 openpilot and measurably wrong here: it would saturate core 4 while driving, which is BluePilot's
 commIssue report reproduced by arithmetic.
 
+
+### THE FLICKER FIX WORKED AND THE ABORTS DID NOT FALL. TWO NEW FIELDS, BECAUSE THE RECORDED ONES CANNOT SAY WHY.
+
+Five drives after the grace fix (0000046b-f, build 476dc5a46a), scored per moving minute against
+drive 61 so the comparison is not a raw count:
+
+    blockedBy nothingSlower<->noLaneAvailable flips within 0.4 s, per MOVING MINUTE
+      0000046a  drive 61, BEFORE     23.7      leadOne swaps 36.4/min
+      0000046b .. 0000046f, AFTER    1.1 - 4.6   leadOne swaps 10.5 - 24.0/min
+
+**Down about 5x once normalised per lead swap, so the fix did what it was built to do.** The
+blockedBy timeline is readable again.
+
+**THE ABORTS DID NOT FOLLOW, and that is the finding.** 18 aborts over ~31.5 moving minutes today
+against 5 in 14.1 on drive 61, and the highway drive 0000046f carried 13 of them in 17 minutes --
+45.8/hour against the 12.4/hour baseline this file recorded on build 8e979260. **So the flicker and
+the aborts were never the same defect**, and fixing one says nothing about the other. Score them
+separately from here.
+
+**EVERY ONE OF THE 13 HAS THE SAME SHAPE, and none of the recorded fields name it.** In bursts --
+four inside eight seconds -- a single frame of `wantedSide none` while `suggestion` still stood,
+`blockedBy` reading `none`, the lead present, and `confirmSeconds` pinned at 2.00. That last one is
+what makes it interesting: `approach_seconds` at its cap rules out every path through
+`_clear_confirmation`, so the confirmation never lapsed. It re-arms ~0.3-0.45 s later, which is
+`WANTED_RISE_S`.
+
+**TWO MECHANISMS FIT AND THE WIRE CANNOT SEPARATE THEM**, which is the fifth instance in this file
+of a decision published without its inputs:
+
+    the debounce released      raw wanted was none for WANTED_FALL_S and the recovery is one rise
+    a gate hard-cleared it     _reset_outputs without keep_wanted, and _hold_suggestion rewrote
+                               blockedBy to none in the same frame -- exactly the cc9b910b0a shape,
+                               which is a cause that erases its own log entry
+
+`rawWantedSide @110` and `blockedByDecided @111` are the two raw terms, captured before the debounce
+and before the hold respectively. **The next drive names the mechanism instead of a sixth inference.**
+
+**AND `suggestion` STANDING WHILE `wantedSide` IS NONE IS NOT ITSELF THE DEFECT.** The suggestion is
+built from `clear_side`; the debounce holds `wanted` back for `WANTED_RISE_S`, so the two are
+legitimately inconsistent during every rise. `passing_maneuver` leaves `signaling` on
+`wanted == none or wanted != side`, so that ordinary inconsistency is what ends the dry run --
+which is precisely why the raw terms were needed to tell a normal rise from a gate letting go.
+
+`test_abort_cause_fields.py` asserts on the PUBLISHED message, not on the attributes, because
+publishing the wrong one of a near-identical pair is the failure mode here: `wantedSide` and
+`rawWantedSide` agree on most frames, so a field fed from its neighbour reads perfectly plausibly in
+a drive and is silent on exactly the frames the aborts live on. 4 tests, 4 mutants, 0 survivors.
+
+**AND THE RISE IS ONE FRAME LONGER THAN THE ARITHMETIC SUGGESTS.** `_debounce_wanted` starts its
+timer at zero on the frame the raw answer changes, so a rise takes `int(WANTED_RISE_S / DT_MDL) + 1`
+frames. The first version of that test was off by one and the TEST was wrong, not the code.
+
+## 2026-09-16: THE NEW FIELDS NAMED THE ABORT ON THEIR FIRST DRIVE. A STALE LINE BYPASSED THE DEBOUNCE.
+
+Routes 00000470-476 on build 5c3e15b239. `tools`-style scan in the session scratchpad (`pa_cause.py`),
+aborts counted as increments of `maneuverAborts`:
+
+    3  HARD CLEAR  adjacentSlow        raw and wanted dropped on the SAME frame, one frame of refusal
+    2  debounce fall  noLaneAvailable  raw none for 16 frames, released after WANTED_FALL_S -- correct
+    1  window expired                  see the braking hold below
+
+**A same-frame drop is impossible through `_debounce_wanted`**, so something wrote `wanted_side`
+after it. The gate-refusal branch of `_decide` called `_reset_outputs(blocked, keep_wanted=True)` and
+then REASSIGNED `wanted_side` from the raw `want_left`/`want_right`. That line dates from 2026-08-10,
+when `_reset_outputs` cleared unconditionally; `keep_wanted` arrived 2026-08-15 and the line stayed,
+so it overwrote the debounced value with the raw one on every frame the branch ran -- in BOTH
+directions. One frame of `adjacentSlow` dropped a standing signal (00000476 at 76 mph, twice, each
+behind a 72 mph lead with an 80 mph car in the left lane), and one frame of geometry behind an
+occupied blind spot lit the signal without `WANTED_RISE_S`. Removed.
+`test_gate_refusal_keeps_the_debounce.py`: 3 tests, both mutants (line restored, keep_wanted off)
+killed by all three. The crossing is unaffected -- it waits on `suggested`, computed live.
+
+**Same shape as cc9b910b0a, found faster:** a debounced value written by a second site. The rule
+already in this file applies -- grep every WRITE of a debounced value, not the debounce.
+
+### AT HIGHWAY SPEED THE CROSSING WAS HELD BY ENGINE BRAKING, NOT BRAKING. HE DECIDED: BRAKE REQUESTS ONLY.
+
+`passing_maneuver` crosses only when `not acc_braking`, and `acc_braking` is `accBrakingAtDecision`:
+`accDecelRequest OR -4.5 < AccPrpl_A_Rq < -0.15` (engine braking was added for the reactive-vs-
+preemptive METRIC, and the crossing reused the flag). 44 signaling sequences, routes 046a-046f and
+471-476:
+
+    speed    sequences   crossed  window expired   ready-to-cross time held by acc_braking
+    <45         21          3           0            47%   (mostly real brake requests -- queues)
+    45-60       11          2           0            34%
+    >=60        12          2           5            96%   ALL engine band, ZERO brake requests
+
+Following a slower lead at 75 mph, Ford holds a slightly negative propulsion request continuously
+(aEgo ~0), so the gate the comment describes as "a second or two" sits closed for the whole 5 s
+window. **Nothing actuates, so this costs dry-run completions, not safety.** Whether engine braking
+counts as "braking" in *"I don't want to involve braking when doing the lane change itself"* is his
+rule to interpret -- asked, not assumed. If he says brake requests only, the change is the crossing
+reading `accDecelRequest` alone while the metric keeps engine braking; it OPENS crossings, so it
+needs his yes.
+
+**HIS ANSWER, same day:** *"Real brake requests only. I mean, it's fine if it has to brake to lane
+change, I just want it to brake the least amount possible."* Done: the crossing reads
+`acc_brake_requested` (`accDecelRequest` alone); `acc_braking_at_decision` keeps engine braking for
+the metric, and `accBrakingAtDecision` on the wire is unchanged so recorded drives keep their
+meaning. **No new field needed** -- `carStateBP.brakeLightStatus.accDecelRequest` is already logged,
+so a drive can reconstruct exactly what held a crossing. `test_crossing_waits_on_brake_requests_only.py`,
+4 tests, 3 mutants killed. Score the next highway drive on sequences crossed at 60+ mph against
+2 of 12.
+
+**Read his sentence as the INTENT, not only the rule:** braking during a lane change is allowed, the
+goal is the least of it. So the hold waits out a brake request rather than forbidding one, and it
+stays bounded by `SIGNAL_WINDOW_S`.
+
+## A REBOOT IS NOT MINE ALONE. ASK THE OTHER SESSIONS FIRST.
+
+2026-09-16: passing assist rebooted the car for a deploy while the ICBM session was investigating on
+it. *"Watch your reboots! Another session is looking at stuff!"* This file already said "say so
+before rebooting a device another session is using" (2026-08-28, when a reboot wiped a finished
+analysis in `/tmp`) -- a rule in prose, broken again. It is now step 5 of `/deploy`: `ListAgents`,
+`SendMessage` every session working on this car, **wait for a reply**, check `who` and running
+analysis jobs on the device, then reboot. "Do reboots and updates unasked" still holds -- unasked by
+HIM, not unannounced to the sessions sharing the car.
 ## 2026-09-15 EVENING: THE BLINKER PAUSES CAME OFF, AND THE HEAT WORK IS VALIDATED ON THE ROAD
 
 Five drives, routes 0000046b..0000046f, build `476dc5a46a`, pulled off the device at 1.5 MB/s and
@@ -8927,6 +11359,53 @@ it printed correctly.
 Start detached jobs with a plain `ssh` call, never through a retry wrapper, and have the remote
 command refuse when `pgrep -f "[n]ame"` already finds one. Retry only READ-ONLY commands.
 
+## 2026-09-17: BOTH PASSING-ASSIST FIXES VALIDATED ON THE ROAD. AND TWO WAYS A LOG COPY LIES.
+
+Six drives on build 9d4f87b8fe (routes 00000477-47c, 31.3 moving minutes above 34 mph), scored from
+QLOGS pulled off-device, with the three segments that mattered pulled at full rate:
+
+    aborts / moving hour        12.4 (build 8e979260)  ->  45.8 on 0000046f  ->  3.8 HERE
+    one-frame adjacentSlow      3 on one drive         ->  ZERO
+    signaling sequences          6 total (>=60 mph: 2, 45-60: 2, <45: 4)
+    crossings                    3 (one at 74 mph, one at 48, one at 44)
+
+**Both remaining aborts are the CORRECT kind, confirmed at 20 Hz** (0000047b seg 10, 43 mph): raw
+disagreed for exactly 0.80 s with `blockedByDecided = noLaneAvailable` before `wanted_side`
+released -- a debounce fall, which is WANTED_FALL_S doing its job. No hard clears anywhere.
+
+**THE HIGHWAY NUMBER IS NOT SETTLED AND MUST NOT BE QUOTED AS ONE.** Two sequences at 60+ mph, one
+crossed. Against 2 of 12 before, that is consistent and proves nothing -- the same trap this file
+records five times. Worse, the 74 mph crossing had **zero engine braking during it**, so it does not
+even exercise the 2026-09-16 gate change. What would: a highway sequence where ACC sits in the
+engine band, which is what every pre-fix 60+ sequence looked like.
+
+### A COPY THAT IS THE RIGHT SIZE CAN STILL BE THE WRONG BYTES. HASH IT.
+
+`rlog.zst` for 00000478 seg 9 came off the device at EXACTLY the device's byte count and failed to
+decompress. md5 on both sides: `5169241b...` on the car, `1f5a5e00...` locally. **A size check passes
+this; only a hash catches it.** Two more copies came back as 0 bytes while the wrapper reported
+success, because the local resolver was failing (`Not enough memory resources`) and `cmd /c ... >
+file` still created the file. So:
+
+    pull, then md5sum on the device and compare -- retry on mismatch, never on size
+    d41d8cd98f00b204e9800998ecf8427e is the md5 of EMPTY. Seeing it means the transfer never ran.
+
+`tools/`-style pulls should batch per route and verify per file; one 40 MB stream over his wifi
+(~200 KB/s) truncated at 22.6 MB mid-file, which is the 2026-08-29 hotel-wifi lesson again.
+
+### AND A MULTI-FRAME ZSTD LOG READS AS CORRUPTION
+
+One qlog decompressed on the device (`zstd -t` clean, md5 identical to the local copy) and threw
+`ZstdError: Data corruption detected` in Python. openpilot can write a log as several CONCATENATED
+zstd frames and `ZstdDecompressor().stream_reader(...)` stops after the first, which surfaces as
+corruption rather than as a short read. **Every off-device reader here needs
+`read_across_frames=True`.** Without it the failure looks like a bad file and invites a re-pull that
+cannot help -- which is exactly what it got.
+
+**AND THE CAR UPDATES ITSELF, WHICH IS EASY TO FORGET WHILE CHASING REACHABILITY.** It went off the
+network for an hour; when it came back it had already pulled `e8fc60a401` and rebooted on its own,
+so the stepper fix was live before anything was deployed by hand. Read the device's HEAD before
+planning a deploy, not after.
 ### AND IT IS EVERY LOW-SPEED STOP, NOT JUST THE ONES BEHIND A CAR. THE CURVATURE DIES BY 2 MPH.
 
 The open question from the entry above, answered on 13 approaches to a standstill that were turning
@@ -9086,6 +11565,46 @@ something a 20 Hz planner ever produces. Same family as the 2026-09-16 lesson ab
 more orderly than reality -- here the fixture was more VIOLENT than reality, which hides bugs just
 as well.
 
+## 2026-09-18: THE BRAKE-REQUEST GATE IS PROVEN ON THE ROAD. AND AN ABORT THAT IS A SIDE CHANGE.
+
+Eight drives, build 46b58a9023 (frozen for the stop-hold drive, so passing assist moved nothing).
+Six were parked or crawling; the road time is 00000480 (7.5 moving min) and 00000487 (4.8), both
+highway. **All three signaling sequences were at 60+ mph, which is the band every earlier sample
+lacked.**
+
+**THE PROOF THE 2026-09-16 GATE CHANGE WAS RIGHT, and it is one line of the dump:**
+
+    seq t+52.0  76 mph  6.9 s  CROSSED  suggestion-up 6.9 s  brakeReq 0.0 s  engine 6.0 s
+
+**Engine braking for 6.0 of the 6.9 seconds, zero brake requests, and it crossed.** Under the old
+gate that sequence is exactly the 96%-held case -- ready to cross, held by the engine band, window
+expires at 5 s. It is the first sequence on record that both exercises the change and completes.
+
+    crossings at 60+ mph   2 of 12 sequences BEFORE  ->  3 of 5 since (1 of 2, then 2 of 3)
+
+Still a small sample and stated as one, but unlike the 2026-09-17 crossing it is no longer consistent
+-with-anything: that one had zero engine braking and therefore tested nothing.
+
+### THE ONE ABORT IS A SIDE CHANGE, AND MY CLASSIFIER CALLED IT A HARD CLEAR
+
+t+13.5, 79 mph, signaling RIGHT. raw alternated R/L for a second (`R x4 L x1 R x4 L x1 R x1 L x1
+R x3 L x1 R x1 L x7`), then held LEFT for 0.35 s, so `_debounce_wanted` granted the new side after
+WANTED_RISE_S and the maneuver aborted because `wanted != side`. **0.1 s later it signalled left and
+crossed.** So the abort is the detector changing its mind between two available lanes, not a gate
+letting go, and the pass happened anyway.
+
+**The scan tool labelled it `HARD CLEAR (one frame)` because it only knew two endings.** `run`
+counts frames where raw disagrees with the OLD side, which on a side change is not the fall time at
+all -- the same shape as measuring a fall against the wrong constant, and the third time in this
+file a scan's own label has been the wrong half of the finding. Fixed: a side change is its own
+verdict, checked before either timing test.
+
+**WHAT IS WORTH A LOOK LATER, NOT NOW:** the right blinker was up for 1.5 s before the sequence
+became a left pass. Nothing moved -- signaling only -- but "never signal what you're not doing" says
+a lamp shown to traffic behind should not advertise the other side. The debounce already forbids
+sliding R->L without passing through none INSIDE `wanted`; what happened here is the maneuver being
+torn down and restarted on the other side in consecutive frames, which is legal by construction.
+Once this actuates, that is a 1.5 s wrong-side lamp and it needs a stand-down between sides.
 ## 2026-09-22: THE LATCH HELD FULL-SCALE OPPOSITE STEERING FOR SEVEN SECONDS AT A STANDSTILL
 
 21 routes and 154.6 moving minutes on `0bde6ff361`, the rebuilt latch. It works on the road -- and
@@ -9152,6 +11671,370 @@ Ask what the LARGEST admissible value is at the same time as the smallest, and c
 the signal does in the regimes the feature is not for -- parking, maneuvering, standing still. Both
 of this feature's defects so far have been at an end of the range nobody bounded.
 
+## 2026-09-25: THE RADAR-DROPOUT FIX WORKS. THE ABORT RATE DID NOT MOVE ENOUGH TO SAY SO.
+
+First measurement of afc3301ad6 / 8621d134dd on the road. 12 routes (0000049d..000004a8), all
+recorded after the 2026-09-22 deploy, scanned on the parked car because the link was under 35 KB/s.
+
+    build 0bde6ff361 (before)   33 aborts / 154.6 moving min = 12.8/hr
+    build 8621d134dd (after)    12 aborts /  69.9 moving min = 10.3/hr
+
+**DO NOT REPORT THAT AS AN IMPROVEMENT.** Under the baseline rate, 69.9 minutes expects 14.9
+aborts; 12 were observed, and P(X <= 12 given lambda 14.9) = **0.27**. That is an ordinary draw.
+Scoring a 33% improvement at p < 0.05 needs about **150 post-fix moving minutes**, roughly double
+what exists. The rate is the headline number for this feature and the one most likely to be quoted
+early -- it has now been computed, and it says nothing yet.
+
+### THE FIX IS VALIDATED ANYWAY, BY THE FRAMES RATHER THAN BY THE RATE
+
+The three noLead aborts (route 000004a4, 76-79 mph) carried the same signature the fix was built
+from -- raw L x23 - x1 / dec nothingSlower x23 noLead x1, character for character the route
+0000048e seg 18 evidence quoted in the code comment. **It was about to be written up as the fix
+having failed.** Dumping the real per-frame state instead of the abort-window summary reverses it:
+
+    t+29.20 .. 29.40   want L  lead 0  conf 1.05  dec nothingSlower   <- FIVE FRAMES, lead GONE,
+                                                                        and the side is HELD
+    t+29.45            want -  lead 0  conf 0.90  dec noLead          <- grace expired, hard clear
+
+conf decaying only at t+29.45 is the proof: _lead_gap decays approach_seconds **only** past
+LEAD_GAP_GRACE_S. So the grace absorbed 0.25-0.30 s of a genuinely absent lead -- the fix doing
+exactly its job -- and then the documented hard clear fired on a lead that had really gone. That
+branch is required to clear at once; test_no_pass_warranted_clears_it_immediately states it.
+
+**So these are not the dropout defect. They are the grace being shorter than the dropout.** What
+drives them is leadOne thrashing at 115 m: dRel alternating 90.9 to 115.6 with the deficit jumping
+2.2 to 6.1 m/s, then the radar losing both. Same family as the 2026-09-15 LEAD_SWAP_D_M work, at a
+distance and speed that work never covered. **Do not lengthen LEAD_GAP_GRACE_S on this** -- three
+events, and the sequences were 1.6 s and 0.2 s old behind a lead 115 m away with a 5 mph deficit,
+which is a marginal suggestion rather than one worth defending.
+
+### rawWantedSide IS MEANINGLESS ON ANY FRAME THAT RETURNED EARLY
+
+raw_wanted_side is cleared immediately before _decide (passing_assist ~2935) and assigned near the
+END of it. **Every early return therefore publishes none without the geometry ever having been
+asked**, so "raw went to none" and "the frame bailed out above the geometry" are the same reading.
+The raw L x23 - x1 above is the second case, and it is what made a by-design hard clear look like a
+one-frame flicker. Read rawWantedSide only WITH blockedByDecided.
+
+This is the fourth field in this file to assert something narrower than its name (overtakenVAbs,
+oneWay, vTarget, now this). **Open the capnp comment AND find where the field is written before
+building a number on it** -- a field's meaning includes which frames it is written on.
+
+### A ONE-FRAME HARD CLEAR IS ONLY A DEFECT IF THE CAUSE IS ONE THE HOLD OWNS
+
+The distinction that would have prevented the wrong report, and it was nowhere in the output:
+
+    cause in HOLD_THROUGH (noLaneAvailable, adjacentSlow, nothingSlower)   DEFECT -- the hold is
+                                                                          not long enough
+    anything else (noLead, driverActive, tooSlow)                         BY DESIGN -- no pass is
+                                                                          warranted at all
+
+tools/bp_abort_why.py now prints that verdict per event, and it was **still reading blockedBy ten
+days after blockedByDecided shipped for exactly this** -- _hold_suggestion rewrites blockedBy to
+none on held frames, so the tool's own comment about three of four events reading "none" described
+a bug it already had the field to fix. A diagnostic outliving the thing it measures, for the third
+recorded time. test_abort_verdict_mirror.py parses the real HOLD_THROUGH out of passing_assist and
+fails if the tool's copy drifts; 4 mutants, 0 survivors.
+
+### WHAT THE SAME SCAN SAYS IS HEALTHY, AND ONE THING THAT IS NOT
+
+- **The brake-request gate is holding.** 4 of 8 signaling sequences crossed at 60+ mph, against
+  18 of 36 (50%) measured after that change and 2 of 12 before it. Consistent, and still a thin
+  sample on its own.
+- **noLaneAvailable is now the dominant cause: 6 of 12**, and all four pulled at full rate are
+  "debounce fall (correct)" -- raw disagreed the full 0.80 s. Route 0000049f alone contributed 4 in
+  3.9 minutes (61.9/hr) on 31-44 mph surface road. That is the ~14 geometry-false cluster (edgeStd
+  7, paint 5, width 2) named as the next target for two weeks, and it is now the largest remaining
+  bucket by a clear margin.
+- Emergency aborts: **0** across all 12 routes.
+
+### AND THE DEPLOY QUESTION FROM 2026-09-22 IS CLOSED BY THE DRIVES, NOT BY A PROCESS LIST
+
+The outstanding item was a post-boot process check on 8621d134dd. **It is not obtainable from a
+parked car** -- card, plannerd and selfdrived are onroad processes, so their absence offroad means
+nothing, and only pandad/ui/mapd_v2/athena/loggerd/manager are up. Route existence proves nothing
+either; loggerd records whether or not card started. What settles it is that carState and
+longitudinalPlanSP are populated across all 12 routes and every one stamps gitCommit 8621d134dd.
+Two days of driving on that tree.
+
+## THE COMMA SSH BANNER SAYS UBUNTU. IT COST ANOTHER SESSION THREE DAYS.
+
+2026-09-25, and it is the second entry here about a device that looks absent and is not.
+
+mDNS was dead from this laptop -- comma-34b959b and comma-34b959b.local both unresolvable -- while
+the car sat on the network the whole time. **The ARP cache is the way in**, because the MAC is a
+constant and the address is not:
+
+```powershell
+arp -a | Select-String "0a-f5-e4-4a-bc"      # -> 192.168.1.187
+ssh -o StrictHostKeyChecking=accept-new comma@192.168.1.187
+```
+
+**THE TRAP: a port-22 sweep FINDS the car and its banner reads OpenSSH_9.6p1 Ubuntu-3ubuntu13.16.**
+AGNOS is Ubuntu-based, so that is exactly what the comma reports. The ICBM session read that
+banner, filed .187 as "his Ubuntu box", and then re-found the same host on three separate sweeps
+over three days without revisiting the label -- while its own key was failing for an unrelated
+reason (a stale host key; ssh-keygen -R plus accept-new fixed it first try).
+
+**IDENTIFY A DEVICE BY WHAT IT REPORTS ABOUT ITSELF, NEVER BY ITS SSH BANNER:**
+
+```bash
+hostname; cat /sys/class/net/wlan0/address; cat /sys/firmware/devicetree/base/model
+cat /data/params/d/DongleId; cat /VERSION
+```
+
+Here: comma-34b959b, 00:0a:f5:e4:4a:bc, comma tizi, 9c78c368d6813aef, 18.5. A wlan0 MAC matching
+the ARP entry and a comma-3X devicetree model is not a label anyone has to argue about.
+
+**And a failing key looks identical to a wrong host.** Two causes, both recorded here already:
+Bitwarden locked (ssh-add -l says "agent refused operation") and a stale host key (with BatchMode
+it HANGS rather than erroring). Neither is evidence about which machine is on the far end.
+
+**THE GENERAL SHAPE, for the third time in this file: a cheap label computed once, then carried
+forward as a fact while newer evidence went to the same conclusion it had already been filed
+under.** Same as oneWay labelling a carriageway and being read as labelling a road.
+
+## 2026-09-25: HOV. THE DATA EXISTS, THE TILE FORMAT DROPS IT, AND THE PR IS OPEN.
+
+He reported it from the road: *"it didn't know that the HOV lane was an HOV lane... it tried to go
+in there a few times"*, then the requirement in one sentence -- *"I just wish I would know that this
+portion of I-15 has an HOV lane, so don't go into the leftmost lane."*
+
+**OSM HAS IT, verified against Overpass on his own road** (bbox 40.68,-111.94,40.78,-111.86):
+
+    way 31489320  I 15  lanes 4  hov:lanes = "designated|||"  hov:minimum = 2
+
+Eight ways, all tagged. `:lanes` values are ordered left to right in the direction of travel, so
+`designated|||` is "the leftmost of four lanes is HOV" -- his sentence, precisely, plus the
+occupancy. **The chain breaks at the TILE FORMAT, not at the publish step:** `Way` in
+mapd's `offline.capnp` carries name, ref, maxSpeed, bbox, nodes, lanes, advisorySpeed, hazard,
+oneWay, the directional/conditional maxspeeds, id and highwayClass. No HOV field of any kind. So
+the tag never reaches the device and no amount of consuming would help.
+
+**AND CONSUMING IT WOULD BE LEGAL when it lands.** Refusing to suggest the leftmost lane is the map
+REFUSING, which the map-is-evidence rule permits freely; the forbidden direction is the map OPENING
+a maneuver. A stale tile then costs a pass we would have offered anyway, never a move into the HOV.
+
+### PR 139 IS OPEN ON pfeiferj/mapd. WAITING ON CI APPROVAL, NOT ON REVIEW.
+
+https://github.com/pfeiferj/mapd/pull/139 -- +421/-278, 8 files, mergeable. It adds `hovLanes` and
+`hovMinimum` as raw Text in the shape of `maxSpeedConditional`: generator reads the tag, offline
+`Way` stores it, `maps.Way` memoizes it, `MapdOut` publishes it. **Status: `action_required`** --
+GitHub holds workflows from a first-time contributor until the maintainer approves them, so CI has
+not run. That is not a review signal and nothing is wrong.
+
+**TWO FIELDS, NOT SIX, and the count is the argument:** taginfo puts `hov:lanes` at 19,596 and
+`hov:minimum` at 12,215 against `hov:lanes:backward` 252 and `hov:lanes:forward` 216 -- about 1%.
+Carrying the directional variants would cost every tile two more Text fields for nothing.
+
+**WHAT WAS NOT VERIFIED, and the PR says so in its own body:** `go build`, `go vet` and `go test`
+were never run. `gomsgq` defines `ThreadSignal` in a cgo file and needs linux, so on Windows
+nothing in the module compiles -- not even `./maps/...`, which pulls it in transitively. What WAS
+done instead: every generated symbol the hand-written code calls was checked to exist with the
+right signature, and the `state.go` call was checked to be the same shape as the `SetRoadName` line
+above it.
+
+### REGENERATE, THEN PROVE THE TOOLCHAIN BEFORE TRUSTING THE DIFF
+
+`*.capnp.go` ARE committed in that repo and his CLAUDE.md forbids hand-editing them, so the
+bindings had to be regenerated. Go 1.25.1 and capnp 1.3.0 were unpacked into the session scratchpad
+rather than installed -- no system change, and `capnpc-go` is `go install
+capnproto.org/go/capnp/v3/capnpc-go@v3.1.0-alpha.1` with `-I ../go-capnp/std`.
+
+**THE STEP THAT MAKES THE DIFF READABLE: regenerate the UNMODIFIED schemas first and require a ZERO
+diff.** A different capnp or plugin version reformats the whole file, and the real change then
+hides inside thousands of lines nobody can review. It was zero here, so the 457/177-line generated
+diff is only the two accessor sets, `MapdOut`'s pointer count 6 -> 8, and the embedded schema blob.
+
+**`capnp.exe` IS A NATIVE WINDOWS BINARY AND LOOKS UP ITS PLUGIN ON THE WINDOWS PATH.** Exporting
+PATH from the Bash tool gives `go: no such plugin (executable should be 'capnpc-go')` while the
+plugin sits right there. Run the generation from PowerShell with `$env:PATH`.
+
+**`gofumpt -l` FLAGGING A FILE ON WINDOWS USUALLY MEANS CRLF, NOT FORMATTING.** It listed files the
+change never touched, and `gofumpt -d` on them rewrote every line -- git checks out CRLF, gofumpt
+writes LF. Confirmed harmless by running it on the same files at HEAD, which flagged them too. **Do
+not run `gofumpt -w` to make it quiet**: it would reformat the whole repo and bury the change.
+
+### HE WAS RIGHT TO ASK WHETHER AN AI PR IS WELCOME THERE, AND THE ANSWER IS EVIDENCE
+
+*"would he be okay with Claude coding stuff like this? That's why I didn't do it before."* Checked
+rather than guessed:
+
+  - **pfeiferj keeps a `CLAUDE.md` in that repo**, written to guide Claude Code working in it.
+  - **Two of the three PRs he merged on 2026-09-22 came from `codex/` branches** (FrogAi), one of
+    them +7,085/-1,392.
+
+His CLAUDE.md is also the build contract: `make capnp` after any `.capnp` edit, never hand-edit a
+generated file, `make format`, and `docs/` is the source of truth for the message schema and must
+be kept in sync. `docs/outputs.md` is updated in the PR for that reason.
+
+### THE OTHER THREE ISSUES ARE NOT PRs TO WRITE, AND THAT IS THE POINT
+
+    127 lanes:forward     DO NOT. He said "Yeah, I can work on adding this" and designed his own
+                          shape (`currentDirectionLanes`, `lanes` keeps meaning the total).
+                          Sending code for something the maintainer claimed and designed is how to
+                          annoy him. A nudge at most.
+    129 change:lanes      DO NOT. HE talked himself out of it in the thread -- `overtaking` is
+                          13.6x more common and answers a different question, and both are on 0%
+                          of the three Utah highways he sampled. Worth closing.
+    131 highway=stop      NOT NOW. Nodes, not ways, and the tile stores node COORDINATES with no
+                          tags at all -- a much larger change than the other three.
+
+Four PRs would also all touch the same two files and conflict with each other. **All four open
+issues in that repo are his**, and pfeiferj is active (three merges on 2026-09-22) -- so he is
+merging patches rather than working a request list, which is why the PR is the move and the wait
+was not.
+
+## 2026-09-25: THE liveTracks UNDERSAMPLE IS 20.0%, PERIODIC, AND WHAT IT COSTS IS SHORT SIGHTINGS
+
+`adjacent_lane.update` returns early on `not sm.updated['liveTracks']` (line ~993). plannerd polls
+carState at 100 Hz and runs the planner body only when modelV2 updated, so a liveTracks message
+reaches the observer ONLY when it lands in the same 10 ms poll as a modelV2. This is the race the
+ICBM session flagged on 2026-09-14 and handed to this branch. Measured here across five rlog
+segments, highway and surface (`tracksrate.py`):
+
+    published 8.35 Hz    VISIBLE 1.62-1.74 Hz    = 19.4-20.8%
+    gap published   p50 0.120  p90 0.121-0.128  max 0.130
+    gap VISIBLE     p50 0.600  p90 0.601-0.952  max 0.601-1.560
+
+**THE SAMPLING IS PERIODIC, NOT RANDOM -- every fifth message, 0.600 s apart.** liveTracks at
+8.35 Hz against modelV2 at 20 Hz is very nearly a 5:1 phase lock, which is why the median visible
+gap is 0.600 with a p90 of 0.601 on highway. That matters because it makes the consequence
+predictable rather than a lottery.
+
+**SO CORROBORATION IS NOT STRUCTURALLY UNREACHABLE, WHICH WAS THE FIRST GUESS AND IT WAS WRONG.**
+`ONCOMING_FRAMES` and `SAME_DIRECTION_FRAMES` both need 3 messages inside a 1.5 s window; three
+visible messages span 1.2 s, so they fit:
+
+    3-in-1.5s reachable    published 100%    VISIBLE 100% highway, 83.3-95.9% surface
+
+**WHAT IT ACTUALLY COSTS IS LATENCY AND SHORT SIGHTINGS, and the second one is the safety case.** A
+verdict takes 1.2 s of evidence instead of 0.24 s. **Any oncoming vehicle visible for less than
+about 1.8 s can never reach three messages, so the veto never fires** -- while at 8.3 Hz the same
+car gives the dozen returns the constant's own comment assumes. That is a REFUSAL being missed,
+which is the direction this fork treats as unsafe; the same latency on the same-direction latch
+merely costs coverage.
+
+### THE ONE-LINE FIX IS STILL NOT SAFE, AND THE REASON IS UNCHANGED
+
+Keying the read on `sm.logMonoTime['liveTracks']` instead of `sm.updated` gives the observer all
+8.3 Hz. Then `SAME_DIRECTION_FRAMES = 3` inside 1.5 s is met in 0.24 s by anything, and the ICBM
+replay measured the same-direction latch going to **96-100% of moving two-way frames**. That latch
+is the ONLY thing that releases the strict turn-lane veto, so fixing the keying alone reopens the
+2026-08-09 center-turn-lane failure -- three real incidents -- through a sampling change. Same
+shape as the edge-std term: something measuring the wrong thing was doing real refusing.
+
+**DO NOT SHIP THE KEYING WITHOUT A RE-DERIVED `SAME_DIRECTION_FRAMES`.**
+
+### THE DERIVATION THE CONSTANT NEEDS, AND WHY IT IS NOT SHIPPED HERE
+
+At 8.35 Hz, from the track lifetimes in BP-REAR-RADAR-PLAN.md section 6 that
+`SAME_DIRECTION_FRAMES` already cites:
+
+    clutter        0.12-0.48 s  ->   1-4 messages
+    real adjacent  4.97-28.73 s ->  41-240 messages
+
+So anything from about 5 to 40 separates them, which is a wide and comfortable gap. Two anchors
+inside it:
+
+    preserve today's EFFECTIVE evidence   3 visible msgs span 1.2 s  ->  ~11 messages at 8.35 Hz
+    clear the clutter ceiling with margin  4 messages + margin       ->  ~8 messages (0.96 s)
+
+**Neither is shipped, because a number derived from two quoted ranges is not a measurement.** This
+file's own rule for this feature is not to act on a sweep with fewer than ~20 events and to state
+the count beside any claim. The measurement that settles it is a replay of the REAL `AdjacentLane`
+at full rate with candidate counts, scored FIRST on the same-direction release on two-way roads --
+the opening direction, so the higher bar -- and second on the right-side oncoming false edges.
+Confirmed possible: the class imports on the device.
+
+**USE `openpilot.tools.lib.logreader` FOR THAT REPLAY, ON THE DEVICE, NOT A SECOND `capnp.load`.**
+`adjacent_lane` pulls in the car layer, and this file already records that importing
+`opendbc.car.*` in a process that has called `capnp.load()` calls `abort()` -- exit 127, no
+traceback, `except` never runs. The scan tools in `/data/steer_review` all load log.capnp directly
+and therefore must NOT be extended to import the class.
+
+### AND THE DECAY IS FINE, WHICH IS WORTH KNOWING BEFORE ANYONE "FIXES" IT
+
+`self.left.decay(dt)` and `tick_overtaken(dt)` run BEFORE the early return, so the memory windows
+(`ONCOMING_MEMORY_S` and friends) tick at the full 20 Hz whatever the radar does. Only the
+OBSERVATION is undersampled. A fix that moved the decay inside the new keying would quietly
+lengthen every memory window by 5x.
+
+### THE SWEEP RAN, AND THE ANSWER IS NOT A NUMBER: BOTH COUNTS WERE CALIBRATED BY THE UNDERSAMPLE
+
+Replayed the REAL `AdjacentLane` over 10 rlog segments -- 7 with genuine two-way road, 3 divided --
+both keyings, sweeping `SAME_DIRECTION_FRAMES` with `ONCOMING_FRAMES` held at 3
+(`sdsweep.py`, 554 s on the parked car). Two-way frames 5456, divided 4601, moving only.
+
+                                  TWO-WAY                    DIVIDED
+    shipped today            sd  66.8%  veto 52.8%      sd 25.5%  veto 36.4%
+    full rate, sd = 3        sd 100.0%  veto 92.1%      sd 99.5%  veto 73.1%
+    full rate, sd = 8        sd  97.6%  veto 93.4%      sd 95.3%  veto 73.1%
+    full rate, sd = 11       sd  97.4%  veto 93.5%      sd 72.9%  veto 74.9%
+    full rate, sd = 20       sd  76.9%  veto 98.9%      sd 66.2%  veto 74.9%
+
+**`SAME_DIRECTION_FRAMES` CANNOT FIX THIS ON ITS OWN, WHICH IS WHAT THE SWEEP WAS FOR.** Even at 20
+-- nearly seven times the shipped value -- the two-way latch is 76.9% against today's 66.8%, so the
+turn-lane veto still releases MORE often than it does now. And the divided-road oncoming veto is
+flat at 73-75% across the whole sweep, because that number is driven by `ONCOMING_FRAMES`, which
+this sweep held fixed.
+
+**THE FINDING IS THE OTHER COLUMN: the oncoming veto DOUBLES on divided roads, 36.4% -> 73.1%.**
+That is passing assist refused on three quarters of freeway frames -- the feature gone on the road
+it is most used on. And it is a familiar failure: it is the 2026-08-21 report *"I was on I-15 for a
+while, and kept saying two-way road"*, which `ONCOMING_FRAMES = 3` was added to fix. **That fix
+only ever worked because the observer was seeing one message in five.** Three clutter returns
+inside 1.5 s is hard at 1.67 Hz and trivial at 8.35 Hz.
+
+So the undersample has been acting as the clutter filter for BOTH corroboration tests, and both
+constants are unknowingly calibrated against a rate nobody intended.
+
+### A CORROBORATION THRESHOLD IN MESSAGES IS RATE-DEPENDENT. IT BELONGS IN SECONDS.
+
+That is the durable fix and it is better than any pair of numbers. The window constants
+(`ONCOMING_WINDOW_S`, `SAME_DIRECTION_WINDOW_S`, both 1.5) are already in seconds; the counts are
+not, so the same code means 0.24 s of evidence at 8.35 Hz and 1.2 s at 1.67 Hz. Requiring N
+SECONDS of agreement instead of N messages is invariant to the message rate, and it makes the
+keying fix safe rather than merely survivable.
+
+**The number that falls out, and unlike the counts it is measured rather than inherited:**
+
+    clutter tracks         0.12 - 0.48 s     (BP-REAR-RADAR-PLAN.md section 6)
+    real adjacent traffic  4.97 - 28.73 s
+    today's EFFECTIVE      3 visible messages x 0.600 s = 1.2 s
+
+So anything from about 0.6 s to 4 s separates clutter from traffic, today's accidental behaviour
+sits at 1.2 s inside that band, and the ORIGINAL intent -- 3 messages at 8.3 Hz, 0.24 s -- sits
+BELOW it, which is why it does not reject clutter at the true rate.
+
+**STILL NOT SHIPPED, and the missing half is named.** The `ONCOMING_FRAMES` sweep was launched and
+the car left the network mid-run -- `wd.sh` kills on ignition, so a drive most likely ended it and
+`/data/steer_review/out/oncsweep.txt` will say so. What it answers is what restores divided-road
+coverage: the prediction is ~11 messages (1.2 s at 8.35 Hz) bringing the veto back near today's
+36%, and the prediction needs checking before anything is written.
+
+**Do not ship the keying fix with only one of the two constants re-derived.** Fixing the keying
+plus `SAME_DIRECTION_FRAMES` alone would leave the oncoming veto at 73% on divided roads, which
+trades a turn-lane risk for losing the feature on the interstate.
+
+### THE REPLAY HARNESS, SO THE NEXT SESSION DOES NOT REBUILD IT
+
+`/data/steer_review/sdsweep.py` -- runs on the device, drives the real class, and both keyings come
+from one code path so the comparison is honest:
+
+- **`openpilot.tools.lib.logreader`, never a second `capnp.load`.** `adjacent_lane` pulls in the
+  car layer and the double schema load calls `abort()` -- exit 127, no traceback.
+- **Both constants are module globals read at call time** (`adjacent_lane.py` lines 730 and 781),
+  so `al.SAME_DIRECTION_FRAMES = n` before constructing is enough. Verified.
+- **The keying difference is modelled exactly**: shipped processes a liveTracks message only when
+  its 10 ms poll bin matches a modelV2's; full rate processes every message once, on the first
+  planner tick after it arrives.
+- **`divided` is approximated as `mapdOut.oneWay and tileLoaded`** and `strict` is forced True.
+  Both runs share those inputs, so the COMPARISON holds even though the absolute shares are
+  approximate.
+- **Pick the segments first.** `findtwoway.py` scores two-way share per segment off qlogs; most of
+  his driving is `oneWay=True`, and a sweep run on divided-only segments reports 0 two-way frames
+  and silently measures nothing. The first single-segment trial did exactly that.
 ## 2026-09-25: 105 DEGREES IS OPENPILOT'S CEILING ON THIS CAR. ANY BIGGER PEAK IS HIS HANDS.
 
 Three turn-analysis gates were set wrong in one evening, and he had to correct the third himself:
@@ -9225,6 +12108,97 @@ for errors clustered at +-1. The errors were p50 -4 and p10 -15 -- mostly the st
 legitimately asking for less. What identified the real cause was the 118-of-702 SMALL-error
 population, and then one episode with `vTargetRaw` and `gasPressed` as columns. **Publish the
 inputs of the rule you suspect, on the frames it acted, before theorising about the output.**
+
+## 2026-09-26: A FULL TABLE OF ZEROS IS NOT A NULL RESULT. IT IS NO DATA.
+
+Relaunching the interrupted `ONCOMING_FRAMES` sweep, I ran `oncsweep.py` with **no arguments**. Its
+segments come from `sys.argv[1:]`, so it swept nothing -- and printed its entire formatted table:
+seven candidate rows, both keyings, every cell `0.0%`, `EXIT 0 after 2 s`. The only tell is line
+one, `segments: 0`.
+
+**That is worse than the empty file it replaced.** `oncsweep.txt.part` from the killed run was 0
+bytes, which is obviously nothing. A complete table is the exact SHAPE of an answer, and the
+conclusion it invites -- *the constant makes no difference at any value* -- is one somebody would
+write down. This file already records "a zero from a new diagnostic is a claim about the TOOL until
+something independent agrees"; the new half is that a zero-filled TABLE hides its own N.
+
+**The rule: print N before the table, and refuse to print the table when N is 0.** Both
+`sdsweep.py` and `oncsweep.py` have the print-then-trust shape.
+
+**And the sweep's segment list has to be rebuilt every time, because routes rotate off.** The 10
+segments the 2026-09-25 harness used are gone; `deleter.py` holds 5 GB free and the device now
+starts at 0000049d. Run `findtwoway.py <routes>` first and pick from its output -- 8 two-way
+dominant for the opening risk, 4 pure divided for coverage.
+
+### THREE DEVICE FACTS, each of which cost a round
+
+- **The tmux on `pts/0` is AGNOS's own.** `ps` shows `/usr/bin/tmux new-session -s comma -d
+  /usr/comma/comma.sh` with an etime equal to uptime. It is on `who` after every boot and is never
+  a person. **Check what a tmux is RUNNING before treating a pts as a foreign session** -- I held a
+  reboot and asked two peers about it first. Same shape as `grep -c _handle_mouse_release` reading
+  1 in both states: a surface signal that cannot separate the two cases it is asked about.
+- **`wd.sh` cds to `/data/openpilot`, so a RELATIVE script path fails inside it.** `wd.sh twoway2
+  ... ./findtwoway.py` died instantly with `can't open file '/data/openpilot/findtwoway.py'`. It
+  fails loudly into the output file, which is the good case. Absolute paths only.
+- **`pgrep -f` self-matched AGAIN, in a new costume.** `pgrep -f "[o]ncsweep.py"` returned a hit
+  because the SAME `bash -lc` line also carried the unbracketed `/data/steer_review/oncsweep.py` in
+  its launch half. **The bracket trick protects the PATTERN, not the rest of the command line.**
+  It reported ALREADY RUNNING with nothing running, which is the direction that silently skips the
+  work. Use `ps -eo args | grep <name> | grep -v "bash -lc"`.
+
+### THE RESOLVER, NOT THE CAR: "Not enough memory resources"
+
+`ssh comma-34b959b` returned `Could not resolve hostname comma-34b959b: Not enough memory resources
+are available to process this command`, and `[System.Net.Dns]::GetHostAddresses` returned the same.
+**That is the Windows resolver failing on this laptop, not the device being absent** -- it has now
+produced three different "the car is offline" reports across two sessions.
+
+He had also moved networks: laptop on SSID `Capital Tech` at `10.0.1.50`, car at **`10.0.1.184`**,
+found by sweeping the /24 and matching the wlan0 MAC `00:0a:f5:e4:4a:bc` in ARP. **Sweep and match
+the MAC; never ask him for an IP**, and never read a resolver error as a statement about the car.
+
+### THE `ONCOMING_FRAMES` SWEEP RAN. IT BOUNDS THE COST AND CANNOT SHOW THE BENEFIT.
+
+12 segments off 000004a3/a4/a5/a6/a8/a9, chosen by `findtwoway.py` -- 8 two-way dominant, 4 pure
+divided. 7,477 two-way and 4,965 divided moving frames, `SAME_DIRECTION_FRAMES` fixed at 8.
+
+    SHIPPED (sm.updated keying, ONCOMING_FRAMES=3)
+      twoway   sd  0.0%   onc 93.9%        divided  sd 36.8%   onc 15.2%
+
+    FULL RATE (logMonoTime keying), sweeping ONCOMING_FRAMES
+      3    twoway onc 97.1%   divided onc 24.5%
+      11   twoway onc 96.5%   divided onc 23.7%
+      25   twoway onc 93.8%   divided onc 23.7%
+
+**IT IS FLAT. 3 to 25 moves the two-way veto 3.3 points and the divided veto 0.8.** So the COST of
+raising it -- real vetoes lost -- is near zero across an eight-fold range, which is the
+safety-critical direction and is now measured rather than argued.
+
+**IT CANNOT SHOW THE BENEFIT, and the reason is a mistake this file already records.** The tool
+scores `blocks_oncoming` as a SHARE OF FRAMES, and that flag is a 90 s decaying memory -- so one
+latch pins the share for a minute and a half whatever the count was. The 2026-08-21 entry says it
+in as many words: *"A LEVEL IS NOT AN EVENT... Count rising edges."* `bp_oncoming_adjacent.py`
+already scores edges; `oncsweep.py` does not, and that is what has to change before this question
+gets an answer.
+
+**A WRONG CLAIM I NEARLY WROTE, caught by reading the module instead of the prose.** I had
+"candidates above ~13 are structurally unreachable, because a 1.5 s window at 8.35 Hz cannot hold
+more than that." **False.** `ONCOMING_WINDOW_S` is a GAP TIMEOUT between consecutive corroborating
+messages (`if self._oncoming_gap_s > ONCOMING_WINDOW_S: self._oncoming_hits = 0`), not a fixed
+window from the first hit. Messages arrive 0.12 s apart, so the count accumulates for as long as
+traffic is in view and 25 is three seconds of sighting -- easily reached against the measured
+4.97-28.73 s real-track lifetimes. **A constant named `*_WINDOW_S` beside a count is not
+necessarily a window over that count.**
+
+**AND THE TWO SWEEPS CANNOT BE COMPARED.** 2026-09-25 ran different segments and reported shipped
+two-way sd 66.8% / onc 52.8% and divided onc 36.4% -> 73.1% at full rate. This one reads 0.0% /
+93.9% and 15.2% -> 23.7%. Same code, same keyings, wildly different roads. **Neither set is a
+settled number, and the freeway coverage cost of the keying fix is somewhere between "doubles" and
+"rises 8 points" depending on which roads you sample.** Do not quote either as the cost.
+
+**SO THE KEYING FIX STILL DOES NOT SHIP**, and the blocker is unchanged: the two-way same-direction
+latch goes 0.0% -> 85.8% at full rate with `SAME_DIRECTION_FRAMES = 8`, which is the turn-lane veto
+releasing on the road that already cost three real incidents.
 
 ## 2026-09-28: THE PSCM DECLARED ITS OWN ANGLE INVALID MID-TURN. openpilot DID NOT NOTICE.
 

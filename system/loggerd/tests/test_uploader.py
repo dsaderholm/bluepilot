@@ -7,6 +7,7 @@ from pathlib import Path
 from openpilot.system.hardware.hw import Paths
 
 from openpilot.common.swaglog import cloudlog
+from openpilot.system.loggerd import uploader  # BluePilot: rlog tests patch module constants
 from openpilot.system.loggerd.uploader import main, UPLOAD_ATTR_NAME, UPLOAD_ATTR_VALUE
 
 from openpilot.system.loggerd.tests.loggerd_tests_common import UploaderTestCase
@@ -66,6 +67,10 @@ class TestUploader(UploaderTestCase):
       keys += [f"boot/{self.seg_format2.format(i)}.zst" for i in seg2]
     keys += [f"{self.seg_format.format(i)}/qlog.zst" for i in seg1]
     keys += [f"{self.seg_format2.format(i)}/qlog.zst" for i in seg2]
+    # BluePilot: rlogs upload after every qlog
+    keys += [f"{self.seg_format.format(i)}/rlog.zst" for i in seg1]
+    keys += [f"{self.seg_format2.format(i)}/rlog.zst" for i in seg2]
+    # End BluePilot
     return keys
 
   def test_upload(self):
@@ -182,3 +187,13 @@ class TestUploader(UploaderTestCase):
     for f_path in f_paths:
       lock_path = f_path.with_suffix(f_path.suffix + ".lock")
       assert not lock_path.is_file(), "File lock not cleared on startup"
+
+
+  # BluePilot: rlog upload rules
+  def test_rlog_skipped_when_metered(self, monkeypatch):
+    monkeypatch.setattr(uploader, "force_wifi", False)
+    self.gen_files(boot=False)
+    uploads = [n for n, _, _ in uploader.Uploader("0000000000000000", Paths.log_root()).list_upload_files(metered=True)]
+    assert "rlog" not in uploads
+    assert "qlog" in uploads
+  # End BluePilot

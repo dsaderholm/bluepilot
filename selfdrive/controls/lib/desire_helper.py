@@ -2,6 +2,8 @@ from cereal import log, custom
 from openpilot.common.constants import CV
 from openpilot.common.realtime import DT_MDL
 from openpilot.sunnypilot.selfdrive.controls.lib.auto_lane_change import AutoLaneChangeController, AutoLaneChangeMode
+from openpilot.sunnypilot.selfdrive.controls.lib.passing_assist_desire import (
+  request_side as pa_request_side, NONE as PA_NONE, LEFT as PA_LEFT)
 from openpilot.sunnypilot.selfdrive.controls.lib.lane_turn_desire import LaneTurnController
 # BluePilot: blinker-based lane change pause during turn signals
 from openpilot.common.bluepilot import is_bluepilot
@@ -60,14 +62,49 @@ class DesireHelper:
       self._bp_blinker_pause = BPBlinkerPause()
 
   @staticmethod
-  def get_lane_change_direction(CS):
+  def get_lane_change_direction(CS, pa_side=PA_NONE):
+    # BluePilot: THE REQUEST DECIDES THE SIDE WHEN THERE IS ONE. Stock reads "left if the left
+    # blinker is on, else RIGHT" -- right by default, because a stalk press is the only way to get
+    # here and one of the two is always set. A commanded signal is invisible to carState (panda
+    # drops our own TX), so a left request would arm the machine and then be steered RIGHT, into
+    # whatever is there. On the outside lane that is the shoulder. See passing_assist_desire.
+    if pa_side != PA_NONE:
+      return LaneChangeDirection.left if pa_side == PA_LEFT else LaneChangeDirection.right
     return LaneChangeDirection.left if CS.leftBlinker else LaneChangeDirection.right
 
-  def update(self, carstate, lateral_active, lane_change_prob):
+  def update(self, carstate, lateral_active, lane_change_prob, longitudinal_plan_sp=None):
     self.alc.update_params()
     self.lane_turn_controller.update_params()
     v_ego = carstate.vEgo
-    one_blinker = carstate.leftBlinker != carstate.rightBlinker
+    # BluePilot: `one_blinker` means A BLINKER IS ON. It does NOT mean the driver asked for
+    # anything, and the day openpilot commands the signal that difference becomes a hazard rather
+    # than a nicety. READ THIS BEFORE WIRING THE BLINKER UP.
+    #
+    # The plan is that a cancelled lane change signals the way it is going back -- which is correct
+    # driving and what was asked for. Trace it through this state machine as it stands:
+    #
+    #   revert starts, we light the opposite signal; on this car a tap runs eight flashes, ~5.5 s
+    #   the reverse crossing takes ~2-4 s, then laneChangeFinishing fades the lane lines back in
+    #   at the end of that, OUR signal is still flashing -- and the line below reads `one_blinker`
+    #   and arms preLaneChange, whereupon the nudgeless timer starts ANOTHER lane change, the same
+    #   way we just went
+    #
+    # A revert that launches a second lane change is worse than no revert. The same trap exists at
+    # `off -> preLaneChange` above, on the rising edge.
+    #
+    # The fix is not a special case in any one branch: it is that `one_blinker` must mean the
+    # DRIVER's blinker everywhere in this function, with our own commanded signal subtracted --
+    # exactly what PassingAssistDetector._driver_override already does for its own gates, and for
+    # exactly the same reason. Do that once, here, rather than patching the branches that bite.
+    # BluePilot: passing assist's own request counts as a blinker, because it IS one -- the lamp is
+    # lit and only carState cannot see it. Everything downstream then treats it exactly like a stalk
+    # press: the nudgeless timer, the blind-spot check and the torque override all apply unchanged.
+    # See passing_assist_desire for why it cannot outlive the maneuver and re-arm itself.
+    pa_side = pa_request_side(longitudinal_plan_sp) if longitudinal_plan_sp is not None else PA_NONE
+    one_blinker = (carstate.leftBlinker != carstate.rightBlinker) or pa_side != PA_NONE
+    # BluePilot: see AutoLaneChangeController.should_cancel -- the blinker on this car turns itself
+    # off after its one-touch flashes, and how long it was on is what separates that from a cancel.
+    self.alc.update_blinker_timer(one_blinker, carstate.steeringPressed)
     below_lane_change_speed = v_ego < LANE_CHANGE_SPEED_MIN
 
     # Lane turn controller update
@@ -85,12 +122,12 @@ class DesireHelper:
         self.lane_change_state = LaneChangeState.preLaneChange
         self.lane_change_ll_prob = 1.0
         # Initialize lane change direction to prevent UI alert flicker
-        self.lane_change_direction = self.get_lane_change_direction(carstate)
+        self.lane_change_direction = self.get_lane_change_direction(carstate, pa_side)
 
       # LaneChangeState.preLaneChange
       elif self.lane_change_state == LaneChangeState.preLaneChange:
         # Update lane change direction
-        self.lane_change_direction = self.get_lane_change_direction(carstate)
+        self.lane_change_direction = self.get_lane_change_direction(carstate, pa_side)
 
         torque_applied = carstate.steeringPressed and \
                          ((carstate.steeringTorque > 0 and self.lane_change_direction == LaneChangeDirection.left) or
@@ -109,12 +146,40 @@ class DesireHelper:
 
       # LaneChangeState.laneChangeStarting
       elif self.lane_change_state == LaneChangeState.laneChangeStarting:
-        # fade out over .5s
-        self.lane_change_ll_prob = max(self.lane_change_ll_prob - 2 * DT_MDL, 0.0)
+        # BluePilot: cancelling the blinker calls it off, if it is early enough to go back. Stock
+        # never looks at the blinker again once this state is entered, so a change could not be
+        # called off at all. See AutoLaneChangeController.should_cancel.
+        # A stalk pushed the OTHER way is unambiguous; a blinker simply going out is only a cancel
+        # if it went out early. See should_cancel.
+        reversed_side = one_blinker and (
+          (carstate.rightBlinker and self.lane_change_direction == LaneChangeDirection.left) or
+          (carstate.leftBlinker and self.lane_change_direction == LaneChangeDirection.right))
+        if not self.alc.reverting and self.alc.should_cancel(
+            one_blinker, self.lane_change_timer, reversed_side, self.alc.blinker_last_held_s,
+            carstate.steeringPressed):
+          going_left = self.lane_change_direction == LaneChangeDirection.left
+          # The lane we would go BACK into is the one on the other side. See begin_revert.
+          return_blocked = carstate.rightBlindspot if going_left else carstate.leftBlindspot
+          if self.alc.begin_revert(return_blocked):
+            # A lane change the other way IS this one reversed, and the model already knows how to
+            # do that. Stays in laneChangeStarting so the desire keeps steering -- back, now.
+            self.lane_change_direction = (LaneChangeDirection.right if going_left
+                                          else LaneChangeDirection.left)
+          else:
+            self.lane_change_state = LaneChangeState.off
+            self.lane_change_direction = LaneChangeDirection.none
+        else:
+          # fade out over .5s
+          self.lane_change_ll_prob = max(self.lane_change_ll_prob - 2 * DT_MDL, 0.0)
 
-        # 98% certainty
-        if lane_change_prob < 0.02 and self.lane_change_ll_prob < 0.01:
-          self.lane_change_state = LaneChangeState.laneChangeFinishing
+          # 98% certainty
+          # BluePilot: inside the else, so a cancel is not undone by it on the way out. Both of its
+          # conditions can be true on the frame the stalk drops -- the fade has run out half a
+          # second in, and lane_change_prob is the model's confidence a change is happening, which
+          # dips exactly when the driver has thought better of one. It then set the state straight
+          # back to laneChangeFinishing and the cancel did nothing.
+          if lane_change_prob < 0.02 and self.lane_change_ll_prob < 0.01:
+            self.lane_change_state = LaneChangeState.laneChangeFinishing
 
       # LaneChangeState.laneChangeFinishing
       elif self.lane_change_state == LaneChangeState.laneChangeFinishing:
@@ -130,10 +195,17 @@ class DesireHelper:
 
     if self.lane_change_state in (LaneChangeState.off, LaneChangeState.preLaneChange):
       self.lane_change_timer = 0.0
+      # BluePilot: the reverse crossing is over. Cleared here rather than where it is set so every
+      # way out of a lane change -- completed, timed out, lateral dropped -- releases the latch.
+      self.alc.reverting = False
     else:
       self.lane_change_timer += DT_MDL
 
     self.prev_one_blinker = one_blinker
+
+    # BluePilot: measure what a real lane change did -- the only real ones this car performs. See
+    # AutoLaneChangeController.update_stats; it reads state and never writes it.
+    self.alc.update_stats()
 
     if self.lane_turn_direction != TurnDirection.none:
       self.desire = TURN_DESIRES[self.lane_turn_direction]

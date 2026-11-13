@@ -5,6 +5,9 @@ from openpilot.common.params import Params
 from openpilot.system.hardware import HARDWARE
 from openpilot.common.swaglog import cloudlog
 from openpilot.system.statsd import statlog
+# BluePilot: parked recorder offroad limit and voltage floor
+from bluepilot.parked_recorder.guards_bp import effective_max_time_offroad_s, sentry_voltage_shutdown
+# End BluePilot
 
 CAR_VOLTAGE_LOW_PASS_K = 0.011 # LPF gain for 45s tau (dt/tau / (dt/tau + 1))
 
@@ -117,6 +120,16 @@ class PowerMonitoring:
     except Exception:
       sp_max_time_val_s = MAX_TIME_OFFROAD_S
 
+    # BluePilot: the parked recorder raises the offroad limit to its window, only while enabled and the car
+    # voltage is healthy; any failure here keeps the stock limit
+    try:
+      sp_max_time_val_s = effective_max_time_offroad_s(
+        sp_max_time_val_s, self.params.get_bool("ParkedRecordingEnabled"), self.params.get("ParkedRecordingMaxHours"),
+        self.car_voltage_mV, self.params.get("ParkedRecordingMinVoltage"))
+    except Exception:
+      pass
+    # End BluePilot
+
     return 0 < sp_max_time_val_s <= offroad_time
 
   # See if we need to shutdown
@@ -129,6 +142,17 @@ class PowerMonitoring:
     offroad_time = (now - offroad_timestamp)
     low_voltage_shutdown = (self.car_voltage_mV < (VBATT_PAUSE_CHARGING * 1e3) and
                             offroad_time > VOLTAGE_SHUTDOWN_MIN_OFFROAD_TIME_S)
+    # BluePilot: while the parked recorder is enabled, hardwared shuts down at the recorder's voltage floor (stricter than the
+    # stock 11.8 V); any failure here leaves the stock rules in charge
+    sentry_low_voltage = False
+    try:
+      sentry_low_voltage = sentry_voltage_shutdown(
+        self.params.get_bool("ParkedRecordingEnabled"), self.car_voltage_mV,
+        self.params.get("ParkedRecordingMinVoltage"), offroad_time)
+    except Exception:
+      pass
+    low_voltage_shutdown |= sentry_low_voltage
+    # End BluePilot
     should_shutdown |= self.max_time_offroad_exceeded(offroad_time)
     should_shutdown |= low_voltage_shutdown
     should_shutdown |= (self.car_battery_capacity_uWh <= 0)
@@ -138,4 +162,14 @@ class PowerMonitoring:
     should_shutdown &= offroad_time > DELAY_SHUTDOWN_TIME_S
     should_shutdown |= self.params.get_bool("ForcePowerDown")
     should_shutdown &= started_seen or (now > MIN_ON_TIME_S)
+    # BluePilot: remember why the parked recorder's floor shut the device down, so the next boot can say so
+    if should_shutdown and sentry_low_voltage and not getattr(self, "_bp_reason_saved", False):
+      self._bp_reason_saved = True
+      try:
+        self.params.put("ParkedRecordingShutdownReason", {
+          "reason": "low_voltage", "voltageV": round(self.car_voltage_mV / 1000.0, 2),
+          "floorV": self.params.get("ParkedRecordingMinVoltage"), "offroadS": int(offroad_time)})
+      except Exception:
+        pass
+    # End BluePilot
     return should_shutdown

@@ -113,10 +113,15 @@ class LateralCurvExt:
   def __init__(self, CP, CP_SP):
     # SubMaster for model data, live parameters, and selfdrive state
     # liveDelay is consumed by LateralAngleExt (variable lookup time); harmless for curvature mode.
-    # FusionPilot: longitudinalPlanSP carries dec.hasSlowDown -- the model's own "I am planning to
-    # stop for something ahead" -- which is the trigger for the stop override. Subscribed here
-    # rather than routed through CC_SP because it is one entry against a capnp field plus
-    # controlsd plumbing, and the carcontroller already owns this SubMaster.
+    # FusionPilot: longitudinalPlanSP now has TWO consumers on this SubMaster, and both need it
+    # every frame:
+    #   passingAssist   the passing-assist verdict, which the cluster's lane display shows.
+    #                   See create_lkas_ui_msg.
+    #   dec.hasSlowDown the model's own "I am planning to stop for something ahead", which is the
+    #                   stop override's trigger.
+    # Subscribed here rather than routed through CC_SP because it is one entry against a capnp
+    # field plus controlsd plumbing, and the carcontroller already owns this SubMaster. Adding a
+    # third consumer needs no change here -- but REMOVING one does not free the subscription.
     # FusionPilot: gpsLocationExternal feeds the synthesized APIM GPS messages (apim_gps.py). It is
     # the comma's own receiver, which is the only source of the GPS telemetry the IPMA is missing.
     # BOTH GPS SERVICES. `gpsLocationExternal` is the ublox on a comma two / panda; everything

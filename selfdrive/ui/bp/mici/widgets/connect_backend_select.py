@@ -1,4 +1,4 @@
-"""BluePilot: MICI connect backend selector (Comma Connect / Konik Stable / Offline Mode)."""
+"""BluePilot: MICI connect backend selector (Comma Connect / Konik Stable / Offline Mode / Self-hosted)."""
 
 from collections.abc import Callable
 

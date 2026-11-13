@@ -15,6 +15,18 @@ from openpilot.system.ui.widgets import Widget
 from openpilot.selfdrive.ui.sunnypilot.layouts.settings.steering_sub_layouts.lane_change_settings import LaneChangeSettingsLayout
 from openpilot.selfdrive.ui.sunnypilot.layouts.settings.steering_sub_layouts.mads_settings import MadsSettingsLayout
 from openpilot.selfdrive.ui.sunnypilot.layouts.settings.steering_sub_layouts.torque_settings import TorqueSettingsLayout
+# BluePilot: passing assist. Lives here rather than under Cruise because it is a lane-change
+# feature -- it answers which LANE to be in. It was under Cruise only because the observer happens
+# to be implemented inside longitudinal_planner.py, which is an implementation detail.
+from openpilot.selfdrive.ui.sunnypilot.layouts.settings.steering_sub_layouts.passing_assist_settings import (
+  PassingAssistSettingsLayout,
+)
+# BluePilot: the turn-signal bench. Here for the same reason as the above, and one more -- the
+# blinker is the actuator a lane change is MADE of, and its controls were two menus from everything
+# that decides when to use it. "Let's move all your settings out of Blue Pilot, please."
+from openpilot.selfdrive.ui.sunnypilot.layouts.settings.steering_sub_layouts.blinker_settings import (
+  BlinkerSettingsLayout,
+)
 
 
 class PanelType(IntEnum):
@@ -22,6 +34,8 @@ class PanelType(IntEnum):
   MADS = 1
   LANE_CHANGE = 2
   TORQUE_CONTROL = 3
+  PASSING_ASSIST = 4
+  BLINKER = 5
 
 
 class SteeringLayout(Widget):
@@ -32,6 +46,8 @@ class SteeringLayout(Widget):
     self._lane_change_settings_layout = LaneChangeSettingsLayout(lambda: self._set_current_panel(PanelType.STEERING))
     self._mads_settings_layout = MadsSettingsLayout(lambda: self._set_current_panel(PanelType.STEERING))
     self._torque_control_layout = TorqueSettingsLayout(lambda: self._set_current_panel(PanelType.STEERING))
+    self._passing_assist_layout = PassingAssistSettingsLayout(lambda: self._set_current_panel(PanelType.STEERING))
+    self._blinker_layout = BlinkerSettingsLayout(lambda: self._set_current_panel(PanelType.STEERING))
 
     items = self._initialize_items()
     self._scroller = Scroller(items, line_separator=False, spacing=0)
@@ -57,6 +73,23 @@ class SteeringLayout(Widget):
       button_text=lambda: tr("Customize Lane Change"),
       button_width=800,
       callback=lambda: self._set_current_panel(PanelType.LANE_CHANGE)
+    )
+    # BluePilot: sits next to Customize Lane Change because that is what it is about. Its own
+    # sub-panel rather than more rows here -- it owns fifteen controls, which would bury
+    # everything else on this screen.
+    self._passing_assist_button = simple_button_item_sp(
+      button_text=lambda: tr("Customize Passing Assist"),
+      button_width=800,
+      callback=lambda: self._set_current_panel(PanelType.PASSING_ASSIST)
+    )
+    # BluePilot: grouped with the two blinker behaviour settings below rather than with the
+    # lane-change buttons above -- everything on this screen that is about the turn signal is now
+    # in one run, and this is the only entry that is about the SIGNAL rather than about when to use
+    # it.
+    self._blinker_test_button = simple_button_item_sp(
+      button_text=lambda: tr("Customize Blinker"),
+      button_width=800,
+      callback=lambda: self._set_current_panel(PanelType.BLINKER)
     )
     self._blinker_control_toggle = toggle_item_sp(
       param="BlinkerPauseLateralControl",
@@ -102,7 +135,9 @@ class SteeringLayout(Widget):
       self._mads_settings_button,
       LineSeparatorSP(40),
       self._lane_change_settings_button,
+      self._passing_assist_button,
       LineSeparatorSP(40),
+      self._blinker_test_button,
       self._blinker_control_toggle,
       self._blinker_control_options,
       self._blinker_reengage_delay,
@@ -150,6 +185,10 @@ class SteeringLayout(Widget):
       self._mads_settings_layout.render(rect)
     elif self._current_panel == PanelType.TORQUE_CONTROL:
       self._torque_control_layout.render(rect)
+    elif self._current_panel == PanelType.PASSING_ASSIST:
+      self._passing_assist_layout.render(rect)
+    elif self._current_panel == PanelType.BLINKER:
+      self._blinker_layout.render(rect)
     else:
       self._scroller.render(rect)
 

@@ -7,6 +7,7 @@ See the LICENSE.md file in the root directory for more details.
 
 import math
 from cereal import messaging, custom
+from openpilot.common.swaglog import cloudlog
 from opendbc.car import structs
 from openpilot.common.constants import CV
 from openpilot.selfdrive.car.cruise import V_CRUISE_MAX, V_CRUISE_UNSET
@@ -15,12 +16,19 @@ from openpilot.sunnypilot.selfdrive.controls.lib.e2e_alerts_helper import E2EAle
 from openpilot.sunnypilot.selfdrive.controls.lib.smart_cruise_control.smart_cruise_control import SmartCruiseControl
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.speed_limit_assist import SpeedLimitAssist
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.speed_limit_resolver import SpeedLimitResolver
+from openpilot.sunnypilot.selfdrive.controls.lib.passing_assist import PassingAssistDetector
 from openpilot.sunnypilot.selfdrive.controls.lib.unconfirmed_lead import UnconfirmedLeadDetector
-from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP
+from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP, EventNameSP
 from openpilot.sunnypilot.models.helpers import get_active_bundle
 
 DecState = custom.LongitudinalPlanSP.DynamicExperimentalControl.DynamicExperimentalControlState
 LongitudinalPlanSource = custom.LongitudinalPlanSP.LongitudinalPlanSource
+
+
+# The services upstream's longitudinal_planner.publish() passes to all_checks for
+# longitudinalPlan.valid. Duplicated here ONLY to explain that rule, so the two must not drift --
+# test_planner_checks_mirror_the_plan parses both and fails if they do. Bit order is this order.
+PLAN_VALID_SERVICES = ('carState', 'controlsState', 'selfdriveState', 'radarState')
 
 
 class LongitudinalPlannerSP:
@@ -32,6 +40,11 @@ class LongitudinalPlannerSP:
     self.resolver = SpeedLimitResolver()
     self.sla = SpeedLimitAssist(CP, CP_SP)
     self.unconfirmed_lead = UnconfirmedLeadDetector()
+    self.passing_assist = PassingAssistDetector()
+    # FusionPilot: latched True by the first exception out of the detector. Passing assist only
+    # narrates, so a bug in it must cost the feature for this drive, never plannerd -- which is what
+    # an unguarded raise did (an AttributeError at a capnp boundary cost a drive on 2026-08-18).
+    self.passing_assist_failed = False
     self.generation = int(model_bundle.generation) if (model_bundle := get_active_bundle()) else None
     self.source = LongitudinalPlanSource.cruise
     self.e2e_alerts_helper = E2EAlertsHelper()
@@ -69,6 +82,39 @@ class LongitudinalPlannerSP:
     self.unconfirmed_lead.update(sm, self.v_desired_trajectory, v_cruise_cluster,
                                  long_enabled and not long_override, self.events_sp,
                                  self.dec.has_slow_down(), self.dec.endpoint_x())
+
+    # BluePilot: passing-assist observation. Log only -- no events_sp, no target, no return value
+    # consumed anywhere. Takes v_cruise_cluster rather than v_cruise because the question is
+    # whether the lead is holding us below the speed the DRIVER set, not below a limiter's output.
+    # speed_limit_final is the limit plus offset -- one of the things that can express what the
+    # driver actually asked for, but ONLY when Speed Limit Assist is switched on. A valid limit is
+    # not consent to drive it: with SLA off the driver's set speed is the whole intent, and feeding
+    # the limit in anyway made passing assist suggest passes to reach a speed they had not asked
+    # for. See PassingAssistDetector._reference_speed.
+    sl_target = (self.resolver.speed_limit_final
+                 if self.sla.enabled and self.resolver.speed_limit_valid else 0.0)
+    # ...and the RAW posted limit alongside it, which is a different question and needs a different
+    # answer. sl_target is what SLA would drive and is zeroed when SLA is off; this is what the sign
+    # says, wanted whether or not he has handed the speed over. See _apply_patience: it measures how
+    # far over the limit he has ASKED to go, and gating that on SLA being enabled would switch the
+    # measurement off precisely when the driver is the one choosing the speed.
+    posted = float(self.resolver.speed_limit) if self.resolver.speed_limit_valid else 0.0
+    if not self.passing_assist_failed:
+      try:
+        self.passing_assist.update(sm, v_cruise_cluster, long_enabled, sl_target, posted)
+      except Exception:
+        cloudlog.exception("passing assist raised; disabled for this drive")
+        self.passing_assist_failed = True
+    # ...with one exception to "log only": a chime when it decides. See passingAssistSuggested --
+    # the panel is the whole readout for this feature and nobody is reading it at the moment that
+    # matters. Still no target and no return value; the only thing that leaves here is a sound.
+    if not self.passing_assist_failed and self.passing_assist.suggestion_started and self.passing_assist.chime_enabled:
+      self.events_sp.add(EventNameSP.passingAssistSuggested)
+    # ...and the lower one when it backs out. Same toggle: a driver who wants to be told what it is
+    # doing wants both halves, and a control that announces only the successes would be worse than
+    # no control at all.
+    if not self.passing_assist_failed and self.passing_assist.abort_started and self.passing_assist.chime_enabled:
+      self.events_sp.add(EventNameSP.passingAssistBackedOut)
 
     # Speed Limit Assist
     has_speed_limit = self.resolver.speed_limit_valid or self.resolver.speed_limit_last_valid
@@ -137,10 +183,42 @@ class LongitudinalPlannerSP:
     plan_sp_send.valid = sm.all_checks(service_list=['carState', 'controlsState'])
 
     longitudinalPlanSP = plan_sp_send.longitudinalPlanSP
+
+    # See custom.capnp PlannerChecks. A commIssue is ET.SOFT_DISABLE, so an invalid longitudinal
+    # plan DISENGAGES -- and nothing recorded WHICH of all_checks' three tests failed, or for which
+    # service. Recomputed rather than intercepted because upstream's publish() throws the breakdown
+    # away the moment it ANDs it into one bool.
+    checks = longitudinalPlanSP.plannerChecks
+    not_alive = freq_bad = not_valid = 0
+    for bit, svc in enumerate(PLAN_VALID_SERVICES):
+      if not sm.alive[svc]:
+        not_alive |= 1 << bit
+      # Mirrors all_freq_ok's own filter: a service excluded from the average-frequency test can
+      # never fail it, and reporting it as failing would send the next drive after a phantom.
+      if sm._check_avg_freq(svc) and not sm.freq_ok[svc]:
+        freq_bad |= 1 << bit
+      if not sm.valid[svc]:
+        not_valid |= 1 << bit
+    checks.notAlive = not_alive
+    checks.freqBad = freq_bad
+    checks.notValid = not_valid
+    checks.planValid = sm.all_checks(service_list=list(PLAN_VALID_SERVICES))
+
     longitudinalPlanSP.longitudinalPlanSource = self.source
     longitudinalPlanSP.vTarget = float(self.output_v_target)
     longitudinalPlanSP.aTarget = float(self.output_a_target)
     longitudinalPlanSP.events = self.events_sp.to_msg()
+
+    # FusionPilot: ask ICBM for a closer follow gap while a pass is being pursued.
+    #
+    # ASSERTED, NOT TIMED -- ICBM releases on silence, which is deliberate on their side and right:
+    # a stored deadline cannot survive this planner dying, and continuous assertion can. So this is
+    # republished every frame it is still wanted and simply stops otherwise.
+    #
+    # EARLY, because reaching a gap takes up to ~4.5 s of confirmed toggle steps and set-speed
+    # presses win the wire. Requesting at the start of the maneuver would arrive after the moment it
+    # was for. See PassingAssistDetector.gap_request for what "pursuing" means.
+    longitudinalPlanSP.accGapRequest = 0 if self.passing_assist_failed else int(self.passing_assist.gap_request)
 
     # Dynamic Experimental Control
     dec = longitudinalPlanSP.dec
@@ -231,6 +309,22 @@ class LongitudinalPlannerSP:
     unconfirmedLead.modelDesiredAccel = float(self.unconfirmed_lead.model_desired_accel)
     unconfirmedLead.hasLead = self.unconfirmed_lead.has_lead
     unconfirmedLead.trigger = self.unconfirmed_lead.trigger
+
+    # BluePilot: passing-assist observation (log only -- see the capnp comment).
+    # The field copying lives in the detector so it is not upstream rebase surface.
+    # A latched failure leaves the struct at its defaults -- actuating False, no side -- so nothing
+    # downstream (desire, blinker, gap request) can act on a detector that stopped mid-frame. A raise
+    # part-way through publish forces the three fields that can command anything back off.
+    if not self.passing_assist_failed:
+      try:
+        self.passing_assist.publish(longitudinalPlanSP.passingAssist)
+      except Exception:
+        cloudlog.exception("passing assist publish raised; disabled for this drive")
+        self.passing_assist_failed = True
+        pa = longitudinalPlanSP.passingAssist
+        pa.actuating = False
+        pa.desireOk = False
+        pa.blinkerWouldBeOn = False
 
     # E2E Alerts
     e2eAlerts = longitudinalPlanSP.e2eAlerts

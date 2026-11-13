@@ -2563,7 +2563,7 @@ struct Event {
     signReadingBP @138 :Custom.SignReadingBP;  # BluePilot: claims customReserved12 slot
     controllerStateBP @139 :Custom.ControllerStateBP;  # BluePilot: claims customReserved13 slot
     carStateBP @140 :Custom.CarStateBP;  # BluePilot: claims customReserved14 slot
-    customReserved15 @141 :Custom.CustomReserved15;
+    rearRadarBP @141 :Custom.RearRadarBP;  # FusionPilot: claims customReserved15 slot
     customReserved16 @142 :Custom.CustomReserved16;
     mapdExtendedOut @143 :Custom.MapdExtendedOut;  # FusionPilot: claims customReserved17 slot
     mapdIn @144 :Custom.MapdIn;                    # FusionPilot: claims customReserved18 slot

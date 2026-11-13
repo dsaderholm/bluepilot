@@ -220,6 +220,10 @@ class BluePilotLayout(Widget):
       icon="warning.png"
     )
 
+    # THE BLINKER CONTROLS ARE NOT HERE ANY MORE. They moved to Steering > Customize Blinker --
+    # see steering_sub_layouts/blinker_settings.py. "Let's move all your settings out of Blue
+    # Pilot, please", and they belong next to the things that decide when to signal.
+
     # Hide onroad border toggle
     self._hide_onroad_border = toggle_item(
       lambda: tr("Hide Onroad Border"),
@@ -552,13 +556,13 @@ class BluePilotLayout(Widget):
       icon="warning.png"
     )
 
-    # Connect backend selector (Comma Connect / Konik Stable / Offline Mode)
+    # Connect backend selector (Comma Connect / Konik Stable / Offline Mode / Self-hosted)
     self._connect_backend_dialog: MultiOptionDialog | None = None
     self._connect_backend_action = ButtonAction(lambda: tr("SELECT"))
     self._connect_backend_action.set_value(lambda: self._get_connect_backend_display())
     self._connect_backend_btn = ListItem(
       lambda: tr("Connect Backend"),
-      description=lambda: tr("Comma Connect uses stock servers. Konik Stable sends routes to stable.konik.ai (dongle ID switches automatically). Offline Mode points at unreachable hosts so uploads never succeed. Reboot to apply."),
+      description=lambda: tr("Comma Connect uses stock servers. Konik Stable sends routes to stable.konik.ai (dongle ID switches automatically). Self-hosted sends routes to car.saderholm.us (no remote access). Offline Mode points at unreachable hosts so uploads never succeed. Reboot to apply."),
       action_item=self._connect_backend_action,
       callback=self._select_connect_backend
     )

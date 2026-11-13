@@ -241,6 +241,19 @@ class CarState(CarStateBase, MadsCarState, CarStateExt):
     ret.stockFcw = bool(cp_cam.vl["ACCDATA_3"]["FcwVisblWarn_B_Rq"])
     ret.stockAeb = bool(cp_cam.vl["ACCDATA_2"]["CmbbBrkDecel_B_Rq"])
 
+    # BluePilot: WHEN the gateway's own copy of this frame last arrived, in nanoseconds.
+    #
+    # This is the whole of the blinker fix. Steering_Data_FD1 is sent by the GATEWAY at 10 Hz
+    # carrying the driver's real stalk position, and openpilot writes its own copy of the same frame
+    # to command a signal -- so both claim the switch and the body module obeys whichever landed
+    # last. Four attempts to pace our frames failed because they had no phase relationship to the
+    # contender: each command owned the switch for somewhere between 0 and 100 ms at random, which
+    # is exactly "sometimes six flashes, sometimes four, sometimes none".
+    #
+    # Knowing when the gateway's frame arrived turns that from luck into control: send immediately
+    # after it and our value owns the switch for very nearly the whole 100 ms until the next one.
+    self.steering_data_ts = cp.ts_nanos["Steering_Data_FD1"]["TurnLghtSwtch_D_Stat"]
+
     # button presses
     ret.leftBlinker = cp.vl["Steering_Data_FD1"]["TurnLghtSwtch_D_Stat"] == 1
     ret.rightBlinker = cp.vl["Steering_Data_FD1"]["TurnLghtSwtch_D_Stat"] == 2
@@ -255,6 +268,18 @@ class CarState(CarStateBase, MadsCarState, CarStateExt):
     ret.doorOpen = any([cp.vl["BodyInfo_3_FD1"]["DrStatDrv_B_Actl"], cp.vl["BodyInfo_3_FD1"]["DrStatPsngr_B_Actl"],
                         cp.vl["BodyInfo_3_FD1"]["DrStatRl_B_Actl"], cp.vl["BodyInfo_3_FD1"]["DrStatRr_B_Actl"]])
     ret.seatbeltUnlatched = cp.vl["RCMStatusMessage2_FD1"]["FirstRowBuckleDriver"] == 2
+
+    # BluePilot: the body module's own report of the turn lamps. This is the ANSWER side of the
+    # blinker-actuation question -- ret.leftBlinker above is the SWITCH position from the SCCM, and
+    # openpilot cannot see its own transmitted switch value (panda returns TX at bus | 0x80, which
+    # the parser drops). The lamp state is what the car actually did. Note these flash, so a
+    # consumer must latch over a flash period rather than trust one frame.
+    # BluePilot: the stalk-end LKA button. Unused by this car and by openpilot, so it is free for
+    # the fork to bind. 1 = Pressed; 2 and 3 are Unused and Fault, not presses.
+    self.lka_button_pressed = cp.vl["Steering_Data_FD1"]["LaSwtchPos_D_Stat"] == 1
+
+    self.turn_lamp_left = bool(cp.vl["BodyInfo_3_FD1"]["TurnLghtLeftOn_B_Stat"])
+    self.turn_lamp_right = bool(cp.vl["BodyInfo_3_FD1"]["TurnLghtRightOn_B_Stat"])
 
     # blindspot sensors
     if self.CP.enableBsm:

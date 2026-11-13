@@ -1,5 +1,9 @@
+import os
+import traceback
+
 import pyray as rl
 from openpilot.common.params import Params
+from cereal import custom
 from opendbc.car.structs import ControllerStateBP
 from openpilot.bluepilot.ui.lib.bp_shaders import draw_shader_circle_gradient
 from openpilot.selfdrive.ui.onroad.hud_renderer import UI_CONFIG, FONT_SIZES, COLORS
@@ -7,8 +11,12 @@ from openpilot.selfdrive.ui.sunnypilot.onroad.hud_renderer import HudRendererSP
 from openpilot.selfdrive.ui.bp.onroad.exp_button_bp import ExpButtonBP
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.text_measure import measure_text_cached
+from openpilot.common.swaglog import cloudlog
+
+# Frames, not seconds: this renderer has no dt and the UI runs at a fixed rate, so counting frames
+# is the honest unit here. ~1 s at 20 fps, matching adjacent_lane_renderer.INVALID_HOLD_S.
+PA_INVALID_HOLD_FRAMES = 20
 from openpilot.selfdrive.ui.bp.lib.ui_debug_logger import bp_ui_log
-from cereal import custom
 
 LateralMode = ControllerStateBP.LateralMode
 SpeedLimitSource = custom.LongitudinalPlanSP.SpeedLimit.Source
@@ -40,7 +48,7 @@ ACC_PROPULSION_INACTIVE = -4.5  # m/s^2; at or below this the signal carries no 
 # ENG BRAKE sits deliberately OFF that scale, in teal. It is the one state that is both slowing the
 # car and costing nothing -- no pads, and below 1.3 m/s^2 no stop lamps either -- which does not
 # fit on a single "how hard is it slowing" axis. Ford documents ACC as using transmission downshift
-# to slow "without wearing out the brakes", so this is the good outcome and should not be coloured
+# to slow "without wearing out the brakes", so this is the good outcome and should not be colored
 # like an escalation toward red.
 ACC_STATUS_COLORS = {
   "ACCEL": rl.Color(70, 200, 115, 235),
@@ -142,6 +150,51 @@ LAMP_OFF_INK = rl.Color(150, 156, 162, 255)
 # already doing it or only offering to. Two symbols would have to be learned, one symbol in two
 # states reads immediately.
 
+# BluePilot: blockedBy -> what a driver should read. The enum names are for the log; putting
+# "nothingSlower" or "noLaneAvailable" in front of someone at 70 mph is a failure of the display, not
+# a shorthand. Anything unmapped falls through to the raw name so a new state is visible rather
+# than silently blank.
+# Ordinal -> name, straight off the schema rather than hand-listed. The last-drive summary stores
+# the Blocked value as an int in a param, and a hand-written order here would silently mislabel
+# every stored reason the moment a new one is added to the enum.
+_BLOCKED_ORDER = tuple(
+  name for name, _ in sorted(
+    custom.LongitudinalPlanSP.PassingAssist.Blocked.schema.enumerants.items(), key=lambda kv: kv[1]))
+
+_BLOCKED_TEXT = {
+  'disabled': "Passing assist off",
+  'notEngaged': "Cruise not engaged",
+  # Not a number: the floor is a setting and moved from 40 to 30 without this following it, which
+  # is exactly how a label starts lying. The panel cannot know the driver's value here.
+  'tooSlow': "Too slow to pass",
+  'driverActive': "You are driving",
+  'noLead': "Road ahead clear",
+  'nothingSlower': "Nothing slower ahead",
+  'noLaneAvailable': "No lane to move into",
+  'blindspotOccupied': "Blind spot not clear",
+  'overtakeRestricted': "No-passing zone",
+  'rearApproaching': "Traffic coming up behind",
+  'suspended': "Paused",
+  'adjacentSlow': "Next lane is no faster",
+  'oncomingLane': "Oncoming traffic that side",
+  # "Closing in" reads as something closing in on YOU, which is the opposite of what it means --
+  # this is the system deliberately hanging back until the gap is smaller.
+  'closingIn': "Waiting to get closer",
+  'leadBraking': "Car ahead is braking",
+  'driverChangedLanes': "You just changed lanes",
+  # Not "curve ahead" -- the point is not that a bend exists, it is that this is a bad place to be
+  # changing lanes. On this car it is also a steering-authority fact: the retrofit PSCM needs the
+  # car slowed to accept a hard steering command, so a bend is already asking near its limit.
+  'inCurve': "Road is bending too much",
+  # The map's own word for it, not a guess -- OSM calls a ramp a motorwayLink, and nothing on the
+  # car can tell one from a road on its own.
+  'onRamp': "On a ramp",
+  # Not "no lane available" -- that one is the camera's verdict and this is the map's, and telling
+  # them apart at a stop is the difference between tuning a threshold and tuning nothing.
+  'noRoomInMap': "Map says one lane each way",
+  'limitDropAhead': "Slower zone ahead",
+}
+
 # BluePilot: sunnypilot's "AHEAD" box hangs off the bottom of the speed-limit sign, in the same
 # rows our stack occupies. Its geometry, from SpeedLimitRenderer._draw_ahead_info: 170x160 at
 # sign_rect.y + sign_rect.height + 10, horizontally centred on the sign.
@@ -152,6 +205,128 @@ LAMP_OFF_INK = rl.Color(150, 156, 162, 255)
 # a glance -- the stack starts below the box whenever the box is there.
 AHEAD_BOX_HEIGHT = 160
 AHEAD_BOX_GAP = 10
+
+
+# BluePilot: the three thresholds that decide whether a lane exists beside us, mirrored from
+# passing_assist.py. Duplicated rather than imported for the same reason ACC_PROPULSION_INACTIVE
+# above is -- that file is controls and this is UI, and pulling a planner module into the UI
+# process to read three floats is a dependency that buys nothing.
+#
+# test_geometry_thresholds_mirrored keeps them honest: it fails if either copy moves without the
+# other, which is the only real objection to duplicating them.
+MIN_ADJACENT_LINE_PROB = 0.5
+MIN_LANE_WIDTH_M = 3.0
+MAX_LANE_WIDTH_M = 5.0
+MIN_EDGE_BEYOND_LINE_M = 0.8
+MAX_ROAD_EDGE_STD = 1.2
+
+
+# Why a blinker run that was already going got stopped. Every one of these is the test working --
+# none is a fault of the car or of the signal -- which is exactly why they must not be reported as
+# a flash count and left to look like one.
+# Mirrors lane_display_test_ext.LANE_TEST_STEPS, in order. See _render_lane_display_test.
+# Mirrors lane_display_test_ext. 1 is "refused because the car was moving"; naming it stops a bare
+# 1 from being compared against a field whose neighbour of the same name is an enum.
+LANE_TEST_BLOCK_MOVING = 1
+
+_LDT_LABELS = (
+  "BOTH GREEN",
+  "LEFT: NONE",
+  "LEFT: SUPPRESS",
+  "LEFT: WARNING",
+  "LEFT: INTERVENE",
+  "LANE ASSIST OFF",
+  "HANDS: LEVEL 1",
+  "HANDS: LEVEL 2  (listen)",
+  "HANDS: SUPPRESSED",
+)
+
+_BT_STOPPED = {
+  'notStationary': "STOPPED - CAR MOVED",
+  'cruiseEngaged': "STOPPED - CRUISE ON",
+  'driverSignalling': "STOPPED - YOUR STALK",
+}
+
+# Held, not stopped: the car is still running its own flash pattern from the last press and this one
+# will go as soon as it is quiet. Shown for completeness -- he presses these from inside the
+# settings menu, where none of this is visible, which is exactly why the request WAITS rather than
+# being refused.
+_BT_WAITING = "WAITING FOR THE LAMP"
+
+
+# The left gate's four terms, in the order it evaluates them. Named for a driver rather than for
+# the code: "paint" is the model's confidence in a line beyond ours, "room past it" is how much
+# road is left outside the lane we would move into.
+_GEO_TERMS = ("edge unsure", "paint", "lane width", "room past it")
+
+
+def _feet(m: float, metric: bool) -> str:
+  return f"{m:.1f}m" if metric else f"{m * 3.28084:.1f}ft"
+
+
+def _suggested_deficit(missed_mph: float, active_mph: float) -> float | None:
+  """What the speed bar would have had to be to accept the passes he made and it refused.
+
+  Returns None when there is nothing to say -- a bar already at or below what was missed, or a
+  suggestion that would land at zero, which is not a threshold but the absence of one.
+
+  ROUNDED DOWN, and to a whole mph because that is what the setting takes. Rounding to nearest
+  would recommend a bar that still refuses the very passes it was derived from, which is the one
+  outcome that would make this line worse than silence.
+  """
+  if missed_mph <= 0.0 or active_mph <= 0.0 or missed_mph >= active_mph:
+    return None
+  suggested = float(int(missed_mph))
+  return suggested if suggested >= 1.0 else None
+
+
+# LANE STRIP GEOMETRY. Sized against the panel's own text rather than picked: he reported the first
+# version as "I can't see the lanes UI at all. It's tiny", and it was 18x12 next to a 40-52 px
+# headline and a 30 px sub-line -- under half the height of the smallest thing beside it. A readout
+# nobody can read on the road is the same as one that was never wired up, which has happened here
+# three times. Box height now matches the sub-line, so it reads as part of the panel.
+# One name per line: preview_passing_panel lifts these by AST and only sees simple assignments,
+# so a tuple assign here silently leaves the preview rendering different geometry from the car.
+LANE_BOX_W = 40
+LANE_BOX_H = 26
+LANE_BOX_GAP = 10
+LANE_STRIP_H = 38
+
+
+def _rear_caveat(left_avail: bool, left_source: str, right_avail: bool, right_source: str) -> str:
+  """What the panel must say about rear coverage. Empty string means say nothing.
+
+  FOUR STATES, NOT TWO, and the two in the middle are the ones a bare availability test got wrong.
+
+    nothing fitted        "no rear data"
+    BLIS only             "rear: blind spot only"
+    one side uncovered    "no rear data left" / "no rear data right"
+    radar                 nothing -- this is the case the feature was built for
+
+  WHY THE BLIS STATE NEEDS SAYING. Wiring the BLIS producer makes both sides `available`, so a
+  bare availability test DROPS the caveat the day the canbox lands, and the screen then reads as
+  properly rear-checked by a sensor that cannot see a car closing from two hundred feet back. Same
+  rule as `_rear_can_authorize`: a BLIS-sourced decision must not pass for one a radar cleared, on
+  the panel exactly as in the log.
+
+  WHY PER-SIDE. `RearApproach.available` is left OR right -- the permissive combiner -- and
+  `may_actuate` already had to learn that one working sensor answers yes for both sides. A panel
+  that repeats it tells the driver the rear is covered while one side has nothing at all, which on
+  a half-finished canbox retrofit is the likely state rather than an exotic one.
+
+  Takes plain values rather than the capnp readers so it can be lifted and tested without pyray.
+  """
+  if not (left_avail or right_avail):
+    return "no rear data"
+  if not left_avail:
+    return "no rear data left"
+  if not right_avail:
+    return "no rear data right"
+  if left_source != 'radar' or right_source != 'radar':
+    # EITHER side short of radar downgrades the line. Saying nothing because the OTHER side has a
+    # radar would be the permissive combiner again, one level down.
+    return "rear: blind spot only"
+  return ""
 
 
 class HudRendererBP(HudRendererSP):
@@ -198,6 +373,27 @@ class HudRendererBP(HudRendererSP):
     self._lateral_mode = None
     # FusionPilot: None until controllerStateBP arrives; see _update_state.
 
+    # BluePilot: passing-assist observer readout. Debug only -- this displays what the phase-1
+    # observer WOULD have suggested. It is not an instruction and nothing acts on it.
+    self._show_passing_assist = self._bp_params.get_bool("ShowPassingAssist")
+    self._pa_main = ""
+    self._pa_sub = ""
+    self._pa_sub_detail = ""
+    self._pa_progress = 0.0
+    self._pa_alert = False
+    self._pa_color = COLORS.WHITE
+    self._pa_confirm_target = float(self._bp_params.get("PassingAssistConfirmTime", return_default=True) or 2)
+    self._pa_blinker_lead = float(self._bp_params.get("PassingAssistBlinkerLead", return_default=True) or 1)
+    self._pa_crawl_target = float(self._bp_params.get("PassingAssistCrawlTime", return_default=True) or 8)
+    # BluePilot: suggestions are transient -- a glance at the wrong moment misses one entirely, and
+    # "I saw nothing" is indistinguishable from "it never ran". A per-drive count makes the answer
+    # readable at any time without watching continuously or opening a log.
+    self._pa_count = 0
+    self._pa_suggesting_prev = False
+    self._pa_started_frame = 0
+    self._pa_panel_rect = None   # last drawn rect, used as the tap target
+    self._pa_failed = False      # own latch: must not share fate with the ACC readout
+
   def set_gradient_rect(self, rect: rl.Rectangle):
     """Set full-width rect for header gradient (when HUD renders offset for confidence ball)."""
     self._gradient_rect = rect
@@ -215,7 +411,17 @@ class HudRendererBP(HudRendererSP):
       self._show_brake_status = self._bp_params.get_bool("ShowBrakeStatus")
       self._hide_v_ego_ui = self._bp_params.get_bool("HideVEgoUI")
       self._show_lateral_control = self._bp_params.get_bool("BpShowLateralControl")
+      self._show_passing_assist = self._bp_params.get_bool("ShowPassingAssist")
+      if self._show_passing_assist:
+        # Needed as the progress-bar denominator, so the bar means "how close to the threshold
+        # you actually configured" rather than to a hardcoded guess.
+        self._pa_confirm_target = float(self._bp_params.get("PassingAssistConfirmTime", return_default=True) or 2)
+        # Refreshed here as well as in __init__, or the setting would only take effect on a reboot
+        # -- which reads as the control doing nothing.
+        self._pa_blinker_lead = float(self._bp_params.get("PassingAssistBlinkerLead", return_default=True) or 1)
+        self._pa_crawl_target = float(self._bp_params.get("PassingAssistCrawlTime", return_default=True) or 8)
 
+    # 7.0 reads the lateral mode from controllerStateBP rather than re-deriving it from params.
     if self._show_lateral_control:
       sm = ui_state.sm
       self._lateral_mode = sm['controllerStateBP'].activeLateralMode if sm.alive['controllerStateBP'] else None
@@ -234,7 +440,7 @@ class HudRendererBP(HudRendererSP):
           brake_light_status = car_state_bp.brakeLightStatus
           self._lamp_data_available = brake_light_status.dataAvailable
           self._brakes_on = brake_light_status.dataAvailable and brake_light_status.brakeLightsOn
-          # Decel request only -- precharge produces no deceleration, so colouring the speed for
+          # Decel request only -- precharge produces no deceleration, so coloring the speed for
           # it would claim the car was slowing when it was not.
           self._acc_braking = (brake_light_status.accDataAvailable and
                                brake_light_status.accDecelRequest)
@@ -262,6 +468,53 @@ class HudRendererBP(HudRendererSP):
         self._acc_status_failed = True
         self._acc_state, self._acc_accel = "", 0.0
         bp_ui_log.state("HudRendererBP", "acc_status_error", repr(e))
+
+    # BluePilot: same protection, SEPARATE latch. These are unrelated readouts and must fail
+    # independently -- sharing one would mean an ACC error silently freezing the passing-assist
+    # panel on its last frame forever, and a panel error blanking the ACC line. Calling this from
+    # inside _update_acc_status, where it briefly lived after a merge, produced exactly that.
+    if not self._pa_failed:
+      try:
+        self._update_passing_assist()
+      except Exception as e:
+        self._pa_failed = True
+        # SAY SO ON THE SCREEN. This used to blank the panel and record the exception through
+        # bp_ui_log, which is gated on the BPUIDebugLog param and therefore off -- so a crashed
+        # panel and a panel with nothing to say looked identical, and a whole drive was spent
+        # wondering why "all passing assist options on" showed nothing. 2026-08-07.
+        #
+        # The latch itself stays: one bad frame must not be retried sixty times a second. What
+        # changes is that it is now visible, and cloudlogged rather than debug-logged, so the
+        # traceback reaches the route even with the debug param off.
+        # THE REASON GOES ON THE SCREEN AND INTO A PARAM, because neither log carried it.
+        #
+        # This latched on a drive on 2026-08-08 and the sub-line said "the route has the reason".
+        # The route did not have the reason. Nor did swaglog -- 2500 files searched, and the only
+        # UI entries were FPS warnings. So the one instruction on screen sent him, and then me,
+        # looking somewhere the answer had never been written, and it cost a test drive he had
+        # limited time for.
+        #
+        # Two channels now, neither of which depends on a log daemon:
+        #   - the panel names the exception and where it came from, readable at a stop, no SSH
+        #   - PassingAssistLastError persists it, so a REBOOT -- the only thing that clears this
+        #     latch -- no longer destroys the evidence along with the symptom
+        where = "?"
+        tb = traceback.extract_tb(e.__traceback__)
+        if tb:
+          where = f"{os.path.basename(tb[-1].filename)}:{tb[-1].lineno}"
+        self._pa_main = "PASSING ASSIST ERROR"
+        self._pa_sub = f"{type(e).__name__} at {where}"
+        self._pa_progress, self._pa_alert = 0.0, True
+        self._pa_color = rl.Color(235, 90, 80, 255)
+        cloudlog.exception(f"passing assist panel failed, latched off: {e}")
+        bp_ui_log.state("HudRendererBP", "passing_assist_error", repr(e))
+        # Never let the reporting path become the crash. This runs once per latch.
+        try:
+          self._bp_params.put("PassingAssistLastError",
+                              {"type": type(e).__name__, "msg": str(e)[:200], "where": where,
+                               "traceback": "".join(traceback.format_tb(e.__traceback__))[-1500:]})
+        except Exception:  # noqa: BLE001 - a params failure must not replace the real error
+          cloudlog.exception("could not record PassingAssistLastError")
 
     bp_ui_log.state("HudRendererBP", "brakes_on", self._brakes_on)
     bp_ui_log.state("HudRendererBP", "acc_braking", self._acc_braking)
@@ -337,6 +590,692 @@ class HudRendererBP(HudRendererSP):
         pass
 
 
+  # Widest the sub-line may be. The panel clamps its own box to the screen but the text is drawn
+  # from its own measured width, so anything longer does not wrap or shrink -- it runs off both
+  # ends and is unreadable. The drive summary grew to six possible items without anyone checking,
+  # and a preview render of the worst case is what caught it.
+  MAX_SUB_WIDTH = 960
+  SUB_SIZE = 30
+
+  def _fit_sub(self, lines: list[str]) -> str:
+    """Join as many lines as actually fit, in the order given.
+
+    Measured rather than counted: the items vary from "7 backed out" to "mostly: oncoming traffic
+    that side 62%", and any fixed count is either wasteful or wrong. Callers pass them in priority
+    order, so what gets dropped is the least useful thing rather than the last thing.
+    """
+    out: list[str] = []
+    for line in lines:
+      candidate = "  -  ".join(out + [line])
+      if out and measure_text_cached(self._font_bold, candidate, self.SUB_SIZE).x > self.MAX_SUB_WIDTH:
+        break
+      out.append(line)
+    return "  -  ".join(out)
+
+  def _draw_drive_summary(self, pa, sm) -> bool:
+    """What this drive actually measured, shown while stopped. Returns True if it owns the line.
+
+    Every number here exists to settle a question that cannot be settled by argument:
+
+      slow passes   -> how often a pass grinds, and for how long. Sets the speed-nudge trigger.
+      backed out    -> how often a sequence signaled and had to abandon it. Near zero means the
+                       gates are steady enough to act on; climbing names an unstable one.
+      ACC braked by -> the furthest back Ford's ACC ever lost patience. The close-in hold has to
+                       stay clear of this, and until it is measured that hold has no safe value.
+    """
+    try:
+      if sm['carState'].vEgo > 0.3:
+        return False
+
+      # Nothing measured yet this drive: show the last one instead. Parking used to throw these
+      # away entirely, and they are the whole output of this phase -- read off this panel at a
+      # traffic light or not at all.
+      if pa.wantedSeconds <= 0.0 and not pa.crawlEvents and not pa.maneuverAborts:
+        return self._draw_last_drive()
+
+      # Priority order, most useful first -- see _fit_sub, which drops from the end.
+      # PRIORITY ORDER, and it matters far more than it looks. _fit_sub stops adding once the line
+      # would overflow, and rendering the whole panel on one sheet showed the truth: the agreement
+      # line alone very nearly fills the width, so in practice only two items ever appear. Anything
+      # below second is decoration.
+      #
+      # Which made a comment further down flatly false -- it claimed reversed-mid-change "must
+      # never be dropped for space" while sitting fourth, where it was always dropped. It goes
+      # first now. It is short and it is usually zero, so it costs nothing when there is nothing
+      # to say, and it is the only safety figure here.
+      lines = []
+      if pa.emergencyAborts:
+        lines.append(f"{pa.emergencyAborts} reversed mid-change")
+
+      # Then the one line that answers "is this ready" rather than describing a symptom. Shortened
+      # from "you passed 7, agreed 6 (11s early), missed on ..." because that single sentence ate
+      # the entire budget and left no room for the evidence behind it. The miss reason is its own
+      # item now, so it competes on merit instead of riding along.
+      if pa.driverPasses:
+        agreed = pa.driverPassesAgreed
+        # AGAINST THE ELIGIBLE COUNT, not the total. A pass made below the minimum speed or with
+        # the feature off is not a disagreement, and counting it as one made the readiness score
+        # read far worse than the feature deserved. The total is still shown when they differ, so
+        # nothing is hidden -- see driverPassesEligible in custom.capnp.
+        eligible = pa.driverPassesEligible
+        line = (f"{eligible} passes, {agreed} agreed" if eligible == pa.driverPasses else
+                f"{eligible} of {pa.driverPasses} passes, {agreed} agreed")
+        if agreed:
+          line += f" ({pa.driverPassLeadSeconds:.0f}s early)"
+        # AND THE ONES HE AGREED WITH AFTER WAITING FOR THE LANE TO CLEAR. Without this the line
+        # reads "82 passes, 3 agreed" on a feature that mostly wanted the same thing he did, just
+        # not in the same frame -- which is what the strict count measures. His words: "A lot of
+        # lane changes are correct, I just have to wait for no one to be in that lane."
+        late = pa.driverPassesAgreedLate
+        if late:
+          line += f", {late} after waiting ({pa.driverPassLateDelay:.0f}s)"
+        lines.append(line)
+        if agreed < pa.driverPasses:
+          # str(), NOT int(). A capnp enum read off a live message is a _DynamicEnum and int()
+          # raises TypeError on it -- which crashed this panel on the road, and because
+          # _draw_drive_summary only runs at a standstill it took a red light to reach: "then I
+          # just got passing assist error for the rest of my drive after stopping at a red light."
+          #
+          # str() gives the enumerant name directly, so the index and _BLOCKED_ORDER are not needed
+          # at all. The lookup was doing work to recover something capnp already had.
+          #
+          # The ICBM session hit this exact TypeError in bp_dump_exit.py two commits before this
+          # crashed, and I did not check my own code for it.
+          name = str(pa.driverPassMissReason)
+          if name == "nothingSlower" and pa.missedDeficitMph > 0:
+            # Names the number to change rather than the symptom. "Missed on nothing slower" is a
+            # complaint; "they were 2.4 mph slower" is an instruction.
+            #
+            # ...and then TAKE THE LAST STEP, which this stopped one short of. Every competitor
+            # that adapts to a driver does it by quietly retuning itself -- Hyundai's HDA2
+            # machine-learns ACC habits, Tesla folds it into a speed profile. Neither tells you
+            # what it changed. Here the measurement is already exact: these are passes HE made that
+            # the speed bar alone refused, so the bar is provably too high by the difference.
+            #
+            # Says the number, does not write it. A default I picked is a suggestion; a setting he
+            # picked is data -- see params_migration.py. The one thing it must never become is a
+            # system that retunes itself and mentions it nowhere.
+            #
+            # ONE ITEM, not two. _fit_sub drops whole items to make the line fit, and a
+            # recommendation that can be dropped independently of the measurement it came from
+            # would appear as a bare instruction with nothing behind it -- or, more often, not at
+            # all, since it sits behind two other items in priority order.
+            miss = f"missed cars {pa.missedDeficitMph:.1f} mph slower"
+            suggest = _suggested_deficit(pa.missedDeficitMph, pa.minDeficitActive)
+            if suggest is not None:
+              miss += f", try {suggest:.0f}"
+            lines.append(miss)
+          elif name:
+            lines.append(f"missed on {_BLOCKED_TEXT.get(name, name).lower()}")
+
+        # WHAT THE EXTRA FUSSINESS COST OVER THE DRIVE. The live line above says the bar moved;
+        # this says whether that mattered. Counted in passes he went and made himself, which is the
+        # only unarguable evidence that a refusal was wrong -- seconds are exposure, a pass is a
+        # verdict. Below the threshold it stays off the panel rather than reporting a zero: the
+        # drive summary is priority-ordered and a line that says nothing happened outranks nothing.
+        if pa.patienceMissed > 0:
+          lines.append(f"at-limit fussiness cost {pa.patienceMissed} "
+                       f"pass{'' if pa.patienceMissed == 1 else 'es'}")
+
+      # The total is what actually decides anything -- one drive's seven passes swing by a third on
+      # a single odd stretch of road. Shown only once there is more of it than the drive in front
+      # of it, or it is the same number printed twice.
+      if pa.lifetimeDrives > 1 and pa.lifetimePasses > pa.driverPasses:
+        lines.append(f"{pa.lifetimeDrives} drives: {pa.lifetimePasses} passed, "
+                     f"{pa.lifetimeAgreed} agreed")
+      # The other error direction: suggestions nobody acted on.
+      #
+      # SHOWN AT ZERO TOO, once a pass has actually been wanted. Hiding it made "it suggested
+      # nothing" look exactly like "that line does not exist", which is the difference between a
+      # feature working correctly on a quiet road and a feature that is broken. Reported from the
+      # car as "I heard zero chimes, but maybe I never turned it on?" -- a question the panel
+      # should have answered without anyone having to ask it.
+      # WHY IT NEVER FIRED, as one sentence, at a stop. Five drives, twenty-one passes and zero
+      # suggestions is a number with no next step attached; "left refused: paint 0.31 (86%)" names
+      # the one of four constants to change. Placed above the counts because it is the finding and
+      # they are the symptom.
+      #
+      # Only once there is enough of it to mean anything, and only when it is actually the thing
+      # standing in the way -- on a road where a pass was never wanted, the left side being refused
+      # is not news.
+      # NOT gated on having suggested nothing. It was, and one suggestion anywhere in a drive
+      # would have taken the diagnosis away -- on a drive that refused four hundred times and
+      # suggested once, the line is still the most useful thing on the screen. He has very little
+      # testing time; losing the answer to a technicality costs a day.
+      if pa.wantedSeconds > 30.0 and pa.geoRefusedShare > 0.5:
+        term = _GEO_TERMS[pa.geoRefusedBy] if pa.geoRefusedBy < len(_GEO_TERMS) else "?"
+        v = pa.geoRefusedValue
+        shown = f"{v:.2f}" if pa.geoRefusedBy in (0, 1) else _feet(v, ui_state.is_metric)
+        lines.append(f"left refused: {term} {shown} ({pa.geoRefusedShare * 100:.0f}%)")
+      if pa.suggestionsMade or pa.wantedSeconds > 0.0:
+        line = f"suggested {pa.suggestionsMade}, taken {pa.suggestionsTaken}"
+        if pa.longestIgnoredSeconds > 5.0:
+          line += f", longest ignored {pa.longestIgnoredSeconds:.0f}s"
+        lines.append(line)
+      # Split by maneuver only when they disagree. The counters were kept separate so an unstable
+      # gate could be attributed to one or the other -- and then never shown, which made the whole
+      # justification for splitting them worthless. One number when they agree, two when they
+      # differ, because the difference IS the finding.
+      if pa.keepRightAborts:
+        lines.append(f"{pa.keepRightAborts} backed out moving right")
+      # The most useful line here, so it goes first: what actually stopped the passes.
+      # A minute of evidence, not five seconds. A percentage over six seconds of data is noise
+      # dressed as a finding, and this line is meant to decide what gets worked on next.
+      if pa.wantedSeconds > 60.0 and pa.topBlockedShare > 0.05:
+        reason = _BLOCKED_TEXT.get(str(pa.topBlockedBy), str(pa.topBlockedBy))
+        lines.append(f"mostly: {reason.lower()} {pa.topBlockedShare * 100:.0f}%")
+      if pa.accBrakingOnsetMax > 0:
+        d = pa.accBrakingOnsetMax if ui_state.is_metric else pa.accBrakingOnsetMax * 3.28084
+        lines.append(f"ACC braked by {d:.0f}{'m' if ui_state.is_metric else 'ft'}")
+      # LEFT LANE HOGS. He asked for this by name; the other items on that list were the horn,
+      # the high beams and a brake check. This is the one that tells the next drive something --
+      # it is the deficit threshold's own evidence, counted on the road rather than argued about.
+      if pa.hogCount:
+        lines.append(f"{pa.hogCount} left-lane hog{'' if pa.hogCount == 1 else 's'}, "
+                     f"{pa.hogSeconds:.0f}s")
+      if pa.maneuverAborts:
+        lines.append(f"{pa.maneuverAborts} backed out")
+      if pa.crawlEvents:
+        lines.append(f"{pa.crawlEvents} slow "
+                     f"{'pass' if pa.crawlEvents == 1 else 'passes'}, worst {pa.crawlLongestSeconds:.0f}s")
+    except (AttributeError, KeyError):
+      return False
+
+    if not lines:
+      return False
+
+    self._pa_main = "THIS DRIVE"
+    # Assembled here, NOT via _pa_sub_detail. That field is folded into _pa_sub at the end of
+    # _update_passing_assist, and every method here returns before reaching it -- so anything left
+    # in it is silently dropped. Cost me three readouts before a preview render showed it.
+    self._pa_sub = self._fit_sub(lines)
+    self._pa_color = rl.Color(150, 205, 235, 255)
+    return True
+
+  def _draw_last_drive(self) -> bool:
+    """The previous drive's numbers, from the param the detector writes. Returns True if shown."""
+    try:
+      d = self._bp_params.get("PassingAssistLastDrive")
+      if not d or float(d.get("wantedSeconds", 0)) <= 5.0:
+        return False
+      lines = []
+      if int(d.get("driverPasses", 0)):
+        # See driverPassesEligible. Older archived drives predate the field; fall back to the
+        # total rather than reading a missing key as zero, which would report every drive before
+        # today as having had no eligible passes at all.
+        elig = int(d.get("driverPassesEligible", d.get("driverPasses", 0)))
+        tot = int(d['driverPasses'])
+        line = (f"you passed {elig}, agreed {int(d['driverPassesAgreed'])}" if elig == tot else
+                f"you passed {elig} of {tot}, agreed {int(d['driverPassesAgreed'])}")
+        if int(d.get("driverPassesAgreed", 0)):
+          line += f" ({float(d['driverPassLead']):.0f}s early)"
+        lines.append(line)
+      if int(d.get("suggestionsMade", 0)) or float(d.get("wantedSeconds", 0)) > 0:
+        lines.append(f"suggested {int(d['suggestionsMade'])}, taken {int(d['suggestionsTaken'])}")
+      # WHY IT DID NOT SUGGEST THE PASSES HE MADE HIMSELF.
+      #
+      # Counted, saved and never drawn -- the same fault as the cancelled count further down, in
+      # the one readout that answers the question this feature is currently being tuned against.
+      # The LIVE panel does show it, which is what hid this: it is not missing, it is only missing
+      # at the moment he would read it. He does not read the panel at speed and has said so
+      # repeatedly -- see _record_refusal in passing_assist.py, which states the same rule and is
+      # the reason the geometry diagnosis was moved here in the first place.
+      miss = d.get("driverPassMiss")
+      if miss is not None and int(d.get("driverPasses", 0)):
+        name = str(miss) if isinstance(miss, str) else (
+          _BLOCKED_ORDER[int(miss)] if int(miss) < len(_BLOCKED_ORDER) else "")
+        if name and name != "none":
+          line = f"missed yours: {_BLOCKED_TEXT.get(name, name).lower()}"
+          # Stored in mph already, so no conversion here -- see missedDeficitMph. The reason says
+          # which gate refused; this says by how much, which is the number to move the setting to
+          # rather than a description of why it said no.
+          if float(d.get("missedDeficit", 0)) > 0:
+            line += f", deficit {float(d['missedDeficit']):.0f} mph"
+          lines.append(line)
+      # A suggestion nobody acted on, INCLUDING one still standing when the drive ended -- see
+      # longest_ignored. Also saved and never shown. Five seconds filters the ones he simply had
+      # not got to yet from the ones that stood there being ignored.
+      if float(d.get("longestIgnored", 0)) > 5.0:
+        lines.append(f"longest ignored {float(d['longestIgnored']):.0f}s")
+      if int(d.get("lifetimeDrives", 0)) > 1:
+        lines.append(f"all {int(d['lifetimeDrives'])} drives: {int(d['lifetimePasses'])} passed, "
+                     f"{int(d['lifetimeAgreed'])} agreed")
+      share = float(d.get("topBlockedShare", 0))
+      if share > 0.05:
+        # The int is the Blocked ordinal. Mapped through the same table the live panel uses, so
+        # the wording cannot drift between "what stopped it" and "what stopped it last time".
+        # d is a decoded param here, not a live capnp message, so this int() is on a real number
+        # and is safe. Stated because it looks identical to the line above that was not.
+        top = d["topBlockedBy"]
+        name = str(top) if isinstance(top, str) else (
+          _BLOCKED_ORDER[int(top)] if int(top) < len(_BLOCKED_ORDER) else "")
+        if name:
+          lines.append(f"mostly: {_BLOCKED_TEXT.get(name, name).lower()} {share * 100:.0f}%")
+      if d.get("crawlEvents"):
+        n = int(d["crawlEvents"])
+        lines.append(f"{n} slow {'pass' if n == 1 else 'passes'}, worst {float(d['crawlLongest']):.0f}s")
+      if d.get("aborts"):
+        lines.append(f"{int(d['aborts'])} backed out")
+      # Which half of the oncoming veto did the work. Mostly-remembered on a divided highway is
+      # the I-15 fault stated as a number rather than a complaint.
+      seen, remembered = float(d.get("oncomingSeen", 0)), float(d.get("oncomingRemembered", 0))
+      # ONE LINE, not two, and that is a fit decision rather than a style one. _fit_sub keeps
+      # lines in priority order until the width runs out, so a follow-on detail line is the first
+      # thing dropped -- the provenance would have been invisible on exactly the busy drives worth
+      # diagnosing. Joined to its parent it cannot be separated from it.
+      fired = float(d.get("oncomingDRel", 0)) > 0
+      # The 5 s floor stays for the memory-only case, where a second or two is noise. It must NOT
+      # apply when something actually fired: the 2026-08-09 drive recorded 1.2 s remembered and
+      # this line never appeared, which is how a real firing came to be invisible on the panel
+      # while its numbers sat in the param file the whole time.
+      if seen + remembered > 5.0 or fired:
+        line = f"oncoming: {seen:.0f}s seen, {remembered:.0f}s remembered"
+        if fired:
+          od = float(d["oncomingDRel"])
+          unit = 'm' if ui_state.is_metric else 'ft'
+          ov = abs(float(d["oncomingVAbs"])) * (3.6 if ui_state.is_metric else 2.23694)
+          du = od if ui_state.is_metric else od * 3.28084
+          # WHERE it was and WHETHER THE EDGE WAS TRUSTED -- the pair that says WHICH bug fired.
+          # See oncomingEdgeTrusted in custom.capnp. "band only" is the honest name for the
+          # fallback: no usable road edge, so the carriageway test narrowed to the adjacent lane
+          # and whatever fired was within ADJACENT_MAX_M of the car.
+          oy = abs(float(d.get("oncomingYRel", 0.0)))
+          yu = oy if ui_state.is_metric else oy * 3.28084
+          edge = "trusted edge" if d.get("oncomingEdgeTrusted") else "band only"
+          line += f", {ov:.0f} at {du:.0f}{unit}, {yu:.0f}{unit} out, {edge}"
+        lines.append(line)
+      # How many cars went past us, and how long the lane has been quiet since. The whole question
+      # this is meant to answer is whether a long quiet stretch is real, so the gap is the number
+      # that matters -- not the count.
+      passed_by = int(d.get("overtakenLeft", 0)) + int(d.get("overtakenRight", 0))
+      if passed_by:
+        quiet = float(d.get("overtakenQuietest", 0))
+        lines.append(f"passed by {passed_by}, quiet {quiet:.0f}s")
+      hogs = int(d.get("hogCount", 0))
+      if hogs:
+        lines.append(f"{hogs} left-lane hog{'' if hogs == 1 else 's'}, "
+                     f"{float(d.get('hogSeconds', 0)):.0f}s")
+      # The driver's own lane changes, from a separate param. Two of passing assist's constants
+      # are guesses this measures away: how long a crossing takes, and what a HUMAN abandon rate
+      # looks like -- without which its own backed-out count has no scale.
+      lc = self._bp_params.get("LaneChangeStats") or {}
+      if int(lc.get("changes", 0)):
+        line = f"your changes: {int(lc['changes'])}, {float(lc.get('seconds', 0)):.1f}s each"
+        if int(lc.get("abandoned", 0)):
+          line += f", {int(lc['abandoned'])} abandoned"
+        # Cancelled was being counted and saved and never shown, which left the one question a
+        # drive can answer about the cancel unanswerable: "turning off my blinker mid lane change
+        # doesn't really seem to cancel." A zero here means the cancel never fired and the window
+        # is the thing to change; a number means it fired and the car went anyway, which is a
+        # different fault with a different fix.
+        if int(lc.get("cancelled", 0)):
+          line += f", {int(lc['cancelled'])} cancelled"
+        lines.append(line)
+      # Is his cancel gesture visible to the state machine at all? "I usually just cancel the one
+      # touch by slightly moving my blinker back towards the right, which cancels it, but doesn't
+      # trigger the right." If that nudge never reaches the opposite switch position, reversed_side
+      # is never true and the cancel is a no-op. Shown as a pair because either number alone is
+      # ambiguous -- see OPPOSITE_SWITCH_WINDOW_S in auto_lane_change.
+      saw_opp, saw_out = int(lc.get("sawOpposite", 0)), int(lc.get("sawSignalOut", 0))
+      if saw_opp or saw_out:
+        line = f"cancel gesture: {saw_opp} reached the other side, {saw_out} just went out"
+        # Of the ones that just went out, how many had his hands on the wheel -- which separates
+        # "he is doing the change himself" from "he is asking the car to stop". See should_cancel.
+        hands = int(lc.get("signalOutSteering", 0))
+        if saw_out:
+          line += f" ({hands} steering)"
+        lines.append(line)
+      if float(d.get("accOnsetMax", 0)) > 0:
+        m = float(d["accOnsetMax"])
+        v = m if ui_state.is_metric else m * 3.28084
+        lines.append(f"ACC braked by {v:.0f}{'m' if ui_state.is_metric else 'ft'}")
+    except Exception:  # noqa: BLE001 - a malformed param must never blank the panel
+      return False
+
+    if not lines:
+      return False
+    self._pa_main = "LAST DRIVE"
+    self._pa_sub = self._fit_sub(lines)
+    self._pa_color = rl.Color(150, 205, 235, 255)
+    return True
+
+  def _draw_crawl(self, pa) -> bool:
+    """A pass that is taking too long. Returns True if it owns the line this frame."""
+    try:
+      if pa.crawlSeconds < self._pa_crawl_target:
+        return False
+    except (AttributeError, KeyError):
+      return False
+
+    # NO SIDE IN THE TEXT. Only one side can produce a slow pass now -- the car you are passing is
+    # on your right, by definition -- so naming it is noise at best. At worst it is the wording that
+    # made the old bug so confusing to report: "barely gaining on the car on the left" described
+    # traffic that was overtaking HIM, and reads as nonsense precisely because it was.
+    self._pa_main = f"SLOW PASS  {pa.crawlSeconds:.0f}s"
+    self._pa_sub = "barely gaining on the car you are passing"
+    self._pa_color = rl.Color(240, 175, 60, 255)
+    self._pa_alert = True
+    return True
+
+  def _draw_maneuver(self, pa) -> bool:
+    """The dry run: what a fully automatic pass WOULD be doing right now. Returns True if it owns
+    the line this frame.
+
+    Nothing here is actuating anything and the wording has to keep saying so, every phase, or a
+    driver glancing at "SIGNALING LEFT" will reasonably conclude the car did it. Hence the
+    "would" line under every phase, and no chevrons -- those mean "act on this" everywhere else on
+    this screen.
+    """
+    try:
+      phase = str(pa.maneuver)
+    except (AttributeError, KeyError):
+      return False
+    if phase in ('idle', 'confirming', 'waiting'):
+      # ...unless a crossing was just reversed. The detector still says a pass is warranted and
+      # the lane is clear -- both true -- so with nothing said here the screen falls through to a
+      # green PASS LEFT seconds after the car backed out of exactly that pass. Contradicting
+      # yourself on the one readout a driver is meant to trust is worse than saying nothing.
+      if pa.maneuverStandDown > 0.0:
+        # ...or a run that went all the way through, which shares the clock and nothing else.
+        # Reported as "BACKED OUT" it would be a flat lie about a sequence that worked, and it is
+        # the more common of the two now that a completed run stands down at all -- see
+        # COMPLETE_STANDDOWN_S, and the loop that made it necessary.
+        if pa.maneuverStandDownComplete:
+          self._pa_main = "WOULD BE DONE"
+          self._pa_sub = f"holding {pa.maneuverStandDown:.0f}s before looking again"
+          self._pa_color = rl.Color(190, 150, 235, 255)
+        else:
+          self._pa_main = "BACKED OUT"
+          self._pa_sub = f"waiting {pa.maneuverStandDown:.0f}s before trying again"
+          self._pa_color = rl.Color(235, 90, 80, 255)
+        self._pa_alert = True
+        return True
+      return False   # nothing committed yet; the verdict display below is the better readout
+
+    side = str(pa.maneuverSide).upper()
+    keep_right = str(pa.maneuverReason) == 'keepRight'
+    self._pa_alert = True
+    self._pa_color = rl.Color(190, 150, 235, 255)   # not the green of a real suggestion
+
+    if phase == 'signaling':
+      self._pa_main = f"WOULD SIGNAL {side}"
+      # Keep-right and passing look identical on this line otherwise, and they mean opposite
+      # things: one is going round something, the other is getting out of the way.
+      self._pa_sub = "moving back over" if keep_right else "waiting before moving"
+      self._pa_progress = min(1.0, pa.maneuverSeconds / max(self._pa_blinker_lead, 0.1))
+    elif phase == 'changing':
+      self._pa_main = f"WOULD BE CHANGING {side}"
+      self._pa_sub = "blinker on, steering across"
+      self._pa_progress = min(1.0, pa.maneuverSeconds / 4.0)
+    elif phase == 'aborting':
+      # Red, alone among these. Every other phase is the system going about its business; this one
+      # is it getting out of the way of something, and it should not look like the others.
+      self._pa_main = "WOULD BACK OUT"
+      self._pa_sub = "something arriving behind"
+      self._pa_color = rl.Color(235, 90, 80, 255)
+    else:
+      self._pa_main = "WOULD BE DONE"
+      self._pa_sub = "blinker off"
+
+    # A sequence resting on a camera-only lead is worth seeing AS IT HAPPENS, not just in a log:
+    # that lead's speed is the model's guess rather than the radar's measurement, and "4 mph
+    # slower" is the entire judgment. Takes priority over the abort count -- it says something
+    # about THIS maneuver, where the count is about the drive.
+    # Appended to _pa_sub directly -- see the note in _draw_drive_summary about _pa_sub_detail.
+    if not pa.leadRadarConfirmed:
+      self._pa_sub += "  -  camera only, speed not radar-measured"
+    elif pa.maneuverAborts:
+      # The number this whole dry run exists to produce, on screen rather than only in the log --
+      # a drive where this climbs is a drive that answered the question.
+      self._pa_sub += f"  -  {pa.maneuverAborts} backed out this drive"
+    return True
+
+  def _update_passing_assist(self) -> None:
+    """BluePilot: build the passing-assist panel state.
+
+    Written to be read at a glance at speed, not decoded. Enum names like "nothingSlower" are what the
+    log records and are the wrong thing to put in front of a driver, so every state maps to plain
+    words; the confirmation timer becomes a progress bar because a bar answers "is it nearly there" in
+    peripheral vision and a number does not.
+
+    Three things have to be legible without study: is it running, is it building toward something,
+    and did it decide -- which way.
+    """
+    self._pa_main = ""
+    self._pa_sub = ""
+    self._pa_sub_detail = ""
+    self._pa_progress = 0.0
+    self._pa_alert = False
+    self._pa_color = COLORS.WHITE
+    if not self._show_passing_assist:
+      return
+
+    sm = ui_state.sm
+
+    # The stationary blinker test owns the panel while it runs. The two barely overlap -- the
+    # blinker test only runs stopped, and passing assist needs PassingAssistMinSpeed, 30 mph by
+    # default -- but the drive summary IS a stopped state, so this has to come first outright. It
+    # is a deliberate action the driver is standing there waiting for a result from.
+    if self._render_blinker_test(sm):
+      return
+
+    # Same claim on the panel, same reason: a stationary test the driver is standing there watching
+    # for. It goes first because its whole output is a word the driver has to read off this screen
+    # while looking at the cluster -- if anything else owned the line, the walk would be five
+    # unlabeled pictures.
+    if self._render_lane_display_test(sm):
+      return
+
+    # See adjacent_lane_renderer.INVALID_HOLD_S for the whole reasoning. `alive` is the publisher
+    # being gone and blanks the panel at once; `valid` is plannerd flagging the message because
+    # some OTHER service it subscribes to failed a check, while it carries on publishing this data
+    # at 20 Hz. Blanking on the second made the panel strobe next to a perfectly healthy readout.
+    if not sm.alive.get('longitudinalPlanSP', False):
+      self._pa_invalid_s = 0.0
+      return
+    if not sm.valid.get('longitudinalPlanSP', False):
+      self._pa_invalid_s = getattr(self, '_pa_invalid_s', 0) + 1
+      if self._pa_invalid_s >= PA_INVALID_HOLD_FRAMES:
+        return
+    else:
+      self._pa_invalid_s = 0.0
+
+    try:
+      pa = sm['longitudinalPlanSP'].passingAssist
+    except (KeyError, AttributeError):
+      return
+
+    # The lane strip. Read here with the rest of pa; drawn at the end of the panel.
+    try:
+      self._pa_lane_index = int(pa.laneIndex)
+      self._pa_lanes_total = int(pa.lanesTotal)
+      self._pa_no_lane_left = bool(pa.noLaneLeft)
+      self._pa_lane_bound = (int(pa.laneBoundLo), int(pa.laneBoundHi))
+    except (AttributeError, TypeError, ValueError):
+      self._pa_lane_index, self._pa_lanes_total, self._pa_no_lane_left = -1, 0, False
+      self._pa_lane_bound = (-1, -1)
+
+    # Reset the count on each new drive rather than each UI start, so it always means
+    # "this trip" no matter when the display was switched on.
+    if ui_state.started_frame != self._pa_started_frame:
+      self._pa_started_frame = ui_state.started_frame
+      self._pa_count = 0
+      self._pa_suggesting_prev = False
+
+    # TURNED OFF, and it says so rather than going blank. He turned it off with the LKA button and
+    # it stays off across ignition cycles -- "leave it off until I turn it on" -- so an empty panel
+    # would be indistinguishable from a quiet road, and from a broken feature.
+    #
+    # NO PANEL TAP any more. It used to toggle the pause, and he is right that it does not belong:
+    # "MADS and stuff don't have panel controls." A full-panel target that disables a feature is an
+    # accidental press waiting to happen, and the physical button is the precedent that fits.
+    if str(pa.blockedBy) == 'disabled':
+      self._pa_main = "PASSING ASSIST OFF"
+      self._pa_sub = "LKA button turns it back on"
+      self._pa_color = rl.Color(170, 175, 180, 255)
+      return
+
+    suggestion = str(pa.suggestion)
+
+    # Stopped, so nothing is happening and the panel is free. This is the only place the drive's
+    # own numbers can be read: the owner does not SSH into the car and does not read logs, so a
+    # measurement with nowhere to appear is a measurement that was never taken.
+    if self._draw_drive_summary(pa, sm):
+      return
+
+    # ORDER MATTERS, and the obvious order is wrong. A grinding pass is happening now and is the
+    # one state a driver might act on, so it outranks the dry run -- but NOT while the car is
+    # committed. Once the maneuver is crossing, backing out, or standing down after a reversal, a
+    # slow-pass warning would suppress the only red state this panel has, which is the one that
+    # says something arrived behind us. Crawling and crossing can both be true at once: a slow pass
+    # IS a car close alongside being barely gained on.
+    committed = str(pa.maneuver) in ('changing', 'aborting') or pa.maneuverStandDown > 0.0
+    if not committed and self._draw_crawl(pa):
+      return
+
+    # The dry run takes the line whenever a sequence is actually running. It is strictly more
+    # informative than the single-frame verdict below -- it says the same thing plus where in the
+    # maneuver it is -- and it is the readout the whole phase-2 question turns on.
+    if self._draw_maneuver(pa):
+      return
+
+    # Rising edge only: a suggestion that holds for 30 s is one event, not 600.
+    suggesting = suggestion != 'none'
+    if suggesting and not self._pa_suggesting_prev:
+      self._pa_count += 1
+    self._pa_suggesting_prev = suggesting
+
+    if suggesting:
+      self._pa_alert = True
+      # Direction is carried by chevrons on the correct side, so the side registers before the
+      # words are read. KEEP RIGHT and PASS RIGHT are both Side.right and mean opposite things,
+      # which is why the reason is spelled out rather than inferred from the side.
+      if str(pa.reason) == 'keepRight':
+        self._pa_main = "MOVE RIGHT  >>>"
+        self._pa_color = rl.Color(140, 190, 230, 255)
+      elif suggestion == 'left':
+        self._pa_main = "<<<  PASS LEFT"
+        self._pa_color = rl.Color(120, 220, 140, 255)
+      else:
+        self._pa_main = "PASS RIGHT  >>>"
+        self._pa_color = rl.Color(120, 220, 140, 255)
+    else:
+      blocked = str(pa.blockedBy)
+      self._pa_color = rl.Color(170, 175, 180, 255)
+      if blocked == 'nothingSlower' and pa.confirmSeconds > 0:
+        # The one state that is genuinely "working on it". Show the bar, not the arithmetic.
+        self._pa_main = "Slower car ahead"
+        self._pa_progress = min(1.0, pa.confirmSeconds / max(self._pa_confirm_target, 1.0))
+      else:
+        self._pa_main = _BLOCKED_TEXT.get(blocked, blocked)
+        # Show the two numbers actually being compared. "Nothing slower ahead" with a visibly
+        # slower car in front is the exact report that took a drive to diagnose twice; the operands
+        # make it a glance instead. Reference is the speed the driver asked for, which with ICBM
+        # running is NOT the number on the dash.
+        conv = 2.23694 if not ui_state.is_metric else 3.6
+        if blocked == 'nothingSlower' and pa.hasLead and pa.referenceSpeed > 0:
+          self._pa_sub_detail = (f"want {pa.referenceSpeed * conv:.0f}"
+                                 f"  lead {pa.leadVLead * conv:.0f}"
+                                 f"  [{pa.referenceSource}]")
+          # ...and the bar it is being held to, when that is NOT the number on the settings screen.
+          # Without this the line shows a lead visibly slower than the wanted speed and says
+          # "nothing slower ahead" anyway -- which is the exact report that cost two drives to
+          # diagnose, reintroduced by a feature that quietly moves the threshold. Shown only while
+          # patience is doing something, because at 8 over it is his setting and needs no gloss.
+          if pa.patienceScale > 1.0:
+            self._pa_sub_detail += f"  need {pa.minDeficitActive * pa.patienceScale:.0f}"
+        # ONE WORD, for the LEFT side, and nothing else. It used to print "L paint 0.31     R
+        # shoulder 0.3ft" -- four numbers to parse at 70 mph -- which earned "and you expect me to
+        # read all of that while driving?" and was removed outright.
+        #
+        # A single word is the other thing he said, though: "I love having good visual information
+        # on the screen, but only for at-a-glance information." This is glanceable, it is the only
+        # question standing between the feature and working at all, and it means one look answers
+        # what otherwise costs an SSH session. The numbers stay in the drive summary.
+        elif blocked == 'noLaneAvailable' and pa.geoRefusedShare > 0.0:
+          # THE WORD AND THE NUMBER. A word alone names the constant; it does not say what to set
+          # it to, and a drive that produces "paint" and nothing else still costs a second drive to
+          # act on. geoLoosenTo is where that term would have to sit to admit four fifths of the
+          # refusals -- so "paint 0.31" read off the screen at a light is the entire answer.
+          term = (_GEO_TERMS[pa.geoRefusedBy] if pa.geoRefusedBy < len(_GEO_TERMS) else "?")
+          self._pa_sub_detail = f"left: {term} {pa.geoLoosenTo:.2f}"
+        elif blocked == 'closingIn' and pa.minApproachActive > 0:
+          # Auto derives this from what the car's own ACC has been measured doing, so the number is
+          # different per car and changes as it learns. Without showing it, "Waiting to get closer"
+          # is a state with no observable meaning -- closer than WHAT.
+          d = pa.minApproachActive if ui_state.is_metric else pa.minApproachActive * 3.28084
+          unit = 'm' if ui_state.is_metric else 'ft'
+          now = pa.leadDRel * (1 if ui_state.is_metric else 3.28084)
+          self._pa_sub_detail = f"until {d:.0f}{unit}  -  now {now:.0f}{unit}"
+        elif blocked == 'oncomingLane':
+          # Say how long the veto has left, so a driver who has just turned off a two-lane road
+          # onto a divided one can see it counting down rather than wonder if it has hung.
+          # WHAT fired it, not just that it did. Reported on I-15, which is divided, so this
+          # veto is either seeing the opposite carriageway or inventing traffic -- and the two
+          # need completely different fixes. The numbers tell them apart at a glance, which is the
+          # only way to tell without reading a log.
+          # Named per SIDE, because that is all this ever knew. The veto has always been
+          # per-side -- on a four-lane two-way road in the left lane, the oncoming lane is one
+          # to the left and an ordinary through lane is one to the right, and the right is still
+          # offered. Calling the state "two-way road" claimed something about the whole road that
+          # was never measured, and on I-15 it read as a flat error rather than as "something came
+          # at me on this side", which is the honest and much narrower claim.
+          left = pa.adjacentLeft.oncoming or pa.adjacentLeft.oncomingSeconds > 0
+          onc = pa.adjacentLeft if left else pa.adjacentRight
+          self._pa_main = f"ONCOMING {'LEFT' if left else 'RIGHT'}"
+          conv = 2.23694 if not ui_state.is_metric else 3.6
+          if onc.oncomingDRel > 0:
+            d = onc.oncomingDRel if ui_state.is_metric else onc.oncomingDRel * 3.28084
+            self._pa_sub_detail = (f"saw {abs(onc.oncomingVAbs) * conv:.0f} at "
+                                   f"{d:.0f}{'m' if ui_state.is_metric else 'ft'}  -  "
+                                   f"{pa.oncomingSecondsLeft:.0f}s left")
+          else:
+            self._pa_sub_detail = f"seen {pa.oncomingSecondsLeft:.0f}s of memory left"
+        elif blocked == 'adjacentSlow':
+          # Same reasoning as above: show the comparison, not just its verdict. Which side is
+          # reported matters, because "the next lane is no faster" is a claim about a specific
+          # lane and the driver can look at it.
+          parts = [f"lead {pa.leadVLead * conv:.0f}"]
+          for name, adj in (("L", pa.adjacentLeft), ("R", pa.adjacentRight)):
+            if adj.available and adj.occupied:
+              parts.append(f"{name} {adj.vAbs * conv:.0f} at {adj.dRel:.0f}m")
+          self._pa_sub_detail = "  ".join(parts)
+
+    # Sub-line: what was NOT checked, plus the per-drive count. Both belong here rather than in the
+    # headline -- a suggestion with no blind-spot data must never read as one that passed a check,
+    # but the caveat should not crowd out the thing being suggested.
+    caveats = []
+    if not pa.blindspotAvailable:
+      caveats.append("no blind spot data")
+    if not pa.tsrAvailable:
+      caveats.append("no sign data")
+    rear_caveat = _rear_caveat(pa.rearLeft.available, str(pa.rearLeft.source),
+                               pa.rearRight.available, str(pa.rearRight.source))
+    if rear_caveat:
+      caveats.append(rear_caveat)
+    if not (pa.adjacentLeft.available or pa.adjacentRight.available):
+      caveats.append("no next-lane data")
+    # Say so even when it is not what is blocking. On a four-lane two-way road a pass can still be
+    # suggested to the right while the left is refused, and the driver should be able to see WHY
+    # only one side is ever offered rather than infer it.
+    if pa.oncomingAnySide:
+      caveats.append("oncoming seen")
+    if self._pa_count:
+      caveats.append(f"{self._pa_count} this drive")
+    if self._pa_sub_detail:
+      caveats.insert(0, self._pa_sub_detail)
+    # FITTED, like the drive summary. This joined everything unconditionally, and the worst case
+    # measures 1355px against a 1008px panel -- so it ran off BOTH edges, and the two things at the
+    # front of the list, the geometry numbers, went off the left one first.
+    #
+    # Which is the whole of "it still just says no lane to move into all the time" plus "at some
+    # point the entire UI went off the screen". The reason was computed correctly, published
+    # correctly, and drawn 170px past the edge of the display on either side.
+    #
+    # Priority order is already right: the detail is inserted at the front, so what gets dropped
+    # is "no sign data" and friends rather than the number that explains the refusal.
+    self._pa_sub = self._fit_sub(caveats)
+
   def _render(self, rect: rl.Rectangle) -> None:
     # BluePilot: Draw header gradient at full content width (not offset by confidence ball)
     gradient_rect = self._gradient_rect if self._gradient_rect else rect
@@ -365,6 +1304,7 @@ class HudRendererBP(HudRendererSP):
       button_y + UI_CONFIG.button_size / 2,
       UI_CONFIG.button_size,
     )
+    self._draw_passing_assist(rect)
 
     # SP additions (dev UI, road name, speed limit, SCC, turn signals, circular alerts, rocket fuel)
     self.developer_ui.render(rect)
@@ -486,6 +1426,293 @@ class HudRendererBP(HudRendererSP):
       rl.draw_rectangle_rounded(
         rl.Rectangle(bar_x, bar_y, max(bar_height, bar_width * frac), bar_height), 1.0, 6, ACC_INK)
     return ACC_PILL_HEIGHT
+
+  def _render_lane_display_test(self, sm) -> bool:
+    """Name the lane-display state the cluster is being sent right now. True while a walk runs.
+
+    The labels are duplicated from lane_display_test_ext.LANE_TEST_STEPS rather than imported --
+    the UI process does not import opendbc car code -- and test_lane_display_test_labels_match
+    fails if they drift apart. Written down because a walk that names the steps wrongly is worse
+    than no walk: it produces confident, wrong answers.
+    """
+    try:
+      if float(sm['carState'].vEgo) > 0.5:
+        return False
+    except (KeyError, AttributeError, TypeError):
+      pass
+    try:
+      ldt = sm['carStateBP'].laneDisplayTest
+    except (KeyError, AttributeError):
+      return False
+
+    step = int(ldt.step)
+    if step == 0:
+      # No int(). laneDisplayTest.blockedReason is a UInt8, so it already reads as one -- but
+      # BlinkerTest.blockedReason a few lines down is a real enum with the SAME field name, and the
+      # two are told apart only by which struct they came from. Writing this one the way an enum
+      # must never be written keeps the distinction visible, and the schema guard cannot
+      # distinguish them by name at all.
+      if ldt.blockedReason == LANE_TEST_BLOCK_MOVING:
+        self._pa_main = "STOP THE CAR FIRST"
+        self._pa_sub = "the lane walk only runs stopped"
+        self._pa_color = rl.Color(255, 200, 60, 255)
+        self._pa_alert = True
+        return True
+      return False
+
+    if step > len(_LDT_LABELS):
+      return False
+
+    label = _LDT_LABELS[step - 1]
+    # Where to look. "Watch the left line" is wrong for LA_Off, which is a whole-display value --
+    # and being told to watch the wrong thing is how a walk produces a confident wrong answer.
+    if label.startswith("LEFT:"):
+      where = "watch the LEFT line"
+    elif label.startswith("HANDS:"):
+      where = "the hands-on-wheel indicator"
+    else:
+      where = "watch the whole display"
+    self._pa_main = label
+    self._pa_sub = f"{where}  --  {step} of {len(_LDT_LABELS)}"
+    self._pa_progress = 0.0
+    self._pa_color = rl.Color(150, 205, 235, 255)
+    self._pa_alert = True
+    return True
+
+  def _render_blinker_test(self, sm) -> bool:
+    """Show blinker-test state while a pulse runs, or its verdict just after. Returns True if it
+    owns the line this frame.
+
+    STANDSTILL ONLY, and that guard is not belt-and-braces -- its absence blanked the whole panel
+    on a drive. Reported: "all the feedback went away on the screen and it just kept beeping."
+
+    This function returns True for any non-idle blinker-test state and the caller returns
+    immediately, so it silently owns the line. That was harmless for as long as nothing published
+    the state -- it read 0 forever and this never fired. Wiring the verdict through to the message
+    made the path live, and a state left non-idle then hid every passing-assist readout for the
+    rest of the drive while the planner carried on chiming into a blank screen.
+
+    The test itself refuses to run above STANDSTILL_V_EGO, so there is no case where this should
+    own the panel in motion. Checking the car rather than the state means a stuck, stale or
+    unpublished value cannot cost the driver their instruments.
+    """
+    try:
+      if float(sm['carState'].vEgo) > 0.5:
+        return False
+    except (KeyError, AttributeError, TypeError):
+      pass
+    try:
+      bt = sm['carStateBP'].blinkerTest
+    except (KeyError, AttributeError):
+      return False
+
+    state = str(bt.state)
+    if state == 'idle' and str(bt.blockedReason) == 'lampStillFlashing':
+      self._pa_main = _BT_WAITING
+      self._pa_sub = "the car is still flashing from the last one"
+      self._pa_color = rl.Color(255, 200, 60, 255)
+      self._pa_alert = True
+      return True
+    # MEASURING has no commanded side and no progress -- it is waiting for the driver. Reported as
+    # "measure my blinker didn't seem to do anything at all", because this fell through to the
+    # pulsing branch below, which reads bt.commanded (zero here) and cheerfully announced
+    # "SIGNAL RIGHT" while a progress bar filled against a pulse that was not running.
+    if bt.commanded == 0 and state == 'pulsing':
+      self._pa_main = "FLICK YOUR STALK"
+      self._pa_sub = (f"{bt.flashes} flashes so far" if bt.flashes else "watching your blinker...")
+      self._pa_progress = 0.0
+      self._pa_color = rl.Color(150, 205, 235, 255)
+      self._pa_alert = True
+      return True
+    if state == 'pulsing':
+      side = "LEFT" if bt.commanded == 1 else "RIGHT"
+      self._pa_main = f"SIGNAL {side}"
+      self._pa_sub = "lamp confirmed" if bt.lampSeen else "waiting for lamp..."
+      self._pa_progress = min(1.0, max(0.0, 1.0 - bt.secondsRemaining / 4.0))
+      self._pa_color = rl.Color(255, 200, 60, 255)
+      self._pa_alert = True
+      return True
+    if state == 'done':
+      if bt.measuredPeriodMs:
+        # Measure mode's whole output: his own flasher, timed. The number the blink follows.
+        self._pa_main = "YOUR BLINKER"
+        self._pa_sub = f"{bt.flashes} flashes, {bt.measuredPeriodMs} ms apart"
+        self._pa_color = rl.Color(150, 205, 235, 255)
+        self._pa_alert = True
+        return True
+      # A RUN THAT WAS CUT SHORT SAYS SO, before anything else. Reported six times in one drive as
+      # "it only did two flashes", "only six", "only three" -- short, never gapped, varying with
+      # how long he waited. That is a run being stopped, not a car dropping blinks, and the most
+      # likely stopper is the first one here: the gate is 0.3 m/s, which is below a creep, so
+      # testing at a light ends the run the moment the car rolls. Correct behaviour, reported as
+      # "SIGNAL WORKS, 2 flashes", which reads as the car half-ignoring us.
+      reason = str(bt.blockedReason)
+      # A short count with NO gate to blame is a different fault and has to read differently.
+      # Reported as "the readout does say what blink count it was, it's just not always 7" -- no
+      # stop reason, so nothing cut it off; it ran out of time waiting for a lamp report that never
+      # came. See BLINK_STALL_S. With the watchdog this should stop happening, and if it does not,
+      # this line is the difference between a run that was stopped and a run that lost the lamp.
+      if reason == 'none' and bt.blinksWanted and bt.blinksSent < bt.blinksWanted:
+        self._pa_main = "LOST THE LAMP"
+        self._pa_sub = f"{bt.blinksSent} of {bt.blinksWanted} blinks - the car stopped reporting it"
+        self._pa_color = rl.Color(255, 200, 60, 255)
+        self._pa_alert = True
+        return True
+      if reason != 'none' and bt.blinksWanted:
+        self._pa_main = _BT_STOPPED.get(reason, "STOPPED")
+        self._pa_sub = f"{bt.blinksSent} of {bt.blinksWanted} blinks - press again when stopped"
+        self._pa_color = rl.Color(255, 200, 60, 255)
+        self._pa_alert = True
+        return True
+      # Held after the pulse so the answer is readable without watching all four seconds.
+      ok = bool(bt.lampSeen)
+      self._pa_main = "SIGNAL WORKS" if ok else "SIGNAL DID NOT WORK"
+      # THE COUNT, not just "it lit". A clean signal is about six flashes in four seconds; the
+      # erratic case is many times that, and telling them apart by eye is what left this question
+      # open across two drives. `after` is the tap measurement: flashes once we stopped commanding
+      # are the car running its own one-touch pattern.
+      if ok:
+        self._pa_sub = f"{bt.flashes} flashes"
+        if bt.flashesAfter:
+          self._pa_sub += f", {bt.flashesAfter} on its own"
+      else:
+        self._pa_sub = "car ignored the request"
+      self._pa_color = rl.Color(120, 220, 140, 255) if ok else rl.Color(255, 90, 90, 255)
+      self._pa_alert = True
+      return True
+    return False
+
+  def _draw_passing_assist(self, rect: rl.Rectangle) -> None:
+    """BluePilot: glanceable panel under the speed. Off by default.
+
+    Sized and colored so the three questions answer themselves in peripheral vision: a dim panel
+    means running-but-idle, a filling bar means building toward a suggestion, and a bright panel
+    with chevrons means it decided and which way. Nothing here instructs -- it reports what an
+    observer that checks no approaching traffic would have said.
+    """
+    if not self._pa_main:
+      return
+
+    main_size = 52 if self._pa_alert else 40
+    sub_size = 30
+    main_dims = measure_text_cached(self._font_bold, self._pa_main, main_size)
+    sub_dims = measure_text_cached(self._font_bold, self._pa_sub, sub_size) if self._pa_sub else rl.Vector2(0, 0)
+
+    pad_x, pad_y = 36, 18
+    content_w = max(main_dims.x, sub_dims.x, self._lane_strip_width())
+    strip_h = LANE_STRIP_H if self._lane_strip_worth_drawing() else 0
+    content_h = (main_dims.y + (sub_dims.y + 6 if self._pa_sub else 0)
+                 + (14 if self._pa_progress > 0 else 0) + strip_h)
+    panel_w = min(content_w + pad_x * 2, rect.width - 40)
+    panel_h = content_h + pad_y * 2
+
+    panel = rl.Rectangle(
+      rect.x + rect.width / 2 - panel_w / 2,
+      rect.y + SPEED_UNIT_CENTER_Y + FONT_SIZES.speed_unit,
+      panel_w, panel_h,
+    )
+
+    bg_alpha = 210 if self._pa_alert else 130
+    rl.draw_rectangle_rounded(panel, 0.25, 10, rl.Color(0, 0, 0, bg_alpha))
+    if self._pa_alert:
+      rl.draw_rectangle_rounded_lines_ex(panel, 0.25, 10, 3, self._pa_color)
+
+    y = panel.y + pad_y
+    rl.draw_text_ex(self._font_bold, self._pa_main,
+                    rl.Vector2(panel.x + panel.width / 2 - main_dims.x / 2, y),
+                    main_size, 0, self._pa_color)
+    y += main_dims.y + 6
+
+    if self._pa_sub:
+      rl.draw_text_ex(self._font_bold, self._pa_sub,
+                      rl.Vector2(panel.x + panel.width / 2 - sub_dims.x / 2, y),
+                      sub_size, 0, rl.Color(200, 205, 210, 200))
+      y += sub_dims.y + 6
+
+    self._pa_panel_rect = panel
+
+    if self._pa_progress > 0:
+      # A bar answers "nearly there?" without reading digits, which a number never does at speed.
+      bar_w = panel.width - pad_x * 2
+      track = rl.Rectangle(panel.x + pad_x, y, bar_w, 8)
+      rl.draw_rectangle_rounded(track, 1.0, 6, rl.Color(255, 255, 255, 50))
+      fill = rl.Rectangle(track.x, track.y, max(8.0, bar_w * self._pa_progress), 8)
+      rl.draw_rectangle_rounded(fill, 1.0, 6, self._pa_color)
+      y += 14
+
+    self._draw_lane_strip(panel, y)
+
+  def _lane_strip_width(self) -> float:
+    """How wide the strip needs to be, so the PANEL can be sized to hold it.
+
+    The panel used to size itself on text alone, which was fine when a box was 18 px wide. At 40 px
+    a five-lane strip is 240 px against a panel that can be ~210 px for a short headline like
+    "Paused" -- and since the strip is CENTRED on the panel, the outer box on each side was drawn
+    past the rounded black background, straight onto the camera image with no backing.
+    """
+    if not self._lane_strip_worth_drawing():
+      return 0.0
+    n = min(int(getattr(self, "_pa_lanes_total", 0)), 8)
+    return n * LANE_BOX_W + (n - 1) * LANE_BOX_GAP
+
+  def _lane_strip_worth_drawing(self) -> bool:
+    """Only when the map has given a lane count. Without one there is nothing to draw boxes for,
+    and inventing a width would be the strip asserting something nobody measured."""
+    return getattr(self, "_pa_lanes_total", 0) >= 2
+
+  def _draw_lane_strip(self, panel, y: float) -> None:
+    """Which lane the SYSTEM thinks we are in, out of the map's count.
+
+    NOT a redraw of the road. openpilot already draws lane lines and the path, and Tesla, Super
+    Cruise and BlueCruise all render a road view for the same reason -- to show what the car
+    believes before it acts. Repeating the camera here would be redundant with the window. What
+    this carries is the part the camera cannot: the MAP's lane count, our derived position in it,
+    and the difference between not knowing and knowing.
+
+    THREE STATES, and drawing them alike is how an unavailable estimator reads as a confident one:
+
+      filled box    the anchor placed us in that lane. A measurement.
+      dim box       it is one of THESE, we cannot say which. From the four-line bound, or from the
+                    lane-line witness alone. Weaker evidence, so it is drawn weaker.
+      all empty     unknown. The strip still draws, because an absent strip cannot be told from a
+                    feature that is switched off.
+
+    HE REPORTED THE MIDDLE LANE AS ALL-EMPTY, 2026-08-19, and it was: from a middle lane the right
+    edge is out of reach and a left line is genuinely present, so both of the original witnesses
+    fell silent at once. Dimming a RANGE is what puts something on the strip there -- on a
+    three-lane road the bound pins the lane and it fills instead, and on I-15's five it narrows to
+    the three middle boxes, which is a true statement rather than a blank one.
+    """
+    if not self._lane_strip_worth_drawing():
+      return
+    n = min(int(getattr(self, "_pa_lanes_total", 0)), 8)   # 8 boxes is already an unusual road
+    idx = int(getattr(self, "_pa_lane_index", -1))
+    witness = bool(getattr(self, "_pa_no_lane_left", False))
+    lo, hi = getattr(self, "_pa_lane_bound", (-1, -1))
+
+    box_w, box_h, gap = LANE_BOX_W, LANE_BOX_H, LANE_BOX_GAP
+    total_w = n * box_w + (n - 1) * gap
+    x0 = panel.x + panel.width / 2 - total_w / 2
+
+    for i in range(n):
+      # Index 0 is the RIGHTMOST lane, and the strip is drawn left-to-right as the road looks
+      # from the driver's seat -- so lane 0 is the box on the RIGHT, and the list is reversed.
+      lane = n - 1 - i
+      box = rl.Rectangle(x0 + i * (box_w + gap), y, box_w, box_h)
+      # ONE SHAPE, THREE BRIGHTNESSES. It was a filled box, a hollow box and a gray box, and he
+      # said twice he could not tell them apart -- the second time after it had been explained.
+      # Two different SHAPES meaning two different confidences is a legend to memorize; brightness
+      # of the same shape is a gradient you read without one. The rule is now sayable in a
+      # sentence: the brightest box is you, a dim one is a maybe, gray is just a lane.
+      c = self._pa_color
+      if lane == idx:
+        rl.draw_rectangle_rounded(box, 0.35, 4, c)
+      elif idx < 0 and ((lo >= 0 and lo <= lane <= hi) or (witness and lane == n - 1)):
+        # Narrowed, not pinned: we are in one of these. Dimmed rather than outlined, because a
+        # range is not a position and must never read as one.
+        rl.draw_rectangle_rounded(box, 0.35, 4, rl.Color(c.r, c.g, c.b, 150))
+      else:
+        rl.draw_rectangle_rounded(box, 0.35, 4, rl.Color(255, 255, 255, 70))
 
   def _draw_lateral_control_overlay(self, center_x: float, center_y: float, wheel_size: int) -> None:
     """Draw the current lateral control mode over the steering wheel icon."""

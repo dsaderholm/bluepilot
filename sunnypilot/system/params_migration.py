@@ -46,6 +46,31 @@ def _migrate_car_platform_bundle(_params):
   _params.put("CarPlatformBundle", bundle, block=True)
   cloudlog.info(f"params_migration: CarPlatformBundle migrated {old_platform!r} -> {new_platform!r}")
 
+
+BP_PASSING_ASSIST_RENAME_MIGRATION_VERSION: str = "1"
+
+# BluePilot: PassingAssistStuckTime -> PassingAssistConfirmTime.
+#
+# A rename, not a redefinition: same units, same default, same meaning. The old name described a
+# reactive design that no longer exists -- the feature does not wait to be held up by a slower car,
+# because being held up means Ford's ACC has already braked and the whole point is to have moved
+# over before it does. It is a confirmation time, so it is now called one.
+def _migrate_bp_passing_assist_rename(_params):
+  if _params.get("BPPassingAssistRenameMigrated") == BP_PASSING_ASSIST_RENAME_MIGRATION_VERSION:
+    return
+
+  try:
+    # Never clobber a value the driver has already set on the new key -- makes a re-run harmless.
+    if _params.get("PassingAssistConfirmTime") is None:
+      old_val = _params.get("PassingAssistStuckTime", return_default=True)
+      _params.put("PassingAssistConfirmTime", old_val, block=True)
+      cloudlog.info(f"params_migration: seeded PassingAssistConfirmTime from PassingAssistStuckTime ({old_val})")
+
+    _params.put("BPPassingAssistRenameMigrated", BP_PASSING_ASSIST_RENAME_MIGRATION_VERSION, block=True)
+  except Exception as e:
+    cloudlog.exception(f"Error migrating passing-assist confirm time: {e}")
+
+
 BP_LATERAL_SCHEME_PARAMS_MIGRATION_VERSION: str = "1"
 
 # (old key, new key) -- old keys stay declared in common/params_keys.h (harmless orphans) so their
@@ -128,6 +153,14 @@ def run_migration(_params):
 
   # BluePilot: split lateral-tuning params by control scheme (curvature vs angle)
   _migrate_bp_lateral_scheme_params(_params)
+
+  # BluePilot: PassingAssistStuckTime -> PassingAssistConfirmTime
+  #
+  # BEFORE both clearing passes, and the order is load-bearing. They CLEAR keys so a new default
+  # applies; this rename SEEDS PassingAssistConfirmTime from the old key whenever it reads as unset.
+  # Run the other way round on a device doing both for the first time and the rename puts the stale
+  # value straight back over the default that had just been applied.
+  _migrate_bp_passing_assist_rename(_params)
 
   # BluePilot: the legacy generation lists. Closed -- icbm-1 has already run on the car, and the
 

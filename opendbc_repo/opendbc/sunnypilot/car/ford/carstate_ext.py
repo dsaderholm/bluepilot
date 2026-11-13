@@ -13,6 +13,7 @@ from opendbc.car.common.conversions import Conversions as CV
 from opendbc.can.parser import CANParser
 from opendbc.car.ford.values import CAR, FordFlags
 from opendbc.sunnypilot.car.ford.values_ext import BUTTONS
+from opendbc.sunnypilot.car.ford.blis_ext import update_blis
 
 
 # BluePilot: Traffic_RecognitnData (0x3CD) signal map, capnp field -> CAN signal. Logged whole so
@@ -381,6 +382,9 @@ class CarStateExt:
     hybrid_battery = dat.carStateBP.hybridBattery
     brake_light_status = dat.carStateBP.brakeLightStatus
     traffic_sign_data = dat.carStateBP.trafficSignData
+    blis_left = dat.carStateBP.blisLeft
+    blis_right = dat.carStateBP.blisRight
+    blinker_test = dat.carStateBP.blinkerTest
 
     # Initialize with defaults
     hybrid_drive.dataAvailable = False
@@ -402,6 +406,36 @@ class CarStateExt:
 
     traffic_sign_data.dataAvailable = False
     dat.carStateBP.accGap = 0
+    blis_left.dataAvailable = False
+    blis_right.dataAvailable = False
+
+    # BluePilot: turn-signal actuation test. lampLeft/lampRight are read every frame regardless of
+    # whether a pulse is running -- during a pulse they are the measurement, and outside one they
+    # are the baseline that proves the signal decodes at all when the DRIVER uses the stalk.
+    dat.carStateBP.lkaButtonPressed = bool(getattr(self, 'lka_button_pressed', False))
+
+    # BluePilot: the standstill cluster lane-display walk. Defaulted the same way, for the same
+    # reason -- a car that never runs it publishes a clean idle.
+    lane_display_test = dat.carStateBP.laneDisplayTest
+    lane_display_test.step = min(int(getattr(self, 'ldt_step', 0)), 255)
+    lane_display_test.secondsRemaining = float(getattr(self, 'ldt_seconds_remaining', 0.0))
+    lane_display_test.blockedReason = min(int(getattr(self, 'ldt_blocked', 0)), 255)
+
+    blinker_test.lampLeft = bool(getattr(self, 'turn_lamp_left', False))
+    blinker_test.lampRight = bool(getattr(self, 'turn_lamp_right', False))
+    # The rest of the verdict, stashed here by BlinkerTestExt -- see its _publish_to. Defaulted so
+    # a car that never runs the test, or a cycle before the controller has run once, publishes a
+    # clean idle rather than raising.
+    blinker_test.state = int(getattr(self, 'bt_state', 0))
+    blinker_test.commanded = int(getattr(self, 'bt_commanded', 0))
+    blinker_test.secondsRemaining = float(getattr(self, 'bt_seconds_remaining', 0.0))
+    blinker_test.lampSeen = bool(getattr(self, 'bt_lamp_seen', False))
+    blinker_test.blockedReason = int(getattr(self, 'bt_blocked', 0))
+    blinker_test.flashes = min(int(getattr(self, 'bt_flashes', 0)), 255)
+    blinker_test.flashesAfter = min(int(getattr(self, 'bt_flashes_after', 0)), 255)
+    blinker_test.blinksSent = min(int(getattr(self, 'bt_blinks_sent', 0)), 255)
+    blinker_test.blinksWanted = min(int(getattr(self, 'bt_blinks_wanted', 0)), 255)
+    blinker_test.measuredPeriodMs = min(int(getattr(self, 'bt_measured_ms', 0)), 65535)
 
     brake_light_status.dataAvailable = False
     brake_light_status.brakeLightsOn = False
@@ -527,6 +561,18 @@ class CarStateExt:
         traffic_sign_data.wrongWayAlert = bool(tsr["WwaWarn_B_Rq"])
       except (KeyError, AttributeError):
         pass
+
+    # BluePilot: log every Side_Detect_L/R_Stat signal, not just the one bool openpilot consumes.
+    # Sensor health in particular is discarded by that bool: SodDetct 3/4 are Sensor_Fault and
+    # Sensor_Blocked, which "!= 0" turns into a permanent blind-spot detection.
+    #
+    # These do NOT carry approach information -- see the CarStateBP.SideDetect comment in
+    # custom.capnp. Sod*_D_Stat is the system enable state and SodAlrt*_D_Stat is the mirror lamp,
+    # whose Flash state follows the driver's own turn signal rather than the other vehicle. Logged
+    # to confirm that on this car, not in hope of finding closing rate in them.
+    if self.CP.enableBsm:
+      cp_bsm = cp_cam if self.CP.flags & FordFlags.CANFD else cp
+      update_blis(cp_bsm, blis_left, blis_right)
 
     return dat
 

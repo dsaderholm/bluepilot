@@ -29,6 +29,10 @@ MAX_UPLOAD_SIZES = {
   "qcam": 5*1e6,
 }
 
+# BluePilot: rlog upload. Every rlog still on the device is eligible, on unmetered connections only.
+RLOG_NAMES = ("rlog", "rlog.zst")
+# End BluePilot
+
 allow_sleep = bool(int(os.getenv("UPLOADER_SLEEP", "1")))
 force_wifi = os.getenv("FORCEWIFI") is not None
 fake_upload = os.getenv("FAKEUPLOAD") is not None
@@ -116,6 +120,11 @@ class Uploader:
           continue
 
         # limit uploading on metered connections
+        # BluePilot: rlog only on unmetered connections
+        if name in RLOG_NAMES and metered:
+          continue
+        # End BluePilot
+
         if metered:
           dt = datetime.timedelta(hours=12)
           if logdir in self.immediate_folders and (datetime.datetime.now() - datetime.datetime.fromtimestamp(ctime)) < dt:
@@ -136,6 +145,12 @@ class Uploader:
     for name, key, fn in upload_files:
       if name in self.immediate_priority:
         return name, key, fn
+
+    # BluePilot: rlogs go last, so a backlog of rlogs never delays qlogs or qcameras
+    for name, key, fn in upload_files:
+      if name in RLOG_NAMES:
+        return name, key, fn
+    # End BluePilot
 
     return None
 

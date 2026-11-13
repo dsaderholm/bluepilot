@@ -28,6 +28,7 @@ export STAGING_ROOT="/data/safe_staging"
 #   0 / unset = Comma Connect (stock defaults)
 #   1         = Konik Stable (api.konik.ai / athena.konik.ai)
 #   2         = Offline Mode (bogus hosts — uploads can never succeed)
+#   3         = Self-hosted opconnect (car.saderholm.us; no athena, so ATHENA_HOST never resolves)
 # Legacy: migrate BPUseKonik=1 -> BPConnectBackend=1 when the new param file is missing.
 BP_CONNECT_BACKEND="$(cat /data/params/d/BPConnectBackend 2>/dev/null)"
 if [ -z "$BP_CONNECT_BACKEND" ] && [ "$(cat /data/params/d/BPUseKonik 2>/dev/null)" = "1" ]; then
@@ -41,6 +42,10 @@ if [ "$BP_CONNECT_BACKEND" = "1" ]; then
 elif [ "$BP_CONNECT_BACKEND" = "2" ]; then
   # RFC 2606 .invalid never resolves, so offline mode can never egress
   export API_HOST="https://api.invalid"
+  export ATHENA_HOST="wss://athena.invalid"
+elif [ "$BP_CONNECT_BACKEND" = "3" ]; then
+  export API_HOST="https://car.saderholm.us"
+  # athena is not implemented on opconnect; .invalid keeps athenad from retrying a real host forever
   export ATHENA_HOST="wss://athena.invalid"
 fi
 # End BluePilot

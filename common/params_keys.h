@@ -138,6 +138,14 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // --- sunnypilot params --- //
     {"ApiCache_DriveStats", {PERSISTENT, JSON}},
     {"AutoLaneChangeBsmDelay", {PERSISTENT | BACKUP, BOOL, "0"}},
+    // Seconds after a lane change starts during which cancelling the blinker aborts it and
+    // returns to the original lane. 0 = the stock behavior, which cannot be cancelled at all.
+    {"AutoLaneChangeCancelWindow", {PERSISTENT | BACKUP, INT, "4"}},
+    {"AutoLaneChangeRevert", {PERSISTENT | BACKUP, BOOL, "1"}},
+    {"AutoLaneChangeOneTouchTime", {PERSISTENT | BACKUP, FLOAT, "5.5"}},
+    // What the driver's own lane changes measured: how long one really takes, and how often
+    // they abandon a signal. Both replace guesses inside passing assist.
+    {"LaneChangeStats", {PERSISTENT | BACKUP, JSON}},
     {"AutoLaneChangeTimer", {PERSISTENT | BACKUP, INT, "0"}},
     {"BlinkerLateralReengageDelay", {PERSISTENT | BACKUP, INT, "0"}},  // seconds
     {"BlinkerMinLateralControlSpeed", {PERSISTENT | BACKUP, INT, "20"}},  // MPH or km/h
@@ -229,6 +237,157 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // finds out for itself and declines if nothing moves, but until that has happened on the road
     // once, nothing should be pressing this button unasked.
     {"IcbmGapControl", {PERSISTENT | BACKUP, BOOL, "0"}},
+    // BluePilot: passing-assist observation. Defaults ON, unlike the Icbm* actuating features --
+    // this one only publishes a message. It cannot alert, steer, or touch the set speed, and it
+    // is worthless switched off because its entire purpose is collecting drive data.
+    {"PassingAssistLogEnabled", {PERSISTENT | BACKUP, BOOL, "1"}},
+    // How far below the set speed the lead must hold us before it counts as being held back (mph).
+    {"PassingAssistMinDeficit", {PERSISTENT | BACKUP, INT, "4"}},
+    // How long that must persist before a pass would be suggested (seconds).
+    // BluePilot: how long a slower lead must persist before suggesting, in seconds. Short by
+    // design -- waiting is the behavior this exists to remove, and the only job of this timer is
+    // to reject a single bad frame of lead tracking.
+    {"PassingAssistBlinkerLead", {PERSISTENT | BACKUP, INT, "1"}},
+    // -1 = Auto (from the measured ACC braking onset), 0 = off, otherwise meters.
+    //
+    // THE ONE DELIBERATE EXCEPTION to "every feature this fork builds ships on", and the reason is
+    // recorded here because that rule requires it. Reviewed 2026-08-08 and left off.
+    //
+    // Auto holds the suggestion until roughly where this car's ACC starts braking (~137 m,
+    // measured, re-learned every drive). That directly shortens driverPassLead -- the "11s early"
+    // figure in the drive summary, which is the entire measurement of whether passing assist is
+    // worth having. On, the feature grades its own exam: it would suggest later, agree with him
+    // more often, and report a smaller benefit, and none of those numbers would mean anything.
+    //
+    // Right for the finished system, wrong while phase 1 is still measuring. Turn it to -1 once
+    // the lead-time figure has settled across enough drives -- that is the condition, not a date.
+    // test_close_in_is_off_while_measuring pins it so this cannot be flipped by a blanket sweep.
+    {"PassingAssistMinApproach", {PERSISTENT | BACKUP, INT, "0"}},
+    // The previous drive's measurements, so parking does not throw them away. Written
+    // periodically by the detector, read by the panel when the current drive has nothing yet.
+    {"PassingAssistLastDrive", {PERSISTENT | BACKUP, JSON}},
+    {"PassingAssistHistory", {PERSISTENT | BACKUP, JSON}},
+    // Why the panel latched off, written once per latch by the UI. Storage, not a setting, so no
+    // control -- same as LastDrive and History above.
+    // Exists because on 2026-08-08 the panel latched, told him "the route has the reason", and the
+    // reason was in neither the route nor any of 2500 swaglog files. A reboot is the only thing
+    // that clears the latch, so before this the one action that fixed the symptom also destroyed
+    // the evidence.
+    {"PassingAssistLastError", {PERSISTENT | BACKUP, JSON}},
+    {"PassingAssistExitStandDown", {PERSISTENT | BACKUP, INT, "45"}},
+    {"PassingAssistMinSpeed", {PERSISTENT | BACKUP, INT, "30"}},
+    {"PassingAssistConfirmTime", {PERSISTENT | BACKUP, INT, "1"}},
+    {"PassingAssistCrawlTime", {PERSISTENT | BACKUP, INT, "8"}},
+    {"PassingAssistChime", {PERSISTENT | BACKUP, BOOL, "1"}},
+    {"PassingAssistLeadBrakingHold", {PERSISTENT | BACKUP, BOOL, "1"}},
+    // Renamed to PassingAssistConfirmTime. Declared only so params_migration can read a value
+    // stored before the rename; nothing in the UI or controls references it.
+    {"PassingAssistStuckTime", {PERSISTENT | BACKUP, INT, "2"}},
+    // How far ahead to look for a slower vehicle, in meters. Distance, not time: a time bound
+    // shrinks as the speed difference shrinks, so it would notice a gently slower car LATER than a
+    // dramatically slower one, which is backwards.
+    {"PassingAssistMaxDistance", {PERSISTENT | BACKUP, INT, "220"}},
+    // Hold-off after suggesting a pass before suggesting the return. Stops a slow left lane on a
+    // three-lane road turning into a weave.
+    {"PassingAssistSettleTime", {PERSISTENT | BACKUP, INT, "20"}},
+    // BluePilot: "keep right except to pass". DEFAULT OFF -- modelV2 cannot tell a through lane
+    // from an exit-only or merge lane, so the suggestion can mean "take the exit". Left in place
+    // because the observer still records what it WOULD have said, which measures how often that
+    // actually bites; it is not a feature to lean on until map data can distinguish the two.
+    {"PassingAssistKeepRight", {PERSISTENT | BACKUP, BOOL, "1"}},
+    // FusionPilot: 10 -> 5 on 2026-08-09, asked for by name. How long the lane to the right must
+    // stay clear and fast enough before moving back over.
+    //
+    //     "I want the left lane to be like the floor is lava, and be there enough to pass cars,
+    //      and that's it. No one should ever have to be stuck behind me."
+    //
+    // This is the number that governs that, and it is the closest thing here to the BlueCruise
+    // behaviour he objects to -- "I also don't like the biased to stay put thing". Lowering it is
+    // the anti-bias, and it compounds: the system can only see the lane immediately beside it, so
+    // reaching the rightmost usable lane on a four-lane road is repeated single steps, each paying
+    // this wait. At 10 s that is twenty-odd seconds from lane one to lane three; at 5 s it is ten.
+    //
+    // Not lower than 5, because the wait is also what stops a keep-right firing into a gap that
+    // closes -- and the 15 s lane-age test runs CONCURRENTLY with it, so below about 5 s this stops
+    // being the binding constraint anyway and only the age test remains.
+    {"PassingAssistKeepRightDelay", {PERSISTENT | BACKUP, INT, "5"}},  // seconds
+    // BluePilot: seconds the lane to the right must have existed CONTINUOUSLY before moving into
+    // it is suggested. An exit lane did not exist a moment ago and now does; a through lane has
+    // been beside us the whole time. Every other exit test asks what the lane looks like, and an
+    // exit looks exactly like a through lane. This asks how long it has been there.
+    {"PassingAssistMinLaneAge", {PERSISTENT | BACKUP, INT, "15"}},
+    // FusionPilot: how hard the road may be bending and still be a place to pass, in TENTHS of
+    // m/s^2 lateral. 13 -> 1.3, which is vision_controller's own entering-a-turn threshold rather
+    // than a number invented here. Asked for after driving Parley's: "I don't want to pass on
+    // curves". 0 disables the gate. Gates the suggestion only, never a crossing already underway.
+    {"PassingAssistMaxCurve", {PERSISTENT | BACKUP, INT, "13"}},
+    // Tenths of a multiplier on the minimum speed gain, applied when driving AT the posted
+    // limit and fading to nothing by 8 mph over it. His own idea: "could we derive aggression
+    // from how far over the speed limit I am manually going or have a hold set on my cruise".
+    // Only ever adds patience -- 8+ over is the unmodified behavior, so this cannot make the
+    // system pass more than the deficit setting says. 10 disables it.
+    {"PassingAssistPatience", {PERSISTENT | BACKUP, INT, "18"}},
+    // BluePilot: extra-conservative exit avoidance -- require a further lane BEYOND the one being
+    // moved into. Superseded as the primary defence by the road-widening check, which spots an exit
+    // from the road opening up ahead and works on two-lane roads. Default off: this one costs
+    // keep-right entirely on two-lane-each-way roads, which is most of an interstate.
+    // BluePilot: use the front radar's off-path tracks to check the target lane is not already
+    // full of traffic no faster than the car being passed. DEFAULT ON -- unlike the two gates
+    // above it can only ever suppress a suggestion that was going to be wasted, it needs no
+    // hardware that is not already fitted, and an unavailable radar reports unavailable rather
+    // than clear. Off is for isolating it when the band or the debounce is being fitted from logs.
+    {"PassingAssistAdjacentLane", {PERSISTENT | BACKUP, BOOL, "1"}},
+    // FusionPilot: read the rear radar digest off bus 1. Ships ON, and that is not a claim that a
+    // radar is fitted -- card builds a parser that simply never sees a frame, RearApproach reports
+    // unavailable, and unavailable already refuses rather than clears. Off is for isolating the
+    // parser if the feeder is ever suspected of putting traffic on a bus that is 60-73% loaded.
+    {"PassingAssistRearRadar", {PERSISTENT | BACKUP, BOOL, "1"}},
+    // BluePilot: draw the speed and distance of the next-lane vehicle over it on the road view.
+    // Separate from PassingAssistAdjacentLane above, which is the detection itself: turning the
+    // display off must not stop the gate working, and turning the gate off must not leave a
+    // display showing stale numbers.
+    // BluePilot: draw oncoming vehicles too, in their own color. Separate from the
+    // same-direction markers because the roads differ: this only ever appears where the
+    // opposing carriageway is within radar reach, which on a divided highway it is not.
+    {"ShowOncomingSpeeds", {PERSISTENT | BACKUP, BOOL, "1"}},
+    {"ShowAdjacentLanes", {PERSISTENT | BACKUP, BOOL, "1"}},
+    // BluePilot: never suggest a pass on a road the radar has seen oncoming traffic on. DEFAULT
+    // ON, and it is the only gate here that guards against a genuinely dangerous suggestion rather
+    // than a merely wasted one -- the camera cannot tell an oncoming lane from a passing lane, so
+    // without this every two-lane road clears a pass into head-on traffic.
+    {"PassingAssistOncomingVeto", {PERSISTENT | BACKUP, BOOL, "1"}},
+    // FusionPilot: let passing assist SIGNAL AND MAKE the lane change itself, rather than
+    // describing one. Ships ON, and the reason that is safe is that the switch is not what gates
+    // it -- REAR SENSING IS. Nothing actuates on a side whose rear sensor is unavailable, and with
+    // no rear radar fitted that is both sides, so this reads on and does nothing until the hardware
+    // exists. See PassingAssistDetector.may_actuate.
+    //
+    // Per-side rather than "is a rear sensor fitted", deliberately. RearApproach.available is
+    // left OR right, which is the permissive combiner: with one sensor working it would answer yes
+    // and allow a move into the side that has no coverage at all. For a suggestion that is
+    // acceptable, since the driver still checks. For a maneuver it is the exact failure this whole
+    // module is built to avoid -- unavailable must never read as clear.
+    {"PassingAssistActuate", {PERSISTENT | BACKUP, BOOL, "1"}},
+    // How long one sighting keeps the road classified as two-way, in seconds. Long on purpose:
+    // meeting a car is evidence about the ROAD, not an event, and on a quiet two-lane road the
+    // gaps between meetings are exactly when a wrong suggestion would look most plausible.
+    {"PassingAssistOncomingMemory", {PERSISTENT | BACKUP, INT, "90"}},
+    // BluePilot: on a two-way road, is a middle lane we have no evidence about a turn lane or a
+    // travel lane? They are geometrically identical -- from the left lane of a 2+TWLTL+2 arterial
+    // and from the right lane of a plain four-lane undivided road, the picture is the same: a lane
+    // at 3.7 m and opposing traffic at 7.9 m. Nothing in the sensors separates them.
+    //
+    // DEFAULT ON (assume turn lane). The cost is real and local: Utah's 2+1 highways, US-6 and
+    // US-89 especially, lose their passing lanes until a car drives down one. Off trades that back
+    // for the chance of suggesting a pass into a center turn lane. Opposing traffic seen IN the
+    // next lane blocks it either way -- that part is not a judgment call.
+    {"PassingAssistStrictTwoWay", {PERSISTENT | BACKUP, BOOL, "1"}},
+    // BluePilot: seconds to wait AFTER the blind spot clears before an auto lane change starts.
+    // sunnypilot's arithmetic gave exactly one second regardless of the configured delay, which
+    // put the car alongside a vehicle that had only just stopped being beside it. BLIS cannot say
+    // whether that vehicle is now ahead or behind, so a longer hold stands in for the measurement
+    // until a rear sensor exists. Default 3.
+    {"AutoLaneChangeBsmHoldTime", {PERSISTENT | BACKUP, INT, "3"}},
     {"DeviceBootMode", {PERSISTENT | BACKUP, INT, "0"}},
     {"DevUIInfo", {PERSISTENT | BACKUP, INT, "0"}},
     {"EnableCopyparty", {PERSISTENT | BACKUP, BOOL}},
@@ -636,6 +795,9 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // car into cross traffic. That is his to weigh at a light, not ours to ship on.
     {"FordLowSpeedAngleHold_ang", {PERSISTENT | BACKUP, FLOAT, "0.0"}},
     {"BPLateralSchemeParamsMigratedV1", {PERSISTENT | BACKUP, STRING, "0"}},
+    // STRING, not BOOL -- see the note in params_migration: a BOOL marker made put("1") raise, so
+    // the marker never stuck and the migration re-ran (and re-clobbered) on every boot.
+    {"BPPassingAssistRenameMigrated", {PERSISTENT | BACKUP, STRING, "0"}},
 
     // BluePilot: angle-mode lane centering trim (advanced lane positioning) -- see
     // opendbc/sunnypilot/car/ford/lane_center_trim.py.
@@ -702,7 +864,24 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"FordPrefHevDataAvailable", {CLEAR_ON_MANAGER_START, BOOL, "0"}},
     {"FordPrefHevBattDataAvailable", {CLEAR_ON_MANAGER_START, BOOL, "0"}},
     {"mici_complication", {PERSISTENT | BACKUP, INT, "0"}},
+    // ShowBrakeStatus default is ICBM's, not this branch's: it was flipped to 1 deliberately as
+    // part of making the owner's tested tune the shipped one. Keep theirs.
     {"ShowBrakeStatus", {PERSISTENT | BACKUP, BOOL, "1"}},
+    // BluePilot: the passing-assist panel. Every gate, the dry run of the maneuver and the drive
+    // summary all land here -- it is the whole feature's readout. Nothing acts; this only displays.
+    // BluePilot: show the passing-assist side on the CLUSTER, by opening the lane line on the
+    // side it wants. ON by default, because the display it borrows is provably idle while it is
+    // borrowed: ldw.py does not compute lane departure when lateral control is active, so the two
+    // uses cannot collide. Shipped off first, on the weaker reasoning that it "borrows a safety
+    // display" -- which turned out not to be true in the only state that matters.
+    {"ShowPassingInCluster", {PERSISTENT | BACKUP, BOOL, "1"}},
+    {"ShowPassingAssist", {PERSISTENT | BACKUP, BOOL, "1"}},
+    // BluePilot: one-shot stationary turn-signal actuation test. 0 off, 1 left, 2 right.
+    // NOT persistent and NOT backed up: cleared on manager start and self-cleared when the pulse
+    // ends, so it cannot survive a reboot and cannot repeat without a fresh deliberate request.
+    {"FordBlinkerTest", {CLEAR_ON_MANAGER_START | CLEAR_ON_IGNITION_ON, INT, "0"}},
+    {"FordLaneDisplayTest", {CLEAR_ON_MANAGER_START | CLEAR_ON_IGNITION_ON, INT, "0"}},
+    {"FordBlinkerBlinkPeriod", {PERSISTENT | BACKUP, INT, "760"}},
     {"FordPrefHybridPowerFlowAlternate", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"mici_hide_onroad_fade", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"mici_hide_onroad_border", {PERSISTENT | BACKUP, BOOL, "0"}},
@@ -735,7 +914,34 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"EnableWebRoutesServer", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"BPPortalPort", {PERSISTENT | BACKUP, INT, "8088"}},
 
-    // BluePilot: connect backend — 0=Comma Connect, 1=Konik Stable, 2=Offline Mode.
+    // BluePilot: parked recorder. Every key the code reads or writes must be listed here: this compiled list
+    // is what Params accepts at runtime (params.json only describes them), and the process manager reads the
+    // gating keys. bluepilot/parked_recorder/test_params_registered.py checks this.
+    {"ParkedRecordingEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},
+    {"ParkedRecordingSensitivity", {PERSISTENT | BACKUP, FLOAT, "3.0"}},
+    {"ParkedRecordingMaxHours", {PERSISTENT | BACKUP, FLOAT, "4.0"}},
+    {"ParkedRecordingMinVoltage", {PERSISTENT | BACKUP, FLOAT, "12.3"}},
+    {"ParkedRecordingMaxStorageMB", {PERSISTENT | BACKUP, INT, "2048"}},
+    {"ParkedRecordingClipSeconds", {PERSISTENT | BACKUP, INT, "20"}},
+    {"ParkedRecordingActive", {CLEAR_ON_MANAGER_START | DONT_LOG, BOOL, "0"}},
+    {"ParkedRecordingCapture", {CLEAR_ON_MANAGER_START | DONT_LOG, BOOL, "0"}},
+    {"ParkedRecordingStatus", {CLEAR_ON_MANAGER_START | DONT_LOG, JSON}},
+    {"ParkedRecordingLastEvent", {PERSISTENT | DONT_LOG, JSON}},
+    {"ParkedRecordingWarningEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},
+    {"ParkedRecordingWarningSeconds", {PERSISTENT | BACKUP, INT, "30"}},
+    {"ParkedRecordingWarning", {CLEAR_ON_MANAGER_START | DONT_LOG, BOOL, "0"}},
+    {"ParkedRecordingShutdownReason", {PERSISTENT | DONT_LOG, JSON}},
+    {"ParkedRecordingWebhookEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},
+    // the URL is a secret (a webhook id): not BACKUP (so it never leaves the device in a settings backup), not logged
+    {"ParkedRecordingWebhookUrl", {PERSISTENT | DONT_LOG, STRING}},
+    {"ParkedRecordingUpload", {PERSISTENT | BACKUP, BOOL, "0"}},
+    {"ParkedRecordingUploadDailyMB", {PERSISTENT | BACKUP, INT, "1000"}},
+    {"ParkedRecordingWarningSound", {PERSISTENT | BACKUP, BOOL, "0"}},
+    {"ParkedBatteryLog", {PERSISTENT, BOOL, "0"}},
+    {"ParkedBatteryLogLabel", {PERSISTENT, STRING}},
+    // End BluePilot
+
+    // BluePilot: connect backend — 0=Comma Connect, 1=Konik Stable, 2=Offline Mode, 3=Self-hosted.
     // Per-backend dongle ID caches let comma <-> Konik switch without losing either identity;
     // see bluepilot/backend_switch.py. BPUseKonik is legacy (bool toggle); migrated once to
     // BPConnectBackend=1 then cleared.
@@ -744,6 +950,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"BPActiveBackend", {PERSISTENT, STRING}},
     {"BPDongleIdComma", {PERSISTENT, STRING}},
     {"BPDongleIdKonik", {PERSISTENT, STRING}},
+    {"BPDongleIdSelfhost", {PERSISTENT, STRING}},
 
     // BluePilot: UI params
     {"BPLastSeenVersion", {PERSISTENT, STRING}},

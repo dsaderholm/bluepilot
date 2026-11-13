@@ -133,10 +133,17 @@ class HudExt:
     self.distance_bar_frame = 0
     self.main_on_last = False
     self.lkas_enabled_last = False
+    # BluePilot: the cluster's lane display IS the passing-assist indicator while openpilot
+    # steers. See create_lkas_ui_msg -- each line is a four-level meter for its own side.
+    self.passing_last = fordcan_ext.CLUSTER_PASSING_IDLE
+    self.show_passing_in_cluster = False
+    # BluePilot: the standstill lane-display walk's current override, or None.
+    self.lane_test_last = None
 
   def update_hud_params(self, params, CP):
     """Read HUD-related Params from the UI. Called each frame."""
     self.send_hands_free_cluster_msg = params.get_bool("send_hands_free_cluster_msg")
+    self.show_passing_in_cluster = params.get_bool("ShowPassingInCluster")
     # Block hands-free UI on CAN vehicles — only CAN FD supports the cluster message
     if not (CP.flags & FordFlags.CANFD):
       self.send_hands_free_cluster_msg = False
@@ -162,7 +169,8 @@ class HudExt:
       steer_alert = hud_control.visualAlert in (VisualAlert.steerRequired, VisualAlert.ldw)
       self.hands = 1 if steer_alert else 0
 
-  def update_hud(self, CC, CS, hud_control, main_on, fcw_alert, frame, packer, CAN, CP):
+  def update_hud(self, CC, CS, hud_control, main_on, fcw_alert, frame, packer, CAN, CP,
+                 lane_test=None):
     """Generate LKAS UI and ACC UI CAN messages.
 
     Called each frame from CarController.update() after DM state is computed.
@@ -177,6 +185,8 @@ class HudExt:
       packer: CAN packer
       CAN: Ford CAN bus config
       CP: CarParams
+      lane_test: LaneTestOverride from the standstill display walk, or None. See
+        lane_display_test_ext -- while a walk runs it owns the lane display outright.
 
     Returns:
       List of CAN sends for UI messages.
@@ -185,15 +195,63 @@ class HudExt:
     steer_alert = hud_control.visualAlert in (VisualAlert.steerRequired, VisualAlert.ldw)
     standstill = CS.out.cruiseState.standstill
 
+    # BluePilot: everything the cluster's lane display is being asked to say, built here rather
+    # than in the message builder so that a planner that is missing, stale or mid-restart costs the
+    # cluster nothing. 0 none, 1 left, 2 right throughout -- the Side enum's own ordering, read
+    # straight through, so no mapping table can drift.
+    #
+    # Behind a toggle because it repurposes a safety indicator: the driver decides whether his
+    # lane display is also allowed to mean this.
+    passing = fordcan_ext.CLUSTER_PASSING_IDLE
+    if self.show_passing_in_cluster:
+      try:
+        pa = self.sm['longitudinalPlanSP'].passingAssist
+        # Past deciding and actually going. `waiting` and `confirming` are still deliberating, and
+        # a line that went to Intervene while the machine was only thinking about it would promise
+        # a lane change that may never come.
+        phase = str(pa.maneuver)
+        moving = phase in ("signaling", "changing", "finishing", "aborting")
+        # A pass is on the table: the machine is past idle, or a suggestion is standing. `waiting`
+        # counts and matters most -- that is the state where a gate is what is stopping us, and
+        # oncoming is one of the gates.
+        # .raw, NOT int(). A capnp enum off a live message is a _DynamicEnum and int() raises
+        # TypeError on the device -- which the broad except below turned into a cluster
+        # display that silently never worked. Found 2026-08-10 when the same mistake was
+        # caught in new code by test_no_int_on_capnp_enums, whose COVERED list did not
+        # reach opendbc. It does now.
+        in_play = phase != "idle" or getattr(pa.suggestion, 'raw', pa.suggestion) != 0
+        passing = fordcan_ext.ClusterPassing(
+          suggestion=getattr(pa.suggestion, 'raw', pa.suggestion),
+          maneuver_side=getattr(pa.maneuverSide, 'raw', pa.maneuverSide),
+          maneuver_moving=moving,
+          pass_in_play=in_play,
+          oncoming_left=bool(pa.adjacentLeft.oncoming),
+          oncoming_right=bool(pa.adjacentRight.oncoming),
+        )
+      except Exception:  # noqa: BLE001 - a missing planner must never stop the cluster updating
+        passing = fordcan_ext.CLUSTER_PASSING_IDLE
+
     # Determine if UI state changed
-    send_ui = ((self.main_on_last != main_on) or
+    # A walk step must land on the cluster the moment it changes, and the step BEFORE it has to be
+    # replaced when the walk ends -- at 1 Hz the last state would linger for up to a second and get
+    # written down as the next one.
+    lane_test_changed = lane_test != self.lane_test_last
+
+    send_ui = (lane_test_changed or (self.main_on_last != main_on) or
+               # ...INCLUDING the passing side, which is what makes this usable: the message is
+               # otherwise sent at 1 Hz, and a suggestion that took a second to appear would be a
+               # second stale by the time it did.
+               (self.passing_last != passing) or
                (self.lkas_enabled_last != CC.latActive) or
                (self.steer_alert_last != steer_alert))
 
     # LKAS UI msg at 1Hz or if UI state changes
     if (frame % CarControllerParams.LKAS_UI_STEP) == 0 or send_ui:
       can_sends.append(fordcan_ext.create_lkas_ui_msg(
-        packer, CAN, main_on, CC.latActive, self.hands, hud_control, CS.lkas_status_stock_values))
+        packer, CAN, main_on, CC.latActive, self.hands, hud_control, CS.lkas_status_stock_values,
+        passing, lane_test))
+      self.passing_last = passing
+      self.lane_test_last = lane_test
 
     # ACC UI msg at 5Hz or if UI state changes
     send_bars = False

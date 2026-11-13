@@ -92,3 +92,168 @@ SCC-Map's judgement and wants the state-2 drive as its baseline.
 3 residential, 2 tertiary. Enough to say a field is populated and behaves sensibly; **not** enough to
 set a threshold on. Anything with a number in it wants his roads under it first — which is the same
 rule the four SCC-Map defenses were each built under.
+
+## THE LEFT ROAD EDGE IS NEVER TRUSTED ON A FREEWAY. MEASURED, AND IT KILLS AN ASSUMPTION.
+
+Route 00000383, above 34 mph, `tools/bp_left_edge_profile.py`, 2026-08-17:
+
+    motorway, 4 lanes   1257 frames    left edge trusted   0.0%
+    motorway, 5 lanes   1024 frames                        0.0%
+    motorway, 3 lanes    779 frames                        0.0%
+    secondary, 5 lanes   576 frames                        0.0%
+    motorwayLink, 1 lane 463 frames                       14.7%   at p50 3.0 m
+
+**Zero, across 3,060 frames of multi-lane motorway.** The only place the left edge is ever trusted
+is a single-lane ramp, where it genuinely is beside the car.
+
+**WHAT THIS KILLS.** It was stated earlier the same day that a physically separated HOV lane -- a
+concrete wall or pylon barrier -- would produce a road edge and that "the existing left-edge logic
+already refuses" a target beyond it. **The premise is false.** `_on_our_carriageway` never has a
+trusted left edge to work from at freeway speed, so that path cannot refuse anything there. It is
+also why `UNTRUSTED_EDGE_ONCOMING_M` exists: untrusted is the NORMAL state, not an edge case.
+
+**SO NO CALIFORNIA HOV BOUNDARY IS HANDLED BY PERCEPTION TODAY**, in any of its three forms. The
+earlier three-case table implied two of them were covered. None are:
+
+    concrete or pylon wall   no trusted edge at freeway speed. NOT refused.
+    double white line        paint, and no edge either way. NOT refused.
+    candlestick delineators  unknown, and now the ONLY candidate for producing one.
+
+That inverts what the California drive is for. It is not confirming a fallback already works; it is
+testing whether candlesticks are the one boundary type that can produce a trusted left edge at all.
+**If they do, that is a NEW capability. If they do not, perception offers nothing and only
+`hov:lanes` can help -- which is 0% in California.**
+
+**THE MEASUREMENT IS ALREADY INSTRUMENTED, which is why no capnp field was added.** `modelV2`,
+`roadEdgeStds` and `mapdOut` are all in every route already, so the trip records what is needed
+whether or not anyone remembers to enable something. Run the tool on a California route and compare
+against the table above. Utah is the control: the owner reports Utah uses a double white line and no
+posts, so every existing route is the paint case.
+
+**Read the std VARIABILITY, not just the trusted fraction.** The failure that matters is not a
+present or absent edge, both of which are decidable. It is FLICKER -- an edge appearing at each post
+and vanishing between them would let a pass open in the gaps. Route 00000383's 4-lane motorway
+already shows stdev-of-std at 2.83, so churn is the baseline behavior and a California run has to
+beat that rather than merely show movement.
+
+## `distanceFromWayCenter` CANNOT CARRY A LANE GATE. MEASURED, AND THE QUESTION IS CLOSED.
+
+The table at the top of this document flagged its 11.58 m p90 and said not to build a lane-position
+gate on it "without measuring it against something else first". Measured 2026-08-17,
+`tools/bp_way_center_sanity.py`, route 00000383, 8,740 frames.
+
+**The camera turned out to be the wrong referee** -- the left road edge is trusted 0.0% of the time
+on multi-lane motorway, so it cannot arbitrate anything at freeway speed. But mapd publishes
+`estimatedRoadWidth` on the SAME frame, and the two constrain each other with no third party:
+a car on the road must satisfy `|distanceFromWayCenter| <= estimatedRoadWidth / 2`.
+
+    IMPOSSIBLE (|dfwc| > roadWidth/2):  2203 of 8740   25.2%
+
+    by waySelectionType                    by highwayClass
+      current    n=7186   22.6% bad          motorway      n=2305   24.2% bad   p50 0.32
+      extended   n= 308  100.0% bad          secondary     n=2698    8.2% bad   p50 0.54
+      possible   n= 276   45.7% bad          residential   n=1575   53.1% bad   p50 1.29
+      fail       n= 313    0.0% (zeroed)     tertiary      n= 438   61.0% bad   p50 1.89
+
+**On motorway the median is fine and a quarter of frames are off the road.** Filtering to mapd's own
+confident match does not rescue it: `current` is still 22.6%. `extended` is 100% impossible, which
+is at least a clean rule -- never read the field on an extended match -- but it is 3.5% of frames.
+
+**So the answer is no, and it is no after filtering rather than before.** A gate firing on a field
+that is wrong a quarter of the time on the exact road class it is needed for is not a gate.
+
+**WHAT THIS CLOSES.** Lane position was the last path to the California HOV problem: knowing we are
+in the leftmost lane of our own way would refuse a pass into a separately-mapped express lane
+without needing any new tag. Both candidate signals are now measured dead rather than assumed weak:
+
+    left road edge            trusted 0.0% on multi-lane motorway
+    distanceFromWayCenter     24.2% physically impossible on motorway
+
+**THE ONE REMAINING CANDIDATE, UNTESTED:** `modelV2.laneLines` and `laneLineProbs` carry FOUR lines,
+not two. A high probability on the outermost left line means there is a lane beyond our immediate
+left neighbour, which is a lane COUNT rather than a lane position, and counting is all the HOV rule
+needs. That has not been measured and it is the next thing to try before declaring the problem
+unsolvable from the vehicle.
+
+## LANE LINE COUNTING WORKS. IT DOES NOT SOLVE THE HOV CASE.
+
+`tools/bp_lane_line_count.py`, route 00000383, above 34 mph. The third and last candidate for
+knowing what is to our left, after the road edge and `distanceFromWayCenter` were both measured dead.
+
+**INDEX ORDER VERIFIED, NOT ASSUMED.** Median lateral position per line: idx 0 at -5.1 m, idx 1 at
+-1.7, idx 2 at +1.8, idx 3 at +5.1. Negative is LEFT, which matches `adjacent_lane.py`'s own
+`lat < 0 is left`. So idx 0 is the outer left line and the probability below it is the right one.
+
+    road                     idx 0 p50   idx 0 p90   frames > 0.5
+    motorwayLink, 1 lane          0.03        0.27            0%     <- THE DECIDING ROW
+    motorway, 3 lanes             0.54        0.74           59%
+    motorwayLink, 2 lanes         0.70        0.85           88%
+    motorway, 4 lanes             0.77        0.87           83%
+    motorway, 5 lanes             0.75        0.82          100%
+
+**Zero false-permissive readings in 463 frames of single-lane ramp.** The model never claims a lane
+to our left where there is none, which is exactly the property a REFUSAL gate needs and the property
+neither dead signal had. As a "is there any lane to my left at all" detector this is usable.
+
+**AND IT STILL DOES NOT CLOSE CALIFORNIA.** It answers *is there a lane to my left*, never *may I
+enter it*. A painted buffer has an ordinary lane with ordinary lane lines beyond it, so on a
+California express lane `laneLineProbs[0]` reads HIGH and a gate built on it PERMITS precisely the
+move that must be refused. The signal is real and it is aimed at a different question.
+
+**So the HOV case is now closed to every vehicle signal**, which is a conclusion rather than a gap:
+
+    left road edge          trusted 0.0% on multi-lane motorway
+    distanceFromWayCenter   24.2% impossible on motorway
+    lane line count         works, answers the wrong question
+    separation tagging      `separation=flex_post` is ONE object worldwide
+
+**What remains is `hov:lanes` (issue 130), which is 0% in California**, and the boundary type itself,
+which the trip will measure via `bp_left_edge_profile.py`. If candlestick delineators produce a
+trusted left edge they are the only thing that can, and that is the whole hope.
+
+**DO NOT BUILD THE LANE-COUNT GATE ON THIS EVIDENCE ALONE.** `_on_a_ramp` already refuses every
+motorwayLink, which is where the clean 0% was measured, so the deciding row comes from a road the
+feature already declines. Its marginal value is on a two-lane road where we sit in the left lane, and
+that case is NOT measured here. Measure it before writing a gate, or the number that justified it
+will have come from somewhere the gate never runs.
+
+## HOW EVERYONE ELSE SOLVES RESTRICTED LANES: WITH A MAP. NOBODY USES PERCEPTION.
+
+Researched 2026-08-17, after every vehicle signal was measured dead. The point was to find the
+approach we had missed. There is not one, and that is the useful result.
+
+    Tesla          a NAVIGATION SETTING. "Use HOV Lanes" off means Navigate on Autopilot never
+                   routes through one, at any hour. It does not count occupants and it does not
+                   read the diamond. The strongest vision stack in the industry solves this
+                   from map data.
+    GM Super Cruise  LiDAR-surveyed HD maps, ~750,000 miles of North America, lane level.
+    Ford BlueCruise  curated "Blue Zones". The camera steers, but the MAP decides where the
+                   feature runs at all.
+
+**All three are MAP AS PERMISSION**, which is the model this fork deliberately rejects. So the
+conclusion is not that we are behind; it is that a vehicle-only answer to "may I enter this lane"
+does not exist in production anywhere, and `hov:lanes` is the OSM equivalent of what Tesla already
+reads from its nav data. **That makes issue 130 the correct ask rather than a consolation prize.**
+
+**AND IT NAMES THE TRADE EXACTLY.** BlueCruise's answer to a California express lane is that it does
+not do automatic lane changes there at all, because that road is not a Blue Zone. Ours works
+everywhere and cannot refuse that one lane. That is the same trade CLAUDE.md already records -- we
+give up the mapped-case ceiling to work on roads nobody surveyed -- showing up as a specific, named
+gap rather than as a general principle.
+
+### TWO CANDIDATE SIGNALS CHECKED AND ABSENT, both from the source rather than from search
+
+- **openpilot publishes NO lane line type.** `cereal/log.capnp` carries `laneLines`, `laneLineProbs`,
+  `laneLineStds`, `roadEdges`, `roadEdgeStds` and nothing else. `laneLineMeta` looks promising and is
+  not -- it is `leftY/rightY/leftProb/rightProb`, filled by `fill_lane_line_meta()` FROM the two
+  arrays above. A convenience summary, no new information.
+  **This is a real capability gap against production ADAS**, which routinely classifies
+  dashed / solid / double-solid; it is simply not what comma's model was trained to emit.
+- **The Ford camera publishes no lane data on CAN either.** Zero signals matching `Lane` in
+  `ford_lincoln_base_pt.dbc`. It computes lane geometry internally for LKA and keeps it. So the
+  retrofit Edge IPMA cannot supply what comma's model does not.
+
+**WHY LINE TYPE WAS THE PRIZE, and why it stays out of reach.** "Is the line to my left crossable"
+would have solved the California buffer, gore points at exits, and no-passing zones with ONE signal.
+It needs a model trained to emit it. That is not a fork-scale change, and it is the honest reason
+this line of work stops here rather than continuing.

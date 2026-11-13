@@ -1,0 +1,258 @@
+#!/usr/bin/env python3
+"""FusionPilot: the rear radar reduction, in Python, so it can be proven before it is C++.
+
+WHAT THIS IS FOR. The feeder microcontroller turns ~2150 raw detection frames a second into three
+digest messages at 20 Hz. That reduction is the whole architecture -- bus 1 is already 60-73%
+loaded and cannot carry the raw stream -- and it is also the one piece that would be miserable to
+debug once it is firmware on a part bolted behind a bumper.
+
+So the algorithm lives here first, runs against a real capture, and the firmware mirrors it. When
+the two disagree, this is the reference.
+
+  python tools/bp_rear_digest_sim.py <capture.json>
+
+The capture is [[t, addr, hexbytes], ...] as bp_radar_bench writes it.
+
+WHAT IT DELIBERATELY DOES NOT DO: cluster, track, or smooth. RearApproach wants the nearest closing
+target and a TTC, and every layer of cleverness between the sensor and that number is a layer that
+can invent a target that is not there. The front radar's own interface clusters because it must
+produce leads; this must produce a veto, and a veto that fires late is better than one that fires
+on a phantom.
+"""
+from __future__ import annotations
+
+import io
+import json
+import math
+import re
+import sys
+from dataclasses import dataclass
+
+MRR_START, MRR_END = 0x120, 0x15F
+MRR_HEADER = 0x174
+
+# Empty slots read 8080xx0000800400 -- the two high bytes are the tell, and rejecting on them
+# before decoding is what lets the feeder keep up. Measured 2026-08-14: ~97% of frames.
+EMPTY_PREFIX = b"\x80\x80"
+
+# Long-range scan modes are more sensitive and pick up the road surface. The front interface
+# discards long-range returns closer than this for the same reason.
+MIN_LONG_RANGE_DIST_M = 30.0
+LONG_RANGE_SCANS = (1, 3)
+
+# Below this a target is not closing on us in any sense worth reporting. Matches MIN_CLOSING_MS in
+# rear_approach.py deliberately -- two thresholds for one idea is how they drift apart.
+MIN_CLOSING_MS = 0.5
+
+# A target beyond this is not about to arrive. The sensor's long-range mode reaches ~175 m and
+# measures ~130 m in practice on this part; nothing useful to a lane change lives past that.
+MAX_RANGE_M = 175.0
+
+# Lane binning. Deliberately a DEADBAND rather than a sign test: a target dead astern is in our own
+# lane, not in the lane we would move into, and calling it left or right by the sign of a noisy
+# 0.1 m offset would make the two sides flicker against each other.
+OWN_LANE_HALF_WIDTH_M = 1.4
+
+DIGEST_HZ = 20.0
+
+
+def be_raw(d: bytes, start: int, length: int) -> int:
+  """One @0+ (Motorola) signal out of an 8-byte frame.
+
+  DBC big-endian numbering: `start` is the MSB, bits run 7..0 within a byte and then continue at
+  bit 7 of the NEXT byte. Verified against FORD_CADS: CAN_DET_RANGE at 31|14 comes out as all of
+  byte 3 plus the top 6 bits of byte 4, which is what the layout has to be for a 14-bit field
+  starting at the top of byte 3.
+
+  Raw rather than CANParser deliberately -- bp_fallback_reason.py records that
+  `cp.update_strings([m.as_builder().to_bytes()])` raises on every route message and gets swallowed
+  by a per-message except, reporting NO DATA for a reason inside the tool. And cantools is not
+  installed on the device.
+  """
+  val = 0
+  bit = start
+  for _ in range(length):
+    val = (val << 1) | ((d[bit // 8] >> (bit % 8)) & 1)
+    bit = bit + 15 if bit % 8 == 0 else bit - 1
+  return val
+
+
+def sig(d: bytes, spec) -> float:
+  start, length, scale, offset = spec
+  return be_raw(d, start, length) * scale + offset
+
+
+def mrr_layout(dbc_path: str) -> dict:
+  """Start bit, length, scale and offset for the six signals we need, READ FROM THE DBC.
+
+  All 64 MRR_Detection messages share one layout with only the name suffix changing, so parsing
+  MRR_Detection_001 gives the offsets for every address. Nothing is transcribed by hand, so the
+  tool cannot drift from the DBC the car is actually decoded with.
+  """
+  want = ("VALID_LEVEL", "RANGE", "RANGE_RATE", "AZIMUTH", "AMPLITUDE", "SCAN_INDEX_2LSB")
+  out: dict = {}
+  # WALKED LINE BY LINE rather than matched as one block. The first version took "everything up to
+  # the next BO_", and MRR_Detection_001 is the LAST message in FORD_CADS.dbc -- so the lookahead
+  # never matched and the parse silently returned nothing at all.
+  sig_re = re.compile(r"SG_ (\w+) : (\d+)\|(\d+)@(\d)\+ \(([-\d.eE]+),([-\d.eE]+)\)")
+  inside = False
+  for line in io.open(dbc_path, encoding="utf-8"):
+    if line.startswith("BO_ "):
+      inside = line.startswith("BO_ 288 MRR_Detection_001:")
+      continue
+    if not inside:
+      continue
+    m = sig_re.search(line)
+    if not m:
+      continue
+    name, start, length, order, scale, offset = m.groups()
+    assert order == "0", f"{name} is not @0+ -- this decoder assumes Motorola"
+    key = name.removeprefix("CAN_DET_").removeprefix("CAN_").removesuffix("_01")
+    if key in want:
+      out[key] = (int(start), int(length), float(scale), float(offset))
+  missing = [w for w in want if w not in out]
+  assert not missing, f"not found in FORD_CADS.dbc: {missing}"
+  return out
+
+
+@dataclass
+class Detection:
+  d_rel: float   # m behind us
+  y_rel: float   # m lateral, left positive
+  v_rel: float   # m/s, POSITIVE = closing on us
+  amplitude: float
+
+
+@dataclass
+class SideDigest:
+  detected: bool = False
+  d_rel: float = 0.0
+  y_rel: float = 0.0
+  v_rel: float = 0.0
+  target_count: int = 0
+
+
+def decode_detections(db, addr_to_index, frames, azimuth_offset_rad: float = 0.0):
+  """Raw frames for one radar cycle -> detections, in the car's rear frame.
+
+  SIGNS, stated rather than inherited. The DBC gives range, azimuth and RANGE RATE, where a
+  negative range rate means the gap is closing. RearApproachSide.from_radar wants v_rel POSITIVE
+  for closing, so it is negated exactly once, here. ESR.dbc and ford_fusion_2018_adas.dbc disagree
+  on azimuth sign for the same hardware, which is why nothing about a Delphi convention is assumed.
+  """
+  out = []
+  for addr, raw in frames:
+    i = addr_to_index.get(addr)
+    if i is None or raw[:2] == EMPTY_PREFIX:
+      continue
+    d = db.decode_message(addr, raw)
+    if not d[f"CAN_DET_VALID_LEVEL_{i:02d}"]:
+      continue
+    scan = int(d[f"CAN_SCAN_INDEX_2LSB_{i:02d}"])
+    rng = float(d[f"CAN_DET_RANGE_{i:02d}"])
+    if rng <= 0.0 or rng > MAX_RANGE_M:
+      continue
+    if scan in LONG_RANGE_SCANS and rng < MIN_LONG_RANGE_DIST_M:
+      continue
+    az = float(d[f"CAN_DET_AZIMUTH_{i:02d}"]) - azimuth_offset_rad
+    out.append(Detection(
+      d_rel=math.cos(az) * rng,
+      y_rel=-math.sin(az) * rng,
+      v_rel=-float(d[f"CAN_DET_RANGE_RATE_{i:02d}"]),
+      amplitude=float(d[f"CAN_DET_AMPLITUDE_{i:02d}"]),
+    ))
+  return out
+
+
+def reduce_to_sides(dets) -> tuple[SideDigest, SideDigest]:
+  """Detections -> nearest CLOSING target per side. This is the entire feeder algorithm.
+
+  SOONEST -- smallest time to contact. Not nearest, not strongest, not fastest. Amplitude is
+  decoded but deliberately unused: a big slow lorry is not more urgent than a small fast car.
+
+  THIS WAS min(d_rel) UNTIL 2026-08-21 AND IT WAS MEASURABLY WRONG. The docstring already argued
+  "the target that matters is the one arriving first", which is a TTC argument, while the code
+  picked the nearest -- a different target:
+
+      80 m back at 15 m/s   ->  TTC  5.3 s   REFUSES the pass (UNSAFE_TTC_S is 8.0)
+      20 m back at  2 m/s   ->  TTC 10.0 s   allows it
+
+  Nearest reports the second and discards the first AT THE FEEDER, where nothing downstream can see
+  it existed -- the digest carries one target per side and target_count is the only tell. That
+  makes this the one place in the whole rear chain where evidence is destroyed rather than weighed.
+
+  MEASURED before changing, with tools/bp_digest_pick_rule.py on route 000003a1 (30,257 radar
+  scans, front MRR as a proxy since no rear radar exists yet):
+
+      side-scans with 2+ closing targets      33,287
+      nearest and soonest DISAGREE             5,573    16.7%
+      ...and the disagreement CROSSES 8 s      1,298     3.9%
+      worst: nearest reported 12.0 s while a discarded target sat at 0.4 s
+
+  3.9% of multi-target scenes would have been reported CLEAR with a car inside the veto window.
+  The worst case is not marginal. Changed here and mirrored in rear_radar_feeder.ino; the change
+  costs one divide per detection and nothing else.
+
+  The proxy caveat is real -- forward closing targets are traffic we are overtaking and oncoming
+  cars, rear ones are faster followers -- so treat 3.9% as "multi-target scenes on his roads
+  separate the two rules this often", not as a rear-radar rate. It does not change the direction.
+  """
+  left, right = SideDigest(), SideDigest()
+  for side, keep in ((left, lambda d: d.y_rel > OWN_LANE_HALF_WIDTH_M),
+                     (right, lambda d: d.y_rel < -OWN_LANE_HALF_WIDTH_M)):
+    closing = [d for d in dets if keep(d) and d.v_rel >= MIN_CLOSING_MS]
+    side.target_count = min(31, len(closing))
+    if closing:
+      # v_rel >= MIN_CLOSING_MS is already guaranteed by the filter above, so the divide is safe.
+      n = min(closing, key=lambda d: d.d_rel / d.v_rel)
+      side.detected = True
+      side.d_rel, side.y_rel, side.v_rel = n.d_rel, n.y_rel, n.v_rel
+  return left, right
+
+
+def main() -> int:
+  if len(sys.argv) < 2:
+    return print(__doc__) or 2
+  import cantools
+  from pathlib import Path
+
+  repo = Path(__file__).resolve().parent.parent
+  db = cantools.database.load_file(repo / "opendbc_repo/opendbc/dbc/FORD_CADS.dbc")
+  addr_to_index = {db.get_message_by_name(f"MRR_Detection_{i:03d}").frame_id: i
+                   for i in range(1, 65)}
+
+  rows = json.load(open(sys.argv[1]))
+  span = rows[-1][0] - rows[0][0] if len(rows) > 1 else 1.0
+
+  # Group into radar cycles on the header, which is what the feeder does: the header carries the
+  # scan index every detection in the cycle must agree with.
+  cycles, cur = [], []
+  for t, addr, hexs in rows:
+    if addr == MRR_HEADER and cur:
+      cycles.append(cur)
+      cur = []
+    if MRR_START <= addr <= MRR_END:
+      cur.append((addr, bytes.fromhex(hexs)))
+  if cur:
+    cycles.append(cur)
+
+  raw_frames = sum(1 for r in rows if MRR_START <= r[1] <= MRR_END or r[1] == MRR_HEADER)
+  total_dets = 0
+  reported = 0
+  for frames in cycles:
+    dets = decode_detections(db, addr_to_index, frames)
+    total_dets += len(dets)
+    left, right = reduce_to_sides(dets)
+    reported += int(left.detected) + int(right.detected)
+
+  digest_frames = 3 * DIGEST_HZ * span
+  print(f"capture: {span:.1f} s, {len(cycles)} radar cycles")
+  print(f"  raw in    {raw_frames:7d} frames  {raw_frames / span:8.0f} /s")
+  print(f"  digest out{int(digest_frames):7d} frames  {digest_frames / span:8.0f} /s")
+  print(f"  reduction {raw_frames / max(1, digest_frames):7.0f}x")
+  print(f"  valid detections {total_dets}, of which closing and off-centre: {reported}")
+  return 0
+
+
+if __name__ == "__main__":
+  raise SystemExit(main())

@@ -40,3 +40,35 @@ to disagree with your device.
 | FusionPilot | Lane Centering Damping | **0.0** | `lane_centering_damping_ang` |
 | FusionPilot | Lane Centering Strength | **0.15**  (was 0.25) | `lane_centering_strength_ang` |
 | FusionPilot | Low Speed Adjustment Factor | **0.981**  (was 1.0) | `FordLowSpeedFactor_ang` |
+| Steering > Customize Blinker | Blink Spacing If Unmeasurable (ms) | **760** | `FordBlinkerBlinkPeriod` |
+| Steering > Customize Lane Change | Cancel By Turning The Blinker Off | **4** | `AutoLaneChangeCancelWindow` |
+| Steering > Customize Lane Change | Steer Back When Cancelled | **On** | `AutoLaneChangeRevert` |
+| Steering > Customize Lane Change | Wait After Blind Spot Clears | **3** | `AutoLaneChangeBsmHoldTime` |
+| Steering > Customize Lane Change | Your One-Touch Flash Time | **5.5** | `AutoLaneChangeOneTouchTime` |
+| Steering > Customize Passing Assist | Assume An Unknown Middle Lane Is A Turn Lane | **On** | `PassingAssistStrictTwoWay` |
+| Steering > Customize Passing Assist | Be Fussier When Not In A Hurry | **18** | `PassingAssistPatience` |
+| Steering > Customize Passing Assist | Call It A Slow Pass After | **8** | `PassingAssistCrawlTime` |
+| Steering > Customize Passing Assist | Check The Lane Before Suggesting It | **On** | `PassingAssistAdjacentLane` |
+| Steering > Customize Passing Assist | Chime When It Decides Or Backs Out | **On** | `PassingAssistChime` |
+| Steering > Customize Passing Assist | Close In Before Passing | **0** | `PassingAssistMinApproach` |
+| Steering > Customize Passing Assist | Confirm For | **1** | `PassingAssistConfirmTime` |
+| Steering > Customize Passing Assist | Do Not Pass In A Bend Tighter Than | **13** | `PassingAssistMaxCurve` |
+| Steering > Customize Passing Assist | Keep Right Except To Pass | **On** | `PassingAssistKeepRight` |
+| Steering > Customize Passing Assist | Lane Must Have Been There | **15** | `PassingAssistMinLaneAge` |
+| Steering > Customize Passing Assist | Look Ahead | **220** | `PassingAssistMaxDistance` |
+| Steering > Customize Passing Assist | Make The Lane Change Itself | **On** | `PassingAssistActuate` |
+| Steering > Customize Passing Assist | Never Pass Into Oncoming Traffic | **On** | `PassingAssistOncomingVeto` |
+| Steering > Customize Passing Assist | Only Above | **30** | `PassingAssistMinSpeed` |
+| Steering > Customize Passing Assist | Passing Assist (Log Only) | **On** | `PassingAssistLogEnabled` |
+| Steering > Customize Passing Assist | Remember Oncoming Traffic For | **90** | `PassingAssistOncomingMemory` |
+| Steering > Customize Passing Assist | Settle After A Pass | **20** | `PassingAssistSettleTime` |
+| Steering > Customize Passing Assist | Show It On The Dash | **On** | `ShowPassingInCluster` |
+| Steering > Customize Passing Assist | Show Next Lane Speeds | **On** | `ShowAdjacentLanes` |
+| Steering > Customize Passing Assist | Show Oncoming Speeds | **On** | `ShowOncomingSpeeds` |
+| Steering > Customize Passing Assist | Show The Onroad Panel | **On** | `ShowPassingAssist` |
+| Steering > Customize Passing Assist | Signal Before Moving | **1** | `PassingAssistBlinkerLead` |
+| Steering > Customize Passing Assist | Slower By At Least | **4** | `PassingAssistMinDeficit` |
+| Steering > Customize Passing Assist | Stay Quiet After You Take An Exit | **45** | `PassingAssistExitStandDown` |
+| Steering > Customize Passing Assist | Use The Rear Radar | **On** | `PassingAssistRearRadar` |
+| Steering > Customize Passing Assist | Wait Before Moving Right | **5** | `PassingAssistKeepRightDelay` |
+| Steering > Customize Passing Assist | Wait If The Car Ahead Slams On | **On** | `PassingAssistLeadBrakingHold` |

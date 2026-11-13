@@ -17,6 +17,8 @@ never gets deferred because it looks like a chore.
 
 What this does that a bare `git merge` does not:
 
+  * checks it is on the branch upstream is supposed to be merged into, because this fork uses
+    several worktrees and a fresh session will run this wherever it happens to be
   * tags a rollback point BEFORE touching anything
   * refuses to start on a dirty tree, so the tag actually means something
   * auto-resolves car_list.json by REGENERATING it. That file is generated from PLATFORMS, adding
@@ -50,6 +52,14 @@ FALLBACK_BRANCH = "bp-7.0"
 # bp-dev, bp-dev-ui, bp-dev-f150-mk14.5, bp-sync-06102026, bp-no-stall, bp-livedelay-icon.
 # Only bp-<major>.<minor> is a release.
 RELEASE_RE = re.compile(r"^bp-(\d+)\.(\d+)$")
+
+# The branch upstream is merged INTO. This fork uses several worktrees -- one per line of work --
+# and a fresh session asked to "update BluePilot" will run this in whichever directory it happens
+# to be sitting in. Merging upstream into a feature branch instead of the main line silently
+# diverges it from everything else, and the damage only shows up at the next rebase.
+#
+# Change this if the main line ever moves. --any-branch overrides it for a one-off.
+UPDATE_BRANCH = "icbm-manual-override-and-tuning"
 
 # Generated files: never hand-merge, just re-run the generator. It rewrites the file wholesale, so
 # conflict markers in it do not matter and neither does which side "ours" means -- which is worth
@@ -136,6 +146,8 @@ def main() -> int:
                       help="replay our commits on top of upstream instead of merging; see the "
                            "module docstring for why merge is the default")
   parser.add_argument("--dry-run", action="store_true", help="show what would come in, change nothing")
+  parser.add_argument("--any-branch", action="store_true",
+                      help=f"merge into whatever branch is checked out, not just {UPDATE_BRANCH}")
   args = parser.parse_args()
   branch = args.branch
   if branch is None:
@@ -148,6 +160,32 @@ def main() -> int:
     else:
       print(f"  could not list {args.remote} branches; falling back to {branch}")
   target = f"{args.remote}/{branch}"
+
+  branch = git("rev-parse", "--abbrev-ref", "HEAD")
+  # To stderr with the messages below, so the context does not arrive after the complaint.
+  print(f"worktree: {REPO}", file=sys.stderr)
+  print(f"branch:   {branch}", file=sys.stderr)
+
+  if branch != UPDATE_BRANCH and not args.any_branch:
+    # Not a question, an instruction. Point at the worktree holding the right branch, because
+    # switching branches inside a worktree is exactly what must not happen in this fork.
+    where = ""
+    # --porcelain, because the plain listing is whitespace-separated and these paths contain
+    # spaces -- splitting on whitespace truncates the path at the first one.
+    path = ""
+    for line in git("worktree", "list", "--porcelain").splitlines():
+      if line.startswith("worktree "):
+        path = line[len("worktree "):]
+      elif line == "branch refs/heads/" + UPDATE_BRANCH:
+        where = path
+    msg = ["", "Upstream is merged into " + UPDATE_BRANCH + ", not " + branch + "."]
+    if where:
+      msg += ["", "Run this there instead:", "", "    cd " + where,
+              "    python tools/bp_merge_upstream.py", ""]
+    msg += [branch + " then picks the update up by being rebased onto " + UPDATE_BRANCH + ".",
+            "Use --any-branch only if you genuinely mean to merge upstream into " + branch + "."]
+    print(chr(10).join(msg), file=sys.stderr)
+    return 1
 
   if git("status", "--porcelain"):
     print("Working tree is dirty. Commit or stash first -- the rollback tag is worthless otherwise.",

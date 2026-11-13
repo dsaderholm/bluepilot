@@ -47,6 +47,10 @@ COVERED = (
   "selfdrive/ui/bp/onroad",
   "selfdrive/car",
   "tools",
+  # ADDED 2026-08-10. The car side reads these messages too, and it is where the mistake is most
+  # dangerous: hud_ext.py wraps its read in a broad except, so int() on a live enum did not
+  # crash -- it silently disabled the cluster passing display for its entire life.
+  "opendbc/sunnypilot",
 )
 
 _ENUM_DECL = re.compile(r"^\s*enum\s+([A-Za-z_]\w*)\s*\{", re.M)

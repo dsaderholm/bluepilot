@@ -60,6 +60,455 @@ curvature -- which SCC-Vision has never had and now will not get from the map.
 **`turn:lanes` at 6-28% confirms the center-turn-lane case is not solved by the map either**, which
 is what the passing assist section below already says for a different reason.
 
+### WHAT OSM HAS THAT MAPD DOES NOT PUBLISH -- measured on US 6, 2026-08-17
+
+He asked what OSM could give this fork as it grows. Measured rather than listed, on the road it
+matters most on: US 6, 497 way segments.
+
+    lanes:forward / lanes:backward   52.9%   <- THE PRIZE
+    shoulder                         35.4%
+    bridge                            7.6%
+    turn:lanes                        1.4%
+    turn:lanes:both_ways              0.2%   <- the TWLTL tag. dead.
+    overtaking                        0.0%   <- dead
+    incline                           0.0%   <- dead
+
+**`lanes:forward` ANSWERS THE ONE QUESTION NOTHING ELSE CAN.** On a 2+1 road `lanes = 3` is
+ambiguous: the lane to our left is either OUR passing lane or the oncoming side's. The camera cannot
+separate them -- that is the geometry problem -- and the radar only settles it once a vehicle
+appears, which is the oncoming veto arriving late. `lanes:forward=2, lanes:backward=1` states it
+from the map before anyone arrives, and US 6 / US 89 2+1 sections are the roads he drives.
+
+**mapd publishes `lanes` (the total) and drops the directional split.** So this is data in OSM, in
+the tile's source, discarded at the interface. Two routes to it: ask pfeiferj (his integration doc
+explicitly invites additions) or generate tiles ourselves, which is already possible -- see the
+self-hosting note. Neither is urgent; both are cheaper than any camera work aimed at the same
+question.
+
+**STOP SIGNS ARE A REAL ASK; TRAFFIC LIGHTS ARE NOT.** His reason for wanting either is that the
+MODEL is inaccurate, and he wants a cross-check rather than a replacement -- which is the allowed
+direction, since a mapped sign could refuse or corroborate and never opens anything. But the two
+split completely:
+
+  a traffic light is DYNAMIC. The map can say one exists; only the camera can say it is red. A
+  mapped light is a "be ready" prior and cannot check the thing that matters.
+  a stop sign is STATIC AND COMPLETE. On the matched way, in the direction of travel, it is always a
+  stop. Nothing is left to read, so it is a FULL independent check on the model rather than a hint.
+
+`highway=stop` is a NODE on the way it applies to, and mapd already matches us to a way -- so "is
+this sign mine or is it on the cross street" is answered for free by machinery that already exists.
+What blocks it is that mapd's tiles carry node POSITIONS only, for tracing road shape, and drop node
+tags at generation. That is a bigger change than a way tag: a new object in the tile format rather
+than a field on an existing struct. Not to be bundled into the `lanes:forward` issue -- a second ask
+in the same thread is how both get ignored. MEASURED 2026-08-17 and it is GOOD, which is what
+makes this worth filing eventually. Salt Lake bbox 40.55/-112.05 to 40.80/-111.80:
+
+    highway=stop              3,958 nodes
+    highway=traffic_signals   2,223 nodes
+
+More stop signs than signals, which is what the ground looks like and means mappers did the work
+rather than only tagging the easy landmarks. Contrast `overtaking`, which would have been the dream
+tag for passing assist -- 151,009 uses WORLDWIDE against 299.8M ways, 0% on US 6, a European
+convention tied to their centre-line rules that nobody surveys here. Dead for the same structural
+reason as `maxspeed:advisory` at 113K. So the two separate cleanly -- except that the on-the-nose tag DOES exist under a different name;
+see "I declared the no-passing tag dead by checking one spelling" below, which supersedes this
+paragraph's claim about `overtaking` being the only candidate.
+
+#### THE DRAFT, ready to file. Conditions on sending it are below the text.
+
+**Do not send it yet.** Send it (a) after `pfeiferj/mapd#127` gets a response either way, because two
+open asks from one person on a volunteer project is how both slide, and (b) from whoever is actually
+building the model-stop cross-check, so they can answer follow-ups. Title:
+`Expose stop signs on the predicted path (highway=stop nodes)`
+
+```
+Hi. Following on from the lanes request, a second one that is a bigger change, so
+please treat it as a "would you ever consider" rather than a request.
+
+Would you consider carrying `highway=stop` nodes into the tiles and exposing the
+next one on MapdOut, in the same shape as the existing speed limit and hazard
+outputs? Something like nextStopSign and nextStopSignDistance would slot straight
+into the pattern already there.
+
+WHY, and it is a cross-check rather than a replacement. Our fork slows for stop
+signs using the driving model, which sees them with the camera. That works most of
+the time and is wrong often enough to matter, and there is currently no second
+source. A stop sign is unusual in being fully static: if the map says there is one
+on the way we are matched to, in our direction of travel, that is the whole answer.
+Nothing has to be read off it in real time.
+
+We measured coverage before asking. Salt Lake City, bbox 40.55/-112.05 to
+40.80/-111.80:
+
+    highway=stop              3,958 nodes
+    highway=traffic_signals   2,223 nodes
+
+More stop signs than signals, which is what the ground actually looks like, so
+mappers here have done the work rather than only tagging the obvious landmarks.
+
+NOT ASKING FOR TRAFFIC SIGNALS, deliberately. A light is dynamic state. The map can
+say one exists but only the camera can say it is red, so it would be a "be ready"
+prior at best and cannot check the thing that matters. Stop signs are the case
+where a map is strictly better than a detector, and they are the only part of this
+worth your time.
+
+The part I understand is the real cost: node tags are a new object in the tile
+format rather than a field on an existing struct, and that is a different scale of
+change from the lanes one. There is also direction to handle, since a node on a
+two-way way does not necessarily apply to us. Way matching already knows which way
+we are on and which direction we are travelling, so I think the pieces exist, but
+you would know whether that is true.
+
+If you do pick it up I am glad to test. I have v2 running on a device with tiles
+downloaded for Utah, so I can flash a build and check the output against roads
+where I know exactly where the stop signs are.
+
+Entirely understand if this is out of scope. Thanks either way.
+```
+
+**What the draft is doing, so it is not "improved" into uselessness later.** It concedes the scale in
+the first line, because a large request smuggled in as a small one reads badly. The strongest
+paragraph is the REFUSAL: declining traffic signals with a reason proves the ask was filtered rather
+than dumped, and it is the same filtering that kept `overtaking` and `incline` out of both issues. And
+it names the hard parts (format change, direction handling) rather than glossing them, so a "no" costs
+him no explanation. No em dashes, at the owner's request, so it does not read as generated.
+
+### `hov:lanes` -- HIS DECISION, AND THE STRONGEST ASK FOR THE CALIFORNIA DRIVE
+
+*"Yes, the HOV lane is something we should never try to lane change into."* 2026-08-17. A decision,
+not a preference to be weighed later.
+
+**THE 100% FIGURE THAT USED TO BE HERE IS WITHDRAWN, 2026-08-17.** It read "all 400 motorway ways on
+I-15 in Salt Lake carry both `hov:lanes` and `hov:minimum`", and the same paragraph went on to
+describe 279 tagged ways, which should have been the tell. Re-measured by `ref="I 15"` along the
+whole corridor rather than one metro box:
+
+    I-15 Utah              1269 ways    45%
+    I-15 Arizona/Nevada     500 ways    22%
+    I-15 California         544 ways     0%
+
+**THIRD TIME. Same error, three different tags** -- `change` on US 6, this, and the ACCDATA cancel
+rate before them. A number measured over one narrow window, quoted as a general property. The
+denominator was never stated, so nothing contradicted it.
+
+**AND THE CALIFORNIA ZERO IS THE FINDING, not a gap in the survey.** There the HOV lane is mapped as
+its own separate carriageway: 419 of 501 bare-`hov` ways in the LA basin carry only 1-2 lanes. So on
+the California end of the trip, `hov:lanes` on our matched way says nothing, WHILE A PHYSICALLY
+ADJACENT HOV LANE STILL EXISTS to our left, buffer-separated. Radar and camera see a normal adjacent
+lane. **The gate this ask was supposed to close stays open for exactly the drive it was justified
+by**, and no tag on our own way can close it, because the restriction belongs to a different way.
+
+That is a real design problem for passing assist, not just a coverage note, and it is unsolved. The
+in-carriageway case (Utah 45%, Nevada 22%) is what `hov:lanes` actually buys.
+
+**Why it still outranks stop signs as a request.** Stop signs cross-check a detector we do not trust;
+`hov:lanes` closes a gate that is currently WIDE OPEN wherever it applies. Passing assist will
+happily suggest moving into the express lane today, because nothing in the system knows it exists.
+
+**Worldwide, for the commonality half of the question** (`tools/bp_osm_tag_census.py`, 2026-08-17):
+`hov:lanes` 19,306 objects, `hov:minimum` 11,419, `lanes:hov` 212 and not worth reading. A US and
+Canada tag rather than a common one. FILED as mapd issue 130, with all of the above stated in it.
+
+**FORMAT MEASURED 2026-08-17**, 279 I-15 motorway ways carrying the tag:
+
+    hov:lanes = "designated||||"    108      hov:minimum = 2   on all 279
+                "designated|||"      62      lanes       = 4..8, pipe count always matches
+                "designated|||||"    59
+
+Pipe-separated per lane, and **`designated` is always FIRST** -- the leftmost lane, on every way, with
+a 2-occupant minimum. That is precisely the lane a pass would move into.
+
+**Ask for it as raw Text, following their own `conditionalSpeedLimit` precedent.** That field is
+documented as "always output when the tag is present so forks can evaluate conditions mapd does not
+handle itself", which is exactly this situation: mapd should not have to reason about occupancy,
+tolling or which lane we are in. Hand over the string. That also makes the ask small -- one Text
+field, no parsing, no lane indexing in their code -- rather than the lane-indexed structure this
+section previously assumed it needed.
+
+#### THE DRAFT
+
+Title: `Expose hov:lanes as raw text`
+
+```
+Hi. A small one, and shaped like conditionalSpeedLimit rather than like a new
+feature.
+
+Would you consider outputting OSM's `hov:lanes` (and `hov:minimum`) as raw Text on
+MapdOut, the way conditionalSpeedLimit passes the tag through untouched?
+
+The reason for raw rather than parsed: whether an HOV lane is usable depends on
+occupancy, tolling and local rules, none of which mapd should have to reason
+about. Your conditionalSpeedLimit note says it best -- output the tag so forks can
+evaluate what mapd does not handle itself. Same thing here.
+
+Coverage on the road I care about, measured before asking. I-15 through Salt Lake,
+279 motorway ways carrying the tag:
+
+    hov:lanes = "designated||||"    108      hov:minimum = 2 on all 279
+                "designated|||"      62      lanes = 4..8, pipe count matches
+                "designated|||||"    59
+
+100% of I-15 motorway ways in that box have both tags, and `designated` is always
+the first entry, so the leftmost lane is the HOV lane throughout.
+
+What it is for: my fork suggests lane changes to pass slower traffic, and it will
+currently suggest moving into the express lane because nothing in the system knows
+it exists. A refusal is all I need, and one string is enough to build it.
+
+Happy to test on hardware -- I have v2 running with Utah tiles downloaded.
+```
+
+**Ordering unchanged**: after `pfeiferj/mapd#127` gets a response.
+
+**Ordering unchanged**: after `pfeiferj/mapd#127` gets a response. Two open asks from one person is
+how both slide, and that applies to this one as much as to the stop signs.
+
+### I DECLARED THE NO-PASSING TAG DEAD BY CHECKING ONE SPELLING. IT IS NOT.
+
+He asked "so there is absolutely nothing else we want from OSM?" and the honest answer was no only
+because I had been answering from a list I chose. A full tag census of US 6 -- every tag on more than
+5% of 497 ways, rather than the ones I thought to query -- turned up four that matter and one that is
+the single most on-the-nose tag for this feature:
+
+    change:forward        = "no"            54 ways   NO PASSING, full stop
+    change:lanes:forward  = "not_left|yes"  80 ways   per lane: leftmost may not cross left
+    lanes:both_ways       = "1"             73 ways   a CENTRE TURN LANE, explicitly
+    placement:forward     = "left_of:1"     90 ways   where the centreline actually sits
+    shoulder              = "yes"          176 ways
+
+**`change` IS THE NO-PASSING-ZONE TAG.** `overtaking` is the European convention, tied to their
+centre-line rules; `change` is what is used here, and it encodes the solid-versus-dashed line
+directly, per lane. This document previously said the on-the-nose tag "does not exist" on the
+strength of `overtaking` reading 0%. That was checking one spelling and concluding the concept was
+absent. About 16% of US 6 carries it.
+
+**`lanes:both_ways = 1` IS THE CENTRE TURN LANE**, explicitly, on 14.7% of US 6 -- the exact case that
+reverted the road-edge waiver on 2026-08-09 and that this document says twice the map cannot help
+with. `turn:lanes:both_ways` at 0.2% is a different tag; I measured that one and generalised.
+
+**`placement:forward`** says where the way geometry sits relative to the lanes -- `left_of:1` on 74 of
+90. That is a systematic offset in `distanceFromWayCenter`, and may explain part of its 11.58 m p90
+rather than the whole thing being noise. Worth checking before that field is written off for good.
+
+**HIS CHALLENGE, AND THE MEASUREMENT THAT ANSWERS IT.** *"No passing zones are only on two lane
+roads where we don't want this system to work at all, right?"* Reasonable, and wrong -- in a
+direction that makes the tag more useful rather than less. Of the 134 US 6 ways carrying `change`:
+
+    1 forward lane    19   14%   <- the two-lane road he means, where we already refuse
+    2 forward lanes   57   43%
+    3 forward lanes   38   28%
+    4 forward lanes   14   10%
+
+**86% is on multi-lane sections, which is exactly where the feature wants to work**, and the values
+there are not about oncoming at all. `2 lanes "no"` on 27 ways means two SAME-DIRECTION lanes with no
+lane change permitted -- a construction zone, a bridge, a gore area. `4 lanes "no|no|no|no"` likewise.
+Nothing in this system knows, and it would suggest a pass straight through one.
+
+So it is not a no-passing-zone tag. It is a **"may you change lanes here"** tag, and the two-lane case
+he described is a seventh of it.
+
+**Coverage on I-15 is only 4% (17 of 400 ways)**, but the values are worth knowing:
+`"no|not_left|yes|yes|yes|not_right|no"` on 12 of them -- seven lanes, lane 1 `no` and lane 2
+`not_left`. That is the express-lane barrier, the same restriction `hov:lanes` carries at 100%. So
+`change` does NOT displace the HOV ask; `hov:lanes` covers the California drive and `change` covers
+US 6.
+
+**Revised ordering of the asks:**
+
+    1. hov:lanes         100% on I-15. Closes a gate that is open TODAY. Drafted.
+    2. lanes:forward     52.9% on US 6. FILED as mapd issue 127, unanswered.
+    3. change/change:lanes  27% US 6, 4% I-15. States directly what lanes:forward infers, and adds
+                            the multi-lane restrictions nothing else covers. Third because two are
+                            already ahead of it, not because it is weak.
+    4. highway=stop      ICBM's, drafted.
+
+#### AND THEN THE WORLDWIDE COUNTS CAME IN AND DEMOTED ITEM 3 BY OUR OWN HAND
+
+Asked by pfeiferj on issue 129 (*"if there is a more common thing that gets more or less the same
+information I'd prefer that"*), measured with `tools/bp_osm_tag_census.py` on 2026-08-17. taginfo,
+planet-wide object counts:
+
+    overtaking             151,095      13.6x bare `change`
+    change:lanes            80,151       7.2x bare `change`
+    change:lanes:forward    52,650
+    change:lanes:backward   51,022
+    change                  11,105
+    median                   9,617
+    divider                  8,862
+    separation:left          7,528
+
+**This needed a different instrument and that is the transferable part.** Every other coverage
+number in this document is Overpass over a corridor he drives, which answers *can my car use this*.
+A maintainer choosing between two tags is asking *is this tag common*, over a planet file, and
+Overpass on US 6 cannot answer it. taginfo can, and the two questions have different answers.
+
+Three findings, in decreasing order of how much they cost us:
+
+- **`overtaking` is the more common key and we told him so, knowing it demotes our own ask.** It is a
+  different question -- crossing into ONCOMING on a two-lane road, versus moving between
+  same-direction lanes -- so it does not substitute for `change`. But if only one is ever built,
+  it is the better value for his users, and the reply says we would drop 129 for it. That is a real
+  concession and it is the right one: `change` is 27/4/0% across three Utah highways, so the ask was
+  marginal for this car anyway, and credibility spends better on `hov:lanes`, which is 100% on I-15
+  and closes a gate that is open today.
+- **`overtaking` is worth nothing to US.** 0% on all three Utah roads, and the maneuver never crosses
+  into oncoming traffic, so the restriction it encodes describes something passing assist does not
+  do. Conceding it costs this car nothing real.
+- **We asked for the wrong spelling.** `change:lanes` is 7.2x bare `change`. The per-lane form is
+  where the data is, and the original issue named the rare one.
+
+**The rule this leaves:** a coverage number and a commonality number are different measurements with
+different tools, and quoting one when asked for the other is how the US 6 figure went out. Before
+arguing that a maintainer should expose a tag, measure it BOTH ways.
+
+### HE SAID YES, AND TOLD US HIS PATTERN. Both drafts below are shaped to it.
+
+pfeiferj on mapd issue 127, 2026-08-17: *"Yeah, I can work on adding this. I honestly didn't even
+know forward and backwards tags for lane counts was a thing in osm. The way I generally handle
+forward and backwards tags is by adding them to the offline file, but I don't add additional fields
+to mapdOut. Instead, I check if they exist for the direction of travel and if so then I use the
+correct one in the lanes output. That's how maxSpeed:forward and maxSpeed:backward are handled as the
+user probably doesn't care about the direction that isn't active."*
+
+**THE PATTERN, as first stated:** directional tags are resolved to the direction of travel and
+folded into the EXISTING output. No new field. So do not ask for `change:lanes:forward` -- ask for
+`change`, resolved.
+
+**And it silently inverts our lane-count gate**; see the comment at `_map_says_no_room`. Flagged in
+the reply below because every other fork consuming `lanes` has the same problem and cannot detect it.
+
+#### HE CHANGED IT AFTER THAT REPLY. THE PATTERN ABOVE IS NOT A GENERAL RULE.
+
+pfeiferj, 2026-08-17, responding to the release-note request: *"Gotcha, what I might do then is have
+a new field that is something like currentDirectionLanes that only gets filled when there is a
+directional lane tag and then keep lanes as a total. The current lanes tag does get used for road
+size calculations when attaching to a road so it might make sense to split them for this as opposed
+to maxSpeed where there's really not a functional reason to know the other directions maxSpeed."*
+
+**So the fold-into-the-existing-output pattern holds only where the total has NO consumer of its
+own.** `maxSpeed` folds because nobody needs the other direction's limit. `lanes` does not, because
+mapd itself uses the way total for road-size calculations when attaching a position to a road. That
+distinction is the thing to carry into the next ask, not "he never adds fields":
+
+  ASK FOR A RESOLVED VALUE IN THE EXISTING FIELD when the unresolved total is meaningless.
+  EXPECT A NEW FIELD when something already depends on the total.
+
+Two consequences, both good for us:
+
+- **The version hazard is gone.** `lanes` keeps its meaning, `_map_says_no_room` stays correct across
+  the bump, and the capitalized instruction that used to sit in that comment -- invert the threshold
+  to `lanes <= 1` -- would now BREAK the gate on the exact 2+1 sections it exists for. The comment
+  has been rewritten to say so; do not resurrect it from this document's history.
+- **`currentDirectionLanes` is strictly better than the `oneWay` term** it would replace, because it
+  answers the question directly rather than inferring it from divided-vs-undivided. Prefer it where
+  present. A count of 0 must keep meaning UNKNOWN: he confirmed on issue 86 that absent numeric
+  fields read as 0 in tiles predating a field, so 0 can never mean "no lanes this way".
+
+**This also validates raising the ambiguity at all.** The ask itself was answered "yes" immediately;
+the FOLLOW-UP -- that the change was invisible to consumers and needed a release note -- is what
+produced a better design. Worth repeating: when a maintainer agrees to a change, the useful next
+message is what the change breaks silently, not thanks.
+
+#### REPLY TO ISSUE 127
+
+```
+That is a better shape than what I asked for, and it works for us -- we only care
+about the active direction too.
+
+One thing worth a line in the release notes when it lands, because it will not be
+visible to consumers: `lanes` changes meaning on two-way ways. Today it is the
+way total, so a 2+1 passing section reads 3. Afterwards it is the count for our
+direction, so the same section reads 2. Both are correct and there is no way to
+tell at runtime which one you are getting.
+
+We have a gate that reads `lanes <= 2` on a two-way way as "one lane each way, so
+the lane to my left is oncoming". After the change that same test would refuse a
+pass on a real passing lane. Ours is pinned by a test now so the version bump
+breaks loudly rather than quietly, but other forks reading `lanes` may not notice.
+
+Not asking you to change the approach -- it is the right one. Just that the
+release note say `lanes` is now direction-resolved on two-way ways.
+
+Happy to test a build when there is one.
+```
+
+#### DRAFT: `change` / `change:lanes`
+
+Title: `Expose the change tag, resolved to direction of travel`
+
+```
+Following the lanes one, and shaped the way you described there: resolved to the
+direction of travel, folded into one output, no per-direction fields.
+
+Would you consider carrying OSM's `change` / `change:lanes` and exposing the value
+for our direction as a single output?
+
+It is the closest thing OSM has to "may I change lanes here". `change=no` is a
+solid line; `change:lanes=not_left|yes` says the leftmost lane may not cross left
+while the next may. `overtaking` is the European tag for roughly this and reads 0%
+in Utah, so I had assumed the concept was unmapped here until I enumerated instead
+of guessing.
+
+Measured on US-6 in Utah, 497 ways, 134 carrying it:
+
+    1 forward lane    19   14%
+    2 forward lanes   57   43%
+    3 forward lanes   38   28%
+    4 forward lanes   14   10%
+
+86% is on multi-lane sections, which surprised me -- I expected it to be a
+two-lane-road tag. The values there are not about oncoming at all: `change=no`
+with two same-direction lanes is a work zone, a bridge, or a gore area. That is a
+restriction nothing on the vehicle can see.
+
+Coverage is lower on interstate: 17 of 400 I-15 motorway ways. Those encode the
+express lane barrier -- `no|not_left|yes|yes|yes|not_right|no`, lane 1 closed and
+lane 2 unable to enter it.
+
+For a lane-change feature this is more directly useful than the lane counts I
+asked for first, since it states the restriction rather than letting us infer it.
+
+Happy to test.
+```
+
+#### DRAFT: `lanes:both_ways`
+
+Title: `Expose lanes:both_ways (centre turn lane)`
+
+```
+A small one, and it gets more useful once `lanes` is direction-resolved.
+
+Would you consider exposing OSM's `lanes:both_ways`?
+
+It marks a centre turn lane explicitly -- the shared lane on a road tagged
+1 + TWLTL + 1. On US-6 in Utah it is on 73 of 497 ways, always with the value 1.
+
+The reason it matters to a lane-change feature: a centre turn lane is painted like
+a travel lane, sized like one, and has vehicles moving down it in our direction,
+so nothing on the vehicle can tell it from a passing lane. We reverted a change
+last year that tried, after it suggested moving into one three times.
+
+`turn:lanes:both_ways` would be the richer tag but reads 0.2% here, so the plain
+count is the one with coverage.
+
+It also becomes harder to infer once `lanes` is direction-resolved: today we can
+compare the total against the directional tags, and afterwards the total is gone.
+A small field or a boolean would cover it.
+
+Happy to test.
+```
+
+**The lesson, which is the reusable part:** ENUMERATE, DO NOT RECALL. Every earlier census here was a
+list of tags I thought to ask about, and each one came back mostly dead, which felt like evidence the
+map had nothing left. It was evidence about my list. The one census that asked "what is actually on
+these ways" found the best candidate in the document.
+
+**Three ideas closed by the same measurement**, worth recording so nobody re-hopes them:
+`overtaking=no` would have been the dream tag and does not exist on US 6 at all; `turn:lanes:both_ways`
+is the canonical TWLTL tagging and is 0.2%, so the center-turn-lane case stays with
+`geoLeftTravelProven`; and `incline` is 0%, so "do not pass uphill when the engine is stressed" gets
+nothing from OSM and stays with the sensors.
+
 ### THE 50x DISCREPANCY WAS NOT REAL. MEASURED AND WITHDRAWN 2026-08-16.
 
 **It was an artifact of a PARKED CAR.** This section used to read: OSM has a limit on 86-97% of his
@@ -644,3 +1093,85 @@ Observe mode went live 2026-08-16. Once a drive with `mapdOut` in it exists, run
 3. **What do the `only v2` rows look like?** Those are places v1 was blind. The measured US 40/189
    case -- tile holds 65 mph, SLA showed nothing -- should appear among them; if it does not, the
    residual defect is somewhere other than v1's way-matching and the 1.7% figure needs re-deriving.
+
+## THE FOUR ASKS AS FILED, 2026-08-17, AND WHAT EACH IS WORTH
+
+All four are open on pfeiferj/mapd. Each was measured BOTH ways before filing, after three
+single-window numbers went out wrong in one day: coverage on his roads via Overpass, and worldwide
+commonality via taginfo (`tools/bp_osm_tag_census.py`). The two questions have different answers and
+answering one with the other is what produced the retraction on 129.
+
+    issue  ask                     worldwide     his roads                    verdict
+    -----  ----------------------  ------------  ---------------------------  ----------------------
+     127   lanes:forward           1.41 M        52.9% US 6                   ACCEPTED, being built
+     129   change / change:lanes   80 k          27% US 6, 4% I-15, 0% US 89   weakest, ours to drop
+     130   hov:lanes               19 k          45% UT, 22% NV, 0% CA         real but bounded
+     131   highway=stop            2.47 M        5655 nodes in SLC alone       STRONGEST BY FAR
+
+**131 is the one to care about and it was ranked last for months.** `highway=stop` is 2,468,125
+objects worldwide, MORE COMMON THAN TRAFFIC SIGNALS (2.00 M), and over a hundred times either way tag
+we spent the day arguing for. It was filed last because it is ICBM's rather than passing assist's,
+which is an ownership fact and was never a value judgement -- and it sat behind two asks worth
+0.8% and 0.4% of its object count. Rank by what the tag is worth, not by which feature asked.
+
+**The two qualifiers are the whole engineering content of 131**, measured over 9,845 nodes in three
+metros:
+
+- `direction` on 90%, and directional rather than symmetric: forward 4,185, backward 4,177, both 438.
+  A stop node sits on a TWO-WAY way and usually governs ONE approach. Consuming stop nodes without
+  resolving direction slows the car for signs facing the other way roughly half the time. This is
+  the same direction-of-travel resolution pfeiferj already applies to lane tags, moved to a node.
+- `stop` on 30%, reading `minor` 2,077 against `all` 902. On `stop=minor` the MAJOR road does not
+  stop, so it is a refusal signal and not a detail.
+
+**131 is also a structurally bigger ask and the issue says so.** Every other request is a field on the
+Way struct; this one is node data, and mapd's offline format is built around ways. Stating that
+before he has to is what keeps the next request credible.
+
+**130's California zero is recorded above and is a design problem, not a coverage gap.** Read that
+section before treating `hov:lanes` as closing the express-lane gate.
+
+### WHY CALIFORNIA MAPS HOV SEPARATELY, AND WHAT THAT DOES TO THE GATE
+
+His observation, 2026-08-17: *"HOV lanes in California always have some kind of barrier thing that
+technically you can go through."* That is the explanation for the 0% in the section above, and the
+tag data supports it rather than merely being consistent with it.
+
+California express lanes are separated by a painted buffer that is legally uncrossable except at
+marked openings, so mappers treat the lane as its own carriageway. Two encodings result, and BOTH
+appear on the roads he will drive:
+
+    separate way        bare `hov=designated`, 1-2 lanes.  LA 419/501, San Diego 85/99.
+    lane in our way     `hov:lanes`, with the buffer stated as `change:lanes`.
+
+**The buffer IS mapped, where anyone bothered.** On LA ways carrying `hov:lanes`:
+
+    change:lanes = "no|not_left|yes|yes|yes|yes"     x13
+                   "no|not_left|yes|yes|yes|yes|yes" x7
+                   "no|not_left|yes|yes|yes"         x4
+
+Lane 1 is the HOV lane you may not leave; lane 2 may not move LEFT into it. That is the painted
+buffer written as a tag, and it is exactly the restriction the camera cannot see -- a buffer is
+paint, and paint is what the model already struggles with.
+
+**But it is thin: 27 of 240 LA ways, 27 of 597 in Riverside, 10 of 71 in San Diego.** So
+`change:lanes` does not rescue the California case; it covers about a tenth of it.
+
+**`designated` leftmost is NOT a Utah artifact** -- re-measured across four metros and 1,526 ways
+after nearly generalizing from Utah a second time: Utah 100%, Riverside 100%, LA 98%, San Diego 94%,
+all four 100% oneway. Issue 130 now carries this.
+
+**THE GATE STILL DOES NOT CLOSE, and it is worth being precise about why.** Three cases:
+
+    HOV as a lane on our way, hov:lanes present     SOLVED by issue 130.
+    HOV as a lane on our way, only change:lanes     solved by 129, ~10% of California.
+    HOV as a SEPARATE WAY                           NOT SOLVABLE from tags on our way.
+
+The third is the majority of the LA basin, and no map field on the matched way can fix it: the
+restriction lives on a different way, while the lane sits physically to our left across paint that
+radar and camera read as an ordinary lane marking. **Passing assist would move into a California
+express lane today and nothing in the map would object.**
+
+That makes it a PERCEPTION or GEOMETRY problem, not a tag problem -- the honest options are a
+spatial query for a parallel HOV way (which mapd does not expose and we should not ask it to), or
+refusing passes into a lane whose entry we never observed. Neither is designed. Recorded as open.

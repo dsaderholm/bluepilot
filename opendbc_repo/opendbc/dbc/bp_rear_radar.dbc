@@ -1,0 +1,76 @@
+VERSION ""
+
+
+NS_ :
+	NS_DESC_
+	CM_
+	BA_DEF_
+	BA_
+	VAL_
+	CAT_DEF_
+	CAT_
+	FILTER
+	BA_DEF_DEF_
+	EV_DATA_
+	ENVVAR_DATA_
+	SGTYPE_
+	SGTYPE_VAL_
+	BA_DEF_SGTYPE_
+	BA_SGTYPE_
+	SIG_TYPE_REF_
+	VAL_TABLE_
+	SIG_GROUP_
+	SIG_VALGRP_
+	BA_DEF_EDIT_
+	BA_DEF_DEF_REL_
+	BA_DEF_REL_
+	BA_DEF_SGTYPE_REL_
+	BA_REL_
+	BU_SG_REL_
+	BU_EV_REL_
+	BU_BO_REL_
+	SG_MUL_VAL_
+
+BS_:
+
+BU_: FEEDER OPENPILOT
+
+
+BO_ 1600 RearRadarLeft: 8 FEEDER
+ SG_ Detected : 0|1@1+ (1,0) [0|1] "" OPENPILOT
+ SG_ DRel : 1|10@1+ (0.25,0) [0|255.75] "m" OPENPILOT
+ SG_ YRel : 11|9@1+ (0.1,-25.6) [-25.6|25.5] "m" OPENPILOT
+ SG_ VRel : 20|11@1+ (0.05,-51.2) [-51.2|51.15] "m/s" OPENPILOT
+ SG_ TargetCount : 31|5@1+ (1,0) [0|31] "" OPENPILOT
+ SG_ Counter : 36|4@1+ (1,0) [0|15] "" OPENPILOT
+ SG_ Checksum : 56|8@1+ (1,0) [0|255] "" OPENPILOT
+
+BO_ 1601 RearRadarRight: 8 FEEDER
+ SG_ Detected : 0|1@1+ (1,0) [0|1] "" OPENPILOT
+ SG_ DRel : 1|10@1+ (0.25,0) [0|255.75] "m" OPENPILOT
+ SG_ YRel : 11|9@1+ (0.1,-25.6) [-25.6|25.5] "m" OPENPILOT
+ SG_ VRel : 20|11@1+ (0.05,-51.2) [-51.2|51.15] "m/s" OPENPILOT
+ SG_ TargetCount : 31|5@1+ (1,0) [0|31] "" OPENPILOT
+ SG_ Counter : 36|4@1+ (1,0) [0|15] "" OPENPILOT
+ SG_ Checksum : 56|8@1+ (1,0) [0|255] "" OPENPILOT
+
+BO_ 1602 RearRadarStatus: 8 FEEDER
+ SG_ RadarAlive : 0|1@1+ (1,0) [0|1] "" OPENPILOT
+ SG_ ScanIndexOk : 1|1@1+ (1,0) [0|1] "" OPENPILOT
+ SG_ DetectionHz : 2|8@1+ (1,0) [0|255] "Hz" OPENPILOT
+ SG_ ValidDetections : 10|7@1+ (1,0) [0|127] "" OPENPILOT
+ SG_ FeederUptime : 17|16@1+ (1,0) [0|65535] "s" OPENPILOT
+ SG_ Counter : 36|4@1+ (1,0) [0|15] "" OPENPILOT
+ SG_ Checksum : 56|8@1+ (1,0) [0|255] "" OPENPILOT
+
+
+
+CM_ "FusionPilot: the rear radar DIGEST -- the contract between the feeder microcontroller and openpilot.";
+CM_ BO_ 1600 "Nearest CLOSING target on the left, already reduced from 64 raw detections at 33 Hz. Sent at 20 Hz.";
+CM_ BO_ 1601 "Nearest CLOSING target on the right. Same layout as left deliberately, so one decoder serves both.";
+CM_ BO_ 1602 "Feeder and sensor health. RearApproach must read this before believing a quiet bus means a clear road.";
+CM_ SG_ 1600 DRel "Distance BEHIND the car, positive rearward. 0.25 m resolution is well inside what a 3 s TTC gate needs.";
+CM_ SG_ 1600 VRel "Positive = CLOSING on us, matching RearApproachSide.from_radar. Stated because ESR.dbc and ford_fusion_2018_adas.dbc disagree on sign for the same hardware.";
+CM_ SG_ 1600 YRel "Lateral offset, left positive. Sent so the LANE BINNING stays tunable in software -- the feeder must not own a threshold nobody can change without reflashing.";
+CM_ SG_ 1600 TargetCount "How many closing targets this side had. Zero with Detected set is impossible and means a feeder bug.";
+CM_ SG_ 1602 DetectionHz "Measured rate of MRR_Detection frames the feeder is seeing. Falls to 0 if the radar dies, which a silent digest alone cannot distinguish from an empty road.";

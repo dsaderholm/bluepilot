@@ -228,6 +228,9 @@ class Device(DeviceSP):
     self._interactive_timeout_callbacks: list[Callable] = []
     self._prev_timed_out = False
     self._awake: bool = True
+    # BluePilot: set each frame by the parked warning overlay; wakes the screen at full brightness
+    self.parked_warning: bool = False
+    # End BluePilot
 
     self._offroad_brightness: int = BACKLIGHT_OFFROAD
     self._last_brightness: int = 0
@@ -312,6 +315,11 @@ class Device(DeviceSP):
     if gui_app.sunnypilot_ui():
       brightness = DeviceSP.set_onroad_brightness(ui_state, self._awake, brightness)
 
+    # BluePilot: parked warning screen is always as bright as possible
+    if self.parked_warning:
+      brightness = 100
+    # End BluePilot
+
     if not self._awake:
       brightness = 0
 
@@ -337,7 +345,9 @@ class Device(DeviceSP):
         callback()
     self._prev_timed_out = interaction_timeout
 
-    self._set_awake(ui_state.ignition or not interaction_timeout or PC)
+    # BluePilot: parked warning screen keeps the display on
+    self._set_awake(ui_state.ignition or not interaction_timeout or PC or self.parked_warning)
+    # End BluePilot
 
   def _set_awake(self, on: bool):
     if on != self._awake:

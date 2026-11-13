@@ -3,8 +3,9 @@
 The reader is a nice-to-have running beside the driving stack on a device that has no spare
 capacity to lend it. On 2026-11-12 the first drive with it actually reading never engaged (comm
 errors, a lagging selfdrived) and the drive with it off was fine, so this is the contract now:
-it starts late, looks slowly, and switches ITSELF off for the rest of the drive at the first sign
-that the car is struggling. Pure logic with an injected clock, so every rule is tested.
+it starts late, looks slowly, PAUSES itself while the car reports trouble (resuming once it has been
+quiet for a while, as the stock stack does), and stands down for the rest of the drive only if trouble
+keeps starting while it runs or its own inference gets slow. Pure logic with an injected clock, so every rule is tested.
 """
 from __future__ import annotations
 
@@ -20,7 +21,17 @@ MIN_INFERENCE_GAP_S = 0.25
 SLOW_INFERENCE_S = 1.0
 SLOW_INFERENCE_LIMIT = 3
 
-# Onroad events that mean the driving stack is struggling. Seeing ANY of them stops the reader.
+# While any trouble event is showing the reader pauses (no inference), and it resumes this long after
+# the last one cleared. Startup errors (locationd, paramsd) clear within a minute or so; the stock
+# stack also reacts to such events while they last instead of giving up for the drive.
+RESUME_QUIET_S = 20.0
+
+# Trouble that begins again and again while the reader is actually running is a sign it is the cause:
+# after this many such episodes it stands down for the rest of the drive.
+ACTIVE_EPISODE_LIMIT = 3
+ACTIVE_WINDOW_S = 5.0  # "running" = it ran an inference within this long before the episode began
+
+# Onroad events that mean the driving stack is struggling. While any is showing the reader is paused.
 TROUBLE_EVENTS = frozenset({
   "commIssue", "commIssueAvgFreq", "selfdrivedLagging", "locationdTemporaryError", "locationdPermanentError",
   "controlsdLagging", "processNotRunning", "modeldLagging", "paramsdTemporaryError", "paramsdPermanentError",
@@ -33,6 +44,9 @@ class Guard:
     self.last_inference_at = None
     self.slow_in_a_row = 0
     self.stopped_reason: str | None = None
+    self.last_trouble_at: float | None = None
+    self.in_trouble = False
+    self.active_episodes = 0
 
   def stopped(self) -> bool:
     return self.stopped_reason is not None
@@ -41,15 +55,24 @@ class Guard:
     if self.stopped_reason is None:  # the first reason is the cause; later ones are consequences
       self.stopped_reason = reason
 
-  def note_events(self, names) -> None:
-    """Event names from the car's onroadEvents. Any trouble event latches the reader off for the drive."""
-    for name in names:
-      if str(name) in TROUBLE_EVENTS:
-        self.stop(f"car reported {name}")
-        return
+  def note_events(self, names, now: float) -> None:
+    """Event names from the car's onroadEvents. Trouble pauses the reader; repeated trouble while it ran stops it."""
+    trouble = next((str(n) for n in names if str(n) in TROUBLE_EVENTS), None)
+    if trouble is None:
+      self.in_trouble = False
+      return
+    if not self.in_trouble and self.last_inference_at is not None and now - self.last_inference_at <= ACTIVE_WINDOW_S:
+      self.active_episodes += 1
+      if self.active_episodes >= ACTIVE_EPISODE_LIMIT:
+        self.stop(f"car reported {trouble} {self.active_episodes} times while the reader was running")
+    self.in_trouble = True
+    self.last_trouble_at = now
+
+  def paused(self, now: float) -> bool:
+    return self.in_trouble or (self.last_trouble_at is not None and now - self.last_trouble_at < RESUME_QUIET_S)
 
   def may_infer(self, now: float) -> bool:
-    if self.stopped() or now - self.started_at < STARTUP_QUIET_S:
+    if self.stopped() or self.paused(now) or now - self.started_at < STARTUP_QUIET_S:
       return False
     return self.last_inference_at is None or now - self.last_inference_at >= MIN_INFERENCE_GAP_S
 

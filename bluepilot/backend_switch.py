@@ -1,10 +1,11 @@
-"""BluePilot: connect backend selection (comma / Konik / offline).
+"""BluePilot: connect backend selection (comma / Konik / offline / selfhost).
 
 BPConnectBackend (int) selects where the device sends routes and telemetry:
 
   0 = Comma Connect  — stock openpilot defaults (API_HOST / ATHENA_HOST unset)
   1 = Konik Stable   — api.konik.ai / athena.konik.ai (stable.konik.ai pairing)
   2 = Offline Mode   — bogus hosts so uploads and athena can never succeed
+  3 = Self-hosted    — opconnect at car.saderholm.us (uploads only; athena is not implemented)
 
 launch_env.sh exports API_HOST / ATHENA_HOST from this param. openpilot already
 reads those env vars everywhere it talks to the backend (common/api/comma_connect.py,
@@ -18,6 +19,8 @@ Dongle ID handling (register() calls reconcile_backend on every manager start):
 - Konik (connect-killer): deterministic dongle ID, sha256(imei+imei2+serial+public_key)[:16],
   assigned by its /v2/pilotauth on first registration. Registration is idempotent, so the
   same device always maps to the same Konik ID.
+- Self-hosted (opconnect): its own /v2/pilotauth assigns the ID; cached like comma/Konik so
+  switching back is lossless.
 - Offline: keep the current DongleId (or UnregisteredDevice); never hit the network.
 
 Each real backend's ID is cached the first time it is seen, so after one registration
@@ -47,25 +50,29 @@ UNREGISTERED_DONGLE_ID = "UnregisteredDevice"
 BACKEND_COMMA = "comma"
 BACKEND_KONIK = "konik"
 BACKEND_OFFLINE = "offline"
+BACKEND_SELFHOST = "selfhost"
 
 # Index order matches BPConnectBackend and the settings UI option lists.
-BACKENDS = (BACKEND_COMMA, BACKEND_KONIK, BACKEND_OFFLINE)
+BACKENDS = (BACKEND_COMMA, BACKEND_KONIK, BACKEND_OFFLINE, BACKEND_SELFHOST)
 
 BACKEND_LABELS = {
   BACKEND_COMMA: "Comma Connect",
   BACKEND_KONIK: "Konik Stable",
   BACKEND_OFFLINE: "Offline Mode",
+  BACKEND_SELFHOST: "Self-hosted",
 }
 
 PAIRING_HOST = {
   BACKEND_COMMA: "connect.comma.ai",
   BACKEND_KONIK: "stable.konik.ai",
   BACKEND_OFFLINE: "pairing.invalid",  # RFC 2606 .invalid never resolves
+  BACKEND_SELFHOST: "pairing.invalid",  # opconnect has no pairing UI
 }
 
 CACHE_PARAM = {
   BACKEND_COMMA: "BPDongleIdComma",
   BACKEND_KONIK: "BPDongleIdKonik",
+  BACKEND_SELFHOST: "BPDongleIdSelfhost",
 }
 
 PARAM_KEY = "BPConnectBackend"
@@ -120,7 +127,7 @@ def _read_persist_comma_dongle_id() -> str | None:
 
 
 def get_connect_backend(params) -> str:
-  """Return the selected backend name: comma, konik, or offline."""
+  """Return the selected backend name: comma, konik, offline, or selfhost."""
   _maybe_migrate_legacy_konik(params)
   try:
     raw = params.get(PARAM_KEY)
@@ -164,7 +171,8 @@ def reconcile_backend(params) -> str:
     # always show what this function saw and decided, even on the common comma/comma no-op path.
     cloudlog.event("bp_backend_reconcile", target=target, active=active, registered=registered,
                    dongle_id=dongle_id, first_run=first_run, persist_comma_id=persist_comma_id,
-                   cache_comma=params.get(CACHE_PARAM[BACKEND_COMMA]), cache_konik=params.get(CACHE_PARAM[BACKEND_KONIK]))
+                   cache_comma=params.get(CACHE_PARAM[BACKEND_COMMA]), cache_konik=params.get(CACHE_PARAM[BACKEND_KONIK]),
+                   cache_selfhost=params.get(CACHE_PARAM[BACKEND_SELFHOST]))
 
     if target == active:
       # Keep the cache fresh for real backends after a successful registration.

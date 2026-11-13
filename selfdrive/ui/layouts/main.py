@@ -19,6 +19,7 @@ if is_bluepilot():
   from bluepilot.ui.layouts.home_bp import HomeLayoutBP as HomeLayout
   from openpilot.selfdrive.ui.bp.onroad.augmented_road_view_bp import AugmentedRoadViewBP as AugmentedRoadView
   from bluepilot.ui.widgets.debug import ControlsDebugPanel
+  from openpilot.selfdrive.ui.bp.onroad.parked_warning_overlay_bp import ParkedWarningOverlayBP
 
 if gui_app.sunnypilot_ui():
   from openpilot.selfdrive.ui.sunnypilot.layouts.settings.settings import SettingsLayoutSP as SettingsLayout
@@ -52,6 +53,7 @@ class MainLayout(Widget):
     if is_bluepilot():
       self._debug_panel = ControlsDebugPanel()
       self._debug_toggled_this_frame = False
+      self._parked_warning = ParkedWarningOverlayBP(ui_state.params)
 
     # Set callbacks
     self._setup_callbacks()
@@ -68,6 +70,11 @@ class MainLayout(Widget):
       self._debug_toggled_this_frame = False
     self._handle_onroad_transition()
     self._render_main_content()
+    # BluePilot: parked recorder warning screen, over everything (it only shows while parked)
+    if is_bluepilot():
+      device.parked_warning = self._parked_warning.update_active(not ui_state.ignition and not ui_state.started)
+      self._parked_warning.render(self._rect)
+    # End BluePilot
 
   def _setup_callbacks(self):
     self._sidebar.set_callbacks(on_settings=self._on_settings_clicked,

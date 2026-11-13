@@ -25,6 +25,7 @@ from openpilot.sunnypilot.mads.helpers import set_alternative_experience, set_ca
 from openpilot.sunnypilot.selfdrive.car import interfaces as sunnypilot_interfaces
 # BluePilot: conditional BP message publishing (controllerStateBP, carStateBP)
 from openpilot.common.bluepilot import is_bluepilot
+from openpilot.sunnypilot.selfdrive.car.rear_radar import RearRadarParser
 if is_bluepilot():
   from openpilot.bluepilot.selfdrive.car.bp_card_publisher import publish_controller_state_bp, publish_car_state_bp
 
@@ -76,7 +77,7 @@ class Car:
     self.can_sock = messaging.sub_sock('can', timeout=20)
     self.sm = messaging.SubMaster(['pandaStates', 'carControl', 'onroadEvents'] + ['carControlSP', 'longitudinalPlanSP'])
     # BluePilot: added controllerStateBP, carStateBP to PubMaster
-    self.pm = messaging.PubMaster(['sendcan', 'carState', 'carParams', 'carOutput', 'liveTracks'] + ['carParamsSP', 'carStateSP', 'controllerStateBP', 'carStateBP'])
+    self.pm = messaging.PubMaster(['sendcan', 'carState', 'carParams', 'carOutput', 'liveTracks'] + ['carParamsSP', 'carStateSP', 'controllerStateBP', 'carStateBP', 'rearRadarBP'])
 
     self.can_rcv_cum_timeout_counter = 0
 
@@ -125,6 +126,11 @@ class Car:
     else:
       self.CI, self.CP, self.CP_SP = CI, CI.CP, CI.CP_SP
       self.RI = RI
+
+    # FusionPilot: rear radar digest. Constructed unconditionally and inert without the param, so a
+    # car with no feeder builds a parser that never sees a frame rather than taking a branch here.
+    self.rear_radar = RearRadarParser(self.params.get_bool("PassingAssistRearRadar"))
+    self.rear_radar_data = None
 
     self.CP.alternativeExperience = 0
     # mads
@@ -206,6 +212,10 @@ class Car:
     # Update radar tracks from CAN
     RD: structs.RadarDataT | None = self.RI.update(can_list)
 
+    # FusionPilot: the REAR radar digest, deliberately a separate object publishing a separate
+    # message. It must never touch RD -- see test_rear_radar_isolation.py for why.
+    self.rear_radar_data = self.rear_radar.update(can_list)
+
     self.sm.update(0)
 
     can_rcv_valid = len(can_strs) > 0
@@ -258,6 +268,18 @@ class Car:
       tracks_msg.valid = not any(RD.errors.to_dict().values())
       tracks_msg.liveTracks = RD
       self.pm.send('liveTracks', tracks_msg)
+
+    # FusionPilot: the rear digest, published separately from liveTracks and never merged into it.
+    if self.rear_radar_data is not None:
+      rr_msg = messaging.new_message('rearRadarBP')
+      rr_msg.valid = True
+      for k, v in self.rear_radar_data.items():
+        if isinstance(v, dict):
+          for sk, sv in v.items():
+            setattr(getattr(rr_msg.rearRadarBP, k), sk, sv)
+        else:
+          setattr(rr_msg.rearRadarBP, k, v)
+      self.pm.send('rearRadarBP', rr_msg)
 
     # carParamsSP - logged every 50 seconds (> 1 per segment)
     if self.sm.frame % int(50. / DT_CTRL) == 0:

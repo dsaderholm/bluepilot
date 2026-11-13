@@ -14,6 +14,8 @@ parameter list. When stock carcontroller.py is refactored, it will import these
 functions instead of the stock versions.
 """
 
+from collections import namedtuple
+
 from opendbc.car import structs
 from opendbc.car.ford.fordcan import CanBus, calculate_lat_ctl2_checksum
 from opendbc.sunnypilot.car.ford import apim_gps
@@ -324,8 +326,72 @@ def create_acc_ui_msg(packer, CAN: CanBus, CP, main_on: bool, enabled: bool, fcw
   return packer.make_can_msg("ACCDATA_3", CAN.main, values)
 
 
+# BluePilot: what the cluster is being asked to say, per side. Built in hud_ext from the planner.
+#
+#   suggestion      Side it wants to move to now: 0 none, 1 left, 2 right.
+#   maneuver_side   Side a maneuver has committed to, once it is past deciding.
+#   maneuver_moving True from the blinker going on until the sequence lets go.
+#   pass_in_play    A pass is being considered or executed AT ALL -- see _passing_line, this is
+#                   what keeps the oncoming warning from firing on every car on a two-lane road.
+#   oncoming_left   A vehicle detected RIGHT NOW coming at us in that lane. Live sighting only --
+#   oncoming_right  the 90 s memory is a decision input, and a line held yellow for a minute and a
+#                   half down every canyon road is noise, not information.
+ClusterPassing = namedtuple(
+  "ClusterPassing",
+  "suggestion maneuver_side maneuver_moving pass_in_play oncoming_left oncoming_right")
+CLUSTER_PASSING_IDLE = ClusterPassing(0, 0, False, False, False, False)
+
+# LaActvStats_D_Dsply, per side. The names are the DBC's.
+LANE_NONE, LANE_AVAILABLE, LANE_SUPPRESS, LANE_WARNING, LANE_INTERVENE = 0, 1, 2, 3, 4
+LANE_LA_OFF = 30          # whole-display value, outside the 5x5 matrix
+LANE_WARN_LEFT_ONLY = 3   # upstream's departure values, for the not-steering branch
+LANE_WARN_RIGHT_ONLY = 15
+
+
+def _passing_line(side: int, visible: bool, pa: ClusterPassing) -> int:
+  """One lane line as a four-level meter for its own side. Highest thing true wins.
+
+  The old display used one state for one meaning and left the other four unused, which is why it
+  could only ever say "over there" and never how strongly or why. Read top to bottom this is the
+  order a driver needs it in: a hazard outranks a commitment, a commitment outranks a wish.
+  """
+  # MEASURED ON HIS CLUSTER, 2026-08-07, and it inverted the first mapping. The walk reported:
+  #
+  #   None      GRAY      Available  GREEN    Suppress  RED    Warning  YELLOW    LA_Off  both off
+  #
+  # Suppress is RED. The suggestion was built on it -- "the line gives way toward the gap" -- so a
+  # suggestion to move LEFT would have turned the left line red, which every driver reads as DO NOT
+  # GO LEFT. Precisely backwards, and it would have been shipped on the reasoning that Suppress
+  # sounds like dimming. Meanwhile the one thing that really means "do not go there", oncoming
+  # traffic, was on yellow.
+  #
+  # So they swap. Red carries the veto, yellow carries the suggestion. Gray stays with the unseen
+  # lane, where a dimmed line for a line the model cannot see is the honest picture.
+  oncoming = pa.oncoming_left if side == 1 else pa.oncoming_right
+  if oncoming and pa.pass_in_play:
+    # DO NOT GO THERE. The departure look is the car's own vocabulary for danger on a side, and for
+    # opposing traffic in the lane we were about to take it is the literally correct thing to say --
+    # unlike a passing suggestion, which is what made borrowing it wrong before.
+    #
+    # ONLY WHILE A PASS IS IN PLAY, and that gate is the whole difference between a warning and
+    # wallpaper. Oncoming traffic is not an event on US-6 or a canyon road, it is the road working
+    # normally, and warning about every car coming the other way would hold the left line yellow
+    # for most of the drive. Nobody reads a light that is always on. This fires when it is the
+    # ANSWER to a question the car was actually asking -- and it stays true while oncoming is the
+    # thing refusing the pass, which is exactly when it is worth knowing.
+    return LANE_SUPPRESS    # RED on his cluster
+  if pa.maneuver_moving and pa.maneuver_side == side:
+    return LANE_INTERVENE   # going now: blinker on, or already crossing
+  if pa.suggestion == side:
+    return LANE_WARNING     # YELLOW on his cluster -- attention on this side, not a veto
+  if visible:
+    return LANE_AVAILABLE   # normal
+  return LANE_NONE          # nothing to draw
+
+
 def create_lkas_ui_msg(packer, CAN: CanBus, main_on: bool, enabled: bool, hands: int,
-                       hud_control, stock_values: dict):
+                       hud_control, stock_values: dict, passing: 'ClusterPassing | None' = None,
+                       lane_test=None):  # LaneTestOverride(lines, hands); see lane_display_test_ext
   """
   Creates a CAN message for the Ford IPC IPMA/LKAS status.
 
@@ -351,27 +417,64 @@ def create_lkas_ui_msg(packer, CAN: CanBus, main_on: bool, enabled: bool, hands:
   Frequency is 1Hz.
   """
 
-  lines = 0
+  pa = passing if passing is not None else CLUSTER_PASSING_IDLE
 
-  if hud_control is not None:
-    # Determine left lane status independently
-    if hud_control.leftLaneDepart:
-      left_status = 4   # Intervene (Yellow)
-    elif hud_control.leftLaneVisible:
-      left_status = 1   # Available
+  if hud_control is None:
+    lines = LANE_NONE
+
+  elif not enabled:
+    # NOT STEERING. Upstream branches three ways here on main_on and enabled; BluePilot used
+    # neither argument and computed the engaged-style values unconditionally, so the lines went
+    # green whenever the model saw paint whether or not anything was holding the lane. That is
+    # almost certainly "my LKA display just shows green on both sides of my car all the time, no
+    # matter what", and it costs the green its meaning: if it is on when nothing is steering, it
+    # cannot also mean openpilot has the wheel.
+    #
+    # Restored to upstream's shape. Green now means openpilot is steering, which is what makes
+    # everything below readable at a glance.
+    if main_on:
+      lines = LANE_NONE
+    elif hud_control.leftLaneDepart:
+      lines = LANE_WARN_LEFT_ONLY
+    elif hud_control.rightLaneDepart:
+      lines = LANE_WARN_RIGHT_ONLY
     else:
-      left_status = 2   # Suppress
+      lines = LANE_LA_OFF
 
-    # Determine right lane status independently
-    if hud_control.rightLaneDepart:
-      right_status = 20  # Intervene (Yellow)
-    elif hud_control.rightLaneVisible:
-      right_status = 5   # Available
-    else:
-      right_status = 10  # Suppress
+  else:
+    # STEERING. THE CLUSTER IS THE PASSING-ASSIST INSTRUMENT.
+    #
+    # His idea, then his follow-up: "this entire screen on my car can be reused for passing assist
+    # or other features... I'm fine if we overhaul that screen to make it more useful." So each
+    # line stops being a lane marker and becomes a four-level meter for its own side -- see
+    # _passing_line for the order. The pair then reads as a direction AND an intensity without the
+    # driver learning anything: the side that changes is the side it means, and how far it changes
+    # is how serious it is.
+    #
+    # Nothing here can collide with lane departure, and that is structural rather than a judgement
+    # about acceptable risk. ldw.py line 21:
+    #
+    #     ldw_allowed = CS.vEgo > LDW_MIN_SPEED and not recent_blinker and not CC.latActive
+    #
+    # openpilot does not COMPUTE departure while it is steering -- the thing keeping the car in its
+    # lane does not also warn about leaving it -- so the departure branches belong to the not-
+    # steering case above and nowhere else. test_ldw_does_not_run_while_steering asserts that
+    # against openpilot's own source, so an upstream change to the condition fails before it
+    # reaches the car.
+    lines = (_passing_line(1, hud_control.leftLaneVisible, pa) +
+             5 * _passing_line(2, hud_control.rightLaneVisible, pa))
 
-    # Combine left and right lane status
-    lines = left_status + right_status
+  # The display test overrides everything, including the departure branches above. It only ever runs
+  # at a standstill, where none of them can be true, and it has to be able to SEND the departure
+  # states -- learning what they look like is the entire point. Raw, because LA_Off is 30, outside
+  # the 5x5 matrix.
+  #
+  # It owns `hands` too. Those are the only two signals in this message the fork authors rather than
+  # passes through, and a walk that changed one while leaving the other stale would be measuring two
+  # things at once. See lane_display_test_ext.
+  if lane_test is not None:
+    lines = int(lane_test.lines)
+    hands = int(lane_test.hands)
 
   values = {s: stock_values[s] for s in [
     "FeatConfigIpmaActl",
@@ -397,7 +500,7 @@ def create_lkas_ui_msg(packer, CAN: CanBus, main_on: bool, enabled: bool, hands:
 
 
 def create_button_msg(packer, bus: int, stock_values: dict, cancel=False, resume=False,
-                      tja_toggle=False, icbm_button=None):
+                      tja_toggle=False, icbm_button=None, turn_signal=None):
   """
   Creates a CAN message for the Ford SCCM buttons/switches.
 
@@ -454,6 +557,12 @@ def create_button_msg(packer, bus: int, stock_values: dict, cancel=False, resume
   # ICBM button support — set the specified button signal to 1
   if icbm_button is not None:
     values[icbm_button] = 1
+
+  # BluePilot: turn-signal override for the stationary blinker actuation test. None means keep the
+  # driver's own switch position, which is the passthrough above and the case on every normal
+  # frame. Only BlinkerTestExt ever passes a value here.
+  if turn_signal is not None:
+    values["TurnLghtSwtch_D_Stat"] = turn_signal
 
   return packer.make_can_msg("Steering_Data_FD1", bus, values)
 

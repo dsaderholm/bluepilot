@@ -39,7 +39,29 @@ def main():
   # hold outranks the posted limit and announcing a change that cannot happen is a lie on screen.
   # NOTE: this list is edited by more than one branch. Resolve any conflict here as a UNION.
   sm = messaging.SubMaster(['carControl', 'carState', 'controlsState', 'liveParameters', 'radarState', 'modelV2', 'selfdriveState',
-                            'liveMapDataSP', 'carStateSP', 'carStateBP', 'mapdExtendedOut', 'selfdriveStateSP',
+                            # BluePilot: carStateBP carries the raw TSR and BLIS signals the
+                            # passing-assist observer records. Not in any all_checks() list, so a
+                            # platform that never publishes it (non-Ford, non-BluePilot) is
+                            # unaffected -- sm.valid stays False and the observer reports it.
+                            # selfdriveStateSP carries ICBM's held baseline, which is the driver's own set speed
+                            # when they have taken it back from ICBM.
+                            # liveTracks is the FULL front-radar object list, including the off-path
+                            # tracks radard discards after picking its two in-path leads. It is how
+                            # the observer sees the lane it would move into. Note the rate: card
+                            # emits it at ~8.3 Hz on a Delphi MRR, not the 20 Hz declared in
+                            # services.py, so anything counting frames must gate on sm.updated.
+                            # rearRadarBP is the rear digest, published only when a feeder is
+                            # fitted -- absent on every other car, where sm.valid stays False and
+                            # RearApproach correctly reports unavailable rather than clear.
+                            # mapdOut is mapd v2's own message, and passing assist needs exactly one
+                            # field from it: oneWay. A divided carriageway is a one-way way, which is
+                            # the ONLY thing that separates it from an undivided road with a centre
+                            # turn lane -- the two are geometrically identical from the car, and the
+                            # sensor-only fix was replayed against a real drive and measured dead.
+                            # Absent unless MapdV2 is 1 or 2, where sm.valid stays False and the
+                            # oncoming veto keeps its pre-map behaviour exactly.
+                            'liveMapDataSP', 'carStateSP', 'carStateBP', 'liveTracks', 'rearRadarBP', 'mapdOut',
+                            'selfdriveStateSP', 'mapdExtendedOut',
                             'signReadingBP',  # BluePilot: camera sign reader; read by the speed-limit resolver
                             gps_location_service],
                            poll='carState')
