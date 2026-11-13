@@ -105,12 +105,14 @@ def main():
     buf = client.recv(1000)
     sm.update(0)
     if sm.updated["onroadEvents"]:
-      guard.note_events([e.name for e in sm["onroadEvents"]])
+      guard.note_events([e.name for e in sm["onroadEvents"]], time.monotonic())
     if guard.stopped():
       _idle(pm, guard.stopped_reason)  # does not return: stops reading the camera for this drive
     if buf is None:
       continue
     now = time.monotonic()
+    if guard.paused(now):
+      reading = {}  # the car is struggling: say nothing rather than repeat a stale reading
     if guard.may_infer(now) and reader.wants_frame(client.frame_id):
       try:
         reading = reader.step(client.frame_id, buf.width, buf.height, buf.stride, buf.uv_offset, buf.data, sm)

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from bluepilot.sign_reader.guard import (MIN_INFERENCE_GAP_S, SLOW_INFERENCE_LIMIT, SLOW_INFERENCE_S, STARTUP_QUIET_S,
+from bluepilot.sign_reader.guard import (ACTIVE_EPISODE_LIMIT, MIN_INFERENCE_GAP_S, RESUME_QUIET_S, SLOW_INFERENCE_LIMIT, SLOW_INFERENCE_S, STARTUP_QUIET_S,
                                          TROUBLE_EVENTS, Guard)
 
 REPO = Path(__file__).resolve().parents[3]
@@ -29,21 +29,42 @@ class TestGuard:
     assert g.may_infer(t + MIN_INFERENCE_GAP_S)
 
   @pytest.mark.parametrize("event", sorted(TROUBLE_EVENTS))
-  def test_any_trouble_event_stops_it_for_good(self, event):
+  def test_any_trouble_event_pauses_it_and_it_resumes_after_it_clears(self, event):
     g = Guard(0.0)
-    g.note_events(["gasPressedOverride", event])
-    assert g.stopped() and event in g.stopped_reason
-    assert not g.may_infer(1e6)  # latched: no amount of time brings it back within this drive
+    t = STARTUP_QUIET_S + 10
+    g.note_events(["gasPressedOverride", event], t)
+    assert not g.stopped() and g.paused(t) and not g.may_infer(t)
+    g.note_events([], t + 1)  # cleared
+    assert not g.may_infer(t + RESUME_QUIET_S - 0.1)  # counted from the last moment of trouble
+    assert g.may_infer(t + RESUME_QUIET_S)
 
-  def test_ordinary_driving_events_do_not_stop_it(self):
+  def test_startup_errors_do_not_cost_the_whole_drive(self):
     g = Guard(0.0)
-    g.note_events(["gasPressedOverride", "steerOverride", "parkBrake", "wrongGear"])
-    assert not g.stopped()
+    for t in range(0, 40):  # locationdTemporaryError at every tick for 40 s, as on route 5d2
+      g.note_events(["locationdTemporaryError"], float(t))
+    g.note_events([], 40.0)
+    assert not g.stopped() and not g.may_infer(40.0) and g.may_infer(39.0 + RESUME_QUIET_S)
+
+  def test_ordinary_driving_events_do_not_pause_it(self):
+    g = Guard(0.0)
+    g.note_events(["gasPressedOverride", "steerOverride", "parkBrake", "wrongGear"], 100.0)
+    assert not g.stopped() and not g.paused(100.0) and g.may_infer(100.0)
+
+  def test_trouble_that_keeps_coming_back_while_it_runs_stops_it_for_good(self):
+    g = Guard(0.0)
+    t = 100.0
+    for _ in range(ACTIVE_EPISODE_LIMIT):
+      g.note_inference(t, 0.3)
+      g.note_events(["commIssue"], t + 1)
+      g.note_events([], t + 2)
+      t += 100
+    assert g.stopped() and "commIssue" in g.stopped_reason
+    assert not g.may_infer(1e6)
 
   def test_the_first_reason_is_kept(self):
     g = Guard(0.0)
-    g.note_events(["selfdrivedLagging"])
-    g.note_events(["commIssue"])
+    g.stop("selfdrivedLagging")
+    g.stop("commIssue")
     assert "selfdrivedLagging" in g.stopped_reason
 
   def test_three_slow_inferences_in_a_row_stop_it_but_a_good_one_resets_the_count(self):
@@ -83,7 +104,7 @@ class TestProcessIsPolite:
 
   def test_the_guard_is_consulted_every_frame_and_stopping_stops_the_camera_reads(self):
     loop = self.src.split("reading = {}", 1)[1]
-    assert "guard.note_events" in loop and "guard.stopped()" in loop and "guard.may_infer" in loop
+    assert "guard.note_events" in loop and "guard.stopped()" in loop and "guard.paused" in loop and "guard.may_infer" in loop
     assert loop.index("guard.stopped()") < loop.index("reader.step")  # decided before looking at a frame
     assert "onroadEvents" in self.src
 
